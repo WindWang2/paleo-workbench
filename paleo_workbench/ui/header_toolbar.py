@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLineEdit, QPushButton, QSpacerItem, QSizePolicy
-)
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLineEdit, QPushButton
 
 _BUTTON_SPECS = [
     ("新建工程", "PrimaryButton"),
