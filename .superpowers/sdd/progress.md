@@ -46,3 +46,7 @@ Branch base: e34c2f1
 Baseline tests: 95 passing
 
 Prep Task 1: complete (commits e34c2f1..054b8f5, review clean, 99/99 tests passing)
+Prep Task 2: complete (commits 054b8f5..22ef770, review clean, 105/105 tests passing; Minor: row stylesheet selector broad, no populated-horizon test — both non-blocking)
+Prep Task 3: complete (commits 22ef770..858b081, review clean after fix [grid default 50×50 + double padding], 111/111 tests passing)
+Prep Task 4: complete (commits 858b081..00f14ce, review clean, 115/115 tests passing)
+Prep Task 5: complete (commits 00f14ce..dabde0f, review clean, 117/117 tests passing)

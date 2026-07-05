@@ -23,4 +23,5 @@ class PaleoWorkbenchWindow(QWidget):
         steps = active_run.workflow_steps if active_run else []
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_data_page(state, self.project.resources)
+        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
         layout.addWidget(self.app_shell)
