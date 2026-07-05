@@ -22,4 +22,5 @@ class PaleoWorkbenchWindow(QWidget):
         active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
         steps = active_run.workflow_steps if active_run else []
         self.app_shell.update_home_page(state, steps)
+        self.app_shell.update_data_page(state, self.project.resources)
         layout.addWidget(self.app_shell)

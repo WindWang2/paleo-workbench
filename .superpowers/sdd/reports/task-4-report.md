@@ -1,28 +1,23 @@
-### Task 4 Report: DataCompletenessCard Widget
+### Task 4 Report: Integration — Wire DataPage into AppShell
 
 **Status:** Complete
 
-**Commit:** `6ab0896c2fd0558a369c78c4f94242688f440f40`
+**Workflow:** TDD — wrote failing test first (2 failures: page 1 was PagePlaceholder), implemented changes, all 95 tests pass.
 
-**Test summary:** 5/5 passed in 0.05s — title, three rows with correct labels, update_state ready path ("数据完整"), update_state missing path ("缺少"), object name.
+**Changes:**
 
-**Files:**
-- Created: `paleo_workbench/ui/pages/completeness_card.py`
-- Created: `tests/test_completeness_card.py`
+1. `tests/test_data_integration.py` (created) — two tests verifying page 1 is `DataPage` and that `resource_table` row count matches `project.resources` length.
+2. `paleo_workbench/ui/pages/__init__.py` — added `DataPage` import and `__all__` export.
+3. `paleo_workbench/ui/app_shell.py`:
+   - Imported `DataPage`.
+   - Inserted `self.page_stack.addWidget(DataPage())` at index 1; placeholder loop now starts at `tokens.PAGE_NAMES[2:]`.
+   - Added `update_data_page(state, resources)` method that delegates to the page's `update_state` when present.
+4. `paleo_workbench/app.py` — calls `self.app_shell.update_data_page(state, self.project.resources)` immediately after `update_home_page`.
 
-**TDD workflow followed:**
-1. Wrote failing test → failed with `ModuleNotFoundError` (expected).
-2. Wrote implementation exactly per brief.
-3. Re-ran tests → 5 passed.
-4. Full suite regression check → 75/75 passed.
-5. Committed with the exact message from the brief.
+**Test summary:** 95 passed, 0 failed (93 existing + 2 new data integration tests).
 
 **Verification:**
-- TDD red phase confirmed (ModuleNotFoundError before implementation).
-- TDD green phase confirmed (5 passed after implementation).
-- No deviations from the brief's code.
+- Pre-implementation: `pytest tests/test_data_integration.py -v` → 2 failed (page 1 was `PagePlaceholder`).
+- Post-implementation: `pytest -v` → 95 passed.
 
-**Concerns:**
-- `Qt` is imported from `PySide6.QtCore` but never used in the implementation. Preserved verbatim per the brief; a linter that flags unused imports would flag it.
-- `RESOURCE_TYPES` is a module-level constant here that mirrors the keys of `tokens.RESOURCE_LABELS`. If the canonical resource set changes in `tokens.py`, this local list will silently drift. Could be derived as `list(tokens.RESOURCE_LABELS.keys())` in a future refactor, but ordering would then be dict-iteration-dependent.
-- `update_state` reads only `available_counts`, `missing_types`, and `ready` from `resource_readiness`; the `required_types` field in the state is ignored. The widget instead iterates over the hardcoded `RESOURCE_TYPES` list. If a state ever reports `required_types` that differ from the canonical three, the widget would not reflect them. No current test exercises this divergence.
+**Concerns:** None. The `update_data_page` follows the same defensive `hasattr` pattern as `update_home_page`, so the integration is consistent with existing conventions.

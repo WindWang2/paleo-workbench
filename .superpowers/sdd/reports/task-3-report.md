@@ -1,28 +1,32 @@
-### Task 3 Report: RecentActivityCard Widget
+# Task 3 Report: DataPage Assembly + ActionPanel
 
-**Status:** Complete
+## Status
+PASS
 
-**Commit:** `cea9230e5c3ac18f873842505b3a9e9b60bac92e`
+## Commit
+295558a6726be413cb11d951c32b3c948b3687d2
 
-**Test summary:** 4/4 passed in 0.05s — title, empty state, update_with_steps (filters pending → 2 entries), object name.
+## Test Summary
+4 passed in 0.12s — `tests/test_data_page.py`
+- test_data_page_assembles_sub_widgets PASSED
+- test_data_page_update_state_delegates PASSED
+- test_data_page_has_action_buttons PASSED
+- test_data_page_object_name PASSED
 
-**Files:**
-- Created: `paleo_workbench/ui/pages/activity_card.py`
-- Created: `tests/test_activity_card.py`
+## TDD Workflow
+1. Wrote failing test `tests/test_data_page.py` — 4 test cases per brief.
+2. Verified FAIL: `ModuleNotFoundError: No module named 'paleo_workbench.ui.pages.data_page'`.
+3. Created `paleo_workbench/ui/pages/data_page.py` with `DataPage(QWidget)`:
+   - Assembles `ResourceSummaryBar` on top, `ResourceTable` (stretch) + inline `ActionPanel` (fixed 180px) in bottom `QHBoxLayout`.
+   - `ActionPanel` is a `QFrame` with `import_btn` ("导入资源", PrimaryButton) and `convert_btn` ("数据转换", SecondaryButton).
+   - `update_state(state, resources)` delegates to `summary_bar.update_state(state)` and `resource_table.update_resources(resources)`.
+   - Uses tokens `BG_SIDEBAR`, `BORDER`, `RADIUS_CARD`.
+4. Verified PASS: 4/4 in 0.12s.
+5. Committed as `295558a`.
 
-**TDD workflow followed:**
-1. Wrote failing test → failed with `ModuleNotFoundError` (expected).
-2. Wrote implementation exactly per brief.
-3. Re-ran tests → 4 passed.
-4. Committed with the exact message from the brief.
+## Files
+- Created: `paleo_workbench/ui/pages/data_page.py` (52 lines)
+- Created: `tests/test_data_page.py` (40 lines)
 
-**Verification:**
-- TDD red phase confirmed (ModuleNotFoundError before implementation).
-- TDD green phase confirmed (4 passed after implementation).
-- No deviations from the brief's code.
-
-**Concerns:**
-- `STEP_TYPES` is duplicated as a module-level constant here; `tokens.STEP_LABELS` is the canonical 6-element list. If a future task introduces a shared `STEP_TYPES` constant in `tokens.py`, this local copy should be replaced to avoid drift.
-- `empty_label` attribute is reassigned to a new `QLabel` instance on every `update_state` call when count==0; the original instance reference set in `__init__` is leaked (only the latest is kept as attribute). Not a correctness issue for the current tests, but the attribute identity changes across updates — consumers holding the original reference would not see updates.
-- `update_state` accepts a `state: dict` parameter but never reads it. Acceptable for current test coverage but indicates incomplete integration with app state (presumably wired in a later task).
-- `_clear_entries` deletes widgets via `deleteLater` but does not null the `empty_label` attribute reference when entries exist; if `entry_count > 0`, `card.empty_label` still references a deleted widget. Calling `.text()` on it would crash. No current test exercises this path, but it's a latent bug.
+## Concerns
+None. Implementation matches brief verbatim. ActionPanel buttons are not yet wired to handlers (consistent with Task 3 scope — wiring is a later task). `QLabel` import in implementation is unused per brief but kept to match the spec exactly.

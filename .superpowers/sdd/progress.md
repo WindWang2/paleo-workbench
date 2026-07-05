@@ -32,3 +32,6 @@ HomePage Task 4: complete (cea9230..6ab0896, review clean, 5/5 tests, 75/75 full
 HomePage Task 5: complete (6ab0896..f053b79, review clean, 3/3 tests)
 HomePage Task 6: complete (f053b79..adf0acc, review clean, 80/80 tests)
 HomePage Final review: READY TO MERGE; I1+M1 fixed (96c88f9); M2/M3 follow-up
+DataPage Task 1: complete (4ba7122..ea255c4, review clean, 4/4 tests)
+DataPage Task 2: complete (ea255c4..87ac17d, review clean, 4/4 tests, 89/89 full suite)
+DataPage Task 3: complete (87ac17d..295558a, review clean, 4/4 tests)

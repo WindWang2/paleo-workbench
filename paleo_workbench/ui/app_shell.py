@@ -8,6 +8,7 @@ from paleo_workbench.ui.header_toolbar import HeaderToolbar
 from paleo_workbench.ui.icon_rail import IconRail
 from paleo_workbench.ui.menu_bar import MenuBar
 from paleo_workbench.ui.page_placeholder import PagePlaceholder
+from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.home_page import HomePage
 from paleo_workbench.ui.sidebar import TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
@@ -34,7 +35,8 @@ class AppShell(QWidget):
         self.sidebar = TextSidebar()
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())  # index 0 = 首页
-        for name in tokens.PAGE_NAMES[1:]:
+        self.page_stack.addWidget(DataPage())  # index 1 = 数据
+        for name in tokens.PAGE_NAMES[2:]:
             self.page_stack.addWidget(PagePlaceholder(name))
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
@@ -57,3 +59,8 @@ class AppShell(QWidget):
         home = self.page_stack.widget(0)
         if hasattr(home, "update_state"):
             home.update_state(state, steps)
+
+    def update_data_page(self, state: dict, resources: list) -> None:
+        page = self.page_stack.widget(1)
+        if hasattr(page, "update_state"):
+            page.update_state(state, resources)
