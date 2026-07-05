@@ -25,3 +25,10 @@ AppShell Task 9: complete (commits b00b57e..a3a571e, review clean, 2+57 tests pa
 AppShell Task 10: complete (commits a3a571e..0c7108c, review clean, 57/0 tests passing, WorkflowDashboard fully replaced)
 AppShell Task 11: complete (commits 0c7108c..bcf6101, review clean, screen inventory updated to 9 pages)
 AppShell Final review: READY TO MERGE; M1/M2 fixed (commit c7352e1, unused imports removed); M3 no-fix (intentional); legacy screen_inventory.py divergence = follow-up ticket
+HomePage Task 1: complete (73ff911..8f8a1f9, review clean, 10/10 tests)
+HomePage Task 2: complete (8f8a1f9..6454b49, review clean, 4/4 tests)
+HomePage Task 3: complete (6454b49..cea9230, review clean, 4/4 tests, Important: latent empty_label dangling ref - non-crashing, tracked)
+HomePage Task 4: complete (cea9230..6ab0896, review clean, 5/5 tests, 75/75 full suite)
+HomePage Task 5: complete (6ab0896..f053b79, review clean, 3/3 tests)
+HomePage Task 6: complete (f053b79..adf0acc, review clean, 80/80 tests)
+HomePage Final review: READY TO MERGE; I1+M1 fixed (96c88f9); M2/M3 follow-up

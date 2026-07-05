@@ -82,3 +82,9 @@ def test_resource_labels_exist():
     assert tokens.RESOURCE_LABELS["well_log"] == "测井数据"
     assert tokens.RESOURCE_LABELS["seismic"] == "地震数据"
     assert tokens.RESOURCE_LABELS["horizon"] == "层位数据"
+
+
+def test_resource_units_exist():
+    assert tokens.RESOURCE_UNITS["well_log"] == "井"
+    assert tokens.RESOURCE_UNITS["seismic"] == "条测线"
+    assert tokens.RESOURCE_UNITS["horizon"] == "层位"

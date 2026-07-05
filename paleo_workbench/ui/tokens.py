@@ -76,6 +76,11 @@ RESOURCE_LABELS = {
     "seismic": "地震数据",
     "horizon": "层位数据",
 }
+RESOURCE_UNITS = {
+    "well_log": "井",
+    "seismic": "条测线",
+    "horizon": "层位",
+}
 
 QSS_TEMPLATE = f"""
 QWidget {{

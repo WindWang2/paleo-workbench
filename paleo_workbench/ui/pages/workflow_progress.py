@@ -41,6 +41,11 @@ class WorkflowProgress(QWidget):
                 "badge": badge, "label": label, "status": status, "card": card,
             })
             layout.addWidget(card)
+            if i < 5:
+                line = QFrame()
+                line.setFixedHeight(2)
+                line.setStyleSheet(f"background: {tokens.BORDER}; border: none;")
+                layout.addWidget(line, 0, Qt.AlignmentFlag.AlignTop)
         layout.addStretch()
 
     def update_steps(self, steps: list) -> None:

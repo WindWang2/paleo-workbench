@@ -30,7 +30,7 @@ class DataCompletenessCard(QFrame):
             name_label.setStyleSheet(
                 f"color: {tokens.TEXT_PRIMARY}; font-size: 12.5px;"
             )
-            count_label = QLabel("0")
+            count_label = QLabel(f"0{tokens.RESOURCE_UNITS.get(rtype, '')}")
             count_label.setStyleSheet(
                 f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
             )
@@ -65,7 +65,8 @@ class DataCompletenessCard(QFrame):
         ready = readiness.get("ready", False)
         for i, rtype in enumerate(RESOURCE_TYPES):
             count = available.get(rtype, 0)
-            self.rows[i]["count"].setText(str(count))
+            unit = tokens.RESOURCE_UNITS.get(rtype, "")
+            self.rows[i]["count"].setText(f"{count}{unit}")
             if count > 0:
                 self.rows[i]["status"].setText("✓")
                 self.rows[i]["status"].setStyleSheet(

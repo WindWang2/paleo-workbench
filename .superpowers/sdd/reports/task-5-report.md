@@ -1,24 +1,31 @@
-# Task 5 Report: IconRail Widget
+# Task 5 Report: HomePage Assembly
 
-**Status:** Complete
-**Commit:** c111bc2f1897b11226a634021dc213a32481b22c
-**Test summary:** 5 passed in 0.05s (5/5 IconRail tests green)
+## Status
+✅ Complete
 
-## Files
-- Created: `paleo_workbench/ui/icon_rail.py`
-- Test: `tests/test_icon_rail.py`
+## Commit
+`f053b79` — feat(ui): add HomePage assembling workflow progress, activity, and completeness cards
 
-## TDD Workflow
-1. Wrote failing test → `ModuleNotFoundError: No module named 'paleo_workbench.ui.icon_rail'` ✓
-2. Implemented `IconRail(QFrame)` per brief
-3. Re-ran tests → 5 passed ✓
-4. Committed on `main`
+## Test Summary
+3 passed in 0.06s (test_home_page_assembles_sub_widgets, test_home_page_update_state_delegates, test_home_page_object_name)
+
+## TDD Cycle
+1. Wrote failing test `tests/test_home_page.py` — failed with `ModuleNotFoundError` (verified RED).
+2. Created `paleo_workbench/ui/pages/home_page.py` per brief.
+3. Re-ran tests — all 3 passed (verified GREEN).
+4. Committed both files together.
 
 ## Implementation Notes
-- `IconRail` exposes `page_changed = Signal(int)`, `nav_buttons` list, `set_active(index)`, and `active_index` property as specified.
-- 9 nav buttons built from `tokens.PAGE_NAMES`; each sets `navItem=True` and `active` properties for QSS selector matching.
-- `set_active` uses the `style().unpolish()` / `style().polish()` pattern to force QSS re-evaluation on dynamic property change (correct PySide6 pattern for property-based styling).
-- No existing files modified.
+- `HomePage(QWidget)` assembles three existing sub-widgets:
+  - `WorkflowProgress` (top, full width)
+  - `RecentActivityCard` (bottom-left, stretch=1)
+  - `DataCompletenessCard` (bottom-right, stretch=0)
+- `update_state(state, steps)` delegates to each child: `workflow_progress.update_steps(steps)`, `activity_card.update_state(state, steps)`, `completeness_card.update_state(state)`.
+- Layout: `QVBoxLayout` with 16px margins/spacing; bottom row uses `QHBoxLayout` with stretch 1 on the activity card.
+- Verified sub-widget interfaces match the brief before writing impl:
+  - `WorkflowProgress.step_widgets[i]["status"]` is a `QLabel` whose text updates via `STATUS_TEXT[status]`.
+  - `RecentActivityCard.entry_count()` returns count of non-pending steps (1 for the test fixture).
+  - `DataCompletenessCard.summary_label` shows `"数据完整"` when `resource_readiness.ready == True`.
 
 ## Concerns
-None. Implementation matches the brief verbatim; all tests pass on first run after implementation.
+None. Implementation matches the brief verbatim; sub-widget contracts confirmed against existing source.
