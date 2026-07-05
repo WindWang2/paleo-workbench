@@ -4,13 +4,17 @@ Source: `古地理图编制系统 (standalone).html`
 
 ## Pages
 
-- 工程工作台: target horizon, sequence scheme, resource completeness, factor map status, prediction status, QC blockers, export artifacts.
-- 多源数据管理与转换: resource categories, format/status table, conversion options, queue.
-- 数据可视化: well log, seismic, cross-well, well-tie, reference document previews.
-- 制图数据制备: factor map task cards, map preview, interpolation/method metadata.
-- 沉积相预测: input selectors, mock/service adapter status, probability/evidence panels, review areas.
-- 古地理图编制: facies polygons, well overlay, legend, north arrow, scale bar, coordinate/grid display.
-- 质控与导出: QC rules, issue table, export formats, artifact summary.
+The standalone prototype has 9 icon-rail navigation items (updated from initial 7-page simplification after headless browser extraction):
+
+1. 首页: project dashboard (workflow steps, recent activity, data completeness)
+2. 数据: multi-source data management and conversion
+3. 测井预测: well log visualization + prediction
+4. 地震预测: seismic visualization + prediction
+5. 层序格架: sequence stratigraphy framework
+6. 可视化: composite visualization (well/seismic/cross-well)
+7. 制备: cartographic data preparation (factor maps)
+8. 编图: paleogeographic map compilation
+9. 成图审核: QC and export
 
 ## Design Tokens
 
@@ -20,3 +24,6 @@ Source: `古地理图编制系统 (standalone).html`
 - Warning: `#c47e12`
 - Surface: `#ffffff`
 - Background: `#eef2f7`
+- Teal: `#0f93a4` (step 2 indicator, newly discovered)
+- Header BG: `#f3f5f9` (menu bar and header toolbar)
+- Body BG: `#eef0f4` (main content area; initial inventory `#eef2f7` was close but not exact)
