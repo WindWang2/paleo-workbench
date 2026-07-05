@@ -58,3 +58,6 @@ Branch base: 32dbd81
 Baseline tests: 119 passing
 Review Task 1: complete (commits 32dbd81..a70a19f, review clean, 124/124 tests passing)
 Review Task 2: complete (commits a70a19f..c0a7a3b, review clean, 129/129 tests passing)
+Review Task 3: complete (commits c0a7a3b..b776514, review clean, 135/135 tests passing; Minor: duplicate-issue collapse + trailing space on empty message — both non-blocking)
+Review Task 4: complete (commits b776514..fc9c3a5, review clean, 141/141 tests passing; Minor: test `self` shadow + redundant palette rebuild — both non-blocking)
+Review Task 5: complete (commits fc9c3a5..98763f7, review clean, 143/143 tests passing)

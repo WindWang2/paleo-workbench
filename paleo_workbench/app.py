@@ -24,4 +24,9 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_data_page(state, self.project.resources)
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
+        self.app_shell.update_review_export_page(
+            self.project.quality_reports,
+            self.project.paleomap_documents,
+            self.project.export_artifacts,
+        )
         layout.addWidget(self.app_shell)
