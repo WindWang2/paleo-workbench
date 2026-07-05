@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment / IDE
+.env
+.env.*
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent/tooling caches (not project source)
+.agents/
+.codex/
+.cache/
+
+# Sample data is large and stays local; scanner tests use tmp_path fixtures
+data/
+
+# Nested engine repo is tracked as a submodule (see .gitmodules)
+# geo-viz-engine/

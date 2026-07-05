@@ -1,0 +1,41 @@
+[project]
+name = "paleo-workbench"
+version = "0.1.0"
+description = "Paleogeographic map compilation desktop workbench"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyside6>=6.6",
+    "pydantic>=2.0",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "lasio>=0.14",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.5.0",
+    "pytest-timeout>=2.3.1",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["paleo_workbench*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+timeout = 60
+pythonpath = [
+    ".",
+    "geo-viz-engine",
+    "geo-viz-engine/packages/geoviz_paleo_map",
+    "geo-viz-engine/packages/geoviz_plots",
+    "geo-viz-engine/packages/geoviz_seismic",
+    "geo-viz-engine/packages/geoviz_well_log",
+    "geo-viz-engine/packages/geoviz_cross_well",
+]

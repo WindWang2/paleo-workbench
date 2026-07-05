@@ -1,0 +1,103 @@
+from pathlib import Path
+
+from paleo_workbench.project.manager import ProjectManager
+from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.project.paths import artifact_dir_for
+
+
+def test_project_round_trip_uses_relative_paths(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    data_file = tmp_path / "data" / "well.las"
+    data_file.parent.mkdir()
+    data_file.write_text("~Version\n", encoding="utf-8")
+
+    project = ProjectDocument.new(name="Demo")
+    project.resources.append(
+        ResourceItem(
+            name="well.las",
+            path=str(data_file),
+            type="well_log",
+            format="las",
+            status="indexed",
+        )
+    )
+
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+
+    assert loaded.resources[0].path == "data/well.las"
+    assert loaded.resources[0].external is False
+    assert artifact_dir_for(project_path) == tmp_path / "demo.artifacts"
+
+
+def test_resaving_loaded_project_keeps_relative_resource_paths(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    data_file = tmp_path / "data" / "well.las"
+    data_file.parent.mkdir()
+    data_file.write_text("~Version\n", encoding="utf-8")
+
+    project = ProjectDocument.new(name="Demo")
+    project.resources.append(
+        ResourceItem(
+            name="well.las",
+            path=str(data_file),
+            type="well_log",
+            format="las",
+        )
+    )
+
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+    manager.save(loaded)
+    reloaded = manager.load()
+
+    assert reloaded.resources[0].path == "data/well.las"
+    assert reloaded.resources[0].external is False
+
+
+def test_external_resource_paths_remain_absolute_and_external(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    external_file = tmp_path.parent / "shared" / "regional.las"
+    external_file.parent.mkdir(parents=True, exist_ok=True)
+    external_file.write_text("~Version\n", encoding="utf-8")
+
+    project = ProjectDocument.new(name="Demo")
+    project.resources.append(
+        ResourceItem(
+            name="regional.las",
+            path=str(external_file),
+            type="well_log",
+            format="las",
+        )
+    )
+
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+
+    assert loaded.resources[0].path == external_file.resolve().as_posix()
+    assert loaded.resources[0].external is True
+
+
+def test_export_artifact_output_path_is_relativized_when_inside_project(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    export_file = tmp_path / "exports" / "demo.png"
+    export_file.parent.mkdir()
+    export_file.write_text("png", encoding="utf-8")
+
+    project = ProjectDocument.new(name="Demo")
+    project.export_artifacts.append(
+        ExportArtifact(
+            linked_id="map_1",
+            format="png",
+            output_path=str(export_file),
+        )
+    )
+
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+
+    assert loaded.export_artifacts[0].output_path == "exports/demo.png"
