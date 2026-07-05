@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+
+from paleo_workbench.ui import tokens
+
+
+class ResultSummary(QFrame):
+    """Right-hand summary panel for the QC review page.
+
+    Shows pass/warning/error counts derived from a QualityReport, an advisory
+    line, and the list of exported artifacts.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ResultSummary")
+        self.setStyleSheet(
+            f"QFrame#ResultSummary {{ background: {tokens.BG_SIDEBAR};"
+            f" border: 1px solid {tokens.BORDER};"
+            f" border-radius: {tokens.RADIUS_CARD}px; }}"
+        )
+        self.setFixedWidth(240)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.title_label = QLabel("检查结果输出")
+        self._style_label(self.title_label, tokens.TEXT_PRIMARY, "13px", 600)
+        layout.addWidget(self.title_label)
+
+        self.pass_label = QLabel("通过项: 0")
+        self._color_label(self.pass_label, tokens.SUCCESS)
+        layout.addWidget(self.pass_label)
+
+        self.warning_label = QLabel("警告项: 0")
+        self._color_label(self.warning_label, tokens.WARNING)
+        layout.addWidget(self.warning_label)
+
+        self.error_label = QLabel("待处理项: 0")
+        self._color_label(self.error_label, tokens.ERROR_RED)
+        layout.addWidget(self.error_label)
+
+        self.advisory_label = QLabel("全部通过，可输出成果")
+        self._color_label(self.advisory_label, tokens.SUCCESS)
+        layout.addWidget(self.advisory_label)
+
+        # Divider
+        self.divider = QFrame()
+        self.divider.setFrameShape(QFrame.Shape.HLine)
+        self.divider.setStyleSheet(
+            f"background: {tokens.BORDER}; border: none; max-height: 1px;"
+        )
+        layout.addWidget(self.divider)
+
+        self.export_title = QLabel("导出图件")
+        self._style_label(self.export_title, tokens.TEXT_PRIMARY, "13px", 600)
+        layout.addWidget(self.export_title)
+
+        self.export_container = QWidget()
+        self.export_container.setStyleSheet("border: none; background: transparent;")
+        self.export_layout = QVBoxLayout(self.export_container)
+        self.export_layout.setContentsMargins(0, 0, 0, 0)
+        self.export_layout.setSpacing(4)
+        layout.addWidget(self.export_container)
+
+        layout.addStretch()
+
+        # Initialize to empty state
+        self.update_state([], [])
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _style_label(label: QLabel, color: str, size: str, weight: int) -> None:
+        label.setStyleSheet(
+            f"color: {color}; font-size: {size}; font-weight: {weight};"
+            " border: none; background: transparent;"
+        )
+
+    @staticmethod
+    def _color_label(label: QLabel, color: str) -> None:
+        label.setStyleSheet(
+            f"color: {color}; font-size: 12px;"
+            " border: none; background: transparent;"
+        )
+        palette = label.palette()
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
+        label.setPalette(palette)
+
+    def _clear_export(self) -> None:
+        while self.export_layout.count():
+            item = self.export_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def update_state(self, reports: list, artifacts: list) -> None:
+        # Count pass / warning / error distinct rules, error taking precedence.
+        pass_count = warning_count = error_count = 0
+        if reports:
+            report = reports[0]
+            issues_by_rule: dict[str, dict] = {}
+            for issue in report.issues:
+                rule = issue.get("rule")
+                if rule is None:
+                    continue
+                # error takes precedence over warning per rule
+                existing = issues_by_rule.get(rule)
+                if existing is None or (
+                    existing.get("severity") != "error"
+                    and issue.get("severity") == "error"
+                ):
+                    issues_by_rule[rule] = issue
+            for rule in report.rules:
+                issue = issues_by_rule.get(rule)
+                if issue is None:
+                    pass_count += 1
+                elif issue.get("severity") == "error":
+                    error_count += 1
+                else:
+                    warning_count += 1
+
+        self.pass_label.setText(f"通过项: {pass_count}")
+        self.warning_label.setText(f"警告项: {warning_count}")
+        self.error_label.setText(f"待处理项: {error_count}")
+
+        if error_count > 0:
+            self.advisory_label.setText("建议先处理待处理项后再输出成果")
+            self._color_label(self.advisory_label, tokens.ERROR_RED)
+        else:
+            self.advisory_label.setText("全部通过，可输出成果")
+            self._color_label(self.advisory_label, tokens.SUCCESS)
+
+        # Rebuild export list
+        self._clear_export()
+        if not artifacts:
+            empty = QLabel("暂无导出图件")
+            self._color_label(empty, tokens.TEXT_SECONDARY)
+            self.export_layout.addWidget(empty)
+        else:
+            for artifact in artifacts:
+                row = QLabel(f"• {artifact.format} — {artifact.output_path}")
+                self._color_label(row, tokens.TEXT_PRIMARY)
+                self.export_layout.addWidget(row)
