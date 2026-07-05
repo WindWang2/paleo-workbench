@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-05
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 4/9 pages complete (首页 + 数据 + 制备 + 成图审核), 149 tests passing
+## Project Status: 5/9 pages complete (首页 + 数据 + 层序格架 + 制备 + 成图审核), 161 tests passing
 
 ## Current Architecture
 
@@ -50,10 +50,11 @@
 - Spec: `docs/superpowers/specs/2026-07-05-reviewexportpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-reviewexportpage.md`
 
-### Phase 6: 层序格架页 SequenceFrameworkPage — 🔲 PENDING (next)
-- Target horizon editor, sequence scheme management
-- Complexity: Medium
-- Data source: `project.stratigraphy`
+### Phase 6: 层序格架页 SequenceFrameworkPage — ✅ COMPLETE
+- SequenceTargetPanel (target horizon + interpretation version + scheme selector + applicable well/seismic counts), SequenceBoundaryTable (sequence boundary rows + empty state), SequenceSchemeSummary (scheme + boundary count + systems tract labels + save action)
+- Tests: +12 new (161 total)
+- Spec: `docs/superpowers/specs/2026-07-05-sequenceframeworkpage-design.md`
+- Plan: `docs/superpowers/plans/2026-07-05-sequenceframeworkpage.md`
 
 ### Phase 7: 编图页 MappingPage — 🔲 PENDING (high complexity)
 - PaleoMapCanvas from geo-viz-engine, facies polygons, well overlay, legend, north arrow, scale bar
@@ -96,7 +97,7 @@
 | 2 | 数据 | ✅ Complete | 14 | ✅ | ✅ |
 | 3 | 测井预测 | 🔲 Placeholder | — | — | — |
 | 4 | 地震预测 | 🔲 Placeholder | — | — | — |
-| 5 | 层序格架 | 🔲 Placeholder | — | — | — |
+| 5 | 层序格架 | ✅ Complete | 12 | ✅ | ✅ |
 | 6 | 可视化 | 🔲 Placeholder | — | — | — |
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
 | 8 | 编图 | 🔲 Placeholder | — | — | — |
@@ -112,3 +113,4 @@
 | 2026-07-05 (DataPage) | 95 | ✅ |
 | 2026-07-05 (PreparationPage) | 119 | ✅ |
 | 2026-07-05 (ReviewExportPage) | 149 | ✅ |
+| 2026-07-05 (SequenceFrameworkPage) | 161 | ✅ |

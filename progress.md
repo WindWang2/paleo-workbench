@@ -92,6 +92,30 @@ Implemented via SDD (6 TDD tasks + 1 final-fix refactor):
 
 Final review: READY TO MERGE (1 Important found + fixed before merge; 6 Minor deferred to follow-ups).
 
+### 层序格架页 SequenceFrameworkPage (Phase 6) — COMPLETE ✅
+
+Implemented inline via TDD (4 implementation tasks + docs):
+
+| Task | Content | Tests |
+|------|---------|-------|
+| 1 | Sequence tokens (`SEQUENCE_SCHEMES`, `SYSTEMS_TRACT_LABELS`) | +2 |
+| 2 | Child widgets: `SequenceTargetPanel`, `SequenceBoundaryTable`, `SequenceSchemeSummary` | +6 |
+| 3 | `SequenceFrameworkPage` assembly + pages export | +2 |
+| 4 | AppShell index 4 + `PaleoWorkbenchWindow` stratigraphy wiring | +2 |
+
+Design/plan added:
+- `docs/superpowers/specs/2026-07-05-sequenceframeworkpage-design.md`
+- `docs/superpowers/plans/2026-07-05-sequenceframeworkpage.md`
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_tokens.py tests/test_app_shell.py tests/test_ui_exports.py tests/test_sequence_target_panel.py tests/test_sequence_boundary_table.py tests/test_sequence_scheme_summary.py tests/test_sequence_framework_page.py tests/test_sequence_integration.py -q` — 40 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 161 passed
+
+Notes:
+- Page is display-first and does not mutate `ProjectDocument`.
+- Data source is `project.stratigraphy`; missing values render conservative defaults.
+- Explicit `QT_QPA_PLATFORM=offscreen` is required in this headless environment for PySide/pytest-qt.
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -102,6 +126,7 @@ Final review: READY TO MERGE (1 Important found + fixed before merge; 6 Minor de
 | DataPage | 95 | ✅ |
 | PreparationPage | 119 | ✅ |
 | ReviewExportPage | 149 | ✅ |
+| SequenceFrameworkPage | 161 | ✅ |
 
 ### Commits This Session
 
@@ -110,10 +135,10 @@ HomePage: `73ff911`..`adf0acc` + `c507629` + `96c88f9` (8 commits)
 DataPage: `4ba7122`..`28a3a04` + `bd8d7be` (6 commits)
 PreparationPage: `054b8f5`..`446ee05` + `a438167` (7 commits)
 ReviewExportPage: `a70a19f`..`3ad80ce` + `1bdd23d` (7 commits)
-Total: ~41 commits, all pushed to origin/main
+SequenceFrameworkPage: working tree changes pending commit (Phase 6)
+Total: ~41 committed changes + Phase 6 pending commit
 
-### Next: Phase 6 — 层序格架页 SequenceFrameworkPage
+### Next: Phase 7 — 编图页 MappingPage
 
-- Target horizon editor, sequence scheme management
-- Complexity: Medium
-- Data source: `project.stratigraphy`
+- PaleoMapCanvas from geo-viz-engine, facies polygons, well overlay, legend, north arrow, scale bar
+- Complexity: High (requires geo-viz-engine integration)

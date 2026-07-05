@@ -142,3 +142,14 @@ def test_rule_descriptions():
     assert "层级一致性" in tokens.RULE_DESCRIPTIONS
     assert "facies_polygons_present" in tokens.RULE_DESCRIPTIONS
     assert tokens.RULE_DESCRIPTIONS["facies_polygons_present"] == "古地理图相带多边形是否存在"
+
+
+def test_sequence_schemes():
+    assert tokens.SEQUENCE_SCHEMES == [
+        "三级层序格架（推荐）", "四级高频层序", "体系域二分方案",
+    ]
+    assert len(tokens.SEQUENCE_SCHEMES) == 3
+
+
+def test_systems_tract_labels():
+    assert tokens.SYSTEMS_TRACT_LABELS == ["LST", "TST", "HST"]

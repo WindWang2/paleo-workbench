@@ -113,6 +113,8 @@ TASK_STATUS_COLORS = {"complete": SUCCESS, "pending": TEXT_SECONDARY, "running":
 TASK_STATUS_LABELS = {"complete": "已生成", "pending": "待生成", "running": "进行中", "failed": "失败"}
 INTERPOLATION_METHODS = ["克里金", "IDW", "样条"]
 SMOOTHING_LEVELS = ["弱", "中", "强"]
+SEQUENCE_SCHEMES = ["三级层序格架（推荐）", "四级高频层序", "体系域二分方案"]
+SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
 
 QSS_TEMPLATE = f"""
 QWidget {{

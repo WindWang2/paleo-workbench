@@ -12,6 +12,7 @@ from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.home_page import HomePage
 from paleo_workbench.ui.pages.preparation_page import PreparationPage
 from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
+from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
 from paleo_workbench.ui.sidebar import TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui import tokens
@@ -38,7 +39,10 @@ class AppShell(QWidget):
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
         self.page_stack.addWidget(DataPage())        # index 1 = 数据
-        for name in tokens.PAGE_NAMES[2:6]:          # 2,3,4,5
+        for name in tokens.PAGE_NAMES[2:4]:          # 2,3
+            self.page_stack.addWidget(PagePlaceholder(name))
+        self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
+        for name in tokens.PAGE_NAMES[5:6]:          # 5 = 可视化
             self.page_stack.addWidget(PagePlaceholder(name))
         self.page_stack.addWidget(PreparationPage()) # index 6 = 制备
         for name in tokens.PAGE_NAMES[7:8]:           # 7 = 编图
@@ -70,6 +74,11 @@ class AppShell(QWidget):
         page = self.page_stack.widget(1)
         if hasattr(page, "update_state"):
             page.update_state(state, resources)
+
+    def update_sequence_framework_page(self, stratigraphy) -> None:
+        page = self.page_stack.widget(4)
+        if hasattr(page, "update_state"):
+            page.update_state(stratigraphy)
 
     def update_preparation_page(self, tasks: list) -> None:
         page = self.page_stack.widget(6)
