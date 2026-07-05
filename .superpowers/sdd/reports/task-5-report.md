@@ -1,69 +1,24 @@
-# Task 5 Report: Deterministic Factor Map And Prediction Mock Services
+# Task 5 Report: IconRail Widget
 
-## Scope
+**Status:** Complete
+**Commit:** c111bc2f1897b11226a634021dc213a32481b22c
+**Test summary:** 5 passed in 0.05s (5/5 IconRail tests green)
 
-- Implemented `paleo_workbench/workflow/factors.py`
-- Implemented `paleo_workbench/prediction/__init__.py`
-- Implemented `paleo_workbench/prediction/adapters.py`
-- Added `tests/test_mock_outputs.py`
+## Files
+- Created: `paleo_workbench/ui/icon_rail.py`
+- Test: `tests/test_icon_rail.py`
 
-## TDD Evidence
+## TDD Workflow
+1. Wrote failing test → `ModuleNotFoundError: No module named 'paleo_workbench.ui.icon_rail'` ✓
+2. Implemented `IconRail(QFrame)` per brief
+3. Re-ran tests → 5 passed ✓
+4. Committed on `main`
 
-### RED
+## Implementation Notes
+- `IconRail` exposes `page_changed = Signal(int)`, `nav_buttons` list, `set_active(index)`, and `active_index` property as specified.
+- 9 nav buttons built from `tokens.PAGE_NAMES`; each sets `navItem=True` and `active` properties for QSS selector matching.
+- `set_active` uses the `style().unpolish()` / `style().polish()` pattern to force QSS re-evaluation on dynamic property change (correct PySide6 pattern for property-based styling).
+- No existing files modified.
 
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_mock_outputs.py -v
-```
-
-Result:
-
-- Failed during collection with `ModuleNotFoundError: No module named 'paleo_workbench.prediction'`
-
-### GREEN
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_mock_outputs.py -v
-```
-
-Result:
-
-- `2 passed in 0.09s`
-
-## Required Verification
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_mock_outputs.py tests/test_workflow_service.py tests/test_project_models.py tests/test_project_manager.py tests/test_resource_scanner.py -v
-```
-
-Result:
-
-- `15 passed in 0.12s`
-
-## Git Checkpoint
-
-Command:
-
-```bash
-git rev-parse --show-toplevel
-```
-
-Result:
-
-- Failed as expected: `fatal: not a git repository (or any of the parent directories): .git`
-- Checkpoint recorded: `Task 5 complete; root commit pending repository repair`
-
-## Self-Review
-
-- Deterministic generators include `seed`, `generator_version`, and `input_snapshot_hash`.
-- Mock prediction output is explicitly marked replaceable and non-final.
-- Changes are limited to the Task 5 owned files plus this report.
-
-## Commit
-
-- None created, because root git is invalid.
+## Concerns
+None. Implementation matches the brief verbatim; all tests pass on first run after implementation.

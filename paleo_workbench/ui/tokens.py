@@ -14,6 +14,9 @@ BG_HEADER = "#f3f5f9"
 BG_SIDEBAR = "#ffffff"
 BG_SEARCH = "#eef2f7"
 BG_RAIL = "#1b3a6b"
+BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1f5fbf, stop:1 #184c97)"
+BG_RAIL_TOP = "#1f5fbf"
+BG_RAIL_BOTTOM = "#184c97"
 TEXT_PRIMARY = "#28323f"
 TEXT_SECONDARY = "#7e8794"
 TEXT_DARK = "#1b2330"
@@ -27,6 +30,8 @@ FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Sego
 FONT_SIZE_BASE = "12.5px"
 FONT_SIZE_STATUS = "11px"
 FONT_SIZE_SIDEBAR_SECONDARY = "10.5px"
+FONT_SIZE_NAV_LABEL = "9.5px"
+FONT_WEIGHT_NAV_LABEL = "500"
 
 MENU_BAR_HEIGHT = 36
 HEADER_TOOLBAR_HEIGHT = 38
@@ -38,6 +43,12 @@ RADIUS_BUTTON = 5
 RADIUS_CARD = 9
 RADIUS_BADGE = 8
 RADIUS_PANEL = 10
+RADIUS_NAV_ITEM = 8
+
+ICON_FILES = [
+    "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
+    "visualization.svg", "preparation.svg", "mapping.svg", "review.svg",
+]
 
 PAGE_NAMES = [
     "首页", "数据", "测井预测", "地震预测", "层序格架",
@@ -72,17 +83,18 @@ QLineEdit#SearchBox {{
     border-radius: {RADIUS_BUTTON}px; padding: 4px 8px; color: {TEXT_PRIMARY};
 }}
 QFrame#IconRail {{
-    background: {BG_RAIL};
+    background: {BG_RAIL_GRADIENT};
     min-width: {ICON_RAIL_WIDTH}px; max-width: {ICON_RAIL_WIDTH}px;
 }}
-QPushButton[navItem="true"] {{
+QToolButton[navItem="true"] {{
     background: transparent; color: {TEXT_ON_RAIL}; border: none;
-    border-radius: 4px;
+    border-radius: {RADIUS_NAV_ITEM}px;
     min-width: {ICON_RAIL_ITEM_SIZE}px; max-width: {ICON_RAIL_ITEM_SIZE}px;
     min-height: {ICON_RAIL_ITEM_SIZE}px; max-height: {ICON_RAIL_ITEM_SIZE}px;
+    font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
 }}
-QPushButton[navItem="true"]:hover {{ background: rgba(255, 255, 255, 0.08); }}
-QPushButton[navItem="true"][active="true"] {{
+QToolButton[navItem="true"]:hover {{ background: rgba(255, 255, 255, 0.08); }}
+QToolButton[navItem="true"][active="true"] {{
     background: rgba(255, 255, 255, 0.18); color: {TEXT_ON_RAIL_ACTIVE};
 }}
 QFrame#TextSidebar {{

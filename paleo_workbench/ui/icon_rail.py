@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QPushButton, QVBoxLayout
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QFrame, QToolButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
+
+_ICONS_DIR = Path(__file__).parent / "assets" / "icons"
 
 
 class IconRail(QFrame):
@@ -13,14 +18,20 @@ class IconRail(QFrame):
         super().__init__(parent)
         self.setObjectName("IconRail")
         self._active_index = 0
-        self.nav_buttons: list[QPushButton] = []
+        self.nav_buttons: list[QToolButton] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(7, 8, 7, 8)
         layout.setSpacing(4)
         for index, name in enumerate(tokens.PAGE_NAMES):
-            btn = QPushButton(name)
+            btn = QToolButton()
+            btn.setText(name)
             btn.setProperty("navItem", True)
             btn.setProperty("active", index == 0)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            btn.setIconSize(QSize(18, 18))
+            icon_path = _ICONS_DIR / tokens.ICON_FILES[index]
+            if icon_path.exists():
+                btn.setIcon(QIcon(str(icon_path)))
             btn.clicked.connect(lambda _checked=False, i=index: self._on_click(i))
             self.nav_buttons.append(btn)
             layout.addWidget(btn)

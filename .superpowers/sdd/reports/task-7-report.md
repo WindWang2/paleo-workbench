@@ -1,67 +1,21 @@
-# Task 7 Report: Minimal Paleo Map Adapter
+# Task 7: StatusBar Widget — Report
 
-## Scope
-
-- Implemented `paleo_workbench/adapters/paleo_map.py`
-- Updated `tests/test_adapter_schemas.py`
-
-## TDD Evidence
-
-### RED
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_adapter_schemas.py::test_paleo_map_adapter_validates_payload_and_exports_metadata -v
-```
-
-Result:
-
-- Failed during collection with `ModuleNotFoundError: No module named 'paleo_workbench.adapters.paleo_map'`
-
-### GREEN
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_adapter_schemas.py -v
-```
-
-Result:
-
-- `4 passed in 0.08s`
-
-## Required Verification
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_adapter_schemas.py tests/test_mock_outputs.py tests/test_workflow_service.py tests/test_project_models.py tests/test_project_manager.py tests/test_resource_scanner.py -v
-```
-
-Result:
-
-- `19 passed in 0.12s`
-
-## Git Checkpoint
-
-Command:
-
-```bash
-git rev-parse --show-toplevel
-```
-
-Result:
-
-- Failed as expected: `fatal: not a git repository (or any of the parent directories): .git`
-- Checkpoint recorded: `Task 7 complete; root commit pending repository repair`
-
-## Self-Review
-
-- `PaleoMapAdapter` validates `viewer_type=paleo_map` and rejects mismatched payloads.
-- Export writes GeoJSON FeatureCollection stubs and records adapter metadata in `ExportResult`.
-- Changes are limited to the Task 7 owned files plus this report.
+## Status
+Complete
 
 ## Commit
+da9e72bff058aee0db65850cafbdb231c67e9d9f
 
-- None created, because root git is invalid.
+## Test Summary
+4 passed in 0.03s (test_status_bar_default_text, test_status_bar_coord_label, test_status_bar_set_project_name, test_status_bar_object_name)
+
+## Steps
+1. Wrote `tests/test_status_bar.py` (4 tests per brief).
+2. Verified FAIL — `ModuleNotFoundError: No module named 'paleo_workbench.ui.status_bar'`.
+3. Created `paleo_workbench/ui/status_bar.py` — `StatusBar(QFrame)` with `status_label`, `coord_label`, `set_project_name(name)`, objectName `"StatusBar"`.
+4. Verified PASS — 4/4.
+5. Committed as `da9e72b`.
+
+## Concerns
+- Unused imports `QSpacerItem` and `QSizePolicy` carried over verbatim from the brief; left as-is per "follow it exactly". Could be removed in a later cleanup.
+- Coord label is static placeholder text; live coordinate updates will need wiring when map interaction lands.

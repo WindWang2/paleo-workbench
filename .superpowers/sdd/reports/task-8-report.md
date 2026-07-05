@@ -1,69 +1,33 @@
-# Task 8 Report: UI Screen Inventory Artifact
+# Task 8 Report — AppShell Assembly
 
-## Scope
+**Status:** COMPLETE
 
-- Implemented `paleo_workbench/ui/__init__.py`
-- Implemented `paleo_workbench/ui/screen_inventory.py`
-- Created `docs/paleo_workbench_screen_inventory.md`
-- Updated `tests/test_project_models.py`
+**Commit:** `b00b57e`
 
-## TDD Evidence
+## Summary
 
-### RED
+Composed the 4-zone AppShell layout per the task brief, wiring the `IconRail.page_changed` signal to `_switch_page(index)` which sets the `page_stack` current index and updates the sidebar context label. All 6 zone widgets are assembled: MenuBar, HeaderToolbar, IconRail, TextSidebar, QStackedWidget (9 PagePlaceholder pages), StatusBar.
 
-Command:
+## Files
 
-```bash
-.venv/bin/python -m pytest tests/test_project_models.py::test_screen_inventory_includes_required_pages -v
-```
+- **Created:** `paleo_workbench/ui/app_shell.py` — `AppShell(QWidget)` with `menu_bar`, `header_toolbar`, `icon_rail`, `sidebar`, `page_stack`, `status_bar` attributes and `set_project_name(name)` delegation to status bar.
+- **Test:** `tests/test_app_shell.py` — 6 tests covering zone assembly, 9-page count, default page index, icon-rail signal wiring + sidebar context sync, project name delegation, and objectName.
 
-Result:
+## TDD Workflow
 
-- Failed during collection with `ModuleNotFoundError: No module named 'paleo_workbench.ui'`
+1. Wrote failing test → `ModuleNotFoundError: No module named 'paleo_workbench.ui.app_shell'` ✓
+2. Created `app_shell.py` exactly per brief.
+3. Ran `pytest tests/test_app_shell.py -v` → **6 passed in 0.12s** ✓
+4. Committed: `b00b57e`
 
-### GREEN
+## Interface Verification
 
-Command:
+Pre-implementation verification confirmed the consumed widget APIs match brief expectations:
+- `IconRail.page_changed` Signal(int) + `nav_buttons` list — `icon_rail.py:10,16`
+- `TextSidebar.set_context(name)` + `context_label` QLabel — `sidebar.py:25,15`
+- `StatusBar.set_project_name(name)` + `status_label` QLabel — `status_bar.py:22,14`
+- `tokens.PAGE_NAMES` — 9 entries — `tokens.py:42`
 
-```bash
-.venv/bin/python -m pytest tests/test_project_models.py -v
-```
+## Concerns
 
-Result:
-
-- `3 passed in 0.09s`
-
-## Required Verification
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_adapter_schemas.py tests/test_mock_outputs.py tests/test_workflow_service.py tests/test_project_models.py tests/test_project_manager.py tests/test_resource_scanner.py -v
-```
-
-Result:
-
-- `20 passed in 0.12s`
-
-## Git Checkpoint
-
-Command:
-
-```bash
-git rev-parse --show-toplevel
-```
-
-Result:
-
-- Failed as expected: `fatal: not a git repository (or any of the parent directories): .git`
-- Checkpoint recorded: `Task 8 complete; root commit pending repository repair`
-
-## Self-Review
-
-- `SCREEN_INVENTORY` defines seven required pages and design tokens from the standalone HTML source.
-- Human-readable inventory document mirrors the module for UI implementation reference.
-- Changes are limited to the Task 8 owned files plus this report.
-
-## Commit
-
-- None created, because root git is invalid.
+None. Implementation matches the brief verbatim; no existing files modified.

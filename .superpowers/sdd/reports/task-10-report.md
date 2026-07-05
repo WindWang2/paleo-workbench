@@ -1,68 +1,24 @@
-# Task 10 Report: QC And Export Artifact Records
+### Task 10 Report: Integration — Replace WorkflowDashboard
 
-## Scope
+**Status:** Complete
 
-- Implemented `paleo_workbench/workflow/qc.py`
-- Implemented `paleo_workbench/workflow/export.py`
-- Updated `tests/test_workflow_service.py`
+**Commit:** `0c7108cb9001ceb33d36d89c8d5da36432eefdce`
 
-## TDD Evidence
+**Test summary:** 57 passed / 0 failed (full suite, 0.29s)
 
-### RED
+### Changes made
 
-Command:
+1. `paleo_workbench/app.py` — replaced `WorkflowDashboard` with `AppShell`; window now creates `self.app_shell = AppShell()`, calls `dashboard_state(self.project)`, and pushes `state["project_name"]` to `app_shell.set_project_name()`. Window resized to 1440×900 per brief.
+2. `paleo_workbench/main.py` — imports `tokens` from `paleo_workbench.ui` and applies `app.setStyleSheet(tokens.QSS_TEMPLATE)` after `QApplication` construction.
+3. `paleo_workbench/ui/dashboard.py` — deleted via `git rm`.
+4. `tests/test_integration_smoke.py` — renamed `test_dashboard_window_shows_project_name` → `test_app_shell_window_shows_project_name`; asserts `"HZ26 Demo" in window.app_shell.status_bar.status_label.text()`.
 
-```bash
-.venv/bin/python -m pytest tests/test_workflow_service.py::test_qc_warns_when_map_has_no_polygons tests/test_workflow_service.py::test_record_export_adds_artifact -v
-```
+### Verification
 
-Result:
+- `git rm` confirmed in commit: `delete mode 100644 paleo_workbench/ui/dashboard.py`.
+- Full suite: `57 passed in 0.29s` — all 24 pre-existing MVP tests + 33 UI/zones tests green; the renamed integration test passes.
+- Grep across `paleo_workbench/` and `tests/` confirms no remaining references to `WorkflowDashboard` or `window.dashboard` (only mentions are in `docs/superpowers/` historical plan/spec docs, which are intentional records).
 
-- Failed during collection with `ModuleNotFoundError: No module named 'paleo_workbench.workflow.export'`
+### Concerns
 
-### GREEN
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_workflow_service.py -v
-```
-
-Result:
-
-- `4 passed in 0.09s`
-
-## Required Verification
-
-Command:
-
-```bash
-.venv/bin/python -m pytest tests/test_integration_smoke.py tests/test_adapter_schemas.py tests/test_mock_outputs.py tests/test_workflow_service.py tests/test_project_models.py tests/test_project_manager.py tests/test_resource_scanner.py -v
-```
-
-Result:
-
-- `23 passed in 0.14s`
-
-## Git Checkpoint
-
-Command:
-
-```bash
-git rev-parse --show-toplevel
-```
-
-Result:
-
-- Failed as expected: `fatal: not a git repository (or any of the parent directories): .git`
-- Checkpoint recorded: `Task 10 complete; root commit pending repository repair`
-
-## Self-Review
-
-- `run_basic_qc` checks facies polygons and target horizon linkage, appends `QualityReport` to project.
-- `record_export` creates `ExportArtifact` with map elements and source task provenance.
-- Changes are limited to the Task 10 owned files plus this report.
-
-## Commit
-
-- None created, because root git is invalid.
+None. The brief specifies a single-line commit message but the plan doc prescribed a multi-line body; I used the multi-line body form from the plan's Step 7 since it is more specific and the user instruction said "Follow it exactly" referring to the brief, while the brief itself quotes the multi-line message. No behavior divergence — both forms name the same commit.
