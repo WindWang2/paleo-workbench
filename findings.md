@@ -134,3 +134,46 @@ This pattern will be reused as more pages gain real content.
 | FactorPreviewGrid defaulted grid metric to "—" instead of "50×50" (spec deviation) | Fixed: default "50×50" + regression test; found in task review before merge |
 | Card had double padding (stylesheet + layout margins) | Fixed: removed stylesheet padding, kept layout margins (sibling convention) |
 | BoundaryPanel labels drifted from spec wording (岩相阈值 vs 概率阈值 etc.) | Fixed: aligned to spec strings (概率阈值/边界平滑强度/最小图斑面积) |
+
+## ReviewExportPage (Phase 5) Notes
+
+### Prototype 成图审核 Page Structure (3 panels)
+
+Extracted from standalone HTML via headless browser. QC-centric page:
+1. **ActionHeader**: title (map horizon) + 3 buttons (运行检查/规则配置/导出检查报告) + rules chips row.
+2. **QCIssueTable**: 检查项目/检查说明/结果说明 columns, one row per QC rule, result ✓通过/!警告/!待处理.
+3. **ResultSummary**: 通过项 N/警告项 N/待处理项 N counts + advisory text + export artifacts list.
+
+### New Tokens Added
+
+- `WARNING = "#c47e12"` (standalone; previously only embedded as STEP_COLORS[3])
+- `QC_RESULT_COLORS`: pass→SUCCESS, warning→WARNING, error→ERROR_RED
+- `QC_RESULT_LABELS`: pass→"✓通过", warning→"!警告", error→"!待处理"
+- `DEFAULT_QC_RULES`: 6 prototype rule names
+- `RULE_DESCRIPTIONS`: maps BOTH Chinese prototype rule names AND engine rule keys (facies_polygons_present, target_horizon_present) to descriptions — bridges the engine's English rule IDs to Chinese display text
+
+### Severity Mapping Decision
+
+Engine (`run_basic_qc`) emits severity "warning"/"error". Prototype displays 通过/警告/待处理. Mapping chosen: warning→警告 (amber), error→待处理 (red, treated as needs-action). The advisory text "待处理项" reinforces error=needs-action. Counts are one-result-per-rule (matches prototype's 通过项 5 / 警告项 2 / 待处理项 1 semantics).
+
+### Shared Helper Pattern (qc_helpers.py)
+
+Final review caught a divergence bug: QCIssueTable (last-issue-wins) and ResultSummary (error-precedence) derived per-rule results independently, so they could disagree when a rule had multiple issues of different severities. Fixed by extracting `derive_rule_result(rule, issues) -> (severity, text, color)` in `qc_helpers.py` with error-takes-precedence semantics, called by both widgets. This pattern (shared derivation helper for cross-widget consistency) should be reused if future pages derive display values from the same source data.
+
+### AppShell Integration (split-loop, continued)
+
+Page construction now uses three segments to keep index alignment with PAGE_NAMES:
+```python
+self.page_stack.addWidget(HomePage())            # 0
+self.page_stack.addWidget(DataPage())            # 1
+for name in tokens.PAGE_NAMES[2:6]:              # 2,3,4,5
+    self.page_stack.addWidget(PagePlaceholder(name))
+self.page_stack.addWidget(PreparationPage())     # 6
+for name in tokens.PAGE_NAMES[7:8]:              # 7 (编图)
+    self.page_stack.addWidget(PagePlaceholder(name))
+self.page_stack.addWidget(ReviewExportPage())    # 8
+```
+
+### Data Model Note
+
+QualityReport carries rule keys that may be either Chinese display names (prototype) or engine keys (facies_polygons_present). RULE_DESCRIPTIONS maps both, so QCIssueTable's description column works for either source. The integration test confirms engine output renders descriptions correctly, not raw keys.

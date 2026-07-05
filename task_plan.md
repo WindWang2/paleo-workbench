@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-05
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 3/9 pages complete (首页 + 数据 + 制备), 119 tests passing
+## Project Status: 4/9 pages complete (首页 + 数据 + 制备 + 成图审核), 149 tests passing
 
 ## Current Architecture
 
@@ -43,12 +43,14 @@
 - Spec: `docs/superpowers/specs/2026-07-05-preparationpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-preparationpage.md`
 
-### Phase 5: 成图审核页 ReviewExportPage — 🔲 PENDING (next)
-- QC issue table, export formats, artifact summary
-- Complexity: Low (no engine dependency)
-- Data source: `project.quality_reports`, `project.export_artifacts`
+### Phase 5: 成图审核页 ReviewExportPage — ✅ COMPLETE
+- ActionHeader (title + 3 action buttons + rules chips), QCIssueTable (one row per QC rule, derived 通过/警告/待处理 result + colored cell), ResultSummary (pass/warning/error counts + advisory + export artifacts list); shared derive_rule_result helper (error precedence)
+- Commits: `a70a19f`..`3ad80ce`, refactor `1bdd23d`
+- Tests: +30 new (149 total)
+- Spec: `docs/superpowers/specs/2026-07-05-reviewexportpage-design.md`
+- Plan: `docs/superpowers/plans/2026-07-05-reviewexportpage.md`
 
-### Phase 6: 层序格架页 SequenceFrameworkPage — 🔲 PENDING
+### Phase 6: 层序格架页 SequenceFrameworkPage — 🔲 PENDING (next)
 - Target horizon editor, sequence scheme management
 - Complexity: Medium
 - Data source: `project.stratigraphy`
@@ -81,6 +83,10 @@
 | 6 | FactorTaskPanel.Row uses unscoped `QWidget` stylesheet selector (mitigated by child resets) | PreparationPage final review |
 | 7 | BoundaryPanel `area_spin` (最小图斑面积) has no dedicated test | PreparationPage final review |
 | 8 | `FactorPreviewGrid` rsquared visibility assertion on un-shown widget (Qt-version-fragile) | PreparationPage final review |
+| 9 | `ResultSummary` rebuilds QPalette on every update_state (redundant with stylesheet) | ReviewExportPage final review |
+| 10 | `test_result_summary.py` uses `self` as throwaway loop variable | ReviewExportPage final review |
+| 11 | Integration test only asserts qc_table rows, not action_header/result_summary receipt | ReviewExportPage final review |
+| 12 | `derive_rule_result` helper has redundant `if s == "warning"` arm (default already covers it) | ReviewExportPage final fix review |
 
 ## Page Progress Matrix
 
@@ -94,7 +100,7 @@
 | 6 | 可视化 | 🔲 Placeholder | — | — | — |
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
 | 8 | 编图 | 🔲 Placeholder | — | — | — |
-| 9 | 成图审核 | 🔲 Placeholder | — | — | — |
+| 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
 
 ## Test History
 
@@ -105,3 +111,4 @@
 | 2026-07-05 (HomePage polish) | 81 | ✅ |
 | 2026-07-05 (DataPage) | 95 | ✅ |
 | 2026-07-05 (PreparationPage) | 119 | ✅ |
+| 2026-07-05 (ReviewExportPage) | 149 | ✅ |

@@ -76,6 +76,22 @@ Implemented via SDD (6 TDD tasks + 2 fixes):
 
 Final review: READY TO MERGE (no Critical/Important; 5 Minor deferred to follow-ups).
 
+### 成图审核页 ReviewExportPage (Phase 5) — COMPLETE ✅
+
+Implemented via SDD (6 TDD tasks + 1 final-fix refactor):
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | Tokens (WARNING, QC_RESULT_COLORS/LABELS, DEFAULT_QC_RULES, RULE_DESCRIPTIONS) | `a70a19f` | 5 (124 total) |
+| 2 | ActionHeader (title + 3 buttons + rules chips) | `c0a7a3b` | 5 (129 total) |
+| 3 | QCIssueTable (one row per QC rule, derived result + colored cell) | `b776514` | 6 (135 total) |
+| 4 | ResultSummary (pass/warning/error counts + advisory + export list) | `fc9c3a5` | 6 (141 total) |
+| 5 | ReviewExportPage assembly | `98763f7` | 2 (143 total) |
+| 6 | Integration (AppShell idx 8, exports, app.py wiring) | `3ad80ce` | 2 (145 total) |
+| Fix | Extract shared `derive_rule_result` helper (error precedence; resolved cross-widget divergence) | `1bdd23d` | 4 (149 total) |
+
+Final review: READY TO MERGE (1 Important found + fixed before merge; 6 Minor deferred to follow-ups).
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -85,6 +101,7 @@ Final review: READY TO MERGE (no Critical/Important; 5 Minor deferred to follow-
 | HomePage polish | 81 | ✅ |
 | DataPage | 95 | ✅ |
 | PreparationPage | 119 | ✅ |
+| ReviewExportPage | 149 | ✅ |
 
 ### Commits This Session
 
@@ -92,10 +109,11 @@ AppShell: `bf38646`..`c7352e1` + `6222a80`..`203c457` (13 commits)
 HomePage: `73ff911`..`adf0acc` + `c507629` + `96c88f9` (8 commits)
 DataPage: `4ba7122`..`28a3a04` + `bd8d7be` (6 commits)
 PreparationPage: `054b8f5`..`446ee05` + `a438167` (7 commits)
-Total: ~34 commits, all pushed to origin/main
+ReviewExportPage: `a70a19f`..`3ad80ce` + `1bdd23d` (7 commits)
+Total: ~41 commits, all pushed to origin/main
 
-### Next: Phase 5 — 成图审核页 ReviewExportPage
+### Next: Phase 6 — 层序格架页 SequenceFrameworkPage
 
-- QC issue table, export formats, artifact summary
-- Complexity: Low (no engine dependency)
-- Data source: `project.quality_reports`, `project.export_artifacts`
+- Target horizon editor, sequence scheme management
+- Complexity: Medium
+- Data source: `project.stratigraphy`
