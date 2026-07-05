@@ -92,3 +92,45 @@ Step statuses: pending, ready, running, complete, warning, failed, skipped, mock
 | SVG files written to wrong directory (`paleo_project/` instead of `paleo_workbench/`) | Moved files, deleted wrong dir |
 | `empty_label` dangling reference in RecentActivityCard | Fixed: persistent label with show/hide instead of recreate |
 | Status coloring dead code in ResourceTable | Fixed: apply `setForeground(QColor(status_color))` |
+
+## PreparationPage (Phase 4) Notes
+
+### Prototype 制备 Page Structure (3 panels)
+
+Extracted from standalone HTML via headless browser:
+1. **Left (单因素图清单)**: target horizon label + interpolation method combobox (克里金/IDW/样条) + "批量生成单因素图" button + 8 task rows (name + method/grid + status badge 已生成/待生成) + footer "已制备 6 / 8 个单因素图".
+2. **Center (单因素图集预览)**: header "{horizon} 单因素图集（{method}插值 · 网格 50×50 m）" + 2-col grid of cards (factor name + value range + R²) + 沉积相概率体 + 初始岩相边界 preview placeholders.
+3. **Right (初始岩相边界制备)**: probability threshold (0.55) + smoothing (中) + min area (0.5 km²) + participating facies chips + "生成初始边界并送入编图" button.
+
+### New Tokens Added
+
+- `TASK_STATUS_COLORS`: complete→SUCCESS, pending→TEXT_SECONDARY, running→PRIMARY, failed→ERROR_RED
+- `TASK_STATUS_LABELS`: complete→已生成, pending→待生成, running→进行中, failed→失败
+- `INTERPOLATION_METHODS`: ["克里金", "IDW", "样条"]
+- `SMOOTHING_LEVELS`: ["弱", "中", "强"]
+
+### Data Model Note
+
+`FactorMapTask.method` from `create_mock_factor_map` is the literal string "mock" (not "克里金"). Displayed as-is — the method combobox and preview header will show "mock" for mock-generated tasks. A future task could map mock→display method.
+
+### AppShell Integration Pattern (split-loop)
+
+To insert a real page mid-stack while keeping index alignment with PAGE_NAMES, AppShell uses a split-loop:
+```python
+self.page_stack.addWidget(HomePage())        # 0
+self.page_stack.addWidget(DataPage())        # 1
+for name in tokens.PAGE_NAMES[2:6]:          # 2,3,4,5
+    self.page_stack.addWidget(PagePlaceholder(name))
+self.page_stack.addWidget(PreparationPage()) # 6
+for name in tokens.PAGE_NAMES[7:]:           # 7,8
+    self.page_stack.addWidget(PagePlaceholder(name))
+```
+This pattern will be reused as more pages gain real content.
+
+### Errors Encountered
+
+| Error | Resolution |
+|-------|------------|
+| FactorPreviewGrid defaulted grid metric to "—" instead of "50×50" (spec deviation) | Fixed: default "50×50" + regression test; found in task review before merge |
+| Card had double padding (stylesheet + layout margins) | Fixed: removed stylesheet padding, kept layout margins (sibling convention) |
+| BoundaryPanel labels drifted from spec wording (岩相阈值 vs 概率阈值 etc.) | Fixed: aligned to spec strings (概率阈值/边界平滑强度/最小图斑面积) |

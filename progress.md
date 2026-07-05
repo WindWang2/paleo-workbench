@@ -59,6 +59,23 @@ Implemented via SDD (4 TDD tasks + 1 fix):
 
 Final review: READY TO MERGE.
 
+### 制备页 PreparationPage (Phase 4) — COMPLETE ✅
+
+Implemented via SDD (6 TDD tasks + 2 fixes):
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | Tokens (TASK_STATUS_COLORS/LABELS, INTERPOLATION_METHODS, SMOOTHING_LEVELS) | `054b8f5` | 4 (99 total) |
+| 2 | FactorTaskPanel (task list + horizon/method header + summary) | `22ef770` | 6 (105 total) |
+| 3 | FactorPreviewGrid (completed factor map cards + value range/R²) | `858b081` | 6 (111 total) |
+| 4 | BoundaryPanel (probability threshold / smoothing / area form) | `00f14ce` | 4 (115 total) |
+| 5 | PreparationPage assembly | `dabde0f` | 2 (117 total) |
+| 6 | Integration (AppShell idx 6, exports, app.py wiring) | `446ee05` | 2 (119 total) |
+| Fix | Grid metric default "50×50" + remove double card padding (Task 3 review) | `858b081` (amend) | — |
+| Fix | Align BoundaryPanel labels to spec wording | `a438167` | — |
+
+Final review: READY TO MERGE (no Critical/Important; 5 Minor deferred to follow-ups).
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -67,16 +84,18 @@ Final review: READY TO MERGE.
 | HomePage | 80 | ✅ |
 | HomePage polish | 81 | ✅ |
 | DataPage | 95 | ✅ |
+| PreparationPage | 119 | ✅ |
 
 ### Commits This Session
 
 AppShell: `bf38646`..`c7352e1` + `6222a80`..`203c457` (13 commits)
 HomePage: `73ff911`..`adf0acc` + `c507629` + `96c88f9` (8 commits)
 DataPage: `4ba7122`..`28a3a04` + `bd8d7be` (6 commits)
-Total: ~27 commits, all pushed to origin/main
+PreparationPage: `054b8f5`..`446ee05` + `a438167` (7 commits)
+Total: ~34 commits, all pushed to origin/main
 
-### Next: Phase 4 — 制备页 PreparationPage
+### Next: Phase 5 — 成图审核页 ReviewExportPage
 
-- Factor map task cards list
+- QC issue table, export formats, artifact summary
 - Complexity: Low (no engine dependency)
-- Data source: `project.factor_map_tasks`
+- Data source: `project.quality_reports`, `project.export_artifacts`

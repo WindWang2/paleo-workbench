@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-05
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 2/9 pages complete (首页 + 数据), 95 tests passing
+## Project Status: 3/9 pages complete (首页 + 数据 + 制备), 119 tests passing
 
 ## Current Architecture
 
@@ -36,12 +36,14 @@
 - Spec: `docs/superpowers/specs/2026-07-05-datapage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-datapage.md`
 
-### Phase 4: 制备页 PreparationPage — 🔲 PENDING (next)
-- Factor map task cards list, map preview, interpolation/method metadata
-- Complexity: Low (no engine dependency)
-- Data source: `project.factor_map_tasks`
+### Phase 4: 制备页 PreparationPage — ✅ COMPLETE
+- FactorTaskPanel (task list + horizon/method header + summary footer), FactorPreviewGrid (completed factor map cards with value range + R²), BoundaryPanel (probability threshold / smoothing / min area form)
+- Commits: `054b8f5`..`446ee05`, label fix `a438167`
+- Tests: +24 new (119 total)
+- Spec: `docs/superpowers/specs/2026-07-05-preparationpage-design.md`
+- Plan: `docs/superpowers/plans/2026-07-05-preparationpage.md`
 
-### Phase 5: 成图审核页 ReviewExportPage — 🔲 PENDING
+### Phase 5: 成图审核页 ReviewExportPage — 🔲 PENDING (next)
 - QC issue table, export formats, artifact summary
 - Complexity: Low (no engine dependency)
 - Data source: `project.quality_reports`, `project.export_artifacts`
@@ -76,6 +78,9 @@
 | 3 | WorkflowProgress: no test asserts badge styling/colors are applied | Task 2 review |
 | 4 | ResourceSummaryBar: combined label instead of separate label+count (spec deviation) | DataPage final review |
 | 5 | ActionPanel inlined as method instead of separate class (spec deviation) | DataPage final review |
+| 6 | FactorTaskPanel.Row uses unscoped `QWidget` stylesheet selector (mitigated by child resets) | PreparationPage final review |
+| 7 | BoundaryPanel `area_spin` (最小图斑面积) has no dedicated test | PreparationPage final review |
+| 8 | `FactorPreviewGrid` rsquared visibility assertion on un-shown widget (Qt-version-fragile) | PreparationPage final review |
 
 ## Page Progress Matrix
 
@@ -87,7 +92,7 @@
 | 4 | 地震预测 | 🔲 Placeholder | — | — | — |
 | 5 | 层序格架 | 🔲 Placeholder | — | — | — |
 | 6 | 可视化 | 🔲 Placeholder | — | — | — |
-| 7 | 制备 | 🔲 Placeholder | — | — | — |
+| 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
 | 8 | 编图 | 🔲 Placeholder | — | — | — |
 | 9 | 成图审核 | 🔲 Placeholder | — | — | — |
 
@@ -99,3 +104,4 @@
 | 2026-07-05 (HomePage) | 80 | ✅ |
 | 2026-07-05 (HomePage polish) | 81 | ✅ |
 | 2026-07-05 (DataPage) | 95 | ✅ |
+| 2026-07-05 (PreparationPage) | 119 | ✅ |
