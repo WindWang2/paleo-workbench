@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.ui.dashboard import WorkflowDashboard
+from paleo_workbench.ui import AppShell
 from paleo_workbench.workflow.service import dashboard_state
 
 
@@ -12,9 +12,11 @@ class PaleoWorkbenchWindow(QWidget):
         super().__init__()
         self.project = project or ProjectDocument.new("Untitled Project")
         self.setWindowTitle(f"{self.project.meta.name} - Paleogeography Workbench")
-        self.resize(1280, 820)
+        self.resize(1440, 900)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.dashboard = WorkflowDashboard(dashboard_state(self.project))
-        layout.addWidget(self.dashboard)
+        self.app_shell = AppShell()
+        state = dashboard_state(self.project)
+        self.app_shell.set_project_name(state.get("project_name", self.project.meta.name))
+        layout.addWidget(self.app_shell)

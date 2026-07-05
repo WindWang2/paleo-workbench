@@ -12,13 +12,15 @@ from paleo_workbench.workflow.qc import run_basic_qc
 from paleo_workbench.workflow.service import create_compilation_run, dashboard_state
 
 
-def test_dashboard_window_shows_project_name(qtbot):
-    project = ProjectDocument.new(name="HZ26 Demo")
-    window = PaleoWorkbenchWindow(project)
-    qtbot.addWidget(window)
+def test_app_shell_window_shows_project_name(qtbot):
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.app import PaleoWorkbenchWindow
 
-    assert "HZ26 Demo" in window.windowTitle()
-    assert window.dashboard.project_name_label.text() == "HZ26 Demo"
+    project = ProjectDocument.new("HZ26 Demo")
+    window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(window)
+    # AppShell replaces WorkflowDashboard; project name appears in status bar
+    assert "HZ26 Demo" in window.app_shell.status_bar.status_label.text()
 
 
 def test_full_mvp_loop_recovers_dashboard_state(tmp_path: Path):
