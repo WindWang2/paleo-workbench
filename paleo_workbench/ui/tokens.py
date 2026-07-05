@@ -55,6 +55,28 @@ PAGE_NAMES = [
     "可视化", "制备", "编图", "成图审核",
 ]
 
+STEP_COLORS = ["#1f6fe0", "#0f93a4", "#6f47cf", "#c47e12", "#e2705b", "#7e8794"]
+STEP_LABELS = [
+    "数据管理", "数据转换", "制图数据制备",
+    "沉积相预测", "古地理图编制", "质控与导出",
+]
+STATUS_TEXT = {
+    "complete": "完成",
+    "running": "进行中",
+    "pending": "待开始",
+    "warning": "警告",
+    "failed": "失败",
+    "ready": "就绪",
+    "skipped": "已跳过",
+    "mock": "Mock",
+}
+ERROR_RED = "#dc2626"
+RESOURCE_LABELS = {
+    "well_log": "测井数据",
+    "seismic": "地震数据",
+    "horizon": "层位数据",
+}
+
 QSS_TEMPLATE = f"""
 QWidget {{
     font-family: {FONT_FAMILY};

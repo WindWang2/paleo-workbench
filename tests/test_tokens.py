@@ -46,3 +46,39 @@ def test_page_names_constant():
         "可视化", "制备", "编图", "成图审核",
     ]
     assert len(tokens.PAGE_NAMES) == 9
+
+
+def test_step_colors_exist():
+    assert tokens.STEP_COLORS == [
+        "#1f6fe0", "#0f93a4", "#6f47cf", "#c47e12", "#e2705b", "#7e8794",
+    ]
+    assert len(tokens.STEP_COLORS) == 6
+
+
+def test_step_labels_exist():
+    assert tokens.STEP_LABELS == [
+        "数据管理", "数据转换", "制图数据制备",
+        "沉积相预测", "古地理图编制", "质控与导出",
+    ]
+    assert len(tokens.STEP_LABELS) == 6
+
+
+def test_status_text_mapping():
+    assert tokens.STATUS_TEXT["complete"] == "完成"
+    assert tokens.STATUS_TEXT["running"] == "进行中"
+    assert tokens.STATUS_TEXT["pending"] == "待开始"
+    assert tokens.STATUS_TEXT["warning"] == "警告"
+    assert tokens.STATUS_TEXT["failed"] == "失败"
+    assert tokens.STATUS_TEXT["ready"] == "就绪"
+    assert tokens.STATUS_TEXT["skipped"] == "已跳过"
+    assert tokens.STATUS_TEXT["mock"] == "Mock"
+
+
+def test_error_red_token():
+    assert tokens.ERROR_RED == "#dc2626"
+
+
+def test_resource_labels_exist():
+    assert tokens.RESOURCE_LABELS["well_log"] == "测井数据"
+    assert tokens.RESOURCE_LABELS["seismic"] == "地震数据"
+    assert tokens.RESOURCE_LABELS["horizon"] == "层位数据"
