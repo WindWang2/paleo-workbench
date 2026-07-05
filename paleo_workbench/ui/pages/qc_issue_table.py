@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.qc_helpers import derive_rule_result
 
 COLUMN_HEADERS = ["检查项目", "检查说明", "结果说明"]
 COLUMN_WIDTHS = [160, 0, 160]  # 0 = stretch (检查说明)
@@ -46,18 +47,10 @@ class QCIssueTable(QWidget):
         if not reports:
             return
         report = reports[0]
-        issues_by_rule = {issue.get("rule"): issue for issue in report.issues}
         for row, rule in enumerate(report.rules):
             self.table.insertRow(row)
             description = tokens.RULE_DESCRIPTIONS.get(rule, rule)
-            issue = issues_by_rule.get(rule)
-            if issue is not None:
-                severity = issue.get("severity", "warning")
-                result_text = f"{tokens.QC_RESULT_LABELS[severity]} {issue.get('message', '')}"
-                result_color = tokens.QC_RESULT_COLORS[severity]
-            else:
-                result_text = tokens.QC_RESULT_LABELS["pass"]
-                result_color = tokens.SUCCESS
+            severity, result_text, result_color = derive_rule_result(rule, report.issues)
             items = [
                 QTableWidgetItem(rule),
                 QTableWidgetItem(description),

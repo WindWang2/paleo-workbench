@@ -4,6 +4,7 @@ from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.qc_helpers import derive_rule_result
 
 
 class ResultSummary(QFrame):
@@ -107,26 +108,14 @@ class ResultSummary(QFrame):
         pass_count = warning_count = error_count = 0
         if reports:
             report = reports[0]
-            issues_by_rule: dict[str, dict] = {}
-            for issue in report.issues:
-                rule = issue.get("rule")
-                if rule is None:
-                    continue
-                # error takes precedence over warning per rule
-                existing = issues_by_rule.get(rule)
-                if existing is None or (
-                    existing.get("severity") != "error"
-                    and issue.get("severity") == "error"
-                ):
-                    issues_by_rule[rule] = issue
             for rule in report.rules:
-                issue = issues_by_rule.get(rule)
-                if issue is None:
-                    pass_count += 1
-                elif issue.get("severity") == "error":
+                severity, _text, _color = derive_rule_result(rule, report.issues)
+                if severity == "error":
                     error_count += 1
-                else:
+                elif severity == "warning":
                     warning_count += 1
+                else:
+                    pass_count += 1
 
         self.pass_label.setText(f"通过项: {pass_count}")
         self.warning_label.setText(f"警告项: {warning_count}")
