@@ -26,6 +26,11 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell.update_well_log_prediction_page(self.project.prediction_tasks)
         self.app_shell.update_seismic_prediction_page(self.project.prediction_tasks)
         self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
+        self.app_shell.update_visualization_page(
+            self.project.resources,
+            self.project.prediction_tasks,
+            self.project.paleomap_documents,
+        )
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
         self.app_shell.update_mapping_page(self.project.paleomap_documents)
         self.app_shell.update_review_export_page(

@@ -199,6 +199,32 @@ Verification:
 - `PYTHONPATH=geo-viz-engine/packages/geoviz_seismic:geo-viz-engine/packages/geoviz_common QT_QPA_PLATFORM=offscreen pytest geo-viz-engine/tests/test_seismic_view.py::test_seismic_view_init geo-viz-engine/tests/test_seismic_view.py::test_seismic_view_load_demo -q` — 2 passed
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 196 passed
 
+Commit: `c070fd5` — `feat: add seismic prediction page`
+Nested geo-viz-engine commit: `e3376a2` — `fix: allow seismic view without auto loading`
+
+### 可视化页 VisualizationPage (Phase 10) — COMPLETE ✅
+
+Implemented inline via TDD (3 implementation tasks + docs):
+
+| Task | Content | Tests |
+|------|---------|-------|
+| 1 | Child widgets: `VisualizationSummaryPanel`, `CompositeVisualizationPanel`, `VisualizationTracePanel` | +5 |
+| 2 | `VisualizationPage` assembly + pages export | +2 |
+| 3 | AppShell index 5 + `PaleoWorkbenchWindow` resources/predictions/maps wiring | +2 |
+
+Design/plan added:
+- `docs/superpowers/specs/2026-07-05-visualizationpage-design.md`
+- `docs/superpowers/plans/2026-07-05-visualizationpage.md`
+
+Implementation notes:
+- `CompositeVisualizationPanel` hosts three geo-viz tabs: `WellLogCanvas`, `SeismicView(auto_load=False)`, and `CrossWellWidget`.
+- Reuses `well_log_data_from_prediction()` and `seismic_volume_from_prediction()` rather than creating new visualization data semantics.
+- Page remains display-first; linked cursors, saved composite layouts, and export artifact creation are not implemented in this phase.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_visualization_summary_panel.py tests/test_composite_visualization_panel.py tests/test_visualization_trace_panel.py tests/test_visualization_page.py tests/test_visualization_integration.py -q` — 9 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 205 passed
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -213,6 +239,7 @@ Verification:
 | MappingPage | 172 | ✅ |
 | WellLogPredictionPage | 184 | ✅ |
 | SeismicPredictionPage | 196 | ✅ |
+| VisualizationPage | 205 | ✅ |
 
 ### Commits This Session
 
@@ -224,10 +251,10 @@ ReviewExportPage: `a70a19f`..`3ad80ce` + `1bdd23d` (7 commits)
 SequenceFrameworkPage: `b6d1df0` (1 commit)
 MappingPage: `db65ee5` (1 commit)
 WellLogPredictionPage: `5054a92` (1 commit)
-SeismicPredictionPage: working tree changes pending commit (Phase 9)
-Total: ~44 committed changes + Phase 9 pending commit
+SeismicPredictionPage: `c070fd5` (1 root commit) + `e3376a2` (geo-viz-engine nested commit)
+VisualizationPage: working tree changes pending commit (Phase 10)
+Total: ~45 committed changes + Phase 10 pending commit
 
-### Next: Phase 10 — 可视化页 VisualizationPage
+### Next: Post-Implementation Hardening
 
-- Composite visualization (well/seismic/cross-well)
-- Complexity: High (requires geo-viz-engine integration)
+- Review remaining minor follow-ups and decide which should be fixed before release.
