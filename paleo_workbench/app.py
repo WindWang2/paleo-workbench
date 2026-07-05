@@ -19,4 +19,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell = AppShell()
         state = dashboard_state(self.project)
         self.app_shell.set_project_name(state.get("project_name", self.project.meta.name))
+        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
+        steps = active_run.workflow_steps if active_run else []
+        self.app_shell.update_home_page(state, steps)
         layout.addWidget(self.app_shell)
