@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-05
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 5/9 pages complete (首页 + 数据 + 层序格架 + 制备 + 成图审核), 161 tests passing
+## Project Status: 6/9 pages complete (首页 + 数据 + 层序格架 + 制备 + 编图 + 成图审核), 172 tests passing
 
 ## Current Architecture
 
@@ -56,9 +56,11 @@
 - Spec: `docs/superpowers/specs/2026-07-05-sequenceframeworkpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-sequenceframeworkpage.md`
 
-### Phase 7: 编图页 MappingPage — 🔲 PENDING (high complexity)
-- PaleoMapCanvas from geo-viz-engine, facies polygons, well overlay, legend, north arrow, scale bar
-- Complexity: High (requires geo-viz-engine integration)
+### Phase 7: 编图页 MappingPage — ✅ COMPLETE
+- MapDocumentPanel (active map document + horizon + polygon/well counts + list), MapCanvasPanel (embedded geo-viz-engine `PaleoMapCanvas` loading facies polygons and well overlays), MapChromePanel (title/elements summary + draft/review actions)
+- Tests: +11 new (172 total)
+- Spec: `docs/superpowers/specs/2026-07-05-mappingpage-design.md`
+- Plan: `docs/superpowers/plans/2026-07-05-mappingpage.md`
 
 ### Phase 8: 测井预测页 WellLogPredictionPage — 🔲 PENDING (high complexity)
 - WellLogCanvas from geo-viz-engine, prediction adapter
@@ -100,7 +102,7 @@
 | 5 | 层序格架 | ✅ Complete | 12 | ✅ | ✅ |
 | 6 | 可视化 | 🔲 Placeholder | — | — | — |
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
-| 8 | 编图 | 🔲 Placeholder | — | — | — |
+| 8 | 编图 | ✅ Complete | 11 | ✅ | ✅ |
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
 
 ## Test History
@@ -114,3 +116,4 @@
 | 2026-07-05 (PreparationPage) | 119 | ✅ |
 | 2026-07-05 (ReviewExportPage) | 149 | ✅ |
 | 2026-07-05 (SequenceFrameworkPage) | 161 | ✅ |
+| 2026-07-05 (MappingPage) | 172 | ✅ |

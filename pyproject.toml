@@ -33,6 +33,7 @@ timeout = 60
 pythonpath = [
     ".",
     "geo-viz-engine",
+    "geo-viz-engine/packages/geoviz_common",
     "geo-viz-engine/packages/geoviz_paleo_map",
     "geo-viz-engine/packages/geoviz_plots",
     "geo-viz-engine/packages/geoviz_seismic",

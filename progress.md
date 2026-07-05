@@ -116,6 +116,33 @@ Notes:
 - Data source is `project.stratigraphy`; missing values render conservative defaults.
 - Explicit `QT_QPA_PLATFORM=offscreen` is required in this headless environment for PySide/pytest-qt.
 
+Commit: `b6d1df0` — `feat: add sequence framework page`
+
+### 编图页 MappingPage (Phase 7) — COMPLETE ✅
+
+Implemented inline via TDD (3 implementation tasks + docs):
+
+| Task | Content | Tests |
+|------|---------|-------|
+| 1 | Child widgets: `MapDocumentPanel`, `MapCanvasPanel`, `MapChromePanel`, plus active-document helper | +7 |
+| 2 | `MappingPage` assembly + pages export | +2 |
+| 3 | AppShell index 7 + `PaleoWorkbenchWindow` paleomap document wiring | +2 |
+
+Design/plan added:
+- `docs/superpowers/specs/2026-07-05-mappingpage-design.md`
+- `docs/superpowers/plans/2026-07-05-mappingpage.md`
+
+Implementation notes:
+- `MapCanvasPanel` embeds `geoviz_paleo_map.PaleoMapCanvas`.
+- Active document is the latest `ProjectDocument.paleomap_documents` entry.
+- `PaleoMapCanvas.load_features(facies_polygons, period_name=linked_target_horizon, wells=well_overlays)` handles polygons, labels, well overlay, title, legend, north arrow, and scale bar.
+- Added `geo-viz-engine/packages/geoviz_common` to pytest pythonpath because `PaleoMapCanvas` imports `geoviz_common.paint_scheduler`.
+- Page remains display-first; polygon editing/export actions are not implemented in this phase.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_map_document_panel.py tests/test_map_canvas_panel.py tests/test_map_chrome_panel.py tests/test_mapping_page.py tests/test_mapping_integration.py -q` — 11 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 172 passed
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -127,6 +154,7 @@ Notes:
 | PreparationPage | 119 | ✅ |
 | ReviewExportPage | 149 | ✅ |
 | SequenceFrameworkPage | 161 | ✅ |
+| MappingPage | 172 | ✅ |
 
 ### Commits This Session
 
@@ -135,10 +163,11 @@ HomePage: `73ff911`..`adf0acc` + `c507629` + `96c88f9` (8 commits)
 DataPage: `4ba7122`..`28a3a04` + `bd8d7be` (6 commits)
 PreparationPage: `054b8f5`..`446ee05` + `a438167` (7 commits)
 ReviewExportPage: `a70a19f`..`3ad80ce` + `1bdd23d` (7 commits)
-SequenceFrameworkPage: working tree changes pending commit (Phase 6)
-Total: ~41 committed changes + Phase 6 pending commit
+SequenceFrameworkPage: `b6d1df0` (1 commit)
+MappingPage: working tree changes pending commit (Phase 7)
+Total: ~42 committed changes + Phase 7 pending commit
 
-### Next: Phase 7 — 编图页 MappingPage
+### Next: Phase 8 — 测井预测页 WellLogPredictionPage
 
-- PaleoMapCanvas from geo-viz-engine, facies polygons, well overlay, legend, north arrow, scale bar
+- WellLogCanvas from geo-viz-engine, prediction adapter
 - Complexity: High (requires geo-viz-engine integration)

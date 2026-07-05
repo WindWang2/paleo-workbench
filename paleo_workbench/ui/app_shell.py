@@ -10,6 +10,7 @@ from paleo_workbench.ui.menu_bar import MenuBar
 from paleo_workbench.ui.page_placeholder import PagePlaceholder
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.home_page import HomePage
+from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.ui.pages.preparation_page import PreparationPage
 from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
 from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
@@ -45,8 +46,7 @@ class AppShell(QWidget):
         for name in tokens.PAGE_NAMES[5:6]:          # 5 = 可视化
             self.page_stack.addWidget(PagePlaceholder(name))
         self.page_stack.addWidget(PreparationPage()) # index 6 = 制备
-        for name in tokens.PAGE_NAMES[7:8]:           # 7 = 编图
-            self.page_stack.addWidget(PagePlaceholder(name))
+        self.page_stack.addWidget(MappingPage())      # index 7 = 编图
         self.page_stack.addWidget(ReviewExportPage()) # index 8 = 成图审核
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
@@ -84,6 +84,11 @@ class AppShell(QWidget):
         page = self.page_stack.widget(6)
         if hasattr(page, "update_state"):
             page.update_state(tasks)
+
+    def update_mapping_page(self, map_documents: list) -> None:
+        page = self.page_stack.widget(7)
+        if hasattr(page, "update_state"):
+            page.update_state(map_documents)
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
         page = self.page_stack.widget(8)
