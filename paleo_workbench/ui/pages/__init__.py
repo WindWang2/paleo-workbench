@@ -5,6 +5,7 @@ from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.ui.pages.preparation_page import PreparationPage
 from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
 from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
+from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 
 __all__ = [
     "DataPage",
@@ -13,4 +14,5 @@ __all__ = [
     "PreparationPage",
     "ReviewExportPage",
     "SequenceFrameworkPage",
+    "WellLogPredictionPage",
 ]

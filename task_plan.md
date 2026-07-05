@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-05
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 6/9 pages complete (首页 + 数据 + 层序格架 + 制备 + 编图 + 成图审核), 172 tests passing
+## Project Status: 7/9 pages complete (首页 + 数据 + 测井预测 + 层序格架 + 制备 + 编图 + 成图审核), 184 tests passing
 
 ## Current Architecture
 
@@ -62,9 +62,11 @@
 - Spec: `docs/superpowers/specs/2026-07-05-mappingpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-mappingpage.md`
 
-### Phase 8: 测井预测页 WellLogPredictionPage — 🔲 PENDING (high complexity)
-- WellLogCanvas from geo-viz-engine, prediction adapter
-- Complexity: High (requires geo-viz-engine integration)
+### Phase 8: 测井预测页 WellLogPredictionPage — ✅ COMPLETE
+- PredictionTaskPanel (active prediction task + status/probability/review counts + list), WellLogCanvasPanel (embedded geo-viz-engine `WellLogCanvas` fed by deterministic `PredictionTask` → `WellLogData` conversion), PredictionEvidencePanel (evidence weights + mock/replaceable status + actions)
+- Tests: +12 new (184 total)
+- Spec: `docs/superpowers/specs/2026-07-05-welllogpredictionpage-design.md`
+- Plan: `docs/superpowers/plans/2026-07-05-welllogpredictionpage.md`
 
 ### Phase 9: 地震预测页 SeismicPredictionPage — 🔲 PENDING (high complexity)
 - SeismicView from geo-viz-engine, prediction adapter
@@ -97,7 +99,7 @@
 |---|------|--------|-------|------|------|
 | 1 | 首页 | ✅ Complete | 23 | ✅ | ✅ |
 | 2 | 数据 | ✅ Complete | 14 | ✅ | ✅ |
-| 3 | 测井预测 | 🔲 Placeholder | — | — | — |
+| 3 | 测井预测 | ✅ Complete | 12 | ✅ | ✅ |
 | 4 | 地震预测 | 🔲 Placeholder | — | — | — |
 | 5 | 层序格架 | ✅ Complete | 12 | ✅ | ✅ |
 | 6 | 可视化 | 🔲 Placeholder | — | — | — |
@@ -117,3 +119,4 @@
 | 2026-07-05 (ReviewExportPage) | 149 | ✅ |
 | 2026-07-05 (SequenceFrameworkPage) | 161 | ✅ |
 | 2026-07-05 (MappingPage) | 172 | ✅ |
+| 2026-07-05 (WellLogPredictionPage) | 184 | ✅ |

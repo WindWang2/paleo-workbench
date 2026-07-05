@@ -23,6 +23,7 @@ class PaleoWorkbenchWindow(QWidget):
         steps = active_run.workflow_steps if active_run else []
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_data_page(state, self.project.resources)
+        self.app_shell.update_well_log_prediction_page(self.project.prediction_tasks)
         self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
         self.app_shell.update_mapping_page(self.project.paleomap_documents)
