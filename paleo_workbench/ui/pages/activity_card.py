@@ -32,6 +32,7 @@ class RecentActivityCard(QFrame):
         self.empty_label = QLabel("暂无活动")
         self.empty_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         self.entries_layout.addWidget(self.empty_label)
+        self._entry_labels: list[QLabel] = []
         layout.addStretch()
 
     def update_state(self, state: dict, steps: list) -> None:
@@ -48,18 +49,19 @@ class RecentActivityCard(QFrame):
                 f"color: {tokens.TEXT_PRIMARY}; font-size: 12.5px;"
             )
             self.entries_layout.addWidget(entry)
+            self._entry_labels.append(entry)
             count += 1
-        if count == 0:
-            self.empty_label = QLabel("暂无活动")
-            self.empty_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
-            self.entries_layout.addWidget(self.empty_label)
+        if count > 0:
+            self.empty_label.hide()
+        else:
+            self.empty_label.show()
         self._entry_count = count
 
     def _clear_entries(self) -> None:
-        while self.entries_layout.count() > 0:
-            item = self.entries_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        for entry in self._entry_labels:
+            self.entries_layout.removeWidget(entry)
+            entry.deleteLater()
+        self._entry_labels.clear()
 
     def entry_count(self) -> int:
         return getattr(self, "_entry_count", 0)
