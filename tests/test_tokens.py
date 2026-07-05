@@ -88,3 +88,27 @@ def test_resource_units_exist():
     assert tokens.RESOURCE_UNITS["well_log"] == "井"
     assert tokens.RESOURCE_UNITS["seismic"] == "条测线"
     assert tokens.RESOURCE_UNITS["horizon"] == "层位"
+
+
+def test_task_status_colors():
+    assert tokens.TASK_STATUS_COLORS["complete"] == tokens.SUCCESS
+    assert tokens.TASK_STATUS_COLORS["pending"] == tokens.TEXT_SECONDARY
+    assert tokens.TASK_STATUS_COLORS["running"] == tokens.PRIMARY
+    assert tokens.TASK_STATUS_COLORS["failed"] == tokens.ERROR_RED
+
+
+def test_task_status_labels():
+    assert tokens.TASK_STATUS_LABELS["complete"] == "已生成"
+    assert tokens.TASK_STATUS_LABELS["pending"] == "待生成"
+    assert tokens.TASK_STATUS_LABELS["running"] == "进行中"
+    assert tokens.TASK_STATUS_LABELS["failed"] == "失败"
+
+
+def test_interpolation_methods():
+    assert tokens.INTERPOLATION_METHODS == ["克里金", "IDW", "样条"]
+    assert len(tokens.INTERPOLATION_METHODS) == 3
+
+
+def test_smoothing_levels():
+    assert tokens.SMOOTHING_LEVELS == ["弱", "中", "强"]
+    assert len(tokens.SMOOTHING_LEVELS) == 3

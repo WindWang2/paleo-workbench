@@ -82,6 +82,11 @@ RESOURCE_UNITS = {
     "horizon": "层位",
 }
 
+TASK_STATUS_COLORS = {"complete": SUCCESS, "pending": TEXT_SECONDARY, "running": PRIMARY, "failed": ERROR_RED}
+TASK_STATUS_LABELS = {"complete": "已生成", "pending": "待生成", "running": "进行中", "failed": "失败"}
+INTERPOLATION_METHODS = ["克里金", "IDW", "样条"]
+SMOOTHING_LEVELS = ["弱", "中", "强"]
+
 QSS_TEMPLATE = f"""
 QWidget {{
     font-family: {FONT_FAMILY};
