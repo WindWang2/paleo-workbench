@@ -37,7 +37,7 @@ class BoundaryPanel(QFrame):
         layout.addWidget(self.title_label)
 
         # Threshold spin (0.0–1.0, step 0.05, default 0.55, 2 decimals)
-        self.threshold_label = QLabel("岩相阈值")
+        self.threshold_label = QLabel("概率阈值")
         self.threshold_label.setStyleSheet(
             f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
             " border: none; background: transparent;"
@@ -56,7 +56,7 @@ class BoundaryPanel(QFrame):
         layout.addWidget(self.threshold_spin)
 
         # Smoothing combo (SMOOTHING_LEVELS, default 中)
-        self.smoothing_label = QLabel("平滑强度")
+        self.smoothing_label = QLabel("边界平滑强度")
         self.smoothing_label.setStyleSheet(
             f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
             " border: none; background: transparent;"
@@ -73,7 +73,7 @@ class BoundaryPanel(QFrame):
         layout.addWidget(self.smoothing_combo)
 
         # Minimum area spin (0.0–10.0, step 0.1, default 0.5, 1 decimal, " km²")
-        self.area_label = QLabel("最小相面积")
+        self.area_label = QLabel("最小图斑面积 (km²)")
         self.area_label.setStyleSheet(
             f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
             " border: none; background: transparent;"
