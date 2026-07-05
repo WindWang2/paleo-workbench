@@ -170,6 +170,35 @@ Verification:
 - `QT_QPA_PLATFORM=offscreen pytest tests/test_prediction_helpers.py tests/test_prediction_task_panel.py tests/test_well_log_canvas_panel.py tests/test_prediction_evidence_panel.py tests/test_well_log_prediction_page.py tests/test_well_log_prediction_integration.py -q` — 12 passed
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 184 passed
 
+Commit: `5054a92` — `feat: add well log prediction page`
+
+### 地震预测页 SeismicPredictionPage (Phase 9) — COMPLETE ✅
+
+Implemented inline via TDD (4 implementation tasks + docs + one engine integration fix):
+
+| Task | Content | Tests |
+|------|---------|-------|
+| 1 | Seismic prediction helper: deterministic `PredictionTask` → `numpy.float32` volume conversion | +2 |
+| 2 | Child widgets: `SeismicTaskPanel`, `SeismicViewPanel`, `SeismicControlPanel` | +6 |
+| 3 | `SeismicPredictionPage` assembly + pages export | +2 |
+| 4 | AppShell index 3 + `PaleoWorkbenchWindow` prediction task wiring | +2 |
+
+Design/plan added:
+- `docs/superpowers/specs/2026-07-05-seismicpredictionpage-design.md`
+- `docs/superpowers/plans/2026-07-05-seismicpredictionpage.md`
+
+Implementation notes:
+- `SeismicViewPanel` embeds `geoviz_seismic.SeismicView`.
+- Active prediction task is the latest `ProjectDocument.prediction_tasks` entry.
+- `seismic_volume_from_prediction()` creates a deterministic small volume using the task seed and predicted-region probabilities, then `SeismicView.load_demo()` renders it.
+- Added backward-compatible `SeismicView(auto_load=True)` parameter in geo-viz-engine; workbench embeds with `auto_load=False` to prevent background synthetic workers from surviving tests and app page construction.
+- Page remains display-first; SEGY import, seismic attributes, horizon picking, and model execution are not implemented in this phase.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_seismic_prediction_helpers.py tests/test_seismic_task_panel.py tests/test_seismic_view_panel.py tests/test_seismic_control_panel.py tests/test_seismic_prediction_page.py tests/test_seismic_prediction_integration.py -q` — 12 passed
+- `PYTHONPATH=geo-viz-engine/packages/geoviz_seismic:geo-viz-engine/packages/geoviz_common QT_QPA_PLATFORM=offscreen pytest geo-viz-engine/tests/test_seismic_view.py::test_seismic_view_init geo-viz-engine/tests/test_seismic_view.py::test_seismic_view_load_demo -q` — 2 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 196 passed
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -183,6 +212,7 @@ Verification:
 | SequenceFrameworkPage | 161 | ✅ |
 | MappingPage | 172 | ✅ |
 | WellLogPredictionPage | 184 | ✅ |
+| SeismicPredictionPage | 196 | ✅ |
 
 ### Commits This Session
 
@@ -193,10 +223,11 @@ PreparationPage: `054b8f5`..`446ee05` + `a438167` (7 commits)
 ReviewExportPage: `a70a19f`..`3ad80ce` + `1bdd23d` (7 commits)
 SequenceFrameworkPage: `b6d1df0` (1 commit)
 MappingPage: `db65ee5` (1 commit)
-WellLogPredictionPage: working tree changes pending commit (Phase 8)
-Total: ~43 committed changes + Phase 8 pending commit
+WellLogPredictionPage: `5054a92` (1 commit)
+SeismicPredictionPage: working tree changes pending commit (Phase 9)
+Total: ~44 committed changes + Phase 9 pending commit
 
-### Next: Phase 9 — 地震预测页 SeismicPredictionPage
+### Next: Phase 10 — 可视化页 VisualizationPage
 
-- SeismicView from geo-viz-engine, prediction adapter
+- Composite visualization (well/seismic/cross-well)
 - Complexity: High (requires geo-viz-engine integration)

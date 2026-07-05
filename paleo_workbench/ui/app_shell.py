@@ -14,6 +14,7 @@ from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.ui.pages.preparation_page import PreparationPage
 from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
 from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
+from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.ui.sidebar import TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
@@ -42,8 +43,7 @@ class AppShell(QWidget):
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
         self.page_stack.addWidget(DataPage())        # index 1 = 数据
         self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
-        for name in tokens.PAGE_NAMES[3:4]:          # 3 = 地震预测
-            self.page_stack.addWidget(PagePlaceholder(name))
+        self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
         for name in tokens.PAGE_NAMES[5:6]:          # 5 = 可视化
             self.page_stack.addWidget(PagePlaceholder(name))
@@ -79,6 +79,11 @@ class AppShell(QWidget):
 
     def update_well_log_prediction_page(self, prediction_tasks: list) -> None:
         page = self.page_stack.widget(2)
+        if hasattr(page, "update_state"):
+            page.update_state(prediction_tasks)
+
+    def update_seismic_prediction_page(self, prediction_tasks: list) -> None:
+        page = self.page_stack.widget(3)
         if hasattr(page, "update_state"):
             page.update_state(prediction_tasks)
 
