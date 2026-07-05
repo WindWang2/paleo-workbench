@@ -71,6 +71,33 @@ STATUS_TEXT = {
     "mock": "Mock",
 }
 ERROR_RED = "#dc2626"
+WARNING = "#c47e12"  # amber, previously only embedded in STEP_COLORS
+
+QC_RESULT_COLORS = {
+    "pass": SUCCESS,
+    "warning": WARNING,
+    "error": ERROR_RED,
+}
+QC_RESULT_LABELS = {
+    "pass": "✓通过",
+    "warning": "!警告",
+    "error": "!待处理",
+}
+DEFAULT_QC_RULES = [
+    "层级一致性", "未分类区域", "低可信区",
+    "边界碎斑异常", "图例符号完整性", "字段与输出格式完整性",
+]
+RULE_DESCRIPTIONS = {
+    "层级一致性": "各层级结构与命名是否一致",
+    "未分类区域": "是否存在未分类或未赋值区域",
+    "低可信区": "低可信区是否已复核确认",
+    "边界碎斑异常": "是否存在碎斑、孤岛等异常斑块",
+    "图例符号完整性": "图例符号与备注是否完整",
+    "字段与输出格式完整性": "字段是否齐全、格式是否规范",
+    # QC engine rule keys map to display via these too:
+    "facies_polygons_present": "古地理图相带多边形是否存在",
+    "target_horizon_present": "古地理图是否关联目标层位",
+}
 RESOURCE_LABELS = {
     "well_log": "测井数据",
     "seismic": "地震数据",

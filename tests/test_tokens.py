@@ -112,3 +112,33 @@ def test_interpolation_methods():
 def test_smoothing_levels():
     assert tokens.SMOOTHING_LEVELS == ["弱", "中", "强"]
     assert len(tokens.SMOOTHING_LEVELS) == 3
+
+
+def test_warning_token():
+    assert tokens.WARNING == "#c47e12"
+
+
+def test_qc_result_colors():
+    assert tokens.QC_RESULT_COLORS["pass"] == tokens.SUCCESS
+    assert tokens.QC_RESULT_COLORS["warning"] == tokens.WARNING
+    assert tokens.QC_RESULT_COLORS["error"] == tokens.ERROR_RED
+    assert len(tokens.QC_RESULT_COLORS) == 3
+
+
+def test_qc_result_labels():
+    assert tokens.QC_RESULT_LABELS["pass"] == "✓通过"
+    assert tokens.QC_RESULT_LABELS["warning"] == "!警告"
+    assert tokens.QC_RESULT_LABELS["error"] == "!待处理"
+    assert len(tokens.QC_RESULT_LABELS) == 3
+
+
+def test_default_qc_rules():
+    assert len(tokens.DEFAULT_QC_RULES) == 6
+    assert "层级一致性" in tokens.DEFAULT_QC_RULES
+    assert "字段与输出格式完整性" in tokens.DEFAULT_QC_RULES
+
+
+def test_rule_descriptions():
+    assert "层级一致性" in tokens.RULE_DESCRIPTIONS
+    assert "facies_polygons_present" in tokens.RULE_DESCRIPTIONS
+    assert tokens.RULE_DESCRIPTIONS["facies_polygons_present"] == "古地理图相带多边形是否存在"
