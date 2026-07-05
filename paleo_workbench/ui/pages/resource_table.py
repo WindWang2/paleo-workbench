@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
@@ -58,8 +59,7 @@ class ResourceTable(QWidget):
             ]
             for col, item in enumerate(items):
                 if col == 3:
-                    item.setForeground(Qt.GlobalColor.black)
-                    item.setData(Qt.ItemDataRole.ForegroundRole, None)
+                    item.setForeground(QColor(status_color))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(row, col, item)
             self.table.setRowHeight(row, 28)
