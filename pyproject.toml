@@ -10,6 +10,12 @@ dependencies = [
     "pandas>=2.0",
     "openpyxl>=3.1",
     "lasio>=0.14",
+    # geo-viz-engine is consumed as a git submodule at ./geo-viz-engine.
+    # Its subpackages are installed editable (see requirements-geoviz.txt) so each
+    # subpackage pulls its own heavy deps (scipy, segyio, pyqtgraph, PyOpenGL,
+    # matplotlib, shapely). They are NOT listed here as PEP 508 path deps because
+    # standard pip does not expand ${PROJECT_ROOT}-style variables; list-install
+    # order also matters (leaf packages first).
 ]
 
 [project.optional-dependencies]
@@ -39,4 +45,6 @@ pythonpath = [
     "geo-viz-engine/packages/geoviz_seismic",
     "geo-viz-engine/packages/geoviz_well_log",
     "geo-viz-engine/packages/geoviz_cross_well",
+    "geo-viz-engine/packages/geoviz_well_tie",
+    "geo-viz-engine/packages/geoviz_map",
 ]

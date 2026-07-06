@@ -1,0 +1,11 @@
+# geo-viz-engine subpackages — install editable, leaf packages first so pip can
+# resolve the inter-package dependencies. Run from the repo root:
+#   python -m pip install -r requirements-geoviz.txt
+-e geo-viz-engine/packages/geoviz_common
+-e geo-viz-engine/packages/geoviz_well_log
+-e geo-viz-engine/packages/geoviz_well_tie
+-e geo-viz-engine/packages/geoviz_paleo_map
+-e geo-viz-engine/packages/geoviz_seismic
+-e geo-viz-engine/packages/geoviz_cross_well
+-e geo-viz-engine/packages/geoviz_plots
+-e geo-viz-engine/packages/geoviz_map
