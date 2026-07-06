@@ -83,6 +83,10 @@ class AppShell(QWidget):
         page = self.page_stack.widget(1)
         if hasattr(page, "update_state"):
             page.update_state(state, resources, artifacts or [])
+        self.sidebar.update_data_context(
+            resource_count=len(resources),
+            artifact_count=len(artifacts or []),
+        )
 
     def update_well_log_prediction_page(self, prediction_tasks: list) -> None:
         page = self.page_stack.widget(2)

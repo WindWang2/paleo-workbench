@@ -238,3 +238,4 @@ There are currently no standalone `tests/test_resources_scanner.py` or `tests/te
 - `DataDetailPanel` uses `setMinimumWidth(240)` instead of `setFixedWidth(260)`, allowing the preview panel to expand for PDFs and images.
 - Data actions are non-destructive: `移出项目` unregisters resources but never deletes source files.
 - `重新扫描` handles missing files by setting resource status to `missing` and preserving the project record.
+- `TextSidebar` no longer uses the "上下文面板 (待实现)" placeholder. It renders page-specific context text for every AppShell page and receives live data counts from `AppShell.update_data_page()`.

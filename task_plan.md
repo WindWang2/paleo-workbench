@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implemented with multi-format previews and resizable preview controls, 257 tests passing with clean root pytest output
+## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implemented with multi-format previews, resizable preview controls, and real context sidebar, 259 tests passing with clean root pytest output
 
 ## Current Architecture
 
@@ -105,7 +105,8 @@
 - Wired `重新扫描`, `移出项目`, and `打开目录` action buttons to concrete DataPage behaviors.
 - Added import/action status feedback in the action panel.
 - Removed the `ActionHeader` stylesheet padding rule that caused Qt runtime stylesheet parse warnings.
-- Tests: +5 new/updated in this phase, 257 total
+- Replaced the left text sidebar placeholder with real page context sections; the Data page context now shows resource counts, artifact counts, current selection, reader capabilities, and operations.
+- Tests: +7 new/updated in this phase, 259 total
 
 ## Known Follow-up Items (Minor, non-blocking)
 
@@ -126,7 +127,7 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
 | 11 | 数据管理中心升级 | ✅ Complete | 27 | ✅ | ✅ |
 | 12 | 数据多格式预览 | ✅ Complete | 9 | ✅ | ✅ |
-| 13 | 数据页 V2 交互完善 | ✅ Complete | 5 | ✅ | ✅ |
+| 13 | 数据页 V2 交互完善 | ✅ Complete | 7 | ✅ | ✅ |
 
 ## Test History
 
@@ -148,4 +149,4 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 2026-07-06 (Preflight warning cleanup) | 212 | ✅ |
 | 2026-07-06 (Data Management Center) | 239 | ✅ |
 | 2026-07-06 (Data Preview Formats) | 248 | ✅ |
-| 2026-07-06 (Data Page V2 Polish) | 257 | ✅ |
+| 2026-07-06 (Data Page V2 Polish) | 259 | ✅ |

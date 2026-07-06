@@ -396,9 +396,12 @@ Implemented:
 - `打开目录` reports and opens the selected resource's containing directory.
 - Import actions report added/duplicate/warning counts in the action panel.
 - Removed an `ActionHeader` stylesheet rule that caused Qt parse warnings during app startup.
+- Replaced the left `TextSidebar` placeholder with real page context content for all 9 pages.
+- Data page sidebar context now shows resource/artifact counts, selected item placeholder, reader capabilities, and data operations.
 
 Verification:
 - `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_detail_panel.py tests/test_action_header.py -q` — 30 passed
 - `git diff --check` — passed
-- `QT_QPA_PLATFORM=offscreen pytest -q` — 257 passed
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py tests/test_data_page.py tests/test_data_detail_panel.py -q` — 36 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 259 passed
 - `python -m compileall -q paleo_workbench` — passed
