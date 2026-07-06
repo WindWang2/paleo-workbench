@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtPdf import QPdfDocument
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
@@ -15,11 +15,68 @@ from paleo_workbench.ui.pages.preview_strategy import (
 )
 
 
+class PdfPreviewPanel(QWidget):
+    def __init__(self, document: QPdfDocument, parent=None):
+        super().__init__(parent)
+        self.setObjectName("PdfPreviewPanel")
+        self._document = document
+        self._page_index = 0
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.image_label = QLabel()
+        self.image_label.setObjectName("DataPreviewPdf")
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.image_label)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
+        self.prev_button = QPushButton("上一页")
+        self.prev_button.setObjectName("DataPreviewPdfPrevious")
+        self.prev_button.clicked.connect(self.previous_page)
+        controls.addWidget(self.prev_button)
+
+        self.page_label = QLabel()
+        self.page_label.setObjectName("DataPreviewPdfPageLabel")
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controls.addWidget(self.page_label, 1)
+
+        self.next_button = QPushButton("下一页")
+        self.next_button.setObjectName("DataPreviewPdfNext")
+        self.next_button.clicked.connect(self.next_page)
+        controls.addWidget(self.next_button)
+        layout.addLayout(controls)
+
+        self._render_page()
+
+    def next_page(self) -> None:
+        if self._page_index < self._document.pageCount() - 1:
+            self._page_index += 1
+            self._render_page()
+
+    def previous_page(self) -> None:
+        if self._page_index > 0:
+            self._page_index -= 1
+            self._render_page()
+
+    def _render_page(self) -> None:
+        image = self._document.render(self._page_index, QSize(420, 560))
+        if not image.isNull():
+            self.image_label.setPixmap(QPixmap.fromImage(image))
+        page_count = self._document.pageCount()
+        self.page_label.setText(f"{self._page_index + 1} / {page_count}")
+        self.prev_button.setEnabled(self._page_index > 0)
+        self.next_button.setEnabled(self._page_index < page_count - 1)
+
+
 class DataDetailPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DataDetailPanel")
-        self.setFixedWidth(260)
+        self.setMinimumWidth(240)
         self.setStyleSheet(
             f"QFrame#DataDetailPanel {{ background: {tokens.BG_SIDEBAR};"
             f" border: 1px solid {tokens.BORDER};"
@@ -169,14 +226,9 @@ class DataDetailPanel(QFrame):
         error = document.load(path)
         if error != QPdfDocument.Error.None_:
             return False
-        image = document.render(0, QSize(220, 160))
-        if image.isNull():
+        if document.pageCount() <= 0:
             return False
-        label = QLabel()
-        label.setObjectName("DataPreviewPdf")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setPixmap(QPixmap.fromImage(image))
-        self.preview_layout.addWidget(label)
+        self.preview_layout.addWidget(PdfPreviewPanel(document))
         return True
 
     def _add_warning(self, text: str) -> None:

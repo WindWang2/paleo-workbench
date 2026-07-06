@@ -229,4 +229,12 @@ There are currently no standalone `tests/test_resources_scanner.py` or `tests/te
 - Image decoding is UI-only via `QPixmap`; `preview_strategy.py` returns only the image path.
 - `DataDetailPanel` scales image thumbnails to fit a 220x160 preview area and shows `"图片预览加载失败"` for invalid images.
 - PDF preview renders the first page to a thumbnail via `QPdfDocument.render()` and avoids `QPdfView` because the widget segfaulted under offscreen tests.
+- PDF preview now keeps a `QPdfDocument` in a custom `PdfPreviewPanel`, renders the current page via `QPdfDocument.render()`, and exposes previous/next page controls instead of embedding `QPdfView`.
 - Other heavy professional formats remain metadata-first until dedicated parsers/viewers are introduced: LAS, SGY, SEGY, XLSX, XLS, PPT, PPTX, WLP, and DFB.
+
+## Data Page V2 Interaction Notes
+
+- The lower data workspace uses `QSplitter` with catalog, asset table, and detail preview panels; the action panel remains fixed-width outside the splitter so buttons do not collapse.
+- `DataDetailPanel` uses `setMinimumWidth(240)` instead of `setFixedWidth(260)`, allowing the preview panel to expand for PDFs and images.
+- Data actions are non-destructive: `移出项目` unregisters resources but never deletes source files.
+- `重新扫描` handles missing files by setting resource status to `missing` and preserving the project record.

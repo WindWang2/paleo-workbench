@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
 
@@ -41,5 +41,12 @@ class ActionPanel(QFrame):
         self.open_folder_btn = QPushButton("打开目录")
         self.open_folder_btn.setObjectName("SecondaryButton")
         layout.addWidget(self.open_folder_btn)
+
+        self.status_label = QLabel("等待操作")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
+        )
+        layout.addWidget(self.status_label)
 
         layout.addStretch()

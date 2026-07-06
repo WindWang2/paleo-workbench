@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QSplitter
 
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.data_page import DataPage
@@ -15,6 +15,18 @@ def test_data_page_assembles_management_panels(qtbot):
     assert page.asset_table is not None
     assert page.detail_panel is not None
     assert page.action_panel is not None
+
+
+def test_data_page_uses_resizable_content_splitter(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    assert isinstance(page.content_splitter, QSplitter)
+    assert page.content_splitter.indexOf(page.catalog_panel) == 0
+    assert page.content_splitter.indexOf(page.asset_table) == 1
+    assert page.content_splitter.indexOf(page.detail_panel) == 2
+    assert page.detail_panel.minimumWidth() == 240
+    assert page.detail_panel.maximumWidth() > 260
 
 
 def test_data_page_update_state_delegates(qtbot):
@@ -81,6 +93,7 @@ def test_data_page_import_paths_updates_project_and_table(qtbot, tmp_path: Path)
     assert report.added_count == 1
     assert len(project.resources) == 1
     assert page.asset_table.table.rowCount() == 1
+    assert "新增 1" in page.action_panel.status_label.text()
 
 
 def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
@@ -96,6 +109,57 @@ def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
     assert report.added_count == 0
     assert report.skipped_count == 1
     assert len(project.resources) == 1
+    assert "重复 1" in page.action_panel.status_label.text()
+
+
+def test_data_page_remove_selected_resource_unregisters_only(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([well])
+    page.asset_table.table.selectRow(0)
+
+    removed = page.remove_selected_asset()
+
+    assert removed is True
+    assert project.resources == []
+    assert well.exists()
+    assert page.asset_table.table.rowCount() == 0
+    assert "已移出项目" in page.action_panel.status_label.text()
+
+
+def test_data_page_rescan_selected_resource_marks_missing(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([well])
+    page.asset_table.table.selectRow(0)
+    well.unlink()
+
+    rescanned = page.rescan_selected_asset()
+
+    assert rescanned is True
+    assert project.resources[0].status == "missing"
+    assert "文件不存在" in page.action_panel.status_label.text()
+
+
+def test_data_page_open_selected_folder_reports_path(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([well])
+    page.asset_table.table.selectRow(0)
+
+    folder = page.open_selected_folder()
+
+    assert folder == tmp_path
+    assert tmp_path.as_posix() in page.action_panel.status_label.text()
 
 
 def test_data_page_import_files_dialog_uses_selected_paths(

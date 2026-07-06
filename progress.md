@@ -380,3 +380,25 @@ Verification:
 - `git diff --check` — passed
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 248 passed
 - `python -m compileall -q paleo_workbench` — passed
+
+### Data Page V2 Interaction Polish — COMPLETE ✅
+
+User request:
+- Make the preview panel resizable and make PDF preview a real preview panel with page navigation, not a static thumbnail.
+- Fill in remaining visible Data page actions.
+
+Implemented:
+- Data page lower content now uses `QSplitter`, allowing the catalog/table/detail preview columns to be resized.
+- `DataDetailPanel` no longer uses fixed width; it has a 240px minimum width.
+- PDF preview now renders a page panel with `上一页` / `下一页` controls and `当前页 / 总页数` label.
+- `重新扫描` refreshes selected resource metadata or marks it `missing` if the source file no longer exists.
+- `移出项目` unregisters the selected resource without deleting the source file.
+- `打开目录` reports and opens the selected resource's containing directory.
+- Import actions report added/duplicate/warning counts in the action panel.
+- Removed an `ActionHeader` stylesheet rule that caused Qt parse warnings during app startup.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_detail_panel.py tests/test_action_header.py -q` — 30 passed
+- `git diff --check` — passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 257 passed
+- `python -m compileall -q paleo_workbench` — passed

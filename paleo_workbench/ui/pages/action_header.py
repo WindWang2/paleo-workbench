@@ -20,8 +20,7 @@ class ActionHeader(QFrame):
         self.setStyleSheet(
             f"QFrame#ActionHeader {{ background: {tokens.BG_SIDEBAR};"
             f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px;"
-            " padding: 12px; }}"
+            f" border-radius: {tokens.RADIUS_CARD}px; }}"
         )
 
         layout = QVBoxLayout(self)

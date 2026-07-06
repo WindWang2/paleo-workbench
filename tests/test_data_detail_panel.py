@@ -1,5 +1,5 @@
-from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QLabel
+from PySide6.QtGui import QImage, QPainter, QPdfWriter
+from PySide6.QtWidgets import QLabel, QPushButton
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.data_detail_panel import DataDetailPanel
@@ -7,6 +7,15 @@ from paleo_workbench.ui.pages.data_detail_panel import DataDetailPanel
 
 def _labels(panel):
     return [label.text() for label in panel.findChildren(QLabel)]
+
+
+def _write_two_page_pdf(path):
+    writer = QPdfWriter(path.as_posix())
+    painter = QPainter(writer)
+    painter.drawText(100, 100, "Page 1")
+    writer.newPage()
+    painter.drawText(100, 100, "Page 2")
+    painter.end()
 
 
 def test_detail_panel_empty_state(qtbot):
@@ -111,37 +120,7 @@ def test_detail_panel_renders_text_preview_lines(qtbot, tmp_path):
 
 def test_detail_panel_renders_pdf_view(qtbot, tmp_path):
     pdf_path = tmp_path / "report.pdf"
-    pdf_path.write_bytes(
-        b"""%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>
-endobj
-4 0 obj
-<< /Length 44 >>
-stream
-BT /F1 12 Tf 72 120 Td (Hello PDF) Tj ET
-endstream
-endobj
-xref
-0 5
-0000000000 65535 f
-0000000009 00000 n
-0000000058 00000 n
-0000000115 00000 n
-0000000202 00000 n
-trailer
-<< /Root 1 0 R /Size 5 >>
-startxref
-296
-%%EOF
-"""
-    )
+    _write_two_page_pdf(pdf_path)
     panel = DataDetailPanel()
     qtbot.addWidget(panel)
     resource = ResourceItem(
@@ -160,6 +139,35 @@ startxref
         and not label.pixmap().isNull()
     ]
     assert pixmap_labels
+
+
+def test_detail_panel_pdf_preview_can_page_up_and_down(qtbot, tmp_path):
+    pdf_path = tmp_path / "report.pdf"
+    _write_two_page_pdf(pdf_path)
+    panel = DataDetailPanel()
+    qtbot.addWidget(panel)
+    resource = ResourceItem(
+        name="report.pdf",
+        path=pdf_path.as_posix(),
+        type="document",
+        format="pdf",
+    )
+
+    panel.update_asset(resource)
+
+    page_label = panel.findChild(QLabel, "DataPreviewPdfPageLabel")
+    next_button = panel.findChild(QPushButton, "DataPreviewPdfNext")
+    prev_button = panel.findChild(QPushButton, "DataPreviewPdfPrevious")
+    assert page_label is not None
+    assert next_button is not None
+    assert prev_button is not None
+    assert page_label.text() == "1 / 2"
+
+    next_button.click()
+    assert page_label.text() == "2 / 2"
+
+    prev_button.click()
+    assert page_label.text() == "1 / 2"
 
 
 def test_detail_panel_invalid_pdf_shows_warning(qtbot, tmp_path):
