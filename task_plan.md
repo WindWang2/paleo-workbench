@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implemented, 239 tests passing with clean root pytest output
+## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implemented with multi-format previews, 248 tests passing with clean root pytest output
 
 ## Current Architecture
 
@@ -90,6 +90,15 @@
 - Plan: `docs/superpowers/plans/2026-07-06-datamanagementpage.md`
 - Tests: +27 new/updated in this phase, 239 total
 
+### Phase 12: 数据预览格式增强 Data Preview Formats — ✅ COMPLETE
+- Added bounded TXT/XML/CSV/DAT preview with maximum 8192 bytes and 20 lines.
+- Added inline image thumbnails in `DataDetailPanel` using `QPixmap`, with invalid-image warnings.
+- Kept LAS/SEGY/PDF/PPT/Excel/WLP/DFB safe summary-only by default.
+- Added DataPage selection-flow coverage for imported text and image preview rendering.
+- Spec: `docs/superpowers/specs/2026-07-06-data-preview-formats-design.md`
+- Plan: `docs/superpowers/plans/2026-07-06-data-preview-formats.md`
+- Tests: +9 new/updated in this phase, 248 total
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hardening pass.
@@ -108,6 +117,7 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 8 | 编图 | ✅ Complete | 11 | ✅ | ✅ |
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
 | 11 | 数据管理中心升级 | ✅ Complete | 27 | ✅ | ✅ |
+| 12 | 数据多格式预览 | ✅ Complete | 9 | ✅ | ✅ |
 
 ## Test History
 
@@ -128,3 +138,4 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 2026-07-06 (Post-implementation hardening 2) | 212 | ✅ |
 | 2026-07-06 (Preflight warning cleanup) | 212 | ✅ |
 | 2026-07-06 (Data Management Center) | 239 | ✅ |
+| 2026-07-06 (Data Preview Formats) | 248 | ✅ |

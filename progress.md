@@ -349,3 +349,34 @@ Implementation notes:
 Verification:
 - `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_integration.py tests/test_data_import_service.py tests/test_data_asset_table.py tests/test_data_catalog_panel.py tests/test_data_detail_panel.py tests/test_preview_strategy.py -q` — 29 passed
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 239 passed
+
+### Data Preview Formats Enhancement — COMPLETE ✅
+
+User request:
+- Extend the Data page so it supports previews for multiple data/file formats, not only metadata summaries.
+
+Implemented inline from the approved spec and plan:
+
+| Task | Content | Tests |
+|------|---------|-------|
+| 1 | Bounded preview strategy for TXT/XML/CSV/DAT, missing files, and professional summary-only formats | +5 strategy cases |
+| 2 | `DataDetailPanel` image thumbnails, invalid-image warning, and text/table snippet rendering | +3 widget cases |
+| 3 | DataPage imported text/image selection flow coverage | +2 integration cases |
+| 4 | Final verification and tracking docs | — |
+
+Design/plan:
+- Spec: `docs/superpowers/specs/2026-07-06-data-preview-formats-design.md`
+- Plan: `docs/superpowers/plans/2026-07-06-data-preview-formats.md`
+
+Implementation notes:
+- Text-like preview reads at most 8192 bytes and 20 lines.
+- `txt` and `xml` render as `text`; `csv` and `dat` render as `table`.
+- Image preview is UI-only via `QPixmap`; the strategy layer returns only `image_path`.
+- LAS, SGY, SEGY, XLSX, XLS, PDF, PPT, PPTX, WLP, and DFB remain safe summary-only by default.
+- Missing files return metadata mode with `"文件不存在"`.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_preview_strategy.py tests/test_data_detail_panel.py tests/test_data_page.py -q` — 25 passed
+- `git diff --check` — passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 248 passed
+- `python -m compileall -q paleo_workbench` — passed

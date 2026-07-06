@@ -219,3 +219,13 @@ There are currently no standalone `tests/test_resources_scanner.py` or `tests/te
 - Preview strategy returns immutable `PreviewState` records and is intentionally metadata-only for heavy formats. Image resources expose an image path, but no image bytes are decoded in the strategy layer.
 - DataPage now treats `ProjectDocument.resources` and `ProjectDocument.export_artifacts` as the two project-wide asset sources. Generated files are displayed as artifacts; derived resources can still be represented through `ResourceItem.artifact_role`.
 - File dialog behavior is behind `_choose_import_files()` and `_choose_import_folder()` seams so tests can exercise import refresh without launching native dialogs.
+
+## Data Preview Format Notes
+
+- Text preview reads at most 8192 bytes and 20 lines.
+- `txt` and `xml` use `PreviewState.mode == "text"`; `csv` and `dat` use `PreviewState.mode == "table"`.
+- Binary-looking text-like files fall back to metadata-only with a safe-summary warning.
+- Missing text/table/professional files return metadata mode with `"文件不存在"`.
+- Image decoding is UI-only via `QPixmap`; `preview_strategy.py` returns only the image path.
+- `DataDetailPanel` scales image thumbnails to fit a 220x160 preview area and shows `"图片预览加载失败"` for invalid images.
+- Heavy professional formats remain metadata-first until dedicated parsers/viewers are introduced: LAS, SGY, SEGY, XLSX, XLS, PDF, PPT, PPTX, WLP, and DFB.
