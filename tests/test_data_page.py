@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QLabel
+
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.data_page import DataPage
 
@@ -130,3 +133,39 @@ def test_data_page_import_folder_dialog_uses_selected_folder(
 
     assert report.added_count == 1
     assert project.resources[0].name == "cube.sgy"
+
+
+def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    text_path = tmp_path / "notes.txt"
+    text_path.write_text("alpha\nbeta\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([text_path])
+
+    page.asset_table.table.selectRow(0)
+
+    labels = "\n".join(
+        label.text() for label in page.detail_panel.findChildren(QLabel)
+    )
+    assert "alpha" in labels
+    assert "beta" in labels
+
+
+def test_data_page_selection_renders_imported_image_preview(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    image_path = tmp_path / "map.png"
+    image = QImage(8, 8, QImage.Format.Format_RGB32)
+    image.fill(0x336699)
+    image.save(image_path.as_posix())
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([image_path])
+
+    page.asset_table.table.selectRow(0)
+
+    pixmap_labels = [
+        label for label in page.detail_panel.findChildren(QLabel)
+        if label.pixmap() is not None and not label.pixmap().isNull()
+    ]
+    assert pixmap_labels
