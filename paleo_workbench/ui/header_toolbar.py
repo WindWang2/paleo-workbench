@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLineEdit, QPushButton
 
 _BUTTON_SPECS = [
@@ -11,6 +12,11 @@ _BUTTON_SPECS = [
 
 
 class HeaderToolbar(QFrame):
+    new_project_requested = Signal()
+    open_project_requested = Signal()
+    save_project_requested = Signal()
+    properties_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("HeaderToolbar")
@@ -24,6 +30,17 @@ class HeaderToolbar(QFrame):
             self.buttons.append(btn)
             layout.addWidget(btn)
         layout.addStretch()
+
+        self.new_project_btn = self.buttons[0]
+        self.open_project_btn = self.buttons[1]
+        self.save_project_btn = self.buttons[2]
+        self.properties_btn = self.buttons[3]
+
+        self.new_project_btn.clicked.connect(self.new_project_requested)
+        self.open_project_btn.clicked.connect(self.open_project_requested)
+        self.save_project_btn.clicked.connect(self.save_project_requested)
+        self.properties_btn.clicked.connect(self.properties_requested)
+
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
         self.search_box.setPlaceholderText("搜索井名 / 层位 / 功能…  Ctrl+K")

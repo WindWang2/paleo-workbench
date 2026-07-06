@@ -1,3 +1,5 @@
+from PySide6.QtCore import Qt
+
 from paleo_workbench.ui.header_toolbar import HeaderToolbar
 
 
@@ -27,3 +29,31 @@ def test_header_object_name(qtbot):
     bar = HeaderToolbar()
     qtbot.addWidget(bar)
     assert bar.objectName() == "HeaderToolbar"
+
+
+def test_toolbar_emits_new_project_signal(qtbot):
+    bar = HeaderToolbar()
+    qtbot.addWidget(bar)
+    with qtbot.waitSignal(bar.new_project_requested, timeout=1000):
+        qtbot.mouseClick(bar.new_project_btn, Qt.MouseButton.LeftButton)
+
+
+def test_toolbar_emits_open_project_signal(qtbot):
+    bar = HeaderToolbar()
+    qtbot.addWidget(bar)
+    with qtbot.waitSignal(bar.open_project_requested, timeout=1000):
+        qtbot.mouseClick(bar.open_project_btn, Qt.MouseButton.LeftButton)
+
+
+def test_toolbar_emits_save_project_signal(qtbot):
+    bar = HeaderToolbar()
+    qtbot.addWidget(bar)
+    with qtbot.waitSignal(bar.save_project_requested, timeout=1000):
+        qtbot.mouseClick(bar.save_project_btn, Qt.MouseButton.LeftButton)
+
+
+def test_toolbar_emits_properties_signal(qtbot):
+    bar = HeaderToolbar()
+    qtbot.addWidget(bar)
+    with qtbot.waitSignal(bar.properties_requested, timeout=1000):
+        qtbot.mouseClick(bar.properties_btn, Qt.MouseButton.LeftButton)
