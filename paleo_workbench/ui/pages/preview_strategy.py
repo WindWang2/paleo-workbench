@@ -5,6 +5,23 @@ from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 
+MAX_PREVIEW_BYTES = 8192
+MAX_PREVIEW_LINES = 20
+TEXT_FORMATS = {"txt", "xml"}
+TABLE_FORMATS = {"csv", "dat"}
+PROFESSIONAL_FORMATS = {
+    "las",
+    "sgy",
+    "segy",
+    "xlsx",
+    "xls",
+    "pdf",
+    "ppt",
+    "pptx",
+    "wlp",
+    "dfb",
+}
+
 
 @dataclass(frozen=True)
 class PreviewState:
@@ -29,11 +46,34 @@ def _summary_lines(name: str, path: str, fmt: str, size: object = None) -> list[
     return lines
 
 
+def _looks_binary(data: bytes) -> bool:
+    return b"\x00" in data
+
+
+def _read_preview_lines(
+    path: str,
+    max_bytes: int = MAX_PREVIEW_BYTES,
+    max_lines: int = MAX_PREVIEW_LINES,
+) -> tuple[list[str], str]:
+    try:
+        data = Path(path).read_bytes()[:max_bytes]
+    except OSError as exc:
+        return [], f"{Path(path).name}: {exc.__class__.__name__}"
+    if _looks_binary(data):
+        return [], "内容看起来是二进制，使用安全摘要预览"
+    text = data.decode("utf-8", errors="replace")
+    raw_lines = text.splitlines()
+    lines = raw_lines[:max_lines]
+    warning = f"仅显示前 {max_lines} 行" if len(raw_lines) > max_lines else ""
+    return lines, warning
+
+
 def preview_for_resource(
     resource: ResourceItem,
     base_path: Path | None = None,
 ) -> PreviewState:
     path = _display_path(resource.path, base_path)
+    fmt = resource.format.lower()
     size = resource.parsed_summary.get("size_bytes")
     lines = _summary_lines(resource.name, path, resource.format, size)
     image_types = {"image_reference"}
@@ -46,8 +86,51 @@ def preview_for_resource(
         "well_stratification",
     }
 
+    if (
+        not Path(path).exists()
+        and fmt in TEXT_FORMATS | TABLE_FORMATS | PROFESSIONAL_FORMATS
+    ):
+        return PreviewState("metadata", resource.name, lines, warning="文件不存在")
+
     if resource.type in image_types or resource.format in image_formats:
         return PreviewState("image", resource.name, lines, image_path=path)
+    if fmt in TEXT_FORMATS:
+        preview_lines, warning = _read_preview_lines(path)
+        if preview_lines:
+            return PreviewState(
+                "text",
+                resource.name,
+                lines + preview_lines,
+                warning=warning,
+            )
+        return PreviewState(
+            "metadata",
+            resource.name,
+            lines,
+            warning=warning or "暂不支持预览",
+        )
+    if fmt in TABLE_FORMATS:
+        preview_lines, warning = _read_preview_lines(path)
+        if preview_lines:
+            return PreviewState(
+                "table",
+                resource.name,
+                lines + preview_lines,
+                warning=warning,
+            )
+        return PreviewState(
+            "metadata",
+            resource.name,
+            lines,
+            warning=warning or "暂不支持预览",
+        )
+    if fmt in PROFESSIONAL_FORMATS and resource.type not in {"well_log", "seismic"}:
+        return PreviewState(
+            "metadata",
+            resource.name,
+            lines,
+            warning="此格式暂使用安全摘要预览",
+        )
     if resource.type in table_types:
         return PreviewState("table", resource.name, lines)
     if resource.type == "well_log":
