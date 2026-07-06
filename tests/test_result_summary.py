@@ -67,12 +67,12 @@ def test_summary_export_list(qtbot):
     ]
     widget.update_state([], artifacts)
     labels = [
-        self.text()
-        for self in (
+        label.text()
+        for label in (
             widget.export_layout.itemAt(i).widget()
             for i in range(widget.export_layout.count())
         )
-        if self is not None
+        if label is not None
     ]
     assert labels == [
         "• GeoTIFF — /tmp/map.tif",

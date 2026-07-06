@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
-> **Updated:** 2026-07-05
+> **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), 205 tests passing
+## Project Status: 9/9 pages complete (all AppShell pages implemented), 206 tests passing
 
 ## Current Architecture
 
@@ -84,18 +84,13 @@
 
 | # | Item | Source |
 |---|------|--------|
-| 1 | Legacy `screen_inventory.py` module (7 pages) diverges from updated doc (9 pages) | AppShell final review |
-| 2 | `STEP_TYPES`/`RESOURCE_TYPES` duplicated across modules instead of importing from `workflow.service` | HomePage/DataPage reviews |
-| 3 | WorkflowProgress: no test asserts badge styling/colors are applied | Task 2 review |
-| 4 | ResourceSummaryBar: combined label instead of separate label+count (spec deviation) | DataPage final review |
-| 5 | ActionPanel inlined as method instead of separate class (spec deviation) | DataPage final review |
-| 6 | FactorTaskPanel.Row uses unscoped `QWidget` stylesheet selector (mitigated by child resets) | PreparationPage final review |
-| 7 | BoundaryPanel `area_spin` (最小图斑面积) has no dedicated test | PreparationPage final review |
-| 8 | `FactorPreviewGrid` rsquared visibility assertion on un-shown widget (Qt-version-fragile) | PreparationPage final review |
-| 9 | `ResultSummary` rebuilds QPalette on every update_state (redundant with stylesheet) | ReviewExportPage final review |
-| 10 | `test_result_summary.py` uses `self` as throwaway loop variable | ReviewExportPage final review |
-| 11 | Integration test only asserts qc_table rows, not action_header/result_summary receipt | ReviewExportPage final review |
-| 12 | `derive_rule_result` helper has redundant `if s == "warning"` arm (default already covers it) | ReviewExportPage final fix review |
+| 1 | `STEP_TYPES`/`RESOURCE_TYPES` duplicated across modules instead of importing from `workflow.service` | HomePage/DataPage reviews |
+| 2 | WorkflowProgress: no test asserts badge styling/colors are applied | Task 2 review |
+| 3 | ResourceSummaryBar: combined label instead of separate label+count (spec deviation) | DataPage final review |
+| 4 | ActionPanel inlined as method instead of separate class (spec deviation) | DataPage final review |
+| 5 | FactorTaskPanel.Row uses unscoped `QWidget` stylesheet selector (mitigated by child resets) | PreparationPage final review |
+| 6 | `FactorPreviewGrid` rsquared visibility assertion on un-shown widget (Qt-version-fragile) | PreparationPage final review |
+| 7 | `ResultSummary` rebuilds QPalette on every update_state (redundant with stylesheet) | ReviewExportPage final review |
 
 ## Page Progress Matrix
 
@@ -126,3 +121,4 @@
 | 2026-07-05 (WellLogPredictionPage) | 184 | ✅ |
 | 2026-07-05 (SeismicPredictionPage) | 196 | ✅ |
 | 2026-07-05 (VisualizationPage) | 205 | ✅ |
+| 2026-07-06 (Post-implementation hardening) | 206 | ✅ |

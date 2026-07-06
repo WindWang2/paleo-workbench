@@ -20,8 +20,6 @@ def derive_rule_result(rule: str, issues: list[dict]) -> tuple[str, str, str]:
         if s == "error":
             severity = "error"
             break
-        if s == "warning":
-            severity = "warning"
     message = matching[0].get("message", "")  # use first matching issue's message
     text = f"{tokens.QC_RESULT_LABELS[severity]} {message}".rstrip()
     color = tokens.QC_RESULT_COLORS[severity]

@@ -29,6 +29,17 @@ def test_boundary_smoothing_options(qtbot):
     assert panel.smoothing_combo.currentText() == "中"
 
 
+def test_boundary_area_default(qtbot):
+    panel = BoundaryPanel()
+    qtbot.addWidget(panel)
+    assert panel.area_spin.minimum() == 0.0
+    assert panel.area_spin.maximum() == 10.0
+    assert panel.area_spin.singleStep() == 0.1
+    assert panel.area_spin.decimals() == 1
+    assert panel.area_spin.value() == 0.5
+    assert panel.area_spin.suffix() == " km²"
+
+
 def test_boundary_generate_button_present(qtbot):
     panel = BoundaryPanel()
     qtbot.addWidget(panel)

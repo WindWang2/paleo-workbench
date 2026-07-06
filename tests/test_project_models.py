@@ -20,6 +20,16 @@ def test_project_defaults_include_crs_and_empty_workflow():
 
 
 def test_screen_inventory_includes_required_pages():
-    page_ids = {page["id"] for page in SCREEN_INVENTORY["pages"]}
+    page_ids = [page["id"] for page in SCREEN_INVENTORY["pages"]]
 
-    assert {"dashboard", "data", "visualization", "preparation", "prediction", "paleomap", "qc_export"} <= page_ids
+    assert page_ids == [
+        "dashboard",
+        "data",
+        "well_log_prediction",
+        "seismic_prediction",
+        "sequence_framework",
+        "visualization",
+        "preparation",
+        "paleomap",
+        "qc_export",
+    ]
