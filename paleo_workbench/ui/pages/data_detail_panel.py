@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -86,10 +88,16 @@ class DataDetailPanel(QFrame):
 
         state = preview_for_resource(resource)
         self.preview_title.setText(state.title)
-        for line in state.lines:
-            self._add_muted(self.preview_layout, line)
-        if state.image_path:
+        if state.mode == "image" and state.image_path:
+            if not self._add_image_preview(state.image_path):
+                self._add_warning("图片预览加载失败")
             self._add_muted(self.preview_layout, f"图片: {state.image_path}")
+        elif state.mode in {"text", "table"}:
+            for line in state.lines:
+                self._add_preview_line(line)
+        else:
+            for line in state.lines:
+                self._add_muted(self.preview_layout, line)
         if state.warning:
             self._add_warning(state.warning)
 
@@ -121,6 +129,34 @@ class DataDetailPanel(QFrame):
         item.setWordWrap(True)
         item.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;")
         layout.addWidget(item)
+
+    def _add_preview_line(self, text: str) -> None:
+        item = QLabel(text)
+        item.setWordWrap(True)
+        item.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        item.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
+            " font-family: Consolas, 'Courier New', monospace;"
+        )
+        self.preview_layout.addWidget(item)
+
+    def _add_image_preview(self, path: str) -> bool:
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            return False
+        label = QLabel()
+        label.setObjectName("DataPreviewImage")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setPixmap(
+            pixmap.scaled(
+                220,
+                160,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.preview_layout.addWidget(label)
+        return True
 
     def _add_warning(self, text: str) -> None:
         item = QLabel(text)
