@@ -63,3 +63,8 @@ Review Task 4: complete (commits b776514..fc9c3a5, review clean, 141/141 tests p
 Review Task 5: complete (commits fc9c3a5..98763f7, review clean, 143/143 tests passing)
 Review Task 6: complete (commits 98763f7..3ad80ce, review clean, 145/145 tests passing; index 8 alignment verified; Minor: test only asserts qc_table, not result_summary/action_header)
 Review Task 7 (final review + fix): complete (commits 3ad80ce..1bdd23d, final review clean after extracting shared derive_rule_result helper, 149/149 tests passing)
+
+# Phase 6: Data Management Center (started 2026-07-06)
+Plan: docs/superpowers/plans/2026-07-06-datamanagementpage.md
+
+Data Management Task 1: complete (classifier/scanner characterization coverage, 5/5 tests passing)
