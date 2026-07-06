@@ -29,7 +29,7 @@ include = ["paleo_workbench*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-timeout = 60
+asyncio_default_fixture_loop_scope = "function"
 pythonpath = [
     ".",
     "geo-viz-engine",

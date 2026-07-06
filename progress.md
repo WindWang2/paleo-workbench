@@ -256,6 +256,18 @@ Verification:
 - `QT_QPA_PLATFORM=offscreen pytest tests/test_page_constant_sources.py tests/test_data_page.py tests/test_workflow_progress.py tests/test_factor_task_panel.py tests/test_factor_preview_grid.py tests/test_resource_summary.py tests/test_result_summary.py -q` — 36 passed
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 212 passed
 
+### Preflight Warning Cleanup — COMPLETE ✅
+
+Resolved release-prep warnings:
+- Fixed `geo-viz-engine` `Renderer3D._setup_sliders()` so slider `valueChanged` handlers are connected once during initialization and slider range/value updates are signal-blocked during volume loading.
+- Added a regression test ensuring repeated `Renderer3D.load_volume()` calls do not emit PySide "Failed to disconnect" runtime warnings.
+- Updated root and `geo-viz-engine` pytest config to remove the environment-dependent `timeout` config warning and set `asyncio_default_fixture_loop_scope = "function"`.
+
+Verification:
+- `PYTHONPATH=geo-viz-engine/packages/geoviz_seismic:geo-viz-engine/packages/geoviz_common QT_QPA_PLATFORM=offscreen pytest geo-viz-engine/tests/test_renderer_3d.py -q` — 7 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 212 passed, clean output
+- `python -m compileall -q paleo_workbench geo-viz-engine/packages/geoviz_seismic` — passed
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -273,6 +285,7 @@ Verification:
 | VisualizationPage | 205 | ✅ |
 | Post-implementation hardening | 206 | ✅ |
 | Post-implementation hardening 2 | 212 | ✅ |
+| Preflight warning cleanup | 212 | ✅ |
 
 ### Commits This Session
 
@@ -288,8 +301,9 @@ SeismicPredictionPage: `c070fd5` (1 root commit) + `e3376a2` (geo-viz-engine nes
 VisualizationPage: `36cce8e` (1 commit)
 Post-Implementation Hardening: `chore: harden ui follow-ups`
 Post-Implementation Hardening 2: `chore: finish ui hardening follow-ups`
-Total: ~48 committed changes; all current phase and hardening work committed
+Preflight Warning Cleanup: `chore: clean preflight test warnings` + nested geo-viz-engine commit `bb5d29b6`
+Total: ~49 committed changes; all current phase, hardening, and preflight work committed
 
 ### Next: Post-Implementation Hardening
 
-- No currently tracked non-blocking UI follow-ups remain; next useful step is release/merge preparation or a fresh product review.
+- No currently tracked non-blocking UI follow-ups remain; next useful step is branch publication or a fresh review.

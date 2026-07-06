@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), 212 tests passing
+## Project Status: 9/9 pages complete (all AppShell pages implemented), 212 tests passing with clean root pytest output
 
 ## Current Architecture
 
@@ -115,3 +115,4 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 2026-07-05 (VisualizationPage) | 205 | ✅ |
 | 2026-07-06 (Post-implementation hardening) | 206 | ✅ |
 | 2026-07-06 (Post-implementation hardening 2) | 212 | ✅ |
+| 2026-07-06 (Preflight warning cleanup) | 212 | ✅ |
