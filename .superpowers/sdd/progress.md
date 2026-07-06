@@ -70,3 +70,4 @@ Plan: docs/superpowers/plans/2026-07-06-datamanagementpage.md
 Data Management Task 1: complete (classifier/scanner characterization coverage, 5/5 tests passing)
 Data Management Task 2: complete (data import service, 5/5 tests passing)
 Data Management Task 3: complete (preview strategy helpers, 4/4 tests passing)
+Data Management Task 4: complete (catalog panel, 2/2 tests passing)
