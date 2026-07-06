@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
-> **Updated:** 2026-07-06
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center.
+> **Updated:** 2026-07-07
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implemented with multi-format previews, resizable preview controls, and real context sidebar, 259 tests passing with clean root pytest output
+## Project Status: 9/9 pages + Data Management Center complete; Project Management V1 (new/open/save/properties lifecycle) complete, 283 tests passing.
 
 ## Current Architecture
 
@@ -108,9 +108,23 @@
 - Replaced the left text sidebar placeholder with real page context sections; the Data page context now shows resource counts, artifact counts, current selection, reader capabilities, and operations.
 - Tests: +7 new/updated in this phase, 259 total
 
+### Phase 14: 项目管理 V1 Project Management — ✅ COMPLETE
+- Made the top-level toolbar actions real workflows: 新建工程 (new empty project), 打开工程 (file picker → load `.paleo.json`), 保存工程 (save / save-as with `.paleo.json` normalization), 工程属性 (read-only QMessageBox with 7 fields).
+- Window-level controller in `PaleoWorkbenchWindow`; shell rebuilt on new/open via `_refresh_shell` + `_apply_project_to_shell`; signal wiring centralized in `_wire_toolbar()` (called from both `__init__` and `_refresh_shell`).
+- Non-destructive error handling: open failures (JSONDecodeError/ValidationError/OSError) return False with current project preserved; save OSError → error dialog + None return.
+- Also fixed a baseline break: 07-06 接入的 SeismicPredictionPage 依赖 scipy 等 geoviz 包但未声明, 导致 36 个测试收集失败; added `requirements-geoviz.txt` + completed `pythonpath` to restore 259-test baseline.
+- Commits: `397993e` (baseline fix), `336bf2e`..`4cee4e1` (5 SDD tasks), cleanup `d…` (drop redundant FileNotFoundError).
+- Tests: +24 new (283 total; was 259 after baseline fix)
+- Spec: `docs/superpowers/specs/2026-07-07-project-management-design.md`
+- Plan: `docs/superpowers/plans/2026-07-07-project-management.md`
+
 ## Known Follow-up Items (Minor, non-blocking)
 
-No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hardening pass.
+| # | Item | Source |
+|---|------|--------|
+| 1 | `save_project` OSError branch lacks a dedicated test (only `save_project_as` tested) | Project Management V1 final review |
+| 2 | `_on_open_project` error message generic — doesn't distinguish missing file vs corrupt JSON | Project Management V1 final review |
+| 3 | Test magic index `page_stack.widget(1)` for DataPage (pre-existing pattern) | Project Management V1 final review |
 
 ## Page Progress Matrix
 

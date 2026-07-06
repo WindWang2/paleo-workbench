@@ -41,7 +41,7 @@ class PaleoWorkbenchWindow(QWidget):
     def open_project_path(self, path: str | Path) -> bool:
         try:
             loaded = ProjectManager(path).load()
-        except (json.JSONDecodeError, ValidationError, OSError, FileNotFoundError):
+        except (json.JSONDecodeError, ValidationError, OSError):
             return False
         self.project = loaded
         self.project_path = Path(path)

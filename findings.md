@@ -239,3 +239,40 @@ There are currently no standalone `tests/test_resources_scanner.py` or `tests/te
 - Data actions are non-destructive: `移出项目` unregisters resources but never deletes source files.
 - `重新扫描` handles missing files by setting resource status to `missing` and preserving the project record.
 - `TextSidebar` no longer uses the "上下文面板 (待实现)" placeholder. It renders page-specific context text for every AppShell page and receives live data counts from `AppShell.update_data_page()`.
+
+## Project Management V1 (Phase 14) Notes
+
+### Architecture Decision: Window-Level Controller
+
+Per spec, project lifecycle logic lives in `PaleoWorkbenchWindow` (`app.py`), not a separate controller class. V1 scope is small enough (4 actions, no autosave/recent-projects/command-history) that a controller class would be premature.
+
+### Shell Rebuild Pattern (critical for new/open)
+
+When the active project changes (new/open), the entire `AppShell` is rebuilt rather than individually updating each page. This avoids stale references — `DataPage` and other pages are constructed from `AppShell.project` at build time, so a new project requires a new shell.
+
+Decomposition:
+- `_refresh_shell()`: tear down old shell (`removeWidget` + `setParent(None)` + `deleteLater()`), build new `AppShell(project=self.project)`, call `_apply_project_to_shell()`, re-add to layout.
+- `_apply_project_to_shell()`: extracted from `__init__` — runs `set_project_name` + all `update_*` calls. Called by both `__init__` and `_refresh_shell`.
+- `_wire_toolbar()`: connects the 4 HeaderToolbar signals to handlers. **CRITICAL**: called from BOTH `__init__` and `_refresh_shell`, because each rebuild creates a new `HeaderToolbar` whose signals would otherwise be dead. Guarded by `test_toolbar_signals_wired_after_refresh`.
+
+### Non-Destructive Open (atomicity contract)
+
+`open_project_path(path) -> bool` loads into a local var FIRST, then assigns `self.project`/`self.project_path` only after success. Any exception (JSONDecodeError, ValidationError, OSError) → return False, current project fully unchanged. This ordering is the airtight part — never assign self.project before load() completes.
+
+### Extension Normalization
+
+`save_project_as` normalizes the filename to end in `.paleo.json`: appends if missing, does NOT double-append if already present. Handles `"p"` → `"p.paleo.json"`, `"p.json"` → `"p.paleo.json"`, `"p.paleo.json"` → unchanged. Uses `Path.with_name()` so directory components are preserved.
+
+### Dialog Testability Seams
+
+`_choose_open_project` / `_choose_save_project` / `_show_project_error` / `_show_properties` are isolated private methods, monkeypatched in tests. NEVER instantiate real `QFileDialog`/`QMessageBox` in tests (would block CI). The path-based public methods (`open_project_path`, `save_project_as`) are the testable surface; dialogs are thin wrappers.
+
+### Save Flow Amendment
+
+`save_project()` final design: if `project_path` set → save there; else call `_choose_save_project()` and save to chosen path (or return None on cancel). This makes `_on_save_project` a one-liner. A Task 2 unit test premise ("returns None without dialog") had to be updated in Task 3 to monkeypatch the dialog — expected cross-task evolution.
+
+### Baseline Lesson (geo-viz-engine deps)
+
+07-06 接入 geo-viz-engine-backed pages (Seismic/WellLog/Visualization/Mapping) but did not declare the engine's heavy deps (scipy/segyio/pyqtgraph/PyOpenGL/matplotlib/shapely) in the main project. The engine's subpackages declare their own deps, but only get installed if each subpackage is `pip install -e`'d individually — they are NOT published to PyPI and the engine's top-level pyproject lists them as external deps that pip can't resolve.
+
+Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency order for `pip install -r`. The `pytest.ini pythonpath` makes tests work without installation, masking the gap. **Future pages adding geo-viz imports must ensure the subpackage is in `requirements-geoviz.txt` + `pythonpath`.**

@@ -405,3 +405,47 @@ Verification:
 - `QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py tests/test_data_page.py tests/test_data_detail_panel.py -q` — 36 passed
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 259 passed
 - `python -m compileall -q paleo_workbench` — passed
+
+---
+
+## Session: 2026-07-07 — Project Management V1 + Baseline Fix
+
+### Baseline Repair (pre-feature)
+
+07-06 会话接入 SeismicPredictionPage 等页面后, `geoviz_seismic` 依赖的 scipy/segyio/pyqtgraph/PyOpenGL/matplotlib 既未在 pyproject 声明、venv 也未安装, 导致 36 个测试收集失败。
+
+修复:
+- `pip install -e` 每个 geoviz 子包(按依赖顺序: common → well_log → well_tie → paleo_map → seismic → cross_well → plots → map), 拉齐 scipy 等重依赖。
+- 新增 `requirements-geoviz.txt` 记录按依赖顺序的可编辑安装路径。
+- 补全 `pyproject.toml` 的 `pythonpath`(含此前缺失的 `geoviz_well_tie` 和 `geoviz_map`), 并在 dependencies 注释里说明依赖策略。
+- 基线恢复: 259 passed。
+
+Commit: `397993e fix: declare geo-viz-engine subpackage deps and restore test baseline`
+
+### Project Management V1 — COMPLETE ✅
+
+Implemented via SDD (5 TDD tasks + 1 final cleanup):
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | HeaderToolbar 4 信号 (new/open/save/properties_requested) + 命名按钮属性(保留 .buttons 兼容) | `336bf2e` | 4 (263 total) |
+| 2 | PaleoWorkbenchWindow 项目生命周期 (new_project/open_project_path→bool/save_project/save_project_as) + _refresh_shell + _apply_project_to_shell 重构 | `c7f95b9` | 8 (271 total) |
+| 3 | 文件对话框 helpers (_choose_open/_choose_save) + _wire_toolbar (两处调用) + save_project 改为无路径时弹对话框 | `e0c3335` | 4 (275 total) |
+| 4 | project_properties_text (7 字段) + _show_properties + save OSError 非破坏处理 | `c1d0d54` | 5 (280 total) |
+| 5 | 集成 smoke (new/open/save 全周期 + 标题/状态栏更新) | `4cee4e1` | 3 (283 total) |
+| Cleanup | 移除冗余 FileNotFoundError (OSError 已覆盖) | (本次同步提交) | — |
+
+Final review: READY TO MERGE (no Critical/Important; 3 Minor deferred to follow-ups)。
+
+### Commits This Session
+
+- Baseline fix: `397993e`
+- Project Management: `336bf2e`..`4cee4e1` (5 commits)
+- All on `main`, all pushed to origin/main
+
+### Test Results
+
+| Phase | Tests | Status |
+|-------|-------|--------|
+| (baseline after dep fix) | 259 | ✅ |
+| Project Management V1 | 283 | ✅ |

@@ -85,3 +85,5 @@ PM Task 1: complete (commits 397993e..336bf2e, review clean, 263/263 tests passi
 PM Task 2: complete (commits 336bf2e..c7f95b9, review clean, 271/271 tests passing; all 4 critical correctness checks verified)
 PM Task 3: complete (commits c7f95b9..e0c3335, review clean, 275/275 tests passing; _wire_toolbar verified at both call sites)
 PM Task 4: complete (properties dialog + save OSError handling, 280/280 tests passing; 5 new lifecycle tests)
+PM Task 4: complete (commits e0c3335..c1d0d54, review clean, 280/280 tests passing; properties text + save OSError handling verified)
+PM Task 5: complete (commits c1d0d54..4cee4e1, review clean, 283/283 tests passing; smoke tests verify real end-to-end pipeline)
