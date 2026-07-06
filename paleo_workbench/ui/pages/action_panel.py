@@ -22,12 +22,24 @@ class ActionPanel(QFrame):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        self.import_btn = QPushButton("导入资源")
+        self.import_btn = QPushButton("导入文件")
         self.import_btn.setObjectName("PrimaryButton")
         layout.addWidget(self.import_btn)
 
-        self.convert_btn = QPushButton("数据转换")
-        self.convert_btn.setObjectName("SecondaryButton")
-        layout.addWidget(self.convert_btn)
+        self.import_folder_btn = QPushButton("导入目录")
+        self.import_folder_btn.setObjectName("SecondaryButton")
+        layout.addWidget(self.import_folder_btn)
+
+        self.rescan_btn = QPushButton("重新扫描")
+        self.rescan_btn.setObjectName("SecondaryButton")
+        layout.addWidget(self.rescan_btn)
+
+        self.remove_btn = QPushButton("移出项目")
+        self.remove_btn.setObjectName("SecondaryButton")
+        layout.addWidget(self.remove_btn)
+
+        self.open_folder_btn = QPushButton("打开目录")
+        self.open_folder_btn.setObjectName("SecondaryButton")
+        layout.addWidget(self.open_folder_btn)
 
         layout.addStretch()

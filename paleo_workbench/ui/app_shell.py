@@ -20,12 +20,14 @@ from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionP
 from paleo_workbench.ui.sidebar import TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui import tokens
+from paleo_workbench.project.models import ProjectDocument
 
 
 class AppShell(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, project: ProjectDocument | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("AppShell")
+        self.project = project or ProjectDocument.new("Untitled Project")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -42,7 +44,7 @@ class AppShell(QWidget):
         self.sidebar = TextSidebar()
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
-        self.page_stack.addWidget(DataPage())        # index 1 = 数据
+        self.page_stack.addWidget(DataPage(project=self.project))        # index 1 = 数据
         self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
         self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
@@ -72,10 +74,15 @@ class AppShell(QWidget):
         if hasattr(home, "update_state"):
             home.update_state(state, steps)
 
-    def update_data_page(self, state: dict, resources: list) -> None:
+    def update_data_page(
+        self,
+        state: dict,
+        resources: list,
+        artifacts: list | None = None,
+    ) -> None:
         page = self.page_stack.widget(1)
         if hasattr(page, "update_state"):
-            page.update_state(state, resources)
+            page.update_state(state, resources, artifacts or [])
 
     def update_well_log_prediction_page(self, prediction_tasks: list) -> None:
         page = self.page_stack.widget(2)

@@ -16,13 +16,17 @@ class PaleoWorkbenchWindow(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.app_shell = AppShell()
+        self.app_shell = AppShell(project=self.project)
         state = dashboard_state(self.project)
         self.app_shell.set_project_name(state.get("project_name", self.project.meta.name))
         active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
         steps = active_run.workflow_steps if active_run else []
         self.app_shell.update_home_page(state, steps)
-        self.app_shell.update_data_page(state, self.project.resources)
+        self.app_shell.update_data_page(
+            state,
+            self.project.resources,
+            self.project.export_artifacts,
+        )
         self.app_shell.update_well_log_prediction_page(self.project.prediction_tasks)
         self.app_shell.update_seismic_prediction_page(self.project.prediction_tasks)
         self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
