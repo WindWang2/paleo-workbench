@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.workflow.service import REQUIRED_RESOURCE_TYPES
 
-RESOURCE_TYPES = ["well_log", "seismic", "horizon"]
+RESOURCE_TYPES = REQUIRED_RESOURCE_TYPES
 
 
 class ResourceSummaryBar(QFrame):
@@ -19,14 +20,30 @@ class ResourceSummaryBar(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(24)
-        self.type_labels: dict[str, QLabel] = {}
+        self.name_labels: dict[str, QLabel] = {}
+        self.count_labels: dict[str, QLabel] = {}
+        self.type_labels = self.count_labels
         for rtype in RESOURCE_TYPES:
-            label = QLabel(f"{tokens.RESOURCE_LABELS[rtype]}: 0{tokens.RESOURCE_UNITS.get(rtype, '')}")
-            label.setStyleSheet(
+            group = QWidget()
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(2)
+
+            name_label = QLabel(tokens.RESOURCE_LABELS[rtype])
+            name_label.setStyleSheet(
                 f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
             )
-            self.type_labels[rtype] = label
-            layout.addWidget(label)
+            group_layout.addWidget(name_label)
+
+            count_label = QLabel(f"0{tokens.RESOURCE_UNITS.get(rtype, '')}")
+            count_label.setStyleSheet(
+                f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
+            )
+            group_layout.addWidget(count_label)
+
+            self.name_labels[rtype] = name_label
+            self.count_labels[rtype] = count_label
+            layout.addWidget(group)
         layout.addStretch()
         self.status_label = QLabel("—")
         self.status_label.setStyleSheet(
@@ -42,9 +59,7 @@ class ResourceSummaryBar(QFrame):
         for rtype in RESOURCE_TYPES:
             count = available.get(rtype, 0)
             unit = tokens.RESOURCE_UNITS.get(rtype, "")
-            self.type_labels[rtype].setText(
-                f"{tokens.RESOURCE_LABELS[rtype]}: {count}{unit}"
-            )
+            self.count_labels[rtype].setText(f"{count}{unit}")
         if ready:
             self.status_label.setText("数据完整")
             self.status_label.setStyleSheet(

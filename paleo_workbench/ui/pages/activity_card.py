@@ -3,8 +3,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.workflow.service import STEP_ORDER
 
-STEP_TYPES = ["data_check", "factor_map", "prediction", "map_compile", "qc", "export"]
+STEP_TYPES = STEP_ORDER
 
 
 class RecentActivityCard(QFrame):

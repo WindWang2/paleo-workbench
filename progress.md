@@ -241,6 +241,21 @@ Verification:
 - `QT_QPA_PLATFORM=offscreen pytest -q` — 206 passed
 - `git diff --check` — passed
 
+### Post-Implementation Hardening 2 — COMPLETE ✅
+
+Resolved remaining tracked UI follow-up items:
+- Replaced duplicated `STEP_TYPES` and `RESOURCE_TYPES` lists in page modules with shared `workflow.service.STEP_ORDER` and `REQUIRED_RESOURCE_TYPES` references.
+- Added explicit `WorkflowProgress` badge color metadata and tests for badge object names, step colors, and stylesheet application.
+- Split `ResourceSummaryBar` resource names and counts into separate labels while preserving `type_labels` as a compatibility alias for counts.
+- Extracted DataPage action controls into reusable `ActionPanel`.
+- Scoped `FactorTaskPanel.Row` styling to `QWidget#FactorTaskRow`.
+- Replaced Qt-version-fragile `FactorPreviewGrid` visibility assertion with direct hidden-state checks.
+- Removed redundant `QPalette` rebuilds from `ResultSummary`; color assertions now verify stylesheet output.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_page_constant_sources.py tests/test_data_page.py tests/test_workflow_progress.py tests/test_factor_task_panel.py tests/test_factor_preview_grid.py tests/test_resource_summary.py tests/test_result_summary.py -q` — 36 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 212 passed
+
 ### Test Results History
 
 | Phase | Tests | Status |
@@ -257,6 +272,7 @@ Verification:
 | SeismicPredictionPage | 196 | ✅ |
 | VisualizationPage | 205 | ✅ |
 | Post-implementation hardening | 206 | ✅ |
+| Post-implementation hardening 2 | 212 | ✅ |
 
 ### Commits This Session
 
@@ -271,8 +287,9 @@ WellLogPredictionPage: `5054a92` (1 commit)
 SeismicPredictionPage: `c070fd5` (1 root commit) + `e3376a2` (geo-viz-engine nested commit)
 VisualizationPage: `36cce8e` (1 commit)
 Post-Implementation Hardening: `chore: harden ui follow-ups`
-Total: ~47 committed changes; all current phase and hardening work committed
+Post-Implementation Hardening 2: `chore: finish ui hardening follow-ups`
+Total: ~48 committed changes; all current phase and hardening work committed
 
 ### Next: Post-Implementation Hardening
 
-- Continue remaining minor follow-ups that affect behavior or maintainability before release.
+- No currently tracked non-blocking UI follow-ups remain; next useful step is release/merge preparation or a fresh product review.

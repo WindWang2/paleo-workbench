@@ -24,8 +24,9 @@ class FactorTaskPanel(QFrame):
 
         def __init__(self, task, parent=None):
             super().__init__(parent)
+            self.setObjectName("FactorTaskRow")
             self.setStyleSheet(
-                f"QWidget {{ background: {tokens.BG_SIDEBAR};"
+                f"QWidget#FactorTaskRow {{ background: {tokens.BG_SIDEBAR};"
                 f" border-bottom: 1px solid {tokens.BORDER_LIGHT}; }}"
             )
             layout = QHBoxLayout(self)

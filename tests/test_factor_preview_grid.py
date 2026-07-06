@@ -68,7 +68,22 @@ def test_grid_card_shows_range(qtbot):
     # rsquared label visible and formatted
     first = cards[0]
     assert "R²" in first.rsquared_label.text()
-    assert first.rsquared_label.isVisibleTo(grid)
+    assert not first.rsquared_label.isHidden()
+
+
+def test_grid_card_hides_missing_rsquared(qtbot):
+    task = FactorMapTask(
+        name="水深图",
+        target_horizon="ZJ-2",
+        factor_type="水深",
+        method="克里金",
+        status="complete",
+        quality_metrics={"range": "—", "grid": "50×50"},
+    )
+    card = FactorPreviewGrid.FactorPreviewCard(task)
+    qtbot.addWidget(card)
+    assert card.rsquared_label.text() == ""
+    assert card.rsquared_label.isHidden()
 
 
 def test_grid_default_grid_metric(qtbot):

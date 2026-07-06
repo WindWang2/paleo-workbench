@@ -65,6 +65,16 @@ def test_panel_update_populates_rows(qtbot):
     assert rows[2].status_badge.text() == "待生成"
 
 
+def test_panel_row_stylesheet_is_scoped(qtbot):
+    panel = FactorTaskPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(_make_tasks())
+    row = panel.task_container.findChild(FactorTaskPanel.Row)
+    assert row.objectName() == "FactorTaskRow"
+    assert "QWidget#FactorTaskRow" in row.styleSheet()
+    assert "QWidget {" not in row.styleSheet()
+
+
 def test_panel_summary_count(qtbot):
     panel = FactorTaskPanel()
     qtbot.addWidget(panel)

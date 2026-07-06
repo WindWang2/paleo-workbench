@@ -1,14 +1,14 @@
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 
 
 def test_summary_has_three_type_labels(qtbot):
     bar = ResourceSummaryBar()
     qtbot.addWidget(bar)
-    assert len(bar.type_labels) == 3
-    texts = [lbl.text() for lbl in bar.type_labels.values()]
-    assert any("测井数据" in t for t in texts)
-    assert any("地震数据" in t for t in texts)
-    assert any("层位数据" in t for t in texts)
+    assert len(bar.name_labels) == 3
+    assert len(bar.count_labels) == 3
+    assert bar.name_labels["well_log"].text() == tokens.RESOURCE_LABELS["well_log"]
+    assert bar.count_labels["well_log"].text() == "0井"
 
 
 def test_summary_update_ready(qtbot):
@@ -22,9 +22,10 @@ def test_summary_update_ready(qtbot):
         }
     }
     bar.update_state(state)
-    assert "57" in bar.type_labels["well_log"].text()
-    assert "8" in bar.type_labels["seismic"].text()
-    assert "3" in bar.type_labels["horizon"].text()
+    assert bar.name_labels["well_log"].text() == tokens.RESOURCE_LABELS["well_log"]
+    assert bar.count_labels["well_log"].text() == "57井"
+    assert bar.count_labels["seismic"].text() == "8条测线"
+    assert bar.count_labels["horizon"].text() == "3层位"
     assert "数据完整" in bar.status_label.text()
 
 

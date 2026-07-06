@@ -15,6 +15,16 @@ def test_workflow_progress_step_labels(qtbot):
     assert labels == tokens.STEP_LABELS
 
 
+def test_workflow_progress_badges_expose_step_colors(qtbot):
+    widget = WorkflowProgress()
+    qtbot.addWidget(widget)
+    for index, step_widget in enumerate(widget.step_widgets):
+        badge = step_widget["badge"]
+        assert badge.objectName() == "WorkflowStepBadge"
+        assert badge.property("stepColor") == tokens.STEP_COLORS[index]
+        assert f"background: {tokens.STEP_COLORS[index]}" in badge.styleSheet()
+
+
 def test_workflow_progress_default_all_pending(qtbot):
     widget = WorkflowProgress()
     qtbot.addWidget(widget)

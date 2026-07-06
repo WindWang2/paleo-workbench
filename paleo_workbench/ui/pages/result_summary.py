@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
@@ -88,9 +87,6 @@ class ResultSummary(QFrame):
             f"color: {color}; font-size: 12px;"
             " border: none; background: transparent;"
         )
-        palette = label.palette()
-        palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
-        label.setPalette(palette)
 
     def _clear_export(self) -> None:
         while self.export_layout.count():

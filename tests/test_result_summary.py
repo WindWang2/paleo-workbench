@@ -42,9 +42,7 @@ def test_summary_advisory_with_errors(qtbot):
     )
     widget.update_state([report], [])
     assert "待处理项" in widget.advisory_label.text()
-    assert widget.advisory_label.palette().color(
-        widget.advisory_label.foregroundRole()
-    ).name() == tokens.ERROR_RED
+    assert f"color: {tokens.ERROR_RED}" in widget.advisory_label.styleSheet()
 
 
 def test_summary_advisory_all_pass(qtbot):
@@ -53,9 +51,7 @@ def test_summary_advisory_all_pass(qtbot):
     report = _make_report(rules=["层级一致性", "未分类区域"])
     widget.update_state([report], [])
     assert widget.advisory_label.text() == "全部通过，可输出成果"
-    assert widget.advisory_label.palette().color(
-        widget.advisory_label.foregroundRole()
-    ).name() == tokens.SUCCESS
+    assert f"color: {tokens.SUCCESS}" in widget.advisory_label.styleSheet()
 
 
 def test_summary_export_list(qtbot):

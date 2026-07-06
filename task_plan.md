@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, replacing placeholders with production widgets.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), 206 tests passing
+## Project Status: 9/9 pages complete (all AppShell pages implemented), 212 tests passing
 
 ## Current Architecture
 
@@ -82,15 +82,7 @@
 
 ## Known Follow-up Items (Minor, non-blocking)
 
-| # | Item | Source |
-|---|------|--------|
-| 1 | `STEP_TYPES`/`RESOURCE_TYPES` duplicated across modules instead of importing from `workflow.service` | HomePage/DataPage reviews |
-| 2 | WorkflowProgress: no test asserts badge styling/colors are applied | Task 2 review |
-| 3 | ResourceSummaryBar: combined label instead of separate label+count (spec deviation) | DataPage final review |
-| 4 | ActionPanel inlined as method instead of separate class (spec deviation) | DataPage final review |
-| 5 | FactorTaskPanel.Row uses unscoped `QWidget` stylesheet selector (mitigated by child resets) | PreparationPage final review |
-| 6 | `FactorPreviewGrid` rsquared visibility assertion on un-shown widget (Qt-version-fragile) | PreparationPage final review |
-| 7 | `ResultSummary` rebuilds QPalette on every update_state (redundant with stylesheet) | ReviewExportPage final review |
+No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hardening pass.
 
 ## Page Progress Matrix
 
@@ -122,3 +114,4 @@
 | 2026-07-05 (SeismicPredictionPage) | 196 | ✅ |
 | 2026-07-05 (VisualizationPage) | 205 | ✅ |
 | 2026-07-06 (Post-implementation hardening) | 206 | ✅ |
+| 2026-07-06 (Post-implementation hardening 2) | 212 | ✅ |

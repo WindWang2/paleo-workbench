@@ -4,8 +4,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.workflow.service import STEP_ORDER
 
-STEP_TYPES = ["data_check", "factor_map", "prediction", "map_compile", "qc", "export"]
+STEP_TYPES = STEP_ORDER
 
 
 class WorkflowProgress(QWidget):
@@ -17,6 +18,8 @@ class WorkflowProgress(QWidget):
         layout.setSpacing(0)
         for i in range(6):
             badge = QLabel(str(i + 1))
+            badge.setObjectName("WorkflowStepBadge")
+            badge.setProperty("stepColor", tokens.STEP_COLORS[i])
             badge.setFixedSize(30, 30)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setStyleSheet(

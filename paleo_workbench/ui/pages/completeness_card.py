@@ -3,8 +3,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.workflow.service import REQUIRED_RESOURCE_TYPES
 
-RESOURCE_TYPES = ["well_log", "seismic", "horizon"]
+RESOURCE_TYPES = REQUIRED_RESOURCE_TYPES
 
 
 class DataCompletenessCard(QFrame):
