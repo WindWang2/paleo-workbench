@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implementation plan ready, 212 tests passing with clean root pytest output
+## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implemented, 239 tests passing with clean root pytest output
 
 ## Current Architecture
 
@@ -80,11 +80,15 @@
 - Spec: `docs/superpowers/specs/2026-07-05-visualizationpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-visualizationpage.md`
 
-### Phase 11: 数据管理中心 Data Management Center — 📋 PLAN READY
+### Phase 11: 数据管理中心 Data Management Center — ✅ COMPLETE
 - Upgrade DataPage from resource summary/table/actions into a project-wide data, result, and file management center with import, catalog filters, dedupe, details, and lightweight previews.
+- Added `DataImportService` with deterministic path-first/checksum-second dedupe.
+- Added `PreviewState` helpers for resources and export artifacts without deep-loading LAS/SEGY/PDF/PPT/Excel.
+- Rebuilt DataPage around `DataCatalogPanel`, `DataAssetTable`, `DataDetailPanel`, and expanded `ActionPanel`.
+- Wired file/folder import dialog seams and AppShell/PaleoWorkbenchWindow project/artifact propagation.
 - Spec: `docs/superpowers/specs/2026-07-06-datamanagementpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-06-datamanagementpage.md`
-- Implementation: pending
+- Tests: +27 new/updated in this phase, 239 total
 
 ## Known Follow-up Items (Minor, non-blocking)
 
@@ -103,7 +107,7 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
 | 8 | 编图 | ✅ Complete | 11 | ✅ | ✅ |
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
-| 11 | 数据管理中心升级 | 📋 Plan Ready | — | ✅ | ✅ |
+| 11 | 数据管理中心升级 | ✅ Complete | 27 | ✅ | ✅ |
 
 ## Test History
 
@@ -123,3 +127,4 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 2026-07-06 (Post-implementation hardening) | 206 | ✅ |
 | 2026-07-06 (Post-implementation hardening 2) | 212 | ✅ |
 | 2026-07-06 (Preflight warning cleanup) | 212 | ✅ |
+| 2026-07-06 (Data Management Center) | 239 | ✅ |

@@ -93,3 +93,40 @@ def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
     assert report.added_count == 0
     assert report.skipped_count == 1
     assert len(project.resources) == 1
+
+
+def test_data_page_import_files_dialog_uses_selected_paths(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = ProjectDocument.new("Demo")
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    monkeypatch.setattr(page, "_choose_import_files", lambda: [well])
+
+    report = page.import_files_from_dialog()
+
+    assert report.added_count == 1
+    assert project.resources[0].name == "well.las"
+
+
+def test_data_page_import_folder_dialog_uses_selected_folder(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = ProjectDocument.new("Demo")
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    (folder / "cube.sgy").write_bytes(b"cube")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    monkeypatch.setattr(page, "_choose_import_folder", lambda: folder)
+
+    report = page.import_folder_from_dialog()
+
+    assert report.added_count == 1
+    assert project.resources[0].name == "cube.sgy"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.resources.import_service import (
@@ -56,6 +56,8 @@ class DataPage(QWidget):
 
         self.catalog_panel.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self.detail_panel.update_asset)
+        self.import_btn.clicked.connect(self.import_files_from_dialog)
+        self.import_folder_btn.clicked.connect(self.import_folder_from_dialog)
 
         self.update_state(
             dashboard_state(self.project),
@@ -94,3 +96,23 @@ class DataPage(QWidget):
             self.project.export_artifacts,
         )
         return report
+
+    def _choose_import_files(self) -> list[Path]:
+        paths, _selected_filter = QFileDialog.getOpenFileNames(self, "导入文件")
+        return [Path(path) for path in paths]
+
+    def _choose_import_folder(self) -> Path | None:
+        path = QFileDialog.getExistingDirectory(self, "导入目录")
+        return Path(path) if path else None
+
+    def import_files_from_dialog(self) -> ImportReport:
+        paths = self._choose_import_files()
+        if not paths:
+            return ImportReport()
+        return self.import_paths(paths)
+
+    def import_folder_from_dialog(self) -> ImportReport:
+        folder = self._choose_import_folder()
+        if folder is None:
+            return ImportReport()
+        return self.import_folder_path(folder)

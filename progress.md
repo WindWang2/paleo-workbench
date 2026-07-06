@@ -310,7 +310,7 @@ Total: ~49 committed changes; all current phase, hardening, and preflight work c
 
 ## Session: 2026-07-06 (Data Management Redesign)
 
-### Data Page Redesign — DESIGN IN PROGRESS
+### Data Management Center — COMPLETE ✅
 
 User request:
 - Redesign the Data page so it manages all project data,成果, and files, and provides preview for selected data types.
@@ -323,12 +323,29 @@ Current context findings:
 - Existing resource classifier covers LAS, SEGY/SGY, DAT variants, spreadsheets, documents, images, reference maps, and WLP files.
 - Existing data-page tests cover table rendering and shell integration, but there are no standalone `tests/test_resources_scanner.py` or `tests/test_resources_classifier.py` files; future implementation should add direct tests for import/dedupe/preview behavior.
 
-Design status:
-- User approved the proposed Data Management Center direction.
-- Written design spec added at `docs/superpowers/specs/2026-07-06-datamanagementpage-design.md`.
-- `task_plan.md` now tracks Phase 11: Data Management Center design review.
-- `findings.md` now records backend context, design decision, and testing gaps.
-- User approved the written spec.
-- Implementation plan added at `docs/superpowers/plans/2026-07-06-datamanagementpage.md`.
-- `task_plan.md` now tracks Phase 11 as plan ready.
-- No implementation code changes yet. Next step is choosing execution mode.
+Implementation completed inline from the approved plan because this runtime did not expose subagent dispatch tools.
+
+| Task | Content | Tests |
+|------|---------|-------|
+| 1 | Classifier/scanner characterization coverage | +5 |
+| 2 | `DataImportService` with deterministic path/checksum dedupe | +5 |
+| 3 | `PreviewState` helpers for resources/artifacts | +4 |
+| 4 | `DataCatalogPanel` category/count panel | +2 |
+| 5 | `DataAssetTable` unified resources/artifacts table with filtering | +4 |
+| 6 | `DataDetailPanel` metadata and lightweight preview display | +3 |
+| 7 | DataPage/AppShell/PaleoWorkbenchWindow assembly and project/artifact wiring | +6 updated |
+| 8 | File/folder dialog seams and button wiring | +2 |
+
+Design/plan:
+- Spec: `docs/superpowers/specs/2026-07-06-datamanagementpage-design.md`
+- Plan: `docs/superpowers/plans/2026-07-06-datamanagementpage.md`
+
+Implementation notes:
+- Import does not copy or delete source files.
+- Dedupe is path-first, checksum-second, and handles project-relative resource paths.
+- Previews are metadata-driven and do not deep-load LAS, SEGY, PDF, PPT, or Excel by default.
+- `ResourceTable` remains in the codebase for legacy tests, but DataPage now uses `DataAssetTable`.
+
+Verification:
+- `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_integration.py tests/test_data_import_service.py tests/test_data_asset_table.py tests/test_data_catalog_panel.py tests/test_data_detail_panel.py tests/test_preview_strategy.py -q` — 29 passed
+- `QT_QPA_PLATFORM=offscreen pytest -q` — 239 passed
