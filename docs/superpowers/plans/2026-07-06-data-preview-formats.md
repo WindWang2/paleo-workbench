@@ -15,7 +15,7 @@
 - Preview reads only a bounded prefix of text-like files.
 - Default limits: maximum bytes `8192`, maximum lines `20`.
 - Binary-looking content falls back to metadata-only with a warning.
-- LAS, SGY, SEGY, XLSX, XLS, PDF, PPT, PPTX, WLP, and DFB are not deep-loaded by default.
+- PDF renders a first-page thumbnail when possible; LAS, SGY, SEGY, XLSX, XLS, PPT, PPTX, WLP, and DFB are not deep-loaded by default.
 - Unsupported files return `mode == "metadata"` and warning `"暂不支持预览"`.
 - Missing files return metadata plus warning `"文件不存在"`.
 - Preview failures must not remove the item from the project or crash the Data page.
@@ -500,7 +500,7 @@ Update `progress.md` with:
 
 - Added bounded TXT/XML/CSV/DAT preview.
 - Added inline image thumbnails in DataDetailPanel.
-- Kept LAS/SEGY/PDF/PPT/Excel safe summary-only by default.
+- Added PDF first-page thumbnail preview; kept LAS/SEGY/PPT/Excel safe summary-only by default.
 - Verified focused preview suite and full root test suite.
 ```
 

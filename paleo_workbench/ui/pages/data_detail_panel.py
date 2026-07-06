@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QPixmap
+from PySide6.QtPdf import QPdfDocument
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -92,6 +94,10 @@ class DataDetailPanel(QFrame):
             if not self._add_image_preview(state.image_path):
                 self._add_warning("图片预览加载失败")
             self._add_muted(self.preview_layout, f"图片: {state.image_path}")
+        elif state.mode == "pdf" and state.document_path:
+            if not self._add_pdf_preview(state.document_path):
+                self._add_warning("PDF预览加载失败")
+            self._add_muted(self.preview_layout, f"PDF: {state.document_path}")
         elif state.mode in {"text", "table"}:
             for line in state.lines:
                 self._add_preview_line(line)
@@ -155,6 +161,21 @@ class DataDetailPanel(QFrame):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+        self.preview_layout.addWidget(label)
+        return True
+
+    def _add_pdf_preview(self, path: str) -> bool:
+        document = QPdfDocument(self)
+        error = document.load(path)
+        if error != QPdfDocument.Error.None_:
+            return False
+        image = document.render(0, QSize(220, 160))
+        if image.isNull():
+            return False
+        label = QLabel()
+        label.setObjectName("DataPreviewPdf")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setPixmap(QPixmap.fromImage(image))
         self.preview_layout.addWidget(label)
         return True
 

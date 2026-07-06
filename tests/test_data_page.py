@@ -169,3 +169,52 @@ def test_data_page_selection_renders_imported_image_preview(qtbot, tmp_path: Pat
         if label.pixmap() is not None and not label.pixmap().isNull()
     ]
     assert pixmap_labels
+
+
+def test_data_page_selection_renders_imported_pdf_preview(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(
+        b"""%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 44 >>
+stream
+BT /F1 12 Tf 72 120 Td (Hello PDF) Tj ET
+endstream
+endobj
+xref
+0 5
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000202 00000 n
+trailer
+<< /Root 1 0 R /Size 5 >>
+startxref
+296
+%%EOF
+"""
+    )
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([pdf_path])
+
+    page.asset_table.table.selectRow(0)
+
+    pixmap_labels = [
+        label for label in page.detail_panel.findChildren(QLabel)
+        if label.objectName() == "DataPreviewPdf"
+        and label.pixmap() is not None
+        and not label.pixmap().isNull()
+    ]
+    assert pixmap_labels

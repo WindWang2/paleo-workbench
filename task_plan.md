@@ -83,7 +83,7 @@
 ### Phase 11: 数据管理中心 Data Management Center — ✅ COMPLETE
 - Upgrade DataPage from resource summary/table/actions into a project-wide data, result, and file management center with import, catalog filters, dedupe, details, and lightweight previews.
 - Added `DataImportService` with deterministic path-first/checksum-second dedupe.
-- Added `PreviewState` helpers for resources and export artifacts without deep-loading LAS/SEGY/PDF/PPT/Excel.
+- Added `PreviewState` helpers for resources and export artifacts; PDF uses first-page thumbnails while LAS/SEGY/PPT/Excel remain non-deep-loaded summaries.
 - Rebuilt DataPage around `DataCatalogPanel`, `DataAssetTable`, `DataDetailPanel`, and expanded `ActionPanel`.
 - Wired file/folder import dialog seams and AppShell/PaleoWorkbenchWindow project/artifact propagation.
 - Spec: `docs/superpowers/specs/2026-07-06-datamanagementpage-design.md`
@@ -93,7 +93,7 @@
 ### Phase 12: 数据预览格式增强 Data Preview Formats — ✅ COMPLETE
 - Added bounded TXT/XML/CSV/DAT preview with maximum 8192 bytes and 20 lines.
 - Added inline image thumbnails in `DataDetailPanel` using `QPixmap`, with invalid-image warnings.
-- Kept LAS/SEGY/PDF/PPT/Excel/WLP/DFB safe summary-only by default.
+- Added PDF first-page thumbnail preview; kept LAS/SEGY/PPT/Excel/WLP/DFB safe summary-only by default.
 - Added DataPage selection-flow coverage for imported text and image preview rendering.
 - Spec: `docs/superpowers/specs/2026-07-06-data-preview-formats-design.md`
 - Plan: `docs/superpowers/plans/2026-07-06-data-preview-formats.md`

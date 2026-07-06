@@ -53,7 +53,7 @@ Behavior:
 - Binary-looking content falls back to metadata-only with a warning.
 - Encoding handling is conservative: try UTF-8 first, then replace undecodable bytes.
 
-### Tier 3: Metadata-Only Professional Formats
+### Tier 3: PDF Page Preview And Metadata-Only Professional Formats
 
 Supported formats:
 
@@ -62,7 +62,6 @@ Supported formats:
 - `segy`
 - `xlsx`
 - `xls`
-- `pdf`
 - `ppt`
 - `pptx`
 - `wlp`
@@ -70,7 +69,9 @@ Supported formats:
 
 Behavior:
 
-- These formats are not deep-loaded by default.
+- `pdf` renders a first-page thumbnail using Qt PDF rendering when possible.
+- Invalid or unsupported PDF content falls back to metadata plus `"PDF预览加载失败"`.
+- The remaining formats are not deep-loaded by default.
 - The preview shows type, format, path, size, checksum when present, and a clear reason such as "此格式暂使用安全摘要预览".
 - LAS and SEGY keep their specialized modes (`well_log`, `seismic`) but remain summary-only.
 - Excel remains metadata-only for this phase to avoid adding a spreadsheet dependency.
@@ -128,7 +129,7 @@ Unit tests:
 - CSV preview uses table mode and includes header/row text.
 - DAT preview uses table mode and does not read more than the configured limits.
 - Missing file produces metadata mode with `"文件不存在"`.
-- LAS/SEGY/PDF/XLSX remain metadata or specialized summary modes without deep reads.
+- PDF renders a first-page thumbnail; LAS/SEGY/XLSX remain metadata or specialized summary modes without deep reads.
 
 Widget tests:
 
@@ -147,6 +148,6 @@ Integration tests:
 - The Data page previews images inline when possible.
 - The Data page previews text-like files with bounded content.
 - CSV/DAT files show a lightweight table/text preview.
-- Heavy professional formats remain safe summary-only previews.
+- PDF shows a first-page thumbnail when possible; other heavy professional formats remain safe summary-only previews.
 - Missing, unreadable, invalid, unsupported, and oversized files produce readable non-crashing states.
 - Full root test suite remains green.

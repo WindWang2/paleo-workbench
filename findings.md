@@ -228,4 +228,5 @@ There are currently no standalone `tests/test_resources_scanner.py` or `tests/te
 - Missing text/table/professional files return metadata mode with `"文件不存在"`.
 - Image decoding is UI-only via `QPixmap`; `preview_strategy.py` returns only the image path.
 - `DataDetailPanel` scales image thumbnails to fit a 220x160 preview area and shows `"图片预览加载失败"` for invalid images.
-- Heavy professional formats remain metadata-first until dedicated parsers/viewers are introduced: LAS, SGY, SEGY, XLSX, XLS, PDF, PPT, PPTX, WLP, and DFB.
+- PDF preview renders the first page to a thumbnail via `QPdfDocument.render()` and avoids `QPdfView` because the widget segfaulted under offscreen tests.
+- Other heavy professional formats remain metadata-first until dedicated parsers/viewers are introduced: LAS, SGY, SEGY, XLSX, XLS, PPT, PPTX, WLP, and DFB.

@@ -343,7 +343,7 @@ Design/plan:
 Implementation notes:
 - Import does not copy or delete source files.
 - Dedupe is path-first, checksum-second, and handles project-relative resource paths.
-- Previews are metadata-driven and do not deep-load LAS, SEGY, PDF, PPT, or Excel by default.
+- Previews are metadata-driven and do not deep-load LAS, SEGY, PPT, or Excel by default; PDF now uses a first-page thumbnail preview.
 - `ResourceTable` remains in the codebase for legacy tests, but DataPage now uses `DataAssetTable`.
 
 Verification:
@@ -372,7 +372,7 @@ Implementation notes:
 - Text-like preview reads at most 8192 bytes and 20 lines.
 - `txt` and `xml` render as `text`; `csv` and `dat` render as `table`.
 - Image preview is UI-only via `QPixmap`; the strategy layer returns only `image_path`.
-- LAS, SGY, SEGY, XLSX, XLS, PDF, PPT, PPTX, WLP, and DFB remain safe summary-only by default.
+- PDF renders a first-page thumbnail; LAS, SGY, SEGY, XLSX, XLS, PPT, PPTX, WLP, and DFB remain safe summary-only by default.
 - Missing files return metadata mode with `"文件不存在"`.
 
 Verification:

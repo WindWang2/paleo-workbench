@@ -94,8 +94,24 @@ def test_preview_strategy_missing_file_warns(tmp_path: Path):
 
 
 def test_preview_strategy_professional_formats_stay_summary_only(tmp_path: Path):
+    pdf = tmp_path / "report.xlsx"
+    pdf.write_bytes(b"workbook")
+    resource = ResourceItem(
+        name="report.xlsx",
+        path=pdf.as_posix(),
+        type="spreadsheet",
+        format="xlsx",
+    )
+
+    state = preview_for_resource(resource)
+
+    assert state.mode == "metadata"
+    assert "安全摘要预览" in state.warning
+
+
+def test_preview_strategy_pdf_uses_pdf_mode(tmp_path: Path):
     pdf = tmp_path / "report.pdf"
-    pdf.write_bytes(b"%PDF-heavy")
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
     resource = ResourceItem(
         name="report.pdf",
         path=pdf.as_posix(),
@@ -105,8 +121,9 @@ def test_preview_strategy_professional_formats_stay_summary_only(tmp_path: Path)
 
     state = preview_for_resource(resource)
 
-    assert state.mode == "metadata"
-    assert "安全摘要预览" in state.warning
+    assert state.mode == "pdf"
+    assert state.document_path == pdf.as_posix()
+    assert state.warning == ""
 
 
 def test_preview_strategy_metadata_for_unknown():

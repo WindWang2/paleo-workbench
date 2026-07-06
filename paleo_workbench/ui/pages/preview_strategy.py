@@ -9,13 +9,13 @@ MAX_PREVIEW_BYTES = 8192
 MAX_PREVIEW_LINES = 20
 TEXT_FORMATS = {"txt", "xml"}
 TABLE_FORMATS = {"csv", "dat"}
+PDF_FORMATS = {"pdf"}
 PROFESSIONAL_FORMATS = {
     "las",
     "sgy",
     "segy",
     "xlsx",
     "xls",
-    "pdf",
     "ppt",
     "pptx",
     "wlp",
@@ -29,6 +29,7 @@ class PreviewState:
     title: str
     lines: list[str]
     image_path: str | None = None
+    document_path: str | None = None
     warning: str = ""
 
 
@@ -88,12 +89,14 @@ def preview_for_resource(
 
     if (
         not Path(path).exists()
-        and fmt in TEXT_FORMATS | TABLE_FORMATS | PROFESSIONAL_FORMATS
+        and fmt in TEXT_FORMATS | TABLE_FORMATS | PDF_FORMATS | PROFESSIONAL_FORMATS
     ):
         return PreviewState("metadata", resource.name, lines, warning="文件不存在")
 
     if resource.type in image_types or resource.format in image_formats:
         return PreviewState("image", resource.name, lines, image_path=path)
+    if fmt == "pdf":
+        return PreviewState("pdf", resource.name, lines, document_path=path)
     if fmt in TEXT_FORMATS:
         preview_lines, warning = _read_preview_lines(path)
         if preview_lines:
