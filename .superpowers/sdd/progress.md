@@ -75,3 +75,13 @@ Data Management Task 5: complete (asset table, 4/4 tests passing)
 Data Management Task 6: complete (detail panel, 3/3 tests passing)
 Data Management Task 7: complete (DataPage/AppShell assembly, 15/15 focused tests passing)
 Data Management Task 8: complete (dialog seams + final docs, 29 focused tests and 239 full tests passing)
+
+# Phase: Project Management V1 (started 2026-07-07)
+Plan: docs/superpowers/plans/2026-07-07-project-management.md
+Spec: docs/superpowers/specs/2026-07-07-project-management-design.md
+Branch base: 397993e (after baseline dep fix)
+Baseline tests: 259 passing
+PM Task 1: complete (commits 397993e..336bf2e, review clean, 263/263 tests passing)
+PM Task 2: complete (commits 336bf2e..c7f95b9, review clean, 271/271 tests passing; all 4 critical correctness checks verified)
+PM Task 3: complete (commits c7f95b9..e0c3335, review clean, 275/275 tests passing; _wire_toolbar verified at both call sites)
+PM Task 4: complete (properties dialog + save OSError handling, 280/280 tests passing; 5 new lifecycle tests)

@@ -50,7 +50,11 @@ class PaleoWorkbenchWindow(QWidget):
 
     def save_project(self) -> Path | None:
         if self.project_path is not None:
-            ProjectManager(self.project_path).save(self.project)
+            try:
+                ProjectManager(self.project_path).save(self.project)
+            except OSError as e:
+                self._show_project_error("保存工程失败", str(e))
+                return None
             return self.project_path
         # No path yet: ask the user via the save dialog, then save to that path.
         chosen = self._choose_save_project()
@@ -60,7 +64,11 @@ class PaleoWorkbenchWindow(QWidget):
         if path is None:
             return None
         target = self._normalize_project_path(Path(path))
-        ProjectManager(target).save(self.project)
+        try:
+            ProjectManager(target).save(self.project)
+        except OSError as e:
+            self._show_project_error("保存工程失败", str(e))
+            return None
         self.project_path = target
         return target
 
@@ -107,9 +115,24 @@ class PaleoWorkbenchWindow(QWidget):
     def _show_project_error(self, title: str, message: str) -> None:
         QMessageBox.critical(self, title, message)
 
+    def project_properties_text(self) -> str:
+        """Build the read-only summary shown by the properties dialog."""
+        project = self.project
+        path_str = str(self.project_path) if self.project_path is not None else "未保存"
+        return "\n".join(
+            [
+                f"工程名称: {project.meta.name}",
+                f"区域: {project.meta.region or '—'}",
+                f"工程文件: {path_str}",
+                f"资源数量: {len(project.resources)}",
+                f"导出图件: {len(project.export_artifacts)}",
+                f"显示坐标系: {project.coordinate.display_crs}",
+                f"版本: {project.meta.version}",
+            ]
+        )
+
     def _show_properties(self) -> None:
-        # Placeholder; Task 4 fills in the real properties text.
-        QMessageBox.information(self, "工程属性", "")
+        QMessageBox.information(self, "工程属性", self.project_properties_text())
 
     # --- signal wiring ---
 

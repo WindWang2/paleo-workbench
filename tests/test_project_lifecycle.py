@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from paleo_workbench.app import PaleoWorkbenchWindow
-from paleo_workbench.project.models import ProjectDocument, ResourceItem
+from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
 
 def test_new_project_clears_path(qtbot):
@@ -195,3 +195,94 @@ def test_toolbar_signals_wired_after_refresh(qtbot, monkeypatch):
     window.app_shell.header_toolbar.new_project_requested.emit()
 
     assert counter["n"] >= 1
+
+
+# --- Task 4: properties dialog + error handling completeness ---
+
+def test_properties_text_contains_fields(qtbot):
+    """project_properties_text() shows every field label + value, and "未保存" when no path."""
+    project = ProjectDocument.new("MyProject", region="Tarim Basin")
+    project.resources.extend(
+        [
+            ResourceItem(name="r1", path="/tmp/r1.las", type="well_log", format="LAS"),
+            ResourceItem(name="r2", path="/tmp/r2.las", type="well_log", format="LAS"),
+        ]
+    )
+    project.export_artifacts.append(
+        ExportArtifact(linked_id="map_1", format="PNG", output_path="/tmp/out.png")
+    )
+    window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(window)
+    window.project_path = None
+
+    text = window.project_properties_text()
+
+    assert "工程名称: MyProject" in text
+    assert "区域: Tarim Basin" in text
+    assert "工程文件: 未保存" in text
+    assert "资源数量: 2" in text
+    assert "导出图件: 1" in text
+    assert f"显示坐标系: {project.coordinate.display_crs}" in text
+    assert f"版本: {project.meta.version}" in text
+
+
+def test_properties_text_shows_path_when_saved(qtbot, tmp_path: Path):
+    """After save_project_as, project_properties_text() shows the path, not "未保存"."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    assert window.project_path is None
+
+    target = window.save_project_as(tmp_path / "saved")
+
+    text = window.project_properties_text()
+    assert str(target) in text
+    assert "未保存" not in text
+
+
+def test_properties_text_region_dash_when_empty(qtbot):
+    """An empty region renders as the em-dash placeholder."""
+    window = PaleoWorkbenchWindow(project=ProjectDocument.new("NoRegion"))
+    qtbot.addWidget(window)
+    assert window.project.meta.region == ""
+
+    text = window.project_properties_text()
+    assert "区域: —" in text
+
+
+def test_open_handles_corrupt_json(qtbot, tmp_path: Path):
+    """A file with invalid JSON returns False and leaves the active project unchanged."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    original_name = window.project.meta.name
+
+    bad = tmp_path / "corrupt.paleo.json"
+    bad.write_text("{ not json", encoding="utf-8")
+
+    ok = window.open_project_path(bad)
+
+    assert ok is False
+    assert window.project.meta.name == original_name
+    assert window.project_path is None
+
+
+def test_save_as_handles_write_error(qtbot, tmp_path: Path, monkeypatch):
+    """An OSError during save shows an error and returns None, leaving path unset."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(window, "_show_project_error", lambda title, msg: errors.append((title, msg)))
+
+    from paleo_workbench.project import manager as manager_module
+
+    def boom(self, project):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(manager_module.ProjectManager, "save", boom)
+
+    result = window.save_project_as(tmp_path / "doomed")
+
+    assert result is None
+    assert len(errors) == 1
+    assert errors[0][0] == "保存工程失败"
+    assert window.project_path is None
