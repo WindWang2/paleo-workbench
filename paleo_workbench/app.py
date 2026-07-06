@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from pydantic import ValidationError
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
@@ -12,6 +12,7 @@ from paleo_workbench.ui import AppShell
 from paleo_workbench.workflow.service import dashboard_state
 
 _PROJECT_SUFFIX = ".paleo.json"
+_PROJECT_FILTER = "Project (*.paleo.json)"
 
 
 class PaleoWorkbenchWindow(QWidget):
@@ -27,6 +28,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell = AppShell(project=self.project)
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
+        self._wire_toolbar()
         self._update_title()
 
     # --- project lifecycle (path-based, no dialogs) ---
@@ -50,7 +52,9 @@ class PaleoWorkbenchWindow(QWidget):
         if self.project_path is not None:
             ProjectManager(self.project_path).save(self.project)
             return self.project_path
-        return None
+        # No path yet: ask the user via the save dialog, then save to that path.
+        chosen = self._choose_save_project()
+        return self.save_project_as(chosen)
 
     def save_project_as(self, path: str | Path | None) -> Path | None:
         if path is None:
@@ -59,6 +63,67 @@ class PaleoWorkbenchWindow(QWidget):
         ProjectManager(target).save(self.project)
         self.project_path = target
         return target
+
+    # --- toolbar handlers (signals -> dialogs -> core methods) ---
+
+    def _on_new_project(self) -> None:
+        self.new_project()
+
+    def _on_open_project(self) -> None:
+        path = self._choose_open_project()
+        if path is None:
+            return
+        if not self.open_project_path(path):
+            self._show_project_error(
+                "打开工程失败",
+                f"无法打开工程文件：\n{path}",
+            )
+
+    def _on_save_project(self) -> None:
+        self.save_project()
+
+    def _on_properties(self) -> None:
+        self._show_properties()
+
+    # --- file dialogs / message boxes ---
+
+    def _choose_open_project(self) -> Path | None:
+        start_dir = str(self.project_path.parent) if self.project_path else str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "打开工程", start_dir, _PROJECT_FILTER
+        )
+        return Path(path) if path else None
+
+    def _choose_save_project(self) -> Path | None:
+        suggested = f"{self.project.meta.name}{_PROJECT_SUFFIX}"
+        start_dir = (
+            str(self.project_path.parent) if self.project_path else str(Path.home())
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存工程", str(Path(start_dir) / suggested), _PROJECT_FILTER
+        )
+        return Path(path) if path else None
+
+    def _show_project_error(self, title: str, message: str) -> None:
+        QMessageBox.critical(self, title, message)
+
+    def _show_properties(self) -> None:
+        # Placeholder; Task 4 fills in the real properties text.
+        QMessageBox.information(self, "工程属性", "")
+
+    # --- signal wiring ---
+
+    def _wire_toolbar(self) -> None:
+        """Connect the current toolbar's signals to the handler methods.
+
+        Each shell rebuild creates a fresh :class:`HeaderToolbar`, so this must
+        be called from both ``__init__`` and ``_refresh_shell``.
+        """
+        toolbar = self.app_shell.header_toolbar
+        toolbar.new_project_requested.connect(self._on_new_project)
+        toolbar.open_project_requested.connect(self._on_open_project)
+        toolbar.save_project_requested.connect(self._on_save_project)
+        toolbar.properties_requested.connect(self._on_properties)
 
     # --- shell rebuild helpers ---
 
@@ -70,6 +135,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell = AppShell(project=self.project)
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
+        self._wire_toolbar()
         self._update_title()
 
     def _apply_project_to_shell(self) -> None:

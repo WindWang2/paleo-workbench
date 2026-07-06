@@ -70,12 +70,17 @@ def test_save_project_uses_existing_path(qtbot, tmp_path: Path):
     assert target.exists()
 
 
-def test_save_project_without_path_returns_none(qtbot):
+def test_save_project_without_path_returns_none(qtbot, monkeypatch):
+    """When no path is set and the user cancels the save dialog, return None."""
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     assert window.project_path is None
 
+    # Avoid opening a real QFileDialog — simulate the user cancelling.
+    monkeypatch.setattr(window, "_choose_save_project", lambda: None)
+
     assert window.save_project() is None
+    assert window.project_path is None
 
 
 def test_open_project_path_loads(qtbot, tmp_path: Path):
@@ -123,3 +128,70 @@ def test_open_project_path_invalid_returns_false(qtbot, tmp_path: Path):
     ok2 = window.open_project_path(bad)
     assert ok2 is False
     assert window.project.meta.name == original_name
+
+
+# --- Task 3: file dialog helpers + toolbar signal wiring ---
+
+def test_save_project_uses_dialog_when_no_path(qtbot, tmp_path: Path, monkeypatch):
+    """When project_path is None, save_project() invokes the save dialog."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    assert window.project_path is None
+
+    chosen = tmp_path / "from_dialog.paleo.json"
+    monkeypatch.setattr(window, "_choose_save_project", lambda: chosen)
+
+    result = window.save_project()
+
+    assert result == chosen
+    assert chosen.exists()
+    assert window.project_path == chosen
+
+
+def test_cancel_save_dialog_returns_none(qtbot, monkeypatch):
+    """Cancelling the save dialog returns None and writes no file."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    assert window.project_path is None
+
+    monkeypatch.setattr(window, "_choose_save_project", lambda: None)
+
+    assert window.save_project() is None
+    assert window.project_path is None
+
+
+def test_open_handler_reports_error_on_failure(qtbot, tmp_path: Path, monkeypatch):
+    """A failed open via the handler reports an error and leaves the project unchanged."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    original_name = window.project.meta.name
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(window, "_show_project_error", lambda title, msg: calls.append((title, msg)))
+    bad_path = tmp_path / "missing.paleo.json"
+    monkeypatch.setattr(window, "_choose_open_project", lambda: bad_path)
+
+    window._on_open_project()
+
+    assert len(calls) == 1
+    assert window.project.meta.name == original_name
+    assert window.project_path is None
+
+
+def test_toolbar_signals_wired_after_refresh(qtbot, monkeypatch):
+    """After a shell rebuild the toolbar signals still reach handlers."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+
+    counter = {"n": 0}
+    monkeypatch.setattr(
+        window, "_on_new_project", lambda: counter.__setitem__("n", counter["n"] + 1)
+    )
+
+    # Force a shell rebuild — _refresh_shell must re-wire the *new* toolbar.
+    window.new_project("After Refresh")
+
+    # Emit on the freshly built toolbar; the patched handler should fire.
+    window.app_shell.header_toolbar.new_project_requested.emit()
+
+    assert counter["n"] >= 1
