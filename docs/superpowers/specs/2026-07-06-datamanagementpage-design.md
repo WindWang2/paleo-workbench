@@ -1,6 +1,6 @@
 # Data Management Page Design
 
-> **Status:** Approved draft, pending user spec review
+> **Status:** Approved
 > **Date:** 2026-07-06
 > **Scope:** Upgrade the existing Data page into a project-wide data, result, and file management center with lightweight previews.
 

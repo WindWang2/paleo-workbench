@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-06
 > **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center.
 
-## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center design pending spec review, 212 tests passing with clean root pytest output
+## Project Status: 9/9 pages complete (all AppShell pages implemented), Data Management Center implementation plan ready, 212 tests passing with clean root pytest output
 
 ## Current Architecture
 
@@ -80,10 +80,10 @@
 - Spec: `docs/superpowers/specs/2026-07-05-visualizationpage-design.md`
 - Plan: `docs/superpowers/plans/2026-07-05-visualizationpage.md`
 
-### Phase 11: 数据管理中心 Data Management Center — 📝 DESIGN REVIEW
+### Phase 11: 数据管理中心 Data Management Center — 📋 PLAN READY
 - Upgrade DataPage from resource summary/table/actions into a project-wide data, result, and file management center with import, catalog filters, dedupe, details, and lightweight previews.
 - Spec: `docs/superpowers/specs/2026-07-06-datamanagementpage-design.md`
-- Plan: pending after user spec review
+- Plan: `docs/superpowers/plans/2026-07-06-datamanagementpage.md`
 - Implementation: pending
 
 ## Known Follow-up Items (Minor, non-blocking)
@@ -103,7 +103,7 @@ No currently tracked non-blocking UI follow-ups remain after the 2026-07-06 hard
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
 | 8 | 编图 | ✅ Complete | 11 | ✅ | ✅ |
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
-| 11 | 数据管理中心升级 | 📝 Design Review | — | ✅ | ⏳ |
+| 11 | 数据管理中心升级 | 📋 Plan Ready | — | ✅ | ✅ |
 
 ## Test History
 
