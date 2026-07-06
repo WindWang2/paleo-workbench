@@ -286,3 +286,88 @@ def test_save_as_handles_write_error(qtbot, tmp_path: Path, monkeypatch):
     assert len(errors) == 1
     assert errors[0][0] == "保存工程失败"
     assert window.project_path is None
+
+
+# --- Task 5: end-to-end integration smoke tests ---
+
+
+def _data_page_row_count(window) -> int:
+    """Visible asset rows shown on the data page's asset table."""
+    data_page = window.app_shell.page_stack.widget(1)
+    return data_page.asset_table.table.rowCount()
+
+
+def test_full_new_open_save_cycle(qtbot, tmp_path: Path, monkeypatch):
+    """New -> save-as -> new -> open round-trips a resource end-to-end."""
+    # Window holding project A with one resource.
+    project_a = ProjectDocument.new("Project A")
+    project_a.resources.append(
+        ResourceItem(name="r1", path="/tmp/r1.las", type="well_log", format="LAS", status="parsed")
+    )
+    window = PaleoWorkbenchWindow(project=project_a)
+    qtbot.addWidget(window)
+    assert _data_page_row_count(window) == 1
+
+    # save-as writes a.paleo.json to the temp dir.
+    saved = window.save_project_as(tmp_path / "a")
+    expected = tmp_path / "a.paleo.json"
+    assert saved == expected
+    assert expected.exists()
+
+    # new_project() clears the path and empties the data page.
+    window.new_project()
+    assert window.project_path is None
+    assert _data_page_row_count(window) == 0
+
+    # Monkeypatch the open dialog and trigger the toolbar open handler.
+    monkeypatch.setattr(window, "_choose_open_project", lambda: expected)
+    window._on_open_project()
+
+    # Resource is visible again and the path is the saved one.
+    assert window.project_path == expected
+    assert _data_page_row_count(window) == 1
+    assert window.project.meta.name == "Project A"
+    assert any(r.name == "r1" for r in window.project.resources)
+
+
+def test_window_title_updates_on_project_change(qtbot, tmp_path: Path, monkeypatch):
+    """The window title tracks the active project name across new/open."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    assert window.project.meta.name in window.windowTitle()
+
+    window.new_project("Z")
+    assert "Z" in window.windowTitle()
+
+    # Save and reopen via the handler; title carries the loaded name.
+    project = ProjectDocument.new("Loaded Name")
+    target = tmp_path / "loaded.paleo.json"
+    save_window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(save_window)
+    save_window.save_project_as(target)
+
+    monkeypatch.setattr(window, "_choose_open_project", lambda: target)
+    window._on_open_project()
+    assert "Loaded Name" in window.windowTitle()
+
+
+def test_status_bar_updates_on_project_change(qtbot, tmp_path: Path, monkeypatch):
+    """The status bar project name mirrors new/open transitions."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+
+    window.new_project("StatusBarProj")
+    status_text = window.app_shell.status_bar.status_label.text()
+    assert "StatusBarProj" in status_text
+
+    # Open a different saved project and confirm the status bar follows.
+    project = ProjectDocument.new("OpenedProj")
+    target = tmp_path / "opened.paleo.json"
+    save_window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(save_window)
+    save_window.save_project_as(target)
+
+    monkeypatch.setattr(window, "_choose_open_project", lambda: target)
+    window._on_open_project()
+    opened_text = window.app_shell.status_bar.status_label.text()
+    assert "OpenedProj" in opened_text
