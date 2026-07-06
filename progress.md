@@ -307,3 +307,25 @@ Total: ~49 committed changes; all current phase, hardening, and preflight work c
 ### Next: Post-Implementation Hardening
 
 - No currently tracked non-blocking UI follow-ups remain; next useful step is branch publication or a fresh review.
+
+## Session: 2026-07-06 (Data Management Redesign)
+
+### Data Page Redesign — DESIGN IN PROGRESS
+
+User request:
+- Redesign the Data page so it manages all project data,成果, and files, and provides preview for selected data types.
+- Use `/superpowers /planning-with-files` for design before implementation.
+
+Current context findings:
+- Existing `DataPage` is still a narrow resource table + summary + `ActionPanel`; buttons are not wired to import behavior.
+- Existing backend pieces include `scan_resources(root, project_path=None)`, `classify_path(path)`, `ResourceItem`, `ProjectDocument.resources`, `ProjectDocument.export_artifacts`, and `ProjectManager`.
+- `scan_resources()` already produces checksums, file sizes, relative/external path flags, resource type, format, and status.
+- Existing resource classifier covers LAS, SEGY/SGY, DAT variants, spreadsheets, documents, images, reference maps, and WLP files.
+- Existing data-page tests cover table rendering and shell integration, but there are no standalone `tests/test_resources_scanner.py` or `tests/test_resources_classifier.py` files; future implementation should add direct tests for import/dedupe/preview behavior.
+
+Design status:
+- User approved the proposed Data Management Center direction.
+- Written design spec added at `docs/superpowers/specs/2026-07-06-datamanagementpage-design.md`.
+- `task_plan.md` now tracks Phase 11: Data Management Center design review.
+- `findings.md` now records backend context, design decision, and testing gaps.
+- No implementation code changes yet. Awaiting user review of written spec before creating the implementation plan.

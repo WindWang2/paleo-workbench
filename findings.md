@@ -177,3 +177,36 @@ self.page_stack.addWidget(ReviewExportPage())    # 8
 ### Data Model Note
 
 QualityReport carries rule keys that may be either Chinese display names (prototype) or engine keys (facies_polygons_present). RULE_DESCRIPTIONS maps both, so QCIssueTable's description column works for either source. The integration test confirms engine output renders descriptions correctly, not raw keys.
+
+## Data Management Center Redesign Notes
+
+### Current DataPage Limit
+
+The current DataPage is a narrow resource-management page:
+- `ResourceSummaryBar` displays readiness counts.
+- `ResourceTable` displays five columns.
+- `ActionPanel` contains import/convert buttons but they are not wired to behavior.
+
+User clarified that the Data page should manage all project data, results, and files, and preview supported data types. This is broader than the current Phase 3 DataPage implementation.
+
+### Existing Backend Pieces
+
+- `scan_resources(root, project_path=None)` recursively scans files and creates `ResourceItem` records with name, path, type, format, status, source, `parsed_summary["size_bytes"]`, checksum, and external flag.
+- `classify_path(path)` classifies LAS, SEGY/SGY, DAT variants, spreadsheets, documents, images, reference maps, WLP files, and unknowns.
+- `ProjectDocument.resources` stores imported/reference resources.
+- `ProjectDocument.export_artifacts` stores export outputs.
+- `ProjectManager.save()` relativizes resource paths and export output paths.
+
+### Design Decision
+
+For the first Data Management Center implementation, keep the existing data model:
+- Use `ProjectDocument.resources` for data/reference files.
+- Use `ProjectDocument.export_artifacts` for generated export files.
+- Use `ResourceItem.artifact_role` to distinguish input/reference/derived/export roles where needed.
+- Store lightweight preview metadata in `ResourceItem.parsed_summary`.
+
+Avoid introducing a new `ProjectFileItem` model until real usage proves the current model insufficient.
+
+### Testing Gap
+
+There are currently no standalone `tests/test_resources_scanner.py` or `tests/test_resources_classifier.py` files. The Data Management Center implementation should add direct tests for classifier, scanner, import service, dedupe, and preview strategy behavior.
