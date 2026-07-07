@@ -33,22 +33,32 @@ class TextSidebar(QFrame):
         self,
         resource_count: int,
         artifact_count: int,
+        issue_count: int = 0,
         selected_name: str = "未选择",
+        selected_type: str = "",
+        selected_format: str = "",
+        reader_mode: str = "empty",
     ) -> None:
         self.context_label.setText("数据")
+        format_text = (
+            f"{selected_type} / {selected_format}"
+            if selected_type or selected_format
+            else "未选择"
+        )
         self._render_lines(
             [
                 ("数据概览", True),
                 (f"资源 {resource_count}", False),
                 (f"成果 {artifact_count}", False),
+                (f"异常 {issue_count}", False),
+                ("当前选择", True),
                 (f"当前选择: {selected_name}", False),
-                ("阅读器", True),
-                ("PDF 翻页阅读", False),
-                ("图片 / 文本 / 表格", False),
-                ("CSV / DAT / XML", False),
-                ("操作", True),
+                (f"格式: {format_text}", False),
+                (f"阅读器: {reader_mode}", False),
+                ("管理", True),
                 ("导入文件 / 导入目录", False),
                 ("重新扫描 / 移出项目", False),
+                ("打开目录", False),
             ]
         )
 

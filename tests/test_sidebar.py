@@ -20,7 +20,7 @@ def test_sidebar_set_context_updates_label(qtbot):
     assert any("当前图件" in text for text in _label_texts(bar))
 
 
-def test_sidebar_data_context_renders_counts_and_reader_capabilities(qtbot):
+def test_sidebar_data_context_renders_counts_and_selection_defaults(qtbot):
     bar = TextSidebar()
     qtbot.addWidget(bar)
 
@@ -29,10 +29,34 @@ def test_sidebar_data_context_renders_counts_and_reader_capabilities(qtbot):
     texts = "\n".join(_label_texts(bar))
     assert "资源 3" in texts
     assert "成果 2" in texts
+    assert "异常 0" in texts
     assert "report.pdf" in texts
-    assert "PDF 翻页阅读" in texts
-    assert "图片 / 文本 / 表格" in texts
+    assert "格式: 未选择" in texts
+    assert "阅读器: empty" in texts
     assert "上下文面板 (待实现)" not in texts
+
+
+def test_sidebar_renders_expanded_data_context(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+
+    bar.update_data_context(
+        resource_count=3,
+        artifact_count=2,
+        issue_count=1,
+        selected_name="demo.pdf",
+        selected_type="document",
+        selected_format="pdf",
+        reader_mode="pdf",
+    )
+
+    text = " ".join(label.text() for label in bar._content_labels)
+    assert "资源 3" in text
+    assert "成果 2" in text
+    assert "异常 1" in text
+    assert "当前选择: demo.pdf" in text
+    assert "格式: document / pdf" in text
+    assert "阅读器: pdf" in text
 
 
 def test_sidebar_object_name(qtbot):

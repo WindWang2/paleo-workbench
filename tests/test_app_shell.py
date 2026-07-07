@@ -1,6 +1,6 @@
 from paleo_workbench.ui.app_shell import AppShell
 from paleo_workbench.ui import tokens
-from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
 
 def test_app_shell_assembles_all_zones(qtbot):
@@ -61,7 +61,8 @@ def test_app_shell_data_sidebar_receives_resource_counts(qtbot):
     )
     assert "资源 1" in texts
     assert "成果 1" in texts
-    assert "PDF 翻页阅读" in texts
+    assert "异常 0" in texts
+    assert "阅读器: empty" in texts
 
 
 def test_app_shell_set_project_name(qtbot):
@@ -75,3 +76,25 @@ def test_app_shell_object_name(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     assert shell.objectName() == "AppShell"
+
+
+def test_app_shell_syncs_data_page_context_to_sidebar(tmp_path, qtbot):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    shell = AppShell(project=project)
+    qtbot.addWidget(shell)
+    page = shell.page_stack.widget(1)
+
+    page._set_selected_asset(resource)
+
+    text = " ".join(label.text() for label in shell.sidebar._content_labels)
+    assert "当前选择: notes.txt" in text
+    assert "阅读器: text" in text

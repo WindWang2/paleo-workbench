@@ -44,7 +44,9 @@ class AppShell(QWidget):
         self.sidebar = TextSidebar()
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
-        self.page_stack.addWidget(DataPage(project=self.project))        # index 1 = 数据
+        self.data_page = DataPage(project=self.project)
+        self.data_page.data_context_changed.connect(self.update_data_context)
+        self.page_stack.addWidget(self.data_page)        # index 1 = 数据
         self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
         self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
@@ -86,6 +88,22 @@ class AppShell(QWidget):
         self.sidebar.update_data_context(
             resource_count=len(resources),
             artifact_count=len(artifacts or []),
+            issue_count=sum(
+                1
+                for resource in resources
+                if resource.status in {"missing", "warning", "failed", "error"}
+            ),
+        )
+
+    def update_data_context(self, context: dict) -> None:
+        self.sidebar.update_data_context(
+            resource_count=context.get("resource_count", 0),
+            artifact_count=context.get("artifact_count", 0),
+            issue_count=context.get("issue_count", 0),
+            selected_name=context.get("selected_name", "未选择"),
+            selected_type=context.get("selected_type", ""),
+            selected_format=context.get("selected_format", ""),
+            reader_mode=context.get("reader_mode", "empty"),
         )
 
     def update_well_log_prediction_page(self, prediction_tasks: list) -> None:
