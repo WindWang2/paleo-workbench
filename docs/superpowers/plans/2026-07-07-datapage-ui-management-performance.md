@@ -13,7 +13,7 @@
 - The data page must preserve the existing workbench shell.
 - The lower data page area must remain horizontally resizable with a splitter.
 - Text previews read at most 256 KiB.
-- Table previews read at most 200 rows and 40 columns.
+- Table previews read at most 200 data rows plus a header row, and at most 40 columns.
 - PDF previews render only the visible page.
 - Data table filtering and search must not read file contents.
 - Removing an asset removes it from the project document only; it must not delete files from disk.
@@ -317,7 +317,7 @@ class PreviewProvider:
         with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
             reader = csv.reader(handle, delimiter=delimiter)
             for index, row in enumerate(reader):
-                if index >= MAX_TABLE_ROWS:
+                if index > MAX_TABLE_ROWS:
                     truncated = True
                     break
                 trimmed = row[:MAX_TABLE_COLUMNS]
