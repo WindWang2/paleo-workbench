@@ -76,9 +76,9 @@ def test_reader_panel_rerenders_image_preview_on_resize(qtbot, monkeypatch, tmp_
     calls = []
     original = panel._render_image
 
-    def tracking_render(image_path: str) -> None:
+    def tracking_render(image_path: str, revision=None) -> None:
         calls.append(image_path)
-        original(image_path)
+        original(image_path, revision)
 
     monkeypatch.setattr(panel, "_render_image", tracking_render)
 
@@ -146,3 +146,94 @@ def test_reader_panel_rerenders_pdf_preview_on_resize_without_reloading_document
     assert loads == [str(pdf_path)]
     assert len(renders) >= 2
     assert renders[-1][1] > renders[0][1]
+
+
+def test_reader_panel_reload_image_preview_when_same_path_file_changes(qtbot, tmp_path: Path):
+    path = tmp_path / "map.png"
+    first = QImage(16, 16, QImage.Format.Format_RGB32)
+    first.fill(0xCC3300)
+    first.save(path.as_posix())
+    resource = ResourceItem(name="map.png", path=str(path), type="image_reference", format="png")
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
+
+    panel.update_asset(resource)
+    initial_color = panel.image_label.pixmap().toImage().pixelColor(8, 8).rgb()
+
+    updated = QImage(16, 16, QImage.Format.Format_RGB32)
+    updated.fill(0x0066CC)
+    updated.save(path.as_posix())
+    stat = path.stat()
+    resource.checksum = f"{stat.st_mtime_ns}"
+
+    panel.update_asset(resource)
+    refreshed_color = panel.image_label.pixmap().toImage().pixelColor(8, 8).rgb()
+
+    assert refreshed_color != initial_color
+
+
+def test_reader_panel_reload_pdf_when_same_path_revision_changes_but_not_on_resize(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
+    loads = []
+
+    class FakePdfDocument:
+        class Error:
+            None_ = 0
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def load(self, path: str) -> int:
+            loads.append(path)
+            return self.Error.None_
+
+        def pageCount(self) -> int:
+            return 1
+
+        def render(self, page: int, size) -> QImage:
+            return QImage(size.width(), size.height(), QImage.Format.Format_RGB32)
+
+    monkeypatch.setattr("paleo_workbench.ui.pages.data_reader_panel.QPdfDocument", FakePdfDocument)
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+            revision=(12, 100),
+        )
+    )
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+            revision=(12, 200),
+        )
+    )
+
+    assert loads == [str(pdf_path), str(pdf_path)]
+
+    panel.resize(780, 600)
+    qtbot.wait(50)
+
+    assert loads == [str(pdf_path), str(pdf_path)]

@@ -430,3 +430,43 @@ def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, t
     assert "新增 1" in page.action_panel.operation_status_label.text()
     page.asset_table.table.selectRow(0)
     assert "新增 1" in page.action_panel.operation_status_label.text()
+
+
+def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
+    path = tmp_path / "notes.txt"
+    path.write_text("alpha", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+    received = []
+    page.data_context_changed.connect(received.append)
+
+    replacement = ResourceItem(
+        id=resource.id,
+        name="notes.txt",
+        path=str(path),
+        type="image_reference",
+        format="png",
+        status="indexed",
+    )
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.data_page.scan_resources",
+        lambda _folder: [replacement],
+    )
+
+    assert page.rescan_selected_asset() is True
+
+    assert received[-1]["selected_name"] == "notes.txt"
+    assert received[-1]["reader_mode"] == "image"

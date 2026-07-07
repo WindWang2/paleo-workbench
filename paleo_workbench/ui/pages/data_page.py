@@ -291,6 +291,7 @@ class DataPage(QWidget):
             reader_mode=self.reader_panel.current_mode,
             asset_kind=self._selected_asset_kind(),
         )
+        self._emit_data_context()
 
     def _set_import_status(self, report: ImportReport) -> None:
         self._set_action_status(

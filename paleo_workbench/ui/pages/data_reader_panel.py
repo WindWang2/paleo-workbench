@@ -32,10 +32,12 @@ class DataReaderPanel(QFrame):
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
         self._image_path = ""
+        self._image_revision: tuple[int, int] | None = None
         self._image_pixmap: QPixmap | None = None
         self._pdf_document: QPdfDocument | None = None
         self._pdf_page = 0
         self._pdf_path = ""
+        self._pdf_revision: tuple[int, int] | None = None
         self.setStyleSheet(
             f"QFrame#DataReaderPanel {{ background: {tokens.BG_SIDEBAR};"
             f" border: 1px solid {tokens.BORDER};"
@@ -138,12 +140,12 @@ class DataReaderPanel(QFrame):
             return
 
         if result.mode == "image":
-            self._render_image(result.path)
+            self._render_image(result.path, result.revision)
             self.stack.setCurrentWidget(self.image_label)
             return
 
         if result.mode == "pdf":
-            self._load_pdf(result.path)
+            self._load_pdf(result.path, result.revision)
             self.stack.setCurrentWidget(self.pdf_widget)
             return
 
@@ -182,10 +184,15 @@ class DataReaderPanel(QFrame):
                 self.table_preview.setItem(row_index, column_index, QTableWidgetItem(value))
         self.table_preview.resizeColumnsToContents()
 
-    def _render_image(self, path: str) -> None:
+    def _render_image(self, path: str, revision: tuple[int, int] | None = None) -> None:
         self.image_label.clear()
-        if path != self._image_path or self._image_pixmap is None:
+        if (
+            path != self._image_path
+            or revision != self._image_revision
+            or self._image_pixmap is None
+        ):
             self._image_path = path
+            self._image_revision = revision
             self._image_pixmap = QPixmap(path)
         if self._image_pixmap is None or self._image_pixmap.isNull():
             self.image_label.setText("图片预览加载失败")
@@ -199,11 +206,12 @@ class DataReaderPanel(QFrame):
             )
         )
 
-    def _load_pdf(self, path: str) -> None:
+    def _load_pdf(self, path: str, revision: tuple[int, int] | None = None) -> None:
         if self._pdf_document is None:
             self._pdf_document = QPdfDocument(self)
-        if path != self._pdf_path:
+        if path != self._pdf_path or revision != self._pdf_revision:
             self._pdf_path = path
+            self._pdf_revision = revision
             self._pdf_page = 0
             self.pdf_image.clear()
             error = self._pdf_document.load(path)
@@ -235,6 +243,6 @@ class DataReaderPanel(QFrame):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self.current_mode == "image" and self._current_result.path:
-            self._render_image(self._current_result.path)
+            self._render_image(self._current_result.path, self._current_result.revision)
         elif self.current_mode == "pdf" and self._pdf_document is not None:
             self._render_pdf_page()

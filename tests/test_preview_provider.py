@@ -166,3 +166,18 @@ def test_preview_provider_export_artifact_message(tmp_path: Path):
     assert result.mode == "message"
     assert result.title == "map.png"
     assert "成果文件" in result.message
+
+
+def test_preview_provider_image_revision_changes_when_file_stat_changes(tmp_path: Path):
+    path = tmp_path / "map.png"
+    path.write_bytes(b"first-image")
+    resource = ResourceItem(name="map.png", path=str(path), type="image_reference", format="png")
+    provider = PreviewProvider()
+
+    first = provider.preview(resource)
+    path.write_bytes(b"second-image-with-new-bytes")
+    second = provider.preview(resource)
+
+    assert first.mode == "image"
+    assert second.mode == "image"
+    assert first.revision != second.revision

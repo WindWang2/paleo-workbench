@@ -25,6 +25,7 @@ class PreviewResult:
     mode: PreviewMode
     title: str
     path: str = ""
+    revision: tuple[int, int] | None = None
     format: str = ""
     status: str = ""
     type_label: str = ""
@@ -63,10 +64,25 @@ class PreviewProvider:
     def _cache_key(self, asset: ResourceItem | ExportArtifact) -> tuple:
         if isinstance(asset, ExportArtifact):
             path = Path(asset.output_path)
-            return ("artifact", asset.id, asset.output_path, self._safe_stat(path))
+            return (
+                "artifact",
+                asset.id,
+                asset.output_path,
+                asset.format,
+                self._safe_stat(path),
+            )
 
         path = Path(asset.path)
-        return ("resource", asset.id, asset.path, asset.checksum, self._safe_stat(path))
+        return (
+            "resource",
+            asset.id,
+            asset.path,
+            asset.type,
+            asset.format,
+            asset.status,
+            asset.checksum,
+            self._safe_stat(path),
+        )
 
     def _safe_stat(self, path: Path) -> tuple[int, int] | None:
         try:
@@ -80,6 +96,7 @@ class PreviewProvider:
             return self._artifact_preview(asset)
 
         path = Path(asset.path)
+        revision = self._safe_stat(path)
         fmt = asset.format.lower()
         title = asset.name
 
@@ -88,6 +105,7 @@ class PreviewProvider:
                 mode="message",
                 title=title,
                 path=asset.path,
+                revision=revision,
                 format=asset.format,
                 status="missing",
                 type_label=asset.type,
@@ -99,6 +117,7 @@ class PreviewProvider:
                 mode="pdf",
                 title=title,
                 path=asset.path,
+                revision=revision,
                 format=asset.format,
                 status=asset.status,
                 type_label=asset.type,
@@ -109,6 +128,7 @@ class PreviewProvider:
                 mode="image",
                 title=title,
                 path=asset.path,
+                revision=revision,
                 format=asset.format,
                 status=asset.status,
                 type_label=asset.type,
@@ -125,6 +145,7 @@ class PreviewProvider:
             mode="message",
             title=title,
             path=asset.path,
+            revision=revision,
             format=asset.format,
             status=asset.status,
             type_label=asset.type,
@@ -137,6 +158,7 @@ class PreviewProvider:
             mode="message",
             title=title,
             path=artifact.output_path,
+            revision=self._safe_stat(Path(artifact.output_path)),
             format=artifact.format,
             status="generated",
             type_label="成果",
@@ -152,6 +174,7 @@ class PreviewProvider:
             mode="text",
             title=resource.name,
             path=resource.path,
+            revision=self._safe_stat(path),
             format=resource.format,
             status=resource.status,
             type_label=resource.type,
@@ -184,6 +207,7 @@ class PreviewProvider:
             mode="table",
             title=resource.name,
             path=resource.path,
+            revision=self._safe_stat(path),
             format=resource.format,
             status=resource.status,
             type_label=resource.type,
