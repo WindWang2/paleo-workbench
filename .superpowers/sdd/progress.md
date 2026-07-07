@@ -87,3 +87,13 @@ PM Task 3: complete (commits c7f95b9..e0c3335, review clean, 275/275 tests passi
 PM Task 4: complete (properties dialog + save OSError handling, 280/280 tests passing; 5 new lifecycle tests)
 PM Task 4: complete (commits e0c3335..c1d0d54, review clean, 280/280 tests passing; properties text + save OSError handling verified)
 PM Task 5: complete (commits c1d0d54..4cee4e1, review clean, 283/283 tests passing; smoke tests verify real end-to-end pipeline)
+
+# Phase: Data Page UI Management Performance (started 2026-07-07)
+Plan: docs/superpowers/plans/2026-07-07-datapage-ui-management-performance.md
+Spec: docs/superpowers/specs/2026-07-07-datapage-ui-management-performance-design.md
+Branch base: 395dbd5
+Data Page UI Management Performance Task 1: complete (commits 395dbd5..538b3bb, review clean, 7/7 preview provider tests passing)
+Data Page UI Management Performance Task 2: complete (commits 538b3bb..1394f41, review clean, 11/11 focused offscreen tests passing)
+Data Page UI Management Performance Task 3: complete (commits 1394f41..066b967, review clean, 24/24 focused offscreen tests passing)
+Data Page UI Management Performance Task 4: complete (commits 066b967..5e25cfd, review clean, 17/17 focused offscreen tests passing)
+Data Page UI Management Performance Task 5: complete (52/52 focused tests passing; 304/304 full suite passing; GUI app launched without startup crash)
