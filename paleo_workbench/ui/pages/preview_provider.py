@@ -30,8 +30,8 @@ class PreviewResult:
     message: str = ""
     warning: str = ""
     text: str = ""
-    table_headers: list[str] = field(default_factory=list)
-    table_rows: list[list[str]] = field(default_factory=list)
+    table_headers: tuple[str, ...] = field(default_factory=tuple)
+    table_rows: tuple[tuple[str, ...], ...] = field(default_factory=tuple)
     truncated: bool = False
 
 
@@ -144,9 +144,7 @@ class PreviewProvider:
 
     def _text_preview(self, resource: ResourceItem) -> PreviewResult:
         path = Path(resource.path)
-        data = path.read_bytes()
-        truncated = len(data) > MAX_TEXT_PREVIEW_BYTES
-        preview_bytes = data[:MAX_TEXT_PREVIEW_BYTES]
+        preview_bytes, truncated = self._read_preview_chunk(path)
         text = preview_bytes.decode("utf-8", errors="replace")
         warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
         return PreviewResult(
@@ -163,22 +161,23 @@ class PreviewProvider:
 
     def _table_preview(self, resource: ResourceItem, delimiter: str) -> PreviewResult:
         path = Path(resource.path)
-        rows: list[list[str]] = []
-        truncated = False
+        preview_bytes, truncated = self._read_preview_chunk(path)
+        preview_text = preview_bytes.decode("utf-8", errors="replace")
+        lines = preview_text.splitlines()
+        preview_lines = lines[: MAX_TABLE_ROWS + 1]
+        if len(lines) > MAX_TABLE_ROWS + 1:
+            truncated = True
 
-        with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
-            reader = csv.reader(handle, delimiter=delimiter)
-            for index, row in enumerate(reader):
-                if index > MAX_TABLE_ROWS:
-                    truncated = True
-                    break
-                trimmed = row[:MAX_TABLE_COLUMNS]
-                if len(row) > MAX_TABLE_COLUMNS:
-                    truncated = True
-                rows.append(trimmed)
+        parsed_rows: list[tuple[str, ...]] = []
+        for line in preview_lines:
+            parsed = next(csv.reader([line], delimiter=delimiter), [])
+            trimmed = tuple(parsed[:MAX_TABLE_COLUMNS])
+            if len(parsed) > MAX_TABLE_COLUMNS:
+                truncated = True
+            parsed_rows.append(trimmed)
 
-        headers = rows[0] if rows else []
-        body = rows[1:] if rows else []
+        headers = parsed_rows[0] if parsed_rows else ()
+        body = tuple(parsed_rows[1:]) if parsed_rows else ()
         warning = "表格预览已按行列上限截断" if truncated else ""
         return PreviewResult(
             mode="table",
@@ -192,3 +191,8 @@ class PreviewProvider:
             warning=warning,
             truncated=truncated,
         )
+
+    def _read_preview_chunk(self, path: Path) -> tuple[bytes, bool]:
+        with path.open("rb") as handle:
+            data = handle.read(MAX_TEXT_PREVIEW_BYTES + 1)
+        return data[:MAX_TEXT_PREVIEW_BYTES], len(data) > MAX_TEXT_PREVIEW_BYTES

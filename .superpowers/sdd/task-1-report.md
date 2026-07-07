@@ -40,3 +40,12 @@
 
 ## Concerns
 - None at this stage.
+
+## Reviewer Fixes
+- Reworked `_text_preview()` to read at most `MAX_TEXT_PREVIEW_BYTES + 1` bytes from disk and decode only that bounded chunk.
+- Reworked `_table_preview()` to read a bounded binary preview chunk, split it into at most one header row plus `MAX_TABLE_ROWS` data rows, and parse each row individually with `csv.reader`.
+- Switched `PreviewResult.table_headers` and `PreviewResult.table_rows` to immutable tuples so cached preview results cannot leak mutable list state across calls.
+
+## Fresh Verification
+- Command: `pytest tests/test_preview_provider.py -v`
+- Result: `6 passed`

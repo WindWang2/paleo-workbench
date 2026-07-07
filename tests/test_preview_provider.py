@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_provider import (
@@ -21,7 +22,8 @@ def test_preview_provider_reads_bounded_text(tmp_path: Path):
     path.write_text("a" * (MAX_TEXT_PREVIEW_BYTES + 100), encoding="utf-8")
     resource = ResourceItem(name="large.txt", path=str(path), type="document", format="txt")
 
-    result = PreviewProvider().preview(resource)
+    with patch.object(Path, "read_bytes", side_effect=AssertionError("full text file read")):
+        result = PreviewProvider().preview(resource)
 
     assert result.mode == "text"
     assert len(result.text) <= MAX_TEXT_PREVIEW_BYTES + 32
@@ -39,12 +41,58 @@ def test_preview_provider_reads_bounded_csv_table(tmp_path: Path):
     path.write_text("\n".join([header, *rows]), encoding="utf-8")
     resource = ResourceItem(name="table.csv", path=str(path), type="tabular", format="csv")
 
-    result = PreviewProvider().preview(resource)
+    class BoundedTextFile:
+        def __init__(self, text: str):
+            self._lines = text.splitlines(True)
+            self._index = 0
+            self.read_calls = 0
+
+        def readline(self, size: int = -1) -> str:
+            self.read_calls += 1
+            if self.read_calls > 2:
+                raise AssertionError("table preview read beyond bounded preview chunk")
+            if self._index >= len(self._lines):
+                return ""
+            line = self._lines[self._index]
+            self._index += 1
+            return line
+
+        def __iter__(self):
+            return self
+
+        def __next__(self) -> str:
+            line = self.readline()
+            if line == "":
+                raise StopIteration
+            return line
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    real_open = Path.open
+
+    def bounded_open(self: Path, mode: str = "r", *args, **kwargs):
+        if mode == "rb":
+            return real_open(self, mode, *args, **kwargs)
+        if mode == "r":
+            with real_open(self, "r", encoding="utf-8", newline="") as handle:
+                return BoundedTextFile(handle.read())
+        return real_open(self, mode, *args, **kwargs)
+
+    with patch.object(Path, "open", bounded_open):
+        result = PreviewProvider().preview(resource)
 
     assert result.mode == "table"
+    assert result.table_headers is not None
     assert len(result.table_rows) == MAX_TABLE_ROWS
     assert all(len(row) == MAX_TABLE_COLUMNS for row in result.table_rows)
     assert result.truncated is True
+    assert isinstance(result.table_headers, tuple)
+    assert isinstance(result.table_rows, tuple)
+    assert all(isinstance(row, tuple) for row in result.table_rows)
 
 
 def test_preview_provider_missing_file_message(tmp_path: Path):
