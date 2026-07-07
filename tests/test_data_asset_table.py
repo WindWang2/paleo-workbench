@@ -85,3 +85,27 @@ def test_asset_table_filters_by_search(qtbot):
 
     assert table.table.rowCount() == 1
     assert table.table.item(0, 0).text() == "cube.sgy"
+
+
+def test_data_asset_table_visible_asset_count_after_search(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [
+        ResourceItem(
+            name="alpha.txt",
+            path="/tmp/alpha.txt",
+            type="document",
+            format="txt",
+        ),
+        ResourceItem(
+            name="beta.txt",
+            path="/tmp/beta.txt",
+            type="document",
+            format="txt",
+        ),
+    ]
+
+    table.update_assets(resources, [])
+    table.set_search_text("alpha")
+
+    assert table.visible_asset_count() == 1

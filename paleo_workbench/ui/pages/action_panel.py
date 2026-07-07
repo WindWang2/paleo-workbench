@@ -50,3 +50,17 @@ class ActionPanel(QFrame):
         layout.addWidget(self.status_label)
 
         layout.addStretch()
+
+    def update_selection_state(
+        self,
+        has_resource: bool,
+        has_asset: bool,
+        reader_mode: str,
+    ) -> None:
+        self.rescan_btn.setEnabled(has_resource)
+        self.remove_btn.setEnabled(has_resource)
+        self.open_folder_btn.setEnabled(has_resource)
+        if has_asset:
+            self.status_label.setText(f"阅读器: {reader_mode}")
+        else:
+            self.status_label.setText("等待操作")

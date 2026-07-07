@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QLabel, QSplitter
 
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.data_page import DataPage
+from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 
 
 def test_data_page_assembles_management_panels(qtbot):
@@ -13,7 +14,7 @@ def test_data_page_assembles_management_panels(qtbot):
 
     assert page.catalog_panel is not None
     assert page.asset_table is not None
-    assert page.detail_panel is not None
+    assert page.reader_panel is not None
     assert page.action_panel is not None
 
 
@@ -24,9 +25,8 @@ def test_data_page_uses_resizable_content_splitter(qtbot):
     assert isinstance(page.content_splitter, QSplitter)
     assert page.content_splitter.indexOf(page.catalog_panel) == 0
     assert page.content_splitter.indexOf(page.asset_table) == 1
-    assert page.content_splitter.indexOf(page.detail_panel) == 2
-    assert page.detail_panel.minimumWidth() == 240
-    assert page.detail_panel.maximumWidth() > 260
+    assert page.content_splitter.indexOf(page.reader_panel) == 2
+    assert page.reader_panel.minimumWidth() == 320
 
 
 def test_data_page_update_state_delegates(qtbot):
@@ -209,11 +209,9 @@ def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path
 
     page.asset_table.table.selectRow(0)
 
-    labels = "\n".join(
-        label.text() for label in page.detail_panel.findChildren(QLabel)
-    )
-    assert "alpha" in labels
-    assert "beta" in labels
+    assert page.reader_panel.current_mode == "text"
+    assert "alpha" in page.reader_panel.text_preview.toPlainText()
+    assert "beta" in page.reader_panel.text_preview.toPlainText()
 
 
 def test_data_page_selection_renders_imported_image_preview(qtbot, tmp_path: Path):
@@ -228,11 +226,9 @@ def test_data_page_selection_renders_imported_image_preview(qtbot, tmp_path: Pat
 
     page.asset_table.table.selectRow(0)
 
-    pixmap_labels = [
-        label for label in page.detail_panel.findChildren(QLabel)
-        if label.pixmap() is not None and not label.pixmap().isNull()
-    ]
-    assert pixmap_labels
+    assert page.reader_panel.current_mode == "image"
+    assert page.reader_panel.image_label.pixmap() is not None
+    assert not page.reader_panel.image_label.pixmap().isNull()
 
 
 def test_data_page_selection_renders_imported_pdf_preview(qtbot, tmp_path: Path):
@@ -275,10 +271,59 @@ startxref
 
     page.asset_table.table.selectRow(0)
 
-    pixmap_labels = [
-        label for label in page.detail_panel.findChildren(QLabel)
-        if label.objectName() == "DataPreviewPdf"
-        and label.pixmap() is not None
-        and not label.pixmap().isNull()
-    ]
-    assert pixmap_labels
+    assert page.reader_panel.current_mode == "pdf"
+    assert page.reader_panel.pdf_image.pixmap() is not None
+    assert not page.reader_panel.pdf_image.pixmap().isNull()
+
+
+def test_data_page_uses_reader_panel(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    assert isinstance(page.reader_panel, DataReaderPanel)
+    assert page.content_splitter.indexOf(page.reader_panel) >= 0
+
+
+def test_data_page_selection_updates_reader_and_context_signal(qtbot, tmp_path: Path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    received = []
+    page.data_context_changed.connect(received.append)
+
+    page._set_selected_asset(resource)
+
+    assert page.reader_panel.current_mode == "text"
+    assert received[-1]["selected_name"] == "notes.txt"
+    assert received[-1]["reader_mode"] == "text"
+
+
+def test_data_page_remove_refreshes_reader_and_action_state(qtbot, tmp_path: Path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(resource)
+
+    assert page.remove_selected_asset() is True
+
+    assert project.resources == []
+    assert page.reader_panel.current_mode == "empty"
+    assert page.remove_btn.isEnabled() is False

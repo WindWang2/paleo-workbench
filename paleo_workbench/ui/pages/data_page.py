@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QSplitter, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
@@ -17,12 +17,14 @@ from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui.pages.action_panel import ActionPanel
 from paleo_workbench.ui.pages.data_asset_table import DataAssetTable
 from paleo_workbench.ui.pages.data_catalog_panel import DataCatalogPanel
-from paleo_workbench.ui.pages.data_detail_panel import DataDetailPanel
+from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.workflow.service import dashboard_state
 
 
 class DataPage(QWidget):
+    data_context_changed = Signal(dict)
+
     def __init__(self, project: ProjectDocument | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("DataPage")
@@ -51,12 +53,12 @@ class DataPage(QWidget):
         self.asset_table = DataAssetTable()
         self.content_splitter.addWidget(self.asset_table)
 
-        self.detail_panel = DataDetailPanel()
-        self.content_splitter.addWidget(self.detail_panel)
+        self.reader_panel = DataReaderPanel()
+        self.content_splitter.addWidget(self.reader_panel)
         self.content_splitter.setStretchFactor(0, 0)
         self.content_splitter.setStretchFactor(1, 1)
-        self.content_splitter.setStretchFactor(2, 1)
-        self.content_splitter.setSizes([180, 720, 340])
+        self.content_splitter.setStretchFactor(2, 2)
+        self.content_splitter.setSizes([180, 560, 520])
         bottom.addWidget(self.content_splitter, 1)
 
         self.action_panel = ActionPanel()
@@ -75,6 +77,7 @@ class DataPage(QWidget):
         self.rescan_btn.clicked.connect(self.rescan_selected_asset)
         self.remove_btn.clicked.connect(self.remove_selected_asset)
         self.action_panel.open_folder_btn.clicked.connect(self.open_selected_folder)
+        self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
 
         self.update_state(
             dashboard_state(self.project),
@@ -93,6 +96,12 @@ class DataPage(QWidget):
         self.summary_bar.update_state(state)
         self.catalog_panel.update_counts(self._resources, self._artifacts)
         self.asset_table.update_assets(self._resources, self._artifacts)
+        self.action_panel.update_selection_state(
+            has_resource=isinstance(self._selected_asset, ResourceItem),
+            has_asset=self._selected_asset is not None,
+            reader_mode=self.reader_panel.current_mode,
+        )
+        self._emit_data_context()
 
     def import_paths(self, paths: list[Path]) -> ImportReport:
         report = import_files(paths, self.project.resources)
@@ -149,8 +158,7 @@ class DataPage(QWidget):
         ]
         removed = len(self.project.resources) != before
         if removed:
-            self._selected_asset = None
-            self.detail_panel.update_asset(None)
+            self._set_selected_asset(None)
             self.update_state(
                 dashboard_state(self.project),
                 self.project.resources,
@@ -173,7 +181,7 @@ class DataPage(QWidget):
                 self.project.resources,
                 self.project.export_artifacts,
             )
-            self.detail_panel.update_asset(resource)
+            self.reader_panel.update_asset(resource)
             self._set_action_status("文件不存在")
             return True
 
@@ -199,7 +207,7 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
-        self.detail_panel.update_asset(resource)
+        self.reader_panel.update_asset(resource)
         self._set_action_status("已重新扫描")
         return True
 
@@ -218,7 +226,54 @@ class DataPage(QWidget):
 
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
-        self.detail_panel.update_asset(asset)
+        self.reader_panel.update_asset(asset)
+        has_resource = isinstance(asset, ResourceItem)
+        self.action_panel.update_selection_state(
+            has_resource=has_resource,
+            has_asset=asset is not None,
+            reader_mode=self.reader_panel.current_mode,
+        )
+        self._emit_data_context()
+
+    def current_reader_mode(self) -> str:
+        return self.reader_panel.current_mode
+
+    def _emit_data_context(self) -> None:
+        issue_count = sum(
+            1
+            for resource in self.project.resources
+            if resource.status in {"missing", "warning", "failed", "error"}
+        )
+        selected = self._selected_asset
+        selected_name = "未选择"
+        selected_type = ""
+        selected_format = ""
+        if isinstance(selected, ResourceItem):
+            selected_name = selected.name
+            selected_type = selected.type
+            selected_format = selected.format
+        elif isinstance(selected, ExportArtifact):
+            selected_name = Path(selected.output_path).name
+            selected_type = "成果"
+            selected_format = selected.format
+        self.data_context_changed.emit(
+            {
+                "resource_count": len(self.project.resources),
+                "artifact_count": len(self.project.export_artifacts),
+                "issue_count": issue_count,
+                "selected_name": selected_name,
+                "selected_type": selected_type,
+                "selected_format": selected_format,
+                "reader_mode": self.reader_panel.current_mode,
+            }
+        )
+
+    def _handle_reader_mode_changed(self, _mode: str) -> None:
+        self.action_panel.update_selection_state(
+            has_resource=isinstance(self._selected_asset, ResourceItem),
+            has_asset=self._selected_asset is not None,
+            reader_mode=self.reader_panel.current_mode,
+        )
 
     def _set_import_status(self, report: ImportReport) -> None:
         self._set_action_status(

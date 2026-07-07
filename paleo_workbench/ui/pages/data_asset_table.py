@@ -86,6 +86,9 @@ class DataAssetTable(QWidget):
         self._search_text = text.strip().lower()
         self._render()
 
+    def visible_asset_count(self) -> int:
+        return len(self._visible_assets)
+
     def _render(self) -> None:
         assets: list[ResourceItem | ExportArtifact] = [
             asset
