@@ -49,7 +49,7 @@ class AppShell(QWidget):
         self.data_page = DataPage(project=self.project)
         self.data_page.data_context_changed.connect(self.update_data_context)
         self.page_stack.addWidget(self.data_page)        # index 1 = 数据
-        self.update_data_context(self._build_data_context())
+        self._data_context = self._build_data_context()
         self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
         self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
@@ -70,7 +70,7 @@ class AppShell(QWidget):
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)
         if index == 1:
-            self.update_data_context(self._build_data_context())
+            self.sidebar.update_data_context(**self._data_context)
         else:
             self.sidebar.set_context(tokens.PAGE_NAMES[index])
 
@@ -92,20 +92,24 @@ class AppShell(QWidget):
         page = self.page_stack.widget(1)
         if hasattr(page, "update_state"):
             page.update_state(state, resources, current_artifacts)
-        self.update_data_context(
-            self._build_data_context(resources=resources, artifacts=current_artifacts)
+        self._data_context = self._build_data_context(
+            resources=resources, artifacts=current_artifacts
         )
+        if self.page_stack.currentIndex() == 1:
+            self.sidebar.update_data_context(**self._data_context)
 
     def update_data_context(self, context: dict) -> None:
-        self.sidebar.update_data_context(
-            resource_count=context.get("resource_count", 0),
-            artifact_count=context.get("artifact_count", 0),
-            issue_count=context.get("issue_count", 0),
-            selected_name=context.get("selected_name", "未选择"),
-            selected_type=context.get("selected_type", ""),
-            selected_format=context.get("selected_format", ""),
-            reader_mode=context.get("reader_mode", "empty"),
-        )
+        self._data_context = {
+            "resource_count": context.get("resource_count", 0),
+            "artifact_count": context.get("artifact_count", 0),
+            "issue_count": context.get("issue_count", 0),
+            "selected_name": context.get("selected_name", "未选择"),
+            "selected_type": context.get("selected_type", ""),
+            "selected_format": context.get("selected_format", ""),
+            "reader_mode": context.get("reader_mode", "empty"),
+        }
+        if self.page_stack.currentIndex() == 1:
+            self.sidebar.update_data_context(**self._data_context)
 
     def _build_data_context(
         self,

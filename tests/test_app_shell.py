@@ -37,7 +37,6 @@ def test_app_shell_icon_rail_switches_page(qtbot):
 def test_app_shell_data_sidebar_receives_resource_counts(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.icon_rail.nav_buttons[1].click()
     resources = [
         ResourceItem(
             name="well.las",
@@ -56,9 +55,36 @@ def test_app_shell_data_sidebar_receives_resource_counts(qtbot):
 
     shell.update_data_page({}, resources, artifacts)
 
-    texts = "\n".join(
-        label.text() for label in shell.sidebar.findChildren(type(shell.sidebar.context_label))
-    )
+    texts = "\n".join(label.text() for label in shell.sidebar._content_labels)
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[0]
+    assert "项目总览" in texts
+    assert "资源 1" not in texts
+    assert "阅读器: empty" not in texts
+
+
+def test_app_shell_switching_to_data_renders_cached_context(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    resources = [
+        ResourceItem(
+            name="well.las",
+            path="/tmp/well.las",
+            type="well_log",
+            format="las",
+        )
+    ]
+    artifacts = [
+        ExportArtifact(
+            linked_id="map_1",
+            format="PDF",
+            output_path="/tmp/map.pdf",
+        )
+    ]
+
+    shell.update_data_page({}, resources, artifacts)
+    shell.icon_rail.nav_buttons[1].click()
+
+    texts = "\n".join(label.text() for label in shell.sidebar._content_labels)
     assert "资源 1" in texts
     assert "成果 1" in texts
     assert "异常 0" in texts
@@ -95,12 +121,18 @@ def test_app_shell_syncs_data_page_context_to_sidebar(tmp_path, qtbot):
 
     page._set_selected_asset(resource)
 
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[0]
+    assert "项目总览" in " ".join(label.text() for label in shell.sidebar._content_labels)
+
+    shell.icon_rail.nav_buttons[1].click()
+
     text = " ".join(label.text() for label in shell.sidebar._content_labels)
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[1]
     assert "当前选择: notes.txt" in text
     assert "阅读器: text" in text
 
 
-def test_app_shell_initializes_sidebar_from_project_data(tmp_path, qtbot):
+def test_app_shell_initializes_sidebar_on_home_context(tmp_path, qtbot):
     path = tmp_path / "resource-1.txt"
     path.write_text("hello", encoding="utf-8")
     project = ProjectDocument.new("Demo")
@@ -117,12 +149,9 @@ def test_app_shell_initializes_sidebar_from_project_data(tmp_path, qtbot):
     qtbot.addWidget(shell)
 
     text = " ".join(label.text() for label in shell.sidebar._content_labels)
-    assert shell.sidebar.context_label.text() == "数据"
-    assert "资源 1" in text
-    assert "成果 0" in text
-    assert "异常 0" in text
-    assert "当前选择: 未选择" in text
-    assert "阅读器: empty" in text
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[0]
+    assert "项目总览" in text
+    assert "资源 1" not in text
 
 
 def test_app_shell_update_data_page_preserves_sidebar_selection(tmp_path, qtbot):
@@ -142,6 +171,9 @@ def test_app_shell_update_data_page_preserves_sidebar_selection(tmp_path, qtbot)
 
     page._set_selected_asset(resource)
     shell.update_data_page({}, project.resources, project.export_artifacts)
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[0]
+
+    shell.icon_rail.nav_buttons[1].click()
 
     text = " ".join(label.text() for label in shell.sidebar._content_labels)
     assert "资源 1" in text
@@ -167,6 +199,7 @@ def test_app_shell_retains_data_sidebar_context_when_navigating_back(tmp_path, q
 
     page._set_selected_asset(resource)
     shell.icon_rail.nav_buttons[4].click()
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
     shell.icon_rail.nav_buttons[1].click()
 
     text = " ".join(label.text() for label in shell.sidebar._content_labels)

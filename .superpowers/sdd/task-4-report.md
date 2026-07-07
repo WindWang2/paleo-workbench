@@ -102,3 +102,29 @@ Result:
 ### Files changed
 - `paleo_workbench/ui/app_shell.py`
 - `tests/test_app_shell.py`
+
+---
+
+## Final re-review fix: cache data context without forcing sidebar rendering
+
+### Implementation summary
+- Added `self._data_context` to `AppShell` and treated it as the live data snapshot for the shell.
+- Changed `AppShell.update_data_context(...)` and `AppShell.update_data_page(...)` to update that cache first, then render into `TextSidebar` only when the current page is Data.
+- Changed `AppShell._switch_page(...)` so non-Data pages keep their own sidebar context, while Data restores the cached live data context, including selected asset and reader mode.
+- Updated the app-shell regressions to verify:
+  - startup still shows Home in the sidebar
+  - `update_data_page(...)` on Home does not overwrite the Home sidebar
+  - switching to Data renders the cached data context
+  - navigating away and back restores the selected asset and reader mode
+
+### Test evidence
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
+```
+Result:
+- `17 passed in 2.62s`
+
+### Files changed
+- `paleo_workbench/ui/app_shell.py`
+- `tests/test_app_shell.py`
