@@ -58,3 +58,12 @@
 ## Re-Review Verification
 - Command: `pytest tests/test_preview_provider.py -v`
 - Result: `7 passed`
+
+## Final Ceiling Fix
+- Updated `_read_preview_chunk()` to read at most exactly `MAX_TEXT_PREVIEW_BYTES` bytes from disk and derive truncation from `stat().st_size > MAX_TEXT_PREVIEW_BYTES`, removing the extra sentinel byte read.
+- Kept the CSV preview path unchanged so quoted embedded newlines still parse through `csv.reader` over the bounded preview chunk.
+- Added a regression check that asserts the text preview file handle is asked to read exactly `MAX_TEXT_PREVIEW_BYTES` bytes.
+
+## Final Verification
+- Command: `pytest tests/test_preview_provider.py -v`
+- Result: `7 passed`

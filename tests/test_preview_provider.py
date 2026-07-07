@@ -22,7 +22,30 @@ def test_preview_provider_reads_bounded_text(tmp_path: Path):
     path.write_text("a" * (MAX_TEXT_PREVIEW_BYTES + 100), encoding="utf-8")
     resource = ResourceItem(name="large.txt", path=str(path), type="document", format="txt")
 
-    with patch.object(Path, "read_bytes", side_effect=AssertionError("full text file read")):
+    class BoundedBinaryFile:
+        def __init__(self, file_obj):
+            self._file_obj = file_obj
+            self.read_sizes: list[int] = []
+
+        def read(self, size: int = -1):
+            self.read_sizes.append(size)
+            assert size == MAX_TEXT_PREVIEW_BYTES
+            return self._file_obj.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return self._file_obj.__exit__(exc_type, exc, tb)
+
+    real_open = Path.open
+
+    def bounded_open(self: Path, mode: str = "r", *args, **kwargs):
+        if mode == "rb":
+            return BoundedBinaryFile(real_open(self, mode, *args, **kwargs))
+        return real_open(self, mode, *args, **kwargs)
+
+    with patch.object(Path, "open", bounded_open):
         result = PreviewProvider().preview(resource)
 
     assert result.mode == "text"

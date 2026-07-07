@@ -194,6 +194,7 @@ class PreviewProvider:
         )
 
     def _read_preview_chunk(self, path: Path) -> tuple[bytes, bool]:
+        stat = path.stat()
         with path.open("rb") as handle:
-            data = handle.read(MAX_TEXT_PREVIEW_BYTES + 1)
-        return data[:MAX_TEXT_PREVIEW_BYTES], len(data) > MAX_TEXT_PREVIEW_BYTES
+            data = handle.read(MAX_TEXT_PREVIEW_BYTES)
+        return data, stat.st_size > MAX_TEXT_PREVIEW_BYTES
