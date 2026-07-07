@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 )
@@ -20,7 +22,7 @@ from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionP
 from paleo_workbench.ui.sidebar import TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui import tokens
-from paleo_workbench.project.models import ProjectDocument
+from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
 
 class AppShell(QWidget):
@@ -47,6 +49,7 @@ class AppShell(QWidget):
         self.data_page = DataPage(project=self.project)
         self.data_page.data_context_changed.connect(self.update_data_context)
         self.page_stack.addWidget(self.data_page)        # index 1 = 数据
+        self.update_data_context(self._build_data_context())
         self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
         self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
@@ -82,17 +85,12 @@ class AppShell(QWidget):
         resources: list,
         artifacts: list | None = None,
     ) -> None:
+        current_artifacts = artifacts or []
         page = self.page_stack.widget(1)
         if hasattr(page, "update_state"):
-            page.update_state(state, resources, artifacts or [])
-        self.sidebar.update_data_context(
-            resource_count=len(resources),
-            artifact_count=len(artifacts or []),
-            issue_count=sum(
-                1
-                for resource in resources
-                if resource.status in {"missing", "warning", "failed", "error"}
-            ),
+            page.update_state(state, resources, current_artifacts)
+        self.update_data_context(
+            self._build_data_context(resources=resources, artifacts=current_artifacts)
         )
 
     def update_data_context(self, context: dict) -> None:
@@ -105,6 +103,42 @@ class AppShell(QWidget):
             selected_format=context.get("selected_format", ""),
             reader_mode=context.get("reader_mode", "empty"),
         )
+
+    def _build_data_context(
+        self,
+        resources: list[ResourceItem] | None = None,
+        artifacts: list[ExportArtifact] | None = None,
+    ) -> dict:
+        current_resources = resources if resources is not None else self.project.resources
+        current_artifacts = (
+            artifacts if artifacts is not None else self.project.export_artifacts
+        )
+        issue_count = sum(
+            1
+            for resource in current_resources
+            if resource.status in {"missing", "warning", "failed", "error"}
+        )
+        selected = getattr(self.data_page, "_selected_asset", None)
+        selected_name = "未选择"
+        selected_type = ""
+        selected_format = ""
+        if isinstance(selected, ResourceItem):
+            selected_name = selected.name
+            selected_type = selected.type
+            selected_format = selected.format
+        elif isinstance(selected, ExportArtifact):
+            selected_name = Path(selected.output_path).name
+            selected_type = "成果"
+            selected_format = selected.format
+        return {
+            "resource_count": len(current_resources),
+            "artifact_count": len(current_artifacts),
+            "issue_count": issue_count,
+            "selected_name": selected_name,
+            "selected_type": selected_type,
+            "selected_format": selected_format,
+            "reader_mode": self.data_page.current_reader_mode(),
+        }
 
     def update_well_log_prediction_page(self, prediction_tasks: list) -> None:
         page = self.page_stack.widget(2)

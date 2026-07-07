@@ -98,3 +98,53 @@ def test_app_shell_syncs_data_page_context_to_sidebar(tmp_path, qtbot):
     text = " ".join(label.text() for label in shell.sidebar._content_labels)
     assert "当前选择: notes.txt" in text
     assert "阅读器: text" in text
+
+
+def test_app_shell_initializes_sidebar_from_project_data(tmp_path, qtbot):
+    path = tmp_path / "resource-1.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    project.resources.append(
+        ResourceItem(
+            name="resource-1.txt",
+            path=str(path),
+            type="document",
+            format="txt",
+        )
+    )
+
+    shell = AppShell(project=project)
+    qtbot.addWidget(shell)
+
+    text = " ".join(label.text() for label in shell.sidebar._content_labels)
+    assert shell.sidebar.context_label.text() == "数据"
+    assert "资源 1" in text
+    assert "成果 0" in text
+    assert "异常 0" in text
+    assert "当前选择: 未选择" in text
+    assert "阅读器: empty" in text
+
+
+def test_app_shell_update_data_page_preserves_sidebar_selection(tmp_path, qtbot):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    shell = AppShell(project=project)
+    qtbot.addWidget(shell)
+    page = shell.page_stack.widget(1)
+
+    page._set_selected_asset(resource)
+    shell.update_data_page({}, project.resources, project.export_artifacts)
+
+    text = " ".join(label.text() for label in shell.sidebar._content_labels)
+    assert "资源 1" in text
+    assert "当前选择: notes.txt" in text
+    assert "格式: document / txt" in text
+    assert "阅读器: text" in text
