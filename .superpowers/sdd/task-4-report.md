@@ -81,3 +81,24 @@ Result:
 ### Notes
 - `DataPage` was left untouched as requested.
 - `AppShell.update_data_page(...)` still honors explicit `resources` / `artifacts` arguments even when they are not yet mirrored onto `project`, while preserving the richer selection details from the live page state.
+
+---
+
+## Re-review fix: preserve live data sidebar state on page switch
+
+### Implementation summary
+- Changed `AppShell._switch_page()` so the Data tab (`index == 1`) re-pushes the live data context via `self.update_data_context(self._build_data_context())` instead of calling `sidebar.set_context("数据")`.
+- Left `TextSidebar` unchanged; the existing default-reset behavior remains useful for non-Data pages, and the shell now avoids it when returning to the Data page.
+- Added a regression test that selects a resource, navigates away, navigates back to Data, and verifies the sidebar still shows the selected asset and reader mode instead of resetting to `未选择` / `empty`.
+
+### Test evidence
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
+```
+Result:
+- `16 passed in 2.45s`
+
+### Files changed
+- `paleo_workbench/ui/app_shell.py`
+- `tests/test_app_shell.py`

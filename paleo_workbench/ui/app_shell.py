@@ -69,7 +69,10 @@ class AppShell(QWidget):
 
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)
-        self.sidebar.set_context(tokens.PAGE_NAMES[index])
+        if index == 1:
+            self.update_data_context(self._build_data_context())
+        else:
+            self.sidebar.set_context(tokens.PAGE_NAMES[index])
 
     def set_project_name(self, name: str) -> None:
         self.status_bar.set_project_name(name)

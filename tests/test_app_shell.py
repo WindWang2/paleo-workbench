@@ -148,3 +148,31 @@ def test_app_shell_update_data_page_preserves_sidebar_selection(tmp_path, qtbot)
     assert "当前选择: notes.txt" in text
     assert "格式: document / txt" in text
     assert "阅读器: text" in text
+
+
+def test_app_shell_retains_data_sidebar_context_when_navigating_back(tmp_path, qtbot):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    shell = AppShell(project=project)
+    qtbot.addWidget(shell)
+    page = shell.page_stack.widget(1)
+
+    page._set_selected_asset(resource)
+    shell.icon_rail.nav_buttons[4].click()
+    shell.icon_rail.nav_buttons[1].click()
+
+    text = " ".join(label.text() for label in shell.sidebar._content_labels)
+    assert shell.sidebar.context_label.text() == "数据"
+    assert "资源 1" in text
+    assert "当前选择: notes.txt" in text
+    assert "阅读器: text" in text
+    assert "当前选择: 未选择" not in text
+    assert "阅读器: empty" not in text
