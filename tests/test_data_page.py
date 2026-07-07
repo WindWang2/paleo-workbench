@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QLabel, QSplitter
 
-from paleo_workbench.project.models import ProjectDocument, ResourceItem
+from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 
@@ -327,3 +327,106 @@ def test_data_page_remove_refreshes_reader_and_action_state(qtbot, tmp_path: Pat
     assert project.resources == []
     assert page.reader_panel.current_mode == "empty"
     assert page.remove_btn.isEnabled() is False
+
+
+def test_data_page_filtering_hidden_selection_clears_reader_action_state_and_context(
+    qtbot,
+    tmp_path: Path,
+):
+    first = tmp_path / "alpha.txt"
+    second = tmp_path / "beta.txt"
+    first.write_text("alpha", encoding="utf-8")
+    second.write_text("beta", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    alpha = ResourceItem(
+        name="alpha.txt",
+        path=str(first),
+        type="document",
+        format="txt",
+    )
+    beta = ResourceItem(
+        name="beta.txt",
+        path=str(second),
+        type="document",
+        format="txt",
+    )
+    project.resources.extend([alpha, beta])
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    received = []
+    page.data_context_changed.connect(received.append)
+
+    page._set_selected_asset(alpha)
+    page.asset_table.set_search_text("beta")
+
+    assert page.reader_panel.current_mode == "empty"
+    assert page.remove_btn.isEnabled() is False
+    assert page.rescan_btn.isEnabled() is False
+    assert page.action_panel.selection_status_label.text() == "等待选择"
+    assert received[-1]["selected_name"] == "未选择"
+    assert received[-1]["selected_type"] == ""
+    assert received[-1]["selected_format"] == ""
+    assert received[-1]["reader_mode"] == "empty"
+
+
+def test_data_page_can_remove_selected_export_artifact(qtbot):
+    project = ProjectDocument.new("Demo")
+    artifact = ExportArtifact(
+        linked_id="map_1",
+        format="PDF",
+        output_path="/tmp/map.pdf",
+    )
+    project.export_artifacts.append(artifact)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(artifact)
+
+    removed = page.remove_selected_asset()
+
+    assert removed is True
+    assert project.export_artifacts == []
+    assert page.reader_panel.current_mode == "empty"
+    assert page.remove_btn.isEnabled() is False
+    assert "已移出项目" in page.action_panel.operation_status_label.text()
+
+
+def test_data_page_can_open_selected_export_artifact_folder(qtbot, monkeypatch, tmp_path: Path):
+    output_dir = tmp_path / "exports"
+    output_dir.mkdir()
+    output_path = output_dir / "map.pdf"
+    output_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    project = ProjectDocument.new("Demo")
+    artifact = ExportArtifact(
+        linked_id="map_1",
+        format="PDF",
+        output_path=str(output_path),
+    )
+    project.export_artifacts.append(artifact)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page._set_selected_asset(artifact)
+    opened = []
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.data_page.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toLocalFile()) or True,
+    )
+
+    folder = page.open_selected_folder()
+
+    assert folder == output_dir
+    assert opened == [output_dir.as_posix()]
+    assert output_dir.as_posix() in page.action_panel.operation_status_label.text()
+
+
+def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("Demo")
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    page.import_paths([path])
+
+    assert "新增 1" in page.action_panel.operation_status_label.text()
+    page.asset_table.table.selectRow(0)
+    assert "新增 1" in page.action_panel.operation_status_label.text()

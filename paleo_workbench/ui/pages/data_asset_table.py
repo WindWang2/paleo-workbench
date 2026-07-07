@@ -45,6 +45,7 @@ class DataAssetTable(QWidget):
         self._resources: list[ResourceItem] = []
         self._artifacts: list[ExportArtifact] = []
         self._visible_assets: list[ResourceItem | ExportArtifact] = []
+        self._selected_asset: ResourceItem | ExportArtifact | None = None
         self._category = "全部"
         self._search_text = ""
 
@@ -89,6 +90,10 @@ class DataAssetTable(QWidget):
     def visible_asset_count(self) -> int:
         return len(self._visible_assets)
 
+    def set_selected_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
+        self._selected_asset = asset
+        self._sync_selection()
+
     def _render(self) -> None:
         assets: list[ResourceItem | ExportArtifact] = [
             asset
@@ -96,7 +101,6 @@ class DataAssetTable(QWidget):
             if self._matches_category(asset) and self._matches_search(asset)
         ]
         self._visible_assets = assets
-
         self.table.blockSignals(True)
         self.table.setRowCount(len(assets))
         for row, asset in enumerate(assets):
@@ -106,6 +110,10 @@ class DataAssetTable(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole, asset)
                 self.table.setItem(row, column, item)
         self.table.blockSignals(False)
+
+        if not self._sync_selection() and self._selected_asset is not None:
+            self._selected_asset = None
+            self.selected_asset_changed.emit(None)
 
     def _matches_category(self, asset: ResourceItem | ExportArtifact) -> bool:
         if self._category == "全部":
@@ -174,8 +182,33 @@ class DataAssetTable(QWidget):
     def _emit_selection(self) -> None:
         rows = self.table.selectionModel().selectedRows()
         if not rows:
+            self._selected_asset = None
             self.selected_asset_changed.emit(None)
             return
         row = rows[0].row()
         asset: Any = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        self._selected_asset = asset
         self.selected_asset_changed.emit(asset)
+
+    def _asset_key(self, asset: ResourceItem | ExportArtifact | None) -> tuple[str, str] | None:
+        if asset is None:
+            return None
+        kind = "artifact" if isinstance(asset, ExportArtifact) else "resource"
+        return (kind, asset.id)
+
+    def _sync_selection(self) -> bool:
+        selected_key = self._asset_key(self._selected_asset)
+        selected_row = next(
+            (
+                row
+                for row, asset in enumerate(self._visible_assets)
+                if self._asset_key(asset) == selected_key
+            ),
+            None,
+        )
+        self.table.blockSignals(True)
+        self.table.clearSelection()
+        if selected_row is not None:
+            self.table.selectRow(selected_row)
+        self.table.blockSignals(False)
+        return selected_row is not None

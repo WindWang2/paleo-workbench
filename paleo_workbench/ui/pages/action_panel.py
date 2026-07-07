@@ -42,12 +42,20 @@ class ActionPanel(QFrame):
         self.open_folder_btn.setObjectName("SecondaryButton")
         layout.addWidget(self.open_folder_btn)
 
-        self.status_label = QLabel("等待操作")
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet(
+        self.selection_status_label = QLabel("等待选择")
+        self.selection_status_label.setWordWrap(True)
+        self.selection_status_label.setStyleSheet(
             f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
         )
-        layout.addWidget(self.status_label)
+        layout.addWidget(self.selection_status_label)
+
+        self.operation_status_label = QLabel("等待操作")
+        self.operation_status_label.setWordWrap(True)
+        self.operation_status_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
+        )
+        layout.addWidget(self.operation_status_label)
+        self.status_label = self.operation_status_label
 
         layout.addStretch()
 
@@ -56,11 +64,13 @@ class ActionPanel(QFrame):
         has_resource: bool,
         has_asset: bool,
         reader_mode: str,
+        asset_kind: str = "none",
     ) -> None:
         self.rescan_btn.setEnabled(has_resource)
-        self.remove_btn.setEnabled(has_resource)
-        self.open_folder_btn.setEnabled(has_resource)
+        self.remove_btn.setEnabled(has_asset)
+        self.open_folder_btn.setEnabled(has_asset)
         if has_asset:
-            self.status_label.setText(f"阅读器: {reader_mode}")
+            kind_label = "资源" if asset_kind == "resource" else "成果"
+            self.selection_status_label.setText(f"已选{kind_label} · 阅读器: {reader_mode}")
         else:
-            self.status_label.setText("等待操作")
+            self.selection_status_label.setText("等待选择")

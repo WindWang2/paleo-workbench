@@ -100,6 +100,7 @@ class DataPage(QWidget):
             has_resource=isinstance(self._selected_asset, ResourceItem),
             has_asset=self._selected_asset is not None,
             reader_mode=self.reader_panel.current_mode,
+            asset_kind=self._selected_asset_kind(),
         )
         self._emit_data_context()
 
@@ -146,17 +147,28 @@ class DataPage(QWidget):
         return self.import_folder_path(folder)
 
     def remove_selected_asset(self) -> bool:
-        if not isinstance(self._selected_asset, ResourceItem):
-            self._set_action_status("请选择一个项目资源")
+        if self._selected_asset is None:
+            self._set_action_status("请选择一个数据项")
             return False
         selected_id = self._selected_asset.id
-        before = len(self.project.resources)
-        self.project.resources[:] = [
-            resource
-            for resource in self.project.resources
-            if resource.id != selected_id
-        ]
-        removed = len(self.project.resources) != before
+        removed = False
+        if isinstance(self._selected_asset, ResourceItem):
+            before = len(self.project.resources)
+            self.project.resources[:] = [
+                resource
+                for resource in self.project.resources
+                if resource.id != selected_id
+            ]
+            removed = len(self.project.resources) != before
+        elif isinstance(self._selected_asset, ExportArtifact):
+            before = len(self.project.export_artifacts)
+            self.project.export_artifacts[:] = [
+                artifact
+                for artifact in self.project.export_artifacts
+                if artifact.id != selected_id
+            ]
+            removed = len(self.project.export_artifacts) != before
+
         if removed:
             self._set_selected_asset(None)
             self.update_state(
@@ -212,10 +224,13 @@ class DataPage(QWidget):
         return True
 
     def open_selected_folder(self) -> Path | None:
-        if not isinstance(self._selected_asset, ResourceItem):
-            self._set_action_status("请选择一个项目资源")
+        if self._selected_asset is None:
+            self._set_action_status("请选择一个数据项")
             return None
-        path = Path(self._selected_asset.path)
+        if isinstance(self._selected_asset, ResourceItem):
+            path = Path(self._selected_asset.path)
+        else:
+            path = Path(self._selected_asset.output_path)
         folder = path if path.is_dir() else path.parent
         if not folder.exists():
             self._set_action_status("目录不存在")
@@ -226,12 +241,13 @@ class DataPage(QWidget):
 
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
+        self.asset_table.set_selected_asset(asset)
         self.reader_panel.update_asset(asset)
-        has_resource = isinstance(asset, ResourceItem)
         self.action_panel.update_selection_state(
-            has_resource=has_resource,
+            has_resource=isinstance(asset, ResourceItem),
             has_asset=asset is not None,
             reader_mode=self.reader_panel.current_mode,
+            asset_kind=self._selected_asset_kind(),
         )
         self._emit_data_context()
 
@@ -273,6 +289,7 @@ class DataPage(QWidget):
             has_resource=isinstance(self._selected_asset, ResourceItem),
             has_asset=self._selected_asset is not None,
             reader_mode=self.reader_panel.current_mode,
+            asset_kind=self._selected_asset_kind(),
         )
 
     def _set_import_status(self, report: ImportReport) -> None:
@@ -281,4 +298,11 @@ class DataPage(QWidget):
         )
 
     def _set_action_status(self, text: str) -> None:
-        self.action_panel.status_label.setText(text)
+        self.action_panel.operation_status_label.setText(text)
+
+    def _selected_asset_kind(self) -> str:
+        if isinstance(self._selected_asset, ResourceItem):
+            return "resource"
+        if isinstance(self._selected_asset, ExportArtifact):
+            return "artifact"
+        return "none"

@@ -30,6 +30,9 @@ class DataReaderPanel(QFrame):
         self.setMinimumWidth(320)
         self.provider = provider or PreviewProvider()
         self.current_mode = "empty"
+        self._current_result = PreviewResult(mode="empty", title="请选择数据项")
+        self._image_path = ""
+        self._image_pixmap: QPixmap | None = None
         self._pdf_document: QPdfDocument | None = None
         self._pdf_page = 0
         self._pdf_path = ""
@@ -108,6 +111,7 @@ class DataReaderPanel(QFrame):
         self.render(self.provider.preview(asset))
 
     def render(self, result: PreviewResult) -> None:
+        self._current_result = result
         self.current_mode = result.mode
         self.reader_mode_changed.emit(result.mode)
         self.title_label.setText(result.title)
@@ -180,12 +184,14 @@ class DataReaderPanel(QFrame):
 
     def _render_image(self, path: str) -> None:
         self.image_label.clear()
-        pixmap = QPixmap(path)
-        if pixmap.isNull():
+        if path != self._image_path or self._image_pixmap is None:
+            self._image_path = path
+            self._image_pixmap = QPixmap(path)
+        if self._image_pixmap is None or self._image_pixmap.isNull():
             self.image_label.setText("图片预览加载失败")
             return
         self.image_label.setPixmap(
-            pixmap.scaled(
+            self._image_pixmap.scaled(
                 max(self.width() - 48, 240),
                 max(self.height() - 160, 180),
                 Qt.AspectRatioMode.KeepAspectRatio,
@@ -196,16 +202,18 @@ class DataReaderPanel(QFrame):
     def _load_pdf(self, path: str) -> None:
         if self._pdf_document is None:
             self._pdf_document = QPdfDocument(self)
-        self._pdf_path = path
-        self._pdf_page = 0
+        if path != self._pdf_path:
+            self._pdf_path = path
+            self._pdf_page = 0
+            self.pdf_image.clear()
+            error = self._pdf_document.load(path)
+            if error != QPdfDocument.Error.None_ or self._pdf_document.pageCount() <= 0:
+                self.pdf_image.setText("PDF 预览加载失败")
+                self.pdf_page_label.setText("0 / 0")
+                self.pdf_prev_btn.setEnabled(False)
+                self.pdf_next_btn.setEnabled(False)
+                return
         self.pdf_image.clear()
-        error = self._pdf_document.load(path)
-        if error != QPdfDocument.Error.None_ or self._pdf_document.pageCount() <= 0:
-            self.pdf_image.setText("PDF 预览加载失败")
-            self.pdf_page_label.setText("0 / 0")
-            self.pdf_prev_btn.setEnabled(False)
-            self.pdf_next_btn.setEnabled(False)
-            return
         self._render_pdf_page()
 
     def _render_pdf_page(self) -> None:
@@ -223,3 +231,10 @@ class DataReaderPanel(QFrame):
         self.pdf_page_label.setText(f"{self._pdf_page + 1} / {page_count}")
         self.pdf_prev_btn.setEnabled(self._pdf_page > 0)
         self.pdf_next_btn.setEnabled(self._pdf_page < page_count - 1)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.current_mode == "image" and self._current_result.path:
+            self._render_image(self._current_result.path)
+        elif self.current_mode == "pdf" and self._pdf_document is not None:
+            self._render_pdf_page()

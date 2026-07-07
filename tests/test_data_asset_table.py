@@ -109,3 +109,32 @@ def test_data_asset_table_visible_asset_count_after_search(qtbot):
     table.set_search_text("alpha")
 
     assert table.visible_asset_count() == 1
+
+
+def test_asset_table_clears_selection_when_search_hides_selected_row(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [
+        ResourceItem(
+            name="alpha.txt",
+            path="/tmp/alpha.txt",
+            type="document",
+            format="txt",
+        ),
+        ResourceItem(
+            name="beta.txt",
+            path="/tmp/beta.txt",
+            type="document",
+            format="txt",
+        ),
+    ]
+    received = []
+    table.selected_asset_changed.connect(received.append)
+
+    table.update_assets(resources, [])
+    table.table.selectRow(0)
+    table.set_search_text("beta")
+
+    assert table.table.rowCount() == 1
+    assert table.table.selectionModel().selectedRows() == []
+    assert received[-1] is None
