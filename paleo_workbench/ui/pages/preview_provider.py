@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -163,18 +164,18 @@ class PreviewProvider:
         path = Path(resource.path)
         preview_bytes, truncated = self._read_preview_chunk(path)
         preview_text = preview_bytes.decode("utf-8", errors="replace")
-        lines = preview_text.splitlines()
-        preview_lines = lines[: MAX_TABLE_ROWS + 1]
-        if len(lines) > MAX_TABLE_ROWS + 1:
-            truncated = True
-
         parsed_rows: list[tuple[str, ...]] = []
-        for line in preview_lines:
-            parsed = next(csv.reader([line], delimiter=delimiter), [])
-            trimmed = tuple(parsed[:MAX_TABLE_COLUMNS])
-            if len(parsed) > MAX_TABLE_COLUMNS:
-                truncated = True
-            parsed_rows.append(trimmed)
+
+        with io.StringIO(preview_text, newline="") as buffer:
+            reader = csv.reader(buffer, delimiter=delimiter)
+            for row_index, row in enumerate(reader):
+                if row_index > MAX_TABLE_ROWS:
+                    truncated = True
+                    break
+
+                if len(row) > MAX_TABLE_COLUMNS:
+                    truncated = True
+                parsed_rows.append(tuple(row[:MAX_TABLE_COLUMNS]))
 
         headers = parsed_rows[0] if parsed_rows else ()
         body = tuple(parsed_rows[1:]) if parsed_rows else ()

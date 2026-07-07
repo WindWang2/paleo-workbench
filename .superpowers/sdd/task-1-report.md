@@ -49,3 +49,12 @@
 ## Fresh Verification
 - Command: `pytest tests/test_preview_provider.py -v`
 - Result: `6 passed`
+
+## Re-Review Fix
+- Reworked `_table_preview()` to decode a bounded binary preview chunk and pass it through `io.StringIO` into `csv.reader`, so quoted embedded newlines stay inside a single CSV record.
+- Kept the preview capped at one header row plus `MAX_TABLE_ROWS` data rows and `MAX_TABLE_COLUMNS` columns.
+- Added a regression test for `name,note\nalpha,"line one\nline two"\nbeta,plain` to verify the first data row preserves the multi-line quoted cell.
+
+## Re-Review Verification
+- Command: `pytest tests/test_preview_provider.py -v`
+- Result: `7 passed`

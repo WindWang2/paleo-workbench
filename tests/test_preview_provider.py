@@ -95,6 +95,19 @@ def test_preview_provider_reads_bounded_csv_table(tmp_path: Path):
     assert all(isinstance(row, tuple) for row in result.table_rows)
 
 
+def test_preview_provider_preserves_quoted_csv_newlines(tmp_path: Path):
+    path = tmp_path / "quoted-newlines.csv"
+    path.write_text('name,note\nalpha,"line one\nline two"\nbeta,plain', encoding="utf-8")
+    resource = ResourceItem(name="quoted-newlines.csv", path=str(path), type="tabular", format="csv")
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "table"
+    assert result.table_headers == ("name", "note")
+    assert result.table_rows[0] == ("alpha", "line one\nline two")
+    assert result.table_rows[1] == ("beta", "plain")
+
+
 def test_preview_provider_missing_file_message(tmp_path: Path):
     resource = ResourceItem(
         name="missing.txt",
