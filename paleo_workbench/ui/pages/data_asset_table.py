@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,6 @@ from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.data_catalog_panel import CATEGORIES
 
 
-HEADERS = ["文件名", "类型", "格式", "状态", "角色", "大小", "来源", "路径"]
 ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
 REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_reference"}
 RESOURCE_TYPE_LABELS = {
@@ -36,6 +36,28 @@ RESOURCE_TYPE_LABELS = {
 }
 
 
+@dataclass(frozen=True)
+class ColumnDefinition:
+    key: str
+    label: str
+    required: bool = False
+
+
+COLUMN_DEFINITIONS = (
+    ColumnDefinition("name", "文件名", required=True),
+    ColumnDefinition("type", "类型"),
+    ColumnDefinition("format", "格式"),
+    ColumnDefinition("status", "状态"),
+    ColumnDefinition("role", "角色"),
+    ColumnDefinition("size", "大小"),
+    ColumnDefinition("source", "来源"),
+    ColumnDefinition("path", "路径"),
+)
+COLUMN_BY_KEY = {column.key: column for column in COLUMN_DEFINITIONS}
+DEFAULT_COLUMN_KEYS = [column.key for column in COLUMN_DEFINITIONS]
+HEADERS = [column.label for column in COLUMN_DEFINITIONS]
+
+
 class DataAssetTable(QWidget):
     selected_asset_changed = Signal(object)
 
@@ -48,14 +70,15 @@ class DataAssetTable(QWidget):
         self._selected_asset: ResourceItem | ExportArtifact | None = None
         self._category = "全部"
         self._search_text = ""
+        self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.table = QTableWidget(0, len(HEADERS))
+        self.table = QTableWidget(0, len(self._visible_column_keys))
         self.table.setObjectName("DataAssetGrid")
-        self.table.setHorizontalHeaderLabels(HEADERS)
+        self._apply_headers()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -90,6 +113,25 @@ class DataAssetTable(QWidget):
     def visible_asset_count(self) -> int:
         return len(self._visible_assets)
 
+    def visible_column_keys(self) -> list[str]:
+        return list(self._visible_column_keys)
+
+    def set_visible_columns(self, keys: list[str]) -> None:
+        requested = set(keys)
+        ordered = [
+            column.key
+            for column in COLUMN_DEFINITIONS
+            if column.key in requested or column.required
+        ]
+        if not ordered:
+            ordered = ["name"]
+        self._visible_column_keys = ordered
+        self._render()
+
+    def reset_columns(self) -> None:
+        self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
+        self._render()
+
     def set_selected_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
         self._selected_asset = asset
         self._sync_selection()
@@ -102,10 +144,13 @@ class DataAssetTable(QWidget):
         ]
         self._visible_assets = assets
         self.table.blockSignals(True)
+        self.table.setColumnCount(len(self._visible_column_keys))
+        self._apply_headers()
         self.table.setRowCount(len(assets))
         for row, asset in enumerate(assets):
             values = self._row_values(asset)
-            for column, value in enumerate(values):
+            for column, key in enumerate(self._visible_column_keys):
+                value = values[key]
                 item = QTableWidgetItem(value)
                 item.setData(Qt.ItemDataRole.UserRole, asset)
                 self.table.setItem(row, column, item)
@@ -147,37 +192,41 @@ class DataAssetTable(QWidget):
                 asset.output_path,
                 asset.linked_id,
             ]
-        return [asset.name, asset.type, asset.format, asset.status, asset.path]
+        return [asset.name, asset.type, asset.format, asset.status, asset.source, asset.path]
 
-    def _row_values(self, asset: ResourceItem | ExportArtifact) -> list[str]:
+    def _row_values(self, asset: ResourceItem | ExportArtifact) -> dict[str, str]:
         if isinstance(asset, ExportArtifact):
-            return [
-                Path(asset.output_path).name,
-                "成果",
-                asset.format,
-                "generated",
-                "成果",
-                "—",
-                "export",
-                asset.output_path,
-            ]
+            return {
+                "name": Path(asset.output_path).name,
+                "type": "成果",
+                "format": asset.format,
+                "status": "generated",
+                "role": "成果",
+                "size": "—",
+                "source": "export",
+                "path": asset.output_path,
+            }
 
         size = asset.parsed_summary.get("size_bytes")
         role = asset.artifact_role or "input"
-        return [
-            asset.name,
-            RESOURCE_TYPE_LABELS.get(asset.type, asset.type),
-            asset.format,
-            asset.status,
-            self._role_label(role),
-            str(size) if size is not None else "—",
-            asset.source,
-            asset.path,
-        ]
+        return {
+            "name": asset.name,
+            "type": RESOURCE_TYPE_LABELS.get(asset.type, asset.type),
+            "format": asset.format,
+            "status": asset.status,
+            "role": self._role_label(role),
+            "size": str(size) if size is not None else "—",
+            "source": asset.source,
+            "path": asset.path,
+        }
 
     def _role_label(self, role: str) -> str:
         labels = {"input": "输入", "derived": "成果", "export": "成果"}
         return labels.get(role, role)
+
+    def _apply_headers(self) -> None:
+        labels = [COLUMN_BY_KEY[key].label for key in self._visible_column_keys]
+        self.table.setHorizontalHeaderLabels(labels)
 
     def _emit_selection(self) -> None:
         rows = self.table.selectionModel().selectedRows()
