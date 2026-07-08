@@ -148,17 +148,28 @@ def test_reader_panel_rerenders_pdf_preview_on_resize_without_reloading_document
     assert renders[-1][1] > renders[0][1]
 
 
-def test_reader_panel_reload_image_preview_when_same_path_file_changes(qtbot, tmp_path: Path):
+def test_reader_panel_reload_image_preview_when_same_path_stat_stays_constant_but_checksum_changes(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
     path = tmp_path / "map.png"
     first = QImage(16, 16, QImage.Format.Format_RGB32)
     first.fill(0xCC3300)
     first.save(path.as_posix())
-    resource = ResourceItem(name="map.png", path=str(path), type="image_reference", format="png")
+    resource = ResourceItem(
+        name="map.png",
+        path=str(path),
+        type="image_reference",
+        format="png",
+        checksum="checksum-1",
+    )
     panel = DataReaderPanel()
     qtbot.addWidget(panel)
     panel.resize(420, 320)
     panel.show()
     qtbot.waitExposed(panel)
+    monkeypatch.setattr(panel.provider, "_safe_stat", lambda _path: (12, 100))
 
     panel.update_asset(resource)
     initial_color = panel.image_label.pixmap().toImage().pixelColor(8, 8).rgb()
@@ -166,8 +177,7 @@ def test_reader_panel_reload_image_preview_when_same_path_file_changes(qtbot, tm
     updated = QImage(16, 16, QImage.Format.Format_RGB32)
     updated.fill(0x0066CC)
     updated.save(path.as_posix())
-    stat = path.stat()
-    resource.checksum = f"{stat.st_mtime_ns}"
+    resource.checksum = "checksum-2"
 
     panel.update_asset(resource)
     refreshed_color = panel.image_label.pixmap().toImage().pixelColor(8, 8).rgb()

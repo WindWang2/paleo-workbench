@@ -168,13 +168,21 @@ def test_preview_provider_export_artifact_message(tmp_path: Path):
     assert "成果文件" in result.message
 
 
-def test_preview_provider_image_revision_changes_when_file_stat_changes(tmp_path: Path):
+def test_preview_provider_image_revision_changes_when_resource_checksum_changes(tmp_path: Path):
     path = tmp_path / "map.png"
     path.write_bytes(b"first-image")
-    resource = ResourceItem(name="map.png", path=str(path), type="image_reference", format="png")
+    resource = ResourceItem(
+        name="map.png",
+        path=str(path),
+        type="image_reference",
+        format="png",
+        checksum="checksum-1",
+    )
     provider = PreviewProvider()
 
+    provider._safe_stat = lambda _path: (12, 100)  # type: ignore[method-assign]
     first = provider.preview(resource)
+    resource.checksum = "checksum-2"
     path.write_bytes(b"second-image-with-new-bytes")
     second = provider.preview(resource)
 

@@ -25,7 +25,7 @@ class PreviewResult:
     mode: PreviewMode
     title: str
     path: str = ""
-    revision: tuple[int, int] | None = None
+    revision: tuple[object, ...] | None = None
     format: str = ""
     status: str = ""
     type_label: str = ""
@@ -72,6 +72,9 @@ class PreviewProvider:
                 self._safe_stat(path),
             )
 
+        return self._resource_revision_token(asset)
+
+    def _resource_revision_token(self, asset: ResourceItem) -> tuple[object, ...]:
         path = Path(asset.path)
         return (
             "resource",
@@ -96,7 +99,7 @@ class PreviewProvider:
             return self._artifact_preview(asset)
 
         path = Path(asset.path)
-        revision = self._safe_stat(path)
+        revision = self._resource_revision_token(asset)
         fmt = asset.format.lower()
         title = asset.name
 
