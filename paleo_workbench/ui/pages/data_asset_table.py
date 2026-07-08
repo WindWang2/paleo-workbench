@@ -5,9 +5,13 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QHBoxLayout,
     QHeaderView,
+    QMenu,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -71,10 +75,23 @@ class DataAssetTable(QWidget):
         self._category = "全部"
         self._search_text = ""
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
+        self.column_actions: dict[str, QAction] = {}
+        self._syncing_column_actions = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(8)
+
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.addStretch()
+        self.column_settings_btn = QPushButton("列设置")
+        self.column_settings_btn.setObjectName("SecondaryButton")
+        self.column_settings_menu = QMenu(self.column_settings_btn)
+        self._build_column_settings_menu()
+        self.column_settings_btn.setMenu(self.column_settings_menu)
+        toolbar.addWidget(self.column_settings_btn)
+        layout.addLayout(toolbar)
 
         self.table = QTableWidget(0, len(self._visible_column_keys))
         self.table.setObjectName("DataAssetGrid")
@@ -127,10 +144,12 @@ class DataAssetTable(QWidget):
             ordered = ["name"]
         self._visible_column_keys = ordered
         self._render()
+        self._sync_column_actions()
 
     def reset_columns(self) -> None:
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
         self._render()
+        self._sync_column_actions()
 
     def set_selected_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
         self._selected_asset = asset
@@ -227,6 +246,43 @@ class DataAssetTable(QWidget):
     def _apply_headers(self) -> None:
         labels = [COLUMN_BY_KEY[key].label for key in self._visible_column_keys]
         self.table.setHorizontalHeaderLabels(labels)
+
+    def _build_column_settings_menu(self) -> None:
+        for column in COLUMN_DEFINITIONS:
+            action = QAction(column.label, self)
+            action.setCheckable(True)
+            action.setChecked(column.key in self._visible_column_keys)
+            action.setEnabled(not column.required)
+            action.toggled.connect(
+                lambda checked, key=column.key: self._set_column_visible_from_action(
+                    key,
+                    checked,
+                )
+            )
+            self.column_settings_menu.addAction(action)
+            self.column_actions[column.key] = action
+        self.column_settings_menu.addSeparator()
+        self.reset_columns_action = self.column_settings_menu.addAction("恢复默认列")
+        self.reset_columns_action.triggered.connect(self.reset_columns)
+
+    def _set_column_visible_from_action(self, key: str, checked: bool) -> None:
+        if self._syncing_column_actions:
+            return
+        keys = self.visible_column_keys()
+        if checked and key not in keys:
+            keys.append(key)
+        elif not checked:
+            keys = [visible_key for visible_key in keys if visible_key != key]
+        self.set_visible_columns(keys)
+
+    def _sync_column_actions(self) -> None:
+        self._syncing_column_actions = True
+        try:
+            visible = set(self._visible_column_keys)
+            for key, action in self.column_actions.items():
+                action.setChecked(key in visible)
+        finally:
+            self._syncing_column_actions = False
 
     def _emit_selection(self) -> None:
         rows = self.table.selectionModel().selectedRows()

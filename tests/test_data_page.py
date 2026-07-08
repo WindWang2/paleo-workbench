@@ -4,8 +4,16 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QLabel, QSplitter
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
+
+
+def _table_headers(page: DataPage) -> list[str]:
+    return [
+        page.asset_table.table.horizontalHeaderItem(i).text()
+        for i in range(page.asset_table.table.columnCount())
+    ]
 
 
 def test_data_page_assembles_management_panels(qtbot):
@@ -61,6 +69,88 @@ def test_data_page_has_action_buttons(qtbot):
     assert page.remove_btn is not None
     assert page.import_btn.text() == "导入文件"
     assert page.import_folder_btn.text() == "导入目录"
+
+
+def test_data_page_has_column_settings_menu(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    assert page.column_settings_btn.text() == "列设置"
+    assert page.column_settings_menu is not None
+    assert set(page.column_actions) == {
+        "name",
+        "type",
+        "format",
+        "status",
+        "role",
+        "size",
+        "source",
+        "path",
+    }
+
+
+def test_data_page_column_settings_toggle_hides_column(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    page.column_actions["path"].trigger()
+
+    assert "路径" not in _table_headers(page)
+    assert "文件名" in _table_headers(page)
+    assert page.column_actions["path"].isChecked() is False
+
+
+def test_data_page_required_name_column_action_disabled(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    assert page.column_actions["name"].isEnabled() is False
+    assert page.column_actions["name"].isChecked() is True
+    page.column_actions["name"].trigger()
+    assert _table_headers(page)[0] == "文件名"
+
+
+def test_data_page_reset_columns_action_restores_defaults(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    page.column_actions["path"].trigger()
+    page.reset_columns_action.trigger()
+
+    assert _table_headers(page) == [
+        "文件名",
+        "类型",
+        "格式",
+        "状态",
+        "角色",
+        "大小",
+        "来源",
+        "路径",
+    ]
+    assert page.asset_table.visible_column_keys() == DEFAULT_COLUMN_KEYS
+
+
+def test_data_page_column_change_preserves_selection_and_reader(qtbot, tmp_path: Path):
+    path = tmp_path / "notes.txt"
+    path.write_text("alpha", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    project.resources.append(resource)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    page._set_selected_asset(resource)
+    page.column_actions["source"].trigger()
+    page.column_actions["path"].trigger()
+
+    assert page.reader_panel.current_mode == "text"
+    assert page.asset_table.table.selectionModel().selectedRows()[0].row() == 0
+    assert page._selected_asset == resource
 
 
 def test_action_panel_exports_buttons(qtbot):

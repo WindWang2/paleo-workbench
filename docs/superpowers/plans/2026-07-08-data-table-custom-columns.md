@@ -30,10 +30,10 @@
 - Produces `DataAssetTable.set_visible_columns(keys: list[str]) -> None`
 - Produces `DataAssetTable.reset_columns() -> None`
 
-- [ ] Write failing tests for default columns, hidden optional columns, required `文件名`, unknown keys, reset, hidden-field search, and selection preservation.
-- [ ] Implement structured column definitions and visible-column rendering.
-- [ ] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_asset_table.py -v`.
-- [ ] Commit with `feat: support configurable data table columns`.
+- [x] Write failing tests for default columns, hidden optional columns, required `文件名`, unknown keys, reset, hidden-field search, and selection preservation.
+- [x] Implement structured column definitions and visible-column rendering.
+- [x] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_asset_table.py -v`.
+- [x] Commit with `feat: support configurable data table columns`.
 
 ### Task 2: Data Page Column Settings UI
 
@@ -46,9 +46,9 @@
 - Adds checkable menu actions for optional columns.
 - Adds a `恢复默认列` action.
 
-- [ ] Write failing tests for the settings button/menu, toggling a column, required column disabled, and reset action.
-- [ ] Implement menu UI and hook actions to `DataAssetTable`.
-- [ ] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
+- [x] Write failing tests for the settings button/menu, toggling a column, required column disabled, and reset action.
+- [x] Implement menu UI and hook actions to `DataAssetTable`.
+- [x] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
 - [ ] Commit with `feat: add data table column settings menu`.
 
 ### Task 3: Verification
@@ -56,7 +56,7 @@
 **Files:**
 - No planned production changes.
 
-- [ ] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
-- [ ] Run `QT_QPA_PLATFORM=offscreen pytest`.
+- [x] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
+- [x] Run `QT_QPA_PLATFORM=offscreen pytest`.
 - [ ] Launch the app and confirm it starts.
 - [ ] Push the commits.

@@ -51,6 +51,10 @@ class DataPage(QWidget):
         self.content_splitter.addWidget(self.catalog_panel)
 
         self.asset_table = DataAssetTable()
+        self.column_settings_btn = self.asset_table.column_settings_btn
+        self.column_settings_menu = self.asset_table.column_settings_menu
+        self.column_actions = self.asset_table.column_actions
+        self.reset_columns_action = self.asset_table.reset_columns_action
         self.content_splitter.addWidget(self.asset_table)
 
         self.reader_panel = DataReaderPanel()
