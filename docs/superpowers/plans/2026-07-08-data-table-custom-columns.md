@@ -49,7 +49,7 @@
 - [x] Write failing tests for the settings button/menu, toggling a column, required column disabled, and reset action.
 - [x] Implement menu UI and hook actions to `DataAssetTable`.
 - [x] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
-- [ ] Commit with `feat: add data table column settings menu`.
+- [x] Commit with `feat: add data table column settings menu`.
 
 ### Task 3: Verification
 
@@ -58,5 +58,5 @@
 
 - [x] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
 - [x] Run `QT_QPA_PLATFORM=offscreen pytest`.
-- [ ] Launch the app and confirm it starts.
+- [x] Launch the app and confirm it starts.
 - [ ] Push the commits.
