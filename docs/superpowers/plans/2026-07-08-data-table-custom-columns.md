@@ -59,4 +59,4 @@
 - [x] Run `QT_QPA_PLATFORM=offscreen pytest tests/test_data_page.py tests/test_data_asset_table.py -v`.
 - [x] Run `QT_QPA_PLATFORM=offscreen pytest`.
 - [x] Launch the app and confirm it starts.
-- [ ] Push the commits.
+- [x] Push the commits.
