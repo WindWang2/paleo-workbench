@@ -109,6 +109,7 @@ class PdfPreviewWidget(QWidget):
         self._page = 0
         self._path = ""
         self._revision: tuple[object, ...] | None = None
+        self._load_failed = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -136,13 +137,21 @@ class PdfPreviewWidget(QWidget):
             self._path = path
             self._revision = revision
             self._page = 0
+            self._load_failed = False
             error = self.document.load(path)
             if error != QPdfDocument.Error.None_ or self.document.pageCount() <= 0:
+                self._load_failed = True
                 self._show_fallback_message("PDF 预览加载失败")
                 self.page_label.setText("0 / 0")
                 self.prev_btn.setEnabled(False)
                 self.next_btn.setEnabled(False)
                 return
+        if self._load_failed:
+            self._show_fallback_message("PDF 预览加载失败")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
         self._render_page()
 
     def next_page(self) -> None:

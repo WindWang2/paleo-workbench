@@ -76,3 +76,40 @@ Result:
 - `paleo_workbench/ui/pages/preview_widgets.py`
 - `tests/test_data_reader_panel.py`
 - `.superpowers/sdd/task-4-report.md`
+
+---
+
+## Re-Review Fix Round 2
+### Findings Addressed
+- Made failed `PdfPreviewWidget` loads durable for the same path/revision so a repeat `load()` does not fall through into `_render_page()` after an earlier document load failure.
+- Added a regression test covering repeated `QPdfView` renders for the same failed PDF result and asserting the fallback message, `0 / 0` label, disabled buttons, and no navigator `jump()` calls.
+
+### RED
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py::test_reader_panel_keeps_failed_qpdfview_state_for_same_path_and_revision -q
+```
+Result:
+- `1 failed in 0.19s`
+- Failure detail: `assert panel.pdf_widget.fallback_image.isVisible()`
+
+### GREEN
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py::test_reader_panel_keeps_failed_qpdfview_state_for_same_path_and_revision -q
+```
+Result:
+- `1 passed in 0.13s`
+
+### Full Verification
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py -q
+```
+Result:
+- `13 passed in 0.34s`
+
+### Changed Files
+- `paleo_workbench/ui/pages/preview_widgets.py`
+- `tests/test_data_reader_panel.py`
+- `.superpowers/sdd/task-4-report.md`
