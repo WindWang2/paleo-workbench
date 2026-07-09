@@ -45,3 +45,34 @@ Result:
 
 ## Concerns
 - None.
+
+---
+
+## Review Fix Round
+### Findings Addressed
+- Added a visible fallback state for the `QPdfView` branch when `QPdfDocument.load()` fails.
+- Added focused `QPdfView`-branch tests that substitute lightweight fake `QPdfView` / document classes before constructing `DataReaderPanel`.
+- Cleared stale fallback pixmaps before showing PDF render/load failure messages.
+
+### RED
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py -q
+```
+Result:
+- `1 failed, 11 passed in 0.39s`
+- Failing test: `test_reader_panel_shows_failure_message_when_qpdfview_load_fails`
+- Failure detail: `assert panel.pdf_widget.fallback_image.isVisible()`
+
+### GREEN
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py -q
+```
+Result:
+- `12 passed in 0.35s`
+
+### Changed Files
+- `paleo_workbench/ui/pages/preview_widgets.py`
+- `tests/test_data_reader_panel.py`
+- `.superpowers/sdd/task-4-report.md`

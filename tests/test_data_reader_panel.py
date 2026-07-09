@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QTableWidget
 
 from paleo_workbench.project.models import ResourceItem
@@ -172,6 +172,158 @@ def test_reader_panel_rerenders_pdf_preview_on_resize_without_reloading_document
     assert renders[-1][1] > renders[0][1]
 
 
+def test_reader_panel_uses_qpdfview_branch_for_successful_pdf_load(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
+    class FakeNavigator:
+        def __init__(self) -> None:
+            self.jumps = []
+
+        def currentZoom(self) -> float:
+            return 1.5
+
+        def jump(self, page: int, location, zoom: float) -> None:
+            self.jumps.append((page, location, zoom))
+
+    class FakePdfView(QLabel):
+        class PageMode:
+            SinglePage = "single-page"
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.document = None
+            self.page_mode = None
+            self.navigator = FakeNavigator()
+
+        def setDocument(self, document) -> None:
+            self.document = document
+
+        def setPageMode(self, mode) -> None:
+            self.page_mode = mode
+
+        def pageNavigator(self) -> FakeNavigator:
+            return self.navigator
+
+    class FakePdfDocument:
+        class Error:
+            None_ = 0
+
+        def __init__(self, *_args, **_kwargs):
+            self.loaded_paths = []
+
+        def load(self, path: str) -> int:
+            self.loaded_paths.append(path)
+            return self.Error.None_
+
+        def pageCount(self) -> int:
+            return 3
+
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfView", FakePdfView)
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", FakePdfDocument)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+        )
+    )
+
+    assert panel.current_mode == "pdf"
+    assert panel.pdf_preview_widget.pdf_view is panel.pdf_widget.pdf_view
+    assert panel.pdf_widget.pdf_view.document is panel.pdf_widget.document
+    assert panel.pdf_widget.document.loaded_paths == [str(pdf_path)]
+    assert panel.pdf_widget.pdf_view.page_mode == FakePdfView.PageMode.SinglePage
+    assert panel.pdf_widget.pdf_view.navigator.jumps
+    assert panel.pdf_widget.pdf_view.isVisible()
+    assert not panel.pdf_widget.fallback_image.isVisible()
+
+
+def test_reader_panel_shows_failure_message_when_qpdfview_load_fails(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
+    class FakeNavigator:
+        def currentZoom(self) -> float:
+            return 1.0
+
+        def jump(self, *_args) -> None:
+            raise AssertionError("jump should not be called for failed loads")
+
+    class FakePdfView(QLabel):
+        class PageMode:
+            SinglePage = "single-page"
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.navigator = FakeNavigator()
+
+        def setDocument(self, document) -> None:
+            self.document = document
+
+        def setPageMode(self, mode) -> None:
+            self.page_mode = mode
+
+        def pageNavigator(self) -> FakeNavigator:
+            return self.navigator
+
+    class FakePdfDocument:
+        class Error:
+            None_ = 0
+            DataNotYetAvailable = 1
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def load(self, _path: str) -> int:
+            return self.Error.DataNotYetAvailable
+
+        def pageCount(self) -> int:
+            return 0
+
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfView", FakePdfView)
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", FakePdfDocument)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
+    pdf_path = tmp_path / "broken.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="broken.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+        )
+    )
+
+    assert panel.current_mode == "pdf"
+    assert panel.pdf_widget.fallback_image.isVisible()
+    assert "PDF 预览加载失败" in panel.pdf_widget.fallback_image.text()
+    assert not panel.pdf_widget.pdf_view.isVisible()
+    assert panel.pdf_page_label.text() == "0 / 0"
+    assert not panel.pdf_prev_btn.isEnabled()
+    assert not panel.pdf_next_btn.isEnabled()
+
+
 def test_reader_panel_reload_image_preview_when_same_path_stat_stays_constant_but_checksum_changes(
     qtbot,
     monkeypatch,
@@ -272,3 +424,57 @@ def test_reader_panel_reload_pdf_when_same_path_revision_changes_but_not_on_resi
     qtbot.wait(50)
 
     assert loads == [str(pdf_path), str(pdf_path)]
+
+
+def test_reader_panel_clears_old_pdf_fallback_pixmap_after_render_failure(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfView", None)
+
+    class FakePdfDocument:
+        class Error:
+            None_ = 0
+
+        def __init__(self, *_args, **_kwargs):
+            self.render_calls = 0
+
+        def load(self, _path: str) -> int:
+            return self.Error.None_
+
+        def pageCount(self) -> int:
+            return 1
+
+        def render(self, _page: int, size) -> QImage:
+            self.render_calls += 1
+            return QImage()
+
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", FakePdfDocument)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    stale_pixmap = QPixmap(12, 12)
+    stale_pixmap.fill(0x224466)
+    panel.pdf_widget.fallback_image.setPixmap(stale_pixmap)
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+            revision=(12, 200),
+        )
+    )
+
+    pixmap = panel.pdf_widget.fallback_image.pixmap()
+    assert pixmap is None or pixmap.isNull()
+    assert "PDF 页面渲染失败" in panel.pdf_widget.fallback_image.text()

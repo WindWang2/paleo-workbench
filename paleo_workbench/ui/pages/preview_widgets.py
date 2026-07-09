@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -104,6 +105,7 @@ class PdfPreviewWidget(QWidget):
         self.pdf_view = QPdfView(self) if QPdfView is not None else None
         self.fallback_image = QLabel()
         self.fallback_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._content_stack = QStackedWidget(self)
         self._page = 0
         self._path = ""
         self._revision: tuple[object, ...] | None = None
@@ -112,9 +114,10 @@ class PdfPreviewWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         if self.pdf_view is not None:
             self.pdf_view.setDocument(self.document)
-            layout.addWidget(self.pdf_view, 1)
-        else:
-            layout.addWidget(self.fallback_image, 1)
+            self._content_stack.addWidget(self.pdf_view)
+        self._content_stack.addWidget(self.fallback_image)
+        self._content_stack.setCurrentWidget(self.pdf_view or self.fallback_image)
+        layout.addWidget(self._content_stack, 1)
 
         controls = QHBoxLayout()
         self.prev_btn = QPushButton("上一页")
@@ -135,7 +138,7 @@ class PdfPreviewWidget(QWidget):
             self._page = 0
             error = self.document.load(path)
             if error != QPdfDocument.Error.None_ or self.document.pageCount() <= 0:
-                self.fallback_image.setText("PDF 预览加载失败")
+                self._show_fallback_message("PDF 预览加载失败")
                 self.page_label.setText("0 / 0")
                 self.prev_btn.setEnabled(False)
                 self.next_btn.setEnabled(False)
@@ -155,6 +158,7 @@ class PdfPreviewWidget(QWidget):
     def _render_page(self) -> None:
         page_count = self.document.pageCount()
         if self.pdf_view is not None:
+            self._content_stack.setCurrentWidget(self.pdf_view)
             self.pdf_view.setPageMode(QPdfView.PageMode.SinglePage)
             navigator = self.pdf_view.pageNavigator()
             navigator.jump(self._page, QPointF(), navigator.currentZoom())
@@ -164,9 +168,9 @@ class PdfPreviewWidget(QWidget):
                 QSize(max(self.width(), 420), max(self.height(), 560)),
             )
             if image.isNull():
-                self.fallback_image.setText("PDF 页面渲染失败")
+                self._show_fallback_message("PDF 页面渲染失败")
             else:
-                self.fallback_image.setPixmap(QPixmap.fromImage(image))
+                self._show_fallback_pixmap(QPixmap.fromImage(image))
         self.page_label.setText(f"{self._page + 1} / {page_count}")
         self.prev_btn.setEnabled(self._page > 0)
         self.next_btn.setEnabled(self._page < page_count - 1)
@@ -175,3 +179,13 @@ class PdfPreviewWidget(QWidget):
         super().resizeEvent(event)
         if self._path and self.pdf_view is None and self.document.pageCount() > 0:
             self._render_page()
+
+    def _show_fallback_message(self, text: str) -> None:
+        self.fallback_image.clear()
+        self.fallback_image.setText(text)
+        self._content_stack.setCurrentWidget(self.fallback_image)
+
+    def _show_fallback_pixmap(self, pixmap: QPixmap) -> None:
+        self.fallback_image.clear()
+        self.fallback_image.setPixmap(pixmap)
+        self._content_stack.setCurrentWidget(self.fallback_image)
