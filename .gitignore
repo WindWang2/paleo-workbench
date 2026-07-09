@@ -24,6 +24,7 @@ Thumbs.db
 .agents/
 .codex/
 .cache/
+.superpowers/
 
 # Sample data is large and stays local; scanner tests use tmp_path fixtures
 data/
