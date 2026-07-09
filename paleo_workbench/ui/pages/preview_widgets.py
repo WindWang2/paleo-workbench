@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtPdf import QPdfDocument
+try:
+    from PySide6.QtPdf import QPdfDocument
+except ImportError:  # pragma: no cover
+    QPdfDocument = None
 
 try:
     from PySide6.QtPdfWidgets import QPdfView
@@ -101,8 +104,8 @@ class ImagePreviewWidget(QLabel):
 class PdfPreviewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.document = QPdfDocument(self)
-        self.pdf_view = QPdfView(self) if QPdfView is not None else None
+        self.document = QPdfDocument(self) if QPdfDocument is not None else None
+        self.pdf_view = QPdfView(self) if QPdfView is not None and self.document is not None else None
         self.fallback_image = QLabel()
         self.fallback_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._content_stack = QStackedWidget(self)
@@ -132,7 +135,19 @@ class PdfPreviewWidget(QWidget):
         controls.addWidget(self.next_btn)
         layout.addLayout(controls)
 
+        if self.document is None:
+            self._show_fallback_message("PDF 预览不可用")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+
     def load(self, path: str, revision: tuple[object, ...] | None = None) -> None:
+        if self.document is None:
+            self._show_fallback_message("PDF 预览不可用")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
         if path != self._path or revision != self._revision:
             self._path = path
             self._revision = revision
@@ -186,7 +201,7 @@ class PdfPreviewWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._path and self.pdf_view is None and self.document.pageCount() > 0:
+        if self._path and self.pdf_view is None and self.document is not None and self.document.pageCount() > 0:
             self._render_page()
 
     def _show_fallback_message(self, text: str) -> None:

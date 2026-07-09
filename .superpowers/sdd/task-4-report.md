@@ -79,6 +79,36 @@ Result:
 
 ---
 
+## Review Fix Round 3
+### Findings Addressed
+- Guarded the `QPdfDocument` import in `paleo_workbench/ui/pages/preview_widgets.py` so the module no longer crashes when `PySide6.QtPdf` is unavailable.
+- Made `PdfPreviewWidget` fall back to a visible message view with disabled paging controls when `QPdfDocument` cannot be constructed.
+- Added a regression test that monkeypatches `preview_widgets.QPdfDocument` to `None` before constructing `DataReaderPanel`, then renders a PDF result and checks the visible fallback state, `0 / 0`, disabled controls, and lack of crash.
+
+### RED
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py::test_reader_panel_degrades_when_qpdfdocument_is_unavailable -q
+```
+Result:
+- `1 failed in 0.17s`
+- Failure detail: `TypeError: 'NoneType' object is not callable` from `PdfPreviewWidget.__init__`
+
+### GREEN
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py -q
+```
+Result:
+- `14 passed in 0.38s`
+
+### Changed Files
+- `paleo_workbench/ui/pages/preview_widgets.py`
+- `tests/test_data_reader_panel.py`
+- `.superpowers/sdd/task-4-report.md`
+
+---
+
 ## Re-Review Fix Round 2
 ### Findings Addressed
 - Made failed `PdfPreviewWidget` loads durable for the same path/revision so a repeat `load()` does not fall through into `_render_page()` after an earlier document load failure.

@@ -318,10 +318,40 @@ def test_reader_panel_shows_failure_message_when_qpdfview_load_fails(
     assert panel.current_mode == "pdf"
     assert panel.pdf_widget.fallback_image.isVisible()
     assert "PDF 预览加载失败" in panel.pdf_widget.fallback_image.text()
-    assert not panel.pdf_widget.pdf_view.isVisible()
+
+
+def test_reader_panel_degrades_when_qpdfdocument_is_unavailable(
+    qtbot,
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", None)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+        )
+    )
+
+    assert panel.current_mode == "pdf"
+    assert panel.pdf_widget.fallback_image.isVisible()
+    assert "PDF 预览不可用" in panel.pdf_widget.fallback_image.text()
     assert panel.pdf_page_label.text() == "0 / 0"
     assert not panel.pdf_prev_btn.isEnabled()
     assert not panel.pdf_next_btn.isEnabled()
+    assert panel.pdf_widget.pdf_view is None
 
 
 def test_reader_panel_keeps_failed_qpdfview_state_for_same_path_and_revision(
