@@ -9,6 +9,7 @@ from paleo_workbench.resources.import_service import ImportReport
 from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
+from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 
 
 def _table_headers(page: DataPage) -> list[str]:
@@ -33,10 +34,24 @@ def test_data_page_uses_resizable_content_splitter(qtbot):
     qtbot.addWidget(page)
 
     assert isinstance(page.content_splitter, QSplitter)
-    assert page.content_splitter.indexOf(page.catalog_panel) == 0
-    assert page.content_splitter.indexOf(page.asset_table) == 1
-    assert page.content_splitter.indexOf(page.reader_panel) == 2
+    assert page.content_splitter.indexOf(page.asset_table) == 0
+    assert page.content_splitter.indexOf(page.reader_panel) == 1
+    assert page.content_splitter.indexOf(page.catalog_panel) == -1
+    assert page.content_splitter.indexOf(page.action_panel) == -1
     assert page.reader_panel.minimumWidth() == 320
+
+
+def test_data_page_uses_workspace_toolbar_and_floating_panels(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+
+    assert isinstance(page.workspace, DataWorkspace)
+    assert page.catalog_panel is page.workspace.catalog_panel
+    assert page.action_panel is page.workspace.action_panel
+    assert page.content_splitter.indexOf(page.asset_table) == 0
+    assert page.content_splitter.indexOf(page.reader_panel) == 1
+    assert page.content_splitter.indexOf(page.catalog_panel) == -1
+    assert page.content_splitter.indexOf(page.action_panel) == -1
 
 
 def test_data_page_update_state_delegates(qtbot):

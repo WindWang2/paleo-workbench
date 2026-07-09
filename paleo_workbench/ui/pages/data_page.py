@@ -4,9 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.resources.import_service import (
@@ -15,10 +15,8 @@ from paleo_workbench.resources.import_service import (
     import_folder,
 )
 from paleo_workbench.resources.scanner import scan_resources
-from paleo_workbench.ui.pages.action_panel import ActionPanel
-from paleo_workbench.ui.pages.data_asset_table import DataAssetTable
-from paleo_workbench.ui.pages.data_catalog_panel import DataCatalogPanel
-from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
+from paleo_workbench.ui.pages.data_toolbar import DataToolbar
+from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.workflow.service import dashboard_state
 
@@ -63,42 +61,41 @@ class DataPage(QWidget):
         self.summary_bar = ResourceSummaryBar()
         layout.addWidget(self.summary_bar)
 
-        bottom = QHBoxLayout()
-        bottom.setSpacing(16)
+        self.data_toolbar = DataToolbar()
+        layout.addWidget(self.data_toolbar)
 
-        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.content_splitter.setObjectName("DataContentSplitter")
-        self.content_splitter.setChildrenCollapsible(False)
+        self.workspace = DataWorkspace()
+        layout.addWidget(self.workspace, 1)
 
-        self.catalog_panel = DataCatalogPanel()
-        self.content_splitter.addWidget(self.catalog_panel)
+        self.content_splitter = self.workspace.content_splitter
+        self.catalog_panel = self.workspace.catalog_panel
+        self.asset_table = self.workspace.asset_table
+        self.reader_panel = self.workspace.reader_panel
+        self.action_panel = self.workspace.action_panel
 
-        self.asset_table = DataAssetTable()
         self.column_settings_btn = self.asset_table.column_settings_btn
         self.column_settings_menu = self.asset_table.column_settings_menu
         self.column_actions = self.asset_table.column_actions
         self.reset_columns_action = self.asset_table.reset_columns_action
-        self.content_splitter.addWidget(self.asset_table)
+        self.data_toolbar.set_column_settings_button(self.column_settings_btn)
 
-        self.reader_panel = DataReaderPanel()
-        self.content_splitter.addWidget(self.reader_panel)
-        self.content_splitter.setStretchFactor(0, 0)
-        self.content_splitter.setStretchFactor(1, 1)
-        self.content_splitter.setStretchFactor(2, 2)
-        self.content_splitter.setSizes([180, 560, 520])
-        bottom.addWidget(self.content_splitter, 1)
-
-        self.action_panel = ActionPanel()
         self.import_btn = self.action_panel.import_btn
         self.import_folder_btn = self.action_panel.import_folder_btn
         self.rescan_btn = self.action_panel.rescan_btn
         self.remove_btn = self.action_panel.remove_btn
-        bottom.addWidget(self.action_panel, 0)
-
-        layout.addLayout(bottom, 1)
 
         self.catalog_panel.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
+        self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
+        self.data_toolbar.import_folder_requested.connect(
+            self.begin_import_folder_from_dialog
+        )
+        self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
+        self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
+        self.data_toolbar.catalog_toggled.connect(self.workspace.toggle_catalog_panel)
+        self.data_toolbar.reader_toggled.connect(
+            lambda: self.workspace.set_reader_visible(not self.reader_panel.isVisible())
+        )
         self.import_btn.clicked.connect(self.begin_import_files_from_dialog)
         self.import_folder_btn.clicked.connect(self.begin_import_folder_from_dialog)
         self.rescan_btn.clicked.connect(self.rescan_selected_asset)
@@ -248,6 +245,8 @@ class DataPage(QWidget):
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
+        self.data_toolbar.import_btn.setEnabled(not running)
+        self.data_toolbar.import_folder_btn.setEnabled(not running)
         self.import_btn.setEnabled(not running)
         self.import_folder_btn.setEnabled(not running)
 
