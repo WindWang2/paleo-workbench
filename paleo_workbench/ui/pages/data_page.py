@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QSplitter, QVBoxLayout, QWidget
 
@@ -22,8 +23,28 @@ from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.workflow.service import dashboard_state
 
 
+class _ImportWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, task: Callable[[], ImportReport], parent=None):
+        super().__init__(parent)
+        self._task = task
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            report = self._task()
+        except Exception as exc:  # pragma: no cover - defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(report)
+
+
 class DataPage(QWidget):
     data_context_changed = Signal(dict)
+    import_finished = Signal(object)
+    import_failed = Signal(str)
 
     def __init__(self, project: ProjectDocument | None = None, parent=None):
         super().__init__(parent)
@@ -32,6 +53,8 @@ class DataPage(QWidget):
         self._resources = self.project.resources
         self._artifacts = self.project.export_artifacts
         self._selected_asset: object | None = None
+        self._import_jobs: list[tuple[QThread, _ImportWorker]] = []
+        self._import_in_progress = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -76,8 +99,8 @@ class DataPage(QWidget):
 
         self.catalog_panel.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
-        self.import_btn.clicked.connect(self.import_files_from_dialog)
-        self.import_folder_btn.clicked.connect(self.import_folder_from_dialog)
+        self.import_btn.clicked.connect(self.begin_import_files_from_dialog)
+        self.import_folder_btn.clicked.connect(self.begin_import_folder_from_dialog)
         self.rescan_btn.clicked.connect(self.rescan_selected_asset)
         self.remove_btn.clicked.connect(self.remove_selected_asset)
         self.action_panel.open_folder_btn.clicked.connect(self.open_selected_folder)
@@ -110,24 +133,12 @@ class DataPage(QWidget):
 
     def import_paths(self, paths: list[Path]) -> ImportReport:
         report = import_files(paths, self.project.resources)
-        self.project.resources.extend(report.added)
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
-        self._set_import_status(report)
+        self._apply_import_report(report)
         return report
 
     def import_folder_path(self, path: Path) -> ImportReport:
         report = import_folder(path, self.project.resources)
-        self.project.resources.extend(report.added)
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
-        self._set_import_status(report)
+        self._apply_import_report(report)
         return report
 
     def _choose_import_files(self) -> list[Path]:
@@ -149,6 +160,96 @@ class DataPage(QWidget):
         if folder is None:
             return ImportReport()
         return self.import_folder_path(folder)
+
+    def begin_import_files_from_dialog(self) -> bool:
+        paths = self._choose_import_files()
+        if not paths:
+            return False
+        return self.begin_import_paths(paths)
+
+    def begin_import_folder_from_dialog(self) -> bool:
+        folder = self._choose_import_folder()
+        if folder is None:
+            return False
+        return self.begin_import_folder_path(folder)
+
+    def begin_import_paths(self, paths: list[Path]) -> bool:
+        if self._import_in_progress:
+            self._set_action_status("正在导入，请稍候")
+            return False
+        existing = list(self.project.resources)
+        return self._start_import_job(lambda: import_files(paths, existing))
+
+    def begin_import_folder_path(self, path: Path) -> bool:
+        if self._import_in_progress:
+            self._set_action_status("正在导入，请稍候")
+            return False
+        existing = list(self.project.resources)
+        return self._start_import_job(lambda: import_folder(path, existing))
+
+    def _start_import_job(self, task: Callable[[], ImportReport]) -> bool:
+        thread = QThread(self)
+        worker = _ImportWorker(task)
+        worker.moveToThread(thread)
+        self._import_jobs.append((thread, worker))
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(
+            lambda report, thread=thread, worker=worker: self._handle_import_finished(
+                report,
+                thread,
+                worker,
+            )
+        )
+        worker.failed.connect(
+            lambda message, thread=thread, worker=worker: self._handle_import_failed(
+                message,
+                thread,
+                worker,
+            )
+        )
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        self._set_import_running(True)
+        self._set_action_status("正在导入...")
+        thread.start()
+        return True
+
+    def _handle_import_finished(
+        self,
+        report: ImportReport,
+        thread: QThread,
+        worker: _ImportWorker,
+    ) -> None:
+        self._apply_import_report(report)
+        self._finish_import_job(thread, worker)
+        self.import_finished.emit(report)
+
+    def _handle_import_failed(
+        self,
+        message: str,
+        thread: QThread,
+        worker: _ImportWorker,
+    ) -> None:
+        self._set_action_status(f"导入失败: {message}")
+        self._finish_import_job(thread, worker)
+        self.import_failed.emit(message)
+
+    def _finish_import_job(self, thread: QThread, worker: _ImportWorker) -> None:
+        self._import_jobs = [
+            job
+            for job in self._import_jobs
+            if job != (thread, worker)
+        ]
+        self._set_import_running(False)
+
+    def _set_import_running(self, running: bool) -> None:
+        self._import_in_progress = running
+        self.import_btn.setEnabled(not running)
+        self.import_folder_btn.setEnabled(not running)
 
     def remove_selected_asset(self) -> bool:
         if self._selected_asset is None:
@@ -301,6 +402,15 @@ class DataPage(QWidget):
         self._set_action_status(
             f"新增 {report.added_count} · 重复 {report.skipped_count} · 警告 {len(report.warnings)}"
         )
+
+    def _apply_import_report(self, report: ImportReport) -> None:
+        self.project.resources.extend(report.added)
+        self.update_state(
+            dashboard_state(self.project),
+            self.project.resources,
+            self.project.export_artifacts,
+        )
+        self._set_import_status(report)
 
     def _set_action_status(self, text: str) -> None:
         self.action_panel.operation_status_label.setText(text)

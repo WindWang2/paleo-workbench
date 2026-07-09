@@ -1,9 +1,11 @@
 from pathlib import Path
 
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QLabel, QSplitter
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.resources.import_service import ImportReport
 from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
@@ -270,6 +272,47 @@ def test_data_page_import_files_dialog_uses_selected_paths(
     assert project.resources[0].name == "well.las"
 
 
+def test_data_page_starts_file_import_in_worker_thread(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = ProjectDocument.new("Demo")
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    worker_threads = []
+
+    def fake_import_files(paths, existing):
+        worker_threads.append(QThread.currentThread())
+        return ImportReport(
+            added=[
+                ResourceItem(
+                    name=paths[0].name,
+                    path=paths[0].as_posix(),
+                    type="well_log",
+                    format="las",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(page, "_choose_import_files", lambda: [well])
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.data_page.import_files",
+        fake_import_files,
+    )
+
+    with qtbot.waitSignal(page.import_finished, timeout=1000):
+        started = page.begin_import_files_from_dialog()
+
+    assert started is True
+    assert worker_threads
+    assert worker_threads[0] is not page.thread()
+    assert project.resources[0].name == "well.las"
+    assert "新增 1" in page.action_panel.status_label.text()
+
+
 def test_data_page_import_folder_dialog_uses_selected_folder(
     qtbot,
     tmp_path: Path,
@@ -287,6 +330,49 @@ def test_data_page_import_folder_dialog_uses_selected_folder(
 
     assert report.added_count == 1
     assert project.resources[0].name == "cube.sgy"
+
+
+def test_data_page_starts_folder_import_in_worker_thread(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = ProjectDocument.new("Demo")
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    cube = folder / "cube.sgy"
+    cube.write_bytes(b"cube")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    worker_threads = []
+
+    def fake_import_folder(path, existing):
+        worker_threads.append(QThread.currentThread())
+        return ImportReport(
+            added=[
+                ResourceItem(
+                    name=cube.name,
+                    path=cube.as_posix(),
+                    type="seismic",
+                    format="sgy",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(page, "_choose_import_folder", lambda: folder)
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.data_page.import_folder",
+        fake_import_folder,
+    )
+
+    with qtbot.waitSignal(page.import_finished, timeout=1000):
+        started = page.begin_import_folder_from_dialog()
+
+    assert started is True
+    assert worker_threads
+    assert worker_threads[0] is not page.thread()
+    assert project.resources[0].name == "cube.sgy"
+    assert "新增 1" in page.action_panel.status_label.text()
 
 
 def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path):
