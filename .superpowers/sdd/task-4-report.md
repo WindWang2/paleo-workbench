@@ -1,130 +1,47 @@
-# Task 4 Report: App Shell Sidebar Synchronization
+# Task 4 Report: Preview Widgets Shell And QPdfView Reader
 
-## Implementation summary
-- Expanded `TextSidebar.update_data_context(...)` to render resource count, artifact count, issue count, current selection, format, reader mode, and management actions.
-- Stored `DataPage` on `AppShell` as `self.data_page`, connected `data_context_changed` to a new `AppShell.update_data_context(context: dict)` adapter, and forwarded emitted context into the sidebar.
-- Updated `AppShell.update_data_page(...)` to keep the sidebar's aggregate counts aligned with the richer sidebar contract, including derived issue counts.
-- Added regression coverage for the expanded sidebar rendering and the shell-to-sidebar synchronization path driven by `DataPage._set_selected_asset(...)`.
+## Scope
+- Added `paleo_workbench/ui/pages/preview_widgets.py` with `MessagePreviewWidget`, `TextPreviewWidget`, `TablePreviewWidget`, `ImagePreviewWidget`, and `PdfPreviewWidget`.
+- Refactored `paleo_workbench/ui/pages/data_reader_panel.py` to delegate preview rendering to those widgets while preserving the existing public fields: `text_preview`, `table_preview`, `image_label`, `pdf_widget`, `pdf_prev_btn`, `pdf_next_btn`, and `pdf_page_label`.
+- Added `image_preview_widget` and `pdf_preview_widget` public attributes and updated `tests/test_data_reader_panel.py` to assert through them.
 
-## RED/GREEN evidence
+## TDD Evidence
 ### RED
 Command:
 ```bash
-QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py::test_reader_panel_uses_pdf_preview_widget -q
 ```
 Result:
-- `tests/test_sidebar.py::test_sidebar_renders_expanded_data_context` failed with `TypeError: TextSidebar.update_data_context() got an unexpected keyword argument 'issue_count'`
-- `tests/test_app_shell.py::test_app_shell_syncs_data_page_context_to_sidebar` failed because the sidebar still showed the home-page context instead of the selected asset details
+- Failed with `AttributeError: 'DataReaderPanel' object has no attribute 'pdf_preview_widget'`.
 
 ### GREEN
 Command:
 ```bash
-QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py::test_reader_panel_uses_pdf_preview_widget -q
 ```
 Result:
-- `13 passed in 2.03s`
+- `1 passed in 0.14s`
 
-## Tests and results
-- Focused widget suite run in headless mode with `QT_QPA_PLATFORM=offscreen`
-- Verified passing:
-  - `tests/test_sidebar.py`
-  - `tests/test_app_shell.py`
+### Full Verification
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_data_reader_panel.py -q
+```
+Result:
+- `9 passed in 0.34s`
 
-## Files changed
-- `paleo_workbench/ui/app_shell.py`
-- `paleo_workbench/ui/sidebar.py`
-- `tests/test_app_shell.py`
-- `tests/test_sidebar.py`
+## Implementation Notes
+- `PdfPreviewWidget` uses `PySide6.QtPdfWidgets.QPdfView` when available and falls back to image rendering with the same paging controls when it is not.
+- `DataReaderPanel` now uses widget-level `load()` / `load_text()` / `load_table()` methods instead of owning per-format render state directly.
+- Resize coverage now targets the public `image_preview_widget` and `pdf_preview_widget` handles; the PDF resize tests explicitly force the fallback path and patch `preview_widgets.QPdfDocument` before panel construction.
 
-## Self-review findings
-- Kept the change inside the owned files and did not modify `DataPage`.
-- Used the existing `data_context_changed` payload directly instead of duplicating selection inference in `AppShell`.
-- Updated pre-existing tests whose expectations no longer matched the new sidebar contract, so the suite now checks live data context rather than the removed static reader capability copy.
+## Self-Review
+- Verified the refactor kept the compatibility aliases required by the task brief (`image_label -> image_preview_widget`, `pdf_widget -> pdf_preview_widget`, and the PDF control aliases).
+- Checked that PDF navigation wrappers remain on `DataReaderPanel` and delegate to the widget.
+- Kept edits scoped to the task-owned files plus this report.
+
+## Commit
+- `feat: add library-backed preview widgets`
 
 ## Concerns
-- Focused verification is limited to `tests/test_sidebar.py` and `tests/test_app_shell.py`; broader UI integration coverage was not run in this task.
-
----
-
-## Reviewer follow-up: sidebar synchronization fixes
-
-### Implementation summary
-- Kept the fix scoped to `paleo_workbench/ui/app_shell.py` and `tests/test_app_shell.py`; `sidebar.py` already supported the richer context shape and did not need further changes.
-- Seeded `AppShell` sidebar state immediately after connecting `DataPage.data_context_changed`, so startup now reflects the initial project data context even though `DataPage.__init__()` emitted before the connection existed.
-- Changed `AppShell.update_data_page(...)` to rebuild the sidebar context from the refresh arguments plus the current `DataPage` selection/reader state, avoiding the old counts-only overwrite that reset `当前选择` and `阅读器`.
-- Added focused regressions for:
-  - initial sidebar synchronization from a project that already has resources
-  - preserving selected asset and reader mode after `shell.update_data_page(...)`
-
-### RED/GREEN evidence
-#### RED
-Command:
-```bash
-QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
-```
-Result:
-- `tests/test_app_shell.py::test_app_shell_initializes_sidebar_from_project_data` failed because the sidebar still opened on `首页` and never received the initial data context
-- `tests/test_app_shell.py::test_app_shell_update_data_page_preserves_sidebar_selection` failed because `update_data_page(...)` reset the sidebar back to `当前选择: 未选择` and `阅读器: empty`
-
-#### GREEN
-Command:
-```bash
-QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
-```
-Result:
-- `15 passed in 2.32s`
-
-### Files changed
-- `paleo_workbench/ui/app_shell.py`
-- `tests/test_app_shell.py`
-
-### Notes
-- `DataPage` was left untouched as requested.
-- `AppShell.update_data_page(...)` still honors explicit `resources` / `artifacts` arguments even when they are not yet mirrored onto `project`, while preserving the richer selection details from the live page state.
-
----
-
-## Re-review fix: preserve live data sidebar state on page switch
-
-### Implementation summary
-- Changed `AppShell._switch_page()` so the Data tab (`index == 1`) re-pushes the live data context via `self.update_data_context(self._build_data_context())` instead of calling `sidebar.set_context("数据")`.
-- Left `TextSidebar` unchanged; the existing default-reset behavior remains useful for non-Data pages, and the shell now avoids it when returning to the Data page.
-- Added a regression test that selects a resource, navigates away, navigates back to Data, and verifies the sidebar still shows the selected asset and reader mode instead of resetting to `未选择` / `empty`.
-
-### Test evidence
-Command:
-```bash
-QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
-```
-Result:
-- `16 passed in 2.45s`
-
-### Files changed
-- `paleo_workbench/ui/app_shell.py`
-- `tests/test_app_shell.py`
-
----
-
-## Final re-review fix: cache data context without forcing sidebar rendering
-
-### Implementation summary
-- Added `self._data_context` to `AppShell` and treated it as the live data snapshot for the shell.
-- Changed `AppShell.update_data_context(...)` and `AppShell.update_data_page(...)` to update that cache first, then render into `TextSidebar` only when the current page is Data.
-- Changed `AppShell._switch_page(...)` so non-Data pages keep their own sidebar context, while Data restores the cached live data context, including selected asset and reader mode.
-- Updated the app-shell regressions to verify:
-  - startup still shows Home in the sidebar
-  - `update_data_page(...)` on Home does not overwrite the Home sidebar
-  - switching to Data renders the cached data context
-  - navigating away and back restores the selected asset and reader mode
-
-### Test evidence
-Command:
-```bash
-QT_QPA_PLATFORM=offscreen pytest tests/test_sidebar.py tests/test_app_shell.py -v
-```
-Result:
-- `17 passed in 2.62s`
-
-### Files changed
-- `paleo_workbench/ui/app_shell.py`
-- `tests/test_app_shell.py`
+- None.

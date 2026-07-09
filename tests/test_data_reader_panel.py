@@ -62,6 +62,28 @@ def test_reader_panel_renders_missing_message(qtbot, tmp_path: Path):
     assert any("文件不存在" in label.text() for label in labels)
 
 
+def test_reader_panel_uses_pdf_preview_widget(qtbot, tmp_path: Path):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    pdf_path = tmp_path / "report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            status="indexed",
+            type_label="document",
+        )
+    )
+
+    assert panel.current_mode == "pdf"
+    assert panel.pdf_preview_widget is panel.pdf_widget
+    assert hasattr(panel.pdf_preview_widget, "pdf_view")
+
+
 def test_reader_panel_rerenders_image_preview_on_resize(qtbot, monkeypatch, tmp_path: Path):
     path = tmp_path / "map.png"
     image = QImage(16, 16, QImage.Format.Format_RGB32)
@@ -74,13 +96,13 @@ def test_reader_panel_rerenders_image_preview_on_resize(qtbot, monkeypatch, tmp_
     panel.show()
     qtbot.waitExposed(panel)
     calls = []
-    original = panel._render_image
+    original = panel.image_preview_widget.render_current
 
-    def tracking_render(image_path: str, revision=None) -> None:
-        calls.append(image_path)
-        original(image_path, revision)
+    def tracking_render() -> None:
+        calls.append(panel.image_preview_widget._path)
+        original()
 
-    monkeypatch.setattr(panel, "_render_image", tracking_render)
+    monkeypatch.setattr(panel.image_preview_widget, "render_current", tracking_render)
 
     panel.update_asset(resource)
     initial = panel.image_label.pixmap().size()
@@ -97,11 +119,7 @@ def test_reader_panel_rerenders_pdf_preview_on_resize_without_reloading_document
     monkeypatch,
     tmp_path: Path,
 ):
-    panel = DataReaderPanel()
-    qtbot.addWidget(panel)
-    panel.resize(420, 320)
-    panel.show()
-    qtbot.waitExposed(panel)
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfView", None)
     renders = []
     loads = []
 
@@ -123,7 +141,12 @@ def test_reader_panel_rerenders_pdf_preview_on_resize_without_reloading_document
             renders.append((page, size.width(), size.height()))
             return QImage(size.width(), size.height(), QImage.Format.Format_RGB32)
 
-    monkeypatch.setattr("paleo_workbench.ui.pages.data_reader_panel.QPdfDocument", FakePdfDocument)
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", FakePdfDocument)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
     pdf_path = tmp_path / "report.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
     panel.render(
@@ -139,6 +162,7 @@ def test_reader_panel_rerenders_pdf_preview_on_resize_without_reloading_document
 
     assert loads == [str(pdf_path)]
     assert renders
+    assert panel.pdf_preview_widget is panel.pdf_widget
 
     panel.resize(780, 600)
     qtbot.wait(50)
@@ -190,11 +214,7 @@ def test_reader_panel_reload_pdf_when_same_path_revision_changes_but_not_on_resi
     monkeypatch,
     tmp_path: Path,
 ):
-    panel = DataReaderPanel()
-    qtbot.addWidget(panel)
-    panel.resize(420, 320)
-    panel.show()
-    qtbot.waitExposed(panel)
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfView", None)
     loads = []
 
     class FakePdfDocument:
@@ -214,7 +234,12 @@ def test_reader_panel_reload_pdf_when_same_path_revision_changes_but_not_on_resi
         def render(self, page: int, size) -> QImage:
             return QImage(size.width(), size.height(), QImage.Format.Format_RGB32)
 
-    monkeypatch.setattr("paleo_workbench.ui.pages.data_reader_panel.QPdfDocument", FakePdfDocument)
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", FakePdfDocument)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.resize(420, 320)
+    panel.show()
+    qtbot.waitExposed(panel)
     pdf_path = tmp_path / "report.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
 
