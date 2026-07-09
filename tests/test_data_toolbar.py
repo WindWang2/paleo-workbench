@@ -26,5 +26,10 @@ def test_data_toolbar_rehomes_column_settings_button(qtbot):
 
     toolbar.set_column_settings_button(button)
 
-    assert button.parent() is toolbar
-    assert toolbar.column_settings_slot.layout().indexOf(button) >= 0
+    assert toolbar.column_settings_slot is not toolbar
+    assert button.parent() is toolbar.column_settings_slot
+
+    layout = toolbar.layout()
+    assert layout.indexOf(toolbar.column_settings_slot) < layout.indexOf(toolbar.catalog_btn)
+    assert layout.indexOf(toolbar.column_settings_slot) < layout.indexOf(toolbar.reader_btn)
+    assert toolbar.column_settings_slot.layout().indexOf(button) == 0

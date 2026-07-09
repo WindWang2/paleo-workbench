@@ -41,7 +41,12 @@ class DataToolbar(QWidget):
         self.search_box.textChanged.connect(self.search_changed.emit)
         layout.addWidget(self.search_box, 1)
 
-        self.column_settings_slot = self
+        self.column_settings_slot = QWidget(self)
+        self.column_settings_slot.setObjectName("ColumnSettingsSlot")
+        column_settings_layout = QHBoxLayout(self.column_settings_slot)
+        column_settings_layout.setContentsMargins(0, 0, 0, 0)
+        column_settings_layout.setSpacing(0)
+        layout.addWidget(self.column_settings_slot)
 
         self.catalog_btn = QPushButton("目录")
         self.catalog_btn.setObjectName("SecondaryButton")

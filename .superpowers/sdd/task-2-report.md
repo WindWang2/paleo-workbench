@@ -25,3 +25,28 @@ Result: `2 passed in 0.06s`
 ## Notes
 
 - The working tree already contained unrelated edits in `.superpowers/sdd/progress.md` and `.superpowers/sdd/task-1-report.md`; I left them alone.
+
+## Follow-up fix
+
+Addressed the review finding about the toolbar layout contract.
+
+### TDD evidence
+
+RED:
+
+`QT_QPA_PLATFORM=offscreen pytest tests/test_data_toolbar.py -q`
+
+Result: `1 failed, 1 passed`
+
+Failure: `assert toolbar.column_settings_slot is not toolbar`
+
+GREEN:
+
+`QT_QPA_PLATFORM=offscreen pytest tests/test_data_toolbar.py -q`
+
+Result: `2 passed in 0.06s`
+
+### Changed files
+
+- `paleo_workbench/ui/pages/data_toolbar.py`
+- `tests/test_data_toolbar.py`
