@@ -1,10 +1,6 @@
 """Paleogeography Workbench UI shell package."""
-from paleo_workbench.ui.app_shell import AppShell
-from paleo_workbench.ui.header_toolbar import HeaderToolbar
-from paleo_workbench.ui.icon_rail import IconRail
-from paleo_workbench.ui.menu_bar import MenuBar
-from paleo_workbench.ui.sidebar import TextSidebar
-from paleo_workbench.ui.status_bar import StatusBar
+
+from importlib import import_module
 
 __all__ = [
     "AppShell",
@@ -14,3 +10,26 @@ __all__ = [
     "StatusBar",
     "TextSidebar",
 ]
+
+_EXPORTS = {
+    "AppShell": "paleo_workbench.ui.app_shell",
+    "HeaderToolbar": "paleo_workbench.ui.header_toolbar",
+    "IconRail": "paleo_workbench.ui.icon_rail",
+    "MenuBar": "paleo_workbench.ui.menu_bar",
+    "StatusBar": "paleo_workbench.ui.status_bar",
+    "TextSidebar": "paleo_workbench.ui.sidebar",
+}
+
+
+def __getattr__(name: str):
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + __all__)

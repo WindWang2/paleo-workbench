@@ -1,69 +1,62 @@
-# Task 1 Report: Preview Provider
+# Task 1 Report: Floating Panel Component
 
-## Implementation Summary
-- Added `paleo_workbench/ui/pages/preview_provider.py` with `PreviewProvider`, `PreviewResult`, and the exported bounds constants.
-- Provider handles `None`, `ResourceItem`, and `ExportArtifact`.
-- Text previews are bounded to `MAX_TEXT_PREVIEW_BYTES`.
-- Table previews are bounded to a header row plus at most `MAX_TABLE_ROWS` data rows and at most `MAX_TABLE_COLUMNS` columns.
-- Added caching so repeated previews for an unchanged file return the same `PreviewResult` object.
+## Scope
+- Added a reusable `FloatingPanel` widget at `paleo_workbench/ui/pages/floating_panel.py`.
+- Added focused pytest-qt coverage at `tests/test_floating_panel.py`.
+- No other data page behavior was changed.
 
-## Tests and Results
-- Added `tests/test_preview_provider.py` with six focused tests covering:
-  - empty state
-  - bounded text preview
-  - bounded CSV table preview
-  - missing file handling
-  - cache reuse
-  - export artifact messaging
-- Verification run:
-  - `pytest tests/test_preview_provider.py -v`
-  - Result: `6 passed`
+## TDD Evidence
+### RED
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_floating_panel.py -q
+```
+Result:
+- Failed during collection with `ModuleNotFoundError: No module named 'paleo_workbench.ui.pages.floating_panel'`.
 
-## RED / GREEN TDD Evidence
-- RED:
-  - Ran `pytest tests/test_preview_provider.py -v` before implementation.
-  - Result: import failure on `paleo_workbench.ui.pages.preview_provider` because the module did not exist yet.
-- GREEN:
-  - Implemented the provider.
-  - Re-ran `pytest tests/test_preview_provider.py -v`.
-  - Result: `6 passed`.
+### GREEN
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_floating_panel.py -q
+```
+Result:
+- `3 passed in 0.77s`
 
-## Files Changed
-- `paleo_workbench/ui/pages/preview_provider.py`
-- `tests/test_preview_provider.py`
-- `.superpowers/sdd/task-1-report.md`
+## Implementation Notes
+- `FloatingPanel` exposes the requested API: `tab_button`, `content_frame`, `title_label`, `set_content`, `set_expanded`, `is_expanded`, and `expanded_changed`.
+- The component uses `tokens` for panel styling and keeps the content frame collapsed by default.
+- The widget is shown on construction so the visibility assertions in the focused tests are stable under pytest-qt.
 
-## Self-Review Findings
-- Table preview logic keeps the CSV header separate from `table_rows`, which matches the task contract of one header row plus bounded data rows.
-- The cache key includes path metadata and checksum where available, so unchanged files reuse the same preview object while file edits invalidate the cache.
-- `clear()` fully resets the in-memory cache.
+## Commit
+- `42e7c4c feat: add floating panel component`
 
 ## Concerns
-- None at this stage.
+- None.
 
-## Reviewer Fixes
-- Reworked `_text_preview()` to read at most `MAX_TEXT_PREVIEW_BYTES + 1` bytes from disk and decode only that bounded chunk.
-- Reworked `_table_preview()` to read a bounded binary preview chunk, split it into at most one header row plus `MAX_TABLE_ROWS` data rows, and parse each row individually with `csv.reader`.
-- Switched `PreviewResult.table_headers` and `PreviewResult.table_rows` to immutable tuples so cached preview results cannot leak mutable list state across calls.
+## Follow-up Fix After Review
 
-## Fresh Verification
-- Command: `pytest tests/test_preview_provider.py -v`
-- Result: `6 passed`
+### Scope
+- Removed the `FloatingPanel.__init__()` visibility side effect so a parentless panel stays hidden until callers explicitly show it.
+- Made `FloatingPanel.set_content()` replace the previous content widget instead of accumulating multiple widgets.
+- Switched `paleo_workbench.ui` and `paleo_workbench.ui.pages` public exports to lazy `__getattr__` loading so direct imports of `paleo_workbench.ui.pages.floating_panel` do not pull in `AppShell`, `DataPage`, or geo-viz-backed page modules.
 
-## Re-Review Fix
-- Reworked `_table_preview()` to decode a bounded binary preview chunk and pass it through `io.StringIO` into `csv.reader`, so quoted embedded newlines stay inside a single CSV record.
-- Kept the preview capped at one header row plus `MAX_TABLE_ROWS` data rows and `MAX_TABLE_COLUMNS` columns.
-- Added a regression test for `name,note\nalpha,"line one\nline two"\nbeta,plain` to verify the first data row preserves the multi-line quoted cell.
+### TDD Evidence
+#### RED
+Command:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_floating_panel.py tests/test_ui_exports.py -q
+```
+Result:
+- `test_floating_panel_does_not_show_parentless_widget_on_init` failed because `FloatingPanel.__init__()` called `self.show()`.
+- `test_floating_panel_set_content_replaces_existing_widget` failed because `set_content()` left both old and new widgets in the content layout.
+- `test_floating_panel_import_does_not_eagerly_import_ui_shell_modules` failed because importing `paleo_workbench.ui.pages.floating_panel` eagerly loaded `paleo_workbench.ui.app_shell`.
 
-## Re-Review Verification
-- Command: `pytest tests/test_preview_provider.py -v`
-- Result: `7 passed`
-
-## Final Ceiling Fix
-- Updated `_read_preview_chunk()` to read at most exactly `MAX_TEXT_PREVIEW_BYTES` bytes from disk and derive truncation from `stat().st_size > MAX_TEXT_PREVIEW_BYTES`, removing the extra sentinel byte read.
-- Kept the CSV preview path unchanged so quoted embedded newlines still parse through `csv.reader` over the bounded preview chunk.
-- Added a regression check that asserts the text preview file handle is asked to read exactly `MAX_TEXT_PREVIEW_BYTES` bytes.
-
-## Final Verification
-- Command: `pytest tests/test_preview_provider.py -v`
-- Result: `7 passed`
+#### GREEN
+Commands:
+```bash
+QT_QPA_PLATFORM=offscreen pytest tests/test_floating_panel.py tests/test_ui_exports.py -q
+python -c "import paleo_workbench.ui.pages.floating_panel"
+```
+Result:
+- `8 passed in 0.78s`
+- Direct import completed successfully with exit code `0` and without requiring geo-viz imports during module load.

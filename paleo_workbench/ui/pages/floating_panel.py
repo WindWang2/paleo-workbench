@@ -19,6 +19,7 @@ class FloatingPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("FloatingPanel")
         self._expanded = False
+        self._content_widget: QWidget | None = None
         self.setStyleSheet(
             f"QFrame#FloatingPanel {{ background: transparent; border: none; }}"
             f"QFrame#FloatingPanelContent {{ background: {tokens.BG_SIDEBAR};"
@@ -52,11 +53,16 @@ class FloatingPanel(QFrame):
 
         layout.addWidget(self.content_frame)
         self.set_expanded(False)
-        self.show()
 
     def set_content(self, widget: QWidget) -> None:
+        if self._content_widget is widget:
+            return
+        if self._content_widget is not None:
+            self.content_frame.layout().removeWidget(self._content_widget)
+            self._content_widget.setParent(None)
         widget.setParent(self.content_frame)
         self.content_frame.layout().addWidget(widget)
+        self._content_widget = widget
 
     def is_expanded(self) -> bool:
         return self._expanded

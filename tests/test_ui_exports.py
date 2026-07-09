@@ -1,3 +1,7 @@
+import importlib
+import sys
+
+
 def test_ui_exports_app_shell():
     from paleo_workbench.ui import AppShell
     assert AppShell is not None
@@ -10,3 +14,26 @@ def test_ui_exports_zone_widgets():
     assert all([
         AppShell, MenuBar, HeaderToolbar, IconRail, TextSidebar, StatusBar
     ])
+
+
+def test_floating_panel_import_does_not_eagerly_import_ui_shell_modules():
+    for module_name in [
+        "geoviz_paleo_map",
+        "geoviz_seismic",
+        "geoviz_well_log",
+        "paleo_workbench.ui",
+        "paleo_workbench.ui.pages",
+        "paleo_workbench.ui.pages.floating_panel",
+        "paleo_workbench.ui.app_shell",
+        "paleo_workbench.ui.pages.data_page",
+    ]:
+        sys.modules.pop(module_name, None)
+
+    module = importlib.import_module("paleo_workbench.ui.pages.floating_panel")
+
+    assert module.FloatingPanel is not None
+    assert "paleo_workbench.ui.app_shell" not in sys.modules
+    assert "paleo_workbench.ui.pages.data_page" not in sys.modules
+    assert "geoviz_paleo_map" not in sys.modules
+    assert "geoviz_seismic" not in sys.modules
+    assert "geoviz_well_log" not in sys.modules
