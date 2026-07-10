@@ -44,8 +44,9 @@ def make_tmp_tree(base: Path, n: int = 300) -> Path:
     root = base / "stress_import"
     root.mkdir(parents=True, exist_ok=True)
     for i in range(n):
-        # Mix extensions for classifier variety; keep tiny
+        # Mix extensions for classifier variety; keep tiny unique content
+        # so import_folder does not skip siblings as checksum duplicates.
         ext = "las" if i % 3 == 0 else ("txt" if i % 3 == 1 else "dat")
         p = root / f"f_{i:04d}.{ext}"
-        p.write_bytes(b"x")
+        p.write_bytes(f"x{i}\n".encode("ascii"))
     return root
