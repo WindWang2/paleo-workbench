@@ -25,3 +25,10 @@ def test_status_bar_object_name(qtbot):
     bar = StatusBar()
     qtbot.addWidget(bar)
     assert bar.objectName() == "StatusBar"
+
+
+def test_status_coord_label_object_name(qtbot):
+    bar = StatusBar()
+    qtbot.addWidget(bar)
+    assert bar.coord_label.objectName() == "StatusCoordLabel"
+
