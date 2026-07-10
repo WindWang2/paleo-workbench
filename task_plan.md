@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path).
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`.
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + **Mapping Editor V1 (PR #3)** complete. ~449+ tests; optional `map_edit_core` C++ extension available.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + **Visualization geo-viz adapter (Phase 17)** complete. ~497 tests; optional `map_edit_core` C++ extension available.
 
 ## Current Architecture
 
@@ -13,6 +13,7 @@
 - **Pages package** at `paleo_workbench/ui/pages/`
 - **DataPage (post Phase 15):** `DataWorkspace` (virtual `QTableView` + multi-format reader) + floating catalog/actions; `FilterIndex`; serial async `PreviewRequestController` + LRU `PreviewCache`; async import via `QThread`
 - **MappingPage (post Phase 16):** GIS shell — toolbar · layer tree · `MapEditView`/`MapEditScene` · attribute table; save draft to `PaleoMapDocument`; geometry via `map_edit_api` (+ optional C++ `map_edit_core`)
+- **Visualization (post Phase 17):** pure `paleo_workbench/viz/` (`VizRef` / `VizPayload` / `VizAdapter`); data-page jump → page index 5 + `open_ref`; composite tabs 测井/地震/连井/古地理; prediction mock fallback when no ref
 
 ## 数据管理思维（改数据页时先读）
 
@@ -174,6 +175,23 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 - PR #3 → `2e98da6`; ~449 tests at merge
 - Build C++: `pip install -e native/map_edit_core` (see `mapping/CPP_EXTENSION.md`)
 
+### Phase 17: 可视化 geo-viz 适配器 Visualization geo-viz Adapter — ✅ COMPLETE
+
+Shared adapter turns project LAS / SEGY / paleomap assets into geo-viz payloads; data page jumps to visualization; visualization loads real assets with prediction mock fallback.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| T1 | Pure `viz/` package: models, LAS/SEGY/map loaders, `VizAdapter` | `paleo_workbench/viz/*`, `tests/test_viz_adapter.py` |
+| T2 | Visualization `open_ref` + 古地理 tab + summary list + trace refresh | `visualization_page.py`, `composite_visualization_panel.py`, summary/trace panels |
+| T3 | Data page 「在可视化中打开」 + window jump to index 5 | `action_panel.py`, `data_page.py`, `app.py` |
+| T4 | Message clears canvas; `from_prediction` soft-fail; full suite + planning docs | composite clear, adapter hardening |
+
+- Spec: `docs/superpowers/specs/2026-07-10-visualization-geoviz-adapter-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-visualization-geoviz-adapter.md`
+- Branch: `feature/viz-geoviz-adapter`
+- Bounds: LAS max 12 curves / 2000 samples; SEGY product ≤ 64³
+- Tests: **497 passed**, 4 skipped (optional C++ unchanged)
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |
@@ -197,7 +215,7 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 | 3 | 测井预测 | ✅ Complete | 12 | ✅ | ✅ |
 | 4 | 地震预测 | ✅ Complete | 12 | ✅ | ✅ |
 | 5 | 层序格架 | ✅ Complete | 12 | ✅ | ✅ |
-| 6 | 可视化 | ✅ Complete | 9 | ✅ | ✅ |
+| 6 | 可视化 | ✅ Complete + geo-viz adapter (Phase 17) | 9+ | ✅ | ✅ |
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
 | 8 | 编图 | ✅ Editor V1 (PR #3) | 60+ | ✅ | ✅ |
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
@@ -207,6 +225,7 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 | 14 | 项目管理 V1 | ✅ Complete | 24 | ✅ | ✅ |
 | 15 | 数据页 UI/性能优化 | ✅ Complete (PR #1–2) | ~100+ | ✅ | ✅ |
 | 16 | 编图编辑器 V1 | ✅ Complete (PR #3) | ~60+ | ✅ | ✅ |
+| 17 | 可视化 geo-viz 适配器 | ✅ Complete | ~20+ | ✅ | ✅ |
 
 ## Test History
 
@@ -232,3 +251,5 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 | 2026-07-07 (Project Management V1) | 283 | ✅ |
 | 2026-07-10 (Data page redesign + preview formats era) | ~350+ | ✅ |
 | 2026-07-10 (Data Page UI/Perf Optimization, PR #1) | ~385 | ✅ |
+| 2026-07-10 (Mapping Editor V1 + post-V1) | ~475 | ✅ |
+| 2026-07-10 (Visualization geo-viz adapter, Phase 17) | 497 | ✅ |

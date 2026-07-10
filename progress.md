@@ -567,3 +567,40 @@ Tests: **475 passed**, 4 skipped.
 - LRU keeps media ≤512KB; larger stripped; path-only hits use `_MediaPreloadWorker`
 - `PdfPreviewWidget` loads via `QBuffer` when `pdf_bytes` present
 - UI still owns QPixmap/QPdfDocument decode (Qt thread affinity)
+
+---
+
+## Session: 2026-07-10 — Visualization geo-viz adapter (Phase 17) — COMPLETE ✅
+
+Implemented via SDD on `feature/viz-geoviz-adapter` (4 tasks).
+
+| Task | Content | Commit area |
+|------|---------|-------------|
+| 1 | Pure `paleo_workbench/viz/` — `VizRef` / `VizPayload` / `VizAdapter`; LAS / SEGY / map loaders; prediction bridge | `f9e6468` |
+| 2 | Visualization `open_ref`, 古地理 tab, summary asset list, trace refresh | `669f7e2` |
+| 3 | Data page 「在可视化中打开」 + window jump (`PAGE_INDEX_VISUALIZATION` + rail + `open_ref`) | `3defc2a` |
+| 4 | Message clears prior canvases; `from_prediction` soft-fail; dual-payload asserts; full suite + planning docs | polish + docs |
+
+### Modules
+
+| Path | Role |
+|------|------|
+| `paleo_workbench/viz/models.py` | `VizKind`, frozen `VizRef`, `VizPayload` |
+| `paleo_workbench/viz/well_log_load.py` | LAS → bounded `WellLogData` (12 curves / 2000 samples) |
+| `paleo_workbench/viz/seismic_load.py` | SEGY → bounded volume (≤ 64³) |
+| `paleo_workbench/viz/map_load.py` | `PaleoMapDocument` → GeoJSON features + wells (via mapping preview helper) |
+| `paleo_workbench/viz/adapter.py` | `supports_resource` / `ref_from_*` / `resolve` / `from_prediction` |
+| `visualization_page.py` | `open_ref`, `_reload_current`, prediction fallback when no ref |
+| `composite_visualization_panel.py` | 古地理 tab + `load_payload` + message `_clear_canvases` |
+| `data_page.py` / `action_panel.py` / `app.py` | Jump signal `open_in_visualization(VizRef)` with `source="data_page"` |
+
+### Verification
+
+- Focused viz suites green throughout T1–T4
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **497 passed**, 4 skipped
+- Spec: `docs/superpowers/specs/2026-07-10-visualization-geoviz-adapter-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-visualization-geoviz-adapter.md`
+
+### Status
+
+**Phase 17 COMPLETE** on branch `feature/viz-geoviz-adapter` (not merged/pushed in this task).

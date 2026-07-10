@@ -441,3 +441,32 @@ Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency orde
 - **Preview mode notes:** `preview_payload_from_*` converts editor rings → GeoJSON Feature and wells → `{lng,lat}` for canvas; unsaved dirty scene geometry is preferred over document; edit tools disabled while preview on; sidebar shows `模式: 编辑|图面预览`.
 - **Topology rebuild:** pure-Python shared-node clustering; merge/split prefer shapely; undo via `BatchVertexEditCommand` / `CompositeCommand`.
 - **CI:** Ubuntu job installs pybind11, builds `native/map_edit_core`, asserts `HAS_CPP`, runs full suite offscreen.
+
+## Visualization geo-viz adapter (Phase 17) notes
+
+### Adapter boundary
+
+- **`paleo_workbench/viz/` is pure** — no Qt widgets, no AppShell page construction. Allowed bridges only: `mapping_helpers.preview_payload_from_document`, prediction mock helpers (`well_log_data_from_prediction`, `seismic_volume_from_prediction`).
+- **UI owns canvases** — `CompositeVisualizationPanel` hosts `WellLogCanvas` / `SeismicView` / `CrossWellWidget` / `PaleoMapCanvas`; adapter only produces `VizPayload`.
+- **Soft failure contract:** `resolve` and `from_prediction` never raise into UI handlers; missing/corrupt/unreadable → `kind="message"` with human text. Message path **clears** well/cross-well/map so prior graphics do not linger (seismic has no empty-clear API).
+
+### Bounds constants
+
+| Loader | Constant | Default |
+|--------|----------|---------|
+| LAS | `MAX_CURVES` / `MAX_SAMPLES` | 12 / 2000 (stride long curves) |
+| SEGY | `MAX_DIM` / product budget | 64 / 64³; set `payload.warning` when downsampled |
+
+### Jump wiring
+
+1. Data page: `supports_resource` → enable 「在可视化中打开」 → emit `open_in_visualization(VizRef)` with `source="data_page"`.
+2. Window: `icon_rail.set_active(PAGE_INDEX_VISUALIZATION)` + `_switch_page(5)` + `VisualizationPage.open_ref(ref)`.
+3. Visualization: `adapter.resolve(ref, project_or_stub)` → `load_payload` + `trace.update_ref`.
+4. Refresh: `_reload_current` re-resolves `_current_ref`; if no ref, `update_state(prediction_tasks)` mock fallback.
+5. Load priority (测井/地震): current `VizRef` → else prediction mock → else empty.
+
+### Tests / packaging notes
+
+- Monkeypatch dotted paths into `paleo_workbench.ui.pages.*` can fail because pages package uses lazy `__getattr__` — patch the imported module object instead.
+- Jump tests must drain/shutdown data-page preview QThreads before teardown (offscreen abort risk).
+- Tab identity in tests: prefer `tabs.tabText(...)` over hard-coded indices (古地理 may move).
