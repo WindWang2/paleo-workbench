@@ -26,6 +26,7 @@ class MapEditToolbar(QWidget):
     merge_facies_requested = Signal()
     split_facies_requested = Signal()
     save_draft_requested = Signal()
+    generate_demo_draft_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
 
@@ -101,6 +102,12 @@ class MapEditToolbar(QWidget):
         layout.addWidget(self.split_btn)
 
         layout.addStretch(1)
+
+        self.generate_demo_draft_btn = QPushButton("生成演示草稿")
+        self.generate_demo_draft_btn.setObjectName("SecondaryButton")
+        self.generate_demo_draft_btn.setToolTip("从预测相带区域生成可编辑的演示级编图草稿")
+        self.generate_demo_draft_btn.clicked.connect(self.generate_demo_draft_requested.emit)
+        layout.addWidget(self.generate_demo_draft_btn)
 
         self.save_draft_btn = QPushButton("保存编图草稿")
         self.save_draft_btn.setObjectName("PrimaryButton")

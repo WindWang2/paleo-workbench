@@ -51,3 +51,13 @@ def test_mapping_page_context_snapshot(qtbot):
     assert ctx["dirty"] is False
     assert received
     assert received[-1]["map_name"] == "Delta Map"
+
+
+def test_mapping_page_forwards_generate_demo_draft_signal(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    received = []
+    page.generate_demo_draft_requested.connect(lambda: received.append(True))
+
+    page.toolbar.generate_demo_draft_btn.click()
+    assert received == [True]

@@ -38,10 +38,12 @@ def test_toolbar_snap_and_action_signals(qtbot):
 
     snaps = []
     saves = []
+    demos = []
     undos = []
     redos = []
     bar.snap_toggled.connect(snaps.append)
     bar.save_draft_requested.connect(lambda: saves.append(True))
+    bar.generate_demo_draft_requested.connect(lambda: demos.append(True))
     bar.undo_requested.connect(lambda: undos.append(True))
     bar.redo_requested.connect(lambda: redos.append(True))
 
@@ -52,7 +54,22 @@ def test_toolbar_snap_and_action_signals(qtbot):
 
     bar.undo_btn.click()
     bar.redo_btn.click()
+    bar.generate_demo_draft_btn.click()
     bar.save_draft_btn.click()
     assert undos == [True]
     assert redos == [True]
+    assert demos == [True]
     assert saves == [True]
+
+
+def test_toolbar_generate_demo_draft_button_emits(qtbot):
+    bar = MapEditToolbar()
+    qtbot.addWidget(bar)
+
+    assert bar.generate_demo_draft_btn.text() == "生成演示草稿"
+    assert bar.generate_demo_draft_btn.objectName() == "SecondaryButton"
+
+    received = []
+    bar.generate_demo_draft_requested.connect(lambda: received.append(True))
+    bar.generate_demo_draft_btn.click()
+    assert received == [True]

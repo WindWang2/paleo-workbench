@@ -31,6 +31,7 @@ class MappingPage(QWidget):
 
     draft_saved = Signal(object)
     mapping_context_changed = Signal(dict)
+    generate_demo_draft_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,6 +85,7 @@ class MappingPage(QWidget):
         self.toolbar.merge_facies_requested.connect(self.merge_selected_facies)
         self.toolbar.split_facies_requested.connect(self.split_selected_facies)
         self.toolbar.save_draft_requested.connect(self.save_draft)
+        self.toolbar.generate_demo_draft_requested.connect(self.generate_demo_draft_requested.emit)
         self.chrome_panel.save_btn.clicked.connect(self.save_draft)
 
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)

@@ -200,11 +200,23 @@ class PaleoWorkbenchWindow(QWidget):
         toolbar.save_project_requested.connect(self._on_save_project)
         toolbar.properties_requested.connect(self._on_properties)
         self._wire_data_visualization_jump()
+        self._wire_mapping_page()
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()
         if hasattr(page, "open_in_visualization"):
             page.open_in_visualization.connect(self._on_open_in_visualization)
+
+    def _wire_mapping_page(self) -> None:
+        page = self.app_shell.mapping_page_widget()
+        if hasattr(page, "generate_demo_draft_requested"):
+            page.generate_demo_draft_requested.connect(self._on_generate_demo_map_draft)
+
+    def _on_generate_demo_map_draft(self) -> None:
+        from paleo_workbench.pipeline.compile_map import compile_map_draft
+
+        compile_map_draft(self.project, seed=0)
+        self._refresh_shell()
 
     def _on_open_in_visualization(self, ref) -> None:
         from paleo_workbench.ui.app_shell import PAGE_INDEX_VISUALIZATION
