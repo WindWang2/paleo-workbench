@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
 from paleo_workbench.ui.pages.visualization_summary_panel import VisualizationSummaryPanel
 from paleo_workbench.ui.pages.visualization_trace_panel import VisualizationTracePanel
+from paleo_workbench.viz.adapter import VizAdapter
+from paleo_workbench.viz.models import VizRef
 
 
 class VisualizationPage(QWidget):
@@ -13,6 +16,13 @@ class VisualizationPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("VisualizationPage")
+
+        self._resources: list = []
+        self._prediction_tasks: list = []
+        self._map_documents: list = []
+        self._project: ProjectDocument | None = None
+        self._current_ref: VizRef | None = None
+        self._adapter = VizAdapter()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -32,7 +42,49 @@ class VisualizationPage(QWidget):
 
         outer.addLayout(content, 1)
 
-    def update_state(self, resources: list, prediction_tasks: list, map_documents: list) -> None:
-        self.summary_panel.update_state(resources, prediction_tasks, map_documents)
-        self.composite_panel.update_state(prediction_tasks)
-        self.trace_panel.update_state(prediction_tasks, map_documents)
+        self.summary_panel.asset_selected.connect(self.open_ref)
+        self.trace_panel.refresh_requested.connect(self._reload_current)
+
+    def update_state(
+        self,
+        resources: list,
+        prediction_tasks: list,
+        map_documents: list,
+        project: ProjectDocument | None = None,
+    ) -> None:
+        self._resources = list(resources or [])
+        self._prediction_tasks = list(prediction_tasks or [])
+        self._map_documents = list(map_documents or [])
+        self._project = project
+
+        self.summary_panel.update_state(self._resources, self._prediction_tasks, self._map_documents)
+        self.trace_panel.update_state(self._prediction_tasks, self._map_documents)
+
+        if self._current_ref is None:
+            self.composite_panel.update_state(self._prediction_tasks)
+        else:
+            self.open_ref(self._current_ref)
+
+    def open_ref(self, ref: VizRef | None) -> None:
+        if ref is None:
+            return
+        self._current_ref = ref
+        project = self._project_stub()
+        payload = self._adapter.resolve(ref, project)
+        self.composite_panel.load_payload(payload)
+        self.trace_panel.update_ref(ref, payload)
+
+    def _reload_current(self) -> None:
+        if self._current_ref is not None:
+            self.open_ref(self._current_ref)
+        else:
+            self.composite_panel.update_state(self._prediction_tasks)
+
+    def _project_stub(self) -> ProjectDocument:
+        if self._project is not None:
+            return self._project
+        doc = ProjectDocument.new("_viz")
+        doc.resources = list(self._resources)
+        doc.prediction_tasks = list(self._prediction_tasks)
+        doc.paleomap_documents = list(self._map_documents)
+        return doc
