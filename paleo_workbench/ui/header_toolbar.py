@@ -3,6 +3,8 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLineEdit, QPushButton
 
+from paleo_workbench.ui import tokens
+
 _BUTTON_SPECS = [
     ("新建工程", "PrimaryButton"),
     ("打开工程", "SecondaryButton"),
@@ -25,10 +27,14 @@ class HeaderToolbar(QFrame):
         self.buttons: list[QPushButton] = []
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 12, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(tokens.SPACE_2)
         for text, obj_name in _BUTTON_SPECS:
             btn = QPushButton(text)
             btn.setObjectName(obj_name)
+            if obj_name == "PrimaryButton":
+                btn.setMinimumHeight(tokens.CONTROL_HEIGHT_LG)
+            else:
+                btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
             self.buttons.append(btn)
             layout.addWidget(btn)
         layout.addStretch()

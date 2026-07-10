@@ -11,8 +11,13 @@ class TextSidebar(QFrame):
         self.setObjectName("TextSidebar")
         layout = QVBoxLayout(self)
         self._layout = layout
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
+        layout.setSpacing(tokens.SPACE_2)
         self.context_label = QLabel(tokens.PAGE_NAMES[0])
         self.context_label.setStyleSheet(
             f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"

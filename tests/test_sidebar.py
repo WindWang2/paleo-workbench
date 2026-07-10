@@ -1,8 +1,19 @@
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.sidebar import TextSidebar
 
 
 def _label_texts(bar):
     return [label.text() for label in bar.findChildren(type(bar.context_label))]
+
+
+def test_sidebar_page_margin(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    m = bar._layout.contentsMargins()
+    assert m.left() == tokens.PAGE_MARGIN
+    assert m.top() == tokens.PAGE_MARGIN
+    assert m.right() == tokens.PAGE_MARGIN
+    assert m.bottom() == tokens.PAGE_MARGIN
 
 
 def test_sidebar_default_context_label(qtbot):
