@@ -16,6 +16,14 @@ def test_ui_exports_zone_widgets():
     ])
 
 
+def test_ui_pages_exports_data_management_widgets():
+    from paleo_workbench.ui.pages import DataToolbar, DataWorkspace, FloatingPanel
+
+    assert DataToolbar is not None
+    assert DataWorkspace is not None
+    assert FloatingPanel is not None
+
+
 def test_floating_panel_import_does_not_eagerly_import_ui_shell_modules():
     for module_name in [
         "geoviz_paleo_map",

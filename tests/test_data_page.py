@@ -561,6 +561,45 @@ def test_data_page_filtering_hidden_selection_clears_reader_action_state_and_con
     assert received[-1]["reader_mode"] == "empty"
 
 
+def test_data_page_toolbar_search_filters_asset_table(qtbot, tmp_path: Path):
+    first = tmp_path / "alpha.txt"
+    second = tmp_path / "beta.txt"
+    first.write_text("alpha", encoding="utf-8")
+    second.write_text("beta", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    project.resources.extend(
+        [
+            ResourceItem(name="alpha.txt", path=str(first), type="document", format="txt"),
+            ResourceItem(name="beta.txt", path=str(second), type="document", format="txt"),
+        ]
+    )
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    page.data_toolbar.search_box.setText("beta")
+
+    assert page.asset_table.table.rowCount() == 1
+    assert page.asset_table.table.item(0, 0).text() == "beta.txt"
+
+
+def test_data_page_floating_action_import_button_uses_background_import(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = ProjectDocument.new("Demo")
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    monkeypatch.setattr(page, "_choose_import_files", lambda: [path])
+
+    with qtbot.waitSignal(page.import_finished, timeout=1000):
+        page.action_panel.import_btn.click()
+
+    assert project.resources[0].name == "notes.txt"
+
+
 def test_data_page_can_remove_selected_export_artifact(qtbot):
     project = ProjectDocument.new("Demo")
     artifact = ExportArtifact(
