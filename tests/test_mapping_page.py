@@ -34,3 +34,20 @@ def test_mapping_page_update_state_sets_layer_tree(qtbot):
     assert root.child(1).text(0) == "Map B"
     # Active is last document — layers under Map B
     assert root.child(1).childCount() == 4
+
+
+def test_mapping_page_context_snapshot(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    received: list[dict] = []
+    page.mapping_context_changed.connect(received.append)
+
+    page.update_state([
+        PaleoMapDocument(name="Delta Map", linked_target_horizon="H3"),
+    ])
+    ctx = page.mapping_context()
+    assert ctx["map_name"] == "Delta Map"
+    assert ctx["horizon"] == "H3"
+    assert ctx["dirty"] is False
+    assert received
+    assert received[-1]["map_name"] == "Delta Map"

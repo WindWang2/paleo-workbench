@@ -26,6 +26,8 @@ class TextSidebar(QFrame):
         self.context_label.setText(name)
         if name == "数据":
             self.update_data_context(resource_count=0, artifact_count=0)
+        elif name == "编图":
+            self.update_mapping_context()
         else:
             self._render_context(name)
 
@@ -59,6 +61,28 @@ class TextSidebar(QFrame):
                 ("导入文件 / 导入目录", False),
                 ("重新扫描 / 移出项目", False),
                 ("打开目录", False),
+            ]
+        )
+
+    def update_mapping_context(
+        self,
+        map_name: str = "未选择",
+        horizon: str = "",
+        dirty: bool = False,
+    ) -> None:
+        """Show active map name, horizon, and dirty state for the 编图 page."""
+        self.context_label.setText("编图")
+        name_text = map_name or "未选择"
+        horizon_text = horizon or "—"
+        status_text = "未保存" if dirty else "已保存"
+        self._render_lines(
+            [
+                ("编图上下文", True),
+                (f"图件: {name_text}", False),
+                (f"层位: {horizon_text}", False),
+                (f"状态: {status_text}", False),
+                ("相带画布", False),
+                ("图面元素", False),
             ]
         )
 
@@ -101,7 +125,9 @@ class TextSidebar(QFrame):
             ],
             "编图": [
                 ("编图上下文", True),
-                ("当前图件", False),
+                ("图件: 未选择", False),
+                ("层位: —", False),
+                ("状态: 已保存", False),
                 ("相带画布", False),
                 ("图面元素", False),
             ],

@@ -1,6 +1,11 @@
 from paleo_workbench.ui.app_shell import AppShell
 from paleo_workbench.ui import tokens
-from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.project.models import (
+    ExportArtifact,
+    PaleoMapDocument,
+    ProjectDocument,
+    ResourceItem,
+)
 
 
 def test_app_shell_assembles_all_zones(qtbot):
@@ -96,6 +101,22 @@ def test_app_shell_set_project_name(qtbot):
     qtbot.addWidget(shell)
     shell.set_project_name("HZ26 Demo")
     assert "HZ26 Demo" in shell.status_bar.status_label.text()
+
+
+def test_app_shell_mapping_sidebar_shows_map_name(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    docs = [
+        PaleoMapDocument(name="ZJ2 Map", linked_target_horizon="ZJ2"),
+    ]
+    shell.update_mapping_page(docs)
+    shell.icon_rail.nav_buttons[7].click()
+
+    texts = "\n".join(label.text() for label in shell.sidebar._content_labels)
+    assert shell.sidebar.context_label.text() == "编图"
+    assert "图件: ZJ2 Map" in texts
+    assert "层位: ZJ2" in texts
+    assert "状态: 已保存" in texts
 
 
 def test_app_shell_object_name(qtbot):

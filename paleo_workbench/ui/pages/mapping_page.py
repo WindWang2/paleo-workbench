@@ -16,6 +16,7 @@ class MappingPage(QWidget):
     """GIS-shell 编图 page: toolbar, layer tree, edit view, attribute table."""
 
     draft_saved = Signal(object)
+    mapping_context_changed = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -63,6 +64,7 @@ class MappingPage(QWidget):
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         self._on_tool_changed(self.toolbar.current_tool())
+        self._emit_mapping_context()
 
     def is_dirty(self) -> bool:
         scene = self.edit_view.scene()
@@ -72,6 +74,15 @@ class MappingPage(QWidget):
 
     def active_document(self):
         return self._active_document
+
+    def mapping_context(self) -> dict:
+        """Snapshot of active map name / horizon / dirty for the sidebar."""
+        doc = self._active_document
+        return {
+            "map_name": getattr(doc, "name", None) or "未选择",
+            "horizon": getattr(doc, "linked_target_horizon", None) or "",
+            "dirty": self.is_dirty(),
+        }
 
     def update_state(self, map_documents: list | tuple | None) -> None:
         documents = list(map_documents or [])
@@ -88,6 +99,7 @@ class MappingPage(QWidget):
         self.attribute_table.set_feature(None)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        self._emit_mapping_context()
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""
@@ -102,6 +114,7 @@ class MappingPage(QWidget):
         scene.set_dirty(False)
         self._sync_save_enabled()
         self.draft_saved.emit(doc)
+        self._emit_mapping_context()
         return True
 
     def _edit_scene(self) -> MapEditScene | None:
@@ -137,6 +150,7 @@ class MappingPage(QWidget):
         self.attribute_table.set_feature(None)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        self._emit_mapping_context()
 
     def _on_property_changed(self, feature_id: str, key: str, value: object) -> None:
         scene = self._edit_scene()
@@ -183,6 +197,7 @@ class MappingPage(QWidget):
     def _on_document_dirty_changed(self, _dirty: bool) -> None:
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        self._emit_mapping_context()
 
     def _sync_undo_redo_enabled(self) -> None:
         scene = self._edit_scene()
@@ -193,3 +208,6 @@ class MappingPage(QWidget):
     def _sync_save_enabled(self) -> None:
         can_save = self._active_document is not None and self.is_dirty()
         self.toolbar.save_draft_btn.setEnabled(can_save)
+
+    def _emit_mapping_context(self) -> None:
+        self.mapping_context_changed.emit(self.mapping_context())

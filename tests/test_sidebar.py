@@ -17,7 +17,20 @@ def test_sidebar_set_context_updates_label(qtbot):
     bar.set_context("编图")
     assert bar.context_label.text() == "编图"
     assert "上下文面板 (待实现)" not in _label_texts(bar)
-    assert any("当前图件" in text for text in _label_texts(bar))
+    texts = _label_texts(bar)
+    assert any("图件:" in text for text in texts)
+    assert any("状态:" in text for text in texts)
+
+
+def test_sidebar_mapping_context_shows_name_and_dirty(qtbot):
+    bar = TextSidebar()
+    qtbot.addWidget(bar)
+    bar.update_mapping_context(map_name="ZJ2 Map", horizon="ZJ2", dirty=True)
+    texts = "\n".join(_label_texts(bar))
+    assert bar.context_label.text() == "编图"
+    assert "图件: ZJ2 Map" in texts
+    assert "层位: ZJ2" in texts
+    assert "状态: 未保存" in texts
 
 
 def test_sidebar_data_context_renders_counts_and_selection_defaults(qtbot):
