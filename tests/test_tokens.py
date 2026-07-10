@@ -186,3 +186,14 @@ def test_qss_has_button_states_and_panels():
     assert "EmptyStateLabel" in qss
     assert "QHeaderView::section" in qss
     assert "QTableView" in qss or "QTableWidget" in qss
+
+
+def test_qss_has_mapping_and_status_selectors():
+    qss = tokens.QSS_TEMPLATE
+    assert "MapEditToolbar" in qss
+    assert "ToolbarSeparator" in qss
+    assert "MapLayerTree" in qss
+    assert "MapAttributeTable" in qss
+    assert "MapDockTitle" in qss
+    assert "StatusCoordLabel" in qss
+    assert "MapCanvasPanel" in qss

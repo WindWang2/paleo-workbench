@@ -256,4 +256,46 @@ QFrame#StatusBar {{
     font-size: {FONT_SIZE_STATUS}; color: {TEXT_SECONDARY};
 }}
 QFrame#PagePlaceholder {{ background: {BG_BODY}; }}
+QWidget#MapEditToolbar {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_CARD}px;
+}}
+QFrame#ToolbarSeparator {{
+    background: {BORDER};
+    border: none;
+    max-width: 1px;
+    min-width: 1px;
+}}
+QFrame#MapLayerTree,
+QFrame#MapAttributeTable,
+QFrame#MapCanvasPanel,
+QFrame#MapChromePanel {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_CARD}px;
+}}
+QLabel#MapDockTitle {{
+    color: {TEXT_PRIMARY};
+    font-size: {FONT_SIZE_TITLE};
+    font-weight: {FONT_WEIGHT_TITLE};
+    border: none;
+    background: transparent;
+}}
+QTreeWidget#MapLayerTreeWidget {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 2px;
+}}
+QTableWidget#MapAttributeTableWidget {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+}}
+QLabel#StatusCoordLabel {{
+    color: {TEXT_SECONDARY};
+    font-size: {FONT_SIZE_STATUS};
+    font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+}}
 """
