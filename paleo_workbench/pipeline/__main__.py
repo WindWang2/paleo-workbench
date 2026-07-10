@@ -6,6 +6,7 @@ from pathlib import Path
 
 from paleo_workbench.pipeline.assets import ensure_demo_prediction
 from paleo_workbench.pipeline.bootstrap import bootstrap_sample_project, write_project
+from paleo_workbench.pipeline.compile_map import compile_map_draft
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,6 +22,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Seed a demo prediction task bound to sample LAS/SEGY assets.",
     )
+    parser.add_argument(
+        "--with-map-draft",
+        action="store_true",
+        help="Compile a deterministic demo paleomap draft into the project.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -30,8 +36,11 @@ def main(argv: list[str] | None = None) -> int:
             region=args.region,
             project_path=args.out,
         )
+        # Order: bootstrap → demo tasks → map draft → write
         if args.with_demo_tasks:
             ensure_demo_prediction(result.document, seed=0)
+        if args.with_map_draft:
+            compile_map_draft(result.document, seed=0)
         path = write_project(result.document, args.out)
     except FileNotFoundError as e:
         print(str(e), file=sys.stderr)

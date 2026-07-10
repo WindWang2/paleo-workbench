@@ -74,10 +74,10 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
         assert ref.id == resource.id
         return VizPayload(kind="well_log", label="from-adapter", well_log=known)
 
-    monkeypatch.setattr(
-        "paleo_workbench.ui.pages.well_log_canvas_panel.VizAdapter.resolve",
-        _fake_resolve,
-    )
+    # Patch class method (string path breaks when pages lazy __getattr__ is active).
+    from paleo_workbench.viz.adapter import VizAdapter
+
+    monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
 
     panel = WellLogCanvasPanel()
     qtbot.addWidget(panel)
@@ -111,10 +111,9 @@ def test_well_log_canvas_bound_failure_shows_message(qtbot, monkeypatch):
             message="井数据文件不存在或不可读",
         )
 
-    monkeypatch.setattr(
-        "paleo_workbench.ui.pages.well_log_canvas_panel.VizAdapter.resolve",
-        _fake_resolve,
-    )
+    from paleo_workbench.viz.adapter import VizAdapter
+
+    monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
 
     panel = WellLogCanvasPanel()
     qtbot.addWidget(panel)
