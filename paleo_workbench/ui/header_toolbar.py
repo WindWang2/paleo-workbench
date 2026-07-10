@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLineEdit, QPushButton
 _BUTTON_SPECS = [
     ("新建工程", "PrimaryButton"),
     ("打开工程", "SecondaryButton"),
+    ("打开样例工程", "SecondaryButton"),
     ("保存工程", "SecondaryButton"),
     ("工程属性", "SecondaryButton"),
 ]
@@ -14,6 +15,7 @@ _BUTTON_SPECS = [
 class HeaderToolbar(QFrame):
     new_project_requested = Signal()
     open_project_requested = Signal()
+    open_sample_project_requested = Signal()
     save_project_requested = Signal()
     properties_requested = Signal()
 
@@ -33,11 +35,13 @@ class HeaderToolbar(QFrame):
 
         self.new_project_btn = self.buttons[0]
         self.open_project_btn = self.buttons[1]
-        self.save_project_btn = self.buttons[2]
-        self.properties_btn = self.buttons[3]
+        self.open_sample_project_btn = self.buttons[2]
+        self.save_project_btn = self.buttons[3]
+        self.properties_btn = self.buttons[4]
 
         self.new_project_btn.clicked.connect(self.new_project_requested)
         self.open_project_btn.clicked.connect(self.open_project_requested)
+        self.open_sample_project_btn.clicked.connect(self.open_sample_project_requested)
         self.save_project_btn.clicked.connect(self.save_project_requested)
         self.properties_btn.clicked.connect(self.properties_requested)
 
