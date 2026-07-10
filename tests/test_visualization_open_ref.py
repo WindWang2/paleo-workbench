@@ -48,7 +48,8 @@ def test_open_ref_well_log_selects_well_tab(qtbot, tmp_path: Path):
     assert page.composite_panel.tabs.currentIndex() == 0  # 测井
     assert page.composite_panel.well_canvas is not None
     assert len(page.composite_panel.well_canvas.tracks) > 0
-
+    # Cross-well primary canvas also receives a well via package API
+    assert page.composite_panel.cross_well_widget.canvas_count >= 1
 
 def test_open_ref_map_selects_map_tab(qtbot):
     doc = PaleoMapDocument(
