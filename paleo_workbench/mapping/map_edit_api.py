@@ -662,6 +662,10 @@ def _try_shapely():
         return None
 
 
+# Public capability flag (merge/split polygons). True when shapely imports cleanly.
+HAS_SHAPELY = _try_shapely() is not None
+
+
 def _polygon_exterior_coords(poly) -> list[list[float]]:
     coords = list(poly.exterior.coords)
     return [[float(x), float(y)] for x, y in coords]

@@ -603,4 +603,15 @@ Implemented via SDD on `feature/viz-geoviz-adapter` (4 tasks).
 
 ### Status
 
-**Phase 17 COMPLETE** on branch `feature/viz-geoviz-adapter` (not merged/pushed in this task).
+**Phase 17 COMPLETE** on branch `feature/viz-geoviz-adapter`.
+
+### Post-merge on main (2026-07-10 cont.)
+
+- Fast-forward merged `feature/viz-geoviz-adapter` → `main` (`6d8a131`)
+- Declared `shapely>=2.0` in `pyproject.toml` (merge/split topology)
+- Public `HAS_SHAPELY` on `map_edit_api`; shapely-dependent topology tests use `skipif`
+- Removed unused pytest `asyncio_default_fixture_loop_scope` (warning cleanup)
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **501 passed**
+- Smoke: `PaleoWorkbenchWindow` constructs; `HAS_CPP=True`, `HAS_SHAPELY=True`
+
+**MVP scope (Phases 1–17) complete on `main`.**

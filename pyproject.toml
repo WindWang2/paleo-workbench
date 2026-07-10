@@ -10,10 +10,12 @@ dependencies = [
     "pandas>=2.0",
     "openpyxl>=3.1",
     "lasio>=0.14",
+    # Mapping topology merge/split (map_edit_api) requires shapely.
+    "shapely>=2.0",
     # geo-viz-engine is consumed as a git submodule at ./geo-viz-engine.
     # Its subpackages are installed editable (see requirements-geoviz.txt) so each
     # subpackage pulls its own heavy deps (scipy, segyio, pyqtgraph, PyOpenGL,
-    # matplotlib, shapely). They are NOT listed here as PEP 508 path deps because
+    # matplotlib). They are NOT listed here as PEP 508 path deps because
     # standard pip does not expand ${PROJECT_ROOT}-style variables; list-install
     # order also matters (leaf packages first).
 ]
@@ -38,7 +40,6 @@ include = ["paleo_workbench*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-asyncio_default_fixture_loop_scope = "function"
 pythonpath = [
     ".",
     "geo-viz-engine",

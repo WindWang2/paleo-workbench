@@ -3,7 +3,7 @@
 > **Updated:** 2026-07-10
 > **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`.
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + **Visualization geo-viz adapter (Phase 17)** complete. ~497 tests; optional `map_edit_core` C++ extension available.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + **Visualization geo-viz adapter (Phase 17)** complete and on `main`. **501 tests** passing; `map_edit_core` C++ + `shapely` available for topology merge/split.
 
 ## Current Architecture
 
@@ -188,9 +188,9 @@ Shared adapter turns project LAS / SEGY / paleomap assets into geo-viz payloads;
 
 - Spec: `docs/superpowers/specs/2026-07-10-visualization-geoviz-adapter-design.md`
 - Plan: `docs/superpowers/plans/2026-07-10-visualization-geoviz-adapter.md`
-- Branch: `feature/viz-geoviz-adapter`
+- Branch: `feature/viz-geoviz-adapter` → **merged `main`** (fast-forward `6d8a131`)
 - Bounds: LAS max 12 curves / 2000 samples; SEGY product ≤ 64³
-- Tests: **497 passed**, 4 skipped (optional C++ unchanged)
+- Tests: **501 passed** (post-merge; shapely declared + installed)
 
 ## Known Follow-up Items (Minor, non-blocking)
 
@@ -205,6 +205,7 @@ Shared adapter turns project LAS / SEGY / paleomap assets into geo-viz payloads;
 | 7 | CI job requires `HAS_CPP` (`map_edit_core` build) | ✅ done (`.github/workflows/ci.yml`) |
 | 8 | Search haystack Chinese type labels | ✅ done |
 | 9 | Facies freehand + chrome print preview | ✅ done earlier |
+| 10 | Declare `shapely>=2.0` + public `HAS_SHAPELY` for merge/split | ✅ done |
 
 ## Page Progress Matrix
 
@@ -251,5 +252,5 @@ Shared adapter turns project LAS / SEGY / paleomap assets into geo-viz payloads;
 | 2026-07-07 (Project Management V1) | 283 | ✅ |
 | 2026-07-10 (Data page redesign + preview formats era) | ~350+ | ✅ |
 | 2026-07-10 (Data Page UI/Perf Optimization, PR #1) | ~385 | ✅ |
-| 2026-07-10 (Mapping Editor V1 + post-V1) | ~475 | ✅ |
-| 2026-07-10 (Visualization geo-viz adapter, Phase 17) | 497 | ✅ |
+| 2026-07-10 (Mapping Editor V1 + post-V1 topology, PR #3) | ~475 | ✅ |
+| 2026-07-10 (Visualization geo-viz adapter Phase 17, merged main) | 501 | ✅ |

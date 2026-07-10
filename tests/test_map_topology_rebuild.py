@@ -1,4 +1,7 @@
+import pytest
+
 from paleo_workbench.mapping.map_edit_api import (
+    HAS_SHAPELY,
     merge_rings,
     rebuild_topology,
     snap_shared_nodes,
@@ -7,6 +10,11 @@ from paleo_workbench.mapping.map_edit_api import (
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.mapping_page import MappingPage
+
+requires_shapely = pytest.mark.skipif(
+    not HAS_SHAPELY,
+    reason="shapely required for polygon merge/split",
+)
 
 
 def test_snap_shared_nodes_merges_nearby_vertices():
@@ -28,6 +36,7 @@ def test_rebuild_topology_report():
     assert report["rings"][0][1] == report["rings"][1][0]
 
 
+@requires_shapely
 def test_merge_rings_with_shapely():
     a = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]
     b = [[1, 1], [3, 1], [3, 3], [1, 3], [1, 1]]
@@ -36,6 +45,7 @@ def test_merge_rings_with_shapely():
     assert len(merged) >= 4
 
 
+@requires_shapely
 def test_split_ring_by_line_with_shapely():
     ring = [[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]
     line = [[2, -1], [2, 5]]
@@ -75,6 +85,7 @@ def test_scene_rebuild_topology_forced_snaps_and_is_undoable(qtbot):
     assert scene.undo() is True
 
 
+@requires_shapely
 def test_scene_merge_and_split_facies(qtbot):
     scene = MapEditScene()
     doc = PaleoMapDocument(
