@@ -6,6 +6,10 @@ from pathlib import Path
 from pydantic import ValidationError
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
 
+from paleo_workbench.pipeline.bootstrap import (
+    bootstrap_sample_project,
+    resolve_sample_data_root,
+)
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui import AppShell
@@ -87,6 +91,37 @@ class PaleoWorkbenchWindow(QWidget):
 
     # --- toolbar handlers (signals -> dialogs -> core methods) ---
 
+    def open_sample_project(self, data_root: Path | None = None) -> bool:
+        """Bootstrap sample data into the current window (no auto-save)."""
+        if not self._confirm_replace_project():
+            return False
+        try:
+            root = resolve_sample_data_root(data_root)
+            result = bootstrap_sample_project(root)
+        except FileNotFoundError as e:
+            self._show_project_error("打开样例工程失败", str(e))
+            return False
+        except ValueError as e:
+            self._show_project_error("打开样例工程失败", str(e))
+            return False
+        except OSError as e:
+            self._show_project_error("打开样例工程失败", str(e))
+            return False
+        self.project = result.document
+        self.project_path = None
+        self._refresh_shell()
+        return True
+
+    def _confirm_replace_project(self) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "打开样例工程",
+            "将用样例数据替换当前工程（未保存更改会丢失）。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _on_new_project(self) -> None:
         self.new_project()
 
@@ -97,6 +132,9 @@ class PaleoWorkbenchWindow(QWidget):
         if not self.open_project_path(path):
             detail = getattr(self, "_last_open_error", None) or f"无法打开工程文件：\n{path}"
             self._show_project_error("打开工程失败", detail)
+
+    def _on_open_sample_project(self) -> None:
+        self.open_sample_project()
 
     def _on_save_project(self) -> None:
         self.save_project()
@@ -156,6 +194,7 @@ class PaleoWorkbenchWindow(QWidget):
         toolbar = self.app_shell.header_toolbar
         toolbar.new_project_requested.connect(self._on_new_project)
         toolbar.open_project_requested.connect(self._on_open_project)
+        toolbar.open_sample_project_requested.connect(self._on_open_sample_project)
         toolbar.save_project_requested.connect(self._on_save_project)
         toolbar.properties_requested.connect(self._on_properties)
         self._wire_data_visualization_jump()
