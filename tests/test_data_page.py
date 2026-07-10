@@ -1,21 +1,40 @@
 from pathlib import Path
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QLabel, QSplitter
+from PySide6.QtWidgets import QLabel, QSplitter, QTableView
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.resources.import_service import ImportReport
+from paleo_workbench.ui.pages.asset_table_model import AssetTableModel
 from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 
 
+def _table_model(page: DataPage):
+    return page.asset_table.table.model()
+
+
+def _table_row_count(page: DataPage) -> int:
+    return _table_model(page).rowCount()
+
+
+def _table_text(page: DataPage, row: int, column: int) -> str:
+    model = _table_model(page)
+    return model.data(model.index(row, column)) or ""
+
+
+def _wait_reader_mode(qtbot, page: DataPage, mode: str, timeout: int = 3000) -> None:
+    qtbot.waitUntil(lambda: page.reader_panel.current_mode == mode, timeout=timeout)
+
+
 def _table_headers(page: DataPage) -> list[str]:
+    model = _table_model(page)
     return [
-        page.asset_table.table.horizontalHeaderItem(i).text()
-        for i in range(page.asset_table.table.columnCount())
+        model.headerData(i, Qt.Orientation.Horizontal)
+        for i in range(model.columnCount())
     ]
 
 
@@ -54,6 +73,34 @@ def test_data_page_uses_workspace_toolbar_and_floating_panels(qtbot):
     assert page.content_splitter.indexOf(page.action_panel) == -1
 
 
+def test_data_page_toolbar_toggles_update_checked_state(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    page.show()
+    qtbot.waitExposed(page)
+
+    assert page.data_toolbar.catalog_btn.isChecked() is False
+    assert page.workspace.catalog_floating_panel.is_expanded() is False
+    assert page.data_toolbar.reader_btn.isChecked() is True
+    assert page.reader_panel.isVisible() is True
+
+    page.data_toolbar.catalog_btn.click()
+    assert page.workspace.catalog_floating_panel.is_expanded() is True
+    assert page.data_toolbar.catalog_btn.isChecked() is True
+
+    page.data_toolbar.catalog_btn.click()
+    assert page.workspace.catalog_floating_panel.is_expanded() is False
+    assert page.data_toolbar.catalog_btn.isChecked() is False
+
+    page.data_toolbar.reader_btn.click()
+    assert page.reader_panel.isVisible() is False
+    assert page.data_toolbar.reader_btn.isChecked() is False
+
+    page.data_toolbar.reader_btn.click()
+    assert page.reader_panel.isVisible() is True
+    assert page.data_toolbar.reader_btn.isChecked() is True
+
+
 def test_data_page_update_state_delegates(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
@@ -73,7 +120,7 @@ def test_data_page_update_state_delegates(qtbot):
         ),
     ]
     page.update_state(state, resources)
-    assert page.asset_table.table.rowCount() == 1
+    assert _table_row_count(page) == 1
     assert "5" in page.summary_bar.type_labels["well_log"].text()
 
 
@@ -162,6 +209,7 @@ def test_data_page_column_change_preserves_selection_and_reader(qtbot, tmp_path:
     qtbot.addWidget(page)
 
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
     page.column_actions["source"].trigger()
     page.column_actions["path"].trigger()
 
@@ -199,7 +247,7 @@ def test_data_page_import_paths_updates_project_and_table(qtbot, tmp_path: Path)
 
     assert report.added_count == 1
     assert len(project.resources) == 1
-    assert page.asset_table.table.rowCount() == 1
+    assert _table_row_count(page) == 1
     assert "新增 1" in page.action_panel.status_label.text()
 
 
@@ -233,7 +281,7 @@ def test_data_page_remove_selected_resource_unregisters_only(qtbot, tmp_path: Pa
     assert removed is True
     assert project.resources == []
     assert well.exists()
-    assert page.asset_table.table.rowCount() == 0
+    assert _table_row_count(page) == 0
     assert "已移出项目" in page.action_panel.status_label.text()
 
 
@@ -390,6 +438,86 @@ def test_data_page_starts_folder_import_in_worker_thread(
     assert "新增 1" in page.action_panel.status_label.text()
 
 
+def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
+    """Multi-file async import applies one model reset with the expected total."""
+    project = ProjectDocument.new("Demo")
+    paths = []
+    for index in range(5):
+        path = tmp_path / f"well_{index}.las"
+        # Distinct content so checksum dedupe does not collapse the batch.
+        path.write_text(f"~Version\n# file {index}\n", encoding="utf-8")
+        paths.append(path)
+
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    reset_count = {"n": 0}
+    page.asset_table.model.modelAboutToBeReset.connect(
+        lambda *_args: reset_count.__setitem__("n", reset_count["n"] + 1)
+    )
+    update_counts: list[int] = []
+    original_update_assets = page.asset_table.update_assets
+
+    def tracking_update_assets(resources, artifacts):
+        update_counts.append(len(resources))
+        return original_update_assets(resources, artifacts)
+
+    page.asset_table.update_assets = tracking_update_assets
+
+    assert page.reader_panel.current_mode == "empty"
+    with qtbot.waitSignal(page.import_finished, timeout=3000):
+        started = page.begin_import_paths(paths)
+
+    assert started is True
+    assert len(project.resources) == 5
+    assert _table_row_count(page) == 5
+    assert reset_count["n"] == 1
+    assert update_counts == [5]
+    assert "新增 5" in page.action_panel.operation_status_label.text()
+    assert isinstance(page.asset_table.table, QTableView)
+    assert isinstance(_table_model(page), AssetTableModel)
+    # Import must not rebuild reader when nothing is selected.
+    assert page.reader_panel.current_mode == "empty"
+
+
+def test_async_import_keeps_reader_content_for_prior_selection(
+    qtbot,
+    tmp_path: Path,
+):
+    """Batch table refresh after import must not clear an existing reader preview."""
+    first = tmp_path / "alpha.txt"
+    first.write_text("alpha-content\n", encoding="utf-8")
+    extra_paths = []
+    for index in range(3):
+        path = tmp_path / f"extra_{index}.txt"
+        path.write_text(f"extra {index}\n", encoding="utf-8")
+        extra_paths.append(path)
+
+    project = ProjectDocument.new("Demo")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([first])
+    page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
+    assert "alpha-content" in page.reader_panel.text_preview.toPlainText()
+
+    reset_count = {"n": 0}
+    page.asset_table.model.modelAboutToBeReset.connect(
+        lambda *_args: reset_count.__setitem__("n", reset_count["n"] + 1)
+    )
+
+    with qtbot.waitSignal(page.import_finished, timeout=3000):
+        started = page.begin_import_paths(extra_paths)
+
+    assert started is True
+    assert len(project.resources) == 4
+    assert _table_row_count(page) == 4
+    assert reset_count["n"] == 1
+    assert "新增 3" in page.action_panel.operation_status_label.text()
+    assert page.reader_panel.current_mode == "text"
+    assert "alpha-content" in page.reader_panel.text_preview.toPlainText()
+
+
 def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path):
     project = ProjectDocument.new("Demo")
     text_path = tmp_path / "notes.txt"
@@ -399,6 +527,7 @@ def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path
     page.import_paths([text_path])
 
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
 
     assert page.reader_panel.current_mode == "text"
     assert "alpha" in page.reader_panel.text_preview.toPlainText()
@@ -416,6 +545,7 @@ def test_data_page_selection_renders_imported_image_preview(qtbot, tmp_path: Pat
     page.import_paths([image_path])
 
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "image")
 
     assert page.reader_panel.current_mode == "image"
     assert page.reader_panel.image_label.pixmap() is not None
@@ -461,6 +591,7 @@ startxref
     page.import_paths([pdf_path])
 
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "pdf")
 
     assert page.reader_panel.current_mode == "pdf"
     assert page.reader_panel.stack.currentWidget() is page.reader_panel.pdf_widget
@@ -493,6 +624,7 @@ def test_data_page_selection_updates_reader_and_context_signal(qtbot, tmp_path: 
     page.data_context_changed.connect(received.append)
 
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
 
     assert page.reader_panel.current_mode == "text"
     assert received[-1]["selected_name"] == "notes.txt"
@@ -513,6 +645,7 @@ def test_data_page_remove_refreshes_reader_and_action_state(qtbot, tmp_path: Pat
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
 
     assert page.remove_selected_asset() is True
 
@@ -549,6 +682,7 @@ def test_data_page_filtering_hidden_selection_clears_reader_action_state_and_con
     page.data_context_changed.connect(received.append)
 
     page._set_selected_asset(alpha)
+    _wait_reader_mode(qtbot, page, "text")
     page.asset_table.set_search_text("beta")
 
     assert page.reader_panel.current_mode == "empty"
@@ -577,9 +711,11 @@ def test_data_page_toolbar_search_filters_asset_table(qtbot, tmp_path: Path):
     qtbot.addWidget(page)
 
     page.data_toolbar.search_box.setText("beta")
+    # Toolbar search is debounced (~180ms).
+    qtbot.wait(200)
 
-    assert page.asset_table.table.rowCount() == 1
-    assert page.asset_table.table.item(0, 0).text() == "beta.txt"
+    assert _table_row_count(page) == 1
+    assert _table_text(page, 0, 0) == "beta.txt"
 
 
 def test_data_page_floating_action_import_button_uses_background_import(
@@ -611,6 +747,7 @@ def test_data_page_can_remove_selected_export_artifact(qtbot):
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(artifact)
+    _wait_reader_mode(qtbot, page, "message")
 
     removed = page.remove_selected_asset()
 
@@ -636,6 +773,7 @@ def test_data_page_can_open_selected_export_artifact_folder(qtbot, monkeypatch, 
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(artifact)
+    _wait_reader_mode(qtbot, page, "message")
     opened = []
     monkeypatch.setattr(
         "paleo_workbench.ui.pages.data_page.QDesktopServices.openUrl",
@@ -660,6 +798,7 @@ def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, t
 
     assert "新增 1" in page.action_panel.operation_status_label.text()
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
     assert "新增 1" in page.action_panel.operation_status_label.text()
 
 
@@ -681,6 +820,7 @@ def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
     received = []
     page.data_context_changed.connect(received.append)
 
@@ -699,5 +839,6 @@ def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
 
     assert page.rescan_selected_asset() is True
 
+    _wait_reader_mode(qtbot, page, "image")
     assert received[-1]["selected_name"] == "notes.txt"
     assert received[-1]["reader_mode"] == "image"

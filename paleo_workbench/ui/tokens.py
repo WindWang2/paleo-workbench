@@ -139,6 +139,9 @@ QPushButton#SecondaryButton {{
     border-radius: {RADIUS_BUTTON}px; padding: 4px 12px;
 }}
 QPushButton#SecondaryButton:hover {{ background: {BG_SEARCH}; }}
+QPushButton#SecondaryButton:checked {{
+    background: {BG_SEARCH}; color: {TEXT_PRIMARY};
+}}
 QLineEdit#SearchBox {{
     background: {BG_SEARCH}; border: 1px solid {BORDER};
     border-radius: {RADIUS_BUTTON}px; padding: 4px 8px; color: {TEXT_PRIMARY};

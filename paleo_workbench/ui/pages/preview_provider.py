@@ -57,11 +57,8 @@ class PreviewResult:
 
 
 class PreviewProvider:
-    def __init__(self) -> None:
-        self._cache: dict[tuple, PreviewResult] = {}
-
     def clear(self) -> None:
-        self._cache.clear()
+        """No-op: caching lives on the UI-thread PreviewCache (Task 4)."""
 
     def preview(self, asset: ResourceItem | ExportArtifact | None) -> PreviewResult:
         if asset is None:
@@ -71,27 +68,9 @@ class PreviewProvider:
                 message="从列表中选择一个数据、成果或文件",
             )
 
-        key = self._cache_key(asset)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
-
-        result = self._build_preview(asset)
-        self._cache[key] = result
-        return result
-
-    def _cache_key(self, asset: ResourceItem | ExportArtifact) -> tuple:
-        if isinstance(asset, ExportArtifact):
-            path = Path(asset.output_path)
-            return (
-                "artifact",
-                asset.id,
-                asset.output_path,
-                asset.format,
-                self._safe_stat(path),
-            )
-
-        return self._resource_revision_token(asset)
+        # Pure build — safe for worker threads. LRU cache is owned by
+        # PreviewRequestController on the UI thread.
+        return self._build_preview(asset)
 
     def _resource_revision_token(self, asset: ResourceItem) -> tuple[object, ...]:
         path = Path(asset.path)

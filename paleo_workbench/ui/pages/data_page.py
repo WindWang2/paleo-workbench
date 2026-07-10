@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
-from PySide6.QtCore import QObject, QThread, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEvent, QObject, QThread, QUrl, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
@@ -17,6 +16,8 @@ from paleo_workbench.resources.import_service import (
 from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
+from paleo_workbench.ui.pages.preview_provider import PreviewResult
+from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.workflow.service import dashboard_state
 
@@ -55,7 +56,7 @@ class DataPage(QWidget):
         self._import_in_progress = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(16)
 
         self.summary_bar = ResourceSummaryBar()
@@ -84,6 +85,16 @@ class DataPage(QWidget):
         self.rescan_btn = self.action_panel.rescan_btn
         self.remove_btn = self.action_panel.remove_btn
 
+        self._preview_controller = PreviewRequestController(
+            self.reader_panel.provider,
+            self,
+        )
+        self._preview_controller.loading.connect(
+            lambda: self.reader_panel.show_loading(self._selected_asset)
+        )
+        self._preview_controller.result_ready.connect(self.reader_panel.render)
+        self._preview_controller.failed.connect(self._handle_preview_failed)
+
         self.catalog_panel.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
         self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
@@ -92,10 +103,9 @@ class DataPage(QWidget):
         )
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
         self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
-        self.data_toolbar.catalog_toggled.connect(self.workspace.toggle_catalog_panel)
-        self.data_toolbar.reader_toggled.connect(
-            lambda: self.workspace.set_reader_visible(not self.reader_panel.isVisible())
-        )
+        self.data_toolbar.catalog_toggled.connect(self._toggle_catalog_from_toolbar)
+        self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
+        self._sync_toolbar_toggle_state()
         self.import_btn.clicked.connect(self.begin_import_files_from_dialog)
         self.import_folder_btn.clicked.connect(self.begin_import_folder_from_dialog)
         self.rescan_btn.clicked.connect(self.rescan_selected_asset)
@@ -108,6 +118,16 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._preview_controller.shutdown()
+        super().closeEvent(event)
+
+    def event(self, event: QEvent) -> bool:  # type: ignore[override]
+        # Shell rebuild uses deleteLater; closeEvent may not run for nested pages.
+        if event.type() == QEvent.Type.DeferredDelete:
+            self._preview_controller.shutdown()
+        return super().event(event)
 
     def update_state(
         self,
@@ -297,7 +317,8 @@ class DataPage(QWidget):
                 self.project.resources,
                 self.project.export_artifacts,
             )
-            self.reader_panel.update_asset(resource)
+            # Participate in generation invalidation so in-flight previews cannot win.
+            self._preview_controller.request(resource)
             self._set_action_status("文件不存在")
             return True
 
@@ -323,7 +344,8 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
-        self.reader_panel.update_asset(resource)
+        # Participate in generation invalidation so in-flight previews cannot win.
+        self._preview_controller.request(resource)
         self._set_action_status("已重新扫描")
         return True
 
@@ -346,7 +368,7 @@ class DataPage(QWidget):
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
         self.asset_table.set_selected_asset(asset)
-        self.reader_panel.update_asset(asset)
+        self._preview_controller.request(asset)
         self.action_panel.update_selection_state(
             has_resource=isinstance(asset, ResourceItem),
             has_asset=asset is not None,
@@ -355,8 +377,32 @@ class DataPage(QWidget):
         )
         self._emit_data_context()
 
+    def _handle_preview_failed(self, message: str) -> None:
+        self.reader_panel.render(
+            PreviewResult(mode="message", title="预览失败", message=message)
+        )
+
     def current_reader_mode(self) -> str:
         return self.reader_panel.current_mode
+
+    def _toggle_catalog_from_toolbar(self) -> None:
+        self.workspace.toggle_catalog_panel()
+        self.data_toolbar.catalog_btn.setChecked(
+            self.workspace.catalog_floating_panel.is_expanded()
+        )
+
+    def _toggle_reader_from_toolbar(self) -> None:
+        # Use isHidden() so toggle works before the page has been shown
+        # (isVisible() is False until the widget is exposed).
+        make_visible = self.reader_panel.isHidden()
+        self.workspace.set_reader_visible(make_visible)
+        self.data_toolbar.reader_btn.setChecked(make_visible)
+
+    def _sync_toolbar_toggle_state(self) -> None:
+        self.data_toolbar.catalog_btn.setChecked(
+            self.workspace.catalog_floating_panel.is_expanded()
+        )
+        self.data_toolbar.reader_btn.setChecked(not self.reader_panel.isHidden())
 
     def _emit_data_context(self) -> None:
         issue_count = sum(
@@ -403,6 +449,12 @@ class DataPage(QWidget):
         )
 
     def _apply_import_report(self, report: ImportReport) -> None:
+        """Single batch UI refresh after import (sync or async completion).
+
+        Extends project resources once, then routes through update_state so the
+        asset table performs one model reset via set_assets_filtered. Does not
+        rebuild the reader; selection may keep prior preview content.
+        """
         self.project.resources.extend(report.added)
         self.update_state(
             dashboard_state(self.project),

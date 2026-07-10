@@ -130,7 +130,8 @@ def test_preview_provider_missing_file_message(tmp_path: Path):
     assert "文件不存在" in result.message
 
 
-def test_preview_provider_reuses_cached_result_for_unchanged_file(tmp_path: Path):
+def test_preview_provider_is_pure_no_internal_cache(tmp_path: Path):
+    # Provider.preview is pure; LRU lives on PreviewRequestController (UI thread).
     path = tmp_path / "sample.txt"
     path.write_text("first", encoding="utf-8")
     resource = ResourceItem(name="sample.txt", path=str(path), type="document", format="txt")
@@ -139,7 +140,10 @@ def test_preview_provider_reuses_cached_result_for_unchanged_file(tmp_path: Path
     first = provider.preview(resource)
     second = provider.preview(resource)
 
-    assert first is second
+    assert first == second
+    assert first.mode == "text"
+    assert first.text == "first"
+    provider.clear()  # no-op cleanup still callable
 
 
 def test_preview_provider_export_artifact_message(tmp_path: Path):
