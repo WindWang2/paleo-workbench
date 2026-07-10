@@ -638,7 +638,7 @@ Implemented via SDD on `feature/e2e-pipeline-18a` (tasks 1–5 code + task 6 sui
 | `paleo_workbench` scan path | Large-file checksum skip (SEGY-class) |
 | `paleo_workbench/pipeline/` | `bootstrap_sample_project` pure bootstrap |
 | `python -m paleo_workbench.pipeline` | CLI: `--data-root` / `--out` |
-| Header toolbar + `app.py` | 「打开样例工程」 → load sample `.paleo.json` |
+| Header toolbar + `app.py` | 「打开样例工程」 → `bootstrap_sample_project` in-memory (no auto-save) |
 
 ### Verification
 
