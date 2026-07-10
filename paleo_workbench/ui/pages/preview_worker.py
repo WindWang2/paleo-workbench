@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from copy import copy
+from dataclasses import replace
+from pathlib import Path
+
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -7,6 +11,30 @@ from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_ca
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 
 Asset = ResourceItem | ExportArtifact
+
+
+def snapshot_asset(asset: Asset) -> Asset:
+    """Copy asset so worker threads never share mutable project state."""
+    if hasattr(asset, "model_copy"):
+        return asset.model_copy(deep=True)
+    return copy(asset)
+
+
+def preload_media(result: PreviewResult) -> PreviewResult:
+    """Read image file bytes off the UI thread.
+
+    UI converts bytes → QImage/QPixmap. Avoids creating QImage/QPixmap on
+    the worker thread (Shiboken/Qt teardown hazards under pytest-qt).
+    """
+    if not result.path or result.mode != "image":
+        return result
+    try:
+        data = Path(result.path).read_bytes()
+    except OSError:
+        return result
+    if not data:
+        return result
+    return replace(result, image_bytes=data)
 
 
 class _PreviewWorker(QObject):
@@ -22,6 +50,7 @@ class _PreviewWorker(QObject):
     ):
         super().__init__(parent)
         self._provider = provider
+        # Always a snapshot — never the live project model object.
         self._asset = asset
         self._generation = generation
 
@@ -29,6 +58,7 @@ class _PreviewWorker(QObject):
     def run(self) -> None:
         try:
             result = self._provider.preview(self._asset)
+            result = preload_media(result)
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(self._generation, str(exc))
             return
@@ -40,7 +70,7 @@ class PreviewRequestController(QObject):
 
     At most one worker thread runs at a time. Newer cache-miss requests replace
     a single pending slot (latest-only). Stale generations never update the UI
-    or the LRU cache.
+    or the LRU cache. Assets passed to workers are deep-copied snapshots.
     """
 
     result_ready = Signal(object)  # PreviewResult
@@ -54,14 +84,16 @@ class PreviewRequestController(QObject):
         *,
         cache: PreviewCache | None = None,
         cache_max_size: int = 32,
+        shutdown_wait_ms: int = 10_000,
     ):
         super().__init__(parent)
         self.provider = provider or PreviewProvider()
         self.cache = cache if cache is not None else PreviewCache(max_size=cache_max_size)
+        self._shutdown_wait_ms = shutdown_wait_ms
         self._generation = 0
         self._jobs: list[tuple[QThread, _PreviewWorker]] = []
         self._active: tuple[QThread, _PreviewWorker] | None = None
-        # Latest pending miss while a job is active: (generation, asset, cache_key)
+        # Latest pending miss: (generation, snapshot_asset, cache_key)
         self._pending: tuple[int, Asset, tuple] | None = None
         self._inflight_keys: dict[int, tuple] = {}
         self._shutting_down = False
@@ -89,16 +121,16 @@ class PreviewRequestController(QObject):
             self.result_ready.emit(hit)
             return
 
+        snap = snapshot_asset(asset)
         self.loading.emit()
         if self._active is not None:
-            # Serial queue: only keep the latest requested asset.
-            self._pending = (generation, asset, key)
+            self._pending = (generation, snap, key)
             return
 
-        self._start_job(generation, asset, key)
+        self._start_job(generation, snap, key)
 
-    def shutdown(self, wait_ms: int = 3000) -> None:
-        """Stop accepting work and wait for the active worker thread."""
+    def shutdown(self, wait_ms: int | None = None) -> None:
+        """Stop accepting work and wait for the active worker (no force-kill)."""
         self._shutting_down = True
         self._pending = None
         self._generation += 1
@@ -109,12 +141,20 @@ class PreviewRequestController(QObject):
             self._jobs.clear()
             return
 
-        thread, _worker = active
-        thread.quit()
-        if not thread.wait(wait_ms):
-            # Best-effort: do not hang UI forever if native code is stuck.
-            thread.terminate()
-            thread.wait(500)
+        thread, worker = active
+        # Cooperative only: wait for the in-flight job to finish naturally.
+        # Do not force-kill the worker thread — unsafe with native parsers.
+        # Keep finished→thread.quit so the thread can exit after run().
+        deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
+        try:
+            worker.finished.disconnect(self._on_finished)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            worker.failed.disconnect(self._on_failed)
+        except (RuntimeError, TypeError):
+            pass
+        thread.wait(max(deadline, 0))
         self._active = None
         self._jobs.clear()
 
@@ -139,7 +179,13 @@ class PreviewRequestController(QObject):
         key = self._inflight_keys.pop(generation, None)
         if not self._shutting_down and generation == self._generation:
             if key is not None and isinstance(result, PreviewResult):
-                self.cache.put(key, result)
+                # Cache metadata/text without large image payloads.
+                cached = (
+                    replace(result, image_bytes=b"")
+                    if result.image_bytes
+                    else result
+                )
+                self.cache.put(key, cached)
             self.result_ready.emit(result)
         self._after_job()
 
@@ -151,7 +197,6 @@ class PreviewRequestController(QObject):
 
     def _after_job(self) -> None:
         self._active = None
-        # Pump pending after the current event returns to avoid re-entrancy issues.
         if not self._shutting_down:
             self._pump_pending()
 

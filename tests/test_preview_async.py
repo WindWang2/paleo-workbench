@@ -444,3 +444,68 @@ def test_data_page_close_shuts_down_preview_controller(qtbot, tmp_path):
     page.close()
     assert page._preview_controller._jobs == []
     assert page._preview_controller._active is None
+
+
+def test_worker_uses_asset_snapshot(qtbot, tmp_path):
+    """Worker must not see live mutations made after request()."""
+    path = tmp_path / "notes.txt"
+    path.write_text("v1", encoding="utf-8")
+    resource = ResourceItem(
+        name="notes.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    release = threading.Event()
+    entered = threading.Event()
+    seen_names: list[str] = []
+
+    class GatedProvider(PreviewProvider):
+        def preview(self, asset):
+            if asset is None:
+                return super().preview(asset)
+            seen_names.append(asset.name)
+            entered.set()
+            assert release.wait(timeout=3.0)
+            return PreviewResult(
+                mode="message",
+                title=asset.name,
+                path=getattr(asset, "path", ""),
+                message=f"name={asset.name}",
+            )
+
+    provider = GatedProvider()
+    controller = PreviewRequestController(provider)
+    results: list[object] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(resource)
+    assert entered.wait(timeout=3.0)
+    # Mutate the live project object while the worker is blocked.
+    resource.name = "MUTATED"
+    release.set()
+    _wait_controller_idle(qtbot, controller)
+    assert seen_names == ["notes.txt"]
+    assert results[-1].title == "notes.txt"
+    assert "MUTATED" not in results[-1].message
+
+
+def test_shutdown_does_not_force_kill():
+    import inspect
+
+    # Contract: cooperative wait only — force-kill must not appear as a call.
+    src = inspect.getsource(PreviewRequestController.shutdown)
+    assert "thread.terminate" not in src
+    assert "QThread.terminate" not in src
+    assert "wait(" in src
+
+
+def test_preload_media_image_bytes(tmp_path):
+    from paleo_workbench.ui.pages.preview_worker import preload_media
+
+    path = tmp_path / "dot.bin"
+    payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    path.write_bytes(payload)
+    result = PreviewResult(mode="image", title="dot.bin", path=str(path))
+    loaded = preload_media(result)
+    assert loaded.image_bytes == payload

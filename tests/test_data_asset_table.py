@@ -297,3 +297,26 @@ def test_asset_table_filter_scale_search_without_preview(qtbot):
     assert table_row_count(table) == 1
     assert table.visible_asset_count() == 1
     assert table_text(table, 0, 0) == "well_1999.las"
+
+
+def test_search_does_not_rebuild_filter_index(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [
+        ResourceItem(name=f"well_{i}.las", path=f"/tmp/well_{i}.las", type="well_log", format="las")
+        for i in range(20)
+    ]
+    table.update_assets(resources, [])
+    rebuild_calls = {"n": 0}
+    original = table._index.rebuild
+
+    def counting_rebuild(assets):
+        rebuild_calls["n"] += 1
+        return original(assets)
+
+    table._index.rebuild = counting_rebuild  # type: ignore[method-assign]
+    table.set_search_text("well_5")
+    table.set_category("测井")
+    assert rebuild_calls["n"] == 0
+    assert table_row_count(table) == 1
+    assert table_text(table, 0, 0) == "well_5.las"
