@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c), then ship a demo-ready global visual system (Phase 19 density tokens, QSS, shared widgets), then polish the Mapping GIS shell chrome (Phase 20).
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c), then ship a demo-ready global visual system (Phase 19 density tokens, QSS, shared widgets), then polish the Mapping GIS shell chrome (Phase 20), then ship a DataPage stress harness + import checksum skip (Phase 21).
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a–18c** sample/demo pipeline + **Phase 19 UI visual polish** + **Phase 20 Mapping GIS shell polish** on `feature/mapping-gis-shell-polish`. **549 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a–18c** sample/demo pipeline + **Phase 19 UI visual polish** + **Phase 20 Mapping GIS shell polish** + **Phase 21 DataPage stress + import checksum skip** on `feature/datapage-stress-hotspots`. **557 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
 
 ## Current Architecture
 
@@ -275,6 +275,25 @@ Make the 编图 page feel like a compact professional GIS shell: grouped toolbar
 - Branch: `feature/mapping-gis-shell-polish`
 - Tests: **549 passed**, 4 skipped
 
+### Phase 21: 数据页压测 + 热点修复 Data Page Stress + Hotspots — ✅ COMPLETE
+
+Reproducible DataPage stress harness (S1–S4 with printed timings) and production alignment of import scan with large-file checksum skip; no CI wall-clock gates; second UI hotspot not needed after measurement.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| T1 | Timing + synthetic fixture helpers | `tests/perf/` |
+| T2 | Stress scenarios S1–S4 with `[datapage-stress]` logs | `tests/test_datapage_stress.py` |
+| T3 | Import path: `skip_checksum_over_bytes` (default 50 MiB) via `import_files` / `import_folder` | `paleo_workbench/resources/import_service.py` |
+| T4 | Optional second hotspot — **SKIPPED** (S1 update ~4ms, S3 ~3ms at N=2000) | — |
+| T5 | Full suite + planning docs | `task_plan.md`, `progress.md` |
+
+- Brief: test-only stress harness (S1 set_assets / S2 filter / S3 rapid select / S4 import_folder); production win is large-file import checksum skip aligned with bootstrap scanner policy; no second UI hot-path change required
+- Spec: `docs/superpowers/specs/2026-07-10-datapage-stress-hotspots-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-datapage-stress-hotspots.md`
+- Branch: `feature/datapage-stress-hotspots`
+- Sample timings (local, post-import-fix): S1_update n=2000 ~3.7ms; S2_filter ~0.2–0.5ms; S3_rapid_select n=30 ~2.7ms; S4_import_folder n=300 ~24.6ms
+- Tests: **557 passed**, 4 skipped
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |
@@ -315,6 +334,7 @@ Make the 编图 page feel like a compact professional GIS shell: grouped toolbar
 | 18c | 演示相带草稿 (compile_map_draft) | ✅ Complete (branch) | ~10+ | ✅ design | ✅ |
 | 19 | UI 视觉抛光 (density tokens / QSS / widgets) | ✅ Complete (branch) | ~11+ | ✅ | ✅ |
 | 20 | 编图 GIS 壳抛光 (toolbar groups / dock QSS / status coords) | ✅ Complete (branch) | ~5+ | ✅ | ✅ |
+| 21 | 数据页压测 + 导入 checksum skip (S1–S4 harness) | ✅ Complete (branch) | ~8+ | ✅ | ✅ |
 
 ## Test History
 
@@ -346,3 +366,4 @@ Make the 编图 page feel like a compact professional GIS shell: grouped toolbar
 | 2026-07-10 (Phase 18b asset binding + 18c map draft) | 533 | ✅ |
 | 2026-07-10 (Phase 19 UI visual polish) | 544 | ✅ |
 | 2026-07-10 (Phase 20 Mapping GIS shell polish) | 549 | ✅ |
+| 2026-07-10 (Phase 21 DataPage stress + import checksum skip) | 557 | ✅ |

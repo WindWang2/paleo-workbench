@@ -769,3 +769,52 @@ Compact professional GIS shell chrome for 编图: grouped toolbar, unified docks
 ### Status
 
 **Phase 20 COMPLETE** on branch `feature/mapping-gis-shell-polish`.
+
+---
+
+## Session: 2026-07-10 — Phase 21 DataPage stress + hotspots — COMPLETE ✅
+
+Implemented via SDD on `feature/datapage-stress-hotspots` (tasks 1–5).
+
+| Task | Content | Commit |
+|------|---------|--------|
+| 1 | Timing + synthetic fixture helpers | `31fa2c0` |
+| 2 | Stress scenarios S1–S4 with timing logs | `dc7608b` |
+| 3 | Import scan: skip large-file checksums (align with bootstrap) | `f28994f` |
+| 4 | Optional second hotspot | **SKIPPED** — S1 update ~4ms, S3 ~3ms at N=2000; no UI hot-path change warranted |
+| 5 | Full suite + planning docs | (this session) |
+
+Design/plan docs: `ec6be1c`, `3b914bd`.
+
+### Modules
+
+| Path | Role |
+|------|------|
+| `tests/perf/` | Timing helpers + synthetic asset fixtures |
+| `tests/test_datapage_stress.py` | S1–S4 stress scenarios; print `[datapage-stress]` timings (no CI ms gates) |
+| `paleo_workbench/resources/import_service.py` | `skip_checksum_over_bytes` default 50 MiB on `import_files` / `import_folder` → `scan_resources` |
+
+### Sample stress timings (local, after import checksum fix)
+
+```
+S1_update n=2000 ~3.7ms
+S2_filter ~0.2-0.5ms
+S3_rapid_select n=30 ~2.7ms
+S4_import_folder n=300 ~24.6ms
+```
+
+### Notes
+
+- **Production win:** large-file import checksum skip (SEGY-class / files over threshold no longer SHA256 on import scan), aligned with Phase 18a bootstrap scanner policy.
+- **No second hotspot:** measured S1/S3 times are already in the low-ms range for N=2000; Task 4 deliberately skipped.
+- Stress harness is evidence-only (printed timings); no wall-clock asserts in CI.
+
+### Verification
+
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **557 passed**, 4 skipped
+- Spec: `docs/superpowers/specs/2026-07-10-datapage-stress-hotspots-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-datapage-stress-hotspots.md`
+
+### Status
+
+**Phase 21 COMPLETE** on branch `feature/datapage-stress-hotspots`.
