@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
+from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
@@ -43,5 +44,8 @@ class MappingPage(QWidget):
         document = active_map_document(documents)
         self.layer_tree.set_documents(documents)
         self.layer_tree.set_active_document(document)
-        # Scene load deferred to Task 3; attribute table stays empty without selection.
+        scene = self.edit_view.scene()
+        if isinstance(scene, MapEditScene):
+            scene.load_document(document)
+        # Attribute table stays empty without selection (Task 4+).
         self.attribute_table.set_feature(None)

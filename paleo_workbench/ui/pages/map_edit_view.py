@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QWheelEvent
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QGraphicsView
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 
 
 class MapEditView(QGraphicsView):
-    """Primary map edit surface. Scene content is filled in later tasks."""
+    """Primary map edit surface backed by MapEditScene."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,8 +25,7 @@ class MapEditView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
 
-        scene = QGraphicsScene(self)
-        scene.setSceneRect(-5000, -5000, 10000, 10000)
+        scene = MapEditScene(self)
         self.setScene(scene)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
