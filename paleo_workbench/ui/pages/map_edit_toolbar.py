@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QWidget
 
 from paleo_workbench.ui import tokens
 
@@ -33,11 +33,6 @@ class MapEditToolbar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MapEditToolbar")
-        self.setStyleSheet(
-            f"QWidget#MapEditToolbar {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(
@@ -59,6 +54,10 @@ class MapEditToolbar(QWidget):
             layout.addWidget(btn)
             self._tool_buttons[tool_id] = btn
             setattr(self, f"{tool_id}_btn", btn)
+            if tool_id == "vertex":
+                self._add_separator(layout)
+            elif tool_id == "label":
+                self._add_separator(layout)
 
         self.select_btn.setChecked(True)
         self._tool_group.buttonClicked.connect(self._on_tool_clicked)
@@ -81,6 +80,7 @@ class MapEditToolbar(QWidget):
         self.redo_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.redo_btn.clicked.connect(self.redo_requested.emit)
         layout.addWidget(self.redo_btn)
+        self._add_separator(layout)
 
         self.preview_btn = QPushButton("图面预览")
         self.preview_btn.setObjectName("SecondaryButton")
@@ -89,6 +89,7 @@ class MapEditToolbar(QWidget):
         self.preview_btn.setToolTip("切换 PaleoMapCanvas 图面预览（含图例/指北针/比例尺）")
         self.preview_btn.toggled.connect(self.preview_toggled.emit)
         layout.addWidget(self.preview_btn)
+        self._add_separator(layout)
 
         self.topology_btn = QPushButton("重建拓扑")
         self.topology_btn.setObjectName("SecondaryButton")
@@ -110,6 +111,7 @@ class MapEditToolbar(QWidget):
         self.split_btn.setToolTip("用选中的线分割选中的一个相带")
         self.split_btn.clicked.connect(self.split_facies_requested.emit)
         layout.addWidget(self.split_btn)
+        self._add_separator(layout)
 
         layout.addStretch(1)
 
@@ -128,6 +130,14 @@ class MapEditToolbar(QWidget):
 
         self._current_tool = "select"
         self._preview_mode = False
+
+    def _add_separator(self, layout: QHBoxLayout) -> QFrame:
+        sep = QFrame()
+        sep.setObjectName("ToolbarSeparator")
+        sep.setFixedWidth(1)
+        sep.setMinimumHeight(max(1, tokens.CONTROL_HEIGHT - 4))
+        layout.addWidget(sep)
+        return sep
 
     def is_preview_mode(self) -> bool:
         return self._preview_mode

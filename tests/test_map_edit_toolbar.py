@@ -1,4 +1,13 @@
+from PySide6.QtWidgets import QFrame
+
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
+
+
+def test_toolbar_has_visual_separators(qtbot):
+    bar = MapEditToolbar()
+    qtbot.addWidget(bar)
+    seps = [w for w in bar.findChildren(QFrame) if w.objectName() == "ToolbarSeparator"]
+    assert len(seps) >= 4
 
 
 def test_toolbar_tools_are_exclusive(qtbot):
