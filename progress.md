@@ -728,3 +728,44 @@ Density tokens, richer global QSS (button states / tables / focus / panel select
 ### Status
 
 **Phase 19 COMPLETE** on branch `feature/ui-visual-polish`.
+
+---
+
+## Session: 2026-07-10 — Phase 20 Mapping GIS shell polish — COMPLETE ✅
+
+Implemented via SDD on `feature/mapping-gis-shell-polish` (tasks 1–6).
+
+| Task | Content | Commit |
+|------|---------|--------|
+| 1 | Mapping dock + status QSS selectors | `15c47db` |
+| 2 | Visual separators on mapping edit toolbar | `a0a0eeb` |
+| 3 | Unify layer tree + attribute dock chrome | `15ca16c` |
+| 4 | Denser mapping page spacing + canvas dock chrome | `0bdb36b` |
+| 5 | Status bar coordinate zone (`StatusCoordLabel`) | `4710de0` |
+| 6 | Full suite + planning docs | (this session) |
+
+Design/plan docs landed earlier: `0f334aa`, `914ef95`.
+
+### Modules
+
+| Path | Role |
+|------|------|
+| `paleo_workbench/ui/tokens.py` | Mapping/status selectors in `QSS_TEMPLATE` |
+| `map_edit_toolbar.py` | Thin separators between tool groups (order unchanged) |
+| `map_layer_tree.py` / `map_attribute_table.py` | Dock objectNames; drop local card QSS |
+| `map_canvas_panel.py` / `map_chrome_panel.py` / `mapping_page.py` | Dock chrome + denser page spacing |
+| `status_bar.py` | `StatusCoordLabel` for distinct coordinate zone |
+
+### Brief
+
+Compact professional GIS shell chrome for 编图: grouped toolbar, unified docks via global QSS, denser spacing, clearer status coordinates—no tool / topology / save behavior changes.
+
+### Verification
+
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **549 passed**, 4 skipped
+- Spec: `docs/superpowers/specs/2026-07-10-mapping-gis-shell-polish-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-mapping-gis-shell-polish.md`
+
+### Status
+
+**Phase 20 COMPLETE** on branch `feature/mapping-gis-shell-polish`.

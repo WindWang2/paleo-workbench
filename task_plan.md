@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c), then ship a demo-ready global visual system (Phase 19 density tokens, QSS, shared widgets).
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c), then ship a demo-ready global visual system (Phase 19 density tokens, QSS, shared widgets), then polish the Mapping GIS shell chrome (Phase 20).
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a–18c** sample/demo pipeline + **Phase 19 UI visual polish** on `feature/ui-visual-polish`. **544 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a–18c** sample/demo pipeline + **Phase 19 UI visual polish** + **Phase 20 Mapping GIS shell polish** on `feature/mapping-gis-shell-polish`. **549 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
 
 ## Current Architecture
 
@@ -256,6 +256,25 @@ Demo-ready global visual system: density tokens, richer QSS, five shared widgets
 - Branch: `feature/ui-visual-polish`
 - Tests: **544 passed**, 4 skipped
 
+### Phase 20: 编图 GIS 壳抛光 Mapping GIS Shell Polish — ✅ COMPLETE
+
+Make the 编图 page feel like a compact professional GIS shell: grouped toolbar, unified dock chrome, denser spacing, clearer status coordinates—without changing tool / topology / save behavior.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| T1 | Mapping + status QSS selectors in `QSS_TEMPLATE` | `ui/tokens.py`, `tests/test_tokens.py` |
+| T2 | Non-interactive toolbar separators between visual groups | `map_edit_toolbar.py` |
+| T3 | Unified layer tree + attribute dock chrome (objectNames, drop local QSS) | `map_layer_tree.py`, `map_attribute_table.py` |
+| T4 | Canvas/chrome dock QSS + denser mapping page spacing | `map_canvas_panel.py`, `map_chrome_panel.py`, `mapping_page.py` |
+| T5 | Status bar coordinate zone (`StatusCoordLabel`) | `status_bar.py` |
+| T6 | Full suite + planning docs | `task_plan.md`, `progress.md` |
+
+- Brief: global QSS for MapEditToolbar / MapLayerTree / MapAttributeTable / MapCanvasPanel / MapChromePanel / StatusCoordLabel; toolbar separators (order unchanged); docks use objectNames over local card CSS; logic freeze on edit/topology/save
+- Spec: `docs/superpowers/specs/2026-07-10-mapping-gis-shell-polish-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-mapping-gis-shell-polish.md`
+- Branch: `feature/mapping-gis-shell-polish`
+- Tests: **549 passed**, 4 skipped
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |
@@ -295,6 +314,7 @@ Demo-ready global visual system: density tokens, richer QSS, five shared widgets
 | 18b | 预测资产绑定 (input_refs + VizAdapter) | ✅ Complete (branch) | ~15+ | ✅ design | ✅ |
 | 18c | 演示相带草稿 (compile_map_draft) | ✅ Complete (branch) | ~10+ | ✅ design | ✅ |
 | 19 | UI 视觉抛光 (density tokens / QSS / widgets) | ✅ Complete (branch) | ~11+ | ✅ | ✅ |
+| 20 | 编图 GIS 壳抛光 (toolbar groups / dock QSS / status coords) | ✅ Complete (branch) | ~5+ | ✅ | ✅ |
 
 ## Test History
 
@@ -325,3 +345,4 @@ Demo-ready global visual system: density tokens, richer QSS, five shared widgets
 | 2026-07-10 (Phase 18a sample project bootstrap) | 509 | ✅ |
 | 2026-07-10 (Phase 18b asset binding + 18c map draft) | 533 | ✅ |
 | 2026-07-10 (Phase 19 UI visual polish) | 544 | ✅ |
+| 2026-07-10 (Phase 20 Mapping GIS shell polish) | 549 | ✅ |
