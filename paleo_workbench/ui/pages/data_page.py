@@ -422,6 +422,12 @@ class DataPage(QWidget):
         )
 
     def _apply_import_report(self, report: ImportReport) -> None:
+        """Single batch UI refresh after import (sync or async completion).
+
+        Extends project resources once, then routes through update_state so the
+        asset table performs one model reset via set_assets_filtered. Does not
+        rebuild the reader; selection may keep prior preview content.
+        """
         self.project.resources.extend(report.added)
         self.update_state(
             dashboard_state(self.project),

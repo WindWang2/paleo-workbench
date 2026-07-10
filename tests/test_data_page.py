@@ -2,10 +2,11 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QLabel, QSplitter
+from PySide6.QtWidgets import QLabel, QSplitter, QTableView
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.resources.import_service import ImportReport
+from paleo_workbench.ui.pages.asset_table_model import AssetTableModel
 from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
@@ -407,6 +408,86 @@ def test_data_page_starts_folder_import_in_worker_thread(
     assert worker_threads[0] is not page.thread()
     assert project.resources[0].name == "cube.sgy"
     assert "新增 1" in page.action_panel.status_label.text()
+
+
+def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
+    """Multi-file async import applies one model reset with the expected total."""
+    project = ProjectDocument.new("Demo")
+    paths = []
+    for index in range(5):
+        path = tmp_path / f"well_{index}.las"
+        # Distinct content so checksum dedupe does not collapse the batch.
+        path.write_text(f"~Version\n# file {index}\n", encoding="utf-8")
+        paths.append(path)
+
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    reset_count = {"n": 0}
+    page.asset_table.model.modelAboutToBeReset.connect(
+        lambda *_args: reset_count.__setitem__("n", reset_count["n"] + 1)
+    )
+    update_counts: list[int] = []
+    original_update_assets = page.asset_table.update_assets
+
+    def tracking_update_assets(resources, artifacts):
+        update_counts.append(len(resources))
+        return original_update_assets(resources, artifacts)
+
+    page.asset_table.update_assets = tracking_update_assets
+
+    assert page.reader_panel.current_mode == "empty"
+    with qtbot.waitSignal(page.import_finished, timeout=3000):
+        started = page.begin_import_paths(paths)
+
+    assert started is True
+    assert len(project.resources) == 5
+    assert _table_row_count(page) == 5
+    assert reset_count["n"] == 1
+    assert update_counts == [5]
+    assert "新增 5" in page.action_panel.operation_status_label.text()
+    assert isinstance(page.asset_table.table, QTableView)
+    assert isinstance(_table_model(page), AssetTableModel)
+    # Import must not rebuild reader when nothing is selected.
+    assert page.reader_panel.current_mode == "empty"
+
+
+def test_async_import_keeps_reader_content_for_prior_selection(
+    qtbot,
+    tmp_path: Path,
+):
+    """Batch table refresh after import must not clear an existing reader preview."""
+    first = tmp_path / "alpha.txt"
+    first.write_text("alpha-content\n", encoding="utf-8")
+    extra_paths = []
+    for index in range(3):
+        path = tmp_path / f"extra_{index}.txt"
+        path.write_text(f"extra {index}\n", encoding="utf-8")
+        extra_paths.append(path)
+
+    project = ProjectDocument.new("Demo")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([first])
+    page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
+    assert "alpha-content" in page.reader_panel.text_preview.toPlainText()
+
+    reset_count = {"n": 0}
+    page.asset_table.model.modelAboutToBeReset.connect(
+        lambda *_args: reset_count.__setitem__("n", reset_count["n"] + 1)
+    )
+
+    with qtbot.waitSignal(page.import_finished, timeout=3000):
+        started = page.begin_import_paths(extra_paths)
+
+    assert started is True
+    assert len(project.resources) == 4
+    assert _table_row_count(page) == 4
+    assert reset_count["n"] == 1
+    assert "新增 3" in page.action_panel.operation_status_label.text()
+    assert page.reader_panel.current_mode == "text"
+    assert "alpha-content" in page.reader_panel.text_preview.toPlainText()
 
 
 def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path):
