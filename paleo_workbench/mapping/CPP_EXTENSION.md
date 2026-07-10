@@ -126,17 +126,29 @@ PYBIND11_MODULE(map_edit_core, m) {
 }
 ```
 
-## Build notes (optional native/)
+## Build notes (`native/map_edit_core/`)
 
-V1 ships **without** a required native build. When ready:
+Source lives at `native/map_edit_core/src/map_edit_core.cpp` (pybind11 + C++17).
 
-1. Scaffold `native/map_edit_core/` (or under `geo-viz-engine`) with CMake +
-   pybind11.
-2. Produce an importable extension module named exactly `map_edit_core` on
-   `PYTHONPATH` / site-packages.
-3. Keep behavioral parity with pure Python unit tests in
-   `tests/test_map_*.py` and `tests/test_map_topology.py`.
-4. CI may later set a job that builds the extension and asserts `HAS_CPP is True`.
+```bash
+# From repo root, with project venv active:
+python -m pip install -e ".[native]"   # pulls pybind11
+python -m pip install -e native/map_edit_core
+
+# Verify:
+python -c "from paleo_workbench.mapping.map_edit_api import HAS_CPP; assert HAS_CPP"
+```
+
+In-place build (dev):
+
+```bash
+cd native/map_edit_core && python setup.py build_ext --inplace
+```
+
+Behavioral parity: `tests/test_map_topology.py` (Python path) and
+`tests/test_map_edit_core_cpp.py` (skipped when extension missing; asserts
+when built). CI may add a job that builds the extension and requires
+`HAS_CPP is True`.
 
 Until the extension exists, `HAS_CPP` is `False` and all tests run on the
 Python path.

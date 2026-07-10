@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance).
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path).
 
-## Project Status: 9/9 pages + Data Management Center + Project Management V1 complete; **Data Page UI/Perf Optimization merged to main** (PR #1). ~385 tests passing.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + **Mapping Editor V1 (PR #3)** complete. ~449+ tests; optional `map_edit_core` C++ extension available.
 
 ## Current Architecture
 
@@ -12,6 +12,7 @@
 - **Global QSS** applied in `main.py` via `app.setStyleSheet(tokens.QSS_TEMPLATE)`
 - **Pages package** at `paleo_workbench/ui/pages/`
 - **DataPage (post Phase 15):** `DataWorkspace` (virtual `QTableView` + multi-format reader) + floating catalog/actions; `FilterIndex`; serial async `PreviewRequestController` + LRU `PreviewCache`; async import via `QThread`
+- **MappingPage (post Phase 16):** GIS shell — toolbar · layer tree · `MapEditView`/`MapEditScene` · attribute table; save draft to `PaleoMapDocument`; geometry via `map_edit_api` (+ optional C++ `map_edit_core`)
 
 ## 数据管理思维（改数据页时先读）
 
@@ -155,6 +156,24 @@ Surgical performance pass for 2000+ assets; floating-panel workspace layout pres
 - Branch: `feature/datapage-ui-perf` → merged `main` as PR #1 (`bc8b68b`)
 - Tests: ~385 passed at merge
 
+### Phase 16: 编图编辑器 V1 Mapping Editor — ✅ COMPLETE (merged PR #3)
+
+GIS-shell vector editor replacing display-only three-column mapping page.
+
+| Slice | Work |
+|-------|------|
+| Schema I/O | `mapping/geometry_schema.py`, `document_io.py`; `line_features` / `label_features` on `PaleoMapDocument` |
+| GIS shell | Toolbar · layer tree · attribute table · `MapEditView` |
+| Scene | Facies/well/line/label items; select/move/vertex; undo stack |
+| Topology | Snap + self-intersection warnings via `map_edit_api` |
+| Save | Draft write-back to active `PaleoMapDocument` |
+| Native | Optional C++ `map_edit_core` (pybind11) under `native/map_edit_core/` |
+
+- Spec: `docs/superpowers/specs/2026-07-10-mapping-editor-v1-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-mapping-editor-v1.md`
+- PR #3 → `2e98da6`; ~449 tests at merge
+- Build C++: `pip install -e native/map_edit_core` (see `mapping/CPP_EXTENSION.md`)
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Source |
@@ -164,27 +183,29 @@ Surgical performance pass for 2000+ assets; floating-panel workspace layout pres
 | 3 | Test magic index `page_stack.widget(1)` for DataPage (pre-existing pattern) | Project Management V1 final review |
 | 4 | Floating catalog tab vs toolbar checked-state can desync if tab used directly | Data page perf final review |
 | 5 | Image/PDF decode still on UI thread after async path returns path-only result | Data page perf final review |
-| 6 | `FilterIndex.rebuild` still runs on pure search/category (could rebuild only on asset list change) | Data page perf final review |
-| 7 | Search haystack uses raw `type` (`well_log`), not Chinese labels | Data page perf final review |
+| 6 | Freehand new facies polygons; forced topology rebuild; chrome print preview mode | Mapping editor V1 out of scope |
+| 7 | CI job that requires `HAS_CPP is True` for map_edit_core | Mapping native follow-up |
+| 8 | Search haystack uses raw `type` (`well_log`), not Chinese labels | Data page residual |
 
 ## Page Progress Matrix
 
 | # | Page | Status | Tests | Spec | Plan |
 |---|------|--------|-------|------|------|
 | 1 | 首页 | ✅ Complete | 23 | ✅ | ✅ |
-| 2 | 数据 | ✅ Complete | 14 | ✅ | ✅ |
+| 2 | 数据 | ✅ Complete | 14+ | ✅ | ✅ |
 | 3 | 测井预测 | ✅ Complete | 12 | ✅ | ✅ |
 | 4 | 地震预测 | ✅ Complete | 12 | ✅ | ✅ |
 | 5 | 层序格架 | ✅ Complete | 12 | ✅ | ✅ |
 | 6 | 可视化 | ✅ Complete | 9 | ✅ | ✅ |
 | 7 | 制备 | ✅ Complete | 24 | ✅ | ✅ |
-| 8 | 编图 | ✅ Complete | 11 | ✅ | ✅ |
+| 8 | 编图 | ✅ Editor V1 (PR #3) | 60+ | ✅ | ✅ |
 | 9 | 成图审核 | ✅ Complete | 30 | ✅ | ✅ |
 | 11 | 数据管理中心升级 | ✅ Complete | 27 | ✅ | ✅ |
 | 12 | 数据多格式预览 | ✅ Complete | 9 | ✅ | ✅ |
 | 13 | 数据页 V2 交互完善 | ✅ Complete | 7 | ✅ | ✅ |
 | 14 | 项目管理 V1 | ✅ Complete | 24 | ✅ | ✅ |
-| 15 | 数据页 UI/性能优化 | ✅ Complete (PR #1) | ~100+ | ✅ | ✅ |
+| 15 | 数据页 UI/性能优化 | ✅ Complete (PR #1–2) | ~100+ | ✅ | ✅ |
+| 16 | 编图编辑器 V1 | ✅ Complete (PR #3) | ~60+ | ✅ | ✅ |
 
 ## Test History
 

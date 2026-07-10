@@ -1,0 +1,9 @@
+[build-system]
+requires = ["setuptools>=68", "pybind11>=2.12"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "map_edit_core"
+version = "0.1.0"
+description = "Native geometry hot path for paleo mapping editor"
+requires-python = ">=3.12"

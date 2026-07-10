@@ -517,3 +517,27 @@ Make the data management page feel smooth under **2000+ assets** and large direc
 - Wrote durable **数据管理思维 (Data Management Mindset)** into `findings.md` (product + architecture principles: asset universe, register-vs-disk, workspace metaphor, preview bounds, scale mindset, decision checklist).
 - Added compressed decision table to `task_plan.md` pointing at full findings section.
 - Purpose: future sessions / agents change the data page against explicit management philosophy, not only UI/perf implementation notes.
+
+---
+
+## Session: 2026-07-10 (cont.) — Mapping Editor V1 + native core
+
+### Mapping Editor V1 — COMPLETE ✅ (PR #3)
+
+Implemented via SDD on `feature/mapping-editor-v1` (10 tasks), merged `2e98da6`.
+
+- GIS shell + QGraphicsView scene + full draft features + topology + save draft
+- Spec/plan under `docs/superpowers/specs|plans/2026-07-10-mapping-editor-v1*`
+- Tests at merge: **449 passed**
+
+### map_edit_core C++ (post-merge continuation)
+
+- Scaffolded `native/map_edit_core/` (pybind11 C++17): hit_test, snap, move_feature, vertex ops, validate
+- Install: `pip install -e native/map_edit_core` → `HAS_CPP is True`
+- Tests: `tests/test_map_edit_core_cpp.py` (skip if not built)
+- Docs: updated `paleo_workbench/mapping/CPP_EXTENSION.md`
+- Optional dep: `pyproject.toml` `[native]` → pybind11
+
+### Cleanup
+
+- Worktrees `datapage-ui-perf` / `mapping-editor-v1` removable after merge

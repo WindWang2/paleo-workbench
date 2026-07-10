@@ -429,3 +429,11 @@ Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency orde
 - Plan: `docs/superpowers/plans/2026-07-10-datapage-ui-perf-optimization.md`
 - PR: https://github.com/WindWang2/paleo-workbench/pull/1 (merged `bc8b68b`)
 - Worktree used: `.worktrees/datapage-ui-perf` on `feature/datapage-ui-perf`
+
+## Mapping Editor V1 + C++ core notes
+
+- **Layout:** GIS shell (toolbar / layer tree / MapEditView / attribute table), not the old fixed three-column display page.
+- **Edit path:** QGraphicsScene items; geometry ops via `map_edit_api` façade.
+- **Native:** `map_edit_core` pybind11 module under `native/map_edit_core/`. Hot path preference; Python fallback always works. Install with `pip install -e native/map_edit_core`.
+- **Document:** `line_features` / `label_features` on `PaleoMapDocument`; save draft writes memory document (disk via project save).
+- **Out of scope still:** freehand new facies polygons, forced topology rebuild, QGIS, chrome print mode.
