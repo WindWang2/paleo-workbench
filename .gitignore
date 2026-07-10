@@ -33,3 +33,9 @@ data/
 # geo-viz-engine/
 .gstack/
 .worktrees/
+
+# Native build artifacts
+native/**/*.so
+native/**/*.pyd
+native/**/build/
+native/**/*.egg-info/
