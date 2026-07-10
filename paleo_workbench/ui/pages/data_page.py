@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
-from PySide6.QtCore import QObject, QThread, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEvent, QObject, QThread, QUrl, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
@@ -119,6 +118,16 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._preview_controller.shutdown()
+        super().closeEvent(event)
+
+    def event(self, event: QEvent) -> bool:  # type: ignore[override]
+        # Shell rebuild uses deleteLater; closeEvent may not run for nested pages.
+        if event.type() == QEvent.Type.DeferredDelete:
+            self._preview_controller.shutdown()
+        return super().event(event)
 
     def update_state(
         self,

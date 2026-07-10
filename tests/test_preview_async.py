@@ -126,15 +126,16 @@ def test_delayed_provider_last_wins_under_overlap(qtbot, tmp_path):
         and page.reader_panel.current_mode == "message",
         timeout=3000,
     )
-    # Wait for the slow A job to finish; it must not overwrite B.
+    # Serial queue: A runs then latest pending B. Stale A must not overwrite B.
     _wait_controller_idle(qtbot, page._preview_controller)
     assert page.reader_panel.title_label.text() == "b.txt"
     assert page.reader_panel.current_mode == "message"
     assert page.reader_panel.message_label.text() == "preview:b.txt"
-    # Both workers should have been started (overlap).
     assert "a.txt" in provider.started
     assert "b.txt" in provider.started
     assert saw_loading["value"] is True
+    # Never more than one concurrent job.
+    assert page._preview_controller._active is None
 
 
 def test_reader_shows_loading_with_delayed_provider(qtbot, tmp_path):
@@ -371,3 +372,75 @@ def test_cache_miss_after_file_rewrite(qtbot, tmp_path):
     _wait_controller_idle(qtbot, controller)
     assert provider.calls == ["rewrite.txt", "rewrite.txt"]
     assert len(results) == 2
+
+
+def test_serial_queue_keeps_only_latest_pending(qtbot, tmp_path):
+    """While a job runs, intermediate selections collapse to the latest pending."""
+    paths = [tmp_path / f"{name}.txt" for name in ("a", "b", "c")]
+    for path in paths:
+        path.write_text(path.stem, encoding="utf-8")
+    resources = [
+        ResourceItem(name=p.name, path=str(p), type="document", format="txt")
+        for p in paths
+    ]
+    provider = DelayedProvider(
+        delay_by_name={"a.txt": 0.3, "b.txt": 0.05, "c.txt": 0.05}
+    )
+    controller = PreviewRequestController(provider)
+    results: list[object] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(resources[0])
+    controller.request(resources[1])
+    controller.request(resources[2])
+
+    _wait_controller_idle(qtbot, controller)
+    # a ran; b was superseded by c while a was active — only a then c.
+    assert provider.calls[0] == "a.txt"
+    assert "c.txt" in provider.calls
+    assert "b.txt" not in provider.calls
+    assert results[-1].title == "c.txt"
+
+
+def test_shutdown_stops_accepting_and_clears_jobs(qtbot, tmp_path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    resource = ResourceItem(name="notes.txt", path=str(path), type="document", format="txt")
+    provider = DelayedProvider(default_delay=0.4)
+    controller = PreviewRequestController(provider)
+    results: list[object] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(resource)
+    qtbot.waitUntil(lambda: len(provider.started) >= 1, timeout=2000)
+    controller.shutdown(wait_ms=2000)
+
+    assert len(controller._jobs) == 0
+    assert controller._active is None
+    assert controller._pending is None
+    # Further requests ignored while shut down.
+    controller.request(resource)
+    assert len(controller._jobs) == 0
+    # Stale completion must not deliver after shutdown.
+    qtbot.wait(100)
+    assert results == []
+
+
+def test_data_page_close_shuts_down_preview_controller(qtbot, tmp_path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("P")
+    project.resources = [
+        ResourceItem(name="notes.txt", path=str(path), type="document", format="txt")
+    ]
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    provider = DelayedProvider(default_delay=0.3)
+    page.reader_panel.provider = provider
+    page._preview_controller.provider = provider
+
+    page._set_selected_asset(project.resources[0])
+    qtbot.waitUntil(lambda: len(provider.started) >= 1, timeout=2000)
+    page.close()
+    assert page._preview_controller._jobs == []
+    assert page._preview_controller._active is None
