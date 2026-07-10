@@ -158,6 +158,21 @@ class PaleoWorkbenchWindow(QWidget):
         toolbar.open_project_requested.connect(self._on_open_project)
         toolbar.save_project_requested.connect(self._on_save_project)
         toolbar.properties_requested.connect(self._on_properties)
+        self._wire_data_visualization_jump()
+
+    def _wire_data_visualization_jump(self) -> None:
+        page = self.app_shell.data_page_widget()
+        if hasattr(page, "open_in_visualization"):
+            page.open_in_visualization.connect(self._on_open_in_visualization)
+
+    def _on_open_in_visualization(self, ref) -> None:
+        from paleo_workbench.ui.app_shell import PAGE_INDEX_VISUALIZATION
+
+        self.app_shell.icon_rail.set_active(PAGE_INDEX_VISUALIZATION)
+        self.app_shell._switch_page(PAGE_INDEX_VISUALIZATION)
+        viz = self.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)
+        if hasattr(viz, "open_ref"):
+            viz.open_ref(ref)
 
     # --- shell rebuild helpers ---
 

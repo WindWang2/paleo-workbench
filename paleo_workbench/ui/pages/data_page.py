@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from dataclasses import replace
+
 from PySide6.QtCore import QEvent, QObject, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
@@ -19,6 +21,7 @@ from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
+from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
 
 
@@ -44,6 +47,7 @@ class DataPage(QWidget):
     data_context_changed = Signal(dict)
     import_finished = Signal(object)
     import_failed = Signal(str)
+    open_in_visualization = Signal(object)  # VizRef
 
     def __init__(self, project: ProjectDocument | None = None, parent=None):
         super().__init__(parent)
@@ -54,6 +58,7 @@ class DataPage(QWidget):
         self._selected_asset: object | None = None
         self._import_jobs: list[tuple[QThread, _ImportWorker]] = []
         self._import_in_progress = False
+        self._viz_adapter = VizAdapter()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -84,6 +89,7 @@ class DataPage(QWidget):
         self.import_folder_btn = self.action_panel.import_folder_btn
         self.rescan_btn = self.action_panel.rescan_btn
         self.remove_btn = self.action_panel.remove_btn
+        self.open_visualization_btn = self.action_panel.open_visualization_btn
 
         self._preview_controller = PreviewRequestController(
             self.reader_panel.provider,
@@ -115,6 +121,7 @@ class DataPage(QWidget):
         self.rescan_btn.clicked.connect(self.rescan_selected_asset)
         self.remove_btn.clicked.connect(self.remove_selected_asset)
         self.action_panel.open_folder_btn.clicked.connect(self.open_selected_folder)
+        self.open_visualization_btn.clicked.connect(self._emit_open_visualization)
         self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
 
         self.update_state(
@@ -150,6 +157,7 @@ class DataPage(QWidget):
             reader_mode=self.reader_panel.current_mode,
             asset_kind=self._selected_asset_kind(),
         )
+        self._sync_visualization_button()
         self._emit_data_context()
 
     def import_paths(self, paths: list[Path]) -> ImportReport:
@@ -379,7 +387,22 @@ class DataPage(QWidget):
             reader_mode=self.reader_panel.current_mode,
             asset_kind=self._selected_asset_kind(),
         )
+        self._sync_visualization_button()
         self._emit_data_context()
+
+    def _sync_visualization_button(self) -> None:
+        asset = self._selected_asset
+        ok = isinstance(asset, ResourceItem) and self._viz_adapter.supports_resource(asset)
+        self.open_visualization_btn.setEnabled(ok)
+
+    def _emit_open_visualization(self) -> None:
+        asset = self._selected_asset
+        if not isinstance(asset, ResourceItem):
+            return
+        ref = self._viz_adapter.ref_from_resource(asset)
+        if ref is None:
+            return
+        self.open_in_visualization.emit(replace(ref, source="data_page"))
 
     def _handle_preview_failed(self, message: str) -> None:
         self.reader_panel.render(
@@ -446,6 +469,7 @@ class DataPage(QWidget):
             reader_mode=self.reader_panel.current_mode,
             asset_kind=self._selected_asset_kind(),
         )
+        self._sync_visualization_button()
         self._emit_data_context()
 
     def _set_import_status(self, report: ImportReport) -> None:

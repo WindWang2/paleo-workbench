@@ -42,6 +42,11 @@ class ActionPanel(QFrame):
         self.open_folder_btn.setObjectName("SecondaryButton")
         layout.addWidget(self.open_folder_btn)
 
+        self.open_visualization_btn = QPushButton("在可视化中打开")
+        self.open_visualization_btn.setObjectName("SecondaryButton")
+        self.open_visualization_btn.setEnabled(False)
+        layout.addWidget(self.open_visualization_btn)
+
         self.selection_status_label = QLabel("等待选择")
         self.selection_status_label.setWordWrap(True)
         self.selection_status_label.setStyleSheet(
