@@ -51,6 +51,16 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         self.setZValue(10)
         self.setFlag(QGraphicsPolygonItem.GraphicsItemFlag.ItemIsSelectable, True)
 
+    def translate_by(self, dx: float, dy: float) -> None:
+        """Shift polygon vertices and update the graphics path."""
+        dx_f = float(dx)
+        dy_f = float(dy)
+        for p in self._coordinates:
+            p[0] += dx_f
+            p[1] += dy_f
+        self.setPolygon(QPolygonF([QPointF(p[0], p[1]) for p in self._coordinates]))
+        self.setPos(0.0, 0.0)
+
     def to_record(self) -> dict[str, Any]:
         return {
             "id": self.feature_id,
@@ -85,6 +95,14 @@ class WellPointItem(QGraphicsEllipseItem, FeatureItemMixin):
         self.setPen(_WELL_PEN)
         self.setZValue(20)
         self.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemIsSelectable, True)
+
+    def translate_by(self, dx: float, dy: float) -> None:
+        """Shift well point and update the ellipse rect."""
+        self._x = float(self._x) + float(dx)
+        self._y = float(self._y) + float(dy)
+        r = self._radius
+        self.setRect(QRectF(self._x - r, self._y - r, 2 * r, 2 * r))
+        self.setPos(0.0, 0.0)
 
     def to_record(self) -> dict[str, Any]:
         return {
