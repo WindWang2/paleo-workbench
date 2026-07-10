@@ -102,8 +102,20 @@ def test_compile_map_draft_with_factor_wells():
     )
     m = compile_map_draft(doc, seed=0)
     assert len(m.well_overlays) == 2
-    assert m.well_overlays[0] == {"name": "A1", "lng": 114.1, "lat": 22.7}
-    assert m.well_overlays[1] == {"name": "A2", "lng": 114.2, "lat": 22.8}
+    assert m.well_overlays[0] == {
+        "name": "A1",
+        "lng": 114.1,
+        "lat": 22.7,
+        "x": 114.1,
+        "y": 22.7,
+    }
+    assert m.well_overlays[1] == {
+        "name": "A2",
+        "lng": 114.2,
+        "lat": 22.8,
+        "x": 114.2,
+        "y": 22.8,
+    }
 
 
 def test_compile_map_draft_synthetic_wells_from_applicable():
@@ -111,8 +123,8 @@ def test_compile_map_draft_synthetic_wells_from_applicable():
     doc.stratigraphy.applicable_wells = ["W1", "W2"]
     m = compile_map_draft(doc, seed=0)
     assert m.well_overlays == [
-        {"name": "W1", "lng": 114.0, "lat": 22.6},
-        {"name": "W2", "lng": 114.02, "lat": 22.61},
+        {"name": "W1", "lng": 114.0, "lat": 22.6, "x": 114.0, "y": 22.6},
+        {"name": "W2", "lng": 114.02, "lat": 22.61, "x": 114.02, "y": 22.61},
     ]
 
 

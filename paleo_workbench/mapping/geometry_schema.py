@@ -18,12 +18,22 @@ def normalize_facies(raw: dict[str, Any]) -> dict[str, Any]:
         ring = list(coords[0])
     else:
         ring = [list(p) for p in coords]
+    props = raw.get("properties") if isinstance(raw.get("properties"), dict) else {}
+    name = (
+        raw.get("name")
+        or raw.get("facies")
+        or raw.get("label")
+        or props.get("name")
+        or props.get("facies")
+        or props.get("label")
+        or ""
+    )
     return {
         "id": raw.get("id") or new_feature_id("facies"),
         "kind": "facies",
-        "name": raw.get("name") or raw.get("facies") or raw.get("label") or "",
+        "name": name,
         "coordinates": ring,
-        "style": dict(raw.get("style") or {}),
+        "style": dict(raw.get("style") or props.get("style") or {}),
     }
 
 
@@ -31,7 +41,8 @@ def normalize_well(raw: dict[str, Any]) -> dict[str, Any]:
     if "coordinates" in raw and isinstance(raw["coordinates"], (list, tuple)):
         x, y = float(raw["coordinates"][0]), float(raw["coordinates"][1])
     else:
-        x = float(raw.get("x", raw.get("lon", 0.0)))
+        # Accept x/lon/lng and y/lat (preview helpers and demo drafts use lng/lat).
+        x = float(raw.get("x", raw.get("lng", raw.get("lon", 0.0))))
         y = float(raw.get("y", raw.get("lat", 0.0)))
     return {
         "id": raw.get("id") or new_feature_id("well"),

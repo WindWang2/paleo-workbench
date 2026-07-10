@@ -157,8 +157,11 @@ def _square_feature(
         "probability": probability,
         "region_id": region_id,
     }
+    # Top-level name/facies for map_edit normalize_facies; properties for GeoJSON consumers.
     return {
         "type": "Feature",
+        "name": facies,
+        "facies": facies,
         "properties": props,
         "geometry": {
             "type": "Polygon",
@@ -182,13 +185,18 @@ def _wells_from_project(project: ProjectDocument) -> list[dict[str, Any]]:
             }
         )
     return [
-        {
-            "name": well_name,
-            "lng": round(114.0 + i * 0.02, 6),
-            "lat": round(22.6 + (i % 3) * 0.01, 6),
-        }
+        _well_record(
+            well_name,
+            round(114.0 + i * 0.02, 6),
+            round(22.6 + (i % 3) * 0.01, 6),
+        )
         for i, well_name in enumerate(names)
     ]
+
+
+def _well_record(name: str, lng: float, lat: float) -> dict[str, Any]:
+    """Dual keys: lng/lat for preview, x/y for map_edit normalize_well."""
+    return {"name": name, "lng": lng, "lat": lat, "x": lng, "y": lat}
 
 
 def _wells_from_factor_tasks(project: ProjectDocument) -> list[dict[str, Any]]:
@@ -215,7 +223,7 @@ def _wells_from_factor_tasks(project: ProjectDocument) -> list[dict[str, Any]]:
             if key in seen:
                 continue
             seen.add(key)
-            wells.append({"name": name, "lng": lng, "lat": lat})
+            wells.append(_well_record(name, lng, lat))
     return wells
 
 
