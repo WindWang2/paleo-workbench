@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.activity_card import RecentActivityCard
 from paleo_workbench.ui.pages.completeness_card import DataCompletenessCard
 from paleo_workbench.ui.pages.workflow_progress import WorkflowProgress
@@ -12,12 +13,17 @@ class HomePage(QWidget):
         super().__init__(parent)
         self.setObjectName("HomePage")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+        layout.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
+        layout.setSpacing(tokens.SPACE_3)
         self.workflow_progress = WorkflowProgress()
         layout.addWidget(self.workflow_progress)
         bottom = QHBoxLayout()
-        bottom.setSpacing(16)
+        bottom.setSpacing(tokens.SPACE_3)
         self.activity_card = RecentActivityCard()
         self.completeness_card = DataCompletenessCard()
         bottom.addWidget(self.activity_card, 1)

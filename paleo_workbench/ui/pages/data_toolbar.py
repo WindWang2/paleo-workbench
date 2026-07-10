@@ -3,6 +3,8 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
 
+from paleo_workbench.ui import tokens
+
 
 class DataToolbar(QWidget):
     import_files_requested = Signal()
@@ -18,20 +20,23 @@ class DataToolbar(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(tokens.SPACE_1)
 
         self.import_btn = QPushButton("导入文件")
         self.import_btn.setObjectName("PrimaryButton")
+        self.import_btn.setMinimumHeight(tokens.CONTROL_HEIGHT_LG)
         self.import_btn.clicked.connect(self.import_files_requested.emit)
         layout.addWidget(self.import_btn)
 
         self.import_folder_btn = QPushButton("导入目录")
         self.import_folder_btn.setObjectName("SecondaryButton")
+        self.import_folder_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.import_folder_btn.clicked.connect(self.import_folder_requested.emit)
         layout.addWidget(self.import_folder_btn)
 
         self.rescan_btn = QPushButton("重新扫描")
         self.rescan_btn.setObjectName("SecondaryButton")
+        self.rescan_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.rescan_btn.clicked.connect(self.rescan_requested.emit)
         layout.addWidget(self.rescan_btn)
 
@@ -44,6 +49,7 @@ class DataToolbar(QWidget):
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
         self.search_box.setPlaceholderText("搜索文件名 / 类型 / 格式 / 路径...")
+        self.search_box.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         layout.addWidget(self.search_box, 1)
 
@@ -56,12 +62,14 @@ class DataToolbar(QWidget):
 
         self.catalog_btn = QPushButton("目录")
         self.catalog_btn.setObjectName("SecondaryButton")
+        self.catalog_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.catalog_btn.setCheckable(True)
         self.catalog_btn.clicked.connect(self.catalog_toggled.emit)
         layout.addWidget(self.catalog_btn)
 
         self.reader_btn = QPushButton("阅读器")
         self.reader_btn.setObjectName("SecondaryButton")
+        self.reader_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.reader_btn.setCheckable(True)
         self.reader_btn.clicked.connect(self.reader_toggled.emit)
         layout.addWidget(self.reader_btn)
