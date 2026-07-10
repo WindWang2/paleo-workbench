@@ -3,7 +3,11 @@ from paleo_workbench.ui.pages.map_edit_items import FaciesPolygonItem, WellPoint
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.mapping_page import MappingPage
-from paleo_workbench.mapping.map_edit_api import hit_test
+from paleo_workbench.mapping.map_edit_api import HAS_CPP, hit_test
+
+
+def test_has_cpp_is_bool():
+    assert isinstance(HAS_CPP, bool)
 
 
 def test_scene_loads_facies_and_wells(qtbot):
@@ -117,9 +121,48 @@ def test_mapping_page_loads_active_document_into_scene(qtbot):
     assert scene.item_by_id("w9") is not None
 
 
-def test_hit_test_stub_returns_none():
+def test_hit_test_python_path():
+    """Pure Python hit_test works without map_edit_core (default CI path)."""
+    assert isinstance(HAS_CPP, bool)
     assert hit_test([], 0.0, 0.0) is None
+    # No coordinates → miss
     assert hit_test([{"id": "f1"}], 1.0, 2.0, tolerance=5.0) is None
+    # Point hit
+    assert hit_test(
+        [{"id": "w1", "coordinates": [1.0, 2.0]}],
+        1.0,
+        2.0,
+        tolerance=0.5,
+    ) == "w1"
+    # Point miss outside tolerance
+    assert hit_test(
+        [{"id": "w1", "coordinates": [1.0, 2.0]}],
+        5.0,
+        5.0,
+        tolerance=0.5,
+    ) is None
+    # Polygon interior
+    ring = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    assert hit_test([{"id": "f1", "coordinates": ring}], 5.0, 5.0) == "f1"
+    assert hit_test([{"id": "f1", "coordinates": ring}], 50.0, 50.0) is None
+
+
+def test_scene_hit_test_at(qtbot):
+    scene = MapEditScene()
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],
+        }],
+        well_overlays=[{"id": "w1", "name": "A1", "x": 20, "y": 20}],
+    )
+    scene.load_document(doc)
+    assert scene.hit_test_at(5.0, 5.0) == "f1"
+    assert scene.hit_test_at(20.0, 20.0, tolerance=0.5) == "w1"
+    assert scene.hit_test_at(100.0, 100.0, tolerance=0.1) is None
 
 
 def test_select_item_emits_selection_ids(qtbot):

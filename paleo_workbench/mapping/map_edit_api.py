@@ -1,11 +1,144 @@
 """Geometry façade for the mapping editor.
 
-Python implementation first; optional map_edit_core C++ extension later.
+Tries optional ``map_edit_core`` (C++ / pybind11) for hot paths; falls back to
+pure Python. Public call signatures stay stable so UI and tests do not care
+which backend is active. See ``CPP_EXTENSION.md`` for native signatures.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+try:
+    import map_edit_core as _map_edit_core  # type: ignore
+    HAS_CPP = True
+except ImportError:
+    _map_edit_core = None  # type: ignore[assignment]
+    HAS_CPP = False
+
+
+def _cpp_fn(name: str):
+    """Return a callable from map_edit_core if present, else None."""
+    if not HAS_CPP or _map_edit_core is None:
+        return None
+    return getattr(_map_edit_core, name, None)
+
+
+# ---------------------------------------------------------------------------
+# hit_test
+# ---------------------------------------------------------------------------
+
+
+def _point_dist2(ax: float, ay: float, bx: float, by: float) -> float:
+    dx, dy = ax - bx, ay - by
+    return dx * dx + dy * dy
+
+
+def _point_to_segment_dist2(
+    px: float,
+    py: float,
+    ax: float,
+    ay: float,
+    bx: float,
+    by: float,
+) -> float:
+    dx, dy = bx - ax, by - ay
+    if dx == 0.0 and dy == 0.0:
+        return _point_dist2(px, py, ax, ay)
+    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    return _point_dist2(px, py, ax + t * dx, ay + t * dy)
+
+
+def _point_in_ring(px: float, py: float, ring: list[list[float]]) -> bool:
+    """Ray-cast point-in-polygon. Ring may be open or closed."""
+    n = len(ring)
+    if n < 3:
+        return False
+    # Drop closing duplicate for iteration.
+    pts = ring
+    if (
+        isinstance(ring[0], list)
+        and isinstance(ring[-1], list)
+        and len(ring[0]) >= 2
+        and len(ring[-1]) >= 2
+        and float(ring[0][0]) == float(ring[-1][0])
+        and float(ring[0][1]) == float(ring[-1][1])
+    ):
+        n = n - 1
+        if n < 3:
+            return False
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = float(pts[i][0]), float(pts[i][1])
+        xj, yj = float(pts[j][0]), float(pts[j][1])
+        if ((yi > py) != (yj > py)) and (
+            px < (xj - xi) * (py - yi) / ((yj - yi) or 1e-30) + xi
+        ):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _hit_test_python(
+    records: list[dict[str, Any]] | None,
+    x: float,
+    y: float,
+    tolerance: float = 0.0,
+) -> str | None:
+    """Return the first feature id under (x, y), or None.
+
+    Points: within ``tolerance`` (default 0 uses a tiny epsilon).
+    Rings (closed polygons): point-in-polygon or edge within tolerance.
+    Lines (open rings): edge within tolerance.
+    """
+    if not records:
+        return None
+    px, py = float(x), float(y)
+    tol = max(0.0, float(tolerance))
+    # Default small hit radius for bare points when tol is 0.
+    point_tol = tol if tol > 0.0 else 1e-9
+    tol2 = point_tol * point_tol
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        fid = record.get("id")
+        if fid is None:
+            continue
+        coords = record.get("coordinates")
+        if not isinstance(coords, list) or not coords:
+            continue
+        first = coords[0]
+        # Point: [x, y]
+        if isinstance(first, (int, float)):
+            if len(coords) >= 2:
+                if _point_dist2(px, py, float(coords[0]), float(coords[1])) <= tol2:
+                    return str(fid)
+            continue
+        # Ring / line: list of [x, y]
+        ring = [p for p in coords if isinstance(p, list) and len(p) >= 2]
+        if len(ring) < 2:
+            continue
+        closed = _is_closed_ring(ring)
+        if closed and _point_in_ring(px, py, ring):
+            return str(fid)
+        # Edge proximity
+        edge_tol2 = (tol if tol > 0.0 else 0.0) ** 2
+        if edge_tol2 <= 0.0 and not closed:
+            # Open lines with zero tol: only exact vertex hits
+            for p in ring:
+                if _point_dist2(px, py, float(p[0]), float(p[1])) <= 1e-18:
+                    return str(fid)
+            continue
+        seg_count = len(ring) - 1
+        for i in range(seg_count):
+            ax, ay = float(ring[i][0]), float(ring[i][1])
+            bx, by = float(ring[i + 1][0]), float(ring[i + 1][1])
+            if _point_to_segment_dist2(px, py, ax, ay, bx, by) <= max(edge_tol2, 1e-18):
+                return str(fid)
+    return None
 
 
 def hit_test(
@@ -16,9 +149,32 @@ def hit_test(
 ) -> str | None:
     """Return the feature id under (x, y), or None.
 
-    Stub for Task 3 — full spatial hit-test arrives with select/move tools.
+    When ``map_edit_core`` is available, prefers the C++ implementation.
+    Accepts feature dicts with ``id`` + ``coordinates`` (point or ring).
     """
-    return None
+    cpp = _cpp_fn("hit_test")
+    if cpp is not None:
+        # Compact payload: list of (id, coordinates)
+        payload: list[tuple[str, list]] = []
+        for record in records or []:
+            if not isinstance(record, dict):
+                continue
+            fid = record.get("id")
+            coords = record.get("coordinates")
+            if fid is None or not isinstance(coords, list):
+                continue
+            payload.append((str(fid), coords))
+        try:
+            return cpp(payload, float(x), float(y), float(tolerance))
+        except Exception:
+            # Fall through to pure Python on any native error.
+            pass
+    return _hit_test_python(records, x, y, tolerance)
+
+
+# ---------------------------------------------------------------------------
+# move / vertex ops
+# ---------------------------------------------------------------------------
 
 
 def move_features(
@@ -31,6 +187,7 @@ def move_features(
 
     Supports point coordinates ``[x, y]`` and ring/line ``[[x, y], ...]``.
     """
+    cpp = _cpp_fn("move_feature")
     dx_f = float(dx)
     dy_f = float(dy)
     for fid in ids:
@@ -40,6 +197,12 @@ def move_features(
         coords = record.get("coordinates")
         if not isinstance(coords, list) or not coords:
             continue
+        if cpp is not None:
+            try:
+                cpp(coords, dx_f, dy_f)
+                continue
+            except Exception:
+                pass
         # Point: [x, y] — first element is a scalar number.
         first = coords[0]
         if isinstance(first, (int, float)):
@@ -65,6 +228,13 @@ def _is_closed_ring(ring: list[list[float]]) -> bool:
 
 def set_vertex(ring: list[list[float]], index: int, x: float, y: float) -> None:
     """Set ring[index] to (x, y). Syncs closing point when the ring is closed."""
+    cpp = _cpp_fn("set_vertex")
+    if cpp is not None:
+        try:
+            cpp(ring, int(index), float(x), float(y))
+            return
+        except Exception:
+            pass
     if not isinstance(ring, list):
         raise TypeError("ring must be a list")
     n = len(ring)
@@ -84,6 +254,13 @@ def set_vertex(ring: list[list[float]], index: int, x: float, y: float) -> None:
 
 def insert_vertex(ring: list[list[float]], index: int, x: float, y: float) -> None:
     """Insert a vertex at ``index`` (list.insert semantics)."""
+    cpp = _cpp_fn("insert_vertex")
+    if cpp is not None:
+        try:
+            cpp(ring, int(index), float(x), float(y))
+            return
+        except Exception:
+            pass
     if not isinstance(ring, list):
         raise TypeError("ring must be a list")
     if index < 0 or index > len(ring):
@@ -98,6 +275,12 @@ def delete_vertex(ring: list[list[float]], index: int) -> bool:
     Open rings/lines require at least 2 vertices.
     Returns True if a vertex was removed.
     """
+    cpp = _cpp_fn("delete_vertex")
+    if cpp is not None:
+        try:
+            return bool(cpp(ring, int(index)))
+        except Exception:
+            pass
     if not isinstance(ring, list):
         raise TypeError("ring must be a list")
     n = len(ring)
@@ -157,16 +340,17 @@ def closest_edge(
     return best
 
 
-def snap_point(
+# ---------------------------------------------------------------------------
+# snap
+# ---------------------------------------------------------------------------
+
+
+def _snap_point_python(
     candidates: list[tuple[float, float]] | list[list[float]] | None,
     x: float,
     y: float,
     tol: float = 0.5,
 ) -> tuple[float, float]:
-    """Snap (x, y) to the nearest candidate within ``tol`` (map units).
-
-    Returns the original point when no candidate is within tolerance.
-    """
     px, py = float(x), float(y)
     if not candidates:
         return px, py
@@ -185,6 +369,32 @@ def snap_point(
             best_d2 = d2
             best = (cx, cy)
     return best if best is not None else (px, py)
+
+
+def snap_point(
+    candidates: list[tuple[float, float]] | list[list[float]] | None,
+    x: float,
+    y: float,
+    tol: float = 0.5,
+) -> tuple[float, float]:
+    """Snap (x, y) to the nearest candidate within ``tol`` (map units).
+
+    Returns the original point when no candidate is within tolerance.
+    """
+    cpp = _cpp_fn("snap")
+    if cpp is not None:
+        try:
+            result = cpp(list(candidates or []), float(x), float(y), float(tol))
+            if result is not None and len(result) >= 2:
+                return float(result[0]), float(result[1])
+        except Exception:
+            pass
+    return _snap_point_python(candidates, x, y, tol)
+
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
 
 
 def _segments_properly_intersect(
@@ -226,12 +436,7 @@ def _segments_properly_intersect(
     return False
 
 
-def validate_ring(ring: list[list[float]] | None) -> list[dict[str, Any]]:
-    """Return topology issues for a polygon ring (closed or open).
-
-    Detects self-intersections between non-adjacent edges. Issues look like
-    ``{"code": "self_intersection", "message": "..."}``.
-    """
+def _validate_ring_python(ring: list[list[float]] | None) -> list[dict[str, Any]]:
     if not isinstance(ring, list) or len(ring) < 4:
         return []
     pts: list[tuple[float, float]] = []
@@ -274,6 +479,23 @@ def validate_ring(ring: list[list[float]] | None) -> list[dict[str, Any]]:
                 })
                 return issues  # one is enough for V1 warnings
     return issues
+
+
+def validate_ring(ring: list[list[float]] | None) -> list[dict[str, Any]]:
+    """Return topology issues for a polygon ring (closed or open).
+
+    Detects self-intersections between non-adjacent edges. Issues look like
+    ``{"code": "self_intersection", "message": "..."}``.
+    """
+    cpp = _cpp_fn("validate")
+    if cpp is not None:
+        try:
+            result = cpp(ring if ring is not None else [])
+            if isinstance(result, list):
+                return list(result)
+        except Exception:
+            pass
+    return _validate_ring_python(ring)
 
 
 def validate_adjacency(

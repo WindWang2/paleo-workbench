@@ -160,6 +160,10 @@ class MapEditScene(QGraphicsScene):
         """Alias used by save-draft path."""
         return self.features_to_records()
 
+    def hit_test_at(self, x: float, y: float, tolerance: float = 0.0) -> str | None:
+        """Return feature id under map point via map_edit_api (Python or C++)."""
+        return api.hit_test(self.features_to_records(), float(x), float(y), tolerance=float(tolerance))
+
     def clear_features(self) -> None:
         self._cancel_drag()
         self._cancel_vertex_drag()
