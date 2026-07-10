@@ -316,3 +316,58 @@ def test_stale_generation_discarded(qtbot, tmp_path):
     controller.request(None)
     assert len(received) == 1
     assert received[0].mode == "empty"
+
+
+def test_cache_hit_skips_provider_and_loading(qtbot, tmp_path):
+    """Re-selecting the same unchanged asset serves from LRU without provider.preview."""
+    path = tmp_path / "hit.txt"
+    path.write_text("cached content", encoding="utf-8")
+    resource = ResourceItem(name="hit.txt", path=str(path), type="document", format="txt")
+    provider = SlowProvider()
+    controller = PreviewRequestController(provider)
+    results: list[object] = []
+    loadings: list[bool] = []
+    controller.result_ready.connect(results.append)
+    controller.loading.connect(lambda: loadings.append(True))
+
+    controller.request(resource)
+    _wait_controller_idle(qtbot, controller)
+    assert provider.calls == ["hit.txt"]
+    assert len(results) == 1
+    assert loadings == [True]
+
+    controller.request(resource)
+    # Cache hit is synchronous — no worker, no second provider call, no loading.
+    assert provider.calls == ["hit.txt"]
+    assert len(controller._jobs) == 0
+    assert len(results) == 2
+    assert loadings == [True]
+    assert results[0].title == results[1].title == "hit.txt"
+    assert results[1].message == "preview:hit.txt"
+
+
+def test_cache_miss_after_file_rewrite(qtbot, tmp_path):
+    """Rewriting the file changes the cache key so provider runs again."""
+    path = tmp_path / "rewrite.txt"
+    path.write_text("v1", encoding="utf-8")
+    resource = ResourceItem(
+        name="rewrite.txt",
+        path=str(path),
+        type="document",
+        format="txt",
+        checksum="c1",
+    )
+    provider = SlowProvider()
+    controller = PreviewRequestController(provider)
+    results: list[object] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(resource)
+    _wait_controller_idle(qtbot, controller)
+    assert provider.calls == ["rewrite.txt"]
+
+    path.write_text("v2-longer-content", encoding="utf-8")
+    controller.request(resource)
+    _wait_controller_idle(qtbot, controller)
+    assert provider.calls == ["rewrite.txt", "rewrite.txt"]
+    assert len(results) == 2

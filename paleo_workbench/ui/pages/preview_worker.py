@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_cache_key
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 
 
@@ -37,11 +38,21 @@ class PreviewRequestController(QObject):
     loading = Signal()
     failed = Signal(str)
 
-    def __init__(self, provider: PreviewProvider | None = None, parent=None):
+    def __init__(
+        self,
+        provider: PreviewProvider | None = None,
+        parent=None,
+        *,
+        cache: PreviewCache | None = None,
+        cache_max_size: int = 32,
+    ):
         super().__init__(parent)
         self.provider = provider or PreviewProvider()
+        self.cache = cache if cache is not None else PreviewCache(max_size=cache_max_size)
         self._generation = 0
         self._jobs: list[tuple[QThread, _PreviewWorker]] = []
+        # generation -> cache key for in-flight successful puts
+        self._inflight_keys: dict[int, tuple] = {}
 
     @property
     def generation(self) -> int:
@@ -54,7 +65,14 @@ class PreviewRequestController(QObject):
             self.result_ready.emit(self.provider.preview(None))
             return
 
+        key = make_preview_cache_key(asset)
+        hit = self.cache.get(key)
+        if hit is not None:
+            self.result_ready.emit(hit)
+            return
+
         self.loading.emit()
+        self._inflight_keys[generation] = key
         thread = QThread(self)
         worker = _PreviewWorker(self.provider, asset, generation)
         worker.moveToThread(thread)
@@ -70,11 +88,15 @@ class PreviewRequestController(QObject):
         thread.start()
 
     def _on_finished(self, generation: int, result: object) -> None:
+        key = self._inflight_keys.pop(generation, None)
         if generation != self._generation:
             return
+        if key is not None and isinstance(result, PreviewResult):
+            self.cache.put(key, result)
         self.result_ready.emit(result)
 
     def _on_failed(self, generation: int, message: str) -> None:
+        self._inflight_keys.pop(generation, None)
         if generation != self._generation:
             return
         self.failed.emit(message)
