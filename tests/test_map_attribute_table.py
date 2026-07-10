@@ -1,4 +1,16 @@
+from PySide6.QtWidgets import QLabel
+
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
+
+
+def test_attribute_table_dock_title_object_name(qtbot):
+    w = MapAttributeTable()
+    qtbot.addWidget(w)
+    titles = [c for c in w.findChildren(QLabel) if c.objectName() == "MapDockTitle"]
+    assert len(titles) >= 1
+    assert titles[0].text() == "属性"
+    assert w.objectName() == "MapAttributeTable"
+    assert w.table.objectName() == "MapAttributeTableWidget"
 
 
 def test_attribute_table_empty_and_set_feature(qtbot):

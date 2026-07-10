@@ -28,21 +28,18 @@ class MapLayerTree(QFrame):
         super().__init__(parent)
         self.setObjectName("MapLayerTree")
         self.setFixedWidth(240)
-        self.setStyleSheet(
-            f"QFrame#MapLayerTree {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         title = QLabel("图件与图层")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
         self.tree = QTreeWidget()
@@ -50,11 +47,6 @@ class MapLayerTree(QFrame):
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
         self.tree.setRootIsDecorated(True)
-        self.tree.setStyleSheet(
-            f"QTreeWidget {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px; }}"
-        )
         layout.addWidget(self.tree, 1)
 
         self._documents: list[Any] = []

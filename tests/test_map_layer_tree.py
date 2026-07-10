@@ -1,5 +1,17 @@
+from PySide6.QtWidgets import QLabel
+
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_layer_tree import LAYER_KEYS, MapLayerTree
+
+
+def test_layer_tree_dock_title_object_name(qtbot):
+    w = MapLayerTree()
+    qtbot.addWidget(w)
+    titles = [c for c in w.findChildren(QLabel) if c.objectName() == "MapDockTitle"]
+    assert len(titles) >= 1
+    assert titles[0].text() == "图件与图层"
+    assert w.objectName() == "MapLayerTree"
+    assert w.tree.objectName() == "MapLayerTreeWidget"
 
 
 def test_layer_tree_lists_documents_and_default_layers(qtbot):

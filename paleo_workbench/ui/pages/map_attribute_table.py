@@ -27,21 +27,18 @@ class MapAttributeTable(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MapAttributeTable")
-        self.setStyleSheet(
-            f"QFrame#MapAttributeTable {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.SPACE_2,
+            tokens.PANEL_PADDING,
+            tokens.SPACE_2,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         title = QLabel("属性")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
         self.table = QTableWidget(0, 2)
@@ -55,11 +52,6 @@ class MapAttributeTable(QFrame):
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.SelectedClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
-        )
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; }}"
         )
         layout.addWidget(self.table, 1)
 
