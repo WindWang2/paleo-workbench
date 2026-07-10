@@ -55,8 +55,11 @@ class AppShell(QWidget):
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
         self.page_stack.addWidget(VisualizationPage()) # index 5 = 可视化
         self.page_stack.addWidget(PreparationPage()) # index 6 = 制备
-        self.page_stack.addWidget(MappingPage())      # index 7 = 编图
+        self.mapping_page = MappingPage()
+        self.mapping_page.mapping_context_changed.connect(self.update_mapping_context)
+        self.page_stack.addWidget(self.mapping_page)  # index 7 = 编图
         self.page_stack.addWidget(ReviewExportPage()) # index 8 = 成图审核
+        self._mapping_context = self._build_mapping_context()
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
         middle.addWidget(self.page_stack, 1)
@@ -71,6 +74,8 @@ class AppShell(QWidget):
         self.page_stack.setCurrentIndex(index)
         if index == 1:
             self.sidebar.update_data_context(**self._data_context)
+        elif index == 7:
+            self.sidebar.update_mapping_context(**self._mapping_context)
         else:
             self.sidebar.set_context(tokens.PAGE_NAMES[index])
 
@@ -176,6 +181,24 @@ class AppShell(QWidget):
         page = self.page_stack.widget(7)
         if hasattr(page, "update_state"):
             page.update_state(map_documents)
+        self._mapping_context = self._build_mapping_context()
+        if self.page_stack.currentIndex() == 7:
+            self.sidebar.update_mapping_context(**self._mapping_context)
+
+    def update_mapping_context(self, context: dict) -> None:
+        self._mapping_context = {
+            "map_name": context.get("map_name", "未选择") or "未选择",
+            "horizon": context.get("horizon", "") or "",
+            "dirty": bool(context.get("dirty", False)),
+        }
+        if self.page_stack.currentIndex() == 7:
+            self.sidebar.update_mapping_context(**self._mapping_context)
+
+    def _build_mapping_context(self) -> dict:
+        page = self.page_stack.widget(7)
+        if hasattr(page, "mapping_context"):
+            return page.mapping_context()
+        return {"map_name": "未选择", "horizon": "", "dirty": False}
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
         page = self.page_stack.widget(8)
