@@ -649,4 +649,40 @@ Implemented via SDD on `feature/e2e-pipeline-18a` (tasks 1–5 code + task 6 sui
 
 ### Status
 
-**Phase 18a COMPLETE** on branch `feature/e2e-pipeline-18a`. **18b/18c still pending** (design contracts only).
+**Phase 18a COMPLETE** on branch `feature/e2e-pipeline-18a`.
+
+---
+
+## Session: 2026-07-10 — Phase 18b asset binding + 18c map draft — COMPLETE ✅
+
+Implemented via SDD on `feature/e2e-pipeline-18b-18c` (tasks 1–6).
+
+| Task | Content | Commit area |
+|------|---------|-------------|
+| 1 | `bind_prediction_assets` / `suggest_assets_for_demo` / `ensure_demo_prediction` | `8e81df1` |
+| 2 | Bound LAS/SEGY canvases via VizAdapter; unbound mock fallback | `818f29b` |
+| 3 | Sample open + CLI `--with-demo-tasks` seed demo prediction | `8085d4c` |
+| 4 | Deterministic `compile_map_draft` (always produces draft) | `c50c6e6` |
+| 5 | Mapping toolbar 「生成演示草稿」 | `95e91a1` |
+| 6 | CLI `--with-map-draft`, full suite, docs | (this session) |
+
+### Modules
+
+| Path | Role |
+|------|------|
+| `paleo_workbench/pipeline/assets.py` | Bind prediction → resource ids; suggest demo LAS/SEGY; ensure demo task |
+| `paleo_workbench/pipeline/compile_map.py` | Deterministic demo paleomap (polygons, wells, `is_demo_draft`) |
+| `paleo_workbench/pipeline/__main__.py` | `--with-demo-tasks` / `--with-map-draft` (order: bootstrap → demo → draft → write) |
+| `well_log_canvas_panel.py` / `seismic_view_panel.py` | Bound path → `VizAdapter.resolve`; message / mock fallback |
+| `app.py` + mapping toolbar | Sample open seeds demo prediction; 「生成演示草稿」 → `compile_map_draft` |
+
+### Verification
+
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **533 passed**, 4 skipped
+- Smoke: `python -m paleo_workbench.pipeline --data-root data --out /tmp/demo18.paleo.json --with-demo-tasks --with-map-draft` → **200 resources**, 1 prediction_task (bound well+seismic), 1 paleomap_document (demo draft, polygons+wells)
+- Spec: `docs/superpowers/specs/2026-07-10-e2e-real-data-pipeline-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-e2e-pipeline-18b-18c.md`
+
+### Status
+
+**Phase 18b + 18c COMPLETE** on branch `feature/e2e-pipeline-18b-18c`.

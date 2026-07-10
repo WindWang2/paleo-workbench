@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) toward full pipeline (18b/18c).
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c).
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a sample project bootstrap** on `feature/e2e-pipeline-18a`. **509 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a sample bootstrap** + **Phase 18b asset binding + 18c map draft** on `feature/e2e-pipeline-18b-18c`. **533 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
 
 ## Current Architecture
 
@@ -14,7 +14,7 @@
 - **DataPage (post Phase 15):** `DataWorkspace` (virtual `QTableView` + multi-format reader) + floating catalog/actions; `FilterIndex`; serial async `PreviewRequestController` + LRU `PreviewCache`; async import via `QThread`
 - **MappingPage (post Phase 16):** GIS shell — toolbar · layer tree · `MapEditView`/`MapEditScene` · attribute table; save draft to `PaleoMapDocument`; geometry via `map_edit_api` (+ optional C++ `map_edit_core`)
 - **Visualization (post Phase 17):** pure `paleo_workbench/viz/` (`VizRef` / `VizPayload` / `VizAdapter`); data-page jump → page index 5 + `open_ref`; composite tabs 测井/地震/连井/古地理; prediction mock fallback when no ref
-- **Sample pipeline (post Phase 18a):** `paleo_workbench/pipeline/` bootstrap + CLI; scan large-file checksum skip; toolbar 「打开样例工程」
+- **Sample pipeline (post Phase 18a–18c):** `paleo_workbench/pipeline/` bootstrap + asset bind + `compile_map_draft`; CLI `--with-demo-tasks` / `--with-map-draft`; toolbar 「打开样例工程」 + mapping 「生成演示草稿」
 
 ## 数据管理思维（改数据页时先读）
 
@@ -195,7 +195,7 @@ Shared adapter turns project LAS / SEGY / paleomap assets into geo-viz payloads;
 
 ### Phase 18a: 样例工程引导 Sample Project Bootstrap — ✅ COMPLETE
 
-Scan repo `data/` into a loadable `.paleo.json` sample project (CLI + toolbar); large-file checksum skip for SEGY-class assets. **18b/18c still pending** (contracts only in the design doc).
+Scan repo `data/` into a loadable `.paleo.json` sample project (CLI + toolbar); large-file checksum skip for SEGY-class assets.
 
 | Slice | Work | Key modules |
 |-------|------|-------------|
@@ -208,8 +208,33 @@ Scan repo `data/` into a loadable `.paleo.json` sample project (CLI + toolbar); 
 - Plan: `docs/superpowers/plans/2026-07-10-e2e-real-data-pipeline-18a.md`
 - Branch: `feature/e2e-pipeline-18a`
 - Smoke: `python -m paleo_workbench.pipeline --data-root data --out /tmp/sample.paleo.json` → **200 resources**
-- Tests: **509 passed**, 4 skipped
-- Pending: **18b** real-domain loaders / workflows; **18c** E2E demo polish (design contracts only)
+- Tests: **509 passed**, 4 skipped (at 18a close)
+
+### Phase 18b: 预测资产绑定 Prediction Asset Binding — ✅ COMPLETE
+
+Bind prediction tasks to real LAS/SEGY `ResourceItem`s via `input_refs`; canvases load through `VizAdapter` with mock fallback when unbound; sample open seeds a demo prediction.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| T1 | `bind_prediction_assets` / `suggest_assets_for_demo` / `ensure_demo_prediction` | `pipeline/assets.py` |
+| T2 | Well log + seismic canvases: bound path → VizAdapter, unbound → mock | `well_log_canvas_panel.py`, `seismic_view_panel.py` |
+| T3 | Sample open + CLI `--with-demo-tasks` seed bound prediction | `app.py`, `pipeline/__main__.py` |
+
+### Phase 18c: 演示相带草稿 Demo Map Draft — ✅ COMPLETE
+
+Deterministic `compile_map_draft` always produces an editable paleomap (placeholder when empty); mapping toolbar 「生成演示草稿」; CLI `--with-map-draft`.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| T4 | `compile_map_draft` pure compiler (polygons + wells + demo flags) | `pipeline/compile_map.py` |
+| T5 | Mapping toolbar generates demo draft + page refresh | `map_edit_toolbar.py`, `app.py` |
+| T6 | CLI `--with-map-draft`, docs, full suite | `pipeline/__main__.py` |
+
+- Spec: `docs/superpowers/specs/2026-07-10-e2e-real-data-pipeline-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-e2e-pipeline-18b-18c.md`
+- Branch: `feature/e2e-pipeline-18b-18c`
+- Smoke: `python -m paleo_workbench.pipeline --data-root data --out /tmp/demo18.paleo.json --with-demo-tasks --with-map-draft` → **200 resources** + prediction_tasks + paleomap_documents
+- Tests: **533 passed**, 4 skipped
 
 ## Known Follow-up Items (Minor, non-blocking)
 
@@ -247,8 +272,8 @@ Scan repo `data/` into a loadable `.paleo.json` sample project (CLI + toolbar); 
 | 16 | 编图编辑器 V1 | ✅ Complete (PR #3) | ~60+ | ✅ | ✅ |
 | 17 | 可视化 geo-viz 适配器 | ✅ Complete | ~20+ | ✅ | ✅ |
 | 18a | 样例工程引导 (E2E pipeline) | ✅ Complete (branch) | ~8+ | ✅ | ✅ |
-| 18b | 真实域加载 / 工作流 | ⏳ Pending (contracts only) | — | ✅ design | — |
-| 18c | E2E 演示抛光 | ⏳ Pending (contracts only) | — | ✅ design | — |
+| 18b | 预测资产绑定 (input_refs + VizAdapter) | ✅ Complete (branch) | ~15+ | ✅ design | ✅ |
+| 18c | 演示相带草稿 (compile_map_draft) | ✅ Complete (branch) | ~10+ | ✅ design | ✅ |
 
 ## Test History
 
@@ -277,3 +302,4 @@ Scan repo `data/` into a loadable `.paleo.json` sample project (CLI + toolbar); 
 | 2026-07-10 (Mapping Editor V1 + post-V1 topology, PR #3) | ~475 | ✅ |
 | 2026-07-10 (Visualization geo-viz adapter Phase 17, merged main) | 501 | ✅ |
 | 2026-07-10 (Phase 18a sample project bootstrap) | 509 | ✅ |
+| 2026-07-10 (Phase 18b asset binding + 18c map draft) | 533 | ✅ |
