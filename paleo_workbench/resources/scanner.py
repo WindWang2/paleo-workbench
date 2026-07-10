@@ -16,7 +16,12 @@ def _checksum(path: Path) -> str:
     return digest.hexdigest()
 
 
-def scan_resources(root: Path, project_path: Path | None = None) -> list[ResourceItem]:
+def scan_resources(
+    root: Path,
+    project_path: Path | None = None,
+    *,
+    skip_checksum_over_bytes: int | None = None,
+) -> list[ResourceItem]:
     resources: list[ResourceItem] = []
 
     for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
@@ -31,6 +36,22 @@ def scan_resources(root: Path, project_path: Path | None = None) -> list[Resourc
         if project_path is not None:
             stored_path, external = relativize_path(str(path), project_path)
 
+        size_bytes = resolved_path.stat().st_size
+        summary: dict = {"size_bytes": size_bytes}
+        checksum: str | None
+        if (
+            skip_checksum_over_bytes is not None
+            and size_bytes > skip_checksum_over_bytes
+        ):
+            checksum = None
+            summary["checksum_skipped"] = True
+        else:
+            try:
+                checksum = _checksum(path)
+            except OSError:
+                checksum = None
+                summary["checksum_error"] = True
+
         resources.append(
             ResourceItem(
                 name=path.name,
@@ -39,8 +60,8 @@ def scan_resources(root: Path, project_path: Path | None = None) -> list[Resourc
                 format=resource_format,
                 status=status,
                 source="scan",
-                parsed_summary={"size_bytes": resolved_path.stat().st_size},
-                checksum=_checksum(path),
+                parsed_summary=summary,
+                checksum=checksum,
                 external=external,
             )
         )

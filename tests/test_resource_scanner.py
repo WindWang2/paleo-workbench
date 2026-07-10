@@ -79,3 +79,27 @@ def test_scan_resources_computes_checksum_for_reference_image(tmp_path: Path):
     assert resources[0].status == "indexed_reference"
     assert resources[0].format == "png"
     assert resources[0].checksum == hashlib.sha256(payload).hexdigest()
+
+
+def test_scan_resources_skips_checksum_over_threshold(tmp_path: Path):
+    big = tmp_path / "vol.sgy"
+    big.write_bytes(b"x" * 100)
+    small = tmp_path / "A1.Las"
+    small.write_text("~Version\n", encoding="utf-8")
+
+    resources = scan_resources(tmp_path, skip_checksum_over_bytes=50)
+    by_name = {r.name: r for r in resources}
+
+    assert by_name["vol.sgy"].checksum is None
+    assert by_name["vol.sgy"].parsed_summary.get("checksum_skipped") is True
+    assert by_name["vol.sgy"].parsed_summary["size_bytes"] == 100
+    assert by_name["A1.Las"].checksum is not None
+    assert by_name["A1.Las"].parsed_summary.get("checksum_skipped") is not True
+
+
+def test_scan_resources_default_still_checksums(tmp_path: Path):
+    f = tmp_path / "A1.Las"
+    content = "~Version\n"
+    f.write_text(content, encoding="utf-8")
+    resources = scan_resources(tmp_path)
+    assert resources[0].checksum == hashlib.sha256(content.encode("utf-8")).hexdigest()
