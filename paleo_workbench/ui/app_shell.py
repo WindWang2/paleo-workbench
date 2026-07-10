@@ -169,15 +169,15 @@ class AppShell(QWidget):
             "reader_mode": self.data_page.current_reader_mode(),
         }
 
-    def update_well_log_prediction_page(self, prediction_tasks: list) -> None:
+    def update_well_log_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(2)
         if hasattr(page, "update_state"):
-            page.update_state(prediction_tasks)
+            page.update_state(prediction_tasks, project=project)
 
-    def update_seismic_prediction_page(self, prediction_tasks: list) -> None:
+    def update_seismic_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(3)
         if hasattr(page, "update_state"):
-            page.update_state(prediction_tasks)
+            page.update_state(prediction_tasks, project=project)
 
     def update_sequence_framework_page(self, stratigraphy) -> None:
         page = self.page_stack.widget(4)

@@ -20,12 +20,15 @@ def test_well_log_prediction_page_update_delegates(qtbot):
     calls = {"task": [], "canvas": [], "evidence": []}
 
     page.task_panel.update_state = lambda tasks: calls["task"].append(tasks)
-    page.canvas_panel.update_state = lambda task: calls["canvas"].append(task)
+    page.canvas_panel.update_state = lambda task, project=None: calls["canvas"].append(
+        (task, project)
+    )
     page.evidence_panel.update_state = lambda task: calls["evidence"].append(task)
 
     tasks = [{"name": "old"}, {"name": "active"}]
-    page.update_state(tasks)
+    project = object()
+    page.update_state(tasks, project=project)
 
     assert calls["task"] == [tasks]
-    assert calls["canvas"] == [tasks[-1]]
+    assert calls["canvas"] == [(tasks[-1], project)]
     assert calls["evidence"] == [tasks[-1]]

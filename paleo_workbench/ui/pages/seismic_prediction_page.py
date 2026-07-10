@@ -33,8 +33,8 @@ class SeismicPredictionPage(QWidget):
 
         outer.addLayout(content, 1)
 
-    def update_state(self, prediction_tasks: list | tuple | None) -> None:
+    def update_state(self, prediction_tasks: list | tuple | None, project=None) -> None:
         task = active_prediction_task(prediction_tasks)
         self.task_panel.update_state(prediction_tasks)
-        self.view_panel.update_state(task)
+        self.view_panel.update_state(task, project=project)
         self.control_panel.update_state(task, self.view_panel.volume_shape)
