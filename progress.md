@@ -686,3 +686,45 @@ Implemented via SDD on `feature/e2e-pipeline-18b-18c` (tasks 1–6).
 ### Status
 
 **Phase 18b + 18c COMPLETE** on branch `feature/e2e-pipeline-18b-18c`.
+
+---
+
+## Session: 2026-07-10 — Phase 19 UI visual polish — COMPLETE ✅
+
+Implemented via SDD on `feature/ui-visual-polish` (tasks 1–7).
+
+| Task | Content | Commit |
+|------|---------|--------|
+| 1 | Density tokens + richer global QSS | `42970e0` |
+| 2 | Shared UI widgets (PanelCard, SectionHeader, ToolbarStrip, EmptyStateLabel, PageScaffold) | `84760ae` |
+| 3 | Denser AppShell chrome margins and toolbar spacing | `e8254c2` |
+| 4 | Density tokens on home, data, mapping chrome | `916a0ac` |
+| 5 | Unify page outer margins to `PAGE_MARGIN` | `da78d75` |
+| 6 | Adopt PanelCard/EmptyState objectNames; drop duplicate QSS | `6a33245` |
+| 7 | Full suite + planning docs | (this session) |
+
+Design/plan docs landed earlier: `e3b2be2`, `c1e1a77`.
+
+### Modules
+
+| Path | Role |
+|------|------|
+| `paleo_workbench/ui/tokens.py` | Density scale, interaction colors, expanded `QSS_TEMPLATE` |
+| `paleo_workbench/ui/widgets/` | Five shared polish widgets + package exports |
+| Shell chrome | Header toolbar height 36; denser margins/spacing |
+| Page roots | Outer margins → `tokens.PAGE_MARGIN` (12) |
+| Cards / empty labels | `objectName` `PanelCard` / `EmptyStateLabel` for global QSS |
+
+### Brief
+
+Density tokens, richer global QSS (button states / tables / focus / panel selectors), five shared widgets, shell + high-traffic page density, `PanelCard`/`EmptyState` objectName adoption—no business-logic changes.
+
+### Verification
+
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **544 passed**, 4 skipped
+- Spec: `docs/superpowers/specs/2026-07-10-ui-visual-polish-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-ui-visual-polish.md`
+
+### Status
+
+**Phase 19 COMPLETE** on branch `feature/ui-visual-polish`.

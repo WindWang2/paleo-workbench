@@ -1,15 +1,16 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c).
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c), then ship a demo-ready global visual system (Phase 19 density tokens, QSS, shared widgets).
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a sample bootstrap** + **Phase 18b asset binding + 18c map draft** on `feature/e2e-pipeline-18b-18c`. **533 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
+## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a–18c** sample/demo pipeline + **Phase 19 UI visual polish** on `feature/ui-visual-polish`. **544 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
 
 ## Current Architecture
 
-- **AppShell** (4-zone): menu bar (36px) + header toolbar (38px) + icon rail (60px, 9 nav, gradient bg, SVG icons) + text sidebar (248px) + QStackedWidget (9 pages) + status bar (24px)
-- **Design tokens** in `paleo_workbench/ui/tokens.py` — colors, fonts, dimensions, QSS_TEMPLATE, step colors/labels, status text, resource labels/units
-- **Global QSS** applied in `main.py` via `app.setStyleSheet(tokens.QSS_TEMPLATE)`
+- **AppShell** (4-zone): menu bar (36px) + header toolbar (36px post Phase 19) + icon rail (60px, 9 nav, gradient bg, SVG icons) + text sidebar (248px) + QStackedWidget (9 pages) + status bar (24px)
+- **Design tokens** in `paleo_workbench/ui/tokens.py` — colors, fonts, dimensions, density scale (`SPACE_*`, `PAGE_MARGIN`, `CONTROL_HEIGHT*`), interaction colors, QSS_TEMPLATE, step colors/labels, status text, resource labels/units
+- **Global QSS** applied in `main.py` via `app.setStyleSheet(tokens.QSS_TEMPLATE)` (buttons/tables/focus/PanelCard/ToolbarStrip/EmptyState)
+- **Shared UI widgets** (post Phase 19): `PanelCard`, `SectionHeader`, `ToolbarStrip`, `EmptyStateLabel`, `PageScaffold` under `paleo_workbench/ui/widgets/`
 - **Pages package** at `paleo_workbench/ui/pages/`
 - **DataPage (post Phase 15):** `DataWorkspace` (virtual `QTableView` + multi-format reader) + floating catalog/actions; `FilterIndex`; serial async `PreviewRequestController` + LRU `PreviewCache`; async import via `QThread`
 - **MappingPage (post Phase 16):** GIS shell — toolbar · layer tree · `MapEditView`/`MapEditScene` · attribute table; save draft to `PaleoMapDocument`; geometry via `map_edit_api` (+ optional C++ `map_edit_core`)
@@ -236,6 +237,25 @@ Deterministic `compile_map_draft` always produces an editable paleomap (placehol
 - Smoke: `python -m paleo_workbench.pipeline --data-root data --out /tmp/demo18.paleo.json --with-demo-tasks --with-map-draft` → **200 resources** + prediction_tasks + paleomap_documents
 - Tests: **533 passed**, 4 skipped
 
+### Phase 19: UI 视觉抛光 UI Visual Polish — ✅ COMPLETE
+
+Demo-ready global visual system: density tokens, richer QSS, five shared widgets, shell + high-traffic page adoption—without changing business logic.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| T1 | Density tokens + interaction colors + expanded `QSS_TEMPLATE` | `ui/tokens.py`, `tests/test_tokens.py` |
+| T2 | Five shared widgets | `ui/widgets/` (`PanelCard`, `SectionHeader`, `ToolbarStrip`, `EmptyStateLabel`, `PageScaffold`) |
+| T3 | Denser AppShell chrome (toolbar height 36, margins/spacing) | `header_toolbar.py`, `sidebar.py`, shell chrome |
+| T4 | Density on home / data / mapping chrome | `home_page.py`, data chrome, map toolbar |
+| T5 | Unify page outer margins to `PAGE_MARGIN` | all 9 page roots |
+| T6 | Adopt `PanelCard` / `EmptyStateLabel` objectNames; drop duplicate local QSS | activity/completeness cards, result/scheme/action panels, empty labels |
+
+- Brief: density tokens (`SPACE_*`, `PAGE_MARGIN`, `CONTROL_HEIGHT*`), richer global QSS (button states, tables, focus, panel/toolbar/empty selectors), 5 shared widgets, shell + page density, `PanelCard`/`EmptyState` objectName adoption
+- Spec: `docs/superpowers/specs/2026-07-10-ui-visual-polish-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-ui-visual-polish.md`
+- Branch: `feature/ui-visual-polish`
+- Tests: **544 passed**, 4 skipped
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |
@@ -274,6 +294,7 @@ Deterministic `compile_map_draft` always produces an editable paleomap (placehol
 | 18a | 样例工程引导 (E2E pipeline) | ✅ Complete (branch) | ~8+ | ✅ | ✅ |
 | 18b | 预测资产绑定 (input_refs + VizAdapter) | ✅ Complete (branch) | ~15+ | ✅ design | ✅ |
 | 18c | 演示相带草稿 (compile_map_draft) | ✅ Complete (branch) | ~10+ | ✅ design | ✅ |
+| 19 | UI 视觉抛光 (density tokens / QSS / widgets) | ✅ Complete (branch) | ~11+ | ✅ | ✅ |
 
 ## Test History
 
@@ -303,3 +324,4 @@ Deterministic `compile_map_draft` always produces an editable paleomap (placehol
 | 2026-07-10 (Visualization geo-viz adapter Phase 17, merged main) | 501 | ✅ |
 | 2026-07-10 (Phase 18a sample project bootstrap) | 509 | ✅ |
 | 2026-07-10 (Phase 18b asset binding + 18c map draft) | 533 | ✅ |
+| 2026-07-10 (Phase 19 UI visual polish) | 544 | ✅ |
