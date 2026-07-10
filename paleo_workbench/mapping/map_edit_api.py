@@ -570,3 +570,198 @@ def validate_adjacency(
                     "pair": (i, j),
                 })
     return issues
+
+
+# ---------------------------------------------------------------------------
+# forced topology rebuild: shared-node snap, merge, split
+# ---------------------------------------------------------------------------
+
+
+def _ring_to_pts(ring: list[list[float]] | None) -> list[list[float]]:
+    if not isinstance(ring, list):
+        return []
+    out: list[list[float]] = []
+    for p in ring:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            try:
+                out.append([float(p[0]), float(p[1])])
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def snap_shared_nodes(
+    rings: list[list[list[float]]] | None,
+    tol: float = 0.5,
+) -> list[list[list[float]]]:
+    """Snap nearby vertices across rings to shared coordinates (union-find clusters).
+
+    Within each ring, identical consecutive points after snap are preserved as ring
+    structure (including closing vertex). Returns a new list of rings.
+    """
+    if not rings:
+        return []
+    tol = max(0.0, float(tol))
+    prepared = [_ring_to_pts(r) for r in rings]
+    # Flatten (ring_i, vertex_j) references.
+    refs: list[tuple[int, int]] = []
+    coords: list[list[float]] = []
+    for ri, ring in enumerate(prepared):
+        for vi, pt in enumerate(ring):
+            refs.append((ri, vi))
+            coords.append([pt[0], pt[1]])
+    n = len(coords)
+    if n == 0:
+        return prepared
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    tol2 = tol * tol
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = coords[i][0] - coords[j][0]
+            dy = coords[i][1] - coords[j][1]
+            if dx * dx + dy * dy <= tol2:
+                union(i, j)
+
+    # Representative = mean of cluster.
+    clusters: dict[int, list[int]] = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+    reps: dict[int, list[float]] = {}
+    for root, members in clusters.items():
+        sx = sum(coords[m][0] for m in members)
+        sy = sum(coords[m][1] for m in members)
+        k = len(members)
+        reps[root] = [sx / k, sy / k]
+
+    out: list[list[list[float]]] = [list(r) for r in prepared]
+    for idx, (ri, vi) in enumerate(refs):
+        root = find(idx)
+        out[ri][vi] = list(reps[root])
+    return out
+
+
+def _try_shapely():
+    try:
+        from shapely.geometry import LineString, Polygon
+        from shapely.ops import split, unary_union
+
+        return Polygon, LineString, split, unary_union
+    except Exception:
+        return None
+
+
+def _polygon_exterior_coords(poly) -> list[list[float]]:
+    coords = list(poly.exterior.coords)
+    return [[float(x), float(y)] for x, y in coords]
+
+
+def merge_rings(
+    ring_a: list[list[float]] | None,
+    ring_b: list[list[float]] | None,
+) -> list[list[float]] | None:
+    """Union two polygon rings. Prefers shapely; returns None if merge fails."""
+    a = _ring_to_pts(ring_a)
+    b = _ring_to_pts(ring_b)
+    if len(a) < 3 or len(b) < 3:
+        return None
+    sh = _try_shapely()
+    if sh is None:
+        return None
+    Polygon, _LineString, _split, unary_union = sh
+    try:
+        pa = Polygon(a)
+        pb = Polygon(b)
+        if not pa.is_valid:
+            pa = pa.buffer(0)
+        if not pb.is_valid:
+            pb = pb.buffer(0)
+        merged = unary_union([pa, pb])
+        if merged.is_empty:
+            return None
+        if merged.geom_type == "Polygon":
+            return _polygon_exterior_coords(merged)
+        if merged.geom_type == "MultiPolygon":
+            # Take largest polygon by area.
+            largest = max(merged.geoms, key=lambda g: g.area)
+            return _polygon_exterior_coords(largest)
+    except Exception:
+        return None
+    return None
+
+
+def split_ring_by_line(
+    ring: list[list[float]] | None,
+    line: list[list[float]] | None,
+) -> list[list[list[float]]] | None:
+    """Split a polygon ring by a cutter polyline. Returns 2+ rings or None."""
+    poly_pts = _ring_to_pts(ring)
+    line_pts = _ring_to_pts(line)
+    if len(poly_pts) < 3 or len(line_pts) < 2:
+        return None
+    sh = _try_shapely()
+    if sh is None:
+        return None
+    Polygon, LineString, split, _unary_union = sh
+    try:
+        poly = Polygon(poly_pts)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        cutter = LineString(line_pts)
+        # Extend slightly if needed is out of scope; require proper cut.
+        result = split(poly, cutter)
+        parts: list[list[list[float]]] = []
+        for geom in getattr(result, "geoms", [result]):
+            if geom.geom_type == "Polygon" and not geom.is_empty and geom.area > 0:
+                parts.append(_polygon_exterior_coords(geom))
+        if len(parts) < 2:
+            return None
+        return parts
+    except Exception:
+        return None
+
+
+def rebuild_topology(
+    rings: list[list[list[float]]] | None,
+    *,
+    snap_tol: float = 0.5,
+    gap_tol: float | None = None,
+) -> dict[str, Any]:
+    """Forced topology rebuild: shared-node snap + ring/adjacency validation.
+
+    Returns::
+
+        {
+          "rings": snapped rings,
+          "changed": bool,
+          "ring_issues": [{index, issues: [...]}],
+          "adjacency_issues": [...],
+        }
+    """
+    original = [_ring_to_pts(r) for r in (rings or [])]
+    snapped = snap_shared_nodes(original, tol=snap_tol)
+    changed = snapped != original
+    ring_issues: list[dict[str, Any]] = []
+    for i, ring in enumerate(snapped):
+        issues = validate_ring(ring)
+        if issues:
+            ring_issues.append({"index": i, "issues": issues})
+    adj_tol = float(snap_tol if gap_tol is None else gap_tol)
+    adjacency_issues = validate_adjacency(snapped, gap_tol=adj_tol)
+    return {
+        "rings": snapped,
+        "changed": changed,
+        "ring_issues": ring_issues,
+        "adjacency_issues": adjacency_issues,
+    }

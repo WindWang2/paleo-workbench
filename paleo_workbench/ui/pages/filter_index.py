@@ -3,10 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.data_catalog_panel import CATEGORIES
 
 ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
 REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_reference"}
+
+_STATUS_LABELS = {
+    "indexed": "已索引",
+    "parsed": "已解析",
+    "missing": "缺失",
+    "warning": "警告",
+    "failed": "失败",
+    "error": "错误",
+    "ready": "就绪",
+}
 
 
 class FilterIndex:
@@ -35,19 +46,24 @@ class FilterIndex:
                 Path(asset.output_path).name,
                 asset.format,
                 "成果",
+                "export",
                 asset.output_path,
                 asset.linked_id,
             ]
         else:
+            type_zh = RESOURCE_TYPE_LABELS.get(asset.type, asset.type)
+            status_zh = _STATUS_LABELS.get(asset.status, asset.status)
             parts = [
                 asset.name,
                 asset.type,
+                type_zh,
                 asset.format,
                 asset.status,
+                status_zh,
                 asset.source,
                 asset.path,
             ]
-        return " ".join(parts).lower()
+        return " ".join(str(p) for p in parts if p).lower()
 
     def _matches_category(
         self,

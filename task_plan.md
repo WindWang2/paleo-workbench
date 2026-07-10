@@ -176,17 +176,17 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 
 ## Known Follow-up Items (Minor, non-blocking)
 
-| # | Item | Source |
+| # | Item | Status |
 |---|------|--------|
-| 1 | `save_project` OSError branch lacks a dedicated test (only `save_project_as` tested) | Project Management V1 final review |
-| 2 | `_on_open_project` error message generic — doesn't distinguish missing file vs corrupt JSON | Project Management V1 final review |
-| 3 | Test magic index `page_stack.widget(1)` for DataPage (pre-existing pattern) | Project Management V1 final review |
-| 4 | Floating catalog tab vs toolbar checked-state can desync if tab used directly | Data page perf final review |
-| 5 | Image/PDF decode still on UI thread after async path returns path-only result | Data page perf final review |
-| 6 | Forced topology rebuild (merge/split/shared-node editing) | Mapping editor V1 out of scope |
-| 7 | CI job that requires `HAS_CPP is True` for map_edit_core | Mapping native follow-up |
-| 9 | Facies freehand draw shipped (`e413e11`); chrome print preview shipped (图面预览 mode) | Mapping post-V1 |
-| 8 | Search haystack uses raw `type` (`well_log`), not Chinese labels | Data page residual |
+| 1 | `save_project` OSError dedicated test | ✅ done |
+| 2 | Open project error: missing vs corrupt JSON | ✅ done |
+| 3 | `PAGE_INDEX_*` + `data_page_widget()` helpers | ✅ done |
+| 4 | Floating catalog tab ↔ toolbar check sync | ✅ done |
+| 5 | Image/PDF decode still on UI thread after async path | open (non-blocking) |
+| 6 | Forced topology rebuild + merge/split + shared-node snap | ✅ done |
+| 7 | CI job requires `HAS_CPP` (`map_edit_core` build) | ✅ done (`.github/workflows/ci.yml`) |
+| 8 | Search haystack Chinese type labels | ✅ done |
+| 9 | Facies freehand + chrome print preview | ✅ done earlier |
 
 ## Page Progress Matrix
 

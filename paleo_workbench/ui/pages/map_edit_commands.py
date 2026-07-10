@@ -109,6 +109,69 @@ class PropertyChangeCommand:
         self.apply_property(self.feature_id, self.key, self.old_value)
 
 
+class DeleteFeatureCommand:
+    """Remove a feature; undo restores it from the stored record."""
+
+    def __init__(
+        self,
+        record: dict,
+        add_feature: Callable[[dict], None],
+        remove_feature: Callable[[str], None],
+    ):
+        self.record = dict(record)
+        self.feature_id = str(record.get("id") or "")
+        self.add_feature = add_feature
+        self.remove_feature = remove_feature
+
+    def do(self) -> None:
+        self.remove_feature(self.feature_id)
+
+    def undo(self) -> None:
+        self.add_feature(self.record)
+
+
+class BatchVertexEditCommand:
+    """Apply coordinate updates to multiple features as one undo step."""
+
+    def __init__(
+        self,
+        changes: Sequence[tuple[str, Sequence[Sequence[float]], Sequence[Sequence[float]]]],
+        apply_coordinates: Callable[[str, list[list[float]]], None],
+    ):
+        self.changes = [
+            (
+                str(fid),
+                [[float(p[0]), float(p[1])] for p in old_c],
+                [[float(p[0]), float(p[1])] for p in new_c],
+            )
+            for fid, old_c, new_c in changes
+        ]
+        self.apply_coordinates = apply_coordinates
+
+    def do(self) -> None:
+        for fid, _old, new_c in self.changes:
+            self.apply_coordinates(fid, [list(p) for p in new_c])
+
+    def undo(self) -> None:
+        for fid, old_c, _new in self.changes:
+            self.apply_coordinates(fid, [list(p) for p in old_c])
+
+
+class CompositeCommand:
+    """Run child commands as a single undo/redo unit."""
+
+    def __init__(self, commands: Sequence[EditCommand]):
+        self.commands = list(commands)
+
+    def do(self) -> None:
+        for cmd in self.commands:
+            cmd.do()
+
+    def undo(self) -> None:
+        for cmd in reversed(self.commands):
+            cmd.undo()
+
+
 class EditCommandStack:
     """Linear undo/redo stack with a maximum depth."""
 

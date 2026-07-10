@@ -436,6 +436,8 @@ Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency orde
 - **Edit path:** QGraphicsScene items; geometry ops via `map_edit_api` façade.
 - **Native:** `map_edit_core` pybind11 module under `native/map_edit_core/`. Hot path preference; Python fallback always works. Install with `pip install -e native/map_edit_core`.
 - **Document:** `line_features` / `label_features` on `PaleoMapDocument`; save draft writes memory document (disk via project save).
-- **Post-V1 shipped:** facies polygon draft tool; geometry hit-test select; line/facies vertex edit; **图面预览** mode (`PaleoMapCanvas` + `MapChromePanel` on live scene export).
-- **Out of scope still:** forced topology rebuild (merge/split/shared-node), QGIS, full multi-page print cartography.
+- **Post-V1 shipped:** facies polygon draft tool; geometry hit-test select; line/facies vertex edit; **图面预览** mode; **forced topology rebuild** (shared-node snap + adjacency), merge/split (shapely), CI `HAS_CPP`.
+- **Out of scope still:** QGIS, full multi-page print cartography, advanced shared-edge topology constraints.
 - **Preview mode notes:** `preview_payload_from_*` converts editor rings → GeoJSON Feature and wells → `{lng,lat}` for canvas; unsaved dirty scene geometry is preferred over document; edit tools disabled while preview on; sidebar shows `模式: 编辑|图面预览`.
+- **Topology rebuild:** pure-Python shared-node clustering; merge/split prefer shapely; undo via `BatchVertexEditCommand` / `CompositeCommand`.
+- **CI:** Ubuntu job installs pybind11, builds `native/map_edit_core`, asserts `HAS_CPP`, runs full suite offscreen.

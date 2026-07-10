@@ -43,6 +43,15 @@ def test_filter_search_substring():
     assert idx.filter("全部", "cube") == [1]
 
 
+def test_filter_search_chinese_type_label():
+    """Haystack includes Chinese type labels (e.g. 测井数据 for well_log)."""
+    idx = FilterIndex()
+    assets = _assets()
+    idx.rebuild(assets)
+    assert idx.filter("全部", "测井数据") == [0]
+    assert idx.filter("全部", "地震数据") == [1]
+
+
 def test_filter_category_then_search():
     idx = FilterIndex()
     assets = _assets()

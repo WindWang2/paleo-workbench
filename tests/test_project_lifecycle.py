@@ -105,7 +105,7 @@ def test_open_project_path_loads(qtbot, tmp_path: Path):
     assert window.project_path == target
     assert window.project.meta.name == "With Resource"
     # Resource visible on data page.
-    data_page = window.app_shell.page_stack.widget(1)
+    data_page = window.app_shell.data_page_widget()
     assert any(r.name == "r1" for r in window.project.resources)
     # Sanity: data page model holds at least the one resource.
     if hasattr(data_page, "table") and hasattr(data_page.table, "model"):
@@ -174,8 +174,48 @@ def test_open_handler_reports_error_on_failure(qtbot, tmp_path: Path, monkeypatc
     window._on_open_project()
 
     assert len(calls) == 1
+    assert "不存在" in calls[0][1]
     assert window.project.meta.name == original_name
     assert window.project_path is None
+
+
+def test_open_handler_distinguishes_corrupt_json(qtbot, tmp_path: Path, monkeypatch):
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    bad = tmp_path / "bad.paleo.json"
+    bad.write_text("{not-json", encoding="utf-8")
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(window, "_show_project_error", lambda title, msg: calls.append((title, msg)))
+    monkeypatch.setattr(window, "_choose_open_project", lambda: bad)
+
+    window._on_open_project()
+
+    assert len(calls) == 1
+    assert "JSON" in calls[0][1] or "损坏" in calls[0][1]
+
+
+def test_save_project_oserror_shows_error_and_returns_none(qtbot, tmp_path: Path, monkeypatch):
+    """OSError on save is reported and does not claim success."""
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    target = tmp_path / "p.paleo.json"
+    window.project_path = target
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(window, "_show_project_error", lambda title, msg: calls.append((title, msg)))
+
+    from paleo_workbench.project import manager as mgr_mod
+
+    def boom(self, project):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mgr_mod.ProjectManager, "save", boom)
+
+    result = window.save_project()
+    assert result is None
+    assert len(calls) == 1
+    assert "保存" in calls[0][0]
+    assert "disk full" in calls[0][1]
 
 
 def test_toolbar_signals_wired_after_refresh(qtbot, monkeypatch):

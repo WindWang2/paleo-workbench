@@ -20,6 +20,7 @@ class PaleoWorkbenchWindow(QWidget):
         super().__init__()
         self.project = project or ProjectDocument.new("Untitled Project")
         self.project_path: Path | None = None
+        self._last_open_error: str | None = None
         self.resize(1440, 900)
 
         self.outer_layout = QVBoxLayout(self)
@@ -39,12 +40,24 @@ class PaleoWorkbenchWindow(QWidget):
         self._refresh_shell()
 
     def open_project_path(self, path: str | Path) -> bool:
+        self._last_open_error: str | None = None
+        target = Path(path)
         try:
-            loaded = ProjectManager(path).load()
-        except (json.JSONDecodeError, ValidationError, OSError):
+            loaded = ProjectManager(target).load()
+        except FileNotFoundError:
+            self._last_open_error = f"文件不存在：\n{target}"
+            return False
+        except json.JSONDecodeError as e:
+            self._last_open_error = f"工程文件 JSON 损坏：\n{target}\n{e}"
+            return False
+        except ValidationError as e:
+            self._last_open_error = f"工程文件格式无效：\n{target}\n{e}"
+            return False
+        except OSError as e:
+            self._last_open_error = f"无法读取工程文件：\n{target}\n{e}"
             return False
         self.project = loaded
-        self.project_path = Path(path)
+        self.project_path = target
         self._refresh_shell()
         return True
 
@@ -82,10 +95,8 @@ class PaleoWorkbenchWindow(QWidget):
         if path is None:
             return
         if not self.open_project_path(path):
-            self._show_project_error(
-                "打开工程失败",
-                f"无法打开工程文件：\n{path}",
-            )
+            detail = getattr(self, "_last_open_error", None) or f"无法打开工程文件：\n{path}"
+            self._show_project_error("打开工程失败", detail)
 
     def _on_save_project(self) -> None:
         self.save_project()

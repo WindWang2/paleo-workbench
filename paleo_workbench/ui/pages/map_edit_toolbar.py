@@ -22,6 +22,9 @@ class MapEditToolbar(QWidget):
     tool_changed = Signal(str)
     snap_toggled = Signal(bool)
     preview_toggled = Signal(bool)
+    topology_rebuild_requested = Signal()
+    merge_facies_requested = Signal()
+    split_facies_requested = Signal()
     save_draft_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
@@ -79,6 +82,24 @@ class MapEditToolbar(QWidget):
         self.preview_btn.toggled.connect(self.preview_toggled.emit)
         layout.addWidget(self.preview_btn)
 
+        self.topology_btn = QPushButton("重建拓扑")
+        self.topology_btn.setObjectName("SecondaryButton")
+        self.topology_btn.setToolTip("共享节点捕捉 + 自交/邻接校验")
+        self.topology_btn.clicked.connect(self.topology_rebuild_requested.emit)
+        layout.addWidget(self.topology_btn)
+
+        self.merge_btn = QPushButton("合并相带")
+        self.merge_btn.setObjectName("SecondaryButton")
+        self.merge_btn.setToolTip("合并选中的两个相带多边形")
+        self.merge_btn.clicked.connect(self.merge_facies_requested.emit)
+        layout.addWidget(self.merge_btn)
+
+        self.split_btn = QPushButton("分割相带")
+        self.split_btn.setObjectName("SecondaryButton")
+        self.split_btn.setToolTip("用选中的线分割选中的一个相带")
+        self.split_btn.clicked.connect(self.split_facies_requested.emit)
+        layout.addWidget(self.split_btn)
+
         layout.addStretch(1)
 
         self.save_draft_btn = QPushButton("保存编图草稿")
@@ -103,6 +124,9 @@ class MapEditToolbar(QWidget):
         for btn in self._tool_buttons.values():
             btn.setEnabled(not enabled)
         self.snap_btn.setEnabled(not enabled)
+        self.topology_btn.setEnabled(not enabled)
+        self.merge_btn.setEnabled(not enabled)
+        self.split_btn.setEnabled(not enabled)
 
     def current_tool(self) -> str:
         return self._current_tool

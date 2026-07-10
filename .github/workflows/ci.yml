@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Tests + map_edit_core (HAS_CPP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries (Qt / offscreen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libgl1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libegl1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxkbcommon-x11-0 \
+            libfontconfig1 \
+            libfreetype6
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,native]"
+          # geo-viz-engine subpackages (may pull shapely, scipy, …)
+          if [ -f requirements-geoviz.txt ]; then
+            python -m pip install -r requirements-geoviz.txt || true
+          fi
+          # Core geoviz packages needed by mapping/preview tests
+          python -m pip install -e geo-viz-engine/packages/geoviz_common || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_well_log || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_paleo_map || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_seismic || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_cross_well || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_plots || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_map || true
+          python -m pip install -e geo-viz-engine/packages/geoviz_well_tie || true
+          python -m pip install shapely
+
+      - name: Build map_edit_core (required)
+        run: |
+          python -m pip install -e native/map_edit_core
+          python -c "from paleo_workbench.mapping.map_edit_api import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          REQUIRE_MAP_EDIT_CPP: "1"
+        run: |
+          python -m pytest -q --tb=short

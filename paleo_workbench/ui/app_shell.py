@@ -24,6 +24,17 @@ from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui import tokens
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
+# Stable page indices (avoid magic numbers in callers/tests).
+PAGE_INDEX_HOME = 0
+PAGE_INDEX_DATA = 1
+PAGE_INDEX_WELL_LOG = 2
+PAGE_INDEX_SEISMIC = 3
+PAGE_INDEX_SEQUENCE = 4
+PAGE_INDEX_VISUALIZATION = 5
+PAGE_INDEX_PREPARATION = 6
+PAGE_INDEX_MAPPING = 7
+PAGE_INDEX_REVIEW = 8
+
 
 class AppShell(QWidget):
     def __init__(self, project: ProjectDocument | None = None, parent=None):
@@ -72,18 +83,24 @@ class AppShell(QWidget):
 
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)
-        if index == 1:
+        if index == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
-        elif index == 7:
+        elif index == PAGE_INDEX_MAPPING:
             self.sidebar.update_mapping_context(**self._mapping_context)
         else:
             self.sidebar.set_context(tokens.PAGE_NAMES[index])
+
+    def data_page_widget(self):
+        return self.page_stack.widget(PAGE_INDEX_DATA)
+
+    def mapping_page_widget(self):
+        return self.page_stack.widget(PAGE_INDEX_MAPPING)
 
     def set_project_name(self, name: str) -> None:
         self.status_bar.set_project_name(name)
 
     def update_home_page(self, state: dict, steps: list) -> None:
-        home = self.page_stack.widget(0)
+        home = self.page_stack.widget(PAGE_INDEX_HOME)
         if hasattr(home, "update_state"):
             home.update_state(state, steps)
 
@@ -94,13 +111,13 @@ class AppShell(QWidget):
         artifacts: list | None = None,
     ) -> None:
         current_artifacts = artifacts or []
-        page = self.page_stack.widget(1)
+        page = self.data_page_widget()
         if hasattr(page, "update_state"):
             page.update_state(state, resources, current_artifacts)
         self._data_context = self._build_data_context(
             resources=resources, artifacts=current_artifacts
         )
-        if self.page_stack.currentIndex() == 1:
+        if self.page_stack.currentIndex() == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
 
     def update_data_context(self, context: dict) -> None:
@@ -178,20 +195,20 @@ class AppShell(QWidget):
             page.update_state(tasks)
 
     def update_mapping_page(self, map_documents: list) -> None:
-        page = self.page_stack.widget(7)
+        page = self.mapping_page_widget()
         if hasattr(page, "update_state"):
             page.update_state(map_documents)
         self._mapping_context = self._build_mapping_context()
-        if self.page_stack.currentIndex() == 7:
+        if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
             self.sidebar.update_mapping_context(**self._mapping_context)
 
     def update_mapping_context(self, context: dict) -> None:
         self._mapping_context = self._normalize_mapping_context(context)
-        if self.page_stack.currentIndex() == 7:
+        if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
             self.sidebar.update_mapping_context(**self._mapping_context)
 
     def _build_mapping_context(self) -> dict:
-        page = self.page_stack.widget(7)
+        page = self.mapping_page_widget()
         if hasattr(page, "mapping_context"):
             return self._normalize_mapping_context(page.mapping_context())
         return self._normalize_mapping_context({})

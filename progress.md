@@ -550,3 +550,13 @@ Implemented via SDD on `feature/mapping-editor-v1` (10 tasks), merged `2e98da6`.
 | 图面预览 mode | Toolbar `图面预览` toggle; center stack switches edit view ↔ `MapCanvasPanel` + `MapChromePanel`; live dirty scene exported without force-save; helpers `facies_to_geojson` / `well_to_lnglat` / `preview_payload_from_*`; sidebar mode line |
 
 Tests: **~469+** (preview suite in `tests/test_map_preview_mode.py`).
+
+### Post-V1 batch — topology + CI + data polish
+
+| Area | Work |
+|------|------|
+| Topology | `snap_shared_nodes` / `rebuild_topology` / `merge_rings` / `split_ring_by_line`; scene forced rebuild (undoable); merge 2 facies; split by line; toolbar 重建拓扑/合并/分割 |
+| CI | `.github/workflows/ci.yml` builds `map_edit_core` and asserts `HAS_CPP is True` before pytest |
+| Data polish | catalog tab → toolbar sync; Chinese haystack labels; open error detail; save OSError test; `PAGE_INDEX_*` helpers |
+
+Tests: **475 passed**, 4 skipped.

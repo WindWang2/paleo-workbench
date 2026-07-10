@@ -4,6 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
+    QMessageBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -79,6 +80,9 @@ class MappingPage(QWidget):
         self.toolbar.redo_requested.connect(self._on_redo)
         self.toolbar.snap_toggled.connect(self._on_snap_toggled)
         self.toolbar.preview_toggled.connect(self._on_preview_toggled)
+        self.toolbar.topology_rebuild_requested.connect(self.rebuild_topology)
+        self.toolbar.merge_facies_requested.connect(self.merge_selected_facies)
+        self.toolbar.split_facies_requested.connect(self.split_selected_facies)
         self.toolbar.save_draft_requested.connect(self.save_draft)
         self.chrome_panel.save_btn.clicked.connect(self.save_draft)
 
@@ -167,6 +171,56 @@ class MappingPage(QWidget):
         self.draft_saved.emit(doc)
         self._emit_mapping_context()
         return True
+
+    def rebuild_topology(self) -> dict:
+        """Forced shared-node snap + full topology validation."""
+        scene = self._edit_scene()
+        if scene is None:
+            return {"changed": False, "snapped_count": 0}
+        report = scene.rebuild_topology_forced()
+        self._sync_undo_redo_enabled()
+        self._sync_save_enabled()
+        self._refresh_attribute_from_selection()
+        if self._preview_mode:
+            self._refresh_preview()
+        self._emit_mapping_context()
+        return report
+
+    def merge_selected_facies(self) -> str | None:
+        scene = self._edit_scene()
+        if scene is None:
+            return None
+        new_id = scene.merge_selected_facies()
+        if new_id is None:
+            QMessageBox.information(
+                self,
+                "合并相带",
+                "请选中恰好两个相带多边形后再合并（需 shapely）。",
+            )
+            return None
+        self._sync_undo_redo_enabled()
+        self._sync_save_enabled()
+        self._refresh_attribute_from_selection()
+        self._emit_mapping_context()
+        return new_id
+
+    def split_selected_facies(self) -> list[str] | None:
+        scene = self._edit_scene()
+        if scene is None:
+            return None
+        new_ids = scene.split_selected_facies_by_line()
+        if not new_ids:
+            QMessageBox.information(
+                self,
+                "分割相带",
+                "请同时选中一个相带和一个切割线（线需穿过多边形，需 shapely）。",
+            )
+            return None
+        self._sync_undo_redo_enabled()
+        self._sync_save_enabled()
+        self._refresh_attribute_from_selection()
+        self._emit_mapping_context()
+        return new_ids
 
     def _edit_scene(self) -> MapEditScene | None:
         scene = self.edit_view.scene()

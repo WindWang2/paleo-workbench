@@ -12,7 +12,10 @@ from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_edit_commands import (
+    BatchVertexEditCommand,
+    CompositeCommand,
     CreateFeatureCommand,
+    DeleteFeatureCommand,
     EditCommandStack,
     MoveCommand,
     PropertyChangeCommand,
@@ -356,6 +359,187 @@ class MapEditScene(QGraphicsScene):
                 # Open polylines: no self-intersection ring check; keep ok for V1.
                 status = "ok"
             item.set_topology_status(status)
+        # Full refresh also applies adjacency warnings across facies.
+        if feature_id is None:
+            self._apply_adjacency_warnings()
+
+    def _apply_adjacency_warnings(self) -> None:
+        facies = [
+            item
+            for item in self._items_by_id.values()
+            if isinstance(item, FaciesPolygonItem)
+        ]
+        if len(facies) < 2:
+            return
+        rings = [item.coordinates() for item in facies]
+        issues = api.validate_adjacency(rings, gap_tol=self._snap_tolerance)
+        flagged: set[int] = set()
+        for issue in issues:
+            pair = issue.get("pair")
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                flagged.add(int(pair[0]))
+                flagged.add(int(pair[1]))
+        for idx in flagged:
+            if 0 <= idx < len(facies) and facies[idx].topology_status == "ok":
+                facies[idx].set_topology_status("warning")
+
+    def rebuild_topology_forced(self, snap_tol: float | None = None) -> dict[str, Any]:
+        """Snap shared nodes across facies, re-validate rings/adjacency, undoable.
+
+        Returns a report: ``snapped_count``, ``ring_warnings``, ``adjacency_issues``,
+        ``changed``.
+        """
+        tol = float(self._snap_tolerance if snap_tol is None else snap_tol)
+        facies = [
+            item
+            for item in self._items_by_id.values()
+            if isinstance(item, FaciesPolygonItem)
+        ]
+        if not facies:
+            return {
+                "snapped_count": 0,
+                "ring_warnings": 0,
+                "adjacency_issues": 0,
+                "changed": False,
+            }
+        rings = [item.coordinates() for item in facies]
+        report = api.rebuild_topology(rings, snap_tol=tol, gap_tol=tol)
+        snapped_rings = report["rings"]
+        changes: list[tuple[str, list, list]] = []
+        for item, old_ring, new_ring in zip(facies, rings, snapped_rings):
+            if old_ring != new_ring:
+                changes.append((item.feature_id, old_ring, new_ring))
+        if changes:
+            cmd = BatchVertexEditCommand(changes, apply_coordinates=self._apply_coordinates)
+            self._command_stack.push(cmd)
+            self.set_dirty(True)
+            self.command_stack_changed.emit()
+            self._refresh_vertex_handles()
+        self.refresh_topology()
+        return {
+            "snapped_count": len(changes),
+            "ring_warnings": len(report.get("ring_issues") or []),
+            "adjacency_issues": len(report.get("adjacency_issues") or []),
+            "changed": bool(changes or report.get("changed")),
+            "ring_issues": report.get("ring_issues") or [],
+            "adjacency_issue_list": report.get("adjacency_issues") or [],
+        }
+
+    def merge_selected_facies(self) -> str | None:
+        """Merge exactly two selected facies polygons into one. Returns new id."""
+        ids = self.selected_feature_ids()
+        facies_ids = [
+            fid
+            for fid in ids
+            if isinstance(self._items_by_id.get(fid), FaciesPolygonItem)
+        ]
+        if len(facies_ids) != 2:
+            return None
+        a = self._items_by_id[facies_ids[0]]
+        b = self._items_by_id[facies_ids[1]]
+        assert isinstance(a, FaciesPolygonItem) and isinstance(b, FaciesPolygonItem)
+        merged = api.merge_rings(a.coordinates(), b.coordinates())
+        if not merged:
+            return None
+        name = (
+            str(a.get_property("name") or "")
+            or str(b.get_property("name") or "")
+            or "合并相带"
+        )
+        new_id = new_feature_id("facies")
+        style = dict(a.to_record().get("style") or {})
+        new_rec = {
+            "id": new_id,
+            "kind": "facies",
+            "name": name,
+            "coordinates": merged,
+            "style": style,
+        }
+        if self._item_from_record(new_rec) is None:
+            return None
+        cmd = CompositeCommand(
+            [
+                DeleteFeatureCommand(
+                    a.to_record(),
+                    add_feature=self._add_feature_from_record,
+                    remove_feature=self._remove_feature_by_id,
+                ),
+                DeleteFeatureCommand(
+                    b.to_record(),
+                    add_feature=self._add_feature_from_record,
+                    remove_feature=self._remove_feature_by_id,
+                ),
+                CreateFeatureCommand(
+                    new_rec,
+                    add_feature=self._add_feature_from_record,
+                    remove_feature=self._remove_feature_by_id,
+                ),
+            ]
+        )
+        self._command_stack.push(cmd)
+        self.set_dirty(True)
+        self.command_stack_changed.emit()
+        self.refresh_topology(new_id)
+        self._refresh_vertex_handles()
+        return new_id
+
+    def split_selected_facies_by_line(self) -> list[str] | None:
+        """Split one selected facies using one selected line. Returns new ids."""
+        ids = self.selected_feature_ids()
+        facies_ids = [
+            fid
+            for fid in ids
+            if isinstance(self._items_by_id.get(fid), FaciesPolygonItem)
+        ]
+        line_ids = [
+            fid for fid in ids if isinstance(self._items_by_id.get(fid), LineItem)
+        ]
+        if len(facies_ids) != 1 or len(line_ids) != 1:
+            return None
+        poly_item = self._items_by_id[facies_ids[0]]
+        line_item = self._items_by_id[line_ids[0]]
+        assert isinstance(poly_item, FaciesPolygonItem) and isinstance(line_item, LineItem)
+        parts = api.split_ring_by_line(poly_item.coordinates(), line_item.coordinates())
+        if not parts or len(parts) < 2:
+            return None
+        base_name = str(poly_item.get_property("name") or "") or "相带"
+        poly_style = dict(poly_item.to_record().get("style") or {})
+        new_recs = []
+        new_ids: list[str] = []
+        for i, ring in enumerate(parts):
+            nid = new_feature_id("facies")
+            new_ids.append(nid)
+            new_recs.append({
+                "id": nid,
+                "kind": "facies",
+                "name": f"{base_name}-{i + 1}",
+                "coordinates": ring,
+                "style": poly_style,
+            })
+        children: list = [
+            DeleteFeatureCommand(
+                poly_item.to_record(),
+                add_feature=self._add_feature_from_record,
+                remove_feature=self._remove_feature_by_id,
+            )
+        ]
+        for rec in new_recs:
+            if self._item_from_record(rec) is None:
+                return None
+            children.append(
+                CreateFeatureCommand(
+                    rec,
+                    add_feature=self._add_feature_from_record,
+                    remove_feature=self._remove_feature_by_id,
+                )
+            )
+        self._command_stack.push(CompositeCommand(children))
+        self.set_dirty(True)
+        self.command_stack_changed.emit()
+        for nid in new_ids:
+            self.refresh_topology(nid)
+        self._refresh_vertex_handles()
+        return new_ids
 
     def undo(self) -> bool:
         if not self._command_stack.can_undo():
