@@ -15,6 +15,7 @@ from paleo_workbench.ui.pages.preview_widgets import (
     ImagePreviewWidget,
     MessagePreviewWidget,
     PdfPreviewWidget,
+    SummaryTablePreviewWidget,
     TablePreviewWidget,
     TextPreviewWidget,
 )
@@ -67,6 +68,12 @@ class DataReaderPanel(QFrame):
         self.table_preview = TablePreviewWidget()
         self.stack.addWidget(self.table_preview)
 
+        self.well_log_preview = SummaryTablePreviewWidget()
+        self.stack.addWidget(self.well_log_preview)
+
+        self.seismic_preview = SummaryTablePreviewWidget()
+        self.stack.addWidget(self.seismic_preview)
+
         self.image_preview_widget = ImagePreviewWidget()
         self.image_label = self.image_preview_widget
         self.stack.addWidget(self.image_label)
@@ -114,6 +121,26 @@ class DataReaderPanel(QFrame):
         if result.mode == "table":
             self.table_preview.load_table(result.table_headers, result.table_rows)
             self.stack.setCurrentWidget(self.table_preview)
+            return
+
+        if result.mode == "well_log":
+            self.well_log_preview.load_summary(
+                result.summary_rows,
+                result.table_headers,
+                result.table_rows,
+                result.message,
+            )
+            self.stack.setCurrentWidget(self.well_log_preview)
+            return
+
+        if result.mode == "seismic":
+            self.seismic_preview.load_summary(
+                result.summary_rows,
+                result.table_headers,
+                result.table_rows,
+                result.message,
+            )
+            self.stack.setCurrentWidget(self.seismic_preview)
             return
 
         if result.mode == "image":

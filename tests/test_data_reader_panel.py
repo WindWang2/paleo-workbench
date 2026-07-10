@@ -45,6 +45,42 @@ def test_reader_panel_renders_table_resource(qtbot, tmp_path: Path):
     assert table.columnCount() == 2
 
 
+def test_reader_panel_renders_well_log_summary(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            summary_rows=(("井名", "A1"), ("曲线数", "2")),
+            table_headers=("曲线", "单位"),
+            table_rows=(("GR", "API"), ("RHOB", "G/C3")),
+        )
+    )
+
+    assert panel.current_mode == "well_log"
+    assert panel.well_log_preview.summary_table.item(0, 1).text() == "A1"
+    assert panel.well_log_preview.detail_table.item(0, 0).text() == "GR"
+
+
+def test_reader_panel_renders_seismic_summary_message(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="seismic",
+            title="cube.sgy",
+            message="地震数据预览需要 SEG-Y 支持库或地震工作流打开",
+            summary_rows=(("文件", "cube.sgy"), ("格式", "sgy")),
+        )
+    )
+
+    assert panel.current_mode == "seismic"
+    assert "SEG-Y" in panel.seismic_preview.message_label.text()
+
+
 def test_reader_panel_renders_missing_message(qtbot, tmp_path: Path):
     resource = ResourceItem(
         name="missing.txt",

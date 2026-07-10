@@ -66,6 +66,34 @@ class TablePreviewWidget(QTableWidget):
         self.resizeColumnsToContents()
 
 
+class SummaryTablePreviewWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.message_label = QLabel("")
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
+
+        self.summary_table = TablePreviewWidget()
+        self.detail_table = TablePreviewWidget()
+        layout.addWidget(self.summary_table)
+        layout.addWidget(self.detail_table, 1)
+
+    def load_summary(
+        self,
+        summary_rows: tuple[tuple[str, str], ...],
+        detail_headers: tuple[str, ...],
+        detail_rows: tuple[tuple[str, ...], ...],
+        message: str = "",
+    ) -> None:
+        self.message_label.setText(message)
+        self.summary_table.load_table(("属性", "值"), summary_rows)
+        self.detail_table.load_table(detail_headers, detail_rows)
+
+
 class ImagePreviewWidget(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
