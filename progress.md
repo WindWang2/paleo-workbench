@@ -615,3 +615,38 @@ Implemented via SDD on `feature/viz-geoviz-adapter` (4 tasks).
 - Smoke: `PaleoWorkbenchWindow` constructs; `HAS_CPP=True`, `HAS_SHAPELY=True`
 
 **MVP scope (Phases 1–17) complete on `main`.**
+
+---
+
+## Session: 2026-07-10 — Phase 18a sample project bootstrap — COMPLETE ✅
+
+Implemented via SDD on `feature/e2e-pipeline-18a` (tasks 1–5 code + task 6 suite/docs).
+
+| Task | Content | Commit |
+|------|---------|--------|
+| 1 | Skip large-file checksums in `scan_resources` | `0148a0b` |
+| 2 | `bootstrap_sample_project` pipeline for sample data | `eaf977b` |
+| 3 | CLI: `python -m paleo_workbench.pipeline` | `6ddbfc7` |
+| 4 | Toolbar button 「打开样例工程」 | `24b66aa` |
+| 5 | Open sample project from workbench toolbar | `0a0de76` |
+| docs | Design + 18a plan | `4abb067`, `d0db751` |
+
+### Modules
+
+| Path | Role |
+|------|------|
+| `paleo_workbench` scan path | Large-file checksum skip (SEGY-class) |
+| `paleo_workbench/pipeline/` | `bootstrap_sample_project` pure bootstrap |
+| `python -m paleo_workbench.pipeline` | CLI: `--data-root` / `--out` |
+| Header toolbar + `app.py` | 「打开样例工程」 → load sample `.paleo.json` |
+
+### Verification
+
+- Full suite: **`QT_QPA_PLATFORM=offscreen python -m pytest -q`** → **509 passed**, 4 skipped
+- Smoke: `python -m paleo_workbench.pipeline --data-root data --out /tmp/sample.paleo.json` → **200 resources**, exit 0
+- Spec: `docs/superpowers/specs/2026-07-10-e2e-real-data-pipeline-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-e2e-real-data-pipeline-18a.md`
+
+### Status
+
+**Phase 18a COMPLETE** on branch `feature/e2e-pipeline-18a`. **18b/18c still pending** (design contracts only).
