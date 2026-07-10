@@ -2,20 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPen, QPolygonF
-from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPolygonItem
+from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
+    QGraphicsPolygonItem,
+    QGraphicsRectItem,
+)
 
 from paleo_workbench.ui import tokens
 
 # Default well marker radius in scene/map units.
 WELL_RADIUS = 0.4
+# Vertex handle half-size in scene/map units.
+VERTEX_HANDLE_HALF = 0.35
 
 _FACIES_FILL = QColor(tokens.PRIMARY)
 _FACIES_FILL.setAlpha(70)
 _FACIES_PEN = QPen(QColor(tokens.PRIMARY), 0)  # cosmetic width
 _WELL_FILL = QBrush(QColor(tokens.TEAL))
 _WELL_PEN = QPen(QColor(tokens.TEXT_DARK), 0)
+_HANDLE_FILL = QBrush(QColor(tokens.TEAL))
+_HANDLE_PEN = QPen(QColor(tokens.TEXT_DARK), 0)
 
 
 class FeatureItemMixin:
@@ -26,6 +34,31 @@ class FeatureItemMixin:
 
     def to_record(self) -> dict[str, Any]:
         raise NotImplementedError
+
+
+class VertexHandleItem(QGraphicsRectItem):
+    """Draggable handle for a single ring vertex (scene-managed, not a feature)."""
+
+    def __init__(
+        self,
+        feature_id: str,
+        vertex_index: int,
+        x: float,
+        y: float,
+        half: float = VERTEX_HANDLE_HALF,
+        parent=None,
+    ):
+        h = float(half)
+        super().__init__(QRectF(-h, -h, 2 * h, 2 * h), parent)
+        self.feature_id = str(feature_id)
+        self.vertex_index = int(vertex_index)
+        self.setPos(float(x), float(y))
+        self.setBrush(_HANDLE_FILL)
+        self.setPen(_HANDLE_PEN)
+        self.setZValue(100)
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable, False)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
 
 
 class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
@@ -50,6 +83,15 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         self.setPen(_FACIES_PEN)
         self.setZValue(10)
         self.setFlag(QGraphicsPolygonItem.GraphicsItemFlag.ItemIsSelectable, True)
+
+    def coordinates(self) -> list[list[float]]:
+        return [list(p) for p in self._coordinates]
+
+    def set_coordinates(self, coordinates: list[list[float]]) -> None:
+        """Replace ring coordinates and refresh the polygon path."""
+        self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
+        self.setPolygon(QPolygonF([QPointF(p[0], p[1]) for p in self._coordinates]))
+        self.setPos(0.0, 0.0)
 
     def translate_by(self, dx: float, dy: float) -> None:
         """Shift polygon vertices and update the graphics path."""

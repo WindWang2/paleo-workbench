@@ -36,6 +36,34 @@ class MoveCommand:
             self.apply_move(fid, -self.dx, -self.dy)
 
 
+class VertexEditCommand:
+    """Replace a feature's coordinate ring (set / insert / delete vertex)."""
+
+    def __init__(
+        self,
+        feature_id: str,
+        old_coordinates: Sequence[Sequence[float]],
+        new_coordinates: Sequence[Sequence[float]],
+        apply_coordinates: Callable[[str, list[list[float]]], None],
+    ):
+        self.feature_id = str(feature_id)
+        self.old_coordinates = [[float(p[0]), float(p[1])] for p in old_coordinates]
+        self.new_coordinates = [[float(p[0]), float(p[1])] for p in new_coordinates]
+        self.apply_coordinates = apply_coordinates
+
+    def do(self) -> None:
+        self.apply_coordinates(
+            self.feature_id,
+            [list(p) for p in self.new_coordinates],
+        )
+
+    def undo(self) -> None:
+        self.apply_coordinates(
+            self.feature_id,
+            [list(p) for p in self.old_coordinates],
+        )
+
+
 class EditCommandStack:
     """Linear undo/redo stack with a maximum depth."""
 
