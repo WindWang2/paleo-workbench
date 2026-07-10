@@ -30,4 +30,4 @@ def test_data_page_receives_resources_and_artifacts(qtbot):
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
     page = window.app_shell.page_stack.widget(1)
-    assert page.asset_table.table.rowCount() == 2
+    assert page.asset_table.table.model().rowCount() == 2

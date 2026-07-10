@@ -294,7 +294,7 @@ def test_save_as_handles_write_error(qtbot, tmp_path: Path, monkeypatch):
 def _data_page_row_count(window) -> int:
     """Visible asset rows shown on the data page's asset table."""
     data_page = window.app_shell.page_stack.widget(1)
-    return data_page.asset_table.table.rowCount()
+    return data_page.asset_table.table.model().rowCount()
 
 
 def test_full_new_open_save_cycle(qtbot, tmp_path: Path, monkeypatch):

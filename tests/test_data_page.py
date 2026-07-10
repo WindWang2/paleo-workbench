@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QLabel, QSplitter
 
@@ -12,10 +12,24 @@ from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 
 
+def _table_model(page: DataPage):
+    return page.asset_table.table.model()
+
+
+def _table_row_count(page: DataPage) -> int:
+    return _table_model(page).rowCount()
+
+
+def _table_text(page: DataPage, row: int, column: int) -> str:
+    model = _table_model(page)
+    return model.data(model.index(row, column)) or ""
+
+
 def _table_headers(page: DataPage) -> list[str]:
+    model = _table_model(page)
     return [
-        page.asset_table.table.horizontalHeaderItem(i).text()
-        for i in range(page.asset_table.table.columnCount())
+        model.headerData(i, Qt.Orientation.Horizontal)
+        for i in range(model.columnCount())
     ]
 
 
@@ -73,7 +87,7 @@ def test_data_page_update_state_delegates(qtbot):
         ),
     ]
     page.update_state(state, resources)
-    assert page.asset_table.table.rowCount() == 1
+    assert _table_row_count(page) == 1
     assert "5" in page.summary_bar.type_labels["well_log"].text()
 
 
@@ -199,7 +213,7 @@ def test_data_page_import_paths_updates_project_and_table(qtbot, tmp_path: Path)
 
     assert report.added_count == 1
     assert len(project.resources) == 1
-    assert page.asset_table.table.rowCount() == 1
+    assert _table_row_count(page) == 1
     assert "新增 1" in page.action_panel.status_label.text()
 
 
@@ -233,7 +247,7 @@ def test_data_page_remove_selected_resource_unregisters_only(qtbot, tmp_path: Pa
     assert removed is True
     assert project.resources == []
     assert well.exists()
-    assert page.asset_table.table.rowCount() == 0
+    assert _table_row_count(page) == 0
     assert "已移出项目" in page.action_panel.status_label.text()
 
 
@@ -578,8 +592,8 @@ def test_data_page_toolbar_search_filters_asset_table(qtbot, tmp_path: Path):
 
     page.data_toolbar.search_box.setText("beta")
 
-    assert page.asset_table.table.rowCount() == 1
-    assert page.asset_table.table.item(0, 0).text() == "beta.txt"
+    assert _table_row_count(page) == 1
+    assert _table_text(page, 0, 0) == "beta.txt"
 
 
 def test_data_page_floating_action_import_button_uses_background_import(
