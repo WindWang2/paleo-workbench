@@ -14,7 +14,7 @@ def _make_report(rules, issues=None):
 def test_summary_object_name(qtbot):
     widget = ResultSummary()
     qtbot.addWidget(widget)
-    assert widget.objectName() == "ResultSummary"
+    assert widget.objectName() == "PanelCard"
 
 
 def test_summary_counts(qtbot):

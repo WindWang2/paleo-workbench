@@ -31,4 +31,4 @@ def test_activity_card_update_with_steps(qtbot):
 def test_activity_card_object_name(qtbot):
     card = RecentActivityCard()
     qtbot.addWidget(card)
-    assert card.objectName() == "ActivityCard"
+    assert card.objectName() == "PanelCard"

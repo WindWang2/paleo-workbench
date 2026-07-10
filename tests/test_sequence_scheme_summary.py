@@ -6,7 +6,7 @@ def test_sequence_scheme_summary_defaults(qtbot):
     summary = SequenceSchemeSummary()
     qtbot.addWidget(summary)
 
-    assert summary.objectName() == "SequenceSchemeSummary"
+    assert summary.objectName() == "PanelCard"
     assert summary.scheme_value.text() == "LST/TST/HST"
     assert summary.boundary_count_value.text() == "0 个"
     assert summary.save_btn.text() == "保存层序方案"

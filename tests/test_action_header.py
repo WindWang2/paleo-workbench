@@ -14,7 +14,7 @@ def _make_doc_and_report():
 def test_header_object_name(qtbot):
     header = ActionHeader()
     qtbot.addWidget(header)
-    assert header.objectName() == "ActionHeader"
+    assert header.objectName() == "PanelCard"
 
 
 def test_header_has_three_buttons(qtbot):

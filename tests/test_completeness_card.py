@@ -49,4 +49,4 @@ def test_completeness_card_update_missing(qtbot):
 def test_completeness_card_object_name(qtbot):
     card = DataCompletenessCard()
     qtbot.addWidget(card)
-    assert card.objectName() == "CompletenessCard"
+    assert card.objectName() == "PanelCard"

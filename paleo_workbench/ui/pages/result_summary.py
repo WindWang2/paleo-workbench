@@ -15,12 +15,7 @@ class ResultSummary(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("ResultSummary")
-        self.setStyleSheet(
-            f"QFrame#ResultSummary {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        self.setObjectName("PanelCard")
         self.setFixedWidth(240)
 
         layout = QVBoxLayout(self)

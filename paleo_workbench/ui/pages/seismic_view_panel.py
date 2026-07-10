@@ -55,11 +55,8 @@ class SeismicViewPanel(QFrame):
         self.stack.setContentsMargins(0, 0, 0, 0)
 
         self.empty_label = QLabel("未选择预测任务")
+        self.empty_label.setObjectName("EmptyStateLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 13px;"
-            " border: none; background: transparent;"
-        )
         self.stack.addWidget(self.empty_label)
 
         self.view = SeismicView(auto_load=False)

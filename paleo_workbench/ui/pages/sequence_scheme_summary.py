@@ -11,12 +11,7 @@ class SequenceSchemeSummary(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("SequenceSchemeSummary")
-        self.setStyleSheet(
-            f"QFrame#SequenceSchemeSummary {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
+        self.setObjectName("PanelCard")
         self.setFixedWidth(220)
 
         layout = QVBoxLayout(self)

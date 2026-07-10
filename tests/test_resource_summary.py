@@ -46,4 +46,4 @@ def test_summary_update_missing(qtbot):
 def test_summary_object_name(qtbot):
     bar = ResourceSummaryBar()
     qtbot.addWidget(bar)
-    assert bar.objectName() == "ResourceSummaryBar"
+    assert bar.objectName() == "PanelCard"
