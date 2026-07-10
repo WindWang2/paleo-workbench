@@ -19,7 +19,7 @@ def test_color_constants_exist():
 
 def test_dimension_constants_exist():
     assert tokens.MENU_BAR_HEIGHT == 36
-    assert tokens.HEADER_TOOLBAR_HEIGHT == 38
+    assert tokens.HEADER_TOOLBAR_HEIGHT == 36
     assert tokens.ICON_RAIL_WIDTH == 60
     assert tokens.TEXT_SIDEBAR_WIDTH == 248
     assert tokens.STATUS_BAR_HEIGHT == 24
@@ -153,3 +153,36 @@ def test_sequence_schemes():
 
 def test_systems_tract_labels():
     assert tokens.SYSTEMS_TRACT_LABELS == ["LST", "TST", "HST"]
+
+
+def test_density_tokens():
+    assert tokens.SPACE_1 == 4
+    assert tokens.SPACE_2 == 8
+    assert tokens.SPACE_3 == 12
+    assert tokens.SPACE_4 == 16
+    assert tokens.PAGE_MARGIN == 12
+    assert tokens.PANEL_PADDING == 10
+    assert tokens.CONTROL_HEIGHT == 28
+    assert tokens.CONTROL_HEIGHT_LG == 32
+    assert tokens.HEADER_TOOLBAR_HEIGHT == 36
+    assert tokens.FONT_SIZE_TITLE == "13px"
+    assert tokens.FONT_WEIGHT_TITLE == "600"
+
+
+def test_interaction_color_tokens():
+    assert tokens.PRIMARY_HOVER == "#2b7cf0"
+    assert tokens.PRIMARY_PRESSED == "#1a5fc4"
+    assert tokens.PRIMARY_DISABLED == "#a8c4f0"
+    assert tokens.FOCUS_RING == tokens.PRIMARY
+
+
+def test_qss_has_button_states_and_panels():
+    qss = tokens.QSS_TEMPLATE
+    assert "PrimaryButton:hover" in qss or "QPushButton#PrimaryButton:hover" in qss
+    assert "PrimaryButton:pressed" in qss or "QPushButton#PrimaryButton:pressed" in qss
+    assert "PrimaryButton:disabled" in qss or "QPushButton#PrimaryButton:disabled" in qss
+    assert "PanelCard" in qss
+    assert "ToolbarStrip" in qss
+    assert "EmptyStateLabel" in qss
+    assert "QHeaderView::section" in qss
+    assert "QTableView" in qss or "QTableWidget" in qss

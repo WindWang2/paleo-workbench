@@ -26,15 +26,22 @@ BORDER = "#e2e6ec"
 BORDER_STRONG = "#dde2e9"
 BORDER_LIGHT = "#d8dee6"
 
+PRIMARY_HOVER = "#2b7cf0"
+PRIMARY_PRESSED = "#1a5fc4"
+PRIMARY_DISABLED = "#a8c4f0"
+FOCUS_RING = PRIMARY
+
 FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif'
 FONT_SIZE_BASE = "12.5px"
 FONT_SIZE_STATUS = "11px"
 FONT_SIZE_SIDEBAR_SECONDARY = "10.5px"
 FONT_SIZE_NAV_LABEL = "9.5px"
 FONT_WEIGHT_NAV_LABEL = "500"
+FONT_SIZE_TITLE = "13px"
+FONT_WEIGHT_TITLE = "600"
 
 MENU_BAR_HEIGHT = 36
-HEADER_TOOLBAR_HEIGHT = 38
+HEADER_TOOLBAR_HEIGHT = 36
 ICON_RAIL_WIDTH = 60
 TEXT_SIDEBAR_WIDTH = 248
 STATUS_BAR_HEIGHT = 24
@@ -44,6 +51,15 @@ RADIUS_CARD = 9
 RADIUS_BADGE = 8
 RADIUS_PANEL = 10
 RADIUS_NAV_ITEM = 8
+
+SPACE_1 = 4
+SPACE_2 = 8
+SPACE_3 = 12
+SPACE_4 = 16
+PAGE_MARGIN = 12
+PANEL_PADDING = 10
+CONTROL_HEIGHT = 28
+CONTROL_HEIGHT_LG = 32
 
 ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
@@ -132,19 +148,88 @@ QFrame#HeaderToolbar {{
 }}
 QPushButton#PrimaryButton {{
     background: {PRIMARY}; color: #ffffff; border: none;
-    border-radius: {RADIUS_BUTTON}px; padding: 4px 12px;
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 4px 14px;
+    min-height: {CONTROL_HEIGHT_LG}px;
+}}
+QPushButton#PrimaryButton:hover {{ background: {PRIMARY_HOVER}; }}
+QPushButton#PrimaryButton:pressed {{ background: {PRIMARY_PRESSED}; }}
+QPushButton#PrimaryButton:disabled {{
+    background: {PRIMARY_DISABLED}; color: #ffffff;
+}}
+QPushButton#PrimaryButton:focus {{
+    border: 1px solid {FOCUS_RING};
 }}
 QPushButton#SecondaryButton {{
-    background: transparent; color: {TEXT_PRIMARY}; border: none;
-    border-radius: {RADIUS_BUTTON}px; padding: 4px 12px;
+    background: {BG_SIDEBAR}; color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 4px 12px;
+    min-height: {CONTROL_HEIGHT}px;
 }}
 QPushButton#SecondaryButton:hover {{ background: {BG_SEARCH}; }}
+QPushButton#SecondaryButton:pressed {{ background: {BORDER_LIGHT}; }}
+QPushButton#SecondaryButton:disabled {{
+    color: {TEXT_SECONDARY}; border-color: {BORDER};
+}}
 QPushButton#SecondaryButton:checked {{
-    background: {BG_SEARCH}; color: {TEXT_PRIMARY};
+    background: {BG_SEARCH}; border-color: {PRIMARY}; color: {TEXT_PRIMARY};
+}}
+QPushButton#SecondaryButton:focus {{
+    border: 1px solid {FOCUS_RING};
 }}
 QLineEdit#SearchBox {{
     background: {BG_SEARCH}; border: 1px solid {BORDER};
     border-radius: {RADIUS_BUTTON}px; padding: 4px 8px; color: {TEXT_PRIMARY};
+    min-height: {CONTROL_HEIGHT}px;
+}}
+QLineEdit#SearchBox:focus {{ border: 1px solid {FOCUS_RING}; }}
+QLineEdit {{
+    min-height: {CONTROL_HEIGHT}px;
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 2px 8px;
+    background: {BG_SIDEBAR};
+}}
+QLineEdit:focus {{ border: 1px solid {FOCUS_RING}; }}
+QComboBox {{
+    min-height: {CONTROL_HEIGHT}px;
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 2px 8px;
+    background: {BG_SIDEBAR};
+}}
+QComboBox:focus {{ border: 1px solid {FOCUS_RING}; }}
+QHeaderView::section {{
+    background: {BG_HEADER};
+    color: {TEXT_PRIMARY};
+    border: none;
+    border-bottom: 1px solid {BORDER_STRONG};
+    border-right: 1px solid {BORDER};
+    padding: 4px 8px;
+    font-weight: 600;
+    min-height: {CONTROL_HEIGHT}px;
+}}
+QTableView, QTableWidget {{
+    gridline-color: {BORDER};
+    selection-background-color: #d6e6fb;
+    selection-color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
+    background: {BG_SIDEBAR};
+}}
+QFrame#PanelCard {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_CARD}px;
+}}
+QFrame#ToolbarStrip {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_CARD}px;
+}}
+QLabel#EmptyStateLabel {{
+    color: {TEXT_SECONDARY};
+    font-size: {FONT_SIZE_BASE};
 }}
 QFrame#IconRail {{
     background: {BG_RAIL_GRADIENT};
