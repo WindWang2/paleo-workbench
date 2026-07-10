@@ -13,21 +13,18 @@ class PredictionTaskPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("PredictionTaskPanel")
         self.setFixedWidth(240)
-        self.setStyleSheet(
-            f"QFrame#PredictionTaskPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         title = QLabel("测井预测任务")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
         self.name_value = self._add_value(layout, "当前任务", "未选择预测任务")
@@ -37,31 +34,18 @@ class PredictionTaskPanel(QFrame):
         self.review_count_value = self._add_value(layout, "待复核区", "0 个")
 
         list_label = QLabel("任务列表")
-        list_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        list_label.setObjectName("WorkFieldLabel")
         layout.addWidget(list_label)
         self.task_list = QListWidget()
-        self.task_list.setStyleSheet(
-            f"QListWidget {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px; }}"
-        )
+        self.task_list.setObjectName("WorkListWidget")
         layout.addWidget(self.task_list, 1)
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
-        label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        label.setObjectName("WorkFieldLabel")
         layout.addWidget(label)
         value = QLabel(value_text)
-        value.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
-            " border: none; background: transparent;"
-        )
+        value.setObjectName("WorkFieldValue")
         layout.addWidget(value)
         return value
 

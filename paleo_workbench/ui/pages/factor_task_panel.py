@@ -68,11 +68,6 @@ class FactorTaskPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("FactorTaskPanel")
-        self.setStyleSheet(
-            f"QFrame#FactorTaskPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
         outer.setSpacing(10)
@@ -80,18 +75,11 @@ class FactorTaskPanel(QFrame):
         header = QHBoxLayout()
         header.setSpacing(8)
         self.horizon_label = QLabel("层位: —")
-        self.horizon_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-        )
+        self.horizon_label.setObjectName("MapDockTitle")
         header.addWidget(self.horizon_label)
         header.addStretch()
         self.method_combo = QComboBox()
         self.method_combo.addItems(tokens.INTERPOLATION_METHODS)
-        self.method_combo.setStyleSheet(
-            f"QComboBox {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
-        )
         header.addWidget(self.method_combo)
         outer.addLayout(header)
 

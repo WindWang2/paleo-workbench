@@ -12,22 +12,19 @@ class SequenceTargetPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SequenceTargetPanel")
-        self.setStyleSheet(
-            f"QFrame#SequenceTargetPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
         self.setFixedWidth(240)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         title = QLabel("层序格架设置")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
         self.target_value = self._add_value(layout, "目标层位", "未设置")
@@ -54,16 +51,10 @@ class SequenceTargetPanel(QFrame):
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
-        label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        label.setObjectName("WorkFieldLabel")
         layout.addWidget(label)
         value = QLabel(value_text)
-        value.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
-            " border: none; background: transparent;"
-        )
+        value.setObjectName("WorkFieldValue")
         layout.addWidget(value)
         return value
 

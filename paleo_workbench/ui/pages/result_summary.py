@@ -23,7 +23,7 @@ class ResultSummary(QFrame):
         layout.setSpacing(10)
 
         self.title_label = QLabel("检查结果输出")
-        self._style_label(self.title_label, tokens.TEXT_PRIMARY, "13px", 600)
+        self.title_label.setObjectName("MapDockTitle")
         layout.addWidget(self.title_label)
 
         self.pass_label = QLabel("通过项: 0")
@@ -123,6 +123,7 @@ class ResultSummary(QFrame):
         self._clear_export()
         if not artifacts:
             empty = QLabel("暂无导出图件")
+            empty.setObjectName("EmptyStateLabel")
             self._color_label(empty, tokens.TEXT_SECONDARY)
             self.export_layout.addWidget(empty)
         else:

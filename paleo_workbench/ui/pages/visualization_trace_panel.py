@@ -18,20 +18,17 @@ class VisualizationTracePanel(QFrame):
         super().__init__(parent)
         self.setObjectName("VisualizationTracePanel")
         self.setFixedWidth(220)
-        self.setStyleSheet(
-            f"QFrame#VisualizationTracePanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
-        title = QLabel("视图追踪")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
         )
+        layout.setSpacing(tokens.SPACE_2)
+        title = QLabel("视图追踪")
+        title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
         self.task_value = self._add_value(layout, "预测任务", "未选择预测任务")
@@ -52,10 +49,7 @@ class VisualizationTracePanel(QFrame):
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
-        label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        label.setObjectName("WorkFieldLabel")
         layout.addWidget(label)
         value = QLabel(value_text)
         value.setWordWrap(True)

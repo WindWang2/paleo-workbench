@@ -18,22 +18,19 @@ class BoundaryPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("BoundaryPanel")
-        self.setStyleSheet(
-            f"QFrame#BoundaryPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
         self.setFixedWidth(220)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("初始岩相边界制备")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        self.title_label.setObjectName("MapDockTitle")
         layout.addWidget(self.title_label)
 
         # Threshold spin (0.0–1.0, step 0.05, default 0.55, 2 decimals)

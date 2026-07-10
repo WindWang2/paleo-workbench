@@ -298,4 +298,43 @@ QLabel#StatusCoordLabel {{
     font-size: {FONT_SIZE_STATUS};
     font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
 }}
+/* Multi-panel work pages — shared dock chrome (prediction / prep / viz / sequence) */
+QFrame#PredictionTaskPanel,
+QFrame#PredictionEvidencePanel,
+QFrame#WellLogCanvasPanel,
+QFrame#SeismicTaskPanel,
+QFrame#SeismicControlPanel,
+QFrame#SeismicViewPanel,
+QFrame#FactorTaskPanel,
+QFrame#BoundaryPanel,
+QFrame#VisualizationSummaryPanel,
+QFrame#VisualizationTracePanel,
+QFrame#CompositeVisualizationPanel,
+QFrame#SequenceTargetPanel,
+QFrame#SequenceBoundaryTable,
+QFrame#QCIssueTable,
+QFrame#FactorPreviewCard {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_CARD}px;
+}}
+QListWidget#WorkListWidget {{
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 2px;
+}}
+QLabel#WorkFieldLabel {{
+    color: {TEXT_SECONDARY};
+    font-size: {FONT_SIZE_STATUS};
+    border: none;
+    background: transparent;
+}}
+QLabel#WorkFieldValue {{
+    color: {TEXT_PRIMARY};
+    font-size: {FONT_SIZE_TITLE};
+    font-weight: 500;
+    border: none;
+    background: transparent;
+}}
 """

@@ -23,11 +23,6 @@ class CompositeVisualizationPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("CompositeVisualizationPanel")
-        self.setStyleSheet(
-            f"QFrame#CompositeVisualizationPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)

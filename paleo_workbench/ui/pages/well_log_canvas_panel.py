@@ -28,21 +28,18 @@ class WellLogCanvasPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("WellLogCanvasPanel")
         self.well_log_data = None
-        self.setStyleSheet(
-            f"QFrame#WellLogCanvasPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
-        outer.setSpacing(8)
+        outer.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        outer.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("测井预测剖面")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        self.title_label.setObjectName("MapDockTitle")
         outer.addWidget(self.title_label)
 
         host = QFrame()

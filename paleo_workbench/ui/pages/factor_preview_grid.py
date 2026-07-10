@@ -21,16 +21,16 @@ class FactorPreviewGrid(QWidget):
         def __init__(self, task, parent=None):
             super().__init__(parent)
             self.setObjectName("FactorPreviewCard")
-            self.setStyleSheet(
-                f"QFrame#FactorPreviewCard {{ background: {tokens.BG_SIDEBAR};"
-                f" border: 1px solid {tokens.BORDER};"
-                f" border-radius: {tokens.RADIUS_CARD}px; }}"
-            )
             self.setMinimumSize(160, 100)
 
             layout = QVBoxLayout(self)
-            layout.setContentsMargins(10, 10, 10, 10)
-            layout.setSpacing(4)
+            layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+            layout.setSpacing(tokens.SPACE_2)
 
             title = task.factor_type or task.name
             self.name_label = QLabel(title)
@@ -68,13 +68,16 @@ class FactorPreviewGrid(QWidget):
         self.setStyleSheet(f"QWidget#FactorPreviewGrid {{ background: transparent; }}")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
-        outer.setSpacing(10)
+        outer.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        outer.setSpacing(tokens.SPACE_2)
 
         self.header_label = QLabel("单因素图集")
-        self.header_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
-        )
+        self.header_label.setObjectName("MapDockTitle")
         outer.addWidget(self.header_label)
 
         self.scroll = QScrollArea()
@@ -109,10 +112,7 @@ class FactorPreviewGrid(QWidget):
         if not completed:
             self.header_label.setText("单因素图集")
             self._empty_label = QLabel("暂无已生成的单因素图")
-            self._empty_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
-                " border: none; background: transparent;"
-            )
+            self._empty_label.setObjectName("EmptyStateLabel")
             self.grid_layout.addWidget(self._empty_label, 0, 0, 1, 2)
             return
 

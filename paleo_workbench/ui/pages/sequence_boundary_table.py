@@ -19,28 +19,22 @@ class SequenceBoundaryTable(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SequenceBoundaryTable")
-        self.setStyleSheet(
-            f"QFrame#SequenceBoundaryTable {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("层序界面清单")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        self.title_label.setObjectName("MapDockTitle")
         layout.addWidget(self.title_label)
 
         self.empty_label = QLabel("未配置层序界面")
-        self.empty_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
-            " border: none; background: transparent;"
-        )
+        self.empty_label.setObjectName("EmptyStateLabel")
         layout.addWidget(self.empty_label)
 
         self.table = QTableWidget(0, 3)
