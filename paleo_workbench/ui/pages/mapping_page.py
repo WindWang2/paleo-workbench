@@ -47,13 +47,13 @@ class MappingPage(QWidget):
             tokens.PAGE_MARGIN,
             tokens.PAGE_MARGIN,
         )
-        outer.setSpacing(10)
+        outer.setSpacing(tokens.SPACE_2)
 
         self.toolbar = MapEditToolbar()
         outer.addWidget(self.toolbar)
 
         mid = QHBoxLayout()
-        mid.setSpacing(10)
+        mid.setSpacing(tokens.SPACE_2)
 
         self.layer_tree = MapLayerTree()
         mid.addWidget(self.layer_tree, 0)
@@ -68,7 +68,7 @@ class MappingPage(QWidget):
         preview_host.setObjectName("MappingPreviewHost")
         preview_layout = QHBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(10)
+        preview_layout.setSpacing(tokens.SPACE_2)
         self.canvas_panel = MapCanvasPanel()
         self.chrome_panel = MapChromePanel()
         preview_layout.addWidget(self.canvas_panel, 1)

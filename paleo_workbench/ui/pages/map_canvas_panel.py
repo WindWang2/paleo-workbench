@@ -14,21 +14,13 @@ class MapCanvasPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MapCanvasPanel")
-        self.setStyleSheet(
-            f"QFrame#MapCanvasPanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
         outer.setSpacing(8)
 
         self.title_label = QLabel("编图画布")
-        self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        self.title_label.setObjectName("MapDockTitle")
         outer.addWidget(self.title_label)
 
         host = QFrame()
@@ -41,11 +33,8 @@ class MapCanvasPanel(QFrame):
         self.stack.setContentsMargins(0, 0, 0, 0)
 
         self.empty_label = QLabel("未选择古地理图")
+        self.empty_label.setObjectName("EmptyStateLabel")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 13px;"
-            " border: none; background: transparent;"
-        )
         self.stack.addWidget(self.empty_label)
 
         self.canvas = PaleoMapCanvas()

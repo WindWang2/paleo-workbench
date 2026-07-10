@@ -16,21 +16,13 @@ class MapChromePanel(QFrame):
         super().__init__(parent)
         self.setObjectName("MapChromePanel")
         self.setFixedWidth(220)
-        self.setStyleSheet(
-            f"QFrame#MapChromePanel {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
         title = QLabel("图面要素")
-        title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
-            " border: none; background: transparent;"
-        )
+        title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
         self.title_value = self._add_value(layout, "图名", "未设置")
