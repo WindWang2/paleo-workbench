@@ -47,6 +47,20 @@ class AssetTableModel(QAbstractTableModel):
         self._filtered_rows = list(rows)
         self.endResetModel()
 
+    def set_assets_filtered(
+        self,
+        assets: list[ResourceItem | ExportArtifact],
+        rows: list[int],
+        column_keys: list[str] | None = None,
+    ) -> None:
+        """Apply assets, filtered rows, and optional columns in one model reset."""
+        self.beginResetModel()
+        if column_keys is not None:
+            self._column_keys = list(column_keys)
+        self._assets = list(assets)
+        self._filtered_rows = list(rows)
+        self.endResetModel()
+
     def asset_at(self, view_row: int) -> ResourceItem | ExportArtifact | None:
         if view_row < 0 or view_row >= len(self._filtered_rows):
             return None

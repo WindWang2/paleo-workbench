@@ -276,3 +276,24 @@ def test_asset_table_handles_2000_assets(qtbot):
     assert table_text(table, 1999, 0) == "well_1999.las"
     # Virtual QTableView has no per-cell QTableWidgetItem API.
     assert not hasattr(table.table, "item") or not callable(getattr(table.table, "item", None))
+
+
+def test_asset_table_filter_scale_search_without_preview(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [
+        ResourceItem(
+            name=f"well_{i}.las",
+            path=f"/tmp/well_{i}.las",
+            type="well_log",
+            format="las",
+        )
+        for i in range(2000)
+    ]
+    table.update_assets(resources, [])
+    # Direct API stays immediate (debounce is only on toolbar textChanged).
+    table.set_search_text("well_1999")
+
+    assert table_row_count(table) == 1
+    assert table.visible_asset_count() == 1
+    assert table_text(table, 0, 0) == "well_1999.las"

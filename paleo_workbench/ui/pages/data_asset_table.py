@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -21,12 +19,16 @@ from paleo_workbench.ui.pages.asset_table_model import (
     RESOURCE_TYPE_LABELS,
     AssetTableModel,
 )
-from paleo_workbench.ui.pages.data_catalog_panel import CATEGORIES
 from paleo_workbench.ui.pages.data_table_columns import (
     COLUMN_BY_KEY,
     COLUMN_DEFINITIONS,
     DEFAULT_COLUMN_KEYS,
     HEADERS,
+)
+from paleo_workbench.ui.pages.filter_index import (
+    ISSUE_STATUSES,
+    REFERENCE_TYPES,
+    FilterIndex,
 )
 
 # Re-export for existing importers (e.g. tests, detail panel).
@@ -35,12 +37,11 @@ __all__ = [
     "COLUMN_DEFINITIONS",
     "DEFAULT_COLUMN_KEYS",
     "HEADERS",
+    "ISSUE_STATUSES",
+    "REFERENCE_TYPES",
     "RESOURCE_TYPE_LABELS",
     "DataAssetTable",
 ]
-
-ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
-REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_reference"}
 
 
 class DataAssetTable(QWidget):
@@ -58,6 +59,7 @@ class DataAssetTable(QWidget):
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
         self.column_actions: dict[str, QAction] = {}
         self._syncing_column_actions = False
+        self._index = FilterIndex()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -143,52 +145,17 @@ class DataAssetTable(QWidget):
             *self._resources,
             *self._artifacts,
         ]
-        self.model.set_column_keys(self._visible_column_keys)
-        self.model.set_assets(assets)
-        filtered = [
-            i
-            for i, asset in enumerate(assets)
-            if self._matches_category(asset) and self._matches_search(asset)
-        ]
-        self.model.set_filtered_rows(filtered)
+        self._index.rebuild(assets)
+        filtered = self._index.filter(self._category, self._search_text)
+        self.model.set_assets_filtered(
+            assets,
+            filtered,
+            column_keys=self._visible_column_keys,
+        )
         self._visible_assets = [assets[i] for i in filtered]
         if not self._sync_selection() and self._selected_asset is not None:
             self._selected_asset = None
             self.selected_asset_changed.emit(None)
-
-    def _matches_category(self, asset: ResourceItem | ExportArtifact) -> bool:
-        if self._category == "全部":
-            return True
-        if isinstance(asset, ExportArtifact):
-            return self._category == "成果"
-
-        if self._category == "输入数据":
-            return (asset.artifact_role or "input") == "input"
-        if self._category == "成果":
-            return (asset.artifact_role or "") in {"derived", "export"}
-        if self._category == "参考资料":
-            return asset.type in REFERENCE_TYPES
-        if self._category == "异常":
-            return asset.status in ISSUE_STATUSES
-
-        resource_type = CATEGORIES.get(self._category)
-        return asset.type == resource_type
-
-    def _matches_search(self, asset: ResourceItem | ExportArtifact) -> bool:
-        if not self._search_text:
-            return True
-        return self._search_text in " ".join(self._search_fields(asset)).lower()
-
-    def _search_fields(self, asset: ResourceItem | ExportArtifact) -> list[str]:
-        if isinstance(asset, ExportArtifact):
-            return [
-                Path(asset.output_path).name,
-                asset.format,
-                "成果",
-                asset.output_path,
-                asset.linked_id,
-            ]
-        return [asset.name, asset.type, asset.format, asset.status, asset.source, asset.path]
 
     def _build_column_settings_menu(self) -> None:
         for column in COLUMN_DEFINITIONS:

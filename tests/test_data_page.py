@@ -591,6 +591,8 @@ def test_data_page_toolbar_search_filters_asset_table(qtbot, tmp_path: Path):
     qtbot.addWidget(page)
 
     page.data_toolbar.search_box.setText("beta")
+    # Toolbar search is debounced (~180ms).
+    qtbot.wait(200)
 
     assert _table_row_count(page) == 1
     assert _table_text(page, 0, 0) == "beta.txt"
