@@ -463,8 +463,9 @@ startxref
     page.asset_table.table.selectRow(0)
 
     assert page.reader_panel.current_mode == "pdf"
-    assert page.reader_panel.pdf_image.pixmap() is not None
-    assert not page.reader_panel.pdf_image.pixmap().isNull()
+    assert page.reader_panel.stack.currentWidget() is page.reader_panel.pdf_widget
+    assert page.reader_panel.pdf_image is page.reader_panel.pdf_widget.fallback_image
+    assert page.reader_panel.pdf_page_label.text()
 
 
 def test_data_page_uses_reader_panel(qtbot):

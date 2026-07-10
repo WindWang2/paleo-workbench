@@ -73,6 +73,7 @@ class DataReaderPanel(QFrame):
 
         self.pdf_preview_widget = PdfPreviewWidget()
         self.pdf_widget = self.pdf_preview_widget
+        self.pdf_image = self.pdf_preview_widget.fallback_image
         self.pdf_prev_btn = self.pdf_preview_widget.prev_btn
         self.pdf_next_btn = self.pdf_preview_widget.next_btn
         self.pdf_page_label = self.pdf_preview_widget.page_label

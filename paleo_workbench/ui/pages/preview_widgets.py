@@ -170,17 +170,34 @@ class PdfPreviewWidget(QWidget):
         self._render_page()
 
     def next_page(self) -> None:
+        if self.document is None or self._load_failed:
+            return
         if self._page < self.document.pageCount() - 1:
             self._page += 1
             self._render_page()
 
     def previous_page(self) -> None:
+        if self.document is None or self._load_failed:
+            return
         if self._page > 0:
             self._page -= 1
             self._render_page()
 
     def _render_page(self) -> None:
+        if self.document is None:
+            self._show_fallback_message("PDF 预览不可用")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
         page_count = self.document.pageCount()
+        if page_count <= 0:
+            self._load_failed = True
+            self._show_fallback_message("PDF 预览加载失败")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
         if self.pdf_view is not None:
             self._content_stack.setCurrentWidget(self.pdf_view)
             self.pdf_view.setPageMode(QPdfView.PageMode.SinglePage)

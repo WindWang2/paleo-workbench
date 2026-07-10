@@ -354,6 +354,22 @@ def test_reader_panel_degrades_when_qpdfdocument_is_unavailable(
     assert panel.pdf_widget.pdf_view is None
 
 
+def test_reader_panel_pdf_page_controls_noop_when_qpdfdocument_is_unavailable(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfDocument", None)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.next_pdf_page()
+    panel.previous_pdf_page()
+
+    assert panel.pdf_page_label.text() == "0 / 0"
+    assert not panel.pdf_prev_btn.isEnabled()
+    assert not panel.pdf_next_btn.isEnabled()
+
+
 def test_reader_panel_keeps_failed_qpdfview_state_for_same_path_and_revision(
     qtbot,
     monkeypatch,
