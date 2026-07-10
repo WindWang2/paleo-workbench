@@ -76,8 +76,9 @@ class MapEditScene(QGraphicsScene):
         # Snap
         self._snap_enabled = False
         self._snap_tolerance = _DEFAULT_SNAP_TOL
-        # Line draft state
+        # Draft polyline/polygon state (tool "line" or "facies")
         self._draft_points: list[list[float]] = []
+        self._draft_kind: str | None = None  # "line" | "facies"
         self._draft_preview: QGraphicsPathItem | None = None
         self.selectionChanged.connect(self._on_selection_changed)
 
@@ -100,8 +101,10 @@ class MapEditScene(QGraphicsScene):
         self._tool = str(tool_id or "select")
         self._cancel_drag()
         self._cancel_vertex_drag()
-        if prev == "line" and self._tool != "line":
-            self._cancel_line_draft()
+        if prev in {"line", "facies"} and self._tool not in {"line", "facies"}:
+            self._cancel_draft()
+        elif prev != self._tool and self._tool in {"line", "facies"}:
+            self._cancel_draft()
         self._refresh_vertex_handles()
 
     def is_dirty(self) -> bool:
@@ -214,7 +217,7 @@ class MapEditScene(QGraphicsScene):
     def apply_set_vertex(self, feature_id: str, index: int, x: float, y: float) -> bool:
         """Set one vertex via VertexEditCommand. Returns True if applied."""
         item = self._items_by_id.get(feature_id)
-        if not isinstance(item, FaciesPolygonItem):
+        if not isinstance(item, (FaciesPolygonItem, LineItem)):
             return False
         old = item.coordinates()
         new = [list(p) for p in old]
@@ -226,7 +229,7 @@ class MapEditScene(QGraphicsScene):
 
     def apply_insert_vertex(self, feature_id: str, index: int, x: float, y: float) -> bool:
         item = self._items_by_id.get(feature_id)
-        if not isinstance(item, FaciesPolygonItem):
+        if not isinstance(item, (FaciesPolygonItem, LineItem)):
             return False
         old = item.coordinates()
         new = [list(p) for p in old]
@@ -238,7 +241,7 @@ class MapEditScene(QGraphicsScene):
 
     def apply_delete_vertex(self, feature_id: str, index: int) -> bool:
         item = self._items_by_id.get(feature_id)
-        if not isinstance(item, FaciesPolygonItem):
+        if not isinstance(item, (FaciesPolygonItem, LineItem)):
             return False
         old = item.coordinates()
         new = [list(p) for p in old]
@@ -292,8 +295,10 @@ class MapEditScene(QGraphicsScene):
 
     def finish_line_draft(self) -> str | None:
         """Finish current line draft if it has at least 2 points. Returns new feature id."""
+        if self._draft_kind not in (None, "line"):
+            return None
         points = [list(p) for p in self._draft_points]
-        self._cancel_line_draft()
+        self._cancel_draft()
         if len(points) < 2:
             return None
         return self.create_feature({
@@ -303,11 +308,37 @@ class MapEditScene(QGraphicsScene):
             "coordinates": points,
         })
 
+    def finish_facies_draft(self) -> str | None:
+        """Finish facies polygon draft (min 3 unique points). Closes the ring."""
+        if self._draft_kind not in (None, "facies"):
+            return None
+        points = [list(p) for p in self._draft_points]
+        self._cancel_draft()
+        if len(points) < 3:
+            return None
+        ring = [list(p) for p in points]
+        # Close ring if open
+        if ring[0][0] != ring[-1][0] or ring[0][1] != ring[-1][1]:
+            ring.append([ring[0][0], ring[0][1]])
+        fid = self.create_feature({
+            "id": new_feature_id("facies"),
+            "kind": "facies",
+            "name": "新相带",
+            "coordinates": ring,
+            "style": {},
+        })
+        if fid:
+            self.refresh_topology(fid)
+        return fid
+
     def cancel_line_draft(self) -> None:
-        self._cancel_line_draft()
+        self._cancel_draft()
 
     def draft_point_count(self) -> int:
         return len(self._draft_points)
+
+    def draft_kind(self) -> str | None:
+        return self._draft_kind
 
     def refresh_topology(self, feature_id: str | None = None) -> None:
         """Validate topology and set topology_status on facies (and optional lines)."""
@@ -349,9 +380,9 @@ class MapEditScene(QGraphicsScene):
     # --- mouse / key interaction --------------------------------------------
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._tool == "line":
+        if event.button() == Qt.MouseButton.LeftButton and self._tool in {"line", "facies"}:
             x, y = self._snap_xy(event.scenePos().x(), event.scenePos().y())
-            self._append_draft_point(x, y)
+            self._append_draft_point(x, y, kind=self._tool)
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton and self._tool == "label":
@@ -376,7 +407,7 @@ class MapEditScene(QGraphicsScene):
                 self._vertex_drag_index = handle.vertex_index
                 self._vertex_drag_origin = QPointF(pos)
                 item = self._items_by_id.get(handle.feature_id)
-                if isinstance(item, FaciesPolygonItem):
+                if isinstance(item, (FaciesPolygonItem, LineItem)):
                     coords = item.coordinates()
                     idx = handle.vertex_index
                     if 0 <= idx < len(coords):
@@ -389,16 +420,34 @@ class MapEditScene(QGraphicsScene):
                 return
             # Click feature to select for vertex editing
             hit = self._feature_item_at(pos)
-            if hit is not None and isinstance(hit, FaciesPolygonItem):
+            if hit is not None and isinstance(hit, (FaciesPolygonItem, LineItem)):
                 if not hit.isSelected() or len(self.selected_feature_ids()) != 1:
                     self.clearSelection()
                     hit.setSelected(True)
                 event.accept()
                 return
+        if event.button() == Qt.MouseButton.LeftButton and self._tool == "select":
+            pos = event.scenePos()
+            # Prefer geometry hit-test (C++ when available) over pure Qt item stack.
+            fid = self.hit_test_at(pos.x(), pos.y(), tolerance=self._snap_tolerance)
+            if fid:
+                item = self._items_by_id.get(fid)
+                if item is not None and isinstance(item, QGraphicsItem):
+                    multi = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                    if not multi:
+                        self.clearSelection()
+                    item.setSelected(True)
+                    event.accept()
+                    return
+            elif not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+                self.clearSelection()
         if event.button() == Qt.MouseButton.LeftButton and self._tool == "move":
             pos = event.scenePos()
             hit = self._feature_item_at(pos)
-            if hit is not None and not hit.isSelected():
+            if hit is None:
+                fid = self.hit_test_at(pos.x(), pos.y(), tolerance=self._snap_tolerance)
+                hit = self._items_by_id.get(fid) if fid else None
+            if hit is not None and isinstance(hit, QGraphicsItem) and not hit.isSelected():
                 self.clearSelection()
                 hit.setSelected(True)
             ids = self.selected_feature_ids()
@@ -412,9 +461,9 @@ class MapEditScene(QGraphicsScene):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        if self._tool == "line" and self._draft_points:
+        if self._tool in {"line", "facies"} and self._draft_points:
             x, y = self._snap_xy(event.scenePos().x(), event.scenePos().y())
-            self._update_draft_preview(x, y)
+            self._update_draft_preview(x, y, close_preview=(self._tool == "facies"))
             event.accept()
             return
         if self._vertex_drag and self._tool == "vertex":
@@ -423,7 +472,7 @@ class MapEditScene(QGraphicsScene):
             fid = self._vertex_drag_feature_id
             idx = self._vertex_drag_index
             item = self._items_by_id.get(fid) if fid else None
-            if isinstance(item, FaciesPolygonItem) and idx is not None:
+            if isinstance(item, (FaciesPolygonItem, LineItem)) and idx is not None:
                 coords = item.coordinates()
                 try:
                     api.set_vertex(coords, idx, x, y)
@@ -462,7 +511,7 @@ class MapEditScene(QGraphicsScene):
             self._vertex_drag_index = None
             self._vertex_drag_start_xy = None
             item = self._items_by_id.get(fid) if fid else None
-            if isinstance(item, FaciesPolygonItem) and idx is not None and start is not None:
+            if isinstance(item, (FaciesPolygonItem, LineItem)) and idx is not None and start is not None:
                 if end_x != start[0] or end_y != start[1]:
                     # Restore original, then commit via command for undo.
                     restored = item.coordinates()
@@ -496,11 +545,15 @@ class MapEditScene(QGraphicsScene):
             self.finish_line_draft()
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton and self._tool == "facies":
+            self.finish_facies_draft()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._tool == "vertex":
             fid = self._single_editable_feature_id()
             if fid is not None:
                 item = self._items_by_id.get(fid)
-                if isinstance(item, FaciesPolygonItem):
+                if isinstance(item, (FaciesPolygonItem, LineItem)):
                     pos = event.scenePos()
                     # Prefer edge insert when not on an existing handle.
                     if self._handle_at(pos) is None:
@@ -515,13 +568,16 @@ class MapEditScene(QGraphicsScene):
         super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if self._tool == "line":
+        if self._tool in {"line", "facies"}:
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self.finish_line_draft()
+                if self._tool == "line":
+                    self.finish_line_draft()
+                else:
+                    self.finish_facies_draft()
                 event.accept()
                 return
             if event.key() == Qt.Key.Key_Escape:
-                self._cancel_line_draft()
+                self._cancel_draft()
                 event.accept()
                 return
         if self._tool == "vertex" and event.key() in (
@@ -569,7 +625,7 @@ class MapEditScene(QGraphicsScene):
 
     def _apply_coordinates(self, feature_id: str, coordinates: list[list[float]]) -> None:
         item = self._items_by_id.get(feature_id)
-        if isinstance(item, FaciesPolygonItem):
+        if isinstance(item, (FaciesPolygonItem, LineItem)):
             item.set_coordinates(coordinates)
             self.refresh_topology(feature_id)
 
@@ -611,7 +667,7 @@ class MapEditScene(QGraphicsScene):
         if len(ids) != 1:
             return None
         item = self._items_by_id.get(ids[0])
-        if isinstance(item, FaciesPolygonItem):
+        if isinstance(item, (FaciesPolygonItem, LineItem)):
             return ids[0]
         return None
 
@@ -628,7 +684,7 @@ class MapEditScene(QGraphicsScene):
         if fid is None:
             return
         item = self._items_by_id.get(fid)
-        if not isinstance(item, FaciesPolygonItem):
+        if not isinstance(item, (FaciesPolygonItem, LineItem)):
             return
         coords = item.coordinates()
         if len(coords) < 2:
@@ -644,7 +700,7 @@ class MapEditScene(QGraphicsScene):
             self.addItem(handle)
             self._vertex_handles.append(handle)
 
-    def _sync_handle_positions(self, item: FaciesPolygonItem) -> None:
+    def _sync_handle_positions(self, item: FaciesPolygonItem | LineItem) -> None:
         coords = item.coordinates()
         for handle in self._vertex_handles:
             if handle.feature_id != item.feature_id:
@@ -707,15 +763,23 @@ class MapEditScene(QGraphicsScene):
 
     # --- line draft ---------------------------------------------------------
 
-    def _append_draft_point(self, x: float, y: float) -> None:
+    def _append_draft_point(self, x: float, y: float, kind: str = "line") -> None:
+        self._draft_kind = kind
         if self._draft_points:
             last = self._draft_points[-1]
             if abs(last[0] - x) < _DRAFT_MIN_DIST and abs(last[1] - y) < _DRAFT_MIN_DIST:
                 return
         self._draft_points.append([float(x), float(y)])
-        self._update_draft_preview(float(x), float(y))
+        self._update_draft_preview(
+            float(x), float(y), close_preview=(kind == "facies")
+        )
 
-    def _update_draft_preview(self, cursor_x: float, cursor_y: float) -> None:
+    def _update_draft_preview(
+        self,
+        cursor_x: float,
+        cursor_y: float,
+        close_preview: bool = False,
+    ) -> None:
         if self._draft_preview is None:
             self._draft_preview = QGraphicsPathItem()
             self._draft_preview.setPen(_DRAFT_PEN)
@@ -730,13 +794,20 @@ class MapEditScene(QGraphicsScene):
         for p in pts[1:]:
             path.lineTo(p[0], p[1])
         path.lineTo(float(cursor_x), float(cursor_y))
+        if close_preview and len(pts) >= 2:
+            path.lineTo(pts[0][0], pts[0][1])
         self._draft_preview.setPath(path)
 
-    def _cancel_line_draft(self) -> None:
+    def _cancel_draft(self) -> None:
         self._draft_points = []
+        self._draft_kind = None
         if self._draft_preview is not None:
             self.removeItem(self._draft_preview)
             self._draft_preview = None
+
+    def _cancel_line_draft(self) -> None:
+        # Backward-compatible alias.
+        self._cancel_draft()
 
     # --- snap ---------------------------------------------------------------
 

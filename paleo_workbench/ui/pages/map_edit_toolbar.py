@@ -5,11 +5,12 @@ from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
 
 from paleo_workbench.ui import tokens
 
-TOOL_IDS = ("select", "move", "vertex", "line", "label")
+TOOL_IDS = ("select", "move", "vertex", "facies", "line", "label")
 TOOL_LABELS = {
     "select": "选择",
     "move": "移动",
     "vertex": "节点",
+    "facies": "相带",
     "line": "线",
     "label": "注记",
 }
