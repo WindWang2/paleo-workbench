@@ -170,7 +170,11 @@ class DataReaderPanel(QFrame):
             return
 
         if result.mode == "pdf":
-            self.pdf_preview_widget.load(result.path, result.revision)
+            self.pdf_preview_widget.load(
+                result.path,
+                result.revision,
+                pdf_bytes=result.pdf_bytes,
+            )
             self.stack.setCurrentWidget(self.pdf_preview_widget)
             return
 

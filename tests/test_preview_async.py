@@ -10,7 +10,14 @@ from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 
 def _wait_controller_idle(qtbot, controller: PreviewRequestController, timeout: int = 5000) -> None:
     """Block until in-flight preview workers finish (avoids Qt teardown aborts)."""
-    qtbot.waitUntil(lambda: len(controller._jobs) == 0, timeout=timeout)
+    qtbot.waitUntil(
+        lambda: (
+            len(controller._jobs) == 0
+            and controller._active is None
+            and controller._pending is None
+        ),
+        timeout=timeout,
+    )
 
 
 class SlowProvider(PreviewProvider):
@@ -509,3 +516,102 @@ def test_preload_media_image_bytes(tmp_path):
     result = PreviewResult(mode="image", title="dot.bin", path=str(path))
     loaded = preload_media(result)
     assert loaded.image_bytes == payload
+
+
+def test_preload_media_pdf_bytes(tmp_path):
+    from paleo_workbench.ui.pages.preview_worker import preload_media
+
+    path = tmp_path / "doc.pdf"
+    payload = b"%PDF-1.4\n%%EOF\n"
+    path.write_bytes(payload)
+    result = PreviewResult(mode="pdf", title="doc.pdf", path=str(path))
+    loaded = preload_media(result)
+    assert loaded.pdf_bytes == payload
+
+
+def test_cacheable_result_strips_large_media():
+    from paleo_workbench.ui.pages.preview_worker import (
+        MAX_CACHED_MEDIA_BYTES,
+        cacheable_result,
+    )
+
+    small = PreviewResult(
+        mode="image",
+        title="s",
+        path="/s.png",
+        image_bytes=b"x" * 100,
+    )
+    assert cacheable_result(small).image_bytes == b"x" * 100
+
+    large = PreviewResult(
+        mode="pdf",
+        title="big",
+        path="/b.pdf",
+        pdf_bytes=b"y" * (MAX_CACHED_MEDIA_BYTES + 1),
+    )
+    assert cacheable_result(large).pdf_bytes == b""
+
+
+def test_image_cache_keeps_small_bytes_on_reselect(qtbot, tmp_path):
+    """Small images stay in LRU so re-select does not re-open the file on UI."""
+    from PySide6.QtGui import QImage
+
+    path = tmp_path / "tiny.png"
+    image = QImage(4, 4, QImage.Format.Format_RGB32)
+    image.fill(0x112233)
+    image.save(path.as_posix())
+    resource = ResourceItem(
+        name="tiny.png",
+        path=str(path),
+        type="image_reference",
+        format="png",
+    )
+    controller = PreviewRequestController()
+    results: list[object] = []
+    loadings: list[bool] = []
+    controller.result_ready.connect(results.append)
+    controller.loading.connect(lambda: loadings.append(True))
+
+    controller.request(resource)
+    _wait_controller_idle(qtbot, controller)
+    assert len(results) == 1
+    assert results[0].mode == "image"
+    assert results[0].image_bytes  # preloaded off-thread
+
+    controller.request(resource)
+    # Small payload cached → sync hit, no second loading flash required.
+    assert len(results) == 2
+    assert results[1].image_bytes == results[0].image_bytes
+    assert len(controller._jobs) == 0
+
+
+def test_path_only_image_cache_reloads_bytes_off_thread(qtbot, tmp_path):
+    """Path-only LRU entries re-read media off-thread (no UI QPixmap(path))."""
+    from paleo_workbench.ui.pages.preview_cache import make_preview_cache_key
+    from paleo_workbench.ui.pages.preview_worker import needs_media_preload
+
+    path = tmp_path / "bigish.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    resource = ResourceItem(
+        name="bigish.png",
+        path=str(path),
+        type="image_reference",
+        format="png",
+    )
+    controller = PreviewRequestController()
+    # Seed a path-only cache entry (simulates stripped large media).
+    key = make_preview_cache_key(resource)
+    path_only = PreviewResult(mode="image", title="bigish.png", path=str(path))
+    assert needs_media_preload(path_only) is True
+    controller.cache.put(key, path_only)
+
+    results: list[object] = []
+    loadings: list[bool] = []
+    controller.result_ready.connect(results.append)
+    controller.loading.connect(lambda: loadings.append(True))
+
+    controller.request(resource)
+    _wait_controller_idle(qtbot, controller)
+    assert loadings == [True]
+    assert len(results) == 1
+    assert results[0].image_bytes == path.read_bytes()

@@ -3,14 +3,20 @@ from __future__ import annotations
 from copy import copy
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_cache_key
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 
 Asset = ResourceItem | ExportArtifact
+
+# Keep small media payloads in the LRU so re-select is path-free on the UI.
+MAX_CACHED_MEDIA_BYTES = 512 * 1024
+
+PendingKind = Literal["asset", "media"]
 
 
 def snapshot_asset(asset: Asset) -> Asset:
@@ -20,21 +26,59 @@ def snapshot_asset(asset: Asset) -> Asset:
     return copy(asset)
 
 
-def preload_media(result: PreviewResult) -> PreviewResult:
-    """Read image file bytes off the UI thread.
+def needs_media_preload(result: PreviewResult) -> bool:
+    """True when UI would otherwise open the file path for image/PDF."""
+    if not result.path:
+        return False
+    if result.mode == "image" and not result.image_bytes:
+        return True
+    if result.mode == "pdf" and not result.pdf_bytes:
+        return True
+    return False
 
-    UI converts bytes → QImage/QPixmap. Avoids creating QImage/QPixmap on
-    the worker thread (Shiboken/Qt teardown hazards under pytest-qt).
+
+def preload_media(result: PreviewResult) -> PreviewResult:
+    """Read image/PDF file bytes off the UI thread.
+
+    UI converts image bytes → QPixmap and PDF bytes → QPdfDocument (via QBuffer).
+    Avoid creating QImage/QPixmap/QPdfDocument on the worker thread.
     """
-    if not result.path or result.mode != "image":
+    if not result.path:
         return result
-    try:
-        data = Path(result.path).read_bytes()
-    except OSError:
+    if result.mode == "image":
+        if result.image_bytes:
+            return result
+        try:
+            data = Path(result.path).read_bytes()
+        except OSError:
+            return result
+        if not data:
+            return result
+        return replace(result, image_bytes=data)
+    if result.mode == "pdf":
+        if result.pdf_bytes:
+            return result
+        try:
+            data = Path(result.path).read_bytes()
+        except OSError:
+            return result
+        if not data:
+            return result
+        return replace(result, pdf_bytes=data)
+    return result
+
+
+def cacheable_result(result: PreviewResult) -> PreviewResult:
+    """Strip large media payloads before storing in the UI-thread LRU."""
+    image_bytes = result.image_bytes
+    pdf_bytes = result.pdf_bytes
+    if image_bytes and len(image_bytes) > MAX_CACHED_MEDIA_BYTES:
+        image_bytes = b""
+    if pdf_bytes and len(pdf_bytes) > MAX_CACHED_MEDIA_BYTES:
+        pdf_bytes = b""
+    if image_bytes is result.image_bytes and pdf_bytes is result.pdf_bytes:
         return result
-    if not data:
-        return result
-    return replace(result, image_bytes=data)
+    return replace(result, image_bytes=image_bytes, pdf_bytes=pdf_bytes)
 
 
 class _PreviewWorker(QObject):
@@ -65,12 +109,36 @@ class _PreviewWorker(QObject):
         self.finished.emit(self._generation, result)
 
 
+class _MediaPreloadWorker(QObject):
+    """Reload image/PDF bytes for a path-only cached PreviewResult."""
+
+    finished = Signal(int, object)
+    failed = Signal(int, str)
+
+    def __init__(self, result: PreviewResult, generation: int, parent=None):
+        super().__init__(parent)
+        self._result = result
+        self._generation = generation
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            out = preload_media(self._result)
+        except Exception as exc:  # pragma: no cover
+            self.failed.emit(self._generation, str(exc))
+            return
+        self.finished.emit(self._generation, out)
+
+
 class PreviewRequestController(QObject):
     """UI-thread coordinator for async previews.
 
     At most one worker thread runs at a time. Newer cache-miss requests replace
     a single pending slot (latest-only). Stale generations never update the UI
     or the LRU cache. Assets passed to workers are deep-copied snapshots.
+
+    Image/PDF file bytes are always read off the UI thread (full preview job or
+    media-only reload after a path-only cache hit).
     """
 
     result_ready = Signal(object)  # PreviewResult
@@ -91,10 +159,10 @@ class PreviewRequestController(QObject):
         self.cache = cache if cache is not None else PreviewCache(max_size=cache_max_size)
         self._shutdown_wait_ms = shutdown_wait_ms
         self._generation = 0
-        self._jobs: list[tuple[QThread, _PreviewWorker]] = []
-        self._active: tuple[QThread, _PreviewWorker] | None = None
-        # Latest pending miss: (generation, snapshot_asset, cache_key)
-        self._pending: tuple[int, Asset, tuple] | None = None
+        self._jobs: list[tuple[QThread, QObject]] = []
+        self._active: tuple[QThread, QObject] | None = None
+        # Latest pending: ("asset", gen, Asset, key) | ("media", gen, PreviewResult, key)
+        self._pending: tuple[PendingKind, int, object, tuple] | None = None
         self._inflight_keys: dict[int, tuple] = {}
         self._shutting_down = False
 
@@ -117,6 +185,14 @@ class PreviewRequestController(QObject):
         key = make_preview_cache_key(asset)
         hit = self.cache.get(key)
         if hit is not None:
+            if needs_media_preload(hit):
+                # Path-only cache: re-read media off-thread, skip provider rebuild.
+                self.loading.emit()
+                if self._active is not None:
+                    self._pending = ("media", generation, hit, key)
+                    return
+                self._start_media_job(generation, hit, key)
+                return
             self._pending = None
             self.result_ready.emit(hit)
             return
@@ -124,7 +200,7 @@ class PreviewRequestController(QObject):
         snap = snapshot_asset(asset)
         self.loading.emit()
         if self._active is not None:
-            self._pending = (generation, snap, key)
+            self._pending = ("asset", generation, snap, key)
             return
 
         self._start_job(generation, snap, key)
@@ -143,8 +219,6 @@ class PreviewRequestController(QObject):
 
         thread, worker = active
         # Cooperative only: wait for the in-flight job to finish naturally.
-        # Do not force-kill the worker thread — unsafe with native parsers.
-        # Keep finished→thread.quit so the thread can exit after run().
         deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
         try:
             worker.finished.disconnect(self._on_finished)
@@ -158,11 +232,7 @@ class PreviewRequestController(QObject):
         self._active = None
         self._jobs.clear()
 
-    def _start_job(self, generation: int, asset: Asset, key: tuple) -> None:
-        self._inflight_keys[generation] = key
-        thread = QThread(self)
-        worker = _PreviewWorker(self.provider, asset, generation)
-        worker.moveToThread(thread)
+    def _wire_thread(self, thread: QThread, worker: QObject) -> None:
         self._active = (thread, worker)
         self._jobs = [(thread, worker)]
         thread.started.connect(worker.run)
@@ -172,33 +242,48 @@ class PreviewRequestController(QObject):
         worker.failed.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda t=thread, w=worker: self._drop_job(t, w))
+        # Pump the next job only after the thread has fully stopped — starting a
+        # new QThread while Shiboken is still tearing down the previous one can
+        # segfault under pytest-qt / offscreen.
+        thread.finished.connect(lambda t=thread, w=worker: self._on_thread_finished(t, w))
         thread.start()
+
+    def _start_job(self, generation: int, asset: Asset, key: tuple) -> None:
+        self._inflight_keys[generation] = key
+        thread = QThread(self)
+        worker = _PreviewWorker(self.provider, asset, generation)
+        worker.moveToThread(thread)
+        self._wire_thread(thread, worker)
+
+    def _start_media_job(self, generation: int, result: PreviewResult, key: tuple) -> None:
+        self._inflight_keys[generation] = key
+        thread = QThread(self)
+        worker = _MediaPreloadWorker(result, generation)
+        worker.moveToThread(thread)
+        self._wire_thread(thread, worker)
 
     def _on_finished(self, generation: int, result: object) -> None:
         key = self._inflight_keys.pop(generation, None)
         if not self._shutting_down and generation == self._generation:
             if key is not None and isinstance(result, PreviewResult):
-                # Cache metadata/text without large image payloads.
-                cached = (
-                    replace(result, image_bytes=b"")
-                    if result.image_bytes
-                    else result
-                )
-                self.cache.put(key, cached)
+                self.cache.put(key, cacheable_result(result))
             self.result_ready.emit(result)
-        self._after_job()
+        # Do not start the next job here — wait for thread.finished.
 
     def _on_failed(self, generation: int, message: str) -> None:
         self._inflight_keys.pop(generation, None)
         if not self._shutting_down and generation == self._generation:
             self.failed.emit(message)
-        self._after_job()
 
-    def _after_job(self) -> None:
-        self._active = None
-        if not self._shutting_down:
-            self._pump_pending()
+    def _on_thread_finished(self, thread: QThread, worker: QObject) -> None:
+        self._jobs = [job for job in self._jobs if job != (thread, worker)]
+        if self._active == (thread, worker):
+            self._active = None
+        if self._shutting_down:
+            return
+        # Defer so Shiboken can finish deleteLater of the prior worker/thread
+        # before we spawn another QThread (avoids intermittent offscreen segfaults).
+        QTimer.singleShot(0, self._pump_pending)
 
     def _pump_pending(self) -> None:
         if self._shutting_down or self._active is not None:
@@ -207,17 +292,26 @@ class PreviewRequestController(QObject):
         self._pending = None
         if pending is None:
             return
-        generation, asset, key = pending
+        kind, generation, payload, key = pending
         if generation != self._generation:
+            return
+        if kind == "media":
+            assert isinstance(payload, PreviewResult)
+            hit = self.cache.get(key)
+            if hit is not None and not needs_media_preload(hit):
+                self.result_ready.emit(hit)
+                return
+            self.loading.emit()
+            self._start_media_job(generation, payload if hit is None else hit, key)
             return
         hit = self.cache.get(key)
         if hit is not None:
+            if needs_media_preload(hit):
+                self.loading.emit()
+                self._start_media_job(generation, hit, key)
+                return
             self.result_ready.emit(hit)
             return
         self.loading.emit()
-        self._start_job(generation, asset, key)
-
-    def _drop_job(self, thread: QThread, worker: _PreviewWorker) -> None:
-        self._jobs = [job for job in self._jobs if job != (thread, worker)]
-        if self._active == (thread, worker):
-            self._active = None
+        assert not isinstance(payload, PreviewResult)
+        self._start_job(generation, payload, key)

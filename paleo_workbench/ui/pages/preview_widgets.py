@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QSize, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt
 from PySide6.QtGui import QPixmap
 try:
     from PySide6.QtPdf import QPdfDocument
@@ -151,6 +151,8 @@ class PdfPreviewWidget(QWidget):
         self._path = ""
         self._revision: tuple[object, ...] | None = None
         self._load_failed = False
+        # Keep buffer alive for the lifetime of a QPdfDocument loaded from bytes.
+        self._source_buffer: QBuffer | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -184,9 +186,10 @@ class PdfPreviewWidget(QWidget):
         path: str,
         revision: tuple[object, ...] | None = None,
         preloaded_image=None,
+        pdf_bytes: bytes = b"",
     ) -> None:
-        # PDF document API stays on the UI thread (QtPdf is not worker-safe).
-        # ``preloaded_image`` is reserved for future first-page handoff.
+        # QPdfDocument stays on the UI thread (not worker-safe). File bytes should
+        # arrive pre-read off-thread so the UI only parses/renders.
         del preloaded_image
         if self.document is None:
             self._show_fallback_message("PDF 预览不可用")
@@ -199,7 +202,7 @@ class PdfPreviewWidget(QWidget):
             self._revision = revision
             self._page = 0
             self._load_failed = False
-            error = self.document.load(path)
+            error = self._load_document(path, pdf_bytes)
             if error != QPdfDocument.Error.None_ or self.document.pageCount() <= 0:
                 self._load_failed = True
                 self._show_fallback_message("PDF 预览加载失败")
@@ -214,6 +217,25 @@ class PdfPreviewWidget(QWidget):
             self.next_btn.setEnabled(False)
             return
         self._render_page()
+
+    def _load_document(self, path: str, pdf_bytes: bytes):
+        """Load from pre-read bytes when available; fall back to path."""
+        assert self.document is not None
+        self._release_source_buffer()
+        if pdf_bytes:
+            buffer = QBuffer(self)
+            buffer.setData(QByteArray(pdf_bytes))
+            if not buffer.open(QIODevice.OpenModeFlag.ReadOnly):
+                return self.document.load(path)
+            self._source_buffer = buffer
+            return self.document.load(buffer)
+        return self.document.load(path)
+
+    def _release_source_buffer(self) -> None:
+        if self._source_buffer is not None:
+            self._source_buffer.close()
+            self._source_buffer.deleteLater()
+            self._source_buffer = None
 
     def next_page(self) -> None:
         if self.document is None or self._load_failed:

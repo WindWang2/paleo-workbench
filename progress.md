@@ -560,3 +560,10 @@ Tests: **~469+** (preview suite in `tests/test_map_preview_mode.py`).
 | Data polish | catalog tab → toolbar sync; Chinese haystack labels; open error detail; save OSError test; `PAGE_INDEX_*` helpers |
 
 Tests: **475 passed**, 4 skipped.
+
+### Off-thread image/PDF media preload
+
+- `preload_media` loads **image + PDF** file bytes on worker
+- LRU keeps media ≤512KB; larger stripped; path-only hits use `_MediaPreloadWorker`
+- `PdfPreviewWidget` loads via `QBuffer` when `pdf_bytes` present
+- UI still owns QPixmap/QPdfDocument decode (Qt thread affinity)

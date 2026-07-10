@@ -120,6 +120,51 @@ def test_reader_panel_uses_pdf_preview_widget(qtbot, tmp_path: Path):
     assert hasattr(panel.pdf_preview_widget, "pdf_view")
 
 
+def test_reader_panel_pdf_prefers_preloaded_bytes(qtbot, monkeypatch, tmp_path: Path):
+    """When pdf_bytes are present, load from buffer instead of reopening the path."""
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_widgets.QPdfView", None)
+    loads: list[object] = []
+
+    class FakePdfDocument:
+        class Error:
+            None_ = 0
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def load(self, source) -> int:
+            loads.append(source)
+            return self.Error.None_
+
+        def pageCount(self) -> int:
+            return 1
+
+        def render(self, page: int, size) -> QImage:
+            return QImage(size.width(), size.height(), QImage.Format.Format_RGB32)
+
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.preview_widgets.QPdfDocument", FakePdfDocument
+    )
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    pdf_path = tmp_path / "report.pdf"
+    payload = b"%PDF-1.4\n%%EOF\n"
+    pdf_path.write_bytes(payload)
+
+    panel.render(
+        PreviewResult(
+            mode="pdf",
+            title="report.pdf",
+            path=str(pdf_path),
+            format="pdf",
+            pdf_bytes=payload,
+        )
+    )
+
+    assert len(loads) == 1
+    assert not isinstance(loads[0], str)
+
+
 def test_reader_panel_rerenders_image_preview_on_resize(qtbot, monkeypatch, tmp_path: Path):
     path = tmp_path / "map.png"
     image = QImage(16, 16, QImage.Format.Format_RGB32)

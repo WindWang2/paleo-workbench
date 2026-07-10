@@ -182,7 +182,7 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 | 2 | Open project error: missing vs corrupt JSON | ✅ done |
 | 3 | `PAGE_INDEX_*` + `data_page_widget()` helpers | ✅ done |
 | 4 | Floating catalog tab ↔ toolbar check sync | ✅ done |
-| 5 | Image/PDF decode still on UI thread after async path | open (non-blocking) |
+| 5 | Image/PDF file I/O off UI thread (bytes preload + media-only cache reload) | ✅ done |
 | 6 | Forced topology rebuild + merge/split + shared-node snap | ✅ done |
 | 7 | CI job requires `HAS_CPP` (`map_edit_core` build) | ✅ done (`.github/workflows/ci.yml`) |
 | 8 | Search haystack Chinese type labels | ✅ done |

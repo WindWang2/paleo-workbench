@@ -418,10 +418,10 @@ Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency orde
 
 ### Residual (non-blocking) perf notes
 
-1. Image/PDF still decode on UI thread in preview widgets after async path returns path-only result.
-2. `FilterIndex.rebuild` runs on every filter apply; could rebuild only when asset list changes.
-3. Floating catalog tab does not sync toolbar check state (only toolbar path sets checked).
-4. Search haystack uses raw English type keys, not Chinese labels.
+1. ~~Image/PDF still decode on UI thread after path-only async result~~ → **fixed**: worker `preload_media` loads image/PDF file bytes; small payloads kept in LRU (≤512KB); path-only cache hits re-read via `_MediaPreloadWorker`; UI only does QPixmap/QPdfDocument from bytes (Qt affinity). PDF structure parse/render still UI-bound (QtPdf not worker-safe).
+2. `FilterIndex.rebuild` runs on every filter apply; could rebuild only when asset list changes (table path may already gate).
+3. ~~Floating catalog tab does not sync toolbar check state~~ → fixed.
+4. ~~Search haystack uses raw English type keys~~ → fixed (Chinese labels).
 
 ### Delivery trail
 

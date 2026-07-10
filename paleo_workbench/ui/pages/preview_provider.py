@@ -54,8 +54,9 @@ class PreviewResult:
     summary_rows: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     sheets: tuple[str, ...] = field(default_factory=tuple)
     truncated: bool = False
-    # Image file bytes loaded off the UI thread; decoded to QPixmap on the UI.
+    # Media file bytes loaded off the UI thread; decoded/loaded on the UI.
     image_bytes: bytes = b""
+    pdf_bytes: bytes = b""
 
 
 class PreviewProvider:
