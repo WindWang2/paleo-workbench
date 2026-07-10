@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.action_header import ActionHeader
 from paleo_workbench.ui.pages.qc_issue_table import QCIssueTable
 from paleo_workbench.ui.pages.result_summary import ResultSummary
@@ -15,7 +16,12 @@ class ReviewExportPage(QWidget):
         self.setObjectName("ReviewExportPage")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
         outer.setSpacing(16)
 
         self.action_header = ActionHeader()

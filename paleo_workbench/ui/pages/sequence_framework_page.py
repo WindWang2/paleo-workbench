@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.sequence_boundary_table import SequenceBoundaryTable
 from paleo_workbench.ui.pages.sequence_scheme_summary import SequenceSchemeSummary
 from paleo_workbench.ui.pages.sequence_target_panel import SequenceTargetPanel
@@ -15,7 +16,12 @@ class SequenceFrameworkPage(QWidget):
         self.setObjectName("SequenceFrameworkPage")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
         outer.setSpacing(16)
 
         content = QHBoxLayout()

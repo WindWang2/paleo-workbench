@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidencePanel
 from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
@@ -16,7 +17,12 @@ class WellLogPredictionPage(QWidget):
         self.setObjectName("WellLogPredictionPage")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
         outer.setSpacing(16)
 
         content = QHBoxLayout()

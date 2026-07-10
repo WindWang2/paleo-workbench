@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ProjectDocument
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
 from paleo_workbench.ui.pages.visualization_summary_panel import VisualizationSummaryPanel
 from paleo_workbench.ui.pages.visualization_trace_panel import VisualizationTracePanel
@@ -25,7 +26,12 @@ class VisualizationPage(QWidget):
         self._adapter = VizAdapter()
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
         outer.setSpacing(16)
 
         content = QHBoxLayout()

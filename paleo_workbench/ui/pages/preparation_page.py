@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.boundary_panel import BoundaryPanel
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.factor_task_panel import FactorTaskPanel
@@ -15,7 +16,12 @@ class PreparationPage(QWidget):
         self.setObjectName("PreparationPage")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
         outer.setSpacing(16)
 
         content = QHBoxLayout()

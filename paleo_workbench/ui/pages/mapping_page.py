@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.mapping.document_io import apply_features_to_document
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
 from paleo_workbench.ui.pages.map_chrome_panel import MapChromePanel
@@ -40,7 +41,12 @@ class MappingPage(QWidget):
         self._preview_mode = False
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setContentsMargins(
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+            tokens.PAGE_MARGIN,
+        )
         outer.setSpacing(10)
 
         self.toolbar = MapEditToolbar()
