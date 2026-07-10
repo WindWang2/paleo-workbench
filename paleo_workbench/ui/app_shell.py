@@ -186,19 +186,25 @@ class AppShell(QWidget):
             self.sidebar.update_mapping_context(**self._mapping_context)
 
     def update_mapping_context(self, context: dict) -> None:
-        self._mapping_context = {
-            "map_name": context.get("map_name", "未选择") or "未选择",
-            "horizon": context.get("horizon", "") or "",
-            "dirty": bool(context.get("dirty", False)),
-        }
+        self._mapping_context = self._normalize_mapping_context(context)
         if self.page_stack.currentIndex() == 7:
             self.sidebar.update_mapping_context(**self._mapping_context)
 
     def _build_mapping_context(self) -> dict:
         page = self.page_stack.widget(7)
         if hasattr(page, "mapping_context"):
-            return page.mapping_context()
-        return {"map_name": "未选择", "horizon": "", "dirty": False}
+            return self._normalize_mapping_context(page.mapping_context())
+        return self._normalize_mapping_context({})
+
+    @staticmethod
+    def _normalize_mapping_context(context: dict | None) -> dict:
+        ctx = context or {}
+        return {
+            "map_name": ctx.get("map_name", "未选择") or "未选择",
+            "horizon": ctx.get("horizon", "") or "",
+            "dirty": bool(ctx.get("dirty", False)),
+            "preview": bool(ctx.get("preview", False)),
+        }
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
         page = self.page_stack.widget(8)

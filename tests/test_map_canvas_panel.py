@@ -39,6 +39,21 @@ def test_map_canvas_panel_loads_document_features(qtbot):
     panel.update_state(doc)
 
     assert panel.empty_label.isHidden()
-    assert panel.canvas._loaded_features == [SAMPLE_FEATURE]
+    assert len(panel.canvas._loaded_features) == 1
+    assert panel.canvas._loaded_features[0]["properties"]["name"] == "三角洲前缘"
     assert panel.canvas._period_name == "ZJ2"
     assert panel.canvas._wells_data == [{"name": "HZ26-7", "lng": 115.0, "lat": 25.0}]
+
+
+def test_map_canvas_panel_load_preview_direct(qtbot):
+    panel = MapCanvasPanel()
+    qtbot.addWidget(panel)
+    panel.load_preview(
+        [SAMPLE_FEATURE],
+        wells=[{"name": "W", "lng": 1.0, "lat": 2.0}],
+        period_name="P1",
+    )
+    assert panel.empty_label.isHidden()
+    assert panel.canvas._loaded_features == [SAMPLE_FEATURE]
+    assert panel.canvas._period_name == "P1"
+    assert panel.canvas._wells_data == [{"name": "W", "lng": 1.0, "lat": 2.0}]

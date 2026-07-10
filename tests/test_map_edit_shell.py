@@ -31,3 +31,4 @@ def test_toolbar_has_core_actions(qtbot):
     assert bar.snap_btn is not None
     assert bar.undo_btn is not None
     assert bar.redo_btn is not None
+    assert bar.preview_btn is not None

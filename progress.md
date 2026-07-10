@@ -541,3 +541,12 @@ Implemented via SDD on `feature/mapping-editor-v1` (10 tasks), merged `2e98da6`.
 ### Cleanup
 
 - Worktrees `datapage-ui-perf` / `mapping-editor-v1` removable after merge
+
+### Post-V1 continuation — facies tool + chrome preview
+
+| Commit area | Work |
+|-------------|------|
+| Facies + hit + vertex | `e413e11` — facies draft tool, hit_test select, broader vertex edit |
+| 图面预览 mode | Toolbar `图面预览` toggle; center stack switches edit view ↔ `MapCanvasPanel` + `MapChromePanel`; live dirty scene exported without force-save; helpers `facies_to_geojson` / `well_to_lnglat` / `preview_payload_from_*`; sidebar mode line |
+
+Tests: **~469+** (preview suite in `tests/test_map_preview_mode.py`).

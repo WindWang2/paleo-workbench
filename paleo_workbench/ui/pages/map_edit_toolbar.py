@@ -17,10 +17,11 @@ TOOL_LABELS = {
 
 
 class MapEditToolbar(QWidget):
-    """Exclusive edit tools plus snap, undo/redo, and save draft actions."""
+    """Exclusive edit tools plus snap, undo/redo, preview, and save draft actions."""
 
     tool_changed = Signal(str)
     snap_toggled = Signal(bool)
+    preview_toggled = Signal(bool)
     save_draft_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
@@ -71,6 +72,13 @@ class MapEditToolbar(QWidget):
         self.redo_btn.clicked.connect(self.redo_requested.emit)
         layout.addWidget(self.redo_btn)
 
+        self.preview_btn = QPushButton("图面预览")
+        self.preview_btn.setObjectName("SecondaryButton")
+        self.preview_btn.setCheckable(True)
+        self.preview_btn.setToolTip("切换 PaleoMapCanvas 图面预览（含图例/指北针/比例尺）")
+        self.preview_btn.toggled.connect(self.preview_toggled.emit)
+        layout.addWidget(self.preview_btn)
+
         layout.addStretch(1)
 
         self.save_draft_btn = QPushButton("保存编图草稿")
@@ -79,6 +87,22 @@ class MapEditToolbar(QWidget):
         layout.addWidget(self.save_draft_btn)
 
         self._current_tool = "select"
+        self._preview_mode = False
+
+    def is_preview_mode(self) -> bool:
+        return self._preview_mode
+
+    def set_preview_mode(self, enabled: bool) -> None:
+        """Sync button + disable exclusive edit tools while preview is on."""
+        enabled = bool(enabled)
+        self._preview_mode = enabled
+        if self.preview_btn.isChecked() != enabled:
+            self.preview_btn.blockSignals(True)
+            self.preview_btn.setChecked(enabled)
+            self.preview_btn.blockSignals(False)
+        for btn in self._tool_buttons.values():
+            btn.setEnabled(not enabled)
+        self.snap_btn.setEnabled(not enabled)
 
     def current_tool(self) -> str:
         return self._current_tool

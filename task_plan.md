@@ -183,8 +183,9 @@ GIS-shell vector editor replacing display-only three-column mapping page.
 | 3 | Test magic index `page_stack.widget(1)` for DataPage (pre-existing pattern) | Project Management V1 final review |
 | 4 | Floating catalog tab vs toolbar checked-state can desync if tab used directly | Data page perf final review |
 | 5 | Image/PDF decode still on UI thread after async path returns path-only result | Data page perf final review |
-| 6 | Freehand new facies polygons; forced topology rebuild; chrome print preview mode | Mapping editor V1 out of scope |
+| 6 | Forced topology rebuild (merge/split/shared-node editing) | Mapping editor V1 out of scope |
 | 7 | CI job that requires `HAS_CPP is True` for map_edit_core | Mapping native follow-up |
+| 9 | Facies freehand draw shipped (`e413e11`); chrome print preview shipped (图面预览 mode) | Mapping post-V1 |
 | 8 | Search haystack uses raw `type` (`well_log`), not Chinese labels | Data page residual |
 
 ## Page Progress Matrix

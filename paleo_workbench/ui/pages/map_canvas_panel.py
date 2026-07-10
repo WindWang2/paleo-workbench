@@ -6,7 +6,6 @@ from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 from geoviz_paleo_map import PaleoMapCanvas
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.mapping_helpers import field_value
 
 
 class MapCanvasPanel(QFrame):
@@ -53,17 +52,33 @@ class MapCanvasPanel(QFrame):
         self.stack.addWidget(self.canvas)
         outer.addWidget(host, 1)
 
-    def update_state(self, document) -> None:
-        if document is None:
+    def load_preview(
+        self,
+        features: list | None,
+        *,
+        wells: list | None = None,
+        period_name: str = "",
+    ) -> None:
+        """Load pre-normalized GeoJSON facies + lng/lat wells for chrome preview."""
+        feats = list(features or [])
+        well_list = list(wells or [])
+        if not feats and not well_list:
             self.canvas.load_features([], period_name="", wells=[])
-            self.empty_label.setText("未选择古地理图")
+            self.empty_label.setText("未选择古地理图" if not period_name else "暂无图面要素")
             self.empty_label.setHidden(False)
             self.stack.setCurrentWidget(self.empty_label)
             return
-
-        features = field_value(document, "facies_polygons", []) or []
-        wells = field_value(document, "well_overlays", []) or []
-        horizon = field_value(document, "linked_target_horizon", "") or ""
-        self.canvas.load_features(features, period_name=horizon, wells=wells)
+        self.canvas.load_features(feats, period_name=period_name, wells=well_list)
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.canvas)
+
+    def update_state(self, document) -> None:
+        if document is None:
+            self.load_preview([], wells=[], period_name="")
+            self.empty_label.setText("未选择古地理图")
+            return
+
+        from paleo_workbench.ui.pages.mapping_helpers import preview_payload_from_document
+
+        features, wells, horizon = preview_payload_from_document(document)
+        self.load_preview(features, wells=wells, period_name=horizon)

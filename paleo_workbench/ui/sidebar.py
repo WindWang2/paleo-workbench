@@ -69,18 +69,21 @@ class TextSidebar(QFrame):
         map_name: str = "未选择",
         horizon: str = "",
         dirty: bool = False,
+        preview: bool = False,
     ) -> None:
-        """Show active map name, horizon, and dirty state for the 编图 page."""
+        """Show active map name, horizon, dirty, and edit/preview mode for 编图."""
         self.context_label.setText("编图")
         name_text = map_name or "未选择"
         horizon_text = horizon or "—"
         status_text = "未保存" if dirty else "已保存"
+        mode_text = "图面预览" if preview else "编辑"
         self._render_lines(
             [
                 ("编图上下文", True),
                 (f"图件: {name_text}", False),
                 (f"层位: {horizon_text}", False),
                 (f"状态: {status_text}", False),
+                (f"模式: {mode_text}", False),
                 ("相带画布", False),
                 ("图面元素", False),
             ]

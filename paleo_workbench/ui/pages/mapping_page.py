@@ -1,19 +1,32 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QGraphicsView, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QGraphicsView,
+    QHBoxLayout,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.mapping.document_io import apply_features_to_document
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
+from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
+from paleo_workbench.ui.pages.map_chrome_panel import MapChromePanel
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
-from paleo_workbench.ui.pages.mapping_helpers import active_map_document
+from paleo_workbench.ui.pages.mapping_helpers import (
+    active_map_document,
+    field_value,
+    preview_payload_from_document,
+    preview_payload_from_features,
+)
 
 
 class MappingPage(QWidget):
-    """GIS-shell 编图 page: toolbar, layer tree, edit view, attribute table."""
+    """GIS-shell 编图 page: toolbar, layer tree, edit view / chrome preview, attribute table."""
 
     draft_saved = Signal(object)
     mapping_context_changed = Signal(dict)
@@ -22,6 +35,7 @@ class MappingPage(QWidget):
         super().__init__(parent)
         self.setObjectName("MappingPage")
         self._active_document = None
+        self._preview_mode = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -36,9 +50,24 @@ class MappingPage(QWidget):
         self.layer_tree = MapLayerTree()
         mid.addWidget(self.layer_tree, 0)
 
-        self.edit_view = MapEditView()
-        mid.addWidget(self.edit_view, 1)
+        self.center_stack = QStackedWidget()
+        self.center_stack.setObjectName("MappingCenterStack")
 
+        self.edit_view = MapEditView()
+        self.center_stack.addWidget(self.edit_view)
+
+        preview_host = QWidget()
+        preview_host.setObjectName("MappingPreviewHost")
+        preview_layout = QHBoxLayout(preview_host)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(10)
+        self.canvas_panel = MapCanvasPanel()
+        self.chrome_panel = MapChromePanel()
+        preview_layout.addWidget(self.canvas_panel, 1)
+        preview_layout.addWidget(self.chrome_panel, 0)
+        self.center_stack.addWidget(preview_host)
+
+        mid.addWidget(self.center_stack, 1)
         outer.addLayout(mid, 1)
 
         self.attribute_table = MapAttributeTable()
@@ -49,7 +78,9 @@ class MappingPage(QWidget):
         self.toolbar.undo_requested.connect(self._on_undo)
         self.toolbar.redo_requested.connect(self._on_redo)
         self.toolbar.snap_toggled.connect(self._on_snap_toggled)
+        self.toolbar.preview_toggled.connect(self._on_preview_toggled)
         self.toolbar.save_draft_requested.connect(self.save_draft)
+        self.chrome_panel.save_btn.clicked.connect(self.save_draft)
 
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)
         self.layer_tree.document_selected.connect(self._on_document_selected)
@@ -64,6 +95,7 @@ class MappingPage(QWidget):
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         self._on_tool_changed(self.toolbar.current_tool())
+        self._apply_mode_ui()
         self._emit_mapping_context()
 
     def is_dirty(self) -> bool:
@@ -71,6 +103,22 @@ class MappingPage(QWidget):
         if isinstance(scene, MapEditScene):
             return scene.is_dirty()
         return False
+
+    def is_preview_mode(self) -> bool:
+        return self._preview_mode
+
+    def set_preview_mode(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._preview_mode == enabled:
+            if enabled:
+                self._refresh_preview()
+            return
+        self._preview_mode = enabled
+        self.toolbar.set_preview_mode(enabled)
+        self._apply_mode_ui()
+        if enabled:
+            self._refresh_preview()
+        self._emit_mapping_context()
 
     def active_document(self):
         return self._active_document
@@ -82,6 +130,7 @@ class MappingPage(QWidget):
             "map_name": getattr(doc, "name", None) or "未选择",
             "horizon": getattr(doc, "linked_target_horizon", None) or "",
             "dirty": self.is_dirty(),
+            "preview": self._preview_mode,
         }
 
     def update_state(self, map_documents: list | tuple | None) -> None:
@@ -93,12 +142,13 @@ class MappingPage(QWidget):
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             scene.load_document(document)
-            # Apply current layer visibility from tree.
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        if self._preview_mode:
+            self._refresh_preview()
         self._emit_mapping_context()
 
     def save_draft(self) -> bool:
@@ -107,12 +157,13 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if doc is None or scene is None:
             return False
-        # Topology refresh before export (warnings only; does not block save).
         scene.refresh_topology()
         features = scene.export_features()
         apply_features_to_document(doc, features)
         scene.set_dirty(False)
         self._sync_save_enabled()
+        if self._preview_mode:
+            self._refresh_preview()
         self.draft_saved.emit(doc)
         self._emit_mapping_context()
         return True
@@ -120,6 +171,33 @@ class MappingPage(QWidget):
     def _edit_scene(self) -> MapEditScene | None:
         scene = self.edit_view.scene()
         return scene if isinstance(scene, MapEditScene) else None
+
+    def _on_preview_toggled(self, enabled: bool) -> None:
+        self.set_preview_mode(enabled)
+
+    def _apply_mode_ui(self) -> None:
+        self.center_stack.setCurrentIndex(1 if self._preview_mode else 0)
+        self.attribute_table.setVisible(not self._preview_mode)
+
+    def _refresh_preview(self) -> None:
+        doc = self._active_document
+        scene = self._edit_scene()
+        period = str(field_value(doc, "linked_target_horizon", "") or "") if doc else ""
+        if scene is not None and (scene.is_dirty() or doc is not None):
+            # Always prefer live scene geometry so unsaved edits appear in preview.
+            features, wells, period = preview_payload_from_features(
+                scene.export_features(),
+                period_name=period,
+            )
+            # If scene is empty but document still has saved data (edge), fall back.
+            if not features and not wells and doc is not None and not scene.is_dirty():
+                features, wells, period = preview_payload_from_document(doc)
+        elif doc is not None:
+            features, wells, period = preview_payload_from_document(doc)
+        else:
+            features, wells, period = [], [], ""
+        self.canvas_panel.load_preview(features, wells=wells, period_name=period)
+        self.chrome_panel.update_state(doc)
 
     def _on_tool_changed(self, tool_id: str) -> None:
         scene = self._edit_scene()
@@ -150,6 +228,8 @@ class MappingPage(QWidget):
         self.attribute_table.set_feature(None)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        if self._preview_mode:
+            self._refresh_preview()
         self._emit_mapping_context()
 
     def _on_property_changed(self, feature_id: str, key: str, value: object) -> None:
@@ -167,6 +247,8 @@ class MappingPage(QWidget):
             scene.undo()
         self._sync_undo_redo_enabled()
         self._refresh_attribute_from_selection()
+        if self._preview_mode:
+            self._refresh_preview()
 
     def _on_redo(self) -> None:
         scene = self._edit_scene()
@@ -174,6 +256,8 @@ class MappingPage(QWidget):
             scene.redo()
         self._sync_undo_redo_enabled()
         self._refresh_attribute_from_selection()
+        if self._preview_mode:
+            self._refresh_preview()
 
     def _on_selection_ids_changed(self, ids: list) -> None:
         scene = self._edit_scene()
@@ -208,6 +292,7 @@ class MappingPage(QWidget):
     def _sync_save_enabled(self) -> None:
         can_save = self._active_document is not None and self.is_dirty()
         self.toolbar.save_draft_btn.setEnabled(can_save)
+        self.chrome_panel.save_btn.setEnabled(can_save)
 
     def _emit_mapping_context(self) -> None:
         self.mapping_context_changed.emit(self.mapping_context())
