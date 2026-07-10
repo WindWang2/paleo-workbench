@@ -32,3 +32,4 @@ data/
 # Nested engine repo is tracked as a submodule (see .gitmodules)
 # geo-viz-engine/
 .gstack/
+.worktrees/
