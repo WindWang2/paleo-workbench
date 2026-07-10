@@ -25,6 +25,10 @@ def _table_text(page: DataPage, row: int, column: int) -> str:
     return model.data(model.index(row, column)) or ""
 
 
+def _wait_reader_mode(qtbot, page: DataPage, mode: str, timeout: int = 3000) -> None:
+    qtbot.waitUntil(lambda: page.reader_panel.current_mode == mode, timeout=timeout)
+
+
 def _table_headers(page: DataPage) -> list[str]:
     model = _table_model(page)
     return [
@@ -176,6 +180,7 @@ def test_data_page_column_change_preserves_selection_and_reader(qtbot, tmp_path:
     qtbot.addWidget(page)
 
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
     page.column_actions["source"].trigger()
     page.column_actions["path"].trigger()
 
@@ -413,6 +418,7 @@ def test_data_page_selection_renders_imported_text_preview(qtbot, tmp_path: Path
     page.import_paths([text_path])
 
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
 
     assert page.reader_panel.current_mode == "text"
     assert "alpha" in page.reader_panel.text_preview.toPlainText()
@@ -430,6 +436,7 @@ def test_data_page_selection_renders_imported_image_preview(qtbot, tmp_path: Pat
     page.import_paths([image_path])
 
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "image")
 
     assert page.reader_panel.current_mode == "image"
     assert page.reader_panel.image_label.pixmap() is not None
@@ -475,6 +482,7 @@ startxref
     page.import_paths([pdf_path])
 
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "pdf")
 
     assert page.reader_panel.current_mode == "pdf"
     assert page.reader_panel.stack.currentWidget() is page.reader_panel.pdf_widget
@@ -507,6 +515,7 @@ def test_data_page_selection_updates_reader_and_context_signal(qtbot, tmp_path: 
     page.data_context_changed.connect(received.append)
 
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
 
     assert page.reader_panel.current_mode == "text"
     assert received[-1]["selected_name"] == "notes.txt"
@@ -527,6 +536,7 @@ def test_data_page_remove_refreshes_reader_and_action_state(qtbot, tmp_path: Pat
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
 
     assert page.remove_selected_asset() is True
 
@@ -563,6 +573,7 @@ def test_data_page_filtering_hidden_selection_clears_reader_action_state_and_con
     page.data_context_changed.connect(received.append)
 
     page._set_selected_asset(alpha)
+    _wait_reader_mode(qtbot, page, "text")
     page.asset_table.set_search_text("beta")
 
     assert page.reader_panel.current_mode == "empty"
@@ -627,6 +638,7 @@ def test_data_page_can_remove_selected_export_artifact(qtbot):
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(artifact)
+    _wait_reader_mode(qtbot, page, "message")
 
     removed = page.remove_selected_asset()
 
@@ -652,6 +664,7 @@ def test_data_page_can_open_selected_export_artifact_folder(qtbot, monkeypatch, 
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(artifact)
+    _wait_reader_mode(qtbot, page, "message")
     opened = []
     monkeypatch.setattr(
         "paleo_workbench.ui.pages.data_page.QDesktopServices.openUrl",
@@ -676,6 +689,7 @@ def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, t
 
     assert "新增 1" in page.action_panel.operation_status_label.text()
     page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
     assert "新增 1" in page.action_panel.operation_status_label.text()
 
 
@@ -697,6 +711,7 @@ def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
     page = DataPage(project=project)
     qtbot.addWidget(page)
     page._set_selected_asset(resource)
+    _wait_reader_mode(qtbot, page, "text")
     received = []
     page.data_context_changed.connect(received.append)
 

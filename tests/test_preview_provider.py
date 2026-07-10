@@ -131,6 +131,8 @@ def test_preview_provider_missing_file_message(tmp_path: Path):
 
 
 def test_preview_provider_reuses_cached_result_for_unchanged_file(tmp_path: Path):
+    # Task 3: preview is pure (no shared cache) for worker-thread safety.
+    # Task 4 reintroduces UI-thread PreviewCache LRU.
     path = tmp_path / "sample.txt"
     path.write_text("first", encoding="utf-8")
     resource = ResourceItem(name="sample.txt", path=str(path), type="document", format="txt")
@@ -139,7 +141,9 @@ def test_preview_provider_reuses_cached_result_for_unchanged_file(tmp_path: Path
     first = provider.preview(resource)
     second = provider.preview(resource)
 
-    assert first is second
+    assert first == second
+    assert first.mode == "text"
+    assert first.text == "first"
 
 
 def test_preview_provider_export_artifact_message(tmp_path: Path):

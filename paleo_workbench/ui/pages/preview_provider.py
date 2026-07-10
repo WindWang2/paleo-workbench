@@ -71,14 +71,9 @@ class PreviewProvider:
                 message="从列表中选择一个数据、成果或文件",
             )
 
-        key = self._cache_key(asset)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
-
-        result = self._build_preview(asset)
-        self._cache[key] = result
-        return result
+        # Pure build for Task 3 worker-thread safety. Shared mutable cache is
+        # deferred to Task 4 (UI-thread PreviewCache LRU).
+        return self._build_preview(asset)
 
     def _cache_key(self, asset: ResourceItem | ExportArtifact) -> tuple:
         if isinstance(asset, ExportArtifact):

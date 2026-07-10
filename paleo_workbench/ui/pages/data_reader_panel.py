@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -93,7 +95,22 @@ class DataReaderPanel(QFrame):
 
         self.stack.setCurrentWidget(self.empty_label)
 
+    def show_loading(self, asset: ResourceItem | ExportArtifact | None = None) -> None:
+        self.current_mode = "loading"
+        self.reader_mode_changed.emit("loading")
+        title = "加载中…"
+        if isinstance(asset, ResourceItem):
+            title = f"加载中… {asset.name}"
+        elif isinstance(asset, ExportArtifact):
+            title = f"加载中… {Path(asset.output_path).name}"
+        self.title_label.setText(title)
+        self.meta_label.setText("")
+        self.warning_label.setText("")
+        self.message_label.set_message("正在生成预览…")
+        self.stack.setCurrentWidget(self.message_label)
+
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
+        # Sync path for direct panel tests and rescan refresh.
         self.render(self.provider.preview(asset))
 
     def render(self, result: PreviewResult) -> None:

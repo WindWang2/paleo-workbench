@@ -17,6 +17,8 @@ from paleo_workbench.resources.import_service import (
 from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
+from paleo_workbench.ui.pages.preview_provider import PreviewResult
+from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.workflow.service import dashboard_state
 
@@ -83,6 +85,16 @@ class DataPage(QWidget):
         self.import_folder_btn = self.action_panel.import_folder_btn
         self.rescan_btn = self.action_panel.rescan_btn
         self.remove_btn = self.action_panel.remove_btn
+
+        self._preview_controller = PreviewRequestController(
+            self.reader_panel.provider,
+            self,
+        )
+        self._preview_controller.loading.connect(
+            lambda: self.reader_panel.show_loading(self._selected_asset)
+        )
+        self._preview_controller.result_ready.connect(self.reader_panel.render)
+        self._preview_controller.failed.connect(self._handle_preview_failed)
 
         self.catalog_panel.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
@@ -346,7 +358,7 @@ class DataPage(QWidget):
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
         self.asset_table.set_selected_asset(asset)
-        self.reader_panel.update_asset(asset)
+        self._preview_controller.request(asset)
         self.action_panel.update_selection_state(
             has_resource=isinstance(asset, ResourceItem),
             has_asset=asset is not None,
@@ -354,6 +366,11 @@ class DataPage(QWidget):
             asset_kind=self._selected_asset_kind(),
         )
         self._emit_data_context()
+
+    def _handle_preview_failed(self, message: str) -> None:
+        self.reader_panel.render(
+            PreviewResult(mode="message", title="预览失败", message=message)
+        )
 
     def current_reader_mode(self) -> str:
         return self.reader_panel.current_mode
