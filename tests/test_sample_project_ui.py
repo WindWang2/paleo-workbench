@@ -57,3 +57,25 @@ def test_open_sample_project_missing_data_returns_false(qtbot, monkeypatch, tmp_
     monkeypatch.setattr(window, "_show_project_error", lambda *a, **k: None)
 
     assert window.open_sample_project() is False
+
+
+def test_open_sample_project_binds_demo_prediction(qtbot, tmp_path: Path, monkeypatch):
+    data = tmp_path / "data"
+    (data / "井曲线").mkdir(parents=True)
+    (data / "井曲线" / "A1.Las").write_text("~Version\n", encoding="utf-8")
+    (data / "层位").mkdir()
+    (data / "层位" / "C6.dat").write_text("h", encoding="utf-8")
+
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    monkeypatch.setattr(
+        "paleo_workbench.app.resolve_sample_data_root",
+        lambda explicit=None, **kwargs: data,
+    )
+    monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
+
+    ok = window.open_sample_project()
+    assert ok is True
+    assert window.project.prediction_tasks
+    task = window.project.prediction_tasks[-1]
+    assert task.input_refs.get("well_log_resource_ids")

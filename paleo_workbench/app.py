@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
 
+from paleo_workbench.pipeline.assets import ensure_demo_prediction
 from paleo_workbench.pipeline.bootstrap import (
     bootstrap_sample_project,
     resolve_sample_data_root,
@@ -108,6 +109,7 @@ class PaleoWorkbenchWindow(QWidget):
             self._show_project_error("打开样例工程失败", str(e))
             return False
         self.project = result.document
+        ensure_demo_prediction(self.project, seed=0)
         self.project_path = None
         self._refresh_shell()
         return True

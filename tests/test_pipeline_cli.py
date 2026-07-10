@@ -68,3 +68,36 @@ def test_cli_missing_data_root_exits_2(tmp_path: Path):
         env=_cli_env(),
     )
     assert proc.returncode == 2
+
+
+def test_cli_with_demo_tasks_seeds_prediction(tmp_path: Path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "井曲线").mkdir()
+    (data / "井曲线" / "A1.Las").write_text("~Version\n", encoding="utf-8")
+    out = tmp_path / "sample.paleo.json"
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "paleo_workbench.pipeline",
+            "--data-root",
+            str(data),
+            "--out",
+            str(out),
+            "--name",
+            "CLIDemo",
+            "--with-demo-tasks",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_cli_env(),
+    )
+    assert proc.returncode == 0, proc.stderr
+    doc = ProjectManager(out).load()
+    assert doc.prediction_tasks
+    task = doc.prediction_tasks[-1]
+    assert task.input_refs.get("well_log_resource_ids")

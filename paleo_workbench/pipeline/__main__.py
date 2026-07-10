@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from paleo_workbench.pipeline.assets import ensure_demo_prediction
 from paleo_workbench.pipeline.bootstrap import bootstrap_sample_project, write_project
 
 
@@ -15,6 +16,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--name", default="惠西南样例工程")
     parser.add_argument("--region", default="惠西南")
+    parser.add_argument(
+        "--with-demo-tasks",
+        action="store_true",
+        help="Seed a demo prediction task bound to sample LAS/SEGY assets.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -24,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
             region=args.region,
             project_path=args.out,
         )
+        if args.with_demo_tasks:
+            ensure_demo_prediction(result.document, seed=0)
         path = write_project(result.document, args.out)
     except FileNotFoundError as e:
         print(str(e), file=sys.stderr)
