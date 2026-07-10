@@ -1,9 +1,9 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
-> **Updated:** 2026-07-07
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle.
+> **Updated:** 2026-07-10
+> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance).
 
-## Project Status: 9/9 pages + Data Management Center complete; Project Management V1 (new/open/save/properties lifecycle) complete, 283 tests passing.
+## Project Status: 9/9 pages + Data Management Center + Project Management V1 complete; **Data Page UI/Perf Optimization merged to main** (PR #1). ~385 tests passing.
 
 ## Current Architecture
 
@@ -11,6 +11,23 @@
 - **Design tokens** in `paleo_workbench/ui/tokens.py` — colors, fonts, dimensions, QSS_TEMPLATE, step colors/labels, status text, resource labels/units
 - **Global QSS** applied in `main.py` via `app.setStyleSheet(tokens.QSS_TEMPLATE)`
 - **Pages package** at `paleo_workbench/ui/pages/`
+- **DataPage (post Phase 15):** `DataWorkspace` (virtual `QTableView` + multi-format reader) + floating catalog/actions; `FilterIndex`; serial async `PreviewRequestController` + LRU `PreviewCache`; async import via `QThread`
+
+## 数据管理思维（改数据页时先读）
+
+> 完整版见 `findings.md` → **「数据管理思维 (Data Management Mindset)」**。下面是压缩决策版。
+
+| 原则 | 含义 |
+|------|------|
+| **工程级中枢** | 管全部输入 / 参考 / 成果文件面，不是单类型资源摘要 |
+| **登记 ≠ 磁盘** | 工程登记路径与元数据；移出不删盘；缺失标 `missing` |
+| **工作台隐喻** | 表 + 阅读器第一视口；目录/操作为浮动 overlay，禁止三列固定卡片回潮 |
+| **选中即读** | 支持格式有界预览；不支持则 message；深度可视化去专用页 |
+| **非破坏默认** | 不默认拷贝入库、不删源文件、不在数据页做全文件编辑 |
+| **规模体感** | 2000+：虚拟表、内存筛选、串行异步预览 + 缓存、导入一次刷新 |
+| **下游一致** | 测井/地震/制备/编图消费同一 `ProjectDocument` 资产 |
+
+**决策检查（任一否 → 重想方案）：** 只管理登记？不碰磁盘删除？表/阅读器仍是主角？大列表不堵 UI？导入一次刷新？缺失/不支持可解释？
 
 ## Phases
 
@@ -118,6 +135,26 @@
 - Spec: `docs/superpowers/specs/2026-07-07-project-management-design.md`
 - Plan: `docs/superpowers/plans/2026-07-07-project-management.md`
 
+### Phase 15: 数据页 UI/性能优化 Data Page UI & Performance — ✅ COMPLETE (merged PR #1)
+
+Surgical performance pass for 2000+ assets; floating-panel workspace layout preserved.
+
+| Slice | Work | Key modules |
+|-------|------|-------------|
+| S1 | Virtual table: `QTableWidget` → `QTableView` + `AssetTableModel` | `asset_table_model.py`, `data_table_columns.py`, `data_asset_table.py` |
+| S2 | `FilterIndex` + 180ms search debounce; single `set_assets_filtered` reset | `filter_index.py`, `data_toolbar.py` |
+| S3 | Async preview + generation tokens + loading; rescan invalidates in-flight | `preview_worker.py`, `data_reader_panel.py`, `data_page.py` |
+| S4 | UI-thread `PreviewCache` LRU (32); pure `PreviewProvider` | `preview_cache.py` |
+| S5 | Import batch refresh (one model reset; no reader rebuild) | `data_page._apply_import_report` |
+| S6 | Checkable catalog/reader toggles; page margins 12px | `data_toolbar.py`, `tokens.py` |
+| Review fix | Serial latest-only preview queue + `shutdown()` on close/deleteLater | `preview_worker.py`, `data_page.py` |
+
+- Approach: balanced surgical (virtualize + index + async cache), not layout redesign
+- Spec: `docs/superpowers/specs/2026-07-10-datapage-ui-perf-optimization-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-datapage-ui-perf-optimization.md`
+- Branch: `feature/datapage-ui-perf` → merged `main` as PR #1 (`bc8b68b`)
+- Tests: ~385 passed at merge
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Source |
@@ -125,6 +162,10 @@
 | 1 | `save_project` OSError branch lacks a dedicated test (only `save_project_as` tested) | Project Management V1 final review |
 | 2 | `_on_open_project` error message generic — doesn't distinguish missing file vs corrupt JSON | Project Management V1 final review |
 | 3 | Test magic index `page_stack.widget(1)` for DataPage (pre-existing pattern) | Project Management V1 final review |
+| 4 | Floating catalog tab vs toolbar checked-state can desync if tab used directly | Data page perf final review |
+| 5 | Image/PDF decode still on UI thread after async path returns path-only result | Data page perf final review |
+| 6 | `FilterIndex.rebuild` still runs on pure search/category (could rebuild only on asset list change) | Data page perf final review |
+| 7 | Search haystack uses raw `type` (`well_log`), not Chinese labels | Data page perf final review |
 
 ## Page Progress Matrix
 
@@ -142,6 +183,8 @@
 | 11 | 数据管理中心升级 | ✅ Complete | 27 | ✅ | ✅ |
 | 12 | 数据多格式预览 | ✅ Complete | 9 | ✅ | ✅ |
 | 13 | 数据页 V2 交互完善 | ✅ Complete | 7 | ✅ | ✅ |
+| 14 | 项目管理 V1 | ✅ Complete | 24 | ✅ | ✅ |
+| 15 | 数据页 UI/性能优化 | ✅ Complete (PR #1) | ~100+ | ✅ | ✅ |
 
 ## Test History
 
@@ -164,3 +207,6 @@
 | 2026-07-06 (Data Management Center) | 239 | ✅ |
 | 2026-07-06 (Data Preview Formats) | 248 | ✅ |
 | 2026-07-06 (Data Page V2 Polish) | 259 | ✅ |
+| 2026-07-07 (Project Management V1) | 283 | ✅ |
+| 2026-07-10 (Data page redesign + preview formats era) | ~350+ | ✅ |
+| 2026-07-10 (Data Page UI/Perf Optimization, PR #1) | ~385 | ✅ |

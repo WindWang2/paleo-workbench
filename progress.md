@@ -449,3 +449,71 @@ Final review: READY TO MERGE (no Critical/Important; 3 Minor deferred to follow-
 |-------|-------|--------|
 | (baseline after dep fix) | 259 | ✅ |
 | Project Management V1 | 283 | ✅ |
+
+---
+
+## Session: 2026-07-10 — Data Page UI/Perf Optimization (Phase 15)
+
+### Goal
+
+Make the data management page feel smooth under **2000+ assets** and large directory imports: virtual table, filter index, async preview with generation + LRU cache, batched import refresh, light toolbar polish. Keep floating-panel layout (surgical Approach A).
+
+### Process
+
+1. **Brainstorming** → design approved section-by-section
+2. **Spec** committed: `docs/superpowers/specs/2026-07-10-datapage-ui-perf-optimization-design.md` (`86f6776`)
+3. **Plan** committed: `docs/superpowers/plans/2026-07-10-datapage-ui-perf-optimization.md` (`28b1ef6`)
+4. **Worktree:** `.worktrees/datapage-ui-perf` on `feature/datapage-ui-perf`
+5. **Subagent-driven development** (sequential implementers; parallel spec/quality reviews; continuous)
+6. **PR #1** created, review fixes (serial queue + shutdown), merged to `main` (`bc8b68b`)
+
+### Implementation commits (feature branch)
+
+| Commit | Content |
+|--------|---------|
+| `0dc2478` | feat: virtualize data asset table with QAbstractTableModel |
+| `99d0d24` | feat: add FilterIndex and debounced data search |
+| `e5c1afb` | feat: async data preview with generation tokens |
+| `bc665cb` | fix: invalidate preview generation on rescan |
+| `4908ce4` | feat: LRU preview cache for data reader |
+| `7f12639` | perf: batch data table refresh after import |
+| `46f8517` | polish: data toolbar toggles and reader loading feedback |
+| `1ca0f2c` | test: wait for async reader mode in app shell sidebar tests |
+| `434dc95` | fix: serial preview queue and controller shutdown |
+
+### New modules
+
+| File | Role |
+|------|------|
+| `paleo_workbench/ui/pages/asset_table_model.py` | Virtual table model |
+| `paleo_workbench/ui/pages/data_table_columns.py` | Column definitions |
+| `paleo_workbench/ui/pages/filter_index.py` | Category + search index |
+| `paleo_workbench/ui/pages/preview_cache.py` | LRU cache keys |
+| `paleo_workbench/ui/pages/preview_worker.py` | Async controller (serial + shutdown) |
+
+### Verification
+
+- Focused suites green throughout SDD
+- Full suite before merge: **385 passed** (after serial/shutdown fix)
+- PR review: READY; Important #1–2 fixed pre-merge
+- Merged: https://github.com/WindWang2/paleo-workbench/pull/1
+
+### Errors / review issues fixed this session
+
+| Issue | Resolution |
+|-------|------------|
+| AppShell tests expected immediate `阅读器: text` after async select | `qtbot.waitUntil` for reader mode |
+| Rescan vs in-flight preview race | rescan uses `controller.request()` (generation bump) |
+| Unbounded concurrent preview threads | serial latest-only queue |
+| Live QThread destroyed on shell rebuild | `shutdown()` on close + DeferredDelete |
+| Quality review NEEDS_FIXES on Task 3 | `bc665cb` then later `434dc95` |
+
+### Status
+
+**Phase 15 COMPLETE.** Local `main` == `origin/main` at merge commit. Planning files updated 2026-07-10.
+
+### Planning follow-up (same day)
+
+- Wrote durable **数据管理思维 (Data Management Mindset)** into `findings.md` (product + architecture principles: asset universe, register-vs-disk, workspace metaphor, preview bounds, scale mindset, decision checklist).
+- Added compressed decision table to `task_plan.md` pointing at full findings section.
+- Purpose: future sessions / agents change the data page against explicit management philosophy, not only UI/perf implementation notes.

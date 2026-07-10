@@ -1,10 +1,120 @@
 # Findings: Paleogeography Workbench
 
+## 数据管理思维 (Data Management Mindset)
+
+> 数据页不是「资源摘要卡片」，而是**工程级数据 / 成果 / 文件管理中枢**。后续任何数据页改动、导入链路、预览与性能优化，都先对齐这套思维。
+
+### 1. 管什么（资产宇宙）
+
+数据页管理 `ProjectDocument` 上**一切文件型资产**，不限于测井/地震：
+
+| 类别 | 典型内容 | 模型落点 |
+|------|----------|----------|
+| **输入数据** | 测井 LAS、地震 SEG-Y、层位、井分层、时深、表格 | `resources`（`artifact_role`≈input） |
+| **参考资料** | PDF/文档、影像、历史图件、WLP 等 | `resources`（document / image_reference / …） |
+| **成果 / 导出** | 单因素图、预测结果、成图 PDF、导出物 | `export_artifacts` + 派生 resource |
+| **异常** | missing / warning / failed / error | 同一表，状态着色 + 目录「异常」 |
+
+原则：**一张表看全工程文件面**；目录按「角色 + 类型」切片，不是按 UI 装饰分区。
+
+### 2. 项目登记 vs 磁盘真相
+
+- 工程文件（`.paleo.json`）登记的是 **路径 + 元数据 + checksum**，默认**不拷贝**进工程目录。
+- **导入** = 扫盘 / 选文件 → 分类 → **去重**（path 优先，checksum 次之）→ 写入 `ProjectDocument`。
+- **移出项目** = 从工程登记删除，**绝不删磁盘文件**。
+- **重新扫描** = 用磁盘刷新元数据；文件没了 → `status=missing`，记录仍在，便于补路径。
+- **打开目录** = 定位源文件所在位置，方便外部工具编辑。
+
+思维口诀：**登记可丢、磁盘不碰；缺失可标、源文件可找。**
+
+### 3. 工作台隐喻（怎么用）
+
+数据页是**文件管理器 + 多格式阅读器**，不是报表 dashboard：
+
+```
+[摘要条：就绪/计数]
+[工具栏：导入 | 搜索 | 列设置 | 目录/阅读器开关]
+┌────────────────────┬────────────────────┐
+│  资产表（主工作面）   │  阅读器（选中即读）   │
+│  虚拟滚动 / 筛选     │  有界预览，非元数据卡  │
+└────────────────────┴────────────────────┘
+  浮动「目录」          浮动「操作」
+  （overlay，不抢宽）    （导入/扫描/移出/状态）
+```
+
+- **表 + 阅读器** 是第一视口；目录/操作是**可收起 overlay**，禁止再改回「三列固定卡片抢宽度」。
+- **选中即读**：支持的格式立刻给出可读预览；不支持的给清晰 message，管理动作仍可用。
+- **阅读器优先于元数据卡片**：元数据做 header/次要信息，主体是 PDF 翻页、表格预览、文本、图件等。
+
+### 4. 操作闭环（用户心智）
+
+1. **进工程** → 打开/新建 → 数据页反映当前 `ProjectDocument`  
+2. **补数据** → 导入文件/目录（后台线程）→ 表 + 目录计数一次刷新  
+3. **找数据** → 目录分类 / 搜索 / 列显隐 → 只动过滤视图，不读文件体  
+4. **看数据** → 点行 → loading → 有界预览（cache 命中则秒开）  
+5. **管数据** → 重扫 / 移出 / 开目录；状态与侧栏上下文同步  
+6. **交给下游** → 测井/地震/制备/编图等页消费同一批 `resources` / artifacts  
+
+数据页是 workflow 第一步（`data_check` / 数据管理）的**常驻中枢**，不是一次性检查表。
+
+### 5. 预览边界（安全默认）
+
+| 做 | 不做（数据页内） |
+|----|------------------|
+| 有界文本/表（行列表上限） | 全文件编辑 |
+| PDF 按页阅读 | 深度 OCR / 全文检索引擎 |
+| 图按视口缩放 | 批量缩略图流水线 |
+| LAS / SEG-Y **摘要 / 曲线名表** | 全道集可视化、全曲线绘图 |
+| 失败降级 message | 崩溃或阻塞 UI |
+
+深度可视化属于 **测井预测 / 地震预测 / 可视化页**；数据页只保证「认得、管得住、能预览到可用程度」。
+
+### 6. 规模与响应（性能思维）
+
+目标体感：**2000+ 行仍可滚、可筛、可切预览**。
+
+| 路径 | 原则 |
+|------|------|
+| 表 | 虚拟 model/view；`data()` 永不读文件体 |
+| 筛选 | 内存 `FilterIndex`；防抖搜索；不触发预览 |
+| 预览 | 后台/串行队列 + generation；UI 线程 LRU；stale 丢弃 |
+| 导入 | 后台导入；完成时 **一次** 批量 refresh |
+| 生命周期 | page 销毁 / shell rebuild 时 shutdown worker |
+
+成功标准是**体感流畅**，不是 CI 硬 latency SLO。
+
+### 7. 与项目管理的关系
+
+- **工程** 拥有资源列表；**数据页** 是编辑/检视该列表的主界面。
+- new/open 会 rebuild `AppShell` → 新 `DataPage(project=…)`；数据状态以当前工程为准。
+- 保存工程 = 持久化登记信息（含相对路径策略），不是打包全部二进制。
+
+### 8. 决策检查清单（改数据页前先问）
+
+1. 这是在**管理工程登记**，还是在做专用可视化？后者考虑别的页。  
+2. 会不会**误删磁盘**？默认禁止。  
+3. 会不会让**表/阅读器失去第一视口**（固定侧栏回潮）？禁止。  
+4. 大列表/大切换会不会**堵主线程**？要有界、异步、可丢弃。  
+5. 导入完成是否**一次刷新**？禁止逐条重绘风暴。  
+6. 缺失/不支持是否**可解释**且管理动作仍可用？
+
+### 9. 关键规格（按时间线）
+
+| 文档 | 贡献的思维 |
+|------|------------|
+| `2026-07-06-datamanagementpage-design.md` | 工程级资产中心、目录分类、去重、非破坏删除 |
+| `2026-07-07-datapage-ui-management-performance-design.md` | 阅读器主表面、有界预览 |
+| `2026-07-09-data-management-page-redesign.md` | 工作台 + 浮动目录/操作、表\|阅读器 |
+| `2026-07-10-datapage-ui-perf-optimization-design.md` | 2000+ 虚拟化、异步预览、缓存与导入批量刷新 |
+
+---
+
 ## Project Architecture
 
 - **Two repos:** `paleo_workbench` (root, business logic + UI shell) + `geo-viz-engine` (submodule, visualization rendering engine)
 - **Tech stack:** Python 3.12, PySide6 6.6+, Pydantic v2, pytest+pytest-qt
 - **Design system:** Standalone HTML prototype (`古地理图编制系统 (standalone).html`, 3.7MB minified bundle) is the single source of truth for UI. Colors/fonts/dimensions extracted via headless browser computed-CSS inspection.
+- **数据管理思维：** 见上文「数据管理思维」——工程文件中枢、非破坏登记、表+阅读器工作台、有界预览、规模体感优先。
 
 ## Design Tokens (extracted from prototype)
 
@@ -276,3 +386,46 @@ Decomposition:
 07-06 接入 geo-viz-engine-backed pages (Seismic/WellLog/Visualization/Mapping) but did not declare the engine's heavy deps (scipy/segyio/pyqtgraph/PyOpenGL/matplotlib/shapely) in the main project. The engine's subpackages declare their own deps, but only get installed if each subpackage is `pip install -e`'d individually — they are NOT published to PyPI and the engine's top-level pyproject lists them as external deps that pip can't resolve.
 
 Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency order for `pip install -r`. The `pytest.ini pythonpath` makes tests work without installation, masking the gap. **Future pages adding geo-viz imports must ensure the subpackage is in `requirements-geoviz.txt` + `pythonpath`.**
+
+## Data Page UI/Perf Optimization (Phase 15) Notes
+
+### Architecture decisions (approved design Approach A)
+
+- **Surgical only:** keep `DataWorkspace` (table | reader) + floating catalog/actions; no card-layout rollback.
+- **Virtual table:** `QTableView` + `AssetTableModel` with `_filtered_rows: list[int]`. Never materialize thousands of `QTableWidgetItem`s. Column defs in `data_table_columns.py` to avoid circular imports.
+- **FilterIndex:** pure category + substring filter over precomputed haystacks. Category semantics must match catalog (`全部` / role buckets / `异常` / `CATEGORIES` type map). Currently still imports `CATEGORIES` from `data_catalog_panel` (Qt panel) — purity nit for later.
+- **Single model reset:** production path uses `set_assets_filtered(assets, rows, column_keys=...)` once per apply; avoid triple `beginResetModel`.
+- **Preview pipeline:** UI-thread `PreviewRequestController` + generation tokens; `PreviewProvider.preview` is pure (no shared dict cache). Worker only builds `PreviewResult` dataclasses (no Qt widgets).
+- **PreviewCache:** LRU 32 on controller (UI thread only). Key = kind, id, path, type, format, checksum, optional `(size, mtime_ns)` from `Path.stat()`. Type/format in key so rescan reclassification is a miss without model field changes.
+- **Serial latest-only queue (post-review fix):** at most one in-flight `QThread`. Newer cache-miss requests replace `_pending`; superseded assets never start. Prevents unbounded concurrent LAS/SEG-Y work.
+- **Shutdown:** `controller.shutdown()` on `DataPage.closeEvent` and `QEvent.DeferredDelete` so shell rebuild (`deleteLater`) does not destroy live threads.
+- **Import path:** still one `_apply_import_report` → `update_state` → one table reset; does not rebuild reader for prior selection.
+
+### Data page public contracts to preserve
+
+- `DataPage.update_state(state, resources, artifacts=None)`
+- Import / rescan / remove / open-folder
+- `data_context_changed` payload (counts + selection + reader_mode)
+- Toolbar search, catalog category, column settings
+- Floating panels as overlays (not splitter children)
+
+### Test patterns learned
+
+- After selection via DataPage, **always** `qtbot.waitUntil` for reader mode (async). AppShell sidebar tests must wait before asserting `阅读器: text`.
+- Tests that spin workers should `_wait_controller_idle` (jobs empty) before teardown.
+- Import batch: assert `modelAboutToBeReset` count == 1, not just final row count.
+- Rescan vs in-flight: gate first provider call with `threading.Event`, rescan, release, assert FRESH not STALE.
+
+### Residual (non-blocking) perf notes
+
+1. Image/PDF still decode on UI thread in preview widgets after async path returns path-only result.
+2. `FilterIndex.rebuild` runs on every filter apply; could rebuild only when asset list changes.
+3. Floating catalog tab does not sync toolbar check state (only toolbar path sets checked).
+4. Search haystack uses raw English type keys, not Chinese labels.
+
+### Delivery trail
+
+- Spec: `docs/superpowers/specs/2026-07-10-datapage-ui-perf-optimization-design.md`
+- Plan: `docs/superpowers/plans/2026-07-10-datapage-ui-perf-optimization.md`
+- PR: https://github.com/WindWang2/paleo-workbench/pull/1 (merged `bc8b68b`)
+- Worktree used: `.worktrees/datapage-ui-perf` on `feature/datapage-ui-perf`
