@@ -110,7 +110,7 @@ class DataReaderPanel(QFrame):
         self.stack.setCurrentWidget(self.message_label)
 
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
-        # Sync path for direct panel tests and rescan refresh.
+        # Sync path for direct panel tests; DataPage uses PreviewRequestController.
         self.render(self.provider.preview(asset))
 
     def render(self, result: PreviewResult) -> None:

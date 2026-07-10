@@ -730,5 +730,6 @@ def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
 
     assert page.rescan_selected_asset() is True
 
+    _wait_reader_mode(qtbot, page, "image")
     assert received[-1]["selected_name"] == "notes.txt"
     assert received[-1]["reader_mode"] == "image"

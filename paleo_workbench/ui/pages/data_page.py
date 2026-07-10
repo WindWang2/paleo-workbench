@@ -309,7 +309,8 @@ class DataPage(QWidget):
                 self.project.resources,
                 self.project.export_artifacts,
             )
-            self.reader_panel.update_asset(resource)
+            # Participate in generation invalidation so in-flight previews cannot win.
+            self._preview_controller.request(resource)
             self._set_action_status("文件不存在")
             return True
 
@@ -335,7 +336,8 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
-        self.reader_panel.update_asset(resource)
+        # Participate in generation invalidation so in-flight previews cannot win.
+        self._preview_controller.request(resource)
         self._set_action_status("已重新扫描")
         return True
 
