@@ -6,6 +6,8 @@ from pathlib import Path
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.resources.scanner import scan_resources
 
+DEFAULT_IMPORT_SKIP_CHECKSUM = 50 * 1024 * 1024
+
 
 @dataclass
 class ImportReport:
@@ -77,13 +79,21 @@ def import_files(
     paths: list[Path],
     existing: list[ResourceItem],
     project_path: Path | None = None,
+    *,
+    skip_checksum_over_bytes: int = DEFAULT_IMPORT_SKIP_CHECKSUM,
 ) -> ImportReport:
     candidates: list[ResourceItem] = []
     warnings: list[str] = []
 
     for path in paths:
         try:
-            candidates.extend(scan_resources(path.parent, project_path=project_path))
+            candidates.extend(
+                scan_resources(
+                    path.parent,
+                    project_path=project_path,
+                    skip_checksum_over_bytes=skip_checksum_over_bytes,
+                )
+            )
         except OSError as exc:
             warnings.append(f"{path}: {exc}")
 
@@ -103,9 +113,15 @@ def import_folder(
     root: Path,
     existing: list[ResourceItem],
     project_path: Path | None = None,
+    *,
+    skip_checksum_over_bytes: int = DEFAULT_IMPORT_SKIP_CHECKSUM,
 ) -> ImportReport:
     try:
-        candidates = scan_resources(root, project_path=project_path)
+        candidates = scan_resources(
+            root,
+            project_path=project_path,
+            skip_checksum_over_bytes=skip_checksum_over_bytes,
+        )
     except OSError as exc:
         return ImportReport(warnings=[f"{root}: {exc}"])
     return _filter_new(candidates, existing, project_path)

@@ -80,3 +80,22 @@ def test_import_folder_uses_recursive_scanner(tmp_path: Path):
 
     assert report.added_count == 1
     assert report.added[0].type == "seismic"
+
+
+def test_import_folder_skips_checksum_over_threshold(tmp_path: Path):
+    root = tmp_path / "folder"
+    root.mkdir()
+    big = root / "big.sgy"
+    big.write_bytes(b"x" * 100)
+    small = root / "small.las"
+    small.write_text("~Version\n", encoding="utf-8")
+
+    report = import_folder(root, existing=[], skip_checksum_over_bytes=50)
+    by_name = {item.name: item for item in report.added}
+
+    assert report.added_count == 2
+    assert by_name["big.sgy"].checksum is None
+    assert by_name["big.sgy"].parsed_summary.get("checksum_skipped") is True
+    assert by_name["big.sgy"].parsed_summary["size_bytes"] == 100
+    assert by_name["small.las"].checksum is not None
+    assert by_name["small.las"].parsed_summary.get("checksum_skipped") is not True
