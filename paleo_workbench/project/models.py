@@ -149,6 +149,8 @@ class PaleoMapDocument(BaseModel):
     facies_polygons: list[dict[str, Any]] = Field(default_factory=list)
     facies_style: dict[str, Any] = Field(default_factory=dict)
     well_overlays: list[dict[str, Any]] = Field(default_factory=list)
+    line_features: list[dict[str, Any]] = Field(default_factory=list)
+    label_features: list[dict[str, Any]] = Field(default_factory=list)
     map_chrome: dict[str, Any] = Field(default_factory=dict)
     view_state: dict[str, Any] = Field(default_factory=dict)
     edit_history: list[dict[str, Any]] = Field(default_factory=list)
