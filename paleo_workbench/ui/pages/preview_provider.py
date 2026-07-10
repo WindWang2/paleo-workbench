@@ -297,8 +297,7 @@ class PreviewProvider:
             for curve in curves[:MAX_TABLE_ROWS]
         )
         well_name = self._las_well_value(las, "WELL") or Path(resource.path).stem
-        data_shape = getattr(getattr(las, "data", None), "shape", ())
-        sample_count = str(data_shape[0]) if data_shape else "0"
+        sample_count = str(self._las_sample_count(las))
         summary_rows = (
             ("井名", str(well_name)),
             ("曲线数", str(len(curves))),
@@ -390,6 +389,13 @@ class PreviewProvider:
             return ""
         item = getattr(well, mnemonic, None)
         return getattr(item, "value", item) if item is not None else ""
+
+    def _las_sample_count(self, las) -> int:
+        try:
+            data_shape = getattr(getattr(las, "data", None), "shape", ())
+        except Exception:
+            return 0
+        return int(data_shape[0]) if data_shape else 0
 
     def _field_value(self, container, key) -> object:
         if key is None or container is None:

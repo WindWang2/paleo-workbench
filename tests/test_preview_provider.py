@@ -238,6 +238,18 @@ def test_preview_provider_reads_las_curve_summary(tmp_path: Path):
     assert ("GR", "API", "Gamma Ray") in result.table_rows
 
 
+def test_preview_provider_degrades_incomplete_las_without_crashing(tmp_path: Path):
+    path = tmp_path / "incomplete.las"
+    path.write_text("~Version\n", encoding="utf-8")
+    resource = ResourceItem(name="incomplete.las", path=str(path), type="well_log", format="las")
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "well_log"
+    assert ("采样点", "0") in result.summary_rows
+    assert result.table_rows == ()
+
+
 def test_preview_provider_reads_segy_metadata_with_optional_library(
     monkeypatch,
     tmp_path: Path,
