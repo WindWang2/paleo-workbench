@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
+    QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsRectItem,
+    QGraphicsSimpleTextItem,
 )
 
 from paleo_workbench.ui import tokens
@@ -24,6 +26,12 @@ _WELL_FILL = QBrush(QColor(tokens.TEAL))
 _WELL_PEN = QPen(QColor(tokens.TEXT_DARK), 0)
 _HANDLE_FILL = QBrush(QColor(tokens.TEAL))
 _HANDLE_PEN = QPen(QColor(tokens.TEXT_DARK), 0)
+_LINE_PEN = QPen(QColor(tokens.ACCENT), 0)
+_LINE_PEN.setCosmetic(True)
+_LINE_PEN.setWidth(2)
+_LABEL_COLOR = QColor(tokens.TEXT_DARK)
+_TOPOLOGY_OK = "ok"
+_TOPOLOGY_WARNING = "warning"
 
 
 class FeatureItemMixin:
@@ -31,10 +39,19 @@ class FeatureItemMixin:
 
     feature_id: str
     kind: str
+    topology_status: str
 
     def to_record(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    def get_property(self, key: str) -> Any:
+        raise NotImplementedError
+
+    def set_property(self, key: str, value: Any) -> None:
+        raise NotImplementedError
+
+    def set_topology_status(self, status: str) -> None:
+        self.topology_status = str(status or _TOPOLOGY_OK)
 
 class VertexHandleItem(QGraphicsRectItem):
     """Draggable handle for a single ring vertex (scene-managed, not a feature)."""
@@ -76,6 +93,7 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         super().__init__(polygon, parent)
         self.feature_id = feature_id
         self.kind = "facies"
+        self.topology_status = _TOPOLOGY_OK
         self._name = name or ""
         self._style = dict(style or {})
         self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
@@ -103,6 +121,19 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         self.setPolygon(QPolygonF([QPointF(p[0], p[1]) for p in self._coordinates]))
         self.setPos(0.0, 0.0)
 
+    def get_property(self, key: str) -> Any:
+        if key == "name":
+            return self._name
+        if key == "topology_status":
+            return self.topology_status
+        return None
+
+    def set_property(self, key: str, value: Any) -> None:
+        if key == "name":
+            self._name = "" if value is None else str(value)
+        elif key == "topology_status":
+            self.set_topology_status(str(value or _TOPOLOGY_OK))
+
     def to_record(self) -> dict[str, Any]:
         return {
             "id": self.feature_id,
@@ -110,6 +141,7 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
             "name": self._name,
             "coordinates": [list(p) for p in self._coordinates],
             "style": dict(self._style),
+            "topology_status": self.topology_status,
         }
 
 
@@ -129,6 +161,7 @@ class WellPointItem(QGraphicsEllipseItem, FeatureItemMixin):
         super().__init__(QRectF(float(x) - r, float(y) - r, 2 * r, 2 * r), parent)
         self.feature_id = feature_id
         self.kind = "well"
+        self.topology_status = _TOPOLOGY_OK
         self._name = name or ""
         self._x = float(x)
         self._y = float(y)
@@ -146,10 +179,159 @@ class WellPointItem(QGraphicsEllipseItem, FeatureItemMixin):
         self.setRect(QRectF(self._x - r, self._y - r, 2 * r, 2 * r))
         self.setPos(0.0, 0.0)
 
+    def get_property(self, key: str) -> Any:
+        if key == "name":
+            return self._name
+        if key == "topology_status":
+            return self.topology_status
+        return None
+
+    def set_property(self, key: str, value: Any) -> None:
+        if key == "name":
+            self._name = "" if value is None else str(value)
+        elif key == "topology_status":
+            self.set_topology_status(str(value or _TOPOLOGY_OK))
+
     def to_record(self) -> dict[str, Any]:
         return {
             "id": self.feature_id,
             "kind": self.kind,
             "name": self._name,
             "coordinates": [self._x, self._y],
+            "topology_status": self.topology_status,
+        }
+
+
+class LineItem(QGraphicsPathItem, FeatureItemMixin):
+    """Polyline feature (faults / boundaries)."""
+
+    def __init__(
+        self,
+        feature_id: str,
+        coordinates: list[list[float]],
+        name: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.feature_id = feature_id
+        self.kind = "line"
+        self.topology_status = _TOPOLOGY_OK
+        self._name = name or ""
+        self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
+        self.setPen(_LINE_PEN)
+        self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        self.setZValue(15)
+        self.setFlag(QGraphicsPathItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self._rebuild_path()
+
+    def coordinates(self) -> list[list[float]]:
+        return [list(p) for p in self._coordinates]
+
+    def set_coordinates(self, coordinates: list[list[float]]) -> None:
+        self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
+        self._rebuild_path()
+        self.setPos(0.0, 0.0)
+
+    def translate_by(self, dx: float, dy: float) -> None:
+        dx_f = float(dx)
+        dy_f = float(dy)
+        for p in self._coordinates:
+            p[0] += dx_f
+            p[1] += dy_f
+        self._rebuild_path()
+        self.setPos(0.0, 0.0)
+
+    def get_property(self, key: str) -> Any:
+        if key == "name":
+            return self._name
+        if key == "topology_status":
+            return self.topology_status
+        return None
+
+    def set_property(self, key: str, value: Any) -> None:
+        if key == "name":
+            self._name = "" if value is None else str(value)
+        elif key == "topology_status":
+            self.set_topology_status(str(value or _TOPOLOGY_OK))
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.feature_id,
+            "kind": self.kind,
+            "name": self._name,
+            "coordinates": [list(p) for p in self._coordinates],
+            "topology_status": self.topology_status,
+        }
+
+    def _rebuild_path(self) -> None:
+        path = QPainterPath()
+        if not self._coordinates:
+            self.setPath(path)
+            return
+        path.moveTo(float(self._coordinates[0][0]), float(self._coordinates[0][1]))
+        for p in self._coordinates[1:]:
+            path.lineTo(float(p[0]), float(p[1]))
+        self.setPath(path)
+
+
+class LabelItem(QGraphicsSimpleTextItem, FeatureItemMixin):
+    """Text annotation anchored at map coordinates."""
+
+    def __init__(
+        self,
+        feature_id: str,
+        x: float,
+        y: float,
+        text: str = "",
+        name: str = "",
+        parent=None,
+    ):
+        display = text or name or ""
+        super().__init__(display, parent)
+        self.feature_id = feature_id
+        self.kind = "label"
+        self.topology_status = _TOPOLOGY_OK
+        self._text = display
+        self._name = name or display
+        self._x = float(x)
+        self._y = float(y)
+        self.setBrush(QBrush(_LABEL_COLOR))
+        font = QFont()
+        font.setPointSize(10)
+        self.setFont(font)
+        self.setZValue(30)
+        self.setFlag(QGraphicsSimpleTextItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setPos(self._x, self._y)
+
+    def translate_by(self, dx: float, dy: float) -> None:
+        self._x = float(self._x) + float(dx)
+        self._y = float(self._y) + float(dy)
+        self.setPos(self._x, self._y)
+
+    def get_property(self, key: str) -> Any:
+        if key == "name":
+            return self._name
+        if key == "text":
+            return self._text
+        if key == "topology_status":
+            return self.topology_status
+        return None
+
+    def set_property(self, key: str, value: Any) -> None:
+        if key == "name":
+            self._name = "" if value is None else str(value)
+        elif key == "text":
+            self._text = "" if value is None else str(value)
+            self.setText(self._text)
+        elif key == "topology_status":
+            self.set_topology_status(str(value or _TOPOLOGY_OK))
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.feature_id,
+            "kind": self.kind,
+            "name": self._name,
+            "text": self._text,
+            "coordinates": [self._x, self._y],
+            "topology_status": self.topology_status,
         }

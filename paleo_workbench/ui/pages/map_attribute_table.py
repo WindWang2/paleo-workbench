@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from paleo_workbench.ui import tokens
 
 # Display keys shown in the property grid (geometry summarized, not fully listed).
-_DISPLAY_KEYS = ("id", "kind", "name", "text")
+_DISPLAY_KEYS = ("id", "kind", "name", "text", "topology_status")
 
 
 class MapAttributeTable(QFrame):
@@ -82,11 +82,18 @@ class MapAttributeTable(QFrame):
 
         rows: list[tuple[str, str, bool]] = []
         for key in _DISPLAY_KEYS:
-            if key not in self._feature and key != "text":
+            if key not in self._feature and key not in {"text", "topology_status"}:
                 continue
             if key == "text" and "text" not in self._feature:
                 continue
+            if key == "topology_status" and "topology_status" not in self._feature:
+                continue
             value = self._feature.get(key, "")
+            if key == "topology_status":
+                # Friendlier display for topology warnings.
+                display = "警告" if value == "warning" else str(value or "ok")
+                rows.append((key, display, False))
+                continue
             editable = key in {"name", "text"}
             rows.append((key, "" if value is None else str(value), editable))
 

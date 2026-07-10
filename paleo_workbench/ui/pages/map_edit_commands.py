@@ -64,6 +64,51 @@ class VertexEditCommand:
         )
 
 
+class CreateFeatureCommand:
+    """Add a feature from a normalized record; undo removes it by id."""
+
+    def __init__(
+        self,
+        record: dict,
+        add_feature: Callable[[dict], None],
+        remove_feature: Callable[[str], None],
+    ):
+        self.record = dict(record)
+        self.feature_id = str(record.get("id") or "")
+        self.add_feature = add_feature
+        self.remove_feature = remove_feature
+
+    def do(self) -> None:
+        self.add_feature(self.record)
+
+    def undo(self) -> None:
+        self.remove_feature(self.feature_id)
+
+
+class PropertyChangeCommand:
+    """Change a scalar property (name/text) on a feature."""
+
+    def __init__(
+        self,
+        feature_id: str,
+        key: str,
+        old_value: object,
+        new_value: object,
+        apply_property: Callable[[str, str, object], None],
+    ):
+        self.feature_id = str(feature_id)
+        self.key = str(key)
+        self.old_value = old_value
+        self.new_value = new_value
+        self.apply_property = apply_property
+
+    def do(self) -> None:
+        self.apply_property(self.feature_id, self.key, self.new_value)
+
+    def undo(self) -> None:
+        self.apply_property(self.feature_id, self.key, self.old_value)
+
+
 class EditCommandStack:
     """Linear undo/redo stack with a maximum depth."""
 
