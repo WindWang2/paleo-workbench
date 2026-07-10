@@ -137,3 +137,9 @@ def write_project(doc: ProjectDocument, path: Path) -> Path:
             target = target.with_name(target.name + ".paleo.json")
     ProjectManager(target).save(doc)
     return target
+
+
+if __name__ == "__main__":
+    from paleo_workbench.pipeline.__main__ import main
+
+    raise SystemExit(main())
