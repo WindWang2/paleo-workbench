@@ -73,6 +73,34 @@ def test_data_page_uses_workspace_toolbar_and_floating_panels(qtbot):
     assert page.content_splitter.indexOf(page.action_panel) == -1
 
 
+def test_data_page_toolbar_toggles_update_checked_state(qtbot):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    page.show()
+    qtbot.waitExposed(page)
+
+    assert page.data_toolbar.catalog_btn.isChecked() is False
+    assert page.workspace.catalog_floating_panel.is_expanded() is False
+    assert page.data_toolbar.reader_btn.isChecked() is True
+    assert page.reader_panel.isVisible() is True
+
+    page.data_toolbar.catalog_btn.click()
+    assert page.workspace.catalog_floating_panel.is_expanded() is True
+    assert page.data_toolbar.catalog_btn.isChecked() is True
+
+    page.data_toolbar.catalog_btn.click()
+    assert page.workspace.catalog_floating_panel.is_expanded() is False
+    assert page.data_toolbar.catalog_btn.isChecked() is False
+
+    page.data_toolbar.reader_btn.click()
+    assert page.reader_panel.isVisible() is False
+    assert page.data_toolbar.reader_btn.isChecked() is False
+
+    page.data_toolbar.reader_btn.click()
+    assert page.reader_panel.isVisible() is True
+    assert page.data_toolbar.reader_btn.isChecked() is True
+
+
 def test_data_page_update_state_delegates(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)

@@ -56,11 +56,13 @@ class DataToolbar(QWidget):
 
         self.catalog_btn = QPushButton("目录")
         self.catalog_btn.setObjectName("SecondaryButton")
+        self.catalog_btn.setCheckable(True)
         self.catalog_btn.clicked.connect(self.catalog_toggled.emit)
         layout.addWidget(self.catalog_btn)
 
         self.reader_btn = QPushButton("阅读器")
         self.reader_btn.setObjectName("SecondaryButton")
+        self.reader_btn.setCheckable(True)
         self.reader_btn.clicked.connect(self.reader_toggled.emit)
         layout.addWidget(self.reader_btn)
 

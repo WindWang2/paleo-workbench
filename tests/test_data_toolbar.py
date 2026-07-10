@@ -50,3 +50,11 @@ def test_data_toolbar_rehomes_column_settings_button(qtbot):
     assert layout.indexOf(toolbar.column_settings_slot) < layout.indexOf(toolbar.catalog_btn)
     assert layout.indexOf(toolbar.column_settings_slot) < layout.indexOf(toolbar.reader_btn)
     assert toolbar.column_settings_slot.layout().indexOf(button) == 0
+
+
+def test_toolbar_catalog_button_checkable(qtbot):
+    toolbar = DataToolbar()
+    qtbot.addWidget(toolbar)
+
+    assert toolbar.catalog_btn.isCheckable() is True
+    assert toolbar.reader_btn.isCheckable() is True

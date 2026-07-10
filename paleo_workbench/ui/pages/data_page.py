@@ -57,7 +57,7 @@ class DataPage(QWidget):
         self._import_in_progress = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(16)
 
         self.summary_bar = ResourceSummaryBar()
@@ -104,10 +104,9 @@ class DataPage(QWidget):
         )
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
         self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
-        self.data_toolbar.catalog_toggled.connect(self.workspace.toggle_catalog_panel)
-        self.data_toolbar.reader_toggled.connect(
-            lambda: self.workspace.set_reader_visible(not self.reader_panel.isVisible())
-        )
+        self.data_toolbar.catalog_toggled.connect(self._toggle_catalog_from_toolbar)
+        self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
+        self._sync_toolbar_toggle_state()
         self.import_btn.clicked.connect(self.begin_import_files_from_dialog)
         self.import_folder_btn.clicked.connect(self.begin_import_folder_from_dialog)
         self.rescan_btn.clicked.connect(self.rescan_selected_asset)
@@ -376,6 +375,25 @@ class DataPage(QWidget):
 
     def current_reader_mode(self) -> str:
         return self.reader_panel.current_mode
+
+    def _toggle_catalog_from_toolbar(self) -> None:
+        self.workspace.toggle_catalog_panel()
+        self.data_toolbar.catalog_btn.setChecked(
+            self.workspace.catalog_floating_panel.is_expanded()
+        )
+
+    def _toggle_reader_from_toolbar(self) -> None:
+        # Use isHidden() so toggle works before the page has been shown
+        # (isVisible() is False until the widget is exposed).
+        make_visible = self.reader_panel.isHidden()
+        self.workspace.set_reader_visible(make_visible)
+        self.data_toolbar.reader_btn.setChecked(make_visible)
+
+    def _sync_toolbar_toggle_state(self) -> None:
+        self.data_toolbar.catalog_btn.setChecked(
+            self.workspace.catalog_floating_panel.is_expanded()
+        )
+        self.data_toolbar.reader_btn.setChecked(not self.reader_panel.isHidden())
 
     def _emit_data_context(self) -> None:
         issue_count = sum(
