@@ -120,6 +120,7 @@ def test_app_shell_syncs_data_page_context_to_sidebar(tmp_path, qtbot):
     page = shell.page_stack.widget(1)
 
     page._set_selected_asset(resource)
+    qtbot.waitUntil(lambda: page.reader_panel.current_mode == "text", timeout=3000)
 
     assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[0]
     assert "项目总览" in " ".join(label.text() for label in shell.sidebar._content_labels)
@@ -170,6 +171,7 @@ def test_app_shell_update_data_page_preserves_sidebar_selection(tmp_path, qtbot)
     page = shell.page_stack.widget(1)
 
     page._set_selected_asset(resource)
+    qtbot.waitUntil(lambda: page.reader_panel.current_mode == "text", timeout=3000)
     shell.update_data_page({}, project.resources, project.export_artifacts)
     assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[0]
 
@@ -198,6 +200,7 @@ def test_app_shell_retains_data_sidebar_context_when_navigating_back(tmp_path, q
     page = shell.page_stack.widget(1)
 
     page._set_selected_asset(resource)
+    qtbot.waitUntil(lambda: page.reader_panel.current_mode == "text", timeout=3000)
     shell.icon_rail.nav_buttons[4].click()
     assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
     shell.icon_rail.nav_buttons[1].click()
