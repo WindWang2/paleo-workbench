@@ -161,7 +161,11 @@ class DataReaderPanel(QFrame):
             return
 
         if result.mode == "image":
-            self.image_preview_widget.load(result.path, result.revision)
+            self.image_preview_widget.load(
+                result.path,
+                result.revision,
+                image_bytes=result.image_bytes,
+            )
             self.stack.setCurrentWidget(self.image_preview_widget)
             return
 

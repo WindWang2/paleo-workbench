@@ -102,7 +102,22 @@ class DataAssetTable(QWidget):
     ) -> None:
         self._resources = list(resources)
         self._artifacts = list(artifacts)
-        self._apply_filter()
+        assets: list[ResourceItem | ExportArtifact] = [
+            *self._resources,
+            *self._artifacts,
+        ]
+        # Rebuild haystacks only when the asset list changes.
+        self._index.rebuild(assets)
+        filtered = self._index.filter(self._category, self._search_text)
+        self.model.set_assets_filtered(
+            assets,
+            filtered,
+            column_keys=self._visible_column_keys,
+        )
+        self._visible_assets = [assets[i] for i in filtered]
+        if not self._sync_selection() and self._selected_asset is not None:
+            self._selected_asset = None
+            self.selected_asset_changed.emit(None)
 
     def set_category(self, category: str) -> None:
         self._category = category
@@ -128,12 +143,16 @@ class DataAssetTable(QWidget):
         if not ordered:
             ordered = ["name"]
         self._visible_column_keys = ordered
-        self._apply_filter()
+        # Column visibility only — do not rebuild the search index.
+        self.model.set_column_keys(self._visible_column_keys)
+        # Model reset clears the view selection; restore by asset id.
+        self._sync_selection()
         self._sync_column_actions()
 
     def reset_columns(self) -> None:
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
-        self._apply_filter()
+        self.model.set_column_keys(self._visible_column_keys)
+        self._sync_selection()
         self._sync_column_actions()
 
     def set_selected_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
@@ -141,18 +160,16 @@ class DataAssetTable(QWidget):
         self._sync_selection()
 
     def _apply_filter(self) -> None:
-        assets: list[ResourceItem | ExportArtifact] = [
-            *self._resources,
-            *self._artifacts,
-        ]
-        self._index.rebuild(assets)
+        """Filter-only path: reuse existing index + model assets (no haystack rebuild)."""
+        assets = self.model.assets()
+        if not assets and (self._resources or self._artifacts):
+            # Model not seeded yet — fall back to full update path.
+            self.update_assets(self._resources, self._artifacts)
+            return
         filtered = self._index.filter(self._category, self._search_text)
-        self.model.set_assets_filtered(
-            assets,
-            filtered,
-            column_keys=self._visible_column_keys,
-        )
-        self._visible_assets = [assets[i] for i in filtered]
+        self.model.set_filtered_rows(filtered)
+        source = assets if assets else [*self._resources, *self._artifacts]
+        self._visible_assets = [source[i] for i in filtered if 0 <= i < len(source)]
         if not self._sync_selection() and self._selected_asset is not None:
             self._selected_asset = None
             self.selected_asset_changed.emit(None)

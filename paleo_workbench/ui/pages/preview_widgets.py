@@ -102,11 +102,21 @@ class ImagePreviewWidget(QLabel):
         self._revision: tuple[object, ...] | None = None
         self._pixmap: QPixmap | None = None
 
-    def load(self, path: str, revision: tuple[object, ...] | None = None) -> None:
+    def load(
+        self,
+        path: str,
+        revision: tuple[object, ...] | None = None,
+        image_bytes: bytes = b"",
+    ) -> None:
         if path != self._path or revision != self._revision or self._pixmap is None:
             self._path = path
             self._revision = revision
-            self._pixmap = QPixmap(path)
+            if image_bytes:
+                # Bytes were read off-thread; decode here without re-opening the file.
+                self._pixmap = QPixmap()
+                self._pixmap.loadFromData(image_bytes)
+            else:
+                self._pixmap = QPixmap(path)
         self.render_current()
 
     def render_current(self) -> None:
@@ -169,7 +179,15 @@ class PdfPreviewWidget(QWidget):
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
 
-    def load(self, path: str, revision: tuple[object, ...] | None = None) -> None:
+    def load(
+        self,
+        path: str,
+        revision: tuple[object, ...] | None = None,
+        preloaded_image=None,
+    ) -> None:
+        # PDF document API stays on the UI thread (QtPdf is not worker-safe).
+        # ``preloaded_image`` is reserved for future first-page handoff.
+        del preloaded_image
         if self.document is None:
             self._show_fallback_message("PDF 预览不可用")
             self.page_label.setText("0 / 0")
