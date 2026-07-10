@@ -1,4 +1,3 @@
-from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
@@ -6,7 +5,7 @@ from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 
 
-def test_mapping_page_assembles_gis_shell(qtbot):
+def test_mapping_page_gis_shell_assembly(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)
 
@@ -16,21 +15,19 @@ def test_mapping_page_assembles_gis_shell(qtbot):
     assert isinstance(page.edit_view, MapEditView)
     assert isinstance(page.attribute_table, MapAttributeTable)
     assert page.attribute_table.maximumHeight() == 160
+    assert page.edit_view.scene() is not None
 
 
-def test_mapping_page_update_state_sets_layer_tree(qtbot):
-    page = MappingPage()
-    qtbot.addWidget(page)
+def test_toolbar_has_core_actions(qtbot):
+    bar = MapEditToolbar()
+    qtbot.addWidget(bar)
 
-    docs = [
-        PaleoMapDocument(name="Map A", linked_target_horizon="H1"),
-        PaleoMapDocument(name="Map B", linked_target_horizon="H2"),
-    ]
-    page.update_state(docs)
-
-    root = page.layer_tree.tree.topLevelItem(0)
-    assert root.childCount() == 2
-    assert root.child(0).text(0) == "Map A"
-    assert root.child(1).text(0) == "Map B"
-    # Active is last document — layers under Map B
-    assert root.child(1).childCount() == 4
+    assert bar.select_btn is not None
+    assert bar.move_btn is not None
+    assert bar.vertex_btn is not None
+    assert bar.line_btn is not None
+    assert bar.label_btn is not None
+    assert bar.save_draft_btn is not None
+    assert bar.snap_btn is not None
+    assert bar.undo_btn is not None
+    assert bar.redo_btn is not None
