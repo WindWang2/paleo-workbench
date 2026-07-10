@@ -100,3 +100,46 @@ def test_trace_refresh_reloads_current(qtbot, tmp_path: Path):
     page.trace_panel.refresh_btn.click()
     assert page.trace_panel.kind_value.text() == "well_log"
     assert page.trace_panel.label_value.text()
+
+
+def test_message_payload_clears_prior_well_tracks(qtbot, tmp_path: Path):
+    path = tmp_path / "w.las"
+    _minimal_las(path)
+    res = ResourceItem(name="w.las", path=str(path), type="well_log", format="las")
+    page = VisualizationPage()
+    qtbot.addWidget(page)
+    page.update_state([res], [], [])
+    page.open_ref(VizAdapter().ref_from_resource(res))
+    assert len(page.composite_panel.well_canvas.tracks) > 0
+
+    missing = ResourceItem(
+        name="gone.las",
+        path="/no/such/gone.las",
+        type="well_log",
+        format="las",
+        status="missing",
+    )
+    page.update_state([res, missing], [], [])
+    page.open_ref(VizAdapter().ref_from_resource(missing))
+
+    assert page.composite_panel.well_canvas.tracks == []
+    assert "不存在" in page.trace_panel.path_value.text() or "不可读" in page.trace_panel.path_value.text()
+
+
+def test_refresh_without_ref_uses_prediction_fallback(qtbot):
+    from paleo_workbench.project.models import PredictionTask
+
+    task = PredictionTask(
+        name="P1",
+        seed=2,
+        result_summary={"predicted_regions": [{"facies": "砂", "probability": 0.7}]},
+    )
+    page = VisualizationPage()
+    qtbot.addWidget(page)
+    page.update_state([], [task], [])
+    assert page._current_ref is None
+    assert len(page.composite_panel.well_canvas.tracks) > 0
+
+    page.trace_panel.refresh_btn.click()
+    assert page._current_ref is None
+    assert len(page.composite_panel.well_canvas.tracks) > 0

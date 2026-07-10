@@ -56,8 +56,7 @@ class CompositeVisualizationPanel(QFrame):
         """Legacy mock fallback when no explicit VizRef is open."""
         task = active_prediction_task(prediction_tasks)
         if task is None:
-            self.well_canvas.set_tracks([])
-            self.cross_well_widget.clear_all()
+            self._clear_canvases()
             return
 
         data = well_log_data_from_prediction(task)
@@ -75,6 +74,8 @@ class CompositeVisualizationPanel(QFrame):
 
     def load_payload(self, payload: VizPayload) -> None:
         if payload.kind == "message":
+            # Soft-fail path: clear stale graphics so prior ref does not linger.
+            self._clear_canvases()
             return
 
         if payload.kind in {"well_log", "prediction"} and payload.well_log is not None:
@@ -91,3 +92,9 @@ class CompositeVisualizationPanel(QFrame):
             wells = payload.map_wells or []
             self.map_canvas.load_features(feats, period_name=payload.period_name, wells=wells)
             self.tabs.setCurrentIndex(self._tab_index("古地理"))
+
+    def _clear_canvases(self) -> None:
+        """Reset well / cross-well / map views; seismic has no empty-clear API."""
+        self.well_canvas.set_tracks([])
+        self.cross_well_widget.clear_all()
+        self.map_canvas.load_features([], period_name="", wells=[])

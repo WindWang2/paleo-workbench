@@ -1,11 +1,9 @@
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
 from paleo_workbench.viz.adapter import VizAdapter
-from paleo_workbench.viz.models import VizPayload, VizRef
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
 
 
@@ -104,6 +102,23 @@ def test_from_prediction_still_works():
     payload = VizAdapter().from_prediction(task)
     assert payload.kind in {"well_log", "prediction"}
     assert payload.well_log is not None
+    # Dual payload: well tab + seismic volume for composite tabs
+    assert payload.seismic_volume is not None
+
+
+def test_from_prediction_soft_fails_on_helper_error(monkeypatch):
+    from paleo_workbench.project.models import PredictionTask
+    import paleo_workbench.ui.pages.prediction_helpers as prediction_helpers
+
+    def _boom(_task):
+        raise RuntimeError("mock converter broken")
+
+    # Patch module object directly: pages package lazy __getattr__ breaks dotted path.
+    monkeypatch.setattr(prediction_helpers, "well_log_data_from_prediction", _boom)
+    task = PredictionTask(name="T-fail", seed=1)
+    payload = VizAdapter().from_prediction(task)
+    assert payload.kind == "message"
+    assert "预测可视化失败" in (payload.message or "")
 
 
 def test_resolve_las_success(tmp_path: Path):

@@ -86,20 +86,30 @@ class VizAdapter:
 
     def from_prediction(self, task: Any) -> VizPayload:
         # Bridge prediction mock converters; keep dual well_log + seismic for UI tabs.
-        from paleo_workbench.ui.pages.prediction_helpers import well_log_data_from_prediction
-        from paleo_workbench.ui.pages.seismic_prediction_helpers import (
-            seismic_volume_from_prediction,
-        )
-
-        well_log = well_log_data_from_prediction(task)
-        seismic_volume = seismic_volume_from_prediction(task)
+        # Soft-fail like resolve(): never raise into UI handlers.
         name = str(getattr(task, "name", "") or "") or "prediction"
-        return VizPayload(
-            kind="prediction",
-            label=name,
-            well_log=well_log,
-            seismic_volume=seismic_volume,
-        )
+        try:
+            from paleo_workbench.ui.pages.prediction_helpers import (
+                well_log_data_from_prediction,
+            )
+            from paleo_workbench.ui.pages.seismic_prediction_helpers import (
+                seismic_volume_from_prediction,
+            )
+
+            well_log = well_log_data_from_prediction(task)
+            seismic_volume = seismic_volume_from_prediction(task)
+            return VizPayload(
+                kind="prediction",
+                label=name,
+                well_log=well_log,
+                seismic_volume=seismic_volume,
+            )
+        except Exception as exc:
+            return VizPayload(
+                kind="message",
+                label=name,
+                message=f"预测可视化失败: {exc.__class__.__name__}",
+            )
 
     def _resolve_well_log(self, ref: VizRef, project: Any, label: str) -> VizPayload:
         resource = self._find_resource(ref, project)
