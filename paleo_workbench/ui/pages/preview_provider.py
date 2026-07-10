@@ -8,16 +8,33 @@ from typing import Literal
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 
+try:
+    import segyio
+except ImportError:  # pragma: no cover
+    segyio = None
+
 MAX_TEXT_PREVIEW_BYTES = 256 * 1024
 MAX_TABLE_ROWS = 200
 MAX_TABLE_COLUMNS = 40
 
-PreviewMode = Literal["empty", "pdf", "image", "text", "table", "message"]
+PreviewMode = Literal[
+    "empty",
+    "pdf",
+    "image",
+    "text",
+    "table",
+    "well_log",
+    "seismic",
+    "message",
+]
 
 TEXT_FORMATS = {"txt", "text", "log", "dat", "json", "xml"}
 TABLE_FORMATS = {"csv", "tsv"}
+EXCEL_FORMATS = {"xlsx", "xls"}
 IMAGE_FORMATS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp"}
 PDF_FORMATS = {"pdf"}
+LAS_FORMATS = {"las"}
+SEGY_FORMATS = {"sgy", "segy"}
 
 
 @dataclass(frozen=True)
@@ -34,6 +51,8 @@ class PreviewResult:
     text: str = ""
     table_headers: tuple[str, ...] = field(default_factory=tuple)
     table_rows: tuple[tuple[str, ...], ...] = field(default_factory=tuple)
+    summary_rows: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    sheets: tuple[str, ...] = field(default_factory=tuple)
     truncated: bool = False
 
 
@@ -141,6 +160,15 @@ class PreviewProvider:
             delimiter = "\t" if fmt == "tsv" else ","
             return self._table_preview(asset, delimiter=delimiter)
 
+        if fmt in EXCEL_FORMATS:
+            return self._excel_preview(asset)
+
+        if fmt in LAS_FORMATS or asset.type == "well_log":
+            return self._las_preview(asset)
+
+        if fmt in SEGY_FORMATS or asset.type == "seismic":
+            return self._segy_preview(asset)
+
         if fmt in TEXT_FORMATS:
             return self._text_preview(asset)
 
@@ -218,6 +246,177 @@ class PreviewProvider:
             table_rows=body,
             warning=warning,
             truncated=truncated,
+        )
+
+    def _excel_preview(self, resource: ResourceItem) -> PreviewResult:
+        path = Path(resource.path)
+        try:
+            import pandas as pd
+
+            workbook = pd.ExcelFile(path)
+            sheets = tuple(str(sheet) for sheet in workbook.sheet_names)
+            if not sheets:
+                return self._parse_error_preview(resource, "Excel 文件没有可预览的工作表")
+            frame = pd.read_excel(workbook, sheet_name=sheets[0], nrows=MAX_TABLE_ROWS + 1)
+        except Exception as exc:
+            return self._parse_error_preview(resource, f"Excel 预览失败: {exc.__class__.__name__}")
+
+        headers, rows, truncated = self._dataframe_rows(frame)
+        warning = "表格预览已按行上限截断" if truncated else ""
+        return PreviewResult(
+            mode="table",
+            title=resource.name,
+            path=resource.path,
+            revision=self._safe_stat(path),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            table_headers=headers,
+            table_rows=rows,
+            sheets=sheets,
+            warning=warning,
+            truncated=truncated,
+        )
+
+    def _las_preview(self, resource: ResourceItem) -> PreviewResult:
+        path = Path(resource.path)
+        try:
+            import lasio
+
+            las = lasio.read(path)
+        except Exception as exc:
+            return self._parse_error_preview(resource, f"LAS 预览失败: {exc.__class__.__name__}")
+
+        curves = list(getattr(las, "curves", []))
+        rows = tuple(
+            (
+                str(getattr(curve, "mnemonic", "") or ""),
+                str(getattr(curve, "unit", "") or ""),
+                str(getattr(curve, "descr", "") or ""),
+            )
+            for curve in curves[:MAX_TABLE_ROWS]
+        )
+        well_name = self._las_well_value(las, "WELL") or Path(resource.path).stem
+        data_shape = getattr(getattr(las, "data", None), "shape", ())
+        sample_count = str(data_shape[0]) if data_shape else "0"
+        summary_rows = (
+            ("井名", str(well_name)),
+            ("曲线数", str(len(curves))),
+            ("采样点", sample_count),
+        )
+        truncated = len(curves) > MAX_TABLE_ROWS
+        return PreviewResult(
+            mode="well_log",
+            title=resource.name,
+            path=resource.path,
+            revision=self._safe_stat(path),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            summary_rows=summary_rows,
+            table_headers=("曲线", "单位", "描述"),
+            table_rows=rows,
+            warning="曲线列表已按行上限截断" if truncated else "",
+            truncated=truncated,
+        )
+
+    def _segy_preview(self, resource: ResourceItem) -> PreviewResult:
+        if segyio is None:
+            return self._parse_error_preview(resource, "SEG-Y 预览依赖不可用")
+
+        path = Path(resource.path)
+        try:
+            with segyio.open(str(path), "r", ignore_geometry=True) as cube:
+                trace_count = int(getattr(cube, "tracecount", 0) or 0)
+                sample_count = len(getattr(cube, "samples", ()) or ())
+                interval = self._field_value(
+                    getattr(cube, "bin", {}),
+                    getattr(segyio.BinField, "Interval", None),
+                )
+                first_header = self._field_value(getattr(cube, "header", {}), 0) or {}
+                inline = self._field_value(
+                    first_header,
+                    getattr(segyio.TraceField, "INLINE_3D", None),
+                )
+                crossline = self._field_value(
+                    first_header,
+                    getattr(segyio.TraceField, "CROSSLINE_3D", None),
+                )
+        except Exception as exc:
+            return self._parse_error_preview(resource, f"SEG-Y 预览失败: {exc.__class__.__name__}")
+
+        summary_rows = [
+            ("道数", str(trace_count)),
+            ("采样点", str(sample_count)),
+        ]
+        if interval is not None:
+            summary_rows.append(("采样间隔", f"{interval} us"))
+        table_rows = []
+        if inline is not None:
+            table_rows.append(("Inline", str(inline)))
+        if crossline is not None:
+            table_rows.append(("Crossline", str(crossline)))
+
+        return PreviewResult(
+            mode="seismic",
+            title=resource.name,
+            path=resource.path,
+            revision=self._safe_stat(path),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            summary_rows=tuple(summary_rows),
+            table_headers=("字段", "值"),
+            table_rows=tuple(table_rows),
+        )
+
+    def _dataframe_rows(
+        self,
+        frame,
+    ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...], bool]:
+        truncated = len(frame.index) > MAX_TABLE_ROWS
+        preview = frame.head(MAX_TABLE_ROWS)
+        headers = tuple(str(column) for column in preview.columns[:MAX_TABLE_COLUMNS])
+        rows = []
+        for _, row in preview.iloc[:, :MAX_TABLE_COLUMNS].iterrows():
+            rows.append(tuple("" if frame_value != frame_value else str(frame_value) for frame_value in row))
+        if len(frame.columns) > MAX_TABLE_COLUMNS:
+            truncated = True
+        return headers, tuple(rows), truncated
+
+    def _las_well_value(self, las, mnemonic: str) -> object:
+        well = getattr(las, "well", None)
+        if well is None:
+            return ""
+        item = getattr(well, mnemonic, None)
+        return getattr(item, "value", item) if item is not None else ""
+
+    def _field_value(self, container, key) -> object:
+        if key is None or container is None:
+            return None
+        getter = getattr(container, "get", None)
+        if callable(getter):
+            try:
+                return getter(key)
+            except Exception:
+                pass
+        try:
+            return container[key]
+        except Exception:
+            return None
+
+    def _parse_error_preview(self, resource: ResourceItem, message: str) -> PreviewResult:
+        path = Path(resource.path)
+        return PreviewResult(
+            mode="message",
+            title=resource.name,
+            path=resource.path,
+            revision=self._safe_stat(path),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            message=message,
+            warning=message,
         )
 
     def _read_preview_chunk(self, path: Path) -> tuple[bytes, bool]:

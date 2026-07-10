@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_provider import (
     MAX_TABLE_COLUMNS,
@@ -171,3 +173,112 @@ def test_preview_provider_image_revision_changes_when_resource_checksum_changes(
     assert first.mode == "image"
     assert second.mode == "image"
     assert first.revision != second.revision
+
+
+def test_preview_provider_reads_excel_first_sheet_as_table(tmp_path: Path):
+    path = tmp_path / "wells.xlsx"
+    with pd.ExcelWriter(path) as writer:
+        pd.DataFrame(
+            {
+                "well": ["A1", "A2"],
+                "depth": [100.0, 120.5],
+            }
+        ).to_excel(writer, sheet_name="Wells", index=False)
+        pd.DataFrame({"key": ["datum"], "value": ["CGCS2000"]}).to_excel(
+            writer,
+            sheet_name="Meta",
+            index=False,
+        )
+    resource = ResourceItem(
+        name="wells.xlsx",
+        path=str(path),
+        type="spreadsheet",
+        format="xlsx",
+    )
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "table"
+    assert result.sheets == ("Wells", "Meta")
+    assert result.table_headers == ("well", "depth")
+    assert result.table_rows[0] == ("A1", "100.0")
+
+
+def test_preview_provider_reads_las_curve_summary(tmp_path: Path):
+    path = tmp_path / "well.las"
+    path.write_text(
+        """~Version Information
+ VERS. 2.0 : CWLS log ASCII Standard - VERSION 2.0
+ WRAP. NO : One line per depth step
+~Well Information
+ STRT.M 100.0 : START DEPTH
+ STOP.M 101.0 : STOP DEPTH
+ STEP.M 0.5 : STEP
+ NULL. -999.25 : NULL VALUE
+ WELL. A1 : WELL
+~Curve Information
+ DEPT.M : Depth
+ GR.API : Gamma Ray
+ RHOB.G/C3 : Bulk Density
+~ASCII
+100.0 80.0 2.45
+100.5 82.0 2.46
+101.0 84.0 2.47
+""",
+        encoding="utf-8",
+    )
+    resource = ResourceItem(name="well.las", path=str(path), type="well_log", format="las")
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "well_log"
+    assert ("井名", "A1") in result.summary_rows
+    assert ("曲线数", "3") in result.summary_rows
+    assert result.table_headers == ("曲线", "单位", "描述")
+    assert ("GR", "API", "Gamma Ray") in result.table_rows
+
+
+def test_preview_provider_reads_segy_metadata_with_optional_library(
+    monkeypatch,
+    tmp_path: Path,
+):
+    path = tmp_path / "cube.sgy"
+    path.write_bytes(b"not-a-real-segy")
+
+    class FakeSegyFile:
+        tracecount = 12
+        samples = [0, 1, 2, 3]
+        bin = {"interval": 2000}
+        header = {0: {"inline": 1180, "crossline": 220}}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSegyio:
+        BinField = type("BinField", (), {"Interval": "interval"})
+        TraceField = type(
+            "TraceField",
+            (),
+            {"INLINE_3D": "inline", "CROSSLINE_3D": "crossline"},
+        )
+
+        @staticmethod
+        def open(path_arg, mode="r", ignore_geometry=True):
+            assert path_arg == str(path)
+            assert mode == "r"
+            assert ignore_geometry is True
+            return FakeSegyFile()
+
+    monkeypatch.setattr("paleo_workbench.ui.pages.preview_provider.segyio", FakeSegyio)
+    resource = ResourceItem(name="cube.sgy", path=str(path), type="seismic", format="sgy")
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "seismic"
+    assert ("道数", "12") in result.summary_rows
+    assert ("采样点", "4") in result.summary_rows
+    assert ("采样间隔", "2000 us") in result.summary_rows
+    assert result.table_rows == (("Inline", "1180"), ("Crossline", "220"))
