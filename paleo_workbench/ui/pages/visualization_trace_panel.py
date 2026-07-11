@@ -53,10 +53,7 @@ class VisualizationTracePanel(QFrame):
         layout.addWidget(label)
         value = QLabel(value_text)
         value.setWordWrap(True)
-        value.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
-            " border: none; background: transparent;"
-        )
+        value.setObjectName("WorkFieldValue")
         layout.addWidget(value)
         return value
 

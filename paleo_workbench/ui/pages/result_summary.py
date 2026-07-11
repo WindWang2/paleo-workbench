@@ -19,8 +19,13 @@ class ResultSummary(QFrame):
         self.setFixedWidth(240)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("检查结果输出")
         self.title_label.setObjectName("MapDockTitle")
@@ -124,7 +129,6 @@ class ResultSummary(QFrame):
         if not artifacts:
             empty = QLabel("暂无导出图件")
             empty.setObjectName("EmptyStateLabel")
-            self._color_label(empty, tokens.TEXT_SECONDARY)
             self.export_layout.addWidget(empty)
         else:
             for artifact in artifacts:

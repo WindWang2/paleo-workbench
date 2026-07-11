@@ -43,13 +43,7 @@ class SequenceBoundaryTable(QFrame):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; gridline-color: {tokens.BORDER}; }}"
-            f"QHeaderView::section {{ background: {tokens.BG_SEARCH};"
-            f" color: {tokens.TEXT_SECONDARY}; border: none; padding: 5px; }}"
-        )
+        # Inherit global QTableWidget / QHeaderView rules from tokens.QSS_TEMPLATE.
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table, 1)
 

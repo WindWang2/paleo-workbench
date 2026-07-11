@@ -69,11 +69,16 @@ class FactorTaskPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("FactorTaskPanel")
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
-        outer.setSpacing(10)
+        outer.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        outer.setSpacing(tokens.SPACE_2)
 
         header = QHBoxLayout()
-        header.setSpacing(8)
+        header.setSpacing(tokens.SPACE_2)
         self.horizon_label = QLabel("层位: —")
         self.horizon_label.setObjectName("MapDockTitle")
         header.addWidget(self.horizon_label)

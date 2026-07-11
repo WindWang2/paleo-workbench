@@ -30,18 +30,11 @@ class PredictionEvidencePanel(QFrame):
         self.mock_value = self._add_value(layout, "输出性质", "—")
 
         evidence_label = QLabel("证据贡献")
-        evidence_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        evidence_label.setObjectName("WorkFieldLabel")
         layout.addWidget(evidence_label)
 
         self.evidence_list = QListWidget()
-        self.evidence_list.setStyleSheet(
-            f"QListWidget {{ background: {tokens.BG_SIDEBAR};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px; }}"
-        )
+        self.evidence_list.setObjectName("WorkListWidget")
         layout.addWidget(self.evidence_list, 1)
 
         self.run_btn = QPushButton("运行测井预测")

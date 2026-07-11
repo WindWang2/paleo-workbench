@@ -25,8 +25,13 @@ class CompositeVisualizationPanel(QFrame):
         self.setObjectName("CompositeVisualizationPanel")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+            tokens.PANEL_PADDING,
+        )
+        layout.setSpacing(tokens.SPACE_2)
 
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet(

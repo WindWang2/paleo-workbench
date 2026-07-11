@@ -45,8 +45,10 @@ def test_prediction_side_panels_use_dock_chrome(qtbot):
     assert _dock_titles(task)
     assert _dock_titles(evidence)
     assert task.task_list.objectName() == "WorkListWidget"
+    assert evidence.evidence_list.objectName() == "WorkListWidget"
     # No frame-level stylesheet fighting global dock QSS
     assert "QFrame#PredictionTaskPanel" not in (task.styleSheet() or "")
+    assert "QListWidget" not in (evidence.evidence_list.styleSheet() or "")
 
 
 def test_well_log_and_seismic_centers_empty_state(qtbot):
@@ -105,6 +107,9 @@ def test_visualization_panels_dock_chrome(qtbot):
     assert _dock_titles(summary)
     assert _dock_titles(trace)
     assert summary.asset_list.objectName() == "WorkListWidget"
+    # Field values use shared WorkFieldValue (not local color sheets)
+    assert trace.task_value.objectName() == "WorkFieldValue"
+    assert "color:" not in (trace.task_value.styleSheet() or "")
 
 
 def test_sequence_and_review_empty_presentation(qtbot):
@@ -119,11 +124,55 @@ def test_sequence_and_review_empty_presentation(qtbot):
     assert table.empty_label.objectName() == "EmptyStateLabel"
     table.update_state(None)
     assert not table.empty_label.isHidden() or table.empty_label.isVisible()
-    # result summary uses PanelCard + empty export state
+    # result summary uses PanelCard + empty export state without local empty color sheet
     assert summary.objectName() == "PanelCard"
     summary.update_state(None, [])
     empties = _empty_labels(summary)
     assert any(e.text() == "暂无导出图件" for e in empties)
+    for empty in empties:
+        if empty.text() == "暂无导出图件":
+            assert empty.objectName() == "EmptyStateLabel"
+            assert "color:" not in (empty.styleSheet() or "")
+
+
+def test_sequence_table_and_primary_buttons_do_not_override_global_roles(qtbot):
+    """Construct real widgets and assert no local QHeader/PrimaryButton overrides."""
+    table_panel = SequenceBoundaryTable()
+    qtbot.addWidget(table_panel)
+    table_ss = table_panel.table.styleSheet() or ""
+    assert "QHeaderView::section" not in table_ss
+    assert "QTableWidget" not in table_ss or table_ss.strip() == ""
+
+    evidence = PredictionEvidencePanel()
+    qtbot.addWidget(evidence)
+    # Primary/Secondary buttons on work docks must not re-style #PrimaryButton
+    for btn in (evidence.run_btn, evidence.send_btn):
+        ss = btn.styleSheet() or ""
+        assert "PrimaryButton" not in ss
+        assert "QPushButton#" not in ss
+    assert evidence.send_btn.objectName() == "PrimaryButton"
+    assert evidence.run_btn.objectName() == "SecondaryButton"
+
+    # Global sheet still defines the roles these objectNames rely on
+    qss = tokens.QSS_TEMPLATE
+    assert "QHeaderView::section" in qss
+    assert "QPushButton#PrimaryButton:hover" in qss or "PrimaryButton:hover" in qss
+
+
+def test_work_page_padding_uses_density_tokens(qtbot):
+    factors = FactorTaskPanel()
+    from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
+
+    composite = CompositeVisualizationPanel()
+    summary = ResultSummary()
+    qtbot.addWidget(factors)
+    qtbot.addWidget(composite)
+    qtbot.addWidget(summary)
+    for widget in (factors, composite, summary):
+        m = widget.layout().contentsMargins()
+        assert m.left() == tokens.PANEL_PADDING
+        assert m.top() == tokens.PANEL_PADDING
+        assert widget.layout().spacing() == tokens.SPACE_2
 
 
 def test_work_pages_construct_with_presentation_hooks(qtbot):
@@ -147,3 +196,7 @@ def test_work_pages_construct_with_presentation_hooks(qtbot):
     assert "EmptyStateLabel" in qss
     assert "PrimaryButton:hover" in qss or "QPushButton#PrimaryButton:hover" in qss
     assert "QHeaderView::section" in qss
+    # Review page primary buttons must not locally override PrimaryButton
+    export_btn = pages[5].action_header.export_btn
+    assert export_btn.objectName() == "PrimaryButton"
+    assert "PrimaryButton" not in (export_btn.styleSheet() or "")
