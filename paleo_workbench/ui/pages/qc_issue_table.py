@@ -21,16 +21,7 @@ class QCIssueTable(QWidget):
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(COLUMN_HEADERS)
         self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background: {tokens.BG_SIDEBAR};"
-            f" alternate-background-color: {tokens.BG_HEADER};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_CARD}px; }}"
-            f" QHeaderView::section {{ background: {tokens.BG_HEADER};"
-            f" font-weight: 600; font-size: 12.5px;"
-            f" color: {tokens.TEXT_PRIMARY};"
-            f" border: none; border-bottom: 1px solid {tokens.BORDER}; }}"
-        )
+        # Inherit global QTableWidget / QHeaderView rules from tokens.QSS_TEMPLATE.
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)

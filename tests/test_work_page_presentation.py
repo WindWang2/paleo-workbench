@@ -13,7 +13,9 @@ from paleo_workbench.ui.pages.result_summary import ResultSummary
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 from paleo_workbench.ui.pages.seismic_task_panel import SeismicTaskPanel
 from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
+from paleo_workbench.ui.pages.qc_issue_table import QCIssueTable
 from paleo_workbench.ui.pages.sequence_boundary_table import SequenceBoundaryTable
+from paleo_workbench.ui.pages.sequence_scheme_summary import SequenceSchemeSummary
 from paleo_workbench.ui.pages.sequence_target_panel import SequenceTargetPanel
 from paleo_workbench.ui.pages.visualization_summary_panel import VisualizationSummaryPanel
 from paleo_workbench.ui.pages.visualization_trace_panel import VisualizationTracePanel
@@ -115,15 +117,24 @@ def test_visualization_panels_dock_chrome(qtbot):
 def test_sequence_and_review_empty_presentation(qtbot):
     target = SequenceTargetPanel()
     table = SequenceBoundaryTable()
+    scheme = SequenceSchemeSummary()
     summary = ResultSummary()
     qtbot.addWidget(target)
     qtbot.addWidget(table)
+    qtbot.addWidget(scheme)
     qtbot.addWidget(summary)
     assert _dock_titles(target)
+    assert _dock_titles(scheme)
     assert table.title_label.objectName() == "MapDockTitle"
     assert table.empty_label.objectName() == "EmptyStateLabel"
     table.update_state(None)
     assert not table.empty_label.isHidden() or table.empty_label.isVisible()
+    # Sequence scheme summary matches target panel field chrome
+    assert scheme.objectName() == "PanelCard"
+    assert scheme.scheme_value.objectName() == "WorkFieldValue"
+    assert "color:" not in (scheme.scheme_value.styleSheet() or "")
+    assert scheme.save_btn.objectName() == "PrimaryButton"
+    assert "PrimaryButton" not in (scheme.save_btn.styleSheet() or "")
     # result summary uses PanelCard + empty export state without local empty color sheet
     assert summary.objectName() == "PanelCard"
     summary.update_state(None, [])
@@ -142,6 +153,13 @@ def test_sequence_table_and_primary_buttons_do_not_override_global_roles(qtbot):
     table_ss = table_panel.table.styleSheet() or ""
     assert "QHeaderView::section" not in table_ss
     assert "QTableWidget" not in table_ss or table_ss.strip() == ""
+
+    # Review-page QC table must also inherit global header/table roles
+    qc_table = QCIssueTable()
+    qtbot.addWidget(qc_table)
+    qc_ss = qc_table.table.styleSheet() or ""
+    assert "QHeaderView::section" not in qc_ss
+    assert "QTableWidget" not in qc_ss or qc_ss.strip() == ""
 
     evidence = PredictionEvidencePanel()
     qtbot.addWidget(evidence)
@@ -165,10 +183,12 @@ def test_work_page_padding_uses_density_tokens(qtbot):
 
     composite = CompositeVisualizationPanel()
     summary = ResultSummary()
+    scheme = SequenceSchemeSummary()
     qtbot.addWidget(factors)
     qtbot.addWidget(composite)
     qtbot.addWidget(summary)
-    for widget in (factors, composite, summary):
+    qtbot.addWidget(scheme)
+    for widget in (factors, composite, summary, scheme):
         m = widget.layout().contentsMargins()
         assert m.left() == tokens.PANEL_PADDING
         assert m.top() == tokens.PANEL_PADDING

@@ -31,10 +31,7 @@ class SequenceTargetPanel(QFrame):
         self.version_value = self._add_value(layout, "解释版本", "v1")
 
         scheme_label = QLabel("体系域方案")
-        scheme_label.setStyleSheet(
-            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            " border: none; background: transparent;"
-        )
+        scheme_label.setObjectName("WorkFieldLabel")
         layout.addWidget(scheme_label)
         self.scheme_combo = QComboBox()
         self.scheme_combo.addItem("LST/TST/HST")
