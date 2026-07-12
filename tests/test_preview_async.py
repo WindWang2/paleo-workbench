@@ -615,3 +615,17 @@ def test_path_only_image_cache_reloads_bytes_off_thread(qtbot, tmp_path):
     assert loadings == [True]
     assert len(results) == 1
     assert results[0].image_bytes == path.read_bytes()
+
+
+def test_needs_media_preload_geotiff():
+    from paleo_workbench.ui.pages.preview_worker import needs_media_preload
+
+    # geotiff without image_bytes (e.g. cache-stripped large thumbnail) → needs preload
+    assert needs_media_preload(PreviewResult(mode="geotiff", title="t", path="x.tif")) is True
+    # geotiff with image_bytes → no preload
+    assert (
+        needs_media_preload(
+            PreviewResult(mode="geotiff", title="t", path="x.tif", image_bytes=b"x")
+        )
+        is False
+    )

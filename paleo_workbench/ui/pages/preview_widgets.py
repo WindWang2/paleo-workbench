@@ -69,8 +69,6 @@ class RichTextPreviewWidget(QTextBrowser):
 
     def loadResource(self, resource_type, url):
         # Block non-file URLs (network). Allow file:// for local images.
-        from PySide6.QtCore import QUrl
-
         if url.scheme() not in ("", "file"):
             return None
         return super().loadResource(resource_type, url)

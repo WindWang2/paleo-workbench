@@ -27,10 +27,12 @@ def snapshot_asset(asset: Asset) -> Asset:
 
 
 def needs_media_preload(result: PreviewResult) -> bool:
-    """True when UI would otherwise open the file path for image/PDF."""
+    """True when UI would otherwise open the file path for image/PDF/GeoTIFF."""
     if not result.path:
         return False
     if result.mode == "image" and not result.image_bytes:
+        return True
+    if result.mode == "geotiff" and not result.image_bytes:
         return True
     if result.mode == "pdf" and not result.pdf_bytes:
         return True
@@ -46,6 +48,16 @@ def preload_media(result: PreviewResult) -> PreviewResult:
     if not result.path:
         return result
     if result.mode == "image":
+        if result.image_bytes:
+            return result
+        try:
+            data = Path(result.path).read_bytes()
+        except OSError:
+            return result
+        if not data:
+            return result
+        return replace(result, image_bytes=data)
+    if result.mode == "geotiff":
         if result.image_bytes:
             return result
         try:
