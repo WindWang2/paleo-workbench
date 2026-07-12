@@ -471,14 +471,14 @@ class PreviewProvider:
 
         path = Path(resource.path)
         try:
-            raw = path.read_text(encoding="utf-8", errors="replace")
+            raw_bytes = path.read_bytes()
         except OSError:
             return self._parse_error_preview(resource, "文件不存在")
-        truncated = len(raw.encode("utf-8")) > MAX_JSON_PARSE_BYTES
+        truncated = len(raw_bytes) > MAX_JSON_PARSE_BYTES
         if truncated:
-            raw = raw.encode("utf-8")[:MAX_JSON_PARSE_BYTES].decode(
-                "utf-8", errors="ignore"
-            )
+            raw = raw_bytes[:MAX_JSON_PARSE_BYTES].decode("utf-8", errors="ignore")
+        else:
+            raw = raw_bytes.decode("utf-8", errors="replace")
         try:
             payload = json_lib.loads(raw)
         except (json_lib.JSONDecodeError, ValueError) as exc:
