@@ -13,6 +13,7 @@ PDF_FORMATS = {"pdf"}
 MARKDOWN_FORMATS = {"md", "markdown", "htm", "html"}
 JSON_FORMATS = {"json", "geojson"}
 GEOTIFF_FORMATS = {"tif", "tiff"}
+AUDIO_FORMATS = {"wav", "mp3", "flac", "ogg", "m4a"}
 PROFESSIONAL_FORMATS = {
     "las",
     "sgy",
@@ -100,6 +101,8 @@ def preview_for_resource(
         return PreviewState("image", resource.name, lines, image_path=path)
     if fmt == "pdf":
         return PreviewState("pdf", resource.name, lines, document_path=path)
+    if fmt in AUDIO_FORMATS:
+        return PreviewState("media", resource.name, lines)
     if fmt in MARKDOWN_FORMATS and Path(path).exists():
         return PreviewState("rich_text", resource.name, lines)
     if fmt in JSON_FORMATS and Path(path).exists():

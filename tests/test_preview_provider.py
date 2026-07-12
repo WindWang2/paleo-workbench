@@ -412,3 +412,12 @@ def test_geotiff_fallback_to_image(tmp_path):
     result = PreviewProvider().preview(res)
     assert result.mode == "image"
     assert "失败" in result.warning
+
+
+def test_audio_preview_returns_media_path(tmp_path):
+    path = tmp_path / "clip.wav"
+    path.write_bytes(b"\x00" * 64)  # placeholder bytes; no real decode in provider
+    res = ResourceItem(name="clip.wav", path=str(path), type="unknown", format="wav", status="parsed")
+    result = PreviewProvider().preview(res)
+    assert result.mode == "media"
+    assert result.media_path == str(path)

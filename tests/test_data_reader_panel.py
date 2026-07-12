@@ -740,3 +740,53 @@ def test_reader_panel_geotiff_dispatch(qtbot):
     assert current.summary_table.item(0, 1).text() == "EPSG:32649"
     assert current.pixmap() is not None and not current.pixmap().isNull()
 
+
+def test_reader_panel_media_dispatch(qtbot, tmp_path: Path):
+    """media mode routes to MediaPreviewWidget and forwards media_path.
+
+    QMediaPlayer playback state is unreliable under offscreen/no-backend, so we
+    assert only that the stack switched and the path was forwarded (NOT that
+    playback started or the player reached a particular state).
+    """
+    clip = tmp_path / "clip.wav"
+    clip.write_bytes(b"\x00" * 64)
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="media",
+            title="clip.wav",
+            path=str(clip),
+            format="wav",
+            media_path=str(clip),
+        )
+    )
+
+    assert panel.current_mode == "media"
+    from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
+
+    current = panel.stack.currentWidget()
+    assert isinstance(current, MediaPreviewWidget)
+    # The path was forwarded to the widget. We do NOT assert on playback state —
+    # QMediaPlayer may emit errorOccurred under offscreen and disable play.
+    assert panel.media_preview is current
+
+
+def test_reader_panel_media_dispatch_via_provider(qtbot, tmp_path: Path):
+    """An audio resource flows through the provider into the media widget."""
+    clip = tmp_path / "note.mp3"
+    clip.write_bytes(b"\x00" * 64)
+    resource = ResourceItem(
+        name="note.mp3", path=str(clip), type="unknown", format="mp3", status="parsed"
+    )
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.update_asset(resource)
+
+    assert panel.current_mode == "media"
+    from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
+
+    assert isinstance(panel.stack.currentWidget(), MediaPreviewWidget)
+

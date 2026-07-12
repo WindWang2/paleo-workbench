@@ -151,3 +151,19 @@ def test_preview_strategy_export_artifact():
 
     assert state.mode == "artifact"
     assert "GeoTIFF" in state.title
+
+
+def test_preview_strategy_audio_uses_media_mode(tmp_path: Path):
+    clip = tmp_path / "note.wav"
+    clip.write_bytes(b"\x00" * 64)
+    resource = ResourceItem(
+        name="note.wav",
+        path=clip.as_posix(),
+        type="unknown",
+        format="wav",
+    )
+
+    state = preview_for_resource(resource)
+
+    assert state.mode == "media"
+    assert any("note.wav" in line for line in state.lines)

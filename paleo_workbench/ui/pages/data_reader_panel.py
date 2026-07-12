@@ -17,6 +17,7 @@ from paleo_workbench.ui.pages.preview_widgets import (
     GeoTiffPreviewWidget,
     ImagePreviewWidget,
     JsonTreePreviewWidget,
+    MediaPreviewWidget,
     MessagePreviewWidget,
     PdfPreviewWidget,
     RichTextPreviewWidget,
@@ -99,6 +100,9 @@ class DataReaderPanel(QFrame):
 
         self.geotiff_preview = GeoTiffPreviewWidget()
         self.stack.addWidget(self.geotiff_preview)
+
+        self.media_preview = MediaPreviewWidget()
+        self.stack.addWidget(self.media_preview)
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
@@ -208,6 +212,13 @@ class DataReaderPanel(QFrame):
                 result.geo_metadata,
             )
             self.stack.setCurrentWidget(self.geotiff_preview)
+            return
+
+        if result.mode == "media":
+            # QMediaPlayer is UI-thread-only: the provider only returns the path;
+            # setSource happens here on the UI thread.
+            self.media_preview.set_media_path(result.media_path)
+            self.stack.setCurrentWidget(self.media_preview)
             return
 
         self.message_label.set_message(result.message or "预览不可用")

@@ -178,6 +178,9 @@ class PreviewProvider:
         if fmt in JSON_FORMATS:
             return self._json_preview(asset)
 
+        if fmt in AUDIO_FORMATS:
+            return self._audio_preview(asset)
+
         if fmt in TEXT_FORMATS:
             return self._text_preview(asset)
 
@@ -582,4 +585,19 @@ class PreviewProvider:
             warning=f"文件超过 {MAX_JSON_PARSE_BYTES // (1024 * 1024)} MB，已截断解析"
             if truncated
             else "",
+        )
+
+    def _audio_preview(self, resource: ResourceItem) -> PreviewResult:
+        # No off-thread decode: QMediaPlayer is UI-thread-only. The provider just
+        # hands the file path to the widget, which sets the media source on the UI
+        # thread in set_media_path.
+        return PreviewResult(
+            mode="media",
+            title=resource.name,
+            path=resource.path,
+            revision=self._resource_revision_token(resource),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            media_path=resource.path,
         )

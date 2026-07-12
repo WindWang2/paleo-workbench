@@ -83,3 +83,28 @@ def test_geotiff_widget_loads_metadata(qtbot):
     assert w.summary_table.rowCount() == 2
     # Thumbnail QLabel should now hold a pixmap (decoded from PNG bytes).
     assert w.pixmap() is not None
+
+
+def test_media_widget_constructs(qtbot):
+    from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
+
+    w = MediaPreviewWidget()
+    qtbot.addWidget(w)
+    w.set_media_path("")  # no crash on empty path
+    assert w.play_btn.text() == "播放"
+
+
+def test_media_widget_loads_path_sets_ready(qtbot):
+    """A real path sets status to 就绪 and enables the play button.
+
+    Only asserts construction + label text; QMediaPlayer playback state is
+    unreliable under offscreen/no-backend so we never assert on it.
+    """
+    from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
+
+    w = MediaPreviewWidget()
+    qtbot.addWidget(w)
+    w.set_media_path("/tmp/clip.wav")
+    assert w.status_label.text() == "就绪"
+    assert w.play_btn.isEnabled()
+    assert w.play_btn.text() == "播放"
