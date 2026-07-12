@@ -166,6 +166,9 @@ class PreviewProvider:
         if fmt in SEGY_FORMATS or asset.type == "seismic":
             return self._segy_preview(asset)
 
+        if fmt in MARKDOWN_FORMATS:
+            return self._rich_text_preview(asset)
+
         if fmt in TEXT_FORMATS:
             return self._text_preview(asset)
 
@@ -364,6 +367,38 @@ class PreviewProvider:
             summary_rows=tuple(summary_rows),
             table_headers=("字段", "值"),
             table_rows=tuple(table_rows),
+        )
+
+    def _rich_text_preview(self, resource: ResourceItem) -> PreviewResult:
+        path = Path(resource.path)
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return PreviewResult(
+                mode="message",
+                title=resource.name,
+                path=resource.path,
+                revision=self._resource_revision_token(resource),
+                format=resource.format,
+                status=resource.status,
+                type_label=resource.type,
+                message="文件不存在",
+            )
+        fmt = resource.format.lower()
+        if fmt in {"htm", "html"}:
+            html = raw
+        else:
+            import markdown as md_lib
+            html = md_lib.markdown(raw, extensions=["extra", "codehilite"])
+        return PreviewResult(
+            mode="rich_text",
+            title=resource.name,
+            path=resource.path,
+            revision=self._resource_revision_token(resource),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            rich_html=html,
         )
 
     def _dataframe_rows(

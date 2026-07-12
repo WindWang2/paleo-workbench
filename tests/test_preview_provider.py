@@ -313,3 +313,31 @@ def test_preview_result_defaults_new_fields_empty():
     assert r.json_truncated is False
     assert r.geo_metadata == ()
     assert r.media_path == ""
+
+
+def _resource(tmp_path, name, fmt, content=""):
+    p = tmp_path / name
+    p.write_text(content, encoding="utf-8")
+    return ResourceItem(name=name, path=str(p), type="document", format=fmt, status="parsed")
+
+
+def test_markdown_preview_renders_html(tmp_path):
+    res = _resource(tmp_path, "notes.md", "md", "# Title\n\nSome **bold** text.")
+    result = PreviewProvider().preview(res)
+    assert result.mode == "rich_text"
+    assert "<h1>" in result.rich_html
+    assert "<strong>bold</strong>" in result.rich_html
+
+
+def test_html_preview_passes_through(tmp_path):
+    res = _resource(tmp_path, "r.html", "html", "<h1>Hi</h1>")
+    result = PreviewProvider().preview(res)
+    assert result.mode == "rich_text"
+    assert "<h1>Hi</h1>" in result.rich_html
+
+
+def test_markdown_missing_file_falls_back(tmp_path):
+    res = ResourceItem(name="x.md", path=str(tmp_path / "missing.md"), type="document", format="md", status="parsed")
+    result = PreviewProvider().preview(res)
+    assert result.mode == "message"
+    assert "不存在" in result.message

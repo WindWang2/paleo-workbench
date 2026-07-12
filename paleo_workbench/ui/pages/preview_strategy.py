@@ -10,6 +10,7 @@ MAX_PREVIEW_LINES = 20
 TEXT_FORMATS = {"txt", "xml"}
 TABLE_FORMATS = {"csv", "dat"}
 PDF_FORMATS = {"pdf"}
+MARKDOWN_FORMATS = {"md", "markdown", "htm", "html"}
 PROFESSIONAL_FORMATS = {
     "las",
     "sgy",
@@ -89,7 +90,7 @@ def preview_for_resource(
 
     if (
         not Path(path).exists()
-        and fmt in TEXT_FORMATS | TABLE_FORMATS | PDF_FORMATS | PROFESSIONAL_FORMATS
+        and fmt in TEXT_FORMATS | TABLE_FORMATS | PDF_FORMATS | PROFESSIONAL_FORMATS | MARKDOWN_FORMATS
     ):
         return PreviewState("metadata", resource.name, lines, warning="文件不存在")
 
@@ -97,6 +98,8 @@ def preview_for_resource(
         return PreviewState("image", resource.name, lines, image_path=path)
     if fmt == "pdf":
         return PreviewState("pdf", resource.name, lines, document_path=path)
+    if fmt in MARKDOWN_FORMATS and Path(path).exists():
+        return PreviewState("rich_text", resource.name, lines)
     if fmt in TEXT_FORMATS:
         preview_lines, warning = _read_preview_lines(path)
         if preview_lines:
