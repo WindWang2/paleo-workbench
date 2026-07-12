@@ -341,3 +341,26 @@ def test_markdown_missing_file_falls_back(tmp_path):
     result = PreviewProvider().preview(res)
     assert result.mode == "message"
     assert "不存在" in result.message
+
+
+def test_json_preview_parses_object(tmp_path):
+    res = _resource(tmp_path, "c.json", "json", '{"a": 1, "b": [1,2,3]}')
+    result = PreviewProvider().preview(res)
+    assert result.mode == "json_tree"
+    assert result.json_payload == {"a": 1, "b": [1, 2, 3]}
+    assert result.json_truncated is False
+
+
+def test_geojson_preview_recognized(tmp_path):
+    payload = '{"type":"FeatureCollection","features":[]}'
+    res = _resource(tmp_path, "f.geojson", "geojson", payload)
+    result = PreviewProvider().preview(res)
+    assert result.mode == "json_tree"
+    assert isinstance(result.json_payload, dict)
+
+
+def test_json_corrupt_falls_back(tmp_path):
+    res = _resource(tmp_path, "bad.json", "json", "{ not json")
+    result = PreviewProvider().preview(res)
+    assert result.mode == "message"
+    assert "JSON" in result.message or "解析" in result.message

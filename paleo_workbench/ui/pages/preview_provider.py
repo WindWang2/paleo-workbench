@@ -169,6 +169,9 @@ class PreviewProvider:
         if fmt in MARKDOWN_FORMATS:
             return self._rich_text_preview(asset)
 
+        if fmt in JSON_FORMATS:
+            return self._json_preview(asset)
+
         if fmt in TEXT_FORMATS:
             return self._text_preview(asset)
 
@@ -462,3 +465,37 @@ class PreviewProvider:
         with path.open("rb") as handle:
             data = handle.read(MAX_TEXT_PREVIEW_BYTES)
         return data, stat.st_size > MAX_TEXT_PREVIEW_BYTES
+
+    def _json_preview(self, resource: ResourceItem) -> PreviewResult:
+        import json as json_lib
+
+        path = Path(resource.path)
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return self._parse_error_preview(resource, "文件不存在")
+        truncated = len(raw.encode("utf-8")) > MAX_JSON_PARSE_BYTES
+        if truncated:
+            raw = raw.encode("utf-8")[:MAX_JSON_PARSE_BYTES].decode(
+                "utf-8", errors="ignore"
+            )
+        try:
+            payload = json_lib.loads(raw)
+        except (json_lib.JSONDecodeError, ValueError) as exc:
+            return self._parse_error_preview(
+                resource, f"JSON 解析失败: {exc.__class__.__name__}"
+            )
+        return PreviewResult(
+            mode="json_tree",
+            title=resource.name,
+            path=resource.path,
+            revision=self._resource_revision_token(resource),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            json_payload=payload,
+            json_truncated=truncated,
+            warning=f"文件超过 {MAX_JSON_PARSE_BYTES // (1024 * 1024)} MB，已截断解析"
+            if truncated
+            else "",
+        )
