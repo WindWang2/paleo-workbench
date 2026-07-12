@@ -12,6 +12,7 @@ dependencies = [
     "lasio>=0.14",
     "markdown>=3.5",
     "rasterio>=1.3",
+    "pillow>=10.0",
     # Mapping topology merge/split (map_edit_api) requires shapely.
     "shapely>=2.0",
     # geo-viz-engine is consumed as a git submodule at ./geo-viz-engine.

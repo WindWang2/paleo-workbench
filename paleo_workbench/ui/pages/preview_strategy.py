@@ -12,7 +12,6 @@ TABLE_FORMATS = {"csv", "dat"}
 PDF_FORMATS = {"pdf"}
 MARKDOWN_FORMATS = {"md", "markdown", "htm", "html"}
 JSON_FORMATS = {"json", "geojson"}
-GEOTIFF_FORMATS = {"tif", "tiff"}
 AUDIO_FORMATS = {"wav", "mp3", "flac", "ogg", "m4a"}
 PROFESSIONAL_FORMATS = {
     "las",

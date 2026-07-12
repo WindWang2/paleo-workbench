@@ -32,7 +32,7 @@ PreviewMode = Literal[
     "media",
 ]
 
-TEXT_FORMATS = {"txt", "text", "log", "dat", "json", "xml"}
+TEXT_FORMATS = {"txt", "text", "log", "dat", "xml"}
 TABLE_FORMATS = {"csv", "tsv"}
 EXCEL_FORMATS = {"xlsx", "xls"}
 IMAGE_FORMATS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp"}
