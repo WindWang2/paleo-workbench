@@ -17,6 +17,7 @@ from paleo_workbench.ui.pages.preview_widgets import (
     ImagePreviewWidget,
     MessagePreviewWidget,
     PdfPreviewWidget,
+    RichTextPreviewWidget,
     SummaryTablePreviewWidget,
     TablePreviewWidget,
     TextPreviewWidget,
@@ -87,6 +88,9 @@ class DataReaderPanel(QFrame):
         self.pdf_next_btn = self.pdf_preview_widget.next_btn
         self.pdf_page_label = self.pdf_preview_widget.page_label
         self.stack.addWidget(self.pdf_widget)
+
+        self.rich_text_preview = RichTextPreviewWidget()
+        self.stack.addWidget(self.rich_text_preview)
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
@@ -176,6 +180,11 @@ class DataReaderPanel(QFrame):
                 pdf_bytes=result.pdf_bytes,
             )
             self.stack.setCurrentWidget(self.pdf_preview_widget)
+            return
+
+        if result.mode == "rich_text":
+            self.rich_text_preview.load_html(result.rich_html)
+            self.stack.setCurrentWidget(self.rich_text_preview)
             return
 
         self.message_label.set_message(result.message or "预览不可用")

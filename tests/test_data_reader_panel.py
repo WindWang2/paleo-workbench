@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QLabel, QTableWidget
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
+from paleo_workbench.ui.pages.preview_widgets import RichTextPreviewWidget
 
 
 def test_reader_panel_empty_state(qtbot):
@@ -685,3 +686,11 @@ def test_reader_panel_clears_old_pdf_fallback_pixmap_after_render_failure(
     pixmap = panel.pdf_widget.fallback_image.pixmap()
     assert pixmap is None or pixmap.isNull()
     assert "PDF 页面渲染失败" in panel.pdf_widget.fallback_image.text()
+
+
+def test_reader_panel_rich_text_dispatch(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.render(PreviewResult(mode="rich_text", title="t", rich_html="<p>hi</p>"))
+    assert isinstance(panel.stack.currentWidget(), RichTextPreviewWidget)
+

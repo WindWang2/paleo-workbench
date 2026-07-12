@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -44,6 +45,30 @@ class TextPreviewWidget(QTextEdit):
 
     def load_text(self, text: str) -> None:
         self.setPlainText(text)
+
+
+class RichTextPreviewWidget(QTextBrowser):
+    """Read-only rich-text renderer for Markdown/HTML.
+
+    External network resources are blocked; local file:// images (relative to
+    the document) are allowed so embedded figures render.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setOpenExternalLinks(False)
+        self.setReadOnly(True)
+
+    def loadResource(self, resource_type, url):
+        # Block non-file URLs (network). Allow file:// for local images.
+        from PySide6.QtCore import QUrl
+
+        if url.scheme() not in ("", "file"):
+            return None
+        return super().loadResource(resource_type, url)
+
+    def load_html(self, html: str) -> None:
+        self.setHtml(html)
 
 
 class TablePreviewWidget(QTableWidget):
