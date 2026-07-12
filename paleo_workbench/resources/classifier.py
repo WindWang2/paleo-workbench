@@ -38,4 +38,9 @@ def classify_path(path: Path) -> tuple[str, str, str]:
     if ext == "wlp":
         return "well_reference", ext, "indexed_reference"
 
+    if ext in {"md", "markdown", "htm", "html"}:
+        return "document", ext, "indexed_reference"
+
+    # json/geojson and audio formats: type stays "unknown" (no geological
+    # semantics) but format string is preserved for preview dispatch.
     return "unknown", ext or "none", "indexed_reference"

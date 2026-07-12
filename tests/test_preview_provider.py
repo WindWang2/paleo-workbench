@@ -9,6 +9,7 @@ from paleo_workbench.ui.pages.preview_provider import (
     MAX_TABLE_ROWS,
     MAX_TEXT_PREVIEW_BYTES,
     PreviewProvider,
+    PreviewResult,
 )
 
 
@@ -298,3 +299,17 @@ def test_preview_provider_reads_segy_metadata_with_optional_library(
     assert ("采样点", "4") in result.summary_rows
     assert ("采样间隔", "2000 us") in result.summary_rows
     assert result.table_rows == (("Inline", "1180"), ("Crossline", "220"))
+
+
+def test_preview_result_has_rich_html_field():
+    r = PreviewResult(mode="rich_text", title="t", rich_html="<p>x</p>")
+    assert r.rich_html == "<p>x</p>"
+
+
+def test_preview_result_defaults_new_fields_empty():
+    r = PreviewResult(mode="text", title="t", text="hi")
+    assert r.rich_html == ""
+    assert r.json_payload is None
+    assert r.json_truncated is False
+    assert r.geo_metadata == ()
+    assert r.media_path == ""

@@ -40,3 +40,27 @@ def test_classifies_reference_and_unknown_formats():
         "xyz",
         "indexed_reference",
     )
+
+
+def test_markdown_classified_as_document():
+    rtype, fmt, _ = classify_path(Path("notes.md"))
+    assert rtype == "document"
+    assert fmt == "md"
+
+
+def test_html_classified_as_document():
+    rtype, fmt, _ = classify_path(Path("report.html"))
+    assert rtype == "document"
+    assert fmt == "html"
+
+
+def test_json_classified_as_unknown():
+    rtype, fmt, _ = classify_path(Path("config.json"))
+    assert rtype == "unknown"
+    assert fmt == "json"
+
+
+def test_audio_classified_as_unknown():
+    rtype, fmt, _ = classify_path(Path("clip.wav"))
+    assert rtype == "unknown"
+    assert fmt == "wav"

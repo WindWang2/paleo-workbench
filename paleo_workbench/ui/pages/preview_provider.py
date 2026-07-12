@@ -26,6 +26,10 @@ PreviewMode = Literal[
     "well_log",
     "seismic",
     "message",
+    "rich_text",
+    "json_tree",
+    "geotiff",
+    "media",
 ]
 
 TEXT_FORMATS = {"txt", "text", "log", "dat", "json", "xml"}
@@ -35,6 +39,12 @@ IMAGE_FORMATS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp"}
 PDF_FORMATS = {"pdf"}
 LAS_FORMATS = {"las"}
 SEGY_FORMATS = {"sgy", "segy"}
+MARKDOWN_FORMATS = {"md", "markdown", "htm", "html"}
+JSON_FORMATS = {"json", "geojson"}
+GEOTIFF_FORMATS = {"tif", "tiff"}
+AUDIO_FORMATS = {"wav", "mp3", "flac", "ogg", "m4a"}
+MAX_JSON_PARSE_BYTES = 5 * 1024 * 1024
+JSON_ARRAY_COLLAPSE_THRESHOLD = 100
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,11 @@ class PreviewResult:
     # Media file bytes loaded off the UI thread; decoded/loaded on the UI.
     image_bytes: bytes = b""
     pdf_bytes: bytes = b""
+    rich_html: str = ""
+    json_payload: object | None = None
+    json_truncated: bool = False
+    geo_metadata: tuple[tuple[str, str], ...] = ()
+    media_path: str = ""
 
 
 class PreviewProvider:
