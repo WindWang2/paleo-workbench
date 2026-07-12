@@ -694,3 +694,17 @@ def test_reader_panel_rich_text_dispatch(qtbot):
     panel.render(PreviewResult(mode="rich_text", title="t", rich_html="<p>hi</p>"))
     assert isinstance(panel.stack.currentWidget(), RichTextPreviewWidget)
 
+
+def test_reader_panel_json_tree_dispatch(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.render(PreviewResult(mode="json_tree", title="t", json_payload={"a": 1}))
+    current = panel.stack.currentWidget()
+    from paleo_workbench.ui.pages.preview_widgets import JsonTreePreviewWidget
+
+    assert isinstance(current, JsonTreePreviewWidget)
+    # Payload should have been loaded into the model.
+    assert current.model().rowCount() == 1
+    assert current.model().item(0, 0).text() == "a"
+    assert current.model().item(0, 1).text() == "1"
+

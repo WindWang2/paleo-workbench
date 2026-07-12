@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QStandardItem, QStandardItemModel
 try:
     from PySide6.QtPdf import QPdfDocument
 except ImportError:  # pragma: no cover
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTextBrowser,
     QTextEdit,
+    QTreeView,
     QVBoxLayout,
     QWidget,
 )
@@ -323,3 +324,72 @@ class PdfPreviewWidget(QWidget):
         self.fallback_image.clear()
         self.fallback_image.setPixmap(pixmap)
         self._content_stack.setCurrentWidget(self.fallback_image)
+
+
+class JsonTreePreviewWidget(QTreeView):
+    """Collapsible tree view for parsed JSON/GeoJSON payloads.
+
+    Arrays longer than ``JSON_ARRAY_COLLAPSE_THRESHOLD`` render as a single
+    ``"[N items]"`` node that populates children lazily when expanded. This
+    keeps the visible tree cheap for huge arrays — the full list is stashed in
+    :attr:`Qt.ItemDataRole.UserRole` on the key item and only materialized into
+    child rows the first time the user expands that node.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setHeaderHidden(False)
+        self._model = QStandardItemModel()
+        self._model.setHorizontalHeaderLabels(["键", "值/类型"])
+        self.setModel(self._model)
+        self.expanded.connect(self._on_expanded)
+
+    def load_payload(self, payload: object, truncated: bool = False) -> None:
+        self._model.clear()
+        self._model.setHorizontalHeaderLabels(["键", "值/类型"])
+        root = self._model.invisibleRootItem()
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                root.appendRow(self._build_row(str(key), value))
+        elif isinstance(payload, list):
+            root.appendRow(self._build_row("[root]", payload))
+        else:
+            root.appendRow(self._build_row("[root]", payload))
+
+    def _build_row(self, key: str, value: object):
+        from paleo_workbench.ui.pages.preview_provider import JSON_ARRAY_COLLAPSE_THRESHOLD
+
+        key_item = QStandardItem(key)
+        if isinstance(value, dict):
+            val_item = QStandardItem(f"{{object · {len(value)} keys}}")
+            val_item.setEditable(False)
+            for k, v in value.items():
+                key_item.appendRow(self._build_row(str(k), v))
+            return [key_item, val_item]
+        if isinstance(value, list):
+            if len(value) > JSON_ARRAY_COLLAPSE_THRESHOLD:
+                # Collapsed placeholder: store the full list for lazy expansion.
+                # The expanded-signal handler materializes children on demand.
+                val_item = QStandardItem(f"[{len(value)} items]")
+                val_item.setEditable(False)
+                key_item.setEditable(False)
+                key_item.setData(value, Qt.ItemDataRole.UserRole)
+                return [key_item, val_item]
+            val_item = QStandardItem(f"[list · {len(value)}]")
+            val_item.setEditable(False)
+            for i, v in enumerate(value):
+                key_item.appendRow(self._build_row(str(i), v))
+            return [key_item, val_item]
+        # scalar
+        val_item = QStandardItem(str(value))
+        val_item.setEditable(False)
+        key_item.setEditable(False)
+        return [key_item, val_item]
+
+    def _on_expanded(self, index):
+        """Lazily populate children for a collapsed-array node on first expand."""
+        item = self._model.itemFromIndex(index)
+        stored = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(stored, list) and item.rowCount() == 0:
+            for i, v in enumerate(stored):
+                item.appendRow(self._build_row(str(i), v))

@@ -15,6 +15,7 @@ from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 from paleo_workbench.ui.pages.preview_widgets import (
     ImagePreviewWidget,
+    JsonTreePreviewWidget,
     MessagePreviewWidget,
     PdfPreviewWidget,
     RichTextPreviewWidget,
@@ -91,6 +92,9 @@ class DataReaderPanel(QFrame):
 
         self.rich_text_preview = RichTextPreviewWidget()
         self.stack.addWidget(self.rich_text_preview)
+
+        self.json_tree_preview = JsonTreePreviewWidget()
+        self.stack.addWidget(self.json_tree_preview)
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
@@ -185,6 +189,11 @@ class DataReaderPanel(QFrame):
         if result.mode == "rich_text":
             self.rich_text_preview.load_html(result.rich_html)
             self.stack.setCurrentWidget(self.rich_text_preview)
+            return
+
+        if result.mode == "json_tree":
+            self.json_tree_preview.load_payload(result.json_payload, result.json_truncated)
+            self.stack.setCurrentWidget(self.json_tree_preview)
             return
 
         self.message_label.set_message(result.message or "预览不可用")
