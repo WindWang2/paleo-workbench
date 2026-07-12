@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_provider import (
@@ -364,3 +365,50 @@ def test_json_corrupt_falls_back(tmp_path):
     result = PreviewProvider().preview(res)
     assert result.mode == "message"
     assert "JSON" in result.message or "解析" in result.message
+
+
+def test_geotiff_preview_metadata(tmp_path):
+    rasterio = pytest.importorskip("rasterio")
+    import numpy as np
+
+    path = tmp_path / "band.tif"
+    arr = np.zeros((32, 32), dtype="uint8")
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=32,
+        width=32,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:32649",
+        transform=rasterio.transform.from_bounds(0, 0, 1, 1, 1, 1),
+    ) as dst:
+        dst.write(arr, 1)
+    res = ResourceItem(
+        name="band.tif",
+        path=str(path),
+        type="image_reference",
+        format="tif",
+        status="parsed",
+    )
+    result = PreviewProvider().preview(res)
+    assert result.mode == "geotiff"
+    assert any("EPSG" in k or "CRS" in k for k, _ in result.geo_metadata)
+    assert len(result.image_bytes) > 0  # thumbnail PNG
+
+
+def test_geotiff_fallback_to_image(tmp_path):
+    # A non-raster tiff (plain bytes) → rasterio fails → image fallback.
+    path = tmp_path / "fake.tif"
+    path.write_bytes(b"\x00" * 64)
+    res = ResourceItem(
+        name="fake.tif",
+        path=str(path),
+        type="image_reference",
+        format="tif",
+        status="parsed",
+    )
+    result = PreviewProvider().preview(res)
+    assert result.mode == "image"
+    assert "失败" in result.warning

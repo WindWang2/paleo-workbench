@@ -12,6 +12,7 @@ TABLE_FORMATS = {"csv", "dat"}
 PDF_FORMATS = {"pdf"}
 MARKDOWN_FORMATS = {"md", "markdown", "htm", "html"}
 JSON_FORMATS = {"json", "geojson"}
+GEOTIFF_FORMATS = {"tif", "tiff"}
 PROFESSIONAL_FORMATS = {
     "las",
     "sgy",

@@ -142,6 +142,12 @@ class PreviewProvider:
                 type_label=asset.type,
             )
 
+        # GeoTIFF must be checked BEFORE the generic image branch: tif/tiff is
+        # in both GEOTIFF_FORMATS and IMAGE_FORMATS. GeoTIFF takes precedence;
+        # a non-raster tiff fails rasterio and falls back to image mode below.
+        if fmt in GEOTIFF_FORMATS:
+            return self._geotiff_preview(asset)
+
         if fmt in IMAGE_FORMATS or asset.type in {"image_reference", "reference_map"}:
             return PreviewResult(
                 mode="image",
@@ -197,6 +203,84 @@ class PreviewProvider:
             status="generated",
             type_label="成果",
             message=f"成果文件 · 关联对象 {artifact.linked_id}",
+        )
+
+    def _geotiff_preview(self, resource: ResourceItem) -> PreviewResult:
+        path = Path(resource.path)
+        revision = self._resource_revision_token(resource)
+        try:
+            import rasterio
+        except ImportError:
+            return self._image_fallback(resource, revision, "地理元数据读取失败，仅显示图像")
+        try:
+            with rasterio.open(str(path)) as dataset:
+                crs = str(dataset.crs or "未知")
+                bounds = dataset.bounds
+                meta = (
+                    ("CRS", crs),
+                    (
+                        "范围",
+                        f"{bounds.left:.4f}, {bounds.bottom:.4f}, {bounds.right:.4f}, {bounds.top:.4f}",
+                    ),
+                    ("尺寸", f"{dataset.width} × {dataset.height} × {dataset.count}"),
+                    ("数据类型", str(dataset.dtypes[0]) if dataset.dtypes else "未知"),
+                    ("Nodata", str(dataset.nodata) if dataset.nodata is not None else "无"),
+                )
+                # Read a decimated overview for the thumbnail (~256px long side).
+                decim = max(1, max(dataset.width, dataset.height) // 256)
+                overviews = dataset.overviews(1)
+                if overviews:
+                    decim = overviews[0]
+                thumbnail = dataset.read(
+                    1,
+                    out_shape=(
+                        1,
+                        max(1, dataset.height // decim),
+                        max(1, dataset.width // decim),
+                    ),
+                )
+        except Exception:
+            return self._image_fallback(resource, revision, "地理元数据读取失败，仅显示图像")
+        # Encode the thumbnail as PNG bytes off-thread (Pillow). PIL may be
+        # unavailable or reject the array dtype; both degrade to image mode.
+        try:
+            from PIL import Image
+
+            buf = io.BytesIO()
+            Image.fromarray(thumbnail).save(buf, format="PNG")
+            image_bytes = buf.getvalue()
+        except Exception:
+            return self._image_fallback(resource, revision, "地理元数据读取失败，仅显示图像")
+        return PreviewResult(
+            mode="geotiff",
+            title=resource.name,
+            path=resource.path,
+            revision=revision,
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            geo_metadata=meta,
+            image_bytes=image_bytes,
+        )
+
+    def _image_fallback(
+        self, resource: ResourceItem, revision, warning: str
+    ) -> PreviewResult:
+        path = Path(resource.path)
+        try:
+            data = path.read_bytes()
+        except OSError:
+            data = b""
+        return PreviewResult(
+            mode="image",
+            title=resource.name,
+            path=resource.path,
+            revision=revision,
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            image_bytes=data,
+            warning=warning,
         )
 
     def _text_preview(self, resource: ResourceItem) -> PreviewResult:
