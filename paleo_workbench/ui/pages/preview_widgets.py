@@ -326,6 +326,66 @@ class PdfPreviewWidget(QWidget):
         self._content_stack.setCurrentWidget(self.fallback_image)
 
 
+class GeoTiffPreviewWidget(QWidget):
+    """GeoTIFF thumbnail + geographic metadata summary table.
+
+    The PNG thumbnail bytes are produced off-thread by the preview provider;
+    this widget only decodes them on the UI thread (mirroring
+    :class:`ImagePreviewWidget`). The metadata table reuses
+    :class:`TablePreviewWidget`.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self._image_label = QLabel()
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._image_label.setMinimumHeight(160)
+        layout.addWidget(self._image_label, 1)
+        self.summary_table = TablePreviewWidget()
+        layout.addWidget(self.summary_table)
+        self._pixmap: QPixmap | None = None
+
+    def load(
+        self,
+        path: str,
+        revision: tuple[object, ...] | None,
+        image_bytes: bytes,
+        geo_metadata: tuple[tuple[str, str], ...],
+    ) -> None:
+        del path, revision  # revision tracked upstream; bytes are pre-read
+        headers = ("属性", "值")
+        rows = tuple(geo_metadata) if geo_metadata else ()
+        self.summary_table.load_table(headers, rows)
+        self._pixmap = QPixmap()
+        if image_bytes:
+            self._pixmap.loadFromData(image_bytes)
+        self._render_thumbnail()
+
+    def pixmap(self) -> QPixmap | None:
+        """Expose the decoded thumbnail pixmap (mirrors QLabel.pixmap)."""
+        return self._pixmap
+
+    def _render_thumbnail(self) -> None:
+        if self._pixmap is None or self._pixmap.isNull():
+            self._image_label.setText("缩略图不可用")
+            return
+        self._image_label.setPixmap(
+            self._pixmap.scaled(
+                max(self._image_label.width(), 240),
+                max(self._image_label.height(), 160),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._render_thumbnail()
+
+
 class JsonTreePreviewWidget(QTreeView):
     """Collapsible tree view for parsed JSON/GeoJSON payloads.
 

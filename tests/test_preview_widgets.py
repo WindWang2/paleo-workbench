@@ -1,4 +1,8 @@
-from paleo_workbench.ui.pages.preview_widgets import JsonTreePreviewWidget, RichTextPreviewWidget
+from paleo_workbench.ui.pages.preview_widgets import (
+    GeoTiffPreviewWidget,
+    JsonTreePreviewWidget,
+    RichTextPreviewWidget,
+)
 
 
 def test_rich_text_widget_loads_html(qtbot):
@@ -59,3 +63,23 @@ def test_json_tree_small_array_expands_inline(qtbot):
     assert key_node.rowCount() == 3
     assert key_node.child(0, 0).text() == "0"
     assert key_node.child(0, 1).text() == "GR"
+
+
+def test_geotiff_widget_loads_metadata(qtbot):
+    # Build a 4x4 PNG so image_bytes is valid.
+    from PIL import Image
+    import io
+    import numpy as np
+    buf = io.BytesIO()
+    Image.fromarray(np.zeros((4, 4, 3), dtype="uint8")).save(buf, format="PNG")
+    w = GeoTiffPreviewWidget()
+    qtbot.addWidget(w)
+    w.load(
+        "x.tif",
+        None,
+        buf.getvalue(),
+        (("CRS", "EPSG:32649"), ("尺寸", "10 × 10 × 1")),
+    )
+    assert w.summary_table.rowCount() == 2
+    # Thumbnail QLabel should now hold a pixmap (decoded from PNG bytes).
+    assert w.pixmap() is not None

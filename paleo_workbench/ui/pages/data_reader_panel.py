@@ -14,6 +14,7 @@ from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 from paleo_workbench.ui.pages.preview_widgets import (
+    GeoTiffPreviewWidget,
     ImagePreviewWidget,
     JsonTreePreviewWidget,
     MessagePreviewWidget,
@@ -95,6 +96,9 @@ class DataReaderPanel(QFrame):
 
         self.json_tree_preview = JsonTreePreviewWidget()
         self.stack.addWidget(self.json_tree_preview)
+
+        self.geotiff_preview = GeoTiffPreviewWidget()
+        self.stack.addWidget(self.geotiff_preview)
 
         self.warning_label = QLabel("")
         self.warning_label.setWordWrap(True)
@@ -194,6 +198,16 @@ class DataReaderPanel(QFrame):
         if result.mode == "json_tree":
             self.json_tree_preview.load_payload(result.json_payload, result.json_truncated)
             self.stack.setCurrentWidget(self.json_tree_preview)
+            return
+
+        if result.mode == "geotiff":
+            self.geotiff_preview.load(
+                result.path,
+                result.revision,
+                result.image_bytes,
+                result.geo_metadata,
+            )
+            self.stack.setCurrentWidget(self.geotiff_preview)
             return
 
         self.message_label.set_message(result.message or "预览不可用")

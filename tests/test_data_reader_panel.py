@@ -708,3 +708,35 @@ def test_reader_panel_json_tree_dispatch(qtbot):
     assert current.model().item(0, 0).text() == "a"
     assert current.model().item(0, 1).text() == "1"
 
+
+def test_reader_panel_geotiff_dispatch(qtbot):
+    """geotiff mode routes to GeoTiffPreviewWidget with bytes + metadata."""
+    from PIL import Image
+    import io
+    import numpy as np
+    buf = io.BytesIO()
+    Image.fromarray(np.zeros((4, 4, 3), dtype="uint8")).save(buf, format="PNG")
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="geotiff",
+            title="dem.tif",
+            path="dem.tif",
+            format="tif",
+            image_bytes=buf.getvalue(),
+            geo_metadata=(("CRS", "EPSG:32649"), ("尺寸", "10 × 10 × 1")),
+        )
+    )
+
+    assert panel.current_mode == "geotiff"
+    current = panel.stack.currentWidget()
+    from paleo_workbench.ui.pages.preview_widgets import GeoTiffPreviewWidget
+
+    assert isinstance(current, GeoTiffPreviewWidget)
+    assert current.summary_table.rowCount() == 2
+    assert current.summary_table.item(0, 0).text() == "CRS"
+    assert current.summary_table.item(0, 1).text() == "EPSG:32649"
+    assert current.pixmap() is not None and not current.pixmap().isNull()
+
