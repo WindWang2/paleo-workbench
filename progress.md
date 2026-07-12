@@ -818,3 +818,29 @@ S4_import_folder n=300 ~24.6ms
 ### Status
 
 **Phase 21 COMPLETE** on branch `feature/datapage-stress-hotspots`.
+
+---
+
+## Session: 2026-07-12/13 — Multimodal Preview Formats (Phase B)
+
+Sub-project B of the data page overhaul. Added 4 new inline preview formats via SDD (8 implementation tasks + 3 fixes), each task individually reviewed.
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | deps (markdown, rasterio) + classifier (md/html) + PreviewResult schema (5 fields, 4 modes) | `9338b6b` | 588 |
+| 2 | Markdown/HTML provider (_rich_text_preview) | `cb6bb44` | 591 |
+| 3 | RichTextPreviewWidget (QTextBrowser, network-blocked) + reader dispatch | `64354ea` | 593 |
+| 4 | JSON/GeoJSON provider (_json_preview, 5MB cap) | `222ad58` | 596 |
+| Fix | JSON bytes-first truncation (memory safety) | `71e8c7e` | 596 |
+| 5 | JsonTreePreviewWidget (QTreeView, lazy-expanded collapsed arrays) + dispatch | `8942c19` | 601 |
+| 6 | GeoTIFF provider (rasterio + 3-path image fallback) | `d301fcb` | 603 |
+| 7 | GeoTiffPreviewWidget (thumbnail + metadata table) + dispatch | `962f40f` | 605 |
+| 8 | Audio provider + MediaPreviewWidget (QMediaPlayer, no video) + dispatch | `1745601` | 611 |
+| Fix | geotiff media preload + dead QUrl import cleanup | `9fcbf66` | 612 |
+| Fix | declare Pillow dep, drop dead json/GEOTIFF_FORMATS | `13643e4` | 612 |
+
+Final whole-branch review: READY TO MERGE (1 Important fixed before merge: Pillow dep declaration; Minor deferred: no JSON boundary test at 100/101, json_payload not size-stripped from cache, GeoJSON root label not implemented, _on_error ignores msg).
+
+Baseline: 582 → Final: **612 tests** (+30 new), 1 upstream rasterio/numpy warning.
+
+Next: Sub-project A (DEVONthink 3-pane layout restructure), then C (performance).

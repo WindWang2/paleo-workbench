@@ -294,6 +294,25 @@ Reproducible DataPage stress harness (S1–S4 with printed timings) and producti
 - Sample timings (local, post-import-fix): S1_update n=2000 ~3.7ms; S2_filter ~0.2–0.5ms; S3_rapid_select n=30 ~2.7ms; S4_import_folder n=300 ~24.6ms
 - Tests: **557 passed**, 4 skipped
 
+### Phase B: 多模态预览扩展 Multimodal Preview Formats — ✅ COMPLETE
+
+Sub-project B of the data page overhaul (B multimodal → A DEVONthink 3-pane → C performance). Added 4 new inline preview formats to the DataPage reader panel, all reusing the existing pipeline (worker thread + LRU cache + generation invalidation):
+
+| Format | mode | Widget | Notes |
+|--------|------|--------|-------|
+| Markdown/HTML | `rich_text` | `RichTextPreviewWidget(QTextBrowser)` | md→HTML via `markdown` lib; network resources blocked, local file images allowed |
+| JSON/GeoJSON | `json_tree` | `JsonTreePreviewWidget(QTreeView)` | arrays >100 collapse to "[N items]" lazy-expanded nodes; 5MB parse cap |
+| GeoTIFF | `geotiff` | `GeoTiffPreviewWidget` | rasterio CRS/bounds/dims + decimated PNG thumbnail (Pillow); 3-path fallback to image mode |
+| Audio | `media` | `MediaPreviewWidget(QMediaPlayer)` | wav/mp3/flac/ogg/m4a; play/pause/seek/volume; graceful codec-missing message |
+
+New deps: `markdown`, `rasterio`, `pillow` (declared in pyproject). Worker preload extended for geotiff mode. Classifier recognizes md/markdown/htm/html.
+
+- Spec: `docs/superpowers/specs/2026-07-12-multimodal-preview-design.md`
+- Plan: `docs/superpowers/plans/2026-07-12-multimodal-preview.md`
+- Branch: `main`
+- Commits: `8eaec39`..`13643e4` (8 SDD tasks + 3 fixes: JSON bytes-first truncation, geotiff preload, Pillow dep + dead-code cleanup)
+- Tests: 582 → **612** (+30 new), all passing (1 upstream rasterio/numpy DeprecationWarning)
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |

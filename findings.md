@@ -470,3 +470,44 @@ Resolution: `requirements-geoviz.txt` lists all 8 subpackages in dependency orde
 - Monkeypatch dotted paths into `paleo_workbench.ui.pages.*` can fail because pages package uses lazy `__getattr__` — patch the imported module object instead.
 - Jump tests must drain/shutdown data-page preview QThreads before teardown (offscreen abort risk).
 - Tab identity in tests: prefer `tabs.tabText(...)` over hard-coded indices (古地理 may move).
+
+## Multimodal Preview Formats (Phase B) Notes
+
+### Pipeline Extension Pattern (confirmed)
+
+The preview pipeline is a clean 3-stage chain; each new format adds exactly 3 touch points:
+1. `PreviewProvider._build_preview()` — format-set dispatch branch (before TEXT_FORMATS/IMAGE_FORMATS), returns `PreviewResult(mode=..., <fields>)`.
+2. `preview_widgets.py` — concrete render widget.
+3. `DataReaderPanel.render()` — stack slot + dispatch branch (before message fallback).
+
+The existing `PreviewCache` (LRU 32), generation-based invalidation, and off-thread media preload apply automatically. New modes only need preload extension if they carry file-bytes payloads (`geotiff` needed it for cache-stripped thumbnails).
+
+### Dispatch Ordering (load-bearing)
+
+`GEOTIFF_FORMATS` overlaps `IMAGE_FORMATS` (both contain tif/tiff) — GeoTIFF dispatch MUST precede IMAGE_FORMATS. GeoTIFF takes precedence; non-GeoTIFF tiffs fail rasterio → image fallback → same outcome. Similarly MARKDOWN/JSON/AUDIO all precede TEXT_FORMATS (`.json` was removed from TEXT_FORMATS to eliminate the latent ordering trap).
+
+### Worker-Thread Safety Invariants
+
+- ✅ Pure off-thread: markdown→HTML, json.loads, rasterio.open/read, Pillow PNG encode.
+- ❌ UI-thread-only: QStandardItemModel population, QPixmap.decode, QMediaPlayer.setSource.
+- Payloads crossing threads: strings (`rich_html`), Python objects (`json_payload`), bytes (`image_bytes` PNG), scalars (`media_path` path only — no media decode off-thread).
+
+### GeoTIFF Triple-Fallback
+
+`_geotiff_preview` has 3 independent failure paths all routing to `_image_fallback`:
+1. `ImportError` (rasterio not installed)
+2. rasterio open/read `Exception` (corrupt file, not a raster)
+3. Pillow encode `Exception`
+Each returns `mode="image"` + warning "地理元数据读取失败，仅显示图像" + raw file bytes.
+
+### JSON Large-Array Lazy Expansion
+
+`JsonTreePreviewWidget._build_row`: arrays >100 items → collapsed "[N items]" node storing the list in `Qt.ItemDataRole.UserRole` with 0 children. The `expanded` signal handler reads UserRole and populates children on first expand, guarded by a `rowCount()==0` check (idempotent). The full parsed payload always ships from the worker (5MB cap); only the tree-model rendering is lazy.
+
+### GeoTIFF Cache-Strip Edge Case
+
+`cacheable_result` strips `image_bytes` >512KB. A large GeoTIFF thumbnail exceeding this becomes path-only in cache; on re-select, `needs_media_preload` (extended for geotiff mode) re-reads bytes off-thread. Note: this re-read gets RAW TIFF bytes (not the decimated PNG), so `GeoTiffPreviewWidget` depends on Qt's TIFF image plugin for the thumbnail — metadata table still renders from cached `geo_metadata`.
+
+### Known Upstream Warning
+
+rasterio 1.5.0 + numpy 2.5: `dataset.read(out_shape=...)` emits a DeprecationWarning (numpy shape mutation). Harmless; will need a rasterio bump when numpy hard-removes the API.
