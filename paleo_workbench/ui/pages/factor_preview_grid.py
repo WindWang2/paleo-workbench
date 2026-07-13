@@ -35,7 +35,7 @@ class FactorPreviewGrid(QWidget):
             title = task.factor_type or task.name
             self.name_label = QLabel(title)
             self.name_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
+                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
                 " border: none; background: transparent;"
             )
             layout.addWidget(self.name_label)

@@ -26,7 +26,7 @@ class ResourceSummaryBar(QFrame):
 
             name_label = QLabel(tokens.RESOURCE_LABELS[rtype])
             name_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
+                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
             )
             group_layout.addWidget(name_label)
 

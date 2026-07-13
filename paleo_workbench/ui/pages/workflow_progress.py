@@ -28,7 +28,7 @@ class WorkflowProgress(QWidget):
             )
             label = QLabel(tokens.STEP_LABELS[i])
             label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
+                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
             )
             status = QLabel(tokens.STATUS_TEXT["pending"])
             status.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")

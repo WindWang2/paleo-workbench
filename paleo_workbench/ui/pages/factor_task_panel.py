@@ -38,7 +38,7 @@ class FactorTaskPanel(QFrame):
             text_box.setContentsMargins(0, 0, 0, 0)
             self.name_label = QLabel(task.name)
             self.name_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
+                f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
                 " border: none; background: transparent;"
             )
             grid = task.parameters.get("grid", "50m") if task.parameters else "50m"

@@ -25,7 +25,7 @@ class MapDocumentPanel(QFrame):
 
         title = QLabel("古地理图文档")
         title.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
+            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
             " border: none; background: transparent;"
         )
         layout.addWidget(title)
@@ -58,7 +58,7 @@ class MapDocumentPanel(QFrame):
         layout.addWidget(label)
         value = QLabel(value_text)
         value.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 500;"
+            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 500;"
             " border: none; background: transparent;"
         )
         layout.addWidget(value)

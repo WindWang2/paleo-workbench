@@ -26,7 +26,7 @@ class ActionHeader(QFrame):
             "成图与审核 · — 古地理图（自动质检 + 人工审核）"
         )
         self.title_label.setStyleSheet(
-            f"color: {tokens.TEXT_PRIMARY}; font-size: 13px; font-weight: 600;"
+            f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE}; font-weight: 600;"
             " border: none; background: transparent;"
         )
         layout.addWidget(self.title_label)

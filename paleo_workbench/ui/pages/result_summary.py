@@ -56,7 +56,7 @@ class ResultSummary(QFrame):
         layout.addWidget(self.divider)
 
         self.export_title = QLabel("导出图件")
-        self._style_label(self.export_title, tokens.TEXT_PRIMARY, "13px", 600)
+        self._style_label(self.export_title, tokens.TEXT_PRIMARY, tokens.FONT_SIZE_TITLE, 600)
         layout.addWidget(self.export_title)
 
         self.export_container = QWidget()
