@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent, QPainter, QWheelEvent
 from PySide6.QtWidgets import QGraphicsView
 
@@ -25,6 +25,7 @@ class MapEditView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._shared_view_state = {"center": (0.0, 0.0), "scale": 1.0}
 
         scene = MapEditScene(self)
         self.setScene(scene)
@@ -37,7 +38,29 @@ class MapEditView(QGraphicsView):
             return
         factor = 1.15 if delta > 0 else 1.0 / 1.15
         self.scale(factor, factor)
+        self._shared_view_state = self._read_view_state()
+        self.view_state_changed.emit(self.view_state())
         event.accept()
+
+    def _read_view_state(self) -> dict:
+        center = self.mapToScene(self.viewport().rect().center())
+        return {
+            "center": (float(center.x()), float(center.y())),
+            "scale": float(self.transform().m11()),
+        }
+
+    def view_state(self) -> dict:
+        return dict(self._shared_view_state)
+
+    def apply_view_state(self, state: dict, *, emit: bool = False) -> None:
+        center = tuple(state.get("center", (0.0, 0.0)))
+        scale = float(state.get("scale", 1.0))
+        self.resetTransform()
+        self.scale(scale, scale)
+        self.centerOn(float(center[0]), float(center[1]))
+        self._shared_view_state = {"center": (float(center[0]), float(center[1])), "scale": scale}
+        if emit:
+            self.view_state_changed.emit(self.view_state())
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         scene = self.scene()
@@ -54,3 +77,4 @@ class MapEditView(QGraphicsView):
                 self.scene().sceneRect(),
                 Qt.AspectRatioMode.KeepAspectRatio,
             )
+    view_state_changed = Signal(dict)

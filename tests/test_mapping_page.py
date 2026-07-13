@@ -3,6 +3,7 @@ from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 
 
@@ -13,6 +14,7 @@ def test_mapping_page_assembles_gis_shell(qtbot):
     assert page.objectName() == "MappingPage"
     assert isinstance(page.toolbar, MapEditToolbar)
     assert isinstance(page.layer_tree, MapLayerTree)
+    assert isinstance(page.reference_panel, MapReferencePanel)
     assert isinstance(page.edit_view, MapEditView)
     assert isinstance(page.attribute_table, MapAttributeTable)
     assert page.attribute_table.maximumHeight() == 160

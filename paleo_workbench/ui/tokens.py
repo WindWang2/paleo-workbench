@@ -269,6 +269,7 @@ QFrame#ToolbarSeparator {{
 }}
 QFrame#MapLayerTree,
 QFrame#MapAttributeTable,
+QFrame#MapReferencePanel,
 QFrame#MapCanvasPanel,
 QFrame#MapChromePanel {{
     background: {BG_SIDEBAR};

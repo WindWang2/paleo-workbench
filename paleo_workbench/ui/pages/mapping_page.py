@@ -19,6 +19,7 @@ from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.mapping_helpers import (
     active_map_document,
     field_value,
@@ -76,6 +77,8 @@ class MappingPage(QWidget):
         self.center_stack.addWidget(preview_host)
 
         mid.addWidget(self.center_stack, 1)
+        self.reference_panel = MapReferencePanel()
+        mid.addWidget(self.reference_panel, 0)
         outer.addLayout(mid, 1)
 
         self.attribute_table = MapAttributeTable()
@@ -97,6 +100,9 @@ class MappingPage(QWidget):
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)
         self.layer_tree.document_selected.connect(self._on_document_selected)
         self.attribute_table.property_changed.connect(self._on_property_changed)
+        self.reference_panel.reference_visibility_changed.connect(self._on_reference_visibility_changed)
+        self.reference_panel.reference_opacity_changed.connect(self._on_reference_opacity_changed)
+        self.edit_view.view_state_changed.connect(self.reference_panel.set_view_state)
 
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
@@ -157,6 +163,7 @@ class MappingPage(QWidget):
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
+        self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
@@ -288,6 +295,7 @@ class MappingPage(QWidget):
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
+        self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
@@ -302,6 +310,24 @@ class MappingPage(QWidget):
             item = scene.item_by_id(feature_id)
             if item is not None:
                 self.attribute_table.set_feature(item.to_record())
+
+    def _reference_layer(self, layer_id: str):
+        for layer in list(getattr(self._active_document, "reference_layers", []) or []):
+            if layer.id == layer_id:
+                return layer
+        return None
+
+    def _on_reference_visibility_changed(self, layer_id: str, visible: bool) -> None:
+        layer = self._reference_layer(layer_id)
+        if layer is not None:
+            layer.visible = bool(visible)
+            self._emit_mapping_context()
+
+    def _on_reference_opacity_changed(self, layer_id: str, opacity: float) -> None:
+        layer = self._reference_layer(layer_id)
+        if layer is not None:
+            layer.opacity = max(0.0, min(1.0, float(opacity)))
+            self._emit_mapping_context()
 
     def _on_undo(self) -> None:
         scene = self._edit_scene()
