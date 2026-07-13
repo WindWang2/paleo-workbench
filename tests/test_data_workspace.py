@@ -1,41 +1,39 @@
-from PySide6.QtWidgets import QSplitter
-
-from paleo_workbench.ui.pages.action_panel import ActionPanel
 from paleo_workbench.ui.pages.data_asset_table import DataAssetTable
-from paleo_workbench.ui.pages.data_catalog_panel import DataCatalogPanel
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
+from paleo_workbench.ui.pages.inspector_panel import InspectorPanel
+from paleo_workbench.ui.pages.navigation_tree import NavigationTree
 
 
-def test_data_workspace_uses_splitter_for_table_and_reader_only(qtbot):
-    workspace = DataWorkspace()
-    qtbot.addWidget(workspace)
-
-    assert isinstance(workspace.content_splitter, QSplitter)
-    assert isinstance(workspace.asset_table, DataAssetTable)
-    assert isinstance(workspace.reader_panel, DataReaderPanel)
-    assert workspace.content_splitter.indexOf(workspace.asset_table) == 0
-    assert workspace.content_splitter.indexOf(workspace.reader_panel) == 1
-    assert workspace.content_splitter.indexOf(workspace.catalog_panel) == -1
-    assert workspace.content_splitter.indexOf(workspace.action_panel) == -1
+def test_workspace_has_three_panes(qtbot):
+    ws = DataWorkspace()
+    qtbot.addWidget(ws)
+    assert isinstance(ws.navigation_tree, NavigationTree)
+    assert isinstance(ws.asset_table, DataAssetTable)
+    assert isinstance(ws.reader_panel, DataReaderPanel)
+    assert isinstance(ws.inspector_panel, InspectorPanel)
 
 
-def test_data_workspace_wraps_catalog_and_actions_in_floating_panels(qtbot):
-    workspace = DataWorkspace()
-    qtbot.addWidget(workspace)
+def test_workspace_main_splitter_three_segments(qtbot):
+    ws = DataWorkspace()
+    qtbot.addWidget(ws)
+    assert ws.main_splitter.count() == 3
+    # Navigation | Asset table | Right column — in that order.
+    assert ws.main_splitter.widget(0) is ws.navigation_tree
+    assert ws.main_splitter.widget(1) is ws.asset_table
+    assert ws.main_splitter.widget(2) is ws.right_splitter
 
-    assert isinstance(workspace.catalog_panel, DataCatalogPanel)
-    assert isinstance(workspace.action_panel, ActionPanel)
-    assert workspace.catalog_floating_panel.is_expanded() is False
-    assert workspace.actions_floating_panel.is_expanded() is True
+
+def test_workspace_right_splitter_two_segments(qtbot):
+    ws = DataWorkspace()
+    qtbot.addWidget(ws)
+    assert ws.right_splitter.count() == 2
+    assert ws.right_splitter.widget(0) is ws.reader_panel
+    assert ws.right_splitter.widget(1) is ws.inspector_panel
 
 
-def test_data_workspace_toggles_catalog_and_reader(qtbot):
-    workspace = DataWorkspace()
-    qtbot.addWidget(workspace)
-
-    workspace.toggle_catalog_panel()
-    workspace.set_reader_visible(False)
-
-    assert workspace.catalog_floating_panel.is_expanded() is True
-    assert workspace.reader_panel.isVisible() is False
+def test_workspace_set_right_visible(qtbot):
+    ws = DataWorkspace()
+    qtbot.addWidget(ws)
+    ws.set_right_visible(False)
+    assert not ws.right_splitter.isVisible()

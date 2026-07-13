@@ -9,9 +9,8 @@ from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
 REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_reference"}
 
-# Canonical home for the smart-group category mapping. Moved here from
-# data_catalog_panel to resolve a circular import (filter_index is imported
-# during panel construction). data_catalog_panel now imports this dict.
+# Canonical home for the smart-group category mapping. Consumed by
+# NavigationTree and DataAssetTable to share the same category vocabulary.
 CATEGORIES = {
     "全部": None,
     "输入数据": "input",
@@ -110,7 +109,7 @@ class FilterIndex:
 
 
 def compute_category_counts(resources: list, artifacts: list) -> dict[str, int]:
-    """Count assets per CATEGORIES key, mirroring DataCatalogPanel logic."""
+    """Count assets per CATEGORIES key (consumed by NavigationTree)."""
     type_counts = Counter(r.type for r in resources)
     role_counts = Counter(r.artifact_role or "input" for r in resources)
     issue_count = sum(1 for r in resources if r.status in ISSUE_STATUSES)

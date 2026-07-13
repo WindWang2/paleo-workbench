@@ -42,35 +42,72 @@ def test_data_page_assembles_management_panels(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
 
-    assert page.catalog_panel is not None
+    assert page.navigation_tree is not None
     assert page.asset_table is not None
     assert page.reader_panel is not None
-    assert page.action_panel is not None
+    assert page.inspector_panel is not None
 
 
-def test_data_page_uses_resizable_content_splitter(qtbot):
+def test_data_page_uses_three_pane_splitter(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
 
-    assert isinstance(page.content_splitter, QSplitter)
-    assert page.content_splitter.indexOf(page.asset_table) == 0
-    assert page.content_splitter.indexOf(page.reader_panel) == 1
-    assert page.content_splitter.indexOf(page.catalog_panel) == -1
-    assert page.content_splitter.indexOf(page.action_panel) == -1
-    assert page.reader_panel.minimumWidth() == 320
+    assert isinstance(page.main_splitter, QSplitter)
+    assert page.main_splitter.count() == 3
+    assert page.main_splitter.widget(0) is page.navigation_tree
+    assert page.main_splitter.widget(1) is page.asset_table
+    assert page.main_splitter.widget(2) is page.right_splitter
+    assert page.right_splitter.widget(0) is page.reader_panel
+    assert page.right_splitter.widget(1) is page.inspector_panel
 
 
-def test_data_page_uses_workspace_toolbar_and_floating_panels(qtbot):
+def test_data_page_exposes_workspace_panes(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
 
     assert isinstance(page.workspace, DataWorkspace)
-    assert page.catalog_panel is page.workspace.catalog_panel
-    assert page.action_panel is page.workspace.action_panel
-    assert page.content_splitter.indexOf(page.asset_table) == 0
-    assert page.content_splitter.indexOf(page.reader_panel) == 1
-    assert page.content_splitter.indexOf(page.catalog_panel) == -1
-    assert page.content_splitter.indexOf(page.action_panel) == -1
+    assert page.navigation_tree is page.workspace.navigation_tree
+    assert page.inspector_panel is page.workspace.inspector_panel
+
+
+def test_page_selecting_asset_updates_inspector(qtbot, tmp_path: Path):
+    path = tmp_path / "notes.txt"
+    path.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.import_paths([path])
+
+    # Select via the table so the selected_asset_changed signal fires and
+    # routes to the inspector (the wiring under test).
+    page.asset_table.table.selectRow(0)
+    _wait_reader_mode(qtbot, page, "text")
+
+    # Inspector receives the selection and renders the resource metadata rows.
+    assert page.inspector_panel.metadata_table.rowCount() > 0
+
+
+def test_page_navigation_tree_routes_to_asset_table(qtbot, tmp_path: Path):
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    project.resources.extend(
+        [
+            ResourceItem(name="well.las", path=str(well), type="well_log", format="las"),
+            ResourceItem(name="notes.txt", path=str(doc), type="document", format="txt"),
+        ]
+    )
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    assert _table_row_count(page) == 2
+
+    # Emitting category_changed("测井") routes through to the asset table filter.
+    page.navigation_tree.category_changed.emit("测井")
+
+    assert _table_row_count(page) == 1
+    assert _table_text(page, 0, 0) == "well.las"
 
 
 def test_data_page_toolbar_toggles_update_checked_state(qtbot):
@@ -211,18 +248,6 @@ def test_data_page_column_change_preserves_selection_and_reader(qtbot, tmp_path:
     assert page._selected_asset == resource
 
 
-def test_action_panel_exports_buttons(qtbot):
-    from paleo_workbench.ui.pages.action_panel import ActionPanel
-
-    panel = ActionPanel()
-    qtbot.addWidget(panel)
-    assert panel.objectName() == "ActionPanel"
-    assert panel.import_btn.text() == "导入文件"
-    assert panel.import_folder_btn.text() == "导入目录"
-    assert panel.rescan_btn.text() == "重新扫描"
-    assert panel.remove_btn.text() == "移出项目"
-
-
 def test_data_page_object_name(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
@@ -241,7 +266,7 @@ def test_data_page_import_paths_updates_project_and_table(qtbot, tmp_path: Path)
     assert report.added_count == 1
     assert len(project.resources) == 1
     assert _table_row_count(page) == 1
-    assert "新增 1" in page.action_panel.status_label.text()
+    assert "新增 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
@@ -257,7 +282,7 @@ def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
     assert report.added_count == 0
     assert report.skipped_count == 1
     assert len(project.resources) == 1
-    assert "重复 1" in page.action_panel.status_label.text()
+    assert "重复 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_remove_selected_resource_unregisters_only(qtbot, tmp_path: Path):
@@ -275,7 +300,7 @@ def test_data_page_remove_selected_resource_unregisters_only(qtbot, tmp_path: Pa
     assert project.resources == []
     assert well.exists()
     assert _table_row_count(page) == 0
-    assert "已移出项目" in page.action_panel.status_label.text()
+    assert "已移出项目" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_rescan_selected_resource_marks_missing(qtbot, tmp_path: Path):
@@ -292,7 +317,7 @@ def test_data_page_rescan_selected_resource_marks_missing(qtbot, tmp_path: Path)
 
     assert rescanned is True
     assert project.resources[0].status == "missing"
-    assert "文件不存在" in page.action_panel.status_label.text()
+    assert "文件不存在" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_open_selected_folder_reports_path(qtbot, tmp_path: Path):
@@ -307,7 +332,7 @@ def test_data_page_open_selected_folder_reports_path(qtbot, tmp_path: Path):
     folder = page.open_selected_folder()
 
     assert folder == tmp_path
-    assert tmp_path.as_posix() in page.action_panel.status_label.text()
+    assert tmp_path.as_posix() in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_import_files_dialog_uses_selected_paths(
@@ -366,7 +391,7 @@ def test_data_page_starts_file_import_in_worker_thread(
     assert worker_threads
     assert worker_threads[0] is not page.thread()
     assert project.resources[0].name == "well.las"
-    assert "新增 1" in page.action_panel.status_label.text()
+    assert "新增 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_import_folder_dialog_uses_selected_folder(
@@ -428,7 +453,7 @@ def test_data_page_starts_folder_import_in_worker_thread(
     assert worker_threads
     assert worker_threads[0] is not page.thread()
     assert project.resources[0].name == "cube.sgy"
-    assert "新增 1" in page.action_panel.status_label.text()
+    assert "新增 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
@@ -466,7 +491,7 @@ def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
     assert _table_row_count(page) == 5
     assert reset_count["n"] == 1
     assert update_counts == [5]
-    assert "新增 5" in page.action_panel.operation_status_label.text()
+    assert "新增 5" in page.data_toolbar.operation_status_label.text()
     assert isinstance(page.asset_table.table, QTableView)
     assert isinstance(_table_model(page), AssetTableModel)
     # Import must not rebuild reader when nothing is selected.
@@ -506,7 +531,7 @@ def test_async_import_keeps_reader_content_for_prior_selection(
     assert len(project.resources) == 4
     assert _table_row_count(page) == 4
     assert reset_count["n"] == 1
-    assert "新增 3" in page.action_panel.operation_status_label.text()
+    assert "新增 3" in page.data_toolbar.operation_status_label.text()
     assert page.reader_panel.current_mode == "text"
     assert "alpha-content" in page.reader_panel.text_preview.toPlainText()
 
@@ -597,7 +622,7 @@ def test_data_page_uses_reader_panel(qtbot):
     qtbot.addWidget(page)
 
     assert isinstance(page.reader_panel, DataReaderPanel)
-    assert page.content_splitter.indexOf(page.reader_panel) >= 0
+    assert page.right_splitter.indexOf(page.reader_panel) == 0
 
 
 def test_data_page_selection_updates_reader_and_context_signal(qtbot, tmp_path: Path):
@@ -681,7 +706,9 @@ def test_data_page_filtering_hidden_selection_clears_reader_action_state_and_con
     assert page.reader_panel.current_mode == "empty"
     assert page.remove_btn.isEnabled() is False
     assert page.rescan_btn.isEnabled() is False
-    assert page.action_panel.selection_status_label.text() == "等待选择"
+    assert page.open_folder_btn.isEnabled() is False
+    # Inspector mirrors the cleared selection (no metadata rows).
+    assert page.inspector_panel.metadata_table.rowCount() == 0
     assert received[-1]["selected_name"] == "未选择"
     assert received[-1]["selected_type"] == ""
     assert received[-1]["selected_format"] == ""
@@ -711,7 +738,7 @@ def test_data_page_toolbar_search_filters_asset_table(qtbot, tmp_path: Path):
     assert _table_text(page, 0, 0) == "beta.txt"
 
 
-def test_data_page_floating_action_import_button_uses_background_import(
+def test_data_page_toolbar_import_button_uses_background_import(
     qtbot,
     tmp_path: Path,
     monkeypatch,
@@ -724,7 +751,7 @@ def test_data_page_floating_action_import_button_uses_background_import(
     monkeypatch.setattr(page, "_choose_import_files", lambda: [path])
 
     with qtbot.waitSignal(page.import_finished, timeout=1000):
-        page.action_panel.import_btn.click()
+        page.data_toolbar.import_btn.click()
 
     assert project.resources[0].name == "notes.txt"
 
@@ -748,7 +775,7 @@ def test_data_page_can_remove_selected_export_artifact(qtbot):
     assert project.export_artifacts == []
     assert page.reader_panel.current_mode == "empty"
     assert page.remove_btn.isEnabled() is False
-    assert "已移出项目" in page.action_panel.operation_status_label.text()
+    assert "已移出项目" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_can_open_selected_export_artifact_folder(qtbot, monkeypatch, tmp_path: Path):
@@ -777,7 +804,7 @@ def test_data_page_can_open_selected_export_artifact_folder(qtbot, monkeypatch, 
 
     assert folder == output_dir
     assert opened == [output_dir.as_posix()]
-    assert output_dir.as_posix() in page.action_panel.operation_status_label.text()
+    assert output_dir.as_posix() in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, tmp_path: Path):
@@ -789,10 +816,10 @@ def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, t
 
     page.import_paths([path])
 
-    assert "新增 1" in page.action_panel.operation_status_label.text()
+    assert "新增 1" in page.data_toolbar.operation_status_label.text()
     page.asset_table.table.selectRow(0)
     _wait_reader_mode(qtbot, page, "text")
-    assert "新增 1" in page.action_panel.operation_status_label.text()
+    assert "新增 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(

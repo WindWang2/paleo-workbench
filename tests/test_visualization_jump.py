@@ -51,12 +51,12 @@ def test_data_page_jump_switches_to_visualization(qtbot, tmp_path: Path):
 
     data_page = window.app_shell.data_page_widget()
     data_page._set_selected_asset(res)
-    assert data_page.action_panel.open_visualization_btn.isEnabled() is True
+    assert data_page.open_visualization_btn.isEnabled() is True
 
     # Avoid offscreen abort: live preview QThreads + open_ref / widget teardown.
     _wait_preview_idle(qtbot, data_page)
 
-    data_page.action_panel.open_visualization_btn.click()
+    data_page.open_visualization_btn.click()
     assert window.app_shell.page_stack.currentIndex() == PAGE_INDEX_VISUALIZATION
     assert window.app_shell.icon_rail.active_index == PAGE_INDEX_VISUALIZATION
 
@@ -80,4 +80,4 @@ def test_visualization_button_disabled_for_unsupported(qtbot, tmp_path: Path):
     data_page = window.app_shell.data_page_widget()
     data_page._preview_controller.request = lambda *a, **k: None
     data_page._set_selected_asset(res)
-    assert data_page.action_panel.open_visualization_btn.isEnabled() is False
+    assert data_page.open_visualization_btn.isEnabled() is False

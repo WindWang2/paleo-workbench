@@ -73,11 +73,12 @@ class DataPage(QWidget):
         self.workspace = DataWorkspace()
         layout.addWidget(self.workspace, 1)
 
-        self.content_splitter = self.workspace.content_splitter
-        self.catalog_panel = self.workspace.catalog_panel
+        self.navigation_tree = self.workspace.navigation_tree
         self.asset_table = self.workspace.asset_table
         self.reader_panel = self.workspace.reader_panel
-        self.action_panel = self.workspace.action_panel
+        self.inspector_panel = self.workspace.inspector_panel
+        self.main_splitter = self.workspace.main_splitter
+        self.right_splitter = self.workspace.right_splitter
 
         self.column_settings_btn = self.asset_table.column_settings_btn
         self.column_settings_menu = self.asset_table.column_settings_menu
@@ -85,11 +86,15 @@ class DataPage(QWidget):
         self.reset_columns_action = self.asset_table.reset_columns_action
         self.data_toolbar.set_column_settings_button(self.column_settings_btn)
 
-        self.import_btn = self.action_panel.import_btn
-        self.import_folder_btn = self.action_panel.import_folder_btn
-        self.rescan_btn = self.action_panel.rescan_btn
-        self.remove_btn = self.action_panel.remove_btn
-        self.open_visualization_btn = self.action_panel.open_visualization_btn
+        # Action buttons now live on the toolbar. Keep page-level aliases so
+        # existing call sites (and tests) referencing page.import_btn keep
+        # working, but they ARE the toolbar buttons — wire each signal once.
+        self.import_btn = self.data_toolbar.import_btn
+        self.import_folder_btn = self.data_toolbar.import_folder_btn
+        self.rescan_btn = self.data_toolbar.rescan_btn
+        self.remove_btn = self.data_toolbar.remove_btn
+        self.open_visualization_btn = self.data_toolbar.visualize_btn
+        self.open_folder_btn = self.data_toolbar.open_folder_btn
 
         self._preview_controller = PreviewRequestController(
             self.reader_panel.provider,
@@ -101,22 +106,20 @@ class DataPage(QWidget):
         self._preview_controller.result_ready.connect(self.reader_panel.render)
         self._preview_controller.failed.connect(self._handle_preview_failed)
 
-        self.catalog_panel.category_changed.connect(self.asset_table.set_category)
+        self.navigation_tree.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
+        self.asset_table.selected_asset_changed.connect(self.inspector_panel.update_asset)
         self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
         self.data_toolbar.import_folder_requested.connect(
             self.begin_import_folder_from_dialog
         )
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
+        self.data_toolbar.remove_requested.connect(self.remove_selected_asset)
+        self.data_toolbar.open_folder_requested.connect(self.open_selected_folder)
+        self.data_toolbar.visualize_requested.connect(self._emit_open_visualization)
         self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
         self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
         self._sync_toolbar_toggle_state()
-        self.import_btn.clicked.connect(self.begin_import_files_from_dialog)
-        self.import_folder_btn.clicked.connect(self.begin_import_folder_from_dialog)
-        self.rescan_btn.clicked.connect(self.rescan_selected_asset)
-        self.remove_btn.clicked.connect(self.remove_selected_asset)
-        self.action_panel.open_folder_btn.clicked.connect(self.open_selected_folder)
-        self.open_visualization_btn.clicked.connect(self._emit_open_visualization)
         self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
 
         self.update_state(
@@ -144,14 +147,9 @@ class DataPage(QWidget):
         self._resources = resources
         self._artifacts = artifacts or []
         self.summary_bar.update_state(state)
-        self.catalog_panel.update_counts(self._resources, self._artifacts)
+        self.navigation_tree.update_counts(self._resources, self._artifacts)
         self.asset_table.update_assets(self._resources, self._artifacts)
-        self.action_panel.update_selection_state(
-            has_resource=isinstance(self._selected_asset, ResourceItem),
-            has_asset=self._selected_asset is not None,
-            reader_mode=self.reader_panel.current_mode,
-            asset_kind=self._selected_asset_kind(),
-        )
+        self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
 
@@ -272,10 +270,10 @@ class DataPage(QWidget):
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
+        # The toolbar import buttons are the single source of truth; the page
+        # aliases (self.import_btn / self.import_folder_btn) point at them.
         self.data_toolbar.import_btn.setEnabled(not running)
         self.data_toolbar.import_folder_btn.setEnabled(not running)
-        self.import_btn.setEnabled(not running)
-        self.import_folder_btn.setEnabled(not running)
 
     def remove_selected_asset(self) -> bool:
         if self._selected_asset is None:
@@ -376,12 +374,7 @@ class DataPage(QWidget):
         self._selected_asset = asset
         self.asset_table.set_selected_asset(asset)
         self._preview_controller.request(asset)
-        self.action_panel.update_selection_state(
-            has_resource=isinstance(asset, ResourceItem),
-            has_asset=asset is not None,
-            reader_mode=self.reader_panel.current_mode,
-            asset_kind=self._selected_asset_kind(),
-        )
+        self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
 
@@ -408,14 +401,16 @@ class DataPage(QWidget):
         return self.reader_panel.current_mode
 
     def _toggle_reader_from_toolbar(self) -> None:
-        # Use isHidden() so toggle works before the page has been shown
-        # (isVisible() is False until the widget is exposed).
-        make_visible = self.reader_panel.isHidden()
-        self.workspace.set_reader_visible(make_visible)
+        # The reader toggle shows/hides the right column (reader + inspector).
+        # Use isHidden() (intent) rather than isVisible() (render state) so the
+        # toggle works before the page has been shown, and so it correctly
+        # detects an explicitly-hidden right_splitter.
+        make_visible = self.right_splitter.isHidden()
+        self.workspace.set_right_visible(make_visible)
         self.data_toolbar.reader_btn.setChecked(make_visible)
 
     def _sync_toolbar_toggle_state(self) -> None:
-        self.data_toolbar.reader_btn.setChecked(not self.reader_panel.isHidden())
+        self.data_toolbar.reader_btn.setChecked(not self.right_splitter.isHidden())
 
     def _emit_data_context(self) -> None:
         issue_count = sum(
@@ -448,12 +443,7 @@ class DataPage(QWidget):
         )
 
     def _handle_reader_mode_changed(self, _mode: str) -> None:
-        self.action_panel.update_selection_state(
-            has_resource=isinstance(self._selected_asset, ResourceItem),
-            has_asset=self._selected_asset is not None,
-            reader_mode=self.reader_panel.current_mode,
-            asset_kind=self._selected_asset_kind(),
-        )
+        self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
 
@@ -478,7 +468,20 @@ class DataPage(QWidget):
         self._set_import_status(report)
 
     def _set_action_status(self, text: str) -> None:
-        self.action_panel.operation_status_label.setText(text)
+        self.data_toolbar.operation_status_label.setText(text)
+
+    def _update_selection_action_state(self) -> None:
+        """Mirror the legacy ActionPanel.update_selection_state enable rules.
+
+        Manages enable state for rescan / remove / open-folder buttons (all on
+        the toolbar now) based on the current selection. The toolbar has no
+        selection-status label, so only button enable state is synchronized.
+        """
+        has_resource = isinstance(self._selected_asset, ResourceItem)
+        has_asset = self._selected_asset is not None
+        self.rescan_btn.setEnabled(has_resource and not self._import_in_progress)
+        self.remove_btn.setEnabled(has_asset)
+        self.open_folder_btn.setEnabled(has_asset)
 
     def _selected_asset_kind(self) -> str:
         if isinstance(self._selected_asset, ResourceItem):

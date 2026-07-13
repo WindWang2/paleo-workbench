@@ -3,14 +3,11 @@
 from importlib import import_module
 
 __all__ = [
-    "ActionPanel",
     "DataAssetTable",
-    "DataCatalogPanel",
     "DataDetailPanel",
     "DataPage",
     "DataToolbar",
     "DataWorkspace",
-    "FloatingPanel",
     "HomePage",
     "MappingPage",
     "PreparationPage",
@@ -22,14 +19,11 @@ __all__ = [
 ]
 
 _EXPORTS = {
-    "ActionPanel": "paleo_workbench.ui.pages.action_panel",
     "DataAssetTable": "paleo_workbench.ui.pages.data_asset_table",
-    "DataCatalogPanel": "paleo_workbench.ui.pages.data_catalog_panel",
     "DataDetailPanel": "paleo_workbench.ui.pages.data_detail_panel",
     "DataPage": "paleo_workbench.ui.pages.data_page",
     "DataToolbar": "paleo_workbench.ui.pages.data_toolbar",
     "DataWorkspace": "paleo_workbench.ui.pages.data_workspace",
-    "FloatingPanel": "paleo_workbench.ui.pages.floating_panel",
     "HomePage": "paleo_workbench.ui.pages.home_page",
     "MappingPage": "paleo_workbench.ui.pages.mapping_page",
     "PreparationPage": "paleo_workbench.ui.pages.preparation_page",
