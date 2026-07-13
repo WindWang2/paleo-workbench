@@ -24,7 +24,7 @@ class PdfPreviewPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(tokens.SPACE_2)
 
         self.image_label = QLabel()
         self.image_label.setObjectName("DataPreviewPdf")
@@ -33,7 +33,7 @@ class PdfPreviewPanel(QWidget):
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(6)
+        controls.setSpacing(tokens.SPACE_2)
         self.prev_button = QPushButton("上一页")
         self.prev_button.setObjectName("DataPreviewPdfPrevious")
         self.prev_button.clicked.connect(self.previous_page)
@@ -84,8 +84,8 @@ class DataDetailPanel(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        layout.setSpacing(tokens.SPACE_3)
 
         self.title_label = QLabel("请选择数据项")
         self.title_label.setStyleSheet(
@@ -94,7 +94,7 @@ class DataDetailPanel(QFrame):
         layout.addWidget(self.title_label)
 
         self.metadata_layout = QVBoxLayout()
-        self.metadata_layout.setSpacing(4)
+        self.metadata_layout.setSpacing(tokens.SPACE_1)
         layout.addLayout(self.metadata_layout)
 
         self.preview_title = QLabel("预览")
@@ -104,7 +104,7 @@ class DataDetailPanel(QFrame):
         layout.addWidget(self.preview_title)
 
         self.preview_layout = QVBoxLayout()
-        self.preview_layout.setSpacing(4)
+        self.preview_layout.setSpacing(tokens.SPACE_1)
         layout.addLayout(self.preview_layout)
         layout.addStretch()
 

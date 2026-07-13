@@ -45,8 +45,8 @@ class DataReaderPanel(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        layout.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("请选择数据项")
         self.title_label.setObjectName("DataReaderTitle")

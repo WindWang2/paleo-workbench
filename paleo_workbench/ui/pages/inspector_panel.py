@@ -20,8 +20,8 @@ class InspectorPanel(QFrame):
             f" border-radius: {tokens.RADIUS_CARD}px; }}"
         )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        layout.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("检查器")
         self.title_label.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-weight: 600;")

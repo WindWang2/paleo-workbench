@@ -16,6 +16,7 @@ from paleo_workbench.resources.import_service import (
     import_folder,
 )
 from paleo_workbench.resources.scanner import scan_resources
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
@@ -61,8 +62,8 @@ class DataPage(QWidget):
         self._viz_adapter = VizAdapter()
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(16)
+        layout.setContentsMargins(tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN)
+        layout.setSpacing(tokens.SPACE_4)
 
         self.summary_bar = ResourceSummaryBar()
         layout.addWidget(self.summary_bar)
