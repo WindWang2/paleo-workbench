@@ -20,8 +20,8 @@ class IconRail(QFrame):
         self._active_index = 0
         self.nav_buttons: list[QToolButton] = []
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(7, 8, 7, 8)
-        layout.setSpacing(4)
+        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        layout.setSpacing(tokens.SPACE_1)
         for index, name in enumerate(tokens.PAGE_NAMES):
             btn = QToolButton()
             btn.setText(name)

@@ -4,6 +4,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton
 
+from paleo_workbench.ui import tokens
+
 _MENU_LABELS = ["视图", "工具", "帮助"]
 
 
@@ -19,8 +21,8 @@ class MenuBar(QFrame):
         self.setObjectName("MenuBar")
         self.labels: list[QLabel] = []
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 0)
-        layout.setSpacing(24)
+        layout.setContentsMargins(tokens.PAGE_MARGIN, 0, tokens.PAGE_MARGIN, 0)
+        layout.setSpacing(tokens.SPACE_4)
 
         self.project_menu_button = QPushButton("工程与文件")
         self.project_menu_button.setObjectName("ProjectMenuButton")

@@ -26,7 +26,7 @@ class HeaderToolbar(QFrame):
         self.setObjectName("HeaderToolbar")
         self.buttons: list[QPushButton] = []
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setContentsMargins(tokens.PAGE_MARGIN, 0, tokens.PAGE_MARGIN, 0)
         layout.setSpacing(tokens.SPACE_2)
         for text, obj_name in _BUTTON_SPECS:
             btn = QPushButton(text)
