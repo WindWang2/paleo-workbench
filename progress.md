@@ -865,3 +865,20 @@ Final whole-branch review: APPROVED (ship). No Critical/Important. 2 integration
 Baseline: 612 → Final: **625 tests** (legacy floating/catalog tests deleted; new tree/inspector/workspace tests added).
 
 Next: Sub-project C (performance: virtual scrolling, import concurrency, search debounce).
+
+---
+
+## Session: 2026-07-13 — Concurrent Resource Scan (Phase C)
+
+Sub-project C of the data page overhaul. Scope narrowed after exploration: Phase 15 (virtual scroll + debounced search) and Phase 21 (checksum skip + stress harness) already completed 2/3 of the original Phase C plan. The only remaining real gap was serial `scan_resources`.
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | Parallelize scan_resources via ThreadPoolExecutor (_process_file + pool.map, order-preserving) + 6 unit tests | `1027bce` | 631 |
+| 2 | S5 stress scenario (N=10000, env-gated DATAPAGE_STRESS_S5=1) — serial vs concurrent timing | `8ae4287` | 632 |
+
+Both tasks reviewed clean. `_process_file` verified module-level + stateless (thread-safe across all transitive helpers). Backward-compatible signature (max_workers keyword-only, None default).
+
+Baseline: 625 → Final: **632 tests**.
+
+**Data page overhaul (B multimodal → A three-pane → C concurrent scan) complete.**

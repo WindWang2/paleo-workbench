@@ -545,3 +545,28 @@ Two bugs caught during integration:
 - 成果/参考资料/异常 group headers show 0 (no children — they're aggregate-only groups). Display refinement.
 - `测井参考` (well_reference) type has no leaf in the tree (omitted from TYPE_LEAVES) — counted under 参考资料 aggregate but not individually clickable.
 - Lost selection-status text (legacy ActionPanel.selection_status_label gone; inspector empty/populated state conveys selection instead).
+
+## Concurrent Resource Scan (Phase C) Notes
+
+### Why ThreadPoolExecutor (not Process/async)
+
+- `stat()` releases GIL during the kernel call.
+- `hashlib.sha256` is a C extension that releases GIL during hash computation.
+- File `open/read` is I/O (releases GIL).
+- So threads achieve real parallelism for both I/O and CPU portions. ProcessPool would add ResourceItem serialization overhead + spawn latency; asyncio wouldn't help the checksum CPU work.
+
+### _process_file Extraction
+
+The per-file loop body extracted to a module-level `_process_file(path, project_path, skip_checksum_over_bytes) -> ResourceItem | None`. Module-level (not nested) so it's independently testable and monkeypatchable. Stateless — all transitive helpers (classify_path, _checksum, relativize_path) are pure functions with no shared mutable state.
+
+### Graceful Vanished-File Skip (behavior refinement)
+
+stat OSError (file vanished between rglob and processing) → `_process_file` returns None → filtered from results. Previously this would raise uncaught, abortting the whole scan. The graceful skip is strictly safer. checksum OSError behavior is unchanged (sets checksum_error flag, still includes the resource).
+
+### S5 Stress Validation
+
+Env-gated (`DATAPAGE_STRESS_S5=1`, N override via `DATAPAGE_STRESS_S5_N`). At small N (100) thread-pool overhead makes concurrent slower than serial — expected and irrelevant (the win is at N=10000 with real checksums). The test asserts correctness only (count + order), prints both timings, no wall-clock gate — consistent with Phase 21's measurement philosophy.
+
+### Phase C Scope Discovery
+
+Original plan had 3 items (virtual scrolling, import concurrency, search debounce). Exploration revealed Phase 15 already shipped virtual scrolling + debounced search (measured non-hotspots: S1=4ms, S2=0.5ms at N=2000), and Phase 21 shipped checksum skip. The only real gap was serial scan — so Phase C became a focused single-improvement spec rather than a 3-part project. YAGNI applied: a real inverted index for FilterIndex was considered and rejected (linear scan fast enough at measured scale).

@@ -331,6 +331,20 @@ Action buttons (remove/open-folder/visualize) + import status moved to DataToolb
 - Tests: 612 → **625** (legacy panel tests deleted; new tree/inspector/workspace/filter tests added)
 - Final review: APPROVED, ship. Minor deferred: reader-btn label says 阅读器 but hides whole right column; lost selection-status text; 测井参考 has no type leaf.
 
+### Phase C: 并发扫描 Concurrent Resource Scan — ✅ COMPLETE
+
+Sub-project C of the data page overhaul. The only remaining real perf gap after Phase 15 (virtual scroll + debounced search) and Phase 21 (checksum skip + stress harness): `scan_resources` was fully serial. Parallelized via `ThreadPoolExecutor` (stat + classify + checksum per-file concurrent; GIL released by stat/IO/hashlib). Added S5 stress scenario (N=10000, env-gated `DATAPAGE_STRESS_S5=1`) for validation.
+
+Virtual scrolling and search debounce/index were already done in Phase 15/21 and measured as non-hotspots (S1=4ms, S2=0.5ms at N=2000) — no work needed.
+
+- Spec: `docs/superpowers/specs/2026-07-13-concurrent-scan-design.md`
+- Plan: `docs/superpowers/plans/2026-07-13-concurrent-scan.md`
+- Commits: `ae69a8d`..`8ae4287` (2 SDD tasks)
+- Tests: 625 → **632** (+6 scanner unit tests + S5 stress)
+- Final review: approved (self-review; both tasks individually reviewed clean)
+
+**Data page overhaul (B→A→C) complete.**
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |
