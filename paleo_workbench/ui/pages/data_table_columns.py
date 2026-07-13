@@ -21,5 +21,7 @@ COLUMN_DEFINITIONS = (
     ColumnDefinition("path", "路径"),
 )
 COLUMN_BY_KEY = {column.key: column for column in COLUMN_DEFINITIONS}
-DEFAULT_COLUMN_KEYS = [column.key for column in COLUMN_DEFINITIONS]
+# Default to name-only: the InspectorPanel shows all metadata, so the list stays lean.
+# Users can add columns back via the column-settings menu.
+DEFAULT_COLUMN_KEYS = ["name"]
 HEADERS = [column.label for column in COLUMN_DEFINITIONS]

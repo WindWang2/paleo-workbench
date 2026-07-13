@@ -32,7 +32,7 @@ def test_asset_table_uses_table_view(qtbot):
 def test_asset_table_columns(qtbot):
     table = DataAssetTable()
     qtbot.addWidget(table)
-    assert table_headers(table) == ["文件名", "类型", "格式", "状态", "角色", "大小", "来源", "路径"]
+    assert table_headers(table) == ["文件名"]
 
 
 def test_asset_table_renders_resources_and_artifacts(qtbot):
@@ -59,7 +59,9 @@ def test_asset_table_renders_resources_and_artifacts(qtbot):
 
     assert table_row_count(table) == 2
     assert table_text(table, 0, 0) == "well.las"
-    assert table_text(table, 1, 4) == "成果"
+    # Default is name-only; add the role column to verify artifact rendering.
+    table.set_visible_columns(["name", "role"])
+    assert table_text(table, 1, 1) == "成果"
 
 
 def test_asset_table_filters_by_category(qtbot):
@@ -211,7 +213,7 @@ def test_asset_table_reset_columns_restores_defaults(qtbot):
     table.set_visible_columns(["name", "format"])
     table.reset_columns()
 
-    assert table_headers(table) == ["文件名", "类型", "格式", "状态", "角色", "大小", "来源", "路径"]
+    assert table_headers(table) == ["文件名"]
 
 
 def test_asset_table_search_matches_hidden_columns(qtbot):

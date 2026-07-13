@@ -183,15 +183,16 @@ def test_data_page_has_column_settings_menu(qtbot):
     }
 
 
-def test_data_page_column_settings_toggle_hides_column(qtbot):
+def test_data_page_column_settings_toggle_shows_column(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
 
+    # Default is name-only; toggling "path" adds it.
     page.column_actions["path"].trigger()
 
-    assert "路径" not in _table_headers(page)
+    assert "路径" in _table_headers(page)
     assert "文件名" in _table_headers(page)
-    assert page.column_actions["path"].isChecked() is False
+    assert page.column_actions["path"].isChecked() is True
 
 
 def test_data_page_required_name_column_action_disabled(qtbot):
@@ -208,19 +209,11 @@ def test_data_page_reset_columns_action_restores_defaults(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
 
+    # Add a column, then reset → back to name-only default.
     page.column_actions["path"].trigger()
     page.reset_columns_action.trigger()
 
-    assert _table_headers(page) == [
-        "文件名",
-        "类型",
-        "格式",
-        "状态",
-        "角色",
-        "大小",
-        "来源",
-        "路径",
-    ]
+    assert _table_headers(page) == ["文件名"]
     assert page.asset_table.visible_column_keys() == DEFAULT_COLUMN_KEYS
 
 
