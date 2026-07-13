@@ -154,7 +154,13 @@ class MappingPage(QWidget):
             "preview": self._preview_mode,
         }
 
-    def update_state(self, map_documents: list | tuple | None) -> None:
+    def update_state(
+        self,
+        map_documents: list | tuple | None,
+        *,
+        factor_tasks: list | tuple | None = None,
+        project_crs: str | None = None,
+    ) -> None:
         documents = list(map_documents or [])
         document = active_map_document(documents)
         self._active_document = document
@@ -167,6 +173,7 @@ class MappingPage(QWidget):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
         self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
+        self.bottom_workbench.factor_shelf.update_state(list(factor_tasks or []))
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
