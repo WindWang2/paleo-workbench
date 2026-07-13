@@ -1,4 +1,4 @@
-from paleo_workbench.ui.app_shell import AppShell
+from paleo_workbench.ui.app_shell import AppShell, PAGE_INDEX_DATA
 from paleo_workbench.ui import tokens
 from paleo_workbench.project.models import (
     ExportArtifact,
@@ -36,6 +36,20 @@ def test_app_shell_icon_rail_switches_page(qtbot):
     qtbot.addWidget(shell)
     shell.icon_rail.nav_buttons[4].click()
     assert shell.page_stack.currentIndex() == 4
+    assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
+
+
+def test_app_shell_hides_sidebar_on_data_page_and_restores_on_navigation(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+
+    shell.icon_rail.nav_buttons[1].click()
+    assert shell.page_stack.currentIndex() == PAGE_INDEX_DATA
+    assert shell.sidebar.isHidden()
+
+    shell.icon_rail.nav_buttons[4].click()
+    assert shell.page_stack.currentIndex() == 4
+    assert not shell.sidebar.isHidden()
     assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
 
 

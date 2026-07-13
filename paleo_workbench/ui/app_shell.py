@@ -83,6 +83,7 @@ class AppShell(QWidget):
 
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)
+        self.sidebar.setVisible(index != PAGE_INDEX_DATA)
         if index == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
         elif index == PAGE_INDEX_MAPPING:
