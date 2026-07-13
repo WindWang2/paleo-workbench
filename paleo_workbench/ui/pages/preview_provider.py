@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -30,6 +32,7 @@ PreviewMode = Literal[
     "json_tree",
     "geotiff",
     "media",
+    "web_document",
 ]
 
 TEXT_FORMATS = {"txt", "text", "log", "dat", "xml"}
@@ -40,6 +43,7 @@ PDF_FORMATS = {"pdf"}
 LAS_FORMATS = {"las"}
 SEGY_FORMATS = {"sgy", "segy"}
 MARKDOWN_FORMATS = {"md", "markdown", "htm", "html"}
+HTML_FORMATS = {"htm", "html"}
 JSON_FORMATS = {"json", "geojson"}
 GEOTIFF_FORMATS = {"tif", "tiff"}
 AUDIO_FORMATS = {"wav", "mp3", "flac", "ogg", "m4a"}
@@ -172,17 +176,19 @@ class PreviewProvider:
         if fmt in SEGY_FORMATS or asset.type == "seismic":
             return self._segy_preview(asset)
 
-        if fmt in MARKDOWN_FORMATS:
+        if fmt in HTML_FORMATS:
             return PreviewResult(
-                mode="message",
+                mode="web_document",
                 title=title,
                 path=asset.path,
                 revision=revision,
                 format=asset.format,
                 status=asset.status,
                 type_label=asset.type,
-                message="此类文档不提供内置预览，可使用打开目录定位文件",
             )
+
+        if fmt in MARKDOWN_FORMATS:
+            return self._markdown_web_preview(asset)
 
         if fmt in JSON_FORMATS:
             return self._json_preview(asset)
@@ -468,37 +474,95 @@ class PreviewProvider:
             table_rows=tuple(table_rows),
         )
 
-    def _rich_text_preview(self, resource: ResourceItem) -> PreviewResult:
+    def _markdown_web_preview(self, resource: ResourceItem) -> PreviewResult:
         path = Path(resource.path)
-        try:
-            raw = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return PreviewResult(
-                mode="message",
-                title=resource.name,
-                path=resource.path,
-                revision=self._resource_revision_token(resource),
-                format=resource.format,
-                status=resource.status,
-                type_label=resource.type,
-                message="文件不存在",
-            )
-        fmt = resource.format.lower()
-        if fmt in {"htm", "html"}:
-            html = raw
-        else:
-            import markdown as md_lib
-            html = md_lib.markdown(raw, extensions=["extra", "codehilite"])
+        preview_bytes, truncated = self._read_preview_chunk(path)
+        markdown = preview_bytes.decode("utf-8", errors="replace")
+        warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
         return PreviewResult(
-            mode="rich_text",
+            mode="web_document",
             title=resource.name,
             path=resource.path,
-            revision=self._resource_revision_token(resource),
+            revision=self._safe_stat(path),
             format=resource.format,
             status=resource.status,
             type_label=resource.type,
-            rich_html=html,
+            rich_html=self._markdown_to_html(markdown),
+            warning=warning,
+            truncated=truncated,
         )
+
+    @staticmethod
+    def _markdown_to_html(markdown: str) -> str:
+        rendered: list[str] = []
+        paragraph: list[str] = []
+        list_items: list[str] = []
+        list_tag = ""
+        code_lines: list[str] = []
+        in_code_block = False
+
+        def flush_paragraph() -> None:
+            if paragraph:
+                rendered.append(f"<p>{' '.join(paragraph)}</p>")
+                paragraph.clear()
+
+        def flush_list() -> None:
+            nonlocal list_tag
+            if list_items:
+                rendered.append(f"<{list_tag}>{''.join(list_items)}</{list_tag}>")
+                list_items.clear()
+            list_tag = ""
+
+        for line in markdown.splitlines():
+            if line.startswith("```"):
+                flush_paragraph()
+                flush_list()
+                if in_code_block:
+                    code = "\n".join(code_lines)
+                    rendered.append(f"<pre><code>{code}</code></pre>")
+                    code_lines.clear()
+                in_code_block = not in_code_block
+                continue
+
+            escaped = html.escape(line)
+            if in_code_block:
+                code_lines.append(escaped)
+                continue
+
+            if not line.strip():
+                flush_paragraph()
+                flush_list()
+                continue
+
+            heading = re.match(r"^(#{1,6})\s+(.*)$", line)
+            if heading:
+                flush_paragraph()
+                flush_list()
+                level = len(heading.group(1))
+                rendered.append(f"<h{level}>{html.escape(heading.group(2))}</h{level}>")
+                continue
+
+            unordered = re.match(r"^[-*]\s+(.*)$", line)
+            ordered = re.match(r"^\d+\.\s+(.*)$", line)
+            if unordered or ordered:
+                next_list_tag = "ul" if unordered else "ol"
+                if list_tag and list_tag != next_list_tag:
+                    flush_list()
+                flush_paragraph()
+                list_tag = next_list_tag
+                item = unordered.group(1) if unordered else ordered.group(1)
+                list_items.append(f"<li>{html.escape(item)}</li>")
+                continue
+
+            flush_list()
+            paragraph.append(escaped)
+
+        if in_code_block:
+            code = "\n".join(code_lines)
+            rendered.append(f"<pre><code>{code}</code></pre>")
+        flush_paragraph()
+        flush_list()
+        return "\n".join(rendered)
 
     def _dataframe_rows(
         self,

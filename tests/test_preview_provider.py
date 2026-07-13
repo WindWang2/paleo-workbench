@@ -1,4 +1,3 @@
-import builtins
 from pathlib import Path
 from unittest.mock import patch
 
@@ -324,74 +323,48 @@ def _resource(tmp_path, name, fmt, content=""):
 
 
 @pytest.mark.parametrize(("name", "fmt"), [("notes.md", "md"), ("notes.markdown", "markdown")])
-def test_markdown_preview_returns_message(tmp_path, name, fmt):
+def test_markdown_preview_returns_web_document(tmp_path, name, fmt):
     res = _resource(tmp_path, name, fmt, "# Title\n\nSome **bold** text.")
     result = PreviewProvider().preview(res)
-    assert result.mode == "message"
-    assert result.message == "此类文档不提供内置预览，可使用打开目录定位文件"
-    assert result.rich_html == ""
+    assert result.mode == "web_document"
+    assert "<h1>Title</h1>" in result.rich_html
 
 
 @pytest.mark.parametrize(("name", "fmt"), [("r.html", "html"), ("r.htm", "htm")])
-def test_html_preview_returns_message(tmp_path, name, fmt):
+def test_html_preview_returns_path_only_web_document(tmp_path, name, fmt):
     res = _resource(tmp_path, name, fmt, "<h1>Hi</h1>")
     result = PreviewProvider().preview(res)
-    assert result.mode == "message"
-    assert result.message == "此类文档不提供内置预览，可使用打开目录定位文件"
+    assert result.mode == "web_document"
+    assert result.path == res.path
     assert result.rich_html == ""
 
 
-def test_html_preview_returns_message_without_reading_full_document(tmp_path, monkeypatch):
-    path = tmp_path / "large.html"
-    path.write_text("<p>large</p>" * 100_000, encoding="utf-8")
-    resource = ResourceItem(
-        name="large.html", path=str(path), type="document", format="html"
-    )
-
-    def should_not_read(*_args, **_kwargs):
-        raise AssertionError("HTML preview must not read the document")
-
-    original_read_text = Path.read_text
-    original_read_bytes = Path.read_bytes
-    original_path_open = Path.open
-    original_builtin_open = builtins.open
-
-    def is_target(file):
-        try:
-            return Path(file).resolve() == path.resolve()
-        except TypeError:
-            return False
-
-    def fail_on_target_read_text(self, *args, **kwargs):
-        if self == path:
-            should_not_read()
-        return original_read_text(self, *args, **kwargs)
-
-    def fail_on_target_read_bytes(self, *args, **kwargs):
-        if self == path:
-            should_not_read()
-        return original_read_bytes(self, *args, **kwargs)
-
-    def fail_on_target_path_open(self, *args, **kwargs):
-        if self == path:
-            should_not_read()
-        return original_path_open(self, *args, **kwargs)
-
-    def fail_on_target_builtin_open(file, *args, **kwargs):
-        if is_target(file):
-            should_not_read()
-        return original_builtin_open(file, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fail_on_target_read_text)
-    monkeypatch.setattr(Path, "read_bytes", fail_on_target_read_bytes)
-    monkeypatch.setattr(Path, "open", fail_on_target_path_open)
-    monkeypatch.setattr(builtins, "open", fail_on_target_builtin_open)
+@pytest.mark.parametrize("fmt", ["html", "htm"])
+def test_html_web_preview_does_not_read_document(tmp_path, monkeypatch, fmt):
+    path = tmp_path / f"large.{fmt}"
+    path.write_text("<h1>large</h1>" * 100_000, encoding="utf-8")
+    resource = ResourceItem(name=path.name, path=str(path), type="document", format=fmt)
+    monkeypatch.setattr(Path, "read_text", lambda *_a, **_k: pytest.fail("must not read HTML"))
 
     result = PreviewProvider().preview(resource)
 
-    assert result.mode == "message"
-    assert result.message == "此类文档不提供内置预览，可使用打开目录定位文件"
+    assert result.mode == "web_document"
+    assert result.path == str(path)
     assert result.rich_html == ""
+
+
+def test_markdown_web_preview_is_bounded_and_escaped(tmp_path):
+    path = tmp_path / "large.md"
+    path.write_text("# Title\n\n- one\n\n<script>x</script>\n" * 50_000, encoding="utf-8")
+    resource = ResourceItem(name=path.name, path=str(path), type="document", format="md")
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "web_document"
+    assert "<h1>Title</h1>" in result.rich_html
+    assert "&lt;script&gt;x&lt;/script&gt;" in result.rich_html
+    assert result.truncated is True
+    assert result.warning == "仅显示前 256 KiB"
 
 
 def test_markdown_missing_file_falls_back(tmp_path):
