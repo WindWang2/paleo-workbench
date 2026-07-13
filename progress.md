@@ -882,3 +882,24 @@ Both tasks reviewed clean. `_process_file` verified module-level + stateless (th
 Baseline: 625 → Final: **632 tests**.
 
 **Data page overhaul (B multimodal → A three-pane → C concurrent scan) complete.**
+
+---
+
+## Session: 2026-07-13 — Global Visual Consistency Polish
+
+Three work lines via SDD (Tasks 1-4 combined + 5 + 6 + fixes).
+
+| Task | Content | Commits | Tests |
+|------|---------|---------|-------|
+| 1-4 | Tokenize ~60 hardcoded spacing/font magic numbers across 28 files (SPACE_*/PAGE_MARGIN/FONT_SIZE_*) | `237b46b`..`3201d81` | 649 |
+| fix | Tokenize 9 residual 13px literals to FONT_SIZE_TITLE (review-found) | `eb544ef` | 649 |
+| 5 | Interaction states: focus rings (SecondaryButton objectNames on PDF/media buttons) + EmptyStateLabel on empty/message placeholders + InspectorPanel empty-state | `38c6698` | 655 |
+| fix | Missing test_focus_states.py + activity_card empty-state (review-found) | `6ce8c53` | 658 |
+| 6 | Core keyboard shortcuts: 1-9 page switch (text-field guarded), Ctrl+F/N/O/S, Delete (data-page-scoped) | `1a95196` | 672 |
+| fix | Align search placeholder Ctrl+K → Ctrl+F | `15c5812` | 672 |
+
+Normalization applied: 4→SPACE_1, 6→8→SPACE_2, 10→12→SPACE_3, 14→12→PAGE_MARGIN, 24→16→SPACE_4. Zero residual hardcoded spacing/font in ui/pages (except legitimate zeros and out-of-scope 14px which has no token).
+
+Tests: 649 → 672 (+23 new: 6 empty-state + 3 focus-state + 14 keyboard-shortcut).
+
+Note: 5-6 test failures in local runs are environmental (libEGL/WebEngine GL init fails without NVIDIA driver); not code regressions. Tests pass in CI with proper GL.
