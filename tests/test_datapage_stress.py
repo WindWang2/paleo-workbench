@@ -1,10 +1,13 @@
 # tests/test_datapage_stress.py
 from __future__ import annotations
 
+import os
+
 from PySide6.QtWidgets import QApplication
 
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.resources.import_service import import_folder
+from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.filter_index import FilterIndex
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
@@ -105,3 +108,33 @@ def test_stress_s4_import_folder(tmp_path):
     timing, report = timed("S4_import_folder", lambda: import_folder(root, existing=[]))
     print_stress("S4_import_folder", n=n, ms=timing.ms)
     assert report.added_count == n
+
+
+def test_stress_s5_scan_concurrent_large(tmp_path):
+    """N=10000 tiny files: concurrent vs serial scan timing (env-gated).
+
+    Skipped unless DATAPAGE_STRESS_S5=1 to avoid slowing the default loop.
+    """
+    n = int(os.getenv("DATAPAGE_STRESS_S5_N", "10000"))
+    if os.getenv("DATAPAGE_STRESS_S5") != "1":
+        print(f"[datapage-stress] S5 SKIPPED (set DATAPAGE_STRESS_S5=1 to enable, N={n})", flush=True)
+        return
+
+    for i in range(n):
+        (tmp_path / f"f{i:05d}.dat").write_bytes(b"x")
+
+    timing_serial, serial_results = timed(
+        "S5_scan_serial", lambda: scan_resources(tmp_path, max_workers=1)
+    )
+    print_stress("S5_scan_serial", n=n, ms=timing_serial.ms)
+
+    timing_concurrent, concurrent_results = timed(
+        "S5_scan_concurrent", lambda: scan_resources(tmp_path)
+    )
+    print_stress("S5_scan_concurrent", n=n, ms=timing_concurrent.ms)
+
+    # Correctness: both scans return all files in sorted order
+    assert len(serial_results) == n
+    assert len(concurrent_results) == n
+    assert serial_results[0].name == concurrent_results[0].name
+    assert serial_results[-1].name == concurrent_results[-1].name
