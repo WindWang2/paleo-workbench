@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
 from paleo_workbench.ui import tokens
 
@@ -10,7 +10,9 @@ class DataToolbar(QWidget):
     import_files_requested = Signal()
     import_folder_requested = Signal()
     rescan_requested = Signal()
-    catalog_toggled = Signal()
+    remove_requested = Signal()
+    open_folder_requested = Signal()
+    visualize_requested = Signal()
     reader_toggled = Signal()
     search_changed = Signal(str)
 
@@ -40,6 +42,28 @@ class DataToolbar(QWidget):
         self.rescan_btn.clicked.connect(self.rescan_requested.emit)
         layout.addWidget(self.rescan_btn)
 
+        self.remove_btn = QPushButton("移出项目")
+        self.remove_btn.setObjectName("SecondaryButton")
+        self.remove_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.remove_btn.clicked.connect(self.remove_requested.emit)
+        layout.addWidget(self.remove_btn)
+
+        self.open_folder_btn = QPushButton("打开目录")
+        self.open_folder_btn.setObjectName("SecondaryButton")
+        self.open_folder_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.open_folder_btn.clicked.connect(self.open_folder_requested.emit)
+        layout.addWidget(self.open_folder_btn)
+
+        self.visualize_btn = QPushButton("可视化")
+        self.visualize_btn.setObjectName("SecondaryButton")
+        self.visualize_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.visualize_btn.clicked.connect(self.visualize_requested.emit)
+        layout.addWidget(self.visualize_btn)
+
+        self.operation_status_label = QLabel("")
+        self.operation_status_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        layout.addWidget(self.operation_status_label)
+
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(180)
@@ -59,13 +83,6 @@ class DataToolbar(QWidget):
         column_settings_layout.setContentsMargins(0, 0, 0, 0)
         column_settings_layout.setSpacing(0)
         layout.addWidget(self.column_settings_slot)
-
-        self.catalog_btn = QPushButton("目录")
-        self.catalog_btn.setObjectName("SecondaryButton")
-        self.catalog_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
-        self.catalog_btn.setCheckable(True)
-        self.catalog_btn.clicked.connect(self.catalog_toggled.emit)
-        layout.addWidget(self.catalog_btn)
 
         self.reader_btn = QPushButton("阅读器")
         self.reader_btn.setObjectName("SecondaryButton")

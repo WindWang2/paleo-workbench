@@ -79,18 +79,8 @@ def test_data_page_toolbar_toggles_update_checked_state(qtbot):
     page.show()
     qtbot.waitExposed(page)
 
-    assert page.data_toolbar.catalog_btn.isChecked() is False
-    assert page.workspace.catalog_floating_panel.is_expanded() is False
     assert page.data_toolbar.reader_btn.isChecked() is True
     assert page.reader_panel.isVisible() is True
-
-    page.data_toolbar.catalog_btn.click()
-    assert page.workspace.catalog_floating_panel.is_expanded() is True
-    assert page.data_toolbar.catalog_btn.isChecked() is True
-
-    page.data_toolbar.catalog_btn.click()
-    assert page.workspace.catalog_floating_panel.is_expanded() is False
-    assert page.data_toolbar.catalog_btn.isChecked() is False
 
     page.data_toolbar.reader_btn.click()
     assert page.reader_panel.isVisible() is False
@@ -101,20 +91,7 @@ def test_data_page_toolbar_toggles_update_checked_state(qtbot):
     assert page.data_toolbar.reader_btn.isChecked() is True
 
 
-def test_data_page_catalog_tab_syncs_toolbar_checked_state(qtbot):
-    """Floating catalog tab toggles must update the toolbar 目录 button."""
-    page = DataPage(project=ProjectDocument.new("Demo"))
-    qtbot.addWidget(page)
-    page.show()
-    qtbot.waitExposed(page)
 
-    assert page.data_toolbar.catalog_btn.isChecked() is False
-    page.workspace.catalog_floating_panel.tab_button.click()
-    assert page.workspace.catalog_floating_panel.is_expanded() is True
-    assert page.data_toolbar.catalog_btn.isChecked() is True
-    page.workspace.catalog_floating_panel.tab_button.click()
-    assert page.workspace.catalog_floating_panel.is_expanded() is False
-    assert page.data_toolbar.catalog_btn.isChecked() is False
 
 
 def test_data_page_update_state_delegates(qtbot):
