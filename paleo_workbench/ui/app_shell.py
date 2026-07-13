@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+    QApplication, QHBoxLayout, QLineEdit, QStackedWidget, QTextBrowser,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 from paleo_workbench.ui.icon_rail import IconRail
@@ -77,6 +79,33 @@ class AppShell(QWidget):
         outer.addWidget(self.status_bar)
 
         self.icon_rail.page_changed.connect(self._switch_page)
+
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        """Register 1-9 digit shortcuts that switch the active page.
+
+        The guard in :meth:`_shortcut_switch_page` blocks these while a text
+        field has focus so digit entry isn't hijacked.
+        """
+        for i in range(min(9, len(tokens.PAGE_NAMES))):
+            digit = str(i + 1)
+            QShortcut(QKeySequence(digit), self,
+                      lambda idx=i: self._shortcut_switch_page(idx))
+
+    def _shortcut_switch_page(self, idx: int) -> None:
+        """Page-switch handler bound to the 1-9 digit shortcuts.
+
+        No-op when a text-entry widget (QLineEdit/QTextEdit/QTextBrowser) has
+        focus, so typing digits into search/name fields isn't intercepted.
+        """
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+            return
+        if 0 <= idx < self.page_stack.count():
+            # Keep the icon-rail's visual active state in sync with the page.
+            self.icon_rail.set_active(idx)
+            self._switch_page(idx)
 
     def _switch_page(self, index: int) -> None:
         self.page_stack.setCurrentIndex(index)

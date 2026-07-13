@@ -6,8 +6,11 @@ from pathlib import Path
 from dataclasses import replace
 
 from PySide6.QtCore import QEvent, QObject, QThread, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.resources.import_service import (
@@ -128,6 +131,17 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+
+        # Delete removes the selected asset. Widget-scoped (parent=self) so it
+        # only fires when the DataPage or a child has focus; guarded against
+        # text-entry widgets so Delete-in-search isn't intercepted.
+        QShortcut(QKeySequence("Delete"), self, self._shortcut_remove_asset)
+
+    def _shortcut_remove_asset(self) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+            return
+        self.remove_selected_asset()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._preview_controller.shutdown()

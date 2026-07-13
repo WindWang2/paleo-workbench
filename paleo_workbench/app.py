@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from pydantic import ValidationError
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.pipeline.assets import ensure_demo_prediction
@@ -35,7 +36,32 @@ class PaleoWorkbenchWindow(QWidget):
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
         self._wire_menu_bar()
+        self._setup_shortcuts()
         self._update_title()
+
+    def _setup_shortcuts(self) -> None:
+        """Window-scoped project-op shortcuts.
+
+        Parented to ``self`` (the window) so they survive shell rebuilds; the
+        callbacks read the current ``self.app_shell`` at call-time.
+        """
+        QShortcut(QKeySequence("Ctrl+S"), self, self.save_project)
+        QShortcut(QKeySequence("Ctrl+N"), self, self.new_project)
+        QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
+        QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)
+
+    def _shortcut_focus_search(self) -> None:
+        """Focus the active search box.
+
+        If the data page is active (it has a toolbar with its own search box),
+        focus that; otherwise fall back to the header/menu-bar search box.
+        """
+        page = self.app_shell.page_stack.currentWidget()
+        toolbar = getattr(page, "data_toolbar", None)
+        if toolbar is not None and hasattr(toolbar, "search_box"):
+            toolbar.search_box.setFocus()
+            return
+        self.app_shell.menu_bar.search_box.setFocus()
 
     # --- project lifecycle (path-based, no dialogs) ---
 
