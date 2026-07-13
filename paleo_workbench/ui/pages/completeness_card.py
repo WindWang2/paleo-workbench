@@ -13,8 +13,8 @@ class DataCompletenessCard(QFrame):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4)
+        layout.setSpacing(tokens.SPACE_2)
         self.title_label = QLabel("数据完整度")
         self.title_label.setStyleSheet(
             f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
@@ -36,7 +36,7 @@ class DataCompletenessCard(QFrame):
             )
             row_layout = QHBoxLayout()
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(8)
+            row_layout.setSpacing(tokens.SPACE_2)
             row_layout.addWidget(name_label, 1)
             row_layout.addWidget(count_label)
             row_layout.addWidget(status_label)

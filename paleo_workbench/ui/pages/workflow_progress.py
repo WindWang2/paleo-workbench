@@ -24,7 +24,7 @@ class WorkflowProgress(QWidget):
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setStyleSheet(
                 f"background: {tokens.STEP_COLORS[i]}; color: #ffffff;"
-                f"border-radius: 8px; font-weight: 600;"
+                f"border-radius: {tokens.RADIUS_BADGE}px; font-weight: 600;"
             )
             label = QLabel(tokens.STEP_LABELS[i])
             label.setStyleSheet(
@@ -33,8 +33,8 @@ class WorkflowProgress(QWidget):
             status = QLabel(tokens.STATUS_TEXT["pending"])
             status.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
             step_layout = QVBoxLayout()
-            step_layout.setContentsMargins(8, 8, 8, 8)
-            step_layout.setSpacing(4)
+            step_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+            step_layout.setSpacing(tokens.SPACE_1)
             step_layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignHCenter)
             step_layout.addWidget(label, 0, Qt.AlignmentFlag.AlignHCenter)
             step_layout.addWidget(status, 0, Qt.AlignmentFlag.AlignHCenter)

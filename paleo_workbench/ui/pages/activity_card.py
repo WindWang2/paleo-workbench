@@ -13,8 +13,8 @@ class RecentActivityCard(QFrame):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4, tokens.SPACE_4)
+        layout.setSpacing(tokens.SPACE_2)
         self.title_label = QLabel("最近活动")
         self.title_label.setStyleSheet(
             f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
@@ -26,7 +26,7 @@ class RecentActivityCard(QFrame):
         self._entries_widget = QWidget()
         self.entries_layout = QVBoxLayout(self._entries_widget)
         self.entries_layout.setContentsMargins(0, 0, 0, 0)
-        self.entries_layout.setSpacing(4)
+        self.entries_layout.setSpacing(tokens.SPACE_1)
         self._entries_widget.setLayout(self.entries_layout)
         self._scroll.setWidget(self._entries_widget)
         layout.addWidget(self._scroll, 1)
@@ -54,7 +54,7 @@ class RecentActivityCard(QFrame):
             )
             entry_layout = QHBoxLayout()
             entry_layout.setContentsMargins(0, 0, 0, 0)
-            entry_layout.setSpacing(8)
+            entry_layout.setSpacing(tokens.SPACE_2)
             entry_layout.addWidget(time_label)
             entry_layout.addWidget(desc_label, 1)
             entry_widget = QWidget()

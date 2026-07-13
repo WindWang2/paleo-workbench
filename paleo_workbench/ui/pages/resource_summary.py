@@ -13,8 +13,8 @@ class ResourceSummaryBar(QFrame):
         super().__init__(parent)
         self.setObjectName("PanelCard")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(24)
+        layout.setContentsMargins(tokens.SPACE_4, tokens.SPACE_3, tokens.SPACE_4, tokens.SPACE_3)
+        layout.setSpacing(tokens.SPACE_4)
         self.name_labels: dict[str, QLabel] = {}
         self.count_labels: dict[str, QLabel] = {}
         self.type_labels = self.count_labels
@@ -22,7 +22,7 @@ class ResourceSummaryBar(QFrame):
             group = QWidget()
             group_layout = QVBoxLayout(group)
             group_layout.setContentsMargins(0, 0, 0, 0)
-            group_layout.setSpacing(2)
+            group_layout.setSpacing(tokens.SPACE_1)
 
             name_label = QLabel(tokens.RESOURCE_LABELS[rtype])
             name_label.setStyleSheet(
