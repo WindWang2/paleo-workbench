@@ -20,6 +20,7 @@ from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
+from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
 from paleo_workbench.ui.pages.mapping_helpers import (
     active_map_document,
     field_value,
@@ -81,9 +82,11 @@ class MappingPage(QWidget):
         mid.addWidget(self.reference_panel, 0)
         outer.addLayout(mid, 1)
 
-        self.attribute_table = MapAttributeTable()
-        self.attribute_table.setMaximumHeight(160)
-        outer.addWidget(self.attribute_table, 0)
+        self.bottom_workbench = MapWorkbenchBottom()
+        self.bottom_workbench.setMaximumHeight(220)
+        self.attribute_table = self.bottom_workbench.attribute_table
+        self.attribute_table.setMaximumHeight(220)
+        outer.addWidget(self.bottom_workbench, 0)
 
         self.toolbar.tool_changed.connect(self._on_tool_changed)
         self.toolbar.undo_requested.connect(self._on_undo)
@@ -246,7 +249,7 @@ class MappingPage(QWidget):
 
     def _apply_mode_ui(self) -> None:
         self.center_stack.setCurrentIndex(1 if self._preview_mode else 0)
-        self.attribute_table.setVisible(not self._preview_mode)
+        self.bottom_workbench.setVisible(not self._preview_mode)
 
     def _refresh_preview(self) -> None:
         doc = self._active_document

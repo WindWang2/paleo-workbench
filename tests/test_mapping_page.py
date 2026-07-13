@@ -17,7 +17,7 @@ def test_mapping_page_assembles_gis_shell(qtbot):
     assert isinstance(page.reference_panel, MapReferencePanel)
     assert isinstance(page.edit_view, MapEditView)
     assert isinstance(page.attribute_table, MapAttributeTable)
-    assert page.attribute_table.maximumHeight() == 160
+    assert page.attribute_table.maximumHeight() == 220
 
 
 def test_mapping_page_update_state_sets_layer_tree(qtbot):
