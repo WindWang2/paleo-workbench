@@ -5,10 +5,30 @@ from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
-from paleo_workbench.ui.pages.data_catalog_panel import CATEGORIES
 
 ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
 REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_reference"}
+
+# Canonical home for the smart-group category mapping. Moved here from
+# data_catalog_panel to resolve a circular import (filter_index is imported
+# during panel construction). data_catalog_panel now imports this dict.
+CATEGORIES = {
+    "全部": None,
+    "输入数据": "input",
+    "成果": "artifact",
+    "参考资料": "reference",
+    "异常": "issue",
+    "测井": "well_log",
+    "地震": "seismic",
+    "层位": "horizon",
+    "井分层": "well_stratification",
+    "时深": "time_depth",
+    "表格": "tabular",
+    "文档": "document",
+    "影像": "image_reference",
+    "参考图": "reference_map",
+    "未知": "unknown",
+}
 
 _STATUS_LABELS = {
     "indexed": "已索引",

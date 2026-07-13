@@ -4,25 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-
-
-CATEGORIES = {
-    "全部": None,
-    "输入数据": "input",
-    "成果": "artifact",
-    "参考资料": "reference",
-    "异常": "issue",
-    "测井": "well_log",
-    "地震": "seismic",
-    "层位": "horizon",
-    "井分层": "well_stratification",
-    "时深": "time_depth",
-    "表格": "tabular",
-    "文档": "document",
-    "影像": "image_reference",
-    "参考图": "reference_map",
-    "未知": "unknown",
-}
+from paleo_workbench.ui.pages.filter_index import CATEGORIES
 
 
 class DataCatalogPanel(QFrame):
@@ -61,8 +43,9 @@ class DataCatalogPanel(QFrame):
         layout.addStretch()
 
     def update_counts(self, resources: list, artifacts: list) -> None:
-        # Lazy import avoids a circular import: filter_index imports CATEGORIES
-        # from this module at load time. Temporary wiring — panel deleted in Task 6.
+        # CATEGORIES now lives in filter_index (canonical home). Importing
+        # compute_category_counts here is no longer circular. Temporary wiring
+        # — DataCatalogPanel is replaced by NavigationTree and deleted in Task 6.
         from paleo_workbench.ui.pages.filter_index import compute_category_counts
 
         counts = compute_category_counts(resources, artifacts)
