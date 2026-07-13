@@ -322,19 +322,41 @@ def _resource(tmp_path, name, fmt, content=""):
     return ResourceItem(name=name, path=str(p), type="document", format=fmt, status="parsed")
 
 
-def test_markdown_preview_renders_html(tmp_path):
-    res = _resource(tmp_path, "notes.md", "md", "# Title\n\nSome **bold** text.")
+@pytest.mark.parametrize(("name", "fmt"), [("notes.md", "md"), ("notes.markdown", "markdown")])
+def test_markdown_preview_returns_message(tmp_path, name, fmt):
+    res = _resource(tmp_path, name, fmt, "# Title\n\nSome **bold** text.")
     result = PreviewProvider().preview(res)
-    assert result.mode == "rich_text"
-    assert "<h1>" in result.rich_html
-    assert "<strong>bold</strong>" in result.rich_html
+    assert result.mode == "message"
+    assert result.message == "此类文档不提供内置预览，可使用打开目录定位文件"
+    assert result.rich_html == ""
 
 
-def test_html_preview_passes_through(tmp_path):
-    res = _resource(tmp_path, "r.html", "html", "<h1>Hi</h1>")
+@pytest.mark.parametrize(("name", "fmt"), [("r.html", "html"), ("r.htm", "htm")])
+def test_html_preview_returns_message(tmp_path, name, fmt):
+    res = _resource(tmp_path, name, fmt, "<h1>Hi</h1>")
     result = PreviewProvider().preview(res)
-    assert result.mode == "rich_text"
-    assert "<h1>Hi</h1>" in result.rich_html
+    assert result.mode == "message"
+    assert result.message == "此类文档不提供内置预览，可使用打开目录定位文件"
+    assert result.rich_html == ""
+
+
+def test_html_preview_returns_message_without_reading_full_document(tmp_path, monkeypatch):
+    path = tmp_path / "large.html"
+    path.write_text("<p>large</p>" * 100_000, encoding="utf-8")
+    resource = ResourceItem(
+        name="large.html", path=str(path), type="document", format="html"
+    )
+
+    def should_not_render(*_args, **_kwargs):
+        raise AssertionError("HTML preview must not read or render the document")
+
+    monkeypatch.setattr(PreviewProvider, "_rich_text_preview", should_not_render)
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "message"
+    assert result.message == "此类文档不提供内置预览，可使用打开目录定位文件"
+    assert result.rich_html == ""
 
 
 def test_markdown_missing_file_falls_back(tmp_path):

@@ -173,7 +173,16 @@ class PreviewProvider:
             return self._segy_preview(asset)
 
         if fmt in MARKDOWN_FORMATS:
-            return self._rich_text_preview(asset)
+            return PreviewResult(
+                mode="message",
+                title=title,
+                path=asset.path,
+                revision=revision,
+                format=asset.format,
+                status=asset.status,
+                type_label=asset.type,
+                message="此类文档不提供内置预览，可使用打开目录定位文件",
+            )
 
         if fmt in JSON_FORMATS:
             return self._json_preview(asset)
