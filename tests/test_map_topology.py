@@ -62,6 +62,17 @@ def test_scene_snap_when_enabled(qtbot):
     assert (sx2, sy2) == (0.2, 0.1)
 
 
+def test_scene_caches_snap_candidates_until_geometry_changes(qtbot):
+    scene = MapEditScene()
+    scene.load_document(PaleoMapDocument(name="M", linked_target_horizon="H", well_overlays=[{"id": "w1", "name": "A", "x": 0, "y": 0}]))
+    scene._snap_candidates()
+    scene._snap_candidates()
+    assert scene.snap_candidate_build_count() == 1
+    scene.create_feature({"id": "w2", "kind": "well", "name": "B", "coordinates": [2, 2]})
+    assert (2.0, 2.0) in scene._snap_candidates()
+    assert scene.snap_candidate_build_count() == 2
+
+
 def test_vertex_edit_sets_topology_status_warning(qtbot):
     scene = MapEditScene()
     # Start with a simple square
