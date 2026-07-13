@@ -31,7 +31,7 @@ class RecentActivityCard(QFrame):
         self._scroll.setWidget(self._entries_widget)
         layout.addWidget(self._scroll, 1)
         self.empty_label = QLabel("暂无活动")
-        self.empty_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
+        self.empty_label.setObjectName("EmptyStateLabel")
         self.entries_layout.addWidget(self.empty_label)
         self._entry_labels: list[QWidget] = []
 
