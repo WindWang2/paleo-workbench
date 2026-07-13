@@ -89,7 +89,7 @@ class RichTextPreviewWidget(QTextBrowser):
 class _LocalOnlyRequestInterceptor(QWebEngineUrlRequestInterceptor):
     """Block WebEngine resource requests outside the local document sandbox."""
 
-    _ALLOWED_SCHEMES = {"file", "data", "about"}
+    _ALLOWED_SCHEMES = {"file", "data", "about", "blob"}
 
     def interceptRequest(self, info) -> None:
         if info.requestUrl().scheme() not in self._ALLOWED_SCHEMES:
@@ -99,7 +99,7 @@ class _LocalOnlyRequestInterceptor(QWebEngineUrlRequestInterceptor):
 class _LocalOnlyPage(QWebEnginePage):
     """Reject user-initiated navigation away from local document content."""
 
-    _ALLOWED_SCHEMES = {"file", "data", "about"}
+    _ALLOWED_SCHEMES = {"file", "data", "about", "blob"}
 
     def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
         del navigation_type, is_main_frame

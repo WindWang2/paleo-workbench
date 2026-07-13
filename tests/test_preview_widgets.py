@@ -84,7 +84,12 @@ def test_local_only_request_interceptor_blocks_non_local_schemes():
         def block(self, blocked):
             self.blocked = blocked
 
-    allowed_urls = ("file:///tmp/page.html", "data:text/html,Page", "about:blank")
+    allowed_urls = (
+        "file:///tmp/page.html",
+        "data:text/html,Page",
+        "about:blank",
+        "blob:file:///tmp/bundled-asset",
+    )
     blocked_urls = (
         "http://example.com",
         "https://example.com",
@@ -111,7 +116,12 @@ def test_local_only_request_interceptor_blocks_non_local_schemes():
 
 
 def test_local_only_page_rejects_remote_navigation():
-    allowed_urls = ("file:///tmp/page.html", "data:text/html,Page", "about:blank")
+    allowed_urls = (
+        "file:///tmp/page.html",
+        "data:text/html,Page",
+        "about:blank",
+        "blob:file:///tmp/bundled-asset",
+    )
     remote_urls = (
         "http://example.com",
         "https://example.com",
