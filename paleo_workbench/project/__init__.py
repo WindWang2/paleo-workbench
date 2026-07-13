@@ -1,6 +1,7 @@
 from paleo_workbench.project.models import (
     CompilationRun,
     CoordinateReference,
+    MapReferenceLayer,
     ExportArtifact,
     FactorMapTask,
     PaleoMapDocument,
@@ -16,6 +17,7 @@ from paleo_workbench.project.models import (
 __all__ = [
     "CompilationRun",
     "CoordinateReference",
+    "MapReferenceLayer",
     "ExportArtifact",
     "FactorMapTask",
     "PaleoMapDocument",

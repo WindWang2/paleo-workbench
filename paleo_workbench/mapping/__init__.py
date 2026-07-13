@@ -12,6 +12,7 @@ from paleo_workbench.mapping.geometry_schema import (
     normalize_line,
     normalize_well,
 )
+from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 
 __all__ = [
     "FeatureKind",
@@ -22,4 +23,6 @@ __all__ = [
     "normalize_label",
     "normalize_line",
     "normalize_well",
+    "ReferenceLayerError",
+    "ReferenceLayerService",
 ]
