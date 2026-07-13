@@ -142,10 +142,10 @@ QFrame#MenuBar {{
     background: {BG_HEADER}; border-bottom: 1px solid {BORDER_STRONG};
     min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
 }}
-QFrame#HeaderToolbar {{
-    background: {BG_HEADER}; border-bottom: 1px solid {BORDER};
-    min-height: {HEADER_TOOLBAR_HEIGHT}px; max-height: {HEADER_TOOLBAR_HEIGHT}px;
+QPushButton#ProjectMenuButton {{
+    background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
 }}
+QPushButton#ProjectMenuButton:hover {{ color: {PRIMARY}; }}
 QPushButton#PrimaryButton {{
     background: {PRIMARY}; color: #ffffff; border: none;
     border-radius: {RADIUS_BUTTON}px;
