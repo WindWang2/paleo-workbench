@@ -30,11 +30,11 @@ class FactorTaskPanel(QFrame):
                 f" border-bottom: 1px solid {tokens.BORDER_LIGHT}; }}"
             )
             layout = QHBoxLayout(self)
-            layout.setContentsMargins(4, 6, 4, 6)
-            layout.setSpacing(8)
+            layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2)
+            layout.setSpacing(tokens.SPACE_2)
 
             text_box = QVBoxLayout()
-            text_box.setSpacing(2)
+            text_box.setSpacing(tokens.SPACE_1)
             text_box.setContentsMargins(0, 0, 0, 0)
             self.name_label = QLabel(task.name)
             self.name_label.setStyleSheet(
@@ -44,7 +44,7 @@ class FactorTaskPanel(QFrame):
             grid = task.parameters.get("grid", "50m") if task.parameters else "50m"
             self.sub_label = QLabel(f"{task.method} · {grid}")
             self.sub_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
+                f"color: {tokens.TEXT_SECONDARY}; font-size: {tokens.FONT_SIZE_STATUS};"
                 " border: none; background: transparent;"
             )
             text_box.addWidget(self.name_label)
@@ -60,7 +60,7 @@ class FactorTaskPanel(QFrame):
             )
             self.status_badge = QLabel(status_key)
             self.status_badge.setStyleSheet(
-                f"color: {status_color}; font-size: 11px; font-weight: 500;"
+                f"color: {status_color}; font-size: {tokens.FONT_SIZE_STATUS}; font-weight: 500;"
                 " border: none; background: transparent;"
             )
             layout.addWidget(self.status_badge)

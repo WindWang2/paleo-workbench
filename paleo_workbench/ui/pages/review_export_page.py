@@ -22,13 +22,13 @@ class ReviewExportPage(QWidget):
             tokens.PAGE_MARGIN,
             tokens.PAGE_MARGIN,
         )
-        outer.setSpacing(16)
+        outer.setSpacing(tokens.SPACE_4)
 
         self.action_header = ActionHeader()
         outer.addWidget(self.action_header, 0)
 
         content = QHBoxLayout()
-        content.setSpacing(16)
+        content.setSpacing(tokens.SPACE_4)
 
         self.qc_table = QCIssueTable()
         content.addWidget(self.qc_table, 1)

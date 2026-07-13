@@ -63,7 +63,7 @@ class ResultSummary(QFrame):
         self.export_container.setStyleSheet("border: none; background: transparent;")
         self.export_layout = QVBoxLayout(self.export_container)
         self.export_layout.setContentsMargins(0, 0, 0, 0)
-        self.export_layout.setSpacing(4)
+        self.export_layout.setSpacing(tokens.SPACE_1)
         layout.addWidget(self.export_container)
 
         layout.addStretch()
@@ -84,7 +84,7 @@ class ResultSummary(QFrame):
     @staticmethod
     def _color_label(label: QLabel, color: str) -> None:
         label.setStyleSheet(
-            f"color: {color}; font-size: 12px;"
+            f"color: {color}; font-size: {tokens.FONT_SIZE_BASE};"
             " border: none; background: transparent;"
         )
 

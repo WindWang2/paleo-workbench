@@ -20,8 +20,8 @@ class MapDocumentPanel(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN)
+        layout.setSpacing(tokens.SPACE_3)
 
         title = QLabel("古地理图文档")
         title.setStyleSheet(

@@ -88,7 +88,7 @@ class FactorPreviewGrid(QWidget):
         self.grid_container.setStyleSheet("background: transparent;")
         self.grid_layout = QGridLayout(self.grid_container)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
-        self.grid_layout.setSpacing(10)
+        self.grid_layout.setSpacing(tokens.SPACE_3)
         self.grid_layout.setColumnStretch(0, 1)
         self.grid_layout.setColumnStretch(1, 1)
         self.scroll.setWidget(self.grid_container)

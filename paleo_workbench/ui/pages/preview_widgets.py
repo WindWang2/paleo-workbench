@@ -42,6 +42,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.ui import tokens
+
 
 class MessagePreviewWidget(QLabel):
     def __init__(self, parent=None):
@@ -154,7 +156,7 @@ class SummaryTablePreviewWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(tokens.SPACE_2)
 
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
@@ -396,7 +398,7 @@ class GeoTiffPreviewWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(tokens.SPACE_2)
         self._image_label = QLabel()
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_label.setMinimumHeight(160)
@@ -529,7 +531,7 @@ class MediaPreviewWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(tokens.SPACE_2)
         self.status_label = QLabel("未加载")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)

@@ -18,8 +18,8 @@ class MapChromePanel(QFrame):
         self.setFixedWidth(220)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN)
+        layout.setSpacing(tokens.SPACE_3)
 
         title = QLabel("图面要素")
         title.setObjectName("MapDockTitle")

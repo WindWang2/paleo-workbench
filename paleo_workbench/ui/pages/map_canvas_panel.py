@@ -16,8 +16,8 @@ class MapCanvasPanel(QFrame):
         self.setObjectName("MapCanvasPanel")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
-        outer.setSpacing(8)
+        outer.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        outer.setSpacing(tokens.SPACE_2)
 
         self.title_label = QLabel("编图画布")
         self.title_label.setObjectName("MapDockTitle")

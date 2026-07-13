@@ -19,8 +19,8 @@ class ActionHeader(QFrame):
         self.setObjectName("PanelCard")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3)
+        layout.setSpacing(tokens.SPACE_3)
 
         self.title_label = QLabel(
             "成图与审核 · — 古地理图（自动质检 + 人工审核）"
@@ -32,7 +32,7 @@ class ActionHeader(QFrame):
         layout.addWidget(self.title_label)
 
         button_row = QHBoxLayout()
-        button_row.setSpacing(8)
+        button_row.setSpacing(tokens.SPACE_2)
         self.run_btn = QPushButton("运行检查")
         self.run_btn.setObjectName("PrimaryButton")
         button_row.addWidget(self.run_btn)

@@ -26,7 +26,7 @@ class ResourceTable(QWidget):
             f" border: 1px solid {tokens.BORDER};"
             f" border-radius: {tokens.RADIUS_CARD}px; }}"
             f" QHeaderView::section {{ background: {tokens.BG_HEADER};"
-            f" font-weight: 600; font-size: 12.5px;"
+            f" font-weight: 600; font-size: {tokens.FONT_SIZE_BASE};"
             f" color: {tokens.TEXT_PRIMARY};"
             f" border: none; border-bottom: 1px solid {tokens.BORDER}; }}"
         )

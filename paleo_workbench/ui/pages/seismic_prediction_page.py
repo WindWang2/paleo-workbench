@@ -23,10 +23,10 @@ class SeismicPredictionPage(QWidget):
             tokens.PAGE_MARGIN,
             tokens.PAGE_MARGIN,
         )
-        outer.setSpacing(16)
+        outer.setSpacing(tokens.SPACE_4)
 
         content = QHBoxLayout()
-        content.setSpacing(16)
+        content.setSpacing(tokens.SPACE_4)
 
         self.task_panel = SeismicTaskPanel()
         content.addWidget(self.task_panel, 0)
