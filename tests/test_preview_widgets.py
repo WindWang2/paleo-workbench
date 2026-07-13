@@ -1,6 +1,12 @@
+from PySide6.QtGui import QPainter, QPdfWriter
+
+from paleo_workbench.project.manager import ProjectManager
+from paleo_workbench.project.models import ProjectDocument, ResourceItem
+from paleo_workbench.ui.pages.preview_provider import PreviewProvider
 from paleo_workbench.ui.pages.preview_widgets import (
     GeoTiffPreviewWidget,
     JsonTreePreviewWidget,
+    PdfPreviewWidget,
     RichTextPreviewWidget,
 )
 
@@ -83,6 +89,37 @@ def test_geotiff_widget_loads_metadata(qtbot):
     assert w.summary_table.rowCount() == 2
     # Thumbnail QLabel should now hold a pixmap (decoded from PNG bytes).
     assert w.pixmap() is not None
+
+
+def test_pdf_widget_loads_relative_path_from_reopened_project(qtbot, tmp_path):
+    project_path = tmp_path / "demo.paleo.json"
+    pdf_path = tmp_path / "documents" / "report.pdf"
+    pdf_path.parent.mkdir()
+    writer = QPdfWriter(pdf_path.as_posix())
+    painter = QPainter(writer)
+    painter.drawText(100, 100, "Preview")
+    painter.end()
+    project = ProjectDocument.new("Demo")
+    project.resources.append(
+        ResourceItem(
+            name="report.pdf",
+            path=pdf_path.as_posix(),
+            type="document",
+            format="pdf",
+        )
+    )
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    resource = manager.load().resources[0]
+    result = PreviewProvider().preview(resource)
+
+    widget = PdfPreviewWidget()
+    qtbot.addWidget(widget)
+    widget.load(result.path, result.revision)
+
+    assert result.mode == "pdf"
+    assert widget.page_label.text() == "1 / 1"
+    assert widget.fallback_image.text() != "PDF 预览加载失败"
 
 
 def test_media_widget_constructs(qtbot):

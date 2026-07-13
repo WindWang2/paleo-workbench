@@ -35,3 +35,11 @@ def relativize_path(path: str, project_path: Path) -> tuple[str, bool]:
         return resolved.relative_to(project_dir).as_posix(), False
     except ValueError:
         return resolved.as_posix(), True
+
+
+def resolve_project_path(path: str, project_path: Path) -> str:
+    """Resolve a path stored in a project document for runtime file access."""
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve().as_posix()
+    return (project_path.parent / candidate).resolve().as_posix()

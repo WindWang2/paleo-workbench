@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.project.paths import ensure_artifact_layout, relativize_path
+from paleo_workbench.project.paths import (
+    ensure_artifact_layout,
+    relativize_path,
+    resolve_project_path,
+)
 
 
 class ProjectManager:
@@ -29,4 +33,13 @@ class ProjectManager:
 
     def load(self) -> ProjectDocument:
         data = json.loads(self.project_path.read_text(encoding="utf-8"))
+        # Project files keep in-project paths relative for portability. Runtime
+        # consumers such as previews must receive paths anchored to this project,
+        # rather than to the application's current working directory.
+        for resource in data.get("resources", []):
+            resource["path"] = resolve_project_path(resource["path"], self.project_path)
+        for artifact in data.get("export_artifacts", []):
+            artifact["output_path"] = resolve_project_path(
+                artifact["output_path"], self.project_path
+            )
         return ProjectDocument.model_validate(data)

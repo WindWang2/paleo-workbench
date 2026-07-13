@@ -26,7 +26,7 @@ def test_project_round_trip_uses_relative_paths(tmp_path: Path):
     manager.save(project)
     loaded = manager.load()
 
-    assert loaded.resources[0].path == "data/well.las"
+    assert loaded.resources[0].path == data_file.resolve().as_posix()
     assert loaded.resources[0].external is False
     assert artifact_dir_for(project_path) == tmp_path / "demo.artifacts"
 
@@ -53,7 +53,7 @@ def test_resaving_loaded_project_keeps_relative_resource_paths(tmp_path: Path):
     manager.save(loaded)
     reloaded = manager.load()
 
-    assert reloaded.resources[0].path == "data/well.las"
+    assert reloaded.resources[0].path == data_file.resolve().as_posix()
     assert reloaded.resources[0].external is False
 
 
@@ -100,4 +100,31 @@ def test_export_artifact_output_path_is_relativized_when_inside_project(tmp_path
     manager.save(project)
     loaded = manager.load()
 
-    assert loaded.export_artifacts[0].output_path == "exports/demo.png"
+    assert loaded.export_artifacts[0].output_path == export_file.resolve().as_posix()
+
+
+def test_loaded_relative_pdf_path_is_ready_for_preview(tmp_path: Path):
+    from paleo_workbench.ui.pages.preview_provider import PreviewProvider
+
+    project_path = tmp_path / "demo.paleo.json"
+    pdf_path = tmp_path / "documents" / "report.pdf"
+    pdf_path.parent.mkdir()
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    project = ProjectDocument.new(name="Demo")
+    project.resources.append(
+        ResourceItem(
+            name="report.pdf",
+            path=str(pdf_path),
+            type="document",
+            format="pdf",
+        )
+    )
+
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+
+    result = PreviewProvider().preview(loaded.resources[0])
+
+    assert loaded.resources[0].path == pdf_path.resolve().as_posix()
+    assert result.mode == "pdf"
