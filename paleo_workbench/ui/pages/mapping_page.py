@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.mapping.document_io import apply_features_to_document
+from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
@@ -41,6 +42,7 @@ class MappingPage(QWidget):
         self.setObjectName("MappingPage")
         self._active_document = None
         self._preview_mode = False
+        self._reference_service = ReferenceLayerService()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -171,6 +173,7 @@ class MappingPage(QWidget):
             scene.load_document(document)
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
+            self._sync_reference_snap_points(scene, document)
         self.attribute_table.set_feature(None)
         self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
         self.bottom_workbench.factor_shelf.update_state(list(factor_tasks or []))
@@ -342,6 +345,17 @@ class MappingPage(QWidget):
         if layer is not None:
             layer.opacity = max(0.0, min(1.0, float(opacity)))
             self._emit_mapping_context()
+
+    def _sync_reference_snap_points(self, scene: MapEditScene, document) -> None:
+        points: list[tuple[float, float]] = []
+        for layer in list(getattr(document, "reference_layers", []) or []):
+            if not layer.participates_in_snap or layer.source_kind != "vector":
+                continue
+            try:
+                points.extend(self._reference_service.vector_snap_points(layer))
+            except ReferenceLayerError:
+                continue
+        scene.set_reference_snap_points(points)
 
     def _on_undo(self) -> None:
         scene = self._edit_scene()

@@ -81,6 +81,7 @@ class MapEditScene(QGraphicsScene):
         self._snap_tolerance = _DEFAULT_SNAP_TOL
         self._snap_candidate_cache: list[tuple[float, float]] | None = None
         self._snap_candidate_builds = 0
+        self._reference_snap_points: list[tuple[float, float]] = []
         # Draft polyline/polygon state (tool "line" or "facies")
         self._draft_points: list[list[float]] = []
         self._draft_kind: str | None = None  # "line" | "facies"
@@ -149,6 +150,10 @@ class MapEditScene(QGraphicsScene):
 
     def set_snap_tolerance(self, tol: float) -> None:
         self._snap_tolerance = max(0.0, float(tol))
+
+    def set_reference_snap_points(self, points: list[tuple[float, float]]) -> None:
+        self._reference_snap_points = [(float(x), float(y)) for x, y in points]
+        self._invalidate_snap_candidates()
 
     def set_layer_visible(self, kind: str, visible: bool) -> None:
         key = str(kind)
@@ -1052,6 +1057,7 @@ class MapEditScene(QGraphicsScene):
                 rec = item.to_record()
                 c = rec.get("coordinates") or [0, 0]
                 pts.append((float(c[0]), float(c[1])))
+        pts.extend(self._reference_snap_points)
         self._snap_candidate_cache = pts
         self._snap_candidate_builds += 1
         return [*pts, *(tuple(p) for p in self._draft_points)]

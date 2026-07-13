@@ -73,6 +73,14 @@ def test_scene_caches_snap_candidates_until_geometry_changes(qtbot):
     assert scene.snap_candidate_build_count() == 2
 
 
+def test_scene_snaps_to_read_only_reference_points(qtbot):
+    scene = MapEditScene()
+    scene.set_snap_enabled(True)
+    scene.set_reference_snap_points([(10.0, 20.0)])
+    assert scene._snap_xy(10.1, 20.1) == (10.0, 20.0)
+    assert scene.feature_count() == 0
+
+
 def test_vertex_edit_sets_topology_status_warning(qtbot):
     scene = MapEditScene()
     # Start with a simple square
