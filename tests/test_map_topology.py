@@ -14,6 +14,20 @@ def test_self_intersection_detected():
     assert any(i["code"] == "self_intersection" for i in issues)
 
 
+def test_scene_exposes_blocking_topology_issue(qtbot):
+    scene = MapEditScene()
+    doc = PaleoMapDocument(
+        name="M", linked_target_horizon="H",
+        facies_polygons=[{"id": "bowtie", "name": "A", "coordinates": [[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]}],
+    )
+    scene.load_document(doc)
+    scene.refresh_topology()
+    ok, issues = scene.validate_for_save()
+    assert ok is False
+    assert issues[0]["feature_id"] == "bowtie"
+    assert issues[0]["severity"] == "error"
+
+
 def test_simple_ring_has_no_issues():
     ring = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]
     assert validate_ring(ring) == []
@@ -46,6 +60,25 @@ def test_scene_snap_when_enabled(qtbot):
     scene.set_snap_enabled(False)
     sx2, sy2 = scene._snap_xy(0.2, 0.1)
     assert (sx2, sy2) == (0.2, 0.1)
+
+
+def test_scene_caches_snap_candidates_until_geometry_changes(qtbot):
+    scene = MapEditScene()
+    scene.load_document(PaleoMapDocument(name="M", linked_target_horizon="H", well_overlays=[{"id": "w1", "name": "A", "x": 0, "y": 0}]))
+    scene._snap_candidates()
+    scene._snap_candidates()
+    assert scene.snap_candidate_build_count() == 1
+    scene.create_feature({"id": "w2", "kind": "well", "name": "B", "coordinates": [2, 2]})
+    assert (2.0, 2.0) in scene._snap_candidates()
+    assert scene.snap_candidate_build_count() == 2
+
+
+def test_scene_snaps_to_read_only_reference_points(qtbot):
+    scene = MapEditScene()
+    scene.set_snap_enabled(True)
+    scene.set_reference_snap_points([(10.0, 20.0)])
+    assert scene._snap_xy(10.1, 20.1) == (10.0, 20.0)
+    assert scene.feature_count() == 0
 
 
 def test_vertex_edit_sets_topology_status_warning(qtbot):

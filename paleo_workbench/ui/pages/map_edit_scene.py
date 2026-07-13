@@ -79,6 +79,9 @@ class MapEditScene(QGraphicsScene):
         # Snap
         self._snap_enabled = False
         self._snap_tolerance = _DEFAULT_SNAP_TOL
+        self._snap_candidate_cache: list[tuple[float, float]] | None = None
+        self._snap_candidate_builds = 0
+        self._reference_snap_points: list[tuple[float, float]] = []
         # Draft polyline/polygon state (tool "line" or "facies")
         self._draft_points: list[list[float]] = []
         self._draft_kind: str | None = None  # "line" | "facies"
@@ -148,6 +151,10 @@ class MapEditScene(QGraphicsScene):
     def set_snap_tolerance(self, tol: float) -> None:
         self._snap_tolerance = max(0.0, float(tol))
 
+    def set_reference_snap_points(self, points: list[tuple[float, float]]) -> None:
+        self._reference_snap_points = [(float(x), float(y)) for x, y in points]
+        self._invalidate_snap_candidates()
+
     def set_layer_visible(self, kind: str, visible: bool) -> None:
         key = str(kind)
         self._layer_visible[key] = bool(visible)
@@ -213,6 +220,7 @@ class MapEditScene(QGraphicsScene):
             apply_move=self._apply_move_one,
         )
         self._command_stack.push(cmd)
+        self._invalidate_snap_candidates()
         self.set_dirty(True)
         self.command_stack_changed.emit()
         self._refresh_vertex_handles()
@@ -362,6 +370,25 @@ class MapEditScene(QGraphicsScene):
         # Full refresh also applies adjacency warnings across facies.
         if feature_id is None:
             self._apply_adjacency_warnings()
+
+    def topology_issues(self) -> list[dict[str, object]]:
+        """Return structured issues for the bottom workbench and save gate."""
+        issues: list[dict[str, object]] = []
+        for item in self._items_by_id.values():
+            if not isinstance(item, FaciesPolygonItem):
+                continue
+            for issue in api.validate_ring(item.coordinates()):
+                issues.append({
+                    "feature_id": item.feature_id,
+                    "code": str(issue.get("code", "invalid_geometry")),
+                    "message": str(issue.get("message", "几何无效")),
+                    "severity": "error",
+                })
+        return issues
+
+    def validate_for_save(self) -> tuple[bool, list[dict[str, object]]]:
+        issues = self.topology_issues()
+        return not any(issue.get("severity") == "error" for issue in issues), issues
 
     def _apply_adjacency_warnings(self) -> None:
         facies = [
@@ -801,6 +828,7 @@ class MapEditScene(QGraphicsScene):
             apply_coordinates=self._apply_coordinates,
         )
         self._command_stack.push(cmd)
+        self._invalidate_snap_candidates()
         self.set_dirty(True)
         self.command_stack_changed.emit()
         self._refresh_vertex_handles()
@@ -811,6 +839,7 @@ class MapEditScene(QGraphicsScene):
         item = self._items_by_id.get(feature_id)
         if isinstance(item, (FaciesPolygonItem, LineItem)):
             item.set_coordinates(coordinates)
+            self._invalidate_snap_candidates()
             self.refresh_topology(feature_id)
 
     def _apply_move_one(self, feature_id: str, dx: float, dy: float) -> None:
@@ -837,12 +866,14 @@ class MapEditScene(QGraphicsScene):
         item = self._items_by_id.pop(feature_id, None)
         if item is not None and isinstance(item, QGraphicsItem):
             self.removeItem(item)
+        self._invalidate_snap_candidates()
 
     def _register_item(self, item: FeatureItemMixin) -> None:
         if not isinstance(item, QGraphicsItem):
             return
         self.addItem(item)
         self._items_by_id[item.feature_id] = item
+        self._invalidate_snap_candidates()
         visible = self._layer_visible.get(item.kind, True)
         item.setVisible(visible)
 
@@ -1001,7 +1032,15 @@ class MapEditScene(QGraphicsScene):
         candidates = self._snap_candidates()
         return api.snap_point(candidates, float(x), float(y), tol=self._snap_tolerance)
 
+    def _invalidate_snap_candidates(self) -> None:
+        self._snap_candidate_cache = None
+
+    def snap_candidate_build_count(self) -> int:
+        return self._snap_candidate_builds
+
     def _snap_candidates(self) -> list[tuple[float, float]]:
+        if self._snap_candidate_cache is not None:
+            return [*self._snap_candidate_cache, *(tuple(p) for p in self._draft_points)]
         pts: list[tuple[float, float]] = []
         for item in self._items_by_id.values():
             if isinstance(item, FaciesPolygonItem):
@@ -1018,9 +1057,10 @@ class MapEditScene(QGraphicsScene):
                 rec = item.to_record()
                 c = rec.get("coordinates") or [0, 0]
                 pts.append((float(c[0]), float(c[1])))
-        for p in self._draft_points:
-            pts.append((float(p[0]), float(p[1])))
-        return pts
+        pts.extend(self._reference_snap_points)
+        self._snap_candidate_cache = pts
+        self._snap_candidate_builds += 1
+        return [*pts, *(tuple(p) for p in self._draft_points)]
 
     # --- item factories -----------------------------------------------------
 

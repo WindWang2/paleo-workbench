@@ -141,6 +141,25 @@ class PredictionTask(BaseModel):
     seed: int | None = None
 
 
+class MapReferenceLayer(BaseModel):
+    """A GDAL-readable reference layer normalized to the project CRS."""
+
+    id: str = Field(default_factory=lambda: _id("ref"))
+    name: str
+    source_path: str
+    source_kind: Literal["raster", "vector"]
+    source_crs: str
+    project_crs: str
+    transform_wkt: str = ""
+    visible: bool = True
+    opacity: float = Field(default=0.65, ge=0.0, le=1.0)
+    order: int = 0
+    participates_in_snap: bool = False
+    cache_key: str = ""
+    status: Literal["ready", "offline", "failed"] = "ready"
+    error_message: str = ""
+
+
 class PaleoMapDocument(BaseModel):
     id: str = Field(default_factory=lambda: _id("map"))
     name: str
@@ -151,6 +170,7 @@ class PaleoMapDocument(BaseModel):
     well_overlays: list[dict[str, Any]] = Field(default_factory=list)
     line_features: list[dict[str, Any]] = Field(default_factory=list)
     label_features: list[dict[str, Any]] = Field(default_factory=list)
+    reference_layers: list[MapReferenceLayer] = Field(default_factory=list)
     map_chrome: dict[str, Any] = Field(default_factory=dict)
     view_state: dict[str, Any] = Field(default_factory=dict)
     edit_history: list[dict[str, Any]] = Field(default_factory=list)

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.mapping.document_io import apply_features_to_document
+from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
@@ -19,6 +20,8 @@ from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
+from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
 from paleo_workbench.ui.pages.mapping_helpers import (
     active_map_document,
     field_value,
@@ -39,6 +42,7 @@ class MappingPage(QWidget):
         self.setObjectName("MappingPage")
         self._active_document = None
         self._preview_mode = False
+        self._reference_service = ReferenceLayerService()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -76,11 +80,15 @@ class MappingPage(QWidget):
         self.center_stack.addWidget(preview_host)
 
         mid.addWidget(self.center_stack, 1)
+        self.reference_panel = MapReferencePanel()
+        mid.addWidget(self.reference_panel, 0)
         outer.addLayout(mid, 1)
 
-        self.attribute_table = MapAttributeTable()
-        self.attribute_table.setMaximumHeight(160)
-        outer.addWidget(self.attribute_table, 0)
+        self.bottom_workbench = MapWorkbenchBottom()
+        self.bottom_workbench.setMaximumHeight(220)
+        self.attribute_table = self.bottom_workbench.attribute_table
+        self.attribute_table.setMaximumHeight(220)
+        outer.addWidget(self.bottom_workbench, 0)
 
         self.toolbar.tool_changed.connect(self._on_tool_changed)
         self.toolbar.undo_requested.connect(self._on_undo)
@@ -97,6 +105,9 @@ class MappingPage(QWidget):
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)
         self.layer_tree.document_selected.connect(self._on_document_selected)
         self.attribute_table.property_changed.connect(self._on_property_changed)
+        self.reference_panel.reference_visibility_changed.connect(self._on_reference_visibility_changed)
+        self.reference_panel.reference_opacity_changed.connect(self._on_reference_opacity_changed)
+        self.edit_view.view_state_changed.connect(self.reference_panel.set_view_state)
 
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
@@ -145,7 +156,13 @@ class MappingPage(QWidget):
             "preview": self._preview_mode,
         }
 
-    def update_state(self, map_documents: list | tuple | None) -> None:
+    def update_state(
+        self,
+        map_documents: list | tuple | None,
+        *,
+        factor_tasks: list | tuple | None = None,
+        project_crs: str | None = None,
+    ) -> None:
         documents = list(map_documents or [])
         document = active_map_document(documents)
         self._active_document = document
@@ -156,7 +173,10 @@ class MappingPage(QWidget):
             scene.load_document(document)
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
+            self._sync_reference_snap_points(scene, document)
         self.attribute_table.set_feature(None)
+        self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
+        self.bottom_workbench.factor_shelf.update_state(list(factor_tasks or []))
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
@@ -170,6 +190,10 @@ class MappingPage(QWidget):
         if doc is None or scene is None:
             return False
         scene.refresh_topology()
+        valid, issues = scene.validate_for_save()
+        self.bottom_workbench.topology_panel.set_issues(issues)
+        if not valid:
+            return False
         features = scene.export_features()
         apply_features_to_document(doc, features)
         scene.set_dirty(False)
@@ -239,7 +263,7 @@ class MappingPage(QWidget):
 
     def _apply_mode_ui(self) -> None:
         self.center_stack.setCurrentIndex(1 if self._preview_mode else 0)
-        self.attribute_table.setVisible(not self._preview_mode)
+        self.bottom_workbench.setVisible(not self._preview_mode)
 
     def _refresh_preview(self) -> None:
         doc = self._active_document
@@ -288,6 +312,7 @@ class MappingPage(QWidget):
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
+        self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
@@ -302,6 +327,35 @@ class MappingPage(QWidget):
             item = scene.item_by_id(feature_id)
             if item is not None:
                 self.attribute_table.set_feature(item.to_record())
+
+    def _reference_layer(self, layer_id: str):
+        for layer in list(getattr(self._active_document, "reference_layers", []) or []):
+            if layer.id == layer_id:
+                return layer
+        return None
+
+    def _on_reference_visibility_changed(self, layer_id: str, visible: bool) -> None:
+        layer = self._reference_layer(layer_id)
+        if layer is not None:
+            layer.visible = bool(visible)
+            self._emit_mapping_context()
+
+    def _on_reference_opacity_changed(self, layer_id: str, opacity: float) -> None:
+        layer = self._reference_layer(layer_id)
+        if layer is not None:
+            layer.opacity = max(0.0, min(1.0, float(opacity)))
+            self._emit_mapping_context()
+
+    def _sync_reference_snap_points(self, scene: MapEditScene, document) -> None:
+        points: list[tuple[float, float]] = []
+        for layer in list(getattr(document, "reference_layers", []) or []):
+            if not layer.participates_in_snap or layer.source_kind != "vector":
+                continue
+            try:
+                points.extend(self._reference_service.vector_snap_points(layer))
+            except ReferenceLayerError:
+                continue
+        scene.set_reference_snap_points(points)
 
     def _on_undo(self) -> None:
         scene = self._edit_scene()

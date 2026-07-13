@@ -1,8 +1,10 @@
-from paleo_workbench.project.models import PaleoMapDocument
+from paleo_workbench.project.models import FactorMapTask, PaleoMapDocument
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
+from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 
 
@@ -13,9 +15,10 @@ def test_mapping_page_assembles_gis_shell(qtbot):
     assert page.objectName() == "MappingPage"
     assert isinstance(page.toolbar, MapEditToolbar)
     assert isinstance(page.layer_tree, MapLayerTree)
+    assert isinstance(page.reference_panel, MapReferencePanel)
     assert isinstance(page.edit_view, MapEditView)
     assert isinstance(page.attribute_table, MapAttributeTable)
-    assert page.attribute_table.maximumHeight() == 160
+    assert page.attribute_table.maximumHeight() == 220
 
 
 def test_mapping_page_update_state_sets_layer_tree(qtbot):
@@ -61,3 +64,17 @@ def test_mapping_page_forwards_generate_demo_draft_signal(qtbot):
 
     page.toolbar.generate_demo_draft_btn.click()
     assert received == [True]
+
+
+def test_mapping_page_loads_completed_factor_maps_into_bottom_shelf(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    tasks = [
+        FactorMapTask(name="厚度", target_horizon="H1", factor_type="厚度", method="IDW", status="complete"),
+        FactorMapTask(name="待生成", target_horizon="H1", factor_type="砂地比", method="IDW", status="pending"),
+    ]
+    page.update_state([PaleoMapDocument(name="M", linked_target_horizon="H1")], factor_tasks=tasks, project_crs="EPSG:3857")
+    cards = page.bottom_workbench.factor_shelf.grid.grid_container.findChildren(
+        FactorPreviewGrid.FactorPreviewCard
+    )
+    assert len(cards) == 1

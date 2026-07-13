@@ -14,7 +14,7 @@ def test_mapping_page_gis_shell_assembly(qtbot):
     assert isinstance(page.layer_tree, MapLayerTree)
     assert isinstance(page.edit_view, MapEditView)
     assert isinstance(page.attribute_table, MapAttributeTable)
-    assert page.attribute_table.maximumHeight() == 160
+    assert page.attribute_table.maximumHeight() == 220
     assert page.edit_view.scene() is not None
 
 
