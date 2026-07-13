@@ -482,10 +482,3 @@ class DataPage(QWidget):
         self.rescan_btn.setEnabled(has_resource and not self._import_in_progress)
         self.remove_btn.setEnabled(has_asset)
         self.open_folder_btn.setEnabled(has_asset)
-
-    def _selected_asset_kind(self) -> str:
-        if isinstance(self._selected_asset, ResourceItem):
-            return "resource"
-        if isinstance(self._selected_asset, ExportArtifact):
-            return "artifact"
-        return "none"
