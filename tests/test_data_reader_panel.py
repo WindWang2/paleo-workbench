@@ -67,9 +67,15 @@ def test_reader_panel_dispatches_web_document(tmp_path):
 
         app = QApplication([])
         panel = DataReaderPanel()
-        panel.render(PreviewResult(mode="web_document", title="page.html", path={path.as_posix()!r}))
+        panel.render(PreviewResult(
+            mode="web_document",
+            title="page.html",
+            path={path.as_posix()!r},
+            rich_html="<h1>Rendered document</h1>",
+        ))
         assert panel.stack.currentWidget() is panel.web_document_preview
         assert panel.web_document_preview.path == {path.as_posix()!r}
+        assert panel.web_document_preview.html == "<h1>Rendered document</h1>"
         app.quit()
         """
     )

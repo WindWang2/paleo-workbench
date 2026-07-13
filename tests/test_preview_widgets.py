@@ -1,3 +1,11 @@
+import os
+from pathlib import Path
+import subprocess
+import sys
+import textwrap
+from types import SimpleNamespace
+
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QPainter, QPdfWriter
 
 from paleo_workbench.project.manager import ProjectManager
@@ -9,6 +17,8 @@ from paleo_workbench.ui.pages.preview_widgets import (
     PdfPreviewWidget,
     RichTextPreviewWidget,
     WebDocumentPreviewWidget,
+    _LocalOnlyPage,
+    _LocalOnlyRequestInterceptor,
 )
 
 
@@ -60,6 +70,147 @@ def test_web_document_widget_loads_html_with_source_directory_base_url(tmp_path)
     assert widget.html == "<h1>Page</h1>"
     assert widget.base_url.isLocalFile()
     assert widget.base_url.toLocalFile() == f"{path.parent.as_posix()}/"
+
+
+def test_local_only_request_interceptor_blocks_non_local_schemes():
+    class FakeRequestInfo:
+        def __init__(self, url):
+            self._url = url
+            self.blocked = False
+
+        def requestUrl(self):
+            return self._url
+
+        def block(self, blocked):
+            self.blocked = blocked
+
+    allowed_urls = ("file:///tmp/page.html", "data:text/html,Page", "about:blank")
+    blocked_urls = (
+        "http://example.com",
+        "https://example.com",
+        "ftp://example.com",
+        "mailto:x@example.com",
+        "javascript:alert(1)",
+        "qrc:/resource.html",
+        "custom-scheme:value",
+        "relative/path.html",
+    )
+    interceptor = SimpleNamespace(
+        _ALLOWED_SCHEMES=_LocalOnlyRequestInterceptor._ALLOWED_SCHEMES,
+    )
+
+    for url in allowed_urls:
+        info = FakeRequestInfo(QUrl(url))
+        _LocalOnlyRequestInterceptor.interceptRequest(interceptor, info)
+        assert info.blocked is False
+
+    for url in blocked_urls:
+        info = FakeRequestInfo(QUrl(url))
+        _LocalOnlyRequestInterceptor.interceptRequest(interceptor, info)
+        assert info.blocked is True
+
+
+def test_local_only_page_rejects_remote_navigation():
+    allowed_urls = ("file:///tmp/page.html", "data:text/html,Page", "about:blank")
+    remote_urls = (
+        "http://example.com",
+        "https://example.com",
+        "ftp://example.com",
+        "mailto:x@example.com",
+        "javascript:alert(1)",
+        "qrc:/resource.html",
+        "custom-scheme:value",
+        "relative/path.html",
+    )
+    page = SimpleNamespace(_ALLOWED_SCHEMES=_LocalOnlyPage._ALLOWED_SCHEMES)
+
+    for url in allowed_urls:
+        assert _LocalOnlyPage.acceptNavigationRequest(page, QUrl(url), object(), True) is True
+
+    for url in remote_urls:
+        assert _LocalOnlyPage.acceptNavigationRequest(page, QUrl(url), object(), True) is False
+
+
+def test_web_document_widget_configures_local_only_security_without_chromium():
+    script = textwrap.dedent(
+        """
+        import importlib
+        import sys
+        import types
+
+        class FakeProfile:
+            def __init__(self, parent=None):
+                self.parent = parent
+                self.interceptor = None
+
+            def setUrlRequestInterceptor(self, interceptor):
+                self.interceptor = interceptor
+
+        class FakeInterceptor:
+            def __init__(self, parent=None):
+                self.parent = parent
+
+        class FakePage:
+            def __init__(self, profile, parent=None):
+                self.profile = profile
+                self.parent = parent
+
+        class FakeSettings:
+            def __init__(self):
+                self.attributes = {}
+
+            def setAttribute(self, attribute, value):
+                self.attributes[attribute] = value
+
+        class FakeWebView:
+            def __init__(self, parent=None):
+                self.parent = parent
+                self.page = None
+                self._settings = FakeSettings()
+
+            def setPage(self, page):
+                self.page = page
+
+            def settings(self):
+                return self._settings
+
+        webengine_core = types.ModuleType("PySide6.QtWebEngineCore")
+        webengine_core.QWebEnginePage = FakePage
+        webengine_core.QWebEngineProfile = FakeProfile
+        webengine_core.QWebEngineUrlRequestInterceptor = FakeInterceptor
+        webengine_core.QWebEngineSettings = type(
+            "FakeWebEngineSettings",
+            (),
+            {"WebAttribute": type("WebAttribute", (), {"LocalContentCanAccessRemoteUrls": "local-remote"})},
+        )
+        webengine_widgets = types.ModuleType("PySide6.QtWebEngineWidgets")
+        webengine_widgets.QWebEngineView = FakeWebView
+        sys.modules[webengine_core.__name__] = webengine_core
+        sys.modules[webengine_widgets.__name__] = webengine_widgets
+
+        module = importlib.import_module("paleo_workbench.ui.pages.preview_widgets")
+        widget = module.WebDocumentPreviewWidget()
+
+        assert widget._profile.parent is widget
+        assert widget._interceptor.parent is widget
+        assert widget._profile.interceptor is widget._interceptor
+        assert widget._page.profile is widget._profile
+        assert widget._page.parent is widget
+        assert widget.page is widget._page
+        assert widget.settings().attributes["local-remote"] is False
+        """
+    )
+    environment = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_json_tree_builds_from_payload(qtbot):
