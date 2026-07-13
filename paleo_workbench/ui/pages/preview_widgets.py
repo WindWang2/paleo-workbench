@@ -1,7 +1,16 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt
+from pathlib import Path
+
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, QUrl
 from PySide6.QtGui import QPixmap, QStandardItem, QStandardItemModel
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+    QWebEngineUrlRequestInterceptor,
+)
+from PySide6.QtWebEngineWidgets import QWebEngineView
 try:
     from PySide6.QtPdf import QPdfDocument
 except ImportError:  # pragma: no cover
@@ -75,6 +84,49 @@ class RichTextPreviewWidget(QTextBrowser):
 
     def load_html(self, html: str) -> None:
         self.setHtml(html)
+
+
+class _LocalOnlyRequestInterceptor(QWebEngineUrlRequestInterceptor):
+    """Block WebEngine resource requests outside the local document sandbox."""
+
+    _ALLOWED_SCHEMES = {"file", "data", "about"}
+
+    def interceptRequest(self, info) -> None:
+        if info.requestUrl().scheme() not in self._ALLOWED_SCHEMES:
+            info.block(True)
+
+
+class _LocalOnlyPage(QWebEnginePage):
+    """Reject user-initiated navigation away from local document content."""
+
+    _ALLOWED_SCHEMES = {"file", "data", "about"}
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        del navigation_type, is_main_frame
+        return url.scheme() in self._ALLOWED_SCHEMES
+
+
+class WebDocumentPreviewWidget(QWebEngineView):
+    """Render local HTML or bounded Markdown output without network access."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._profile = QWebEngineProfile(self)
+        self._interceptor = _LocalOnlyRequestInterceptor(self)
+        self._profile.setUrlRequestInterceptor(self._interceptor)
+        self._page = _LocalOnlyPage(self._profile, self)
+        self.setPage(self._page)
+        self.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
+            False,
+        )
+
+    def load_document(self, path: str, html: str = "") -> None:
+        base_url = QUrl.fromLocalFile(str(Path(path).parent) + "/")
+        if html:
+            self.setHtml(html, base_url)
+        else:
+            self.load(QUrl.fromLocalFile(path))
 
 
 class TablePreviewWidget(QTableWidget):

@@ -24,6 +24,7 @@ from paleo_workbench.ui.pages.preview_widgets import (
     SummaryTablePreviewWidget,
     TablePreviewWidget,
     TextPreviewWidget,
+    WebDocumentPreviewWidget,
 )
 
 
@@ -94,6 +95,9 @@ class DataReaderPanel(QFrame):
 
         self.rich_text_preview = RichTextPreviewWidget()
         self.stack.addWidget(self.rich_text_preview)
+
+        self.web_document_preview = WebDocumentPreviewWidget()
+        self.stack.addWidget(self.web_document_preview)
 
         self.json_tree_preview = JsonTreePreviewWidget()
         self.stack.addWidget(self.json_tree_preview)
@@ -197,6 +201,11 @@ class DataReaderPanel(QFrame):
         if result.mode == "rich_text":
             self.rich_text_preview.load_html(result.rich_html)
             self.stack.setCurrentWidget(self.rich_text_preview)
+            return
+
+        if result.mode == "web_document":
+            self.web_document_preview.load_document(result.path, result.rich_html)
+            self.stack.setCurrentWidget(self.web_document_preview)
             return
 
         if result.mode == "json_tree":

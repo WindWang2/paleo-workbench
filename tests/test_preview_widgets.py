@@ -8,6 +8,7 @@ from paleo_workbench.ui.pages.preview_widgets import (
     JsonTreePreviewWidget,
     PdfPreviewWidget,
     RichTextPreviewWidget,
+    WebDocumentPreviewWidget,
 )
 
 
@@ -17,6 +18,48 @@ def test_rich_text_widget_loads_html(qtbot):
     w.load_html("<h1>Title</h1><p>Body</p>")
     # QTextBrowser exposes its content via toHtml()
     assert "<h1" in w.toHtml().lower() or "title" in w.toHtml().lower()
+
+
+def test_web_document_widget_loads_local_file(tmp_path):
+    path = tmp_path / "page.html"
+    path.write_text("<h1>Page</h1>", encoding="utf-8")
+
+    class FakeWebView:
+        def load(self, url) -> None:
+            self.loaded_url = url
+
+        def setHtml(self, html, base_url) -> None:
+            self.html = html
+            self.base_url = base_url
+
+    widget = FakeWebView()
+
+    # Chromium cannot start its sandbox inside the offscreen test container.
+    # Exercise the real method with only its QWebEngineView transport faked.
+    WebDocumentPreviewWidget.load_document(widget, path.as_posix())
+
+    assert widget.loaded_url.isLocalFile()
+    assert widget.loaded_url.toLocalFile() == path.as_posix()
+
+
+def test_web_document_widget_loads_html_with_source_directory_base_url(tmp_path):
+    path = tmp_path / "documents" / "page.md"
+
+    class FakeWebView:
+        def load(self, url) -> None:
+            self.loaded_url = url
+
+        def setHtml(self, html, base_url) -> None:
+            self.html = html
+            self.base_url = base_url
+
+    widget = FakeWebView()
+
+    WebDocumentPreviewWidget.load_document(widget, path.as_posix(), "<h1>Page</h1>")
+
+    assert widget.html == "<h1>Page</h1>"
+    assert widget.base_url.isLocalFile()
+    assert widget.base_url.toLocalFile() == f"{path.parent.as_posix()}/"
 
 
 def test_json_tree_builds_from_payload(qtbot):

@@ -1,4 +1,8 @@
 from pathlib import Path
+import os
+import subprocess
+import sys
+import textwrap
 
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QTableWidget
@@ -15,6 +19,71 @@ def test_reader_panel_empty_state(qtbot):
 
     assert panel.current_mode == "empty"
     assert panel.title_label.text() == "请选择数据项"
+
+
+def test_reader_panel_dispatches_web_document(tmp_path):
+    path = tmp_path / "page.html"
+    script = textwrap.dedent(
+        f"""
+        import sys
+        import types
+        from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
+
+        class FakeWidget(QWidget):
+            def set_message(self, text):
+                self.message = text
+
+        class FakePdfWidget(FakeWidget):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.fallback_image = QLabel(self)
+                self.prev_btn = QPushButton(self)
+                self.next_btn = QPushButton(self)
+                self.page_label = QLabel(self)
+
+        class FakeWebDocumentWidget(FakeWidget):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.path = ""
+                self.html = ""
+
+            def load_document(self, path, html=""):
+                self.path = path
+                self.html = html
+
+        widgets = types.ModuleType("paleo_workbench.ui.pages.preview_widgets")
+        for name in (
+            "GeoTiffPreviewWidget", "ImagePreviewWidget", "JsonTreePreviewWidget",
+            "MediaPreviewWidget", "MessagePreviewWidget", "RichTextPreviewWidget",
+            "SummaryTablePreviewWidget", "TablePreviewWidget", "TextPreviewWidget",
+        ):
+            setattr(widgets, name, FakeWidget)
+        widgets.PdfPreviewWidget = FakePdfWidget
+        widgets.WebDocumentPreviewWidget = FakeWebDocumentWidget
+        sys.modules[widgets.__name__] = widgets
+
+        from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
+        from paleo_workbench.ui.pages.preview_provider import PreviewResult
+
+        app = QApplication([])
+        panel = DataReaderPanel()
+        panel.render(PreviewResult(mode="web_document", title="page.html", path={path.as_posix()!r}))
+        assert panel.stack.currentWidget() is panel.web_document_preview
+        assert panel.web_document_preview.path == {path.as_posix()!r}
+        app.quit()
+        """
+    )
+    environment = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_reader_panel_renders_text_resource(qtbot, tmp_path: Path):
@@ -789,4 +858,3 @@ def test_reader_panel_media_dispatch_via_provider(qtbot, tmp_path: Path):
     from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
 
     assert isinstance(panel.stack.currentWidget(), MediaPreviewWidget)
-
