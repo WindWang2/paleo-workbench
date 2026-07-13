@@ -844,3 +844,24 @@ Final whole-branch review: READY TO MERGE (1 Important fixed before merge: Pillo
 Baseline: 582 → Final: **612 tests** (+30 new), 1 upstream rasterio/numpy warning.
 
 Next: Sub-project A (DEVONthink 3-pane layout restructure), then C (performance).
+
+---
+
+## Session: 2026-07-13 — DEVONthink Three-Pane Layout (Phase A)
+
+Sub-project A of the data page overhaul. Restructured DataPage into fixed 3-pane layout via SDD (5 implementation tasks + 1 dead-code cleanup).
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | Extract compute_category_counts into filter_index | `ba512c8` | 615 |
+| 2 | NavigationTree (smart-group QTreeWidget + CATEGORIES move) | `3b5f0f6` | 622 |
+| 3 | InspectorPanel (read-only metadata table) | `7555938` | 627 |
+| 4 | DataToolbar extension (remove/open_folder/visualize buttons + status label; remove catalog_btn) | `02f693c` | 630 |
+| 5 | Rewrite DataWorkspace (3-pane splitter) + rewire DataPage + delete legacy (DataCatalogPanel/ActionPanel/FloatingPanel) + test migration | `5b5b696` | 625 |
+| Cleanup | Drop dead _selected_asset_kind + unused Path import | `3d82879` | 625 |
+
+Final whole-branch review: APPROVED (ship). No Critical/Important. 2 integration bugs found+fixed during Task 5 (signal double-fire, reader-toggle direction).
+
+Baseline: 612 → Final: **625 tests** (legacy floating/catalog tests deleted; new tree/inspector/workspace tests added).
+
+Next: Sub-project C (performance: virtual scrolling, import concurrency, search debounce).

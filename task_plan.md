@@ -313,6 +313,24 @@ New deps: `markdown`, `rasterio`, `pillow` (declared in pyproject). Worker prelo
 - Commits: `8eaec39`..`13643e4` (8 SDD tasks + 3 fixes: JSON bytes-first truncation, geotiff preload, Pillow dep + dead-code cleanup)
 - Tests: 582 → **612** (+30 new), all passing (1 upstream rasterio/numpy DeprecationWarning)
 
+### Phase A: DEVONthink 三栏重构 Three-Pane Layout — ✅ COMPLETE
+
+Sub-project A of the data page overhaul. Restructured DataPage from 2-splitter + floating-overlay-panel layout into a fixed DEVONthink-style 3-pane layout:
+
+| Pane | Component | Notes |
+|------|-----------|-------|
+| Left | NavigationTree (new QTreeWidget) | Smart-group tree: 全部 + 4 groups (输入数据/成果/参考资料/异常) + type leaves with count badges; emits category_changed (same CATEGORIES contract as FilterIndex) |
+| Center | DataAssetTable (unchanged) | Moved into splitter middle segment |
+| Right (vertical split) | DataReaderPanel (preview, unchanged) + InspectorPanel (new) | Inspector shows read-only metadata (name/path/type/format/CRS/tags/checksum/status/size/source/external) |
+
+Action buttons (remove/open-folder/visualize) + import status moved to DataToolbar. Deleted: DataCatalogPanel, ActionPanel, FloatingPanel. Extracted `compute_category_counts` + moved `CATEGORIES` to filter_index.py.
+
+- Spec: `docs/superpowers/specs/2026-07-13-devonthink-three-pane-design.md`
+- Plan: `docs/superpowers/plans/2026-07-13-devonthink-three-pane.md`
+- Commits: `7623a33`..`3d82879` (5 SDD tasks + 1 dead-code cleanup)
+- Tests: 612 → **625** (legacy panel tests deleted; new tree/inspector/workspace/filter tests added)
+- Final review: APPROVED, ship. Minor deferred: reader-btn label says 阅读器 but hides whole right column; lost selection-status text; 测井参考 has no type leaf.
+
 ## Known Follow-up Items (Minor, non-blocking)
 
 | # | Item | Status |

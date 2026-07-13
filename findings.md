@@ -511,3 +511,37 @@ Each returns `mode="image"` + warning "地理元数据读取失败，仅显示�
 ### Known Upstream Warning
 
 rasterio 1.5.0 + numpy 2.5: `dataset.read(out_shape=...)` emits a DeprecationWarning (numpy shape mutation). Harmless; will need a rasterio bump when numpy hard-removes the API.
+
+## DEVONthink Three-Pane Layout (Phase A) Notes
+
+### Layout Migration
+
+DataPage went from `QGridLayout` + 2 FloatingPanel overlays (catalog top-left, actions bottom-right over a 2-way QSplitter) to a fixed 3-segment horizontal QSplitter: NavigationTree | DataAssetTable | RightColumn(vertical QSplitter: DataReaderPanel | InspectorPanel). Both splitters `setChildrenCollapsible(False)`.
+
+### Category Contract Preservation
+
+The critical invariant: NavigationTree emits the SAME category-name strings (`CATEGORIES` dict keys) that `FilterIndex._matches_category` consumes. `FilterIndex`/`AssetTableModel`/`DataAssetTable` source is untouched. The tree is purely a new view over the existing filter model. `CATEGORIES` was moved from `data_catalog_panel.py` to `filter_index.py` (its canonical semantic home) to resolve a circular import.
+
+### Count Logic Extraction
+
+`compute_category_counts(resources, artifacts)` extracted from the deleted `DataCatalogPanel.update_counts` into `filter_index.py`. Pure function, Counter-based. Both NavigationTree and (formerly) DataCatalogPanel consume it.
+
+### Signal Rewiring (Task 5 integration risks)
+
+Two bugs caught during integration:
+1. **Signal double-fire**: legacy per-button `clicked.connect` lines remained alongside the new toolbar-signal connections → handlers fired twice. Fixed by removing the redundant per-button wiring.
+2. **Reader-toggle direction**: `_toggle_reader_from_toolbar` keyed off `reader_panel.isHidden()`, but `set_right_visible` hides the parent `right_splitter` (which makes `reader_panel.isHidden()` return True even when it was "visible"). Fixed by keying off `right_splitter.isHidden()`.
+
+### What was deleted
+
+- `DataCatalogPanel` (replaced by NavigationTree)
+- `ActionPanel` (buttons moved to DataToolbar)
+- `FloatingPanel` (no longer used — fixed panes replaced overlays)
+- Their tests (`test_data_catalog_panel.py`, `test_floating_panel.py`)
+
+### Known display refinements (deferred)
+
+- `reader_btn` labeled 阅读器 but hides the whole right column (reader + inspector). Relabel pending.
+- 成果/参考资料/异常 group headers show 0 (no children — they're aggregate-only groups). Display refinement.
+- `测井参考` (well_reference) type has no leaf in the tree (omitted from TYPE_LEAVES) — counted under 参考资料 aggregate but not individually clickable.
+- Lost selection-status text (legacy ActionPanel.selection_status_label gone; inspector empty/populated state conveys selection instead).
