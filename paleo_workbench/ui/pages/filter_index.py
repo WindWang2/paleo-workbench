@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -86,3 +87,22 @@ class FilterIndex:
 
         resource_type = CATEGORIES.get(category)
         return asset.type == resource_type
+
+
+def compute_category_counts(resources: list, artifacts: list) -> dict[str, int]:
+    """Count assets per CATEGORIES key, mirroring DataCatalogPanel logic."""
+    type_counts = Counter(r.type for r in resources)
+    role_counts = Counter(r.artifact_role or "input" for r in resources)
+    issue_count = sum(1 for r in resources if r.status in ISSUE_STATUSES)
+    values = {
+        "全部": len(resources) + len(artifacts),
+        "输入数据": role_counts["input"],
+        "成果": len(artifacts) + role_counts["derived"] + role_counts["export"],
+        "参考资料": sum(type_counts[k] for k in REFERENCE_TYPES),
+        "异常": issue_count,
+    }
+    result = dict(values)
+    for label, rtype in CATEGORIES.items():
+        if label not in result:
+            result[label] = type_counts[rtype] if rtype else 0
+    return result

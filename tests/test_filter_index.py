@@ -1,5 +1,5 @@
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui.pages.filter_index import FilterIndex
+from paleo_workbench.ui.pages.filter_index import FilterIndex, compute_category_counts
 
 
 def _assets():
@@ -65,3 +65,41 @@ def test_filter_issues_category():
     assets = _assets()
     idx.rebuild(assets)
     assert idx.filter("异常", "") == [1]
+
+
+def _res(rtype: str, status: str = "indexed", role: str | None = None) -> ResourceItem:
+    return ResourceItem(
+        name=f"{rtype}",
+        path=f"/x/{rtype}",
+        type=rtype,
+        format="dat",
+        status=status,
+        artifact_role=role,
+    )
+
+
+def test_counts_total_and_types():
+    resources = [_res("well_log"), _res("well_log"), _res("seismic")]
+    counts = compute_category_counts(resources, [])
+    assert counts["全部"] == 3
+    assert counts["测井"] == 2
+    assert counts["地震"] == 1
+
+
+def test_counts_artifacts_and_roles():
+    resources = [_res("well_log", role="input"), _res("horizon", role="derived")]
+    artifacts = [ExportArtifact(linked_id="x", format="tiff", output_path="/x.tif")]
+    counts = compute_category_counts(resources, artifacts)
+    assert counts["输入数据"] == 1
+    assert counts["成果"] == len(artifacts) + 1  # artifact + derived resource
+
+
+def test_counts_issues_and_references():
+    resources = [
+        _res("well_log", status="missing"),
+        _res("document"),
+        _res("image_reference"),
+    ]
+    counts = compute_category_counts(resources, [])
+    assert counts["异常"] == 1
+    assert counts["参考资料"] == 2  # document + image_reference

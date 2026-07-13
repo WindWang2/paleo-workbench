@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
-
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
@@ -63,29 +61,11 @@ class DataCatalogPanel(QFrame):
         layout.addStretch()
 
     def update_counts(self, resources: list, artifacts: list) -> None:
-        counts = Counter(resource.type for resource in resources)
-        role_counts = Counter(resource.artifact_role or "input" for resource in resources)
-        issue_count = sum(
-            1
-            for resource in resources
-            if resource.status in {"missing", "warning", "failed", "error"}
-        )
-        values = {
-            "全部": len(resources) + len(artifacts),
-            "输入数据": role_counts["input"],
-            "成果": len(artifacts) + role_counts["derived"] + role_counts["export"],
-            "参考资料": sum(
-                counts[key]
-                for key in (
-                    "document",
-                    "image_reference",
-                    "reference_map",
-                    "well_reference",
-                )
-            ),
-            "异常": issue_count,
-        }
+        # Lazy import avoids a circular import: filter_index imports CATEGORIES
+        # from this module at load time. Temporary wiring — panel deleted in Task 6.
+        from paleo_workbench.ui.pages.filter_index import compute_category_counts
 
-        for label, resource_type in CATEGORIES.items():
-            count = values.get(label, counts[resource_type] if resource_type else 0)
-            self.category_labels[label].setText(f"{label} {count}")
+        counts = compute_category_counts(resources, artifacts)
+        for label, count in counts.items():
+            if label in self.category_labels:
+                self.category_labels[label].setText(f"{label} {count}")
