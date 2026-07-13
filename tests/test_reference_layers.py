@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pytest
-from osgeo import ogr
+from osgeo import gdal, ogr, osr
 
 from paleo_workbench.mapping.reference_layers import (
     ReferenceLayerError,
@@ -38,6 +39,16 @@ def _write_unreferenced_shapefile(path) -> None:
     feature.SetGeometry(geometry)
     assert layer.CreateFeature(feature) == 0
     feature = None
+    dataset = None
+
+
+def _write_geotiff(path) -> None:
+    dataset = gdal.GetDriverByName("GTiff").Create(str(path), 8, 4, 1, gdal.GDT_Byte)
+    dataset.GetRasterBand(1).WriteArray(np.arange(32, dtype=np.uint8).reshape(4, 8))
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    dataset.SetProjection(srs.ExportToWkt())
+    dataset.SetGeoTransform([120.0, 0.1, 0.0, 30.0, 0.0, -0.1])
     dataset = None
 
 
@@ -86,3 +97,16 @@ def test_reference_layers_round_trip_on_map_document(tmp_path):
 
     assert restored.reference_layers == [layer]
     assert restored.reference_layers[0].participates_in_snap is True
+
+
+def test_raster_reference_has_bounded_preview(tmp_path):
+    source = tmp_path / "reference.tif"
+    _write_geotiff(source)
+    layer = ReferenceLayerService().import_layer(source, "EPSG:3857")
+
+    preview = ReferenceLayerService().raster_preview(layer, max_size=4)
+
+    assert layer.source_kind == "raster"
+    assert preview.width() == 4
+    assert preview.height() == 2
+    assert not preview.isNull()

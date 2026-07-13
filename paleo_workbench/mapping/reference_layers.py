@@ -5,6 +5,8 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 
+import numpy as np
+from PySide6.QtGui import QImage
 from osgeo import gdal, osr
 
 from paleo_workbench.project.models import MapReferenceLayer
@@ -108,3 +110,22 @@ class ReferenceLayerService:
                 continue
             points.extend(_geometry_points(normalized))
         return points
+
+    def raster_preview(self, layer: MapReferenceLayer, max_size: int = 512) -> QImage:
+        """Return a bounded grayscale overview for a GDAL raster reference."""
+        if layer.source_kind != "raster":
+            raise ReferenceLayerError("只有栅格参考图可以生成预览")
+        dataset = gdal.OpenEx(layer.source_path, gdal.OF_RASTER)
+        if dataset is None or dataset.RasterXSize <= 0 or dataset.RasterYSize <= 0:
+            raise ReferenceLayerError("无法读取栅格参考图")
+        limit = max(1, int(max_size))
+        scale = min(1.0, limit / max(dataset.RasterXSize, dataset.RasterYSize))
+        width = max(1, round(dataset.RasterXSize * scale))
+        height = max(1, round(dataset.RasterYSize * scale))
+        values = np.asarray(dataset.GetRasterBand(1).ReadAsArray(buf_xsize=width, buf_ysize=height), dtype=np.float64)
+        finite = values[np.isfinite(values)]
+        if finite.size == 0 or float(finite.max()) == float(finite.min()):
+            pixels = np.zeros((height, width), dtype=np.uint8)
+        else:
+            pixels = np.clip((values - finite.min()) * 255.0 / (finite.max() - finite.min()), 0, 255).astype(np.uint8)
+        return QImage(pixels.tobytes(), width, height, width, QImage.Format.Format_Grayscale8).copy()
