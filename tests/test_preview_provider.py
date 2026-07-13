@@ -1,3 +1,4 @@
+import builtins
 from pathlib import Path
 from unittest.mock import patch
 
@@ -347,10 +348,44 @@ def test_html_preview_returns_message_without_reading_full_document(tmp_path, mo
         name="large.html", path=str(path), type="document", format="html"
     )
 
-    def should_not_render(*_args, **_kwargs):
-        raise AssertionError("HTML preview must not read or render the document")
+    def should_not_read(*_args, **_kwargs):
+        raise AssertionError("HTML preview must not read the document")
 
-    monkeypatch.setattr(PreviewProvider, "_rich_text_preview", should_not_render)
+    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
+    original_path_open = Path.open
+    original_builtin_open = builtins.open
+
+    def is_target(file):
+        try:
+            return Path(file).resolve() == path.resolve()
+        except TypeError:
+            return False
+
+    def fail_on_target_read_text(self, *args, **kwargs):
+        if self == path:
+            should_not_read()
+        return original_read_text(self, *args, **kwargs)
+
+    def fail_on_target_read_bytes(self, *args, **kwargs):
+        if self == path:
+            should_not_read()
+        return original_read_bytes(self, *args, **kwargs)
+
+    def fail_on_target_path_open(self, *args, **kwargs):
+        if self == path:
+            should_not_read()
+        return original_path_open(self, *args, **kwargs)
+
+    def fail_on_target_builtin_open(file, *args, **kwargs):
+        if is_target(file):
+            should_not_read()
+        return original_builtin_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_on_target_read_text)
+    monkeypatch.setattr(Path, "read_bytes", fail_on_target_read_bytes)
+    monkeypatch.setattr(Path, "open", fail_on_target_path_open)
+    monkeypatch.setattr(builtins, "open", fail_on_target_builtin_open)
 
     result = PreviewProvider().preview(resource)
 
