@@ -250,10 +250,12 @@ class PdfPreviewWidget(QWidget):
 
         controls = QHBoxLayout()
         self.prev_btn = QPushButton("上一页")
+        self.prev_btn.setObjectName("SecondaryButton")
         self.prev_btn.clicked.connect(self.previous_page)
         self.page_label = QLabel("0 / 0")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.next_btn = QPushButton("下一页")
+        self.next_btn.setObjectName("SecondaryButton")
         self.next_btn.clicked.connect(self.next_page)
         controls.addWidget(self.prev_btn)
         controls.addWidget(self.page_label, 1)
@@ -538,6 +540,7 @@ class MediaPreviewWidget(QWidget):
 
         controls = QHBoxLayout()
         self.play_btn = QPushButton("播放")
+        self.play_btn.setObjectName("SecondaryButton")
         self.play_btn.clicked.connect(self._toggle_play)
         controls.addWidget(self.play_btn)
         self.position_slider = QSlider(Qt.Orientation.Horizontal)

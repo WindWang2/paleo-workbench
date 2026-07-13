@@ -64,9 +64,11 @@ class DataReaderPanel(QFrame):
         layout.addWidget(self.stack, 1)
 
         self.empty_label = self._message_widget("从列表中选择一个数据、成果或文件")
+        self.empty_label.setObjectName("EmptyStateLabel")
         self.stack.addWidget(self.empty_label)
 
         self.message_label = self._message_widget("")
+        self.message_label.setObjectName("EmptyStateLabel")
         self.stack.addWidget(self.message_label)
 
         self.text_preview = TextPreviewWidget()
@@ -242,7 +244,6 @@ class DataReaderPanel(QFrame):
     def _message_widget(self, text: str) -> MessagePreviewWidget:
         label = MessagePreviewWidget()
         label.set_message(text)
-        label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         return label
 
     def _meta_text(self, result: PreviewResult) -> str:

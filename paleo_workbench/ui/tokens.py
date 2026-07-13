@@ -146,6 +146,20 @@ QPushButton#ProjectMenuButton {{
     background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
 }}
 QPushButton#ProjectMenuButton:hover {{ color: {PRIMARY}; }}
+/* Inline-styled PDF paging buttons keep their functional objectName; the
+   focus rule below mirrors SecondaryButton so keyboard focus is visible. */
+QPushButton#DataPreviewPdfPrevious,
+QPushButton#DataPreviewPdfNext {{
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 4px 12px;
+    min-height: {CONTROL_HEIGHT}px;
+    background: {BG_SIDEBAR};
+}}
+QPushButton#DataPreviewPdfPrevious:focus,
+QPushButton#DataPreviewPdfNext:focus {{
+    border: 1px solid {FOCUS_RING};
+}}
 QPushButton#PrimaryButton {{
     background: {PRIMARY}; color: #ffffff; border: none;
     border-radius: {RADIUS_BUTTON}px;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -27,13 +28,21 @@ class InspectorPanel(QFrame):
         self.title_label.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-weight: 600;")
         layout.addWidget(self.title_label)
 
+        self.empty_label = QLabel("请选择数据项")
+        self.empty_label.setObjectName("EmptyStateLabel")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setWordWrap(True)
+        layout.addWidget(self.empty_label)
+
         self.metadata_table = TablePreviewWidget()
         layout.addWidget(self.metadata_table, 1)
 
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
         if asset is None:
             self.metadata_table.load_table((), ())
+            self.empty_label.show()
             return
+        self.empty_label.hide()
         if isinstance(asset, ResourceItem):
             rows = self._resource_rows(asset)
         else:
