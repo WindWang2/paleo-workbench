@@ -103,3 +103,66 @@ def test_scan_resources_default_still_checksums(tmp_path: Path):
     f.write_text(content, encoding="utf-8")
     resources = scan_resources(tmp_path)
     assert resources[0].checksum == hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def test_scan_concurrent_preserves_order(tmp_path: Path):
+    (tmp_path / "c.las").write_bytes(b"x")
+    (tmp_path / "a.las").write_bytes(b"x")
+    (tmp_path / "b.las").write_bytes(b"x")
+    results = scan_resources(tmp_path)
+    names = [r.name for r in results]
+    assert names == ["a.las", "b.las", "c.las"]
+
+
+def test_scan_concurrent_matches_serial(tmp_path: Path):
+    for i in range(20):
+        (tmp_path / f"f{i:02d}.las").write_bytes(f"content{i}".encode())
+    serial = scan_resources(tmp_path, max_workers=1)
+    concurrent = scan_resources(tmp_path, max_workers=4)
+    assert len(serial) == len(concurrent) == 20
+    for s, c in zip(serial, concurrent):
+        assert s.name == c.name
+        assert s.path == c.path
+        assert s.type == c.type
+        assert s.format == c.format
+        assert s.checksum == c.checksum
+
+
+def test_scan_concurrent_empty_dir(tmp_path: Path):
+    assert scan_resources(tmp_path) == []
+
+
+def test_scan_concurrent_checksum_correct(tmp_path: Path):
+    import hashlib
+    (tmp_path / "data.dat").write_bytes(b"hello world")
+    results = scan_resources(tmp_path)
+    assert len(results) == 1
+    expected = hashlib.sha256(b"hello world").hexdigest()
+    assert results[0].checksum == expected
+
+
+def test_scan_concurrent_max_workers_param(tmp_path: Path):
+    (tmp_path / "a.las").write_bytes(b"x")
+    # Both should work without error; max_workers=1 forces serial
+    r1 = scan_resources(tmp_path, max_workers=1)
+    r8 = scan_resources(tmp_path, max_workers=8)
+    assert len(r1) == len(r8) == 1
+
+
+def test_scan_concurrent_vanished_file_skipped(tmp_path: Path, monkeypatch):
+    (tmp_path / "a.las").write_bytes(b"x")
+    (tmp_path / "b.las").write_bytes(b"x")
+    # Make _process_file return None for one file (simulating vanished file)
+    from paleo_workbench.resources import scanner
+    original = scanner._process_file
+    call_count = [0]
+
+    def patched(path, project_path, skip):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return None  # simulate vanished
+        return original(path, project_path, skip)
+
+    monkeypatch.setattr(scanner, "_process_file", patched)
+    results = scan_resources(tmp_path)
+    assert len(results) == 1  # one skipped, one kept
