@@ -54,7 +54,7 @@ class MenuBar(QFrame):
 
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
-        self.search_box.setPlaceholderText("搜索井名 / 层位 / 功能…  Ctrl+K")
+        self.search_box.setPlaceholderText("搜索井名 / 层位 / 功能…  Ctrl+F")
         self.search_box.setMaximumWidth(280)
         layout.addWidget(self.search_box)
 
