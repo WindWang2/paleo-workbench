@@ -9,10 +9,10 @@ def test_ui_exports_app_shell():
 
 def test_ui_exports_zone_widgets():
     from paleo_workbench.ui import (
-        AppShell, MenuBar, HeaderToolbar, IconRail, TextSidebar, StatusBar
+        AppShell, MenuBar, IconRail, TextSidebar, StatusBar
     )
     assert all([
-        AppShell, MenuBar, HeaderToolbar, IconRail, TextSidebar, StatusBar
+        AppShell, MenuBar, IconRail, TextSidebar, StatusBar
     ])
 
 

@@ -34,7 +34,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell = AppShell(project=self.project)
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
-        self._wire_toolbar()
+        self._wire_menu_bar()
         self._update_title()
 
     # --- project lifecycle (path-based, no dialogs) ---
@@ -187,18 +187,18 @@ class PaleoWorkbenchWindow(QWidget):
 
     # --- signal wiring ---
 
-    def _wire_toolbar(self) -> None:
-        """Connect the current toolbar's signals to the handler methods.
+    def _wire_menu_bar(self) -> None:
+        """Connect the current menu bar's signals to the handler methods.
 
-        Each shell rebuild creates a fresh :class:`HeaderToolbar`, so this must
+        Each shell rebuild creates a fresh :class:`MenuBar`, so this must
         be called from both ``__init__`` and ``_refresh_shell``.
         """
-        toolbar = self.app_shell.header_toolbar
-        toolbar.new_project_requested.connect(self._on_new_project)
-        toolbar.open_project_requested.connect(self._on_open_project)
-        toolbar.open_sample_project_requested.connect(self._on_open_sample_project)
-        toolbar.save_project_requested.connect(self._on_save_project)
-        toolbar.properties_requested.connect(self._on_properties)
+        menu_bar = self.app_shell.menu_bar
+        menu_bar.new_project_requested.connect(self._on_new_project)
+        menu_bar.open_project_requested.connect(self._on_open_project)
+        menu_bar.open_sample_project_requested.connect(self._on_open_sample_project)
+        menu_bar.save_project_requested.connect(self._on_save_project)
+        menu_bar.properties_requested.connect(self._on_properties)
         self._wire_data_visualization_jump()
         self._wire_mapping_page()
 
@@ -237,7 +237,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell = AppShell(project=self.project)
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
-        self._wire_toolbar()
+        self._wire_menu_bar()
         self._update_title()
 
     def _apply_project_to_shell(self) -> None:

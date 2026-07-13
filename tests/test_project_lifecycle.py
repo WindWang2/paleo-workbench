@@ -218,8 +218,8 @@ def test_save_project_oserror_shows_error_and_returns_none(qtbot, tmp_path: Path
     assert "disk full" in calls[0][1]
 
 
-def test_toolbar_signals_wired_after_refresh(qtbot, monkeypatch):
-    """After a shell rebuild the toolbar signals still reach handlers."""
+def test_project_menu_signals_wired_after_refresh(qtbot, monkeypatch):
+    """After a shell rebuild the project-menu signals still reach handlers."""
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
 
@@ -228,13 +228,13 @@ def test_toolbar_signals_wired_after_refresh(qtbot, monkeypatch):
         window, "_on_new_project", lambda: counter.__setitem__("n", counter["n"] + 1)
     )
 
-    # Force a shell rebuild — _refresh_shell must re-wire the *new* toolbar.
+    # Force a shell rebuild — _refresh_shell must re-wire the new menu bar.
     window.new_project("After Refresh")
 
-    # Emit on the freshly built toolbar; the patched handler should fire.
-    window.app_shell.header_toolbar.new_project_requested.emit()
+    # Emit on the freshly built menu bar; the patched handler should fire.
+    window.app_shell.menu_bar.new_project_requested.emit()
 
-    assert counter["n"] >= 1
+    assert counter["n"] == 1
 
 
 # --- Task 4: properties dialog + error handling completeness ---

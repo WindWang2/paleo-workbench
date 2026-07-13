@@ -12,7 +12,8 @@ def test_app_shell_assembles_all_zones(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     assert shell.menu_bar is not None
-    assert shell.header_toolbar is not None
+    assert not hasattr(shell, "header_toolbar")
+    assert shell.menu_bar.search_box.objectName() == "SearchBox"
     assert shell.icon_rail is not None
     assert shell.sidebar is not None
     assert shell.page_stack is not None

@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 )
 
-from paleo_workbench.ui.header_toolbar import HeaderToolbar
 from paleo_workbench.ui.icon_rail import IconRail
 from paleo_workbench.ui.menu_bar import MenuBar
 from paleo_workbench.ui.page_placeholder import PagePlaceholder
@@ -46,9 +45,7 @@ class AppShell(QWidget):
         outer.setSpacing(0)
 
         self.menu_bar = MenuBar()
-        self.header_toolbar = HeaderToolbar()
         outer.addWidget(self.menu_bar)
-        outer.addWidget(self.header_toolbar)
 
         middle = QHBoxLayout()
         middle.setContentsMargins(0, 0, 0, 0)
