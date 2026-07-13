@@ -180,6 +180,10 @@ class MappingPage(QWidget):
         if doc is None or scene is None:
             return False
         scene.refresh_topology()
+        valid, issues = scene.validate_for_save()
+        self.bottom_workbench.topology_panel.set_issues(issues)
+        if not valid:
+            return False
         features = scene.export_features()
         apply_features_to_document(doc, features)
         scene.set_dirty(False)

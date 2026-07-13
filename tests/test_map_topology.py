@@ -14,6 +14,20 @@ def test_self_intersection_detected():
     assert any(i["code"] == "self_intersection" for i in issues)
 
 
+def test_scene_exposes_blocking_topology_issue(qtbot):
+    scene = MapEditScene()
+    doc = PaleoMapDocument(
+        name="M", linked_target_horizon="H",
+        facies_polygons=[{"id": "bowtie", "name": "A", "coordinates": [[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]}],
+    )
+    scene.load_document(doc)
+    scene.refresh_topology()
+    ok, issues = scene.validate_for_save()
+    assert ok is False
+    assert issues[0]["feature_id"] == "bowtie"
+    assert issues[0]["severity"] == "error"
+
+
 def test_simple_ring_has_no_issues():
     ring = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]
     assert validate_ring(ring) == []

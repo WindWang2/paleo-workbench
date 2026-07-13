@@ -363,6 +363,25 @@ class MapEditScene(QGraphicsScene):
         if feature_id is None:
             self._apply_adjacency_warnings()
 
+    def topology_issues(self) -> list[dict[str, object]]:
+        """Return structured issues for the bottom workbench and save gate."""
+        issues: list[dict[str, object]] = []
+        for item in self._items_by_id.values():
+            if not isinstance(item, FaciesPolygonItem):
+                continue
+            for issue in api.validate_ring(item.coordinates()):
+                issues.append({
+                    "feature_id": item.feature_id,
+                    "code": str(issue.get("code", "invalid_geometry")),
+                    "message": str(issue.get("message", "几何无效")),
+                    "severity": "error",
+                })
+        return issues
+
+    def validate_for_save(self) -> tuple[bool, list[dict[str, object]]]:
+        issues = self.topology_issues()
+        return not any(issue.get("severity") == "error" for issue in issues), issues
+
     def _apply_adjacency_warnings(self) -> None:
         facies = [
             item
