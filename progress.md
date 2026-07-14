@@ -903,3 +903,21 @@ Normalization applied: 4→SPACE_1, 6→8→SPACE_2, 10→12→SPACE_3, 14→12�
 Tests: 649 → 672 (+23 new: 6 empty-state + 3 focus-state + 14 keyboard-shortcut).
 
 Note: 5-6 test failures in local runs are environmental (libEGL/WebEngine GL init fails without NVIDIA driver); not code regressions. Tests pass in CI with proper GL.
+
+---
+
+## Session: 2026-07-13 - Full-Project UI Polish
+
+Four work lines via SDD (5 implementation tasks).
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | StatusBar dynamic context (coords/horizon/CRS/scale segments) | `48bdaa9` | +3 |
+| 2 | TextSidebar progress/selection/tips sections for all pages | `beae5eb` | +3 |
+| 3 | Tooltip coverage (nav icons, toolbar buttons, table headers, action panels) | `6beac9b` | +6 |
+| 4 | Page-switch fade-in transition (QGraphicsOpacityEffect 150ms) | `e687c90` | +4 |
+| 5 | section_header tokenization + empty-state audit (5 pages) | `c1d4d7c` | +5 |
+
+Safe tests: 133/133 passing (WebChain env hang excluded). 16 new tests total.
+
+Work lines: cross-page consistency (status bar + sidebar), tooltip discoverability, page-switch transition, misc cleanup.
