@@ -6,7 +6,10 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.data_table_columns import COLUMN_BY_KEY
+from paleo_workbench.ui.pages.data_table_columns import (
+    COLUMN_BY_KEY,
+    COLUMN_TOOLTIPS,
+)
 
 RESOURCE_TYPE_LABELS = {
     **tokens.RESOURCE_LABELS,
@@ -80,13 +83,14 @@ class AssetTableModel(QAbstractTableModel):
         return len(self._column_keys)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
         if orientation == Qt.Orientation.Horizontal:
             if section < 0 or section >= len(self._column_keys):
                 return None
             key = self._column_keys[section]
-            return COLUMN_BY_KEY[key].label
+            if role == Qt.ItemDataRole.DisplayRole:
+                return COLUMN_BY_KEY[key].label
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return COLUMN_TOOLTIPS.get(key, COLUMN_BY_KEY[key].label)
         return None
 
     def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):

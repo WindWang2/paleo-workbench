@@ -25,6 +25,7 @@ class IconRail(QFrame):
         for index, name in enumerate(tokens.PAGE_NAMES):
             btn = QToolButton()
             btn.setText(name)
+            btn.setToolTip(f"{name} · {tokens.PAGE_DESCRIPTIONS[index]}")
             btn.setProperty("navItem", True)
             btn.setProperty("active", index == 0)
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)

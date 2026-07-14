@@ -101,4 +101,5 @@ class BoundaryPanel(QFrame):
 
         self.generate_btn = QPushButton("生成初始边界并送入编图")
         self.generate_btn.setObjectName("PrimaryButton")
+        self.generate_btn.setToolTip("生成初始相带边界")
         layout.addWidget(self.generate_btn)
