@@ -11,7 +11,7 @@ class SectionHeader(QWidget):
         self.setObjectName("SectionHeader")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(tokens.SPACE_1)
         self.title_label = QLabel(title)
         self.title_label.setStyleSheet(
             f"color: {tokens.TEXT_PRIMARY}; font-size: {tokens.FONT_SIZE_TITLE};"

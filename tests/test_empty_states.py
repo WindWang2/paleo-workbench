@@ -55,3 +55,88 @@ def test_inspector_empty_label_hidden_when_asset_selected(qtbot):
     )
     panel.update_asset(res)
     assert panel.empty_label.isHidden() is True
+
+
+# ---------------------------------------------------------------------------
+# Work-page empty-state audit.
+#
+# Each work page (prediction / sequence / viz / prep / review) surfaces empty
+# states through child panels. This block verifies that every placeholder those
+# panels build uses the shared ``EmptyStateLabel`` objectName so the muted
+# QSS rule in tokens.QSS_TEMPLATE applies consistently.
+#
+# Panels audited as HAVING a dedicated EmptyStateLabel:
+#   - WellLogCanvasPanel      (prediction center)
+#   - SeismicViewPanel        (prediction center)
+#   - SequenceBoundaryTable   (sequence center)
+#   - FactorPreviewGrid       (prep center + viz via PreparationPage reuse)
+#   - ResultSummary           (review export list)
+#   - MapCanvasPanel          (mapping center; covered by its own test file)
+#
+# Panels audited as NOT YET having an EmptyStateLabel placeholder (tracked in
+# the report, not fixed here per task scope):
+#   - CompositeVisualizationPanel  (clears canvases; no placeholder label)
+#   - VisualizationSummaryPanel    (empty QListWidget; no label)
+#   - VisualizationTracePanel      ("-" value stubs; no label)
+#   - SequenceTargetPanel          ("未设置" value stubs; no label)
+#   - QCIssueTable                 (empty table; no label)
+# ---------------------------------------------------------------------------
+
+
+def test_well_log_canvas_empty_label_uses_empty_state_label(qtbot):
+    from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
+
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(None)
+    assert panel.empty_label.objectName() == "EmptyStateLabel"
+
+
+def test_seismic_view_empty_label_uses_empty_state_label(qtbot):
+    from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
+
+    panel = SeismicViewPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(None)
+    assert panel.empty_label.objectName() == "EmptyStateLabel"
+
+
+def test_sequence_boundary_empty_label_uses_empty_state_label(qtbot):
+    from paleo_workbench.project.models import StratigraphicFramework
+    from paleo_workbench.ui.pages.sequence_boundary_table import SequenceBoundaryTable
+
+    table = SequenceBoundaryTable()
+    qtbot.addWidget(table)
+    table.update_state(StratigraphicFramework())
+    assert table.empty_label.objectName() == "EmptyStateLabel"
+    # No boundaries -> placeholder is the visible surface, not hidden.
+    assert table.empty_label.isHidden() is False
+
+
+def test_factor_preview_empty_label_uses_empty_state_label(qtbot):
+    from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
+
+    grid = FactorPreviewGrid()
+    qtbot.addWidget(grid)
+    # An empty task list yields no completed factors, so the grid builds its
+    # "暂无已生成的单因素图" EmptyStateLabel.
+    grid.update_state([])
+    assert grid._empty_label is not None
+    assert grid._empty_label.objectName() == "EmptyStateLabel"
+
+
+def test_result_summary_export_empty_label_uses_empty_state_label(qtbot):
+    from PySide6.QtWidgets import QLabel
+
+    from paleo_workbench.ui.pages.result_summary import ResultSummary
+
+    widget = ResultSummary()
+    qtbot.addWidget(widget)
+    # ResultSummary.__init__ calls update_state([], []) so the export list is
+    # empty and a placeholder EmptyStateLabel is present.
+    empty_labels = [
+        child for child in widget.findChildren(QLabel)
+        if child.objectName() == "EmptyStateLabel"
+    ]
+    assert len(empty_labels) == 1
+    assert empty_labels[0].text() == "暂无导出图件"
