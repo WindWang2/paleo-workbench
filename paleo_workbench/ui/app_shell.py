@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLineEdit, QStackedWidget, QTextBrowser,
-    QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLineEdit,
+    QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from paleo_workbench.ui.icon_rail import IconRail
@@ -42,6 +43,7 @@ class AppShell(QWidget):
         super().__init__(parent)
         self.setObjectName("AppShell")
         self.project = project or ProjectDocument.new("Untitled Project")
+        self._fade_anim: QPropertyAnimation | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -116,6 +118,34 @@ class AppShell(QWidget):
             self.sidebar.update_mapping_context(**self._mapping_context)
         else:
             self.sidebar.set_context(tokens.PAGE_NAMES[index])
+        self._animate_page_fade(index)
+
+    def _animate_page_fade(self, index: int) -> None:
+        """Fade the newly switched page in from 0.7 to 1.0 opacity (150ms).
+
+        A fresh :class:`QGraphicsOpacityEffect` is installed on each switch so
+        rapid back-to-back switches restart cleanly: the previous animation is
+        stopped and its effect snapped back to full opacity before the new one
+        begins, preventing stacked/dangling effects.
+        """
+        page = self.page_stack.widget(index)
+        if page is None:
+            return
+        # Stop any in-flight animation and reset its effect to full opacity.
+        if self._fade_anim is not None:
+            self._fade_anim.stop()
+        existing = page.graphicsEffect()
+        if isinstance(existing, QGraphicsOpacityEffect):
+            existing.setOpacity(1.0)
+        effect = QGraphicsOpacityEffect(page)
+        effect.setOpacity(0.7)
+        page.setGraphicsEffect(effect)
+        self._fade_anim = QPropertyAnimation(effect, b"opacity", page)
+        self._fade_anim.setDuration(150)
+        self._fade_anim.setStartValue(0.7)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self._fade_anim.start()
 
     def data_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_DATA)
