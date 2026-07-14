@@ -87,3 +87,93 @@ def test_sidebar_object_name(qtbot):
     bar = TextSidebar()
     qtbot.addWidget(bar)
     assert bar.objectName() == "TextSidebar"
+
+
+def test_sidebar_generic_context_with_progress(qtbot):
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("制备", progress="步骤 3/6 · 制图数据制备 · 进行中")
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert any("步骤 3/6" in t for t in texts)
+
+
+def test_sidebar_generic_context_with_tips(qtbot):
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("制备", tips="Ctrl+F 搜索 · Delete 移出")
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert any("Ctrl+F" in t for t in texts)
+
+
+def test_sidebar_generic_context_minimal(qtbot):
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("首页")  # no progress/tips
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert any("项目总览" in t for t in texts)
+
+
+def test_sidebar_generic_context_with_selection(qtbot):
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("测井预测", selection="井 W1 · ZJ-2")
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert any("井 W1" in t for t in texts)
+
+
+def test_sidebar_generic_context_all_sections_append_after_page_lines(qtbot):
+    """Progress/selection/tips sections append below the existing page lines."""
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context(
+        "成图审核",
+        progress="2/6 规则已执行",
+        selection="图件: 古地理图 v1",
+        tips="双击问题跳转 · 右键忽略",
+    )
+    texts = [lbl.text() for lbl in sb._content_labels]
+    # Page-line heading still present and first.
+    assert texts[0] == "成图审核"
+    # Section headings present.
+    assert "工作流" in texts
+    assert "当前选择" in texts
+    assert "快捷操作" in texts
+    # Order: page lines, then 工作流, 当前选择, 快捷操作.
+    assert texts.index("工作流") < texts.index("当前选择") < texts.index("快捷操作")
+
+
+def test_sidebar_generic_context_unknown_page(qtbot):
+    """An unknown page name still renders its name as a heading."""
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("自定义页面", tips="提示")
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert texts[0] == "自定义页面"
+    assert any("提示" in t for t in texts)
+
+
+def test_sidebar_generic_context_omits_absent_sections(qtbot):
+    """Absent fields (empty selection/tips) must not add empty headings."""
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("可视化", progress="进行中")
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert "工作流" in texts
+    assert "当前选择" not in texts
+    assert "快捷操作" not in texts
+
+
+def test_sidebar_update_context_sets_context_label(qtbot):
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb.update_context("层序格架")
+    assert sb.context_label.text() == "层序格架"
+
+
+def test_sidebar_render_context_backwards_compat(qtbot):
+    """_render_context still works as a backward-compat delegate."""
+    sb = TextSidebar()
+    qtbot.addWidget(sb)
+    sb._render_context("可视化")
+    texts = [lbl.text() for lbl in sb._content_labels]
+    assert any("综合可视化" in t for t in texts)

@@ -34,7 +34,7 @@ class TextSidebar(QFrame):
         elif name == "编图":
             self.update_mapping_context()
         else:
-            self._render_context(name)
+            self.update_context(name)
 
     def update_data_context(
         self,
@@ -94,7 +94,26 @@ class TextSidebar(QFrame):
             ]
         )
 
-    def _render_context(self, name: str) -> None:
+    def update_context(self, name: str, progress: str = "", selection: str = "", tips: str = "") -> None:
+        """Generic context update for pages without dedicated context methods.
+
+        Renders the page's base lines, then appends optional 工作流 / 当前选择 /
+        快捷操作 sections below them. Absent (empty) fields are omitted entirely.
+        """
+        self.context_label.setText(name)
+        lines = self._page_lines(name)
+        if progress:
+            lines.append(("工作流", True))
+            lines.append((progress, False))
+        if selection:
+            lines.append(("当前选择", True))
+            lines.append((selection, False))
+        if tips:
+            lines.append(("快捷操作", True))
+            lines.append((tips, False))
+        self._render_lines(lines)
+
+    def _page_lines(self, name: str) -> list[tuple[str, bool]]:
         page_lines = {
             "首页": [
                 ("项目总览", True),
@@ -131,14 +150,6 @@ class TextSidebar(QFrame):
                 ("边界参数", False),
                 ("批量生成", False),
             ],
-            "编图": [
-                ("编图上下文", True),
-                ("图件: 未选择", False),
-                ("层位: —", False),
-                ("状态: 已保存", False),
-                ("相带画布", False),
-                ("图面元素", False),
-            ],
             "成图审核": [
                 ("成图审核", True),
                 ("质检规则", False),
@@ -146,7 +157,11 @@ class TextSidebar(QFrame):
                 ("导出成果", False),
             ],
         }
-        self._render_lines(page_lines.get(name, [(name, True)]))
+        return page_lines.get(name, [(name, True)])
+
+    def _render_context(self, name: str) -> None:
+        """Backward-compat delegate to ``update_context`` (no extra sections)."""
+        self.update_context(name)
 
     def _render_lines(self, lines: list[tuple[str, bool]]) -> None:
         for label in self._content_labels:
