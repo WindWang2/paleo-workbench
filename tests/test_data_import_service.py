@@ -36,17 +36,50 @@ def test_import_files_skips_duplicate_path(tmp_path: Path):
     assert report.skipped_count == 1
 
 
-def test_import_files_skips_duplicate_checksum(tmp_path: Path):
+def test_import_files_never_opens_file_or_calculates_checksum(
+    tmp_path: Path, monkeypatch
+):
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+
+    def fail_open(*_args, **_kwargs):
+        raise AssertionError("import must not open file content")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+    report = import_files([well], existing=[])
+
+    assert report.added_count == 1
+    assert report.added[0].checksum is None
+    assert report.added[0].parsed_summary == {"size_bytes": len(b"~Version\n")}
+
+
+def test_import_files_processes_only_requested_paths(tmp_path: Path, monkeypatch):
+    selected = tmp_path / "selected.las"
+    unselected = tmp_path / "unselected.sgy"
+    selected.write_text("~Version\n", encoding="utf-8")
+    unselected.write_bytes(b"cube")
+
+    def fail_rglob(*_args, **_kwargs):
+        raise AssertionError("single-file import must not enumerate a directory")
+
+    monkeypatch.setattr(Path, "rglob", fail_rglob)
+
+    report = import_files([selected], existing=[])
+
+    assert [resource.name for resource in report.added] == ["selected.las"]
+
+
+def test_import_files_keeps_same_content_at_distinct_paths(tmp_path: Path):
     first = tmp_path / "first.las"
     second = tmp_path / "second.las"
     first.write_text("same", encoding="utf-8")
     second.write_text("same", encoding="utf-8")
-    first_report = import_files([first], existing=[])
 
+    first_report = import_files([first], existing=[])
     second_report = import_files([second], existing=first_report.added)
 
-    assert second_report.added == []
-    assert second_report.skipped_checksum == [second]
+    assert second_report.added_count == 1
+    assert second_report.skipped_checksum == []
 
 
 def test_import_files_dedupes_relative_project_paths(tmp_path: Path):
@@ -70,32 +103,18 @@ def test_import_files_dedupes_relative_project_paths(tmp_path: Path):
     assert report.skipped_path == [Path("data/well.las")]
 
 
-def test_import_folder_uses_recursive_scanner(tmp_path: Path):
+def test_import_folder_collects_recursively_by_initial_classification(tmp_path: Path):
     root = tmp_path / "folder"
     nested = root / "nested"
     nested.mkdir(parents=True)
     (nested / "cube.sgy").write_bytes(b"cube")
+    horizon = nested / "层位" / "marker.dat"
+    horizon.parent.mkdir()
+    horizon.write_bytes(b"marker")
 
     report = import_folder(root, existing=[])
-
-    assert report.added_count == 1
-    assert report.added[0].type == "seismic"
-
-
-def test_import_folder_skips_checksum_over_threshold(tmp_path: Path):
-    root = tmp_path / "folder"
-    root.mkdir()
-    big = root / "big.sgy"
-    big.write_bytes(b"x" * 100)
-    small = root / "small.las"
-    small.write_text("~Version\n", encoding="utf-8")
-
-    report = import_folder(root, existing=[], skip_checksum_over_bytes=50)
     by_name = {item.name: item for item in report.added}
 
     assert report.added_count == 2
-    assert by_name["big.sgy"].checksum is None
-    assert by_name["big.sgy"].parsed_summary.get("checksum_skipped") is True
-    assert by_name["big.sgy"].parsed_summary["size_bytes"] == 100
-    assert by_name["small.las"].checksum is not None
-    assert by_name["small.las"].parsed_summary.get("checksum_skipped") is not True
+    assert by_name["cube.sgy"].type == "seismic"
+    assert by_name["marker.dat"].type == "horizon"

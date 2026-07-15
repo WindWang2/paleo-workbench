@@ -4,9 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from paleo_workbench.project.models import ResourceItem
-from paleo_workbench.resources.scanner import scan_resources
-
-DEFAULT_IMPORT_SKIP_CHECKSUM = 50 * 1024 * 1024
+from paleo_workbench.project.paths import relativize_path
+from paleo_workbench.resources.classifier import classify_path
 
 
 @dataclass
@@ -45,10 +44,6 @@ def _existing_path_keys(
     }
 
 
-def _existing_checksums(existing: list[ResourceItem]) -> set[str]:
-    return {resource.checksum for resource in existing if resource.checksum}
-
-
 def _filter_new(
     candidates: list[ResourceItem],
     existing: list[ResourceItem],
@@ -56,7 +51,6 @@ def _filter_new(
 ) -> ImportReport:
     report = ImportReport()
     path_keys = _existing_path_keys(existing, project_path)
-    checksums = _existing_checksums(existing)
 
     for resource in candidates:
         candidate_path = Path(resource.path)
@@ -64,45 +58,69 @@ def _filter_new(
         if resolved in path_keys:
             report.skipped_path.append(candidate_path)
             continue
-        if resource.checksum and resource.checksum in checksums:
-            report.skipped_checksum.append(candidate_path)
-            continue
         report.added.append(resource)
         path_keys.add(resolved)
-        if resource.checksum:
-            checksums.add(resource.checksum)
 
     return report
+
+
+def _collect_resource(
+    path: Path,
+    project_path: Path | None = None,
+) -> ResourceItem:
+    resource_type, resource_format, status = classify_path(path)
+    resolved_path = path.resolve()
+    size_bytes = resolved_path.stat().st_size
+    stored_path = resolved_path.as_posix()
+    external = False
+    if project_path is not None:
+        stored_path, external = relativize_path(str(path), project_path)
+    return ResourceItem(
+        name=path.name,
+        path=stored_path,
+        type=resource_type,
+        format=resource_format,
+        status=status,
+        source="import",
+        parsed_summary={"size_bytes": size_bytes},
+        checksum=None,
+        external=external,
+    )
+
+
+def _collect_folder(
+    root: Path,
+    project_path: Path | None = None,
+) -> tuple[list[ResourceItem], list[str]]:
+    try:
+        paths = sorted(root.rglob("*"))
+    except OSError as exc:
+        return [], [f"{root}: {exc}"]
+
+    candidates: list[ResourceItem] = []
+    warnings: list[str] = []
+    for path in paths:
+        try:
+            if path.is_file() and not path.name.startswith("._"):
+                candidates.append(_collect_resource(path, project_path))
+        except OSError as exc:
+            warnings.append(f"{path}: {exc}")
+    return candidates, warnings
 
 
 def import_files(
     paths: list[Path],
     existing: list[ResourceItem],
     project_path: Path | None = None,
-    *,
-    skip_checksum_over_bytes: int = DEFAULT_IMPORT_SKIP_CHECKSUM,
 ) -> ImportReport:
     candidates: list[ResourceItem] = []
     warnings: list[str] = []
 
     for path in paths:
         try:
-            candidates.extend(
-                scan_resources(
-                    path.parent,
-                    project_path=project_path,
-                    skip_checksum_over_bytes=skip_checksum_over_bytes,
-                )
-            )
+            candidates.append(_collect_resource(path, project_path))
         except OSError as exc:
             warnings.append(f"{path}: {exc}")
-
-    requested = {_path_key(path, project_path) for path in paths}
-    candidates = [
-        resource
-        for resource in candidates
-        if _path_key(resource.path, project_path) in requested
-    ]
 
     report = _filter_new(candidates, existing, project_path)
     report.warnings.extend(warnings)
@@ -113,15 +131,8 @@ def import_folder(
     root: Path,
     existing: list[ResourceItem],
     project_path: Path | None = None,
-    *,
-    skip_checksum_over_bytes: int = DEFAULT_IMPORT_SKIP_CHECKSUM,
 ) -> ImportReport:
-    try:
-        candidates = scan_resources(
-            root,
-            project_path=project_path,
-            skip_checksum_over_bytes=skip_checksum_over_bytes,
-        )
-    except OSError as exc:
-        return ImportReport(warnings=[f"{root}: {exc}"])
-    return _filter_new(candidates, existing, project_path)
+    candidates, warnings = _collect_folder(root, project_path)
+    report = _filter_new(candidates, existing, project_path)
+    report.warnings.extend(warnings)
+    return report
