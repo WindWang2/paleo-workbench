@@ -25,12 +25,16 @@ def test_workbench_production_imports_only_geoviz_facade():
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            module = node.module if isinstance(node, ast.ImportFrom) else ""
-            names = [item.name for item in node.names] if isinstance(node, ast.Import) else []
-            roots = [module.split(".")[0]] if module else [
-                name.split(".")[0] for name in names
-            ]
-            if any(name.startswith("geoviz_") for name in roots):
+            modules = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            elif isinstance(node, ast.Import):
+                modules = [item.name for item in node.names]
+            if any(
+                module.split(".", 1)[0].startswith("geoviz_")
+                or module.startswith("geoviz.")
+                for module in modules
+            ):
                 violations.append(str(path.relative_to(root.parent)))
     assert not violations, violations
 

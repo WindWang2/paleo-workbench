@@ -938,3 +938,22 @@ Three implementation tasks via SDD.
 
 Spec: docs/superpowers/specs/2026-07-15-context-menu-export-design.md
 Plan: docs/superpowers/plans/2026-07-15-context-menu-export.md
+
+---
+
+## Session: 2026-07-16 — GeoViz local data preview
+
+Published the one-package `geoviz` facade documentation and verified bounded
+local previews for LAS, SEGY, well-head DAT, well-stratification DAT, horizon
+DAT, and time-depth DAT. Real-data smoke coverage also verifies bounded DFB
+image/message and explicit WLP message fallbacks. Workbench production imports
+are restricted to the `geoviz` facade; the facade AST has no workbench import.
+
+### Verification
+
+- `cd geo-viz-engine && QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_geoviz_public_api.py -q` → **2 passed**.
+- `cd geo-viz-engine && QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_geoviz_contracts.py tests/test_geoviz_engine.py tests/test_geoviz_independence.py tests/test_geoviz_well_log_preview.py tests/test_geoviz_seismic_preview.py tests/test_geoviz_dat_preview.py tests/test_geoviz_formation_preview.py tests/test_geoviz_public_api.py -q` → **111 passed**.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_geoviz_package_independence.py tests/test_geoviz_preview_provider.py tests/test_geoviz_preview_host.py tests/test_geoviz_preview_lifecycle.py tests/test_preview_cache.py tests/test_preview_async.py tests/test_data_reader_panel.py tests/test_data_page.py tests/test_visualization_jump.py tests/test_viz_adapter.py tests/test_fallback_preview.py -q` → 45 nodes completed before an existing Qt async single-process stall; no failure was emitted. Equivalent `QT_QPA_PLATFORM=offscreen ... -vv --timeout=30` → **180 passed**. Minimal/software backend also produced **180 passed**.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_geoviz_real_data_smoke.py -m slow -q` → **8 passed**; the 966 MiB SEGY used only three slices of at most 512×512 and a failing `get_volume_downsampled` guard proved that no full volume was requested.
+- `cd geo-viz-engine && QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -m 'not slow' -q` → existing QtWebEngine `ChartEngine` initialization segfault, exit 139. `QT_QPA_PLATFORM=minimal QT_OPENGL=software LIBGL_ALWAYS_SOFTWARE=1 .venv/bin/python -m pytest -m 'not slow' -q --timeout=30` → **1005 passed, 2 skipped, 130 deselected** in one process. The slice-preview no-3D-import assertion uses a fresh subprocess, so an earlier baseline test importing `renderer_3d` cannot pollute it.
+- `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -m 'not slow' -q` → existing Qt async stall after 53%+ with no failure. Equivalent `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -m 'not slow' -vv --timeout=30` → **801 passed, 4 skipped, 8 deselected**.

@@ -44,6 +44,9 @@ include = ["paleo_workbench*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
+markers = [
+    "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",
+]
 pythonpath = [
     ".",
     "geo-viz-engine",
