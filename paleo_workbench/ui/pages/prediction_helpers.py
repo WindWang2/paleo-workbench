@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from geoviz_well_log import CurveData, FaciesInterval, WellLogData
+from geoviz import CurveData, WellLogData
 
 
 def field_value(source: Any, name: str, default: Any = None) -> Any:
@@ -27,7 +27,7 @@ def well_log_data_from_prediction(task) -> WellLogData:
     interval_height = 100.0 / len(regions)
     depths: list[float] = []
     values: list[float] = []
-    facies_intervals: list[FaciesInterval] = []
+    facies_intervals: list[dict[str, Any]] = []
     for index, region in enumerate(regions):
         top = round(index * interval_height, 3)
         bottom = round((index + 1) * interval_height, 3)
@@ -35,11 +35,11 @@ def well_log_data_from_prediction(task) -> WellLogData:
         depths.append(round((top + bottom) / 2.0, 3))
         values.append(round(probability * 100.0, 1))
         facies_intervals.append(
-            FaciesInterval(
-                top=top,
-                bottom=bottom,
-                facies=str(region.get("facies") or "未分类"),
-            )
+            {
+                "top": top,
+                "bottom": bottom,
+                "facies": str(region.get("facies") or "未分类"),
+            }
         )
 
     return WellLogData(

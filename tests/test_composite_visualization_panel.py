@@ -1,7 +1,4 @@
-from geoviz_cross_well import CrossWellCanvas
-from geoviz_paleo_map import PaleoMapCanvas
-from geoviz_seismic import SeismicView
-from geoviz_well_log import WellLogCanvas
+from geoviz import CrossWellCanvas, PaleoMapCanvas, SeismicView, WellLogCanvas
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import ProjectDocument

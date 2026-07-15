@@ -19,6 +19,22 @@ CORE_FOR_WORKBENCH = (
 )
 
 
+def test_workbench_production_imports_only_geoviz_facade():
+    root = Path(__file__).resolve().parents[1] / "paleo_workbench"
+    violations = []
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            module = node.module if isinstance(node, ast.ImportFrom) else ""
+            names = [item.name for item in node.names] if isinstance(node, ast.Import) else []
+            roots = [module.split(".")[0]] if module else [
+                name.split(".")[0] for name in names
+            ]
+            if any(name.startswith("geoviz_") for name in roots):
+                violations.append(str(path.relative_to(root.parent)))
+    assert not violations, violations
+
+
 def _pkg_dirs() -> list[Path]:
     return sorted(
         p for p in PACKAGES_ROOT.iterdir() if p.is_dir() and p.name.startswith("geoviz_")

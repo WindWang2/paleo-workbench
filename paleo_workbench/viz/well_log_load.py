@@ -25,7 +25,7 @@ def load_well_log_from_path(path: str) -> Any | None:
     """Return WellLogData or None on failure. Uses lasio; stride samples if long."""
     try:
         import lasio
-        from geoviz_well_log import CurveData, WellLogData
+        from geoviz import CurveData, WellLogData
     except Exception:
         return None
 

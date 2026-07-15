@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QTabWidget, QVBoxLayout
 
-from geoviz_cross_well import CrossWellCanvas
-from geoviz_paleo_map import PaleoMapCanvas
-from geoviz_seismic import SeismicView
-from geoviz_well_log import WellLogCanvas, build_qpainter_tracks
+from geoviz import (
+    CrossWellCanvas,
+    PaleoMapCanvas,
+    SeismicView,
+    WellLogCanvas,
+    build_qpainter_tracks,
+)
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task, well_log_data_from_prediction

@@ -1,4 +1,4 @@
-from geoviz_well_log import CurveData, WellLogData
+from geoviz import CurveData, WellLogData
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument, ResourceItem

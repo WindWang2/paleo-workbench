@@ -1,4 +1,4 @@
-from geoviz_well_log import WellLogData
+from geoviz import WellLogData
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import ProjectDocument
@@ -29,5 +29,11 @@ def test_well_log_data_from_prediction_builds_probability_curve_and_facies():
     assert data.bottom_depth == 100.0
     assert data.curves[0].name == "预测概率"
     assert len(data.curves[0].depth) == 4
+    assert data.curves[0].color == "#6f47cf"
     assert len(data.facies) == 4
+    assert type(data.facies[0]).__name__ == "FaciesInterval"
+    assert data.facies[0].top == 0.0
+    assert data.facies[0].bottom == 25.0
     assert data.facies[0].facies == task.result_summary["predicted_regions"][0]["facies"]
+    assert data.facies[0].sub_facies == ""
+    assert data.facies[0].micro_facies == ""

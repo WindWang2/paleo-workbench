@@ -5,7 +5,7 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 
-from geoviz_well_log import WellLogCanvas, build_qpainter_tracks
+from geoviz import WellLogCanvas, build_qpainter_tracks
 
 from paleo_workbench.pipeline.assets import WELL_KEY
 from paleo_workbench.ui import tokens

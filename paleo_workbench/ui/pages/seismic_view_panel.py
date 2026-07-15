@@ -5,7 +5,7 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 
-from geoviz_seismic import SeismicView
+from geoviz import SeismicView
 
 from paleo_workbench.pipeline.assets import SEISMIC_KEY
 from paleo_workbench.ui import tokens

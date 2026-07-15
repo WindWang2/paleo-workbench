@@ -5,10 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from geoviz_cross_well import CrossWellCanvas
-from geoviz_paleo_map import PaleoMapCanvas
-from geoviz_seismic import SeismicView
-from geoviz_well_log import WellLogCanvas
+from geoviz import CrossWellCanvas, PaleoMapCanvas, SeismicView, WellLogCanvas
 
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel

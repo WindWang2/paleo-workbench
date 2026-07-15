@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 
-from geoviz_paleo_map import PaleoMapCanvas
+from geoviz import PaleoMapCanvas
 
 from paleo_workbench.ui import tokens
 

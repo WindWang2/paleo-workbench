@@ -9,3 +9,4 @@
 -e geo-viz-engine/packages/geoviz_cross_well
 -e geo-viz-engine/packages/geoviz_plots
 -e geo-viz-engine/packages/geoviz_map
+-e geo-viz-engine
