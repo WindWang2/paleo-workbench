@@ -2,6 +2,8 @@ import threading
 import time
 from pathlib import Path
 
+from geoviz import PreparedPreview, PreviewKind
+
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
@@ -407,6 +409,111 @@ def test_serial_queue_keeps_only_latest_pending(qtbot, tmp_path):
     assert "c.txt" in provider.calls
     assert "b.txt" not in provider.calls
     assert results[-1].title == "c.txt"
+
+
+def test_slow_geoviz_request_replaced_by_latest_only_reaches_reader_and_cache(
+    qtbot, tmp_path
+):
+    paths = [tmp_path / f"{name}.las" for name in ("a", "b")]
+    for path in paths:
+        path.write_text("~Version", encoding="utf-8")
+    resources = [
+        ResourceItem(name=p.name, path=str(p), type="well_log", format="las")
+        for p in paths
+    ]
+
+    class SlowGeoVizProvider(PreviewProvider):
+        def preview(self, asset):
+            if asset.name == "a.las":
+                time.sleep(0.2)
+            prepared = PreparedPreview(
+                kind=PreviewKind.WELL_LOG,
+                title=asset.name,
+                payload={"source": asset.name},
+                estimated_bytes=60,
+            )
+            return PreviewResult(
+                mode="geoviz",
+                title=asset.name,
+                engine_preview=prepared,
+                estimated_bytes=prepared.estimated_bytes,
+            )
+
+    provider = SlowGeoVizProvider()
+    controller = PreviewRequestController(provider, cache_max_size=8)
+    received: list[PreviewResult] = []
+    received_threads: list[threading.Thread] = []
+
+    def receive(result: PreviewResult) -> None:
+        received.append(result)
+        received_threads.append(threading.current_thread())
+
+    controller.result_ready.connect(receive)
+
+    controller.request(resources[0])
+    controller.request(resources[1])
+    _wait_controller_idle(qtbot, controller)
+
+    from paleo_workbench.ui.pages.preview_cache import make_preview_cache_key
+
+    assert [result.title for result in received] == ["b.las"]
+    assert received_threads == [threading.main_thread()]
+    assert controller.cache.get(make_preview_cache_key(resources[0])) is None
+    cached_b = controller.cache.get(make_preview_cache_key(resources[1]))
+    assert cached_b is received[0]
+    assert cached_b.engine_preview is received[0].engine_preview
+
+
+def test_geoviz_payload_is_not_preloaded_or_stripped(qtbot, tmp_path, monkeypatch):
+    import paleo_workbench.ui.pages.preview_worker as worker_module
+
+    path = tmp_path / "well.las"
+    path.write_text("~Version", encoding="utf-8")
+    resource = ResourceItem(name=path.name, path=str(path), type="well_log", format="las")
+    media = b"x" * (worker_module.MAX_CACHED_MEDIA_BYTES + 1)
+    prepared = PreparedPreview(
+        kind=PreviewKind.WELL_LOG,
+        title=path.name,
+        payload={"opaque": media},
+        estimated_bytes=len(media),
+    )
+    result = PreviewResult(
+        mode="geoviz",
+        title=path.name,
+        path=str(path),
+        image_bytes=media,
+        pdf_bytes=media,
+        engine_preview=prepared,
+        estimated_bytes=prepared.estimated_bytes,
+    )
+
+    class GeoVizProvider(PreviewProvider):
+        def preview(self, asset):
+            return result
+
+    preload_calls: list[PreviewResult] = []
+    original_preload = worker_module.preload_media
+    monkeypatch.setattr(
+        worker_module,
+        "preload_media",
+        lambda value: preload_calls.append(value) or original_preload(value),
+    )
+    controller = PreviewRequestController(
+        GeoVizProvider(),
+        cache=worker_module.PreviewCache(max_bytes=4 * len(media)),
+    )
+    received: list[PreviewResult] = []
+    controller.result_ready.connect(received.append)
+
+    controller.request(resource)
+    _wait_controller_idle(qtbot, controller)
+
+    assert preload_calls == []
+    assert received == [result]
+    cached = controller.cache.get(worker_module.make_preview_cache_key(resource))
+    assert cached is result
+    assert cached.image_bytes is media
+    assert cached.pdf_bytes is media
 
 
 def test_shutdown_stops_accepting_and_clears_jobs(qtbot, tmp_path):

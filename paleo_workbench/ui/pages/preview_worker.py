@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_cache_key
@@ -82,6 +82,8 @@ def preload_media(result: PreviewResult) -> PreviewResult:
 
 def cacheable_result(result: PreviewResult) -> PreviewResult:
     """Strip large media payloads before storing in the UI-thread LRU."""
+    if result.mode == "geoviz":
+        return result
     image_bytes = result.image_bytes
     pdf_bytes = result.pdf_bytes
     if image_bytes and len(image_bytes) > MAX_CACHED_MEDIA_BYTES:
@@ -114,7 +116,8 @@ class _PreviewWorker(QObject):
     def run(self) -> None:
         try:
             result = self._provider.preview(self._asset)
-            result = preload_media(result)
+            if result.mode != "geoviz":
+                result = preload_media(result)
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(self._generation, str(exc))
             return
@@ -250,8 +253,11 @@ class PreviewRequestController(QObject):
         thread.started.connect(worker.run)
         worker.finished.connect(self._on_finished)
         worker.failed.connect(self._on_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
+        # quit() is thread-safe. Invoke it directly from the worker thread so
+        # shutdown() can wait without deadlocking on a quit queued to the UI
+        # thread that is currently blocked in QThread.wait().
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         # Pump the next job only after the thread has fully stopped — starting a
