@@ -149,6 +149,26 @@ class PreviewProvider:
                 type_label=asset.type,
             )
 
+        if fmt == "pptx":
+            from paleo_workbench.ui.pages.fallback_preview import pptx_preview
+
+            return pptx_preview(asset)
+
+        if fmt == "dfb":
+            from paleo_workbench.ui.pages.fallback_preview import dfb_preview
+
+            return dfb_preview(asset)
+
+        if fmt == "zip":
+            from paleo_workbench.ui.pages.fallback_preview import zip_preview
+
+            return zip_preview(asset)
+
+        if fmt == "wlp":
+            from paleo_workbench.ui.pages.fallback_preview import wlp_preview
+
+            return wlp_preview(asset)
+
         # GeoTIFF must be checked BEFORE the generic image branch: tif/tiff is
         # in both GEOTIFF_FORMATS and IMAGE_FORMATS. GeoTIFF takes precedence;
         # a non-raster tiff fails rasterio and falls back to image mode below.
@@ -214,6 +234,13 @@ class PreviewProvider:
 
         if fmt in AUDIO_FORMATS:
             return self._audio_preview(asset)
+
+        if fmt == "xml":
+            from paleo_workbench.ui.pages.fallback_preview import spreadsheetml_preview
+
+            spreadsheet = spreadsheetml_preview(asset)
+            if spreadsheet is not None:
+                return spreadsheet
 
         if fmt in TEXT_FORMATS:
             return self._text_preview(asset)

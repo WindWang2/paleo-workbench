@@ -132,6 +132,44 @@ def test_preview_provider_missing_file_message(tmp_path: Path):
     assert "文件不存在" in result.message
 
 
+@pytest.mark.parametrize(
+    ("name", "fmt", "resource_type", "expected_mode"),
+    [
+        ("deck.pptx", "pptx", "document", "message"),
+        ("phase.dfb", "dfb", "reference_map", "message"),
+        ("bundle.zip", "zip", "archive", "message"),
+        ("well.wlp", "wlp", "well_reference", "message"),
+    ],
+)
+def test_preview_provider_dispatches_bounded_fallbacks(
+    tmp_path: Path,
+    name: str,
+    fmt: str,
+    resource_type: str,
+    expected_mode: str,
+):
+    path = tmp_path / name
+    path.write_bytes(b"vendor bytes")
+    resource = ResourceItem(name=name, path=str(path), type=resource_type, format=fmt)
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == expected_mode
+    if fmt == "wlp":
+        assert "暂不支持 WLP" in result.message
+
+
+def test_preview_provider_keeps_ordinary_xml_as_text(tmp_path: Path):
+    path = tmp_path / "ordinary.xml"
+    path.write_text("<root><value>plain</value></root>", encoding="utf-8")
+    resource = ResourceItem(name=path.name, path=str(path), type="spreadsheet", format="xml")
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "text"
+    assert "plain" in result.text
+
+
 def test_preview_provider_is_pure_no_internal_cache(tmp_path: Path):
     # Provider.preview is pure; LRU lives on PreviewRequestController (UI thread).
     path = tmp_path / "sample.txt"

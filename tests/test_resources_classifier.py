@@ -64,3 +64,16 @@ def test_audio_classified_as_unknown():
     rtype, fmt, _ = classify_path(Path("clip.wav"))
     assert rtype == "unknown"
     assert fmt == "wav"
+
+
+def test_zip_is_classified_from_its_extension_without_content_guessing():
+    assert classify_path(Path("bundle.zip")) == (
+        "archive",
+        "zip",
+        "indexed_reference",
+    )
+    assert classify_path(Path("looks-like-zip.bin")) == (
+        "unknown",
+        "bin",
+        "indexed_reference",
+    )

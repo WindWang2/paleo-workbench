@@ -38,6 +38,9 @@ def classify_path(path: Path) -> tuple[str, str, str]:
     if ext == "wlp":
         return "well_reference", ext, "indexed_reference"
 
+    if ext == "zip":
+        return "archive", ext, "indexed_reference"
+
     if ext in {"md", "markdown", "htm", "html"}:
         return "document", ext, "indexed_reference"
 
