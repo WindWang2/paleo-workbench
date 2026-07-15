@@ -21,6 +21,7 @@ MAX_TABLE_COLUMNS = 40
 
 PreviewMode = Literal[
     "empty",
+    "geoviz",
     "pdf",
     "image",
     "text",
@@ -76,6 +77,8 @@ class PreviewResult:
     json_truncated: bool = False
     geo_metadata: tuple[tuple[str, str], ...] = ()
     media_path: str = ""
+    engine_preview: object | None = None
+    estimated_bytes: int = 0
 
 
 class PreviewProvider:

@@ -10,8 +10,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from geoviz import PreparedPreview
+
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 from paleo_workbench.ui.pages.preview_widgets import (
     GeoTiffPreviewWidget,
@@ -35,7 +39,7 @@ class DataReaderPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("DataReaderPanel")
         self.setMinimumWidth(320)
-        self.provider = provider or PreviewProvider()
+        self.provider = provider or LocalVisualizationProvider()
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
         self.setStyleSheet(
@@ -62,6 +66,10 @@ class DataReaderPanel(QFrame):
 
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
+
+        provider_engine = getattr(self.provider, "engine", None)
+        self.geoviz_host = GeoVizPreviewHost(provider_engine)
+        self.stack.addWidget(self.geoviz_host)
 
         self.empty_label = self._message_widget("从列表中选择一个数据、成果或文件")
         self.empty_label.setObjectName("EmptyStateLabel")
@@ -119,6 +127,7 @@ class DataReaderPanel(QFrame):
         self.stack.setCurrentWidget(self.empty_label)
 
     def show_loading(self, asset: ResourceItem | ExportArtifact | None = None) -> None:
+        self.geoviz_host.clear()
         self.current_mode = "loading"
         self.reader_mode_changed.emit("loading")
         title = "加载中…"
@@ -143,6 +152,13 @@ class DataReaderPanel(QFrame):
         self.title_label.setText(result.title)
         self.meta_label.setText(self._meta_text(result))
         self.warning_label.setText(result.warning)
+
+        if result.mode == "geoviz" and isinstance(result.engine_preview, PreparedPreview):
+            self.geoviz_host.render(result.engine_preview)
+            self.stack.setCurrentWidget(self.geoviz_host)
+            return
+
+        self.geoviz_host.clear()
 
         if result.mode == "empty":
             self.stack.setCurrentWidget(self.empty_label)
@@ -244,6 +260,9 @@ class DataReaderPanel(QFrame):
 
     def previous_pdf_page(self) -> None:
         self.pdf_preview_widget.previous_page()
+
+    def release_engine_widgets(self) -> None:
+        self.geoviz_host.release_all()
 
     def _message_widget(self, text: str) -> MessagePreviewWidget:
         label = MessagePreviewWidget()

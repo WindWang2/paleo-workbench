@@ -148,12 +148,14 @@ class DataPage(QWidget):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._preview_controller.shutdown()
+        self.reader_panel.release_engine_widgets()
         super().closeEvent(event)
 
     def event(self, event: QEvent) -> bool:  # type: ignore[override]
         # Shell rebuild uses deleteLater; closeEvent may not run for nested pages.
         if event.type() == QEvent.Type.DeferredDelete:
             self._preview_controller.shutdown()
+            self.reader_panel.release_engine_widgets()
         return super().event(event)
 
     def update_state(

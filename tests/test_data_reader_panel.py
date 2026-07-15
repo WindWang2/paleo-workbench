@@ -13,12 +13,94 @@ from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_widgets import RichTextPreviewWidget
 
 
+def _prepared_well_preview():
+    from geoviz import PreparedPreview, PreviewKind
+
+    return PreparedPreview(
+        kind=PreviewKind.WELL_LOG,
+        title="Professional well",
+        payload={"depth": (0.0, 1.0)},
+        estimated_bytes=64,
+    )
+
+
 def test_reader_panel_empty_state(qtbot):
     panel = DataReaderPanel()
     qtbot.addWidget(panel)
 
     assert panel.current_mode == "empty"
     assert panel.title_label.text() == "请选择数据项"
+
+
+def test_reader_panel_defaults_to_local_visualization_provider(qtbot):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    assert isinstance(panel.provider, LocalVisualizationProvider)
+
+
+def test_reader_panel_dispatches_prepared_geoviz_preview(qtbot, monkeypatch):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    prepared = _prepared_well_preview()
+    rendered = []
+    monkeypatch.setattr(panel.geoviz_host, "render", rendered.append)
+
+    panel.render(
+        PreviewResult(
+            mode="geoviz",
+            title="well.las",
+            engine_preview=prepared,
+            estimated_bytes=prepared.estimated_bytes,
+        )
+    )
+
+    assert rendered == [prepared]
+    assert panel.stack.currentWidget() is panel.geoviz_host
+
+
+def test_reader_panel_clears_stale_geoviz_before_non_geoviz_states(qtbot, monkeypatch):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    clears = []
+    monkeypatch.setattr(panel.geoviz_host, "clear", lambda: clears.append("clear"))
+
+    panel.show_loading()
+    panel.render(PreviewResult(mode="message", title="failure", message="failed"))
+    panel.render(PreviewResult(mode="empty", title="empty"))
+    panel.render(PreviewResult(mode="text", title="fallback", text="ordinary"))
+
+    assert clears == ["clear", "clear", "clear", "clear"]
+
+
+def test_reader_panel_rejects_non_prepared_geoviz_payload_and_clears_stale_widget(
+    qtbot, monkeypatch
+):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    clears = []
+    monkeypatch.setattr(panel.geoviz_host, "clear", lambda: clears.append("clear"))
+
+    panel.render(
+        PreviewResult(mode="geoviz", title="bad", engine_preview={"widget": object()})
+    )
+
+    assert clears == ["clear"]
+    assert panel.stack.currentWidget() is panel.message_label
+    assert "预览不可用" in panel.message_label.text()
+
+
+def test_reader_panel_releases_all_engine_widgets(qtbot, monkeypatch):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    releases = []
+    monkeypatch.setattr(panel.geoviz_host, "release_all", lambda: releases.append("all"))
+
+    panel.release_engine_widgets()
+
+    assert releases == ["all"]
 
 
 def test_reader_panel_dispatches_web_document(tmp_path):

@@ -668,6 +668,48 @@ def test_data_page_uses_reader_panel(qtbot):
     assert page.right_splitter.indexOf(page.reader_panel) == 0
 
 
+def test_data_page_close_shuts_down_preview_and_releases_engine_widgets(qtbot, monkeypatch):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    calls = []
+    monkeypatch.setattr(
+        type(page._preview_controller),
+        "shutdown",
+        lambda self: calls.append("shutdown"),
+    )
+    monkeypatch.setattr(
+        type(page.reader_panel),
+        "release_engine_widgets",
+        lambda self: calls.append("release"),
+    )
+
+    page.close()
+
+    assert calls == ["shutdown", "release"]
+
+
+def test_data_page_deferred_delete_shuts_down_preview_and_releases_engine_widgets(
+    qtbot, monkeypatch
+):
+    from PySide6.QtCore import QEvent
+
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    calls = []
+    monkeypatch.setattr(
+        type(page._preview_controller),
+        "shutdown",
+        lambda self: calls.append("shutdown"),
+    )
+    monkeypatch.setattr(
+        type(page.reader_panel),
+        "release_engine_widgets",
+        lambda self: calls.append("release"),
+    )
+
+    page.event(QEvent(QEvent.Type.DeferredDelete))
+
+    assert calls == ["shutdown", "release"]
+
+
 def test_data_page_selection_updates_reader_and_context_signal(qtbot, tmp_path: Path):
     path = tmp_path / "notes.txt"
     path.write_text("hello", encoding="utf-8")
