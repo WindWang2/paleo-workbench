@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import io
 from pathlib import Path
+import struct
 from unittest.mock import patch
 import zipfile
 
@@ -9,20 +11,12 @@ import pytest
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.ui.pages.fallback_preview import (
-    MAX_ARCHIVE_NAMES,
-    MAX_EMBEDDED_IMAGE_BYTES,
     dfb_preview,
     pptx_preview,
     spreadsheetml_preview,
     wlp_preview,
     zip_preview,
 )
-from paleo_workbench.ui.pages.preview_provider import (
-    MAX_TABLE_COLUMNS,
-    MAX_TABLE_ROWS,
-)
-
-
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB"
     "AScY42YAAAAASUVORK5CYII="
@@ -54,20 +48,28 @@ def _spreadsheetml(rows: int, columns: int, *, second_sheet: bool = False) -> by
     ).encode()
 
 
+def _patch_eocd(path: Path, offset: int, format_code: str, value: int) -> None:
+    payload = bytearray(path.read_bytes())
+    eocd = payload.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    struct.pack_into(format_code, payload, eocd + offset, value)
+    path.write_bytes(payload)
+
+
 def test_spreadsheetml_preview_is_bounded_to_first_sheet_and_global_table_limits(
     tmp_path: Path,
 ):
     path = tmp_path / "large.xml"
-    path.write_bytes(_spreadsheetml(MAX_TABLE_ROWS + 50, MAX_TABLE_COLUMNS + 5, second_sheet=True))
+    path.write_bytes(_spreadsheetml(250, 45, second_sheet=True))
 
     result = spreadsheetml_preview(_resource(path, "xml", "spreadsheet"))
 
     assert result is not None
     assert result.mode == "table"
     assert result.sheets == ("First",)
-    assert len(result.table_rows) == MAX_TABLE_ROWS
-    assert len(result.table_headers) == MAX_TABLE_COLUMNS
-    assert all(len(row) == MAX_TABLE_COLUMNS for row in result.table_rows)
+    assert len(result.table_rows) == 200
+    assert len(result.table_headers) == 40
+    assert all(len(row) == 40 for row in result.table_rows)
     assert result.truncated is True
     assert "截断" in result.warning
     assert all("do-not-read" not in cell for row in result.table_rows for cell in row)
@@ -89,7 +91,7 @@ def test_spreadsheetml_honours_sparse_cell_indexes_without_unbounded_padding(tmp
     result = spreadsheetml_preview(_resource(path, "xml", "spreadsheet"))
 
     assert result is not None
-    assert len(result.table_headers) == MAX_TABLE_COLUMNS
+    assert len(result.table_headers) == 40
     assert result.table_headers[-1] == "last"
     assert "outside" not in result.table_headers
     assert result.truncated is True
@@ -120,6 +122,48 @@ def test_spreadsheetml_reports_real_malformed_xml_but_keeps_boundary_rows(tmp_pa
     assert len(bounded_result.table_rows) == 4
 
 
+def test_spreadsheetml_malformed_inside_last_budget_chunk_is_not_truncation(tmp_path: Path):
+    path = tmp_path / "malformed-near-boundary.xml"
+    prefix = (
+        b'<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet">'
+        b"<Worksheet><Table><Row><Cell><Data>"
+    )
+    bad_close_offset = 250 * 1024
+    payload = prefix + b"x" * (bad_close_offset - len(prefix)) + b"</Cell>"
+    path.write_bytes(payload + b"x" * (256 * 1024 - len(payload) + 4096))
+
+    result = spreadsheetml_preview(_resource(path, "xml", "spreadsheet"))
+
+    assert result is not None
+    assert result.mode == "message"
+    assert result.truncated is False
+    assert "XML 格式错误" in result.warning
+
+
+def test_spreadsheetml_ignores_foreign_namespace_elements(tmp_path: Path):
+    path = tmp_path / "mixed-namespace.xml"
+    path.write_text(
+        '<?xml version="1.0"?>'
+        '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+        'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" '
+        'xmlns:ext="urn:vendor-extension">'
+        '<ext:Worksheet><ext:Table><ext:Row><ext:Cell><ext:Data>evil</ext:Data>'
+        '</ext:Cell></ext:Row></ext:Table></ext:Worksheet>'
+        '<Worksheet ss:Name="Real"><Table><Row>'
+        '<ext:Cell><ext:Data>ignored</ext:Data></ext:Cell>'
+        '<Cell><Data>good</Data></Cell>'
+        "</Row></Table></Worksheet></Workbook>",
+        encoding="utf-8",
+    )
+
+    result = spreadsheetml_preview(_resource(path, "xml", "spreadsheet"))
+
+    assert result is not None
+    assert result.mode == "table"
+    assert result.sheets == ("Real",)
+    assert result.table_headers == ("good",)
+
+
 def test_empty_or_non_spreadsheet_xml_is_not_claimed(tmp_path: Path):
     empty = tmp_path / "empty.xml"
     empty.write_bytes(b"")
@@ -143,8 +187,14 @@ def test_pptx_reads_only_bounded_thumbnail_and_counts_unique_slides(tmp_path: Pa
             package.writestr(f"ppt/slides/slide{number}.xml", "<slide />")
         package.writestr("ppt/slides/_rels/slide1.xml.rels", "not a slide")
 
-    with patch.object(zipfile.ZipFile, "extract", side_effect=AssertionError("no extract")), patch.object(
-        zipfile.ZipFile, "extractall", side_effect=AssertionError("no extractall")
+    with patch.object(
+        zipfile.ZipFile,
+        "extract",
+        side_effect=AssertionError("no extract"),
+    ), patch.object(
+        zipfile.ZipFile,
+        "extractall",
+        side_effect=AssertionError("no extractall"),
     ):
         result = pptx_preview(_resource(path, "pptx", "document"))
 
@@ -166,7 +216,7 @@ def test_pptx_rejects_bad_zip_duplicate_directory_and_oversized_thumbnails(tmp_p
         package.writestr("docProps/thumbnail.jpeg/", b"")
     oversized = tmp_path / "oversized.pptx"
     with zipfile.ZipFile(oversized, "w", compression=zipfile.ZIP_DEFLATED) as package:
-        package.writestr("docProps/thumbnail.png", b"x" * (MAX_EMBEDDED_IMAGE_BYTES + 1))
+        package.writestr("docProps/thumbnail.png", b"x" * (16 * 1024 * 1024 + 1))
 
     bad_result = pptx_preview(_resource(bad, "pptx", "document"))
     duplicate_result = pptx_preview(_resource(duplicate, "pptx", "document"))
@@ -193,9 +243,41 @@ def test_dfb_prefers_same_stem_sibling_then_validated_embedded_image(tmp_path: P
 
     assert sibling_result.mode == "image"
     assert sibling_result.path == str(sibling)
-    assert sibling_result.image_bytes == b""
+    assert sibling_result.image_bytes == PNG_1X1
     assert embedded_result.mode == "image"
     assert embedded_result.image_bytes == PNG_1X1
+
+
+def test_dfb_sibling_suffix_matching_is_case_insensitive_and_png_first(tmp_path: Path):
+    path = tmp_path / "mixed.dfb"
+    path.write_bytes(b"vendor")
+    png = tmp_path / "mixed.PnG"
+    jpg = tmp_path / "mixed.JpG"
+    jpeg = tmp_path / "mixed.jPeG"
+    png.write_bytes(b"png-preview")
+    jpg.write_bytes(b"jpg-preview")
+    jpeg.write_bytes(b"jpeg-preview")
+
+    result = dfb_preview(_resource(path, "dfb", "reference_map"))
+
+    assert result.mode == "image"
+    assert result.path == str(png)
+    assert result.image_bytes == b"png-preview"
+
+
+def test_dfb_rejects_sibling_larger_than_16_mib_without_reading_unbounded(
+    tmp_path: Path,
+):
+    path = tmp_path / "oversized.dfb"
+    path.write_bytes(b"vendor")
+    sibling = tmp_path / "oversized.png"
+    sibling.write_bytes(b"x" * (16 * 1024 * 1024 + 1))
+
+    result = dfb_preview(_resource(path, "dfb", "reference_map"))
+
+    assert result.mode == "message"
+    assert result.image_bytes == b""
+    assert "16 MiB" in result.warning
 
 
 def test_dfb_rejects_unterminated_or_corrupt_embedded_images_as_metadata(tmp_path: Path):
@@ -207,10 +289,17 @@ def test_dfb_rejects_unterminated_or_corrupt_embedded_images_as_metadata(tmp_pat
     bad_chunk.write_bytes(b"prefix" + corrupted)
     no_eoi = tmp_path / "no-eoi.dfb"
     no_eoi.write_bytes(b"prefix\xff\xd8\xff\xe0\x00\x02")
+    fake_markers = tmp_path / "fake-markers.dfb"
+    fake_markers.write_bytes(
+        b"prefix\xff\xd8"  # SOI
+        b"\xff\xc0\x00\x02"  # empty SOF0
+        b"\xff\xda\x00\x02"  # empty SOS
+        b"\xff\xd9"  # EOI
+    )
 
     results = [
         dfb_preview(_resource(path, "dfb", "reference_map"))
-        for path in (no_iend, bad_chunk, no_eoi)
+        for path in (no_iend, bad_chunk, no_eoi, fake_markers)
     ]
 
     assert all(result.mode == "message" for result in results)
@@ -219,23 +308,108 @@ def test_dfb_rejects_unterminated_or_corrupt_embedded_images_as_metadata(tmp_pat
     assert all("地质" not in result.message for result in results)
 
 
+def test_dfb_accepts_structurally_consistent_jpeg_with_scan_and_eoi(tmp_path: Path):
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 3), color=(10, 20, 30)).save(buffer, format="JPEG")
+    jpeg_bytes = buffer.getvalue()
+    path = tmp_path / "embedded-jpeg.dfb"
+    path.write_bytes(b"prefix" + jpeg_bytes + b"suffix")
+
+    result = dfb_preview(_resource(path, "dfb", "reference_map"))
+
+    assert result.mode == "image"
+    assert result.image_bytes == jpeg_bytes
+
+
 def test_zip_lists_only_first_500_sorted_central_names_without_extracting(tmp_path: Path):
     path = tmp_path / "bundle.zip"
     with zipfile.ZipFile(path, "w") as archive:
         for number in reversed(range(600)):
             archive.writestr(f"item-{number:03}.txt", "payload")
 
-    with patch.object(zipfile.ZipFile, "extract", side_effect=AssertionError("no extract")), patch.object(
-        zipfile.ZipFile, "extractall", side_effect=AssertionError("no extractall")
+    with patch.object(
+        zipfile.ZipFile,
+        "extract",
+        side_effect=AssertionError("no extract"),
+    ), patch.object(
+        zipfile.ZipFile,
+        "extractall",
+        side_effect=AssertionError("no extractall"),
     ):
         result = zip_preview(_resource(path, "zip", "archive"))
 
     assert result.mode == "table"
-    assert len(result.table_rows) == MAX_ARCHIVE_NAMES == 500
+    assert len(result.table_rows) == 500
     assert result.table_rows[0] == ("item-000.txt",)
     assert result.table_rows[-1] == ("item-499.txt",)
     assert result.truncated is True
     assert "截断" in result.warning
+
+
+@pytest.mark.parametrize(
+    ("name", "fmt", "resource_type", "preview"),
+    [
+        ("bad-eocd.zip", "zip", "archive", zip_preview),
+        ("bad-eocd.pptx", "pptx", "document", pptx_preview),
+    ],
+)
+def test_zip_and_pptx_reject_truncated_eocd(
+    tmp_path: Path,
+    name: str,
+    fmt: str,
+    resource_type: str,
+    preview,
+):
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr("docProps/thumbnail.png", PNG_1X1)
+    path.write_bytes(path.read_bytes()[:-1])
+
+    result = preview(_resource(path, fmt, resource_type))
+
+    assert result.mode == "message"
+    assert "目录" in result.warning or fmt.upper() in result.warning
+
+
+@pytest.mark.parametrize(
+    ("field_offset", "format_code", "value"),
+    [
+        (8, "<H", 10_001),
+        (12, "<L", 4 * 1024 * 1024 + 1),
+        (10, "<H", 0xFFFF),
+        (16, "<L", 0xFFFFFFFF),
+    ],
+)
+def test_zip_rejects_eocd_budgets_and_zip64_before_zipfile(
+    tmp_path: Path,
+    field_offset: int,
+    format_code: str,
+    value: int,
+):
+    path = tmp_path / f"central-{field_offset}.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("one.txt", "payload")
+    _patch_eocd(path, field_offset, format_code, value)
+
+    with patch.object(zipfile, "ZipFile", wraps=zipfile.ZipFile) as constructor:
+        result = zip_preview(_resource(path, "zip", "archive"))
+
+    assert result.mode == "message"
+    assert constructor.call_count == 0
+
+
+def test_zip_rejects_total_utf8_central_name_budget(tmp_path: Path):
+    path = tmp_path / "name-budget.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        for number in range(1800):
+            archive.writestr(f"{number:04}-" + "n" * 595, b"")
+
+    result = zip_preview(_resource(path, "zip", "archive"))
+
+    assert result.mode == "message"
+    assert "名称" in result.warning
 
 
 def test_zip_bad_package_and_wlp_return_explicit_messages(tmp_path: Path):
