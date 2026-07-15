@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from paleo_workbench.resources.import_service import import_files
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.project.paths import artifact_dir_for
@@ -29,6 +30,26 @@ def test_project_round_trip_uses_relative_paths(tmp_path: Path):
     assert loaded.resources[0].path == data_file.resolve().as_posix()
     assert loaded.resources[0].external is False
     assert artifact_dir_for(project_path) == tmp_path / "demo.artifacts"
+
+
+def test_lightweight_import_classification_round_trips_as_project_content(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    source = tmp_path / "data" / "well.las"
+    source.parent.mkdir()
+    source.write_text("~Version\n", encoding="utf-8")
+
+    project = ProjectDocument.new(name="Demo")
+    project.resources.extend(
+        import_files([source], existing=[], project_path=project_path).added
+    )
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+
+    assert loaded.resources[0].type == "well_log"
+    assert loaded.resources[0].format == "las"
+    assert loaded.resources[0].checksum is None
+    assert loaded.resources[0].parsed_summary["size_bytes"] == len(b"~Version\n")
 
 
 def test_resaving_loaded_project_keeps_relative_resource_paths(tmp_path: Path):
