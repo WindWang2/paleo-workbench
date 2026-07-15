@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -46,6 +46,7 @@ __all__ = [
 
 class DataAssetTable(QWidget):
     selected_asset_changed = Signal(object)
+    context_menu_requested = Signal(QPoint, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -93,6 +94,12 @@ class DataAssetTable(QWidget):
             f" border-radius: {tokens.RADIUS_CARD}px; gridline-color: {tokens.BORDER}; }}"
         )
         self.table.selectionModel().selectionChanged.connect(self._emit_selection)
+        # Right-click context menu: the table emits customContextMenuRequested
+        # with a viewport-local QPoint; we map it to a row + asset and re-emit
+        # context_menu_requested(global_pos, asset) for the page to build the
+        # menu.
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.table)
 
     def update_assets(
@@ -129,6 +136,10 @@ class DataAssetTable(QWidget):
 
     def visible_asset_count(self) -> int:
         return len(self._visible_assets)
+
+    def asset_at(self, view_row: int) -> ResourceItem | ExportArtifact | None:
+        """Return the asset at a view row, or None if out of range."""
+        return self.model.asset_at(view_row)
 
     def visible_column_keys(self) -> list[str]:
         return list(self._visible_column_keys)
@@ -221,6 +232,25 @@ class DataAssetTable(QWidget):
         asset = self.model.asset_at(row)
         self._selected_asset = asset
         self.selected_asset_changed.emit(asset)
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        """Handle the table's customContextMenuRequested signal.
+
+        Maps the viewport-local ``pos`` to a view row, selects the row under
+        the cursor, resolves the asset, and re-emits ``context_menu_requested``
+        with a global position so the page can build and exec the menu.
+        """
+        view_row = self.table.rowAt(pos.y())
+        if view_row < 0:
+            return
+        # Select the row under the cursor so the page's _selected_asset and the
+        # highlighted row agree before the menu acts on them.
+        self.table.selectRow(view_row)
+        asset = self.asset_at(view_row)
+        if asset is None:
+            return
+        global_pos = self.table.viewport().mapToGlobal(pos)
+        self.context_menu_requested.emit(global_pos, asset)
 
     def _asset_key(self, asset: ResourceItem | ExportArtifact | None) -> tuple[str, str] | None:
         if asset is None:

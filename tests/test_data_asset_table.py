@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import QTableView
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
@@ -322,3 +322,53 @@ def test_search_does_not_rebuild_filter_index(qtbot):
     assert rebuild_calls["n"] == 0
     assert table_row_count(table) == 1
     assert table_text(table, 0, 0) == "well_5.las"
+
+
+def test_asset_table_has_context_menu_policy(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    assert table.table.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+
+
+def test_asset_table_emits_context_menu_requested_for_row(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [
+        ResourceItem(name="well.las", path="/tmp/well.las", type="well_log", format="las"),
+    ]
+    table.update_assets(resources, [])
+
+    received: list[tuple] = []
+    table.context_menu_requested.connect(
+        lambda global_pos, asset: received.append((global_pos, asset))
+    )
+
+    # rowAt at y=0 maps to view row 0.
+    table._on_context_menu(QPoint(5, 5))
+
+    assert len(received) == 1
+    _global_pos, asset = received[0]
+    assert asset is resources[0]
+    # The row under the cursor was selected.
+    selected = table.table.selectionModel().selectedRows()
+    assert selected and selected[0].row() == 0
+
+
+def test_asset_table_context_menu_no_emit_for_invalid_row(qtbot):
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [
+        ResourceItem(name="well.las", path="/tmp/well.las", type="well_log", format="las"),
+    ]
+    table.update_assets(resources, [])
+
+    received: list[tuple] = []
+    table.context_menu_requested.connect(
+        lambda global_pos, asset: received.append((global_pos, asset))
+    )
+
+    # A y far below the only row maps to an invalid row (-1).
+    table._on_context_menu(QPoint(5, 9999))
+
+    assert received == []
+

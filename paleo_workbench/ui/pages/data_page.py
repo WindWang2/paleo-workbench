@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.resources.exporters import get_available_formats
 from paleo_workbench.resources.import_service import (
     ImportReport,
     import_files,
@@ -20,6 +21,7 @@ from paleo_workbench.resources.import_service import (
 )
 from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
@@ -113,6 +115,7 @@ class DataPage(QWidget):
         self.navigation_tree.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
         self.asset_table.selected_asset_changed.connect(self.inspector_panel.update_asset)
+        self.asset_table.context_menu_requested.connect(self._show_context_menu)
         self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
         self.data_toolbar.import_folder_requested.connect(
             self.begin_import_folder_from_dialog
@@ -384,6 +387,73 @@ class DataPage(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(folder.as_posix()))
         self._set_action_status(f"目录: {folder.as_posix()}")
         return folder
+
+    def _show_context_menu(self, global_pos, asset) -> None:
+        """Build and exec the right-click context menu for an asset.
+
+        Wired to ``DataAssetTable.context_menu_requested``. Each menu action's
+        ``triggered`` signal is connected to the matching existing handler on
+        this page; export sub-actions route through ``_export_selected_asset``.
+        """
+        viz_supported = isinstance(asset, ResourceItem) and self._viz_adapter.supports_resource(asset)
+        menu = AssetContextMenu(self)
+        menu.build(asset, viz_supported)
+
+        preview_act = menu.find_action("ctx_preview")
+        if preview_act:
+            preview_act.triggered.connect(lambda: self._preview_controller.request(asset))
+
+        rescan_act = menu.find_action("ctx_rescan")
+        if rescan_act:
+            rescan_act.triggered.connect(self.rescan_selected_asset)
+
+        open_folder_act = menu.find_action("ctx_open_folder")
+        if open_folder_act:
+            open_folder_act.triggered.connect(self.open_selected_folder)
+
+        visualize_act = menu.find_action("ctx_visualize")
+        if visualize_act:
+            visualize_act.triggered.connect(self._emit_open_visualization)
+
+        remove_act = menu.find_action("ctx_remove")
+        if remove_act:
+            remove_act.triggered.connect(self.remove_selected_asset)
+
+        # Wire export sub-actions (one per available converter).
+        for label, _fn in get_available_formats(asset):
+            sub_act = menu.find_export_action(label)
+            if sub_act:
+                sub_act.triggered.connect(
+                    lambda checked=False, fmt=label: self._export_selected_asset(fmt)
+                )
+
+        menu.exec(global_pos)
+
+    def _export_selected_asset(self, format_label: str) -> None:
+        """Convert the selected resource to ``format_label`` via a save dialog."""
+        asset = self._selected_asset
+        if asset is None:
+            return
+        if isinstance(asset, ExportArtifact):
+            return
+        formats = get_available_formats(asset)
+        convert_fn = next((fn for lbl, fn in formats if lbl == format_label), None)
+        if convert_fn is None:
+            return
+        input_path = Path(asset.path)
+        # Suggested output extension derived from the target format label.
+        ext_map = {"CSV": ".csv", "JSON": ".json", "PNG": ".png", "TXT": ".txt"}
+        out_ext = ext_map.get(format_label, ".out")
+        suggested = f"{input_path.stem}{out_ext}"
+        output_path, _selected_filter = QFileDialog.getSaveFileName(self, "导出为", suggested)
+        if not output_path:
+            return
+        output_path = Path(output_path)
+        try:
+            convert_fn(input_path, output_path)
+            self._set_action_status(f"已导出: {output_path.name}")
+        except Exception as exc:
+            self._set_action_status(f"导出失败: {exc}")
 
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
