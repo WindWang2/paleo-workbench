@@ -21,27 +21,27 @@ def test_tree_has_top_level_all(qtbot):
     assert "全部" in top.text(0)
 
 
-def test_tree_group_nodes_present(qtbot):
+def test_tree_has_type_leaves(qtbot):
     tree = NavigationTree()
     qtbot.addWidget(tree)
     tree.update_counts([], [])
     labels = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
     joined = " ".join(labels)
-    assert "输入数据" in joined
-    assert "成果" in joined
-    assert "参考资料" in joined
-    assert "异常" in joined
+    assert "测井" in joined
+    assert "地震" in joined
+    assert "层位" in joined
 
 
-def test_tree_type_leaves_under_input(qtbot):
+def test_tree_type_leaves_populated(qtbot):
     tree = NavigationTree()
     qtbot.addWidget(tree)
     tree.update_counts([_res("well_log"), _res("seismic")], [])
-    input_group = tree.find_group("输入数据")
-    assert input_group is not None
-    child_labels = [input_group.child(i).text(0) for i in range(input_group.childCount())]
-    assert any("测井" in l for l in child_labels)
-    assert any("地震" in l for l in child_labels)
+    well_item = tree.find_category_item("测井")
+    assert well_item is not None
+    assert "测井" in well_item.text(0)
+    seis_item = tree.find_category_item("地震")
+    assert seis_item is not None
+    assert "地震" in seis_item.text(0)
 
 
 def test_tree_counts_populated(qtbot):
@@ -63,12 +63,12 @@ def test_tree_selecting_type_emits_category(qtbot):
     assert received == ["测井"]
 
 
-def test_tree_group_node_does_not_emit(qtbot):
+def test_tree_no_emit_for_nonexistent_group(qtbot):
     tree = NavigationTree()
     qtbot.addWidget(tree)
     tree.update_counts([], [])
     received = []
     tree.category_changed.connect(lambda name: received.append(name))
-    group = tree.find_group("输入数据")
-    tree.setCurrentItem(group)
-    assert received == []  # group node only expands, no filter change
+    # No group nodes anymore; selecting "全部" emits normally
+    tree.setCurrentItem(tree.topLevelItem(0))
+    assert received == ["全部"]

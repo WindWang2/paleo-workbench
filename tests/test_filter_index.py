@@ -60,11 +60,12 @@ def test_filter_category_then_search():
     assert idx.filter("测井", "cube") == []
 
 
-def test_filter_issues_category():
+def test_filter_missing_status_in_all():
     idx = FilterIndex()
     assets = _assets()
     idx.rebuild(assets)
-    assert idx.filter("异常", "") == [1]
+    # "异常" category removed; missing-status items show under "全部" and their type
+    assert idx.filter("全部", "") == [0, 1, 2]
 
 
 def _res(rtype: str, status: str = "indexed", role: str | None = None) -> ResourceItem:
@@ -86,20 +87,26 @@ def test_counts_total_and_types():
     assert counts["地震"] == 1
 
 
-def test_counts_artifacts_and_roles():
-    resources = [_res("well_log", role="input"), _res("horizon", role="derived")]
+def test_counts_artifacts_and_types():
+    resources = [_res("well_log"), _res("horizon")]
     artifacts = [ExportArtifact(linked_id="x", format="tiff", output_path="/x.tif")]
     counts = compute_category_counts(resources, artifacts)
-    assert counts["输入数据"] == 1
-    assert counts["成果"] == len(artifacts) + 1  # artifact + derived resource
+    assert counts["全部"] == 3  # 2 resources + 1 artifact
+    assert counts["测井"] == 1
+    assert counts["层位"] == 1
 
 
-def test_counts_issues_and_references():
+def test_counts_types_no_overlap():
     resources = [
         _res("well_log", status="missing"),
         _res("document"),
         _res("image_reference"),
     ]
     counts = compute_category_counts(resources, [])
-    assert counts["异常"] == 1
-    assert counts["参考资料"] == 2  # document + image_reference
+    assert counts["全部"] == 3
+    assert counts["测井"] == 1
+    assert counts["文档"] == 1
+    assert counts["影像"] == 1
+    # No overlap: sum of type counts == total
+    type_sum = sum(v for k, v in counts.items() if k != "全部")
+    assert type_sum == 3

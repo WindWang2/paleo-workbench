@@ -16,12 +16,11 @@ from paleo_workbench.ui.pages.filter_index import CATEGORIES, compute_category_c
 
 # Top-level group headers. These carry no filter key (UserRole is None) so
 # selecting them is a no-op for filtering — they only group their children.
-GROUP_NODES = ["输入数据", "成果", "参考资料", "异常"]
-# Resource-type leaves rendered under the 输入数据 group, in display order.
-# Each label matches a CATEGORIES key whose value is the ResourceItem.type.
+# Flat category leaves (no group nodes). Each file is counted exactly once
+# under its type, no overlap.
 TYPE_LEAVES = [
     "测井", "地震", "层位", "井分层", "时深",
-    "表格", "文档", "影像", "参考图", "未知",
+    "表格", "文档", "影像", "参考图", "测井参考", "未知",
 ]
 
 
@@ -48,12 +47,9 @@ class NavigationTree(QTreeWidget):
     def _build_nodes(self) -> None:
         all_item = QTreeWidgetItem(self, ["全部 0"])
         all_item.setData(0, Qt.ItemDataRole.UserRole, "全部")
-        for group in GROUP_NODES:
-            group_item = QTreeWidgetItem(self, [f"{group} 0"])
-            group_item.setData(0, Qt.ItemDataRole.UserRole, None)  # header
-            for leaf in TYPE_LEAVES:
-                leaf_item = QTreeWidgetItem(group_item, [f"{leaf} 0"])
-                leaf_item.setData(0, Qt.ItemDataRole.UserRole, leaf)
+        for leaf in TYPE_LEAVES:
+            leaf_item = QTreeWidgetItem(self, [f"{leaf} 0"])
+            leaf_item.setData(0, Qt.ItemDataRole.UserRole, leaf)
 
     def update_counts(self, resources: list, artifacts: list) -> None:
         counts = compute_category_counts(resources, artifacts)
@@ -65,16 +61,8 @@ class NavigationTree(QTreeWidget):
     def _update_node_count(self, item: QTreeWidgetItem, counts: dict) -> None:
         key = item.data(0, Qt.ItemDataRole.UserRole)
         label = self._label_of(item)
-        if key is not None:
-            item.setText(0, f"{label} {counts.get(key, 0)}")
-            return
-        # Group header: sum the displayed counts of its children.
-        child_sum = 0
-        for j in range(item.childCount()):
-            child = item.child(j)
-            self._update_node_count(child, counts)
-            child_sum += counts.get(child.data(0, Qt.ItemDataRole.UserRole), 0)
-        item.setText(0, f"{label} {child_sum}")
+        count = counts.get(key, 0) if key else 0
+        item.setText(0, f"{label} {count}")
 
     @staticmethod
     def _label_of(item: QTreeWidgetItem) -> str:
@@ -82,21 +70,14 @@ class NavigationTree(QTreeWidget):
         return item.text(0).rsplit(" ", 1)[0]
 
     def find_group(self, label: str) -> QTreeWidgetItem | None:
-        for i in range(self.topLevelItemCount()):
-            top = self.topLevelItem(i)
-            if self._label_of(top) == label:
-                return top
-        return None
+        """Alias for find_category_item (no group nodes anymore)."""
+        return self.find_category_item(label)
 
     def find_category_item(self, label: str) -> QTreeWidgetItem | None:
         for i in range(self.topLevelItemCount()):
             top = self.topLevelItem(i)
             if self._label_of(top) == label:
                 return top
-            for j in range(top.childCount()):
-                child = top.child(j)
-                if self._label_of(child) == label:
-                    return child
         return None
 
     def selected_category(self) -> str:

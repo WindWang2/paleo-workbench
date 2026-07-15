@@ -13,10 +13,6 @@ REFERENCE_TYPES = {"document", "image_reference", "reference_map", "well_referen
 # NavigationTree and DataAssetTable to share the same category vocabulary.
 CATEGORIES = {
     "全部": None,
-    "输入数据": "input",
-    "成果": "artifact",
-    "参考资料": "reference",
-    "异常": "issue",
     "测井": "well_log",
     "地震": "seismic",
     "层位": "horizon",
@@ -26,6 +22,7 @@ CATEGORIES = {
     "文档": "document",
     "影像": "image_reference",
     "参考图": "reference_map",
+    "测井参考": "well_reference",
     "未知": "unknown",
 }
 
@@ -93,35 +90,17 @@ class FilterIndex:
         if category == "全部":
             return True
         if isinstance(asset, ExportArtifact):
-            return category == "成果"
-
-        if category == "输入数据":
-            return (asset.artifact_role or "input") == "input"
-        if category == "成果":
-            return (asset.artifact_role or "") in {"derived", "export"}
-        if category == "参考资料":
-            return asset.type in REFERENCE_TYPES
-        if category == "异常":
-            return asset.status in ISSUE_STATUSES
-
+            return False  # artifacts not shown under type leaves
         resource_type = CATEGORIES.get(category)
         return asset.type == resource_type
 
 
 def compute_category_counts(resources: list, artifacts: list) -> dict[str, int]:
-    """Count assets per CATEGORIES key (consumed by NavigationTree)."""
+    """Count assets per CATEGORIES key. Each resource counted exactly once."""
     type_counts = Counter(r.type for r in resources)
-    role_counts = Counter(r.artifact_role or "input" for r in resources)
-    issue_count = sum(1 for r in resources if r.status in ISSUE_STATUSES)
-    values = {
-        "全部": len(resources) + len(artifacts),
-        "输入数据": role_counts["input"],
-        "成果": len(artifacts) + role_counts["derived"] + role_counts["export"],
-        "参考资料": sum(type_counts[k] for k in REFERENCE_TYPES),
-        "异常": issue_count,
-    }
-    result = dict(values)
+    result = {"全部": len(resources) + len(artifacts)}
     for label, rtype in CATEGORIES.items():
-        if label not in result:
-            result[label] = type_counts[rtype] if rtype else 0
+        if label == "全部":
+            continue
+        result[label] = type_counts.get(rtype, 0) if rtype else 0
     return result
