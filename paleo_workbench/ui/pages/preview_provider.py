@@ -177,18 +177,34 @@ class PreviewProvider:
             return self._segy_preview(asset)
 
         if fmt in HTML_FORMATS:
+            # Use lightweight QTextBrowser (rich_text) instead of QWebEngineView
+            # to avoid Chromium subprocess init lag.
+            try:
+                raw_html = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return PreviewResult(
+                    mode="message",
+                    title=title,
+                    path=asset.path,
+                    revision=revision,
+                    format=asset.format,
+                    status=asset.status,
+                    type_label=asset.type,
+                    message="文件不存在",
+                )
             return PreviewResult(
-                mode="web_document",
+                mode="rich_text",
                 title=title,
                 path=asset.path,
                 revision=revision,
                 format=asset.format,
                 status=asset.status,
                 type_label=asset.type,
+                rich_html=raw_html,
             )
 
         if fmt in MARKDOWN_FORMATS:
-            return self._markdown_web_preview(asset)
+            return self._markdown_rich_preview(asset)
 
         if fmt in JSON_FORMATS:
             return self._json_preview(asset)
@@ -474,13 +490,14 @@ class PreviewProvider:
             table_rows=tuple(table_rows),
         )
 
-    def _markdown_web_preview(self, resource: ResourceItem) -> PreviewResult:
+    def _markdown_rich_preview(self, resource: ResourceItem) -> PreviewResult:
+        """Markdown -> HTML -> QTextBrowser (rich_text mode, no WebEngine)."""
         path = Path(resource.path)
         preview_bytes, truncated = self._read_preview_chunk(path)
         markdown = preview_bytes.decode("utf-8", errors="replace")
         warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
         return PreviewResult(
-            mode="web_document",
+            mode="rich_text",
             title=resource.name,
             path=resource.path,
             revision=self._safe_stat(path),

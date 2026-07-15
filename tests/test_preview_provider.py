@@ -323,44 +323,42 @@ def _resource(tmp_path, name, fmt, content=""):
 
 
 @pytest.mark.parametrize(("name", "fmt"), [("notes.md", "md"), ("notes.markdown", "markdown")])
-def test_markdown_preview_returns_web_document(tmp_path, name, fmt):
+def test_markdown_preview_returns_rich_text(tmp_path, name, fmt):
     res = _resource(tmp_path, name, fmt, "# Title\n\nSome **bold** text.")
     result = PreviewProvider().preview(res)
-    assert result.mode == "web_document"
+    assert result.mode == "rich_text"
     assert "<h1>Title</h1>" in result.rich_html
 
 
 @pytest.mark.parametrize(("name", "fmt"), [("r.html", "html"), ("r.htm", "htm")])
-def test_html_preview_returns_path_only_web_document(tmp_path, name, fmt):
+def test_html_preview_returns_rich_text(tmp_path, name, fmt):
     res = _resource(tmp_path, name, fmt, "<h1>Hi</h1>")
     result = PreviewProvider().preview(res)
-    assert result.mode == "web_document"
+    assert result.mode == "rich_text"
     assert result.path == res.path
-    assert result.rich_html == ""
+    assert "<h1>Hi</h1>" in result.rich_html
 
 
 @pytest.mark.parametrize("fmt", ["html", "htm"])
-def test_html_web_preview_does_not_read_document(tmp_path, monkeypatch, fmt):
-    path = tmp_path / f"large.{fmt}"
-    path.write_text("<h1>large</h1>" * 100_000, encoding="utf-8")
+def test_html_preview_reads_file_content(tmp_path, fmt):
+    path = tmp_path / f"doc.{fmt}"
+    path.write_text("<h1>Hello</h1><p>World</p>", encoding="utf-8")
     resource = ResourceItem(name=path.name, path=str(path), type="document", format=fmt)
-    monkeypatch.setattr(Path, "read_text", lambda *_a, **_k: pytest.fail("must not read HTML"))
 
     result = PreviewProvider().preview(resource)
 
-    assert result.mode == "web_document"
-    assert result.path == str(path)
-    assert result.rich_html == ""
+    assert result.mode == "rich_text"
+    assert "<h1>Hello</h1>" in result.rich_html
 
 
-def test_markdown_web_preview_is_bounded_and_escaped(tmp_path):
+def test_markdown_rich_preview_is_bounded_and_escaped(tmp_path):
     path = tmp_path / "large.md"
     path.write_text("# Title\n\n- one\n\n<script>x</script>\n" * 50_000, encoding="utf-8")
     resource = ResourceItem(name=path.name, path=str(path), type="document", format="md")
 
     result = PreviewProvider().preview(resource)
 
-    assert result.mode == "web_document"
+    assert result.mode == "rich_text"
     assert "<h1>Title</h1>" in result.rich_html
     assert "&lt;script&gt;x&lt;/script&gt;" in result.rich_html
     assert result.truncated is True
