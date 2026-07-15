@@ -1,26 +1,21 @@
 """Page-switch fade-in transition tests - Task 4.
 
-AppShell construction pulls in the WebEngine preview chain which can hang in
-headless environments. The AppShell-based tests below are marked with a short
-timeout so they fail fast instead of blocking the suite; the fade logic is
-also verified in isolation via ``test_fade_animation_contract`` which only
-needs a plain QStackedWidget.
+The AppShell tests intentionally exercise the page-switch logic without
+showing a native window.  The offscreen Qt platform does not provide a stable
+window-exposure path, while the animation contract only needs the event loop.
 """
 import pytest
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QStackedWidget
 
 
-# --- AppShell-backed tests (may hang under WebEngine; timeout keeps them safe) ---
+# --- AppShell page-switch tests (headless: no native-window exposure) ---
 
-@pytest.mark.timeout(15)
 def test_page_switch_attaches_opacity_effect(qtbot):
     from paleo_workbench.ui.app_shell import AppShell
 
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.show()
-    qtbot.waitExposed(shell)
     shell._switch_page(1)  # switch to data page
     qtbot.wait(50)
     page = shell.page_stack.widget(1)
@@ -29,14 +24,11 @@ def test_page_switch_attaches_opacity_effect(qtbot):
     assert isinstance(shell._fade_anim, QPropertyAnimation)
 
 
-@pytest.mark.timeout(15)
 def test_page_switch_completes_at_full_opacity(qtbot):
     from paleo_workbench.ui.app_shell import AppShell
 
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.show()
-    qtbot.waitExposed(shell)
     shell._switch_page(2)
     qtbot.wait(250)  # wait for 150ms animation to finish
     page = shell.page_stack.widget(2)
@@ -45,15 +37,12 @@ def test_page_switch_completes_at_full_opacity(qtbot):
         assert effect.opacity() == pytest.approx(1.0)
 
 
-@pytest.mark.timeout(15)
 def test_rapid_page_switch_restarts_animation(qtbot):
     """Rapid switches must stop+restart the animation rather than stack effects."""
     from paleo_workbench.ui.app_shell import AppShell
 
     shell = AppShell()
     qtbot.addWidget(shell)
-    shell.show()
-    qtbot.waitExposed(shell)
     shell._switch_page(2)
     shell._switch_page(3)
     shell._switch_page(4)

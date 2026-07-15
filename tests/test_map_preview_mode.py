@@ -122,14 +122,14 @@ def test_mapping_page_preview_mode_switch(qtbot):
 
     assert page.is_preview_mode() is False
     assert page.center_stack.currentIndex() == 0
-    assert page.attribute_table.isHidden() is False
+    assert page.bottom_workbench.isHidden() is False
     assert isinstance(page.canvas_panel, MapCanvasPanel)
     assert isinstance(page.chrome_panel, MapChromePanel)
 
     page.set_preview_mode(True)
     assert page.is_preview_mode() is True
     assert page.center_stack.currentIndex() == 1
-    assert page.attribute_table.isHidden() is True
+    assert page.bottom_workbench.isHidden() is True
     assert page.toolbar.preview_btn.isChecked() is True
     assert page.toolbar.select_btn.isEnabled() is False
 
@@ -150,7 +150,7 @@ def test_mapping_page_preview_mode_switch(qtbot):
 
     page.set_preview_mode(False)
     assert page.center_stack.currentIndex() == 0
-    assert page.attribute_table.isHidden() is False
+    assert page.bottom_workbench.isHidden() is False
     assert page.toolbar.select_btn.isEnabled() is True
 
 
