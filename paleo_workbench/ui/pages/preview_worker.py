@@ -227,23 +227,38 @@ class PreviewRequestController(QObject):
         self._generation += 1
         self._inflight_keys.clear()
 
-        active = self._active
-        if active is None:
+        jobs = list(self._jobs)
+        if self._active is not None and self._active not in jobs:
+            jobs.append(self._active)
+        if not jobs:
+            self._active = None
             self._jobs.clear()
             return
 
-        thread, worker = active
-        # Cooperative only: wait for the in-flight job to finish naturally.
+        # Cooperative only: ask every owned thread to stop its event loop after
+        # the current bounded provider call returns. Never abandon ownership of
+        # a running QThread, even if the caller's bounded wait expires.
         deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
-        try:
-            worker.finished.disconnect(self._on_finished)
-        except (RuntimeError, TypeError):
-            pass
-        try:
-            worker.failed.disconnect(self._on_failed)
-        except (RuntimeError, TypeError):
-            pass
-        thread.wait(max(deadline, 0))
+        for thread, worker in jobs:
+            try:
+                worker.finished.disconnect(self._on_finished)
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                worker.failed.disconnect(self._on_failed)
+            except (RuntimeError, TypeError):
+                pass
+            thread.requestInterruption()
+            thread.quit()
+
+        for thread, _worker in jobs:
+            if not thread.wait(max(deadline, 0)):
+                thread.wait()
+
+        for thread, _worker in jobs:
+            while thread.isRunning():
+                thread.wait()
+
         self._active = None
         self._jobs.clear()
 

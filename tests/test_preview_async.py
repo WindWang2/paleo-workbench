@@ -2,6 +2,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from geoviz import PreparedPreview, PreviewKind
 
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
@@ -538,6 +540,64 @@ def test_shutdown_stops_accepting_and_clears_jobs(qtbot, tmp_path):
     # Stale completion must not deliver after shutdown.
     qtbot.wait(100)
     assert results == []
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_shutdown_timeout_falls_back_to_waiting_for_real_thread_stop(
+    qtbot, tmp_path, fails
+):
+    paths = [tmp_path / f"{name}.txt" for name in ("a", "b")]
+    for path in paths:
+        path.write_text(path.stem, encoding="utf-8")
+    resources = [
+        ResourceItem(name=path.name, path=str(path), type="document", format="txt")
+        for path in paths
+    ]
+
+    class SlowEndingProvider(PreviewProvider):
+        def __init__(self):
+            super().__init__()
+            self.started = threading.Event()
+            self.calls: list[str] = []
+
+        def preview(self, asset):
+            self.calls.append(asset.name)
+            self.started.set()
+            time.sleep(0.05)
+            if fails:
+                raise RuntimeError("ending failed")
+            return PreviewResult(mode="message", title=asset.name)
+
+    provider = SlowEndingProvider()
+    controller = PreviewRequestController(provider)
+    results: list[PreviewResult] = []
+    failures: list[str] = []
+    controller.result_ready.connect(results.append)
+    controller.failed.connect(failures.append)
+
+    controller.request(resources[0])
+    assert provider.started.wait(timeout=3.0)
+    controller.request(resources[1])
+    assert controller._pending is not None
+    assert controller._active is not None
+    active_thread = controller._active[0]
+
+    controller.shutdown(wait_ms=1)
+    running_after_shutdown = active_thread.isRunning()
+    if running_after_shutdown:
+        active_thread.requestInterruption()
+        active_thread.quit()
+        active_thread.wait()
+
+    assert not running_after_shutdown
+    assert controller._active is None
+    assert controller._jobs == []
+    assert controller._pending is None
+    assert results == []
+    assert failures == []
+    assert controller.cache.current_bytes == 0
+    qtbot.wait(50)
+    assert provider.calls == ["a.txt"]
 
 
 def test_data_page_close_shuts_down_preview_controller(qtbot, tmp_path):

@@ -18,6 +18,8 @@ class LifecycleEngine:
     def __init__(self) -> None:
         self.created: list[QLabel] = []
         self.released: list[QLabel] = []
+        self.watched_thread = None
+        self.thread_running_at_release: list[bool] = []
 
     def create_widget(self, kind, parent=None):
         widget = QLabel(parent)
@@ -28,6 +30,8 @@ class LifecycleEngine:
         widget.setText(preview.title)
 
     def release(self, widget):
+        if self.watched_thread is not None:
+            self.thread_running_at_release.append(self.watched_thread.isRunning())
         self.released.append(widget)
 
 
@@ -85,6 +89,7 @@ def test_page_teardown_leaves_no_preview_job_and_releases_each_engine_widget_onc
     page.reader_panel.geoviz_host.engine = engine
     provider = LifecycleProvider(fail_second=fail_second)
     page._preview_controller.provider = provider
+    page._preview_controller._shutdown_wait_ms = 1
 
     page._set_selected_asset(project.resources[0])
     qtbot.waitUntil(lambda: page.reader_panel.current_mode == "geoviz", timeout=3000)
@@ -97,6 +102,8 @@ def test_page_teardown_leaves_no_preview_job_and_releases_each_engine_widget_onc
     page._set_selected_asset(project.resources[1])
     assert provider.second_started.wait(timeout=3.0)
     assert page._preview_controller._active is not None
+    active_thread = page._preview_controller._active[0]
+    engine.watched_thread = active_thread
     assert engine.released == []
 
     controller = page._preview_controller
@@ -109,7 +116,11 @@ def test_page_teardown_leaves_no_preview_job_and_releases_each_engine_widget_onc
     assert controller._active is None
     assert controller._pending is None
     assert engine.released == engine.created
+    assert engine.thread_running_at_release == [False]
+    assert provider.started == ["well.las", "second.las"]
+    assert controller.cache.current_bytes == 16
 
     if teardown == "close":
+        assert not active_thread.isRunning()
         page.close()
         assert engine.released == engine.created
