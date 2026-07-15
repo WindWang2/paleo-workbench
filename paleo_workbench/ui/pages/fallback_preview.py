@@ -743,21 +743,32 @@ def _validated_jpeg_range(mapped: mmap.mmap, start: int) -> int | None:
 
         seen_scan = True
         position = segment_end
+        scan_has_entropy = False
         while position < max_end:
             marker_start = mapped.find(b"\xff", position, max_end)
             if marker_start < 0:
                 return None
+            if marker_start > position:
+                scan_has_entropy = True
             position = marker_start + 1
             while position < max_end and mapped[position] == 0xFF:
                 position += 1
             if position >= max_end:
                 return None
             marker = mapped[position]
-            if marker == 0x00 or 0xD0 <= marker <= 0xD7:
+            if marker == 0x00:
+                scan_has_entropy = True
+                position += 1
+                continue
+            if 0xD0 <= marker <= 0xD7:
                 position += 1
                 continue
             if marker == 0xD9:
+                if not scan_has_entropy:
+                    return None
                 return position + 1 if frame_components is not None else None
+            if not scan_has_entropy:
+                return None
             position = marker_start
             break
     return None

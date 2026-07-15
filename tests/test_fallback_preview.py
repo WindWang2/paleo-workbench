@@ -323,6 +323,23 @@ def test_dfb_accepts_structurally_consistent_jpeg_with_scan_and_eoi(tmp_path: Pa
     assert result.image_bytes == jpeg_bytes
 
 
+def test_dfb_rejects_27_byte_header_only_jpeg_without_entropy_data(tmp_path: Path):
+    header_only_jpeg = (
+        b"\xff\xd8"  # SOI
+        b"\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00"  # SOF0
+        b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00"  # SOS
+        b"\xff\xd9"  # EOI with no entropy-coded data
+    )
+    assert len(header_only_jpeg) == 27
+    path = tmp_path / "header-only.dfb"
+    path.write_bytes(b"prefix" + header_only_jpeg + b"suffix")
+
+    result = dfb_preview(_resource(path, "dfb", "reference_map"))
+
+    assert result.mode == "message"
+    assert result.image_bytes == b""
+
+
 def test_zip_lists_only_first_500_sorted_central_names_without_extracting(tmp_path: Path):
     path = tmp_path / "bundle.zip"
     with zipfile.ZipFile(path, "w") as archive:
