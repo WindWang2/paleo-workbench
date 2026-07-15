@@ -429,8 +429,10 @@ def test_data_page_import_status_describes_archiving_while_worker_runs(
     assert started is True
     qtbot.waitUntil(worker_started.is_set, timeout=1000)
     with qtbot.waitSignal(page.import_finished, timeout=1000):
-        assert "正在归档文件" in page.data_toolbar.operation_status_label.text()
-        release_worker.set()
+        try:
+            assert "正在归档文件" in page.data_toolbar.operation_status_label.text()
+        finally:
+            release_worker.set()
 
     assert page.data_toolbar.operation_status_label.text().startswith("已归档")
 
