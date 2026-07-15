@@ -40,6 +40,21 @@ class AssetContextMenu(QMenu):
             rescan.setObjectName("ctx_rescan")
             self.addAction(rescan)
 
+            # 归类为 (ResourceItem only) - 手动修改文件类型
+            classify_menu = QMenu("归类为", self)
+            current_type = asset.type
+            from paleo_workbench.ui.pages.filter_index import CATEGORIES
+            for label, rtype in CATEGORIES.items():
+                if rtype is None or rtype == current_type:
+                    continue
+                sub = QAction(label, classify_menu)
+                sub.setObjectName(f"ctx_classify_{rtype}")
+                classify_menu.addAction(sub)
+                self._export_actions.append((f"classify_{rtype}", sub))
+            classify_action = QAction("归类为", self)
+            classify_action.setMenu(classify_menu)
+            self.addAction(classify_action)
+
         # 导出 (only when converters available)
         formats = get_available_formats(asset)
         if formats:

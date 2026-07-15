@@ -427,6 +427,18 @@ class DataPage(QWidget):
                     lambda checked=False, fmt=label: self._export_selected_asset(fmt)
                 )
 
+        # Wire classify sub-actions (one per available type).
+        if isinstance(asset, ResourceItem):
+            from paleo_workbench.ui.pages.filter_index import CATEGORIES
+            for label, rtype in CATEGORIES.items():
+                if rtype is None or rtype == asset.type:
+                    continue
+                sub_act = menu.find_export_action(f"classify_{rtype}")
+                if sub_act:
+                    sub_act.triggered.connect(
+                        lambda checked=False, t=rtype: self._classify_selected_asset(t)
+                    )
+
         menu.exec(global_pos)
 
     def _export_selected_asset(self, format_label: str) -> None:
@@ -454,6 +466,23 @@ class DataPage(QWidget):
             self._set_action_status(f"已导出: {output_path.name}")
         except Exception as exc:
             self._set_action_status(f"导出失败: {exc}")
+
+    def _classify_selected_asset(self, new_type: str) -> None:
+        """Change the selected resource's type (manual reclassification)."""
+        asset = self._selected_asset
+        if not isinstance(asset, ResourceItem):
+            return
+        old_type = asset.type
+        asset.type = new_type
+        self.update_state(
+            dashboard_state(self.project),
+            self.project.resources,
+            self.project.export_artifacts,
+        )
+        from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
+        old_label = RESOURCE_TYPE_LABELS.get(old_type, old_type)
+        new_label = RESOURCE_TYPE_LABELS.get(new_type, new_type)
+        self._set_action_status(f"已归类: {old_label} → {new_label}")
 
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
