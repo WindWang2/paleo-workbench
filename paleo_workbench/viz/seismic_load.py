@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-MAX_DIM = 64
+MAX_DIM = 128  # was 64; increased for 2D lines that need more resolution
 MAX_BUDGET = MAX_DIM * MAX_DIM * MAX_DIM
 
 
@@ -23,7 +23,9 @@ def load_seismic_volume_from_path(path: str) -> tuple[np.ndarray | None, str]:
     try:
         with segyio.open(str(file_path), "r", ignore_geometry=True) as cube:
             n_traces = int(getattr(cube, "tracecount", 0) or 0)
-            samples = getattr(cube, "samples", ()) or ()
+            samples = getattr(cube, "samples", None)
+            if samples is None:
+                samples = ()
             n_samples = len(samples)
             if n_traces <= 0 or n_samples <= 0:
                 return None, "SEGY 无有效道或采样"
@@ -53,7 +55,31 @@ def load_seismic_volume_from_path(path: str) -> tuple[np.ndarray | None, str]:
             if min_len < 1:
                 return None, "SEGY 采样长度为 0"
             stacked = np.stack([r[:min_len] for r in rows], axis=0)  # (traces, samples)
-            volume = stacked.reshape(1, stacked.shape[0], stacked.shape[1]).astype(np.float32)
+
+            # For 2D seismic lines (no 3D geometry), reshape as
+            # (side, side, n_samples) so all three slice planes are meaningful.
+            # Use a larger trace budget for 2D so the pseudo-3D grid is usable.
+            n_samp = stacked.shape[1]
+            target_side = min(48, int(math.isqrt(48 * 48)))  # 48x48 grid max
+            # Re-stride traces to fill target_side^2
+            needed = target_side * target_side
+            t_step2 = max(1, math.ceil(n_traces / needed))
+            t_indices2 = list(range(0, n_traces, t_step2))[:needed]
+            rows2 = []
+            for ti in t_indices2:
+                trace = np.asarray(cube.trace[ti], dtype=np.float32)[sample_slice]
+                if trace.size > MAX_DIM:
+                    stride = max(1, math.ceil(trace.size / MAX_DIM))
+                    trace = trace[::stride][:MAX_DIM]
+                rows2.append(trace.astype(np.float32, copy=False))
+            if not rows2:
+                return None, "SEGY 2D 读取结果为空"
+            min_len2 = min(r.size for r in rows2)
+            stacked2 = np.stack([r[:min_len2] for r in rows2], axis=0)
+            actual_side = int(math.isqrt(stacked2.shape[0]))
+            usable = actual_side * actual_side
+            stacked2 = stacked2[:usable]
+            volume = stacked2.reshape(actual_side, actual_side, min_len2).astype(np.float32)
 
             truncated = t_step > 1 or s_step > 1 or n_traces > MAX_DIM or n_samples > MAX_DIM
             volume, further = _bound_volume(volume)
