@@ -81,6 +81,8 @@ def test_reader_panel_rejects_non_prepared_geoviz_payload_and_clears_stale_widge
     panel = DataReaderPanel()
     qtbot.addWidget(panel)
     clears = []
+    modes = []
+    panel.reader_mode_changed.connect(modes.append)
     monkeypatch.setattr(panel.geoviz_host, "clear", lambda: clears.append("clear"))
 
     panel.render(
@@ -89,6 +91,8 @@ def test_reader_panel_rejects_non_prepared_geoviz_payload_and_clears_stale_widge
 
     assert clears == ["clear"]
     assert panel.stack.currentWidget() is panel.message_label
+    assert panel.current_mode == "message"
+    assert modes == ["message"]
     assert "预览不可用" in panel.message_label.text()
 
 

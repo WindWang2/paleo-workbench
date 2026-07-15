@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Signal
@@ -146,6 +147,20 @@ class DataReaderPanel(QFrame):
         self.render(self.provider.preview(asset))
 
     def render(self, result: PreviewResult) -> None:
+        invalid_geoviz = result.mode == "geoviz" and not isinstance(
+            result.engine_preview,
+            PreparedPreview,
+        )
+        if invalid_geoviz:
+            self.geoviz_host.clear()
+            result = replace(
+                result,
+                mode="message",
+                message=result.message or "预览不可用",
+                engine_preview=None,
+                estimated_bytes=0,
+            )
+
         self._current_result = result
         self.current_mode = result.mode
         self.reader_mode_changed.emit(result.mode)
@@ -158,7 +173,8 @@ class DataReaderPanel(QFrame):
             self.stack.setCurrentWidget(self.geoviz_host)
             return
 
-        self.geoviz_host.clear()
+        if not invalid_geoviz:
+            self.geoviz_host.clear()
 
         if result.mode == "empty":
             self.stack.setCurrentWidget(self.empty_label)

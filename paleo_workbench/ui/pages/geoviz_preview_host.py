@@ -28,7 +28,14 @@ class GeoVizPreviewHost(QWidget):
             self.widgets[preview.kind] = widget
             self.stack.addWidget(widget)
 
-        self.engine.render(widget, preview)
+        try:
+            self.engine.render(widget, preview)
+        except Exception:
+            try:
+                self._dispose_widget(preview.kind, widget)
+            except Exception:
+                pass
+            raise
         self._active_kind = preview.kind
         self.stack.setCurrentWidget(widget)
         widget.show()
@@ -41,21 +48,35 @@ class GeoVizPreviewHost(QWidget):
 
     def release_all(self) -> None:
         self._require_ui_thread()
+        first_error: Exception | None = None
         for kind in tuple(self.widgets):
-            self._release_kind(kind)
+            try:
+                self._release_kind(kind)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
     def _release_kind(self, kind: PreviewKind) -> None:
-        widget = self.widgets.pop(kind, None)
+        widget = self.widgets.get(kind)
         if widget is None:
             if self._active_kind is kind:
                 self._active_kind = None
             return
-        self.engine.release(widget)
-        widget.hide()
-        self.stack.removeWidget(widget)
-        widget.deleteLater()
-        if self._active_kind is kind:
-            self._active_kind = None
+        self._dispose_widget(kind, widget)
+
+    def _dispose_widget(self, kind: PreviewKind, widget: QWidget) -> None:
+        try:
+            self.engine.release(widget)
+        finally:
+            widget.hide()
+            self.stack.removeWidget(widget)
+            if self.widgets.get(kind) is widget:
+                self.widgets.pop(kind)
+            if self._active_kind is kind:
+                self._active_kind = None
+            widget.deleteLater()
 
     @staticmethod
     def _require_ui_thread() -> None:
