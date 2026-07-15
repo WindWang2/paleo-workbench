@@ -254,7 +254,7 @@ class DataPage(QWidget):
         thread.finished.connect(thread.deleteLater)
 
         self._set_import_running(True)
-        self._set_action_status("正在导入...")
+        self._set_action_status("正在归档文件...")
         thread.start()
         return True
 
@@ -563,7 +563,7 @@ class DataPage(QWidget):
 
     def _set_import_status(self, report: ImportReport) -> None:
         self._set_action_status(
-            f"新增 {report.added_count} · 重复 {report.skipped_count} · 警告 {len(report.warnings)}"
+            f"已归档 {report.added_count} · 重复路径 {len(report.skipped_path)} · 警告 {len(report.warnings)}"
         )
 
     def _apply_import_report(self, report: ImportReport) -> None:

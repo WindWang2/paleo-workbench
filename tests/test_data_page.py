@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Event
 from unittest.mock import patch
 
 import pytest
@@ -263,7 +264,7 @@ def test_data_page_import_paths_updates_project_and_table(qtbot, tmp_path: Path)
     assert report.added_count == 1
     assert len(project.resources) == 1
     assert _table_row_count(page) == 1
-    assert "新增 1" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
@@ -279,7 +280,7 @@ def test_data_page_import_paths_skips_duplicate(qtbot, tmp_path: Path):
     assert report.added_count == 0
     assert report.skipped_count == 1
     assert len(project.resources) == 1
-    assert "重复 1" in page.data_toolbar.operation_status_label.text()
+    assert "重复路径 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_remove_selected_resource_unregisters_only(qtbot, tmp_path: Path):
@@ -388,7 +389,50 @@ def test_data_page_starts_file_import_in_worker_thread(
     assert worker_threads
     assert worker_threads[0] is not page.thread()
     assert project.resources[0].name == "well.las"
-    assert "新增 1" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 1" in page.data_toolbar.operation_status_label.text()
+
+
+def test_data_page_import_status_describes_archiving_while_worker_runs(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = ProjectDocument.new("Demo")
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    worker_started = Event()
+    release_worker = Event()
+
+    def controlled_import_files(paths, existing):
+        worker_started.set()
+        release_worker.wait()
+        return ImportReport(
+            added=[
+                ResourceItem(
+                    name=paths[0].name,
+                    path=paths[0].as_posix(),
+                    type="well_log",
+                    format="las",
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.data_page.import_files",
+        controlled_import_files,
+    )
+
+    started = page.begin_import_paths([well])
+
+    assert started is True
+    qtbot.waitUntil(worker_started.is_set, timeout=1000)
+    with qtbot.waitSignal(page.import_finished, timeout=1000):
+        assert "正在归档文件" in page.data_toolbar.operation_status_label.text()
+        release_worker.set()
+
+    assert page.data_toolbar.operation_status_label.text().startswith("已归档")
 
 
 def test_data_page_import_folder_dialog_uses_selected_folder(
@@ -450,7 +494,7 @@ def test_data_page_starts_folder_import_in_worker_thread(
     assert worker_threads
     assert worker_threads[0] is not page.thread()
     assert project.resources[0].name == "cube.sgy"
-    assert "新增 1" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
@@ -488,7 +532,7 @@ def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
     assert _table_row_count(page) == 5
     assert reset_count["n"] == 1
     assert update_counts == [5]
-    assert "新增 5" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 5" in page.data_toolbar.operation_status_label.text()
     assert isinstance(page.asset_table.table, QTableView)
     assert isinstance(_table_model(page), AssetTableModel)
     # Import must not rebuild reader when nothing is selected.
@@ -528,7 +572,7 @@ def test_async_import_keeps_reader_content_for_prior_selection(
     assert len(project.resources) == 4
     assert _table_row_count(page) == 4
     assert reset_count["n"] == 1
-    assert "新增 3" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 3" in page.data_toolbar.operation_status_label.text()
     assert page.reader_panel.current_mode == "text"
     assert "alpha-content" in page.reader_panel.text_preview.toPlainText()
 
@@ -813,10 +857,10 @@ def test_data_page_keeps_latest_operation_report_when_selection_changes(qtbot, t
 
     page.import_paths([path])
 
-    assert "新增 1" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 1" in page.data_toolbar.operation_status_label.text()
     page.asset_table.table.selectRow(0)
     _wait_reader_mode(qtbot, page, "text")
-    assert "新增 1" in page.data_toolbar.operation_status_label.text()
+    assert "已归档 1" in page.data_toolbar.operation_status_label.text()
 
 
 def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
@@ -974,7 +1018,6 @@ def test_data_page_export_selected_asset_noop_when_dialog_cancelled(
 
     assert not out_path.exists()
 
-
 @pytest.mark.timeout(15)
 def test_data_page_export_selected_asset_noop_for_artifact(qtbot, tmp_path: Path):
     project = ProjectDocument.new("Test")
@@ -996,4 +1039,3 @@ def test_data_page_export_selected_asset_noop_for_artifact(qtbot, tmp_path: Path
         page._export_selected_asset("CSV")
 
     assert not out_path.exists()
-

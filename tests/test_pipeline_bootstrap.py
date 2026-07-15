@@ -57,6 +57,17 @@ def test_bootstrap_indexes_and_stratigraphy(tmp_path: Path):
     assert result.stats["by_type"]["well_log"] == 2
 
 
+def test_bootstrap_default_keeps_full_scan_checksums(tmp_path: Path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    source = data_root / "well.las"
+    source.write_text("~Version\n", encoding="utf-8")
+
+    result = bootstrap_sample_project(data_root)
+
+    assert result.document.resources[0].checksum is not None
+
+
 def test_bootstrap_missing_root_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         bootstrap_sample_project(tmp_path / "nope")
