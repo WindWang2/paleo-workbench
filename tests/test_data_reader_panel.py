@@ -4,6 +4,7 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QTableWidget
 
@@ -22,6 +23,57 @@ def _prepared_well_preview():
         payload={"depth": (0.0, 1.0)},
         estimated_bytes=64,
     )
+
+
+class ReaderEngine:
+    def __init__(self) -> None:
+        self.create_error: Exception | None = None
+        self.render_error: Exception | None = None
+        self.release_error: Exception | None = None
+        self.created = []
+        self.released = []
+
+    def create_widget(self, kind, parent=None):
+        if self.create_error is not None:
+            raise self.create_error
+        widget = QLabel(parent)
+        self.created.append((kind, widget))
+        return widget
+
+    def render(self, widget, preview) -> None:
+        if self.render_error is not None:
+            raise self.render_error
+        widget.setText(preview.title)
+
+    def release(self, widget) -> None:
+        self.released.append(widget)
+        if self.release_error is not None:
+            raise self.release_error
+        widget.clear()
+
+
+def _reader_with_engine(qtbot, engine: ReaderEngine):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    panel = DataReaderPanel(provider=LocalVisualizationProvider(engine))
+    qtbot.addWidget(panel)
+    return panel
+
+
+def _reader_with_active_geoviz(qtbot):
+    engine = ReaderEngine()
+    panel = _reader_with_engine(qtbot, engine)
+    prepared = _prepared_well_preview()
+    panel.render(
+        PreviewResult(
+            mode="geoviz",
+            title="well.las",
+            engine_preview=prepared,
+            estimated_bytes=prepared.estimated_bytes,
+        )
+    )
+    engine.release_error = RuntimeError("release failed")
+    return panel, engine
 
 
 def test_reader_panel_empty_state(qtbot):
@@ -46,7 +98,11 @@ def test_reader_panel_dispatches_prepared_geoviz_preview(qtbot, monkeypatch):
     qtbot.addWidget(panel)
     prepared = _prepared_well_preview()
     rendered = []
+    committed = []
     monkeypatch.setattr(panel.geoviz_host, "render", rendered.append)
+    panel.reader_mode_changed.connect(
+        lambda mode: committed.append((mode, panel.stack.currentWidget()))
+    )
 
     panel.render(
         PreviewResult(
@@ -59,6 +115,161 @@ def test_reader_panel_dispatches_prepared_geoviz_preview(qtbot, monkeypatch):
 
     assert rendered == [prepared]
     assert panel.stack.currentWidget() is panel.geoviz_host
+    assert committed == [("geoviz", panel.geoviz_host)]
+
+
+@pytest.mark.parametrize("failure_stage", ["create", "render"])
+def test_reader_panel_geoviz_engine_failure_commits_stable_message_state(
+    qtbot,
+    failure_stage,
+):
+    engine = ReaderEngine()
+    error = RuntimeError(f"{failure_stage} failed")
+    if failure_stage == "create":
+        engine.create_error = error
+    else:
+        engine.render_error = error
+    panel = _reader_with_engine(qtbot, engine)
+    committed = []
+    panel.reader_mode_changed.connect(
+        lambda mode: committed.append((mode, panel.stack.currentWidget()))
+    )
+
+    panel.render(
+        PreviewResult(
+            mode="geoviz",
+            title="well.las",
+            warning="source warning",
+            engine_preview=_prepared_well_preview(),
+        )
+    )
+
+    assert panel.current_mode == "message"
+    assert panel.stack.currentWidget() is panel.message_label
+    assert committed == [("message", panel.message_label)]
+    assert "预览不可用" in panel.message_label.text()
+    assert panel.warning_label.text() == f"source warning · {failure_stage} failed"
+    assert panel.geoviz_host.widgets == {}
+    assert panel.geoviz_host._active_kind is None
+    assert panel.geoviz_host.stack.count() == 0
+
+
+@pytest.mark.parametrize(
+    ("result", "target_name", "expected_message"),
+    [
+        (PreviewResult(mode="empty", title="empty"), "empty_label", ""),
+        (
+            PreviewResult(mode="message", title="failure", message="reader failed"),
+            "message_label",
+            "reader failed",
+        ),
+        (
+            PreviewResult(
+                mode="text",
+                title="fallback",
+                text="ordinary",
+                warning="source warning",
+            ),
+            "text_preview",
+            "",
+        ),
+    ],
+)
+def test_reader_panel_clear_failure_still_commits_non_geoviz_state(
+    qtbot,
+    result,
+    target_name,
+    expected_message,
+):
+    panel, engine = _reader_with_active_geoviz(qtbot)
+    committed = []
+    panel.reader_mode_changed.connect(
+        lambda mode: committed.append((mode, panel.stack.currentWidget()))
+    )
+
+    panel.render(result)
+
+    target = getattr(panel, target_name)
+    assert panel.current_mode == result.mode
+    assert panel.stack.currentWidget() is target
+    assert committed == [(result.mode, target)]
+    if expected_message:
+        assert expected_message in panel.message_label.text()
+    assert "release failed" in panel.warning_label.text()
+    if result.warning:
+        assert result.warning in panel.warning_label.text()
+    assert panel.geoviz_host.widgets == {}
+    assert panel.geoviz_host._active_kind is None
+    assert panel.geoviz_host.stack.count() == 0
+    assert len(engine.released) == 1
+
+
+def test_reader_panel_invalid_geoviz_clear_failure_commits_message_state(qtbot):
+    panel, engine = _reader_with_active_geoviz(qtbot)
+    committed = []
+    panel.reader_mode_changed.connect(
+        lambda mode: committed.append((mode, panel.stack.currentWidget()))
+    )
+
+    panel.render(
+        PreviewResult(
+            mode="geoviz",
+            title="invalid",
+            message="invalid payload",
+            warning="source warning",
+            engine_preview={"widget": object()},
+        )
+    )
+
+    assert panel.current_mode == "message"
+    assert panel.stack.currentWidget() is panel.message_label
+    assert committed == [("message", panel.message_label)]
+    assert panel.message_label.text() == "invalid payload"
+    assert panel.warning_label.text() == "source warning · release failed"
+    assert panel.geoviz_host.widgets == {}
+    assert panel.geoviz_host._active_kind is None
+    assert panel.geoviz_host.stack.count() == 0
+    assert len(engine.released) == 1
+
+
+def test_reader_panel_loading_clear_failure_commits_loading_state(qtbot):
+    panel, engine = _reader_with_active_geoviz(qtbot)
+    committed = []
+    panel.reader_mode_changed.connect(
+        lambda mode: committed.append((mode, panel.stack.currentWidget()))
+    )
+
+    panel.show_loading()
+
+    assert panel.current_mode == "loading"
+    assert panel.stack.currentWidget() is panel.message_label
+    assert committed == [("loading", panel.message_label)]
+    assert "正在生成预览" in panel.message_label.text()
+    assert panel.warning_label.text() == "release failed"
+    assert panel.geoviz_host.widgets == {}
+    assert panel.geoviz_host._active_kind is None
+    assert panel.geoviz_host.stack.count() == 0
+    assert len(engine.released) == 1
+
+
+def test_reader_panel_release_all_failure_leaves_stable_message_state(qtbot):
+    panel, engine = _reader_with_active_geoviz(qtbot)
+    committed = []
+    panel.reader_mode_changed.connect(
+        lambda mode: committed.append((mode, panel.stack.currentWidget()))
+    )
+
+    panel.release_engine_widgets()
+
+    assert panel.current_mode == "message"
+    assert panel.stack.currentWidget() is panel.message_label
+    assert committed == [("message", panel.message_label)]
+    assert "预览不可用" in panel.message_label.text()
+    assert panel.warning_label.text() == "release failed"
+    assert panel.geoviz_host.widgets == {}
+    assert panel.geoviz_host._active_kind is None
+    assert panel.geoviz_host.stack.count() == 0
+    assert len(engine.released) == 1
 
 
 def test_reader_panel_clears_stale_geoviz_before_non_geoviz_states(qtbot, monkeypatch):

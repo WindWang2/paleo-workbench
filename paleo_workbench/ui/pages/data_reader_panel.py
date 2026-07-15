@@ -128,9 +128,7 @@ class DataReaderPanel(QFrame):
         self.stack.setCurrentWidget(self.empty_label)
 
     def show_loading(self, asset: ResourceItem | ExportArtifact | None = None) -> None:
-        self.geoviz_host.clear()
-        self.current_mode = "loading"
-        self.reader_mode_changed.emit("loading")
+        clear_warning = self._safe_clear_geoviz()
         title = "加载中…"
         if isinstance(asset, ResourceItem):
             title = f"加载中… {asset.name}"
@@ -138,21 +136,30 @@ class DataReaderPanel(QFrame):
             title = f"加载中… {Path(asset.output_path).name}"
         self.title_label.setText(title)
         self.meta_label.setText("")
-        self.warning_label.setText("")
+        self.warning_label.setText(clear_warning)
         self.message_label.set_message("正在生成预览…")
         self.stack.setCurrentWidget(self.message_label)
+        self.current_mode = "loading"
+        self.reader_mode_changed.emit("loading")
 
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
         # Sync path for direct panel tests; DataPage uses PreviewRequestController.
         self.render(self.provider.preview(asset))
 
     def render(self, result: PreviewResult) -> None:
-        invalid_geoviz = result.mode == "geoviz" and not isinstance(
-            result.engine_preview,
-            PreparedPreview,
-        )
-        if invalid_geoviz:
-            self.geoviz_host.clear()
+        if result.mode == "geoviz" and isinstance(result.engine_preview, PreparedPreview):
+            try:
+                self.geoviz_host.render(result.engine_preview)
+            except Exception as error:
+                result = self._geoviz_failure_result(result, error)
+                target = self._load_target_widget(result)
+                self._commit_result(result, target)
+                return
+            self._commit_result(result, self.geoviz_host)
+            return
+
+        clear_warning = self._safe_clear_geoviz()
+        if result.mode == "geoviz":
             result = replace(
                 result,
                 mode="message",
@@ -160,40 +167,30 @@ class DataReaderPanel(QFrame):
                 engine_preview=None,
                 estimated_bytes=0,
             )
+        if clear_warning:
+            result = replace(
+                result,
+                warning=self._merge_warning(result.warning, clear_warning),
+            )
 
-        self._current_result = result
-        self.current_mode = result.mode
-        self.reader_mode_changed.emit(result.mode)
-        self.title_label.setText(result.title)
-        self.meta_label.setText(self._meta_text(result))
-        self.warning_label.setText(result.warning)
+        target = self._load_target_widget(result)
+        self._commit_result(result, target)
 
-        if result.mode == "geoviz" and isinstance(result.engine_preview, PreparedPreview):
-            self.geoviz_host.render(result.engine_preview)
-            self.stack.setCurrentWidget(self.geoviz_host)
-            return
-
-        if not invalid_geoviz:
-            self.geoviz_host.clear()
-
+    def _load_target_widget(self, result: PreviewResult):
         if result.mode == "empty":
-            self.stack.setCurrentWidget(self.empty_label)
-            return
+            return self.empty_label
 
         if result.mode == "message":
             self.message_label.set_message(result.message)
-            self.stack.setCurrentWidget(self.message_label)
-            return
+            return self.message_label
 
         if result.mode == "text":
             self.text_preview.load_text(result.text)
-            self.stack.setCurrentWidget(self.text_preview)
-            return
+            return self.text_preview
 
         if result.mode == "table":
             self.table_preview.load_table(result.table_headers, result.table_rows)
-            self.stack.setCurrentWidget(self.table_preview)
-            return
+            return self.table_preview
 
         if result.mode == "well_log":
             self.well_log_preview.load_summary(
@@ -202,8 +199,7 @@ class DataReaderPanel(QFrame):
                 result.table_rows,
                 result.message,
             )
-            self.stack.setCurrentWidget(self.well_log_preview)
-            return
+            return self.well_log_preview
 
         if result.mode == "seismic":
             self.seismic_preview.load_summary(
@@ -212,8 +208,7 @@ class DataReaderPanel(QFrame):
                 result.table_rows,
                 result.message,
             )
-            self.stack.setCurrentWidget(self.seismic_preview)
-            return
+            return self.seismic_preview
 
         if result.mode == "image":
             self.image_preview_widget.load(
@@ -221,8 +216,7 @@ class DataReaderPanel(QFrame):
                 result.revision,
                 image_bytes=result.image_bytes,
             )
-            self.stack.setCurrentWidget(self.image_preview_widget)
-            return
+            return self.image_preview_widget
 
         if result.mode == "pdf":
             self.pdf_preview_widget.load(
@@ -230,26 +224,22 @@ class DataReaderPanel(QFrame):
                 result.revision,
                 pdf_bytes=result.pdf_bytes,
             )
-            self.stack.setCurrentWidget(self.pdf_preview_widget)
-            return
+            return self.pdf_preview_widget
 
         if result.mode == "rich_text":
             self.rich_text_preview.load_html(result.rich_html)
-            self.stack.setCurrentWidget(self.rich_text_preview)
-            return
+            return self.rich_text_preview
 
         if result.mode == "web_document":
             if self.web_document_preview is None:
                 self.web_document_preview = WebDocumentPreviewWidget()
                 self.stack.addWidget(self.web_document_preview)
             self.web_document_preview.load_document(result.path, result.rich_html)
-            self.stack.setCurrentWidget(self.web_document_preview)
-            return
+            return self.web_document_preview
 
         if result.mode == "json_tree":
             self.json_tree_preview.load_payload(result.json_payload, result.json_truncated)
-            self.stack.setCurrentWidget(self.json_tree_preview)
-            return
+            return self.json_tree_preview
 
         if result.mode == "geotiff":
             self.geotiff_preview.load(
@@ -258,18 +248,54 @@ class DataReaderPanel(QFrame):
                 result.image_bytes,
                 result.geo_metadata,
             )
-            self.stack.setCurrentWidget(self.geotiff_preview)
-            return
+            return self.geotiff_preview
 
         if result.mode == "media":
             # QMediaPlayer is UI-thread-only: the provider only returns the path;
             # setSource happens here on the UI thread.
             self.media_preview.set_media_path(result.media_path)
-            self.stack.setCurrentWidget(self.media_preview)
-            return
+            return self.media_preview
 
         self.message_label.set_message(result.message or "预览不可用")
-        self.stack.setCurrentWidget(self.message_label)
+        return self.message_label
+
+    def _commit_result(self, result: PreviewResult, target) -> None:
+        self._current_result = result
+        self.title_label.setText(result.title)
+        self.meta_label.setText(self._meta_text(result))
+        self.warning_label.setText(result.warning)
+        self.stack.setCurrentWidget(target)
+        self.current_mode = result.mode
+        self.reader_mode_changed.emit(result.mode)
+
+    def _safe_clear_geoviz(self) -> str:
+        try:
+            self.geoviz_host.clear()
+        except Exception as error:
+            return self._error_text(error)
+        return ""
+
+    def _geoviz_failure_result(
+        self,
+        result: PreviewResult,
+        error: Exception,
+    ) -> PreviewResult:
+        return replace(
+            result,
+            mode="message",
+            message=result.message or "预览不可用",
+            warning=self._merge_warning(result.warning, self._error_text(error)),
+            engine_preview=None,
+            estimated_bytes=0,
+        )
+
+    @staticmethod
+    def _merge_warning(existing: str, added: str) -> str:
+        return " · ".join(part for part in (existing, added) if part)
+
+    @staticmethod
+    def _error_text(error: Exception) -> str:
+        return str(error) or error.__class__.__name__
 
     def next_pdf_page(self) -> None:
         self.pdf_preview_widget.next_page()
@@ -278,7 +304,12 @@ class DataReaderPanel(QFrame):
         self.pdf_preview_widget.previous_page()
 
     def release_engine_widgets(self) -> None:
-        self.geoviz_host.release_all()
+        try:
+            self.geoviz_host.release_all()
+        except Exception as error:
+            result = self._geoviz_failure_result(self._current_result, error)
+            self.message_label.set_message(result.message)
+            self._commit_result(result, self.message_label)
 
     def _message_widget(self, text: str) -> MessagePreviewWidget:
         label = MessagePreviewWidget()
