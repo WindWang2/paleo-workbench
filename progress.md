@@ -921,3 +921,20 @@ Four work lines via SDD (5 implementation tasks).
 Safe tests: 133/133 passing (WebChain env hang excluded). 16 new tests total.
 
 Work lines: cross-page consistency (status bar + sidebar), tooltip discoverability, page-switch transition, misc cleanup.
+
+---
+
+## Session: 2026-07-15 - Context Menu + Format Export
+
+Three implementation tasks via SDD.
+
+| Task | Content | Commit | Tests |
+|------|---------|--------|-------|
+| 1 | Format converters: LAS->CSV, table->JSON, image->PNG, text->TXT + get_available_formats + ExportError | `6da90a2` | +8 |
+| 2 | AssetContextMenu: 6-item menu with dynamic visibility per asset type | `5ce50e2` | +7 |
+| 3 | DataAssetTable customContextMenuRequested + DataPage wiring + _export_selected_asset with QFileDialog | `44b8060` | +8 (3 table + 5 page) |
+
+23 new tests total. Safe tests 34/34 passing; DataPage integration tests timeout-guarded (WebEngine env).
+
+Spec: docs/superpowers/specs/2026-07-15-context-menu-export-design.md
+Plan: docs/superpowers/plans/2026-07-15-context-menu-export.md
