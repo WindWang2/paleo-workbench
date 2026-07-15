@@ -34,7 +34,7 @@ def test_web_document_widget_loads_local_file(tmp_path):
     path = tmp_path / "page.html"
     path.write_text("<h1>Page</h1>", encoding="utf-8")
 
-    class FakeWebView:
+    class FakeEngineView:
         def load(self, url) -> None:
             self.loaded_url = url
 
@@ -42,20 +42,19 @@ def test_web_document_widget_loads_local_file(tmp_path):
             self.html = html
             self.base_url = base_url
 
-    widget = FakeWebView()
+    # WebDocumentPreviewWidget delegates to self._engine_view
+    widget = SimpleNamespace(_engine_view=FakeEngineView())
 
-    # Chromium cannot start its sandbox inside the offscreen test container.
-    # Exercise the real method with only its QWebEngineView transport faked.
     WebDocumentPreviewWidget.load_document(widget, path.as_posix())
 
-    assert widget.loaded_url.isLocalFile()
-    assert widget.loaded_url.toLocalFile() == path.as_posix()
+    assert widget._engine_view.loaded_url.isLocalFile()
+    assert widget._engine_view.loaded_url.toLocalFile() == path.as_posix()
 
 
 def test_web_document_widget_loads_html_with_source_directory_base_url(tmp_path):
     path = tmp_path / "documents" / "page.md"
 
-    class FakeWebView:
+    class FakeEngineView:
         def load(self, url) -> None:
             self.loaded_url = url
 
@@ -63,13 +62,13 @@ def test_web_document_widget_loads_html_with_source_directory_base_url(tmp_path)
             self.html = html
             self.base_url = base_url
 
-    widget = FakeWebView()
+    widget = SimpleNamespace(_engine_view=FakeEngineView())
 
     WebDocumentPreviewWidget.load_document(widget, path.as_posix(), "<h1>Page</h1>")
 
-    assert widget.html == "<h1>Page</h1>"
-    assert widget.base_url.isLocalFile()
-    assert widget.base_url.toLocalFile() == f"{path.parent.as_posix()}/"
+    assert widget._engine_view.html == "<h1>Page</h1>"
+    assert widget._engine_view.base_url.isLocalFile()
+    assert widget._engine_view.base_url.toLocalFile() == f"{path.parent.as_posix()}/"
 
 
 def test_local_only_request_interceptor_blocks_non_local_schemes():
@@ -148,6 +147,9 @@ def test_web_document_widget_configures_local_only_security_without_chromium():
         import sys
         import types
 
+        from PySide6.QtWidgets import QApplication, QWidget
+        app = QApplication.instance() or QApplication([])
+
         class FakeProfile:
             def __init__(self, parent=None):
                 self.parent = parent
@@ -172,9 +174,9 @@ def test_web_document_widget_configures_local_only_security_without_chromium():
             def setAttribute(self, attribute, value):
                 self.attributes[attribute] = value
 
-        class FakeWebView:
+        class FakeWebView(QWidget):
             def __init__(self, parent=None):
-                self.parent = parent
+                super().__init__(parent)
                 self.page = None
                 self._settings = FakeSettings()
 
@@ -202,12 +204,11 @@ def test_web_document_widget_configures_local_only_security_without_chromium():
         widget = module.WebDocumentPreviewWidget()
 
         assert widget._profile.parent is widget
-        assert widget._interceptor.parent is widget
+        assert widget._interceptor.parent is widget._profile
         assert widget._profile.interceptor is widget._interceptor
         assert widget._page.profile is widget._profile
-        assert widget._page.parent is widget
-        assert widget.page is widget._page
-        assert widget.settings().attributes["local-remote"] is False
+        assert widget._engine_view.page is widget._page
+        assert widget._engine_view.settings().attributes["local-remote"] is False
         """
     )
     environment = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}

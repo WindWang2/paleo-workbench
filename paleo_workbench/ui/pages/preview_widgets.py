@@ -4,13 +4,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, QUrl
 from PySide6.QtGui import QPixmap, QStandardItem, QStandardItemModel
-from PySide6.QtWebEngineCore import (
-    QWebEnginePage,
-    QWebEngineProfile,
-    QWebEngineSettings,
-    QWebEngineUrlRequestInterceptor,
-)
-from PySide6.QtWebEngineWidgets import QWebEngineView
 try:
     from PySide6.QtPdf import QPdfDocument
 except ImportError:  # pragma: no cover
@@ -88,8 +81,12 @@ class RichTextPreviewWidget(QTextBrowser):
         self.setHtml(html)
 
 
-class _LocalOnlyRequestInterceptor(QWebEngineUrlRequestInterceptor):
-    """Block WebEngine resource requests outside the local document sandbox."""
+class _LocalOnlyRequestInterceptor:
+    """Block WebEngine resource requests outside the local document sandbox.
+
+    Lazily inherits from QWebEngineUrlRequestInterceptor at import time to
+    avoid forcing WebEngine initialization when preview_widgets is imported.
+    """
 
     _ALLOWED_SCHEMES = {"file", "data", "about", "blob"}
 
@@ -98,8 +95,11 @@ class _LocalOnlyRequestInterceptor(QWebEngineUrlRequestInterceptor):
             info.block(True)
 
 
-class _LocalOnlyPage(QWebEnginePage):
-    """Reject user-initiated navigation away from local document content."""
+class _LocalOnlyPage:
+    """Reject user-initiated navigation away from local document content.
+
+    Lazily inherits from QWebEnginePage at construction time.
+    """
 
     _ALLOWED_SCHEMES = {"file", "data", "about", "blob"}
 
@@ -108,27 +108,54 @@ class _LocalOnlyPage(QWebEnginePage):
         return url.scheme() in self._ALLOWED_SCHEMES
 
 
-class WebDocumentPreviewWidget(QWebEngineView):
-    """Render local HTML or bounded Markdown output without network access."""
+class WebDocumentPreviewWidget(QWidget):
+    """Render local HTML or bounded Markdown output without network access.
+
+    Inherits from QWidget (no WebEngine dependency at import time). The
+    QWebEngineView is created lazily in __init__, so importing
+    preview_widgets does not trigger WebEngine subprocess initialization.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        from PySide6.QtWebEngineCore import (
+            QWebEnginePage,
+            QWebEngineProfile,
+            QWebEngineSettings,
+            QWebEngineUrlRequestInterceptor,
+        )
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+
+        from PySide6.QtWidgets import QVBoxLayout
+
+        # Dynamically create Qt subclasses that mix in the security logic.
+        # This happens only at construction time, not at module import.
+        class _Interceptor(QWebEngineUrlRequestInterceptor, _LocalOnlyRequestInterceptor):
+            pass
+
+        class _Page(QWebEnginePage, _LocalOnlyPage):
+            pass
+
+        self._engine_view = QWebEngineView(self)
         self._profile = QWebEngineProfile(self)
-        self._interceptor = _LocalOnlyRequestInterceptor(self)
+        self._interceptor = _Interceptor(self._profile)
         self._profile.setUrlRequestInterceptor(self._interceptor)
-        self._page = _LocalOnlyPage(self._profile, self)
-        self.setPage(self._page)
-        self.settings().setAttribute(
+        self._page = _Page(self._profile, self._engine_view)
+        self._engine_view.setPage(self._page)
+        self._engine_view.settings().setAttribute(
             QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
             False,
         )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._engine_view)
 
     def load_document(self, path: str, html: str = "") -> None:
         base_url = QUrl.fromLocalFile(str(Path(path).parent) + "/")
         if html:
-            self.setHtml(html, base_url)
+            self._engine_view.setHtml(html, base_url)
         else:
-            self.load(QUrl.fromLocalFile(path))
+            self._engine_view.load(QUrl.fromLocalFile(path))
 
 
 class TablePreviewWidget(QTableWidget):
