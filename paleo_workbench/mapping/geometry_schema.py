@@ -28,13 +28,34 @@ def normalize_facies(raw: dict[str, Any]) -> dict[str, Any]:
         or props.get("label")
         or ""
     )
-    return {
-        "id": raw.get("id") or new_feature_id("facies"),
+    out: dict[str, Any] = {
+        "id": raw.get("id")
+        or props.get("id")
+        or props.get("region_id")
+        or new_feature_id("facies"),
         "kind": "facies",
         "name": name,
         "coordinates": ring,
         "style": dict(raw.get("style") or props.get("style") or {}),
     }
+    # Preserve prediction / compiler attributes for editor round-trip.
+    facies = raw.get("facies") or props.get("facies") or name
+    if facies:
+        out["facies"] = facies
+    if raw.get("probability") is not None:
+        out["probability"] = raw["probability"]
+    elif props.get("probability") is not None:
+        out["probability"] = props["probability"]
+    if raw.get("region_id") is not None:
+        out["region_id"] = raw["region_id"]
+    elif props.get("region_id") is not None:
+        out["region_id"] = props["region_id"]
+    if props:
+        # Keep non-style properties for re-export on save_draft.
+        kept = {k: v for k, v in props.items() if k != "style"}
+        if kept:
+            out["properties"] = kept
+    return out
 
 
 def normalize_well(raw: dict[str, Any]) -> dict[str, Any]:

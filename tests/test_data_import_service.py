@@ -50,7 +50,9 @@ def test_import_files_never_opens_file_or_calculates_checksum(
 
     assert report.added_count == 1
     assert report.added[0].checksum is None
-    assert report.added[0].parsed_summary == {"size_bytes": len(b"~Version\n")}
+    # Import enriches summary with size/mtime/labels without deep-parsing LAS.
+    assert report.added[0].parsed_summary.get("size_bytes") == len(b"~Version\n")
+    assert "type_label" in report.added[0].parsed_summary
 
 
 def test_import_files_processes_only_requested_paths(tmp_path: Path, monkeypatch):

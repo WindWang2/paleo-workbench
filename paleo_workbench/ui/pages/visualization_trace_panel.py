@@ -13,6 +13,7 @@ class VisualizationTracePanel(QFrame):
     """Right-hand traceability summary for the composite visualization."""
 
     refresh_requested = Signal()
+    export_requested = Signal(str)  # format label: PNG | SVG | PDF
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,9 +44,18 @@ class VisualizationTracePanel(QFrame):
         self.refresh_btn.setObjectName("SecondaryButton")
         self.refresh_btn.clicked.connect(self.refresh_requested.emit)
         layout.addWidget(self.refresh_btn)
-        self.export_btn = QPushButton("导出组合视图")
+        self.export_btn = QPushButton("导出当前视图 PNG")
         self.export_btn.setObjectName("PrimaryButton")
+        self.export_btn.clicked.connect(lambda: self.export_requested.emit("PNG"))
         layout.addWidget(self.export_btn)
+        self.export_svg_btn = QPushButton("导出 SVG")
+        self.export_svg_btn.setObjectName("SecondaryButton")
+        self.export_svg_btn.clicked.connect(lambda: self.export_requested.emit("SVG"))
+        layout.addWidget(self.export_svg_btn)
+        self.export_pdf_btn = QPushButton("导出 PDF")
+        self.export_pdf_btn.setObjectName("SecondaryButton")
+        self.export_pdf_btn.clicked.connect(lambda: self.export_requested.emit("PDF"))
+        layout.addWidget(self.export_pdf_btn)
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
@@ -75,6 +85,12 @@ class VisualizationTracePanel(QFrame):
         self.label_value.setText(ref.label or (payload.label if payload else "") or "—")
         self.kind_value.setText(ref.kind or "—")
 
+        # Reflect the open asset, not only the global "active" prediction/map.
+        if ref.kind == "prediction":
+            self.task_value.setText(ref.label or (payload.label if payload else "") or "—")
+        if ref.kind == "map":
+            self.map_value.setText(ref.label or (payload.label if payload else "") or "—")
+
         path_or_message = ref.path or ""
         if payload is not None:
             if payload.message:
@@ -84,3 +100,8 @@ class VisualizationTracePanel(QFrame):
             elif not path_or_message and payload.label:
                 path_or_message = payload.label
         self.path_value.setText(path_or_message or "—")
+
+        # Gate vector export affordances to canvases that support paint_all.
+        # Parent page re-evaluates on export; here we just keep labels clear.
+        self.export_svg_btn.setToolTip("测井等矢量画布可用；其他 Tab 请用 PNG")
+        self.export_pdf_btn.setToolTip("测井等矢量画布可用；其他 Tab 请用 PNG")

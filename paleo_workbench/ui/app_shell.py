@@ -172,9 +172,13 @@ class AppShell(QWidget):
         state: dict,
         resources: list,
         artifacts: list | None = None,
+        *,
+        project_path=None,
     ) -> None:
         current_artifacts = artifacts or []
         page = self.data_page_widget()
+        if project_path is not None and hasattr(page, "set_project_path"):
+            page.set_project_path(project_path)
         if hasattr(page, "update_state"):
             page.update_state(state, resources, current_artifacts)
         self._data_context = self._build_data_context(
@@ -182,6 +186,12 @@ class AppShell(QWidget):
         )
         if self.page_stack.currentIndex() == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
+
+    def set_data_project_path(self, path) -> None:
+        """Propagate the open ``*.paleo.json`` path to DataPage I/O."""
+        page = self.data_page_widget()
+        if hasattr(page, "set_project_path"):
+            page.set_project_path(path)
 
     def update_data_context(self, context: dict) -> None:
         self._data_context = {
@@ -247,10 +257,21 @@ class AppShell(QWidget):
         if hasattr(page, "update_state"):
             page.update_state(stratigraphy)
 
-    def update_visualization_page(self, resources: list, prediction_tasks: list, map_documents: list) -> None:
+    def update_visualization_page(
+        self,
+        resources: list,
+        prediction_tasks: list,
+        map_documents: list,
+        project=None,
+    ) -> None:
         page = self.page_stack.widget(5)
         if hasattr(page, "update_state"):
-            page.update_state(resources, prediction_tasks, map_documents)
+            page.update_state(
+                resources,
+                prediction_tasks,
+                map_documents,
+                project=project if project is not None else self.project,
+            )
 
     def update_preparation_page(self, tasks: list) -> None:
         page = self.page_stack.widget(6)

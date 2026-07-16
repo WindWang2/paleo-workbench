@@ -1004,3 +1004,69 @@ cache. Clear via DataPage.clear_preview_cache() / toolbar button.
 
 1. Optional backlog: Auto-Tie wiring, hidden-layer hit-test, demo draft idempotency.
 2. Push engine + parent after commit if not already pushed.
+
+---
+
+## Session: 2026-07-16 — Visualization modularization (Phase 24)
+
+### Goal
+模块化可视化，与 geo-viz-engine 功能对齐：workbench 只做薄 host，算法/控件在子工程。
+
+### Done
+- `paleo_workbench/viz/hosts/`: WellLogHost, SeismicHost, CrossWellHost, PaleoMapHost, EnginePreviewHost
+- `CompositeVisualizationPanel` → tab coordinator + status line; 5 tabs (测井/地震/连井/古地理/引擎预览)
+- LAS: `geoviz.load_las_preview` (no lasio reimpl)
+- SEGY: prefer `seismic_path` → `SeismicView.load_segy`; volume via `SeismicLoader.get_volume_downsampled` fallback
+- Summary: engine-preview resource types, predictions, multi-well 连井 virtual asset
+- Facade: `load_las_preview`, `SeismicLoader` on `geoviz` public API
+- Tests: **54 passed** (viz + independence + panels)
+
+### Boundary
+```
+Workbench host (thin)     geo-viz-engine (thick)
+  VizAdapter              load_las_preview / SeismicLoader
+  viz/hosts/*             WellLogCanvas / SeismicView / …
+  VisualizationPage       GeoVizEngine.prepare/render
+```
+
+---
+
+## Session: 2026-07-16 — Richer import/export (Phase 25)
+
+### Import
+- `ImportReport.summary_text` / `by_type`
+- Enriched `parsed_summary` (size, mtime, type_label, small-file probes)
+- `artifact_role` + tags from ROLE_BY_TYPE
+- Skip empty files; optional preferred extension filter
+- Classifier: geojson, vector (shp/gpkg), csv→tabular, audio
+
+### Export
+- `resources/io_registry.py` format registry
+- `resources/export_service.py` unified service (asset convert, inventory, view snapshot)
+- Converters: LAS→CSV/XLSX/JSON摘要, table→JSON/XLSX, SEGY→SUMMARY, GeoJSON normalize
+- Data page: register ExportArtifact on success; 工程清单 export
+- Visualization: PNG/SVG/PDF export wired to active tab (engine export_* when paint_all)
+
+### Tests
+export_service + updated classifier/context-menu/import — green suite in focused run.
+
+---
+
+## Session: 2026-07-16 — Module review + high-severity fixes
+
+Goal: 逐一模块 review 找问题.
+
+**Found (high):** inventory UI dead; import UI-thread UB; viz stale tabs; seismic full load; project not in viz page; save ignores draft fail; facies attr strip on normalize.
+
+**Fixed:** data_page wiring/thread; composite clear; seismic volume-first; app_shell project; save gate; geometry_schema + FaciesPolygonItem extras; adapter messages/aliases.
+
+**Verify:** 66 passed (export/import/viz/mapping_schema/independence focused suite).
+
+---
+
+## Session: 2026-07-16 — Agent protocol Phase 1–2 (baseline)
+
+- Deep geo-stack + page topology scan complete.
+- Created **AGENT_TASK_BOARD.md** (task table + data object dictionary + gate protocol).
+- No new business feature coding in this turn (baseline-first).
+- Next lock: T-COMMIT-01 or T-DATA-02 per board.

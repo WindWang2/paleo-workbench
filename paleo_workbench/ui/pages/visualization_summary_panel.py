@@ -7,6 +7,15 @@ from paleo_workbench.ui import tokens
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.models import VizRef
 
+_KIND_LABELS = {
+    "well_log": "测井",
+    "seismic": "地震",
+    "map": "古地理",
+    "cross_well": "连井",
+    "engine_preview": "引擎",
+    "prediction": "预测",
+}
+
 
 class VisualizationSummaryPanel(QFrame):
     """Left-hand project-slice summary for composite visualization."""
@@ -21,6 +30,7 @@ class VisualizationSummaryPanel(QFrame):
         self._adapter = VizAdapter()
         self._resources: list = []
         self._map_documents: list = []
+        self._prediction_tasks: list = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
@@ -59,7 +69,8 @@ class VisualizationSummaryPanel(QFrame):
     def update_state(self, resources: list, prediction_tasks: list, map_documents: list) -> None:
         self._resources = list(resources or [])
         self._map_documents = list(map_documents or [])
-        self.prediction_count_value.setText(f"{len(prediction_tasks or [])} 个")
+        self._prediction_tasks = list(prediction_tasks or [])
+        self.prediction_count_value.setText(f"{len(self._prediction_tasks)} 个")
         self.map_count_value.setText(f"{len(map_documents or [])} 幅")
         self.resource_count_value.setText(f"{len(resources or [])} 项")
         self._rebuild_asset_list()
@@ -71,7 +82,7 @@ class VisualizationSummaryPanel(QFrame):
             if ref is None:
                 continue
             name = str(getattr(resource, "name", "") or ref.label or ref.id or "未命名")
-            kind_label = "测井" if ref.kind == "well_log" else "地震"
+            kind_label = _KIND_LABELS.get(ref.kind, ref.kind)
             item = QListWidgetItem(f"{kind_label} · {name}")
             item.setData(Qt.ItemDataRole.UserRole, ref)
             self.asset_list.addItem(item)
@@ -80,6 +91,32 @@ class VisualizationSummaryPanel(QFrame):
             ref = self._adapter.ref_from_map_document(doc)
             name = str(getattr(doc, "name", "") or ref.label or "未命名图件")
             item = QListWidgetItem(f"古地理 · {name}")
+            item.setData(Qt.ItemDataRole.UserRole, ref)
+            self.asset_list.addItem(item)
+
+        for task in self._prediction_tasks:
+            ref = self._adapter.ref_from_prediction(task)
+            name = str(getattr(task, "name", "") or ref.label or "预测任务")
+            item = QListWidgetItem(f"预测 · {name}")
+            item.setData(Qt.ItemDataRole.UserRole, ref)
+            self.asset_list.addItem(item)
+
+        # Virtual multi-well section when ≥2 LAS resources exist.
+        well_ids = [
+            str(getattr(r, "id", ""))
+            for r in self._resources
+            if str(getattr(r, "type", "")).lower() == "well_log"
+            and str(getattr(r, "format", "")).lower().lstrip(".") == "las"
+            and getattr(r, "id", None)
+        ]
+        if len(well_ids) >= 2:
+            ref = VizRef(
+                kind="cross_well",
+                id=well_ids[0],
+                label=f"连井剖面 ({len(well_ids)} 口井)",
+                related_ids=tuple(well_ids[:8]),
+            )
+            item = QListWidgetItem(f"连井 · {ref.label}")
             item.setData(Qt.ItemDataRole.UserRole, ref)
             self.asset_list.addItem(item)
 

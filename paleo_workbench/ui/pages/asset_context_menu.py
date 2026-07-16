@@ -55,15 +55,20 @@ class AssetContextMenu(QMenu):
             classify_action.setMenu(classify_menu)
             self.addAction(classify_action)
 
-        # 导出 (only when converters available)
+        # 导出 (converters + always-available inventory when on a resource)
         formats = get_available_formats(asset)
-        if formats:
-            export_menu = QMenu("导出", self)
-            for label, _fn in formats:
-                sub = QAction(label, export_menu)
-                sub.setObjectName(f"ctx_export_{label}")
-                export_menu.addAction(sub)
-                self._export_actions.append((label, sub))
+        export_menu = QMenu("导出", self)
+        for label, _fn in formats:
+            sub = QAction(label, export_menu)
+            sub.setObjectName(f"ctx_export_{label}")
+            export_menu.addAction(sub)
+            self._export_actions.append((label, sub))
+        if isinstance(asset, ResourceItem):
+            inv = QAction("工程清单 (JSON)", export_menu)
+            inv.setObjectName("ctx_export_INVENTORY")
+            export_menu.addAction(inv)
+            self._export_actions.append(("INVENTORY", inv))
+        if formats or isinstance(asset, ResourceItem):
             export_action = QAction("导出", self)
             export_action.setMenu(export_menu)
             self.addAction(export_action)

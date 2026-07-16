@@ -661,3 +661,74 @@ Mode change resets slider range from `axes[mode]`; preloaded middle position use
 ### Interaction capability
 
 `PreviewCapabilities.interactions` includes `slice_scrub` alongside `slice_switch`, `zoom`, `pan`.
+
+---
+
+## 2026-07-16 — Visualization modularization (Phase 24)
+
+### Target architecture
+Workbench **hosts** engine product surfaces; does not reimplement parse/render.
+
+| Host | Engine widget | Load API |
+|------|---------------|----------|
+| WellLogHost | WellLogCanvas | `build_qpainter_tracks(load_las_preview(...))` |
+| SeismicHost | SeismicView | `load_segy(path)` → fallback `load_demo(volume)` |
+| CrossWellHost | CrossWellCanvas | multi WellLogCanvas via package API |
+| PaleoMapHost | PaleoMapCanvas | `load_features` (edit stays MappingPage) |
+| EnginePreviewHost | GeoVizPreviewHost | `GeoVizEngine.prepare/render` (DAT/plots/scrub) |
+
+### Rules
+1. Production imports: only `geoviz` facade names in allowlist.
+2. Dual LAS/SEGY loaders removed: engine is single source of truth.
+3. Composite panel must not grow domain logic — route payload to hosts only.
+
+### Still deferred
+- Wire composite export button to engine `export_*`
+- Well-tie workspace tab
+- Full SeismicView horizon/attribute project wiring
+
+---
+
+## 2026-07-16 — Module-by-module review (goal: find issues)
+
+### Method
+- Static AST boundary scan (workbench → geoviz facade only): clean
+- Runtime smoke import/export/viz/qc: clean
+- 3 parallel read-only reviewers: resources I/O · viz hosts · project/mapping/workflow
+- Fix high-confidence bugs + **66 passed** focused suite
+
+### Module scorecard
+
+| Module | Status | Top issues (before fix) |
+|--------|--------|-------------------------|
+| **resources/import** | OK after enrich | Roles/summary good; UI must pass project_path (residual medium) |
+| **resources/export** | Fixed | Inventory menu unwired; relative path not resolved |
+| **resources/classifier** | OK | geojson/vector/csv |
+| **viz/hosts** | Fixed | Stale tabs; seismic full-volume OOM risk; clear incomplete |
+| **viz/adapter** | Fixed | False SEGY message; formation_tops alias |
+| **ui/data_page** | Fixed | Import slots off UI thread; inventory; reclassify roles |
+| **ui/visualization** | Fixed | project never wired; export registration dead |
+| **app lifecycle** | Fixed | save ignored failed map draft flush |
+| **mapping/document_io** | Partial fix | normalize_facies now keeps attrs; FaciesPolygonItem extras |
+| **workflow/qc** | OK (prior) | residual: reports only append |
+| **adapters/paleo_map** | OK geojson | residual: pdf/svg placeholder |
+
+### Fixed this review pass
+1. Wire 工程清单 export action
+2. Import finished/failed → QueuedConnection (GUI thread)
+3. `load_payload` always `_clear_all` before apply
+4. SeismicHost prefers budgeted `load_demo(volume)`
+5. `update_visualization_page(..., project=)`
+6. `_flush_mapping_draft` returns bool; gate project save
+7. `normalize_facies` + FaciesPolygonItem extras round-trip
+8. formation_tops → well_stratification for engine prepare
+9. Manual reclassify updates artifact_role/tags
+10. export_service resolves relative asset paths
+
+### Residual (not fixed this pass)
+- Import/rescan still often omit real `project_path` from window
+- Demo map generate without dirty prompt
+- Reference layer offline status
+- QC report append inflation
+- SVG/PDF button enable gating by tab (tooltip only)
+- Non-geojson PaleoMapAdapter placeholder formats

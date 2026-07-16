@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dataclasses import replace
 
-from PySide6.QtCore import QEvent, QObject, QThread, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
@@ -59,6 +59,8 @@ class DataPage(QWidget):
         super().__init__(parent)
         self.setObjectName("DataPage")
         self.project = project or ProjectDocument.new("Untitled Project")
+        # Absolute path to the open ``*.paleo.json`` (None when unsaved).
+        self.project_path: Path | None = None
         self._resources = self.project.resources
         self._artifacts = self.project.export_artifacts
         self._selected_asset: object | None = None
@@ -257,19 +259,44 @@ class DataPage(QWidget):
             return False
         return self.begin_import_folder_path(folder)
 
+    def set_project_path(self, path: Path | str | None) -> None:
+        """Bind the on-disk project file for relative path I/O."""
+        if path is None or str(path).strip() in {"", ".", ".."}:
+            self.project_path = None
+        else:
+            self.project_path = Path(path)
+
+    def _project_file_for_io(self) -> Path | None:
+        return self.project_path
+
+    def _resolve_resource_path(self, resource: ResourceItem) -> Path:
+        """Resolve a resource path relative to the open project file when needed."""
+        raw = Path(resource.path)
+        if raw.is_absolute() or self.project_path is None:
+            return raw.expanduser()
+        from paleo_workbench.project.paths import resolve_project_path
+
+        return Path(resolve_project_path(str(raw), self.project_path))
+
     def begin_import_paths(self, paths: list[Path]) -> bool:
         if self._import_in_progress:
             self._set_action_status("正在导入，请稍候")
             return False
         existing = list(self.project.resources)
-        return self._start_import_job(lambda: import_files(paths, existing))
+        project_path = self._project_file_for_io()
+        return self._start_import_job(
+            lambda: import_files(paths, existing, project_path=project_path)
+        )
 
     def begin_import_folder_path(self, path: Path) -> bool:
         if self._import_in_progress:
             self._set_action_status("正在导入，请稍候")
             return False
         existing = list(self.project.resources)
-        return self._start_import_job(lambda: import_folder(path, existing))
+        project_path = self._project_file_for_io()
+        return self._start_import_job(
+            lambda: import_folder(path, existing, project_path=project_path)
+        )
 
     def _start_import_job(self, task: Callable[[], ImportReport]) -> bool:
         thread = QThread(self)
@@ -278,22 +305,25 @@ class DataPage(QWidget):
         self._import_jobs.append((thread, worker))
 
         thread.started.connect(worker.run)
+        # Queue finished/failed onto the GUI thread (worker emits from QThread).
         worker.finished.connect(
             lambda report, thread=thread, worker=worker: self._handle_import_finished(
                 report,
                 thread,
                 worker,
-            )
+            ),
+            Qt.ConnectionType.QueuedConnection,
         )
         worker.failed.connect(
             lambda message, thread=thread, worker=worker: self._handle_import_failed(
                 message,
                 thread,
                 worker,
-            )
+            ),
+            Qt.ConnectionType.QueuedConnection,
         )
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
 
@@ -375,7 +405,7 @@ class DataPage(QWidget):
             self._set_action_status("请选择一个项目资源")
             return False
         resource = self._selected_asset
-        path = Path(resource.path)
+        path = self._resolve_resource_path(resource)
         if not path.exists():
             resource.status = "missing"
             resource.parsed_summary["preview_warning"] = "文件不存在"
@@ -389,23 +419,45 @@ class DataPage(QWidget):
             self._set_action_status("文件不存在")
             return True
 
-        scanned = scan_resources(path.parent)
-        updated = next(
-            (item for item in scanned if Path(item.path).resolve() == path.resolve()),
-            None,
-        )
+        project_path = self._project_file_for_io()
+        scanned = scan_resources(path.parent, project_path=project_path)
+        path_resolved = path.resolve()
+        updated = None
+        for item in scanned:
+            try:
+                item_path = Path(item.path)
+                if not item_path.is_absolute() and project_path is not None:
+                    from paleo_workbench.project.paths import resolve_project_path
+
+                    item_path = Path(resolve_project_path(str(item.path), project_path))
+                if item_path.resolve() == path_resolved:
+                    updated = item
+                    break
+            except OSError:
+                continue
         if updated is None:
             self._set_action_status("重新扫描未找到文件")
             return False
+        # Preserve manual reclassification when the file is still the same.
+        keep_type = resource.type
+        keep_role = resource.artifact_role
+        keep_tags = list(resource.tags or [])
         resource.name = updated.name
         resource.path = updated.path
-        resource.type = updated.type
         resource.format = updated.format
         resource.status = updated.status
         resource.source = updated.source
         resource.parsed_summary = updated.parsed_summary
         resource.checksum = updated.checksum
         resource.external = updated.external
+        # Only adopt scanner type when user had not customized away from default.
+        if keep_type == updated.type or not keep_type:
+            resource.type = updated.type
+            resource.artifact_role = updated.artifact_role or keep_role
+        else:
+            resource.type = keep_type
+            resource.artifact_role = keep_role
+            resource.tags = keep_tags
         self.update_state(
             dashboard_state(self.project),
             self.project.resources,
@@ -463,13 +515,18 @@ class DataPage(QWidget):
         if remove_act:
             remove_act.triggered.connect(self.remove_selected_asset)
 
-        # Wire export sub-actions (one per available converter).
+        # Wire export sub-actions (converters + project inventory).
         for label, _fn in get_available_formats(asset):
             sub_act = menu.find_export_action(label)
             if sub_act:
                 sub_act.triggered.connect(
                     lambda checked=False, fmt=label: self._export_selected_asset(fmt)
                 )
+        inv_act = menu.find_export_action("INVENTORY")
+        if inv_act:
+            inv_act.triggered.connect(
+                lambda checked=False: self._export_selected_asset("INVENTORY")
+            )
 
         # Wire classify sub-actions (one per available type).
         if isinstance(asset, ResourceItem):
@@ -492,24 +549,65 @@ class DataPage(QWidget):
             return
         if isinstance(asset, ExportArtifact):
             return
-        formats = get_available_formats(asset)
-        convert_fn = next((fn for lbl, fn in formats if lbl == format_label), None)
-        if convert_fn is None:
+        from paleo_workbench.resources.export_service import (
+            default_export_dir,
+            export_asset_to_path,
+            export_project_inventory,
+        )
+        from paleo_workbench.resources.exporters import extension_for_label
+
+        project_file = self._project_file_for_io()
+        if format_label == "INVENTORY":
+            start = default_export_dir(project_file)
+            suggested = str(start / f"{self.project.meta.name or 'project'}_inventory.json")
+            output_path, _ = QFileDialog.getSaveFileName(
+                self, "导出工程清单", suggested, "JSON (*.json)"
+            )
+            if not output_path:
+                return
+            result = export_project_inventory(
+                self.project,
+                Path(output_path),
+                project_path=project_file,
+                register=True,
+            )
+            self._set_action_status(result.message)
+            if result.success:
+                self.update_state(
+                    dashboard_state(self.project),
+                    self.project.resources,
+                    self.project.export_artifacts,
+                )
             return
-        input_path = Path(asset.path)
-        # Suggested output extension derived from the target format label.
-        ext_map = {"CSV": ".csv", "JSON": ".json", "PNG": ".png", "TXT": ".txt"}
-        out_ext = ext_map.get(format_label, ".out")
-        suggested = f"{input_path.stem}{out_ext}"
-        output_path, _selected_filter = QFileDialog.getSaveFileName(self, "导出为", suggested)
+
+        formats = get_available_formats(asset)
+        if not any(lbl == format_label for lbl, _ in formats):
+            return
+        input_path = self._resolve_resource_path(asset) if isinstance(asset, ResourceItem) else Path(asset.path)
+        out_ext = extension_for_label(format_label)
+        suggested = str(
+            default_export_dir(project_file) / f"{input_path.stem}{out_ext}"
+        )
+        output_path, _selected_filter = QFileDialog.getSaveFileName(
+            self, "导出为", suggested
+        )
         if not output_path:
             return
-        output_path = Path(output_path)
-        try:
-            convert_fn(input_path, output_path)
-            self._set_action_status(f"已导出: {output_path.name}")
-        except Exception as exc:
-            self._set_action_status(f"导出失败: {exc}")
+        result = export_asset_to_path(
+            asset,
+            format_label,
+            Path(output_path),
+            project=self.project,
+            project_path=project_file,
+            register=True,
+        )
+        self._set_action_status(result.message)
+        if result.success and result.artifact is not None:
+            self.update_state(
+                dashboard_state(self.project),
+                self.project.resources,
+                self.project.export_artifacts,
+            )
 
     def _classify_selected_asset(self, new_type: str) -> None:
         """Change the selected resource's type (manual reclassification)."""
@@ -518,6 +616,13 @@ class DataPage(QWidget):
             return
         old_type = asset.type
         asset.type = new_type
+        from paleo_workbench.resources.io_registry import ROLE_BY_TYPE
+
+        role = ROLE_BY_TYPE.get(new_type)
+        asset.artifact_role = role
+        # Keep a single role tag if present; preserve other free-form tags.
+        other = [t for t in (asset.tags or []) if t not in ROLE_BY_TYPE.values()]
+        asset.tags = ([role] if role else []) + other
         self.update_state(
             dashboard_state(self.project),
             self.project.resources,

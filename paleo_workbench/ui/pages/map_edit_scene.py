@@ -1092,11 +1092,16 @@ class MapEditScene(QGraphicsScene):
                 points.append([float(p[0]), float(p[1])])
             except (TypeError, ValueError):
                 return None
+        extras = {}
+        for key in ("facies", "probability", "region_id", "properties"):
+            if key in record and record[key] is not None:
+                extras[key] = record[key]
         return FaciesPolygonItem(
             feature_id=str(record["id"]),
             coordinates=points,
             name=str(record.get("name") or ""),
             style=record.get("style") or {},
+            extras=extras,
         )
 
     def _make_well(self, record: dict[str, Any]) -> WellPointItem | None:

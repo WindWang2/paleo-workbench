@@ -87,6 +87,7 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         coordinates: list[list[float]],
         name: str = "",
         style: dict[str, Any] | None = None,
+        extras: dict[str, Any] | None = None,
         parent=None,
     ):
         polygon = QPolygonF([QPointF(float(p[0]), float(p[1])) for p in coordinates])
@@ -96,6 +97,8 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         self.topology_status = _TOPOLOGY_OK
         self._name = name or ""
         self._style = dict(style or {})
+        # Prediction/compiler fields preserved for save_draft round-trip.
+        self._extras = dict(extras or {})
         self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
         self.setBrush(QBrush(_FACIES_FILL))
         self.setPen(_FACIES_PEN)
@@ -135,7 +138,7 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
             self.set_topology_status(str(value or _TOPOLOGY_OK))
 
     def to_record(self) -> dict[str, Any]:
-        return {
+        rec: dict[str, Any] = {
             "id": self.feature_id,
             "kind": self.kind,
             "name": self._name,
@@ -143,6 +146,12 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
             "style": dict(self._style),
             "topology_status": self.topology_status,
         }
+        for key in ("facies", "probability", "region_id", "properties"):
+            if key in self._extras and self._extras[key] is not None:
+                rec[key] = self._extras[key]
+        if "facies" not in rec and self._name:
+            rec["facies"] = self._name
+        return rec
 
 
 class WellPointItem(QGraphicsEllipseItem, FeatureItemMixin):

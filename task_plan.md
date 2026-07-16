@@ -5,7 +5,7 @@
 
 ## Project Status
 
-On `main`: 9/9 pages + Data Management (A/B/C) + Project Mgmt + Mapping Editor V1 + Visualization adapter + sample/demo pipeline (18a–c) + UI polish (19–20) + DataPage stress (21) + preview disk cache + **Phase 22 audit hardening** + **Phase 23 SEGY slice scrub** (engine algorithm + workbench data-page preview).
+On `main` (+ local WIP): 9/9 pages + Data Management + Mapping + Visualization + sample pipeline + polish + audit (22) + SEGY scrub (23) + **Phase 24 viz modularization / engine alignment** (thin hosts + facade loaders).
 
 `map_edit_core` C++ + `shapely` available for topology merge/split.
 
@@ -380,6 +380,32 @@ Interactive slice scrub lives in **geo-viz-engine** (visualization subproject); 
 
 - Key modules (engine): `packages/geoviz_seismic/.../preview_widget.py`, `geoviz/previews/seismic.py`
 - Workbench impact: none beyond submodule pin — DataPage already uses geoviz SEGY preview
+
+### Phase 24: 可视化模块化对齐 Engine-aligned Visualization Hosts — 🔄 IN PROGRESS
+
+Thin workbench host + thick geo-viz-engine modules. Visualization page no longer owns render logic.
+
+| Slice | Work | Status |
+|-------|------|--------|
+| T1 | `viz/hosts/*` — WellLog / Seismic / CrossWell / PaleoMap / EnginePreview | ✅ |
+| T2 | Composite panel = tab coordinator only | ✅ |
+| T3 | LAS via `geoviz.load_las_preview`; SEGY via `SeismicLoader` + `load_segy` path | ✅ |
+| T4 | Facade exports `load_las_preview` / `SeismicLoader`; independence tests updated | ✅ |
+| T5 | Summary lists horizon/tops/DAT engine kinds + multi-well 连井 + predictions | ✅ |
+| T6 | Tests green; planning docs | 🔄 |
+
+**Architecture rule:** workbench production code imports only public `geoviz` facade (+ project models). Parsing/render live in engine packages.
+
+### Phase 25: 导入/导出机制增强 Rich Import & Export — ✅ COMPLETE (local)
+
+| Area | Deliverable |
+|------|-------------|
+| Registry | `resources/io_registry.py` — types, roles, preferred extensions, view export specs |
+| Import | Enriched summary (size/mtime/label), roles/tags, empty-file skip, `ImportReport.summary_text` |
+| Convert | LAS→CSV/XLSX/JSON摘要; table→JSON/XLSX; SEGY→SUMMARY; GeoJSON normalize; images/text |
+| Service | `export_service.py` — asset export + inventory + widget snapshot + artifact register |
+| UI | Data context menu 工程清单; Viz PNG/SVG/PDF export on active tab |
+| Facade | `export_svg` / `export_pdf` / `export_png` on `geoviz` for well-log canvases |
 
 ## Known Follow-up Items
 

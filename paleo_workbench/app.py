@@ -96,7 +96,12 @@ class PaleoWorkbenchWindow(QWidget):
         return True
 
     def save_project(self) -> Path | None:
-        self._flush_mapping_draft()
+        if not self._flush_mapping_draft():
+            self._show_project_error(
+                "保存工程失败",
+                "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
+            )
+            return None
         if self.project_path is not None:
             try:
                 self.project.meta.project_root = str(
@@ -114,7 +119,12 @@ class PaleoWorkbenchWindow(QWidget):
     def save_project_as(self, path: str | Path | None) -> Path | None:
         if path is None:
             return None
-        self._flush_mapping_draft()
+        if not self._flush_mapping_draft():
+            self._show_project_error(
+                "保存工程失败",
+                "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
+            )
+            return None
         target = self._normalize_project_path(Path(path))
         try:
             self.project.meta.project_root = str(target.resolve().parent)
@@ -125,13 +135,18 @@ class PaleoWorkbenchWindow(QWidget):
         self.project_path = target
         return target
 
-    def _flush_mapping_draft(self) -> None:
-        """Commit dirty map-scene geometry into the project before serialization."""
+    def _flush_mapping_draft(self) -> bool:
+        """Commit dirty map-scene geometry into the project before serialization.
+
+        Returns False when the mapping page is dirty and ``save_draft`` fails
+        (e.g. topology blocks save), so callers can abort project write.
+        """
         page = self.app_shell.mapping_page_widget()
         if page is None:
-            return
+            return True
         if hasattr(page, "is_dirty") and page.is_dirty() and hasattr(page, "save_draft"):
-            page.save_draft()
+            return bool(page.save_draft())
+        return True
 
     # --- toolbar handlers (signals -> dialogs -> core methods) ---
 
@@ -309,6 +324,8 @@ class PaleoWorkbenchWindow(QWidget):
         self.outer_layout.addWidget(self.app_shell)
         self._wire_menu_bar()
         self._update_title()
+        # Re-bind project file path after shell rebuild (import/export I/O).
+        self.app_shell.set_data_project_path(self.project_path)
 
     def _apply_project_to_shell(self) -> None:
         """Push ``self.project`` into the current shell's pages (set in __init__/_refresh)."""
@@ -321,7 +338,9 @@ class PaleoWorkbenchWindow(QWidget):
             state,
             self.project.resources,
             self.project.export_artifacts,
+            project_path=self.project_path,
         )
+        self.app_shell.set_data_project_path(self.project_path)
         self.app_shell.update_well_log_prediction_page(
             self.project.prediction_tasks, project=self.project
         )
@@ -333,6 +352,7 @@ class PaleoWorkbenchWindow(QWidget):
             self.project.resources,
             self.project.prediction_tasks,
             self.project.paleomap_documents,
+            project=self.project,
         )
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
         self.app_shell.update_mapping_page(

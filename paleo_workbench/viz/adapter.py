@@ -8,14 +8,37 @@ from paleo_workbench.viz.models import VizPayload, VizRef
 from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
 
+# Resource type / format → engine-aligned viz kind.
+_ENGINE_PREVIEW_TYPES = {
+    "horizon": "engine_preview",
+    "well_head": "engine_preview",
+    "well_stratification": "engine_preview",
+    "time_depth": "engine_preview",
+    # Alias → same engine semantic as well_stratification
+    "formation_tops": "engine_preview",
+}
+
 
 class VizAdapter:
-    """UI-agnostic conversion from project assets to geo-viz payloads."""
+    """Project assets → VizPayload. Parsing/render stay in geo-viz-engine.
+
+    Workbench only maps resource ids/paths and prediction stubs onto engine
+    loaders / ``GeoVizEngine.prepare``.
+    """
 
     WELL_TYPES = {"well_log"}
     WELL_FORMATS = {"las"}
     SEISMIC_TYPES = {"seismic"}
     SEISMIC_FORMATS = {"sgy", "segy"}
+    # Formats that go through GeoVizEngine PreviewKind backends.
+    ENGINE_FORMATS = {
+        "dat",
+        "txt",
+        "csv",
+        "sgy",
+        "segy",
+        "las",
+    }
 
     def supports_resource(self, resource: Any) -> bool:
         if resource is None:
@@ -26,6 +49,10 @@ class VizAdapter:
             return True
         if rtype in self.SEISMIC_TYPES and fmt in self.SEISMIC_FORMATS:
             return True
+        if rtype in _ENGINE_PREVIEW_TYPES:
+            return True
+        # SEGY also openable as 2D engine preview (slice scrub) when type is seismic —
+        # primary path is full SeismicView; engine_preview is optional.
         return False
 
     def ref_from_resource(self, resource: Any) -> VizRef | None:
@@ -34,9 +61,13 @@ class VizAdapter:
         rtype = str(getattr(resource, "type", "") or "").strip().lower()
         fmt = str(getattr(resource, "format", "") or "").strip().lower().lstrip(".")
         if rtype in self.WELL_TYPES and fmt in self.WELL_FORMATS:
-            kind = "well_log"
-        else:
+            kind: str = "well_log"
+        elif rtype in self.SEISMIC_TYPES and fmt in self.SEISMIC_FORMATS:
             kind = "seismic"
+        elif rtype in _ENGINE_PREVIEW_TYPES:
+            kind = "engine_preview"
+        else:
+            return None
         return VizRef(
             kind=kind,  # type: ignore[arg-type]
             id=str(getattr(resource, "id", "") or ""),
@@ -54,6 +85,15 @@ class VizAdapter:
             source="",
         )
 
+    def ref_from_prediction(self, task: Any) -> VizRef:
+        return VizRef(
+            kind="prediction",
+            id=str(getattr(task, "id", "") or ""),
+            path="",
+            label=str(getattr(task, "name", "") or ""),
+            source="prediction",
+        )
+
     def resolve(self, ref: VizRef, project: Any) -> VizPayload:
         label = ref.label or ref.id or ref.kind
         try:
@@ -63,6 +103,10 @@ class VizAdapter:
                 return self._resolve_seismic(ref, project, label)
             if ref.kind == "map":
                 return self._resolve_map(ref, project, label)
+            if ref.kind == "cross_well":
+                return self._resolve_cross_well(ref, project, label)
+            if ref.kind == "engine_preview":
+                return self._resolve_engine_preview(ref, project, label)
             if ref.kind == "prediction":
                 task = self._find_prediction(ref, project)
                 if task is None:
@@ -85,7 +129,6 @@ class VizAdapter:
             )
 
     def from_prediction(self, task: Any) -> VizPayload:
-        # Bridge prediction mock converters; keep dual well_log + seismic for UI tabs.
         # Soft-fail like resolve(): never raise into UI handlers.
         name = str(getattr(task, "name", "") or "") or "prediction"
         try:
@@ -102,6 +145,8 @@ class VizAdapter:
                 kind="prediction",
                 label=name,
                 well_log=well_log,
+                well_logs=[well_log] if well_log is not None else [],
+                well_names=[name],
                 seismic_volume=seismic_volume,
             )
         except Exception as exc:
@@ -125,12 +170,14 @@ class VizAdapter:
             return VizPayload(
                 kind="message",
                 label=label,
-                message="无法解析 LAS 井数据",
+                message="无法解析 LAS 井数据（engine load_las_preview）",
             )
         return VizPayload(
             kind="well_log",
             label=label or str(getattr(data, "well_name", "") or path),
             well_log=data,
+            well_logs=[data],
+            well_names=[str(getattr(data, "well_name", "") or label or Path(path).stem)],
         )
 
     def _resolve_seismic(self, ref: VizRef, project: Any, label: str) -> VizPayload:
@@ -142,18 +189,22 @@ class VizAdapter:
                 label=label,
                 message="地震数据文件不存在或不可读",
             )
+        # Engine-native path for SeismicView.load_segy; volume is fallback only.
         volume, warning = load_seismic_volume_from_path(path)
-        if volume is None:
+        # File exists: host can still load_segy if volume prep failed — keep as warning.
+        if volume is None and not Path(path).is_file():
             return VizPayload(
                 kind="message",
                 label=label,
-                message=warning or "无法加载 SEGY 体数据",
+                message=warning or "无法加载 SEGY",
             )
         return VizPayload(
             kind="seismic",
             label=label,
+            seismic_path=path,
             seismic_volume=volume,
             warning=warning or "",
+            message="",
         )
 
     def _resolve_map(self, ref: VizRef, project: Any, label: str) -> VizPayload:
@@ -183,13 +234,104 @@ class VizAdapter:
             period_name=period or "",
         )
 
+    def _resolve_cross_well(self, ref: VizRef, project: Any, label: str) -> VizPayload:
+        ids = list(ref.related_ids) if ref.related_ids else []
+        if ref.id and ref.id not in ids:
+            ids.insert(0, ref.id)
+        resources = getattr(project, "resources", None) or []
+        by_id = {str(getattr(r, "id", "")): r for r in resources}
+        logs: list[Any] = []
+        names: list[str] = []
+        for rid in ids:
+            res = by_id.get(rid)
+            if res is None:
+                continue
+            path = str(getattr(res, "path", "") or "")
+            data = load_well_log_from_path(path) if path else None
+            if data is None:
+                continue
+            logs.append(data)
+            names.append(str(getattr(res, "name", "") or getattr(data, "well_name", "") or rid))
+        if not logs:
+            # Fall back: all well_log resources in project (capped).
+            for res in resources:
+                if str(getattr(res, "type", "")).lower() != "well_log":
+                    continue
+                path = str(getattr(res, "path", "") or "")
+                data = load_well_log_from_path(path) if path else None
+                if data is None:
+                    continue
+                logs.append(data)
+                names.append(str(getattr(res, "name", "") or path))
+                if len(logs) >= 8:
+                    break
+        if not logs:
+            return VizPayload(kind="message", label=label, message="无可用测井数据构建连井")
+        return VizPayload(
+            kind="cross_well",
+            label=label,
+            well_log=logs[0],
+            well_logs=logs,
+            well_names=names,
+        )
+
+    def _resolve_engine_preview(self, ref: VizRef, project: Any, label: str) -> VizPayload:
+        resource = self._find_resource(ref, project)
+        path = (str(getattr(resource, "path", "") or "") if resource is not None else "") or ref.path
+        if not path or not Path(path).is_file():
+            return VizPayload(
+                kind="message",
+                label=label,
+                message="预览文件不存在或不可读",
+            )
+        try:
+            from geoviz import GeoVizEngine, PreviewOptions, PreviewRequest
+        except Exception:
+            return VizPayload(
+                kind="message",
+                label=label,
+                message="geo-viz-engine 不可用",
+            )
+        rtype = str(getattr(resource, "type", "") or "") if resource is not None else ""
+        # Engine WellStratificationBackend expects well_stratification, not formation_tops.
+        if rtype == "formation_tops":
+            rtype = "well_stratification"
+        fmt = str(getattr(resource, "format", "") or Path(path).suffix).lstrip(".")
+        request = PreviewRequest(
+            resource_id=ref.id or "viz",
+            path=path,
+            semantic_type=rtype or "unknown",
+            format=fmt,
+            label=label,
+        )
+        engine = GeoVizEngine.default()
+        if not engine.supports(request):
+            return VizPayload(
+                kind="message",
+                label=label,
+                message=f"引擎不支持此资源类型: {rtype}/{fmt}",
+            )
+        try:
+            prepared = engine.prepare(request, PreviewOptions.local())
+        except Exception as exc:
+            return VizPayload(
+                kind="message",
+                label=label,
+                message=f"引擎 prepare 失败: {exc.__class__.__name__}",
+            )
+        return VizPayload(
+            kind="engine_preview",
+            label=label,
+            prepared=prepared,
+            warning=getattr(prepared, "warning", "") or "",
+        )
+
     @staticmethod
     def _find_resource(ref: VizRef, project: Any) -> Any | None:
         resources = getattr(project, "resources", None) or []
         for item in resources:
             if str(getattr(item, "id", "")) == ref.id:
                 return item
-        # Fallback: match by path when id is empty / stale
         if ref.path:
             for item in resources:
                 if str(getattr(item, "path", "")) == ref.path:

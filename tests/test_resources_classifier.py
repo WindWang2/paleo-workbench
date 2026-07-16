@@ -62,10 +62,13 @@ def test_html_classified_as_document():
     assert fmt == "html"
 
 
-def test_json_classified_as_unknown():
+def test_json_classified_as_tabular_or_geojson():
     rtype, fmt, _ = classify_path(Path("config.json"))
-    assert rtype == "unknown"
+    assert rtype == "tabular"
     assert fmt == "json"
+    rtype2, fmt2, _ = classify_path(Path("facies.geojson"))
+    assert rtype2 == "geojson"
+    assert fmt2 == "geojson"
 
 
 def test_audio_classified_as_unknown():

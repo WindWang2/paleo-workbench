@@ -14,6 +14,18 @@ def classify_path(path: Path) -> tuple[str, str, str]:
     if ext in {"sgy", "segy"}:
         return "seismic", ext, "indexed"
 
+    if ext == "geojson":
+        return "geojson", ext, "indexed"
+
+    if ext == "json":
+        # Heuristic: paleomap / features json often named facies/map
+        if any(k in name for k in ("facies", "paleo", "map", "geo")):
+            return "geojson", "json", "indexed"
+        return "tabular", "json", "indexed"
+
+    if ext in {"shp", "gpkg"}:
+        return "vector", ext, "indexed"
+
     if ext == "dat":
         if "td" in path_parts or any("时深" in part for part in path_parts):
             return "time_depth", ext, "indexed"
@@ -28,10 +40,13 @@ def classify_path(path: Path) -> tuple[str, str, str]:
     if ext in {"xlsx", "xls", "xml"}:
         return "spreadsheet", ext, "indexed"
 
+    if ext == "csv":
+        return "tabular", ext, "indexed"
+
     if ext in {"pdf", "ppt", "pptx"}:
         return "document", ext, "indexed_reference"
 
-    if ext in {"png", "jpg", "jpeg", "tif", "tiff"}:
+    if ext in {"png", "jpg", "jpeg", "tif", "tiff", "bmp"}:
         return "image_reference", ext, "indexed_reference"
 
     if ext == "dfb" or "相图" in name:
@@ -46,6 +61,8 @@ def classify_path(path: Path) -> tuple[str, str, str]:
     if ext in {"md", "markdown", "htm", "html"}:
         return "document", ext, "indexed_reference"
 
-    # json/geojson and audio formats: type stays "unknown" (no geological
-    # semantics) but format string is preserved for preview dispatch.
+    if ext in {"wav", "mp3", "flac", "ogg", "m4a"}:
+        return "unknown", ext, "indexed_reference"
+
+    # Remaining: keep format for preview dispatch.
     return "unknown", ext or "none", "indexed_reference"
