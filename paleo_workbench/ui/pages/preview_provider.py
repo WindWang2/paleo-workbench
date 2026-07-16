@@ -200,21 +200,11 @@ class PreviewProvider:
             return self._segy_preview(asset)
 
         if fmt in HTML_FORMATS:
-            # Use lightweight QTextBrowser (rich_text) instead of QWebEngineView
-            # to avoid Chromium subprocess init lag.
-            try:
-                raw_html = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                return PreviewResult(
-                    mode="message",
-                    title=title,
-                    path=asset.path,
-                    revision=revision,
-                    format=asset.format,
-                    status=asset.status,
-                    type_label=asset.type,
-                    message="文件不存在",
-                )
+            # Use lightweight QTextBrowser (rich_text) instead of QWebEngineView.
+            # Read at most MAX_TEXT_PREVIEW_BYTES to avoid blocking on huge files.
+            preview_bytes, truncated = self._read_preview_chunk(path)
+            raw_html = preview_bytes.decode("utf-8", errors="replace")
+            warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
             return PreviewResult(
                 mode="rich_text",
                 title=title,
@@ -224,6 +214,8 @@ class PreviewProvider:
                 status=asset.status,
                 type_label=asset.type,
                 rich_html=raw_html,
+                warning=warning,
+                truncated=truncated,
             )
 
         if fmt in MARKDOWN_FORMATS:
