@@ -25,6 +25,30 @@ def test_reference_panel_lists_aligned_layer_and_emits_controls(qtbot):
     assert seen == [("ref_1", False)]
 
 
+def test_reference_panel_shows_offline_and_external(qtbot):
+    panel = MapReferencePanel()
+    qtbot.addWidget(panel)
+    offline = MapReferenceLayer(
+        id="ref_off",
+        name="缺失断层",
+        source_path="/tmp/missing.geojson",
+        source_kind="vector",
+        source_crs="EPSG:4326",
+        project_crs="EPSG:3857",
+        status="offline",
+        external=True,
+        error_message="参考图源文件不可用",
+    )
+    panel.set_layers([offline])
+
+    assert panel.layer_list.count() == 1
+    text = panel.layer_list.item(0).text()
+    assert "离线" in text
+    assert "外部" in text
+    assert "1 层离线" in panel.status_label.text()
+    assert "1 外部" in panel.status_label.text()
+
+
 def test_map_edit_view_applies_shared_view_state(qtbot):
     view = MapEditView()
     qtbot.addWidget(view)

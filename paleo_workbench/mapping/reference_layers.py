@@ -95,21 +95,47 @@ class ReferenceLayerService:
             osr.CoordinateTransformation(source_srs, target_srs)
             return MapReferenceLayer(
                 name=source_path.stem,
-                source_path=str(source_path),
+                source_path=str(source_path.resolve()),
                 source_kind=source_kind,
                 source_crs=source_crs,
                 project_crs=_canonical_crs(target_srs),
                 transform_wkt=target_srs.ExportToWkt(),
                 cache_key=_cache_key(source_path, source_crs, _canonical_crs(target_srs), source_kind),
+                status="ready",
+                error_message="",
             )
         finally:
             dataset = None
 
+    @staticmethod
+    def refresh_status(layer: MapReferenceLayer) -> MapReferenceLayer:
+        """Mark layer offline when the source file is missing; restore ready when present.
+
+        Does not clear an existing ``failed`` status unless the file is simply gone
+        (missing → offline takes precedence for path I/O), or the file reappears
+        and was only offline.
+        """
+        path = Path(layer.source_path) if layer.source_path else None
+        if path is None or not path.is_file():
+            layer.status = "offline"
+            layer.error_message = layer.error_message or "参考图源文件不可用"
+            return layer
+        if layer.status == "offline":
+            layer.status = "ready"
+            if layer.error_message == "参考图源文件不可用":
+                layer.error_message = ""
+        return layer
+
     def vector_snap_points(self, layer: MapReferenceLayer) -> list[tuple[float, float]]:
         if layer.source_kind != "vector":
             return []
+        self.refresh_status(layer)
+        if layer.status != "ready":
+            return []
         dataset = gdal.OpenEx(layer.source_path, gdal.OF_VECTOR)
         if dataset is None:
+            layer.status = "failed"
+            layer.error_message = "无法打开矢量参考图"
             return []
         try:
             source = dataset.GetLayer(0)
@@ -135,8 +161,13 @@ class ReferenceLayerService:
         """Return a bounded grayscale overview for a GDAL raster reference."""
         if layer.source_kind != "raster":
             raise ReferenceLayerError("只有栅格参考图可以生成预览")
+        self.refresh_status(layer)
+        if layer.status != "ready":
+            raise ReferenceLayerError(layer.error_message or "参考图不可用")
         dataset = gdal.OpenEx(layer.source_path, gdal.OF_RASTER)
         if dataset is None or dataset.RasterXSize <= 0 or dataset.RasterYSize <= 0:
+            layer.status = "failed"
+            layer.error_message = "无法读取栅格参考图"
             raise ReferenceLayerError("无法读取栅格参考图")
         try:
             limit = max(1, int(max_size))

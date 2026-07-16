@@ -187,7 +187,7 @@ class MappingPage(QWidget):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
             self._sync_reference_snap_points(scene, document)
         self.attribute_table.set_feature(None)
-        self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
+        self._publish_reference_layers(document)
         self.bottom_workbench.factor_shelf.update_state(list(factor_tasks or []))
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
@@ -361,12 +361,19 @@ class MappingPage(QWidget):
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
-        self.reference_panel.set_layers(list(getattr(document, "reference_layers", []) or []))
+        self._publish_reference_layers(document)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
             self._refresh_preview()
         self._emit_mapping_context()
+
+    def _publish_reference_layers(self, document) -> None:
+        """Refresh offline status then push descriptors into the reference dock."""
+        layers = list(getattr(document, "reference_layers", []) or []) if document else []
+        for layer in layers:
+            ReferenceLayerService.refresh_status(layer)
+        self.reference_panel.set_layers(layers)
 
     def _merge_view_state_into_document(self, doc) -> None:
         """Write live viewport into doc.view_state; keep non-viewport provenance keys."""
@@ -422,7 +429,10 @@ class MappingPage(QWidget):
     def _sync_reference_snap_points(self, scene: MapEditScene, document) -> None:
         points: list[tuple[float, float]] = []
         for layer in list(getattr(document, "reference_layers", []) or []):
+            ReferenceLayerService.refresh_status(layer)
             if not layer.participates_in_snap or layer.source_kind != "vector":
+                continue
+            if layer.status != "ready":
                 continue
             try:
                 points.extend(self._reference_service.vector_snap_points(layer))

@@ -156,6 +156,8 @@ class MapReferenceLayer(BaseModel):
     order: int = 0
     participates_in_snap: bool = False
     cache_key: str = ""
+    # True when source_path is outside the project directory (absolute on disk).
+    external: bool = False
     status: Literal["ready", "offline", "failed"] = "ready"
     error_message: str = ""
 

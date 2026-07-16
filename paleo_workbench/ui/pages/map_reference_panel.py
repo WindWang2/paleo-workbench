@@ -49,16 +49,45 @@ class MapReferencePanel(QFrame):
         self._layers = {layer.id: layer for layer in layers}
         self.layer_list.clear()
         for layer in layers:
-            item = QListWidgetItem(layer.name)
+            item = QListWidgetItem(self._layer_label(layer))
             item.setData(Qt.ItemDataRole.UserRole, layer.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
+            if layer.status != "ready":
+                item.setToolTip(layer.error_message or layer.status)
             self.layer_list.addItem(item)
-        self.status_label.setText("坐标已对齐" if layers else "暂无参考图")
+        self.status_label.setText(self._status_summary(layers))
         if layers:
             self.layer_list.setCurrentRow(0)
             self.opacity_slider.setValue(round(layers[0].opacity * 100))
         self._suppress = False
+
+    @staticmethod
+    def _layer_label(layer: MapReferenceLayer) -> str:
+        label = layer.name
+        if layer.status == "offline":
+            label = f"{label} (离线)"
+        elif layer.status == "failed":
+            label = f"{label} (失败)"
+        if layer.external:
+            label = f"{label} [外部]"
+        return label
+
+    @staticmethod
+    def _status_summary(layers: list[MapReferenceLayer]) -> str:
+        if not layers:
+            return "暂无参考图"
+        offline = sum(1 for layer in layers if layer.status == "offline")
+        failed = sum(1 for layer in layers if layer.status == "failed")
+        external = sum(1 for layer in layers if layer.external)
+        parts = ["坐标已对齐"]
+        if offline:
+            parts.append(f"{offline} 层离线")
+        if failed:
+            parts.append(f"{failed} 层失败")
+        if external:
+            parts.append(f"{external} 外部")
+        return " · ".join(parts)
 
     def _on_item_changed(self, item: QListWidgetItem) -> None:
         if not self._suppress:

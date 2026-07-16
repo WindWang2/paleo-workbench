@@ -102,6 +102,54 @@ def test_external_resource_paths_remain_absolute_and_external(tmp_path: Path):
     assert loaded.resources[0].external is True
 
 
+def test_reference_layer_external_and_offline_round_trip(tmp_path: Path):
+    from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
+
+    project_path = tmp_path / "demo.paleo.json"
+    # Source outside project dir → external=True after save
+    external_ref = tmp_path.parent / "shared_ref" / "faults.geojson"
+    external_ref.parent.mkdir(parents=True, exist_ok=True)
+    external_ref.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+
+    project = ProjectDocument.new(name="Demo")
+    map_doc = PaleoMapDocument(
+        name="Map",
+        linked_target_horizon="H1",
+        reference_layers=[
+            MapReferenceLayer(
+                name="断层",
+                source_path=str(external_ref),
+                source_kind="vector",
+                source_crs="EPSG:4326",
+                project_crs="EPSG:3857",
+            ),
+            MapReferenceLayer(
+                name="缺失",
+                source_path=str(tmp_path / "gone.geojson"),
+                source_kind="vector",
+                source_crs="EPSG:4326",
+                project_crs="EPSG:3857",
+            ),
+        ],
+    )
+    project.paleomap_documents.append(map_doc)
+
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+
+    layers = loaded.paleomap_documents[0].reference_layers
+    by_name = {layer.name: layer for layer in layers}
+    assert by_name["断层"].external is True
+    assert by_name["断层"].status == "ready"
+    assert by_name["断层"].source_path == external_ref.resolve().as_posix()
+    assert by_name["缺失"].status == "offline"
+    assert "不可用" in by_name["缺失"].error_message
+
+
 def test_export_artifact_output_path_is_relativized_when_inside_project(tmp_path: Path):
     project_path = tmp_path / "demo.paleo.json"
     export_file = tmp_path / "exports" / "demo.png"

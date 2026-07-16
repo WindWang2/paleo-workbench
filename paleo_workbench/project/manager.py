@@ -31,6 +31,15 @@ def _resolve_reference_layers(data: dict, project_path: Path) -> None:
             if not source:
                 continue
             layer["source_path"] = resolve_project_path(source, project_path)
+            # File presence check on the resolved absolute path (status offline).
+            path = Path(layer["source_path"])
+            if not path.is_file():
+                layer["status"] = "offline"
+                layer["error_message"] = layer.get("error_message") or "参考图源文件不可用"
+            elif layer.get("status") == "offline":
+                layer["status"] = "ready"
+                if layer.get("error_message") == "参考图源文件不可用":
+                    layer["error_message"] = ""
 
 
 class ProjectManager:

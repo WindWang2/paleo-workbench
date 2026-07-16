@@ -110,3 +110,31 @@ def test_raster_reference_has_bounded_preview(tmp_path):
     assert preview.width() == 4
     assert preview.height() == 2
     assert not preview.isNull()
+
+
+def test_refresh_status_marks_missing_source_offline(tmp_path):
+    source = tmp_path / "faults.geojson"
+    _write_geojson(source, include_crs=True)
+    layer = ReferenceLayerService().import_layer(source, "EPSG:3857")
+    assert layer.status == "ready"
+
+    source.unlink()
+    ReferenceLayerService.refresh_status(layer)
+
+    assert layer.status == "offline"
+    assert "不可用" in layer.error_message
+    assert ReferenceLayerService().vector_snap_points(layer) == []
+
+
+def test_refresh_status_restores_ready_when_file_returns(tmp_path):
+    source = tmp_path / "faults.geojson"
+    _write_geojson(source, include_crs=True)
+    layer = ReferenceLayerService().import_layer(source, "EPSG:3857")
+    source.unlink()
+    ReferenceLayerService.refresh_status(layer)
+    assert layer.status == "offline"
+
+    _write_geojson(source, include_crs=True)
+    ReferenceLayerService.refresh_status(layer)
+    assert layer.status == "ready"
+    assert layer.error_message == ""
