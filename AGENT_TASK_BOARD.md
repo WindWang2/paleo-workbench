@@ -60,10 +60,10 @@
 | T-WELL-01 | 测井 | P1 | **DONE** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **DONE** | Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
-| T-QC-02 | 质检 | P1 | **WIP** | Agent | 成图审核页：运行检查 + 导出报告接线；页成熟度 DONE |
-| T-CI-01 | 全局 | P0 | **WIP** | Agent | CI 安装系统 GDAL；修复 3.12/3.13 依赖失败 |
+| T-QC-02 | 质检 | P1 | **DONE** | Agent | 成图审核页：运行检查 + 导出报告接线；页成熟度 DONE |
+| T-CI-01 | 全局 | P0 | **DONE** | Agent | CI 安装系统 GDAL；修复 3.12/3.13 依赖失败 |
 
-**锁定任务（本回合）：** `T-CI-01` + `T-QC-02`。
+**锁定任务（本回合）：** 无。
 
 ---
 
@@ -151,6 +151,8 @@
 | 2026-07-16 | T-ADP-01 | PaleoMapAdapter 拒绝假 pdf/svg；仅 geojson |
 | 2026-07-16 | T-STRAT-01 | 新页「地层对比」idx5；CrossWell 多井+预测相；导航 10 页 |
 | 2026-07-16 | T-ENV-01 | requires-python >=3.12,<3.14；CI 矩阵 3.12+3.13；geoviz 同步 |
+| 2026-07-16 | T-CI-01 | apt libgdal-dev + GDAL_CONFIG；prefer-binary 安装 |
+| 2026-07-16 | T-QC-02 | 审核页 run_qc / 导出 JSON 报告；18 tests |
 
 ---
 
