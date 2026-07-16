@@ -99,10 +99,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           REQUIRE_MAP_EDIT_CPP: "1"
         run: |
-          # Per-test timeout prevents a single Qt/OpenGL hang from eating the job budget.
-          # Prefer signal method on Linux: thread-based timeouts can SIGKILL mid-Qt
-          # native code and surface as flaky segfaults (exit 139).
-          python -m pytest -q --tb=short \
-            --timeout=60 \
-            --timeout-method=signal \
-            -m "not slow"
+          # Per-test timeout + hard suite ceiling. Signal timeouts alone can miss
+          # native Qt hangs; the outer `timeout` kills the whole suite after 8m.
+          timeout --signal=TERM --kill-after=30s 8m \
+            python -m pytest -q --tb=short \
+              --timeout=60 \
+              --timeout-method=signal \
+              -m "not slow"
