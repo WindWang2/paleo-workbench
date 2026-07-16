@@ -47,7 +47,7 @@
 | T-VIZ-02 | 可视化 | P1 | **DONE** | Agent | Review 修复：clear/project/seismic volume-first |
 | T-MAP-01 | 编图 | P0 | **DONE** | Agent | 草稿属性保留 + 保存门禁 flush |
 | T-DATA-01 | 数据 | P0 | **DONE** | Agent | 导入 UI 线程 QueuedConnection；清单菜单接线 |
-| T-COMMIT-01 | 全局 | P0 | **WIP** | Agent | 提交并 push 未入库改动（workbench + geoviz 子模块） |
+| T-COMMIT-01 | 全局 | P0 | **DONE** | Agent | push: workbench `9998222` + geoviz `a6ca6dba` |
 | T-DATA-02 | 数据 | P1 | **DONE** | Agent | DataPage.project_path；导入/重扫/导出 resolve + external |
 | T-MAP-02 | 编图 | P1 | **TODO** | Agent | 演示草稿生成前 dirty 确认；view_state 持久化 |
 | T-MAP-03 | 编图 | P1 | **TODO** | Agent | 参考层 offline 状态；`MapReferenceLayer.external` 字段 |
