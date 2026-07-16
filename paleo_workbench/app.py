@@ -298,6 +298,23 @@ class PaleoWorkbenchWindow(QWidget):
             page.generate_demo_draft_requested.connect(self._on_generate_demo_map_draft)
 
     def _on_generate_demo_map_draft(self) -> None:
+        """Compile a deterministic demo draft; confirm if mapping scene is dirty."""
+        page = self.app_shell.mapping_page_widget()
+        if page is not None and hasattr(page, "is_dirty") and page.is_dirty():
+            reply = QMessageBox.question(
+                self,
+                "未保存的编图修改",
+                "当前图件有未保存修改。生成演示草稿将刷新编图页面。是否先保存草稿？",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                if not page.save_draft():
+                    return
         from paleo_workbench.pipeline.compile_map import compile_map_draft
 
         compile_map_draft(self.project, seed=0)

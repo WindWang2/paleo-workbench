@@ -3,6 +3,57 @@ from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 
 
+def test_save_draft_merges_view_state_preserving_provenance(qtbot):
+    """Viewport center/scale are written; is_demo_draft / seed stay intact."""
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [5, 0], [5, 5], [0, 0]],
+        }],
+        view_state={
+            "generator": "deterministic-map-draft-v1",
+            "is_demo_draft": True,
+            "seed": 7,
+        },
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state([doc])
+    page.edit_view.apply_view_state({"center": (12.5, 34.0), "scale": 2.5})
+    # Mark dirty so save is meaningful (view alone may not dirty scene)
+    page.edit_view.scene().translate_features(["f1"], 0.1, 0.0)
+
+    assert page.save_draft() is True
+    assert doc.view_state["is_demo_draft"] is True
+    assert doc.view_state["seed"] == 7
+    assert doc.view_state["generator"] == "deterministic-map-draft-v1"
+    assert doc.view_state["center"] == [12.5, 34.0]
+    assert doc.view_state["scale"] == 2.5
+
+
+def test_update_state_restores_view_state(qtbot):
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 0], [2, 2], [0, 0]],
+        }],
+        view_state={"center": [40.0, 50.0], "scale": 3.0, "is_demo_draft": True},
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state([doc])
+
+    state = page.edit_view.view_state()
+    assert state["center"] == (40.0, 50.0)
+    assert state["scale"] == 3.0
+
+
 def test_save_draft_writes_document(qtbot):
     doc = PaleoMapDocument(
         name="M",

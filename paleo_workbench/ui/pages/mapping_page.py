@@ -182,6 +182,7 @@ class MappingPage(QWidget):
             )
             if not same_doc or not scene.is_dirty():
                 scene.load_document(document)
+                self._restore_view_state_from_document(document)
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
             self._sync_reference_snap_points(scene, document)
@@ -215,6 +216,9 @@ class MappingPage(QWidget):
             return False
         features = scene.export_features()
         apply_features_to_document(doc, features)
+        # Persist viewport (center/scale) without clobbering provenance keys
+        # like is_demo_draft / generator / seed.
+        self._merge_view_state_into_document(doc)
         scene.set_dirty(False)
         self._sync_save_enabled()
         if self._preview_mode:
@@ -353,6 +357,7 @@ class MappingPage(QWidget):
         self._active_document = document
         if scene is not None:
             scene.load_document(document)
+            self._restore_view_state_from_document(document)
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
@@ -362,6 +367,30 @@ class MappingPage(QWidget):
         if self._preview_mode:
             self._refresh_preview()
         self._emit_mapping_context()
+
+    def _merge_view_state_into_document(self, doc) -> None:
+        """Write live viewport into doc.view_state; keep non-viewport provenance keys."""
+        live = self.edit_view.view_state()
+        merged = dict(getattr(doc, "view_state", None) or {})
+        if "center" in live:
+            center = live["center"]
+            if isinstance(center, (list, tuple)) and len(center) >= 2:
+                merged["center"] = [float(center[0]), float(center[1])]
+            else:
+                merged["center"] = center
+        if "scale" in live:
+            merged["scale"] = float(live["scale"])
+        doc.view_state = merged
+
+    def _restore_view_state_from_document(self, document) -> None:
+        """Apply saved center/scale when present; ignore pure provenance dicts."""
+        if document is None:
+            return
+        vs = getattr(document, "view_state", None) or {}
+        if "center" not in vs and "scale" not in vs:
+            return
+        self.edit_view.apply_view_state(vs)
+        self.reference_panel.set_view_state(self.edit_view.view_state())
 
     def _on_property_changed(self, feature_id: str, key: str, value: object) -> None:
         scene = self._edit_scene()

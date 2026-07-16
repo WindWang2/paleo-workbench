@@ -79,3 +79,105 @@ def test_generate_demo_map_draft_from_prediction_regions(qtbot):
     root = refreshed.layer_tree.tree.topLevelItem(0)
     assert root.childCount() == 1
     assert "相带草稿" in root.child(0).text(0)
+
+
+def test_generate_demo_map_draft_cancel_when_dirty(qtbot, monkeypatch):
+    """Cancel on dirty confirm must not append a demo draft."""
+    from PySide6.QtWidgets import QMessageBox
+
+    project = ProjectDocument.new("Dirty Cancel")
+    existing = PaleoMapDocument(
+        name="Existing",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 0], [2, 2], [0, 0]],
+        }],
+    )
+    project.paleomap_documents.append(existing)
+
+    window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(window)
+    page = window.app_shell.mapping_page_widget()
+    page.edit_view.scene().translate_features(["f1"], 1.0, 0.0)
+    assert page.is_dirty()
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Cancel,
+    )
+    page.generate_demo_draft_requested.emit()
+
+    assert len(window.project.paleomap_documents) == 1
+    assert window.project.paleomap_documents[0].id == existing.id
+    assert page.is_dirty()
+
+
+def test_generate_demo_map_draft_discard_when_dirty(qtbot, monkeypatch):
+    """Discard proceeds with compile even if scene was dirty."""
+    from PySide6.QtWidgets import QMessageBox
+
+    project = ProjectDocument.new("Dirty Discard")
+    existing = PaleoMapDocument(
+        name="Existing",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 0], [2, 2], [0, 0]],
+        }],
+    )
+    project.paleomap_documents.append(existing)
+
+    window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(window)
+    page = window.app_shell.mapping_page_widget()
+    page.edit_view.scene().translate_features(["f1"], 1.0, 0.0)
+    assert page.is_dirty()
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Discard,
+    )
+    page.generate_demo_draft_requested.emit()
+
+    assert len(window.project.paleomap_documents) == 2
+    assert window.project.paleomap_documents[-1].view_state.get("is_demo_draft") is True
+
+
+def test_generate_demo_map_draft_save_when_dirty(qtbot, monkeypatch):
+    """Save flushes geometry then compiles demo draft."""
+    from PySide6.QtWidgets import QMessageBox
+
+    project = ProjectDocument.new("Dirty Save")
+    existing = PaleoMapDocument(
+        name="Existing",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 0], [2, 2], [0, 0]],
+        }],
+    )
+    project.paleomap_documents.append(existing)
+
+    window = PaleoWorkbenchWindow(project=project)
+    qtbot.addWidget(window)
+    page = window.app_shell.mapping_page_widget()
+    page.edit_view.scene().translate_features(["f1"], 3.0, 0.0)
+    assert page.is_dirty()
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Save,
+    )
+    page.generate_demo_draft_requested.emit()
+
+    # Original doc should have flushed geometry (x+3) and a demo draft appended
+    assert existing.facies_polygons[0]["coordinates"][0][0] == 3.0
+    assert len(window.project.paleomap_documents) == 2
+    assert window.project.paleomap_documents[-1].view_state.get("is_demo_draft") is True

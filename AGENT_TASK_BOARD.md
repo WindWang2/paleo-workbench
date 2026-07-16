@@ -49,7 +49,7 @@
 | T-DATA-01 | 数据 | P0 | **DONE** | Agent | 导入 UI 线程 QueuedConnection；清单菜单接线 |
 | T-COMMIT-01 | 全局 | P0 | **DONE** | Agent | push: workbench `9998222` + geoviz `a6ca6dba` |
 | T-DATA-02 | 数据 | P1 | **DONE** | Agent | DataPage.project_path；导入/重扫/导出 resolve + external |
-| T-MAP-02 | 编图 | P1 | **TODO** | Agent | 演示草稿生成前 dirty 确认；view_state 持久化 |
+| T-MAP-02 | 编图 | P1 | **DONE** | Agent | 演示草稿生成前 dirty 确认；view_state 持久化 |
 | T-MAP-03 | 编图 | P1 | **TODO** | Agent | 参考层 offline 状态；`MapReferenceLayer.external` 字段 |
 | T-QC-01 | 质检 | P1 | **DONE** | Agent | QC upsert + active_quality_reports for dashboard |
 | T-VIZ-03 | 可视化 | P1 | **TODO** | Agent | SVG/PDF 按钮按 Tab 能力门控；连井/古地理专用导出 API |
@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（下一步）：** `T-MAP-02` 或 `T-STRAT-01` 或 `T-PREP-01`。
+**锁定任务（本回合）：** 无（T-MAP-02 已完成）。
 
 ---
 
@@ -76,7 +76,7 @@
 | **StratigraphicFramework** | models | 格架页 | 制备/编图/预测 | target_horizon, boundaries | **浅** |
 | **FactorMapTask** | models | 制备页 / pipeline | 编图 factor shelf | parameters.sample_points | **UI 有、算法弱** |
 | **PredictionTask** | models | mock adapter / bind assets | 测井/地震/可视化 | input_refs, results | **mock 为主** |
-| **PaleoMapDocument** | models | 编图 / compile_map_draft | 可视化/质检/导出 | facies/wells/lines/labels | **稳定**；view_state 未回写 |
+| **PaleoMapDocument** | models | 编图 / compile_map_draft | 可视化/质检/导出 | facies/wells/lines/labels | **稳定**；view_state 可回写 center/scale |
 | **MapReferenceLayer** | models | ReferenceLayerService(GDAL) | 编图 snap | source_path+crs | **路径有**；offline 弱 |
 | **QualityReport** | models | run_basic_qc | 质检页/dashboard | issues+status | **可膨胀** |
 | **VizRef / VizPayload** | `viz/models.py` | VizAdapter | Visualization hosts | kind+engine handles | **稳定** |
@@ -140,6 +140,7 @@
 | 2026-07-16 | T-DATA-02 | DataPage.project_path 贯通 import/rescan/export；41 passed 聚焦 |
 | 2026-07-16 | T-COMMIT-01 | 提交 push workbench + geoviz 子模块 |
 | 2026-07-16 | T-QC-01 + T-FLOW-01 | QC upsert；e2e 数据流契约；VizAdapter 相对路径解析 |
+| 2026-07-16 | T-MAP-02 | save_draft 合并 view_state；load 恢复；演示草稿 dirty Save/Discard/Cancel；14 tests |
 
 ---
 
