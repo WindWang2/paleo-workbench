@@ -52,7 +52,7 @@
 | T-MAP-02 | 编图 | P1 | **DONE** | Agent | 演示草稿生成前 dirty 确认；view_state 持久化 |
 | T-MAP-03 | 编图 | P1 | **DONE** | Agent | 参考层 offline 状态；`MapReferenceLayer.external` 字段 |
 | T-QC-01 | 质检 | P1 | **DONE** | Agent | QC upsert + active_quality_reports for dashboard |
-| T-VIZ-03 | 可视化 | P1 | **TODO** | Agent | SVG/PDF 按钮按 Tab 能力门控；连井/古地理专用导出 API |
+| T-VIZ-03 | 可视化 | P1 | **DONE** | Agent | SVG/PDF 按钮按 Tab 能力门控；连井/古地理专用导出 API |
 | T-ADP-01 | 适配器 | P2 | **TODO** | Agent | PaleoMapAdapter 禁用假 pdf/svg 或接引擎出图 |
 | T-PREP-01 | 制备 | P1 | **TODO** | Agent | 单因素真实插值链路对接 engine plots/IDW；与编图 factor shelf 闭环 |
 | T-SEQ-01 | 格架 | P1 | **TODO** | Agent | 层序方案持久化加深；与预测/编图 target_horizon 双向绑定 |
@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** 无（T-MAP-03 已完成）。
+**锁定任务（本回合）：** `T-VIZ-03`。
 
 ---
 

@@ -104,9 +104,9 @@ CONVERT_LABEL_EXT = {
     "INVENTORY": ".inventory.json",
 }
 
-# Visualization / engine canvas export
+# Visualization / engine canvas export (capability gated per Tab at runtime)
 VIEW_EXPORT_FORMATS = (
-    ExportFormatSpec("PNG", ".png", "engine", "当前视图栅格截图"),
-    ExportFormatSpec("SVG", ".svg", "engine", "矢量图（测井等）"),
-    ExportFormatSpec("PDF", ".pdf", "engine", "矢量 PDF（测井等）"),
+    ExportFormatSpec("PNG", ".png", "engine", "当前视图栅格截图（全 Tab）"),
+    ExportFormatSpec("SVG", ".svg", "engine", "矢量图（测井 / 连井 / 古地理）"),
+    ExportFormatSpec("PDF", ".pdf", "engine", "矢量 PDF（测井 / 连井 / 古地理）"),
 )

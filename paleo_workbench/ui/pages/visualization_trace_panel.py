@@ -56,6 +56,8 @@ class VisualizationTracePanel(QFrame):
         self.export_pdf_btn.setObjectName("SecondaryButton")
         self.export_pdf_btn.clicked.connect(lambda: self.export_requested.emit("PDF"))
         layout.addWidget(self.export_pdf_btn)
+        # Default: PNG only until the page reports active-tab capabilities.
+        self.set_export_capabilities({"PNG"})
 
     def _add_value(self, layout: QVBoxLayout, label_text: str, value_text: str) -> QLabel:
         label = QLabel(label_text)
@@ -101,7 +103,21 @@ class VisualizationTracePanel(QFrame):
                 path_or_message = payload.label
         self.path_value.setText(path_or_message or "—")
 
-        # Gate vector export affordances to canvases that support paint_all.
-        # Parent page re-evaluates on export; here we just keep labels clear.
-        self.export_svg_btn.setToolTip("测井等矢量画布可用；其他 Tab 请用 PNG")
-        self.export_pdf_btn.setToolTip("测井等矢量画布可用；其他 Tab 请用 PNG")
+    def set_export_capabilities(self, formats: set[str] | frozenset[str] | list[str]) -> None:
+        """Enable PNG/SVG/PDF buttons according to the active tab's honest capabilities."""
+        caps = {str(f).upper() for f in (formats or [])}
+        self.export_btn.setEnabled("PNG" in caps)
+        self.export_svg_btn.setEnabled("SVG" in caps)
+        self.export_pdf_btn.setEnabled("PDF" in caps)
+        if "SVG" in caps:
+            self.export_svg_btn.setToolTip("导出当前 Tab 为 SVG 矢量图")
+        else:
+            self.export_svg_btn.setToolTip("当前 Tab 不支持 SVG，请切换测井/连井/古地理或改用 PNG")
+        if "PDF" in caps:
+            self.export_pdf_btn.setToolTip("导出当前 Tab 为 PDF")
+        else:
+            self.export_pdf_btn.setToolTip("当前 Tab 不支持 PDF，请切换测井/连井/古地理或改用 PNG")
+        if "PNG" in caps:
+            self.export_btn.setToolTip("导出当前 Tab 截图 PNG")
+        else:
+            self.export_btn.setToolTip("当前无可导出视图")

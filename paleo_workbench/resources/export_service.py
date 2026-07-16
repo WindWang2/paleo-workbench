@@ -32,8 +32,86 @@ def list_asset_export_labels(asset: ResourceItem | ExportArtifact) -> list[str]:
     return [label for label, _ in get_available_formats(asset)]
 
 
-def list_view_export_labels() -> list[str]:
-    return [spec.label for spec in VIEW_EXPORT_FORMATS]
+def list_view_export_labels(widget: Any | None = None) -> list[str]:
+    """Return export labels for a view widget (or the full catalog when None)."""
+    if widget is None:
+        return [spec.label for spec in VIEW_EXPORT_FORMATS]
+    return sorted(view_export_capabilities(widget), key=_view_format_rank)
+
+
+def _view_format_rank(label: str) -> int:
+    order = {"PNG": 0, "SVG": 1, "PDF": 2}
+    return order.get(label.upper(), 99)
+
+
+def view_export_capabilities(widget: Any | None) -> frozenset[str]:
+    """Formats the active visualization surface can honestly export.
+
+    - Well-log canvas (``paint_all``): PNG/SVG/PDF via geoviz_well_log
+    - Cross-well composite (``export_composite``): PNG/SVG/PDF
+    - Paleo map canvas: PNG/SVG/PDF via professional figure export
+    - Everything else (seismic GL, engine preview, empty): PNG grab only
+    """
+    if widget is None:
+        return frozenset()
+    target = _resolve_export_target(widget)
+    kind = _export_surface_kind(target)
+    if kind in {"well_log", "cross_well", "paleo_map"}:
+        return frozenset({"PNG", "SVG", "PDF"})
+    if hasattr(target, "grab"):
+        return frozenset({"PNG"})
+    return frozenset()
+
+
+def _resolve_export_target(widget: Any) -> Any:
+    """Prefer the engine surface that owns vector export APIs.
+
+    ``CrossWellCanvas`` wraps ``CrossWellWidget``; export lives on the inner widget.
+    """
+    if widget is None:
+        return None
+    if hasattr(widget, "export_composite") or hasattr(widget, "paint_all"):
+        return widget
+    if _is_paleo_map_canvas(widget):
+        return widget
+    inner = getattr(widget, "widget", None)
+    if inner is not None and (
+        hasattr(inner, "export_composite")
+        or hasattr(inner, "paint_all")
+        or _is_paleo_map_canvas(inner)
+    ):
+        return inner
+    return widget
+
+
+def _is_paleo_map_canvas(widget: Any) -> bool:
+    if widget is None:
+        return False
+    name = type(widget).__name__
+    if name == "PaleoMapCanvas":
+        return True
+    # Duck-type engine map canvas without hard import.
+    return hasattr(widget, "load_features") and hasattr(widget, "_layers")
+
+
+def _export_surface_kind(widget: Any) -> str:
+    if widget is None:
+        return "none"
+    if hasattr(widget, "paint_all"):
+        return "well_log"
+    if hasattr(widget, "export_composite"):
+        return "cross_well"
+    if _is_paleo_map_canvas(widget):
+        return "paleo_map"
+    return "generic"
+
+
+def _paleo_map_title(canvas: Any) -> str:
+    period = getattr(canvas, "_period_name", None) or getattr(canvas, "period_name", None)
+    period = str(period or "").strip()
+    if period:
+        return f"{period}岩相古地理图"
+    return "岩相古地理图"
 
 
 def export_asset_to_path(
@@ -189,6 +267,13 @@ def export_widget_snapshot(
     """Export a QWidget (or engine canvas) to PNG/SVG/PDF when possible."""
     label = format_label.upper()
     fmt = label.lower()
+    caps = view_export_capabilities(widget)
+    if label not in caps:
+        supported = "、".join(sorted(caps, key=_view_format_rank)) or "无"
+        return ExportJobResult(
+            success=False,
+            message=f"当前 Tab 不支持 {label} 导出（可用: {supported}）",
+        )
     try:
         if label == "PNG":
             _export_widget_png(widget, output_path)
@@ -217,7 +302,8 @@ def export_widget_snapshot(
             fmt=fmt,
             source_task_ids=[],
         )
-        artifact.included_map_elements = ["visualization_view"]
+        surface = _export_surface_kind(_resolve_export_target(widget))
+        artifact.included_map_elements = ["visualization_view", surface]
 
     return ExportJobResult(
         success=True,
@@ -229,45 +315,75 @@ def export_widget_snapshot(
 
 
 def _export_widget_png(widget: Any, output_path: Path) -> None:
-    # Prefer engine well-log vector export helpers when present.
-    try:
-        from geoviz import export_png as engine_png
+    target = _resolve_export_target(widget)
+    kind = _export_surface_kind(target)
+    if kind == "well_log":
+        try:
+            from geoviz import export_png as engine_png
 
-        if hasattr(widget, "paint_all"):
-            engine_png(widget, str(output_path))
+            engine_png(target, str(output_path))
             return
-    except Exception:
-        pass
-    if not hasattr(widget, "grab"):
+        except Exception:
+            pass
+    if kind == "cross_well":
+        target.export_composite(str(output_path), fmt="png")
+        return
+    if kind == "paleo_map":
+        _export_paleo_map(target, output_path, "png")
+        return
+    if not hasattr(target, "grab"):
         raise ExportError("控件不支持截图导出")
-    pixmap = widget.grab()
+    pixmap = target.grab()
     if not pixmap.save(str(output_path), "PNG"):
         raise ExportError("PNG 保存失败")
 
 
 def _export_widget_svg(widget: Any, output_path: Path) -> None:
-    try:
+    target = _resolve_export_target(widget)
+    kind = _export_surface_kind(target)
+    if kind == "well_log":
         from geoviz import export_svg as engine_svg
 
-        if hasattr(widget, "paint_all"):
-            engine_svg(widget, str(output_path))
-            return
-    except Exception:
-        pass
-    # Fallback: rasterize then not true SVG — raise to force PNG
+        engine_svg(target, str(output_path))
+        return
+    if kind == "cross_well":
+        target.export_composite(str(output_path), fmt="svg")
+        return
+    if kind == "paleo_map":
+        _export_paleo_map(target, output_path, "svg")
+        return
     raise ExportError("当前视图不支持 SVG 矢量导出，请改用 PNG")
 
 
 def _export_widget_pdf(widget: Any, output_path: Path) -> None:
-    try:
+    target = _resolve_export_target(widget)
+    kind = _export_surface_kind(target)
+    if kind == "well_log":
         from geoviz import export_pdf as engine_pdf
 
-        if hasattr(widget, "paint_all"):
-            engine_pdf(widget, str(output_path))
-            return
-    except Exception:
-        pass
+        engine_pdf(target, str(output_path))
+        return
+    if kind == "cross_well":
+        target.export_composite(str(output_path), fmt="pdf")
+        return
+    if kind == "paleo_map":
+        _export_paleo_map(target, output_path, "pdf")
+        return
     raise ExportError("当前视图不支持 PDF 矢量导出，请改用 PNG")
+
+
+def _export_paleo_map(canvas: Any, output_path: Path, fmt: str) -> None:
+    """Use geoviz_paleo_map professional figure export (title/scale/legend frame)."""
+    try:
+        from geoviz_paleo_map import export_professional_figure
+    except Exception as exc:  # pragma: no cover - import env
+        raise ExportError(f"古地理导出模块不可用: {exc}") from exc
+    export_professional_figure(
+        canvas,
+        output_path,
+        fmt,  # type: ignore[arg-type]
+        title=_paleo_map_title(canvas),
+    )
 
 
 def default_export_dir(project_path: Path | None) -> Path:

@@ -16,6 +16,24 @@ def test_visualization_trace_panel_empty_state(qtbot):
     assert "PNG" in panel.export_btn.text()
     assert hasattr(panel, "export_svg_btn")
     assert hasattr(panel, "export_pdf_btn")
+    # Default: PNG only until page reports tab capabilities
+    assert panel.export_btn.isEnabled() is True
+    assert panel.export_svg_btn.isEnabled() is False
+    assert panel.export_pdf_btn.isEnabled() is False
+
+
+def test_trace_panel_export_capabilities_gate_vector_buttons(qtbot):
+    panel = VisualizationTracePanel()
+    qtbot.addWidget(panel)
+
+    panel.set_export_capabilities({"PNG", "SVG", "PDF"})
+    assert panel.export_svg_btn.isEnabled() is True
+    assert panel.export_pdf_btn.isEnabled() is True
+
+    panel.set_export_capabilities({"PNG"})
+    assert panel.export_svg_btn.isEnabled() is False
+    assert panel.export_pdf_btn.isEnabled() is False
+    assert "不支持 SVG" in panel.export_svg_btn.toolTip()
 
 
 def test_visualization_trace_panel_update_state(qtbot):
