@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-VIZ-03`。
+**锁定任务（本回合）：** 无（T-VIZ-03 已完成）。
 
 ---
 
@@ -142,6 +142,7 @@
 | 2026-07-16 | T-QC-01 + T-FLOW-01 | QC upsert；e2e 数据流契约；VizAdapter 相对路径解析 |
 | 2026-07-16 | T-MAP-02 | save_draft 合并 view_state；load 恢复；演示草稿 dirty Save/Discard/Cancel；14 tests |
 | 2026-07-16 | T-MAP-03 | MapReferenceLayer.external；refresh_status offline；panel 标注；工程 load 回写；28 tests |
+| 2026-07-16 | T-VIZ-03 | view_export_capabilities；连井 export_composite / 古地理 professional figure；Tab 门控 SVG/PDF；21 tests |
 
 ---
 
