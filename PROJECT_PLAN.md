@@ -18,7 +18,7 @@
 | 6 | 可视化 | 可视化 | `VisualizationPage` | **80%** | 薄 host + engine；井震标定工作区缺独立 tab |
 | 7 | 数据制备 | 制备 | `PreparationPage` | **88%** | WellTable 展示+QC+异步插值；可编辑单元格仍可加深 |
 | 8 | 地理图制作 | 编图 | `MappingPage` | **80%** | 相带编辑+拓扑；等值线初稿 UI 已接；VersionSet 定稿仍缺 |
-| 9 | 质检 | 成图审核 | `ReviewExportPage` | **60%** | 基础 QC upsert；**缺 MAD/IssueLayer/版本定稿** |
+| 9 | 质检 | 成图审核 | `ReviewExportPage` | **78%** | QC + 专家定稿 VersionSet；IssueLayer 空间化仍缺 |
 
 **导航：** `IconRail` 10 项（测井/地震拆分）= 产品 9 域全覆盖 + 预测拆页。  
 **入口：** `python -m paleo_workbench.main`（非 web）。
@@ -38,7 +38,7 @@
 | **ContourDraft** | `ContourDraft`/`ContourSegment` + `contour_draft.py` | 制备 grid | 编图 line_features | **已建** ISS-DOM-03 |
 | **IssueLayer** | `QualityReport.issues` 列表，非空间层 | QC | 审核 | **弱** → ISS-QC-02 |
 | **EditLog** | `PaleoMapDocument.edit_history` 字段存在，编辑命令未稳定落盘 | 编图 undo | 定稿审计 | **弱** → ISS-MAP-02 |
-| **VersionSet** | 无；`CompilationRun` 可作雏形 | 定稿 | 对比/回滚 | **缺失** → ISS-DOM-04 |
+| **VersionSet** | `VersionSet` / `VersionSnapshot` + finalize API | 审核定稿 | 导出/审计 | **已建** ISS-DOM-04 |
 
 ### 目标闭环（单因素图编图）
 

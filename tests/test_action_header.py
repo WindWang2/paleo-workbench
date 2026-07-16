@@ -17,7 +17,7 @@ def test_header_object_name(qtbot):
     assert header.objectName() == "PanelCard"
 
 
-def test_header_has_three_buttons(qtbot):
+def test_header_has_action_buttons(qtbot):
     header = ActionHeader()
     qtbot.addWidget(header)
     assert header.run_btn is not None
@@ -26,6 +26,8 @@ def test_header_has_three_buttons(qtbot):
     assert header.config_btn.objectName() == "SecondaryButton"
     assert header.export_btn is not None
     assert header.export_btn.objectName() == "PrimaryButton"
+    assert header.finalize_btn is not None
+    assert header.finalize_btn.text() == "专家定稿"
 
 
 def test_header_update_title_horizon(qtbot):

@@ -21,9 +21,10 @@ from paleo_workbench.workflow.qc_report_export import export_quality_report_json
 
 
 class ReviewExportPage(QWidget):
-    """成图审核 page: run QC, review issues, export report JSON."""
+    """成图审核 page: run QC, review issues, export report JSON, expert finalize."""
 
     reports_updated = Signal()
+    version_finalized = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -59,6 +60,7 @@ class ReviewExportPage(QWidget):
         self.action_header.run_requested.connect(self.run_qc)
         self.action_header.export_requested.connect(self.export_report)
         self.action_header.config_requested.connect(self._on_config)
+        self.action_header.finalize_requested.connect(self.finalize_version)
 
     def set_project(self, project) -> None:
         self._project = project
@@ -127,6 +129,48 @@ class ReviewExportPage(QWidget):
             self,
             "质检规则",
             f"当前内置规则：\n{rules}\n\n规则编辑器将在后续版本提供。",
+        )
+
+    def finalize_version(self) -> None:
+        """Expert sign-off: write VersionSet snapshot for the active / last map."""
+        if self._project is None:
+            QMessageBox.warning(self, "专家定稿", "未绑定工程")
+            return
+        docs = list(self._project.paleomap_documents or [])
+        if not docs:
+            QMessageBox.information(self, "专家定稿", "工程中尚无古地理图可定稿")
+            return
+        # Prefer map linked by latest QC report, else last document.
+        doc = docs[-1]
+        reports = active_quality_reports(self._project)
+        if reports:
+            linked = reports[0].linked_map_document_id
+            for d in docs:
+                if d.id == linked:
+                    doc = d
+                    break
+        try:
+            from paleo_workbench.workflow.versioning import finalize_map_version
+
+            vset = finalize_map_version(
+                self._project,
+                doc.id,
+                note="审核页专家定稿",
+                operator="expert",
+                require_qc_pass=False,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "定稿失败", f"{exc.__class__.__name__}: {exc}")
+            return
+        self._refresh_from_project()
+        self.version_finalized.emit()
+        self.reports_updated.emit()
+        QMessageBox.information(
+            self,
+            "定稿完成",
+            f"已定稿图件「{doc.name}」\n"
+            f"VersionSet: {vset.name}\n"
+            f"状态: {vset.status} · 快照数: {len(vset.snapshots)}",
         )
 
     def _refresh_from_project(self) -> None:

@@ -9,7 +9,7 @@
 | ISS-DOM-01 | **Blocker** | 制备/全局 | 无独立 **WellTable**；井点仅 `sample_points` dict 列表，缺列语义(Hs/Ht/q/flag) | 定义 `WellTable`/`WellTableRow` 模型 + 与 FactorMapTask 双向适配 | **DONE** |
 | ISS-DOM-02 | **Blocker** | 制备/编图 | **ConstraintLayers / BreakLines / DirectionLines** 未建模；engine fault 屏障未接线 | Pydantic 约束层模型；line_features 角色标注；IDW 传 fault_polylines | **DONE** |
 | ISS-DOM-03 | **Blocker** | 编图 | **ContourDraft** 缺失；SurfaceWidget 未接入 workbench 修编流 | ContourDraft 对象 + 从 TrendSurface 生成等值线初稿 API | **DONE** |
-| ISS-DOM-04 | High | 质检/全局 | **VersionSet** 缺失；专家定稿无法版本化 | VersionSet 挂 CompilationRun / paleomap 快照 | TODO |
+| ISS-DOM-04 | High | 质检/全局 | **VersionSet** 缺失；专家定稿无法版本化 | VersionSet 挂 CompilationRun / paleomap 快照 | **DONE** |
 | ISS-ALG-01 | **Blocker** | 制备/质检 | MAD 异常检测与砂地比 \(R_s=H_s/H_t\) 未实现 | `workflow/well_qc.py`：MAD z* + 砂地比约束写回 WellTable flags | **DONE** |
 | ISS-ALG-02 | **Blocker** | 制备 | 方向加权趋势面未实现（仅各向同性 IDW） | `directional_trend_surface(points, theta, a, b, q, b_i)` | **DONE** |
 | ISS-ALG-03 | High | 制备 | workbench 调用 IDW 时未传 **fault_polylines** | factor_interpolation 读取 BreakLines → engine | **DONE** |
@@ -37,9 +37,9 @@
 
 ### 当前 WIP
 
-- **ISS-DOM-04** — VersionSet 专家定稿（下一步）
+- **ISS-E2E-01** — WellTable→趋势面→等值线→定稿→QC 契约测试（下一步）
 
 ### 本轮完成证据
 
-- ISS-DOM-01 … ISS-DOM-03 / ALG-01..03 / MAP-01: 单因素主链 + 等值线 UI
-- ISS-PREP-01: WellTablePanel + FactorPrepareWorker 异步插值；shell 销毁前 shutdown
+- ISS-DOM-01 … PREP-01: 单因素主链 + UI
+- ISS-DOM-04: VersionSet/Snapshot + 审核页「专家定稿」

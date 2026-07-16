@@ -292,6 +292,43 @@ class QualityReport(BaseModel):
     generated_at: str = Field(default_factory=_now_iso)
 
 
+class VersionSnapshot(BaseModel):
+    """Point-in-time expert-approved state of a map (and optional contour draft)."""
+
+    id: str = Field(default_factory=lambda: _id("vsnap"))
+    map_document_id: str
+    contour_draft_id: str | None = None
+    quality_report_id: str | None = None
+    factor_task_ids: list[str] = Field(default_factory=list)
+    map_name: str = ""
+    target_horizon: str = ""
+    line_feature_count: int = 0
+    facies_count: int = 0
+    contour_segment_count: int = 0
+    qc_status: str = ""
+    note: str = ""
+    # Compact geometry fingerprint for audit (not full payload).
+    content_fingerprint: str = ""
+    created_at: str = Field(default_factory=_now_iso)
+    created_by: str = ""
+
+
+class VersionSet(BaseModel):
+    """Version lineage for expert finalization of maps under a horizon / theme."""
+
+    id: str = Field(default_factory=lambda: _id("vset"))
+    name: str
+    target_horizon: str = ""
+    status: Literal["open", "final", "superseded"] = "open"
+    snapshots: list[VersionSnapshot] = Field(default_factory=list)
+    active_snapshot_id: str | None = None
+    finalized_by: str = ""
+    finalized_at: str | None = None
+    linked_compilation_run_id: str | None = None
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
 class ExportArtifact(BaseModel):
     id: str = Field(default_factory=lambda: _id("artifact"))
     linked_id: str
@@ -316,6 +353,7 @@ class ProjectDocument(BaseModel):
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
     paleomap_documents: list[PaleoMapDocument] = Field(default_factory=list)
     quality_reports: list[QualityReport] = Field(default_factory=list)
+    version_sets: list[VersionSet] = Field(default_factory=list)
     export_artifacts: list[ExportArtifact] = Field(default_factory=list)
 
     @classmethod

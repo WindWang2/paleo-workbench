@@ -18,6 +18,7 @@ class ActionHeader(QFrame):
     run_requested = Signal()
     export_requested = Signal()
     config_requested = Signal()
+    finalize_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,6 +54,11 @@ class ActionHeader(QFrame):
         self.export_btn.setToolTip("导出质检报告文件")
         self.export_btn.clicked.connect(self.export_requested.emit)
         button_row.addWidget(self.export_btn)
+        self.finalize_btn = QPushButton("专家定稿")
+        self.finalize_btn.setObjectName("SecondaryButton")
+        self.finalize_btn.setToolTip("将当前古地理图写入 VersionSet 快照并标记为 final")
+        self.finalize_btn.clicked.connect(self.finalize_requested.emit)
+        button_row.addWidget(self.finalize_btn)
         button_row.addStretch()
         layout.addLayout(button_row)
 
@@ -78,6 +84,7 @@ class ActionHeader(QFrame):
         self.title_label.setText(
             f"成图与审核 · {horizon} 古地理图（自动质检 + 人工审核）"
         )
+        self.finalize_btn.setEnabled(bool(map_documents))
 
         if reports and reports[0].rules:
             chips = " · ".join(reports[0].rules)
