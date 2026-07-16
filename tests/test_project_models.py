@@ -28,6 +28,7 @@ def test_screen_inventory_includes_required_pages():
         "well_log_prediction",
         "seismic_prediction",
         "sequence_framework",
+        "stratigraphy_correlation",
         "visualization",
         "preparation",
         "paleomap",

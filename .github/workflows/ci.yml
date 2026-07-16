@@ -8,9 +8,14 @@ on:
 
 jobs:
   test:
-    name: Tests + map_edit_core (HAS_CPP)
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 = package baseline; 3.13 = host/dev drift coverage (T-ENV-01)
+        python-version: ["3.12", "3.13"]
 
     steps:
       - name: Checkout
@@ -21,7 +26,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: System libraries (Qt / offscreen)

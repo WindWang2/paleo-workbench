@@ -16,7 +16,7 @@
 | **Geo stack** | **GDAL/osgeo** (reference layers), **shapely** (topology merge/split), **rasterio** (GeoTIFF preview), **numpy/pandas**, **lasio/segyio** (via engine) |
 | **NOT present** | PostGIS, MapLibre, OpenLayers, geopandas, QGIS API |
 | **Native** | optional `native/map_edit_core` (pybind11) for map edit hot path |
-| **Python pin** | pyproject `>=3.12,<3.13` — host may run 3.13 (env drift risk) |
+| **Python pin** | pyproject `>=3.12,<3.14` — CI matrix 3.12 + 3.13 |
 | **Nav** | 10 pages, `QStackedWidget` + IconRail index 0–9 |
 
 ### Page index map (product ↔ code)
@@ -59,9 +59,9 @@
 | T-SEIS-01 | 地震 | P1 | **DONE** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
 | T-WELL-01 | 测井 | P1 | **DONE** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
-| T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
+| T-ENV-01 | 全局 | P2 | **DONE** | Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** 无（T-ADP-01 + T-STRAT-01 已完成）。
+**锁定任务（本回合）：** 无（看板任务已清空）。
 
 ---
 
@@ -148,6 +148,7 @@
 | 2026-07-16 | T-WELL-01 | LAS 绑定+岩性/相道 merge；导出 PNG/SVG/PDF；发送制备；21 tests |
 | 2026-07-16 | T-ADP-01 | PaleoMapAdapter 拒绝假 pdf/svg；仅 geojson |
 | 2026-07-16 | T-STRAT-01 | 新页「地层对比」idx5；CrossWell 多井+预测相；导航 10 页 |
+| 2026-07-16 | T-ENV-01 | requires-python >=3.12,<3.14；CI 矩阵 3.12+3.13；geoviz 同步 |
 
 ---
 

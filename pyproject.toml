@@ -2,7 +2,8 @@
 name = "paleo-workbench"
 version = "0.1.0"
 description = "Paleogeographic map compilation desktop workbench"
-requires-python = ">=3.12,<3.13"
+# Support CPython 3.12 (CI baseline) and 3.13 (common host / developer runtime).
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "pyside6>=6.6",
     "pydantic>=2.0",
