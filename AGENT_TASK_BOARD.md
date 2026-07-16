@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-PREP-01`。
+**锁定任务（本回合）：** 无（T-PREP-01 已完成）。
 
 ---
 
@@ -74,7 +74,7 @@
 | **ResourceItem** | models | import/scanner | Data/Viz/Prediction | path+type+format+summary | **稳定**；需 project_path 完善 |
 | **ExportArtifact** | models | export_service / record_export | Data/Review | 相对 path + format | **可用** |
 | **StratigraphicFramework** | models | 格架页 | 制备/编图/预测 | target_horizon, boundaries | **浅** |
-| **FactorMapTask** | models | 制备页 / pipeline | 编图 factor shelf | parameters.sample_points | **UI 有、算法弱** |
+| **FactorMapTask** | models | 制备页 / IDW 插值 | 编图 factor shelf | sample_points + grid_z + metrics | **可用**；批量生成接通 engine |
 | **PredictionTask** | models | mock adapter / bind assets | 测井/地震/可视化 | input_refs, results | **mock 为主** |
 | **PaleoMapDocument** | models | 编图 / compile_map_draft | 可视化/质检/导出 | facies/wells/lines/labels | **稳定**；view_state 可回写 center/scale |
 | **MapReferenceLayer** | models | ReferenceLayerService(GDAL) | 编图 snap | source_path+crs+external | **稳定**；offline/ready 按文件存在 |
@@ -143,6 +143,7 @@
 | 2026-07-16 | T-MAP-02 | save_draft 合并 view_state；load 恢复；演示草稿 dirty Save/Discard/Cancel；14 tests |
 | 2026-07-16 | T-MAP-03 | MapReferenceLayer.external；refresh_status offline；panel 标注；工程 load 回写；28 tests |
 | 2026-07-16 | T-VIZ-03 | view_export_capabilities；连井 export_composite / 古地理 professional figure；Tab 门控 SVG/PDF；21 tests |
+| 2026-07-16 | T-PREP-01 | factor_interpolation IDW/SciPy；批量生成接线；编图 shelf 闭环；26 tests |
 
 ---
 
