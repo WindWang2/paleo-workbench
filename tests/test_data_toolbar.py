@@ -81,3 +81,13 @@ def test_toolbar_no_catalog_button(qtbot):
     tb = DataToolbar()
     qtbot.addWidget(tb)
     assert not hasattr(tb, "catalog_btn")
+
+
+def test_toolbar_clear_preview_cache_button(qtbot):
+    tb = DataToolbar()
+    qtbot.addWidget(tb)
+    assert tb.clear_preview_cache_btn.text() == "清除预览缓存"
+    received = []
+    tb.clear_preview_cache_requested.connect(lambda: received.append(1))
+    tb.clear_preview_cache_btn.click()
+    assert received == [1]

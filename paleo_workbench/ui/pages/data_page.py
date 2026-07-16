@@ -124,6 +124,7 @@ class DataPage(QWidget):
         self.data_toolbar.remove_requested.connect(self.remove_selected_asset)
         self.data_toolbar.open_folder_requested.connect(self.open_selected_folder)
         self.data_toolbar.visualize_requested.connect(self._emit_open_visualization)
+        self.data_toolbar.clear_preview_cache_requested.connect(self.clear_preview_cache)
         self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
         self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
         self._sync_toolbar_toggle_state()
@@ -166,12 +167,19 @@ class DataPage(QWidget):
     ) -> None:
         self._resources = resources
         self._artifacts = artifacts or []
+        root = getattr(self.project.meta, "project_root", None) or None
+        self._preview_controller.set_project_root(root)
         self.summary_bar.update_state(state)
         self.navigation_tree.update_counts(self._resources, self._artifacts)
         self.asset_table.update_assets(self._resources, self._artifacts)
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
+
+    def clear_preview_cache(self) -> None:
+        """Clear the project-scoped disk preview cache and in-memory LRU."""
+        self._preview_controller.clear_disk_cache()
+        self._set_action_status("已清除预览缓存")
 
     def import_paths(self, paths: list[Path]) -> ImportReport:
         report = import_files(paths, self.project.resources)

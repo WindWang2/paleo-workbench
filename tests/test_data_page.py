@@ -1083,3 +1083,32 @@ def test_data_page_export_selected_asset_noop_for_artifact(qtbot, tmp_path: Path
         page._export_selected_asset("CSV")
 
     assert not out_path.exists()
+
+
+def test_data_page_clear_preview_cache(tmp_path: Path, qtbot):
+    """clear_preview_cache removes .preview_cache on disk and memory LRU."""
+    from paleo_workbench.ui.pages.preview_provider import PreviewResult
+
+    project = ProjectDocument.new("Demo")
+    project.meta.project_root = str(tmp_path)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    assert page._preview_controller.disk_cache.project_root == tmp_path.resolve()
+
+    entry = tmp_path / ".preview_cache" / "entries" / "x"
+    entry.mkdir(parents=True)
+    (entry / "meta.json").write_text("{}", encoding="utf-8")
+
+    page._preview_controller.cache.put(
+        ("test-key",),
+        PreviewResult(mode="text", title="cached"),
+    )
+    assert page._preview_controller.cache._data
+    assert (tmp_path / ".preview_cache").is_dir()
+
+    page.clear_preview_cache()
+
+    assert not (tmp_path / ".preview_cache").exists()
+    assert not page._preview_controller.cache._data
+    assert page._preview_controller.cache.current_bytes == 0

@@ -30,6 +30,7 @@ def test_data_toolbar_buttons_have_tooltips(qtbot):
     assert tb.remove_btn.toolTip() != ""
     assert tb.open_folder_btn.toolTip() != ""
     assert tb.visualize_btn.toolTip() != ""
+    assert tb.clear_preview_cache_btn.toolTip() != ""
     assert tb.reader_btn.toolTip() != ""
     assert tb.search_box.toolTip() != ""
 

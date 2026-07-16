@@ -13,6 +13,7 @@ class DataToolbar(QWidget):
     remove_requested = Signal()
     open_folder_requested = Signal()
     visualize_requested = Signal()
+    clear_preview_cache_requested = Signal()
     reader_toggled = Signal()
     search_changed = Signal(str)
 
@@ -65,6 +66,15 @@ class DataToolbar(QWidget):
         self.visualize_btn.setToolTip("在可视化页面打开")
         self.visualize_btn.clicked.connect(self.visualize_requested.emit)
         layout.addWidget(self.visualize_btn)
+
+        self.clear_preview_cache_btn = QPushButton("清除预览缓存")
+        self.clear_preview_cache_btn.setObjectName("SecondaryButton")
+        self.clear_preview_cache_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.clear_preview_cache_btn.setToolTip("清除项目预览磁盘缓存")
+        self.clear_preview_cache_btn.clicked.connect(
+            self.clear_preview_cache_requested.emit
+        )
+        layout.addWidget(self.clear_preview_cache_btn)
 
         self.operation_status_label = QLabel("")
         self.operation_status_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
