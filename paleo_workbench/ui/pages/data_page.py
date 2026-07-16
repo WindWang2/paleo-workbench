@@ -178,12 +178,18 @@ class DataPage(QWidget):
                 worker.failed.disconnect()
             except (RuntimeError, TypeError):
                 pass
-            if thread.isRunning():
-                thread.quit()
-                if not thread.wait(wait_ms):
-                    # Last resort: do not call terminate() (can corrupt state).
-                    # Detach parenting so destroy doesn't force-kill a live thread.
-                    thread.setParent(None)
+            try:
+                if thread.isRunning():
+                    thread.quit()
+                    if not thread.wait(wait_ms):
+                        # Last resort: do not call terminate() (can corrupt state).
+                        thread.setParent(None)
+                else:
+                    worker.deleteLater()
+                    thread.deleteLater()
+            except RuntimeError:
+                # C++ QThread already destroyed (shiboken); ignore.
+                pass
             self._import_in_progress = False
 
     def update_state(
@@ -299,13 +305,16 @@ class DataPage(QWidget):
         )
 
     def _start_import_job(self, task: Callable[[], ImportReport]) -> bool:
-        thread = QThread(self)
+        # Do not parent the QThread to this page: deleteLater races with
+        # QueuedConnection GUI handlers if the shell rebuilds mid-import.
+        thread = QThread()
         worker = _ImportWorker(task)
         worker.moveToThread(thread)
         self._import_jobs.append((thread, worker))
 
         thread.started.connect(worker.run)
-        # Queue finished/failed onto the GUI thread (worker emits from QThread).
+        # All cleanup runs on the GUI thread after the result is delivered so
+        # import_finished cannot be lost to premature thread/worker destruction.
         worker.finished.connect(
             lambda report, thread=thread, worker=worker: self._handle_import_finished(
                 report,
@@ -322,10 +331,6 @@ class DataPage(QWidget):
             ),
             Qt.ConnectionType.QueuedConnection,
         )
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
 
         self._set_import_running(True)
         self._set_action_status("正在归档文件...")
@@ -338,9 +343,11 @@ class DataPage(QWidget):
         thread: QThread,
         worker: _ImportWorker,
     ) -> None:
-        self._apply_import_report(report)
-        self._finish_import_job(thread, worker)
-        self.import_finished.emit(report)
+        try:
+            self._apply_import_report(report)
+            self.import_finished.emit(report)
+        finally:
+            self._finish_import_job(thread, worker)
 
     def _handle_import_failed(
         self,
@@ -348,9 +355,11 @@ class DataPage(QWidget):
         thread: QThread,
         worker: _ImportWorker,
     ) -> None:
-        self._set_action_status(f"导入失败: {message}")
-        self._finish_import_job(thread, worker)
-        self.import_failed.emit(message)
+        try:
+            self._set_action_status(f"导入失败: {message}")
+            self.import_failed.emit(message)
+        finally:
+            self._finish_import_job(thread, worker)
 
     def _finish_import_job(self, thread: QThread, worker: _ImportWorker) -> None:
         self._import_jobs = [
@@ -359,6 +368,19 @@ class DataPage(QWidget):
             if job != (thread, worker)
         ]
         self._set_import_running(False)
+        try:
+            worker.finished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            worker.failed.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        if thread.isRunning():
+            thread.quit()
+            thread.wait(5_000)
+        worker.deleteLater()
+        thread.deleteLater()
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running

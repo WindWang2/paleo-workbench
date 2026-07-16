@@ -49,6 +49,7 @@ testpaths = ["tests"]
 qt_api = "pyside6"
 markers = [
     "slow: opt-in real-data or graphics tests; skip in fast CI with -m 'not slow'",
+    "timeout: per-test timeout (requires pytest-timeout plugin)",
 ]
 pythonpath = [
     ".",

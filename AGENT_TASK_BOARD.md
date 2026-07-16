@@ -62,9 +62,10 @@
 | T-ENV-01 | 全局 | P2 | **DONE** | Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 | T-QC-02 | 质检 | P1 | **DONE** | Agent | 成图审核页：运行检查 + 导出报告接线；页成熟度 DONE |
 | T-CI-01 | 全局 | P0 | **DONE** | Agent | CI 安装系统 GDAL；修复 3.12/3.13 依赖失败 |
-| T-CI-02 | 全局 | P0 | **WIP** | Agent | 钉死 gdal 绑定到系统 libgdal 版本 |
+| T-CI-02 | 全局 | P0 | **DONE** | Agent | 钉死 gdal 绑定到系统 libgdal 版本 |
+| T-DATA-03 | 数据 | P1 | **DONE** | Agent | 导入 QThread 竞态：GUI 线程安全收尾 + 测试签名 |
 
-**锁定任务（本回合）：** `T-CI-02`。
+**锁定任务（本回合）：** 无。
 
 ---
 
@@ -154,6 +155,8 @@
 | 2026-07-16 | T-ENV-01 | requires-python >=3.12,<3.14；CI 矩阵 3.12+3.13；geoviz 同步 |
 | 2026-07-16 | T-CI-01 | apt libgdal-dev + GDAL_CONFIG；prefer-binary 安装 |
 | 2026-07-16 | T-QC-02 | 审核页 run_qc / 导出 JSON 报告；18 tests |
+| 2026-07-16 | T-CI-02 | gdal==$(gdal-config --version) 约束；避免 3.13 sdist |
+| 2026-07-16 | T-DATA-03 | 导入线程 GUI 收尾，修复 import_finished 丢失 |
 
 ---
 

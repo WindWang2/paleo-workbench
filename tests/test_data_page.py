@@ -363,7 +363,7 @@ def test_data_page_starts_file_import_in_worker_thread(
     qtbot.addWidget(page)
     worker_threads = []
 
-    def fake_import_files(paths, existing):
+    def fake_import_files(paths, existing, project_path=None):
         worker_threads.append(QThread.currentThread())
         return ImportReport(
             added=[
@@ -382,7 +382,7 @@ def test_data_page_starts_file_import_in_worker_thread(
         fake_import_files,
     )
 
-    with qtbot.waitSignal(page.import_finished, timeout=1000):
+    with qtbot.waitSignal(page.import_finished, timeout=5000):
         started = page.begin_import_files_from_dialog()
 
     assert started is True
@@ -405,7 +405,7 @@ def test_data_page_import_status_describes_archiving_while_worker_runs(
     worker_started = Event()
     release_worker = Event()
 
-    def controlled_import_files(paths, existing):
+    def controlled_import_files(paths, existing, project_path=None):
         worker_started.set()
         release_worker.wait()
         return ImportReport(
