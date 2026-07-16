@@ -21,6 +21,8 @@ def classify_path(path: Path) -> tuple[str, str, str]:
             return "horizon", ext, "indexed"
         if any("井分层" in part for part in path_parts):
             return "well_stratification", ext, "indexed"
+        if any("井位" in part for part in path_parts) or "wellhead" in name or "well_head" in name:
+            return "well_head", ext, "indexed"
         return "tabular", ext, "indexed"
 
     if ext in {"xlsx", "xls", "xml"}:

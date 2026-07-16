@@ -19,6 +19,14 @@ def test_classifies_dat_variants_from_folder_names():
     )
 
 
+def test_well_head_dat_under_well_folder():
+    assert classify_path(Path("井位/ExportWellHead.dat")) == (
+        "well_head",
+        "dat",
+        "indexed",
+    )
+
+
 def test_classifies_reference_and_unknown_formats():
     assert classify_path(Path("report.pdf")) == (
         "document",
