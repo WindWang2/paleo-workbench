@@ -81,8 +81,9 @@
 | ISS-MAP-01 | 编图/制备 | P0 | **DONE** | Agent | UI 生成等值线初稿（制备+factor shelf） |
 | ISS-PREP-01 | 制备 | P0 | **DONE** | Agent | WellTable 面板 + 插值 QThread Worker |
 | ISS-DOM-04 | 质检 | P0 | **DONE** | Agent | VersionSet 专家定稿 + 审核页按钮 |
+| ISS-E2E-01 | 全局 | P0 | **DONE** | Agent | 单因素全链路契约测试 |
 
-**锁定任务（本回合）：** ISS-E2E-01（下一步）
+**锁定任务（本回合）：** 无（主链闭环完成）
 
 ---
 
@@ -189,6 +190,7 @@
 | 2026-07-17 | ISS-MAP-01 | 制备/编图 UI 等值线初稿；27 tests |
 | 2026-07-17 | ISS-PREP-01 | WellTablePanel + async FactorPrepareWorker；14 tests |
 | 2026-07-17 | ISS-DOM-04 | VersionSet finalize + 专家定稿 UI；15 tests |
+| 2026-07-17 | ISS-E2E-01 | factor map e2e contract WellTable→定稿；2 tests |
 
 ---
 

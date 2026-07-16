@@ -104,7 +104,7 @@ QualityReport upsert ↔ review page
 | **S2** | MAD/砂地比 QC + 方向加权趋势面 + 断层屏障接线 | ISS-ALG-01..03 |
 | **S3** | 制备页消费 WellTable；后台 Worker 插值 | ISS-PREP-01 |
 | **S4** | 编图等值线草稿修编 + EditLog + 定稿 VersionSet | ISS-MAP-01..02 |
-| **S5** | 质检 IssueLayer 空间化 + 全链路 e2e | ISS-QC-02, ISS-E2E-01 |
+| **S5** | 质检 IssueLayer 空间化 + 全链路 e2e | ISS-QC-02；**ISS-E2E-01 DONE** |
 
 ---
 

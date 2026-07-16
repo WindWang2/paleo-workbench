@@ -22,7 +22,7 @@
 | ISS-VIZ-01 | Medium | 可视化 | Well-tie 无独立工作区 tab | 可选引擎 WellTieCanvas 页签 | TODO |
 | ISS-KRIG-01 | Low | 制备 | UI「克里金」实为 SciPy linear | 标注 MVP 或接真实克里金 | TODO |
 | ISS-ENV-01 | Medium | 全局 | 裸 `python -c` 无 PYTHONPATH 时 `import geoviz` 失败 | 文档/入口保证 editable install 或 path | TODO |
-| ISS-E2E-01 | High | 全局 | 缺 WellTable→趋势面→等值线→定稿→QC 契约测试 | `test_e2e_factor_map_contract.py` | TODO |
+| ISS-E2E-01 | High | 全局 | 缺 WellTable→趋势面→等值线→定稿→QC 契约测试 | `test_e2e_factor_map_contract.py` | **DONE** |
 
 ### 已关闭（本会话前 backlog 巩固）
 
@@ -37,9 +37,9 @@
 
 ### 当前 WIP
 
-- **ISS-E2E-01** — WellTable→趋势面→等值线→定稿→QC 契约测试（下一步）
+- **ISS-QC-02** / **ISS-PRED-01** — 可选深化（IssueLayer 空间化 / 预测非 mock）
 
 ### 本轮完成证据
 
-- ISS-DOM-01 … PREP-01: 单因素主链 + UI
-- ISS-DOM-04: VersionSet/Snapshot + 审核页「专家定稿」
+- 单因素主链 ISS-DOM/ALG/MAP/PREP/DOM-04 均 DONE
+- ISS-E2E-01: `test_e2e_factor_map_contract.py` 全链路 2 passed
