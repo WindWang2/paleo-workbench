@@ -17,7 +17,7 @@
 | 5 | 地震 | 测井预测 + 地震预测 | `WellLogPredictionPage` / `SeismicPredictionPage` | **72%** | 双入口；Auto-Tie 已接线；预测仍偏 mock |
 | 6 | 可视化 | 可视化 | `VisualizationPage` | **80%** | 薄 host + engine；井震标定工作区缺独立 tab |
 | 7 | 数据制备 | 制备 | `PreparationPage` | **72%** | IDW/方向趋势/断层屏障已通；UI WellTable 编辑仍缺 |
-| 8 | 地理图制作 | 编图 | `MappingPage` | **65%** | 相带编辑器 V1+拓扑；**缺约束线/趋势面/等值线定稿流** |
+| 8 | 地理图制作 | 编图 | `MappingPage` | **72%** | 相带编辑+拓扑；ContourDraft→line 可落盘；UI 一键生成仍缺 |
 | 9 | 质检 | 成图审核 | `ReviewExportPage` | **60%** | 基础 QC upsert；**缺 MAD/IssueLayer/版本定稿** |
 
 **导航：** `IconRail` 10 项（测井/地震拆分）= 产品 9 域全覆盖 + 预测拆页。  
@@ -35,7 +35,7 @@
 | **BreakLines** | `ConstraintLine(role=break)` → IDW faults | 约束层 | IDW | **已建** ISS-DOM-02/ALG-03 |
 | **DirectionLines** | `ConstraintLine(role=direction)` + azimuth/a/b | 约束层 | 方向加权 | **已建模型**；算法 ISS-ALG-02 |
 | **TrendSurface** | `FactorMapTask.parameters` 中 `grid_x/y/z` 碎片 | 制备 IDW | 编图 shelf 只展示任务 | **弱** → ISS-ALG-02 |
-| **ContourDraft** | engine `SurfaceWidget` + contourpy 存在；workbench 未建草稿对象 | — | 编图修编 | **缺失** → ISS-DOM-03 |
+| **ContourDraft** | `ContourDraft`/`ContourSegment` + `contour_draft.py` | 制备 grid | 编图 line_features | **已建** ISS-DOM-03 |
 | **IssueLayer** | `QualityReport.issues` 列表，非空间层 | QC | 审核 | **弱** → ISS-QC-02 |
 | **EditLog** | `PaleoMapDocument.edit_history` 字段存在，编辑命令未稳定落盘 | 编图 undo | 定稿审计 | **弱** → ISS-MAP-02 |
 | **VersionSet** | 无；`CompilationRun` 可作雏形 | 定稿 | 对比/回滚 | **缺失** → ISS-DOM-04 |
@@ -78,7 +78,7 @@ QualityReport upsert ↔ review page
 | 方向距离/权重 | \(d_i(\theta)=\sqrt{(u/a)^2+(v/b)^2}\), \(w=\exp(-d^2) q b\) | `directional_trend.py` | **90%** ISS-ALG-02 |
 | 趋势面 | \(T=\sum w_i z_i/\sum w_i\) | 方向趋势 + IDW 双路径 | **85%** |
 | 断层屏障 IDW | `fault_polylines` | engine + workbench 接线 | **85%** ISS-ALG-03 |
-| 等值线提取 | marching squares / contourpy | `geoviz_plots.surface` | **70%**（引擎侧） |
+| 等值线提取 | marching squares / contourpy | engine + ContourDraft 工作流 | **85%** ISS-DOM-03 |
 | 克里金 | UI 可选 | 映射为 SciPy linear | **Mock** |
 
 ---

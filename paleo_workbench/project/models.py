@@ -232,11 +232,46 @@ class ConstraintLayers(BaseModel):
     crs: str | None = None
 
 
+class ContourSegment(BaseModel):
+    """One isoline polyline at a fixed contour level."""
+
+    id: str = Field(default_factory=lambda: _id("cseg"))
+    level: float
+    coordinates: list[list[float]] = Field(default_factory=list)  # [[x,y], ...]
+    closed: bool = False
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContourDraft(BaseModel):
+    """Editable contour draft generated from a FactorMapTask trend/grid surface.
+
+    Lifecycle: 制备 grid_z → ContourDraft (初稿) → 编图 line_features 修编 → 定稿.
+    """
+
+    id: str = Field(default_factory=lambda: _id("cdraft"))
+    name: str
+    target_horizon: str = ""
+    factor_type: str = ""
+    linked_factor_task_id: str | None = None
+    linked_map_document_id: str | None = None
+    levels: list[float] = Field(default_factory=list)
+    segments: list[ContourSegment] = Field(default_factory=list)
+    # Snapshot of source grid metadata (not full grid_z to keep .paleo.json lean).
+    source_grid_n: int | None = None
+    source_backend: str | None = None
+    source_value_range: list[float] = Field(default_factory=list)  # [min, max]
+    status: Literal["draft", "editing", "final"] = "draft"
+    generator_version: str = "contour-draft-v1"
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
+
+
 class PaleoMapDocument(BaseModel):
     id: str = Field(default_factory=lambda: _id("map"))
     name: str
     linked_target_horizon: str
     linked_prediction_task_id: str | None = None
+    linked_contour_draft_id: str | None = None
     facies_polygons: list[dict[str, Any]] = Field(default_factory=list)
     facies_style: dict[str, Any] = Field(default_factory=dict)
     well_overlays: list[dict[str, Any]] = Field(default_factory=list)
@@ -275,6 +310,7 @@ class ProjectDocument(BaseModel):
     resources: list[ResourceItem] = Field(default_factory=list)
     well_tables: list[WellTable] = Field(default_factory=list)
     constraint_layers: list[ConstraintLayers] = Field(default_factory=list)
+    contour_drafts: list[ContourDraft] = Field(default_factory=list)
     compilation_runs: list[CompilationRun] = Field(default_factory=list)
     factor_map_tasks: list[FactorMapTask] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
