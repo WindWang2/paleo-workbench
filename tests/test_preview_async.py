@@ -282,7 +282,7 @@ def test_rescan_invalidates_inflight_preview(qtbot, tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "paleo_workbench.ui.pages.data_page.scan_resources",
-        lambda _folder: [
+        lambda _folder, project_path=None: [
             ResourceItem(
                 id=resource.id,
                 name="notes.txt",
