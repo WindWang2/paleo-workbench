@@ -55,13 +55,13 @@
 | T-ADP-01 | 适配器 | P2 | **DONE** | Agent | PaleoMapAdapter 禁用假 pdf/svg；仅 geojson |
 | T-PREP-01 | 制备 | P1 | **DONE** | Agent | 单因素真实插值链路对接 engine plots/IDW；与编图 factor shelf 闭环 |
 | T-SEQ-01 | 格架 | P1 | **DONE** | Agent | 层序方案持久化加深；与预测/编图 target_horizon 双向绑定 |
-| T-STRAT-01 | 地层(新) | P1 | **WIP** | Agent | 产品缺口：地层对比页 = 多井 + tops + DTW；复用 CrossWell engine |
+| T-STRAT-01 | 地层(新) | P1 | **DONE** | Agent | 地层对比页：多井 CrossWell + 相/顶叠加 + SVG 导出 |
 | T-SEIS-01 | 地震 | P1 | **DONE** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
 | T-WELL-01 | 测井 | P1 | **DONE** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-ADP-01` + `T-STRAT-01`。
+**锁定任务（本回合）：** 无（T-ADP-01 + T-STRAT-01 已完成）。
 
 ---
 
@@ -146,6 +146,8 @@
 | 2026-07-16 | T-SEQ-01 | stratigraphy apply/bind；目标层位可编辑；保存同步 run/map/factor；16 tests |
 | 2026-07-16 | T-SEIS-01 | 属性/模式/Auto-Tie→SeismicView；运行预测+发送编图；19 tests |
 | 2026-07-16 | T-WELL-01 | LAS 绑定+岩性/相道 merge；导出 PNG/SVG/PDF；发送制备；21 tests |
+| 2026-07-16 | T-ADP-01 | PaleoMapAdapter 拒绝假 pdf/svg；仅 geojson |
+| 2026-07-16 | T-STRAT-01 | 新页「地层对比」idx5；CrossWell 多井+预测相；导航 10 页 |
 
 ---
 
