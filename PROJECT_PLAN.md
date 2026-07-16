@@ -16,7 +16,7 @@
 | 4 | 地层 | 地层对比 | `StratigraphyCorrelationPage` | **70%** | CrossWell MVP+相叠加；非完整连井解释工区 |
 | 5 | 地震 | 测井预测 + 地震预测 | `WellLogPredictionPage` / `SeismicPredictionPage` | **72%** | 双入口；Auto-Tie 已接线；预测仍偏 mock |
 | 6 | 可视化 | 可视化 | `VisualizationPage` | **80%** | 薄 host + engine；井震标定工作区缺独立 tab |
-| 7 | 数据制备 | 制备 | `PreparationPage` | **62%** | IDW + WellTable/MAD 模型层就绪；UI 表格与方向约束仍缺 |
+| 7 | 数据制备 | 制备 | `PreparationPage` | **72%** | IDW/方向趋势/断层屏障已通；UI WellTable 编辑仍缺 |
 | 8 | 地理图制作 | 编图 | `MappingPage` | **65%** | 相带编辑器 V1+拓扑；**缺约束线/趋势面/等值线定稿流** |
 | 9 | 质检 | 成图审核 | `ReviewExportPage` | **60%** | 基础 QC upsert；**缺 MAD/IssueLayer/版本定稿** |
 
@@ -75,8 +75,8 @@ QualityReport upsert ↔ review page
 |------|-----------|----------|--------|
 | 异常检测 (MAD) | \(z^*=0.6745(x-\mathrm{median})/\mathrm{MAD}\) | `workflow/well_qc.py` | **90%** ISS-ALG-01 |
 | 砂地比 | \(R_s=H_s/H_t,\ 0\le H_s\le H_t\) | `compute_sand_ratio` + WellTable | **85%** ISS-ALG-01 |
-| 方向距离/权重 | \(d_i(\theta)=\sqrt{(u/a)^2+(v/b)^2}\), \(w=\exp(-d^2) q b\) | **无** | **0%** ISS-ALG-02 |
-| 趋势面 | \(T=\sum w_i z_i/\sum w_i\) | IDW \(w=1/d^p\) 近似，各向同性 | **40%** |
+| 方向距离/权重 | \(d_i(\theta)=\sqrt{(u/a)^2+(v/b)^2}\), \(w=\exp(-d^2) q b\) | `directional_trend.py` | **90%** ISS-ALG-02 |
+| 趋势面 | \(T=\sum w_i z_i/\sum w_i\) | 方向趋势 + IDW 双路径 | **85%** |
 | 断层屏障 IDW | `fault_polylines` | engine + workbench 接线 | **85%** ISS-ALG-03 |
 | 等值线提取 | marching squares / contourpy | `geoviz_plots.surface` | **70%**（引擎侧） |
 | 克里金 | UI 可选 | 映射为 SciPy linear | **Mock** |

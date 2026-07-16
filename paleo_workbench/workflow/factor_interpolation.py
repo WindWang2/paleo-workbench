@@ -25,6 +25,9 @@ _METHOD_BACKEND = {
     "idw": "idw",
     "克里金": "linear",  # SciPy linear as practical stand-in for kriging MVP
     "样条": "cubic",
+    "方向趋势": "directional",
+    "directional": "directional",
+    "方向加权": "directional",
     "mock": "idw",
 }
 
@@ -91,7 +94,27 @@ def _run_grid(
     backend: str,
     power: float,
     fault_polylines: list[list[tuple[float, float]]] | None = None,
+    azimuth_deg: float = 0.0,
+    semi_major: float = 1.0,
+    semi_minor: float = 0.4,
+    q: np.ndarray | None = None,
+    b_i: np.ndarray | None = None,
 ) -> np.ndarray:
+    if backend == "directional":
+        from paleo_workbench.workflow.directional_trend import directional_trend_grid
+
+        return directional_trend_grid(
+            x,
+            y,
+            z,
+            grid_x,
+            grid_y,
+            azimuth_deg=azimuth_deg,
+            a=semi_major,
+            b=semi_minor,
+            q=q,
+            b_i=b_i,
+        )
     if backend == "idw":
         from geoviz import interpolate_idw
 
@@ -113,6 +136,11 @@ def _leave_one_out_r2(
     backend: str,
     power: float,
     fault_polylines: list[list[tuple[float, float]]] | None = None,
+    azimuth_deg: float = 0.0,
+    semi_major: float = 1.0,
+    semi_minor: float = 0.4,
+    q: np.ndarray | None = None,
+    b_i: np.ndarray | None = None,
 ) -> float | None:
     """Rough LOO R² for sparse control points (None when N < 3)."""
     n = len(z)
@@ -123,6 +151,8 @@ def _leave_one_out_r2(
         mask = np.ones(n, dtype=bool)
         mask[i] = False
         try:
+            q_m = None if q is None else q[mask]
+            b_m = None if b_i is None else b_i[mask]
             grid = _run_grid(
                 x[mask],
                 y[mask],
@@ -132,6 +162,11 @@ def _leave_one_out_r2(
                 backend=backend,
                 power=power,
                 fault_polylines=fault_polylines,
+                azimuth_deg=azimuth_deg,
+                semi_major=semi_major,
+                semi_minor=semi_minor,
+                q=q_m,
+                b_i=b_m,
             )
             val = float(grid[0, 0])
         except Exception:
@@ -153,16 +188,26 @@ def interpolate_factor_grid(
     grid_n: int = DEFAULT_GRID_N,
     power: float = 2.0,
     fault_polylines: list[list[tuple[float, float]]] | None = None,
+    azimuth_deg: float = 0.0,
+    semi_major: float = 1.0,
+    semi_minor: float = 0.4,
 ) -> dict[str, Any]:
     """Interpolate scattered sample_points onto a regular grid.
 
     Returns a JSON-serializable dict with axes, values, and quality stats.
     Optional *fault_polylines* are passed to IDW as break barriers (ISS-ALG-03).
+    Method ``方向趋势`` uses directional weights (ISS-ALG-02).
     """
-    x, y, z = extract_xy_values(sample_points)
+    backend = _METHOD_BACKEND.get(method, "idw")
+    q = b_i = None
+    if backend == "directional":
+        from paleo_workbench.workflow.directional_trend import extract_xy_z_weights
+
+        x, y, z, q, b_i = extract_xy_z_weights(sample_points)
+    else:
+        x, y, z = extract_xy_values(sample_points)
     if len(z) < 2:
         raise ValueError("插值至少需要 2 个有效采样点")
-    backend = _METHOD_BACKEND.get(method, "idw")
     grid_x, grid_y = _grid_axes(x, y, grid_n)
     grid_z = _run_grid(
         x,
@@ -172,13 +217,28 @@ def interpolate_factor_grid(
         grid_y,
         backend=backend,
         power=power,
-        fault_polylines=fault_polylines,
+        fault_polylines=fault_polylines if backend == "idw" else None,
+        azimuth_deg=azimuth_deg,
+        semi_major=semi_major,
+        semi_minor=semi_minor,
+        q=q,
+        b_i=b_i,
     )
     finite = grid_z[np.isfinite(grid_z)]
     if finite.size == 0:
         raise ValueError("插值结果全为无效值")
     r2 = _leave_one_out_r2(
-        x, y, z, backend=backend, power=power, fault_polylines=fault_polylines
+        x,
+        y,
+        z,
+        backend=backend,
+        power=power,
+        fault_polylines=fault_polylines if backend == "idw" else None,
+        azimuth_deg=azimuth_deg,
+        semi_major=semi_major,
+        semi_minor=semi_minor,
+        q=q,
+        b_i=b_i,
     )
     return {
         "grid_x": [float(v) for v in grid_x],
@@ -188,7 +248,10 @@ def interpolate_factor_grid(
         "method": method,
         "grid_n": int(grid_n),
         "n_points": int(len(z)),
-        "n_break_lines": int(len(fault_polylines or [])),
+        "n_break_lines": int(len(fault_polylines or [])) if backend == "idw" else 0,
+        "azimuth_deg": float(azimuth_deg) if backend == "directional" else None,
+        "semi_major": float(semi_major) if backend == "directional" else None,
+        "semi_minor": float(semi_minor) if backend == "directional" else None,
         "min": float(np.min(finite)),
         "max": float(np.max(finite)),
         "mean": float(np.mean(finite)),
@@ -207,28 +270,56 @@ def apply_interpolation_to_task(
 ) -> FactorMapTask:
     """Mutate a FactorMapTask with a real interpolation grid and quality metrics.
 
-    When *project* is provided, active break lines for the task horizon are
-    collected as IDW fault barriers unless *fault_polylines* is passed explicitly.
+    When *project* is provided:
+      - active break lines → IDW fault barriers (unless *fault_polylines* given)
+      - active direction lines → anisotropy for method 「方向趋势」
     """
     params = dict(task.parameters or {})
     points = params.get("sample_points") or []
     breaks = fault_polylines
-    if breaks is None and project is not None:
+    az, a_axis, b_axis = 0.0, 1.0, 0.4
+    if project is not None:
         from paleo_workbench.workflow.constraints import (
             break_polylines_for_idw,
             constraint_layers_for_project,
+            direction_line_params,
         )
+        from paleo_workbench.workflow.directional_trend import resolve_anisotropy_params
 
-        breaks = break_polylines_for_idw(
-            constraint_layers_for_project(project, target_horizon=task.target_horizon),
-            target_horizon=task.target_horizon,
+        layers = constraint_layers_for_project(
+            project, target_horizon=task.target_horizon
         )
+        if breaks is None:
+            breaks = break_polylines_for_idw(layers, target_horizon=task.target_horizon)
+        az, a_axis, b_axis = resolve_anisotropy_params(
+            direction_line_params(layers, target_horizon=task.target_horizon)
+        )
+    # Allow task parameters to override direction if set.
+    if params.get("azimuth_deg") is not None:
+        try:
+            az = float(params["azimuth_deg"])
+        except (TypeError, ValueError):
+            pass
+    if params.get("semi_major") is not None:
+        try:
+            a_axis = float(params["semi_major"])
+        except (TypeError, ValueError):
+            pass
+    if params.get("semi_minor") is not None:
+        try:
+            b_axis = float(params["semi_minor"])
+        except (TypeError, ValueError):
+            pass
+
     result = interpolate_factor_grid(
         points,
         method=method,
         grid_n=grid_n,
         power=power,
         fault_polylines=breaks,
+        azimuth_deg=az,
+        semi_major=a_axis,
+        semi_minor=b_axis,
     )
 
     params["sample_points"] = list(points)
@@ -239,7 +330,11 @@ def apply_interpolation_to_task(
     params["interp_backend"] = result["backend"]
     params["power"] = power
     params["n_break_lines"] = result.get("n_break_lines", 0)
-    if breaks:
+    if result.get("backend") == "directional":
+        params["azimuth_deg"] = result.get("azimuth_deg")
+        params["semi_major"] = result.get("semi_major")
+        params["semi_minor"] = result.get("semi_minor")
+    if breaks and result.get("backend") == "idw":
         params["break_polylines"] = [
             [[float(x), float(y)] for x, y in poly] for poly in breaks
         ]

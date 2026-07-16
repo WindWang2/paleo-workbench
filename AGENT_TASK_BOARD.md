@@ -76,8 +76,9 @@
 | ISS-ALG-01 | 制备 | P0 | **DONE** | Agent | MAD z* + 砂地比 R_s 约束 QC |
 | ISS-DOM-02 | 制备/编图 | P0 | **DONE** | Agent | ConstraintLayers/Line（break/direction） |
 | ISS-ALG-03 | 制备 | P1 | **DONE** | Agent | IDW 消费 break fault_polylines |
+| ISS-ALG-02 | 制备 | P0 | **DONE** | Agent | 方向加权趋势面 + UI「方向趋势」 |
 
-**锁定任务（本回合）：** ISS-ALG-02（下一步）
+**锁定任务（本回合）：** ISS-DOM-03（下一步）
 
 ---
 
@@ -179,6 +180,7 @@
 | 2026-07-17 | T-UI-01 + T-MAP-06 | 预览栏文案；snap 跳过隐藏层；39 focused tests |
 | 2026-07-17 | ISS-DOM-01/ALG-01 | WellTable + MAD/砂地比；PROJECT_PLAN/ISSUE_BOARD；25 tests |
 | 2026-07-17 | ISS-DOM-02/ALG-03 | ConstraintLayers + IDW fault 接线；30 tests |
+| 2026-07-17 | ISS-ALG-02 | directional_trend + 方向趋势 method；50 tests |
 
 ---
 
