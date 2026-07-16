@@ -156,9 +156,26 @@ class VizAdapter:
                 message=f"预测可视化失败: {exc.__class__.__name__}",
             )
 
+    @staticmethod
+    def _absolute_path(path: str, project: Any) -> str:
+        """Resolve project-relative resource paths using meta.project_root when needed."""
+        candidate = Path(path).expanduser()
+        if candidate.is_file():
+            return str(candidate.resolve())
+        if candidate.is_absolute():
+            return str(candidate)
+        root = str(getattr(getattr(project, "meta", None), "project_root", "") or "").strip()
+        if root and root not in {".", ".."}:
+            joined = Path(root) / candidate
+            if joined.is_file():
+                return str(joined.resolve())
+            return str(joined)
+        return str(candidate)
+
     def _resolve_well_log(self, ref: VizRef, project: Any, label: str) -> VizPayload:
         resource = self._find_resource(ref, project)
         path = (str(getattr(resource, "path", "") or "") if resource is not None else "") or ref.path
+        path = self._absolute_path(path, project) if path else ""
         if not path or not Path(path).is_file():
             return VizPayload(
                 kind="message",
@@ -183,6 +200,7 @@ class VizAdapter:
     def _resolve_seismic(self, ref: VizRef, project: Any, label: str) -> VizPayload:
         resource = self._find_resource(ref, project)
         path = (str(getattr(resource, "path", "") or "") if resource is not None else "") or ref.path
+        path = self._absolute_path(path, project) if path else ""
         if not path or not Path(path).is_file():
             return VizPayload(
                 kind="message",
@@ -278,6 +296,7 @@ class VizAdapter:
     def _resolve_engine_preview(self, ref: VizRef, project: Any, label: str) -> VizPayload:
         resource = self._find_resource(ref, project)
         path = (str(getattr(resource, "path", "") or "") if resource is not None else "") or ref.path
+        path = self._absolute_path(path, project) if path else ""
         if not path or not Path(path).is_file():
             return VizPayload(
                 kind="message",

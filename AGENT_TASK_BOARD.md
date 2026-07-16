@@ -51,7 +51,7 @@
 | T-DATA-02 | 数据 | P1 | **DONE** | Agent | DataPage.project_path；导入/重扫/导出 resolve + external |
 | T-MAP-02 | 编图 | P1 | **TODO** | Agent | 演示草稿生成前 dirty 确认；view_state 持久化 |
 | T-MAP-03 | 编图 | P1 | **TODO** | Agent | 参考层 offline 状态；`MapReferenceLayer.external` 字段 |
-| T-QC-01 | 质检 | P1 | **TODO** | Agent | QC 报告 upsert / active_quality_report_id；计数不膨胀 |
+| T-QC-01 | 质检 | P1 | **DONE** | Agent | QC upsert + active_quality_reports for dashboard |
 | T-VIZ-03 | 可视化 | P1 | **TODO** | Agent | SVG/PDF 按钮按 Tab 能力门控；连井/古地理专用导出 API |
 | T-ADP-01 | 适配器 | P2 | **TODO** | Agent | PaleoMapAdapter 禁用假 pdf/svg 或接引擎出图 |
 | T-PREP-01 | 制备 | P1 | **TODO** | Agent | 单因素真实插值链路对接 engine plots/IDW；与编图 factor shelf 闭环 |
@@ -59,10 +59,10 @@
 | T-STRAT-01 | 地层(新) | P1 | **TODO** | Agent | 产品缺口：地层对比页 = 多井 + tops + DTW；复用 CrossWell engine |
 | T-SEIS-01 | 地震 | P1 | **TODO** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
 | T-WELL-01 | 测井 | P1 | **TODO** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
-| T-FLOW-01 | 全局 | P0 | **TODO** | Agent | 端到端数据流契约测试：资源→预测→制备→编图→质检→导出 |
+| T-FLOW-01 | 全局 | P0 | **WIP** | Agent | 端到端数据流契约测试：资源→预测→制备→编图→质检→导出 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（下一步执行）：** `T-COMMIT-01`（本回合）→ `T-FLOW-01` / `T-QC-01`。
+**锁定任务（本回合）：** `T-QC-01` + `T-FLOW-01`。
 
 ---
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from paleo_workbench.project.models import CompilationRun, ProjectDocument, WorkflowStep
+from paleo_workbench.workflow.qc import active_quality_reports
 
 
 STEP_ORDER = ["data_check", "factor_map", "prediction", "map_compile", "qc", "export"]
@@ -61,6 +62,8 @@ def dashboard_state(project: ProjectDocument) -> dict[str, object]:
         },
         "factor_map_count": len(project.factor_map_tasks),
         "prediction_count": len(project.prediction_tasks),
-        "qc_issue_count": sum(len(report.issues) for report in project.quality_reports),
+        "qc_issue_count": sum(
+            len(report.issues) for report in active_quality_reports(project)
+        ),
         "export_count": len(project.export_artifacts),
     }
