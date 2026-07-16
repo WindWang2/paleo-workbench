@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_cache_key
+from paleo_workbench.ui.pages.preview_disk_cache import PreviewDiskCache
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 
 Asset = ResourceItem | ExportArtifact
@@ -105,19 +106,34 @@ class _PreviewWorker(QObject):
         asset: Asset,
         generation: int,
         parent=None,
+        *,
+        disk_cache: PreviewDiskCache | None = None,
     ):
         super().__init__(parent)
         self._provider = provider
         # Always a snapshot — never the live project model object.
         self._asset = asset
         self._generation = generation
+        self._disk = disk_cache
 
     @Slot()
     def run(self) -> None:
         try:
+            if (
+                self._disk is not None
+                and isinstance(self._asset, ResourceItem)
+            ):
+                hit = self._disk.try_load(self._asset)
+                if hit is not None:
+                    self.finished.emit(self._generation, hit)
+                    return
+
             result = self._provider.preview(self._asset)
             if result.mode != "geoviz":
                 result = preload_media(result)
+
+            if self._disk is not None and isinstance(self._asset, ResourceItem):
+                self._disk.store(self._asset, result)
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(self._generation, str(exc))
             return
@@ -168,10 +184,12 @@ class PreviewRequestController(QObject):
         cache: PreviewCache | None = None,
         cache_max_size: int = 32,
         shutdown_wait_ms: int = 10_000,
+        disk_cache: PreviewDiskCache | None = None,
     ):
         super().__init__(parent)
         self.provider = provider or PreviewProvider()
         self.cache = cache if cache is not None else PreviewCache(max_size=cache_max_size)
+        self.disk_cache = disk_cache if disk_cache is not None else PreviewDiskCache(None)
         self._shutdown_wait_ms = shutdown_wait_ms
         self._generation = 0
         self._jobs: list[tuple[QThread, QObject]] = []
@@ -184,6 +202,14 @@ class PreviewRequestController(QObject):
     @property
     def generation(self) -> int:
         return self._generation
+
+    def set_project_root(self, root: Path | str | None) -> None:
+        self.disk_cache.set_project_root(root)
+
+    def clear_disk_cache(self) -> None:
+        """Clear project disk preview cache and in-memory LRU."""
+        self.disk_cache.clear()
+        self.cache.clear()
 
     def request(self, asset: Asset | None) -> None:
         if self._shutting_down:
@@ -284,7 +310,12 @@ class PreviewRequestController(QObject):
     def _start_job(self, generation: int, asset: Asset, key: tuple) -> None:
         self._inflight_keys[generation] = key
         thread = QThread(self)
-        worker = _PreviewWorker(self.provider, asset, generation)
+        worker = _PreviewWorker(
+            self.provider,
+            asset,
+            generation,
+            disk_cache=self.disk_cache,
+        )
         worker.moveToThread(thread)
         self._wire_thread(thread, worker)
 
