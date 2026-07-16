@@ -35,11 +35,14 @@ def test_batch_generate_runs_idw_and_updates_mapping_shelf(qtbot):
     assert prep._project is window.project
     assert window.project.factor_map_tasks == []
 
-    # Select IDW and click batch generate
+    # Select IDW and click batch generate (async QThread worker)
     idx = prep.task_panel.method_combo.findText("IDW")
     assert idx >= 0
     prep.task_panel.method_combo.setCurrentIndex(idx)
     prep.task_panel.generate_btn.click()
+
+    qtbot.waitUntil(lambda: not prep.is_prepare_running(), timeout=30000)
+    qtbot.waitUntil(lambda: len(window.project.factor_map_tasks) >= 3, timeout=5000)
 
     assert len(window.project.factor_map_tasks) >= 3
     task = window.project.factor_map_tasks[0]
@@ -49,8 +52,15 @@ def test_batch_generate_runs_idw_and_updates_mapping_shelf(qtbot):
     assert "3 / 3" in prep.task_panel.summary_label.text() or " / " in prep.task_panel.summary_label.text()
 
     # Mapping factor shelf receives completed tasks (closed loop)
+    # factor_maps_updated refreshes mapping; wait for cards to appear
     mapping = window.app_shell.mapping_page_widget()
-    cards = mapping.bottom_workbench.factor_shelf.grid.findChildren(
-        type(mapping.bottom_workbench.factor_shelf.grid).FactorPreviewCard
-    )
-    assert len(cards) >= 3
+
+    def _card_count() -> int:
+        return len(
+            mapping.bottom_workbench.factor_shelf.grid.findChildren(
+                type(mapping.bottom_workbench.factor_shelf.grid).FactorPreviewCard
+            )
+        )
+
+    qtbot.waitUntil(lambda: _card_count() >= 3, timeout=5000)
+    assert _card_count() >= 3

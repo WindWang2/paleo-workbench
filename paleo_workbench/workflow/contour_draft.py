@@ -77,13 +77,14 @@ def _extract_via_engine(
     grid_z: np.ndarray,
     levels: Sequence[float],
 ) -> dict[float, list[np.ndarray]]:
+    # Workbench production code must import only the public ``geoviz`` facade
+    # (see tests/test_geoviz_package_independence.py).
     try:
         from geoviz import extract_contour_lines
-    except Exception:
-        try:
-            from geoviz_plots import extract_contour_lines
-        except Exception as exc:
-            raise ImportError("extract_contour_lines unavailable") from exc
+    except Exception as exc:
+        raise ImportError(
+            "geoviz.extract_contour_lines unavailable; ensure geoviz facade is installed"
+        ) from exc
     return extract_contour_lines(grid_x, grid_y, grid_z, list(levels))
 
 

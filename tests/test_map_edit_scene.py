@@ -289,3 +289,32 @@ def test_mapping_page_tool_and_undo_wiring(qtbot):
 
     page.toolbar.redo_btn.click()
     assert item.to_record()["coordinates"][0] == [2.0, 0.0]
+
+
+def test_edit_history_appended_on_command_push(qtbot):
+    """ISS-MAP-02: bound document receives compact edit_history rows."""
+    scene = MapEditScene()
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]],
+        }],
+    )
+    scene.load_document(doc)
+    assert doc.edit_history == []
+    scene.translate_features(["f1"], 1.0, 0.5)
+    assert len(doc.edit_history) == 1
+    entry = doc.edit_history[0]
+    assert entry["op"] == "MoveCommand"
+    assert entry["action"] == "do"
+    assert entry["feature_ids"] == ["f1"]
+    assert entry["dx"] == 1.0
+    assert entry["dy"] == 0.5
+    assert "ts" in entry
+    scene.undo()
+    assert doc.edit_history[-1]["action"] == "undo"
+    scene.redo()
+    assert doc.edit_history[-1]["action"] == "redo"

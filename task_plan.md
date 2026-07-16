@@ -1,6 +1,6 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
-> **Updated:** 2026-07-16
+> **Updated:** 2026-07-17
 > **Goal:** Ship a demo-ready paleogeography desktop workbench (9 AppShell pages, data center, project lifecycle, mapping editor, geo-viz previews). Current focus after Phase 21 / B→A→C data overhaul: **stability hardening** (full-project audit fixes) and **interactive data previews** (SEGY slice scrub).
 
 ## Project Status
@@ -407,6 +407,37 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | UI | Data context menu 工程清单; Viz PNG/SVG/PDF export on active tab |
 | Facade | `export_svg` / `export_pdf` / `export_png` on `geoviz` for well-log canvases |
 
+
+
+### Phase 26: Factor-map domain chain + baseline green — ✅ COMPLETE
+
+**Goal:** Close single-factor pipeline domain objects/math/UI, then restore full-suite green after async prep worker.
+
+#### Completed
+- [x] WellTable / MAD / sand-ratio / constraints / directional trend / ContourDraft / VersionSet (ISS-DOM/ALG/MAP/PREP/E2E)
+- [x] Baseline catchup: 949 passed, 2 failed → fixed
+  - [x] facade-only contour import + allowlist `extract_contour_*`
+  - [x] preparation integration waits for QThread worker
+- [x] ISS-MAP-02: `edit_history` written on command push/undo/redo
+
+#### Decisions Made
+| Decision | Rationale |
+|----------|-----------|
+| Contour extract only via `geoviz` facade | Preserve package independence test contract |
+| Prep batch generate stays async | GUI non-blocking; tests use waitUntil |
+| Compact edit_history (op/ids/ts, no full rings) | Audit without bloating .paleo.json |
+
+#### Errors Encountered
+| Attempt | Error | Resolution |
+|---------|-------|------------|
+| 1 | facade test failed on geoviz_plots import in contour_draft | Remove deep import; allowlist facade exports |
+| 1 | prep integration 0 tasks after click | Wait for FactorPrepareWorker completion |
+
+#### Next pending (ISSUE_BOARD Medium)
+- ISS-QC-01/02 IssueLayer depth
+- ISS-PRED-01 prediction beyond mock
+- ISS-VIZ-01 well-tie workspace tab
+
 ## Known Follow-up Items
 
 | # | Item | Status |
@@ -418,6 +449,7 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 14 | `resolve_project_path` allows `..` escape (trusted-local threat model) | ✅ done (T-PATH-01) |
 | 15 | Commit + push Phase 23 SEGY slider | ✅ done (this session) |
 | 16 | DataPage reader-btn label vs whole-right-column hide | ✅ done (T-UI-01: 预览栏) |
+| 17 | Map edit_history not written from command stack | ✅ done (ISS-MAP-02) |
 
 ## Page Progress Matrix
 
@@ -483,3 +515,4 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 2026-07-16 (Preview disk cache + geoviz local preview era) | 800+ / geoviz 1000+ | ✅ (env-dependent full suite) |
 | 2026-07-16 (Phase 22 full-project audit hardening, pushed) | sampled 56+148+72 | ✅ |
 | 2026-07-16 (Phase 23 SEGY slider — geoviz seismic preview tests) | 11 (focused) | ✅ |
+| 2026-07-17 (Phase 26 baseline + edit_history) | 949 pass / 2 fail→fixed; focused 3+9 green | ✅ |

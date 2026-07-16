@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -56,7 +57,14 @@ class MapEditScene(QGraphicsScene):
         self.setSceneRect(_DEFAULT_SCENE_RECT)
         self._items_by_id: dict[str, FeatureItemMixin] = {}
         self._tool: str = "select"
-        self._command_stack = EditCommandStack(max_depth=50)
+        self._bound_document: PaleoMapDocument | None = None
+        self._edit_history_max = 200
+        self._command_stack = EditCommandStack(
+            max_depth=50,
+            on_push=lambda cmd: self._append_edit_log(cmd, action="do"),
+            on_undo=lambda cmd: self._append_edit_log(cmd, action="undo"),
+            on_redo=lambda cmd: self._append_edit_log(cmd, action="redo"),
+        )
         self._dirty = False
         self._dragging = False
         self._drag_origin = QPointF()
@@ -199,6 +207,7 @@ class MapEditScene(QGraphicsScene):
                 self.removeItem(item)
         self._items_by_id.clear()
         self._command_stack.clear()
+        self._bound_document = None
         self.set_dirty(False)
         self.command_stack_changed.emit()
         self.setSceneRect(_DEFAULT_SCENE_RECT)
@@ -208,6 +217,7 @@ class MapEditScene(QGraphicsScene):
         self.clear_features()
         if doc is None:
             return
+        self._bound_document = doc
         for record in features_from_document(doc):
             try:
                 item = self._item_from_record(record)
@@ -217,6 +227,35 @@ class MapEditScene(QGraphicsScene):
                 continue
             self._register_item(item)
         self._fit_scene_rect()
+
+    def _append_edit_log(self, command: object, *, action: str = "do") -> None:
+        """Persist a compact audit row onto the bound document's edit_history."""
+        doc = self._bound_document
+        if doc is None:
+            return
+        entry: dict[str, Any] = {
+            "op": type(command).__name__,
+            "action": str(action),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        # Best-effort payload for common command types (no full geometry dump).
+        if hasattr(command, "feature_ids"):
+            entry["feature_ids"] = list(getattr(command, "feature_ids") or [])
+        if hasattr(command, "feature_id"):
+            entry["feature_id"] = str(getattr(command, "feature_id") or "")
+        if hasattr(command, "dx") and hasattr(command, "dy"):
+            entry["dx"] = float(command.dx)
+            entry["dy"] = float(command.dy)
+        if hasattr(command, "key"):
+            entry["key"] = str(command.key)
+        if hasattr(command, "record") and isinstance(command.record, dict):
+            entry["record_id"] = str(command.record.get("id") or "")
+            entry["record_kind"] = str(command.record.get("kind") or "")
+        history = list(doc.edit_history or [])
+        history.append(entry)
+        if len(history) > self._edit_history_max:
+            history = history[-self._edit_history_max :]
+        doc.edit_history = history
 
     def translate_features(self, feature_ids: list[str] | tuple[str, ...], dx: float, dy: float) -> None:
         """Translate features and push a MoveCommand (marks dirty when geometry changes)."""

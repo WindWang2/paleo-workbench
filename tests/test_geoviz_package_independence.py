@@ -50,6 +50,8 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "SurfaceWidget",
         "interpolate_idw",
         "interpolate_scipy",
+        "extract_contour_lines",
+        "extract_filled_contours",
         "FaciesData",
         "FaciesInterval",
         "IntervalItem",

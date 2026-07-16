@@ -1070,3 +1070,42 @@ Goal: 逐一模块 review 找问题.
 - Created **AGENT_TASK_BOARD.md** (task table + data object dictionary + gate protocol).
 - No new business feature coding in this turn (baseline-first).
 - Next lock: T-COMMIT-01 or T-DATA-02 per board.
+
+---
+
+## Session: 2026-07-17 — PWF protocol catchup + baseline
+
+### Catchup
+- task_plan.md: historical phases 1–25 documented; follow-ups 11–16 closed; no Phase 26 yet
+- ISSUE_BOARD.md: Blocker factor-map chain DONE; residual Medium: ISS-MAP-02, ISS-QC-01/02, ISS-PRED-01, ISS-VIZ-01, ISS-ENV-01
+- findings.md: architecture notes stable; MAD/path/hit-test backlog items already resolved in code
+
+### Baseline (Phase 1 diagnose)
+```
+QT_QPA_PLATFORM=offscreen pytest tests/ -q --timeout=60 -m "not slow"
+→ 2 failed, 949 passed, 4 skipped, 8 deselected in 34.28s
+```
+
+Failures:
+1. `test_workbench_production_imports_only_geoviz_facade` — `contour_draft.py` fallback `from geoviz_plots import ...` + allowlist missing `extract_contour_*`
+2. `test_batch_generate_runs_idw_and_updates_mapping_shelf` — generate is now QThread async; test asserted immediately (0 tasks)
+
+### Locked Phase 26
+- Fix baseline regressions (in_progress)
+- Then pick ISS-MAP-02 edit_history if green
+
+### Phase 26 action log
+- Fixed contour_draft: remove geoviz_plots deep import; facade-only extract_contour_lines
+- Allowlist extract_contour_lines / extract_filled_contours in independence test
+- preparation_integration waits for async FactorPrepareWorker (waitUntil)
+- Focused retest: **9 passed in 2.16s**
+
+### Phase 26 continued
+- ISS-MAP-02: EditCommandStack on_push/undo/redo → PaleoMapDocument.edit_history (cap 200)
+- Test: test_edit_history_appended_on_command_push **passed**
+- Baseline fixes **3 passed** together
+
+### Phase 26 finalization
+- Commit d24b283 on main (ahead 1, not pushed unless requested)
+- Phase 26 marked complete in task_plan.md
+- Next candidate: ISS-QC-01 expand run_basic_qc rules

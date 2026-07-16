@@ -175,12 +175,21 @@ class CompositeCommand:
 class EditCommandStack:
     """Linear undo/redo stack with a maximum depth."""
 
-    def __init__(self, max_depth: int = 50):
+    def __init__(
+        self,
+        max_depth: int = 50,
+        on_push: Callable[[EditCommand], None] | None = None,
+        on_undo: Callable[[EditCommand], None] | None = None,
+        on_redo: Callable[[EditCommand], None] | None = None,
+    ):
         if max_depth < 1:
             raise ValueError("max_depth must be >= 1")
         self.max_depth = int(max_depth)
         self._undo: list[EditCommand] = []
         self._redo: list[EditCommand] = []
+        self._on_push = on_push
+        self._on_undo = on_undo
+        self._on_redo = on_redo
 
     def push(self, command: EditCommand) -> None:
         command.do()
@@ -188,6 +197,8 @@ class EditCommandStack:
         if len(self._undo) > self.max_depth:
             self._undo.pop(0)
         self._redo.clear()
+        if self._on_push is not None:
+            self._on_push(command)
 
     def undo(self) -> bool:
         if not self._undo:
@@ -195,6 +206,8 @@ class EditCommandStack:
         command = self._undo.pop()
         command.undo()
         self._redo.append(command)
+        if self._on_undo is not None:
+            self._on_undo(command)
         return True
 
     def redo(self) -> bool:
@@ -203,6 +216,8 @@ class EditCommandStack:
         command = self._redo.pop()
         command.do()
         self._undo.append(command)
+        if self._on_redo is not None:
+            self._on_redo(command)
         return True
 
     def can_undo(self) -> bool:
