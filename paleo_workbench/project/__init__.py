@@ -11,6 +11,8 @@ from paleo_workbench.project.models import (
     QualityReport,
     ResourceItem,
     StratigraphicFramework,
+    WellTable,
+    WellTableRow,
     WorkflowStep,
 )
 
@@ -27,5 +29,7 @@ __all__ = [
     "QualityReport",
     "ResourceItem",
     "StratigraphicFramework",
+    "WellTable",
+    "WellTableRow",
     "WorkflowStep",
 ]

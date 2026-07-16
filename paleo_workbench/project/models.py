@@ -106,12 +106,48 @@ class CompilationRun(BaseModel):
     updated_at: str = Field(default_factory=_now_iso)
 
 
+class WellTableRow(BaseModel):
+    """One well / sample row for single-factor preparation (spatial well table).
+
+    Supports thickness/sand-ratio attributes and QC annotations used by MAD
+    outlier detection and directional trend-surface weighting.
+    """
+
+    well_id: str = Field(default_factory=lambda: _id("well"))
+    name: str = ""
+    x: float
+    y: float
+    z: float | None = None
+    H_s: float | None = None  # sand thickness
+    H_t: float | None = None  # total thickness
+    R_s: float | None = None  # sand ratio H_s/H_t when valid
+    q: float = 1.0  # sample quality weight ∈ [0, 1+]
+    b_i: float = 1.0  # barrier / usability weight ∈ [0, 1]
+    qc_flag: Literal["ok", "outlier", "invalid_ratio", "missing"] = "ok"
+    qc_z_star: float | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class WellTable(BaseModel):
+    """Tabular well-point set shared by 制备 → 插值 → 编图 factor shelf."""
+
+    id: str = Field(default_factory=lambda: _id("wtable"))
+    name: str
+    target_horizon: str = ""
+    factor_type: str = ""
+    rows: list[WellTableRow] = Field(default_factory=list)
+    crs: str | None = None
+    source_resource_ids: list[str] = Field(default_factory=list)
+    linked_factor_task_id: str | None = None
+
+
 class FactorMapTask(BaseModel):
     id: str = Field(default_factory=lambda: _id("factor"))
     name: str
     target_horizon: str
     factor_type: str
     input_resource_ids: list[str] = Field(default_factory=list)
+    well_table_id: str | None = None
     method: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     output_resource_ids: list[str] = Field(default_factory=list)
@@ -203,6 +239,7 @@ class ProjectDocument(BaseModel):
     coordinate: CoordinateReference = Field(default_factory=CoordinateReference)
     stratigraphy: StratigraphicFramework = Field(default_factory=StratigraphicFramework)
     resources: list[ResourceItem] = Field(default_factory=list)
+    well_tables: list[WellTable] = Field(default_factory=list)
     compilation_runs: list[CompilationRun] = Field(default_factory=list)
     factor_map_tasks: list[FactorMapTask] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
