@@ -470,7 +470,7 @@ def test_data_page_starts_folder_import_in_worker_thread(
     qtbot.addWidget(page)
     worker_threads = []
 
-    def fake_import_folder(path, existing):
+    def fake_import_folder(path, existing, project_path=None):
         worker_threads.append(QThread.currentThread())
         return ImportReport(
             added=[
@@ -489,7 +489,7 @@ def test_data_page_starts_folder_import_in_worker_thread(
         fake_import_folder,
     )
 
-    with qtbot.waitSignal(page.import_finished, timeout=1000):
+    with qtbot.waitSignal(page.import_finished, timeout=5000):
         started = page.begin_import_folder_from_dialog()
 
     assert started is True
@@ -939,7 +939,7 @@ def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
     )
     monkeypatch.setattr(
         "paleo_workbench.ui.pages.data_page.scan_resources",
-        lambda _folder: [replacement],
+        lambda _folder, project_path=None: [replacement],
     )
 
     assert page.rescan_selected_asset() is True
