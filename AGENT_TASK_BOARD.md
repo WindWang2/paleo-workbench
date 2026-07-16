@@ -68,6 +68,7 @@
 | T-HOME-01 | 首页 | P1 | **DONE** | Agent | 工作流步骤按工程证据推断；活动卡证据回退；sync 进 active run |
 | T-SEIS-02 | 地震 | P1 | **DONE** | Agent | Auto-Tie 信号接通 SeismicView：current_seismic_trace + 合成道叠加 |
 | T-MAP-04 | 编图 | P1 | **DONE** | Agent | hit_test 跳过隐藏图层；Qt item 路径同步过滤 |
+| T-MAP-05 | 编图 | P1 | **DONE** | Agent | 演示草稿幂等：replace demo + 折叠历史重复；用户图保留 |
 
 **锁定任务（本回合）：** 无。
 
@@ -166,6 +167,7 @@
 | 2026-07-16 | T-HOME-01 | home_workflow_steps + infer_status；activity 证据回退；app 全路径接线 |
 | 2026-07-16 | T-SEIS-02 | SeismicView 连接 auto_tie_requested/synthetic_changed；demo 井日志种子；20 tests |
 | 2026-07-16 | T-MAP-04 | hit_test_at / _feature_item_at 仅可见图层；export 仍含隐藏要素；30 tests |
+| 2026-07-17 | T-MAP-05 | compile_map_draft 幂等 replace；稳定 id；折叠 legacy 重复 demo；26 tests |
 
 ---
 

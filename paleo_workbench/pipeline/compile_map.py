@@ -22,6 +22,20 @@ _CELL = 0.05
 _BASE_Y = 22.5
 
 
+def _is_demo_draft_doc(doc: PaleoMapDocument) -> bool:
+    """True when *doc* was produced by this compiler (not a user map)."""
+    vs = doc.view_state or {}
+    return bool(vs.get("is_demo_draft")) and vs.get("generator") == _GENERATOR
+
+
+def _demo_draft_indices(project: ProjectDocument) -> list[int]:
+    return [
+        i
+        for i, doc in enumerate(project.paleomap_documents)
+        if _is_demo_draft_doc(doc)
+    ]
+
+
 def compile_map_draft(
     project: ProjectDocument,
     *,
@@ -29,10 +43,14 @@ def compile_map_draft(
     prediction_task_id: str | None = None,
     seed: int = 0,
 ) -> PaleoMapDocument:
-    """Build a deterministic demo paleomap draft and append it to the project.
+    """Build a deterministic demo paleomap draft and attach it to the project.
 
     Always returns a draft — never raises for empty inputs. Prefer a placeholder
     polygon over dead-ending the UI.
+
+    Idempotent for this generator: if a previous demo draft exists, replace it
+    in place (stable ``id``) and drop extra demo copies left from older builds.
+    User maps without ``is_demo_draft`` / this generator are left untouched.
     """
     horizon = _resolve_horizon(project, target_horizon)
     task = _resolve_prediction_task(project, prediction_task_id)
@@ -43,20 +61,44 @@ def compile_map_draft(
     legend_facies = _unique_facies(facies_polygons)
 
     name = f"{horizon} 相带草稿"
-    doc = PaleoMapDocument(
-        name=name,
-        linked_target_horizon=horizon,
-        linked_prediction_task_id=task.id if task is not None else None,
-        facies_polygons=facies_polygons,
-        well_overlays=well_overlays,
-        map_chrome={"title": name, "legend_facies": legend_facies},
-        view_state={
+    demo_indices = _demo_draft_indices(project)
+    keep_id = (
+        project.paleomap_documents[demo_indices[0]].id if demo_indices else None
+    )
+    # Preserve reference layers from the replaced demo if any (user may have
+    # attached basemaps to the demo document without converting it to a full edit).
+    keep_layers = (
+        list(project.paleomap_documents[demo_indices[0]].reference_layers)
+        if demo_indices
+        else []
+    )
+
+    doc_kwargs: dict[str, Any] = {
+        "name": name,
+        "linked_target_horizon": horizon,
+        "linked_prediction_task_id": task.id if task is not None else None,
+        "facies_polygons": facies_polygons,
+        "well_overlays": well_overlays,
+        "map_chrome": {"title": name, "legend_facies": legend_facies},
+        "view_state": {
             "generator": _GENERATOR,
             "is_demo_draft": True,
             "seed": seed,
         },
-    )
-    project.paleomap_documents.append(doc)
+        "reference_layers": keep_layers,
+    }
+    if keep_id is not None:
+        doc_kwargs["id"] = keep_id
+    doc = PaleoMapDocument(**doc_kwargs)
+
+    if demo_indices:
+        # Replace first demo; remove any duplicate demos (legacy appends).
+        project.paleomap_documents[demo_indices[0]] = doc
+        for idx in reversed(demo_indices[1:]):
+            del project.paleomap_documents[idx]
+    else:
+        project.paleomap_documents.append(doc)
+
     if project.compilation_runs:
         project.compilation_runs[-1].active_paleomap_document_id = doc.id
     return doc

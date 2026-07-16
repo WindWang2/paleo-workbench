@@ -608,7 +608,7 @@ Original plan had 3 items (virtual scrolling, import concurrency, search debounc
 
 1. **Seismic Auto-Tie:** ✅ `SeismicView` connects `auto_tie_requested` → `current_seismic_trace` → `panel.auto_tie`; `synthetic_changed` → IL/XL overlay.
 2. **Hidden layer hit-test:** ✅ `hit_test_at` / `_feature_item_at` skip layers with `layer_is_visible=False` (export still full).
-3. **Demo draft append:** each 「生成演示草稿」 appends another `PaleoMapDocument`.
+3. **Demo draft append:** ✅ `compile_map_draft` replaces same-generator demo (stable id); user maps untouched.
 4. **Path escape:** `resolve_project_path` allows `../` outside project (trusted local OK).
 
 ### Architecture notes from audit
