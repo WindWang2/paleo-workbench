@@ -16,6 +16,46 @@ class ReferenceLayerError(ValueError):
     """Raised when a reference source cannot join the project coordinate system."""
 
 
+def _read_band_as_array(band, *, width: int, height: int) -> np.ndarray:
+    """Read a GDAL band into a float64 array without requiring gdal_array.
+
+    Prefer ``ReadAsArray`` when the numpy bridge is available; otherwise use
+    ``ReadRaster`` + numpy frombuffer. CI/dev installs of osgeo often ship
+    without the ``_gdal_array`` extension when numpy was missing at build time.
+    """
+    try:
+        return np.asarray(
+            band.ReadAsArray(buf_xsize=width, buf_ysize=height),
+            dtype=np.float64,
+        )
+    except ImportError:
+        pass
+
+    gdal_type = band.DataType
+    type_map = {
+        gdal.GDT_Byte: np.uint8,
+        gdal.GDT_UInt16: np.uint16,
+        gdal.GDT_Int16: np.int16,
+        gdal.GDT_UInt32: np.uint32,
+        gdal.GDT_Int32: np.int32,
+        gdal.GDT_Float32: np.float32,
+        gdal.GDT_Float64: np.float64,
+    }
+    dtype = type_map.get(gdal_type, np.float32)
+    raw = band.ReadRaster(
+        0,
+        0,
+        band.XSize,
+        band.YSize,
+        buf_xsize=width,
+        buf_ysize=height,
+        buf_type=gdal_type,
+    )
+    if raw is None:
+        return np.zeros((height, width), dtype=np.float64)
+    return np.frombuffer(raw, dtype=dtype).reshape(height, width).astype(np.float64)
+
+
 def _canonical_crs(srs: osr.SpatialReference) -> str:
     copy = srs.Clone()
     copy.AutoIdentifyEPSG()
@@ -174,9 +214,8 @@ class ReferenceLayerService:
             scale = min(1.0, limit / max(dataset.RasterXSize, dataset.RasterYSize))
             width = max(1, round(dataset.RasterXSize * scale))
             height = max(1, round(dataset.RasterYSize * scale))
-            values = np.asarray(
-                dataset.GetRasterBand(1).ReadAsArray(buf_xsize=width, buf_ysize=height),
-                dtype=np.float64,
+            values = _read_band_as_array(
+                dataset.GetRasterBand(1), width=width, height=height
             )
             finite = values[np.isfinite(values)]
             if finite.size == 0 or float(finite.max()) == float(finite.min()):

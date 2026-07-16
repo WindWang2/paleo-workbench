@@ -67,10 +67,10 @@ jobs:
           SYS_GDAL="$(gdal-config --version)"
           echo "System libgdal: ${SYS_GDAL}"
           echo "gdal==${SYS_GDAL}" > /tmp/gdal-constraint.txt
-          # numpy must be present before building/installing gdal so gdal_array
-          # (WriteArray) is available; otherwise only raw WriteRaster works.
+          # numpy first, then rebuild gdal so optional _gdal_array can link.
+          # Pip wheels/sdists installed without numpy often omit the extension.
           python -m pip install "numpy>=1.26"
-          python -m pip install "gdal==${SYS_GDAL}"
+          python -m pip install --no-cache-dir "gdal==${SYS_GDAL}"
           python -m pip install --prefer-binary \
             -c /tmp/gdal-constraint.txt \
             -e ".[dev,native]"
