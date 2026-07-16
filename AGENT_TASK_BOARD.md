@@ -62,8 +62,9 @@
 | T-ENV-01 | 全局 | P2 | **DONE** | Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 | T-QC-02 | 质检 | P1 | **DONE** | Agent | 成图审核页：运行检查 + 导出报告接线；页成熟度 DONE |
 | T-CI-01 | 全局 | P0 | **DONE** | Agent | CI 安装系统 GDAL；修复 3.12/3.13 依赖失败 |
+| T-CI-02 | 全局 | P0 | **WIP** | Agent | 钉死 gdal 绑定到系统 libgdal 版本 |
 
-**锁定任务（本回合）：** 无。
+**锁定任务（本回合）：** `T-CI-02`。
 
 ---
 

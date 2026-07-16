@@ -13,7 +13,9 @@ dependencies = [
     "lasio>=0.14",
     "markdown>=3.5",
     "rasterio>=1.3",
-    "gdal>=3.6,<3.14",
+    # Bindings must match the system libgdal at runtime. CI pins via gdal-config
+    # (see .github/workflows/ci.yml). Developers: pip install gdal==$(gdal-config --version).
+    "gdal>=3.6",
     "pillow>=10.0",
     # Mapping topology merge/split (map_edit_api) requires shapely.
     "shapely>=2.0",

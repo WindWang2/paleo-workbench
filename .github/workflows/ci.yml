@@ -62,8 +62,15 @@ jobs:
           GDAL_CONFIG: ${{ env.GDAL_CONFIG }}
         run: |
           python -m pip install --upgrade pip
-          # Prefer binary wheels; fall back to building against system libgdal-dev.
-          python -m pip install --prefer-binary -e ".[dev,native]"
+          # Pin Python GDAL bindings to the system libgdal (Ubuntu runners ship ~3.8.x).
+          # Unconstrained pip otherwise picks the latest sdist (e.g. 3.13) which fails to build.
+          SYS_GDAL="$(gdal-config --version)"
+          echo "System libgdal: ${SYS_GDAL}"
+          echo "gdal==${SYS_GDAL}" > /tmp/gdal-constraint.txt
+          python -m pip install "gdal==${SYS_GDAL}"
+          python -m pip install --prefer-binary \
+            -c /tmp/gdal-constraint.txt \
+            -e ".[dev,native]"
           # geo-viz-engine subpackages (may pull shapely, scipy, …)
           if [ -f requirements-geoviz.txt ]; then
             python -m pip install --prefer-binary -r requirements-geoviz.txt || true
