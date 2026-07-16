@@ -44,29 +44,54 @@ class RecentActivityCard(QFrame):
             step_index = STEP_TYPES.index(step.step_type) if step.step_type in STEP_TYPES else 0
             label_text = tokens.STEP_LABELS[step_index]
             status_text = tokens.STATUS_TEXT.get(step.status, step.status)
-            time_label = QLabel("刚刚")
-            time_label.setStyleSheet(
-                f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
-            )
-            desc_label = QLabel(f"{label_text}: {status_text}")
-            desc_label.setStyleSheet(
-                f"color: {tokens.TEXT_PRIMARY}; font-size: 12.5px;"
-            )
-            entry_layout = QHBoxLayout()
-            entry_layout.setContentsMargins(0, 0, 0, 0)
-            entry_layout.setSpacing(tokens.SPACE_2)
-            entry_layout.addWidget(time_label)
-            entry_layout.addWidget(desc_label, 1)
-            entry_widget = QWidget()
-            entry_widget.setLayout(entry_layout)
-            self.entries_layout.addWidget(entry_widget)
-            self._entry_labels.append(entry_widget)
-            count += 1
+            count += self._append_entry("刚刚", f"{label_text}: {status_text}")
+        # Evidence-based fallback when steps are all pending but project has work.
+        if count == 0:
+            for label, value_key in (
+                ("数据资源", "resource_counts"),
+                ("单因素图", "factor_map_count"),
+                ("预测任务", "prediction_count"),
+                ("古地理图", "map_document_count"),
+                ("质检问题", "qc_issue_count"),
+                ("导出成果", "export_count"),
+            ):
+                raw = state.get(value_key, 0)
+                if value_key == "resource_counts" and isinstance(raw, dict):
+                    total = sum(int(v) for v in raw.values())
+                    if total > 0:
+                        count += self._append_entry("工程", f"{label}: {total} 项")
+                    continue
+                try:
+                    n = int(raw or 0)
+                except (TypeError, ValueError):
+                    n = 0
+                if n > 0:
+                    count += self._append_entry("工程", f"{label}: {n}")
         if count > 0:
             self.empty_label.hide()
         else:
             self.empty_label.show()
         self._entry_count = count
+
+    def _append_entry(self, when: str, description: str) -> int:
+        time_label = QLabel(when)
+        time_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
+        )
+        desc_label = QLabel(description)
+        desc_label.setStyleSheet(
+            f"color: {tokens.TEXT_PRIMARY}; font-size: 12.5px;"
+        )
+        entry_layout = QHBoxLayout()
+        entry_layout.setContentsMargins(0, 0, 0, 0)
+        entry_layout.setSpacing(tokens.SPACE_2)
+        entry_layout.addWidget(time_label)
+        entry_layout.addWidget(desc_label, 1)
+        entry_widget = QWidget()
+        entry_widget.setLayout(entry_layout)
+        self.entries_layout.addWidget(entry_widget)
+        self._entry_labels.append(entry_widget)
+        return 1
 
     def _clear_entries(self) -> None:
         for entry in self._entry_labels:

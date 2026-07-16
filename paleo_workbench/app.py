@@ -15,7 +15,7 @@ from paleo_workbench.pipeline.bootstrap import (
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui import AppShell
-from paleo_workbench.workflow.service import dashboard_state
+from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 
 _PROJECT_SUFFIX = ".paleo.json"
 _PROJECT_FILTER = "Project (*.paleo.json)"
@@ -357,8 +357,7 @@ class PaleoWorkbenchWindow(QWidget):
         from paleo_workbench.workflow.qc import active_quality_reports
 
         state = dashboard_state(self.project)
-        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
-        steps = active_run.workflow_steps if active_run else []
+        steps = home_workflow_steps(self.project)
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_review_export_page(
             active_quality_reports(self.project),
@@ -399,8 +398,7 @@ class PaleoWorkbenchWindow(QWidget):
     def _on_seismic_prediction_updated(self) -> None:
         """Refresh seismic / visualization / home after a new facies task."""
         state = dashboard_state(self.project)
-        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
-        steps = active_run.workflow_steps if active_run else []
+        steps = home_workflow_steps(self.project)
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_seismic_prediction_page(
             self.project.prediction_tasks, project=self.project
@@ -444,8 +442,7 @@ class PaleoWorkbenchWindow(QWidget):
     def _on_stratigraphy_updated(self) -> None:
         """Re-push stratigraphy-bound pages after sequence scheme save/target change."""
         state = dashboard_state(self.project)
-        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
-        steps = active_run.workflow_steps if active_run else []
+        steps = home_workflow_steps(self.project)
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
         self.app_shell.update_stratigraphy_correlation_page(self.project)
@@ -507,8 +504,7 @@ class PaleoWorkbenchWindow(QWidget):
         """Push ``self.project`` into the current shell's pages (set in __init__/_refresh)."""
         state = dashboard_state(self.project)
         self.app_shell.set_project_name(state.get("project_name", self.project.meta.name))
-        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
-        steps = active_run.workflow_steps if active_run else []
+        steps = home_workflow_steps(self.project)
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_data_page(
             state,

@@ -1,7 +1,18 @@
-from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
+from paleo_workbench.project.models import (
+    FactorMapTask,
+    PaleoMapDocument,
+    PredictionTask,
+    ProjectDocument,
+    ResourceItem,
+)
 from paleo_workbench.workflow.export import record_export
 from paleo_workbench.workflow.qc import run_basic_qc
-from paleo_workbench.workflow.service import create_compilation_run, dashboard_state
+from paleo_workbench.workflow.service import (
+    create_compilation_run,
+    dashboard_state,
+    home_workflow_steps,
+    infer_workflow_step_status,
+)
 
 
 def test_create_compilation_run_adds_ordered_steps():
@@ -75,3 +86,53 @@ def test_record_export_adds_artifact():
     assert project.export_artifacts == [artifact]
     assert artifact.format == "geojson"
     assert artifact.source_task_ids == ["pred_1"]
+
+
+def test_infer_workflow_steps_from_project_evidence():
+    project = ProjectDocument.new("Demo")
+    assert infer_workflow_step_status(project, "data_check") == "pending"
+
+    project.resources.append(
+        ResourceItem(name="A1.Las", path="a.las", type="well_log", format="las")
+    )
+    project.factor_map_tasks.append(
+        FactorMapTask(
+            name="sand",
+            target_horizon="H1",
+            factor_type="sand",
+            method="IDW",
+            status="complete",
+        )
+    )
+    project.prediction_tasks.append(PredictionTask(name="p1", status="complete"))
+    project.paleomap_documents.append(
+        PaleoMapDocument(name="M1", linked_target_horizon="H1")
+    )
+    record_export(project, "map_1", "exports/map.geojson", "geojson", [])
+
+    steps = home_workflow_steps(project)
+    by_type = {step.step_type: step.status for step in steps}
+    assert by_type["data_check"] == "complete"
+    assert by_type["factor_map"] == "complete"
+    assert by_type["prediction"] == "complete"
+    assert by_type["map_compile"] == "complete"
+    assert by_type["export"] == "complete"
+    assert by_type["qc"] == "pending"
+
+    state = dashboard_state(project)
+    assert state["workflow_complete_count"] == 5
+    assert state["map_document_count"] == 1
+
+
+def test_home_workflow_steps_sync_into_active_run():
+    project = ProjectDocument.new("Demo")
+    run = create_compilation_run(project, "Run", "ZJ2", "scheme")
+    assert all(step.status == "pending" for step in run.workflow_steps)
+
+    project.resources.append(
+        ResourceItem(name="A1.Las", path="a.las", type="well_log", format="las")
+    )
+    steps = home_workflow_steps(project)
+    assert steps[0].step_type == "data_check"
+    assert steps[0].status == "complete"
+    assert run.workflow_steps[0].status == "complete"

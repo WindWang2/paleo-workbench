@@ -65,6 +65,7 @@
 | T-CI-02 | 全局 | P0 | **DONE** | Agent | 钉死 gdal 绑定到系统 libgdal 版本 |
 | T-DATA-03 | 数据 | P1 | **DONE** | Agent | 导入 QThread 竞态：GUI 线程安全收尾 + 测试签名 |
 | T-CI-03 | 全局 | P0 | **DONE** | Agent | CI pytest timeout；facade-only imports；取消挂起 run |
+| T-HOME-01 | 首页 | P1 | **DONE** | Agent | 工作流步骤按工程证据推断；活动卡证据回退；sync 进 active run |
 
 **锁定任务（本回合）：** 无。
 
@@ -160,6 +161,7 @@
 | 2026-07-16 | T-DATA-03 | 导入线程 GUI 收尾，修复 import_finished 丢失 |
 | 2026-07-16 | T-CI-03 | CI --timeout=60；geoviz facade 补 IDW/相模型导出 |
 | 2026-07-16 | T-CI-04 | mock project_path/confirm；raster 无 gdal_array；signal timeout；CI 3.12+3.13 green |
+| 2026-07-16 | T-HOME-01 | home_workflow_steps + infer_status；activity 证据回退；app 全路径接线 |
 
 ---
 
