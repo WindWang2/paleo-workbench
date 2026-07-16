@@ -963,3 +963,44 @@ are restricted to the `geoviz` facade; the facade AST has no workbench import.
 Project-local `.preview_cache/` stores bounded prepare results for horizon /
 well_stratification / well_head. LAS and SGY remain interactive without disk
 cache. Clear via DataPage.clear_preview_cache() / toolbar button.
+
+---
+
+## Session: 2026-07-16 — Full-project audit + SEGY slice scrub
+
+### Phase 22: Full-project audit hardening — COMPLETE ✅ (pushed)
+
+**Method:** Verify prior geo-viz deep-audit CRITICAL items; spawn 3 read-only reviewers (core / UI / packages); fix high-confidence bugs; sample-test; commit + push both repos.
+
+| Repo | Commit | Remote |
+|------|--------|--------|
+| geo-viz-engine | `1bf80d34` fix: geometry, cache, display | `origin/main` |
+| paleo-workbench | `66b7436` fix: lifecycle, mapping, preview | `origin/main` |
+
+**geo-viz fixes:** DTW `Qt.PenStyle.DashLine`; multi-ring polygon move by vertex id; map `ScreenPathCache` pan/size invalidation; sonic TWT ×2; curve `unit` preserved; contour major = every 5th level index.
+
+**workbench fixes:** draft save keeps facies/well attributes; reference_layer path relativize; atomic project save + `updated_at`; GDAL close; SEGY single-pass load; QC error status; GeoJSON real export; factor_tasks wiring; import QThread shutdown; mapping dirty/active-doc guards; flush draft on project save; media stop; fade opacity cleanup; UI confirm on new/open.
+
+**Sampled tests:** lifecycle/manager/adapters/smoke/export/mapping **56 passed**; mapping+data+app_shell **148 passed** (1 flaky subprocess PYTHONPATH fixed); geoviz edit **72 / 60**.
+
+### Phase 23: SEGY preview position slider — COMPLETE ✅
+
+**User ask:** 数据页面的地震体预览，可以拉动滑条调整剖面位置.
+
+**Ownership:** Algorithm/UI widget in **geo-viz-engine** (visualization subproject of paleo-workbench). Workbench DataPage already hosts `SeismicPreviewWidget` via `GeoVizEngine`; no workbench page code required for the scrub control.
+
+| Change | Detail |
+|--------|--------|
+| Payload | `source_path`, `max_slice_axis`, `axes: dict[str, SeismicAxisSpec]` |
+| Load | `load_preview_slice(path, mode, position, limit)` single-slice + downsample |
+| UI | mode combo + horizontal slider + position label; 80ms debounce |
+| Caps | `slice_scrub` added to preview capabilities |
+
+**Tests:** `geo-viz-engine/tests/test_geoviz_seismic_preview.py` + public API → **11 passed**.
+
+**Planning:** Root `task_plan.md` / `findings.md` / `progress.md` updated; architecture documents geo-viz-engine as the viz algorithm subproject.
+
+### Next actions
+
+1. Optional backlog: Auto-Tie wiring, hidden-layer hit-test, demo draft idempotency.
+2. Push engine + parent after commit if not already pushed.

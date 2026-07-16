@@ -64,7 +64,7 @@
 | 有界文本/表（行列表上限） | 全文件编辑 |
 | PDF 按页阅读 | 深度 OCR / 全文检索引擎 |
 | 图按视口缩放 | 批量缩略图流水线 |
-| LAS / SEG-Y **摘要 / 曲线名表** | 全道集可视化、全曲线绘图 |
+| LAS / SEG-Y **有界预览**（LAS 曲线轨；SEGY 中剖面 + **滑条 scrub**） | 全道集体可视化、OpenGL 解释工作台（属地震预测/可视化页） |
 | 失败降级 message | 崩溃或阻塞 UI |
 
 深度可视化属于 **测井预测 / 地震预测 / 可视化页**；数据页只保证「认得、管得住、能预览到可用程度」。
@@ -570,3 +570,94 @@ Env-gated (`DATAPAGE_STRESS_S5=1`, N override via `DATAPAGE_STRESS_S5_N`). At sm
 ### Phase C Scope Discovery
 
 Original plan had 3 items (virtual scrolling, import concurrency, search debounce). Exploration revealed Phase 15 already shipped virtual scrolling + debounced search (measured non-hotspots: S1=4ms, S2=0.5ms at N=2000), and Phase 21 shipped checksum skip. The only real gap was serial scan — so Phase C became a focused single-improvement spec rather than a 3-part project. YAGNI applied: a real inverted index for FilterIndex was considered and rejected (linear scan fast enough at measured scale).
+
+---
+
+## 2026-07-16 — Full-project audit findings (Phase 22)
+
+### Already fixed before this session (prior deep_audit)
+- chart_engine `utils` import, `_well_names` init, seismic `setShading`/loader `f`, hash()-based colors, `nice_number` negatives, IDW empty → NaN, WellLog path cache / mouseMove.
+
+### Fixed this session (high confidence)
+
+| Severity | Issue | Fix locus |
+|----------|-------|-----------|
+| high | DTW paint `QPainterPath.DashLine` AttributeError | `geoviz_cross_well/correlation_layer.py` |
+| high | Multi-ring polygon drag uses outer-ring index only → holes jump/(0,0) | `edit_commands.MovePolygonCmd`, `edit_engine` |
+| high | `geoviz_map` ScreenPathCache ignores pan center | `geoviz_map/screen_path_cache.py` (port paleo `_zoom_center`) |
+| high | Sonic integration labeled TWT but was OWT | `well_tie/calibration.from_sonic` ×2 |
+| high | `_apply_curve_meta` dropped `unit` | `qpainter_builder.py` |
+| high | Map draft save stripped prediction properties | `mapping/document_io.apply_features_to_document` |
+| high | Reference layer paths not relativized on project I/O | `project/manager.py` |
+| high | GDAL datasets never closed | `mapping/reference_layers.py` |
+| high | SEGY preview double full-trace pass | `viz/seismic_load.py` single pass |
+| high | Import QThread destroyed while running on shell rebuild | `data_page._shutdown_import_jobs` |
+| high | Mapping `update_state` always load last doc + wipe dirty | preserve `prefer_id` + skip reload if same dirty doc |
+| high | Document tree switch discards dirty with no prompt | Save/Discard/Cancel |
+| high | Project save did not flush map scene | `app._flush_mapping_draft` |
+| high | PaleoMapAdapter GeoJSON always empty FeatureCollection | serialize `layers`/`features` |
+| medium | QC `StopIteration` / status never `error` | `workflow/qc.py` |
+| medium | Non-atomic project write; stale `updated_at` | tmp + `os.replace` |
+| medium | Closed-ring insert_vertex opened ring | re-close after insert |
+| medium | factor_tasks never passed to mapping page | `update_mapping_page(..., factor_tasks=)` |
+| medium | Line vertex cancel only restored facies | `FaciesPolygonItem \| LineItem` |
+| medium | Media kept playing after leave preview | `MediaPreviewWidget.stop` |
+| medium | Page fade left previous page at partial opacity | clear previous effect |
+
+### Still open (backlog)
+
+1. **Seismic Auto-Tie:** button emits `auto_tie_requested`; nothing in `SeismicView` connects / runs DTW against current trace.
+2. **Hidden layer hit-test:** geometry API path does not filter `layer_is_visible`.
+3. **Demo draft append:** each 「生成演示草稿」 appends another `PaleoMapDocument`.
+4. **Path escape:** `resolve_project_path` allows `../` outside project (trusted local OK).
+
+### Architecture notes from audit
+
+- Prefer **vertex-id maps** over positional lists for multi-ring topology commands.
+- Screen-space path caches that bake `center_world` must invalidate on pan **and** resize.
+- Shell rebuild via `deleteLater` must shut down **all** page-owned `QThread`s (preview + import), not only preview.
+- Export adapters that write placeholders should either implement real geometry or surface explicit warnings (now: geojson real + warnings).
+
+---
+
+## Subproject boundary: geo-viz-engine
+
+`geo-viz-engine/` is a **git submodule** of paleo-workbench and the **visualization algorithm + widget library** for the product:
+
+| Layer | Owns | Does not own |
+|-------|------|----------------|
+| **geo-viz-engine** | SEGY/LAS/map/plot pipelines, `PreparedPreview`, QPainter/OpenGL widgets, slice scrub, DTW/colormap math | Project file lifecycle, DataPage catalog, import/dedupe |
+| **paleo_workbench** | AppShell, project I/O, pages, `VizAdapter` wiring, sample pipeline | Low-level seismic/well-log render kernels |
+
+Install: editable subpackages via `requirements-geoviz.txt` + root `pythonpath`. Prefer fixing viz bugs **in the engine**; workbench only integrates.
+
+---
+
+## 2026-07-16 — SEGY data-page slice scrub (Phase 23)
+
+### Product intent
+
+Data page SEGY preview is **bounded 2-D slices**, not full 3-D OpenGL. Users need to **scrub position** along the current axis without leaving the reader pane. Implementation is **engine-side** so any host of `SeismicPreviewWidget` gets scrub for free.
+
+### Design decisions
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Memory model | Keep middle-slice preload; scrub re-reads **one** slice from disk | Large SEGY cannot fit full volume in preview worker budget |
+| Axis metadata | `SeismicAxisSpec(start, step, count)` on payload | Slider index → SEGY line/sample without re-inspect |
+| Package boundary | `load_preview_slice` lives in **geoviz_seismic**, not engine-only | Widget must not import `geoviz` engine (layering) |
+| Debounce | 80ms single-shot QTimer | Avoid open/read/close per mouse pixel |
+| Failure | Overlay text `切片加载失败: …` | Reader stays up; no crash |
+
+### UX
+
+```
+[Inline ▾]  [========●========]  Inline: 105
+[ ProfileWidget heatmap…              ]
+```
+
+Mode change resets slider range from `axes[mode]`; preloaded middle position used when present.
+
+### Interaction capability
+
+`PreviewCapabilities.interactions` includes `slice_scrub` alongside `slice_switch`, `zoom`, `pan`.

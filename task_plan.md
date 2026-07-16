@@ -1,21 +1,27 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
-> **Updated:** 2026-07-10
-> **Goal:** Implement real content for all 9 AppShell pages, then upgrade DataPage into a project-wide data/result/file management center, then wire up project file lifecycle, then harden DataPage for 2000+ assets (UI + performance), then ship Mapping Editor V1 (GIS shell + vector edit + optional C++ hot path), then wire real geo-viz assets into Visualization via shared `VizAdapter`, then bootstrap end-to-end real-data sample projects (Phase 18a) and asset-bound prediction + demo map draft (Phase 18b/18c), then ship a demo-ready global visual system (Phase 19 density tokens, QSS, shared widgets), then polish the Mapping GIS shell chrome (Phase 20), then ship a DataPage stress harness + import checksum skip (Phase 21).
+> **Updated:** 2026-07-16
+> **Goal:** Ship a demo-ready paleogeography desktop workbench (9 AppShell pages, data center, project lifecycle, mapping editor, geo-viz previews). Current focus after Phase 21 / B→A→C data overhaul: **stability hardening** (full-project audit fixes) and **interactive data previews** (SEGY slice scrub).
 
-## Project Status: 9/9 pages + Data Management + Project Mgmt + Data Page perf (PR #1–2) + Mapping Editor V1 (PR #3) + Visualization geo-viz adapter (Phase 17) on `main` + **Phase 18a–18c** sample/demo pipeline + **Phase 19 UI visual polish** + **Phase 20 Mapping GIS shell polish** + **Phase 21 DataPage stress + import checksum skip** on `feature/datapage-stress-hotspots`. **557 tests** passing (4 skipped); `map_edit_core` C++ + `shapely` available for topology merge/split.
+## Project Status
+
+On `main`: 9/9 pages + Data Management (A/B/C) + Project Mgmt + Mapping Editor V1 + Visualization adapter + sample/demo pipeline (18a–c) + UI polish (19–20) + DataPage stress (21) + preview disk cache + **Phase 22 audit hardening** + **Phase 23 SEGY slice scrub** (engine algorithm + workbench data-page preview).
+
+`map_edit_core` C++ + `shapely` available for topology merge/split.
 
 ## Current Architecture
 
+- **Subproject `geo-viz-engine/`** (git submodule → `WindWang2/geo-viz-engine`): **visualization algorithm & widget library** for the workbench. Pip-installable packages (`geoviz_*`) + top-level `geoviz` facade; consumed via editable installs / `pythonpath` (see `requirements-geoviz.txt`, root `pyproject.toml`). Workbench owns project lifecycle / UI pages; engine owns LAS/SEGY/map/plot render pipelines and prepared previews. Prefer engine-side fixes for viz bugs; workbench wires `GeoVizEngine` / `VizAdapter` only.
 - **AppShell** (4-zone): menu bar (36px) + header toolbar (36px post Phase 19) + icon rail (60px, 9 nav, gradient bg, SVG icons) + text sidebar (248px) + QStackedWidget (9 pages) + status bar (24px)
 - **Design tokens** in `paleo_workbench/ui/tokens.py` — colors, fonts, dimensions, density scale (`SPACE_*`, `PAGE_MARGIN`, `CONTROL_HEIGHT*`), interaction colors, QSS_TEMPLATE, step colors/labels, status text, resource labels/units
 - **Global QSS** applied in `main.py` via `app.setStyleSheet(tokens.QSS_TEMPLATE)` (buttons/tables/focus/PanelCard/ToolbarStrip/EmptyState)
 - **Shared UI widgets** (post Phase 19): `PanelCard`, `SectionHeader`, `ToolbarStrip`, `EmptyStateLabel`, `PageScaffold` under `paleo_workbench/ui/widgets/`
 - **Pages package** at `paleo_workbench/ui/pages/`
-- **DataPage (post Phase 15):** `DataWorkspace` (virtual `QTableView` + multi-format reader) + floating catalog/actions; `FilterIndex`; serial async `PreviewRequestController` + LRU `PreviewCache`; async import via `QThread`
-- **MappingPage (post Phase 16):** GIS shell — toolbar · layer tree · `MapEditView`/`MapEditScene` · attribute table; save draft to `PaleoMapDocument`; geometry via `map_edit_api` (+ optional C++ `map_edit_core`)
+- **DataPage (post Phase A/B/C):** DEVONthink 3-pane (`NavigationTree` | asset table | reader+inspector); multimodal previews; concurrent scan; async `PreviewRequestController` + LRU + **project-local `.preview_cache/`** (horizon/tops/well-head); SEGY via `geoviz` facade with **slice scrub slider** (Phase 23)
+- **MappingPage (post Phase 16 + 20):** GIS shell — toolbar · layer tree · `MapEditView`/`MapEditScene` · attribute table; save draft to `PaleoMapDocument`; geometry via `map_edit_api` (+ optional C++ `map_edit_core`); dirty-doc guards on refresh (Phase 22)
 - **Visualization (post Phase 17):** pure `paleo_workbench/viz/` (`VizRef` / `VizPayload` / `VizAdapter`); data-page jump → page index 5 + `open_ref`; composite tabs 测井/地震/连井/古地理; prediction mock fallback when no ref
-- **Sample pipeline (post Phase 18a–18c):** `paleo_workbench/pipeline/` bootstrap + asset bind + `compile_map_draft`; CLI `--with-demo-tasks` / `--with-map-draft`; toolbar 「打开样例工程」 + mapping 「生成演示草稿」
+- **Sample pipeline (post Phase 18a–18c):** `paleo_workbench/pipeline/` bootstrap + asset bind + `compile_map_draft`; CLI `--with-demo-tasks` / `--with-map-draft`; toolbar 「打开样例工程」 + mapping 「生成演示草稿」; bootstrap seeds full `workflow_steps` (Phase 22)
+- **Project I/O (Phase 22):** atomic save, `meta.updated_at`, resource/artifact/**reference_layer** path relativize/resolve; QC status derives error; GeoJSON adapter exports real features
 
 ## 数据管理思维（改数据页时先读）
 
@@ -345,20 +351,47 @@ Virtual scrolling and search debounce/index were already done in Phase 15/21 and
 
 **Data page overhaul (B→A→C) complete.**
 
-## Known Follow-up Items (Minor, non-blocking)
+### Phase 22: 全项目审计加固 Full-Project Audit Hardening — ✅ COMPLETE
+
+Line-level audit of `paleo_workbench` + `geo-viz-engine` packages (3 parallel reviewers + critical-item verification). Fixed high-confidence bugs: data integrity, crashes, leaks, silent data loss.
+
+| Area | Fixes |
+|------|--------|
+| **geo-viz** | DTW pen `Qt.PenStyle.DashLine`; multi-ring `MovePolygonCmd` by vertex id; `geoviz_map` ScreenPathCache pan/size invalidation; sonic→true TWT (×2); curve meta keeps `unit`; contour major by level index |
+| **project/mapping** | Facies/well attributes preserved on draft save; reference_layer path I/O; atomic project write + `updated_at`; GDAL dataset release; CRS normalize `EPSG:n / label`; closed-ring `insert_vertex`; SEGY single-pass preview load |
+| **workflow/export** | QC unknown-id `ValueError`; status `error` when severity error; real GeoJSON export from layers; factor_tasks → mapping shelf; bootstrap `create_compilation_run` steps |
+| **UI lifecycle** | Import QThread shutdown on page destroy; mapping preserve active doc + dirty; document switch Save/Discard/Cancel; project save flushes map draft; media stop on preview switch; page fade clears previous opacity; new/open UI confirm |
+
+- Commits: parent `66b7436`, geo-viz-engine `1bf80d34` (both pushed to `origin/main`)
+- Tests (sampled): workbench lifecycle/mapping/adapters **56+148+10**; geoviz edit/qpainter **72 / 60**
+- Remaining open (not in this phase): Seismic Auto-Tie signal dead-end; hidden-layer hit-test; demo draft always appends; path `..` escape on resolve
+
+### Phase 23: 数据页地震剖面滑条 SEGY Preview Slice Scrub — ✅ COMPLETE
+
+Interactive slice scrub lives in **geo-viz-engine** (visualization subproject); data page only hosts the widget via `GeoVizEngine` prepare/render.
+
+| Slice | Work | Status |
+|-------|------|--------|
+| T1 | `SeismicAxisSpec` + payload `source_path` / `axes` / `max_slice_axis` | ✅ |
+| T2 | `load_preview_slice` in `geoviz_seismic`; prepare attaches axes | ✅ |
+| T3 | `SeismicPreviewWidget` slider + label + debounced reload | ✅ |
+| T4 | Tests (`test_widget_position_slider_reloads_slice`, capabilities) | ✅ (11 passed) |
+| T5 | Commit engine + parent planning/submodule bump | ✅ |
+
+- Key modules (engine): `packages/geoviz_seismic/.../preview_widget.py`, `geoviz/previews/seismic.py`
+- Workbench impact: none beyond submodule pin — DataPage already uses geoviz SEGY preview
+
+## Known Follow-up Items
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | `save_project` OSError dedicated test | ✅ done |
-| 2 | Open project error: missing vs corrupt JSON | ✅ done |
-| 3 | `PAGE_INDEX_*` + `data_page_widget()` helpers | ✅ done |
-| 4 | Floating catalog tab ↔ toolbar check sync | ✅ done |
-| 5 | Image/PDF file I/O off UI thread (bytes preload + media-only cache reload) | ✅ done |
-| 6 | Forced topology rebuild + merge/split + shared-node snap | ✅ done |
-| 7 | CI job requires `HAS_CPP` (`map_edit_core` build) | ✅ done (`.github/workflows/ci.yml`) |
-| 8 | Search haystack Chinese type labels | ✅ done |
-| 9 | Facies freehand + chrome print preview | ✅ done earlier |
-| 10 | Declare `shapely>=2.0` + public `HAS_SHAPELY` for merge/split | ✅ done |
+| 1–10 | Historical minor items (save tests, PAGE_INDEX, topology, shapely, …) | ✅ done |
+| 11 | Seismic Auto-Tie / synthetic signals never consumed by `SeismicView` | open |
+| 12 | Map edit hit-test ignores hidden layers | open |
+| 13 | Demo map draft always appends (no replace/idempotent) | open |
+| 14 | `resolve_project_path` allows `..` escape (trusted-local threat model) | open |
+| 15 | Commit + push Phase 23 SEGY slider | ✅ done (this session) |
+| 16 | DataPage reader-btn label vs whole-right-column hide | open (deferred Phase A) |
 
 ## Page Progress Matrix
 
@@ -386,6 +419,8 @@ Virtual scrolling and search debounce/index were already done in Phase 15/21 and
 | 19 | UI 视觉抛光 (density tokens / QSS / widgets) | ✅ Complete (branch) | ~11+ | ✅ | ✅ |
 | 20 | 编图 GIS 壳抛光 (toolbar groups / dock QSS / status coords) | ✅ Complete (branch) | ~5+ | ✅ | ✅ |
 | 21 | 数据页压测 + 导入 checksum skip (S1–S4 harness) | ✅ Complete (branch) | ~8+ | ✅ | ✅ |
+| 22 | 全项目审计加固 (audit fixes) | ✅ Complete (`main`) | sampled suites | audit reports | — |
+| 23 | 数据页 SEGY 剖面滑条 (engine scrub) | ✅ Complete | +slider tests | — | — |
 
 ## Test History
 
@@ -418,3 +453,7 @@ Virtual scrolling and search debounce/index were already done in Phase 15/21 and
 | 2026-07-10 (Phase 19 UI visual polish) | 544 | ✅ |
 | 2026-07-10 (Phase 20 Mapping GIS shell polish) | 549 | ✅ |
 | 2026-07-10 (Phase 21 DataPage stress + import checksum skip) | 557 | ✅ |
+| 2026-07-13 (Phase B multimodal + A three-pane + C concurrent scan) | 632 | ✅ |
+| 2026-07-16 (Preview disk cache + geoviz local preview era) | 800+ / geoviz 1000+ | ✅ (env-dependent full suite) |
+| 2026-07-16 (Phase 22 full-project audit hardening, pushed) | sampled 56+148+72 | ✅ |
+| 2026-07-16 (Phase 23 SEGY slider — geoviz seismic preview tests) | 11 (focused) | ✅ |
