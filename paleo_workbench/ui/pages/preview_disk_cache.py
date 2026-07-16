@@ -10,7 +10,9 @@ from pathlib import Path
 
 import numpy as np
 
-from geoviz import (
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from geoviz import (
     PAYLOAD_SCHEMA_VERSION,
     PreparedPreview,
     PreviewOptions,

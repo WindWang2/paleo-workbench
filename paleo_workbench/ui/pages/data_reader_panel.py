@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -11,12 +11,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from geoviz import PreparedPreview
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
-from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 from paleo_workbench.ui.pages.preview_widgets import (
     GeoTiffPreviewWidget,
@@ -40,7 +37,7 @@ class DataReaderPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("DataReaderPanel")
         self.setMinimumWidth(320)
-        self.provider = provider or LocalVisualizationProvider()
+        self.provider = provider or PreviewProvider()
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
         self.setStyleSheet(
@@ -68,9 +65,9 @@ class DataReaderPanel(QFrame):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
 
-        provider_engine = getattr(self.provider, "engine", None)
-        self.geoviz_host = GeoVizPreviewHost(provider_engine)
-        self.stack.addWidget(self.geoviz_host)
+        self._geoviz_host = None  # lazy
+        self._geoviz_placeholder = QLabel("GeoViz")
+        self._geoviz_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter); self.stack.addWidget(self._geoviz_placeholder)
 
         self.empty_label = self._message_widget("从列表中选择一个数据、成果或文件")
         self.empty_label.setObjectName("EmptyStateLabel")
@@ -147,10 +144,23 @@ class DataReaderPanel(QFrame):
         # Sync path for direct panel tests; DataPage uses PreviewRequestController.
         self.render(self.provider.preview(asset))
 
+    @property
+    def geoviz_host(self):
+        """Lazily create the GeoViz preview host (defers 0.7s geoviz import)."""
+        if self._geoviz_host is None:
+            from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+            from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+            if not hasattr(self.provider, "engine"):
+                self.provider = LocalVisualizationProvider()
+            provider_engine = getattr(self.provider, "engine", None)
+            self._geoviz_host = GeoVizPreviewHost(provider_engine)
+            self.stack.addWidget(self._geoviz_host)
+        return self._geoviz_host
+
     def render(self, result: PreviewResult) -> None:
         if result.mode != "media":
             self._stop_media_if_needed()
-        if result.mode == "geoviz" and isinstance(result.engine_preview, PreparedPreview):
+        if result.mode == "geoviz" and result.engine_preview is not None:
             try:
                 self.geoviz_host.render(result.engine_preview)
             except Exception as error:
@@ -313,6 +323,7 @@ class DataReaderPanel(QFrame):
 
     def release_engine_widgets(self) -> None:
         self._stop_media_if_needed()
+        if self._geoviz_host is None: return
         try:
             self.geoviz_host.release_all()
         except Exception as error:
