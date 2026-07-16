@@ -75,6 +75,8 @@ class PaleoWorkbenchWindow(QWidget):
         """Load project from path (no confirm — UI handlers ask before calling)."""
         self._last_open_error: str | None = None
         target = Path(path)
+        from paleo_workbench.project.paths import ProjectPathError
+
         try:
             loaded = ProjectManager(target).load()
         except FileNotFoundError:
@@ -85,6 +87,11 @@ class PaleoWorkbenchWindow(QWidget):
             return False
         except ValidationError as e:
             self._last_open_error = f"工程文件格式无效：\n{target}\n{e}"
+            return False
+        except ProjectPathError as e:
+            self._last_open_error = (
+                f"工程内相对路径非法（疑似逃出工程目录）：\n{target}\n{e}"
+            )
             return False
         except OSError as e:
             self._last_open_error = f"无法读取工程文件：\n{target}\n{e}"

@@ -158,7 +158,12 @@ class VizAdapter:
 
     @staticmethod
     def _absolute_path(path: str, project: Any) -> str:
-        """Resolve project-relative resource paths using meta.project_root when needed."""
+        """Resolve project-relative resource paths using meta.project_root when needed.
+
+        Relative joins are confined to ``project_root`` (no ``..`` escape).
+        """
+        from paleo_workbench.project.paths import is_within_directory
+
         candidate = Path(path).expanduser()
         if candidate.is_file():
             return str(candidate.resolve())
@@ -166,9 +171,13 @@ class VizAdapter:
             return str(candidate)
         root = str(getattr(getattr(project, "meta", None), "project_root", "") or "").strip()
         if root and root not in {".", ".."}:
-            joined = Path(root) / candidate
+            root_path = Path(root).expanduser().resolve()
+            joined = (root_path / candidate).resolve()
+            if not is_within_directory(joined, root_path):
+                # Escape attempt — do not open files outside the project root.
+                return str(candidate)
             if joined.is_file():
-                return str(joined.resolve())
+                return str(joined)
             return str(joined)
         return str(candidate)
 

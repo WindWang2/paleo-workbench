@@ -415,7 +415,7 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 11 | Seismic Auto-Tie / synthetic signals never consumed by `SeismicView` | ✅ done (T-SEIS-02) |
 | 12 | Map edit hit-test ignores hidden layers | ✅ done (T-MAP-04) |
 | 13 | Demo map draft always appends (no replace/idempotent) | ✅ done (T-MAP-05) |
-| 14 | `resolve_project_path` allows `..` escape (trusted-local threat model) | open |
+| 14 | `resolve_project_path` allows `..` escape (trusted-local threat model) | ✅ done (T-PATH-01) |
 | 15 | Commit + push Phase 23 SEGY slider | ✅ done (this session) |
 | 16 | DataPage reader-btn label vs whole-right-column hide | open (deferred Phase A) |
 
