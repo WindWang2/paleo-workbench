@@ -376,10 +376,31 @@ def test_reader_panel_dispatches_web_document(tmp_path):
         app.quit()
         """
     )
-    environment = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    root = Path(__file__).parents[1]
+    # Subprocess does not inherit pytest pythonpath from pyproject.toml.
+    path_parts = [
+        str(root),
+        str(root / "geo-viz-engine"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_common"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_paleo_map"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_plots"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_seismic"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_well_log"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_cross_well"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_well_tie"),
+        str(root / "geo-viz-engine" / "packages" / "geoviz_map"),
+    ]
+    existing = os.environ.get("PYTHONPATH", "")
+    if existing:
+        path_parts.append(existing)
+    environment = {
+        **os.environ,
+        "QT_QPA_PLATFORM": "offscreen",
+        "PYTHONPATH": os.pathsep.join(path_parts),
+    }
     result = subprocess.run(
         [sys.executable, "-c", script],
-        cwd=Path(__file__).parents[1],
+        cwd=root,
         env=environment,
         capture_output=True,
         text=True,

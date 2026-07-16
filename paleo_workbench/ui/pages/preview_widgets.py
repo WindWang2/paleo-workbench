@@ -600,6 +600,13 @@ class MediaPreviewWidget(QWidget):
         self._player.durationChanged.connect(self._on_duration)
         self._player.errorOccurred.connect(self._on_error)
 
+    def stop(self) -> None:
+        """Stop playback when leaving the media preview (asset switch / loading)."""
+        if self._player is None:
+            return
+        self._player.stop()
+        self.play_btn.setText("播放")
+
     def set_media_path(self, path: str) -> None:
         from PySide6.QtCore import QUrl
 
@@ -607,6 +614,7 @@ class MediaPreviewWidget(QWidget):
             self.status_label.setText("音频预览不可用")
             self.play_btn.setEnabled(False)
             return
+        self.stop()
         if not path:
             self.status_label.setText("未加载")
             self.play_btn.setEnabled(False)

@@ -39,19 +39,45 @@ def features_from_document(doc: PaleoMapDocument | None) -> list[dict[str, Any]]
 
 
 def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, Any]]) -> None:
+    """Write editor features back into the document, preserving payload fields.
+
+    Facies keep prediction/compiler attributes (``properties``, ``facies``,
+    ``probability``, ``region_id``). Wells keep dual ``x``/``y`` and ``lng``/``lat``.
+    """
     facies, wells, lines, labels = [], [], [], []
     for f in features:
         kind = f.get("kind")
         if kind == "facies":
-            facies.append({
+            record: dict[str, Any] = {
                 "id": f["id"],
                 "name": f.get("name", ""),
                 "coordinates": f.get("coordinates", []),
                 "style": f.get("style") or {},
-            })
+            }
+            if f.get("facies") is not None:
+                record["facies"] = f["facies"]
+            elif f.get("name"):
+                record["facies"] = f["name"]
+            if f.get("probability") is not None:
+                record["probability"] = f["probability"]
+            if f.get("region_id") is not None:
+                record["region_id"] = f["region_id"]
+            props = f.get("properties")
+            if isinstance(props, dict) and props:
+                record["properties"] = dict(props)
+            facies.append(record)
         elif kind == "well":
             c = f.get("coordinates") or [0, 0]
-            wells.append({"id": f["id"], "name": f.get("name", ""), "x": c[0], "y": c[1]})
+            x = float(c[0]) if len(c) >= 1 else 0.0
+            y = float(c[1]) if len(c) >= 2 else 0.0
+            wells.append({
+                "id": f["id"],
+                "name": f.get("name", ""),
+                "x": x,
+                "y": y,
+                "lng": f.get("lng", x),
+                "lat": f.get("lat", y),
+            })
         elif kind == "line":
             lines.append({
                 "id": f["id"],

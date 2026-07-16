@@ -66,11 +66,13 @@ class PaleoWorkbenchWindow(QWidget):
     # --- project lifecycle (path-based, no dialogs) ---
 
     def new_project(self, name: str = "Untitled Project") -> None:
+        """Replace the in-memory project (no confirm — callers that need one ask first)."""
         self.project = ProjectDocument.new(name)
         self.project_path = None
         self._refresh_shell()
 
     def open_project_path(self, path: str | Path) -> bool:
+        """Load project from path (no confirm — UI handlers ask before calling)."""
         self._last_open_error: str | None = None
         target = Path(path)
         try:
@@ -94,6 +96,7 @@ class PaleoWorkbenchWindow(QWidget):
         return True
 
     def save_project(self) -> Path | None:
+        self._flush_mapping_draft()
         if self.project_path is not None:
             try:
                 self.project.meta.project_root = str(
@@ -111,6 +114,7 @@ class PaleoWorkbenchWindow(QWidget):
     def save_project_as(self, path: str | Path | None) -> Path | None:
         if path is None:
             return None
+        self._flush_mapping_draft()
         target = self._normalize_project_path(Path(path))
         try:
             self.project.meta.project_root = str(target.resolve().parent)
@@ -120,6 +124,14 @@ class PaleoWorkbenchWindow(QWidget):
             return None
         self.project_path = target
         return target
+
+    def _flush_mapping_draft(self) -> None:
+        """Commit dirty map-scene geometry into the project before serialization."""
+        page = self.app_shell.mapping_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "is_dirty") and page.is_dirty() and hasattr(page, "save_draft"):
+            page.save_draft()
 
     # --- toolbar handlers (signals -> dialogs -> core methods) ---
 
@@ -146,27 +158,54 @@ class PaleoWorkbenchWindow(QWidget):
         return True
 
     def _confirm_replace_project(self) -> bool:
+        """Ask the user before discarding the current in-memory project.
+
+        Zero-arg signature is intentional so tests can monkeypatch with
+        ``lambda: True`` / ``lambda: False``.
+        """
+        title = getattr(self, "_confirm_title", "替换工程")
+        message = getattr(
+            self,
+            "_confirm_message",
+            "将替换当前工程（未保存更改会丢失）。是否继续？",
+        )
         reply = QMessageBox.question(
             self,
-            "打开样例工程",
-            "将用样例数据替换当前工程（未保存更改会丢失）。是否继续？",
+            title,
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         return reply == QMessageBox.StandardButton.Yes
 
     def _on_new_project(self) -> None:
+        self._confirm_title = "新建工程"
+        self._confirm_message = (
+            "将创建新工程并替换当前内容（未保存更改会丢失）。是否继续？"
+        )
+        if not self._confirm_replace_project():
+            return
         self.new_project()
 
     def _on_open_project(self) -> None:
         path = self._choose_open_project()
         if path is None:
             return
+        self._confirm_title = "打开工程"
+        self._confirm_message = (
+            "将打开所选工程并替换当前内容（未保存更改会丢失）。是否继续？"
+        )
+        if not self._confirm_replace_project():
+            return
         if not self.open_project_path(path):
             detail = getattr(self, "_last_open_error", None) or f"无法打开工程文件：\n{path}"
             self._show_project_error("打开工程失败", detail)
 
     def _on_open_sample_project(self) -> None:
+        self._confirm_title = "打开样例工程"
+        self._confirm_message = (
+            "将用样例数据替换当前工程（未保存更改会丢失）。是否继续？"
+        )
         self.open_sample_project()
 
     def _on_save_project(self) -> None:
@@ -296,7 +335,11 @@ class PaleoWorkbenchWindow(QWidget):
             self.project.paleomap_documents,
         )
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
-        self.app_shell.update_mapping_page(self.project.paleomap_documents)
+        self.app_shell.update_mapping_page(
+            self.project.paleomap_documents,
+            factor_tasks=self.project.factor_map_tasks,
+            project_crs=self.project.coordinate.project_crs,
+        )
         self.app_shell.update_review_export_page(
             self.project.quality_reports,
             self.project.paleomap_documents,

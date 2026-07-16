@@ -211,13 +211,16 @@ def _wells_from_factor_tasks(project: ProjectDocument) -> list[dict[str, Any]]:
             if not isinstance(pt, dict):
                 continue
             name = str(pt.get("well") or pt.get("name") or pt.get("well_name") or "")
-            if "x" in pt and "y" in pt:
-                lng = float(pt["x"])
-                lat = float(pt["y"])
-            elif "lng" in pt and "lat" in pt:
-                lng = float(pt["lng"])
-                lat = float(pt["lat"])
-            else:
+            try:
+                if "x" in pt and "y" in pt:
+                    lng = float(pt["x"])
+                    lat = float(pt["y"])
+                elif "lng" in pt and "lat" in pt:
+                    lng = float(pt["lng"])
+                    lat = float(pt["lat"])
+                else:
+                    continue
+            except (TypeError, ValueError):
                 continue
             key = f"{name}:{lng}:{lat}"
             if key in seen:

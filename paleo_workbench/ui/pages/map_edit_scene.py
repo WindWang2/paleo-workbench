@@ -964,7 +964,8 @@ class MapEditScene(QGraphicsScene):
             item = self._items_by_id.get(self._vertex_drag_feature_id)
             idx = self._vertex_drag_index
             start = self._vertex_drag_start_xy
-            if isinstance(item, FaciesPolygonItem) and idx is not None:
+            # Facies and line vertices share the same drag path — restore both.
+            if isinstance(item, (FaciesPolygonItem, LineItem)) and idx is not None:
                 coords = item.coordinates()
                 try:
                     api.set_vertex(coords, idx, start[0], start[1])

@@ -45,8 +45,8 @@ def table_to_json(input_path: Path, output_path: Path) -> None:
 def image_to_png(input_path: Path, output_path: Path) -> None:
     try:
         from PIL import Image
-        img = Image.open(input_path)
-        img.save(output_path, "PNG")
+        with Image.open(input_path) as img:
+            img.save(output_path, "PNG")
     except Exception as exc:
         raise ExportError(f"图像 -> PNG 失败: {exc}") from exc
 

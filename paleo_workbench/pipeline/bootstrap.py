@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from paleo_workbench.project.manager import ProjectManager
-from paleo_workbench.project.models import CompilationRun, ProjectDocument
+from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.resources.scanner import scan_resources
+from paleo_workbench.workflow.service import create_compilation_run
 
 DEFAULT_SKIP_CHECKSUM = 50 * 1024 * 1024
 
@@ -109,12 +110,12 @@ def bootstrap_sample_project(
     doc.stratigraphy.applicable_wells = wells
     doc.stratigraphy.applicable_seismic_ranges = seismic_names
 
-    doc.compilation_runs.append(
-        CompilationRun(
-            name=f"{project_name} 演示编制",
-            target_horizon=doc.stratigraphy.target_horizon,
-            status="draft",
-        )
+    # Seed full workflow_steps so Home dashboard progress is not empty.
+    create_compilation_run(
+        doc,
+        name=f"{project_name} 演示编制",
+        target_horizon=doc.stratigraphy.target_horizon,
+        sequence_scheme=doc.stratigraphy.systems_tract_scheme,
     )
 
     by_type: dict[str, int] = {}

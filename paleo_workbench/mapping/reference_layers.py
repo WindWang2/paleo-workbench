@@ -28,9 +28,24 @@ def _canonical_crs(srs: osr.SpatialReference) -> str:
     return value
 
 
+def _normalize_crs_input(crs: str) -> str:
+    """Strip human-readable suffixes like ``EPSG:4326 / WGS84`` → ``EPSG:4326``."""
+    text = str(crs).strip()
+    if "EPSG:" in text.upper():
+        # Prefer the first EPSG token for GDAL SetFromUserInput reliability.
+        upper = text.upper()
+        start = upper.index("EPSG:")
+        token = text[start:]
+        for sep in (" ", "/", ","):
+            if sep in token:
+                token = token.split(sep, 1)[0]
+        return token.strip()
+    return text
+
+
 def _spatial_reference(crs: str) -> osr.SpatialReference:
     value = osr.SpatialReference()
-    if value.SetFromUserInput(str(crs)) != 0:
+    if value.SetFromUserInput(_normalize_crs_input(crs)) != 0:
         raise ReferenceLayerError(f"无法识别项目基准坐标：{crs}")
     return value
 
@@ -63,30 +78,32 @@ class ReferenceLayerService:
         dataset = gdal.OpenEx(str(source_path), gdal.OF_RASTER | gdal.OF_VECTOR)
         if dataset is None:
             raise ReferenceLayerError(f"无法读取参考图：{source_path.name}")
+        try:
+            if dataset.RasterCount:
+                source_kind = "raster"
+                source_srs = dataset.GetSpatialRef()
+            else:
+                source_kind = "vector"
+                source_layer = dataset.GetLayer(0)
+                source_srs = source_layer.GetSpatialRef() if source_layer is not None else None
+            if source_srs is None:
+                raise ReferenceLayerError("参考图缺少坐标系，无法转换到项目基准坐标")
 
-        if dataset.RasterCount:
-            source_kind = "raster"
-            source_srs = dataset.GetSpatialRef()
-        else:
-            source_kind = "vector"
-            source_layer = dataset.GetLayer(0)
-            source_srs = source_layer.GetSpatialRef() if source_layer is not None else None
-        if source_srs is None:
-            raise ReferenceLayerError("参考图缺少坐标系，无法转换到项目基准坐标")
-
-        source_crs = _canonical_crs(source_srs)
-        target_srs = _spatial_reference(project_crs)
-        # Construct once at import time to fail early for incompatible CRSs.
-        osr.CoordinateTransformation(source_srs, target_srs)
-        return MapReferenceLayer(
-            name=source_path.stem,
-            source_path=str(source_path),
-            source_kind=source_kind,
-            source_crs=source_crs,
-            project_crs=_canonical_crs(target_srs),
-            transform_wkt=target_srs.ExportToWkt(),
-            cache_key=_cache_key(source_path, source_crs, _canonical_crs(target_srs), source_kind),
-        )
+            source_crs = _canonical_crs(source_srs)
+            target_srs = _spatial_reference(project_crs)
+            # Construct once at import time to fail early for incompatible CRSs.
+            osr.CoordinateTransformation(source_srs, target_srs)
+            return MapReferenceLayer(
+                name=source_path.stem,
+                source_path=str(source_path),
+                source_kind=source_kind,
+                source_crs=source_crs,
+                project_crs=_canonical_crs(target_srs),
+                transform_wkt=target_srs.ExportToWkt(),
+                cache_key=_cache_key(source_path, source_crs, _canonical_crs(target_srs), source_kind),
+            )
+        finally:
+            dataset = None
 
     def vector_snap_points(self, layer: MapReferenceLayer) -> list[tuple[float, float]]:
         if layer.source_kind != "vector":
@@ -94,22 +111,25 @@ class ReferenceLayerService:
         dataset = gdal.OpenEx(layer.source_path, gdal.OF_VECTOR)
         if dataset is None:
             return []
-        source = dataset.GetLayer(0)
-        if source is None or source.GetSpatialRef() is None:
-            return []
-        target_srs = _spatial_reference(layer.project_crs)
-        transform = osr.CoordinateTransformation(source.GetSpatialRef(), target_srs)
-        points: list[tuple[float, float]] = []
-        source.ResetReading()
-        for feature in source:
-            geometry = feature.GetGeometryRef()
-            if geometry is None:
-                continue
-            normalized = geometry.Clone()
-            if normalized.Transform(transform) != 0:
-                continue
-            points.extend(_geometry_points(normalized))
-        return points
+        try:
+            source = dataset.GetLayer(0)
+            if source is None or source.GetSpatialRef() is None:
+                return []
+            target_srs = _spatial_reference(layer.project_crs)
+            transform = osr.CoordinateTransformation(source.GetSpatialRef(), target_srs)
+            points: list[tuple[float, float]] = []
+            source.ResetReading()
+            for feature in source:
+                geometry = feature.GetGeometryRef()
+                if geometry is None:
+                    continue
+                normalized = geometry.Clone()
+                if normalized.Transform(transform) != 0:
+                    continue
+                points.extend(_geometry_points(normalized))
+            return points
+        finally:
+            dataset = None
 
     def raster_preview(self, layer: MapReferenceLayer, max_size: int = 512) -> QImage:
         """Return a bounded grayscale overview for a GDAL raster reference."""
@@ -118,14 +138,26 @@ class ReferenceLayerService:
         dataset = gdal.OpenEx(layer.source_path, gdal.OF_RASTER)
         if dataset is None or dataset.RasterXSize <= 0 or dataset.RasterYSize <= 0:
             raise ReferenceLayerError("无法读取栅格参考图")
-        limit = max(1, int(max_size))
-        scale = min(1.0, limit / max(dataset.RasterXSize, dataset.RasterYSize))
-        width = max(1, round(dataset.RasterXSize * scale))
-        height = max(1, round(dataset.RasterYSize * scale))
-        values = np.asarray(dataset.GetRasterBand(1).ReadAsArray(buf_xsize=width, buf_ysize=height), dtype=np.float64)
-        finite = values[np.isfinite(values)]
-        if finite.size == 0 or float(finite.max()) == float(finite.min()):
-            pixels = np.zeros((height, width), dtype=np.uint8)
-        else:
-            pixels = np.clip((values - finite.min()) * 255.0 / (finite.max() - finite.min()), 0, 255).astype(np.uint8)
-        return QImage(pixels.tobytes(), width, height, width, QImage.Format.Format_Grayscale8).copy()
+        try:
+            limit = max(1, int(max_size))
+            scale = min(1.0, limit / max(dataset.RasterXSize, dataset.RasterYSize))
+            width = max(1, round(dataset.RasterXSize * scale))
+            height = max(1, round(dataset.RasterYSize * scale))
+            values = np.asarray(
+                dataset.GetRasterBand(1).ReadAsArray(buf_xsize=width, buf_ysize=height),
+                dtype=np.float64,
+            )
+            finite = values[np.isfinite(values)]
+            if finite.size == 0 or float(finite.max()) == float(finite.min()):
+                pixels = np.zeros((height, width), dtype=np.uint8)
+            else:
+                pixels = np.clip(
+                    (values - finite.min()) * 255.0 / (finite.max() - finite.min()),
+                    0,
+                    255,
+                ).astype(np.uint8)
+            return QImage(
+                pixels.tobytes(), width, height, width, QImage.Format.Format_Grayscale8
+            ).copy()
+        finally:
+            dataset = None

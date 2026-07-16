@@ -11,10 +11,26 @@ def field_value(source: Any, name: str, default: Any = None) -> Any:
     return getattr(source, name, default)
 
 
-def active_map_document(map_documents: list | tuple | None):
+def active_map_document(
+    map_documents: list | tuple | None,
+    *,
+    prefer_id: str | None = None,
+):
+    """Pick the active map document.
+
+    Prefer ``prefer_id`` when that document is still in the list (preserves the
+    user's layer-tree selection across project refresh). Otherwise fall back to
+    the last document (most recently added / demo draft).
+    """
     if not map_documents:
         return None
-    return map_documents[-1]
+    docs = list(map_documents)
+    if prefer_id:
+        for doc in docs:
+            doc_id = doc.get("id") if isinstance(doc, dict) else getattr(doc, "id", None)
+            if doc_id == prefer_id:
+                return doc
+    return docs[-1]
 
 
 def _close_ring(ring: list) -> list[list[float]]:

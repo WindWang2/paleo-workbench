@@ -125,26 +125,32 @@ class AppShell(QWidget):
 
         A fresh :class:`QGraphicsOpacityEffect` is installed on each switch so
         rapid back-to-back switches restart cleanly: the previous animation is
-        stopped and its effect snapped back to full opacity before the new one
-        begins, preventing stacked/dangling effects.
+        stopped and both the previous and current pages are restored to full
+        opacity before the new fade begins.
         """
         page = self.page_stack.widget(index)
         if page is None:
             return
-        # Stop any in-flight animation and reset its effect to full opacity.
+        # Stop any in-flight animation and clear effects on the last faded page.
         if self._fade_anim is not None:
             self._fade_anim.stop()
+        prev = getattr(self, "_fade_page", None)
+        if prev is not None and prev is not page:
+            prev.setGraphicsEffect(None)
         existing = page.graphicsEffect()
         if isinstance(existing, QGraphicsOpacityEffect):
             existing.setOpacity(1.0)
+            page.setGraphicsEffect(None)
         effect = QGraphicsOpacityEffect(page)
         effect.setOpacity(0.7)
         page.setGraphicsEffect(effect)
+        self._fade_page = page
         self._fade_anim = QPropertyAnimation(effect, b"opacity", page)
         self._fade_anim.setDuration(150)
         self._fade_anim.setStartValue(0.7)
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        self._fade_anim.finished.connect(lambda p=page: p.setGraphicsEffect(None))
         self._fade_anim.start()
 
     def data_page_widget(self):
@@ -251,10 +257,20 @@ class AppShell(QWidget):
         if hasattr(page, "update_state"):
             page.update_state(tasks)
 
-    def update_mapping_page(self, map_documents: list) -> None:
+    def update_mapping_page(
+        self,
+        map_documents: list,
+        *,
+        factor_tasks: list | None = None,
+        project_crs: str | None = None,
+    ) -> None:
         page = self.mapping_page_widget()
         if hasattr(page, "update_state"):
-            page.update_state(map_documents)
+            page.update_state(
+                map_documents,
+                factor_tasks=factor_tasks,
+                project_crs=project_crs,
+            )
         self._mapping_context = self._build_mapping_context()
         if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
             self.sidebar.update_mapping_context(**self._mapping_context)

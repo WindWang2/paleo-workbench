@@ -128,6 +128,7 @@ class DataReaderPanel(QFrame):
         self.stack.setCurrentWidget(self.empty_label)
 
     def show_loading(self, asset: ResourceItem | ExportArtifact | None = None) -> None:
+        self._stop_media_if_needed()
         clear_warning = self._safe_clear_geoviz()
         title = "加载中…"
         if isinstance(asset, ResourceItem):
@@ -147,6 +148,8 @@ class DataReaderPanel(QFrame):
         self.render(self.provider.preview(asset))
 
     def render(self, result: PreviewResult) -> None:
+        if result.mode != "media":
+            self._stop_media_if_needed()
         if result.mode == "geoviz" and isinstance(result.engine_preview, PreparedPreview):
             try:
                 self.geoviz_host.render(result.engine_preview)
@@ -175,6 +178,11 @@ class DataReaderPanel(QFrame):
 
         target = self._load_target_widget(result)
         self._commit_result(result, target)
+
+    def _stop_media_if_needed(self) -> None:
+        stop = getattr(self.media_preview, "stop", None)
+        if callable(stop):
+            stop()
 
     def _load_target_widget(self, result: PreviewResult):
         if result.mode == "empty":
@@ -304,6 +312,7 @@ class DataReaderPanel(QFrame):
         self.pdf_preview_widget.previous_page()
 
     def release_engine_widgets(self) -> None:
+        self._stop_media_if_needed()
         try:
             self.geoviz_host.release_all()
         except Exception as error:

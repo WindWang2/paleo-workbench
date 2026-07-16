@@ -164,13 +164,24 @@ class MappingPage(QWidget):
         project_crs: str | None = None,
     ) -> None:
         documents = list(map_documents or [])
-        document = active_map_document(documents)
+        prefer_id = getattr(self._active_document, "id", None)
+        document = active_map_document(documents, prefer_id=prefer_id)
+        previous = self._active_document
         self._active_document = document
         self.layer_tree.set_documents(documents)
         self.layer_tree.set_active_document(document)
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
-            scene.load_document(document)
+            # Avoid wiping dirty geometry when the same document is re-pushed
+            # from project refresh (e.g. other pages update shell state).
+            same_doc = (
+                previous is not None
+                and document is not None
+                and getattr(previous, "id", None) == getattr(document, "id", None)
+                and previous is document
+            )
+            if not same_doc or not scene.is_dirty():
+                scene.load_document(document)
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
             self._sync_reference_snap_points(scene, document)
@@ -193,6 +204,14 @@ class MappingPage(QWidget):
         valid, issues = scene.validate_for_save()
         self.bottom_workbench.topology_panel.set_issues(issues)
         if not valid:
+            from PySide6.QtWidgets import QMessageBox
+
+            n = len(issues) if issues else 0
+            QMessageBox.warning(
+                self,
+                "无法保存编图草稿",
+                f"拓扑检查未通过（{n} 项问题）。请查看底部拓扑面板并修复后再保存。",
+            )
             return False
         features = scene.export_features()
         apply_features_to_document(doc, features)
@@ -305,8 +324,33 @@ class MappingPage(QWidget):
             scene.set_layer_visible(kind, visible)
 
     def _on_document_selected(self, document) -> None:
-        self._active_document = document
         scene = self._edit_scene()
+        if (
+            scene is not None
+            and scene.is_dirty()
+            and self._active_document is not None
+            and document is not self._active_document
+        ):
+            from PySide6.QtWidgets import QMessageBox
+
+            reply = QMessageBox.question(
+                self,
+                "未保存的编图修改",
+                "当前图件有未保存修改。是否先保存草稿？",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                # Reselect previous document in the tree without re-entering load.
+                self.layer_tree.set_active_document(self._active_document)
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                if not self.save_draft():
+                    self.layer_tree.set_active_document(self._active_document)
+                    return
+        self._active_document = document
         if scene is not None:
             scene.load_document(document)
             for key in ("facies", "well", "line", "label"):

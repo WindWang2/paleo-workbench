@@ -148,16 +148,41 @@ class DataPage(QWidget):
         self.remove_selected_asset()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        self._preview_controller.shutdown()
-        self.reader_panel.release_engine_widgets()
+        self._shutdown_workers()
         super().closeEvent(event)
 
     def event(self, event: QEvent) -> bool:  # type: ignore[override]
         # Shell rebuild uses deleteLater; closeEvent may not run for nested pages.
         if event.type() == QEvent.Type.DeferredDelete:
-            self._preview_controller.shutdown()
-            self.reader_panel.release_engine_widgets()
+            self._shutdown_workers()
         return super().event(event)
+
+    def _shutdown_workers(self) -> None:
+        """Stop preview + import threads before the page is destroyed."""
+        self._preview_controller.shutdown()
+        self.reader_panel.release_engine_widgets()
+        self._shutdown_import_jobs()
+
+    def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> None:
+        """Quit and wait for in-flight import QThreads (safe for deleteLater)."""
+        jobs = list(self._import_jobs)
+        self._import_jobs.clear()
+        for thread, worker in jobs:
+            try:
+                worker.finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                worker.failed.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            if thread.isRunning():
+                thread.quit()
+                if not thread.wait(wait_ms):
+                    # Last resort: do not call terminate() (can corrupt state).
+                    # Detach parenting so destroy doesn't force-kill a live thread.
+                    thread.setParent(None)
+            self._import_in_progress = False
 
     def update_state(
         self,

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
-from paleo_workbench.project.models import ProjectDocument
+from paleo_workbench.project.models import ProjectDocument, _now_iso
 from paleo_workbench.project.paths import (
     ensure_artifact_layout,
     relativize_path,
@@ -11,11 +13,32 @@ from paleo_workbench.project.paths import (
 )
 
 
+def _relativize_reference_layers(data: dict, project_path: Path) -> None:
+    for doc in data.get("paleomap_documents") or []:
+        for layer in doc.get("reference_layers") or []:
+            source = layer.get("source_path")
+            if not source:
+                continue
+            path, external = relativize_path(source, project_path)
+            layer["source_path"] = path
+            layer["external"] = external
+
+
+def _resolve_reference_layers(data: dict, project_path: Path) -> None:
+    for doc in data.get("paleomap_documents") or []:
+        for layer in doc.get("reference_layers") or []:
+            source = layer.get("source_path")
+            if not source:
+                continue
+            layer["source_path"] = resolve_project_path(source, project_path)
+
+
 class ProjectManager:
     def __init__(self, project_path: str | Path):
         self.project_path = Path(project_path)
 
     def save(self, project: ProjectDocument) -> None:
+        project.meta.updated_at = _now_iso()
         data = project.model_dump()
         for resource in data["resources"]:
             path, external = relativize_path(resource["path"], self.project_path)
@@ -24,12 +47,28 @@ class ProjectManager:
         for artifact in data["export_artifacts"]:
             output_path, _ = relativize_path(artifact["output_path"], self.project_path)
             artifact["output_path"] = output_path
+        _relativize_reference_layers(data, self.project_path)
         self.project_path.parent.mkdir(parents=True, exist_ok=True)
         ensure_artifact_layout(self.project_path)
-        self.project_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        # Atomic replace so a crash mid-write cannot leave a truncated project file.
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{self.project_path.name}.",
+            suffix=".tmp",
+            dir=str(self.project_path.parent),
         )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, self.project_path)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def load(self) -> ProjectDocument:
         data = json.loads(self.project_path.read_text(encoding="utf-8"))
@@ -42,4 +81,5 @@ class ProjectManager:
             artifact["output_path"] = resolve_project_path(
                 artifact["output_path"], self.project_path
             )
+        _resolve_reference_layers(data, self.project_path)
         return ProjectDocument.model_validate(data)

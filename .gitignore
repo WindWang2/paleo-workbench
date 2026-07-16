@@ -25,6 +25,7 @@ Thumbs.db
 .codex/
 .cache/
 .superpowers/
+.planning/
 
 # Project-local prepared preview disk cache
 **/.preview_cache/

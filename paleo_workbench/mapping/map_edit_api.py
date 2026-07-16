@@ -253,7 +253,12 @@ def set_vertex(ring: list[list[float]], index: int, x: float, y: float) -> None:
 
 
 def insert_vertex(ring: list[list[float]], index: int, x: float, y: float) -> None:
-    """Insert a vertex at ``index`` (list.insert semantics)."""
+    """Insert a vertex at ``index`` (list.insert semantics).
+
+    For closed rings (first == last), insert at the closing index is mapped to
+    insert before the close, and the ring is re-closed after mutation so
+    first/last stay synchronized for PIP / hit-test / validation.
+    """
     cpp = _cpp_fn("insert_vertex")
     if cpp is not None:
         try:
@@ -263,9 +268,20 @@ def insert_vertex(ring: list[list[float]], index: int, x: float, y: float) -> No
             pass
     if not isinstance(ring, list):
         raise TypeError("ring must be a list")
-    if index < 0 or index > len(ring):
-        raise IndexError(f"insert index {index} out of range for ring of length {len(ring)}")
+    n = len(ring)
+    if index < 0 or index > n:
+        raise IndexError(f"insert index {index} out of range for ring of length {n}")
+    closed = _is_closed_ring(ring)
+    # On a closed ring, the last point is a geometric duplicate of the first —
+    # never insert *after* the close (would open the ring); treat it as insert
+    # before the closing vertex.
+    if closed and index == n:
+        index = n - 1
     ring.insert(index, [float(x), float(y)])
+    if closed and ring:
+        # Re-close: keep last point identical to first after any insert.
+        ring[-1] = [float(ring[0][0]), float(ring[0][1])]
+
 
 
 def delete_vertex(ring: list[list[float]], index: int) -> bool:
