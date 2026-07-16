@@ -90,11 +90,15 @@ def _run_grid(
     *,
     backend: str,
     power: float,
+    fault_polylines: list[list[tuple[float, float]]] | None = None,
 ) -> np.ndarray:
     if backend == "idw":
         from geoviz import interpolate_idw
 
-        return interpolate_idw(x, y, z, grid_x, grid_y, power=power)
+        kwargs: dict[str, Any] = {"power": power}
+        if fault_polylines:
+            kwargs["fault_polylines"] = fault_polylines
+        return interpolate_idw(x, y, z, grid_x, grid_y, **kwargs)
     from geoviz import interpolate_scipy
 
     method = backend if backend in {"linear", "cubic", "nearest", "rbf"} else "linear"
@@ -102,7 +106,13 @@ def _run_grid(
 
 
 def _leave_one_out_r2(
-    x: np.ndarray, y: np.ndarray, z: np.ndarray, *, backend: str, power: float
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    *,
+    backend: str,
+    power: float,
+    fault_polylines: list[list[tuple[float, float]]] | None = None,
 ) -> float | None:
     """Rough LOO R² for sparse control points (None when N < 3)."""
     n = len(z)
@@ -121,6 +131,7 @@ def _leave_one_out_r2(
                 np.asarray([y[i]]),
                 backend=backend,
                 power=power,
+                fault_polylines=fault_polylines,
             )
             val = float(grid[0, 0])
         except Exception:
@@ -141,21 +152,34 @@ def interpolate_factor_grid(
     method: str = "IDW",
     grid_n: int = DEFAULT_GRID_N,
     power: float = 2.0,
+    fault_polylines: list[list[tuple[float, float]]] | None = None,
 ) -> dict[str, Any]:
     """Interpolate scattered sample_points onto a regular grid.
 
     Returns a JSON-serializable dict with axes, values, and quality stats.
+    Optional *fault_polylines* are passed to IDW as break barriers (ISS-ALG-03).
     """
     x, y, z = extract_xy_values(sample_points)
     if len(z) < 2:
         raise ValueError("插值至少需要 2 个有效采样点")
     backend = _METHOD_BACKEND.get(method, "idw")
     grid_x, grid_y = _grid_axes(x, y, grid_n)
-    grid_z = _run_grid(x, y, z, grid_x, grid_y, backend=backend, power=power)
+    grid_z = _run_grid(
+        x,
+        y,
+        z,
+        grid_x,
+        grid_y,
+        backend=backend,
+        power=power,
+        fault_polylines=fault_polylines,
+    )
     finite = grid_z[np.isfinite(grid_z)]
     if finite.size == 0:
         raise ValueError("插值结果全为无效值")
-    r2 = _leave_one_out_r2(x, y, z, backend=backend, power=power)
+    r2 = _leave_one_out_r2(
+        x, y, z, backend=backend, power=power, fault_polylines=fault_polylines
+    )
     return {
         "grid_x": [float(v) for v in grid_x],
         "grid_y": [float(v) for v in grid_y],
@@ -164,6 +188,7 @@ def interpolate_factor_grid(
         "method": method,
         "grid_n": int(grid_n),
         "n_points": int(len(z)),
+        "n_break_lines": int(len(fault_polylines or [])),
         "min": float(np.min(finite)),
         "max": float(np.max(finite)),
         "mean": float(np.mean(finite)),
@@ -177,11 +202,34 @@ def apply_interpolation_to_task(
     method: str = "IDW",
     grid_n: int = DEFAULT_GRID_N,
     power: float = 2.0,
+    project: ProjectDocument | None = None,
+    fault_polylines: list[list[tuple[float, float]]] | None = None,
 ) -> FactorMapTask:
-    """Mutate a FactorMapTask with a real interpolation grid and quality metrics."""
+    """Mutate a FactorMapTask with a real interpolation grid and quality metrics.
+
+    When *project* is provided, active break lines for the task horizon are
+    collected as IDW fault barriers unless *fault_polylines* is passed explicitly.
+    """
     params = dict(task.parameters or {})
     points = params.get("sample_points") or []
-    result = interpolate_factor_grid(points, method=method, grid_n=grid_n, power=power)
+    breaks = fault_polylines
+    if breaks is None and project is not None:
+        from paleo_workbench.workflow.constraints import (
+            break_polylines_for_idw,
+            constraint_layers_for_project,
+        )
+
+        breaks = break_polylines_for_idw(
+            constraint_layers_for_project(project, target_horizon=task.target_horizon),
+            target_horizon=task.target_horizon,
+        )
+    result = interpolate_factor_grid(
+        points,
+        method=method,
+        grid_n=grid_n,
+        power=power,
+        fault_polylines=breaks,
+    )
 
     params["sample_points"] = list(points)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
@@ -190,6 +238,11 @@ def apply_interpolation_to_task(
     params["grid_z"] = result["grid_z"]
     params["interp_backend"] = result["backend"]
     params["power"] = power
+    params["n_break_lines"] = result.get("n_break_lines", 0)
+    if breaks:
+        params["break_polylines"] = [
+            [[float(x), float(y)] for x, y in poly] for poly in breaks
+        ]
 
     task.parameters = params
     task.method = method if method != "mock" else "IDW"
@@ -277,7 +330,9 @@ def batch_prepare_factor_maps(
                 source_kind="mixed",
                 seed=seed + index,
             )
-            apply_interpolation_to_task(task, method=method, grid_n=grid_n)
+            apply_interpolation_to_task(
+                task, method=method, grid_n=grid_n, project=project
+            )
             project.factor_map_tasks.append(task)
             prepared.append(task)
         return prepared
@@ -291,6 +346,8 @@ def batch_prepare_factor_maps(
                 factor_type=task.factor_type or task.name,
             )
             task.parameters = {**params, "sample_points": points}
-        apply_interpolation_to_task(task, method=method, grid_n=grid_n)
+        apply_interpolation_to_task(
+            task, method=method, grid_n=grid_n, project=project
+        )
         prepared.append(task)
     return prepared

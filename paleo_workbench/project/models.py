@@ -198,6 +198,40 @@ class MapReferenceLayer(BaseModel):
     error_message: str = ""
 
 
+class ConstraintLine(BaseModel):
+    """A single geometric constraint used by trend-surface / IDW preparation.
+
+    Roles:
+      - ``break``: fault / barrier polyline (IDW ``fault_polylines``)
+      - ``direction``: anisotropy axis (azimuth + optional a/b semi-axes)
+      - ``boundary``: study-area outline (reserved)
+      - ``other``: free-form guide line
+    """
+
+    id: str = Field(default_factory=lambda: _id("cline"))
+    name: str = ""
+    role: Literal["break", "direction", "boundary", "other"] = "other"
+    # Open polyline: [[x, y], ...] (at least 2 vertices for break/direction).
+    coordinates: list[list[float]] = Field(default_factory=list)
+    azimuth_deg: float | None = None  # direction lines: major-axis bearing
+    semi_major: float | None = None  # a — elongated along strike
+    semi_minor: float | None = None  # b — across strike
+    active: bool = True
+    target_horizon: str = ""
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConstraintLayers(BaseModel):
+    """Named set of break / direction / boundary lines for one horizon (or project-wide)."""
+
+    id: str = Field(default_factory=lambda: _id("clayers"))
+    name: str = "约束层"
+    target_horizon: str = ""
+    lines: list[ConstraintLine] = Field(default_factory=list)
+    linked_factor_task_ids: list[str] = Field(default_factory=list)
+    crs: str | None = None
+
+
 class PaleoMapDocument(BaseModel):
     id: str = Field(default_factory=lambda: _id("map"))
     name: str
@@ -240,6 +274,7 @@ class ProjectDocument(BaseModel):
     stratigraphy: StratigraphicFramework = Field(default_factory=StratigraphicFramework)
     resources: list[ResourceItem] = Field(default_factory=list)
     well_tables: list[WellTable] = Field(default_factory=list)
+    constraint_layers: list[ConstraintLayers] = Field(default_factory=list)
     compilation_runs: list[CompilationRun] = Field(default_factory=list)
     factor_map_tasks: list[FactorMapTask] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)

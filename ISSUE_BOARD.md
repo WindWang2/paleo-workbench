@@ -7,12 +7,12 @@
 | IssueID | 级别 | 归属 | 问题描述 | 预期目标 | 状态 |
 |---------|------|------|----------|----------|------|
 | ISS-DOM-01 | **Blocker** | 制备/全局 | 无独立 **WellTable**；井点仅 `sample_points` dict 列表，缺列语义(Hs/Ht/q/flag) | 定义 `WellTable`/`WellTableRow` 模型 + 与 FactorMapTask 双向适配 | **DONE** |
-| ISS-DOM-02 | **Blocker** | 制备/编图 | **ConstraintLayers / BreakLines / DirectionLines** 未建模；engine fault 屏障未接线 | Pydantic 约束层模型；line_features 角色标注；IDW 传 fault_polylines | TODO |
+| ISS-DOM-02 | **Blocker** | 制备/编图 | **ConstraintLayers / BreakLines / DirectionLines** 未建模；engine fault 屏障未接线 | Pydantic 约束层模型；line_features 角色标注；IDW 传 fault_polylines | **DONE** |
 | ISS-DOM-03 | **Blocker** | 编图 | **ContourDraft** 缺失；SurfaceWidget 未接入 workbench 修编流 | ContourDraft 对象 + 从 TrendSurface 生成等值线初稿 API | TODO |
 | ISS-DOM-04 | High | 质检/全局 | **VersionSet** 缺失；专家定稿无法版本化 | VersionSet 挂 CompilationRun / paleomap 快照 | TODO |
 | ISS-ALG-01 | **Blocker** | 制备/质检 | MAD 异常检测与砂地比 \(R_s=H_s/H_t\) 未实现 | `workflow/well_qc.py`：MAD z* + 砂地比约束写回 WellTable flags | **DONE** |
 | ISS-ALG-02 | **Blocker** | 制备 | 方向加权趋势面未实现（仅各向同性 IDW） | `directional_trend_surface(points, theta, a, b, q, b_i)` | TODO |
-| ISS-ALG-03 | High | 制备 | workbench 调用 IDW 时未传 **fault_polylines** | factor_interpolation 读取 BreakLines → engine | TODO |
+| ISS-ALG-03 | High | 制备 | workbench 调用 IDW 时未传 **fault_polylines** | factor_interpolation 读取 BreakLines → engine | **DONE** |
 | ISS-PREP-01 | High | 制备 | 制备页无 WellTable 表格编辑/异常高亮；插值在 GUI 线程 | Worker 线程 + 表格绑定 WellTable | TODO |
 | ISS-MAP-01 | High | 编图 | 等值线初稿不可修编；factor_shelf 只展示不消费 grid | ContourDraft → 线要素/可编辑 isolines | TODO |
 | ISS-MAP-02 | Medium | 编图 | `edit_history` 未稳定写入命令栈 | 关键 Command 提交时 append EditLog | TODO |
@@ -37,9 +37,11 @@
 
 ### 当前 WIP
 
-- **ISS-DOM-02** — ConstraintLayers / BreakLines / DirectionLines 建模（下一步）
+- **ISS-ALG-02** — 方向加权趋势面（下一步，消费 DirectionLines + WellTable）
 
 ### 本轮完成证据
 
 - ISS-DOM-01: `WellTable`/`WellTableRow` on `ProjectDocument`; adapters in `workflow/well_table.py`; 25 tests green
 - ISS-ALG-01: `workflow/well_qc.py` MAD z*=0.6745(x-med)/MAD + sand ratio validation
+- ISS-DOM-02: `ConstraintLayers`/`ConstraintLine` roles break|direction|boundary; map feature adapters
+- ISS-ALG-03: `interpolate_factor_grid` / `apply_interpolation_to_task` pass break polylines to IDW

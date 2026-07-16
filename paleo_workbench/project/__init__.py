@@ -1,5 +1,7 @@
 from paleo_workbench.project.models import (
     CompilationRun,
+    ConstraintLayers,
+    ConstraintLine,
     CoordinateReference,
     MapReferenceLayer,
     ExportArtifact,
@@ -18,6 +20,8 @@ from paleo_workbench.project.models import (
 
 __all__ = [
     "CompilationRun",
+    "ConstraintLayers",
+    "ConstraintLine",
     "CoordinateReference",
     "MapReferenceLayer",
     "ExportArtifact",

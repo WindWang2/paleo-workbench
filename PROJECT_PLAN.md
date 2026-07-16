@@ -31,9 +31,9 @@
 |----------|----------|--------|--------|------|
 | **WellTable** | `WellTable` / `WellTableRow` + `project.well_tables` | 制备适配器 / QC | 插值 sample_points | **已建** ISS-DOM-01 |
 | **QCReport** | `QualityReport` | `run_basic_qc` | 审核页 / 首页 | **部分**（规则过浅） |
-| **ConstraintLayers** | 无；仅 `MapReferenceLayer` + 图元 line | — | 插值/编图 | **缺失** → ISS-DOM-02 |
-| **BreakLines** | 无；engine IDW 有 `fault_polylines` 未接线 | — | IDW | **缺失** → ISS-DOM-02 |
-| **DirectionLines** | 无 | — | 方向加权 | **缺失** → ISS-DOM-02 |
+| **ConstraintLayers** | `ConstraintLayers` on project | 制备/编图导入 | IDW / 方向趋势 | **已建** ISS-DOM-02 |
+| **BreakLines** | `ConstraintLine(role=break)` → IDW faults | 约束层 | IDW | **已建** ISS-DOM-02/ALG-03 |
+| **DirectionLines** | `ConstraintLine(role=direction)` + azimuth/a/b | 约束层 | 方向加权 | **已建模型**；算法 ISS-ALG-02 |
 | **TrendSurface** | `FactorMapTask.parameters` 中 `grid_x/y/z` 碎片 | 制备 IDW | 编图 shelf 只展示任务 | **弱** → ISS-ALG-02 |
 | **ContourDraft** | engine `SurfaceWidget` + contourpy 存在；workbench 未建草稿对象 | — | 编图修编 | **缺失** → ISS-DOM-03 |
 | **IssueLayer** | `QualityReport.issues` 列表，非空间层 | QC | 审核 | **弱** → ISS-QC-02 |
@@ -77,7 +77,7 @@ QualityReport upsert ↔ review page
 | 砂地比 | \(R_s=H_s/H_t,\ 0\le H_s\le H_t\) | `compute_sand_ratio` + WellTable | **85%** ISS-ALG-01 |
 | 方向距离/权重 | \(d_i(\theta)=\sqrt{(u/a)^2+(v/b)^2}\), \(w=\exp(-d^2) q b\) | **无** | **0%** ISS-ALG-02 |
 | 趋势面 | \(T=\sum w_i z_i/\sum w_i\) | IDW \(w=1/d^p\) 近似，各向同性 | **40%** |
-| 断层屏障 IDW | `fault_polylines` | engine 有，workbench **未传** | **30%** ISS-ALG-03 |
+| 断层屏障 IDW | `fault_polylines` | engine + workbench 接线 | **85%** ISS-ALG-03 |
 | 等值线提取 | marching squares / contourpy | `geoviz_plots.surface` | **70%**（引擎侧） |
 | 克里金 | UI 可选 | 映射为 SciPy linear | **Mock** |
 
