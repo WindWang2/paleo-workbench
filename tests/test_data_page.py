@@ -1085,6 +1085,27 @@ def test_data_page_export_selected_asset_noop_for_artifact(qtbot, tmp_path: Path
     assert not out_path.exists()
 
 
+def test_data_page_default_project_root_skips_disk_cache(qtbot):
+    """Default meta.project_root='.' is unknown — do not bind disk cache to CWD."""
+    project = ProjectDocument.new("Demo")
+    assert project.meta.project_root == "."
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    assert page._preview_disk_project_root() is None
+    assert page._preview_controller.disk_cache.project_root is None
+
+
+def test_data_page_empty_project_root_skips_disk_cache(qtbot):
+    project = ProjectDocument.new("Demo")
+    project.meta.project_root = ""
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    assert page._preview_disk_project_root() is None
+    assert page._preview_controller.disk_cache.project_root is None
+
+
 def test_data_page_clear_preview_cache(tmp_path: Path, qtbot):
     """clear_preview_cache removes .preview_cache on disk and memory LRU."""
     from paleo_workbench.ui.pages.preview_provider import PreviewResult

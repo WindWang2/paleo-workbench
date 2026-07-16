@@ -167,14 +167,23 @@ class DataPage(QWidget):
     ) -> None:
         self._resources = resources
         self._artifacts = artifacts or []
-        root = getattr(self.project.meta, "project_root", None) or None
-        self._preview_controller.set_project_root(root)
+        self._preview_controller.set_project_root(self._preview_disk_project_root())
         self.summary_bar.update_state(state)
         self.navigation_tree.update_counts(self._resources, self._artifacts)
         self.asset_table.update_assets(self._resources, self._artifacts)
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
+
+    def _preview_disk_project_root(self) -> str | Path | None:
+        """Resolve a real project root for disk cache; treat placeholders as unknown."""
+        raw = getattr(self.project.meta, "project_root", None)
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        if not text or text == ".":
+            return None
+        return text
 
     def clear_preview_cache(self) -> None:
         """Clear the project-scoped disk preview cache and in-memory LRU."""

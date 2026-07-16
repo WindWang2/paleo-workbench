@@ -88,6 +88,7 @@ class PaleoWorkbenchWindow(QWidget):
             self._last_open_error = f"无法读取工程文件：\n{target}\n{e}"
             return False
         self.project = loaded
+        self.project.meta.project_root = str(target.resolve().parent)
         self.project_path = target
         self._refresh_shell()
         return True
@@ -95,6 +96,9 @@ class PaleoWorkbenchWindow(QWidget):
     def save_project(self) -> Path | None:
         if self.project_path is not None:
             try:
+                self.project.meta.project_root = str(
+                    self.project_path.resolve().parent
+                )
                 ProjectManager(self.project_path).save(self.project)
             except OSError as e:
                 self._show_project_error("保存工程失败", str(e))
@@ -109,6 +113,7 @@ class PaleoWorkbenchWindow(QWidget):
             return None
         target = self._normalize_project_path(Path(path))
         try:
+            self.project.meta.project_root = str(target.resolve().parent)
             ProjectManager(target).save(self.project)
         except OSError as e:
             self._show_project_error("保存工程失败", str(e))
