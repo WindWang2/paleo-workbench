@@ -43,8 +43,19 @@ def _write_unreferenced_shapefile(path) -> None:
 
 
 def _write_geotiff(path) -> None:
+    """Write a tiny GeoTIFF without requiring osgeo.gdal_array (numpy bridge).
+
+    CI pins gdal to system libgdal; the wheel/sdist may not ship ``_gdal_array``
+    unless numpy was present at build time. WriteRaster avoids that dependency.
+    """
     dataset = gdal.GetDriverByName("GTiff").Create(str(path), 8, 4, 1, gdal.GDT_Byte)
-    dataset.GetRasterBand(1).WriteArray(np.arange(32, dtype=np.uint8).reshape(4, 8))
+    data = np.arange(32, dtype=np.uint8).reshape(4, 8)
+    band = dataset.GetRasterBand(1)
+    try:
+        band.WriteArray(data)
+    except (ImportError, AttributeError):
+        # Fall back when gdal_array is unavailable.
+        band.WriteRaster(0, 0, 8, 4, data.tobytes())
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
     dataset.SetProjection(srs.ExportToWkt())

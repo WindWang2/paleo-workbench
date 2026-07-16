@@ -5,6 +5,7 @@ import sys
 import textwrap
 from types import SimpleNamespace
 
+import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QPainter, QPdfWriter
 
@@ -342,7 +343,11 @@ def test_media_widget_loads_path_sets_ready(qtbot):
     Only asserts construction + label text; QMediaPlayer playback state is
     unreliable under offscreen/no-backend so we never assert on it.
     """
+    from paleo_workbench.ui.pages import preview_widgets as pw
     from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
+
+    if pw.QMediaPlayer is None:
+        pytest.skip("QtMultimedia (QMediaPlayer) not available in this environment")
 
     w = MediaPreviewWidget()
     qtbot.addWidget(w)
