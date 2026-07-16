@@ -17,26 +17,91 @@ CORE_FOR_WORKBENCH = (
     "geoviz_paleo_map",
     "geoviz_cross_well",
 )
+GEOVIZ_PUBLIC_FACADE = frozenset(
+    {
+        "ErrorCode",
+        "GeoVizEngine",
+        "GeoVizError",
+        "PreparedPreview",
+        "PreviewCapabilities",
+        "PreviewKind",
+        "PreviewOptions",
+        "PreviewRegistry",
+        "PreviewRequest",
+        # Documented compatibility exports used by existing workbench panels.
+        "WellLogCanvas",
+        "WellLogData",
+        "CurveData",
+        "build_qpainter_tracks",
+        "SeismicView",
+        "ProfileWidget",
+        "PaleoMapCanvas",
+        "CrossWellCanvas",
+        "PlotWidget",
+        "SurfaceWidget",
+    }
+)
 
 
-def test_workbench_production_imports_only_geoviz_facade():
-    root = Path(__file__).resolve().parents[1] / "paleo_workbench"
+def _workbench_geoviz_import_violations(root: Path) -> list[str]:
     violations = []
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            modules = []
             if isinstance(node, ast.ImportFrom) and node.module:
-                modules = [node.module]
+                if node.module == "geoviz":
+                    if any(item.name not in GEOVIZ_PUBLIC_FACADE for item in node.names):
+                        violations.append(str(path.relative_to(root.parent)))
+                elif node.module.startswith("geoviz.") or node.module.split(
+                    ".", 1
+                )[0].startswith("geoviz_"):
+                    violations.append(str(path.relative_to(root.parent)))
             elif isinstance(node, ast.Import):
-                modules = [item.name for item in node.names]
-            if any(
-                module.split(".", 1)[0].startswith("geoviz_")
-                or module.startswith("geoviz.")
-                for module in modules
-            ):
-                violations.append(str(path.relative_to(root.parent)))
+                if any(
+                    item.name.startswith("geoviz.")
+                    or item.name.split(".", 1)[0].startswith("geoviz_")
+                    for item in node.names
+                ):
+                    violations.append(str(path.relative_to(root.parent)))
+    return violations
+
+
+def test_workbench_production_imports_only_geoviz_facade():
+    root = Path(__file__).resolve().parents[1] / "paleo_workbench"
+    violations = _workbench_geoviz_import_violations(root)
     assert not violations, violations
+
+
+@pytest.mark.parametrize("private_name", ("engine", "previews"))
+def test_workbench_rejects_private_names_imported_from_facade(
+    tmp_path: Path, private_name: str
+):
+    package = tmp_path / "paleo_workbench"
+    package.mkdir()
+    package.joinpath("bad.py").write_text(
+        f"from geoviz import {private_name}\n", encoding="utf-8"
+    )
+
+    assert _workbench_geoviz_import_violations(package) == [
+        "paleo_workbench/bad.py"
+    ]
+
+
+def test_workbench_accepts_documented_facade_imports(tmp_path: Path):
+    package = tmp_path / "paleo_workbench"
+    package.mkdir()
+    package.joinpath("good.py").write_text(
+        "from geoviz import (\n"
+        "    ErrorCode, GeoVizEngine, GeoVizError, PreparedPreview,\n"
+        "    PreviewCapabilities, PreviewKind, PreviewOptions, PreviewRegistry,\n"
+        "    PreviewRequest, WellLogCanvas, WellLogData, CurveData,\n"
+        "    build_qpainter_tracks, SeismicView, ProfileWidget, PaleoMapCanvas,\n"
+        "    CrossWellCanvas, PlotWidget, SurfaceWidget,\n"
+        ")\n",
+        encoding="utf-8",
+    )
+
+    assert _workbench_geoviz_import_violations(package) == []
 
 
 def _pkg_dirs() -> list[Path]:
