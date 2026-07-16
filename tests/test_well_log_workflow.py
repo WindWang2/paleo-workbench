@@ -141,13 +141,18 @@ def test_page_run_and_export_png(qtbot, tmp_path, monkeypatch):
     assert page.evidence_panel.horizon_value.text() == "H1"
 
     out = tmp_path / "well.png"
+    # Patch on the page module's imported symbols (not nested dotted class attrs).
+    import paleo_workbench.ui.pages.well_log_prediction_page as wlp_mod
+
     monkeypatch.setattr(
-        "paleo_workbench.ui.pages.well_log_prediction_page.QFileDialog.getSaveFileName",
+        wlp_mod.QFileDialog,
+        "getSaveFileName",
         lambda *a, **k: (str(out), "PNG (*.png)"),
     )
     # Avoid modal information dialog hanging tests
     monkeypatch.setattr(
-        "paleo_workbench.ui.pages.well_log_prediction_page.QMessageBox.information",
+        wlp_mod.QMessageBox,
+        "information",
         lambda *a, **k: None,
     )
     page.evidence_panel.export_btn.click()

@@ -170,6 +170,7 @@ def test_open_handler_reports_error_on_failure(qtbot, tmp_path: Path, monkeypatc
     monkeypatch.setattr(window, "_show_project_error", lambda title, msg: calls.append((title, msg)))
     bad_path = tmp_path / "missing.paleo.json"
     monkeypatch.setattr(window, "_choose_open_project", lambda: bad_path)
+    monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
 
     window._on_open_project()
 
@@ -187,6 +188,7 @@ def test_open_handler_distinguishes_corrupt_json(qtbot, tmp_path: Path, monkeypa
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(window, "_show_project_error", lambda title, msg: calls.append((title, msg)))
     monkeypatch.setattr(window, "_choose_open_project", lambda: bad)
+    monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
 
     window._on_open_project()
 
@@ -361,6 +363,7 @@ def test_full_new_open_save_cycle(qtbot, tmp_path: Path, monkeypatch):
 
     # Monkeypatch the open dialog and trigger the toolbar open handler.
     monkeypatch.setattr(window, "_choose_open_project", lambda: expected)
+    monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
     window._on_open_project()
 
     # Resource is visible again and the path is the saved one.
@@ -387,6 +390,7 @@ def test_window_title_updates_on_project_change(qtbot, tmp_path: Path, monkeypat
     save_window.save_project_as(target)
 
     monkeypatch.setattr(window, "_choose_open_project", lambda: target)
+    monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
     window._on_open_project()
     assert "Loaded Name" in window.windowTitle()
 
@@ -408,6 +412,7 @@ def test_status_bar_updates_on_project_change(qtbot, tmp_path: Path, monkeypatch
     save_window.save_project_as(target)
 
     monkeypatch.setattr(window, "_choose_open_project", lambda: target)
+    monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
     window._on_open_project()
     opened_text = window.app_shell.status_bar.status_label.text()
     assert "OpenedProj" in opened_text
