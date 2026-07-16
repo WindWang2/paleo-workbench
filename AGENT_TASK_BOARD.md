@@ -159,6 +159,7 @@
 | 2026-07-16 | T-CI-02 | gdal==$(gdal-config --version) 约束；避免 3.13 sdist |
 | 2026-07-16 | T-DATA-03 | 导入线程 GUI 收尾，修复 import_finished 丢失 |
 | 2026-07-16 | T-CI-03 | CI --timeout=60；geoviz facade 补 IDW/相模型导出 |
+| 2026-07-16 | T-CI-04 | mock project_path/confirm；raster 无 gdal_array；signal timeout；CI 3.12+3.13 green |
 
 ---
 
