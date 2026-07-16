@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-SEQ-01`。
+**锁定任务（本回合）：** 无（T-SEQ-01 已完成）。
 
 ---
 
@@ -73,7 +73,7 @@
 | **ProjectDocument** | `project/models.py` | 新建/打开/样例 bootstrap | 全页 `update_state` | `.paleo.json` | **稳定** |
 | **ResourceItem** | models | import/scanner | Data/Viz/Prediction | path+type+format+summary | **稳定**；需 project_path 完善 |
 | **ExportArtifact** | models | export_service / record_export | Data/Review | 相对 path + format | **可用** |
-| **StratigraphicFramework** | models | 格架页 | 制备/编图/预测 | target_horizon, boundaries | **浅** |
+| **StratigraphicFramework** | models | 格架页编辑/保存 | 制备/编图/run | target_horizon+scheme | **可用**；下游绑定 map/factor |
 | **FactorMapTask** | models | 制备页 / IDW 插值 | 编图 factor shelf | sample_points + grid_z + metrics | **可用**；批量生成接通 engine |
 | **PredictionTask** | models | mock adapter / bind assets | 测井/地震/可视化 | input_refs, results | **mock 为主** |
 | **PaleoMapDocument** | models | 编图 / compile_map_draft | 可视化/质检/导出 | facies/wells/lines/labels | **稳定**；view_state 可回写 center/scale |
@@ -144,6 +144,7 @@
 | 2026-07-16 | T-MAP-03 | MapReferenceLayer.external；refresh_status offline；panel 标注；工程 load 回写；28 tests |
 | 2026-07-16 | T-VIZ-03 | view_export_capabilities；连井 export_composite / 古地理 professional figure；Tab 门控 SVG/PDF；21 tests |
 | 2026-07-16 | T-PREP-01 | factor_interpolation IDW/SciPy；批量生成接线；编图 shelf 闭环；26 tests |
+| 2026-07-16 | T-SEQ-01 | stratigraphy apply/bind；目标层位可编辑；保存同步 run/map/factor；16 tests |
 
 ---
 
