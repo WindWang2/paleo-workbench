@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import uuid
@@ -10,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from geoviz import (
+    PAYLOAD_SCHEMA_VERSION,
     PreparedPreview,
     PreviewOptions,
     decode_prepared_preview,
@@ -17,13 +19,15 @@ from geoviz import (
 )
 
 from paleo_workbench.project.models import ResourceItem
+from paleo_workbench.ui.pages.preview_cache import safe_file_stat
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
+
+logger = logging.getLogger(__name__)
 
 CACHEABLE_RESOURCE_TYPES = frozenset(
     {"horizon", "well_stratification", "well_head"}
 )
 DIR_NAME = ".preview_cache"
-PAYLOAD_SCHEMA_VERSION = 1  # must match geoviz.prepared_codec
 
 
 def is_disk_cacheable(asset: object) -> bool:
@@ -44,17 +48,9 @@ def _options_fingerprint(options: PreviewOptions | None = None) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def _source_stat(path: Path) -> tuple[int, int] | None:
-    try:
-        st = path.stat()
-        return (st.st_size, getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
-    except OSError:
-        return None
-
-
 def _entry_key_material(asset: ResourceItem) -> str:
     path = Path(asset.path).resolve()
-    st = _source_stat(path)
+    st = safe_file_stat(path)
     parts = [
         str(path),
         asset.type,
@@ -65,7 +61,19 @@ def _entry_key_material(asset: ResourceItem) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
 
 
+def _discard_entry(entry: Path) -> None:
+    if entry.exists():
+        shutil.rmtree(entry, ignore_errors=True)
+
+
 class PreviewDiskCache:
+    """Project-scoped prepare-result cache under ``.preview_cache/``.
+
+    Complements the in-memory LRU: worker tries disk after a memory miss for
+    horizon / well_stratification / well_head DAT only. Corrupt entries are
+    deleted on read failure. Store failures never break live preview.
+    """
+
     def __init__(self, project_root: Path | str | None = None) -> None:
         self.project_root = Path(project_root).resolve() if project_root else None
 
@@ -83,7 +91,11 @@ class PreviewDiskCache:
         entries = self._entries_dir()
         if entries is None:
             return None
-        key = _entry_key_material(asset)
+        try:
+            key = _entry_key_material(asset)
+        except Exception:
+            logger.warning("preview disk cache key failed for %s", asset.path, exc_info=True)
+            return None
         entry = entries / key
         meta_path = entry / "meta.json"
         payload_path = entry / "payload.npz"
@@ -93,11 +105,19 @@ class PreviewDiskCache:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             # Re-validate live key matches stored key (mtime/size/options).
             if meta.get("key") != key:
+                _discard_entry(entry)
                 return None
             with np.load(payload_path, allow_pickle=False) as data:
                 arrays = {name: data[name] for name in data.files}
             prepared = decode_prepared_preview(meta["prepared"], arrays)
         except Exception:
+            logger.warning(
+                "preview disk cache miss (corrupt) for %s at %s",
+                asset.path,
+                entry,
+                exc_info=True,
+            )
+            _discard_entry(entry)
             return None
         return PreviewResult(
             mode="geoviz",
@@ -122,9 +142,8 @@ class PreviewDiskCache:
         entries = self._entries_dir()
         if entries is None:
             return
-        key = _entry_key_material(asset)
-        entry = entries / key
         try:
+            key = _entry_key_material(asset)
             prepared_meta, arrays = encode_prepared_preview(result.engine_preview)
             entries.mkdir(parents=True, exist_ok=True)
             # Stage under a unique sibling dir, then replace the entry.
@@ -142,6 +161,7 @@ class PreviewDiskCache:
                     encoding="utf-8",
                 )
                 np.savez_compressed(staging / "payload.npz", **arrays)
+                entry = entries / key
                 if entry.exists():
                     shutil.rmtree(entry)
                 os.replace(str(staging), str(entry))
@@ -150,7 +170,11 @@ class PreviewDiskCache:
                     shutil.rmtree(staging, ignore_errors=True)
                 raise
         except Exception:
-            return  # preview must still succeed without disk
+            # Preview must still succeed without disk.
+            logger.warning(
+                "preview disk cache store failed for %s", asset.path, exc_info=True
+            )
+            return
 
     def clear(self) -> None:
         if self.project_root is None:

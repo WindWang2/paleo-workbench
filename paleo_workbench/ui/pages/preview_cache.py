@@ -20,12 +20,17 @@ def preview_result_weight(value: PreviewResult) -> int:
     )
 
 
-def _safe_stat(path: Path) -> tuple[int, int] | None:
+def safe_file_stat(path: Path) -> tuple[int, int] | None:
+    """Return ``(size, mtime_ns)`` for cache keys, or None if the path is unreadable."""
     try:
         st = path.stat()
         return (st.st_size, getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
     except OSError:
         return None
+
+
+# Backward-compatible alias for internal call sites / older imports.
+_safe_stat = safe_file_stat
 
 
 def make_preview_cache_key(asset: ResourceItem | ExportArtifact) -> tuple:
@@ -42,7 +47,7 @@ def make_preview_cache_key(asset: ResourceItem | ExportArtifact) -> tuple:
             asset.output_path,
             asset.format,
             "",
-            _safe_stat(path),
+            safe_file_stat(path),
         )
     path = Path(asset.path)
     return (
@@ -52,7 +57,7 @@ def make_preview_cache_key(asset: ResourceItem | ExportArtifact) -> tuple:
         asset.type,
         asset.format,
         asset.checksum or "",
-        _safe_stat(path),
+        safe_file_stat(path),
     )
 
 

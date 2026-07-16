@@ -95,8 +95,42 @@ def test_corrupt_payload_is_miss(tmp_path: Path):
     cache.store(asset, _well_head_result(src))
     entries = list((root / ".preview_cache" / "entries").iterdir())
     assert entries
-    (entries[0] / "payload.npz").write_bytes(b"not-npz")
+    corrupt = entries[0]
+    (corrupt / "payload.npz").write_bytes(b"not-npz")
     assert cache.try_load(asset) is None
+    # Corrupt entries are removed so they do not accumulate.
+    assert not corrupt.exists()
+
+
+def test_is_disk_cacheable_rejects_las_and_sgy():
+    from paleo_workbench.ui.pages.preview_disk_cache import is_disk_cacheable
+
+    las = ResourceItem(
+        id="l1", name="a", path="/tmp/a.las", type="well_log", format="las"
+    )
+    sgy = ResourceItem(
+        id="s1", name="b", path="/tmp/b.sgy", type="seismic", format="sgy"
+    )
+    assert not is_disk_cacheable(las)
+    assert not is_disk_cacheable(sgy)
+
+
+def test_roundtrip_preserves_xy_arrays(tmp_path: Path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    src = root / "wells.dat"
+    src.write_text("#WellHead\n", encoding="utf-8")
+    asset = ResourceItem(
+        id="r1", name="wells", path=str(src), type="well_head", format="dat"
+    )
+    cache = PreviewDiskCache(project_root=root)
+    original = _well_head_result(src)
+    cache.store(asset, original)
+    loaded = cache.try_load(asset)
+    assert loaded is not None
+    np.testing.assert_array_equal(loaded.engine_preview.payload.x, np.array([1.0]))
+    np.testing.assert_array_equal(loaded.engine_preview.payload.y, np.array([2.0]))
+    assert loaded.engine_preview.payload.names == ("A1",)
 
 
 def test_clear_removes_entries(tmp_path: Path):

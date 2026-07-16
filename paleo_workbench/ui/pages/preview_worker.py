@@ -9,7 +9,10 @@ from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_cache_key
-from paleo_workbench.ui.pages.preview_disk_cache import PreviewDiskCache
+from paleo_workbench.ui.pages.preview_disk_cache import (
+    PreviewDiskCache,
+    is_disk_cacheable,
+)
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
 
 Asset = ResourceItem | ExportArtifact
@@ -119,10 +122,12 @@ class _PreviewWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            if (
+            use_disk = (
                 self._disk is not None
                 and isinstance(self._asset, ResourceItem)
-            ):
+                and is_disk_cacheable(self._asset)
+            )
+            if use_disk:
                 hit = self._disk.try_load(self._asset)
                 if hit is not None:
                     self.finished.emit(self._generation, hit)
@@ -132,7 +137,7 @@ class _PreviewWorker(QObject):
             if result.mode != "geoviz":
                 result = preload_media(result)
 
-            if self._disk is not None and isinstance(self._asset, ResourceItem):
+            if use_disk:
                 self._disk.store(self._asset, result)
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(self._generation, str(exc))

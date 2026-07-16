@@ -28,6 +28,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "PreviewOptions",
         "PreviewRegistry",
         "PreviewRequest",
+        "PAYLOAD_SCHEMA_VERSION",
         "encode_prepared_preview",
         "decode_prepared_preview",
         # Documented compatibility exports used by existing workbench panels.
@@ -96,7 +97,8 @@ def test_workbench_accepts_documented_facade_imports(tmp_path: Path):
         "from geoviz import (\n"
         "    ErrorCode, GeoVizEngine, GeoVizError, PreparedPreview,\n"
         "    PreviewCapabilities, PreviewKind, PreviewOptions, PreviewRegistry,\n"
-        "    PreviewRequest, encode_prepared_preview, decode_prepared_preview,\n"
+        "    PreviewRequest, PAYLOAD_SCHEMA_VERSION,\n"
+        "    encode_prepared_preview, decode_prepared_preview,\n"
         "    WellLogCanvas, WellLogData, CurveData,\n"
         "    build_qpainter_tracks, SeismicView, ProfileWidget, PaleoMapCanvas,\n"
         "    CrossWellCanvas, PlotWidget, SurfaceWidget,\n"
