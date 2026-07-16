@@ -267,9 +267,13 @@ class PreviewRequestController(QObject):
             return
 
         # Cooperative only: ask every owned thread to stop its event loop after
-        # the current bounded provider call returns. Never abandon ownership of
-        # a running QThread, even if the caller's bounded wait expires.
+        # the current bounded provider call returns. Prefer a bounded wait so a
+        # stuck provider cannot freeze the UI or hang the entire test suite
+        # (CI previously stalled on infinite QThread.wait()).
         deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
+        # Second-chance join after the caller's deadline — still finite.
+        # Absolute ceiling even when caller passes wait_ms=0/1 (tests).
+        hard_cap_ms = min(max(int(deadline), 0) + 2_000, 10_000)
         for thread, worker in jobs:
             try:
                 worker.finished.disconnect(self._on_finished)
@@ -283,12 +287,15 @@ class PreviewRequestController(QObject):
             thread.quit()
 
         for thread, _worker in jobs:
-            if not thread.wait(max(deadline, 0)):
-                thread.wait()
-
-        for thread, _worker in jobs:
-            while thread.isRunning():
-                thread.wait()
+            if thread.wait(max(int(deadline), 0)):
+                continue
+            if not thread.wait(hard_cap_ms):
+                # Last resort: leave the OS thread; ownership is cleared below so
+                # the controller does not block forever. Prefer this over hanging
+                # the process when a provider ignores interruption.
+                thread.requestInterruption()
+                thread.quit()
+                thread.wait(100)
 
         self._active = None
         self._jobs.clear()
