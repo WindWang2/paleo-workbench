@@ -59,10 +59,10 @@
 | T-STRAT-01 | 地层(新) | P1 | **TODO** | Agent | 产品缺口：地层对比页 = 多井 + tops + DTW；复用 CrossWell engine |
 | T-SEIS-01 | 地震 | P1 | **TODO** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
 | T-WELL-01 | 测井 | P1 | **TODO** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
-| T-FLOW-01 | 全局 | P0 | **WIP** | Agent | 端到端数据流契约测试：资源→预测→制备→编图→质检→导出 |
+| T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-QC-01` + `T-FLOW-01`。
+**锁定任务（下一步）：** `T-MAP-02` 或 `T-STRAT-01` 或 `T-PREP-01`。
 
 ---
 
@@ -139,6 +139,7 @@
 | 2026-07-16 前会话 | I/O+VIZ+Review 修复 | 见 task_plan Phase 22–25；测试 66 passed 聚焦套件 |
 | 2026-07-16 | T-DATA-02 | DataPage.project_path 贯通 import/rescan/export；41 passed 聚焦 |
 | 2026-07-16 | T-COMMIT-01 | 提交 push workbench + geoviz 子模块 |
+| 2026-07-16 | T-QC-01 + T-FLOW-01 | QC upsert；e2e 数据流契约；VizAdapter 相对路径解析 |
 
 ---
 
