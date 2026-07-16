@@ -1,7 +1,7 @@
 # Project Preview Disk Cache Design
 
 **Date:** 2026-07-16
-**Status:** Draft (pending user review)
+**Status:** Approved
 **Scope:** Data-page GeoViz previews — selective prepare-result disk cache under the project root
 
 ## Context
