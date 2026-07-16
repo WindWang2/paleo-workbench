@@ -957,3 +957,9 @@ are restricted to the `geoviz` facade; the facade AST has no workbench import.
 - `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_geoviz_real_data_smoke.py -m slow -q` → **8 passed**; the 966 MiB SEGY used only three slices of at most 512×512 and a failing `get_volume_downsampled` guard proved that no full volume was requested.
 - Exact original engine command `cd geo-viz-engine && QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -m 'not slow' -q` → existing QtWebEngine `ChartEngine` initialization segfault, exit 139. Passing alternative `cd geo-viz-engine && QT_QPA_PLATFORM=minimal QT_OPENGL=software LIBGL_ALWAYS_SOFTWARE=1 .venv/bin/python -m pytest -m 'not slow' -q --timeout=30` → **1006 passed, 2 skipped, 130 deselected in 32.16s** in one process. The child preview-import check prepends the current checkout and all local package roots to `PYTHONPATH`, asserts both module paths are inside that checkout, and verifies no `renderer_3d` import.
 - Exact original root command `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -m 'not slow' -q` → existing Qt async stall after 53%+ with no failure. Passing alternative `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -m 'not slow' -vv --timeout=30` → initially **801 passed, 4 skipped, 8 deselected, 2 warnings in 25.23s**; after adding three facade-boundary cases, **804 passed, 4 skipped, 8 deselected, 2 warnings in 25.18s**. One intervening rerun stalled at `test_worker_uses_asset_snapshot`; that node passed alone and the next identical full run completed.
+
+## Session: 2026-07-16 — Preview disk cache
+
+Project-local `.preview_cache/` stores bounded prepare results for horizon /
+well_stratification / well_head. LAS and SGY remain interactive without disk
+cache. Clear via DataPage.clear_preview_cache() / toolbar button.
