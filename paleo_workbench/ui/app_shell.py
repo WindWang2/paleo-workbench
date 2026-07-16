@@ -254,8 +254,13 @@ class AppShell(QWidget):
 
     def update_sequence_framework_page(self, stratigraphy) -> None:
         page = self.page_stack.widget(4)
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
         if hasattr(page, "update_state"):
             page.update_state(stratigraphy)
+
+    def sequence_framework_page_widget(self):
+        return self.page_stack.widget(4)
 
     def update_visualization_page(
         self,

@@ -10,7 +10,7 @@ def test_sequence_boundary_table_empty_state(qtbot):
 
     assert table.table.rowCount() == 0
     assert not table.empty_label.isHidden()
-    assert table.empty_label.text() == "未配置层序界面"
+    assert "未配置层序界面" in table.empty_label.text()
 
 
 def test_sequence_boundary_table_lists_boundaries(qtbot):

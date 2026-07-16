@@ -287,6 +287,7 @@ class PaleoWorkbenchWindow(QWidget):
         self._wire_data_visualization_jump()
         self._wire_mapping_page()
         self._wire_preparation_page()
+        self._wire_sequence_page()
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()
@@ -307,8 +308,33 @@ class PaleoWorkbenchWindow(QWidget):
         if hasattr(page, "factor_maps_updated"):
             page.factor_maps_updated.connect(self._on_factor_maps_updated)
 
+    def _wire_sequence_page(self) -> None:
+        page = self.app_shell.sequence_framework_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
+        if hasattr(page, "stratigraphy_updated"):
+            # Avoid duplicate connections across shell rebuilds of the same page
+            # instance is new each rebuild; connect once per shell.
+            page.stratigraphy_updated.connect(self._on_stratigraphy_updated)
+
     def _on_factor_maps_updated(self) -> None:
         """Refresh preparation + mapping factor shelf after real IDW batch generate."""
+        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
+        self.app_shell.update_mapping_page(
+            self.project.paleomap_documents,
+            factor_tasks=self.project.factor_map_tasks,
+            project_crs=self.project.coordinate.project_crs,
+        )
+
+    def _on_stratigraphy_updated(self) -> None:
+        """Re-push stratigraphy-bound pages after sequence scheme save/target change."""
+        state = dashboard_state(self.project)
+        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
+        steps = active_run.workflow_steps if active_run else []
+        self.app_shell.update_home_page(state, steps)
+        self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
         self.app_shell.update_mapping_page(
             self.project.paleomap_documents,
