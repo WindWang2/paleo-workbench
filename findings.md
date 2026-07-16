@@ -606,7 +606,7 @@ Original plan had 3 items (virtual scrolling, import concurrency, search debounc
 
 ### Still open (backlog)
 
-1. **Seismic Auto-Tie:** button emits `auto_tie_requested`; nothing in `SeismicView` connects / runs DTW against current trace.
+1. **Seismic Auto-Tie:** ✅ `SeismicView` connects `auto_tie_requested` → `current_seismic_trace` → `panel.auto_tie`; `synthetic_changed` → IL/XL overlay.
 2. **Hidden layer hit-test:** geometry API path does not filter `layer_is_visible`.
 3. **Demo draft append:** each 「生成演示草稿」 appends another `PaleoMapDocument`.
 4. **Path escape:** `resolve_project_path` allows `../` outside project (trusted local OK).

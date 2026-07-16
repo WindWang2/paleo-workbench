@@ -412,7 +412,7 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | # | Item | Status |
 |---|------|--------|
 | 1–10 | Historical minor items (save tests, PAGE_INDEX, topology, shapely, …) | ✅ done |
-| 11 | Seismic Auto-Tie / synthetic signals never consumed by `SeismicView` | open |
+| 11 | Seismic Auto-Tie / synthetic signals never consumed by `SeismicView` | ✅ done (T-SEIS-02) |
 | 12 | Map edit hit-test ignores hidden layers | open |
 | 13 | Demo map draft always appends (no replace/idempotent) | open |
 | 14 | `resolve_project_path` allows `..` escape (trusted-local threat model) | open |
