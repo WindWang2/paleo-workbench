@@ -14,6 +14,7 @@ __all__ = [
     "ReviewExportPage",
     "SequenceFrameworkPage",
     "SeismicPredictionPage",
+    "StratigraphyCorrelationPage",
     "VisualizationPage",
     "WellLogPredictionPage",
 ]
@@ -30,6 +31,7 @@ _EXPORTS = {
     "ReviewExportPage": "paleo_workbench.ui.pages.review_export_page",
     "SequenceFrameworkPage": "paleo_workbench.ui.pages.sequence_framework_page",
     "SeismicPredictionPage": "paleo_workbench.ui.pages.seismic_prediction_page",
+    "StratigraphyCorrelationPage": "paleo_workbench.ui.pages.stratigraphy_correlation_page",
     "VisualizationPage": "paleo_workbench.ui.pages.visualization_page",
     "WellLogPredictionPage": "paleo_workbench.ui.pages.well_log_prediction_page",
 }

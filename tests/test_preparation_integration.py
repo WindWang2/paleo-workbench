@@ -7,7 +7,7 @@ from paleo_workbench.workflow.factors import create_mock_factor_map
 def test_app_shell_page_six_is_preparation_page(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(6)
+    page = window.app_shell.page_stack.widget(7)
     assert isinstance(page, PreparationPage)
 
 
@@ -18,7 +18,7 @@ def test_preparation_page_has_factor_tasks(qtbot):
 
     window = PaleoWorkbenchWindow(project=project)
     qtbot.addWidget(window)
-    page = window.app_shell.page_stack.widget(6)
+    page = window.app_shell.page_stack.widget(7)
     assert isinstance(page, PreparationPage)
     summary_text = page.task_panel.summary_label.text()
     assert "2 / 2" in summary_text

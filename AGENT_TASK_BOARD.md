@@ -17,7 +17,7 @@
 | **NOT present** | PostGIS, MapLibre, OpenLayers, geopandas, QGIS API |
 | **Native** | optional `native/map_edit_core` (pybind11) for map edit hot path |
 | **Python pin** | pyproject `>=3.12,<3.13` — host may run 3.13 (env drift risk) |
-| **Nav** | 9 pages, `QStackedWidget` + IconRail index 0–8 |
+| **Nav** | 10 pages, `QStackedWidget` + IconRail index 0–9 |
 
 ### Page index map (product ↔ code)
 
@@ -27,13 +27,12 @@
 | 1 | 数据 | 2 数据 | `DataPage` | **DONE** (A/B/C + I/O enrich) |
 | 2 | 测井预测 | 4 地层·单井相 | `WellLogPredictionPage` | **DONE** (LAS+相道/导出) |
 | 3 | 地震预测 | 5 地震·地震相 | `SeismicPredictionPage` | **DONE** (属性/Tie/运行·发送) |
-| 4 | 层序格架 | 3 格架 | `SequenceFrameworkPage` | **PARTIAL** |
-| 5 | 可视化 | 6 可视化 | `VisualizationPage` | **DONE** (hosts + engine align) |
-| 6 | 制备 | 7 数据制备 | `PreparationPage` | **PARTIAL** |
-| 7 | 编图 | 8 地理图制作 | `MappingPage` | **DONE** (editor V1) |
-| 8 | 成图审核 | 9 质检 | `ReviewExportPage` | **PARTIAL** |
-
-**Gap vs ideal “地层对比”:** multi-well correlation product lives in **engine** `CrossWellCanvas` + viz 连井 tab; **no dedicated 地层 page** — needs task T-STRAT-*.
+| 4 | 层序格架 | 3 格架 | `SequenceFrameworkPage` | **DONE** (方案持久化) |
+| 5 | 地层对比 | 4 连井对比 | `StratigraphyCorrelationPage` | **DONE** (CrossWell MVP) |
+| 6 | 可视化 | 6 可视化 | `VisualizationPage` | **DONE** (hosts + engine align) |
+| 7 | 制备 | 7 数据制备 | `PreparationPage` | **DONE** (IDW) |
+| 8 | 编图 | 8 地理图制作 | `MappingPage` | **DONE** (editor V1) |
+| 9 | 成图审核 | 9 质检 | `ReviewExportPage` | **PARTIAL** |
 
 ---
 
@@ -53,16 +52,16 @@
 | T-MAP-03 | 编图 | P1 | **DONE** | Agent | 参考层 offline 状态；`MapReferenceLayer.external` 字段 |
 | T-QC-01 | 质检 | P1 | **DONE** | Agent | QC upsert + active_quality_reports for dashboard |
 | T-VIZ-03 | 可视化 | P1 | **DONE** | Agent | SVG/PDF 按钮按 Tab 能力门控；连井/古地理专用导出 API |
-| T-ADP-01 | 适配器 | P2 | **TODO** | Agent | PaleoMapAdapter 禁用假 pdf/svg 或接引擎出图 |
+| T-ADP-01 | 适配器 | P2 | **DONE** | Agent | PaleoMapAdapter 禁用假 pdf/svg；仅 geojson |
 | T-PREP-01 | 制备 | P1 | **DONE** | Agent | 单因素真实插值链路对接 engine plots/IDW；与编图 factor shelf 闭环 |
 | T-SEQ-01 | 格架 | P1 | **DONE** | Agent | 层序方案持久化加深；与预测/编图 target_horizon 双向绑定 |
-| T-STRAT-01 | 地层(新) | P1 | **TODO** | Agent | 产品缺口：地层对比页 = 多井 + tops + DTW；复用 CrossWell engine |
+| T-STRAT-01 | 地层(新) | P1 | **WIP** | Agent | 产品缺口：地层对比页 = 多井 + tops + DTW；复用 CrossWell engine |
 | T-SEIS-01 | 地震 | P1 | **DONE** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
 | T-WELL-01 | 测井 | P1 | **DONE** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** 无（T-WELL-01 已完成）。
+**锁定任务（本回合）：** `T-ADP-01` + `T-STRAT-01`。
 
 ---
 

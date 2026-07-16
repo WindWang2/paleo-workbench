@@ -43,9 +43,12 @@ def test_qss_template_is_nonempty_string():
 def test_page_names_constant():
     assert tokens.PAGE_NAMES == [
         "首页", "数据", "测井预测", "地震预测", "层序格架",
+        "地层对比",
         "可视化", "制备", "编图", "成图审核",
     ]
-    assert len(tokens.PAGE_NAMES) == 9
+    assert len(tokens.PAGE_NAMES) == 10
+    assert len(tokens.ICON_FILES) == 10
+    assert len(tokens.PAGE_DESCRIPTIONS) == 10
 
 
 def test_step_colors_exist():

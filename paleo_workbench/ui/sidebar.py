@@ -139,6 +139,12 @@ class TextSidebar(QFrame):
                 ("界面列表", False),
                 ("体系域方案", False),
             ],
+            "地层对比": [
+                ("地层对比", True),
+                ("对比井选择", False),
+                ("连井剖面", False),
+                ("导出 SVG", False),
+            ],
             "可视化": [
                 ("综合可视化", True),
                 ("测井 / 地震 / 连井", False),

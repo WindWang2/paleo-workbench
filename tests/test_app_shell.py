@@ -20,10 +20,10 @@ def test_app_shell_assembles_all_zones(qtbot):
     assert shell.status_bar is not None
 
 
-def test_app_shell_has_nine_pages(qtbot):
+def test_app_shell_has_ten_pages(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.page_stack.count() == 9
+    assert shell.page_stack.count() == 10
 
 
 def test_app_shell_default_page_is_zero(qtbot):
@@ -125,7 +125,7 @@ def test_app_shell_mapping_sidebar_shows_map_name(qtbot):
         PaleoMapDocument(name="ZJ2 Map", linked_target_horizon="ZJ2"),
     ]
     shell.update_mapping_page(docs)
-    shell.icon_rail.nav_buttons[7].click()
+    shell.icon_rail.nav_buttons[8].click()
 
     texts = "\n".join(label.text() for label in shell.sidebar._content_labels)
     assert shell.sidebar.context_label.text() == "编图"

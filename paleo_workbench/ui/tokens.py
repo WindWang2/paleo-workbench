@@ -63,20 +63,23 @@ CONTROL_HEIGHT_LG = 32
 
 ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
+    "stratigraphy.svg",
     "visualization.svg", "preparation.svg", "mapping.svg", "review.svg",
 ]
 
 PAGE_NAMES = [
     "首页", "数据", "测井预测", "地震预测", "层序格架",
+    "地层对比",
     "可视化", "制备", "编图", "成图审核",
 ]
-# Brief Chinese descriptions (<=15 chars) for nav-icon tooltips.
+# Brief Chinese descriptions for nav-icon tooltips.
 PAGE_DESCRIPTIONS = [
     "项目概览与流程导航",
     "导入与管理数据资产",
     "基于测井的沉积相预测",
     "基于地震的沉积相预测",
     "层序地层格架构建",
+    "多井连井地层对比",
     "相带与古地理可视化",
     "制图数据制备与清洗",
     "古地理图编制工作台",

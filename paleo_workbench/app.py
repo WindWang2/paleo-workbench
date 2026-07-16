@@ -425,6 +425,7 @@ class PaleoWorkbenchWindow(QWidget):
         steps = active_run.workflow_steps if active_run else []
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
+        self.app_shell.update_stratigraphy_correlation_page(self.project)
         self.app_shell.update_preparation_page(self.project.factor_map_tasks)
         self.app_shell.update_mapping_page(
             self.project.paleomap_documents,
@@ -500,6 +501,7 @@ class PaleoWorkbenchWindow(QWidget):
             self.project.prediction_tasks, project=self.project
         )
         self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
+        self.app_shell.update_stratigraphy_correlation_page(self.project)
         self.app_shell.update_visualization_page(
             self.project.resources,
             self.project.prediction_tasks,

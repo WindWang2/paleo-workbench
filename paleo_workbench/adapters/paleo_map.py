@@ -31,28 +31,26 @@ class PaleoMapAdapter:
         output = Path(parsed.path)
         output.parent.mkdir(parents=True, exist_ok=True)
         warnings: list[str] = []
-        if parsed.format == "geojson":
-            features = self._layers_to_geojson_features(parsed.selected_layers)
-            collection = {
-                "type": "FeatureCollection",
-                "crs": {"type": "name", "properties": {"name": self._payload.crs}},
-                "features": features,
-            }
-            output.write_text(
-                json.dumps(collection, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+        if parsed.format != "geojson":
+            # T-ADP-01: do not write placeholder PDF/SVG/PNG stubs that look like success.
+            # Use VisualizationPage / MappingPage export (engine professional figure) instead.
+            raise ValueError(
+                f"PaleoMapAdapter does not support '{parsed.format}' export; "
+                "use format='geojson' for geometry, or export the live map canvas "
+                "(visualization / mapping) for PNG/SVG/PDF"
             )
-            if not features:
-                warnings.append("no layers to export; wrote empty FeatureCollection")
-        else:
-            # Vector/raster map rendering is not yet wired through this adapter.
-            output.write_text(
-                f"minimal {parsed.format} export from {self.adapter_name}\n",
-                encoding="utf-8",
-            )
-            warnings.append(
-                f"{parsed.format} export is a placeholder; use geojson for geometry"
-            )
+        features = self._layers_to_geojson_features(parsed.selected_layers)
+        collection = {
+            "type": "FeatureCollection",
+            "crs": {"type": "name", "properties": {"name": self._payload.crs}},
+            "features": features,
+        }
+        output.write_text(
+            json.dumps(collection, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if not features:
+            warnings.append("no layers to export; wrote empty FeatureCollection")
         return ExportResult(
             output_path=output.as_posix(),
             format=parsed.format,
@@ -61,9 +59,7 @@ class PaleoMapAdapter:
             artifact_metadata={
                 "adapter": self.adapter_name,
                 "layer_count": len(self._payload.layers),
-                "feature_count": len(self._layers_to_geojson_features(parsed.selected_layers))
-                if parsed.format == "geojson"
-                else 0,
+                "feature_count": len(features),
             },
         )
 

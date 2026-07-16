@@ -40,3 +40,14 @@ def test_paleo_map_adapter_validates_payload_and_exports_metadata(tmp_path: Path
     assert adapter.get_view_state().viewport["zoom"] == 2
     assert result.output_path.endswith("map.geojson")
     assert Path(result.output_path).exists()
+
+
+def test_paleo_map_adapter_rejects_placeholder_pdf_svg(tmp_path: Path):
+    adapter = PaleoMapAdapter()
+    adapter.set_data({"viewer_type": "paleo_map", "schema_version": "1.0", "layers": []})
+    with pytest.raises(ValueError, match="geojson"):
+        adapter.export({"path": str(tmp_path / "map.pdf"), "format": "pdf"})
+    with pytest.raises(ValueError, match="geojson"):
+        adapter.export({"path": str(tmp_path / "map.svg"), "format": "svg"})
+    assert not (tmp_path / "map.pdf").exists()
+    assert not (tmp_path / "map.svg").exists()

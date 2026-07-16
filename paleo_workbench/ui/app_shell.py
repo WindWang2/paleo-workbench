@@ -19,6 +19,7 @@ from paleo_workbench.ui.pages.preparation_page import PreparationPage
 from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
 from paleo_workbench.ui.pages.sequence_framework_page import SequenceFrameworkPage
 from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
+from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyCorrelationPage
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.ui.sidebar import TextSidebar
@@ -32,10 +33,11 @@ PAGE_INDEX_DATA = 1
 PAGE_INDEX_WELL_LOG = 2
 PAGE_INDEX_SEISMIC = 3
 PAGE_INDEX_SEQUENCE = 4
-PAGE_INDEX_VISUALIZATION = 5
-PAGE_INDEX_PREPARATION = 6
-PAGE_INDEX_MAPPING = 7
-PAGE_INDEX_REVIEW = 8
+PAGE_INDEX_STRATIGRAPHY = 5
+PAGE_INDEX_VISUALIZATION = 6
+PAGE_INDEX_PREPARATION = 7
+PAGE_INDEX_MAPPING = 8
+PAGE_INDEX_REVIEW = 9
 
 
 class AppShell(QWidget):
@@ -65,12 +67,13 @@ class AppShell(QWidget):
         self.page_stack.addWidget(WellLogPredictionPage()) # index 2 = 测井预测
         self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
-        self.page_stack.addWidget(VisualizationPage()) # index 5 = 可视化
-        self.page_stack.addWidget(PreparationPage()) # index 6 = 制备
+        self.page_stack.addWidget(StratigraphyCorrelationPage())  # index 5 = 地层对比
+        self.page_stack.addWidget(VisualizationPage()) # index 6 = 可视化
+        self.page_stack.addWidget(PreparationPage()) # index 7 = 制备
         self.mapping_page = MappingPage()
         self.mapping_page.mapping_context_changed.connect(self.update_mapping_context)
-        self.page_stack.addWidget(self.mapping_page)  # index 7 = 编图
-        self.page_stack.addWidget(ReviewExportPage()) # index 8 = 成图审核
+        self.page_stack.addWidget(self.mapping_page)  # index 8 = 编图
+        self.page_stack.addWidget(ReviewExportPage()) # index 9 = 成图审核
         self._mapping_context = self._build_mapping_context()
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
@@ -278,6 +281,16 @@ class AppShell(QWidget):
     def sequence_framework_page_widget(self):
         return self.page_stack.widget(4)
 
+    def update_stratigraphy_correlation_page(self, project=None) -> None:
+        page = self.page_stack.widget(PAGE_INDEX_STRATIGRAPHY)
+        if hasattr(page, "set_project"):
+            page.set_project(project if project is not None else self.project)
+        if hasattr(page, "update_state"):
+            page.update_state(project if project is not None else self.project)
+
+    def stratigraphy_correlation_page_widget(self):
+        return self.page_stack.widget(PAGE_INDEX_STRATIGRAPHY)
+
     def update_visualization_page(
         self,
         resources: list,
@@ -285,7 +298,7 @@ class AppShell(QWidget):
         map_documents: list,
         project=None,
     ) -> None:
-        page = self.page_stack.widget(5)
+        page = self.page_stack.widget(PAGE_INDEX_VISUALIZATION)
         if hasattr(page, "update_state"):
             page.update_state(
                 resources,
@@ -295,14 +308,14 @@ class AppShell(QWidget):
             )
 
     def update_preparation_page(self, tasks: list) -> None:
-        page = self.page_stack.widget(6)
+        page = self.page_stack.widget(PAGE_INDEX_PREPARATION)
         if hasattr(page, "set_project"):
             page.set_project(self.project)
         if hasattr(page, "update_state"):
             page.update_state(tasks)
 
     def preparation_page_widget(self):
-        return self.page_stack.widget(6)
+        return self.page_stack.widget(PAGE_INDEX_PREPARATION)
 
     def update_mapping_page(
         self,
@@ -344,6 +357,6 @@ class AppShell(QWidget):
         }
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
-        page = self.page_stack.widget(8)
+        page = self.page_stack.widget(PAGE_INDEX_REVIEW)
         if hasattr(page, "update_state"):
             page.update_state(reports, map_documents, artifacts)
