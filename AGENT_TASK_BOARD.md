@@ -26,7 +26,7 @@
 | 0 | 首页 | 1 项目总览 | `HomePage` | **DONE** |
 | 1 | 数据 | 2 数据 | `DataPage` | **DONE** (A/B/C + I/O enrich) |
 | 2 | 测井预测 | 4 地层·单井相 | `WellLogPredictionPage` | **PARTIAL** |
-| 3 | 地震预测 | 5 地震·地震相 | `SeismicPredictionPage` | **PARTIAL** |
+| 3 | 地震预测 | 5 地震·地震相 | `SeismicPredictionPage` | **DONE** (属性/Tie/运行·发送) |
 | 4 | 层序格架 | 3 格架 | `SequenceFrameworkPage` | **PARTIAL** |
 | 5 | 可视化 | 6 可视化 | `VisualizationPage` | **DONE** (hosts + engine align) |
 | 6 | 制备 | 7 数据制备 | `PreparationPage` | **PARTIAL** |
@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-SEIS-01`。
+**锁定任务（本回合）：** 无（T-SEIS-01 已完成）。
 
 ---
 
@@ -145,6 +145,7 @@
 | 2026-07-16 | T-VIZ-03 | view_export_capabilities；连井 export_composite / 古地理 professional figure；Tab 门控 SVG/PDF；21 tests |
 | 2026-07-16 | T-PREP-01 | factor_interpolation IDW/SciPy；批量生成接线；编图 shelf 闭环；26 tests |
 | 2026-07-16 | T-SEQ-01 | stratigraphy apply/bind；目标层位可编辑；保存同步 run/map/factor；16 tests |
+| 2026-07-16 | T-SEIS-01 | 属性/模式/Auto-Tie→SeismicView；运行预测+发送编图；19 tests |
 
 ---
 
