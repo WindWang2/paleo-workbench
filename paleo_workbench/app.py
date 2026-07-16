@@ -286,6 +286,7 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.properties_requested.connect(self._on_properties)
         self._wire_data_visualization_jump()
         self._wire_mapping_page()
+        self._wire_preparation_page()
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()
@@ -296,6 +297,24 @@ class PaleoWorkbenchWindow(QWidget):
         page = self.app_shell.mapping_page_widget()
         if hasattr(page, "generate_demo_draft_requested"):
             page.generate_demo_draft_requested.connect(self._on_generate_demo_map_draft)
+
+    def _wire_preparation_page(self) -> None:
+        page = self.app_shell.preparation_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
+        if hasattr(page, "factor_maps_updated"):
+            page.factor_maps_updated.connect(self._on_factor_maps_updated)
+
+    def _on_factor_maps_updated(self) -> None:
+        """Refresh preparation + mapping factor shelf after real IDW batch generate."""
+        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
+        self.app_shell.update_mapping_page(
+            self.project.paleomap_documents,
+            factor_tasks=self.project.factor_map_tasks,
+            project_crs=self.project.coordinate.project_crs,
+        )
 
     def _on_generate_demo_map_draft(self) -> None:
         """Compile a deterministic demo draft; confirm if mapping scene is dirty."""

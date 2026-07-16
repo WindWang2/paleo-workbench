@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -18,6 +19,8 @@ from paleo_workbench.ui import tokens
 
 class FactorTaskPanel(QFrame):
     """Left sidebar listing factor map tasks for the Preparation page."""
+
+    generate_requested = Signal(str)  # interpolation method label
 
     class Row(QWidget):
         """A single factor map task row."""
@@ -90,6 +93,7 @@ class FactorTaskPanel(QFrame):
 
         self.generate_btn = QPushButton("批量生成单因素图")
         self.generate_btn.setObjectName("PrimaryButton")
+        self.generate_btn.clicked.connect(self._emit_generate)
         outer.addWidget(self.generate_btn)
 
         self.scroll = QScrollArea()
@@ -110,6 +114,12 @@ class FactorTaskPanel(QFrame):
             f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
         )
         outer.addWidget(self.summary_label)
+
+    def _emit_generate(self) -> None:
+        self.generate_requested.emit(self.method_combo.currentText() or "IDW")
+
+    def selected_method(self) -> str:
+        return self.method_combo.currentText() or "IDW"
 
     def _clear_rows(self) -> None:
         while self.task_layout.count() > 1:

@@ -275,8 +275,13 @@ class AppShell(QWidget):
 
     def update_preparation_page(self, tasks: list) -> None:
         page = self.page_stack.widget(6)
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
         if hasattr(page, "update_state"):
             page.update_state(tasks)
+
+    def preparation_page_widget(self):
+        return self.page_stack.widget(6)
 
     def update_mapping_page(
         self,
