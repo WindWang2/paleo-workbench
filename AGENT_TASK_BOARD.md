@@ -32,7 +32,7 @@
 | 6 | 可视化 | 6 可视化 | `VisualizationPage` | **DONE** (hosts + engine align) |
 | 7 | 制备 | 7 数据制备 | `PreparationPage` | **DONE** (IDW) |
 | 8 | 编图 | 8 地理图制作 | `MappingPage` | **DONE** (editor V1) |
-| 9 | 成图审核 | 9 质检 | `ReviewExportPage` | **PARTIAL** |
+| 9 | 成图审核 | 9 质检 | `ReviewExportPage` | **DONE** (运行检查+导出报告) |
 
 ---
 
@@ -60,8 +60,10 @@
 | T-WELL-01 | 测井 | P1 | **DONE** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **DONE** | Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
+| T-QC-02 | 质检 | P1 | **WIP** | Agent | 成图审核页：运行检查 + 导出报告接线；页成熟度 DONE |
+| T-CI-01 | 全局 | P0 | **WIP** | Agent | CI 安装系统 GDAL；修复 3.12/3.13 依赖失败 |
 
-**锁定任务（本回合）：** 无（看板任务已清空）。
+**锁定任务（本回合）：** `T-CI-01` + `T-QC-02`。
 
 ---
 

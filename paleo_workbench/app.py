@@ -290,6 +290,7 @@ class PaleoWorkbenchWindow(QWidget):
         self._wire_sequence_page()
         self._wire_seismic_page()
         self._wire_well_log_page()
+        self._wire_review_page()
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()
@@ -342,6 +343,28 @@ class PaleoWorkbenchWindow(QWidget):
             page.prediction_updated.connect(self._on_well_log_prediction_updated)
         if hasattr(page, "send_to_preparation_requested"):
             page.send_to_preparation_requested.connect(self._on_well_log_send_to_prep)
+
+    def _wire_review_page(self) -> None:
+        page = self.app_shell.review_export_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
+        if hasattr(page, "reports_updated"):
+            page.reports_updated.connect(self._on_qc_reports_updated)
+
+    def _on_qc_reports_updated(self) -> None:
+        from paleo_workbench.workflow.qc import active_quality_reports
+
+        state = dashboard_state(self.project)
+        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
+        steps = active_run.workflow_steps if active_run else []
+        self.app_shell.update_home_page(state, steps)
+        self.app_shell.update_review_export_page(
+            active_quality_reports(self.project),
+            self.project.paleomap_documents,
+            self.project.export_artifacts,
+        )
 
     def _on_well_log_prediction_updated(self) -> None:
         """Refresh well-log / seismic / viz pages after a new single-well task."""
@@ -514,8 +537,10 @@ class PaleoWorkbenchWindow(QWidget):
             factor_tasks=self.project.factor_map_tasks,
             project_crs=self.project.coordinate.project_crs,
         )
+        from paleo_workbench.workflow.qc import active_quality_reports
+
         self.app_shell.update_review_export_page(
-            self.project.quality_reports,
+            active_quality_reports(self.project),
             self.project.paleomap_documents,
             self.project.export_artifacts,
         )

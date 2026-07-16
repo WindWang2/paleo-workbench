@@ -29,11 +29,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: System libraries (Qt / offscreen)
+      - name: System libraries (Qt / offscreen / GDAL)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
+            gdal-bin \
+            libgdal-dev \
             libgl1 \
             libglib2.0-0 \
             libxkbcommon0 \
@@ -51,14 +53,20 @@ jobs:
             libxkbcommon-x11-0 \
             libfontconfig1 \
             libfreetype6
+          # Make pip build of osgeo.gdal find the system library.
+          echo "GDAL_CONFIG=$(command -v gdal-config)" >> "$GITHUB_ENV"
+          gdal-config --version
 
       - name: Install Python dependencies
+        env:
+          GDAL_CONFIG: ${{ env.GDAL_CONFIG }}
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,native]"
+          # Prefer binary wheels; fall back to building against system libgdal-dev.
+          python -m pip install --prefer-binary -e ".[dev,native]"
           # geo-viz-engine subpackages (may pull shapely, scipy, …)
           if [ -f requirements-geoviz.txt ]; then
-            python -m pip install -r requirements-geoviz.txt || true
+            python -m pip install --prefer-binary -r requirements-geoviz.txt || true
           fi
           # Core geoviz packages needed by mapping/preview tests
           python -m pip install -e geo-viz-engine/packages/geoviz_common || true

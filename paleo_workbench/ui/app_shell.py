@@ -358,5 +358,10 @@ class AppShell(QWidget):
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
         page = self.page_stack.widget(PAGE_INDEX_REVIEW)
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
         if hasattr(page, "update_state"):
             page.update_state(reports, map_documents, artifacts)
+
+    def review_export_page_widget(self):
+        return self.page_stack.widget(PAGE_INDEX_REVIEW)
