@@ -57,12 +57,12 @@
 | T-PREP-01 | 制备 | P1 | **DONE** | Agent | 单因素真实插值链路对接 engine plots/IDW；与编图 factor shelf 闭环 |
 | T-SEQ-01 | 格架 | P1 | **DONE** | Agent | 层序方案持久化加深；与预测/编图 target_horizon 双向绑定 |
 | T-STRAT-01 | 地层(新) | P1 | **TODO** | Agent | 产品缺口：地层对比页 = 多井 + tops + DTW；复用 CrossWell engine |
-| T-SEIS-01 | 地震 | P1 | **TODO** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
+| T-SEIS-01 | 地震 | P1 | **DONE** | Agent | 地震相工作流：属性/层位/Auto-Tie 信号接通 SeismicView |
 | T-WELL-01 | 测井 | P1 | **TODO** | Agent | 单井相：岩性/相道/导出；绑定真实 LAS 资源非仅 mock |
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** 无（T-SEQ-01 已完成）。
+**锁定任务（本回合）：** `T-SEIS-01`。
 
 ---
 

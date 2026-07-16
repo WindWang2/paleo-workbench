@@ -249,8 +249,16 @@ class AppShell(QWidget):
 
     def update_seismic_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(3)
+        if hasattr(page, "set_project"):
+            page.set_project(project if project is not None else self.project)
         if hasattr(page, "update_state"):
-            page.update_state(prediction_tasks, project=project)
+            page.update_state(
+                prediction_tasks,
+                project=project if project is not None else self.project,
+            )
+
+    def seismic_prediction_page_widget(self):
+        return self.page_stack.widget(3)
 
     def update_sequence_framework_page(self, stratigraphy) -> None:
         page = self.page_stack.widget(4)

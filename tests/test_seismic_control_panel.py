@@ -11,7 +11,7 @@ def test_seismic_control_panel_empty_state(qtbot):
 
     assert panel.objectName() == "SeismicControlPanel"
     assert panel.shape_value.text() == "—"
-    assert panel.mode_value.text() == "vd"
+    assert panel.mode_combo.currentText() == "vd"
     assert panel.run_btn.text() == "运行地震预测"
     assert panel.send_btn.text() == "发送编图"
 

@@ -288,6 +288,7 @@ class PaleoWorkbenchWindow(QWidget):
         self._wire_mapping_page()
         self._wire_preparation_page()
         self._wire_sequence_page()
+        self._wire_seismic_page()
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()
@@ -318,6 +319,53 @@ class PaleoWorkbenchWindow(QWidget):
             # Avoid duplicate connections across shell rebuilds of the same page
             # instance is new each rebuild; connect once per shell.
             page.stratigraphy_updated.connect(self._on_stratigraphy_updated)
+
+    def _wire_seismic_page(self) -> None:
+        page = self.app_shell.seismic_prediction_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
+        if hasattr(page, "prediction_updated"):
+            page.prediction_updated.connect(self._on_seismic_prediction_updated)
+        if hasattr(page, "send_to_mapping_requested"):
+            page.send_to_mapping_requested.connect(self._on_seismic_send_to_mapping)
+
+    def _on_seismic_prediction_updated(self) -> None:
+        """Refresh seismic / visualization / home after a new facies task."""
+        state = dashboard_state(self.project)
+        active_run = self.project.compilation_runs[-1] if self.project.compilation_runs else None
+        steps = active_run.workflow_steps if active_run else []
+        self.app_shell.update_home_page(state, steps)
+        self.app_shell.update_seismic_prediction_page(
+            self.project.prediction_tasks, project=self.project
+        )
+        self.app_shell.update_well_log_prediction_page(
+            self.project.prediction_tasks, project=self.project
+        )
+        self.app_shell.update_visualization_page(
+            self.project.resources,
+            self.project.prediction_tasks,
+            self.project.paleomap_documents,
+            project=self.project,
+        )
+
+    def _on_seismic_send_to_mapping(self) -> None:
+        """Compile a map draft from the latest prediction and open 编图."""
+        from paleo_workbench.pipeline.compile_map import compile_map_draft
+        from paleo_workbench.ui.app_shell import PAGE_INDEX_MAPPING
+
+        if not self.project.prediction_tasks:
+            QMessageBox.information(self, "发送编图", "请先运行地震预测")
+            return
+        compile_map_draft(self.project, seed=0)
+        self.app_shell.update_mapping_page(
+            self.project.paleomap_documents,
+            factor_tasks=self.project.factor_map_tasks,
+            project_crs=self.project.coordinate.project_crs,
+        )
+        self.app_shell.icon_rail.set_active(PAGE_INDEX_MAPPING)
+        self.app_shell._switch_page(PAGE_INDEX_MAPPING)
 
     def _on_factor_maps_updated(self) -> None:
         """Refresh preparation + mapping factor shelf after real IDW batch generate."""
