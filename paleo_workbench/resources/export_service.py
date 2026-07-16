@@ -373,9 +373,9 @@ def _export_widget_pdf(widget: Any, output_path: Path) -> None:
 
 
 def _export_paleo_map(canvas: Any, output_path: Path, fmt: str) -> None:
-    """Use geoviz_paleo_map professional figure export (title/scale/legend frame)."""
+    """Use engine professional figure export (title/scale/legend frame)."""
     try:
-        from geoviz_paleo_map import export_professional_figure
+        from geoviz import export_professional_figure
     except Exception as exc:  # pragma: no cover - import env
         raise ExportError(f"古地理导出模块不可用: {exc}") from exc
     export_professional_figure(

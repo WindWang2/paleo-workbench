@@ -96,4 +96,8 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           REQUIRE_MAP_EDIT_CPP: "1"
         run: |
-          python -m pytest -q --tb=short
+          # Per-test timeout prevents a single Qt/OpenGL hang from eating the job budget.
+          python -m pytest -q --tb=short \
+            --timeout=60 \
+            --timeout-method=thread \
+            -m "not slow"

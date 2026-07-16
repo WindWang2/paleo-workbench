@@ -92,10 +92,10 @@ def _run_grid(
     power: float,
 ) -> np.ndarray:
     if backend == "idw":
-        from geoviz_plots import interpolate_idw
+        from geoviz import interpolate_idw
 
         return interpolate_idw(x, y, z, grid_x, grid_y, power=power)
-    from geoviz_plots import interpolate_scipy
+    from geoviz import interpolate_scipy
 
     method = backend if backend in {"linear", "cubic", "nearest", "rbf"} else "linear"
     return interpolate_scipy(x, y, z, grid_x, grid_y, method=method)

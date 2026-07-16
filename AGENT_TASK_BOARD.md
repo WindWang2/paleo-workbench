@@ -64,6 +64,7 @@
 | T-CI-01 | 全局 | P0 | **DONE** | Agent | CI 安装系统 GDAL；修复 3.12/3.13 依赖失败 |
 | T-CI-02 | 全局 | P0 | **DONE** | Agent | 钉死 gdal 绑定到系统 libgdal 版本 |
 | T-DATA-03 | 数据 | P1 | **DONE** | Agent | 导入 QThread 竞态：GUI 线程安全收尾 + 测试签名 |
+| T-CI-03 | 全局 | P0 | **DONE** | Agent | CI pytest timeout；facade-only imports；取消挂起 run |
 
 **锁定任务（本回合）：** 无。
 
@@ -157,6 +158,7 @@
 | 2026-07-16 | T-QC-02 | 审核页 run_qc / 导出 JSON 报告；18 tests |
 | 2026-07-16 | T-CI-02 | gdal==$(gdal-config --version) 约束；避免 3.13 sdist |
 | 2026-07-16 | T-DATA-03 | 导入线程 GUI 收尾，修复 import_finished 丢失 |
+| 2026-07-16 | T-CI-03 | CI --timeout=60；geoviz facade 补 IDW/相模型导出 |
 
 ---
 

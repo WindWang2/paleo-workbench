@@ -113,7 +113,7 @@ def merge_prediction_onto_well_log(well_log: Any, task: Any) -> Any:
     intervals = regions_to_depth_intervals(regions, top=top, bottom=bottom)
 
     try:
-        from geoviz_well_log.models import (
+        from geoviz import (
             FaciesData,
             FaciesInterval,
             IntervalItem,

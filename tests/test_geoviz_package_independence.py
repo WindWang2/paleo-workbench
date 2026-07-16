@@ -44,9 +44,17 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "ProfileWidget",
         "SeismicLoader",
         "PaleoMapCanvas",
+        "export_professional_figure",
         "CrossWellCanvas",
         "PlotWidget",
         "SurfaceWidget",
+        "interpolate_idw",
+        "interpolate_scipy",
+        "FaciesData",
+        "FaciesInterval",
+        "IntervalItem",
+        "LithologyInterval",
+        "WellIntervals",
     }
 )
 
