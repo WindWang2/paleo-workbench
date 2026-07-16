@@ -519,6 +519,9 @@ class PaleoWorkbenchWindow(QWidget):
 
     def _refresh_shell(self) -> None:
         """Tear down the current app shell and build a fresh one for ``self.project``."""
+        prep = self.app_shell.preparation_page_widget()
+        if prep is not None and hasattr(prep, "shutdown_workers"):
+            prep.shutdown_workers()
         self.outer_layout.removeWidget(self.app_shell)
         self.app_shell.setParent(None)
         self.app_shell.deleteLater()

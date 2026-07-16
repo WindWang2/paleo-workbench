@@ -79,8 +79,9 @@
 | ISS-ALG-02 | 制备 | P0 | **DONE** | Agent | 方向加权趋势面 + UI「方向趋势」 |
 | ISS-DOM-03 | 编图/制备 | P0 | **DONE** | Agent | ContourDraft 等值线初稿 + 推送 map lines |
 | ISS-MAP-01 | 编图/制备 | P0 | **DONE** | Agent | UI 生成等值线初稿（制备+factor shelf） |
+| ISS-PREP-01 | 制备 | P0 | **DONE** | Agent | WellTable 面板 + 插值 QThread Worker |
 
-**锁定任务（本回合）：** ISS-PREP-01 / ISS-DOM-04（下一步）
+**锁定任务（本回合）：** ISS-DOM-04（下一步）
 
 ---
 
@@ -185,6 +186,7 @@
 | 2026-07-17 | ISS-ALG-02 | directional_trend + 方向趋势 method；50 tests |
 | 2026-07-17 | ISS-DOM-03 | ContourDraft + extract_contour_lines facade；23 tests |
 | 2026-07-17 | ISS-MAP-01 | 制备/编图 UI 等值线初稿；27 tests |
+| 2026-07-17 | ISS-PREP-01 | WellTablePanel + async FactorPrepareWorker；14 tests |
 
 ---
 

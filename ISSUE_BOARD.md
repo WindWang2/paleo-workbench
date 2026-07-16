@@ -13,7 +13,7 @@
 | ISS-ALG-01 | **Blocker** | 制备/质检 | MAD 异常检测与砂地比 \(R_s=H_s/H_t\) 未实现 | `workflow/well_qc.py`：MAD z* + 砂地比约束写回 WellTable flags | **DONE** |
 | ISS-ALG-02 | **Blocker** | 制备 | 方向加权趋势面未实现（仅各向同性 IDW） | `directional_trend_surface(points, theta, a, b, q, b_i)` | **DONE** |
 | ISS-ALG-03 | High | 制备 | workbench 调用 IDW 时未传 **fault_polylines** | factor_interpolation 读取 BreakLines → engine | **DONE** |
-| ISS-PREP-01 | High | 制备 | 制备页无 WellTable 表格编辑/异常高亮；插值在 GUI 线程 | Worker 线程 + 表格绑定 WellTable | TODO |
+| ISS-PREP-01 | High | 制备 | 制备页无 WellTable 表格编辑/异常高亮；插值在 GUI 线程 | Worker 线程 + 表格绑定 WellTable | **DONE** |
 | ISS-MAP-01 | High | 编图 | 等值线初稿不可修编；factor_shelf 只展示不消费 grid | ContourDraft → 线要素/可编辑 isolines | **DONE** |
 | ISS-MAP-02 | Medium | 编图 | `edit_history` 未稳定写入命令栈 | 关键 Command 提交时 append EditLog | TODO |
 | ISS-QC-01 | Medium | 质检 | `run_basic_qc` 仅相带/层位两项，无点位 MAD/拓扑深度 | 扩展规则集挂钩 IssueLayer | TODO |
@@ -37,9 +37,9 @@
 
 ### 当前 WIP
 
-- **ISS-PREP-01** — 制备页 WellTable 表格 UI + 插值后台 Worker（下一步）
+- **ISS-DOM-04** — VersionSet 专家定稿（下一步）
 
 ### 本轮完成证据
 
-- ISS-DOM-01 … ISS-DOM-03 / ALG-01..03: 数据对象与算法主链
-- ISS-MAP-01: 制备「生成等值线初稿」+ 编图 factor shelf 按钮；app 刷新映射
+- ISS-DOM-01 … ISS-DOM-03 / ALG-01..03 / MAP-01: 单因素主链 + 等值线 UI
+- ISS-PREP-01: WellTablePanel + FactorPrepareWorker 异步插值；shell 销毁前 shutdown
