@@ -67,6 +67,7 @@
 | T-CI-03 | 全局 | P0 | **DONE** | Agent | CI pytest timeout；facade-only imports；取消挂起 run |
 | T-HOME-01 | 首页 | P1 | **DONE** | Agent | 工作流步骤按工程证据推断；活动卡证据回退；sync 进 active run |
 | T-SEIS-02 | 地震 | P1 | **DONE** | Agent | Auto-Tie 信号接通 SeismicView：current_seismic_trace + 合成道叠加 |
+| T-MAP-04 | 编图 | P1 | **DONE** | Agent | hit_test 跳过隐藏图层；Qt item 路径同步过滤 |
 
 **锁定任务（本回合）：** 无。
 
@@ -164,6 +165,7 @@
 | 2026-07-16 | T-CI-04 | mock project_path/confirm；raster 无 gdal_array；signal timeout；CI 3.12+3.13 green |
 | 2026-07-16 | T-HOME-01 | home_workflow_steps + infer_status；activity 证据回退；app 全路径接线 |
 | 2026-07-16 | T-SEIS-02 | SeismicView 连接 auto_tie_requested/synthetic_changed；demo 井日志种子；20 tests |
+| 2026-07-16 | T-MAP-04 | hit_test_at / _feature_item_at 仅可见图层；export 仍含隐藏要素；30 tests |
 
 ---
 

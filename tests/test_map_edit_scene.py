@@ -165,6 +165,38 @@ def test_scene_hit_test_at(qtbot):
     assert scene.hit_test_at(100.0, 100.0, tolerance=0.1) is None
 
 
+def test_scene_hit_test_ignores_hidden_layers(qtbot):
+    """Hidden layers must not be pickable via geometry hit-test."""
+    scene = MapEditScene()
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]],
+        }],
+        well_overlays=[{"id": "w1", "name": "A1", "x": 5, "y": 5}],
+    )
+    scene.load_document(doc)
+    # Well sits inside the facies polygon; both layers visible → well wins if
+    # it is listed first... order is insertion order; either id is fine.
+    # After hiding wells, only facies should hit at the shared location.
+    scene.set_layer_visible("well", False)
+    assert scene.layer_is_visible("well") is False
+    assert scene.hit_test_at(5.0, 5.0, tolerance=0.5) == "f1"
+    assert scene.hit_test_at(20.0, 20.0, tolerance=0.5) is None  # no well there anyway
+
+    scene.set_layer_visible("facies", False)
+    assert scene.hit_test_at(5.0, 5.0, tolerance=0.5) is None
+
+    scene.set_layer_visible("well", True)
+    assert scene.hit_test_at(5.0, 5.0, tolerance=0.5) == "w1"
+    # export still includes hidden features
+    ids = {r["id"] for r in scene.features_to_records()}
+    assert ids == {"f1", "w1"}
+
+
 def test_select_item_emits_selection_ids(qtbot):
     scene = MapEditScene()
     doc = PaleoMapDocument(

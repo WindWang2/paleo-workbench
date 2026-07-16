@@ -174,8 +174,18 @@ class MapEditScene(QGraphicsScene):
         return self.features_to_records()
 
     def hit_test_at(self, x: float, y: float, tolerance: float = 0.0) -> str | None:
-        """Return feature id under map point via map_edit_api (Python or C++)."""
-        return api.hit_test(self.features_to_records(), float(x), float(y), tolerance=float(tolerance))
+        """Return feature id under map point via map_edit_api (Python or C++).
+
+        Only considers features on visible layers so hidden geometry cannot be
+        selected or moved via the geometry hit path (Qt item stack already
+        skips invisible items; this keeps the C++/Python geometry path aligned).
+        """
+        records = [
+            item.to_record()
+            for item in self._items_by_id.values()
+            if self.layer_is_visible(getattr(item, "kind", ""))
+        ]
+        return api.hit_test(records, float(x), float(y), tolerance=float(tolerance))
 
     def clear_features(self) -> None:
         self._cancel_drag()
@@ -936,14 +946,19 @@ class MapEditScene(QGraphicsScene):
         return None
 
     def _feature_item_at(self, pos: QPointF) -> FeatureItemMixin | None:
+        """Return topmost feature item at *pos*, ignoring hidden layers."""
         for item in self.items(pos):
-            if isinstance(item, FeatureItemMixin):
+            if isinstance(item, FeatureItemMixin) and self.layer_is_visible(
+                getattr(item, "kind", "")
+            ):
                 return item
         # Slight tolerance for thin edges / small wells.
         path = QPainterPath()
         path.addEllipse(pos, 0.5, 0.5)
         for item in self.items(path):
-            if isinstance(item, FeatureItemMixin):
+            if isinstance(item, FeatureItemMixin) and self.layer_is_visible(
+                getattr(item, "kind", "")
+            ):
                 return item
         return None
 
