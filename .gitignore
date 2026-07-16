@@ -26,6 +26,9 @@ Thumbs.db
 .cache/
 .superpowers/
 
+# Project-local prepared preview disk cache
+**/.preview_cache/
+
 # Sample data is large and stays local; scanner tests use tmp_path fixtures
 data/
 
