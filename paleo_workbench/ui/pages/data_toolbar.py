@@ -101,11 +101,12 @@ class DataToolbar(QWidget):
         column_settings_layout.setSpacing(0)
         layout.addWidget(self.column_settings_slot)
 
-        self.reader_btn = QPushButton("阅读器")
+        # Hides the whole right column (reader + inspector), not only the reader pane.
+        self.reader_btn = QPushButton("预览栏")
         self.reader_btn.setObjectName("SecondaryButton")
         self.reader_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.reader_btn.setCheckable(True)
-        self.reader_btn.setToolTip("切换阅读器面板")
+        self.reader_btn.setToolTip("显示或隐藏右侧预览与属性面板")
         self.reader_btn.clicked.connect(self.reader_toggled.emit)
         layout.addWidget(self.reader_btn)
 

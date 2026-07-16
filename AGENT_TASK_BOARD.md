@@ -70,6 +70,8 @@
 | T-MAP-04 | 编图 | P1 | **DONE** | Agent | hit_test 跳过隐藏图层；Qt item 路径同步过滤 |
 | T-MAP-05 | 编图 | P1 | **DONE** | Agent | 演示草稿幂等：replace demo + 折叠历史重复；用户图保留 |
 | T-PATH-01 | 全局 | P1 | **DONE** | Agent | resolve_project_path 禁止相对路径 ``..`` 逃出工程目录 |
+| T-UI-01 | 数据 | P2 | **DONE** | Agent | 预览栏按钮文案对齐整列隐藏（阅读器+属性） |
+| T-MAP-06 | 编图 | P2 | **DONE** | Agent | snap 候选忽略隐藏图层；图层可见性变更 invalidate 缓存 |
 
 **锁定任务（本回合）：** 无。
 
@@ -170,6 +172,7 @@
 | 2026-07-16 | T-MAP-04 | hit_test_at / _feature_item_at 仅可见图层；export 仍含隐藏要素；30 tests |
 | 2026-07-17 | T-MAP-05 | compile_map_draft 幂等 replace；稳定 id；折叠 legacy 重复 demo；26 tests |
 | 2026-07-17 | T-PATH-01 | ProjectPathError；相对路径 confinement；open 失败提示；viz adapter 同步；41 tests |
+| 2026-07-17 | T-UI-01 + T-MAP-06 | 预览栏文案；snap 跳过隐藏层；39 focused tests |
 
 ---
 

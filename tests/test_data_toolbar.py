@@ -16,7 +16,7 @@ def test_data_toolbar_exposes_actions_and_search(qtbot):
     assert toolbar.import_btn.text() == "导入文件"
     assert toolbar.import_folder_btn.text() == "导入目录"
     assert toolbar.rescan_btn.text() == "重新扫描"
-    assert toolbar.reader_btn.text() == "阅读器"
+    assert toolbar.reader_btn.text() == "预览栏"
     assert received[-1] == "well"
 
 

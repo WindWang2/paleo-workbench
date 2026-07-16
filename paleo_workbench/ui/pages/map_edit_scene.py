@@ -161,6 +161,8 @@ class MapEditScene(QGraphicsScene):
         for item in self._items_by_id.values():
             if item.kind == key and isinstance(item, QGraphicsItem):
                 item.setVisible(bool(visible))
+        # Hidden geometry must leave snap caches so pick/snap stay consistent.
+        self._invalidate_snap_candidates()
 
     def layer_is_visible(self, kind: str) -> bool:
         return self._layer_visible.get(str(kind), True)
@@ -1059,6 +1061,8 @@ class MapEditScene(QGraphicsScene):
             return [*self._snap_candidate_cache, *(tuple(p) for p in self._draft_points)]
         pts: list[tuple[float, float]] = []
         for item in self._items_by_id.values():
+            if not self.layer_is_visible(getattr(item, "kind", "")):
+                continue
             if isinstance(item, FaciesPolygonItem):
                 for p in item.coordinates():
                     pts.append((float(p[0]), float(p[1])))

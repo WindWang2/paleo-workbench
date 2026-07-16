@@ -417,7 +417,7 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 13 | Demo map draft always appends (no replace/idempotent) | ✅ done (T-MAP-05) |
 | 14 | `resolve_project_path` allows `..` escape (trusted-local threat model) | ✅ done (T-PATH-01) |
 | 15 | Commit + push Phase 23 SEGY slider | ✅ done (this session) |
-| 16 | DataPage reader-btn label vs whole-right-column hide | open (deferred Phase A) |
+| 16 | DataPage reader-btn label vs whole-right-column hide | ✅ done (T-UI-01: 预览栏) |
 
 ## Page Progress Matrix
 

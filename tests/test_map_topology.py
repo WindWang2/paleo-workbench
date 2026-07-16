@@ -62,6 +62,31 @@ def test_scene_snap_when_enabled(qtbot):
     assert (sx2, sy2) == (0.2, 0.1)
 
 
+def test_scene_snap_ignores_hidden_layer_vertices(qtbot):
+    """Hidden layers must not contribute snap candidates (aligned with hit-test)."""
+    scene = MapEditScene()
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        well_overlays=[{"id": "w1", "name": "A", "x": 0.0, "y": 0.0}],
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]],
+        }],
+    )
+    scene.load_document(doc)
+    scene.set_snap_enabled(True)
+    scene.set_snap_tolerance(0.5)
+    assert scene._snap_xy(0.2, 0.1) == (0.0, 0.0)
+
+    scene.set_layer_visible("well", False)
+    # Well vertex no longer snaps; point stays unsnapped.
+    assert scene._snap_xy(0.2, 0.1) == (0.2, 0.1)
+    # Facies vertex still snappable.
+    assert scene._snap_xy(5.1, 5.1) == (5.0, 5.0)
+
+
 def test_scene_caches_snap_candidates_until_geometry_changes(qtbot):
     scene = MapEditScene()
     scene.load_document(PaleoMapDocument(name="M", linked_target_horizon="H", well_overlays=[{"id": "w1", "name": "A", "x": 0, "y": 0}]))
