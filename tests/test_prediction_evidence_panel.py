@@ -14,6 +14,7 @@ def test_prediction_evidence_panel_empty_state(qtbot):
     assert panel.evidence_list.count() == 0
     assert panel.run_btn.text() == "运行测井预测"
     assert panel.send_btn.text() == "发送制备"
+    assert panel.export_btn.text() == "导出单井剖面"
 
 
 def test_prediction_evidence_panel_update_state(qtbot):

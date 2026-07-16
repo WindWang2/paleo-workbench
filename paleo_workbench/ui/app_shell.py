@@ -244,8 +244,16 @@ class AppShell(QWidget):
 
     def update_well_log_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(2)
+        if hasattr(page, "set_project"):
+            page.set_project(project if project is not None else self.project)
         if hasattr(page, "update_state"):
-            page.update_state(prediction_tasks, project=project)
+            page.update_state(
+                prediction_tasks,
+                project=project if project is not None else self.project,
+            )
+
+    def well_log_prediction_page_widget(self):
+        return self.page_stack.widget(2)
 
     def update_seismic_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(3)

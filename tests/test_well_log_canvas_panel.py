@@ -83,8 +83,11 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
     qtbot.addWidget(panel)
     panel.update_state(task, project=project)
 
-    assert panel.well_log_data is known
+    # Merge prediction facies onto a copy of LAS data (identity not preserved).
+    assert panel.well_log_data is not None
     assert panel.well_log_data.well_name == "from-adapter"
+    assert panel.has_bound_las() is True
+    assert len(panel.well_log_data.lithology) >= 1
     assert panel.stack.currentWidget() is panel.canvas
     assert panel.empty_label.isHidden()
 

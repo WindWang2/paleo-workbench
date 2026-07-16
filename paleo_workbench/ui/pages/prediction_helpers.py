@@ -20,29 +20,20 @@ def active_prediction_task(prediction_tasks: list | tuple | None):
 
 
 def well_log_data_from_prediction(task) -> WellLogData:
+    """Build synthetic well + lithology/facies tracks from predicted_regions.
+
+    Used when no LAS is bound. Real LAS path merges prediction onto loaded
+    curves via ``merge_prediction_onto_well_log``.
+    """
+    from paleo_workbench.workflow.well_log_prediction import regions_to_depth_intervals
+
     regions = (field_value(task, "result_summary", {}) or {}).get("predicted_regions", [])
-    if not regions:
-        regions = [{"facies": "未分类", "probability": 0.0}]
+    intervals = regions_to_depth_intervals(regions, top=0.0, bottom=100.0)
 
-    interval_height = 100.0 / len(regions)
-    depths: list[float] = []
-    values: list[float] = []
-    facies_intervals: list[dict[str, Any]] = []
-    for index, region in enumerate(regions):
-        top = round(index * interval_height, 3)
-        bottom = round((index + 1) * interval_height, 3)
-        probability = float(region.get("probability", 0.0))
-        depths.append(round((top + bottom) / 2.0, 3))
-        values.append(round(probability * 100.0, 1))
-        facies_intervals.append(
-            {
-                "top": top,
-                "bottom": bottom,
-                "facies": str(region.get("facies") or "未分类"),
-            }
-        )
+    depths = [round((i["top"] + i["bottom"]) / 2.0, 3) for i in intervals]
+    values = [round(float(i["probability"]) * 100.0, 1) for i in intervals]
 
-    return WellLogData(
+    data = WellLogData(
         well_name=field_value(task, "name", "") or "未命名预测任务",
         top_depth=0.0,
         bottom_depth=100.0,
@@ -56,5 +47,7 @@ def well_log_data_from_prediction(task) -> WellLogData:
                 color="#6f47cf",
             )
         ],
-        facies=facies_intervals,
     )
+    from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
+
+    return merge_prediction_onto_well_log(data, task)

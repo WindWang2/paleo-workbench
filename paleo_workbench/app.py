@@ -289,6 +289,7 @@ class PaleoWorkbenchWindow(QWidget):
         self._wire_preparation_page()
         self._wire_sequence_page()
         self._wire_seismic_page()
+        self._wire_well_log_page()
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()
@@ -330,6 +331,47 @@ class PaleoWorkbenchWindow(QWidget):
             page.prediction_updated.connect(self._on_seismic_prediction_updated)
         if hasattr(page, "send_to_mapping_requested"):
             page.send_to_mapping_requested.connect(self._on_seismic_send_to_mapping)
+
+    def _wire_well_log_page(self) -> None:
+        page = self.app_shell.well_log_prediction_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
+        if hasattr(page, "prediction_updated"):
+            page.prediction_updated.connect(self._on_well_log_prediction_updated)
+        if hasattr(page, "send_to_preparation_requested"):
+            page.send_to_preparation_requested.connect(self._on_well_log_send_to_prep)
+
+    def _on_well_log_prediction_updated(self) -> None:
+        """Refresh well-log / seismic / viz pages after a new single-well task."""
+        self._on_seismic_prediction_updated()
+
+    def _on_well_log_send_to_prep(self) -> None:
+        """Batch-prepare factor maps from current project and open 制备 page."""
+        from paleo_workbench.ui.app_shell import PAGE_INDEX_PREPARATION
+        from paleo_workbench.workflow.factor_interpolation import batch_prepare_factor_maps
+
+        if not self.project.prediction_tasks:
+            QMessageBox.information(self, "发送制备", "请先运行测井预测")
+            return
+        try:
+            batch_prepare_factor_maps(self.project, method="IDW")
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "发送制备失败",
+                f"{exc.__class__.__name__}: {exc}",
+            )
+            return
+        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
+        self.app_shell.update_mapping_page(
+            self.project.paleomap_documents,
+            factor_tasks=self.project.factor_map_tasks,
+            project_crs=self.project.coordinate.project_crs,
+        )
+        self.app_shell.icon_rail.set_active(PAGE_INDEX_PREPARATION)
+        self.app_shell._switch_page(PAGE_INDEX_PREPARATION)
 
     def _on_seismic_prediction_updated(self) -> None:
         """Refresh seismic / visualization / home after a new facies task."""

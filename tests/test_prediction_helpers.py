@@ -37,3 +37,7 @@ def test_well_log_data_from_prediction_builds_probability_curve_and_facies():
     assert data.facies[0].facies == task.result_summary["predicted_regions"][0]["facies"]
     assert data.facies[0].sub_facies == ""
     assert data.facies[0].micro_facies == ""
+    # Lithology + nested facies tracks for QPainter canvas
+    assert len(data.lithology) == 4
+    assert data.intervals is not None
+    assert len(data.intervals.facies.phase) == 4

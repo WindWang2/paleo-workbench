@@ -19,16 +19,21 @@ def test_well_log_prediction_page_update_delegates(qtbot):
     qtbot.addWidget(page)
     calls = {"task": [], "canvas": [], "evidence": []}
 
-    page.task_panel.update_state = lambda tasks: calls["task"].append(tasks)
+    page.task_panel.update_state = lambda tasks, selected_index=None: calls["task"].append(
+        (tasks, selected_index)
+    )
     page.canvas_panel.update_state = lambda task, project=None: calls["canvas"].append(
         (task, project)
     )
-    page.evidence_panel.update_state = lambda task: calls["evidence"].append(task)
+    page.evidence_panel.update_state = lambda task, bound_las=False: calls["evidence"].append(
+        (task, bound_las)
+    )
+    page.canvas_panel.has_bound_las = lambda: False
 
     tasks = [{"name": "old"}, {"name": "active"}]
     project = object()
     page.update_state(tasks, project=project)
 
-    assert calls["task"] == [tasks]
+    assert calls["task"] == [(tasks, None)]
     assert calls["canvas"] == [(tasks[-1], project)]
-    assert calls["evidence"] == [tasks[-1]]
+    assert calls["evidence"] == [(tasks[-1], False)]
