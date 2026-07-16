@@ -7,22 +7,16 @@ import os
 import shutil
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from geoviz import (
-    PAYLOAD_SCHEMA_VERSION,
-    PreparedPreview,
-    PreviewOptions,
-    decode_prepared_preview,
-    encode_prepared_preview,
-)
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.ui.pages.preview_cache import safe_file_stat
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
+
+if TYPE_CHECKING:
+    from geoviz import PreparedPreview, PreviewOptions
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +35,10 @@ def is_disk_cacheable(asset: object) -> bool:
 
 
 def _options_fingerprint(options: PreviewOptions | None = None) -> str:
-    opts = options or PreviewOptions.local()
+    # Runtime import: keep geoviz off cold import of this module.
+    from geoviz import PAYLOAD_SCHEMA_VERSION, PreviewOptions as _PreviewOptions
+
+    opts = options or _PreviewOptions.local()
     raw = (
         f"{opts.profile}|{opts.max_curves}|{opts.max_depth_samples}|"
         f"{opts.max_slice_axis}|{opts.max_points}|{opts.surface_grid_size}|"
@@ -104,6 +101,8 @@ class PreviewDiskCache:
         if not meta_path.is_file() or not payload_path.is_file():
             return None
         try:
+            from geoviz import decode_prepared_preview
+
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             # Re-validate live key matches stored key (mtime/size/options).
             if meta.get("key") != key:
@@ -137,9 +136,13 @@ class PreviewDiskCache:
     def store(self, asset: ResourceItem, result: PreviewResult) -> None:
         if self.project_root is None or not is_disk_cacheable(asset):
             return
-        if result.mode != "geoviz" or not isinstance(
-            result.engine_preview, PreparedPreview
-        ):
+        if result.mode != "geoviz" or result.engine_preview is None:
+            return
+        try:
+            from geoviz import PreparedPreview, encode_prepared_preview
+        except ImportError:  # pragma: no cover
+            return
+        if not isinstance(result.engine_preview, PreparedPreview):
             return
         entries = self._entries_dir()
         if entries is None:
