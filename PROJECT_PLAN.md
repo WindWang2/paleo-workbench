@@ -16,8 +16,8 @@
 | 4 | 地层 | 地层对比 | `StratigraphyCorrelationPage` | **70%** | CrossWell MVP+相叠加；非完整连井解释工区 |
 | 5 | 地震 | 测井预测 + 地震预测 | `WellLogPredictionPage` / `SeismicPredictionPage` | **72%** | 双入口；Auto-Tie 已接线；预测仍偏 mock |
 | 6 | 可视化 | 可视化 | `VisualizationPage` | **80%** | 薄 host + engine；井震标定工作区缺独立 tab |
-| 7 | 数据制备 | 制备 | `PreparationPage` | **72%** | IDW/方向趋势/断层屏障已通；UI WellTable 编辑仍缺 |
-| 8 | 地理图制作 | 编图 | `MappingPage` | **72%** | 相带编辑+拓扑；ContourDraft→line 可落盘；UI 一键生成仍缺 |
+| 7 | 数据制备 | 制备 | `PreparationPage` | **78%** | 插值+等值线初稿按钮；WellTable 表格 UI / Worker 仍缺 |
+| 8 | 地理图制作 | 编图 | `MappingPage` | **80%** | 相带编辑+拓扑；等值线初稿 UI 已接；VersionSet 定稿仍缺 |
 | 9 | 质检 | 成图审核 | `ReviewExportPage` | **60%** | 基础 QC upsert；**缺 MAD/IssueLayer/版本定稿** |
 
 **导航：** `IconRail` 10 项（测井/地震拆分）= 产品 9 域全覆盖 + 预测拆页。  

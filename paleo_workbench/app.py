@@ -306,8 +306,14 @@ class PaleoWorkbenchWindow(QWidget):
 
     def _wire_mapping_page(self) -> None:
         page = self.app_shell.mapping_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.project)
         if hasattr(page, "generate_demo_draft_requested"):
             page.generate_demo_draft_requested.connect(self._on_generate_demo_map_draft)
+        if hasattr(page, "contour_drafts_updated"):
+            page.contour_drafts_updated.connect(self._on_contour_drafts_updated)
 
     def _wire_preparation_page(self) -> None:
         page = self.app_shell.preparation_page_widget()
@@ -317,6 +323,8 @@ class PaleoWorkbenchWindow(QWidget):
             page.set_project(self.project)
         if hasattr(page, "factor_maps_updated"):
             page.factor_maps_updated.connect(self._on_factor_maps_updated)
+        if hasattr(page, "contour_drafts_updated"):
+            page.contour_drafts_updated.connect(self._on_contour_drafts_updated)
 
     def _wire_sequence_page(self) -> None:
         page = self.app_shell.sequence_framework_page_widget()
@@ -445,6 +453,21 @@ class PaleoWorkbenchWindow(QWidget):
             factor_tasks=self.project.factor_map_tasks,
             project_crs=self.project.coordinate.project_crs,
         )
+
+    def _on_contour_drafts_updated(self) -> None:
+        """Refresh mapping after ContourDraft isolines are pushed to map documents."""
+        page = self.app_shell.mapping_page_widget()
+        if page is not None and hasattr(page, "set_project"):
+            page.set_project(self.project)
+        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
+        self.app_shell.update_mapping_page(
+            self.project.paleomap_documents,
+            factor_tasks=self.project.factor_map_tasks,
+            project_crs=self.project.coordinate.project_crs,
+        )
+        state = dashboard_state(self.project)
+        steps = home_workflow_steps(self.project)
+        self.app_shell.update_home_page(state, steps)
 
     def _on_stratigraphy_updated(self) -> None:
         """Re-push stratigraphy-bound pages after sequence scheme save/target change."""

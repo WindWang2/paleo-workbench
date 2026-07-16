@@ -36,11 +36,13 @@ class MappingPage(QWidget):
     draft_saved = Signal(object)
     mapping_context_changed = Signal(dict)
     generate_demo_draft_requested = Signal()
+    contour_drafts_updated = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MappingPage")
         self._active_document = None
+        self._project = None
         self._preview_mode = False
         self._reference_service = ReferenceLayerService()
 
@@ -101,6 +103,9 @@ class MappingPage(QWidget):
         self.toolbar.save_draft_requested.connect(self.save_draft)
         self.toolbar.generate_demo_draft_requested.connect(self.generate_demo_draft_requested.emit)
         self.chrome_panel.save_btn.clicked.connect(self.save_draft)
+        self.bottom_workbench.factor_shelf.contour_draft_requested.connect(
+            self._on_contour_draft_requested
+        )
 
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)
         self.layer_tree.document_selected.connect(self._on_document_selected)
@@ -145,6 +150,10 @@ class MappingPage(QWidget):
 
     def active_document(self):
         return self._active_document
+
+    def set_project(self, project) -> None:
+        """Bind live ProjectDocument for ContourDraft generation from factor shelf."""
+        self._project = project
 
     def mapping_context(self) -> dict:
         """Snapshot of active map name / horizon / dirty for the sidebar."""
@@ -194,6 +203,62 @@ class MappingPage(QWidget):
         if self._preview_mode:
             self._refresh_preview()
         self._emit_mapping_context()
+
+    def _on_contour_draft_requested(self) -> None:
+        """Build ContourDrafts from factor grids and reload map documents into the scene."""
+        from PySide6.QtWidgets import QMessageBox
+
+        if self._project is None:
+            QMessageBox.information(self, "等值线初稿", "请先打开或绑定工程。")
+            return
+        try:
+            from paleo_workbench.workflow.contour_draft import (
+                compile_contour_drafts_for_project,
+            )
+
+            drafts = compile_contour_drafts_for_project(
+                self._project, apply_to_map=True
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "等值线初稿失败",
+                f"{exc.__class__.__name__}: {exc}",
+            )
+            return
+        if not drafts:
+            QMessageBox.information(
+                self,
+                "等值线初稿",
+                "没有可提取的单因素网格。请先在制备页生成单因素图。",
+            )
+            return
+        # Prefer the map linked to the last draft as active document.
+        prefer = None
+        if drafts[-1].linked_map_document_id:
+            prefer = next(
+                (
+                    d
+                    for d in self._project.paleomap_documents
+                    if d.id == drafts[-1].linked_map_document_id
+                ),
+                None,
+            )
+        if prefer is not None:
+            self._active_document = prefer
+        self.update_state(
+            self._project.paleomap_documents,
+            factor_tasks=self._project.factor_map_tasks,
+            project_crs=getattr(
+                getattr(self._project, "coordinate", None), "project_crs", None
+            ),
+        )
+        self.contour_drafts_updated.emit()
+        QMessageBox.information(
+            self,
+            "等值线初稿",
+            f"已生成 {len(drafts)} 份等值线并加载到编图。",
+        )
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""

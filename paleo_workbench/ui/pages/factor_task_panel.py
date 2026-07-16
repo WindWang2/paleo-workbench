@@ -21,6 +21,7 @@ class FactorTaskPanel(QFrame):
     """Left sidebar listing factor map tasks for the Preparation page."""
 
     generate_requested = Signal(str)  # interpolation method label
+    contour_draft_requested = Signal()  # build ContourDraft from completed grids
 
     class Row(QWidget):
         """A single factor map task row."""
@@ -95,6 +96,14 @@ class FactorTaskPanel(QFrame):
         self.generate_btn.setObjectName("PrimaryButton")
         self.generate_btn.clicked.connect(self._emit_generate)
         outer.addWidget(self.generate_btn)
+
+        self.contour_draft_btn = QPushButton("生成等值线初稿")
+        self.contour_draft_btn.setObjectName("SecondaryButton")
+        self.contour_draft_btn.setToolTip(
+            "从已完成的单因素网格提取等值线 ContourDraft，并推送到编图 line 图层"
+        )
+        self.contour_draft_btn.clicked.connect(self.contour_draft_requested.emit)
+        outer.addWidget(self.contour_draft_btn)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)

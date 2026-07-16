@@ -14,7 +14,7 @@
 | ISS-ALG-02 | **Blocker** | 制备 | 方向加权趋势面未实现（仅各向同性 IDW） | `directional_trend_surface(points, theta, a, b, q, b_i)` | **DONE** |
 | ISS-ALG-03 | High | 制备 | workbench 调用 IDW 时未传 **fault_polylines** | factor_interpolation 读取 BreakLines → engine | **DONE** |
 | ISS-PREP-01 | High | 制备 | 制备页无 WellTable 表格编辑/异常高亮；插值在 GUI 线程 | Worker 线程 + 表格绑定 WellTable | TODO |
-| ISS-MAP-01 | High | 编图 | 等值线初稿不可修编；factor_shelf 只展示不消费 grid | ContourDraft → 线要素/可编辑 isolines | TODO |
+| ISS-MAP-01 | High | 编图 | 等值线初稿不可修编；factor_shelf 只展示不消费 grid | ContourDraft → 线要素/可编辑 isolines | **DONE** |
 | ISS-MAP-02 | Medium | 编图 | `edit_history` 未稳定写入命令栈 | 关键 Command 提交时 append EditLog | TODO |
 | ISS-QC-01 | Medium | 质检 | `run_basic_qc` 仅相带/层位两项，无点位 MAD/拓扑深度 | 扩展规则集挂钩 IssueLayer | TODO |
 | ISS-QC-02 | Medium | 质检 | issues 非空间 **IssueLayer** | issues 带 geometry/ref 可图上定位 | TODO |
@@ -37,13 +37,9 @@
 
 ### 当前 WIP
 
-- **ISS-MAP-01** — 编图消费 ContourDraft 修编 UI / shelf 动作（下一步）
+- **ISS-PREP-01** — 制备页 WellTable 表格 UI + 插值后台 Worker（下一步）
 
 ### 本轮完成证据
 
-- ISS-DOM-01: `WellTable`/`WellTableRow` on `ProjectDocument`; adapters in `workflow/well_table.py`; 25 tests green
-- ISS-ALG-01: `workflow/well_qc.py` MAD z*=0.6745(x-med)/MAD + sand ratio validation
-- ISS-DOM-02: `ConstraintLayers`/`ConstraintLine` roles break|direction|boundary; map feature adapters
-- ISS-ALG-03: `interpolate_factor_grid` / `apply_interpolation_to_task` pass break polylines to IDW
-- ISS-ALG-02: `directional_trend.py` + method 「方向趋势」; DirectionLines a/b/θ + WellTable q/b_i
-- ISS-DOM-03: ContourDraft/Segment; grid→isolines→map line_features; geoviz extract_contour_lines export
+- ISS-DOM-01 … ISS-DOM-03 / ALG-01..03: 数据对象与算法主链
+- ISS-MAP-01: 制备「生成等值线初稿」+ 编图 factor shelf 按钮；app 刷新映射

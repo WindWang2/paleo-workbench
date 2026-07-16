@@ -14,6 +14,8 @@ class PreparationPage(QWidget):
 
     # Emitted after batch_prepare_factor_maps mutates project.factor_map_tasks
     factor_maps_updated = Signal()
+    # Emitted after ContourDraft generation mutates contour_drafts / maps
+    contour_drafts_updated = Signal()
     generate_requested = Signal(str)  # method — app may handle when no project bound
 
     def __init__(self, parent=None):
@@ -46,6 +48,7 @@ class PreparationPage(QWidget):
         outer.addLayout(content, 1)
 
         self.task_panel.generate_requested.connect(self._on_generate_requested)
+        self.task_panel.contour_draft_requested.connect(self._on_contour_draft_requested)
 
     def set_project(self, project) -> None:
         """Bind the live ProjectDocument so batch generate can mutate factor_map_tasks."""
@@ -75,3 +78,36 @@ class PreparationPage(QWidget):
             return
         self.update_state(self._project.factor_map_tasks)
         self.factor_maps_updated.emit()
+
+    def _on_contour_draft_requested(self) -> None:
+        """Build ContourDraft isolines for all complete factor grids."""
+        if self._project is None:
+            QMessageBox.information(self, "等值线初稿", "请先打开或绑定工程。")
+            return
+        try:
+            from paleo_workbench.workflow.contour_draft import (
+                compile_contour_drafts_for_project,
+            )
+
+            drafts = compile_contour_drafts_for_project(self._project, apply_to_map=True)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "等值线初稿失败",
+                f"{exc.__class__.__name__}: {exc}",
+            )
+            return
+        if not drafts:
+            QMessageBox.information(
+                self,
+                "等值线初稿",
+                "没有可提取的单因素网格。请先「批量生成单因素图」。",
+            )
+            return
+        self.update_state(self._project.factor_map_tasks)
+        self.contour_drafts_updated.emit()
+        QMessageBox.information(
+            self,
+            "等值线初稿",
+            f"已生成 {len(drafts)} 份等值线初稿并推送到编图。",
+        )

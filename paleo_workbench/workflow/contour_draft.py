@@ -271,3 +271,39 @@ def compile_contour_draft_from_task(
     if apply_to_map:
         apply_contour_draft_to_map(project, draft)
     return draft
+
+
+def compile_contour_drafts_for_project(
+    project: ProjectDocument,
+    *,
+    n_levels: int = DEFAULT_N_LEVELS,
+    task_ids: Sequence[str] | None = None,
+    apply_to_map: bool = True,
+    only_complete: bool = True,
+) -> list[ContourDraft]:
+    """Generate ContourDrafts for all (or selected) factor tasks that have grids.
+
+    Skips tasks without ``grid_z``. When *only_complete* is True, requires
+    ``status == complete``. Returns drafts created in this call.
+    """
+    id_filter = set(task_ids) if task_ids is not None else None
+    drafts: list[ContourDraft] = []
+    for task in project.factor_map_tasks:
+        if id_filter is not None and task.id not in id_filter:
+            continue
+        if only_complete and getattr(task, "status", "") != "complete":
+            continue
+        params = task.parameters or {}
+        if not params.get("grid_z"):
+            continue
+        try:
+            draft = compile_contour_draft_from_task(
+                project,
+                task,
+                n_levels=n_levels,
+                apply_to_map=apply_to_map,
+            )
+        except (ValueError, ImportError):
+            continue
+        drafts.append(draft)
+    return drafts
