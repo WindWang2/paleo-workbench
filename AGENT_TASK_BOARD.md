@@ -62,7 +62,7 @@
 | T-FLOW-01 | 全局 | P0 | **DONE** | Agent | test_e2e_dataflow_contract.py 覆盖资源→…→导出契约 |
 | T-ENV-01 | 全局 | P2 | **TODO** | Human/Agent | 对齐 requires-python 与运行时 3.13；CI 矩阵 |
 
-**锁定任务（本回合）：** `T-MAP-03`。
+**锁定任务（本回合）：** 无（T-MAP-03 已完成）。
 
 ---
 
@@ -77,7 +77,7 @@
 | **FactorMapTask** | models | 制备页 / pipeline | 编图 factor shelf | parameters.sample_points | **UI 有、算法弱** |
 | **PredictionTask** | models | mock adapter / bind assets | 测井/地震/可视化 | input_refs, results | **mock 为主** |
 | **PaleoMapDocument** | models | 编图 / compile_map_draft | 可视化/质检/导出 | facies/wells/lines/labels | **稳定**；view_state 可回写 center/scale |
-| **MapReferenceLayer** | models | ReferenceLayerService(GDAL) | 编图 snap | source_path+crs | **路径有**；offline 弱 |
+| **MapReferenceLayer** | models | ReferenceLayerService(GDAL) | 编图 snap | source_path+crs+external | **稳定**；offline/ready 按文件存在 |
 | **QualityReport** | models | run_basic_qc | 质检页/dashboard | issues+status | **可膨胀** |
 | **VizRef / VizPayload** | `viz/models.py` | VizAdapter | Visualization hosts | kind+engine handles | **稳定** |
 | **WellLogData** | geoviz_well_log | load_las_preview | WellLogHost/Canvas | curves+depth | **引擎单一真相** |
@@ -141,6 +141,7 @@
 | 2026-07-16 | T-COMMIT-01 | 提交 push workbench + geoviz 子模块 |
 | 2026-07-16 | T-QC-01 + T-FLOW-01 | QC upsert；e2e 数据流契约；VizAdapter 相对路径解析 |
 | 2026-07-16 | T-MAP-02 | save_draft 合并 view_state；load 恢复；演示草稿 dirty Save/Discard/Cancel；14 tests |
+| 2026-07-16 | T-MAP-03 | MapReferenceLayer.external；refresh_status offline；panel 标注；工程 load 回写；28 tests |
 
 ---
 
