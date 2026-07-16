@@ -37,7 +37,16 @@ class DataReaderPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("DataReaderPanel")
         self.setMinimumWidth(320)
-        self.provider = provider or PreviewProvider()
+        # Default to LocalVisualizationProvider (contract + geoviz previews), but
+        # import it lazily so cold DataPage startup does not pay the geoviz cost
+        # when a custom lightweight provider is injected by tests.
+        if provider is None:
+            from paleo_workbench.ui.pages.geoviz_preview_provider import (
+                LocalVisualizationProvider,
+            )
+
+            provider = LocalVisualizationProvider()
+        self.provider = provider
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
         self.setStyleSheet(
@@ -65,9 +74,12 @@ class DataReaderPanel(QFrame):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
 
-        self._geoviz_host = None  # lazy
+        # Host is created on first geoviz use / clear so GeoVizPreviewHost import
+        # (and engine widgets) stay off the cold path.
+        self._geoviz_host = None
         self._geoviz_placeholder = QLabel("GeoViz")
-        self._geoviz_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter); self.stack.addWidget(self._geoviz_placeholder)
+        self._geoviz_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.stack.addWidget(self._geoviz_placeholder)
 
         self.empty_label = self._message_widget("从列表中选择一个数据、成果或文件")
         self.empty_label.setObjectName("EmptyStateLabel")
@@ -146,21 +158,42 @@ class DataReaderPanel(QFrame):
 
     @property
     def geoviz_host(self):
-        """Lazily create the GeoViz preview host (defers 0.7s geoviz import)."""
+        """Lazily create the GeoViz preview host (defers heavy geoviz import)."""
         if self._geoviz_host is None:
-            from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
             from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+            from paleo_workbench.ui.pages.geoviz_preview_provider import (
+                LocalVisualizationProvider,
+            )
+
             if not hasattr(self.provider, "engine"):
                 self.provider = LocalVisualizationProvider()
             provider_engine = getattr(self.provider, "engine", None)
             self._geoviz_host = GeoVizPreviewHost(provider_engine)
-            self.stack.addWidget(self._geoviz_host)
+            # Replace the lightweight placeholder with the real host widget.
+            idx = self.stack.indexOf(self._geoviz_placeholder)
+            if idx >= 0:
+                self.stack.removeWidget(self._geoviz_placeholder)
+                self.stack.insertWidget(idx, self._geoviz_host)
+            else:
+                self.stack.addWidget(self._geoviz_host)
         return self._geoviz_host
+
+    @staticmethod
+    def _is_prepared_preview(preview) -> bool:
+        if preview is None:
+            return False
+        try:
+            from geoviz import PreparedPreview
+        except ImportError:  # pragma: no cover
+            return False
+        return isinstance(preview, PreparedPreview)
 
     def render(self, result: PreviewResult) -> None:
         if result.mode != "media":
             self._stop_media_if_needed()
-        if result.mode == "geoviz" and result.engine_preview is not None:
+        # Only PreparedPreview payloads enter the engine path; raw dicts/objects
+        # fall through to clear + message (same contract as pre-lazy-load).
+        if result.mode == "geoviz" and self._is_prepared_preview(result.engine_preview):
             try:
                 self.geoviz_host.render(result.engine_preview)
             except Exception as error:
@@ -287,8 +320,12 @@ class DataReaderPanel(QFrame):
         self.reader_mode_changed.emit(result.mode)
 
     def _safe_clear_geoviz(self) -> str:
+        # Do not force-create the host just to clear an empty state.
+        host = self._geoviz_host
+        if host is None:
+            return ""
         try:
-            self.geoviz_host.clear()
+            host.clear()
         except Exception as error:
             return self._error_text(error)
         return ""
@@ -323,9 +360,10 @@ class DataReaderPanel(QFrame):
 
     def release_engine_widgets(self) -> None:
         self._stop_media_if_needed()
-        if self._geoviz_host is None: return
+        if self._geoviz_host is None:
+            return
         try:
-            self.geoviz_host.release_all()
+            self._geoviz_host.release_all()
         except Exception as error:
             result = self._geoviz_failure_result(self._current_result, error)
             self.message_label.set_message(result.message)
