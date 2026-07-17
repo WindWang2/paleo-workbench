@@ -629,20 +629,20 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 - [x] COMMIT：engine scoped commit；父仓纳入新模块、更新 gitlink并提交（排除用户未跟踪资产）。
 - [x] CLEAN CHECKOUT：临时 worktree/submodule 初始化后 import + focused tests；compileall/diff-check。
 
-### Phase 29: PDF 预览加载失败诊断与修复 — 🔄 REFACTORING
+### Phase 29: PDF 预览加载失败诊断与修复 — ✅ IMPLEMENTED
 
 | ID | Priority | Acceptance | Status |
 |----|----------|------------|--------|
-| ISS-PDF-01 | P1 | QIODevice PDF 以 status/error 判定；Ready 正常渲染，Loading 等待，Error 才失败 | 🔄 active |
+| ISS-PDF-01 | P1 | QIODevice PDF 以 status/error 判定；Ready 正常渲染，Loading 等待，Error 才失败 | ✅ fixed |
 
 - [x] 核验 QtPdf / QtPdfWidgets 安装与版本。
 - [x] 用实际 44.6 MiB、248 页 PDF 验证直接路径加载。
 - [x] 验证 `QIODevice` overload 返回语义与 widget 误判状态。
 - [x] 用户批准推荐方案 A：状态驱动、保留异步预载 bytes。
-- [ ] RED：真实 QBuffer PDF 加载后 widget 不得误判 `_load_failed`。
-- [ ] GREEN：统一以 `QPdfDocument.status()/error()/pageCount()` 收敛 load 状态；Loading 由 `statusChanged` 完成。
-- [ ] REGRESSION：PDF widget、preview async、data page focused tests。
-- [ ] FINAL：root non-slow、compileall、diff-check；更新 PWF。
+- [x] RED：真实 QBuffer PDF 加载后 widget 不得误判 `_load_failed`。
+- [x] GREEN：统一以 `QPdfDocument.status()/error()/pageCount()` 收敛 load 状态；Loading 由 `statusChanged` 完成。
+- [x] REGRESSION：PDF widget、preview async、data page focused tests。
+- [x] FINAL：root non-slow、compileall、diff-check；更新 PWF。
 
 #### Approved Design / Inline Plan
 

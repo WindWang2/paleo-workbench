@@ -1469,3 +1469,41 @@ Failures:
 - [PAUSED] 当前请求按诊断处理，未修改产品代码；若用户要求修复，进入 TDD RED→GREEN。
 - [APPROVED] 用户批准方案 A；设计/实施计划因 PWF 唯一记忆约束写入 `task_plan.md`，未新增 docs 文件。
 - [PLAN] 单原子 inline TDD：真实 QBuffer RED → status-driven GREEN → focused/full gates。
+- [WORKTREE] `.worktrees/pdf-preview-fix` / `fix/pdf-preview-status` 创建成功，submodule 检出 `957cb3f5`。
+- [BASELINE attempt 1] quiet preview suite 12 dots 后 >2m 无进展，精确 PID TERM，exit 143。
+- [BASELINE verified] `pytest tests/test_preview_async.py -vv --timeout=30 --maxfail=1` → `30 passed in 6.04s`。
+- [STRIKE] ISS-PDF-01 产品修复失败计数：0；quiet-run stall 为基线 harness 现象。
+- [NEXT] 写真实 QBuffer widget RED 用例并验证预期失败。
+- [RED] `test_pdf_widget_loads_preloaded_bytes_without_reopening_path` → expected FAIL：`assert True is False` at `widget._load_failed`；document 已成功加载 1 页。
+- [STRIKE] 预期 RED，不计实现 strike；ISS-PDF-01 产品修复失败计数仍为 0。
+- [NEXT] 实现 status-driven load completion，并兼容现有 fake-document tests。
+- [GREEN] 新增 `_load_pending`、`_finish_document_load()` 与 `statusChanged` 收敛；未回退到 GUI path I/O。
+- [GREEN focused] 真实 QBuffer-only 回归 → `1 passed in 0.55s`。
+- [STRIKE] 产品修复失败计数保持 0。
+- [NEXT] 运行 preview widget + data reader + preview async 回归，修复任何契约兼容问题。
+- [FOCUSED attempt 1] quiet 三文件 suite 在大量通过点后 teardown stall，精确 PID TERM，exit 143；未出现失败节点。
+- [FOCUSED verified] 同一三文件 suite `-vv --timeout=30` → `82 passed in 11.76s`。
+- [STRIKE] 产品修复失败计数保持 0；两次 quiet stall 均由节点级重跑排除产品失败。
+- [NEXT] 用实际 44.6 MiB / 248 页 PDF 验证 widget bytes 预览，再跑 root full gate。
+- [ACTUAL PDF] 44.6 MiB / 248 pages → widget `failed=False, pending=False, Ready, Error.None_, 1 / 248`，exit 0。
+- [FULL attempt 1] quiet non-slow 运行到 57% 后 >2m 无输出，精确 PID TERM，exit 143；无失败节点。
+- [STRIKE] full quiet stall 不计产品 strike；实现测试失败计数仍为 0。
+- [NEXT] 使用 full `-vv --timeout=60` 获取节点级门禁。
+- [FULL attempt 2] `-vv` 定位停顿节点为既有 `test_stress_s3_rapid_select`，精确 PID TERM，exit 143。
+- [ISOLATION] 同节点全新进程 → `1 passed in 0.51s`，排除 PDF 回归与节点确定性失败。
+- [STRIKE] ISS-PDF-01 产品失败计数仍为 0；full 单进程 stall 作为既有 Qt 全局状态问题单独记录。
+- [NEXT] 按文件分段运行 non-slow collection，汇总精确 pass/skip/deselect 证据。
+- [SEGMENT A] lexicographic `< test_datapage_stress.py` → `210 passed in 23.14s`。
+- [SEGMENT B] `test_datapage_stress.py <= file < test_map*` → `174 passed, 8 deselected in 15.68s`。
+- [NEXT] 运行 map→preview 与 preview→末尾两个独立区间，随后汇总 collection 数量。
+- [SEGMENT C] `test_map* <= file < test_preview*` → `188 passed, 4 skipped in 18.65s`。
+- [SEGMENT D] `file >= test_preview*` → `429 passed in 42.91s`。
+- [FULL SEGMENTED TOTAL] `1001 passed, 4 skipped, 8 deselected`；collection 数量闭合，无失败。
+- [NEXT] compileall/diff-check、审查 diff，关闭 Phase 29。
+- [STATIC] `python -m compileall -q paleo_workbench` 与 `git diff --check` exit 0；diff 仅含 PDF widget/test + 三份 PWF。
+- [SELF REVIEW] 增补 `Loading → Ready` fake-document contract test，待执行验证。
+- [NEXT] 运行双 PDF contract 与 focused suite；确认后关闭 Phase 29。
+- [CONTRACT] immediate Ready + Loading→Ready → `2 passed in 0.27s`。
+- [WIDGET REGRESSION] `tests/test_preview_widgets.py` → `16 passed in 1.33s`。
+- [VERIFIED] Phase 29 所有代码/测试/静态门禁完成；进入 finishing-development-branch 提交与集成流程。
+- [IMPLEMENTED] ISS-PDF-01 fixed；分支 `fix/pdf-preview-status` 准备提交并等待 finishing workflow 集成选择。

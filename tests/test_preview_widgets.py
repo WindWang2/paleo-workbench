@@ -328,6 +328,91 @@ def test_pdf_widget_loads_relative_path_from_reopened_project(qtbot, tmp_path):
     assert widget.fallback_image.text() != "PDF 预览加载失败"
 
 
+def test_pdf_widget_loads_preloaded_bytes_without_reopening_path(qtbot, tmp_path):
+    pdf_path = tmp_path / "preloaded.pdf"
+    writer = QPdfWriter(pdf_path.as_posix())
+    painter = QPainter(writer)
+    painter.drawText(100, 100, "Preloaded PDF")
+    painter.end()
+    payload = pdf_path.read_bytes()
+    pdf_path.unlink()
+
+    widget = PdfPreviewWidget()
+    qtbot.addWidget(widget)
+    widget.load(
+        pdf_path.as_posix(),
+        ("preloaded", len(payload)),
+        pdf_bytes=payload,
+    )
+
+    qtbot.waitUntil(lambda: widget.document.pageCount() == 1, timeout=2000)
+    assert widget._load_failed is False
+    assert widget.page_label.text() == "1 / 1"
+    assert widget.fallback_image.text() != "PDF 预览加载失败"
+
+
+def test_pdf_widget_waits_for_qiodevice_loading_status(qtbot, monkeypatch):
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtGui import QImage
+    from paleo_workbench.ui.pages import preview_widgets
+
+    class FakePdfDocument(QObject):
+        statusChanged = Signal(object)
+
+        class Error:
+            None_ = 0
+
+        class Status:
+            Null = "null"
+            Loading = "loading"
+            Ready = "ready"
+            Error = "error"
+
+        def __init__(self, *_args, **_kwargs):
+            super().__init__()
+            self._status = self.Status.Null
+            self._pages = 0
+
+        def load(self, _source):
+            self._status = self.Status.Loading
+            self.statusChanged.emit(self._status)
+            return None
+
+        def status(self):
+            return self._status
+
+        def error(self):
+            return self.Error.None_
+
+        def pageCount(self):
+            return self._pages
+
+        def render(self, _page, size):
+            return QImage(size.width(), size.height(), QImage.Format.Format_RGB32)
+
+        def finish(self):
+            self._pages = 1
+            self._status = self.Status.Ready
+            self.statusChanged.emit(self._status)
+
+    monkeypatch.setattr(preview_widgets, "QPdfDocument", FakePdfDocument)
+    monkeypatch.setattr(preview_widgets, "QPdfView", None)
+    widget = preview_widgets.PdfPreviewWidget()
+    qtbot.addWidget(widget)
+
+    widget.load("preloaded.pdf", ("loading",), pdf_bytes=b"pdf")
+
+    assert widget._load_pending is True
+    assert widget._load_failed is False
+    assert widget.fallback_image.text() == "PDF 预览加载中…"
+
+    widget.document.finish()
+
+    assert widget._load_pending is False
+    assert widget._load_failed is False
+    assert widget.page_label.text() == "1 / 1"
+
+
 def test_media_widget_constructs(qtbot):
     from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
 

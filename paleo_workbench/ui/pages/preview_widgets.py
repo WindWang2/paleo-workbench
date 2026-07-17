@@ -263,6 +263,7 @@ class PdfPreviewWidget(QWidget):
         self._path = ""
         self._revision: tuple[object, ...] | None = None
         self._load_failed = False
+        self._load_pending = False
         # Keep buffer alive for the lifetime of a QPdfDocument loaded from bytes.
         self._source_buffer: QBuffer | None = None
 
@@ -271,6 +272,9 @@ class PdfPreviewWidget(QWidget):
         if self.pdf_view is not None:
             self.pdf_view.setDocument(self.document)
             self._content_stack.addWidget(self.pdf_view)
+        status_changed = getattr(self.document, "statusChanged", None)
+        if status_changed is not None:
+            status_changed.connect(self._on_document_status_changed)
         self._content_stack.addWidget(self.fallback_image)
         self._content_stack.setCurrentWidget(self.pdf_view or self.fallback_image)
         layout.addWidget(self._content_stack, 1)
@@ -316,14 +320,12 @@ class PdfPreviewWidget(QWidget):
             self._revision = revision
             self._page = 0
             self._load_failed = False
-            error = self._load_document(path, pdf_bytes)
-            if error != QPdfDocument.Error.None_ or self.document.pageCount() <= 0:
-                self._load_failed = True
-                self._show_fallback_message("PDF 预览加载失败")
-                self.page_label.setText("0 / 0")
-                self.prev_btn.setEnabled(False)
-                self.next_btn.setEnabled(False)
-                return
+            self._load_pending = True
+            load_result = self._load_document(path, pdf_bytes)
+            self._finish_document_load(load_result)
+            return
+        if self._load_pending:
+            return
         if self._load_failed:
             self._show_fallback_message("PDF 预览加载失败")
             self.page_label.setText("0 / 0")
@@ -344,6 +346,45 @@ class PdfPreviewWidget(QWidget):
             self._source_buffer = buffer
             return self.document.load(buffer)
         return self.document.load(path)
+
+    def _on_document_status_changed(self, status) -> None:
+        status_type = getattr(QPdfDocument, "Status", None)
+        if status_type is None or status in (status_type.Ready, status_type.Error):
+            self._finish_document_load()
+
+    def _finish_document_load(self, load_result=None) -> None:
+        """Resolve both QPdfDocument load overloads from document state."""
+        if self.document is None:
+            return
+        status_type = getattr(QPdfDocument, "Status", None)
+        status_getter = getattr(self.document, "status", None)
+        status = status_getter() if callable(status_getter) else None
+        if status_type is not None and status == status_type.Loading:
+            self._load_pending = True
+            self._show_fallback_message("PDF 预览加载中…")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
+
+        no_error = getattr(getattr(QPdfDocument, "Error", None), "None_", 0)
+        document_error = getattr(self.document, "error", None)
+        current_error = document_error() if callable(document_error) else no_error
+        failed = (
+            (load_result is not None and load_result != no_error)
+            or (status_type is not None and status == status_type.Error)
+            or current_error != no_error
+            or self.document.pageCount() <= 0
+        )
+        self._load_pending = False
+        self._load_failed = failed
+        if failed:
+            self._show_fallback_message("PDF 预览加载失败")
+            self.page_label.setText("0 / 0")
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+            return
+        self._render_page()
 
     def _release_source_buffer(self) -> None:
         if self._source_buffer is not None:

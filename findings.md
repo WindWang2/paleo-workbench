@@ -940,3 +940,15 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - 初次 bytes 诊断显示 `QPdfDocument.load(QBuffer)` 返回 Python `None`；现有 `PdfPreviewWidget.load()` 将 `_load_document()` 返回值与 `QPdfDocument.Error.None_` 比较，故可能把成功的 QIODevice load 误判为失败。下一步确认 document status/pageCount 与 widget 状态。
 - 根因确认：同一 QBuffer load 返回 `None`，但 document 为 `Ready / Error.None_ / 248 pages`；`PdfPreviewWidget` 随后却为 `_load_failed=True / 0 / 0 / PDF 预览加载失败`。错误发生在 `preview_widgets.py` 对 QIODevice overload 返回值的同步错误码假设，与 PDF 内容无关。
 - Qt 6.11 官方 API 明确区分 overload：`load(QIODevice*) -> void`，`load(QString) -> Error`；document 提供 `statusChanged(Status)`、`status()`、`error()`。批准的修复必须围绕状态机，而不是给 `None` 打补丁。
+- 隔离 worktree baseline：quiet `test_preview_async.py` 首次在 12 dots 后异常无输出并被人工 TERM；同 suite 使用节点级 `-vv --timeout=30` 随后 `30 passed in 6.04s`，未复现测试级失败。作为环境性 quiet-run stall 记录，不计产品 strike。
+- TDD RED 使用 `QPdfWriter` 生成真实单页 PDF，读取 bytes 后删除源文件，强制 QBuffer-only 路径；document pageCount 已为 1，但 widget `_load_failed=True`，精确命中误判而非 fixture/文件错误。
+- GREEN 状态机兼容两种 overload：path 的显式 Error 仍参与判断；QIODevice 的 `None` 被忽略，document status/error/pageCount 决定终态。Loading 时禁用翻页并等待 statusChanged；Ready 渲染，Error/零页失败。
+- Focused 回归覆盖 82 个节点：真实 path/bytes PDF、QPdfView/fallback、fake document success/failure、revision reload、异步预载/缓存/线程收尾全部通过。quiet 多文件命令仍可在 teardown 无输出，`-vv` 同集完整通过，确认非功能回归。
+- 用户实际 44,610,769-byte PDF 经新 widget bytes 路径为 `_load_failed=False / Ready / Error.None_ / 248 pages / 1 / 248`，真实场景已恢复。
+- Worktree full quiet attempt 1 到 57% 后无节点信息停住并被 TERM；与两次 focused quiet stall 同模式。必须用 `-vv` full gate取得最后活动节点与可信最终结果。
+- Full `-vv` 将停顿精确定位在既有 `test_datapage_stress.py::test_stress_s3_rapid_select`；该节点在全新进程 `1 passed in 0.51s`。说明长寿命 Qt 测试进程的全局状态污染/teardown stall，而非 PDF 修复或 stress 节点自身失败。最终门禁应分段运行 collection。
+- Segmented full gate 前两区间通过：A（action→data）210 passed；B（datapage stress→pre-map）174 passed、8 deselected。每区间独立进程后 stress 节点与其后测试稳定完成。
+- Segmented full gate 后两区间通过：C（map→pre-preview）188 passed、4 skipped；D（preview→末尾）429 passed。四区间合计 `1001 passed, 4 skipped, 8 deselected`，与 collection `1013 total / 8 deselected / 1005 selected` 精确守恒。
+- Diff self-review 发现真实 PDF 只覆盖立即 Ready；新增可控 fake-document contract，要求 Loading 阶段保持 pending/非失败，并在 statusChanged(Ready) 后渲染。该测试锁定批准设计中的异步状态分支。
+- 补强 contract 通过：真实 QBuffer Ready 与 fake Loading→Ready 共 2 pass；完整 preview widget 文件 16 pass。状态机即时与延迟两条路径均有门禁。
+- Phase 29 implementation complete：产品 diff 仅 `preview_widgets.py`，测试 diff 仅 `test_preview_widgets.py`；其余为三份 PWF。无依赖、预算或 worker I/O 行为变化。
