@@ -18,6 +18,7 @@ from paleo_workbench.project.models import FactorMapTask, ProjectDocument
 GENERATOR_VERSION = "factor-interp-v1"
 DEFAULT_FACTOR_TYPES = ("地层厚度", "砂岩含量", "砂地比", "泥岩含量")
 DEFAULT_GRID_N = 50
+MAX_LOO_SAMPLES = 64
 
 # UI labels (tokens.INTERPOLATION_METHODS) → engine backends
 _METHOD_BACKEND = {
@@ -105,9 +106,12 @@ def _run_grid(
     semi_minor: float = 0.4,
     q: np.ndarray | None = None,
     b_i: np.ndarray | None = None,
+    cancellation_token=None,
 ) -> np.ndarray:
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
     if backend == "directional":
-        from paleo_workbench.workflow.directional_trend import directional_trend_grid
+        from geoviz import directional_trend_grid
 
         return directional_trend_grid(
             x,
@@ -120,18 +124,25 @@ def _run_grid(
             b=semi_minor,
             q=q,
             b_i=b_i,
+            cancellation_token=cancellation_token,
         )
     if backend == "idw":
         from geoviz import interpolate_idw
 
-        kwargs: dict[str, Any] = {"power": power}
+        kwargs: dict[str, Any] = {
+            "power": power,
+            "cancellation_token": cancellation_token,
+        }
         if fault_polylines:
             kwargs["fault_polylines"] = fault_polylines
         return interpolate_idw(x, y, z, grid_x, grid_y, **kwargs)
     from geoviz import interpolate_scipy
 
     method = backend if backend in {"linear", "cubic", "nearest", "rbf"} else "linear"
-    return interpolate_scipy(x, y, z, grid_x, grid_y, method=method)
+    result = interpolate_scipy(x, y, z, grid_x, grid_y, method=method)
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
+    return result
 
 
 def _leave_one_out_r2(
@@ -147,13 +158,19 @@ def _leave_one_out_r2(
     semi_minor: float = 0.4,
     q: np.ndarray | None = None,
     b_i: np.ndarray | None = None,
+    cancellation_token=None,
 ) -> float | None:
-    """Rough LOO R² for sparse control points (None when N < 3)."""
+    """Estimate LOO R² using at most ``MAX_LOO_SAMPLES`` observations."""
     n = len(z)
     if n < 3:
         return None
-    preds = np.empty(n, dtype=np.float64)
-    for i in range(n):
+    evaluation_indices = (
+        np.arange(n, dtype=np.int64)
+        if n <= MAX_LOO_SAMPLES
+        else np.linspace(0, n - 1, MAX_LOO_SAMPLES, dtype=np.int64)
+    )
+    preds = np.empty(len(evaluation_indices), dtype=np.float64)
+    for prediction_index, i in enumerate(evaluation_indices):
         mask = np.ones(n, dtype=bool)
         mask[i] = False
         try:
@@ -173,15 +190,21 @@ def _leave_one_out_r2(
                 semi_minor=semi_minor,
                 q=q_m,
                 b_i=b_m,
+                cancellation_token=cancellation_token,
             )
             val = float(grid[0, 0])
-        except Exception:
+        except Exception as exc:
+            from geoviz import JobCancelled
+
+            if isinstance(exc, JobCancelled):
+                raise
             return None
         if not math.isfinite(val):
             return None
-        preds[i] = val
-    ss_res = float(np.sum((z - preds) ** 2))
-    ss_tot = float(np.sum((z - np.mean(z)) ** 2))
+        preds[prediction_index] = val
+    observed = z[evaluation_indices]
+    ss_res = float(np.sum((observed - preds) ** 2))
+    ss_tot = float(np.sum((observed - np.mean(observed)) ** 2))
     if ss_tot <= 1e-12:
         return 1.0 if ss_res <= 1e-12 else 0.0
     return max(0.0, min(1.0, 1.0 - ss_res / ss_tot))
@@ -197,6 +220,7 @@ def interpolate_factor_grid(
     azimuth_deg: float = 0.0,
     semi_major: float = 1.0,
     semi_minor: float = 0.4,
+    cancellation_token=None,
 ) -> dict[str, Any]:
     """Interpolate scattered sample_points onto a regular grid.
 
@@ -229,6 +253,7 @@ def interpolate_factor_grid(
         semi_minor=semi_minor,
         q=q,
         b_i=b_i,
+        cancellation_token=cancellation_token,
     )
     finite = grid_z[np.isfinite(grid_z)]
     if finite.size == 0:
@@ -245,6 +270,7 @@ def interpolate_factor_grid(
         semi_minor=semi_minor,
         q=q,
         b_i=b_i,
+        cancellation_token=cancellation_token,
     )
     out: dict[str, Any] = {
         "grid_x": [float(v) for v in grid_x],
@@ -277,6 +303,7 @@ def apply_interpolation_to_task(
     power: float = 2.0,
     project: ProjectDocument | None = None,
     fault_polylines: list[list[tuple[float, float]]] | None = None,
+    cancellation_token=None,
 ) -> FactorMapTask:
     """Mutate a FactorMapTask with a real interpolation grid and quality metrics.
 
@@ -330,6 +357,7 @@ def apply_interpolation_to_task(
         azimuth_deg=az,
         semi_major=a_axis,
         semi_minor=b_axis,
+        cancellation_token=cancellation_token,
     )
 
     params["sample_points"] = list(points)
@@ -383,7 +411,8 @@ def synthetic_sample_points(
 ) -> list[dict[str, Any]]:
     """Deterministic control points when no well-derived samples exist yet."""
     rng = random.Random(f"{seed}:{factor_type}")
-    base = 10.0 + (abs(hash(factor_type)) % 20)
+    digest = hashlib.sha256(factor_type.encode("utf-8")).digest()
+    base = 10.0 + (int.from_bytes(digest[:4], "big") % 20)
     return [
         {
             "well": f"A{i + 1}",
@@ -403,6 +432,7 @@ def batch_prepare_factor_maps(
     factor_types: list[str] | tuple[str, ...] | None = None,
     grid_n: int = DEFAULT_GRID_N,
     seed: int = 0,
+    cancellation_token=None,
 ) -> list[FactorMapTask]:
     """Run real interpolation for existing tasks or create default factor maps.
 
@@ -419,9 +449,14 @@ def batch_prepare_factor_maps(
     )
     prepared: list[FactorMapTask] = []
 
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
+
     if not project.factor_map_tasks:
         types = list(factor_types or DEFAULT_FACTOR_TYPES)
         for index, factor_type in enumerate(types):
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
             points = synthetic_sample_points(
                 seed=seed + index, factor_type=factor_type
             )
@@ -436,13 +471,19 @@ def batch_prepare_factor_maps(
                 seed=seed + index,
             )
             apply_interpolation_to_task(
-                task, method=method, grid_n=grid_n, project=project
+                task,
+                method=method,
+                grid_n=grid_n,
+                project=project,
+                cancellation_token=cancellation_token,
             )
             project.factor_map_tasks.append(task)
             prepared.append(task)
         return prepared
 
     for task in project.factor_map_tasks:
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
         params = task.parameters or {}
         points = params.get("sample_points") or []
         if not points:
@@ -452,7 +493,11 @@ def batch_prepare_factor_maps(
             )
             task.parameters = {**params, "sample_points": points}
         apply_interpolation_to_task(
-            task, method=method, grid_n=grid_n, project=project
+            task,
+            method=method,
+            grid_n=grid_n,
+            project=project,
+            cancellation_token=cancellation_token,
         )
         prepared.append(task)
     return prepared

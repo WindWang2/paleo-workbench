@@ -80,20 +80,21 @@ def test_open_ref_loads_las_into_well_log_canvas(qtbot, tmp_path: Path):
 def test_open_ref_loads_seismic_into_seismic_view(qtbot, tmp_path: Path, monkeypatch):
     path = tmp_path / "v.sgy"
     path.write_bytes(b"fake")
-    volume = np.zeros((3, 4, 5), dtype=np.float32)
-    monkeypatch.setattr(
-        "paleo_workbench.viz.adapter.load_seismic_volume_from_path",
-        lambda _p: (volume, ""),
-    )
     project = ProjectDocument.new("S")
     res = ResourceItem(name="v.sgy", path=str(path), type="seismic", format="sgy")
     project.resources.append(res)
     page = VisualizationPage()
     qtbot.addWidget(page)
+    loaded = []
+    monkeypatch.setattr(
+        page.composite_panel.seismic_host.widget,
+        "load_segy_async",
+        loaded.append,
+    )
     page.update_state(project.resources, [], [])
     page.open_ref(VizAdapter().ref_from_resource(res))
     assert page.composite_panel.tabs.tabText(page.composite_panel.tabs.currentIndex()) == "地震"
-    assert page.composite_panel.seismic_view.is_ready()
+    assert loaded == [str(path)]
 
 
 def test_open_ref_loads_map_into_paleomap_canvas(qtbot):

@@ -107,6 +107,35 @@ def _hit_test_python(
         fid = record.get("id")
         if fid is None:
             continue
+        geometry = record.get("geometry")
+        if isinstance(geometry, dict) and geometry.get("type") in {"Polygon", "MultiPolygon"}:
+            raw_polygons = geometry.get("coordinates") or []
+            polygons = [raw_polygons] if geometry.get("type") == "Polygon" else raw_polygons
+            edge_tol2 = max(tol * tol, 1e-18)
+            for polygon in polygons:
+                if not isinstance(polygon, list) or not polygon:
+                    continue
+                rings = [ring for ring in polygon if isinstance(ring, list)]
+                if not rings:
+                    continue
+                inside = _point_in_ring(px, py, rings[0]) and not any(
+                    _point_in_ring(px, py, hole) for hole in rings[1:]
+                )
+                on_edge = any(
+                    _point_to_segment_dist2(
+                        px,
+                        py,
+                        float(ring[index][0]),
+                        float(ring[index][1]),
+                        float(ring[index + 1][0]),
+                        float(ring[index + 1][1]),
+                    ) <= edge_tol2
+                    for ring in rings
+                    for index in range(max(0, len(ring) - 1))
+                )
+                if inside or on_edge:
+                    return str(fid)
+            continue
         coords = record.get("coordinates")
         if not isinstance(coords, list) or not coords:
             continue
@@ -152,7 +181,13 @@ def hit_test(
     When ``map_edit_core`` is available, prefers the C++ implementation.
     Accepts feature dicts with ``id`` + ``coordinates`` (point or ring).
     """
-    cpp = _cpp_fn("hit_test")
+    has_complex_geometry = any(
+        isinstance(record, dict)
+        and isinstance(record.get("geometry"), dict)
+        and record["geometry"].get("type") in {"Polygon", "MultiPolygon"}
+        for record in records or []
+    )
+    cpp = None if has_complex_geometry else _cpp_fn("hit_test")
     if cpp is not None:
         # Compact payload: list of (id, coordinates)
         payload: list[tuple[str, list]] = []

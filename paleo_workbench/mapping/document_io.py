@@ -48,10 +48,13 @@ def apply_features_to_document(doc: PaleoMapDocument, features: list[dict[str, A
     for f in features:
         kind = f.get("kind")
         if kind == "facies":
+            normalized = normalize_facies(f)
             record: dict[str, Any] = {
                 "id": f["id"],
                 "name": f.get("name", ""),
-                "coordinates": f.get("coordinates", []),
+                "coordinates": normalized.get("coordinates", []),
+                "geometry_type": normalized["geometry_type"],
+                "geometry": normalized["geometry"],
                 "style": f.get("style") or {},
             }
             if f.get("facies") is not None:

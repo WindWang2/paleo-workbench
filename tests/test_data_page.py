@@ -392,6 +392,23 @@ def test_data_page_starts_file_import_in_worker_thread(
     assert "已归档 1" in page.data_toolbar.operation_status_label.text()
 
 
+def test_async_import_commit_runs_on_page_gui_thread(qtbot, tmp_path: Path):
+    project = ProjectDocument.new("GUI commit")
+    path = tmp_path / "well.las"
+    path.write_text("~Version\n", encoding="utf-8")
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    commit_threads = []
+    page.import_finished.connect(
+        lambda _report: commit_threads.append(QThread.currentThread())
+    )
+
+    with qtbot.waitSignal(page.import_finished, timeout=3000):
+        assert page.begin_import_paths([path])
+
+    assert commit_threads == [page.thread()]
+
+
 def test_data_page_import_status_describes_archiving_while_worker_runs(
     qtbot,
     tmp_path: Path,
@@ -435,6 +452,39 @@ def test_data_page_import_status_describes_archiving_while_worker_runs(
             release_worker.set()
 
     assert page.data_toolbar.operation_status_label.text().startswith("已归档")
+
+
+def test_import_shutdown_transfers_running_job_to_application_keeper(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+):
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    project = ProjectDocument.new("Keeper")
+    path = tmp_path / "slow.las"
+    path.write_text("~Version\n", encoding="utf-8")
+    started = Event()
+    release = Event()
+
+    def blocked_import(paths, existing, project_path=None):
+        started.set()
+        release.wait(timeout=5.0)
+        return ImportReport()
+
+    monkeypatch.setattr("paleo_workbench.ui.pages.data_page.import_files", blocked_import)
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    assert page.begin_import_paths([path])
+    assert started.wait(timeout=2.0)
+    thread = page._import_jobs[0][0]
+
+    page._shutdown_import_jobs(wait_ms=1)
+
+    keeper = detached_job_keeper()
+    assert keeper.owns(thread)
+    release.set()
+    qtbot.waitUntil(lambda: not keeper.owns(thread), timeout=3000)
 
 
 def test_data_page_import_folder_dialog_uses_selected_folder(

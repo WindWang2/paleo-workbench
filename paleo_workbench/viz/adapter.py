@@ -5,7 +5,6 @@ from typing import Any
 
 from paleo_workbench.viz.map_load import load_map_payload_from_document
 from paleo_workbench.viz.models import VizPayload, VizRef
-from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
 
 # Resource type / format → engine-aligned viz kind.
@@ -216,21 +215,14 @@ class VizAdapter:
                 label=label,
                 message="地震数据文件不存在或不可读",
             )
-        # Engine-native path for SeismicView.load_segy; volume is fallback only.
-        volume, warning = load_seismic_volume_from_path(path)
-        # File exists: host can still load_segy if volume prep failed — keep as warning.
-        if volume is None and not Path(path).is_file():
-            return VizPayload(
-                kind="message",
-                label=label,
-                message=warning or "无法加载 SEGY",
-            )
+        # Do not parse SEGY on the caller/GUI thread.  The engine view owns
+        # budgeted background preparation and latest-generation commit.
         return VizPayload(
             kind="seismic",
             label=label,
             seismic_path=path,
-            seismic_volume=volume,
-            warning=warning or "",
+            seismic_volume=None,
+            warning="SEGY 将在后台按体素预算加载",
             message="",
         )
 

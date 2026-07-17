@@ -21,145 +21,18 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from geoviz import (
+    azimuth_to_rad,
+    directional_distance,
+    directional_trend_grid,
+    directional_weights,
+    rotate_to_uv,
+    trend_value_at,
+)
+
 # Default anisotropy: elongate along strike (a > b).
 _DEFAULT_A = 1.0
 _DEFAULT_B = 0.4
-_EPS = 1e-15
-
-
-def azimuth_to_rad(azimuth_deg: float) -> float:
-    """Convert azimuth in degrees (0 = +Y, clockwise toward +X) to radians."""
-    return math.radians(float(azimuth_deg) % 360.0)
-
-
-def rotate_to_uv(
-    dx: np.ndarray,
-    dy: np.ndarray,
-    *,
-    azimuth_deg: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Rotate offset vectors into strike-aligned (u, v).
-
-    u: along major axis (strike); v: across strike.
-    """
-    th = azimuth_to_rad(azimuth_deg)
-    # Rotate so that the strike direction (azimuth from north) becomes +u.
-    # Pointing north (0,1) at az=0 → u=1, v=0 after: u = dy cos + dx sin ...
-    cos_t = math.cos(th)
-    sin_t = math.sin(th)
-    u = dx * sin_t + dy * cos_t
-    v = dx * cos_t - dy * sin_t
-    return u, v
-
-
-def directional_distance(
-    u: np.ndarray,
-    v: np.ndarray,
-    *,
-    a: float,
-    b: float,
-) -> np.ndarray:
-    """d = √((u/a)² + (v/b)²) with safe semi-axes."""
-    aa = max(float(a), _EPS)
-    bb = max(float(b), _EPS)
-    return np.sqrt((u / aa) ** 2 + (v / bb) ** 2)
-
-
-def directional_weights(
-    d: np.ndarray,
-    *,
-    q: np.ndarray | float = 1.0,
-    b_i: np.ndarray | float = 1.0,
-) -> np.ndarray:
-    """w = exp(-d²) · q · b_i."""
-    w = np.exp(-(d**2)) * np.asarray(q, dtype=np.float64) * np.asarray(
-        b_i, dtype=np.float64
-    )
-    w = np.where(np.isfinite(w), w, 0.0)
-    w = np.maximum(w, 0.0)
-    return w
-
-
-def trend_value_at(
-    x0: float,
-    y0: float,
-    xs: np.ndarray,
-    ys: np.ndarray,
-    zs: np.ndarray,
-    *,
-    azimuth_deg: float = 0.0,
-    a: float = _DEFAULT_A,
-    b: float = _DEFAULT_B,
-    q: np.ndarray | None = None,
-    b_i: np.ndarray | None = None,
-) -> float:
-    """Evaluate T(x0, y0) with directional weights over sample points."""
-    xs = np.asarray(xs, dtype=np.float64)
-    ys = np.asarray(ys, dtype=np.float64)
-    zs = np.asarray(zs, dtype=np.float64)
-    n = len(zs)
-    if n == 0:
-        return float("nan")
-    q_arr = np.ones(n, dtype=np.float64) if q is None else np.asarray(q, dtype=np.float64)
-    b_arr = np.ones(n, dtype=np.float64) if b_i is None else np.asarray(b_i, dtype=np.float64)
-    dx = xs - float(x0)
-    dy = ys - float(y0)
-    u, v = rotate_to_uv(dx, dy, azimuth_deg=azimuth_deg)
-    d = directional_distance(u, v, a=a, b=b)
-    w = directional_weights(d, q=q_arr, b_i=b_arr)
-    sw = float(np.sum(w))
-    if sw <= _EPS:
-        # Degenerate: fall back to nearest sample.
-        i = int(np.argmin(d))
-        return float(zs[i])
-    return float(np.sum(w * zs) / sw)
-
-
-def directional_trend_grid(
-    xs: np.ndarray,
-    ys: np.ndarray,
-    zs: np.ndarray,
-    grid_x: np.ndarray,
-    grid_y: np.ndarray,
-    *,
-    azimuth_deg: float = 0.0,
-    a: float = _DEFAULT_A,
-    b: float = _DEFAULT_B,
-    q: np.ndarray | None = None,
-    b_i: np.ndarray | None = None,
-) -> np.ndarray:
-    """Evaluate directional trend on a regular grid → shape (len(grid_y), len(grid_x))."""
-    xs = np.asarray(xs, dtype=np.float64)
-    ys = np.asarray(ys, dtype=np.float64)
-    zs = np.asarray(zs, dtype=np.float64)
-    grid_x = np.asarray(grid_x, dtype=np.float64)
-    grid_y = np.asarray(grid_y, dtype=np.float64)
-    n = len(zs)
-    if n == 0 or len(grid_x) == 0 or len(grid_y) == 0:
-        return np.full((len(grid_y), len(grid_x)), np.nan)
-
-    q_arr = np.ones(n, dtype=np.float64) if q is None else np.asarray(q, dtype=np.float64)
-    b_arr = np.ones(n, dtype=np.float64) if b_i is None else np.asarray(b_i, dtype=np.float64)
-
-    # Vectorized over grid cells: (H, W, N)
-    X, Y = np.meshgrid(grid_x, grid_y)  # (H, W)
-    dx = X[:, :, np.newaxis] - xs  # (H, W, N)
-    dy = Y[:, :, np.newaxis] - ys
-    u, v = rotate_to_uv(dx, dy, azimuth_deg=azimuth_deg)
-    d = directional_distance(u, v, a=a, b=b)
-    w = directional_weights(d, q=q_arr, b_i=b_arr)
-    sw = np.sum(w, axis=2)
-    num = np.sum(w * zs, axis=2)
-    out = np.full(sw.shape, np.nan, dtype=np.float64)
-    ok = sw > _EPS
-    out[ok] = num[ok] / sw[ok]
-    # Degenerate cells: nearest sample
-    if np.any(~ok):
-        nearest = np.argmin(d, axis=2)
-        out[~ok] = zs[nearest[~ok]]
-    return out
-
-
 def resolve_anisotropy_params(
     direction_params: Sequence[dict[str, Any]] | None,
 ) -> tuple[float, float, float]:

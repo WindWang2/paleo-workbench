@@ -16,12 +16,12 @@ from paleo_workbench.ui.pages.data_page import DataPage
 
 
 def _shell_digit_shortcuts(shell: AppShell) -> list[QShortcut]:
-    """Return only the 1-9 digit-keyed shortcuts owned by the shell
+    """Return only the 1-9/0 digit-keyed shortcuts owned by the shell
     (excludes the DataPage's Delete shortcut, which is also a descendant)."""
     out = []
     for sc in shell.findChildren(QShortcut):
         key = sc.key().toString()
-        if key in {"1", "2", "3", "4", "5", "6", "7", "8", "9"}:
+        if key in {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"}:
             out.append(sc)
     return out
 
@@ -92,11 +92,26 @@ def test_digit_shortcut_out_of_range_is_noop(qtbot):
     assert shell.page_stack.currentIndex() == 0
 
 
-def test_app_shell_registers_nine_digit_shortcuts(qtbot):
+def test_app_shell_registers_ten_digit_shortcuts(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     digit_shortcuts = _shell_digit_shortcuts(shell)
-    assert len(digit_shortcuts) == 9
+    assert sorted(sc.key().toString() for sc in digit_shortcuts) == [
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+    ]
+
+
+def test_direct_page_switch_out_of_range_preserves_page_and_sidebar(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    original_page = shell.page_stack.currentIndex()
+    original_context = shell.sidebar.context_label.text()
+
+    shell._switch_page(-1)
+    shell._switch_page(999)
+
+    assert shell.page_stack.currentIndex() == original_page
+    assert shell.sidebar.context_label.text() == original_context
 
 
 # --- PaleoWorkbenchWindow project shortcuts -------------------------------

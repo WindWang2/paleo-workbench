@@ -136,17 +136,15 @@ def test_resolve_las_success(tmp_path: Path):
     assert payload.well_log.curves
 
 
-def test_resolve_seismic_with_monkeypatch(monkeypatch, tmp_path: Path):
+def test_resolve_seismic_defers_parse_to_engine_worker(monkeypatch, tmp_path: Path):
     path = tmp_path / "cube.sgy"
     path.write_bytes(b"not-a-real-segy")
-    volume = np.zeros((4, 5, 6), dtype=np.float32)
-
-    def _fake_load(_path: str):
-        return volume, "downsampled for preview"
-
     monkeypatch.setattr(
         "paleo_workbench.viz.adapter.load_seismic_volume_from_path",
-        _fake_load,
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("adapter must not parse SEGY synchronously")
+        ),
+        raising=False,
     )
     project = ProjectDocument.new("P")
     res = ResourceItem(name="cube.sgy", path=str(path), type="seismic", format="sgy")
@@ -156,8 +154,8 @@ def test_resolve_seismic_with_monkeypatch(monkeypatch, tmp_path: Path):
     assert ref is not None
     payload = adapter.resolve(ref, project)
     assert payload.kind == "seismic"
-    assert payload.seismic_volume is not None
-    assert payload.seismic_volume.shape == (4, 5, 6)
+    assert payload.seismic_volume is None
+    assert payload.seismic_path == str(path)
     assert payload.warning
 
 

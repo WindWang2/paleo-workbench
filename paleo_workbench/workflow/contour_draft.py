@@ -76,6 +76,8 @@ def _extract_via_engine(
     grid_y: np.ndarray,
     grid_z: np.ndarray,
     levels: Sequence[float],
+    *,
+    cancellation_token=None,
 ) -> dict[float, list[np.ndarray]]:
     # Workbench production code must import only the public ``geoviz`` facade
     # (see tests/test_geoviz_package_independence.py).
@@ -85,7 +87,13 @@ def _extract_via_engine(
         raise ImportError(
             "geoviz.extract_contour_lines unavailable; ensure geoviz facade is installed"
         ) from exc
-    return extract_contour_lines(grid_x, grid_y, grid_z, list(levels))
+    return extract_contour_lines(
+        grid_x,
+        grid_y,
+        grid_z,
+        list(levels),
+        cancellation_token=cancellation_token,
+    )
 
 
 def _segments_from_lines_dict(
@@ -120,6 +128,7 @@ def contour_draft_from_factor_task(
     levels: Sequence[float] | None = None,
     n_levels: int = DEFAULT_N_LEVELS,
     name: str | None = None,
+    cancellation_token=None,
 ) -> ContourDraft:
     """Build a ContourDraft isoline set from an interpolated FactorMapTask."""
     grid_x, grid_y, grid_z = _grid_from_task(task)
@@ -131,7 +140,13 @@ def contour_draft_from_factor_task(
     if not use_levels:
         use_levels = [zmin]
 
-    lines_dict = _extract_via_engine(grid_x, grid_y, grid_z, use_levels)
+    lines_dict = _extract_via_engine(
+        grid_x,
+        grid_y,
+        grid_z,
+        use_levels,
+        cancellation_token=cancellation_token,
+    )
     segments = _segments_from_lines_dict(lines_dict)
     title = name or f"{task.target_horizon} {task.factor_type or task.name} 等值线初稿"
     return ContourDraft(
@@ -265,9 +280,15 @@ def compile_contour_draft_from_task(
     levels: Sequence[float] | None = None,
     n_levels: int = DEFAULT_N_LEVELS,
     apply_to_map: bool = True,
+    cancellation_token=None,
 ) -> ContourDraft:
     """End-to-end: task grid → ContourDraft → optional map line_features."""
-    draft = contour_draft_from_factor_task(task, levels=levels, n_levels=n_levels)
+    draft = contour_draft_from_factor_task(
+        task,
+        levels=levels,
+        n_levels=n_levels,
+        cancellation_token=cancellation_token,
+    )
     upsert_contour_draft(project, draft)
     if apply_to_map:
         apply_contour_draft_to_map(project, draft)
@@ -281,6 +302,7 @@ def compile_contour_drafts_for_project(
     task_ids: Sequence[str] | None = None,
     apply_to_map: bool = True,
     only_complete: bool = True,
+    cancellation_token=None,
 ) -> list[ContourDraft]:
     """Generate ContourDrafts for all (or selected) factor tasks that have grids.
 
@@ -290,6 +312,8 @@ def compile_contour_drafts_for_project(
     id_filter = set(task_ids) if task_ids is not None else None
     drafts: list[ContourDraft] = []
     for task in project.factor_map_tasks:
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
         if id_filter is not None and task.id not in id_filter:
             continue
         if only_complete and getattr(task, "status", "") != "complete":
@@ -303,8 +327,11 @@ def compile_contour_drafts_for_project(
                 task,
                 n_levels=n_levels,
                 apply_to_map=apply_to_map,
+                cancellation_token=cancellation_token,
             )
         except (ValueError, ImportError):
             continue
         drafts.append(draft)
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
     return drafts

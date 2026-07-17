@@ -1,9 +1,33 @@
 from pathlib import Path
 
+import pytest
+
 from paleo_workbench.resources.import_service import import_files
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.project.paths import artifact_dir_for
+
+
+def test_failed_atomic_replace_does_not_advance_in_memory_updated_at(
+    tmp_path: Path, monkeypatch
+):
+    from paleo_workbench.project import manager as manager_module
+
+    project = ProjectDocument.new(name="Transaction")
+    original_updated_at = project.meta.updated_at
+    manager = ProjectManager(tmp_path / "demo.paleo.json")
+    monkeypatch.setattr(manager_module, "_now_iso", lambda: "2099-01-01T00:00:00+00:00")
+
+    def fail_replace(_source, _target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(manager_module.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        manager.save(project)
+
+    assert project.meta.updated_at == original_updated_at
+    assert not manager.project_path.exists()
 
 
 def test_project_round_trip_uses_relative_paths(tmp_path: Path):

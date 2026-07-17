@@ -47,8 +47,9 @@ class ProjectManager:
         self.project_path = Path(project_path)
 
     def save(self, project: ProjectDocument) -> None:
-        project.meta.updated_at = _now_iso()
+        updated_at = _now_iso()
         data = project.model_dump()
+        data["meta"]["updated_at"] = updated_at
         for resource in data["resources"]:
             path, external = relativize_path(resource["path"], self.project_path)
             resource["path"] = path
@@ -78,6 +79,7 @@ class ProjectManager:
             except OSError:
                 pass
             raise
+        project.meta.updated_at = updated_at
 
     def load(self) -> ProjectDocument:
         data = json.loads(self.project_path.read_text(encoding="utf-8"))

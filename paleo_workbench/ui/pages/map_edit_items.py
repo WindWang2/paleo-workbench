@@ -3,16 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsPathItem,
-    QGraphicsPolygonItem,
     QGraphicsRectItem,
     QGraphicsSimpleTextItem,
 )
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.mapping.geometry_schema import (
+    canonical_facies_geometry,
+    compact_facies_coordinates,
+)
 
 # Default well marker radius in scene/map units.
 WELL_RADIUS = 0.4
@@ -64,11 +67,16 @@ class VertexHandleItem(QGraphicsRectItem):
         y: float,
         half: float = VERTEX_HANDLE_HALF,
         parent=None,
+        *,
+        part_index: int = 0,
+        ring_index: int = 0,
     ):
         h = float(half)
         super().__init__(QRectF(-h, -h, 2 * h, 2 * h), parent)
         self.feature_id = str(feature_id)
         self.vertex_index = int(vertex_index)
+        self.part_index = int(part_index)
+        self.ring_index = int(ring_index)
         self.setPos(float(x), float(y))
         self.setBrush(_HANDLE_FILL)
         self.setPen(_HANDLE_PEN)
@@ -78,7 +86,7 @@ class VertexHandleItem(QGraphicsRectItem):
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
 
 
-class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
+class FaciesPolygonItem(QGraphicsPathItem, FeatureItemMixin):
     """Facies polygon feature on the edit scene."""
 
     def __init__(
@@ -88,10 +96,11 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         name: str = "",
         style: dict[str, Any] | None = None,
         extras: dict[str, Any] | None = None,
+        geometry_type: str = "Polygon",
+        geometry_coordinates: list | None = None,
         parent=None,
     ):
-        polygon = QPolygonF([QPointF(float(p[0]), float(p[1])) for p in coordinates])
-        super().__init__(polygon, parent)
+        super().__init__(parent)
         self.feature_id = feature_id
         self.kind = "facies"
         self.topology_status = _TOPOLOGY_OK
@@ -99,30 +108,115 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
         self._style = dict(style or {})
         # Prediction/compiler fields preserved for save_draft round-trip.
         self._extras = dict(extras or {})
-        self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
+        source_coordinates = geometry_coordinates if geometry_coordinates is not None else coordinates
+        self._geometry_type, self._polygons = canonical_facies_geometry(
+            {
+                "geometry_type": geometry_type,
+                "geometry": {"type": geometry_type, "coordinates": source_coordinates},
+            }
+        )
+        self._refresh_path()
         self.setBrush(QBrush(_FACIES_FILL))
         self.setPen(_FACIES_PEN)
         self.setZValue(10)
-        self.setFlag(QGraphicsPolygonItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsPathItem.GraphicsItemFlag.ItemIsSelectable, True)
 
     def coordinates(self) -> list[list[float]]:
-        return [list(p) for p in self._coordinates]
+        if not self._polygons or not self._polygons[0]:
+            return []
+        return [list(point) for point in self._polygons[0][0]]
+
+    def has_complex_geometry(self) -> bool:
+        """Return whether legacy single-ring operations would lose geometry."""
+        return (
+            self._geometry_type != "Polygon"
+            or len(self._polygons) != 1
+            or not self._polygons[0]
+            or len(self._polygons[0]) != 1
+        )
+
+    def geometry_coordinates(self) -> list:
+        if self._geometry_type == "Polygon":
+            return [[list(point) for point in ring] for ring in self._polygons[0]] if self._polygons else []
+        return [
+            [[list(point) for point in ring] for ring in polygon]
+            for polygon in self._polygons
+        ]
+
+    def all_rings(self) -> list[list[list[float]]]:
+        return [
+            [list(point) for point in ring]
+            for polygon in self._polygons
+            for ring in polygon
+        ]
+
+    def iter_ring_addresses(self):
+        for part_index, polygon in enumerate(self._polygons):
+            for ring_index, ring in enumerate(polygon):
+                yield part_index, ring_index, [list(point) for point in ring]
+
+    def ring_coordinates(self, part_index: int, ring_index: int) -> list[list[float]]:
+        try:
+            ring = self._polygons[int(part_index)][int(ring_index)]
+        except (IndexError, TypeError, ValueError):
+            return []
+        return [list(point) for point in ring]
+
+    def set_ring_coordinates(
+        self,
+        part_index: int,
+        ring_index: int,
+        coordinates: list[list[float]],
+    ) -> None:
+        _, normalized = canonical_facies_geometry(
+            {"geometry_type": "Polygon", "coordinates": coordinates}
+        )
+        if not normalized:
+            return
+        self._polygons[int(part_index)][int(ring_index)] = normalized[0][0]
+        self._refresh_path()
+        self.setPos(0.0, 0.0)
 
     def set_coordinates(self, coordinates: list[list[float]]) -> None:
-        """Replace ring coordinates and refresh the polygon path."""
-        self._coordinates = [[float(p[0]), float(p[1])] for p in coordinates]
-        self.setPolygon(QPolygonF([QPointF(p[0], p[1]) for p in self._coordinates]))
+        """Replace the editable first outer ring while preserving other rings."""
+        _, normalized = canonical_facies_geometry(
+            {"geometry_type": "Polygon", "coordinates": coordinates}
+        )
+        if not normalized:
+            return
+        if not self._polygons:
+            self._polygons = normalized
+        elif not self._polygons[0]:
+            self._polygons[0] = normalized[0]
+        else:
+            self._polygons[0][0] = normalized[0][0]
+        self._refresh_path()
         self.setPos(0.0, 0.0)
 
     def translate_by(self, dx: float, dy: float) -> None:
         """Shift polygon vertices and update the graphics path."""
         dx_f = float(dx)
         dy_f = float(dy)
-        for p in self._coordinates:
-            p[0] += dx_f
-            p[1] += dy_f
-        self.setPolygon(QPolygonF([QPointF(p[0], p[1]) for p in self._coordinates]))
+        for polygon in self._polygons:
+            for ring in polygon:
+                for point in ring:
+                    point[0] += dx_f
+                    point[1] += dy_f
+        self._refresh_path()
         self.setPos(0.0, 0.0)
+
+    def _refresh_path(self) -> None:
+        path = QPainterPath()
+        path.setFillRule(Qt.FillRule.OddEvenFill)
+        for polygon in self._polygons:
+            for ring in polygon:
+                if len(ring) < 3:
+                    continue
+                path.moveTo(float(ring[0][0]), float(ring[0][1]))
+                for point in ring[1:]:
+                    path.lineTo(float(point[0]), float(point[1]))
+                path.closeSubpath()
+        self.setPath(path)
 
     def get_property(self, key: str) -> Any:
         if key == "name":
@@ -142,7 +236,12 @@ class FaciesPolygonItem(QGraphicsPolygonItem, FeatureItemMixin):
             "id": self.feature_id,
             "kind": self.kind,
             "name": self._name,
-            "coordinates": [list(p) for p in self._coordinates],
+            "coordinates": compact_facies_coordinates(self._geometry_type, self._polygons),
+            "geometry_type": self._geometry_type,
+            "geometry": {
+                "type": self._geometry_type,
+                "coordinates": self.geometry_coordinates(),
+            },
             "style": dict(self._style),
             "topology_status": self.topology_status,
         }

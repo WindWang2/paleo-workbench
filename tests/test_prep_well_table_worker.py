@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from threading import Event
+
 from PySide6.QtCore import QCoreApplication
 
 from paleo_workbench.project.models import (
@@ -89,13 +91,32 @@ def test_factor_prepare_worker_runs_batch(qtbot):
     # empty tasks → worker creates defaults
     worker = FactorPrepareWorker(project, method="IDW")
     results: list[int] = []
+    completed: list[object] = []
     errors: list[str] = []
     worker.finished.connect(results.append)
+    worker.completed.connect(completed.append)
     worker.failed.connect(errors.append)
     worker.run()
     assert errors == []
     assert results and results[0] >= 1
-    assert all(t.status == "complete" for t in project.factor_map_tasks)
+    assert project.factor_map_tasks == []
+    assert all(t.status == "complete" for t in completed[0].factor_map_tasks)
+
+
+def test_factor_prepare_worker_returns_snapshot_result_without_mutating_live_project(qtbot):
+    project = ProjectDocument.new("Snapshot")
+    project.stratigraphy.target_horizon = "H1"
+    worker = FactorPrepareWorker(project, method="IDW")
+    completed: list[object] = []
+    worker.completed.connect(completed.append)
+
+    worker.run()
+
+    assert project.factor_map_tasks == []
+    assert completed
+    result = completed[0]
+    assert result.count >= 1
+    assert result.factor_map_tasks
 
 
 def test_preparation_page_async_generate(qtbot, monkeypatch):
@@ -126,3 +147,49 @@ def test_shutdown_workers_is_safe(qtbot):
     qtbot.addWidget(page)
     page.shutdown_workers()  # no-op when idle
     assert page.is_prepare_running() is False
+
+
+def test_running_prepare_shutdown_is_kept_and_stale_snapshot_never_commits(
+    qtbot,
+    monkeypatch,
+):
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    project = ProjectDocument.new("Shutdown")
+    page = PreparationPage()
+    qtbot.addWidget(page)
+    page.set_project(project)
+    started = Event()
+    release = Event()
+
+    def blocked_prepare(snapshot, method="IDW", **_kwargs):
+        started.set()
+        release.wait(timeout=5.0)
+        snapshot.factor_map_tasks = [
+            FactorMapTask(
+                name="stale",
+                target_horizon="H",
+                factor_type="地层厚度",
+                status="complete",
+            )
+        ]
+        return snapshot.factor_map_tasks
+
+    monkeypatch.setattr(
+        "paleo_workbench.workflow.factor_interpolation.batch_prepare_factor_maps",
+        blocked_prepare,
+    )
+    page._start_prepare_worker("IDW")
+    assert started.wait(timeout=2.0)
+    thread = page._prepare_thread
+    assert thread is not None
+
+    page.shutdown_workers(wait_ms=1)
+
+    keeper = detached_job_keeper()
+    assert keeper.owns(thread)
+    assert project.factor_map_tasks == []
+    release.set()
+    qtbot.waitUntil(lambda: not keeper.owns(thread), timeout=3000)
+    QCoreApplication.processEvents()
+    assert project.factor_map_tasks == []

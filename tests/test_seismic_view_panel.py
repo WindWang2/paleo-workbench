@@ -82,6 +82,45 @@ def test_seismic_view_uses_bound_segy(qtbot, monkeypatch):
     assert panel.view.is_ready()
 
 
+def test_seismic_view_panel_schedules_path_only_payload(qtbot, monkeypatch, tmp_path):
+    path = tmp_path / "bound.sgy"
+    path.write_bytes(b"stub")
+    project = ProjectDocument.new("BoundAsync")
+    resource = ResourceItem(
+        name="bound.sgy",
+        path=str(path),
+        type="seismic",
+        format="sgy",
+    )
+    project.resources.append(resource)
+    task = PredictionTask(
+        name="bound-async",
+        status="complete",
+        input_refs={"seismic_resource_ids": [resource.id]},
+    )
+
+    def _fake_resolve(self, ref, project_arg):
+        return VizPayload(
+            kind="seismic",
+            label="bound.sgy",
+            seismic_path=str(path),
+        )
+
+    from paleo_workbench.viz.adapter import VizAdapter
+
+    monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
+    panel = SeismicViewPanel()
+    qtbot.addWidget(panel)
+    scheduled = []
+    monkeypatch.setattr(panel.view, "load_segy_async", scheduled.append)
+
+    panel.update_state(task, project=project)
+
+    assert scheduled == [str(path)]
+    assert panel.stack.currentWidget() is panel.view
+    assert panel.volume_shape is None
+
+
 def test_seismic_view_bound_failure_shows_message(qtbot, monkeypatch):
     project = ProjectDocument.new("BoundFail")
     resource = ResourceItem(

@@ -114,3 +114,36 @@ def test_synthetic_points_are_deterministic():
     a = synthetic_sample_points(seed=42, factor_type="砂")
     b = synthetic_sample_points(seed=42, factor_type="砂")
     assert a == b
+
+
+def test_synthetic_points_do_not_depend_on_python_hash(monkeypatch):
+    import builtins
+
+    monkeypatch.setattr(builtins, "hash", lambda _value: 1)
+    first = synthetic_sample_points(seed=7, factor_type="砂地比", count=3)
+    monkeypatch.setattr(builtins, "hash", lambda _value: 999999)
+    second = synthetic_sample_points(seed=7, factor_type="砂地比", count=3)
+
+    assert first == second
+
+
+def test_large_sample_loo_uses_a_bounded_deterministic_subset(monkeypatch):
+    from paleo_workbench.workflow import factor_interpolation as interpolation
+
+    calls: list[float] = []
+
+    def fake_grid(x, y, z, grid_x, grid_y, **_kwargs):
+        calls.append(float(grid_x[0]))
+        return np.asarray([[float(np.mean(z))]])
+
+    monkeypatch.setattr(interpolation, "_run_grid", fake_grid)
+    sample_count = 2_000
+    x = np.linspace(0.0, 100.0, sample_count)
+    y = np.linspace(10.0, 80.0, sample_count)
+    z = np.sin(x / 10.0)
+
+    interpolation._leave_one_out_r2(x, y, z, backend="idw", power=2.0)
+
+    assert len(calls) == interpolation.MAX_LOO_SAMPLES
+    assert calls[0] == x[0]
+    assert calls[-1] == x[-1]

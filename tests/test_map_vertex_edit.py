@@ -79,7 +79,6 @@ def test_vertex_handles_shown_for_single_facies_when_tool_vertex(qtbot):
     item.setSelected(True)
 
     assert scene.vertex_handle_count() == 0
-
     scene.set_tool("vertex")
     # Closed ring: 5 points including close → 4 unique handles
     assert scene.vertex_handle_count() == 4
@@ -89,6 +88,45 @@ def test_vertex_handles_shown_for_single_facies_when_tool_vertex(qtbot):
 
     scene.set_tool("select")
     assert scene.vertex_handle_count() == 0
+
+
+def test_hole_handles_have_ring_addresses_and_closed_edit_is_undoable(qtbot):
+    outer = [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]]
+    hole = [[2, 2], [2, 6], [6, 6], [6, 2], [2, 2]]
+    scene = MapEditScene()
+    scene.load_document(
+        PaleoMapDocument(
+            name="holes",
+            linked_target_horizon="H",
+            facies_polygons=[
+                {
+                    "id": "f-hole",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [outer, hole],
+                    },
+                }
+            ],
+        )
+    )
+    item = scene.item_by_id("f-hole")
+    item.setSelected(True)
+    scene.set_tool("vertex")
+
+    handles = scene.vertex_handles()
+    assert len(handles) == 8
+    assert {(h.part_index, h.ring_index) for h in handles} == {(0, 0), (0, 1)}
+
+    assert scene.apply_set_vertex(
+        "f-hole", 0, 3.0, 3.0, part_index=0, ring_index=1
+    )
+    edited = item.to_record()["coordinates"]
+    assert edited[0] == outer
+    assert edited[1][0] == [3.0, 3.0]
+    assert edited[1][-1] == [3.0, 3.0]
+
+    scene.undo()
+    assert item.to_record()["coordinates"] == [outer, hole]
 
 
 def test_vertex_handles_hidden_when_multi_or_none_selected(qtbot):
@@ -217,3 +255,53 @@ def test_delete_key_removes_vertex_when_allowed(qtbot):
     key2 = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
     scene.keyPressEvent(key2)
     assert len(item.to_record()["coordinates"]) == 4
+
+
+def test_drag_hole_handle_updates_only_addressed_ring_and_undoes(qtbot):
+    outer = [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]]
+    hole = [[2, 2], [2, 6], [6, 6], [6, 2], [2, 2]]
+    scene = MapEditScene()
+    scene.load_document(
+        PaleoMapDocument(
+            name="holes",
+            linked_target_horizon="H",
+            facies_polygons=[
+                {
+                    "id": "f-hole",
+                    "geometry": {"type": "Polygon", "coordinates": [outer, hole]},
+                }
+            ],
+        )
+    )
+    item = scene.item_by_id("f-hole")
+    item.setSelected(True)
+    scene.set_tool("vertex")
+    handle = next(
+        h
+        for h in scene.vertex_handles()
+        if h.part_index == 0 and h.ring_index == 1 and h.vertex_index == 1
+    )
+    start = handle.sceneBoundingRect().center()
+    end = QPointF(start.x() + 1.0, start.y() + 0.5)
+
+    press = QGraphicsSceneMouseEvent(QGraphicsSceneMouseEvent.Type.GraphicsSceneMousePress)
+    press.setScenePos(start)
+    press.setButton(Qt.MouseButton.LeftButton)
+    press.setButtons(Qt.MouseButton.LeftButton)
+    scene.mousePressEvent(press)
+    move = QGraphicsSceneMouseEvent(QGraphicsSceneMouseEvent.Type.GraphicsSceneMouseMove)
+    move.setScenePos(end)
+    move.setButtons(Qt.MouseButton.LeftButton)
+    scene.mouseMoveEvent(move)
+    release = QGraphicsSceneMouseEvent(QGraphicsSceneMouseEvent.Type.GraphicsSceneMouseRelease)
+    release.setScenePos(end)
+    release.setButton(Qt.MouseButton.LeftButton)
+    release.setButtons(Qt.MouseButton.NoButton)
+    scene.mouseReleaseEvent(release)
+
+    edited = item.to_record()["coordinates"]
+    assert edited[0] == outer
+    assert edited[1][1] == [3.0, 6.5]
+
+    scene.undo()
+    assert item.to_record()["coordinates"] == [outer, hole]

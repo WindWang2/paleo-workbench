@@ -1,7 +1,7 @@
 # Task Plan: Paleogeography Workbench — UI Page Implementation
 
 > **Updated:** 2026-07-17
-> **Goal:** Ship a demo-ready paleogeography desktop workbench (9 AppShell pages, data center, project lifecycle, mapping editor, geo-viz previews). Current focus after Phase 21 / B→A→C data overhaul: **stability hardening** (full-project audit fixes) and **interactive data previews** (SEGY slice scrub).
+> **Goal:** Ship a demo-ready paleogeography desktop workbench (10 AppShell pages, data center, project lifecycle, mapping editor, geo-viz previews). Current focus: Phase 27 system-state, GIS-core, and thread-lifecycle hardening.
 
 ## Project Status
 
@@ -438,6 +438,134 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 - ISS-PRED-01 prediction beyond mock
 - ISS-VIZ-01 well-tie workspace tab
 
+### Phase 27: 系统状态、GIS 核心与线程生命周期审计重构 — ✅ COMPLETE
+
+**Goal:** 在保持现有业务与 `.paleo.json` 兼容性的前提下，验证并修复 Project I/O、三大空间页、核心数学模型、异步预览/插值生命周期，并将专业解析与重计算收拢到 `geo-viz-engine` 公共 API。
+
+**自动设计决策（用户已授权 Fully Automated Loop）：**
+
+| 方案 | 取舍 | 决策 |
+|------|------|------|
+| 风险优先、证据驱动、engine-first 原子迁移 | 先复现高危缺陷；每次只修一条链路，兼容性最好 | **采用** |
+| 页面/engine 一次性重写 | 边界最整齐，但回归面和交付风险过大 | 拒绝 |
+| 仅在页面层打补丁 | 速度快，但继续制造重复解析、线程与算法债务 | 拒绝 |
+
+#### Audit / Issue Board
+
+| ID | Priority | Scope | Acceptance | Status |
+|----|----------|-------|------------|--------|
+| ISS-AUDIT-01 | P0 | 10 页 AppShell 路由、适配器、Project I/O 路径流 | 相对路径不可 `..` 越界；合法内部/绝对外部路径 round-trip；旧工程兼容 | ✅ audited |
+| ISS-TOPO-01 | P0 | 多环多边形拖拽、闭合环、Shape 校验 | 外环/洞环按稳定 vertex id 编辑；首尾闭合不破裂；校验与命令栈一致 | ✅ fixed |
+| ISS-THREAD-01 | P0 | DataPage 多模态预览、导入与 shell rebuild | stale result 丢弃；所有 QThread/worker 可取消、等待并安全销毁；无竞态告警 | ✅ fixed |
+| ISS-ASYNC-01 | P0 | 制备页 IDW/断层屏障/等值线高负载 | GUI 主线程只调度/渲染；N≥2000 计算在 worker；错误/取消可恢复 | ✅ fixed |
+| ISS-ALG-01 | P0 | MAD modified z-score | 严格实现 `0.6745*(x-median)/MAD`；MAD=0 有明确定义且测试覆盖 | ✅ fixed |
+| ISS-ALG-02 | P0 | 砂地比约束 | 强制 `0 <= Hs <= Ht`、处理 Ht=0/NaN，输出范围 `[0,1]` | ✅ fixed |
+| ISS-ALG-03 | P0 | 异向距离与方向加权趋势面 | 旋转坐标 `(u,v)`、轴尺度 `(a,b)` 与归一加权公式真实落地并有数值基准 | ✅ fixed |
+| ISS-ARCH-01 | P1 | LAS/SEGY/插值/等值线解析边界 | workbench 页面仅依赖 `geoviz` facade；解析、重计算和 worker 核心在 engine | ✅ fixed |
+| ISS-STATE-01 | P1 | ProjectDocument 内存状态与保存时序 | dirty scene/后台结果不会静默覆盖；保存原子且 `updated_at`/路径一致 | ✅ fixed |
+| ISS-ROUTE-01 | P1 | 10 页路由与快捷键 | rail/stack/sidebar/窗口更新索引完全一致；第 10 页可由键盘访问；无陈旧 9 页假设 | ✅ fixed |
+| ISS-ALG-04 | P0 | IDW 断层屏障与规模安全 | 非有限输入拒绝/过滤；接触/共线交点阻断正确；chunked 内存；大 N 质控不做无界 O(N²) | ✅ fixed |
+| ISS-REPRO-01 | P1 | 演示采样可复现性 | 同参数跨进程生成相同 synthetic points/snapshot | ✅ fixed |
+
+#### Execution Gates
+
+- [x] A1：完整静态清单（确认 10 个 rail 路由 + shell/窗口入口）与路径调用图
+- [x] A2：数学实现与公式逐项数值核验，Mock/placeholder/deep-import 清单落入 `findings.md`
+- [x] A3：拓扑命令、Shape 校验、QThread 生命周期根因与最小复现
+- [x] R1：按 P0 顺序 TDD 原子修复；每个模块 focused offscreen pytest
+- [x] R2：engine facade 收口与 Thin Host 依赖测试
+- [x] V1：root/engine 全量 non-slow 通过；无 Qt 线程销毁告警；`compileall`/`git diff --check` 通过
+
+#### Inline TDD Implementation Plan
+
+> 用户已授权 Fully Automated Loop；本计划在当前 checkout 内联执行。每个任务严格 RED → GREEN → focused regression；连续三次失败触发 RCA/策略切换。
+
+##### Task 27.1 — 路由与 ProjectManager 事务语义（ISS-ROUTE-01 / ISS-STATE-01）
+
+**Files:** `tests/test_keyboard_shortcuts.py`, `tests/test_app_shell.py`, `tests/test_project_manager.py`, `paleo_workbench/ui/app_shell.py`, `paleo_workbench/project/manager.py`
+
+- [x] RED：新增 `0` 键进入第 10 页、非法 page index 无副作用、保存 `os.replace` 失败不修改内存 `updated_at`。
+- [x] Run: 3 个新增用例按预期全部失败（3 failed in 4.59s）。
+- [x] GREEN：数字映射 1–9+0、所有 helper 使用 `PAGE_INDEX_*`、switch 范围防御；timestamp 先写 data copy，原子 replace 成功后才 commit 到 model。
+- [x] Regression：`37 passed in 7.70s`。
+
+##### Task 27.2 — Engine 数学核心与有界 IDW（ISS-ALG-01..04 / ISS-ARCH-01）
+
+- [x] RED：零 MAD、砂地比边界、异向轴校验、趋势面分块等价。
+- [x] RED：断层端点/共线相交、非有限样点过滤、IDW 分块接口。
+- [x] RED：合成样点不应依赖 Python 随机哈希。
+- [x] GREEN：纯数学实现下沉并从 `geoviz` 门面导出。
+- [x] GREEN：IDW 改为鲁棒相交、有限输入过滤与受限内存分块。
+- [x] GREEN：workbench 包装层委托 engine，并采用稳定摘要种子。
+- [x] GREEN：大样本 LOO 验证固定上限 64，采用确定性等距样本。
+
+**Files:** `geo-viz-engine/packages/geoviz_plots/geoviz_plots/analytics/well_qc.py` (new), `.../interpolation/directional.py` (new), `.../interpolation/idw.py`, `geo-viz-engine/geoviz/__init__.py`/facade exports, workbench `workflow/well_qc.py`, `workflow/directional_trend.py`, `workflow/factor_interpolation.py`, engine/root tests.
+
+- [x] RED：MAD=0+偏离值 → ±inf；砂地比边界；负 axis 拒绝；chunked trend/IDW 等价；fault endpoint/collinear 阻断；inf 输入不传播；跨进程 synthetic 稳定。
+- [x] Run engine/root focused tests；确认失败原因分别命中现有行为。
+- [x] GREEN：新增纯 NumPy engine API；workbench model wrappers 仅调用 `geoviz` facade；IDW/趋势按目标 cell block 计算；健壮 segment orientation；稳定 SHA256 seed；LOO 对大 N 确定性限样。
+- [x] Regression：engine `39 passed`；root `30 passed`。
+
+##### Task 27.3 — Engine polygon closure/MultiPolygon invariants（ISS-TOPO-01）
+
+**Files:** engine `geoviz_paleo_map/topology.py`, `edit_commands.py`, tests `test_edit_commands.py`, `test_topology.py`/new focused cases.
+
+- [x] RED：hole 全图拖拽/undo；删除首闭合 vertex 后 ring 仍闭合；open input 自动闭合；MultiPolygon round-trip 不扁平为 hole（3 failed / 38 passed）。
+- [x] GREEN：ring mutation 同步 closing id；FeatureRef 保存 polygon part grouping；serialization 保留 Polygon/MultiPolygon。
+- [x] Regression：engine topology/edit/canvas/hierarchy `89 passed`。
+
+##### Task 27.4 — Workbench 多环 Thin Host（ISS-TOPO-01 / ISS-ARCH-01）
+
+**Files:** `mapping/geometry_schema.py`, `mapping/document_io.py`, `ui/pages/map_edit_items.py`, `map_edit_commands.py`, `map_edit_scene.py`, mapping tests.
+
+- [x] RED（I/O/item）：Polygon holes/MultiPolygon load→save 保真、洞内不填充、move/undo 全 ring（3 failed / 2 passed）。
+- [x] RED（commands/validation）：hole ring handle/闭合编辑、geometry-aware hit-test、逐 ring save validation（3 failed）。
+- [x] GREEN（I/O/item）：记录保留 geometry/rings；facies 使用 OddEven `QGraphicsPathItem`；move/undo 覆盖所有 part/ring。
+- [x] GREEN（scene）：handle 标识 part/ring/vertex；RingEditCommand 携带稳定 ring address；whole Shape 验证调用 engine facade。
+- [x] Regression：mapping editor/topology/document/project round-trip suites `122 passed`；hole mouse drag `1 passed`。
+
+##### Task 27.5 — 通用可取消 Job 生命周期（ISS-THREAD-01 / ISS-ASYNC-01）
+
+**Files:** engine 新增 bounded job/cancel primitives（具体落点在 geoviz facade 所属 package），workbench `preview_worker.py`, `data_page.py`, `factor_prepare_worker.py`, `preparation_page.py`, lifecycle tests.
+
+- [x] RED：live project mutation、preview/import timeout owner、media unbounded preload 四项失败（4 failed）。
+- [ ] RED：factor stale result 不 commit、running factor timeout keeper。
+- [!] 3-Strike：running prepare shutdown 连续三次 hang；已完成 RCA，暂停猜测式修补，切换 faulthandler 精确栈策略（详见 `findings.md`）。
+- [!] 3-Strike：preview terminal cleanup 三次全域失败；queued relay 后停在第 9 项，暂停 mutation并切换 faulthandler + deletion-order 审计。
+- [x] preview 3-Strike 新策略验证：GUI cleanup 后删除 QThread；focused 1 passed / 全域 30 passed。
+- [x] GREEN：不可变 snapshot→result DTO→GUI commit；超时 job 移交 application-level keeper；禁止丢失最后 owner。
+- [x] GREEN：CancellationToken 下沉到 IDW/directional chunk checkpoint，取消延迟受单 chunk 约束。
+- [x] Regression：preview/import/preparation teardown `95 passed`，无 `QThread destroyed`/self-wait/deleted-wrapper。
+
+##### Task 27.6 — 等值线与地震专业解析异步收口（ISS-ASYNC-01 / ISS-ARCH-01）
+
+**Files:** engine contour/seismic facade + workers, workbench thin hosts/pages, focused tests.
+
+- [x] RED：contour extraction 不在 GUI thread；快速连续 SEGY load 只保留 latest；异常路径关闭 loader；体素预算生效；同步全量 fallback 不可由 host 调用。
+- [x] GREEN：engine prepared-job APIs；generation/cancel；loader `finally close`；budget-derived downsample；GUI 仅 render/commit。
+- [x] Regression：engine contour/SEGY `57 passed`；root contour/preparation/seismic host/lifecycle/package facade `63 passed`。
+
+##### Task 27.7 — 全量审计门禁
+
+- [x] root full（同一 non-slow 集合以 `-vv + faulthandler` 完成诊断门禁）：`993 passed, 4 skipped, 8 deselected`。
+- [x] engine: `QT_QPA_PLATFORM=minimal QT_OPENGL=software LIBGL_ALWAYS_SOFTWARE=1 geo-viz-engine/.venv/bin/python -m pytest -m 'not slow' -q --timeout=60` → `1027 passed, 2 skipped, 134 deselected`。
+- [x] `python -m compileall -q paleo_workbench geo-viz-engine/packages`
+- [x] root + engine `git diff --check`；三份 PWF 与 Issue 状态已同步。
+
+#### Errors Encountered
+
+| Attempt | Error | Resolution |
+|---------|-------|------------|
+| Baseline 1 | `QT_QPA_PLATFORM=offscreen pytest -q --timeout=60 -m 'not slow'` 在 51% 后超过 3 分钟无输出，pytest-timeout 未中断 | 精确终止 PID 391169；不重复同一 quiet 命令，改用 focused suites + `-vv` 定位 |
+| PWF patch 1 | 同一 patch 同时修改较远上下文时 verification failed | 用精确 `rg` 定位后拆分 patch；无代码影响 |
+| Task 27.2 RED command | root pytest 同时收集 `geo-viz-engine/tests` 与 root node id 时 rootdir 切到 engine，导致 `tests.test_factor_interpolation` ModuleNotFoundError | 分成 engine cwd 与 root cwd 两条 focused 命令，避免 pytest rootdir 混用 |
+| Task 27.2 facade regression 1 | `prepared_codec` 顶层导入 `geoviz_cross_well.FormationTop`，可选包屏蔽测试失败 | 延迟可选模型导入到对应 decode 分支，恢复 core-only import 契约 |
+| Task 27.2 facade regression 2 | FormationTop 延迟后暴露 `prepared_codec -> previews.dat -> geoviz_plots` 第二条顶层链 | 同样延迟 XY/Surface payload 类型导入；第三次失败即按 3-Strike 重审 codec 分层 |
+| Task 27.5 prepare hang 1–2 | keeper release 后 pytest Qt teardown 不退出；main in Qt poll | 将 finished→release 强制 queued 到 keeper GUI thread；第三次失败执行 3-Strike RCA |
+| Task 27.5 prepare hang 3 | queued relay 后仍被 GNU timeout 15s 终止（124）；faulthandler 定位 stale failed slot 打开 QMessageBox modal | adopt 断开 completed+failed page slots；failure token guard；改非模态状态文本 |
+| Task 27.5 preview cleanup 1–3 | 两次 cache rewrite idle timeout；queued relay 后全域第 9 项前 timeout 124 | 3-Strike：faulthandler 定位；审计 `finished→deleteLater` 与 relay 顺序，GUI cleanup 后再 delete wrapper |
+| Task 27.7 engine full 1 / DTW focused 2 | cross-well DTW 1k 分别 1.061s / 1.045s，超过 1s 门槛 | 第三次前审计热区；将逐 cell Python DP 等价改写为 NumPy min-plus prefix scan，DTW suite 10 passed |
+
 ## Known Follow-up Items
 
 | # | Item | Status |
@@ -479,6 +607,27 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 21 | 数据页压测 + 导入 checksum skip (S1–S4 harness) | ✅ Complete (branch) | ~8+ | ✅ | ✅ |
 | 22 | 全项目审计加固 (audit fixes) | ✅ Complete (`main`) | sampled suites | audit reports | — |
 | 23 | 数据页 SEGY 剖面滑条 (engine scrub) | ✅ Complete | +slider tests | — | — |
+
+### Phase 28: Review 缺陷修复与 Clean-Checkout 交付 — 🔄 IN PROGRESS
+
+**Goal:** 修复 reviewer 指出的 6 条交付/数据完整性/异步生命周期问题，并把 engine 变更与 parent gitlink 固化为 clean checkout 可复现提交。
+
+| ID | Priority | Acceptance | Status |
+|----|----------|------------|--------|
+| REV-PACK-01 | P1 | 两个新 workbench 模块进入父仓提交；clean checkout 可 import `PreparationPage` | 🔄 active |
+| REV-ENGINE-01 | P1 | engine 变更独立提交，父仓 gitlink 指向含 jobs/算法/拓扑 API 的 commit | 🔄 active |
+| REV-GEOM-01 | P1 | complex Polygon/MultiPolygon merge/split 明确拒绝，原 feature 不删除 | 🔄 active |
+| REV-PREVIEW-01 | P1 | preview 优先 editor record 的标准 geometry，holes/MultiPolygon 保真且不崩 | 🔄 active |
+| REV-SEGY-01 | P1 | clear/demo/empty 离开 path load 时取消并递增 generation；旧 worker 不覆盖新状态 | 🔄 active |
+| REV-IO-01 | P2 | preview mode/payload 门禁先于 stat/read；非 image/PDF 与已有 bytes 零读盘 | 🔄 active |
+
+#### TDD / Delivery Plan
+
+- [ ] RED：分别为 complex merge/split、preview geometry、SEGY invalidation、preload no-read 添加失败测试。
+- [ ] GREEN：最小产品修复；每个原子缺陷 focused offscreen pytest。
+- [ ] REGRESSION：mapping/preview/seismic/package suites。
+- [ ] COMMIT：engine scoped commit；父仓纳入新模块、更新 gitlink并提交（排除用户未跟踪资产）。
+- [ ] CLEAN CHECKOUT：临时 worktree/submodule 初始化后 import + focused tests；compileall/diff-check。
 
 ## Test History
 

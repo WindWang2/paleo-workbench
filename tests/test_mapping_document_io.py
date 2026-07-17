@@ -40,3 +40,56 @@ def test_apply_features_round_trip_lines_and_labels():
     assert len(doc.label_features) == 1
     back = features_from_document(doc)
     assert {f["id"] for f in back} == {"f1", "ln1", "lb1"}
+
+
+def test_facies_polygon_holes_round_trip_without_flattening():
+    coordinates = [
+        [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],
+        [[2, 2], [2, 6], [6, 6], [6, 2], [2, 2]],
+    ]
+    doc = PaleoMapDocument(
+        name="holes",
+        linked_target_horizon="H",
+        facies_polygons=[
+            {
+                "type": "Feature",
+                "properties": {"id": "f-hole", "facies": "delta"},
+                "geometry": {"type": "Polygon", "coordinates": coordinates},
+            }
+        ],
+    )
+
+    feature = features_from_document(doc)[0]
+    assert feature["geometry_type"] == "Polygon"
+    assert feature["coordinates"] == coordinates
+
+    target = PaleoMapDocument(name="target", linked_target_horizon="H")
+    apply_features_to_document(target, [feature])
+    saved = target.facies_polygons[0]
+    assert saved["geometry"] == {"type": "Polygon", "coordinates": coordinates}
+    assert features_from_document(target)[0]["coordinates"] == coordinates
+
+
+def test_facies_multipolygon_round_trip_preserves_every_part():
+    coordinates = [
+        [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+        [[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]],
+    ]
+    doc = PaleoMapDocument(
+        name="multi",
+        linked_target_horizon="H",
+        facies_polygons=[
+            {
+                "id": "multi",
+                "geometry": {"type": "MultiPolygon", "coordinates": coordinates},
+            }
+        ],
+    )
+
+    feature = features_from_document(doc)[0]
+    assert feature["geometry_type"] == "MultiPolygon"
+    assert feature["coordinates"] == coordinates
+
+    apply_features_to_document(doc, [feature])
+    assert doc.facies_polygons[0]["geometry"]["type"] == "MultiPolygon"
+    assert doc.facies_polygons[0]["geometry"]["coordinates"] == coordinates

@@ -31,7 +31,8 @@ def test_review_export_page_receives_data(qtbot):
     assert isinstance(page, ReviewExportPage)
     assert page.qc_table.table.rowCount() > 0
     assert "ZJ-2 古地理图" in page.action_header.title_label.text()
-    assert page.result_summary.warning_label.text() == "警告项: 1"
+    # Empty map warns for missing facies, wells, and contour evidence.
+    assert page.result_summary.warning_label.text() == "警告项: 3"
     assert page.result_summary.error_label.text() == "待处理项: 0"
     export_labels = [
         widget.text()

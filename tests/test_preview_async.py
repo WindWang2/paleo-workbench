@@ -74,6 +74,48 @@ class FailingProvider(PreviewProvider):
         raise RuntimeError("preview boom")
 
 
+def test_preload_media_rejects_files_above_budget(tmp_path):
+    from paleo_workbench.ui.pages.preview_worker import (
+        MAX_PRELOAD_MEDIA_BYTES,
+        preload_media,
+    )
+
+    path = tmp_path / "oversized.pdf"
+    with path.open("wb") as stream:
+        stream.truncate(MAX_PRELOAD_MEDIA_BYTES + 1)
+    result = PreviewResult(mode="pdf", title="large", path=str(path))
+
+    loaded = preload_media(result)
+
+    assert loaded.pdf_bytes == b""
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        PreviewResult(mode="text", title="notes", path="/never/read.txt"),
+        PreviewResult(
+            mode="image", title="image", path="/never/read.png", image_bytes=b"image"
+        ),
+        PreviewResult(
+            mode="geotiff", title="map", path="/never/read.tif", image_bytes=b"thumb"
+        ),
+        PreviewResult(
+            mode="pdf", title="doc", path="/never/read.pdf", pdf_bytes=b"pdf"
+        ),
+    ],
+)
+def test_preload_media_guards_before_any_file_io(monkeypatch, result):
+    import paleo_workbench.ui.pages.preview_worker as worker_module
+
+    def fail_path(_path):
+        raise AssertionError("guarded preview must not touch its source path")
+
+    monkeypatch.setattr(worker_module, "Path", fail_path)
+
+    assert worker_module.preload_media(result) is result
+
+
 def test_rapid_selection_keeps_last_result(qtbot, tmp_path):
     a = tmp_path / "a.txt"
     b = tmp_path / "b.txt"
@@ -224,6 +266,34 @@ def test_preview_failed_signal_surfaces_message(qtbot, tmp_path):
     qtbot.waitUntil(lambda: page.reader_panel.current_mode == "message", timeout=3000)
     assert page.reader_panel.title_label.text() == "预览失败"
     _wait_controller_idle(qtbot, page._preview_controller)
+
+
+def test_shutdown_transfers_still_running_preview_to_application_keeper(qtbot, tmp_path):
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingProvider(PreviewProvider):
+        def preview(self, asset):
+            started.set()
+            release.wait(timeout=5.0)
+            return PreviewResult(mode="message", title=asset.name, message="done")
+
+    path = tmp_path / "blocked.txt"
+    path.write_text("x", encoding="utf-8")
+    asset = ResourceItem(name=path.name, path=str(path), type="document", format="txt")
+    controller = PreviewRequestController(provider=BlockingProvider(), shutdown_wait_ms=1)
+    controller.request(asset)
+    assert started.wait(timeout=2.0)
+    thread = controller._active[0]
+
+    controller.shutdown(wait_ms=1)
+
+    keeper = detached_job_keeper()
+    assert keeper.owns(thread)
+    release.set()
+    qtbot.waitUntil(lambda: not keeper.owns(thread), timeout=3000)
 
 
 def test_rescan_invalidates_inflight_preview(qtbot, tmp_path, monkeypatch):

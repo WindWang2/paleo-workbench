@@ -8,61 +8,13 @@ Formulas (product spec):
 from __future__ import annotations
 
 import math
-from typing import Iterable
 
-import numpy as np
+from geoviz import compute_sand_ratio, median_absolute_deviation, modified_z_scores
 
 from paleo_workbench.project.models import WellTable, WellTableRow
 
 # Consistency constant for normal distribution (≈ Φ^{-1}(0.75)).
-_MAD_Z_SCALE = 0.6745
 _DEFAULT_OUTLIER_THRESHOLD = 3.5
-
-
-def median_absolute_deviation(values: Iterable[float]) -> float:
-    """Sample MAD: median(|x_i - median(x)|)."""
-    arr = np.asarray(list(values), dtype=np.float64)
-    arr = arr[np.isfinite(arr)]
-    if arr.size == 0:
-        return float("nan")
-    med = float(np.median(arr))
-    return float(np.median(np.abs(arr - med)))
-
-
-def modified_z_scores(values: Iterable[float]) -> np.ndarray:
-    """Return z* for each value; 0 when MAD is 0 (all equal / single point)."""
-    arr = np.asarray(list(values), dtype=np.float64)
-    out = np.full(arr.shape, np.nan, dtype=np.float64)
-    finite = np.isfinite(arr)
-    if not np.any(finite):
-        return out
-    x = arr[finite]
-    med = float(np.median(x))
-    mad = float(np.median(np.abs(x - med)))
-    if mad < 1e-15:
-        out[finite] = 0.0
-        return out
-    out[finite] = _MAD_Z_SCALE * (x - med) / mad
-    return out
-
-
-def compute_sand_ratio(H_s: float | None, H_t: float | None) -> tuple[float | None, str]:
-    """Validate sand/total thickness and return (R_s, flag).
-
-    flag is ``ok`` or ``invalid_ratio``.
-    """
-    if H_s is None or H_t is None:
-        return None, "ok"
-    try:
-        hs = float(H_s)
-        ht = float(H_t)
-    except (TypeError, ValueError):
-        return None, "invalid_ratio"
-    if not (math.isfinite(hs) and math.isfinite(ht)):
-        return None, "invalid_ratio"
-    if ht <= 0 or hs < 0 or hs > ht:
-        return None, "invalid_ratio"
-    return hs / ht, "ok"
 
 
 def apply_sand_ratio_qc(table: WellTable) -> WellTable:

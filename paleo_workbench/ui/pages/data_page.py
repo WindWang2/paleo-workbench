@@ -26,6 +26,7 @@ from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
+from paleo_workbench.ui.thread_keeper import detached_job_keeper
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
@@ -171,19 +172,19 @@ class DataPage(QWidget):
         self._import_jobs.clear()
         for thread, worker in jobs:
             try:
-                worker.finished.disconnect()
+                worker.finished.disconnect(self._handle_import_finished_signal)
             except (RuntimeError, TypeError):
                 pass
             try:
-                worker.failed.disconnect()
+                worker.failed.disconnect(self._handle_import_failed_signal)
             except (RuntimeError, TypeError):
                 pass
             try:
                 if thread.isRunning():
                     thread.quit()
                     if not thread.wait(wait_ms):
-                        # Last resort: do not call terminate() (can corrupt state).
-                        thread.setParent(None)
+                        thread.requestInterruption()
+                        detached_job_keeper().adopt(thread, worker)
                 else:
                     worker.deleteLater()
                     thread.deleteLater()
@@ -316,26 +317,42 @@ class DataPage(QWidget):
         # All cleanup runs on the GUI thread after the result is delivered so
         # import_finished cannot be lost to premature thread/worker destruction.
         worker.finished.connect(
-            lambda report, thread=thread, worker=worker: self._handle_import_finished(
-                report,
-                thread,
-                worker,
-            ),
+            self._handle_import_finished_signal,
             Qt.ConnectionType.QueuedConnection,
         )
         worker.failed.connect(
-            lambda message, thread=thread, worker=worker: self._handle_import_failed(
-                message,
-                thread,
-                worker,
-            ),
+            self._handle_import_failed_signal,
             Qt.ConnectionType.QueuedConnection,
         )
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
 
         self._set_import_running(True)
         self._set_action_status("正在归档文件...")
         thread.start()
         return True
+
+    @Slot(object)
+    def _handle_import_finished_signal(self, report: ImportReport) -> None:
+        worker = self.sender()
+        job = next(
+            (job for job in self._import_jobs if job[1] is worker),
+            None,
+        )
+        if job is None or not isinstance(worker, _ImportWorker):
+            return
+        self._handle_import_finished(report, job[0], worker)
+
+    @Slot(str)
+    def _handle_import_failed_signal(self, message: str) -> None:
+        worker = self.sender()
+        job = next(
+            (job for job in self._import_jobs if job[1] is worker),
+            None,
+        )
+        if job is None or not isinstance(worker, _ImportWorker):
+            return
+        self._handle_import_failed(message, job[0], worker)
 
     def _handle_import_finished(
         self,
@@ -369,18 +386,16 @@ class DataPage(QWidget):
         ]
         self._set_import_running(False)
         try:
-            worker.finished.disconnect()
+            worker.finished.disconnect(self._handle_import_finished_signal)
         except (RuntimeError, TypeError):
             pass
         try:
-            worker.failed.disconnect()
+            worker.failed.disconnect(self._handle_import_failed_signal)
         except (RuntimeError, TypeError):
             pass
         if thread.isRunning():
             thread.quit()
             thread.wait(5_000)
-        worker.deleteLater()
-        thread.deleteLater()
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running

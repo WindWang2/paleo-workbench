@@ -61,6 +61,8 @@ class SeismicViewPanel(QFrame):
         self.stack.addWidget(self.empty_label)
 
         self.view = SeismicView(auto_load=False)
+        if hasattr(self.view, "segy_loaded"):
+            self.view.segy_loaded.connect(self._on_segy_loaded)
         self.stack.addWidget(self.view)
         outer.addWidget(host, 1)
 
@@ -129,6 +131,7 @@ class SeismicViewPanel(QFrame):
                 label.setText(f"{current}  目标层位:{self._horizon_name}".strip())
 
     def _show_empty(self, message: str) -> None:
+        self.view.cancel_pending_segy_load()
         self.volume_shape = None
         self.empty_label.setText(message)
         self.empty_label.setHidden(False)
@@ -138,6 +141,25 @@ class SeismicViewPanel(QFrame):
     def _show_volume(self, volume) -> None:
         self.volume_shape = tuple(int(value) for value in volume.shape)
         self.view.load_demo(volume)
+        self.empty_label.setHidden(True)
+        self.stack.setCurrentWidget(self.view)
+        if self._horizon_name:
+            self.set_horizon_context(self._horizon_name)
+        self.view_ready.emit(True)
+
+    def _show_segy_loading(self, path: str) -> None:
+        """Keep the engine surface visible while its worker prepares SEGY."""
+        self.volume_shape = None
+        self.empty_label.setHidden(True)
+        self.stack.setCurrentWidget(self.view)
+        self.view_ready.emit(False)
+        self.view.load_segy_async(path)
+
+    def _on_segy_loaded(self, result) -> None:
+        volume = getattr(result, "volume", None)
+        if volume is None:
+            return
+        self.volume_shape = tuple(int(value) for value in volume.shape)
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.view)
         if self._horizon_name:
@@ -172,6 +194,10 @@ class SeismicViewPanel(QFrame):
             payload = adapter.resolve(ref, project)
             if payload.seismic_volume is not None:
                 self._show_volume(payload.seismic_volume)
+                return
+            path = (payload.seismic_path or "").strip()
+            if path:
+                self._show_segy_loading(path)
                 return
             message = (payload.message or "").strip() or "无法加载地震体数据"
             self._show_empty(message)

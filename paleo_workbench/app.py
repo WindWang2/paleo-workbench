@@ -522,6 +522,9 @@ class PaleoWorkbenchWindow(QWidget):
         prep = self.app_shell.preparation_page_widget()
         if prep is not None and hasattr(prep, "shutdown_workers"):
             prep.shutdown_workers()
+        mapping = self.app_shell.mapping_page_widget()
+        if mapping is not None and hasattr(mapping, "shutdown_workers"):
+            mapping.shutdown_workers()
         self.outer_layout.removeWidget(self.app_shell)
         self.app_shell.setParent(None)
         self.app_shell.deleteLater()

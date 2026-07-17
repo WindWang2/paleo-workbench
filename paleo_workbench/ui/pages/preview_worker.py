@@ -14,11 +14,13 @@ from paleo_workbench.ui.pages.preview_disk_cache import (
     is_disk_cacheable,
 )
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
+from paleo_workbench.ui.thread_keeper import detached_job_keeper
 
 Asset = ResourceItem | ExportArtifact
 
 # Keep small media payloads in the LRU so re-select is path-free on the UI.
 MAX_CACHED_MEDIA_BYTES = 512 * 1024
+MAX_PRELOAD_MEDIA_BYTES = 64 * 1024 * 1024
 
 PendingKind = Literal["asset", "media"]
 
@@ -49,37 +51,30 @@ def preload_media(result: PreviewResult) -> PreviewResult:
     UI converts image bytes → QPixmap and PDF bytes → QPdfDocument (via QBuffer).
     Avoid creating QImage/QPixmap/QPdfDocument on the worker thread.
     """
+    if result.mode not in {"image", "geotiff", "pdf"}:
+        return result
+    if result.mode in {"image", "geotiff"} and result.image_bytes:
+        return result
+    if result.mode == "pdf" and result.pdf_bytes:
+        return result
     if not result.path:
         return result
-    if result.mode == "image":
-        if result.image_bytes:
+    path = Path(result.path)
+    try:
+        if path.stat().st_size > MAX_PRELOAD_MEDIA_BYTES:
             return result
-        try:
-            data = Path(result.path).read_bytes()
-        except OSError:
-            return result
-        if not data:
-            return result
-        return replace(result, image_bytes=data)
-    if result.mode == "geotiff":
-        if result.image_bytes:
-            return result
-        try:
-            data = Path(result.path).read_bytes()
-        except OSError:
-            return result
-        if not data:
-            return result
+    except OSError:
+        return result
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(MAX_PRELOAD_MEDIA_BYTES + 1)
+    except OSError:
+        return result
+    if not data or len(data) > MAX_PRELOAD_MEDIA_BYTES:
+        return result
+    if result.mode in {"image", "geotiff"}:
         return replace(result, image_bytes=data)
     if result.mode == "pdf":
-        if result.pdf_bytes:
-            return result
-        try:
-            data = Path(result.path).read_bytes()
-        except OSError:
-            return result
-        if not data:
-            return result
         return replace(result, pdf_bytes=data)
     return result
 
@@ -180,6 +175,7 @@ class PreviewRequestController(QObject):
     result_ready = Signal(object)  # PreviewResult
     loading = Signal()
     failed = Signal(str)
+    _thread_stopped = Signal(object, object)
 
     def __init__(
         self,
@@ -203,6 +199,10 @@ class PreviewRequestController(QObject):
         self._pending: tuple[PendingKind, int, object, tuple] | None = None
         self._inflight_keys: dict[int, tuple] = {}
         self._shutting_down = False
+        self._thread_stopped.connect(
+            self._on_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
     @property
     def generation(self) -> int:
@@ -273,7 +273,7 @@ class PreviewRequestController(QObject):
         deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
         # Second-chance join after the caller's deadline — still finite.
         # Absolute ceiling even when caller passes wait_ms=0/1 (tests).
-        hard_cap_ms = min(max(int(deadline), 0) + 2_000, 10_000)
+        hard_cap_ms = min(max(int(deadline), 0) + 500, 2_000)
         for thread, worker in jobs:
             try:
                 worker.finished.disconnect(self._on_finished)
@@ -283,19 +283,26 @@ class PreviewRequestController(QObject):
                 worker.failed.disconnect(self._on_failed)
             except (RuntimeError, TypeError):
                 pass
-            thread.requestInterruption()
-            thread.quit()
-
-        for thread, _worker in jobs:
-            if thread.wait(max(int(deadline), 0)):
-                continue
-            if not thread.wait(hard_cap_ms):
-                # Last resort: leave the OS thread; ownership is cleared below so
-                # the controller does not block forever. Prefer this over hanging
-                # the process when a provider ignores interruption.
+            try:
                 thread.requestInterruption()
                 thread.quit()
-                thread.wait(100)
+            except RuntimeError:
+                continue
+
+        for thread, worker in jobs:
+            try:
+                if thread.wait(max(int(deadline), 0)):
+                    continue
+                stopped = thread.wait(hard_cap_ms)
+            except RuntimeError:
+                continue
+            if not stopped:
+                # The provider ignored cooperative interruption. Transfer both
+                # wrappers to application lifetime; never leave an ownerless
+                # running QThread and never terminate calculation mid-write.
+                thread.requestInterruption()
+                thread.quit()
+                detached_job_keeper().adopt(thread, worker)
 
         self._active = None
         self._jobs.clear()
@@ -312,11 +319,12 @@ class PreviewRequestController(QObject):
         worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
         # Pump the next job only after the thread has fully stopped — starting a
         # new QThread while Shiboken is still tearing down the previous one can
         # segfault under pytest-qt / offscreen.
-        thread.finished.connect(lambda t=thread, w=worker: self._on_thread_finished(t, w))
+        thread.finished.connect(
+            lambda t=thread, w=worker: self._thread_stopped.emit(t, w)
+        )
         thread.start()
 
     def _start_job(self, generation: int, asset: Asset, key: tuple) -> None:
@@ -355,6 +363,10 @@ class PreviewRequestController(QObject):
         self._jobs = [job for job in self._jobs if job != (thread, worker)]
         if self._active == (thread, worker):
             self._active = None
+        try:
+            thread.deleteLater()
+        except RuntimeError:
+            pass
         if self._shutting_down:
             return
         # Defer so Shiboken can finish deleteLater of the prior worker/thread

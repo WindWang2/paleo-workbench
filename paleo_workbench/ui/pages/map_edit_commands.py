@@ -64,6 +64,42 @@ class VertexEditCommand:
         )
 
 
+class RingEditCommand:
+    """Replace one addressed ring without flattening sibling holes/parts."""
+
+    def __init__(
+        self,
+        feature_id: str,
+        part_index: int,
+        ring_index: int,
+        old_coordinates: Sequence[Sequence[float]],
+        new_coordinates: Sequence[Sequence[float]],
+        apply_ring: Callable[[str, int, int, list[list[float]]], None],
+    ):
+        self.feature_id = str(feature_id)
+        self.part_index = int(part_index)
+        self.ring_index = int(ring_index)
+        self.old_coordinates = [[float(p[0]), float(p[1])] for p in old_coordinates]
+        self.new_coordinates = [[float(p[0]), float(p[1])] for p in new_coordinates]
+        self.apply_ring = apply_ring
+
+    def do(self) -> None:
+        self.apply_ring(
+            self.feature_id,
+            self.part_index,
+            self.ring_index,
+            [list(point) for point in self.new_coordinates],
+        )
+
+    def undo(self) -> None:
+        self.apply_ring(
+            self.feature_id,
+            self.part_index,
+            self.ring_index,
+            [list(point) for point in self.old_coordinates],
+        )
+
+
 class CreateFeatureCommand:
     """Add a feature from a normalized record; undo removes it by id."""
 

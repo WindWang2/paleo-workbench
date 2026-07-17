@@ -1,5 +1,121 @@
 # Findings: Paleogeography Workbench
 
+## Phase 28 Review 核验（2026-07-17）
+
+- reviewer 的两条 packaging 结论成立：`contour_draft_worker.py`、`thread_keeper.py`、`test_seismic_async_contract.py` 仍是父仓 untracked；engine gitlink 仍为 `dc321a5d`，所有 facade/jobs/topology/seismic API 只存在 dirty submodule。
+- complex geometry 风险采用 fail-closed：现有 merge/split 算法只接受单 outer ring，短期强行扩展会扩大拓扑回归面；对 holes/MultiPolygon 在任何删除/命令 push 前拒绝并提示，保证零数据损失。
+- preview、SEGY stale-result、preload I/O 三条需以行为测试验证，不能仅靠代码审阅。
+- 用户已要求“全修改”，包含 reviewer 明确要求的 engine commit + parent gitlink；提交范围必须排除 `SCRATCH/` 与 5 个历史未跟踪 plan 文件。
+
+## Phase 27 / Task 27.6：等值线与 SEGY 异步边界（2026-07-17）
+
+- 等值线提取的正确状态边界是“后台读取 deep snapshot、GUI 提交 draft DTO”，而不是让 worker 修改 live `ProjectDocument`。worker 只计算 draft；`upsert + apply_to_map` 在 GUI 中作为短事务执行，因此运行期间发生的地图编辑不会被旧工程 clone 整表覆盖。
+- contourpy 的单个 `cg.lines(level)` 是不可抢占的 C 调用，但 engine 在 generator 创建前、每个 level 前及完成后轮询 token；页面销毁超时则由 QApplication keeper 保活，结果另有 token + project identity 双门禁，不会落入陈旧页面。
+- 固定 `(4,4,2)` 无法构成内存上界。SEGY worker 现按元数据和 `max_voxels` 推导三轴整数 stride，并验证 `prod(ceil(dim/stride)) <= budget`；loader 每个 inline 前检查取消，且 downsample cache 与 factor 绑定。
+- SEGY loader 必须在创建它的 worker thread 的 `finally` 中关闭，成功 DTO 发射也在 close 之后。GUI 若需后续交互切片，会在接受 latest generation 后重新创建独立 loader；旧 generation 即使晚到也不会替换 `_meta/_loader/renderer`。
+- `SeismicHost` 与 `VizAdapter` 不再同步解析文件：adapter 只解析工程引用/绝对路径，host 调度 `SeismicView.load_segy_async`。预测面板对 path-only payload 显示非阻塞 loading，并在 engine `segy_loaded` 后更新 shape/controls。
+- QThread wrapper 不应以短生命周期 View 为 parent。SEGY 与 synthetic workers 由 engine application-lifetime registry 保活；view cleanup 只请求 interruption，不逐 worker 阻塞 GUI，application `aboutToQuit` 再用共享 5 秒 deadline 集中收口。
+- `geoviz` facade gate 是显式 allowlist；新增 analytics/directional/jobs/topology API 后必须同步登记公开符号。该失败不是 deep import，而是测试契约未随 facade 扩展更新。
+
+## Phase 27 / Task 27.7：全量门禁 DTW 性能根因（2026-07-17）
+
+- engine 全量唯一失败不是本轮 GIS/线程回归，而是 cross-well DTW 1k 样本稳定为 1.04–1.06 秒，超过既有 1 秒产品预算；独立复现排除了全套资源争用和 editable checkout 指向错误。
+- 热点是 banded DP 内约 50 万次 Python/NumPy scalar 循环。递推 `c[j] = d[j] + min(base[j], c[j-1])` 可严格改写为 min-plus prefix scan：令 `P[j]=sum(d[0:j])`，则 `c[j]=P[j]+min_{k<=j}(base[k]-P[k-1])`。使用 `cumsum + minimum.accumulate` 保持相同 DP/回溯矩阵语义并移除 Python 内环。
+- 数值等价、shift/ref-depth、progress callback 与性能共 10 项 DTW 回归全绿；这不是放宽阈值，而是消除算法解释器开销。
+
+## Phase 27 最终状态与验证结论（2026-07-17）
+
+- Project path 单一真源为 `project.paths.resolve_project_path/relativize_path`：相对路径经 `resolve + relative_to(project_dir)` 拒绝普通 `..` 与 symlink 越界；明确绝对路径保留为外部资产。resources、artifacts、reference layers 的 save/open 均经过 ProjectManager 边界，DataPage/adapter 使用工程路径解析，不再让未相对化路径跨页漂移。
+- `ProjectManager.save` 的 `updated_at` 只在 temp write + fsync + atomic `os.replace` 成功后提交到 live model。factor/contour worker 均计算 deep snapshot，并以 token + project identity 校验后在 GUI thread 做短提交；消除了保存观察半成品和旧工程结果反写两类 ISS-STATE 风险。
+- root quiet 全套在修复后一次停于 57% 且 pytest-timeout 无节点输出；精确终止后，prep 单文件与相邻顺序均通过。改用同一 collection 的 `-vv + faulthandler` 后 997 selected 全部正常结束（993 passed/4 skipped），明确显示 prep、preview、thread keeper 节点均通过。因此该 quiet 停顿没有形成可复现产品缺陷证据。
+- 页面 fade 在全套高负载下曾停在 0.999666；page-owned deadline QTimer 现在精确完成 1.0，并以 effect identity 防止快速切页旧 timer 清除新 effect。empty-map QC 的正确契约为缺 facies/wells/contours 三条 warning，旧 integration 的 1 条期望已更新。
+- 最终门禁：root `993 passed, 4 skipped, 8 deselected`；engine `1027 passed, 2 skipped, 134 deselected`；compileall 与 root/engine diff-check 均为 exit 0，无 `QThread destroyed`、deleted-wrapper 或 modal teardown 告警。
+
+## Phase 27 / Task 27.2：数学核心与有界插值结论（2026-07-17）
+
+- Modified z-score 的正常分支严格使用 `0.6745 * (x - median) / MAD`。当 MAD=0 时，“全部置零”会漏掉少数偏离中位数的极端值；新定义为等于 median 的样本得 0，有限偏离得到带符号 `±inf`，因此现有 `abs(z*) > threshold` 判定自然生效。
+- 砂地比核心已移入 engine 纯数学层：只接受有限数值、`H_t > 0` 且 `0 <= H_s <= H_t`，边界输出严格为 0 或 1。
+- 异向距离保持北向顺时针方位角约定：`u = dx*sin(theta)+dy*cos(theta)`、`v = dx*cos(theta)-dy*sin(theta)`；`a/b` 非有限或非正现在直接拒绝，不再静默钳成 epsilon。方向趋势与 IDW 均按目标 cell 分块，避免全幅 `(H,W,N)` 中间矩阵。
+- 断层屏障由严格 CCW 改为 orientation + on-segment 容差判定，端点接触与共线重叠均视为阻断；IDW 同时过滤 x/y/z 的 NaN 与 infinity。
+- 大样本 LOO R² 验证固定最多 64 个等距确定性观测点，仍以其余全样本训练，将验证插值次数从 N 限制为常数；synthetic 基值改用 SHA-256，不再受 Python hash randomization 影响。
+- `geoviz` cache codec 的 payload 类型顶层导入曾破坏 core-only import；FormationTop 与 DAT payload 类型已按实际 kind 延迟加载，恢复可选渲染包隔离。
+
+## Phase 27 / Task 27.3：engine 拓扑不变量（2026-07-17）
+
+- GeoJSON `MultiPolygon` 不能仅平铺为 `rings`：平铺后无法区分“第二个 outer ring”和“第一个 polygon 的 hole”。兼容方案是在 `FeatureRef` 保留 `geometry_type` 与 `polygon_ring_counts`，编辑算法继续使用平铺 ring 列表，I/O 边界按 counts 重建嵌套。
+- 闭合 ring 的首尾坐标必须共享同一个 vertex id，而不是两个坐标相同但身份不同的点。builder 与 `add_feature` 现在都将 open input 规范为 `[v0, ..., vn, v0]`。
+- 删除闭合端点时，首 occurrence 与 closing occurrence 是同一逻辑顶点。命令必须在排除 closing duplicate 的逻辑列表上删除，然后用新首点重新闭合；undo 还原完整 id snapshot，避免按坐标或数组位置猜测。
+- ring 身份发生变化后，局部手工修补 edge index 容易遗漏首尾边与共享顶点。当前 delete 命令使用模型级索引重建以保证 `_edge_index/_vertex_to_features` 与所有 feature 一致；拖拽仍按 vertex id 原位更新，无需重建。
+
+## Phase 27 / Task 27.4：workbench 多环 Thin Host（2026-07-17）
+
+- compact `.paleo.json` 需兼容三种深度：单 ring、Polygon rings、MultiPolygon polygons→rings。normalized record 现在同时保留 legacy `coordinates`、显式 `geometry_type` 与标准 GeoJSON `geometry`，因此旧消费者不变，复杂几何不再被首 ring 截断。
+- `QGraphicsPolygonItem` 无法表达 hole；Facies item 改为 OddEven `QGraphicsPathItem`，内部 canonical 形状统一为 polygons→rings→points。简单 Polygon 的 `coordinates()` 仍返回第一 outer ring以兼容既有 merge/split/topology API。
+- 多环顶点编辑不能只用 `vertex_index`。handle 与 `RingEditCommand` 使用 `(part_index, ring_index, vertex_index)`，闭合首点仍由 ring primitive 同步 closing point；mouse preview、release commit 与 undo 都沿同一地址传播。
+- C++ compact hit-test 仅支持 point/ring，复杂 geometry 必须显式绕过 native 单 ring payload，使用 outer-minus-holes / per-part 判定；否则不仅命中错误，还会把三层数组送入 `float(list)` 崩溃。
+- 保存门禁现在结合逐 ring 自交诊断与 engine `validate_polygon_geometry` whole-Shape 校验，后者覆盖 hole containment、nested shell 与 MultiPolygon part 冲突。
+
+## 3-Strike RCA：Task 27.5 running prepare teardown hang（2026-07-17）
+
+### 三次证据
+
+1. 全 `test_prep_well_table_worker.py` 输出 8 个通过点后不打印 summary，PID 409193 持续存活，精确 TERM。
+2. 单跑 `test_running_prepare_shutdown_is_kept_and_stale_snapshot_never_commits` 在 test body/teardown 阶段不返回；PID 409571 主线程停在 Qt poll，精确 TERM。
+3. 将 keeper 的 `finished→_release` 改为 queued relay 后，单测仍被外部 `timeout 15s` 终止（exit 124）。因此“仅因 keeper 在错误线程 deleteLater”不是充分根因。
+
+### 已知不变量与排除项
+
+- 基础 preview/import keeper 测试均能 adopt→release 并通过，keeper registry 的一般路径可用。
+- Factor worker snapshot 直接运行测试通过，说明 `model_copy + FactorPrepareResult` 本身不死锁。
+- hang 仅在 `PreparationPage + running worker + shutdown/adopt` 组合出现；没有断言失败，pytest-timeout 的 signal 也未能给出栈。
+- queued relay 修复后仍 hang，不能继续对 deleteLater 顺序做无证据微调。
+
+### 新策略（强制切换）
+
+- 停止产品 mutation；使用外层 Python 启动 pytest，并在 5 秒后由 `faulthandler.dump_traceback_later()` 输出所有 Python thread 栈，定位阻塞发生在 `shutdown_workers`、`qtbot.waitUntil`、页面 teardown 还是 Qt signal handler。
+- 若栈显示 GUI thread 在 keeper ownership wait：改为 GUI-thread `QTimer` reaper 轮询 `isFinished()`，测试等待稳定的 keeper signal/counter，不依赖 deleteLater。
+- 若栈显示页面 teardown 重入 `shutdown_workers`：增加 idempotent shutdown state，并确保 adopted job 与 page 完全断连。
+- 若栈显示 worker 未离开 blocked function：检查 test Event、token checkpoint 和 direct `thread.quit` 顺序，必要时用 worker `terminal` 单一信号统一收尾。
+- 只有精确栈证据出来后才恢复代码修改。
+
+### faulthandler 定位结果
+
+- 5 秒 dump 明确显示 GUI 主线程阻塞在 `PreparationPage._on_prepare_failed` 第 247 行的 `QMessageBox.warning()` 模态循环；调用发生在 `qtbot.waitUntil` 处理 Qt events 时。
+- shutdown/adopt 分支只断开了 `worker.completed -> page`，没有断开 `worker.failed -> page`。因此 worker 结束阶段任何异常仍能进入已取消页面，弹出无人关闭的 modal，并表现为“pytest/Qt teardown hang”。
+- queued keeper release 无法修复此问题，因为 keeper ownership 不是阻塞源；第三次证伪是有效的边界收敛。
+- 最终修复策略：adopt 前断开 completed/failed 与 page 的所有连接；页面 failure slot 以 active cancellation token 做 stale guard；异步失败改写页面状态文本而非模态 QMessageBox。keeper release queued relay保留，因其仍满足 QObject affinity。
+- modal 修复后进一步暴露 keeper relay 类型错误：PySide `Signal(int)` 映射 C++ signed 32-bit，无法承载 64-bit Python object id，warning 明确显示 value exceeds limits。registry key 信号必须使用 `Signal(object)`，不能用 Qt int。
+
+## 3-Strike RCA：Task 27.5 PreviewController terminal cleanup race（2026-07-17）
+
+### 三次证据
+
+1. preview 全域首轮在 cache rewrite 的 idle wait 超时（前 10 项通过）。
+2. preview 全域第二轮同一点失败：29 passed / 1 failed；缩小的 5-test 顺序无法复现，确认累积调度竞态。
+3. 将无 context lambda 改为 controller-owned queued signal 后，全域在 8 个用例后停滞并被外部 45s timeout 终止（124），说明当前 relay 时序反而丢失了 terminal cleanup。
+
+### 当前最强假设与策略切换
+
+- `_wire_thread` 先连接 `thread.finished -> thread.deleteLater`，后连接 queued terminal relay。queued relay携带 QThread/worker wrapper，可能在 GUI 处理 MetaCall 前 wrapper 已 DeferredDelete，导致 `_on_thread_finished` 不执行或参数失效，`_active/_jobs` 永久不清。
+- 停止产品 mutation，先用 faulthandler 包装完整 preview，定位第 9 个用例的 wait 栈并捕获 pytest-qt Qt exceptions。
+- 若证实 active/job 未清：移除 `_wire_thread` 中提前 `thread.deleteLater`；由 GUI-thread `_on_thread_finished` 在清状态、pump pending 后统一 deleteLater。必要时用 per-job QObject relay（receiver context 明确）而不是传 wrapper 的 class signal。
+- 不再重复扩大 timeout 或随机 sleep。
+
+### faulthandler 定位结果
+
+- 第 8 个 `test_rescan_invalidates_inflight_preview` 卡在 `_wait_controller_idle`；teardown 随后明确报错：controller 的 `_jobs` 仍引用 thread，但 `thread.requestInterruption()` 抛出 `Internal C++ object QThread already deleted`。
+- 这证明 deletion-order 假设成立：`thread.finished -> thread.deleteLater` 已销毁 C++ wrapper，而 queued controller cleanup 尚未清 `_jobs/_active`。
+- 修复边界：保留 `thread.finished -> worker.deleteLater`（Qt worker-object推荐模式）；移除提前的 `thread.deleteLater`；在 GUI `_on_thread_finished` 完成状态清理和 pending 调度后再删除 QThread wrapper。shutdown 同时容忍历史 deleted wrapper，避免 teardown 二次异常。
+
+## Phase 27 / Task 27.5：线程生命周期最终不变量（2026-07-17）
+
+- 高负载 worker 输入必须是 deep snapshot，输出必须是 DTO；live `ProjectDocument` 只在 GUI slot 中、且 token 未取消并仍绑定同一 target 时提交。
+- `quit()` 不能中断正在执行的 Python/C/NumPy函数。取消由 engine `CancellationToken` 表达，IDW/方向趋势每个 cell chunk 前 checkpoint；页面销毁时即使计算暂未返回，也只会延迟一个 chunk 后退出，stale result不会 commit。
+- soft deadline 后不能清空最后引用或仅 `setParent(None)`。`DetachedJobKeeper` 挂在 QApplication 生命周期，持有 thread+worker 到 finished，然后在 GUI queued slot释放。
+- terminal signal 的 Qt 时序必须明确：无 receiver-context Python lambda 可能在 worker thread执行；QThread wrapper 不能在 controller queued cleanup 前 deleteLater；import report必须先在 GUI handler apply/emit，再 quit thread。
+- async error不得打开 modal QMessageBox：shell rebuild/pytest event loop中会形成无人关闭的嵌套循环。制备错误改为页面内非模态状态，shutdown断开 completed/failed page slots并用 token二次拒绝 stale 回调。
+- media preload 先 stat，读取上限 64 MiB；避免后台 read_bytes + GUI decode 的双份无界内存峰值。
+
 ## 数据管理思维 (Data Management Mindset)
 
 > 数据页不是「资源摘要卡片」，而是**工程级数据 / 成果 / 文件管理中枢**。后续任何数据页改动、导入链路、预览与性能优化，都先对齐这套思维。
@@ -732,3 +848,81 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - QC report append inflation
 - SVG/PDF button enable gating by tab (tooltip only)
 - Non-geojson PaleoMapAdapter placeholder formats
+## 2026-07-17 系统级 GIS 重构审计（本轮启动）
+
+- 用户授权全自动审计、重构与自愈，范围聚焦 `ProjectDocument`/`.paleo.json` I/O、层序格架页、数据制备页、编图页及 `geo-viz-engine` 核心边界。
+- 根仓库当前位于 `main`（`0e86375`），启动时存在用户未跟踪内容：`SCRATCH/` 与 5 个 `docs/superpowers/plans/*.md`；本轮视为用户资产并保持不动。
+- `geo-viz-engine/CLAUDE.md` 确认当前架构是 PySide6 单进程、独立可安装的 GIS/地质可视化包；重计算与专业解析向 engine 下沉符合既有包边界。
+- 本轮遵循：先复现/取证，再提出单一根因假设；修复必须有失败测试；连续三次失败即在本文件做 RCA 并更换策略。
+- 历史 Phase 22 已修复两项同类高危问题：engine `MovePolygonCmd` 由位置索引改为 vertex-id 映射，以及根项目 `insert_vertex` 保持闭合环；本轮必须用跨外环/洞环与首尾顶点回归测试重新验证，而不能仅信历史记录。
+- 历史路径逃逸项标记为已修复（`ProjectPathError` 限制相对路径、允许明确绝对外部路径）；本轮重点核对所有资源、artifact、reference layer 与页面适配器是否统一经过同一解析入口。
+- 现有 DataPage 线程设计目标是“单 in-flight + latest-only pending + generation 丢弃 stale + DeferredDelete/closeEvent shutdown”；审计应验证实际实现覆盖 preview、media preload、import/rescan 全部 worker，而非只检查主 controller。
+- 初始路由检索发现当前测试明确断言 `len(tokens.PAGE_NAMES) == 10`，说明 PWF 头部仍写“9 页”的描述已陈旧；需以当前 `tokens.py`/`AppShell` 实现建立 10 页真实映射并同步文档状态。
+- 发现多个线程实现入口：workbench 预览/导入/制备 worker，engine `geoviz_seismic.workers`、`SeismicView` 和 `geoviz_plots.interpolation.scipy_grid.InterpolationWorker`。其中 `SeismicView` 仅见到 `wait(500)`，需检查 500ms 后仍运行时的销毁行为。
+- 断层屏障 IDW 的真实现位于 engine `geoviz_plots/interpolation/idw.py`；workbench `ConstraintLine(kind='break'|'direction')` 已有领域模型，因此重点是验证页面到 facade 再到该算法的完整调用链，而非重新实现公式。
+- 10 页真实顺序已由 `tokens.PAGE_NAMES` 与 `AppShell` 对齐：新增第 6 页“地层对比”，随后可视化/制备/编图/审核索引整体后移到 6/7/8/9。`PAGE_INDEX_*` 常量已覆盖 0–9，但 `_setup_shortcuts()` 仍只注册 `1..9`，第 10 页“成图审核”没有数字快捷键；记录为 ISS-ROUTE-01。
+- `ProjectManager.save()` 在构造 payload 和原子写入之前直接修改 `project.meta.updated_at`。若序列化、临时文件写入或 `os.replace` 失败，磁盘文件保持旧版本但内存时间戳已前移，违反“失败不改变内存状态”的事务语义；列入 ISS-STATE-01 根因候选。
+- `ProjectManager` 已统一处理 resources、export artifacts、reference layers 三类路径，并用临时文件 + fsync + `os.replace` 原子提交；下一步核对 `project.paths` 对 `..`、symlink、绝对外部路径的精确定义。
+- `project.paths.resolve_project_path()` 对相对路径先 `resolve()` 再执行 `relative_to(project_dir)`，因此普通 `..` 与指向工程外的 symlink 均会被拒绝；绝对路径按“明确外部资产”策略允许。该底层实现本身符合边界，剩余风险是调用方绕过它或丢失 `project_path`。
+- AppShell 的 10 个页面构造顺序与 `PAGE_INDEX_*` 一致，窗口跳转到可视化/制备/编图均已使用常量；但测井、地震、层序的 update/widget helper 仍硬编码 2/3/4，属于新增页面后容易漂移的维护缺陷，应在 ISS-ROUTE-01 中收拢。
+- `_switch_page(index)` 未显式校验范围，并直接访问 `tokens.PAGE_NAMES[index]`；正常 icon rail 信号受控，但公共/测试调用若越界可能形成负索引侧栏错配或 IndexError。可用同一条路由边界测试修复。
+- 三条指定数学模型均已有实现与直接测试：MAD/砂地比在 `workflow/well_qc.py`，异向趋势在 `workflow/directional_trend.py`，IDW/断层屏障核心在 engine `geoviz_plots/interpolation/idw.py`。因此“Mock 痕迹”主要不是公式缺失，而是算法所有权分裂：MAD、砂地比、方向趋势和 orchestration 仍在 workbench `workflow/`，与“重计算收拢至 geo-viz-engine”目标不完全一致（ISS-ARCH-01）。
+- `factor_interpolation.py` 对 IDW 通过 facade/engine 的程度尚需逐行确认；检索显示其运行时动态导入 workbench `directional_trend`，说明方向趋势当前肯定不是 engine 单一真源。
+- MAD 公式常规路径严格等于 `0.6745*(x-median)/MAD`，非有限值保持 NaN；但 `MAD < 1e-15` 时对所有有限值统一返回 0。对于 `[0,0,0,100]` 这类“多数相同 + 极端异常”，MAD=0 却并非全相等，当前实现会把 100 错判为正常，属于 ISS-ALG-01 数据完整性缺陷。建议定义：等于中位数者 0，偏离中位数者按符号为 ±∞（从而稳定触发阈值），并用回归测试锁定。
+- 砂地比常规边界正确：拒绝非有限、`Ht<=0`、`Hs<0`、`Hs>Ht`，有效输出自然落在 `[0,1]`。缺失任一厚度目前返回 `(None, 'ok')`，后续 MAD 会把无主值行标成 missing；语义虽分两阶段但结果可解释。
+- 异向距离与趋势公式逐项正确：北向方位角旋转、`sqrt((u/a)^2+(v/b)^2)`、非负 `exp(-d^2)*q*b_i`、归一加权均已测试。风险在于 `directional_trend_grid` 一次分配 `(H,W,N)` 的 dx/dy/u/v/d/w 多个三维数组；N=2000、较大网格时会产生高峰内存，必须在 engine 化时按网格块计算并由 worker 调度（ISS-ASYNC-01/ISS-ARCH-01）。
+- `directional_distance` 对负/零半轴直接夹到 `1e-15`，会将调用错误静默放大为极端距离；公开核心 API 应验证 `a>0,b>0`，配置解析层才负责回落默认值。
+- engine IDW 也一次构造 `(H,W,N)` 的 dx/dy/dist/weights，并在断层开启时进入 Python 四重级循环（网格×采样点×断层段）；这是 N=2000+ 压测下的主要计算/内存风险（ISS-ALG-04）。
+- `segments_intersect` 使用严格 ccw 判定，无法识别共线重叠、端点接触等 GIS 屏障常见情形；控制点连线恰好触碰 fault vertex 时可能错误穿透。需要健壮 orientation/on-segment 语义与数值容差测试。
+- IDW 只过滤 `NaN`，不过滤 `±inf`，公开 engine API 可能把无穷坐标/值传播为 NaN/无意义结果；workbench 当前上游虽过滤有限值，但核心包不应依赖单一宿主防御。
+- `factor_interpolation._leave_one_out_r2` 对 N 个点逐个重跑插值，至少 O(N²)，断层场景还乘以屏障段；N=2000 时不适合作为每次生成的同步完整质控。应在 engine 核心提供有界/向量化 LOO 或对大 N 做确定性抽样，并在 worker 中运行。
+- `synthetic_sample_points()` 声称 deterministic，却用 Python 进程随机化的 `hash(factor_type)` 生成 base；跨进程结果会变化，影响 demo/snapshot 可复现性（ISS-REPRO-01）。
+- 制备 worker 当前把**活的 `ProjectDocument` 引用**传入后台线程并直接 mutation；虽然注释要求页面期间不要访问，但 AppShell、保存、编图与其他页面没有全局读锁，因此后台生成与保存/刷新可并发观察半成品状态，属于 ISS-STATE-01/ISS-ASYNC-01 的核心竞态。正确边界应是 worker 接收不可变 snapshot，返回结果 DTO，由 GUI 线程一次性 commit。
+- `PreparationPage.shutdown_workers()` 对正在执行纯 Python/NumPy 的 `worker.run()` 只调用 `thread.quit()`；quit 只能退出事件循环，不能中断当前长函数。`wait(3000)` 超时后代码仍无条件清空最后引用，存在 `QThread: Destroyed while thread is still running` 风险。现有测试只覆盖 idle no-op，完全没有 running shutdown 回归。
+- `_on_contour_draft_requested()` 在 GUI slot 内直接同步调用 `compile_contour_drafts_for_project`，全图等值线提取明确仍会阻塞 GUI；不满足用户 N=2000+/全图等值线体感目标。
+- 当前异步生成没有 cancel token、generation/project identity 校验。若 shell rebuild/new/open 发生在旧 worker 完成前，即便线程未崩，也可能把旧工程结果写入不再可见的 project 实例并触发已销毁页面 slot。
+- DataPage preview 的正常路径设计较好：asset 深拷贝 snapshot、单 active/latest pending、generation 丢 stale、worker 只传纯数据；但 shutdown 的“最后兜底”仍不安全。超时后 `_jobs` 被清空、`_active=None`，而 QThread 是 controller 的 child；controller 随页面销毁会删除仍运行的 child thread，注释所称“leave OS thread”与实际所有权矛盾，仍可能触发 QThread destroyed race（ISS-THREAD-01）。
+- Preview worker 的 interruption request 没有被 provider/engine 重计算路径轮询，因此 `requestInterruption()` 当前基本只是标志，不能终止 LAS/SEGY/GeoTIFF/磁盘读取。需要把 cancellation token 贯穿 engine prepare API，或使用可安全脱离页面且全局托管到 finished 的 job owner。
+- `preload_media()` 对 image/GeoTIFF/PDF 直接 `Path.read_bytes()`，没有文件大小上限；大 PDF/栅格会在 worker 内一次性占用整个文件大小，随后还可能在 Qt 解码阶段复制。虽不堵 GUI 读盘，却仍是内存峰值/泄漏体感隐患，应改为 provider 先做有界预览 payload，禁止通用整文件 preload。
+- DataPage import shutdown 同样在 `wait(5s)` 超时后 `setParent(None)` 并清空唯一 jobs 列表，没有持久 owner 保证 thread/worker 存活到 finished；这是另一条 QThread 销毁竞态。导入任务使用纯 snapshot 并在 GUI 线程 apply，状态模型比制备更安全，但生命周期仍不闭合。
+- 现有 preview lifecycle 测试只模拟 0.2 秒 worker；即使配置 1ms soft wait，内部 hard-cap 仍有 2 秒，故线程总能在页面删除前结束。它没有覆盖“provider 超过 hard-cap/不响应 interruption”的真正失败分支，无法证明 shutdown 安全。
+- engine `SeismicView.cleanup()` 对 `_segy_worker`/`_synth_worker` 仅 requestInterruption + wait(500)，不检查 wait 返回、不保留到异步完成、也未在检索中发现 worker 主动轮询 interruption；这是 engine 内独立的 QThread 销毁竞态（ISS-THREAD-01）。
+- `SeismicView.load_segy()` 是同步兼容 API，直接 inspect + `get_volume_downsampled(factor=(1,1,1))` + 三切片读取 + renderer load。若 Thin Host 在 GUI 线程调用它，会同时造成全体积内存和 UI 阻塞；需要核对 host 路径并限制该 API 或改用有界异步 load spec。
+- `SeismicHost.apply()` 通常优先使用 adapter 的 budgeted volume，但当 payload 只有合法 `seismic_path` 时会在 GUI 线程调用上述同步 `load_segy()`；因此危险 fallback 是真实可达路径，不只是遗留 API。
+- `load_segy_async()` 在已有 worker 运行时只 disconnect 回调，不 requestInterruption/wait，也立即覆盖 `_segy_worker` 引用。旧 worker 仍以 view 为 parent 继续读盘；快速连续打开多个 SEGY 会并发多个重载、增加内存/句柄峰值，并在 view 销毁时留下无法逐个 cleanup 的 child threads。
+- `SegyLoadWorker.run()` 没有 `finally: loader.close()`；仅成功路径主动 close，inspect/volume/slice 任一步抛错都会泄漏 SEGY 句柄。worker 也完全不检查 `isInterruptionRequested()`。
+- async worker 固定 factor=(4,4,2) 而不是按目标体素预算求 factor；超大地震体仍可能产生大 volume。回调还把 `_ds_factor` 误设回 `(1,1,1)`，导致后续原始/显示索引映射元数据不一致。
+- Workbench 编图编辑器当前 schema **明确丢失多环**：`normalize_facies()` 对 GeoJSON Polygon 只取 `coords[0]`，holes 被静默抛弃；对 MultiPolygon 则层级识别错误，可能把 ring list 当 point list，随后 scene 构造失败/跳过。`apply_features_to_document()` 也只写单一 `coordinates` ring。
+- `FaciesPolygonItem` 基于 `QGraphicsPolygonItem` 且只保存 `_coordinates: list[point]`，无法表达 holes/MultiPolygon；Move/Vertex/Batch 命令同样只接受单 ring 坐标数组。这意味着 engine 的 vertex-id 多环修复没有覆盖用户实际使用的 workbench 编图页，ISS-TOPO-01 是现存 P0，而非仅需复验。
+- 当前 root `validate_ring`/重建/merge/split 只针对单 ring。即使 Shapely 能验证 Polygon，holes 与外环的包含/相交约束在进入 Shape 前已经丢失，形成“界面看似可编辑但保存破坏数据”的完整性风险。
+- 修复方向：以 engine 可序列化 polygon topology（stable vertex ids + rings）作为核心，workbench host 使用 `QGraphicsPathItem` OddEvenFill 表示外环/洞；最小兼容层同时接受 legacy 单 ring 与 GeoJSON Polygon/MultiPolygon，保存时保持原 geometry 层级。
+- Engine `MovePolygonCmd` 的 vertex-id snapshot 确实覆盖 outer+holes，拖拽跳到 `(0,0)` 的历史根因已修复；但现有 `test_move_polygon_cmd` 仍只构造单外环，缺少真实 hole 回归，故历史修复没有强测试门禁。
+- Engine ring 的闭合点复用首点同一 vertex id。`DeleteVertexCmd` 用 `list.remove(vertex_id)` 只删第一次出现：删除首/闭合 vertex 会留下末尾重复 id，而新首点不同，立即把闭合环打开。`EditEngine.delete_selected_vertex` 又用 `index(vertex_id)` 总命中首项，因此该破裂路径真实可达（ISS-TOPO-01）。
+- `TopologyBuilder` 对 MultiPolygon 直接 flatten 所有 polygon rings，`TopologyModel.to_geojson()` 又一律输出 Polygon；多个独立外环会被错误解释成一个外环加 holes，导致 Shape 语义与面积/包含关系冲突。需要在 FeatureRef 保存 polygon part 分组，或明确拆成稳定子 feature，不能扁平化。
+- Builder 不主动补闭合、`to_geojson` 也不强制首尾一致；任一命令或脏输入打开 ring 后可直接持久化无效 GeoJSON。核心 mutation 应执行 closure invariant，并在 commit 前做 Shapely/纯 Python 结构校验。
+- Root `MapEditScene` 的 vertex state 只有单一 `vertex_index`，`refresh_topology`/save gate/forced rebuild/merge/split 全部读取 `item.coordinates()` 单 ring；因此多环支持必须贯穿 handle 地址、命令 payload、渲染和 I/O，不能只修 normalize 函数。
+- 2026-07-17 全量 offscreen quiet 基线复现历史 Qt stall：进度到 51% 后无节点/无 timeout 诊断，持续 3m26s；这类 quiet 单进程命令不能作为开发循环的唯一门禁。后续用 focused 测试推进，最终以 `-vv --timeout=60` 获取节点级证据。
+- `geoviz` facade 已用 lazy `_COMPATIBILITY_EXPORTS` 暴露 `interpolate_idw/scipy`，新增 MAD/砂地比/方向趋势纯函数可沿同一机制公开；workbench wrappers 无需 deep import，符合现有 independence contract。
+
+### Phase 28 调用链核验（Review 修复）
+
+- `MapEditScene.merge_selected_facies()` 与 `split_selected_facies_by_line()` 在执行删除命令前均调用 `FaciesPolygonItem.coordinates()`；该兼容接口只返回首个 Polygon 的首个外环，因此带洞 Polygon / MultiPolygon 必须在原操作进入前 fail-closed，不能继续沿用旧 ring 算法。
+- 编辑器 `to_record()` 已输出完整标准 `geometry`，但 `facies_to_geojson()` 对非 Feature 记录优先读取紧凑 `coordinates`，这是预览丢洞与 MultiPolygon 嵌套列表进入 `_close_ring()` 的直接根因。
+- `SeismicHost.clear()/apply(volume)` 和 `SeismicViewPanel._show_empty()/_show_volume()` 未统一使异步 SEGY generation 失效；仅关闭 `_loader` 不能阻止仍在运行的 worker 回调覆盖新视图。
+- `preload_media()` 在判断 mode 与已有 bytes 前执行 stat/open/read，导致文本、表格、地震等非媒体结果及已有缩略图的 GeoTIFF 仍发生无效读取。
+- 修复策略：复杂几何旧操作明确拒绝且保留原对象；预览优先完整 geometry；在 engine 暴露统一 pending-load 取消入口并由所有非文件视图切换调用；媒体预载先做模式/载荷守卫。
+- 现有测试落点已确认：复杂 merge/split 可扩展 `test_map_topology_rebuild.py`，完整几何预览可扩展 `test_map_preview_mode.py`，预载守卫可扩展 `test_preview_async.py`；engine 已有 stale-generation worker 测试，可直接补“切换 demo/取消后旧结果无效”契约。
+- Engine `SeismicView.cleanup()` 已有 generation/interrupt 逻辑但不是可复用视图切换 API；`load_demo()` 完全不取消 pending SEGY，`load_segy_async()` 则重复手写关闭/中断。应抽取公开 `cancel_pending_segy_load()`，让 demo、同步/异步文件加载和 cleanup 共享同一生命周期边界。
+- Workbench `SeismicHost` 当前直接读写 engine 私有 `_loader`，既未覆盖 worker，又违反 Thin Host；修复时删除该私有耦合。`SeismicViewPanel._show_empty()` 因不调用 `load_demo()`，需显式调用公开取消 API。
+- RED 首跑在产品实现处已出现至少两项预期失败；但 `Path.stat` 的全局 monkeypatch 同时破坏 pytest 自身 `Path.exists/is_dir`，产生 INTERNALERROR，须改成“仅目标 path 抛错、其他路径委托原实现”。Engine 命令需在 `geo-viz-engine/` 工作目录执行。
+- 可信 root RED：`7 failed, 42 passed`。失败精确覆盖完整 editor geometry 被忽略、complex merge 未拒绝、4 种 preview guard 仍构造 Path、panel empty 未取消 pending load；没有出现测试夹具内部错误。
+- Engine 从父仓直接 collection 缺少 `geoviz_seismic` package path；需在子模块 cwd 运行其 pytest（与 Phase 27 engine gate 相同）。
+- Engine 自带 `.venv/bin/pytest`，README 明确要求激活该 venv；系统 pytest 即使在 engine cwd 也无法导入 workspace packages。后续所有 engine gate 统一使用 `.venv/bin/pytest`。
+- Engine `.venv/bin/pytest` 脚本 shebang 仍指向迁移前路径，不能直接执行；`.venv/bin/python` symlink 有效，Phase 27 记录的真实入口为 `.venv/bin/python -m pytest`。
+- Engine RED 最终可信：`1 failed, 3 passed`，`load_demo()` 后 stale worker 的 `interrupted` 仍为 false，直接证明旧异步结果可覆盖 demo/volume 状态。
+- GREEN 结构已落地：`SeismicView.cancel_pending_segy_load()` 成为唯一 generation/worker/loader 边界，load_demo、同步/异步 SEGY 与 cleanup 复用；workbench host 不再访问 `_loader` 私有状态。
+- Focused GREEN 无回归：root 相关 map/preview/seismic 四文件 `49 passed`；engine seismic workers `4 passed`。本轮产品修复未产生 strike。
+- Version-control 核验仍显示 reviewer packaging 风险尚未收口：root 三个必需文件与 engine 多个 API/测试文件仍 untracked，父仓 gitlink 仍为 `dc321a5d`。无关 `SCRATCH/` 与 5 个历史 docs plan 必须继续排除。
+- 本轮 diff 静态检查 root/engine 均无 whitespace error；workbench seismic host 已不再访问 engine `_loader`，生命周期边界仅使用公开 API。
+- Phase 28 全量回归通过：root `1000 passed, 4 skipped, 8 deselected`；engine `1027 passed, 2 skipped, 134 deselected`。新增 7 个 root contract case 未引入既有回归，engine 总数不变是因 stale 场景扩展在既有 worker test 内。
+- Engine 已形成独立可引用提交 `957cb3f5`（22 files，含此前 untracked jobs/analytics/directional/seismic tests）；父仓下一提交必须记录该 gitlink，clean checkout 才能导入 `CancellationToken` 等 facade API。

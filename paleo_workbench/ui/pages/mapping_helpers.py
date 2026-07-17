@@ -40,16 +40,43 @@ def _close_ring(ring: list) -> list[list[float]]:
     return pts
 
 
+def _normalize_geojson_geometry(geometry: dict[str, Any]) -> dict[str, Any] | None:
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Polygon" and isinstance(coordinates, (list, tuple)):
+        rings = [_close_ring(list(ring)) for ring in coordinates if isinstance(ring, (list, tuple))]
+        if not rings or any(len(ring) < 4 for ring in rings):
+            return None
+        return {"type": "Polygon", "coordinates": rings}
+    if geometry_type == "MultiPolygon" and isinstance(coordinates, (list, tuple)):
+        polygons: list[list[list[list[float]]]] = []
+        for polygon in coordinates:
+            if not isinstance(polygon, (list, tuple)):
+                return None
+            rings = [_close_ring(list(ring)) for ring in polygon if isinstance(ring, (list, tuple))]
+            if not rings or any(len(ring) < 4 for ring in rings):
+                return None
+            polygons.append(rings)
+        if not polygons:
+            return None
+        return {"type": "MultiPolygon", "coordinates": polygons}
+    return None
+
+
+def _facies_properties(raw: dict[str, Any]) -> dict[str, Any]:
+    props = dict(raw.get("properties") or {})
+    name = raw.get("name") or raw.get("facies") or raw.get("label") or ""
+    props.setdefault("name", name)
+    props.setdefault("facies", props.get("name") or name)
+    return props
+
+
 def facies_to_geojson(raw: dict[str, Any]) -> dict[str, Any] | None:
     """Normalize a facies record (editor or GeoJSON) for PaleoMapCanvas."""
     if not isinstance(raw, dict):
         return None
     if raw.get("type") == "Feature" and isinstance(raw.get("geometry"), dict):
-        props = dict(raw.get("properties") or {})
-        if "name" not in props and raw.get("name"):
-            props["name"] = raw["name"]
-        if "facies" not in props:
-            props["facies"] = props.get("name") or raw.get("name") or ""
+        props = _facies_properties(raw)
         return {
             "type": "Feature",
             "properties": props,
@@ -57,9 +84,18 @@ def facies_to_geojson(raw: dict[str, Any]) -> dict[str, Any] | None:
             **({"id": raw["id"]} if raw.get("id") is not None else {}),
         }
 
+    geometry = raw.get("geometry")
+    if isinstance(geometry, dict):
+        normalized_geometry = _normalize_geojson_geometry(geometry)
+        if normalized_geometry is not None:
+            return {
+                "type": "Feature",
+                "properties": _facies_properties(raw),
+                "geometry": normalized_geometry,
+                **({"id": raw["id"]} if raw.get("id") is not None else {}),
+            }
+
     coords = raw.get("coordinates")
-    if coords is None and isinstance(raw.get("geometry"), dict):
-        coords = raw["geometry"].get("coordinates")
     if not coords:
         return None
     # GeoJSON Polygon: [[[x,y],...]] or editor ring: [[x,y],...]
@@ -73,10 +109,9 @@ def facies_to_geojson(raw: dict[str, Any]) -> dict[str, Any] | None:
         ring = _close_ring(list(coords))
     if len(ring) < 4:
         return None
-    name = raw.get("name") or raw.get("facies") or raw.get("label") or ""
     return {
         "type": "Feature",
-        "properties": {"name": name, "facies": name},
+        "properties": _facies_properties(raw),
         "geometry": {"type": "Polygon", "coordinates": [ring]},
         **({"id": raw["id"]} if raw.get("id") is not None else {}),
     }

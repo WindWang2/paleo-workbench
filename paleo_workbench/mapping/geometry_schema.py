@@ -10,14 +10,83 @@ def new_feature_id(prefix: str = "feat") -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
-def normalize_facies(raw: dict[str, Any]) -> dict[str, Any]:
-    """Return {id, kind, name, coordinates: list[list[float,float]], style}."""
-    coords = raw.get("coordinates") or raw.get("geometry", {}).get("coordinates") or []
-    # Accept ring as [[x,y], ...] or GeoJSON Polygon first ring
-    if coords and isinstance(coords[0], (list, tuple)) and isinstance(coords[0][0], (list, tuple)):
-        ring = list(coords[0])
+def _is_point(value: object) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) >= 2
+        and not isinstance(value[0], (list, tuple))
+        and not isinstance(value[1], (list, tuple))
+    )
+
+
+def _coerce_ring(value: object) -> list[list[float]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    ring: list[list[float]] = []
+    for point in value:
+        if not _is_point(point):
+            return []
+        ring.append([float(point[0]), float(point[1])])
+    if ring and ring[0] != ring[-1]:
+        ring.append(list(ring[0]))
+    return ring
+
+
+def canonical_facies_geometry(
+    raw: dict[str, Any],
+) -> tuple[str, list[list[list[list[float]]]]]:
+    """Return ``(type, polygons→rings→points)`` for legacy or GeoJSON input."""
+    geometry = raw.get("geometry") if isinstance(raw.get("geometry"), dict) else {}
+    geometry_type = str(raw.get("geometry_type") or geometry.get("type") or "")
+    coordinates = geometry.get("coordinates") if geometry else raw.get("coordinates")
+    coordinates = coordinates or []
+
+    if geometry_type not in {"Polygon", "MultiPolygon"}:
+        if isinstance(coordinates, (list, tuple)) and coordinates:
+            first = coordinates[0]
+            if _is_point(first):
+                geometry_type = "Polygon"
+            elif isinstance(first, (list, tuple)) and first and _is_point(first[0]):
+                geometry_type = "Polygon"
+            else:
+                geometry_type = "MultiPolygon"
+        else:
+            geometry_type = "Polygon"
+
+    if geometry_type == "Polygon":
+        if isinstance(coordinates, (list, tuple)) and coordinates and _is_point(coordinates[0]):
+            source_polygons = [[coordinates]]
+        else:
+            source_polygons = [[*(coordinates if isinstance(coordinates, (list, tuple)) else [])]]
     else:
-        ring = [list(p) for p in coords]
+        source_polygons = coordinates if isinstance(coordinates, (list, tuple)) else []
+
+    polygons: list[list[list[list[float]]]] = []
+    for source_polygon in source_polygons:
+        if not isinstance(source_polygon, (list, tuple)):
+            continue
+        rings = [_coerce_ring(source_ring) for source_ring in source_polygon]
+        rings = [ring for ring in rings if ring]
+        if rings:
+            polygons.append(rings)
+    return geometry_type, polygons
+
+
+def compact_facies_coordinates(
+    geometry_type: str,
+    polygons: list[list[list[list[float]]]],
+) -> list:
+    """Keep the historic single-ring shape while preserving complex geometry."""
+    if geometry_type == "Polygon":
+        rings = polygons[0] if polygons else []
+        return [list(point) for point in rings[0]] if len(rings) == 1 else rings
+    return polygons
+
+
+def normalize_facies(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize facies without discarding holes or MultiPolygon parts."""
+    geometry_type, polygons = canonical_facies_geometry(raw)
+    canonical_coordinates = polygons[0] if geometry_type == "Polygon" and polygons else polygons
     props = raw.get("properties") if isinstance(raw.get("properties"), dict) else {}
     name = (
         raw.get("name")
@@ -35,7 +104,9 @@ def normalize_facies(raw: dict[str, Any]) -> dict[str, Any]:
         or new_feature_id("facies"),
         "kind": "facies",
         "name": name,
-        "coordinates": ring,
+        "coordinates": compact_facies_coordinates(geometry_type, polygons),
+        "geometry_type": geometry_type,
+        "geometry": {"type": geometry_type, "coordinates": canonical_coordinates},
         "style": dict(raw.get("style") or props.get("style") or {}),
     }
     # Preserve prediction / compiler attributes for editor round-trip.

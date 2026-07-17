@@ -1156,3 +1156,288 @@ Failures:
 - `paleo_workbench/env_bootstrap.py`: checkout path inject when geoviz not installed
 - Wired from package `__init__` + `main.py` with clear install error
 - Root `README.md` documents editable install preference
+## Session: 2026-07-17（系统级 GIS 自动审计与重构）
+
+- [IN PROGRESS] 启动 PWF 状态恢复；已读取 Planning with Files、brainstorming、systematic-debugging 与 `geo-viz-engine/CLAUDE.md`。
+- [DONE] 确认 PWF 三文件存在；session-catchup 无未同步报告。
+- [DONE] 记录初始 Git 状态：`main@0e86375`，保留现有未跟踪文件，不做清理或覆盖。
+- [NEXT] 分块完整读取三份 PWF 文件，建立当前 Issue 基线，然后执行 10 页路由、路径 I/O、数学模型、拓扑和线程生命周期的只读审计。
+- [DONE] 读取 `task_plan.md` 全文并确认历史 Phase 22/26 基线；新增 Phase 27 风险优先审计板（ISS-AUDIT/TOPO/THREAD/ASYNC/ALG/ARCH/STATE）。
+- [DECISION] 自动采用“风险优先、证据驱动、engine-first 原子迁移”；拒绝一次性大重写与页面层补丁堆积。
+- [DONE] 完整恢复 `findings.md` 的历史架构/缺陷上下文；识别出需要复验的历史修复：多环 vertex-id、闭合环插点、路径逃逸、DataPage latest-only worker 生命周期。
+- [DONE] 已复读 `progress.md` 1–600 行，确认历史测试基线与线程修复轨迹；继续读取剩余日志后开始源码清单审计。
+- [DONE] 完整读取 `progress.md`；开始 ISS-AUDIT-01 静态检索。
+- [FOUND] 当前代码测试基线是 10 个 `PAGE_NAMES`，PWF 旧“9 页”描述需要纠正；定位 Project I/O、算法与 QThread 候选入口，下一步逐文件核对。
+- [FOUND] 10 页 rail/stack 顺序一致，但数字快捷键只覆盖 1–9，第 10 页无快捷入口（ISS-ROUTE-01）。
+- [FOUND] ProjectManager 原子磁盘写入已存在；保存失败时 `meta.updated_at` 可能先行污染内存（ISS-STATE-01 根因候选）。
+- [DONE] 核对 `project.paths`：相对 `..` 与 symlink 越界均被 resolve+containment 拦截；绝对外部路径按契约允许。
+- [FOUND] 10 页路由仍有 2/3/4 魔法索引与 `_switch_page` 越界未防御，合并到 ISS-ROUTE-01。
+- [DONE] 定位指定数学模型及测试文件；公式并非纯 Mock，但 MAD/砂地比/方向趋势仍归属 workbench，engine-first 边界存在缺口（ISS-ARCH-01）。
+- [FOUND] MAD=0 且存在偏离中位数时当前全部返回 0，极端值被漏检（ISS-ALG-01）。
+- [FOUND] 方向趋势公式正确，但 `(H,W,N)` 全量向量化会在 N=2000+ 造成多数组峰值内存；计划迁入 engine 并做 chunked 计算。
+- [FOUND] engine IDW 存在三项 P0 候选：全量三维数组、断层四重级 Python 循环、严格 ccw 漏掉端点/共线屏障；新增 ISS-ALG-04。
+- [FOUND] LOO R² 无界 O(N²)；synthetic 误用进程随机 hash 导致跨进程不确定（ISS-REPRO-01）。
+- [FOUND] 制备 QThread 对 live ProjectDocument 做后台 mutation；quit+wait(3000) 无法中断长计算且超时后丢引用，存在确定的销毁竞态。
+- [FOUND] 等值线初稿仍在 GUI slot 同步提取；ISS-ASYNC-01 根因已确认，现有测试缺 running shutdown/取消覆盖。
+- [FOUND] PreviewController 超时后清空 jobs 但线程仍是 controller child；页面销毁仍会删除运行线程。Import timeout `setParent(None)` 也没有全局 keeper，两个生命周期缺口纳入 ISS-THREAD-01。
+- [FOUND] 通用 media preload 无界 read_bytes，超大 PDF/GeoTIFF/image 会造成后台内存峰值与 Qt 解码复制。
+- [FOUND] lifecycle 测试只覆盖 0.2s（低于 hard-cap），没有命中“超时仍运行”分支；engine SeismicView cleanup 也仅 wait(500) 且不检查结果。
+- [FOUND] SeismicView 快速重复 async load 会覆盖旧 worker 引用但不停止旧任务；异常路径不 close loader、固定降采样无体素预算；SeismicHost 仍有 GUI 同步全量 fallback。
+- [FOUND] 编图页 `normalize_facies` 静默只取 Polygon 外环、错误处理 MultiPolygon；scene/items/commands 全为单 ring。用户指定多环拖拽/Shape 冲突已确认是现存 P0（ISS-TOPO-01）。
+- [FOUND] engine 多环 MovePolygon 实现正确但缺 hole 测试；删除闭合 vertex 会只删首 occurrence 并打开环；MultiPolygon 被 flatten 后错误序列化为 Polygon。
+- [DONE] 读取 writing-plans、TDD、executing-plans 与 worktree 隔离规则。用户已授权全自动且当前 PWF/未跟踪资产均在主 checkout，本轮选择原地内联执行，不创建额外 worktree、不派生 sub-agent。
+- [NEXT] 将 Phase 27 拆成 route/state、engine math、topology、thread/async 四个 TDD 子项目；每项先 RED 再最小 GREEN。
+- [DONE] Phase 27 已写成 7 个内联 TDD 任务，覆盖 route/state、engine math、engine topology、workbench multi-ring、通用 job lifecycle、contour/seismic async 与全量门禁。
+- [TEST BASELINE ATTEMPT 1] offscreen full suite 到 51% 后 stall 超过 3 分钟，无断言失败输出；已 TERM 精确 PID 391169。策略切换为 focused suites，最终再用 `-vv --timeout=60`。
+- [TDD RED · Task 27.1] 新增 3 个回归用例并确认全部按预期失败：缺少 `0` 快捷键；`_switch_page(999)` IndexError/负索引副作用；atomic replace 失败后内存 `updated_at` 被改为 2099 时间。`3 failed in 4.59s`。
+- [TDD GREEN · Task 27.1] 0 映射第 10 页、switch 范围防御、2/3/4 魔法索引收拢、保存成功后才提交 updated_at；focused `37 passed in 7.70s`。
+- [PWF ERROR] 首次状态回写 patch verification failed；已用精确定位拆分重试，生产代码未受影响。
+- [IN PROGRESS · Task 27.2] 已确认 geoviz lazy facade 扩展点与 geoviz_plots exports；准备写 engine 数学 RED 测试。
+- [TDD RED SETUP · Task 27.2] 已写 7 个 engine/root 边界用例；首次混合仓库 pytest 因 rootdir 切换导致 collection error（非行为断言），策略改为 engine/root 分开运行。
+- [TDD RED · Task 27.2] engine focused：`6 failed, 3 passed, 1 warning in 1.24s`；失败精准覆盖 4 个缺失门面 API、共线屏障漏判、IDW 缺少分块参数。
+- [TDD RED · Task 27.2] root focused：`1 failed in 0.94s`；确认合成样点依赖进程随机化的 Python `hash()`。
+- [NEXT] 下沉纯数学实现、改造受限内存 IDW，并将 workbench 包装层切换为 engine facade。
+- [MUTATION · Task 27.2] 新建 `geoviz_plots.analytics.well_qc` 与 `interpolation.directional`：零 MAD 保留偏离信息、严格轴参数校验、趋势网格按 cell chunk 计算。
+- [MUTATION · Task 27.2] IDW 改为过滤全部非有限控制点、orientation/on-segment 鲁棒屏障判交、可配置 cell chunk；新增数学 API 的 `geoviz_plots`/`geoviz` 门面导出。
+- [NEXT] 运行 engine focused GREEN；根据真实反馈修正后再切换 workbench thin-host 包装层。
+- [TDD GREEN · Task 27.2 engine] 数学硬化与 IDW focused：`9 passed, 1 warning in 0.72s`。
+- [MUTATION · Task 27.2 thin host] `well_qc` 与 `directional_trend` 删除重复数学实现并委托 `geoviz`；factor directional backend 直接走 engine facade；合成样点基值改为 SHA-256 稳定摘要。
+- [NEXT] 运行 root 数学/因子 focused 回归，随后补充大样本 LOO 有界性 RED。
+- [REGRESSION · Task 27.2 root] well-table/directional/factor/e2e focused：`29 passed in 0.89s`。
+- [TDD RED · Task 27.2 LOO] 2000 点测试要求确定性首尾覆盖且调用数固定为 `MAX_LOO_SAMPLES`；当前缺少上限常量并执行全量 LOO，单测按预期失败（`1 failed in 0.96s`）。
+- [NEXT] 用均匀确定性索引将验证调用上限设为 64，并仅在抽样观测上计算 R²。
+- [MUTATION · Task 27.2 LOO] 新增 `MAX_LOO_SAMPLES=64`；大样本用覆盖首尾的等距确定性索引，训练仍使用其余全部点，R² 只在验证子集计算。
+- [TDD GREEN · Task 27.2 LOO/repro] 大样本有界调用与稳定摘要：`2 passed in 0.83s`。
+- [NEXT] 执行 facade 与完整 Task 27.2 focused 回归；全绿后更新 Issue Board 并进入拓扑 Task 27.3。
+- [REGRESSION · Task 27.2 root] 完整数学/因子链路：`30 passed in 1.01s`。
+- [REGRESSION FAIL 1 · engine facade] `34 passed, 1 failed`；失败为既有 optional-import 契约：`geoviz/prepared_codec.py` 顶层导入 `geoviz_cross_well.FormationTop`，在屏蔽可选渲染包时导致 `import geoviz` 失败。新增数学测试与 IDW 均通过。
+- [ROOT CAUSE] 核心 codec 的运行时类型构造与可选 renderer 模型耦合，lazy facade 无法隔离其顶层 import；归入 ISS-ARCH-01，不计作数学实现失败。
+- [NEXT] 检查 prepared payload 的类型边界并将可选模型导入延迟到实际 decode 路径，保持核心 `import geoviz` 零可选依赖。
+- [FIX ATTEMPT 1 · facade] FormationTop 改为仅在 formation encode/decode 分支动态导入；codec 4 个 round-trip 测试通过。
+- [REGRESSION FAIL 2 · facade] optional-import 仍失败，堆栈推进到 `prepared_codec -> previews.dat -> geoviz_plots`；说明 codec 同时顶层耦合 XY/Surface payload 定义，而 `previews.dat` 混有渲染 import。
+- [STRATEGY] 不触碰 payload 契约；将 `SurfacePreviewPayload`/`XYPreviewPayload` 也延迟到实际 encode/decode 分支。若第三次仍失败，立即触发 3-Strike RCA 并重画 codec/core 边界。
+- [FIX ATTEMPT 2 · facade GREEN] DAT payload 类也改为分支内动态导入；optional-import + prepared-codec：`5 passed in 0.87s`。未触发第三次失败，3-Strike 阈值未达到。
+- [ARCH] `import geoviz` 现不再因 prepared cache codec 提前加载 cross-well 或 plots 可选包；实际编码/解码对应 kind 时仍保持原类型校验与 round-trip。
+- [NEXT] 重跑 Task 27.2 两仓 focused 总门禁并同步 Issue Board。
+- [DONE · Task 27.2 engine gate] facade/codec/math/IDW：`39 passed, 1 config warning in 1.10s`。
+- [DONE · Task 27.2 root gate] well-table/directional/factor/E2E：`30 passed in 0.88s`。
+- [DONE] ISS-ALG-01/02/03/04 与 ISS-REPRO-01 关闭；ISS-ARCH-01 的数学/插值门面部分关闭，SEGY/contour 部分留待 Task 27.6。
+- [NEXT · Task 27.3] 进入 engine polygon closure/MultiPolygon invariants，先写 hole move、闭合端点删除与 MultiPolygon round-trip RED。
+- [TDD RED · Task 27.3] topology/edit focused：`3 failed, 38 passed in 0.33s`。失败精准命中 open ring 不闭合、MultiPolygon 序列化扁平为 Polygon、删除首闭合 vertex 后首尾 id 不同；hole MovePolygon/undo 新用例已通过。
+- [ROOT CAUSE] `FeatureRef` 只存平铺 rings，丢失 polygon part 边界；builder 不规范化闭合；DeleteVertex 以 `list.index(vertex_id)` 忽略逻辑闭合端点与 `remove_index`。
+- [NEXT] 为 FeatureRef 增加非破坏性的 `polygon_ring_counts` 元数据，builder 规范闭合；删除命令基于完整 ring snapshot 处理逻辑 vertex 并重建索引。
+- [MUTATION · Task 27.3] `FeatureRef` 增加 `geometry_type/polygon_ring_counts`；builder/add_feature 统一闭合 ring；GeoJSON serializer 按 part 元数据恢复 Polygon/MultiPolygon。
+- [MUTATION · Task 27.3] DeleteVertex 以逻辑 ring（排除 closing duplicate）和完整 vertex-id snapshot 执行/撤销；变更后重建反向与边索引，首/末闭合点视为同一逻辑顶点。
+- [TDD GREEN · Task 27.3 focused] topology/edit commands：`41 passed in 0.35s`。
+- [NEXT] 跑 edit engine/paleo canvas/hierarchy 回归，确认新增 FeatureRef 默认字段不破坏调用方。
+- [DONE · Task 27.3 regression] topology/edit/edit-engine/hierarchy/map canvases：`89 passed in 0.94s`。
+- [DONE] ISS-TOPO-01 engine 侧 closure、hole move、MultiPolygon grouping 已固定；workbench thin host 尚未迁移，Issue 保持 partial。
+- [NEXT · Task 27.4] 审计 workbench mapping 的 geometry schema/document I/O/items/commands/scene，先锁定 Polygon holes 与 MultiPolygon round-trip RED。
+- [TDD RED · Task 27.4] document I/O + hole scene：`3 failed, 2 passed in 0.45s`。`geometry_type` 被 normalize 丢弃、MultiPolygon/holes 均被截成首 ring、洞内 `contains()` 错误返回 true。
+- [ROOT CAUSE] workbench compact record 没有 canonical geometry 元数据；`FaciesPolygonItem` 基于 `QGraphicsPolygonItem` 只能表达单 ring，scene 所有移动/保存操作因此只能看到外环。
+- [NEXT] 新增 geometry canonicalization helpers；Facies item 切为 OddEven `QGraphicsPathItem` 并保留 polygons→rings，legacy `coordinates()` 仍映射第一 outer ring。
+- [MUTATION · Task 27.4] geometry schema 新增 canonical Polygon/MultiPolygon 解析与闭合规范；document I/O 同时保存 compact coordinates 和标准 geometry。
+- [MUTATION · Task 27.4] Facies item 切换为 OddEven QGraphicsPathItem，内部保留全部 part/ring；移动覆盖全部 rings，legacy 顶点 API 映射第一 outer ring。
+- [TEST HARNESS ERROR] focused 得到 `4 passed, 1 failed`；唯一失败是新增测试被插入旧测试函数中段，旧 `w_item/w_before` 断言误落入新函数，属于测试排版错误，不计产品 fix strike。
+- [NEXT] 修复测试函数边界后复跑同一 focused 集。
+- [HARNESS FIX] 恢复 translate 测试尾部至原函数，产品实现未变。
+- [TDD GREEN · Task 27.4 I/O/item] holes/MultiPolygon document round-trip、OddEven hole、全 ring move/undo：`6 passed in 0.46s`。
+- [NEXT] 增加闭合 outer vertex 编辑、hole hit-test 与逐 ring save validation RED；随后补齐 scene 的 ring-address handle 与 geometry-aware hit/validation。
+- [TDD RED · Task 27.4 scene] 三项全部按预期失败：complex coordinates 使 legacy hit-test TypeError；只生成 4 个 outer handles 而非 8；save validation 忽略自交 hole（`3 failed in 0.55s`）。
+- [ROOT CAUSE] scene/commands 仍以单 ring callback 和单 `vertex_index` 定址；map_edit_api native/pure hit-test 都只识别 point 或 ring；topology gate 只调用 `validate_ring(item.coordinates())`。
+- [NEXT] 扩展 handle/command 为 part+ring 地址；complex polygon hit-test 强制 geometry-aware Python 路径；逐 ring 基础校验并调用 engine facade 的整 Shape 校验。
+- [MUTATION · Task 27.4 engine validation] engine 新增 `validate_polygon_geometry`，用完整 Shape 捕获 hole containment/自交/多 part 冲突，并由 `geoviz` facade 懒导出。
+- [MUTATION · Task 27.4 ring address] Facies item/handles 新增 part+ring API；新增 RingEditCommand；direct scene vertex edit 可按 ring 地址执行；complex hit-test 绕过旧 C++ 单 ring payload并按 outer-minus-holes 判定。
+- [NEXT] 补齐 mouse drag/active handle 地址传播与逐 ring+whole-shape save validation，然后运行 focused GREEN。
+- [MUTATION · Task 27.4 scene] direct/drag/delete 路径开始传播 part+ring 地址；逐 ring `validate_ring` 与 engine whole-shape 验证共同构成 save gate；snap 候选覆盖所有 rings。
+- [FOCUSED] hole hit-test 与 invalid-hole save validation 已通过；ring-address handle/edit/undo 主断言也通过。
+- [TEST HARNESS ERROR] 唯一失败是新测试再次插入原 handle 测试中段，原“单 ring=4 handles”尾部误落进 hole 测试（当前正确为 8）；不计产品 strike。
+- [NEXT] 恢复两个测试函数边界并复跑；随后执行 mapping 全域回归。
+- [HARNESS FIX] 单 ring handle 断言恢复到原测试；hole 测试只保留 8-handle/ring-address/edit/undo 契约。
+- [TDD GREEN · Task 27.4 scene] simple handles、hole handles、complex hit-test、invalid-hole save gate：`4 passed in 0.42s`。
+- [NEXT] 执行全部 `test_map*`/mapping document/save/topology 回归，定位 legacy compact record 与 QGraphics base 兼容问题。
+- [DONE · Task 27.4 mapping regression] 全部 map/mapping suites：`122 passed in 3.97s`；simple Polygon legacy shape、页面集成、save draft、topology rebuild、merge/split 均无回归。
+- [NEXT] 补一条 hole handle 实际 mouse drag 验证与闭合首点 delete 检查；全绿后关闭 Task 27.4 并转线程生命周期。
+- [VERIFY · Task 27.4] hole handle 实际 press→move→release 只修改被定址 hole ring，undo 完整恢复：`1 passed in 0.38s`。
+- [DONE · Task 27.4] Polygon holes/MultiPolygon I/O、OddEven hit、全 ring move、part/ring/vertex handle、闭合编辑、engine whole-Shape save gate 均落地；ISS-TOPO-01 关闭。
+- [NEXT · Task 27.5] 进入 QThread 生命周期：先复现 preview/import/factor worker 超时销毁、stale commit 与 live ProjectDocument 后台 mutation。
+- [TDD RED · Task 27.5] 四条线程/内存契约全部失败：Factor worker 无 snapshot result 信号；缺 application keeper；preview/import 超时无 owner 转移；缺媒体预载字节预算（`4 failed in 0.54s`）。
+- [ROOT CAUSE] prepare worker持有 live ProjectDocument；preview controller 清空仍运行 child QThread 引用；import 仅 `setParent(None)`；media 使用无界 `Path.read_bytes()`。
+- [NEXT] engine CancellationToken + workbench application keeper；FactorPrepareResult DTO 在 GUI commit；preview/import timeout adopt；preload stat budget。
+- [MUTATION · Task 27.5 core] engine 新增 thread-safe `CancellationToken/JobCancelled`，无 Qt 依赖并由 geoviz core 直接导出。
+- [MUTATION · Task 27.5 keeper] 新增 QApplication-lifetime `DetachedJobKeeper`，按 QThread identity 持有 thread+worker，finished 后自动 deleteLater/release。
+- [NEXT] 改 Factor worker snapshot DTO 与 preview/import shutdown adopt；两次 mutation 后再同步。
+- [MUTATION · Task 27.5 factor] FactorPrepareWorker 深拷贝 project、返回 `FactorPrepareResult`，页面只在 token 有效且仍绑定同一 project 时于 GUI slot commit；shutdown cancel + timeout adopt。
+- [MUTATION · Task 27.5 preview/import/media] preview hard-cap 后 keeper adopt；import 分离 page slots 与 direct thread.quit，timeout adopt；media 预载先 stat 并最多读取 64 MiB+1。
+- [NEXT] 运行四条 focused GREEN；若兼容测试失败，区分预期契约更新与真实生命周期回归。
+- [FOCUSED ATTEMPT] Factor snapshot与 media budget 通过；preview/import 均已被 keeper 持有并在 finished 自动释放。
+- [TEST HARNESS ERROR] 两项失败仅因 release 后继续调用已 deleteLater 的 `thread.isRunning()`，触发 Shiboken deleted wrapper；改为轮询 keeper ownership，不计产品 strike。
+- [NEXT] 复跑四契约，然后更新旧 Factor worker 测试为 DTO 语义并补 stale/prepare-timeout RED。
+- [TDD GREEN · Task 27.5 base] factor snapshot、preview/import keeper、media budget：`4 passed in 2.22s`。
+- [TEST HANG · prep suite attempt 1] 8 个测试均输出通过点，但 pytest 超过 25s 未退出且未打印 summary，疑似 detached QThread/deleteLater teardown 残留；无断言失败。
+- [NEXT] 精确定位/终止残留 pytest，单跑 running-prepare shutdown 用例并检查 keeper release 与 thread delete 时序。
+- [TEST HANG · prep attempt 2] 单跑 stale/keeper 用例仍在测试 teardown 卡住；主线程 wchan 为 Qt poll，未见断言失败。第一残留 PID 409193 已 TERM，第二 PID 409571 待 TERM。
+- [ROOT CAUSE HYPOTHESIS] keeper 使用无 receiver-context 的 Python lambda 连接 `QThread.finished`，可能在发射线程直接调用 `_release/deleteLater`，破坏 QObject GUI-thread affinity 并令 deferred-delete teardown 悬挂。
+- [STRATEGY CHANGE] keeper finished 信号改为显式 queued relay/GUI-thread release；再单跑一次。若第三次仍 hang，触发 3-Strike RCA 并更换为非 QObject registry + app timer reaper。
+- [STRIKE 3 · STOP] queued relay 后单测仍被 `timeout 15s` 终止，exit 124；已停止产品代码修改。
+- [RCA SYNCED] `findings.md` 记录三次证据、排除项与新策略；`task_plan.md` 标记 3-Strike 门禁。
+- [NEXT · DIAGNOSTIC ONLY] 用外层 Python faulthandler 5 秒全线程 dump 定位精确阻塞栈；有证据后才恢复 mutation。
+- [RCA EVIDENCE] faulthandler 栈定位至 `_on_prepare_failed -> QMessageBox.warning`；shutdown 未断开 failed page slot，stale error 进入 modal event loop。
+- [STRATEGY RESUMED] 按证据恢复 mutation：断开 failed page slot + token stale guard + 非模态错误状态；随后单跑原 hang 用例。
+- [RCA FIX RESULT] modal hang 已消失，测试在 3.87s 正常报告失败；新根因是 keeper `Signal(int)` 仅 32 位，`id(thread)` 64 位发射 OverflowError，registry 未 release。
+- [NEXT] release relay 改为 `Signal(object)/Slot(object)`，复跑同一用例；该修正由明确 warning 与 traceback 驱动。
+- [FIX] keeper release relay 改为 Python object payload，消除 64-bit id → Qt int overflow。
+- [TDD GREEN · Task 27.5 prepare teardown] 原三次 hang 用例现 `1 passed in 0.91s`，无 modal/Overflow/timeout。
+- [NEXT] 运行 prep/preview/data lifecycle 全域回归，确认旧接口兼容与 page close 行为。
+- [REGRESSION ATTEMPT 1] 合并线程套件在 60s 上限前出现 `FEE` 后未退出（124）；因 kill 前 pytest 未打印详情，拆分子域定位。
+- [REGRESSION GREEN · preparation] prep worker/page/integration：`14 passed in 5.92s`。
+- [NEXT] 单独运行 preview lifecycle（-x -vv）定位合并套件的首个 F/E；随后 data import suite。
+- [REGRESSION FAIL 1 · preview order] preview 前 10 项通过，`test_cache_miss_after_file_rewrite` 等待 controller idle 超时；无 QThread destroyed 输出。
+- [MINIMIZATION] “keeper timeout → cache rewrite”最小顺序 `2 passed in 1.15s`，未复现；说明不是简单 keeper key/id 污染，暂按偶发 finished-cleanup race 继续复跑完整 preview 并采集状态。
+- [NEXT] 重跑完整 preview；若同点再失败，增加 controller terminal-state 诊断并修改清理连接上下文，不做无证据修补。
+- [REGRESSION FAIL 2 · preview] 完整 preview 再次仅 cache rewrite idle 超时（29 passed / 1 failed）；同点第二次失败。
+- [SEQUENCE CHECK] keeper+rescan+stale+cache-hit+cache-rewrite 显式序列 `5 passed in 3.95s`，说明累积调度下的 thread.finished affinity race。
+- [ROOT CAUSE] PreviewController 用无 receiver-context lambda 从 `QThread.finished` 直调 `_on_thread_finished/QTimer.singleShot`；回调可在 managed thread 执行，违反 controller GUI-thread affinity。
+- [NEXT] 增加 controller-owned queued terminal relay，再跑完整 preview；第三次失败才触发该子缺陷 3-Strike。
+- [STRIKE 3 · preview STOP] queued relay 版本全域仅输出 8 dots 后被 45s timeout（124）；停止产品修改。
+- [RCA SYNCED · preview] 高概率为 thread.deleteLater 先于携带 wrapper 的 queued terminal cleanup；新策略为 faulthandler定位 + deletion-order重构，不增加 sleep/timeout。
+- [NEXT · DIAGNOSTIC ONLY] faulthandler 包装 preview 前 12 项，确认具体 wait 栈与 controller `_active/_jobs` 状态。
+- [RCA EVIDENCE · preview] rescan idle wait时 `_jobs` 未清，teardown 对保存的 thread 调用即报 C++ object already deleted；确认 thread.deleteLater 早于 queued cleanup。
+- [STRATEGY RESUMED · preview] 移除 finished 上的提前 thread.deleteLater，统一由 GUI `_on_thread_finished` 清状态后删除；shutdown 增加 deleted-wrapper防御。
+- [MUTATION · preview deletion order] QThread wrapper 现由 GUI cleanup 在清 `_jobs/_active` 后 deleteLater；worker 仍由 finished 自动删除。
+- [MUTATION · preview teardown defense] shutdown 对历史/外部已删除 wrapper 的 interruption/wait RuntimeError 安全跳过，不再令页面 close 二次报错。
+- [NEXT] 先复跑 rescan focused，再跑 preview 全域，验证 3-Strike 新策略。
+- [TDD GREEN · preview cleanup] rescan focused `1 passed in 3.30s`；preview/lifecycle 全域 `30 passed in 7.85s`。
+- [DONE RCA] deletion-order 新策略验证成功，preview 3-Strike 状态解除；无 idle timeout、deleted QThread 或 teardown error。
+- [NEXT] 跑 DataPage import 全套；随后合并 prep+preview+data 线程门禁。
+- [REGRESSION FAIL 1 · import] DataPage：`6 failed, 44 passed`，所有失败均为 async import_finished 未发射。
+- [ROOT CAUSE] 新增 direct `worker.finished/failed -> thread.quit` 使 worker/thread 在 queued GUI report handler 前销毁，丢失 import commit signal。
+- [MUTATION · import terminal order] 移除 normal-path direct quit；恢复 GUI handler apply/emit 后 `_finish_import_job` quit。shutdown 已主动 quit，不影响 keeper adopt。
+- [NEXT] focused file/folder/import-status 三用例，再跑 DataPage 全套。
+- [REGRESSION GREEN · DataPage] focused `3 passed in 3.34s`；全套 `50 passed in 7.76s`。
+- [THREAD WARNING] 全套捕获 `QThread::wait: Thread tried to wait on itself`；queued Python lambda 无 QObject receiver context，import handler仍可能在 worker thread运行。
+- [NEXT · TDD] 新增 import commit thread-affinity RED；改 DataPage bound @Slot + sender() job lookup，消除 lambda/context 与 self-wait。
+- [AFFINITY CHECK] 新 commit-thread 用例已显示 `import_finished` 在 page GUI thread（`1 passed`），因此 warning 并非稳定复现于普通 import。
+- [DECISION] 仍移除无 context lambdas：bound @Slot 能显式保证 receiver affinity，并让 shutdown 精确断开页面槽；随后全套检查 warning 是否消失。
+- [MUTATION · import affinity] import finished/failed 改为 DataPage bound queued slots，通过 `sender()` 映射 thread/worker job；消除无 context lambda。
+- [REGRESSION FAIL 2 · import cleanup] commit 发生在 GUI thread，但 `_finish` wait后重复 delete 已由 `thread.finished` 删除的 worker，造成 7 个 Shiboken teardown error（44 passed）。
+- [FIX] wrapper deletion 单一归属 `thread.finished`；GUI `_finish` 不再二次 deleteLater。
+- [NEXT] 重跑 DataPage 全套并确认无 self-wait/deleted wrapper Qt message。
+- [REGRESSION GREEN · DataPage] `51 passed in 8.11s`，无 self-wait/deleted wrapper warning。
+- [REGRESSION GREEN · Task 27.5 combined] prep+preview+data lifecycle：`95 passed in 15.14s`。
+- [NEXT] 将 CancellationToken 下传 engine IDW/directional chunk loop 与 factor pipeline；补取消延迟 RED/GREEN 后关闭 Task 27.5。
+- [TDD RED · cancellation checkpoint] directional/IDW 均拒绝 `cancellation_token` 参数，2 个用例按预期失败（2 failed in 1.55s）。
+- [NEXT] engine 两个 chunk loop 每块前 checkpoint；root factor `_run_grid/LOO/interpolate/batch` 透传同一 token；worker 使用已有 token。
+- [MUTATION · cooperative cancel] IDW/directional 每 chunk 前 checkpoint；factor grid/LOO/task/batch 全链透传 token，SciPy backend前后检查，JobCancelled 不再被 LOO吞掉。
+- [TDD GREEN · engine cancellation] math/IDW hardened：`11 passed in 1.38s`。
+- [NEXT] root factor+prep回归，随后 Task 27.5 合并门禁并关闭 Issue。
+- [REGRESSION GREEN · cancel pipeline] factor/directional/prep：`31 passed in 6.03s`。
+- [DONE · Task 27.5 gate] prep+preview+data：`95 passed in 15.26s`；ISS-THREAD-01 关闭，ISS-ASYNC-01 插值部分关闭。
+- [NEXT · Task 27.6] contour extraction worker化；SEGY rapid-load generation/cancel、loader finally-close、voxel budget与 host sync fallback 清除。
+- [TDD RED · Task 27.6 contour] 将 3 个既有 UI 用例改为等待异步结果，并新增 GUI/worker 线程身份回归；当前同步实现按预期失败：`1 failed, 5 passed in 2.48s`，记录到 `ran_off_gui == [False]`。
+- [NEXT] 实现共享 ContourDraft snapshot worker、engine 每 level 取消检查，以及 Preparation/Mapping 两个 thin-host 的 generation/工程身份提交门禁。
+- [GREEN · Task 27.6 contour] 新增共享 `ContourDraftWorker`：深拷贝工程只读计算、返回 draft DTO，GUI 线程再对 live map 做短提交；制备页和编图页均具备 token、工程身份门禁、shutdown 超时托管，AppShell rebuild 同时关闭两页作业。
+- [GREEN · engine contour] `extract_contour_lines` 在 generator 前、每个 level 前和完成后轮询 CancellationToken；workflow 全链透传取消状态。
+- [TEST] contour domain/UI focused：`13 passed in 5.28s`；新线程身份用例确认提取运行于非 GUI QThread。
+- [NEXT] 开始 SEGY RED：连续加载 latest-only、异常 finally-close、budget-derived downsample、host 禁止同步 fallback。
+- [TDD RED · Task 27.6 SEGY] engine 新用例按预期为 `3 failed`：缺 budget factor API、worker generation/max_voxels DTO、异常 finally-close；root host 用例先暴露 fixture 构造漏传必填 `label`（测试夹具错误，不计产品 strike）。
+- [NEXT] 修正 host 测试夹具后实现 engine prepared result 与 cooperative loader；再加 SeismicView latest-generation 回归。
+- [GREEN · Task 27.6 SEGY core] engine worker 现返回 generation/factor DTO，预算函数保证输出体素上限；loader 按 inline 轮询取消且按 factor 缓存；所有成功/异常/取消路径均在 worker thread 的 `finally` 关闭句柄。
+- [GREEN · thin host] `SeismicHost` 只调用 `load_segy_async`；adapter 不再在 GUI resolve 路径同步读取 SEGY。host contract `1 passed`。
+- [TEST] engine worker+loader `7 passed, 1 failed`；唯一失败是测试仍把新 `SeismicLoadError` DTO 当字符串做 `in`（夹具断言迁移错误，不计产品 strike），finally-close 本身已执行。
+- [NEXT] 修正 DTO 断言，补 SeismicView stale-generation/快速连续加载测试，并运行 view/adapter 回归。
+- [TEST] root adapter/host/panel/alignment 回归 `20 passed in 4.37s`，确认 adapter 不解析且 host 异步调度。
+- [TEST · latest-generation] engine `13 passed`，新增 rapid-load 用例的旧 generation 已被正确忽略；当前唯一失败/teardown error 是 fake meta 漏 `dt_ms/t0_ms`，导致 current generation 在测试渲染阶段抛 AttributeError（夹具错误，不计产品 strike）。
+- [NEXT] 补齐真实 `SeismicVolumeMeta` 夹具并把体积扩到 3³，随后核对 worker registry/cleanup 与 facade 回归。
+- [GREEN · latest-only] rapid-load 回归使用真实 `SeismicVolumeMeta`：第一次 worker 收到 interruption，旧 DTO 不触发 `segy_loaded`，仅第二代 `new.sgy` 被渲染/提交。
+- [TEST] engine SEGY worker/loader/view focused：`14 passed in 3.01s`。
+- [NEXT] 审计 engine facade/package independence、SeismicViewPanel 的 path-only 状态承接，以及 Task 27.6 更宽回归；之后更新 issue 状态。
+- [TDD RED · prediction thin host] 新增 path-only payload 回归；当前面板未调度 `load_segy_async`，按预期 `1 failed, 5 passed`，确认 adapter 异步化后预测页存在承接缺口。
+- [NEXT] 面板显示非阻塞 loading 状态，监听 engine `segy_loaded` 更新 shape/ready，并保持旧 volume payload 兼容。
+- [GREEN · prediction thin host] `SeismicViewPanel` 对 path-only payload 立即切入 engine view/loading，监听 `segy_loaded` 后更新体积 shape 与 controls ready；旧 ndarray payload 仍走 `load_demo`。
+- [TEST] seismic prediction panel/page/integration/workflow：`15 passed in 7.61s`。
+- [NEXT] 执行 Task 27.6 contour+seismic 广域回归、package independence 与静态检索；若全绿则关闭 ISS-ASYNC/ARCH 并进入 Task 27.7 全量门禁。
+- [AUDIT] 静态检索确认 `paleo_workbench` 已无 `.load_segy(...)` GUI 调用，唯一同步 helper `viz/seismic_load.py` 已成为无调用者兼容 API；`git diff --check` 无 whitespace 错误。
+- [TEST COVERAGE] 为 engine contour 增加 cancellation-before-work 直接回归，锁定 facade/workflow 之外的底层取消契约。
+- [NEXT] 运行 Task 27.6 广域门禁并检查失败是否为产品回归。
+- [REGRESSION · Task 27.6] engine contour+SEGY broad gate：`57 passed in 10.33s`；root contour/prep/seismic/viz：`62 passed, 1 failed in 12.76s`。
+- [INVESTIGATE] root 唯一失败是 package-independence 扫描一次性报告多个既有/本轮 `from geoviz import ...` facade 文件为 violation，与测试名“only geoviz facade”表面矛盾；先审计扫描器的 AST 规则和 import 环境，不计具体功能 strike。
+- [NEXT] 定位 facade gate 的真实判定（疑似禁止顶层重依赖或模块缓存污染），用最小独立命令复现后修正架构旁路。
+- [DIAG · facade gate attempt 2] 扫描器只维护显式公开符号 allowlist；补入 Task 27.2 的 analytics/directional/jobs 后，violations 从多文件收敛为 `map_edit_scene.py` 单项，即 Task 27.4 新 facade `validate_polygon_geometry` 尚未登记。focused：`1 failed, 10 passed`。
+- [NEXT] 补齐最后一个公开 facade 符号后执行第三次 gate；若仍失败则严格触发 3-Strike RCA/策略切换。
+- [GREEN · facade gate] 登记 `validate_polygon_geometry` 后第三次 package-independence gate 成功：`11 passed in 4.01s`；未触发 3-Strike。
+- [NEXT] 重跑 Task 27.6 root 广域集合并同步 `task_plan.md` / `findings.md`，随后进入 Task 27.7 全量验证。
+- [DONE · Task 27.6] engine application registry 统一保活 SEGY/synthetic worker，view cleanup 非阻塞取消，aboutToQuit 共享 deadline 收口。
+- [REGRESSION · final] engine contour+SEGY `57 passed in 9.93s`；root contour/prep/seismic/viz/facade `63 passed in 11.50s`。
+- [PWF SYNC] ISS-ASYNC-01 与 ISS-ARCH-01 关闭；Task 27.6 全项勾选，关键异步/预算/句柄不变量沉淀至 findings。
+- [NEXT · Task 27.7] 执行 root/engine 全量 non-slow、compileall、diff-check；同时复核 ISS-AUDIT-01/ISS-STATE-01 是否还有未关闭路径。
+- [FULL GATE · engine attempt 1] `1026 passed, 2 skipped, 134 deselected, 1 failed in 104.36s`；唯一失败为未触碰的 cross-well DTW 1k 性能阈值，实测 `1.061s < required 1.0s` 不成立。
+- [FOCUSED · DTW attempt 2] 独立重跑仍为 `1 failed`，耗时 `1.045s`；确认不是全套资源争用。已连续 2 次，第三次失败将触发 3-Strike，当前先做实现/基准根因审计，禁止盲目重跑。
+- [NEXT] 只读检查 DTW 实现与测试基准，判断是工作树路径错配、纯 Python O(NW) 热点或阈值噪声；形成最小性能修复后再进行第三次验证。
+- [ROOT CAUSE · DTW] venv 确认加载当前 submodule；独立 benchmark 3 次约 1.00–1.07s。热点为 band 内逐 cell Python scalar DP，而非测试环境路径或一次性抖动。
+- [GREEN · DTW] 将同一递推等价改写为 `cumsum + minimum.accumulate` 的 min-plus prefix scan，保留 compact matrix、回溯与 progress 语义。
+- [TEST · attempt 3] 完整 DTW suite `10 passed in 1.56s`，性能门槛恢复；第三次验证成功，未触发 3-Strike。
+- [NEXT] 重新执行 engine full gate，然后 root full gate。
+- [FULL GATE · engine attempt 2] `1027 passed, 2 skipped, 134 deselected in 100.79s`；DTW 性能修复通过全量。
+- [FULL GATE · root attempt 1] `991 passed, 4 skipped, 8 deselected, 2 failed in 95.87s`，无 QThread 销毁/teardown hang。失败为：(1) 150ms opacity 动画等待 250ms 后停在 0.999666；(2) review integration 仍硬编码警告 1，当前 QC 实际警告 3。
+- [NEXT] 分别 focused 复现并审计：动画 finished 是否强制写 1.0；QC 规则/测试期望谁已陈旧。两项独立，不共用 strike 计数。
+- [FIX · root failures] fade 增加 150ms identity-checked exact finalize；QC integration 期望更新为当前 6-rule 契约下缺 facies/wells/contours 共 3 warnings；SeismicHost 空体改 3³，消除 gradient warning。
+- [FOCUSED · fade attempt 2] QC 已通过；fade 数值断言本身通过，但前一用例销毁 AppShell 后其无 context singleShot 仍调用已删除 DataPage，pytest-qt 记为 event-loop failure（`1 failed, 5 passed`）。这是 lifecycle 衍生问题，opacity bug 连续第 2 次未过。
+- [NEXT] finalize slot 容忍 wrapper 已删除或改用带 QObject context 的 timer；第三次 focused 若失败立即触发 3-Strike RCA。
+- [GREEN · fade attempt 3] deadline timer 改为 page-owned `QTimer`，新动画会停止旧 timer，页面删除自动销毁 timer；slot 另容忍 deleted wrapper。focused fade+review：`6 passed in 6.67s`，未触发 3-Strike。
+- [NEXT] 重跑 root full gate，随后 compileall/diff-check。
+- [FULL GATE · root attempt 2] 第二轮越过 50% 后停在 57%，超过节点 60s 且 pytest-timeout 无输出；精确 TERM PID 461413（exit 143），未见断言/QThread warning。禁止重复 quiet 全套。
+- [LOCATE] collect 顺序显示 57% 边界落在 `test_prep_well_table_worker.py` 561–569，结合输出停在该组第 7 个点附近，首要嫌疑为 async generate/shutdown lifecycle 的顺序依赖，而不是后续 preview。
+- [NEXT] 用前置 pipeline/prediction 子集 + prep 文件的 `-vv` 复现顺序，并启用 faulthandler；这是本次 root-gate hang 的第 1 次，未触发新 3-Strike。
+- [DIAG] prep lifecycle 单文件 `9 passed in 2.20s`；按 collect 顺序加入紧邻的 pipeline/prediction 前置后 `25 passed in 2.34s`，无法复现 full-run 57% hang。
+- [INFERENCE] 挂起依赖更早的全套累积状态，而非 prep 文件局部顺序；quiet 百分比只能定位区间，不能证明具体节点。下一策略改为全套 `-vv`（节点名可见）并用外层 deadline/必要时 faulthandler，而非第三次 quiet 猜测。
+- [NEXT] 执行 root `-vv` 全量诊断门禁；若同一 lifecycle 节点再次挂起则计第 2 次并抓精确节点/栈。
+- [FULL GATE · root final] 同一 non-slow collection 以 `-vv + faulthandler` 正常完成：`993 passed, 4 skipped, 8 deselected in 40.09s`；prep/preview/lifecycle 均逐节点通过，无 hang 或 Qt thread warning。
+- [STATIC GATE] `python -m compileall -q paleo_workbench geo-viz-engine/packages`、root `git diff --check`、engine `git diff --check` 全部 exit 0。
+- [AUDIT CLOSE] Project path containment/round-trip 已有底层与页面测试；atomic save timestamp、snapshot worker GUI commit 覆盖 ISS-STATE。ISS-AUDIT-01 / ISS-STATE-01 关闭。
+- [COMPLETED · Phase 27] 所有 issue 关闭，Task 27.7 全项完成；用户未跟踪 `SCRATCH/` 与 5 个历史 plan 文件保持未触碰。
+- [START · Phase 28] 用户要求修复全部 6 条 review。已读取 receiving-code-review / planning-with-files / brainstorming / TDD 规则并完成 session catchup。
+- [VERIFY REVIEW] packaging 两条属实：父仓 3 个本轮文件 untracked，engine gitlink仍停在 `dc321a5d` 且 submodule dirty。
+- [DESIGN] complex merge/split fail-closed；preview geometry-first；SEGY 统一 invalidation；preload guard-first；engine→parent 两级提交；clean-checkout 复验。
+- [NEXT] 逐文件验证 4 条产品缺陷的实际调用链，先写 RED 测试。
+
+### Phase 28 — Review 根因核验
+
+- [DONE] 定位 merge/split 数据丢失路径：旧 ring API 在复合几何上发生降维，且删除命令会随后执行。
+- [DONE] 定位预览数据丢失/崩溃路径：编辑器完整 `geometry` 被紧凑 `coordinates` 抢先覆盖。
+- [DONE] 定位 SEGY stale-result 路径：非 path-backed 状态切换没有统一推进 load generation。
+- [DONE] 定位预览额外 I/O：模式及已有 payload 守卫位于文件读取之后。
+- [NEXT] 按 TDD 添加上述四类回归用例，并验证其在修复前失败。
+- [DONE] 确认现有回归测试夹具与目标文件：map topology/preview、preview async、engine seismic workers，以及 root seismic host contract。
+- [NEXT] 写入 RED 测试；首次 focused run 必须呈现 reviewer 所述失败路径。
+- [DONE] 完成 engine SEGY 实现核验：确认可抽取现有 cleanup/load 中断逻辑为公开生命周期 API。
+- [DONE] 确认 Thin Host 修复边界：移除 `_loader` 私有访问，空状态显式取消，volume/demo 由 engine 自身取消。
+- [NEXT] 一次性加入 4 组 RED 回归测试并执行 focused gate。
+- [RED · run 1] Root focused：出现 2 个产品契约失败后，预载测试的全局 `Path.stat` monkeypatch 触发 pytest INTERNALERROR；该 run 不可作为完整断言结果。
+- [RED · command correction] Engine focused 因从父仓使用 `tests/test_seismic_workers.py` 路径而 collection error；尚未执行到 engine 用例。
+- [STRIKE] Phase 28 修复后失败计数仍为 0；本次是预期 RED/测试夹具校正，不计实现自愈 strike。
+- [NEXT] 修正测试隔离与 engine cwd，重新取得可信 RED 证据。
+- [RED · root verified] `7 failed, 42 passed in 5.53s`；全部失败均为本轮预期产品契约，测试隔离已正确。
+- [RED · engine env] 父仓 cwd collection 报 `ModuleNotFoundError: geoviz_seismic`；下一次改用 `geo-viz-engine/` cwd，不计实现 strike。
+- [NEXT] 在 engine cwd 取得 stale SEGY RED，随后进入 GREEN 实现。
+- [ENV] engine cwd + 系统 pytest 仍 collection error；已定位 engine 自带 `.venv/bin/pytest` 与 README 测试入口。
+- [NEXT] 使用 engine `.venv/bin/pytest` 执行 stale-result RED；产品实现 strike 仍为 0。
+- [ENV] `.venv/bin/pytest` 因旧绝对 shebang exit 127；已核对 Phase 27 日志，正确入口为 `.venv/bin/python -m pytest`。
+- [NEXT] 用正确解释器入口执行 engine RED；环境探测不计产品 strike。
+- [RED · engine verified] `.venv/bin/python -m pytest -q tests/test_seismic_workers.py` → `1 failed, 3 passed`，stale demo 覆盖契约确实失败。
+- [GREEN · implementation] 已完成 complex geometry fail-closed、editor geometry-first、preload guard-first、engine SEGY 统一取消 API、panel empty 取消与 host 私有耦合移除。
+- [NEXT] 执行 root + engine focused GREEN；若失败按同一缺陷累计 strike。
+- [GREEN · root] `QT_QPA_PLATFORM=offscreen pytest -q ...` → `49 passed in 5.28s`。
+- [GREEN · engine] `.venv/bin/python -m pytest -q tests/test_seismic_workers.py` → `4 passed in 0.77s`（仅既有 pytest config warning）。
+- [STRIKE] Phase 28 产品修复失败计数：0。
+- [NEXT] 扩展回归、静态检查、版本控制收口与 clean-checkout 测试。
+- [STATIC] root/engine `git diff --check` 均 exit 0；本轮目标 diff 人工复核通过。
+- [PACKAGING] 已确认仍需纳入 root 新模块 2 个 + seismic contract test 1 个，以及 engine 新 API/analytics/directional/tests；父仓 gitlink 尚未更新。
+- [SCOPE] 无关 `SCRATCH/` 与 5 个既有 docs plan 继续保持未触碰/不纳入提交。
+- [NEXT] 跑受影响扩展回归，再执行 engine→parent 两级提交。
+- [FULL GATE · root] `1000 passed, 4 skipped, 8 deselected, 2 warnings in 47.81s`。
+- [FULL GATE · engine] `1027 passed, 2 skipped, 134 deselected, 1 warning in 47.03s`。
+- [STRIKE] Phase 28 产品修复失败计数保持 0；两套全量门禁全绿。
+- [NEXT] 提交 engine，更新父仓 gitlink并提交 root；随后从提交态做 clean-checkout 导入/测试验证。
+- [COMMIT · engine] `957cb3f5 fix(core): harden GIS jobs and seismic lifecycle`；staged diff-check exit 0，新增核心模块与测试均已纳入提交。
+- [NEXT] 更新父仓 gitlink，精确排除 `SCRATCH/` 与 5 个 docs plan 后提交 root。

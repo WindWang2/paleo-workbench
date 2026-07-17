@@ -135,6 +135,62 @@ def test_scene_merge_and_split_facies(qtbot):
     assert scene.item_by_id(new_id) is None
 
 
+@requires_shapely
+def test_legacy_merge_and_split_reject_complex_geometry_without_data_loss(qtbot):
+    hole_geometry = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],
+            [[2, 2], [2, 6], [6, 6], [6, 2], [2, 2]],
+        ],
+    }
+    multi_geometry = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[10, 0], [14, 0], [14, 4], [10, 0]]],
+            [[[20, 0], [24, 0], [24, 4], [20, 0]]],
+        ],
+    }
+    scene = MapEditScene()
+    scene.load_document(PaleoMapDocument(
+        name="complex",
+        linked_target_horizon="H",
+        facies_polygons=[
+            {"id": "hole", "name": "hole", "geometry": hole_geometry},
+            {
+                "id": "simple",
+                "name": "simple",
+                "coordinates": [[7, 0], [10, 0], [10, 3], [7, 0]],
+            },
+            {"id": "multi", "name": "multi", "geometry": multi_geometry},
+        ],
+        line_features=[{
+            "id": "cut",
+            "name": "cut",
+            "coordinates": [[12, -1], [12, 5]],
+        }],
+    ))
+
+    hole = scene.item_by_id("hole")
+    simple = scene.item_by_id("simple")
+    assert hole is not None and simple is not None
+    hole.setSelected(True)
+    simple.setSelected(True)
+    assert scene.merge_selected_facies() is None
+    assert scene.item_by_id("hole").to_record()["geometry"] == hole_geometry
+    assert scene.item_by_id("simple") is simple
+
+    scene.clearSelection()
+    multi = scene.item_by_id("multi")
+    cut = scene.item_by_id("cut")
+    assert multi is not None and cut is not None
+    multi.setSelected(True)
+    cut.setSelected(True)
+    assert scene.split_selected_facies_by_line() is None
+    assert scene.item_by_id("multi").to_record()["geometry"] == multi_geometry
+    assert scene.item_by_id("cut") is cut
+
+
 def test_mapping_page_topology_toolbar(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)

@@ -4,6 +4,7 @@ from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.mapping.map_edit_api import HAS_CPP, hit_test
+from PySide6.QtCore import QPointF
 
 
 def test_has_cpp_is_bool():
@@ -254,6 +255,41 @@ def test_translate_features_and_undo_restores_position(qtbot):
 
     scene.redo()
     assert f_item.to_record()["coordinates"][0] == [f_before[0] + 1.0, f_before[1] + 2.0]
+
+
+def test_polygon_hole_is_not_filled_and_move_undo_preserves_all_rings(qtbot):
+    coordinates = [
+        [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],
+        [[2, 2], [2, 6], [6, 6], [6, 2], [2, 2]],
+    ]
+    scene = MapEditScene()
+    scene.load_document(
+        PaleoMapDocument(
+            name="holes",
+            linked_target_horizon="H",
+            facies_polygons=[
+                {
+                    "id": "f-hole",
+                    "geometry": {"type": "Polygon", "coordinates": coordinates},
+                }
+            ],
+        )
+    )
+    item = scene.item_by_id("f-hole")
+
+    assert item.contains(QPointF(1.0, 1.0))
+    assert not item.contains(QPointF(4.0, 4.0))
+    assert scene.hit_test_at(1.0, 1.0) == "f-hole"
+    assert scene.hit_test_at(4.0, 4.0) is None
+    assert item.to_record()["coordinates"] == coordinates
+
+    scene.translate_features(["f-hole"], 3.0, -1.0)
+    moved = item.to_record()["coordinates"]
+    assert moved[0][0] == [3.0, -1.0]
+    assert moved[1][0] == [5.0, 1.0]
+
+    scene.undo()
+    assert item.to_record()["coordinates"] == coordinates
 
 
 def test_mapping_page_tool_and_undo_wiring(qtbot):

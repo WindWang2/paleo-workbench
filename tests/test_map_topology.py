@@ -28,6 +28,33 @@ def test_scene_exposes_blocking_topology_issue(qtbot):
     assert issues[0]["severity"] == "error"
 
 
+def test_scene_save_validation_checks_hole_rings(qtbot):
+    scene = MapEditScene()
+    scene.load_document(
+        PaleoMapDocument(
+            name="hole-invalid",
+            linked_target_horizon="H",
+            facies_polygons=[
+                {
+                    "id": "bad-hole",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],
+                            [[2, 2], [6, 6], [6, 2], [2, 6], [2, 2]],
+                        ],
+                    },
+                }
+            ],
+        )
+    )
+
+    ok, issues = scene.validate_for_save()
+
+    assert ok is False
+    assert any(issue.get("ring_index") == 1 for issue in issues)
+
+
 def test_simple_ring_has_no_issues():
     ring = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]
     assert validate_ring(ring) == []

@@ -39,6 +39,37 @@ def test_facies_to_geojson_passthrough_feature():
     assert feat["properties"]["facies"] == "A"
 
 
+def test_facies_to_geojson_prefers_complete_editor_geometry():
+    polygon = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0, 0], [8, 0], [8, 8], [0, 8], [0, 0]],
+            [[2, 2], [2, 6], [6, 6], [6, 2], [2, 2]],
+        ],
+    }
+    multipolygon = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[10, 0], [12, 0], [12, 2], [10, 0]]],
+            [[[20, 0], [22, 0], [22, 2], [20, 0]]],
+        ],
+    }
+
+    for geometry in (polygon, multipolygon):
+        feat = facies_to_geojson({
+            "id": "complex",
+            "kind": "facies",
+            "name": "复合相带",
+            # Compatibility field is deliberately incomplete.
+            "coordinates": geometry["coordinates"][0],
+            "geometry": geometry,
+        })
+
+        assert feat is not None
+        assert feat["geometry"] == geometry
+        assert feat["properties"] == {"name": "复合相带", "facies": "复合相带"}
+
+
 def test_well_to_lnglat_from_xy_and_coordinates():
     assert well_to_lnglat({"name": "W1", "x": 1.0, "y": 2.0}) == {
         "name": "W1", "lng": 1.0, "lat": 2.0,

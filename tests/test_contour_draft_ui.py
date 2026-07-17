@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QMessageBox
 
 from paleo_workbench.app import PaleoWorkbenchWindow
@@ -63,6 +64,7 @@ def test_preparation_page_generates_contour_drafts(qtbot, monkeypatch):
     page.contour_drafts_updated.connect(lambda: events.append("ok"))
     page.task_panel.contour_draft_btn.click()
 
+    qtbot.waitUntil(lambda: events == ["ok"], timeout=5_000)
     assert events == ["ok"]
     assert project.contour_drafts
     assert project.paleomap_documents
@@ -105,6 +107,7 @@ def test_mapping_page_contour_from_factor_shelf(qtbot, monkeypatch):
     page.contour_drafts_updated.connect(lambda: events.append(True))
     page.bottom_workbench.factor_shelf.contour_draft_btn.click()
 
+    qtbot.waitUntil(lambda: events == [True], timeout=5_000)
     assert events == [True]
     assert project.contour_drafts
     assert page.active_document() is not None
@@ -141,7 +144,52 @@ def test_app_wires_preparation_contour_signal(qtbot, monkeypatch):
     prep = window.app_shell.preparation_page_widget()
     assert isinstance(prep, PreparationPage)
     prep.task_panel.contour_draft_btn.click()
+    qtbot.waitUntil(lambda: bool(window.project.contour_drafts), timeout=5_000)
     assert window.project.contour_drafts
     mapping = window.app_shell.mapping_page_widget()
     assert isinstance(mapping, MappingPage)
     assert mapping._project is window.project
+
+
+def test_preparation_contour_extraction_runs_off_gui_thread(qtbot, monkeypatch):
+    monkeypatch.setattr(
+        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
+    )
+    project = ProjectDocument.new("ContourThread")
+    task = FactorMapTask(
+        name="厚度",
+        target_horizon="H1",
+        factor_type="地层厚度",
+        method="IDW",
+        status="complete",
+        parameters={
+            "grid_x": [0.0, 1.0],
+            "grid_y": [0.0, 1.0],
+            "grid_z": [[1.0, 2.0], [3.0, 4.0]],
+            "grid_n": 2,
+        },
+    )
+    project.factor_map_tasks.append(task)
+
+    from paleo_workbench.workflow import contour_draft as contour_module
+
+    original = contour_module.compile_contour_drafts_for_project
+    ran_off_gui = []
+
+    def checked_compile(*args, **kwargs):
+        ran_off_gui.append(QThread.currentThread() is not page.thread())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        contour_module, "compile_contour_drafts_for_project", checked_compile
+    )
+    page = PreparationPage()
+    qtbot.addWidget(page)
+    page.set_project(project)
+    completed = []
+    page.contour_drafts_updated.connect(lambda: completed.append(True))
+
+    page.task_panel.contour_draft_btn.click()
+
+    qtbot.waitUntil(lambda: completed == [True], timeout=5_000)
+    assert ran_off_gui == [True]

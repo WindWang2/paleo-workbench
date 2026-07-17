@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLineEdit,
@@ -88,13 +88,13 @@ class AppShell(QWidget):
         self._setup_shortcuts()
 
     def _setup_shortcuts(self) -> None:
-        """Register 1-9 digit shortcuts that switch the active page.
+        """Register 1-9 and 0 digit shortcuts for the ten AppShell pages.
 
         The guard in :meth:`_shortcut_switch_page` blocks these while a text
         field has focus so digit entry isn't hijacked.
         """
-        for i in range(min(9, len(tokens.PAGE_NAMES))):
-            digit = str(i + 1)
+        for i in range(min(10, len(tokens.PAGE_NAMES))):
+            digit = str(i + 1) if i < 9 else "0"
             QShortcut(QKeySequence(digit), self,
                       lambda idx=i: self._shortcut_switch_page(idx))
 
@@ -113,6 +113,8 @@ class AppShell(QWidget):
             self._switch_page(idx)
 
     def _switch_page(self, index: int) -> None:
+        if not 0 <= index < self.page_stack.count():
+            return
         self.page_stack.setCurrentIndex(index)
         self.sidebar.setVisible(index != PAGE_INDEX_DATA)
         if index == PAGE_INDEX_DATA:
@@ -137,6 +139,10 @@ class AppShell(QWidget):
         # Stop any in-flight animation and clear effects on the last faded page.
         if self._fade_anim is not None:
             self._fade_anim.stop()
+        fade_timer = getattr(self, "_fade_finalize_timer", None)
+        if fade_timer is not None:
+            fade_timer.stop()
+            fade_timer.deleteLater()
         prev = getattr(self, "_fade_page", None)
         if prev is not None and prev is not page:
             prev.setGraphicsEffect(None)
@@ -153,7 +159,22 @@ class AppShell(QWidget):
         self._fade_anim.setStartValue(0.7)
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
-        self._fade_anim.finished.connect(lambda p=page: p.setGraphicsEffect(None))
+        def finalize_fade(p=page, e=effect) -> None:
+            # A busy offscreen event loop may leave the unified animation
+            # timer one frame short of exactly 1.0.  Finalize by identity so
+            # stale timers from rapid switches cannot clear a newer effect.
+            try:
+                if p.graphicsEffect() is e:
+                    e.setOpacity(1.0)
+                    p.setGraphicsEffect(None)
+            except RuntimeError:
+                return
+
+        self._fade_anim.finished.connect(finalize_fade)
+        self._fade_finalize_timer = QTimer(page)
+        self._fade_finalize_timer.setSingleShot(True)
+        self._fade_finalize_timer.timeout.connect(finalize_fade)
+        self._fade_finalize_timer.start(self._fade_anim.duration())
         self._fade_anim.start()
 
     def data_page_widget(self):
@@ -246,7 +267,7 @@ class AppShell(QWidget):
         }
 
     def update_well_log_prediction_page(self, prediction_tasks: list, project=None) -> None:
-        page = self.page_stack.widget(2)
+        page = self.page_stack.widget(PAGE_INDEX_WELL_LOG)
         if hasattr(page, "set_project"):
             page.set_project(project if project is not None else self.project)
         if hasattr(page, "update_state"):
@@ -256,10 +277,10 @@ class AppShell(QWidget):
             )
 
     def well_log_prediction_page_widget(self):
-        return self.page_stack.widget(2)
+        return self.page_stack.widget(PAGE_INDEX_WELL_LOG)
 
     def update_seismic_prediction_page(self, prediction_tasks: list, project=None) -> None:
-        page = self.page_stack.widget(3)
+        page = self.page_stack.widget(PAGE_INDEX_SEISMIC)
         if hasattr(page, "set_project"):
             page.set_project(project if project is not None else self.project)
         if hasattr(page, "update_state"):
@@ -269,17 +290,17 @@ class AppShell(QWidget):
             )
 
     def seismic_prediction_page_widget(self):
-        return self.page_stack.widget(3)
+        return self.page_stack.widget(PAGE_INDEX_SEISMIC)
 
     def update_sequence_framework_page(self, stratigraphy) -> None:
-        page = self.page_stack.widget(4)
+        page = self.page_stack.widget(PAGE_INDEX_SEQUENCE)
         if hasattr(page, "set_project"):
             page.set_project(self.project)
         if hasattr(page, "update_state"):
             page.update_state(stratigraphy)
 
     def sequence_framework_page_widget(self):
-        return self.page_stack.widget(4)
+        return self.page_stack.widget(PAGE_INDEX_SEQUENCE)
 
     def update_stratigraphy_correlation_page(self, project=None) -> None:
         page = self.page_stack.widget(PAGE_INDEX_STRATIGRAPHY)
