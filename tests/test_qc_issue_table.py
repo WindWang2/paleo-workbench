@@ -20,7 +20,7 @@ def test_table_object_name(qtbot):
 def test_table_three_columns(qtbot):
     widget = QCIssueTable()
     qtbot.addWidget(widget)
-    assert widget.table.columnCount() == 3
+    assert widget.table.columnCount() == 4  # 检查项目 / 说明 / 结果 / 定位
     headers = [widget.table.horizontalHeaderItem(i).text() for i in range(3)]
     assert headers == ["检查项目", "检查说明", "结果说明"]
 

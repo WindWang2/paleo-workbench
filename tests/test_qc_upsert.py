@@ -133,3 +133,69 @@ def test_missing_horizon_is_error():
     report = run_basic_qc(project, doc.id)
     assert any(i["rule"] == "target_horizon_present" for i in report.issues)
     assert report.status == "error"
+
+
+def test_spatial_issue_on_self_intersecting_facies():
+    from paleo_workbench.workflow.qc import issue_layer_geojson, spatial_issues
+
+    project = ProjectDocument.new("QC-Spatial")
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "f_bad",
+            "coordinates": [[0, 0], [1, 1], [1, 0], [0, 1], [0, 0]],
+        }],
+        well_overlays=[{"id": "w1", "x": 0.2, "y": 0.2}],
+        line_features=[{"id": "c1", "role": "contour", "coordinates": [[0, 0], [1, 0]]}],
+    )
+    project.paleomap_documents.append(doc)
+    report = run_basic_qc(project, doc.id)
+    spatial = spatial_issues(report.issues)
+    assert spatial
+    geom_issue = next(i for i in spatial if i["rule"] == "facies_geometry_valid")
+    assert geom_issue["feature_id"] == "f_bad"
+    assert geom_issue["feature_kind"] == "facies"
+    assert geom_issue["geometry"]["type"] == "Polygon"
+    assert geom_issue.get("centroid")
+    assert "map:" in str(geom_issue.get("ref", ""))
+
+    fc = issue_layer_geojson(report)
+    assert fc["type"] == "FeatureCollection"
+    assert fc["features"]
+    assert fc["features"][0]["geometry"]["type"] == "Polygon"
+    assert fc["features"][0]["properties"]["feature_id"] == "f_bad"
+
+
+def test_well_table_outlier_has_point_geometry():
+    from paleo_workbench.workflow.qc import spatial_issues
+
+    project = ProjectDocument.new("QC-Well-Spatial")
+    project.well_tables.append(
+        WellTable(
+            name="t",
+            target_horizon="H1",
+            rows=[
+                WellTableRow(name="OK", x=0, y=0, z=1.0, qc_flag="ok"),
+                WellTableRow(name="OUT", well_id="w-out", x=10.5, y=20.5, z=99.0, qc_flag="outlier"),
+            ],
+        )
+    )
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "f1",
+            "coordinates": [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]],
+        }],
+        well_overlays=[{"id": "w1", "x": 0, "y": 0}],
+        line_features=[{"id": "c1", "role": "contour", "coordinates": [[0, 0], [1, 1]]}],
+    )
+    project.paleomap_documents.append(doc)
+    report = run_basic_qc(project, doc.id)
+    spatial = spatial_issues(report.issues)
+    well_issues = [i for i in spatial if i["rule"] == "well_table_qc_clean"]
+    assert len(well_issues) == 1
+    assert well_issues[0]["geometry"]["type"] == "Point"
+    assert well_issues[0]["geometry"]["coordinates"] == [10.5, 20.5]
+    assert well_issues[0]["feature_id"] == "w-out"

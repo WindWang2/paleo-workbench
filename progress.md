@@ -1119,3 +1119,13 @@ Failures:
 - RULE_DESCRIPTIONS updated for new engine keys
 - tests/test_qc_upsert.py expanded
 - Focused suite: **15 passed in 2.07s**
+
+### ISS-QC-02 lock
+- Goal: spatial IssueLayer fields on QC issues (geometry/ref) for map locate
+- Start from run_basic_qc issue dicts + review table display
+
+### ISS-QC-02
+- make_issue + geometry/centroid/ref; per-facies and per-well spatial issues
+- issue_layer_geojson FeatureCollection
+- QCIssueTable 定位 column
+- Tests green after column count fix
