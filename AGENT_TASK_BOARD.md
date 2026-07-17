@@ -192,6 +192,7 @@
 | 2026-07-17 | ISS-PREP-01 | WellTablePanel + async FactorPrepareWorker；14 tests |
 | 2026-07-17 | ISS-DOM-04 | VersionSet finalize + 专家定稿 UI；15 tests |
 | 2026-07-17 | ISS-E2E-01 | factor map e2e contract WellTable→定稿；2 tests |
+| 2026-07-17 | ISS-QC-01 | 扩展 QC 规则 + 15 tests；push f91ff0b |
 
 ---
 

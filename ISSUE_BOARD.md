@@ -16,7 +16,7 @@
 | ISS-PREP-01 | High | 制备 | 制备页无 WellTable 表格编辑/异常高亮；插值在 GUI 线程 | Worker 线程 + 表格绑定 WellTable | **DONE** |
 | ISS-MAP-01 | High | 编图 | 等值线初稿不可修编；factor_shelf 只展示不消费 grid | ContourDraft → 线要素/可编辑 isolines | **DONE** |
 | ISS-MAP-02 | Medium | 编图 | `edit_history` 未稳定写入命令栈 | 关键 Command 提交时 append EditLog | **DONE** |
-| ISS-QC-01 | Medium | 质检 | `run_basic_qc` 仅相带/层位两项，无点位 MAD/拓扑深度 | 扩展规则集挂钩 IssueLayer | TODO |
+| ISS-QC-01 | Medium | 质检 | `run_basic_qc` 仅相带/层位两项，无点位 MAD/拓扑深度 | 扩展规则集挂钩 IssueLayer | **DONE** |
 | ISS-QC-02 | Medium | 质检 | issues 非空间 **IssueLayer** | issues 带 geometry/ref 可图上定位 | TODO |
 | ISS-PRED-01 | Medium | 测井/地震 | 预测任务仍以 MockPredictionAdapter 为主 | 真实 LAS/SEGY 特征链路加深 | TODO |
 | ISS-VIZ-01 | Medium | 可视化 | Well-tie 无独立工作区 tab | 可选引擎 WellTieCanvas 页签 | TODO |
@@ -37,7 +37,7 @@
 
 ### 当前 WIP
 
-- **ISS-QC-01** — 扩展 run_basic_qc 规则（下一步候选）
+- **ISS-QC-02** — IssueLayer 空间化（下一步候选）
 
 ### 本轮完成证据
 
