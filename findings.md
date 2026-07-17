@@ -952,3 +952,5 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - Diff self-review 发现真实 PDF 只覆盖立即 Ready；新增可控 fake-document contract，要求 Loading 阶段保持 pending/非失败，并在 statusChanged(Ready) 后渲染。该测试锁定批准设计中的异步状态分支。
 - 补强 contract 通过：真实 QBuffer Ready 与 fake Loading→Ready 共 2 pass；完整 preview widget 文件 16 pass。状态机即时与延迟两条路径均有门禁。
 - Phase 29 implementation complete：产品 diff 仅 `preview_widgets.py`，测试 diff 仅 `test_preview_widgets.py`；其余为三份 PWF。无依赖、预算或 worker I/O 行为变化。
+- `cf2676e` 已 fast-forward 合并到 main；合并态 focused 83 pass，实际 44.6 MiB PDF 仍为 Ready / None_ / 248 pages / 1 / 248。
+- 自建 worktree 因含 submodule 元数据需先 deinit，再在已确认 clean 后 `worktree remove --force`；功能分支用非强制 `branch -d` 删除，现仅保留 main worktree。

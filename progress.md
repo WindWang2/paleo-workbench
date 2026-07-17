@@ -1507,3 +1507,10 @@ Failures:
 - [WIDGET REGRESSION] `tests/test_preview_widgets.py` → `16 passed in 1.33s`。
 - [VERIFIED] Phase 29 所有代码/测试/静态门禁完成；进入 finishing-development-branch 提交与集成流程。
 - [IMPLEMENTED] ISS-PDF-01 fixed；分支 `fix/pdf-preview-status` 准备提交并等待 finishing workflow 集成选择。
+- [MERGED] 用户选择 option 1；`main` fast-forward 到 `cf2676e`，无 pull/push。
+- [MERGED FOCUSED] preview widgets + reader + async → `83 passed in 6.89s`。
+- [MERGED ACTUAL PDF] 44,610,769 bytes / 248 pages → `Ready, Error.None_, 1 / 248`，exit 0。
+- [NEXT] 移除自建 worktree、删除已合并分支，提交最终 PWF 收尾。
+- [CLEANUP] worktree submodule deinit；确认无未提交内容后移除 `.worktrees/pdf-preview-fix`；已合并分支 `fix/pdf-preview-status` 以 `branch -d` 删除。
+- [WORKTREE FINAL] `git worktree list` 仅剩 `/home/kevin/projects/paleo_project cf2676e [main]`。
+- [COMPLETED · Phase 29] PDF QIODevice 预览误判已修复、合并、复验并清理隔离分支。

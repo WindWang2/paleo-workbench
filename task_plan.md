@@ -629,7 +629,7 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 - [x] COMMIT：engine scoped commit；父仓纳入新模块、更新 gitlink并提交（排除用户未跟踪资产）。
 - [x] CLEAN CHECKOUT：临时 worktree/submodule 初始化后 import + focused tests；compileall/diff-check。
 
-### Phase 29: PDF 预览加载失败诊断与修复 — ✅ IMPLEMENTED
+### Phase 29: PDF 预览加载失败诊断与修复 — ✅ COMPLETED
 
 | ID | Priority | Acceptance | Status |
 |----|----------|------------|--------|
