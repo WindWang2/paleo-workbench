@@ -1457,3 +1457,15 @@ Failures:
 - [FINAL HARNESS NOTE] 合并 root+engine 单进程 pytest 因双方 `tests` package 同名导致 3 个 collection error；其后命令未启用 fail-fast，故末尾 exit 0 不可采信为测试结果。
 - [FINAL ROOT FOCUSED] 恢复标准 root 命令 → reviewer contracts `8 passed in 1.03s`。
 - [EVIDENCE] 最终采用隔离证据：root focused 8 pass；clean-checkout engine 4 pass；root full 1000 pass；engine full 1027 pass；compileall/diff-check exit 0。
+
+### Phase 29 — PDF 预览加载失败
+
+- [START] 用户报告 PDF 预览加载失败；按 systematic-debugging 只做根因调查，尚未修改产品代码。
+- [ENV] Qt 6.11.1 的 QtPdf/QtPdfWidgets 均存在。
+- [REPRO] 实际 PDF 路径加载成功：`Error.None_ / 248 pages / Ready`。
+- [HYPOTHESIS] bytes 预载走 `load(QIODevice)` 返回 `None`，被 widget 当作 Error，导致假失败。
+- [NEXT] 最小脚本确认 QBuffer load 后 document 实际 Ready 且 widget `_load_failed=True`。
+- [ROOT CAUSE CONFIRMED] QBuffer document：`return=None, Ready, Error.None_, 248 pages`；widget：`_load_failed=True, 0 / 0`。
+- [PAUSED] 当前请求按诊断处理，未修改产品代码；若用户要求修复，进入 TDD RED→GREEN。
+- [APPROVED] 用户批准方案 A；设计/实施计划因 PWF 唯一记忆约束写入 `task_plan.md`，未新增 docs 文件。
+- [PLAN] 单原子 inline TDD：真实 QBuffer RED → status-driven GREEN → focused/full gates。

@@ -931,3 +931,12 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - Clean-checkout attempt 2 全绿：`AppShell` 实例化成功，`geoviz.__file__` 明确来自临时 submodule，`CancellationToken/JobCancelled` 与两个新 workbench 模块均可导入；reviewer root cases `8 passed`、engine workers `4 passed`。临时 worktree 已清理，父 gitlink与 engine HEAD 都是 `957cb3f5`。
 - 最终静态门禁：root/engine diff-check 与 compileall 均 exit 0。Reviewer 六项已全部形成代码、测试、提交及 clean-checkout 证据，Phase 28 可关闭。
 - 最终合并 root+engine pytest 尝试因 engine 根目录的 `tests` package 遮蔽父仓 `tests` 而 collection error；这证明两套 suite 不应在同一 Python import namespace 混跑。恢复父仓标准入口后 reviewer root cases `8 passed`；engine 证据仍使用隔离 engine/clean-checkout 入口的 `4 passed` 与全量 `1027 passed`。
+
+### Phase 29 PDF 预览诊断
+
+- 环境正常：Qt 6.11.1，`PySide6.QtPdf.QPdfDocument` 与 `QtPdfWidgets.QPdfView` 均可导入。
+- 工作区实际 PDF `geo-viz-engine/勘探管理图件图册编制规范.pdf` 为合法、未加密 PDF 1.6，44,610,769 bytes、248 页；`pdfinfo` 正常。
+- `QPdfDocument.load(path)` 返回 `Error.None_`，pageCount=248、status=Ready，排除文件损坏与 Qt PDF 插件缺失。
+- 初次 bytes 诊断显示 `QPdfDocument.load(QBuffer)` 返回 Python `None`；现有 `PdfPreviewWidget.load()` 将 `_load_document()` 返回值与 `QPdfDocument.Error.None_` 比较，故可能把成功的 QIODevice load 误判为失败。下一步确认 document status/pageCount 与 widget 状态。
+- 根因确认：同一 QBuffer load 返回 `None`，但 document 为 `Ready / Error.None_ / 248 pages`；`PdfPreviewWidget` 随后却为 `_load_failed=True / 0 / 0 / PDF 预览加载失败`。错误发生在 `preview_widgets.py` 对 QIODevice overload 返回值的同步错误码假设，与 PDF 内容无关。
+- Qt 6.11 官方 API 明确区分 overload：`load(QIODevice*) -> void`，`load(QString) -> Error`；document 提供 `statusChanged(Status)`、`status()`、`error()`。批准的修复必须围绕状态机，而不是给 `None` 打补丁。

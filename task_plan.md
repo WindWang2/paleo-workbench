@@ -629,6 +629,29 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 - [x] COMMIT：engine scoped commit；父仓纳入新模块、更新 gitlink并提交（排除用户未跟踪资产）。
 - [x] CLEAN CHECKOUT：临时 worktree/submodule 初始化后 import + focused tests；compileall/diff-check。
 
+### Phase 29: PDF 预览加载失败诊断与修复 — 🔄 REFACTORING
+
+| ID | Priority | Acceptance | Status |
+|----|----------|------------|--------|
+| ISS-PDF-01 | P1 | QIODevice PDF 以 status/error 判定；Ready 正常渲染，Loading 等待，Error 才失败 | 🔄 active |
+
+- [x] 核验 QtPdf / QtPdfWidgets 安装与版本。
+- [x] 用实际 44.6 MiB、248 页 PDF 验证直接路径加载。
+- [x] 验证 `QIODevice` overload 返回语义与 widget 误判状态。
+- [x] 用户批准推荐方案 A：状态驱动、保留异步预载 bytes。
+- [ ] RED：真实 QBuffer PDF 加载后 widget 不得误判 `_load_failed`。
+- [ ] GREEN：统一以 `QPdfDocument.status()/error()/pageCount()` 收敛 load 状态；Loading 由 `statusChanged` 完成。
+- [ ] REGRESSION：PDF widget、preview async、data page focused tests。
+- [ ] FINAL：root non-slow、compileall、diff-check；更新 PWF。
+
+#### Approved Design / Inline Plan
+
+- 仅修改 `paleo_workbench/ui/pages/preview_widgets.py` 与对应测试，不改变 worker 预载预算、不回退为 GUI 线程路径读盘。
+- `load(path, pdf_bytes)` 保存当前 source identity；QIODevice overload 调用后不读取其 Python 返回值，转而调用单一 `_finish_document_load()`。
+- `_finish_document_load()`：`Loading` 时保持加载态并等待 `statusChanged`；`Ready + pageCount>0` 调用 `_render_page()`；`Error` 或 Ready 但零页才显示失败。
+- `statusChanged` 槽只处理当前 document；旧 buffer 在下一次 load 前释放，QBuffer 生命周期继续覆盖 document 使用期。
+- 执行方式：当前会话 inline TDD；用户未授权 subagent，且本任务为单原子缺陷。
+
 ## Test History
 
 | Date | Tests | Status |
