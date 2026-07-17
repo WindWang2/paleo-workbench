@@ -46,6 +46,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "PaleoMapCanvas",
         "export_professional_figure",
         "CrossWellCanvas",
+        "WellTieCanvas",
         "PlotWidget",
         "SurfaceWidget",
         "interpolate_idw",

@@ -1138,3 +1138,12 @@ Failures:
 - well/seismic workflows switch to local adapter; mock fallback preserved
 - regions_to_depth_intervals honors explicit top/bottom
 - **17 passed** focused suite
+
+### ISS-VIZ-01 lock
+- Add well-tie workspace tab on VisualizationPage
+
+### ISS-VIZ-01 done
+- Facade: `WellTieCanvas` via `geoviz_well_tie.canvas` + independence allowlist
+- `WellTieHost`: extract DT/RHOB (or synthetic proxies) + optional seismic volume trace → `set_tie_data`
+- `CompositeVisualizationPanel`: 6th tab「井震标定」before 引擎预览; routes well_log/seismic/prediction
+- Tests: `test_well_tie_host.py` + composite/alignment/facade updates

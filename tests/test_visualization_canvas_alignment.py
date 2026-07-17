@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from geoviz import CrossWellCanvas, PaleoMapCanvas, SeismicView, WellLogCanvas
+from geoviz import (
+    CrossWellCanvas,
+    PaleoMapCanvas,
+    SeismicView,
+    WellLogCanvas,
+    WellTieCanvas,
+)
 
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
@@ -46,8 +52,10 @@ def test_composite_hosts_same_primary_canvases_as_geoviz_pages(qtbot):
     assert isinstance(panel.seismic_view, SeismicView)
     assert isinstance(panel.cross_well_canvas, CrossWellCanvas)
     assert isinstance(panel.map_canvas, PaleoMapCanvas)
+    assert isinstance(panel.well_tie_canvas, WellTieCanvas)
     # Tab widget hosts CrossWellCanvas (not bare CrossWellWidget)
     assert panel.tabs.widget(2) is panel.cross_well_canvas
+    assert panel.tabs.widget(4) is panel.well_tie_canvas
 
 
 def test_open_ref_loads_las_into_well_log_canvas(qtbot, tmp_path: Path):

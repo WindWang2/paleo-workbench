@@ -11,6 +11,7 @@ from paleo_workbench.viz.hosts import (
     PaleoMapHost,
     SeismicHost,
     WellLogHost,
+    WellTieHost,
 )
 from paleo_workbench.viz.models import VizPayload
 
@@ -19,8 +20,8 @@ class CompositeVisualizationPanel(QFrame):
     """Thin tab coordinator over modular geo-viz-engine hosts.
 
     Each tab is an engine product surface (WellLog / SeismicView / CrossWell /
-    PaleoMap / GeoVizEngine preview). Payload routing is kind-driven; hosts own
-    widget APIs so the workbench does not reimplement render logic.
+    PaleoMap / WellTie / GeoVizEngine preview). Payload routing is kind-driven;
+    hosts own widget APIs so the workbench does not reimplement render logic.
     """
 
     def __init__(self, parent=None):
@@ -51,6 +52,7 @@ class CompositeVisualizationPanel(QFrame):
         self.seismic_host = SeismicHost()
         self.cross_well_host = CrossWellHost()
         self.map_host = PaleoMapHost()
+        self.well_tie_host = WellTieHost()
         self.engine_host = EnginePreviewHost()
 
         # Backward-compatible attributes used by tests and trace code.
@@ -59,12 +61,14 @@ class CompositeVisualizationPanel(QFrame):
         self.cross_well_canvas = self.cross_well_host.widget
         self.cross_well_widget = self.cross_well_host.inner
         self.map_canvas = self.map_host.widget
+        self.well_tie_canvas = self.well_tie_host.widget
         self.engine_preview = self.engine_host.widget
 
         self.tabs.addTab(self.well_host.widget, WellLogHost.tab_title)
         self.tabs.addTab(self.seismic_host.widget, SeismicHost.tab_title)
         self.tabs.addTab(self.cross_well_host.widget, CrossWellHost.tab_title)
         self.tabs.addTab(self.map_host.widget, PaleoMapHost.tab_title)
+        self.tabs.addTab(self.well_tie_host.widget, WellTieHost.tab_title)
         self.tabs.addTab(self.engine_host.widget, EnginePreviewHost.tab_title)
         layout.addWidget(self.tabs, 1)
 
@@ -114,6 +118,16 @@ class CompositeVisualizationPanel(QFrame):
             if self.map_host.apply(payload):
                 applied.append(PaleoMapHost.tab_title)
 
+        # Well-tie workspace: any well log and/or seismic volume can seed the 7 tracks.
+        if (
+            payload.kind in {"well_log", "seismic", "prediction", "cross_well"}
+            or payload.well_log is not None
+            or payload.well_logs
+            or payload.seismic_volume is not None
+        ):
+            if self.well_tie_host.apply(payload):
+                applied.append(WellTieHost.tab_title)
+
         if payload.kind == "engine_preview" or payload.prepared is not None:
             if self.engine_host.apply(payload):
                 applied.append(EnginePreviewHost.tab_title)
@@ -141,6 +155,7 @@ class CompositeVisualizationPanel(QFrame):
         self.seismic_host.clear()
         self.cross_well_host.clear()
         self.map_host.clear()
+        self.well_tie_host.clear()
         self.engine_host.clear()
 
     def _clear_canvases(self) -> None:

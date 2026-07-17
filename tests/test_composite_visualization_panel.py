@@ -1,4 +1,10 @@
-from geoviz import CrossWellCanvas, PaleoMapCanvas, SeismicView, WellLogCanvas
+from geoviz import (
+    CrossWellCanvas,
+    PaleoMapCanvas,
+    SeismicView,
+    WellLogCanvas,
+    WellTieCanvas,
+)
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import ProjectDocument
@@ -10,19 +16,21 @@ def test_composite_visualization_panel_has_engine_aligned_tabs(qtbot):
     qtbot.addWidget(panel)
 
     assert panel.objectName() == "CompositeVisualizationPanel"
-    # Five tabs: four primary package canvases + GeoVizEngine prepare/render host.
-    assert panel.tabs.count() == 5
+    # Six tabs: five package canvases + GeoVizEngine prepare/render host.
+    assert panel.tabs.count() == 6
     assert panel.tabs.tabText(0) == "测井"
     assert panel.tabs.tabText(1) == "地震"
     assert panel.tabs.tabText(2) == "连井"
     assert panel.tabs.tabText(3) == "古地理"
-    assert panel.tabs.tabText(4) == "引擎预览"
+    assert panel.tabs.tabText(4) == "井震标定"
+    assert panel.tabs.tabText(5) == "引擎预览"
     # Same primary public canvas types as geo-viz-engine domain pages.
     assert isinstance(panel.well_canvas, WellLogCanvas)
     assert isinstance(panel.seismic_view, SeismicView)
     assert isinstance(panel.cross_well_canvas, CrossWellCanvas)
     assert panel.cross_well_widget is panel.cross_well_canvas.widget
     assert isinstance(panel.map_canvas, PaleoMapCanvas)
+    assert isinstance(panel.well_tie_canvas, WellTieCanvas)
 
 
 def test_composite_visualization_panel_loads_prediction(qtbot):
@@ -36,3 +44,5 @@ def test_composite_visualization_panel_loads_prediction(qtbot):
     assert len(panel.well_canvas.tracks) > 0
     assert panel.seismic_view.is_ready()
     assert panel.cross_well_widget.canvas_count == 2
+    assert panel.well_tie_canvas._depths is not None
+    assert panel.well_tie_canvas._synthetic is not None

@@ -11,6 +11,7 @@ from paleo_workbench.viz.hosts.engine_preview_host import EnginePreviewHost
 from paleo_workbench.viz.hosts.paleo_map_host import PaleoMapHost
 from paleo_workbench.viz.hosts.seismic_host import SeismicHost
 from paleo_workbench.viz.hosts.well_log_host import WellLogHost
+from paleo_workbench.viz.hosts.well_tie_host import WellTieHost
 
 __all__ = [
     "CrossWellHost",
@@ -18,4 +19,5 @@ __all__ = [
     "PaleoMapHost",
     "SeismicHost",
     "WellLogHost",
+    "WellTieHost",
 ]
