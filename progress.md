@@ -1441,3 +1441,16 @@ Failures:
 - [NEXT] 提交 engine，更新父仓 gitlink并提交 root；随后从提交态做 clean-checkout 导入/测试验证。
 - [COMMIT · engine] `957cb3f5 fix(core): harden GIS jobs and seismic lifecycle`；staged diff-check exit 0，新增核心模块与测试均已纳入提交。
 - [NEXT] 更新父仓 gitlink，精确排除 `SCRATCH/` 与 5 个 docs plan 后提交 root。
+- [COMMIT · parent] `540decc fix(workbench): harden GIS state and async editors`；47 files，新增两个必需 worker/keeper 模块及 async seismic contract，gitlink 已更新。
+- [SCOPE VERIFIED] staged name-status 未包含 `SCRATCH/` 或 5 个历史 docs plan。
+- [NEXT] 从提交态创建隔离 worktree，初始化 submodule，验证 clean checkout 导入与 reviewer focused tests。
+- [CLEAN CHECKOUT · attempt 1] parent/submodule 检出成功；import 脚本 expected-path 取值错误导致 AssertionError，非产品失败，trap 已清理临时 worktree。
+- [STRIKE] Clean-checkout 产品失败计数：0；本次为验证夹具修正。
+- [NEXT] 显式传入临时 checkout 路径，重跑 imports + reviewer focused tests。
+- [CLEAN CHECKOUT · PASS] parent `540decc` + submodule `957cb3f5`：AppShell 构造/import 来源断言通过；root reviewer contracts `8 passed in 1.19s`；engine workers `4 passed in 0.75s`。
+- [CLEANUP] 临时 worktree 已自动移除，`git worktree list` 仅剩主工作树。
+- [GITLINK] `git ls-tree HEAD geo-viz-engine` 与 engine HEAD 均为 `957cb3f5f250daff68dfd7eec45a8d0ea05469b0`。
+- [NEXT] 最终 compileall + diff-check，关闭 Phase 28 并提交 PWF 收尾记录。
+- [STATIC FINAL] `python -m compileall -q paleo_workbench geo-viz-engine/geoviz geo-viz-engine/packages` + root/engine diff-check → exit 0。
+- [COMPLETED · Phase 28] REV-PACK/ENGINE/GEOM/PREVIEW/SEGY/IO 全部关闭；全量、focused、clean-checkout、静态门禁均已通过。
+- [NEXT] 提交 PWF 收尾记录，然后做提交态最终状态核验。

@@ -926,3 +926,7 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - 本轮 diff 静态检查 root/engine 均无 whitespace error；workbench seismic host 已不再访问 engine `_loader`，生命周期边界仅使用公开 API。
 - Phase 28 全量回归通过：root `1000 passed, 4 skipped, 8 deselected`；engine `1027 passed, 2 skipped, 134 deselected`。新增 7 个 root contract case 未引入既有回归，engine 总数不变是因 stale 场景扩展在既有 worker test 内。
 - Engine 已形成独立可引用提交 `957cb3f5`（22 files，含此前 untracked jobs/analytics/directional/seismic tests）；父仓下一提交必须记录该 gitlink，clean checkout 才能导入 `CancellationToken` 等 facade API。
+- Parent code commit `540decc` 已记录 engine gitlink `957cb3f5`，并显式新增 reviewer 指出的 `contour_draft_worker.py`、`thread_keeper.py` 与 seismic async contract test；无关 scratch/docs 未入提交。
+- Clean-checkout attempt 1 已成功从父提交检出并将 submodule checkout 到精确 `957cb3f5`；验证脚本因 `Path.cwd()` 仍是原仓而错误断言 import path，属于 harness 缺陷，worktree 已自动清理。重跑须通过环境变量传入 expected checkout。
+- Clean-checkout attempt 2 全绿：`AppShell` 实例化成功，`geoviz.__file__` 明确来自临时 submodule，`CancellationToken/JobCancelled` 与两个新 workbench 模块均可导入；reviewer root cases `8 passed`、engine workers `4 passed`。临时 worktree 已清理，父 gitlink与 engine HEAD 都是 `957cb3f5`。
+- 最终静态门禁：root/engine diff-check 与 compileall 均 exit 0。Reviewer 六项已全部形成代码、测试、提交及 clean-checkout 证据，Phase 28 可关闭。

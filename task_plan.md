@@ -608,26 +608,26 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 22 | 全项目审计加固 (audit fixes) | ✅ Complete (`main`) | sampled suites | audit reports | — |
 | 23 | 数据页 SEGY 剖面滑条 (engine scrub) | ✅ Complete | +slider tests | — | — |
 
-### Phase 28: Review 缺陷修复与 Clean-Checkout 交付 — 🔄 IN PROGRESS
+### Phase 28: Review 缺陷修复与 Clean-Checkout 交付 — ✅ COMPLETED
 
 **Goal:** 修复 reviewer 指出的 6 条交付/数据完整性/异步生命周期问题，并把 engine 变更与 parent gitlink 固化为 clean checkout 可复现提交。
 
 | ID | Priority | Acceptance | Status |
 |----|----------|------------|--------|
-| REV-PACK-01 | P1 | 两个新 workbench 模块进入父仓提交；clean checkout 可 import `PreparationPage` | 🔄 active |
-| REV-ENGINE-01 | P1 | engine 变更独立提交，父仓 gitlink 指向含 jobs/算法/拓扑 API 的 commit | 🔄 active |
-| REV-GEOM-01 | P1 | complex Polygon/MultiPolygon merge/split 明确拒绝，原 feature 不删除 | 🔄 active |
-| REV-PREVIEW-01 | P1 | preview 优先 editor record 的标准 geometry，holes/MultiPolygon 保真且不崩 | 🔄 active |
-| REV-SEGY-01 | P1 | clear/demo/empty 离开 path load 时取消并递增 generation；旧 worker 不覆盖新状态 | 🔄 active |
-| REV-IO-01 | P2 | preview mode/payload 门禁先于 stat/read；非 image/PDF 与已有 bytes 零读盘 | 🔄 active |
+| REV-PACK-01 | P1 | 两个新 workbench 模块进入父仓提交；clean checkout 可 import `PreparationPage` | ✅ done |
+| REV-ENGINE-01 | P1 | engine 变更独立提交，父仓 gitlink 指向含 jobs/算法/拓扑 API 的 commit | ✅ done |
+| REV-GEOM-01 | P1 | complex Polygon/MultiPolygon merge/split 明确拒绝，原 feature 不删除 | ✅ done |
+| REV-PREVIEW-01 | P1 | preview 优先 editor record 的标准 geometry，holes/MultiPolygon 保真且不崩 | ✅ done |
+| REV-SEGY-01 | P1 | clear/demo/empty 离开 path load 时取消并递增 generation；旧 worker 不覆盖新状态 | ✅ done |
+| REV-IO-01 | P2 | preview mode/payload 门禁先于 stat/read；非 image/PDF 与已有 bytes 零读盘 | ✅ done |
 
 #### TDD / Delivery Plan
 
-- [ ] RED：分别为 complex merge/split、preview geometry、SEGY invalidation、preload no-read 添加失败测试。
-- [ ] GREEN：最小产品修复；每个原子缺陷 focused offscreen pytest。
-- [ ] REGRESSION：mapping/preview/seismic/package suites。
-- [ ] COMMIT：engine scoped commit；父仓纳入新模块、更新 gitlink并提交（排除用户未跟踪资产）。
-- [ ] CLEAN CHECKOUT：临时 worktree/submodule 初始化后 import + focused tests；compileall/diff-check。
+- [x] RED：分别为 complex merge/split、preview geometry、SEGY invalidation、preload no-read 添加失败测试。
+- [x] GREEN：最小产品修复；每个原子缺陷 focused offscreen pytest。
+- [x] REGRESSION：mapping/preview/seismic/package suites。
+- [x] COMMIT：engine scoped commit；父仓纳入新模块、更新 gitlink并提交（排除用户未跟踪资产）。
+- [x] CLEAN CHECKOUT：临时 worktree/submodule 初始化后 import + focused tests；compileall/diff-check。
 
 ## Test History
 
