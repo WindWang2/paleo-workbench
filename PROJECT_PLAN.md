@@ -79,7 +79,7 @@ QualityReport upsert ↔ review page
 | 趋势面 | \(T=\sum w_i z_i/\sum w_i\) | 方向趋势 + IDW 双路径 | **85%** |
 | 断层屏障 IDW | `fault_polylines` | engine + workbench 接线 | **85%** ISS-ALG-03 |
 | 等值线提取 | marching squares / contourpy | engine + ContourDraft 工作流 | **85%** ISS-DOM-03 |
-| 克里金 | UI 可选 | 映射为 SciPy linear | **Mock** |
+| 克里金 | UI「克里金(MVP·线性)」 | 映射为 SciPy linear + mvp_note | **MVP 已标注** ISS-KRIG-01 |
 
 ---
 

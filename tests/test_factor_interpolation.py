@@ -47,6 +47,21 @@ def test_interpolate_factor_grid_idw_shape_and_stats():
     assert result["r_squared"] is None or 0.0 <= result["r_squared"] <= 1.0
 
 
+def test_kriging_mvp_maps_to_scipy_linear_and_notes():
+    """ISS-KRIG-01: UI 克里金 is labelled MVP and uses SciPy linear."""
+    points = [
+        {"x": 0.0, "y": 0.0, "value": 1.0},
+        {"x": 1.0, "y": 0.0, "value": 2.0},
+        {"x": 0.0, "y": 1.0, "value": 3.0},
+        {"x": 1.0, "y": 1.0, "value": 4.0},
+    ]
+    for label in ("克里金", "克里金(MVP·线性)"):
+        result = interpolate_factor_grid(points, method=label, grid_n=6)
+        assert result["backend"] == "linear"
+        assert "mvp_note" in result
+        assert "克里金" in result["mvp_note"] or "MVP" in result["mvp_note"]
+
+
 def test_apply_interpolation_to_task_fills_grid_and_metrics():
     task = FactorMapTask(
         name="厚度",

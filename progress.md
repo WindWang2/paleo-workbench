@@ -1147,3 +1147,12 @@ Failures:
 - `WellTieHost`: extract DT/RHOB (or synthetic proxies) + optional seismic volume trace → `set_tie_data`
 - `CompositeVisualizationPanel`: 6th tab「井震标定」before 引擎预览; routes well_log/seismic/prediction
 - Tests: `test_well_tie_host.py` + composite/alignment/facade updates
+
+### ISS-KRIG-01 done
+- UI label `克里金(MVP·线性)` + tooltips; alias `克里金` still maps to SciPy linear
+- `interpolate_factor_grid` emits `mvp_note` for linear backend
+
+### ISS-ENV-01 done
+- `paleo_workbench/env_bootstrap.py`: checkout path inject when geoviz not installed
+- Wired from package `__init__` + `main.py` with clear install error
+- Root `README.md` documents editable install preference

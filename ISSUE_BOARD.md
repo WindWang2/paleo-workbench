@@ -20,8 +20,8 @@
 | ISS-QC-02 | Medium | 质检 | issues 非空间 **IssueLayer** | issues 带 geometry/ref 可图上定位 | **DONE** |
 | ISS-PRED-01 | Medium | 测井/地震 | 预测任务仍以 MockPredictionAdapter 为主 | 真实 LAS/SEGY 特征链路加深 | **DONE** |
 | ISS-VIZ-01 | Medium | 可视化 | Well-tie 无独立工作区 tab | 可选引擎 WellTieCanvas 页签 | **DONE** |
-| ISS-KRIG-01 | Low | 制备 | UI「克里金」实为 SciPy linear | 标注 MVP 或接真实克里金 | TODO |
-| ISS-ENV-01 | Medium | 全局 | 裸 `python -c` 无 PYTHONPATH 时 `import geoviz` 失败 | 文档/入口保证 editable install 或 path | TODO |
+| ISS-KRIG-01 | Low | 制备 | UI「克里金」实为 SciPy linear | 标注 MVP 或接真实克里金 | **DONE** |
+| ISS-ENV-01 | Medium | 全局 | 裸 `python -c` 无 PYTHONPATH 时 `import geoviz` 失败 | 文档/入口保证 editable install 或 path | **DONE** |
 | ISS-E2E-01 | High | 全局 | 缺 WellTable→趋势面→等值线→定稿→QC 契约测试 | `test_e2e_factor_map_contract.py` | **DONE** |
 
 ### 已关闭（本会话前 backlog 巩固）
@@ -37,7 +37,7 @@
 
 ### 当前 WIP
 
-- **ISS-KRIG-01** / **ISS-ENV-01** — residual Low/Medium（克里金标注、geoviz 入口路径）
+- （board residual 已清空；后续从产品 backlog / audit 再开 issue）
 
 ### 本轮完成证据
 
@@ -45,3 +45,5 @@
 - Phase 26 baseline green: facade + async prep test fixes
 - ISS-MAP-02: edit_history on command push/undo/redo
 - ISS-VIZ-01: Visualization composite tab「井震标定」→ `WellTieHost` + facade `WellTieCanvas`
+- ISS-KRIG-01: combobox 标注「克里金(MVP·线性)」+ `mvp_note` + tooltips
+- ISS-ENV-01: `env_bootstrap` + README 优先 editable install

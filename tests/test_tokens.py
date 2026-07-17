@@ -108,8 +108,9 @@ def test_task_status_labels():
 
 
 def test_interpolation_methods():
-    assert tokens.INTERPOLATION_METHODS == ["克里金", "IDW", "样条", "方向趋势"]
+    assert tokens.INTERPOLATION_METHODS == ["克里金(MVP·线性)", "IDW", "样条", "方向趋势"]
     assert len(tokens.INTERPOLATION_METHODS) == 4
+    assert "克里金(MVP·线性)" in tokens.INTERPOLATION_METHOD_TOOLTIPS
 
 
 def test_smoothing_levels():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -89,6 +89,17 @@ class FactorTaskPanel(QFrame):
         header.addStretch()
         self.method_combo = QComboBox()
         self.method_combo.addItems(tokens.INTERPOLATION_METHODS)
+        tooltips = getattr(tokens, "INTERPOLATION_METHOD_TOOLTIPS", {}) or {}
+        for i, label in enumerate(tokens.INTERPOLATION_METHODS):
+            tip = tooltips.get(label)
+            if tip:
+                self.method_combo.setItemData(i, tip, Qt.ItemDataRole.ToolTipRole)
+        default_tip = tooltips.get(tokens.INTERPOLATION_METHODS[0], "")
+        self.method_combo.setToolTip(
+            default_tip
+            or "插值方法（克里金项为 MVP 线性占位，非真实变差函数克里金）"
+        )
+        self.method_combo.currentTextChanged.connect(self._sync_method_tooltip)
         header.addWidget(self.method_combo)
         outer.addLayout(header)
 
@@ -123,6 +134,13 @@ class FactorTaskPanel(QFrame):
             f"color: {tokens.TEXT_SECONDARY}; font-size: 12px;"
         )
         outer.addWidget(self.summary_label)
+
+    def _sync_method_tooltip(self, text: str) -> None:
+        tooltips = getattr(tokens, "INTERPOLATION_METHOD_TOOLTIPS", {}) or {}
+        self.method_combo.setToolTip(
+            tooltips.get(text)
+            or "插值方法（克里金项为 MVP 线性占位，非真实变差函数克里金）"
+        )
 
     def _emit_generate(self) -> None:
         self.generate_requested.emit(self.method_combo.currentText() or "IDW")

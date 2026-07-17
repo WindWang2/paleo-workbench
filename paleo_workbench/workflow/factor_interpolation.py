@@ -23,12 +23,18 @@ DEFAULT_GRID_N = 50
 _METHOD_BACKEND = {
     "IDW": "idw",
     "idw": "idw",
-    "克里金": "linear",  # SciPy linear as practical stand-in for kriging MVP
+    # ISS-KRIG-01: labelled MVP — SciPy linear triangulation, not full kriging.
+    "克里金": "linear",
+    "克里金(MVP·线性)": "linear",
     "样条": "cubic",
     "方向趋势": "directional",
     "directional": "directional",
     "方向加权": "directional",
     "mock": "idw",
+}
+
+_BACKEND_MVP_NOTES = {
+    "linear": "MVP：SciPy linear 三角剖分插值，非变差函数克里金（ISS-KRIG-01）",
 }
 
 
@@ -240,7 +246,7 @@ def interpolate_factor_grid(
         q=q,
         b_i=b_i,
     )
-    return {
+    out: dict[str, Any] = {
         "grid_x": [float(v) for v in grid_x],
         "grid_y": [float(v) for v in grid_y],
         "grid_z": [[None if not math.isfinite(float(v)) else float(v) for v in row] for row in grid_z],
@@ -257,6 +263,10 @@ def interpolate_factor_grid(
         "mean": float(np.mean(finite)),
         "r_squared": None if r2 is None else round(float(r2), 4),
     }
+    note = _BACKEND_MVP_NOTES.get(backend)
+    if note:
+        out["mvp_note"] = note
+    return out
 
 
 def apply_interpolation_to_task(
