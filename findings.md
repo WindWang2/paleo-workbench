@@ -930,3 +930,4 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - Clean-checkout attempt 1 已成功从父提交检出并将 submodule checkout 到精确 `957cb3f5`；验证脚本因 `Path.cwd()` 仍是原仓而错误断言 import path，属于 harness 缺陷，worktree 已自动清理。重跑须通过环境变量传入 expected checkout。
 - Clean-checkout attempt 2 全绿：`AppShell` 实例化成功，`geoviz.__file__` 明确来自临时 submodule，`CancellationToken/JobCancelled` 与两个新 workbench 模块均可导入；reviewer root cases `8 passed`、engine workers `4 passed`。临时 worktree 已清理，父 gitlink与 engine HEAD 都是 `957cb3f5`。
 - 最终静态门禁：root/engine diff-check 与 compileall 均 exit 0。Reviewer 六项已全部形成代码、测试、提交及 clean-checkout 证据，Phase 28 可关闭。
+- 最终合并 root+engine pytest 尝试因 engine 根目录的 `tests` package 遮蔽父仓 `tests` 而 collection error；这证明两套 suite 不应在同一 Python import namespace 混跑。恢复父仓标准入口后 reviewer root cases `8 passed`；engine 证据仍使用隔离 engine/clean-checkout 入口的 `4 passed` 与全量 `1027 passed`。

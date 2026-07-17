@@ -1454,3 +1454,6 @@ Failures:
 - [STATIC FINAL] `python -m compileall -q paleo_workbench geo-viz-engine/geoviz geo-viz-engine/packages` + root/engine diff-check → exit 0。
 - [COMPLETED · Phase 28] REV-PACK/ENGINE/GEOM/PREVIEW/SEGY/IO 全部关闭；全量、focused、clean-checkout、静态门禁均已通过。
 - [NEXT] 提交 PWF 收尾记录，然后做提交态最终状态核验。
+- [FINAL HARNESS NOTE] 合并 root+engine 单进程 pytest 因双方 `tests` package 同名导致 3 个 collection error；其后命令未启用 fail-fast，故末尾 exit 0 不可采信为测试结果。
+- [FINAL ROOT FOCUSED] 恢复标准 root 命令 → reviewer contracts `8 passed in 1.03s`。
+- [EVIDENCE] 最终采用隔离证据：root focused 8 pass；clean-checkout engine 4 pass；root full 1000 pass；engine full 1027 pass；compileall/diff-check exit 0。
