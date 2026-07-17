@@ -84,6 +84,7 @@
 | ISS-E2E-01 | 全局 | P0 | **DONE** | Agent | 单因素全链路契约测试 |
 | ISS-QC-01 | 质检 | P1 | **DONE** | Agent | run_basic_qc 六规则：层位/相带/几何/井/等值线/井表QC |
 | ISS-QC-02 | 质检 | P1 | **DONE** | Agent | issues 空间字段 + issue_layer_geojson + 表「定位」列 |
+| ISS-PRED-01 | 测井/地震 | P1 | **DONE** | Agent | LocalAssetPredictionAdapter LAS/SEGY 驱动 |
 
 **锁定任务（本回合）：** 无
 
@@ -195,6 +196,7 @@
 | 2026-07-17 | ISS-E2E-01 | factor map e2e contract WellTable→定稿；2 tests |
 | 2026-07-17 | ISS-QC-01 | 扩展 QC 规则 + 15 tests；push f91ff0b |
 | 2026-07-17 | ISS-QC-02 | IssueLayer geometry/ref + GeoJSON；19 tests |
+| 2026-07-17 | ISS-PRED-01 | LocalAssetPredictionAdapter；17 tests |
 
 ---
 

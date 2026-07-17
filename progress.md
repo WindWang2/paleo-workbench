@@ -1129,3 +1129,12 @@ Failures:
 - issue_layer_geojson FeatureCollection
 - QCIssueTable 定位 column
 - Tests green after column count fix
+
+### ISS-PRED-01 lock
+- Deepen well/seismic prediction beyond pure Mock when assets bound
+
+### ISS-PRED-01
+- LocalAssetPredictionAdapter: GR-window facies from LAS; seismic path meta
+- well/seismic workflows switch to local adapter; mock fallback preserved
+- regions_to_depth_intervals honors explicit top/bottom
+- **17 passed** focused suite

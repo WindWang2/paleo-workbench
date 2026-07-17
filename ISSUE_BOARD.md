@@ -18,7 +18,7 @@
 | ISS-MAP-02 | Medium | 编图 | `edit_history` 未稳定写入命令栈 | 关键 Command 提交时 append EditLog | **DONE** |
 | ISS-QC-01 | Medium | 质检 | `run_basic_qc` 仅相带/层位两项，无点位 MAD/拓扑深度 | 扩展规则集挂钩 IssueLayer | **DONE** |
 | ISS-QC-02 | Medium | 质检 | issues 非空间 **IssueLayer** | issues 带 geometry/ref 可图上定位 | **DONE** |
-| ISS-PRED-01 | Medium | 测井/地震 | 预测任务仍以 MockPredictionAdapter 为主 | 真实 LAS/SEGY 特征链路加深 | TODO |
+| ISS-PRED-01 | Medium | 测井/地震 | 预测任务仍以 MockPredictionAdapter 为主 | 真实 LAS/SEGY 特征链路加深 | **DONE** |
 | ISS-VIZ-01 | Medium | 可视化 | Well-tie 无独立工作区 tab | 可选引擎 WellTieCanvas 页签 | TODO |
 | ISS-KRIG-01 | Low | 制备 | UI「克里金」实为 SciPy linear | 标注 MVP 或接真实克里金 | TODO |
 | ISS-ENV-01 | Medium | 全局 | 裸 `python -c` 无 PYTHONPATH 时 `import geoviz` 失败 | 文档/入口保证 editable install 或 path | TODO |
@@ -37,7 +37,7 @@
 
 ### 当前 WIP
 
-- **ISS-PRED-01** — 预测去 mock（下一步候选）
+- **ISS-VIZ-01** — 井震标定工作区 tab（下一步候选）
 
 ### 本轮完成证据
 

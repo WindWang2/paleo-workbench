@@ -14,7 +14,7 @@ from paleo_workbench.pipeline.assets import (
     bind_prediction_assets,
     suggest_assets_for_demo,
 )
-from paleo_workbench.prediction.adapters import MockPredictionAdapter
+from paleo_workbench.prediction.adapters import LocalAssetPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument
 from paleo_workbench.workflow.stratigraphy import active_target_horizon
 
@@ -35,13 +35,17 @@ def run_well_log_facies_prediction(
     *,
     seed: int = 0,
 ) -> PredictionTask:
-    """Create a complete well-facies PredictionTask bound to LAS resources."""
+    """Create a complete well-facies PredictionTask bound to LAS resources.
+
+    Uses :class:`LocalAssetPredictionAdapter` so readable LAS GR curves drive
+    depth zones when present (ISS-PRED-01); otherwise falls back to mock.
+    """
     factor_ids = [
         task.id
         for task in project.factor_map_tasks
         if getattr(task, "status", "") == "complete"
     ]
-    adapter = MockPredictionAdapter()
+    adapter = LocalAssetPredictionAdapter()
     task = adapter.run(project, factor_ids, seed=seed)
     suggestion = suggest_assets_for_demo(project)
     bind_prediction_assets(
@@ -55,6 +59,7 @@ def run_well_log_facies_prediction(
     meta = dict(task.model_metadata or {})
     meta["workflow"] = "well_log_facies"
     meta["target_horizon"] = horizon
+    meta["adapter"] = task.adapter_kind
     task.model_metadata = meta
     summary = dict(task.result_summary or {})
     summary["workflow"] = "well_log_facies"
@@ -77,13 +82,44 @@ def regions_to_depth_intervals(
     top: float,
     bottom: float,
 ) -> list[dict[str, Any]]:
-    """Map predicted_regions onto [top, bottom] depth range."""
+    """Map predicted_regions onto depth range.
+
+    Prefer explicit ``top``/``bottom`` on each region (local LAS zones);
+    otherwise split ``[top, bottom]`` evenly.
+    """
     items = list(regions or [])
     if not items:
         items = [{"facies": "未分类", "probability": 0.0}]
+    # If any region carries depth, use those; clamp into [top, bottom].
+    if any("top" in r and "bottom" in r for r in items if isinstance(r, dict)):
+        out: list[dict[str, Any]] = []
+        for region in items:
+            if not isinstance(region, dict):
+                continue
+            try:
+                t = float(region.get("top", top))
+                b = float(region.get("bottom", bottom))
+            except (TypeError, ValueError):
+                continue
+            t = max(float(top), min(t, float(bottom)))
+            b = max(float(top), min(b, float(bottom)))
+            if b <= t:
+                continue
+            facies = str(region.get("facies") or "未分类")
+            out.append(
+                {
+                    "top": round(t, 3),
+                    "bottom": round(b, 3),
+                    "facies": facies,
+                    "lithology": lithology_name_for_facies(facies),
+                    "probability": float(region.get("probability", 0.0) or 0.0),
+                }
+            )
+        if out:
+            return out
     span = max(float(bottom) - float(top), 1e-6)
     step = span / len(items)
-    out: list[dict[str, Any]] = []
+    out = []
     for index, region in enumerate(items):
         t = round(float(top) + index * step, 3)
         b = round(float(top) + (index + 1) * step, 3)

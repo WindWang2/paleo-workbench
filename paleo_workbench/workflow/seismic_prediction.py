@@ -1,13 +1,13 @@
 """Seismic facies prediction workflow helpers (workbench side).
 
-Runs mock adapter with seismic asset binding and tags target_horizon so the
-prediction page / mapping compile share one stratigraphic context.
+Uses LocalAssetPredictionAdapter (ISS-PRED-01) with seismic/LAS asset binding
+and tags target_horizon so prediction page / mapping compile share context.
 """
 
 from __future__ import annotations
 
 from paleo_workbench.pipeline.assets import bind_prediction_assets, suggest_assets_for_demo
-from paleo_workbench.prediction.adapters import MockPredictionAdapter
+from paleo_workbench.prediction.adapters import LocalAssetPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument
 from paleo_workbench.workflow.stratigraphy import active_target_horizon
 
@@ -27,7 +27,7 @@ def run_seismic_facies_prediction(
         for task in project.factor_map_tasks
         if getattr(task, "status", "") == "complete"
     ]
-    adapter = MockPredictionAdapter()
+    adapter = LocalAssetPredictionAdapter()
     task = adapter.run(project, factor_ids, seed=seed)
     suggestion = suggest_assets_for_demo(project)
     bind_prediction_assets(
@@ -41,6 +41,7 @@ def run_seismic_facies_prediction(
     meta = dict(task.model_metadata or {})
     meta["workflow"] = "seismic_facies"
     meta["target_horizon"] = horizon
+    meta["adapter"] = task.adapter_kind
     task.model_metadata = meta
     summary = dict(task.result_summary or {})
     summary["workflow"] = "seismic_facies"
