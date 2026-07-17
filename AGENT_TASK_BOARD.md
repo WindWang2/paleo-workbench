@@ -82,8 +82,9 @@
 | ISS-PREP-01 | 制备 | P0 | **DONE** | Agent | WellTable 面板 + 插值 QThread Worker |
 | ISS-DOM-04 | 质检 | P0 | **DONE** | Agent | VersionSet 专家定稿 + 审核页按钮 |
 | ISS-E2E-01 | 全局 | P0 | **DONE** | Agent | 单因素全链路契约测试 |
+| ISS-QC-01 | 质检 | P1 | **DONE** | Agent | run_basic_qc 六规则：层位/相带/几何/井/等值线/井表QC |
 
-**锁定任务（本回合）：** 无（主链闭环完成）
+**锁定任务（本回合）：** 无
 
 ---
 

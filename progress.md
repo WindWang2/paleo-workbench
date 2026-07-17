@@ -1109,3 +1109,13 @@ Failures:
 - Commit d24b283 on main (ahead 1, not pushed unless requested)
 - Phase 26 marked complete in task_plan.md
 - Next candidate: ISS-QC-01 expand run_basic_qc rules
+
+### 2026-07-17 push + ISS-QC-01 lock
+- Pushed f91ff0b to origin/main (baseline green + edit_history)
+- Lock ISS-QC-01: deepen run_basic_qc rule set
+
+### ISS-QC-01 implement
+- Expanded run_basic_qc: horizon, facies, geometry, wells, contour lines, well_table flags
+- RULE_DESCRIPTIONS updated for new engine keys
+- tests/test_qc_upsert.py expanded
+- Focused suite: **15 passed in 2.07s**

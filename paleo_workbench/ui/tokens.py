@@ -128,6 +128,10 @@ RULE_DESCRIPTIONS = {
     # QC engine rule keys map to display via these too:
     "facies_polygons_present": "古地理图相带多边形是否存在",
     "target_horizon_present": "古地理图是否关联目标层位",
+    "facies_geometry_valid": "相带多边形几何是否有效（无自交）",
+    "well_overlays_present": "图面是否叠加井位",
+    "contour_lines_present": "是否存在等值线线要素",
+    "well_table_qc_clean": "井点表 MAD/砂地比异常是否已清理",
 }
 RESOURCE_LABELS = {
     "well_log": "测井数据",
