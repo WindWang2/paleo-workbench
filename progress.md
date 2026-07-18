@@ -1514,3 +1514,24 @@ Failures:
 - [CLEANUP] worktree submodule deinit；确认无未提交内容后移除 `.worktrees/pdf-preview-fix`；已合并分支 `fix/pdf-preview-status` 以 `branch -d` 删除。
 - [WORKTREE FINAL] `git worktree list` 仅剩 `/home/kevin/projects/paleo_project cf2676e [main]`。
 - [COMPLETED · Phase 29] PDF QIODevice 预览误判已修复、合并、复验并清理隔离分支。
+
+### Phase 30 — 重复实现审计与收敛
+
+- [START] 用户要求重构当前项目、减少重复功能开发；启用 brainstorming + planning-with-files 设计门禁。
+- [CONTEXT] session catchup、三份 PWF、git 状态与近期提交已恢复；无待提交产品改动，用户既存未跟踪资产保持不动。
+- [AUDIT 1] 完成 Python 文件规模、核心符号和 QThread 生命周期入口扫描；建立 thread / algorithm / preview / geometry 四类候选地图。
+- [PWF GATE] 两次只读检索后立即同步 task_plan/findings/progress；尚未修改业务代码、尚未执行测试。
+- [ERROR] 首次 PWF patch 使用了错误的 findings 尾部锚点，apply_patch 原子失败且无文件改变；读取精确尾部后拆分上下文重试成功。
+- [NEXT] 每次只问一个设计问题：先确认第一批重构优先范围，再对选定范围给出 2–3 个方案与兼容策略。
+- [DECISION] 用户选择选项 1：第一批聚焦线程生命周期统一。
+- [AUDIT 2] 细读 ThreadKeeper、Data/Preparation/Mapping/Preview 线程实现、engine 独立包约束及现有测试入口。
+- [BOUNDARY] 通用层负责 owned job 的启动/取消/安全回收；页面保留业务结果提交；Preview 保留 latest-only 调度；engine 不得反向依赖 workbench。
+- [PWF GATE] 两次源码/测试检索后同步三份 PWF；仍未修改业务代码、未执行测试。
+- [NEXT] 确认第一批是否仅收敛 workbench，或同时设计 engine 的同构生命周期 API。
+- [DECISION] 用户选择 Workbench 优先（选项 1）；engine 本批只作为独立契约边界，不进入产品改动范围。
+- [NEXT] 提交 workbench 内三种收敛方案、推荐架构与分批迁移顺序，等待设计批准。
+- [APPROVED] 用户批准方案 A：Workbench 内引入 `OwnedWorkerJob`，保留页面业务与 Preview latest-only 语义。
+- [SKILLS] 已读取 writing-plans、TDD、using-git-worktrees 完整规则；用户三文件 PWF 约束覆盖默认 docs plan 路径。
+- [PLAN] Task 30.1–30.6 已写入 task_plan：基础句柄→contour→factor→Data→Preview transport→全量门禁。
+- [SELF REVIEW] 范围、API 一致性、TDD 节点、YAGNI 与 placeholder 检查通过。
+- [NEXT] 按 worktree 技能先取得用户对隔离工作树的许可，再创建分支并执行基线测试。

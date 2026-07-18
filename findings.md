@@ -954,3 +954,26 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - Phase 29 implementation complete：产品 diff 仅 `preview_widgets.py`，测试 diff 仅 `test_preview_widgets.py`；其余为三份 PWF。无依赖、预算或 worker I/O 行为变化。
 - `cf2676e` 已 fast-forward 合并到 main；合并态 focused 83 pass，实际 44.6 MiB PDF 仍为 Ready / None_ / 248 pages / 1 / 248。
 - 自建 worktree 因含 submodule 元数据需先 deinit，再在已确认 clean 后 `worktree remove --force`；功能分支用非强制 `branch -d` 删除，现仅保留 main worktree。
+
+### Phase 30 重复实现初步审计
+
+- 当前 root `main` 的产品代码停在 `cf2676e`，PWF 收尾提交为 `39f7f9e`；只有既存 `SCRATCH/` 与 5 个历史 plan 文件未跟踪，本轮继续保持不动。
+- 最大的可确认重复职责是 Qt 后台任务生命周期：`data_page.py`、`preparation_page.py`、`mapping_page.py`、`preview_worker.py` 和 engine `seismic_view.py` 均各自实现 QThread 创建、moveToThread、requestInterruption、generation/stale 丢弃、deleteLater 与 wait。现有 `thread_keeper.py` 只覆盖部分页面，尚未形成跨页面一致契约。
+- 算法检索表明 MAD、方向趋势和 IDW 已有 engine 实现；workbench 仍有 factor orchestration、contour 编译与兼容调用。这里需要区分“必要的薄适配”与“重复算法”，不能按同名函数机械删除。
+- 预览链存在两套 source revision/stat 生成：`fallback_preview.py::_revision()` 与 `preview_provider.py::_safe_stat()` / `_resource_revision_token()`；应核对 token 语义后再决定统一入口，避免缓存失效行为变化。
+- 几何链至少包含 `mapping/geometry_schema.py::normalize_facies()`、`ui/pages/mapping_helpers.py::facies_to_geojson()` 与各 adapter；它们可能分别承担 canonicalization、展示转换和 I/O 兼容。需先画完整调用/数据契约再收敛，尤其不能重现 holes/MultiPolygon 降维问题。
+- 大文件热点包括 engine `renderer_3d.py`（1807 行）、`seismic_view.py`（1575 行）和 workbench `map_edit_scene.py`（1381 行）。文件体积是审计信号，不等于功能重复；Phase 30 的成功指标应以职责单一、调用方减少和行为测试为准。
+- 初步建议把“线程生命周期统一”作为第一批：重复证据最强、横跨多个页面、且直接降低泄漏/竞态风险；算法与几何需要更严格的兼容面审计后再动。
+- 用户选择第一批处理线程生命周期（选项 1）。
+- `DetachedJobKeeper` 当前只解决“页面释放后仍在运行的 QThread/worker 由 QApplication 托管”，不负责启动、信号连接、取消令牌、generation 或结果提交；可将它保留为底层最后防线，并在其上增加单任务 coordinator。
+- Preparation 的 prepare job、Preparation 的 contour job、Mapping 的 contour job 三处重复保存 thread/worker/token/target，重复连接 terminal→quit、finished→deleteLater/clear，并在 shutdown 时重复 disconnect + wait + adopt。两处 contour 路径尤其接近同构，是最安全的首个抽取目标。
+- PreviewController 的“单 in-flight + latest-only pending + cache/generation”是业务调度策略，不应被通用 runner 吞并；它只能复用底层 owned-job 生命周期原语，否则会把预览缓存状态与通用线程管理耦合。
+- DataPage import 同样有多 worker 列表与页面级业务状态，适合第二步复用 shutdown/adopt 原语，不适合第一步强行改成 PreviewController 状态机。
+- Engine `geoviz-seismic` 被明确要求是独立可安装包，不能导入 `paleo_workbench.ui.thread_keeper`。跨仓统一只能通过相同契约/engine 自有基础设施，或把真正通用且无 workbench 依赖的 runner 下沉到独立 engine 包；直接共享 workbench QObject 会破坏包边界。
+- 现有测试已覆盖 prepare running shutdown、DataPage keeper、Preview blocking shutdown 与 contour off-GUI；Mapping contour shutdown/stale 的直接覆盖较弱，进入实现前需要先补契约测试。
+- 用户确认采用 Workbench 优先边界（选项 1）：第一批收敛 Preparation、Mapping、Data、Preview 的共有生命周期原语，不修改 engine 包内部实现。
+- 最终设计采用持久 `OwnedWorkerJob`，而不是 helper functions 或全局 scheduler：前者能集中状态和 identity 防护；后两者分别去重不足或过度统一业务队列。
+- DataPage 当前虽用 `_import_jobs` 列表，入口通过 `_import_in_progress` 严格限制为单任务，因此可安全收敛为单 `_import_job`，不改变并发能力。
+- DataPage 正常完成依赖 worker result 以 QueuedConnection 先提交 GUI，再由 `_finish_import_job()` quit/wait；通用 handle 必须保留结果连接顺序，不能在 thread.finished 过早清掉 target。
+- Preview 的 `_thread_stopped` relay 与 `QTimer.singleShot(0, _pump_pending)` 是为规避 Shiboken teardown 竞态，迁移时必须保留“thread 真正停止后再 pump”的时序，而不只是替换字段名。
+- 计划自审通过：选定范围的启动/取消/托管/stale/正常结果顺序均有 RED 契约；无 engine 或业务算法变更。
