@@ -1633,3 +1633,15 @@ Failures:
 - [FULL ROOT] standard non-slow → `1010 passed, 4 skipped, 8 deselected, 2 warnings in 34.84s`，exit 0；本次未复现 stall。
 - [PWF GATE] 连续两次 pytest 后立即同步 task_plan/progress。
 - [NEXT] 计划逐项复核、clean-checkout focused、代码审查、分支提交与集成。
+- [COMMIT] `f86defc refactor(ui): centralize worker lifecycle`；17 files，3 个新增必需文件已纳入，分支提交后 clean。
+- [REVIEW] 按 requesting-code-review 技能启动只读独立 reviewer，范围 `13288e4..f86defc`。
+- [CLEAN CHECKOUT attempt 1] harness 失败：local file transport blocked + Python cwd 错误 + no fail-fast；产品节点未可信执行，不计产品 strike。
+- [CLEANUP] 精确移除 `/tmp/tmp.2UCh6uTEuK/checkout`；worktree list 恢复为 main + feature 两项。
+- [NEXT] 使用允许本地 file transport、显式 PYTHONPATH 与 fail-fast 重跑 clean-checkout。
+- [CLEAN CHECKOUT product PASS] parent `f86defc` + engine `957cb3f5`：import `AppShell OwnedWorkerJob`；focused `8 passed in 1.66s`；status clean。
+- [HARNESS CLEANUP] 普通 remove 因 submodule metadata exit 128；EXIT trap exact force-remove 成功。独立 `git worktree list` 与 path absence 检查 exit 0，仅 main + feature worktree。
+- [NEXT] 等待独立 code review；处理 Critical/Important 后重验，或在无阻塞问题时提交 PWF 收尾并集成。
+- [REVIEW RESULT] 精简独立 reviewer：无 Critical/Important；1 个 RuntimeError defensive-path Minor，评估后接受，未改代码。
+- [REVIEW HARNESS] 首个 reviewer 两次超时后中断；第二个只读 reviewer按要求不跑测试并返回有效分级结论。
+- [IMPLEMENTED · ISS-DEDUP-THREAD-01] Workbench thread lifecycle batch 完成；算法/preview dispatch/geometry/large-module issues 保留为 Phase 30 后续批次。
+- [NEXT] 提交纯 PWF 收尾，按 finishing-development-branch 菜单等待用户选择 merge/PR/keep/discard。

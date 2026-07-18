@@ -689,13 +689,13 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 | 2026-07-16 (Phase 23 SEGY slider — geoviz seismic preview tests) | 11 (focused) | ✅ |
 | 2026-07-17 (Phase 26 baseline + edit_history) | 949 pass / 2 fail→fixed; focused 3+9 green | ✅ |
 
-### Phase 30: 重复实现审计与分阶段收敛 — 🔄 AUDITING
+### Phase 30: 重复实现审计与分阶段收敛 — 🔄 REFACTORING（Thread batch ✅）
 
 **Goal:** 在不改变现有业务行为和公开工程格式的前提下，识别重复职责的单一真源（Single Source of Truth），逐批消除 workbench 页面、适配器与 `geo-viz-engine` 之间的重复实现。
 
 | ID | Priority | Candidate scope | Acceptance | Status |
 |----|----------|-----------------|------------|--------|
-| ISS-DEDUP-THREAD-01 | P1 | Data / Preparation / Mapping / Preview 的 QThread 生命周期 | 统一任务托管、取消、generation 与安全回收契约；页面只编排业务事件 | 🟡 audit |
+| ISS-DEDUP-THREAD-01 | P1 | Data / Preparation / Mapping / Preview 的 QThread 生命周期 | 统一任务托管、取消、generation 与安全回收契约；页面只编排业务事件 | ✅ done |
 | ISS-DEDUP-ALG-01 | P1 | QC、方向趋势、IDW、等值线编译的 engine/workbench 边界 | 专业算法仅保留 engine 单一实现；workbench 仅 DTO/兼容委托 | 🟡 audit |
 | ISS-DEDUP-PREVIEW-01 | P2 | preview provider / fallback / widgets 的 revision、stat 与格式分派 | 统一 source identity 与 preview dispatch，消除重复文件探测 | 🟡 audit |
 | ISS-DEDUP-GEOM-01 | P2 | geometry schema / mapping helper / adapter 的几何规范化 | 明确 canonical geometry 所有权，转换链无重复降维且兼容旧数据 | 🟡 audit |
@@ -706,9 +706,9 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 - [x] 恢复 PWF、git 与既有 Phase 27–29 状态；确认没有待提交产品改动。
 - [x] 建立第一轮重复职责候选地图与大文件热点。
 - [x] 用户确认第一批优先收敛线程生命周期职责（选择 1）。
-- [ ] 对选定范围完成调用图、兼容面与重复证据审计。
-- [ ] 提出 2–3 个收敛方案及取舍，获得设计批准后再进入 TDD 实现。
-- [ ] 分批 focused / full offscreen pytest、compileall、diff-check 与 clean-checkout 验证。
+- [x] 对选定范围完成调用图、兼容面与重复证据审计。
+- [x] 提出 3 个收敛方案及取舍，用户批准方案 A 后进入 TDD 实现。
+- [x] 分批 focused / full offscreen pytest、compileall、diff-check 与 clean-checkout 验证。
 
 > 当前处于设计门禁：在用户确认优先范围并批准方案前，不修改业务代码。
 
@@ -758,7 +758,7 @@ class OwnedWorkerJob(QObject):
 - [x] RED：真实 QObject worker 证明 run 不在 GUI thread；完成后 `released` 且引用清空。
 - [x] RED：阻塞 worker 的 `shutdown(1)` 必须取消、断开结果槽、被 keeper 托管，释放后 keeper 清零。
 - [x] RED：旧 detached worker 后结束不得清空同一 handle 上的新 job；禁止 `QThread.terminate`。
-- [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_owned_worker_job.py -vv --timeout=30`；Expected: 因模块/API 不存在而 FAIL。
+- [x] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_owned_worker_job.py -vv --timeout=30`；RED 已验证模块/API 不存在。
 - [x] GREEN：实现上述最小 API；不实现队列、重试、优先级或业务 generation。
 - [x] Run 同一命令；Expected: 全部 PASS（当前 2 passed）。
 
@@ -773,7 +773,7 @@ class OwnedWorkerJob(QObject):
 **Consumes:** `OwnedWorkerJob.start()` / `shutdown()`。
 
 - [x] RED：两页 contour 都通过 handle 在非 GUI thread 执行；基础 handle 契约覆盖 shutdown stale/keeper。
-- [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_contour_draft_ui.py tests/test_mapping_contour_async.py -vv --timeout=30`；Expected: 新 handle 契约断言 FAIL。
+- [x] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_contour_draft_ui.py tests/test_mapping_contour_async.py -vv --timeout=30`；RED 已验证旧字段存在。
 - [x] GREEN：两页各持有 `_contour_job`，删除重复 `_contour_thread/_worker/_token/_target` 启停代码；页面保留不同成功提示和 commit 行为。
 - [x] Run 同一命令；Expected: PASS（7 passed）。
 
@@ -785,7 +785,7 @@ class OwnedWorkerJob(QObject):
 - Modify: `tests/test_preparation_integration.py`
 
 - [x] RED：补充 handle ownership；既有取消 stale snapshot 与正常完成按钮测试继续作为行为门禁。
-- [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_prep_well_table_worker.py tests/test_preparation_integration.py -vv --timeout=45`；Expected: 新 handle 契约断言 FAIL。
+- [x] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_prep_well_table_worker.py tests/test_preparation_integration.py -vv --timeout=45`；RED 已验证旧 factor ownership。
 - [x] GREEN：用 `_prepare_job` 替代四个并行字段与重复 shutdown；FactorPrepareWorker 和 GUI commit 逻辑不变。
 - [x] Run 同一命令；Expected: PASS（20 passed）。
 
@@ -796,7 +796,7 @@ class OwnedWorkerJob(QObject):
 - Modify: `tests/test_data_page.py`
 
 - [x] RED：ownership 架构契约；既有正常 GUI commit 与 blocked shutdown 测试作为行为门禁。
-- [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_data_page.py -vv --timeout=45`；Expected: 新 job ownership 断言 FAIL。
+- [x] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_data_page.py -vv --timeout=45`；RED 已验证旧 import ownership。
 - [x] GREEN：用一个 `_import_job` 取代 `_import_jobs` tuple 列表及 sender 查找/手工 disconnect/wait；保留 `_import_in_progress` 和工具栏状态。
 - [x] Run 同一命令；Expected: PASS（52 passed）。
 
@@ -809,7 +809,13 @@ class OwnedWorkerJob(QObject):
 - Modify: `tests/test_datapage_stress.py`
 
 - [x] RED：锁定 single in-flight、latest-only、generation 丢弃、thread-stopped 后再 pump、blocking shutdown keeper 五项行为，并断言 active ownership 来自 `OwnedWorkerJob`。
-- [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_preview_async.py tests/test_preview_disk_cache.py tests/test_datapage_stress.py -vv --timeout=45`；Expected: ownership 新断言 FAIL，既有行为测试保持基线。
+- [x] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_preview_async.py tests/test_preview_disk_cache.py tests/test_datapage_stress.py -vv --timeout=45`；RED 已验证旧 preview transport ownership。
+
+#### Independent Review
+
+- Reviewer range: `13288e4..f86defc`，只读、未修改文件。
+- Result: 无 Critical / Important。
+- Minor: `OwnedWorkerJob.shutdown()` 捕获 Shiboken `RuntimeError` 后按 wrapper 已失效处理；正常路径无可触发场景，无法安全 adopt 已删除的 C++ wrapper，接受当前防御语义。
 - [x] GREEN：以 `_active_job` 替代 `_jobs/_active` 的裸 QThread tuple 与重复 shutdown；pending/cache/generation 函数保持原样。
 - [x] Run 同一命令；Expected: PASS（Preview gate 52 passed；cross-module gate 74 passed）。
 
@@ -824,7 +830,7 @@ class OwnedWorkerJob(QObject):
 - [x] Focused: 上述所有受影响测试独立进程通过（76 + 52）。
 - [x] Full root: `QT_QPA_PLATFORM=offscreen pytest -q --timeout=60 -m 'not slow'` → 1010 passed / 4 skipped / 8 deselected。
 - [x] Static: `python -m compileall -q paleo_workbench`、`git diff --check`。
-- [ ] Clean checkout: 导入 AppShell 并执行 owned-job/contour/data/preview focused contracts。
+- [x] Clean checkout: AppShell/OwnedWorkerJob 导入成功；focused 8 passed；提交态 status clean；临时 worktree 清理已独立核验。
 
 #### Plan Self-Review
 
