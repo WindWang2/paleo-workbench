@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dataclasses import replace
 
-from PySide6.QtCore import QEvent, QObject, Qt, QThread, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
@@ -26,7 +26,7 @@ from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
-from paleo_workbench.ui.thread_keeper import detached_job_keeper
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
@@ -65,7 +65,8 @@ class DataPage(QWidget):
         self._resources = self.project.resources
         self._artifacts = self.project.export_artifacts
         self._selected_asset: object | None = None
-        self._import_jobs: list[tuple[QThread, _ImportWorker]] = []
+        self._import_job = OwnedWorkerJob(self)
+        self._import_job.released.connect(self._finish_import_job)
         self._import_in_progress = False
         self._viz_adapter = VizAdapter()
 
@@ -168,30 +169,8 @@ class DataPage(QWidget):
 
     def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> None:
         """Quit and wait for in-flight import QThreads (safe for deleteLater)."""
-        jobs = list(self._import_jobs)
-        self._import_jobs.clear()
-        for thread, worker in jobs:
-            try:
-                worker.finished.disconnect(self._handle_import_finished_signal)
-            except (RuntimeError, TypeError):
-                pass
-            try:
-                worker.failed.disconnect(self._handle_import_failed_signal)
-            except (RuntimeError, TypeError):
-                pass
-            try:
-                if thread.isRunning():
-                    thread.quit()
-                    if not thread.wait(wait_ms):
-                        thread.requestInterruption()
-                        detached_job_keeper().adopt(thread, worker)
-                else:
-                    worker.deleteLater()
-                    thread.deleteLater()
-            except RuntimeError:
-                # C++ QThread already destroyed (shiboken); ignore.
-                pass
-            self._import_in_progress = False
+        self._import_job.shutdown(wait_ms)
+        self._set_import_running(False)
 
     def update_state(
         self,
@@ -306,96 +285,49 @@ class DataPage(QWidget):
         )
 
     def _start_import_job(self, task: Callable[[], ImportReport]) -> bool:
-        # Do not parent the QThread to this page: deleteLater races with
-        # QueuedConnection GUI handlers if the shell rebuilds mid-import.
-        thread = QThread()
         worker = _ImportWorker(task)
-        worker.moveToThread(thread)
-        self._import_jobs.append((thread, worker))
-
-        thread.started.connect(worker.run)
-        # All cleanup runs on the GUI thread after the result is delivered so
-        # import_finished cannot be lost to premature thread/worker destruction.
-        worker.finished.connect(
-            self._handle_import_finished_signal,
-            Qt.ConnectionType.QueuedConnection,
+        self._import_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_import_finished_signal),
+                (worker.failed, self._handle_import_failed_signal),
+            ),
+            target=self.project,
         )
-        worker.failed.connect(
-            self._handle_import_failed_signal,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
 
         self._set_import_running(True)
         self._set_action_status("正在归档文件...")
-        thread.start()
         return True
 
     @Slot(object)
     def _handle_import_finished_signal(self, report: ImportReport) -> None:
-        worker = self.sender()
-        job = next(
-            (job for job in self._import_jobs if job[1] is worker),
-            None,
-        )
-        if job is None or not isinstance(worker, _ImportWorker):
+        if self._import_job.target is not self.project:
             return
-        self._handle_import_finished(report, job[0], worker)
+        self._handle_import_finished(report)
 
     @Slot(str)
     def _handle_import_failed_signal(self, message: str) -> None:
-        worker = self.sender()
-        job = next(
-            (job for job in self._import_jobs if job[1] is worker),
-            None,
-        )
-        if job is None or not isinstance(worker, _ImportWorker):
+        if self._import_job.target is not self.project:
             return
-        self._handle_import_failed(message, job[0], worker)
+        self._handle_import_failed(message)
 
     def _handle_import_finished(
         self,
         report: ImportReport,
-        thread: QThread,
-        worker: _ImportWorker,
     ) -> None:
-        try:
-            self._apply_import_report(report)
-            self.import_finished.emit(report)
-        finally:
-            self._finish_import_job(thread, worker)
+        self._apply_import_report(report)
+        self.import_finished.emit(report)
 
     def _handle_import_failed(
         self,
         message: str,
-        thread: QThread,
-        worker: _ImportWorker,
     ) -> None:
-        try:
-            self._set_action_status(f"导入失败: {message}")
-            self.import_failed.emit(message)
-        finally:
-            self._finish_import_job(thread, worker)
+        self._set_action_status(f"导入失败: {message}")
+        self.import_failed.emit(message)
 
-    def _finish_import_job(self, thread: QThread, worker: _ImportWorker) -> None:
-        self._import_jobs = [
-            job
-            for job in self._import_jobs
-            if job != (thread, worker)
-        ]
+    def _finish_import_job(self) -> None:
         self._set_import_running(False)
-        try:
-            worker.finished.disconnect(self._handle_import_finished_signal)
-        except (RuntimeError, TypeError):
-            pass
-        try:
-            worker.failed.disconnect(self._handle_import_failed_signal)
-        except (RuntimeError, TypeError):
-            pass
-        if thread.isRunning():
-            thread.quit()
-            thread.wait(5_000)
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running

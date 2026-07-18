@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
@@ -34,7 +34,7 @@ from paleo_workbench.ui.pages.contour_draft_worker import (
     ContourDraftWorker,
     commit_contour_drafts,
 )
-from paleo_workbench.ui.thread_keeper import detached_job_keeper
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 
 class MappingPage(QWidget):
@@ -52,10 +52,8 @@ class MappingPage(QWidget):
         self._project = None
         self._preview_mode = False
         self._reference_service = ReferenceLayerService()
-        self._contour_thread: QThread | None = None
-        self._contour_worker: ContourDraftWorker | None = None
-        self._contour_token: CancellationToken | None = None
-        self._contour_target_project = None
+        self._contour_job = OwnedWorkerJob(self)
+        self._contour_job.released.connect(self._clear_contour_job)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -222,31 +220,27 @@ class MappingPage(QWidget):
         if self._project is None:
             QMessageBox.information(self, "等值线初稿", "请先打开或绑定工程。")
             return
-        if self._contour_thread is not None and self._contour_thread.isRunning():
+        if self._contour_job.is_running:
             return
         self.bottom_workbench.factor_shelf.contour_draft_btn.setEnabled(False)
-        thread = QThread()
         token = CancellationToken()
         worker = ContourDraftWorker(self._project, cancellation_token=token)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._on_contour_completed)
-        worker.failed.connect(self._on_contour_failed)
-        worker.terminal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._clear_contour_job)
-        self._contour_thread = thread
-        self._contour_worker = worker
-        self._contour_token = token
-        self._contour_target_project = self._project
-        thread.start()
+        self._contour_job.start(
+            worker,
+            terminal_signals=(worker.terminal,),
+            result_connections=(
+                (worker.completed, self._on_contour_completed),
+                (worker.failed, self._on_contour_failed),
+            ),
+            cancel=token.cancel,
+            target=self._project,
+        )
 
     def _on_contour_completed(self, result: ContourDraftResult) -> None:
         from PySide6.QtWidgets import QMessageBox
 
-        token = self._contour_token
-        target = self._contour_target_project
-        if token is None or token.is_cancelled or target is None or self._project is not target:
+        target = self._contour_job.target
+        if target is None or self._project is not target:
             return
         drafts = commit_contour_drafts(target, result)
         if not drafts:
@@ -284,56 +278,17 @@ class MappingPage(QWidget):
         )
 
     def _on_contour_failed(self, message: str) -> None:
-        token = self._contour_token
-        if token is None or token.is_cancelled:
+        if self._contour_job.target is not self._project:
             return
         self.bottom_workbench.factor_shelf.contour_draft_btn.setToolTip(
             f"等值线初稿失败：{message}"
         )
 
     def _clear_contour_job(self) -> None:
-        thread = self._contour_thread
-        self._contour_thread = None
-        self._contour_worker = None
-        self._contour_token = None
-        self._contour_target_project = None
         self.bottom_workbench.factor_shelf.contour_draft_btn.setEnabled(True)
-        if thread is not None:
-            thread.deleteLater()
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> None:
-        thread = self._contour_thread
-        if thread is None:
-            return
-        token = self._contour_token
-        if token is not None:
-            token.cancel()
-        try:
-            thread.requestInterruption()
-            if thread.isRunning():
-                thread.quit()
-                if not thread.wait(max(0, int(wait_ms))):
-                    worker = self._contour_worker
-                    if worker is not None:
-                        for signal, slot in (
-                            (worker.completed, self._on_contour_completed),
-                            (worker.failed, self._on_contour_failed),
-                        ):
-                            try:
-                                signal.disconnect(slot)
-                            except (RuntimeError, TypeError):
-                                pass
-                        try:
-                            thread.finished.disconnect(self._clear_contour_job)
-                        except (RuntimeError, TypeError):
-                            pass
-                        detached_job_keeper().adopt(thread, worker)
-        except RuntimeError:
-            pass
-        self._contour_thread = None
-        self._contour_worker = None
-        self._contour_token = None
-        self._contour_target_project = None
+        self._contour_job.shutdown(wait_ms)
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""

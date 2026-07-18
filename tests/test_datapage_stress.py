@@ -32,8 +32,7 @@ def _wait_controller_idle(qtbot, controller: PreviewRequestController, timeout: 
     """Block until in-flight preview workers finish (avoids Qt teardown aborts)."""
     qtbot.waitUntil(
         lambda: (
-            len(controller._jobs) == 0
-            and controller._active is None
+            controller._active_job.thread is None
             and controller._pending is None
         ),
         timeout=timeout,

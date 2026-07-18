@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QSplitter, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
@@ -13,7 +13,7 @@ from paleo_workbench.ui.pages.contour_draft_worker import (
     ContourDraftWorker,
     commit_contour_drafts,
 )
-from paleo_workbench.ui.thread_keeper import detached_job_keeper
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.factor_task_panel import FactorTaskPanel
 from paleo_workbench.ui.pages.well_table_panel import WellTablePanel
@@ -33,14 +33,10 @@ class PreparationPage(QWidget):
         self.setObjectName("PreparationPage")
         self._project = None
         self._tasks: list = []
-        self._prepare_thread: QThread | None = None
-        self._prepare_worker: FactorPrepareWorker | None = None
-        self._prepare_token: CancellationToken | None = None
-        self._prepare_target_project = None
-        self._contour_thread: QThread | None = None
-        self._contour_worker: ContourDraftWorker | None = None
-        self._contour_token: CancellationToken | None = None
-        self._contour_target_project = None
+        self._prepare_job = OwnedWorkerJob(self)
+        self._prepare_job.released.connect(self._clear_prepare_job)
+        self._contour_job = OwnedWorkerJob(self)
+        self._contour_job.released.connect(self._clear_contour_job)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -87,83 +83,21 @@ class PreparationPage(QWidget):
         self._refresh_well_table_view()
 
     def is_prepare_running(self) -> bool:
-        return self._prepare_thread is not None and self._prepare_thread.isRunning()
+        return self._prepare_job.is_running
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> None:
         """Quit in-flight prepare thread (call before shell deleteLater)."""
         self._shutdown_contour_worker(wait_ms)
-        thread = self._prepare_thread
-        if thread is None:
-            return
-        token = self._prepare_token
-        if token is not None:
-            token.cancel()
-        try:
-            thread.requestInterruption()
-            if thread.isRunning():
-                thread.quit()
-                if not thread.wait(max(0, int(wait_ms))):
-                    worker = self._prepare_worker
-                    if worker is not None:
-                        try:
-                            worker.completed.disconnect(self._on_prepare_completed)
-                        except (RuntimeError, TypeError):
-                            pass
-                        try:
-                            worker.failed.disconnect(self._on_prepare_failed)
-                        except (RuntimeError, TypeError):
-                            pass
-                        try:
-                            thread.finished.disconnect(self._clear_prepare_job)
-                        except (RuntimeError, TypeError):
-                            pass
-                        detached_job_keeper().adopt(thread, worker)
-        except RuntimeError:
-            pass
-        self._prepare_thread = None
-        self._prepare_worker = None
-        self._prepare_token = None
-        self._prepare_target_project = None
+        self._prepare_job.shutdown(wait_ms)
         self._set_generate_enabled(True)
 
     def _shutdown_contour_worker(self, wait_ms: int) -> None:
-        thread = self._contour_thread
-        if thread is None:
-            return
-        token = self._contour_token
-        if token is not None:
-            token.cancel()
-        try:
-            thread.requestInterruption()
-            if thread.isRunning():
-                thread.quit()
-                if not thread.wait(max(0, int(wait_ms))):
-                    worker = self._contour_worker
-                    if worker is not None:
-                        for signal, slot in (
-                            (worker.completed, self._on_contour_completed),
-                            (worker.failed, self._on_contour_failed),
-                        ):
-                            try:
-                                signal.disconnect(slot)
-                            except (RuntimeError, TypeError):
-                                pass
-                        try:
-                            thread.finished.disconnect(self._clear_contour_job)
-                        except (RuntimeError, TypeError):
-                            pass
-                        detached_job_keeper().adopt(thread, worker)
-        except RuntimeError:
-            pass
-        self._contour_thread = None
-        self._contour_worker = None
-        self._contour_token = None
-        self._contour_target_project = None
+        self._contour_job.shutdown(wait_ms)
         if not self.is_prepare_running():
             self._set_generate_enabled(True)
 
     def is_contour_running(self) -> bool:
-        return self._contour_thread is not None and self._contour_thread.isRunning()
+        return self._contour_job.is_running
 
     def _set_generate_enabled(self, enabled: bool) -> None:
         self.task_panel.generate_btn.setEnabled(enabled)
@@ -247,46 +181,30 @@ class PreparationPage(QWidget):
 
     def _start_prepare_worker(self, method: str) -> None:
         self._set_generate_enabled(False)
-        thread = QThread()
         token = CancellationToken()
         worker = FactorPrepareWorker(
             self._project,
             method=method,
             cancellation_token=token,
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._on_prepare_completed)
-        worker.failed.connect(self._on_prepare_failed)
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.cancelled.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._clear_prepare_job)
-        self._prepare_thread = thread
-        self._prepare_worker = worker
-        self._prepare_token = token
-        self._prepare_target_project = self._project
-        thread.start()
+        self._prepare_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed, worker.cancelled),
+            result_connections=(
+                (worker.completed, self._on_prepare_completed),
+                (worker.failed, self._on_prepare_failed),
+            ),
+            cancel=token.cancel,
+            target=self._project,
+        )
 
     def _clear_prepare_job(self) -> None:
-        self._prepare_thread = None
-        self._prepare_worker = None
-        self._prepare_token = None
-        self._prepare_target_project = None
         if not self.is_contour_running():
             self._set_generate_enabled(True)
 
     def _on_prepare_completed(self, result: FactorPrepareResult) -> None:
-        token = self._prepare_token
-        target = self._prepare_target_project
-        if (
-            token is None
-            or token.is_cancelled
-            or target is None
-            or self._project is not target
-        ):
+        target = self._prepare_job.target
+        if target is None or self._project is not target:
             return
         target.factor_map_tasks = list(result.factor_map_tasks)
         self.update_state(target.factor_map_tasks)
@@ -298,8 +216,7 @@ class PreparationPage(QWidget):
             )
 
     def _on_prepare_failed(self, message: str) -> None:
-        token = self._prepare_token
-        if token is None or token.is_cancelled:
+        if self._prepare_job.target is not self._project:
             return
         # Async failures must not enter a nested modal loop while the shell may
         # be rebuilding. Keep the error visible and recoverable in-page.
@@ -316,26 +233,22 @@ class PreparationPage(QWidget):
         if self.is_contour_running():
             return
         self._set_generate_enabled(False)
-        thread = QThread()
         token = CancellationToken()
         worker = ContourDraftWorker(self._project, cancellation_token=token)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._on_contour_completed)
-        worker.failed.connect(self._on_contour_failed)
-        worker.terminal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._clear_contour_job)
-        self._contour_thread = thread
-        self._contour_worker = worker
-        self._contour_token = token
-        self._contour_target_project = self._project
-        thread.start()
+        self._contour_job.start(
+            worker,
+            terminal_signals=(worker.terminal,),
+            result_connections=(
+                (worker.completed, self._on_contour_completed),
+                (worker.failed, self._on_contour_failed),
+            ),
+            cancel=token.cancel,
+            target=self._project,
+        )
 
     def _on_contour_completed(self, result: ContourDraftResult) -> None:
-        token = self._contour_token
-        target = self._contour_target_project
-        if token is None or token.is_cancelled or target is None or self._project is not target:
+        target = self._contour_job.target
+        if target is None or self._project is not target:
             return
         drafts = commit_contour_drafts(target, result)
         if not drafts:
@@ -354,18 +267,10 @@ class PreparationPage(QWidget):
         )
 
     def _on_contour_failed(self, message: str) -> None:
-        token = self._contour_token
-        if token is None or token.is_cancelled:
+        if self._contour_job.target is not self._project:
             return
         self.task_panel.summary_label.setText(f"等值线初稿失败：{message}")
 
     def _clear_contour_job(self) -> None:
-        thread = self._contour_thread
-        self._contour_thread = None
-        self._contour_worker = None
-        self._contour_token = None
-        self._contour_target_project = None
         if not self.is_prepare_running():
             self._set_generate_enabled(True)
-        if thread is not None:
-            thread.deleteLater()

@@ -976,4 +976,11 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - DataPage 当前虽用 `_import_jobs` 列表，入口通过 `_import_in_progress` 严格限制为单任务，因此可安全收敛为单 `_import_job`，不改变并发能力。
 - DataPage 正常完成依赖 worker result 以 QueuedConnection 先提交 GUI，再由 `_finish_import_job()` quit/wait；通用 handle 必须保留结果连接顺序，不能在 thread.finished 过早清掉 target。
 - Preview 的 `_thread_stopped` relay 与 `QTimer.singleShot(0, _pump_pending)` 是为规避 Shiboken teardown 竞态，迁移时必须保留“thread 真正停止后再 pump”的时序，而不只是替换字段名。
+- Contour/Factor worker 将 CancellationToken 私有保存为 `_cancellation_token`；页面迁移后不应窥探该字段。业务槽以 `job.target is self._project` 判定当前结果，shutdown 则由 handle 先断开业务连接再调用 token.cancel，组合后覆盖原 token+target 双守卫语义。
+- Preview teardown 暴露通用 handle 的 lambda 捕获风险：`thread.finished -> lambda -> self._thread_stopped.emit` 在页面/handle 已删除后仍可能执行。QObject bound slot 使用 QueuedConnection 才能让 Qt 在 receiver 销毁时自动断连，并保证 registry mutation 在 GUI thread。
+- 静态去重结果：Data/Preparation/Mapping/Preview 四个目标文件已无 `QThread()`、moveToThread、requestInterruption、wait 或 keeper adopt；这些原语只在 `owned_worker_job.py` 单一实现中存在。
+- 旧 `_prepare_*`/`_contour_*`/`_import_jobs`/Preview `_active,_jobs` 状态只保留在“属性必须不存在”的架构测试或测试名称中，没有产品兼容别名。
+- Diff 自审显示 tracked 部分删 423/增 268；新增 handle 与两个测试文件尚为 untracked，最终提交必须显式纳入，避免重现 reviewer packaging 缺陷。
 - 计划自审通过：选定范围的启动/取消/托管/stale/正常结果顺序均有 RED 契约；无 engine 或业务算法变更。
+- 隔离 worktree 的首次 `submodule update --init` 失败：远端缺少父仓锁定的 `957cb3f5` 对象，但主工作区 engine 本地仓库拥有该 commit。已从精确本地仓库 fetch 并 detached checkout 到同一 SHA；这再次说明该 engine commit 尚未推送，属于 clean-clone 交付风险，但不改变 Phase 30 的 workbench-only 边界。
+- Phase 30 组合 baseline 在约 70% 后复现既有 Qt quiet-run 无输出 stall；此前已通过 Phase 29 节点隔离证明该类问题来自长寿命 pytest Qt 全局状态，而非单节点确定性失败。本轮基线改为 Preparation/Mapping、Data、Preview、Stress 四个独立进程。

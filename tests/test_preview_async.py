@@ -16,12 +16,21 @@ def _wait_controller_idle(qtbot, controller: PreviewRequestController, timeout: 
     """Block until in-flight preview workers finish (avoids Qt teardown aborts)."""
     qtbot.waitUntil(
         lambda: (
-            len(controller._jobs) == 0
-            and controller._active is None
+            controller._active_job.thread is None
             and controller._pending is None
         ),
         timeout=timeout,
     )
+
+
+def test_preview_controller_uses_owned_worker_job_transport():
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+    controller = PreviewRequestController()
+
+    assert isinstance(controller._active_job, OwnedWorkerJob)
+    assert not hasattr(controller, "_active")
+    assert not hasattr(controller, "_jobs")
 
 
 class SlowProvider(PreviewProvider):
@@ -188,7 +197,7 @@ def test_delayed_provider_last_wins_under_overlap(qtbot, tmp_path):
     assert "b.txt" in provider.started
     assert saw_loading["value"] is True
     # Never more than one concurrent job.
-    assert page._preview_controller._active is None
+    assert page._preview_controller._active_job.thread is None
 
 
 def test_reader_shows_loading_with_delayed_provider(qtbot, tmp_path):
@@ -286,7 +295,8 @@ def test_shutdown_transfers_still_running_preview_to_application_keeper(qtbot, t
     controller = PreviewRequestController(provider=BlockingProvider(), shutdown_wait_ms=1)
     controller.request(asset)
     assert started.wait(timeout=2.0)
-    thread = controller._active[0]
+    thread = controller._active_job.thread
+    assert thread is not None
 
     controller.shutdown(wait_ms=1)
 
@@ -421,7 +431,7 @@ def test_cache_hit_skips_provider_and_loading(qtbot, tmp_path):
     controller.request(resource)
     # Cache hit is synchronous — no worker, no second provider call, no loading.
     assert provider.calls == ["hit.txt"]
-    assert len(controller._jobs) == 0
+    assert controller._active_job.thread is None
     assert len(results) == 2
     assert loadings == [True]
     assert results[0].title == results[1].title == "hit.txt"
@@ -601,12 +611,11 @@ def test_shutdown_stops_accepting_and_clears_jobs(qtbot, tmp_path):
     qtbot.waitUntil(lambda: len(provider.started) >= 1, timeout=2000)
     controller.shutdown(wait_ms=2000)
 
-    assert len(controller._jobs) == 0
-    assert controller._active is None
+    assert controller._active_job.thread is None
     assert controller._pending is None
     # Further requests ignored while shut down.
     controller.request(resource)
-    assert len(controller._jobs) == 0
+    assert controller._active_job.thread is None
     # Stale completion must not deliver after shutdown.
     qtbot.wait(100)
     assert results == []
@@ -649,8 +658,8 @@ def test_shutdown_timeout_falls_back_to_waiting_for_real_thread_stop(
     assert provider.started.wait(timeout=3.0)
     controller.request(resources[1])
     assert controller._pending is not None
-    assert controller._active is not None
-    active_thread = controller._active[0]
+    active_thread = controller._active_job.thread
+    assert active_thread is not None
 
     controller.shutdown(wait_ms=1)
     running_after_shutdown = active_thread.isRunning()
@@ -660,8 +669,7 @@ def test_shutdown_timeout_falls_back_to_waiting_for_real_thread_stop(
         active_thread.quit()
         assert active_thread.wait(5_000)
 
-    assert controller._active is None
-    assert controller._jobs == []
+    assert controller._active_job.thread is None
     assert controller._pending is None
     assert results == []
     assert failures == []
@@ -688,8 +696,7 @@ def test_data_page_close_shuts_down_preview_controller(qtbot, tmp_path):
     page._set_selected_asset(project.resources[0])
     qtbot.waitUntil(lambda: len(provider.started) >= 1, timeout=2000)
     page.close()
-    assert page._preview_controller._jobs == []
-    assert page._preview_controller._active is None
+    assert page._preview_controller._active_job.thread is None
 
 
 def test_worker_uses_asset_snapshot(qtbot, tmp_path):
@@ -739,8 +746,10 @@ def test_worker_uses_asset_snapshot(qtbot, tmp_path):
 def test_shutdown_does_not_force_kill():
     import inspect
 
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
     # Contract: cooperative wait only — force-kill must not appear as a call.
-    src = inspect.getsource(PreviewRequestController.shutdown)
+    src = inspect.getsource(OwnedWorkerJob.shutdown)
     assert "thread.terminate" not in src
     assert "QThread.terminate" not in src
     assert "wait(" in src
@@ -821,7 +830,7 @@ def test_image_cache_keeps_small_bytes_on_reselect(qtbot, tmp_path):
     # Small payload cached → sync hit, no second loading flash required.
     assert len(results) == 2
     assert results[1].image_bytes == results[0].image_bytes
-    assert len(controller._jobs) == 0
+    assert controller._active_job.thread is None
 
 
 def test_path_only_image_cache_reloads_bytes_off_thread(qtbot, tmp_path):

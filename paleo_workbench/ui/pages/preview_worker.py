@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_cache import PreviewCache, make_preview_cache_key
@@ -14,7 +14,7 @@ from paleo_workbench.ui.pages.preview_disk_cache import (
     is_disk_cacheable,
 )
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
-from paleo_workbench.ui.thread_keeper import detached_job_keeper
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 Asset = ResourceItem | ExportArtifact
 
@@ -175,7 +175,6 @@ class PreviewRequestController(QObject):
     result_ready = Signal(object)  # PreviewResult
     loading = Signal()
     failed = Signal(str)
-    _thread_stopped = Signal(object, object)
 
     def __init__(
         self,
@@ -193,16 +192,12 @@ class PreviewRequestController(QObject):
         self.disk_cache = disk_cache if disk_cache is not None else PreviewDiskCache(None)
         self._shutdown_wait_ms = shutdown_wait_ms
         self._generation = 0
-        self._jobs: list[tuple[QThread, QObject]] = []
-        self._active: tuple[QThread, QObject] | None = None
+        self._active_job = OwnedWorkerJob(self)
+        self._active_job.released.connect(self._on_thread_finished)
         # Latest pending: ("asset", gen, Asset, key) | ("media", gen, PreviewResult, key)
         self._pending: tuple[PendingKind, int, object, tuple] | None = None
         self._inflight_keys: dict[int, tuple] = {}
         self._shutting_down = False
-        self._thread_stopped.connect(
-            self._on_thread_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
 
     @property
     def generation(self) -> int:
@@ -234,7 +229,7 @@ class PreviewRequestController(QObject):
             if needs_media_preload(hit):
                 # Path-only cache: re-read media off-thread, skip provider rebuild.
                 self.loading.emit()
-                if self._active is not None:
+                if self._active_job.thread is not None:
                     self._pending = ("media", generation, hit, key)
                     return
                 self._start_media_job(generation, hit, key)
@@ -245,7 +240,7 @@ class PreviewRequestController(QObject):
 
         snap = snapshot_asset(asset)
         self.loading.emit()
-        if self._active is not None:
+        if self._active_job.thread is not None:
             self._pending = ("asset", generation, snap, key)
             return
 
@@ -258,93 +253,43 @@ class PreviewRequestController(QObject):
         self._generation += 1
         self._inflight_keys.clear()
 
-        jobs = list(self._jobs)
-        if self._active is not None and self._active not in jobs:
-            jobs.append(self._active)
-        if not jobs:
-            self._active = None
-            self._jobs.clear()
+        if self._active_job.thread is None:
             return
 
-        # Cooperative only: ask every owned thread to stop its event loop after
-        # the current bounded provider call returns. Prefer a bounded wait so a
-        # stuck provider cannot freeze the UI or hang the entire test suite
-        # (CI previously stalled on infinite QThread.wait()).
+        # Preserve the former two-stage finite wait as one total deadline.
         deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
-        # Second-chance join after the caller's deadline — still finite.
-        # Absolute ceiling even when caller passes wait_ms=0/1 (tests).
-        hard_cap_ms = min(max(int(deadline), 0) + 500, 2_000)
-        for thread, worker in jobs:
-            try:
-                worker.finished.disconnect(self._on_finished)
-            except (RuntimeError, TypeError):
-                pass
-            try:
-                worker.failed.disconnect(self._on_failed)
-            except (RuntimeError, TypeError):
-                pass
-            try:
-                thread.requestInterruption()
-                thread.quit()
-            except RuntimeError:
-                continue
-
-        for thread, worker in jobs:
-            try:
-                if thread.wait(max(int(deadline), 0)):
-                    continue
-                stopped = thread.wait(hard_cap_ms)
-            except RuntimeError:
-                continue
-            if not stopped:
-                # The provider ignored cooperative interruption. Transfer both
-                # wrappers to application lifetime; never leave an ownerless
-                # running QThread and never terminate calculation mid-write.
-                thread.requestInterruption()
-                thread.quit()
-                detached_job_keeper().adopt(thread, worker)
-
-        self._active = None
-        self._jobs.clear()
-
-    def _wire_thread(self, thread: QThread, worker: QObject) -> None:
-        self._active = (thread, worker)
-        self._jobs = [(thread, worker)]
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_finished)
-        worker.failed.connect(self._on_failed)
-        # quit() is thread-safe. Invoke it directly from the worker thread so
-        # shutdown() can wait without deadlocking on a quit queued to the UI
-        # thread that is currently blocked in QThread.wait().
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
-        # Pump the next job only after the thread has fully stopped — starting a
-        # new QThread while Shiboken is still tearing down the previous one can
-        # segfault under pytest-qt / offscreen.
-        thread.finished.connect(
-            lambda t=thread, w=worker: self._thread_stopped.emit(t, w)
-        )
-        thread.start()
+        initial_wait_ms = max(int(deadline), 0)
+        second_wait_ms = min(initial_wait_ms + 500, 2_000)
+        self._active_job.shutdown(initial_wait_ms + second_wait_ms)
 
     def _start_job(self, generation: int, asset: Asset, key: tuple) -> None:
         self._inflight_keys[generation] = key
-        thread = QThread(self)
         worker = _PreviewWorker(
             self.provider,
             asset,
             generation,
             disk_cache=self.disk_cache,
         )
-        worker.moveToThread(thread)
-        self._wire_thread(thread, worker)
+        self._active_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_finished),
+                (worker.failed, self._on_failed),
+            ),
+        )
 
     def _start_media_job(self, generation: int, result: PreviewResult, key: tuple) -> None:
         self._inflight_keys[generation] = key
-        thread = QThread(self)
         worker = _MediaPreloadWorker(result, generation)
-        worker.moveToThread(thread)
-        self._wire_thread(thread, worker)
+        self._active_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_finished),
+                (worker.failed, self._on_failed),
+            ),
+        )
 
     def _on_finished(self, generation: int, result: object) -> None:
         key = self._inflight_keys.pop(generation, None)
@@ -359,14 +304,7 @@ class PreviewRequestController(QObject):
         if not self._shutting_down and generation == self._generation:
             self.failed.emit(message)
 
-    def _on_thread_finished(self, thread: QThread, worker: QObject) -> None:
-        self._jobs = [job for job in self._jobs if job != (thread, worker)]
-        if self._active == (thread, worker):
-            self._active = None
-        try:
-            thread.deleteLater()
-        except RuntimeError:
-            pass
+    def _on_thread_finished(self) -> None:
         if self._shutting_down:
             return
         # Defer so Shiboken can finish deleteLater of the prior worker/thread
@@ -374,7 +312,7 @@ class PreviewRequestController(QObject):
         QTimer.singleShot(0, self._pump_pending)
 
     def _pump_pending(self) -> None:
-        if self._shutting_down or self._active is not None:
+        if self._shutting_down or self._active_job.thread is not None:
             return
         pending = self._pending
         self._pending = None

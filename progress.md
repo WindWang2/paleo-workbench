@@ -1535,3 +1535,101 @@ Failures:
 - [PLAN] Task 30.1–30.6 已写入 task_plan：基础句柄→contour→factor→Data→Preview transport→全量门禁。
 - [SELF REVIEW] 范围、API 一致性、TDD 节点、YAGNI 与 placeholder 检查通过。
 - [NEXT] 按 worktree 技能先取得用户对隔离工作树的许可，再创建分支并执行基线测试。
+- [CONSENT] 用户允许提交 PWF 计划并创建隔离工作树。
+- [COMMIT] main `13288e4 docs(pwf): plan worker lifecycle deduplication`，仅包含三份 PWF；既存未跟踪资产未纳入。
+- [WORKTREE] 创建 `.worktrees/refactor-owned-worker-job` / `refactor/owned-worker-job`。
+- [ENV ERROR] 远端 submodule 不含锁定的 `957cb3f5`，首次 init 失败；从主工作区本地 engine 仓库精确 fetch 后 checkout 成功，worktree 状态恢复干净。
+- [NEXT] 执行 Preparation/Mapping/Data/Preview 受影响测试基线；若失败先报告，不进入实现。
+- [BASELINE COMMAND ERROR] 计划中的新增文件 `tests/test_mapping_contour_async.py` 被误当作现有基线节点，pytest exit 4 / no tests ran；已把计划标为 Create，并从 baseline 命令移除，不计产品 strike。
+- [PWF GATE] 一次测试命令 + 一次测试入口检索后同步 task_plan/progress。
+- [NEXT] 使用现有 contour/mapping 页面测试文件重跑基线。
+- [BASELINE attempt 1] 真实 8 文件组合测试通过 60% 并继续约 12 项后长期无输出；精确 TERM PID 741864，exit 143，无失败节点。
+- [STRIKE] Phase 30 产品失败计数 0；quiet-run stall 作为既有 harness 生命周期问题，不计实现 strike。
+- [NEXT] 将 baseline 分成四个独立 pytest 进程，分别取得可采信的 pass 结果。
+- [BASELINE A] Preparation/Mapping → `23 passed in 5.71s`。
+- [BASELINE B] DataPage → `51 passed, 1 warning in 7.19s`；warning 为既有 lasio/pkg_resources deprecation。
+- [PWF GATE] 连续两次测试执行后立即同步 progress。
+- [NEXT] 独立运行 Preview async/cache 与 DataPage stress 基线。
+- [BASELINE C] Preview async/cache → `40 passed, 1 warning in 6.59s`。
+- [BASELINE D] DataPage stress → `5 passed in 2.96s`。
+- [BASELINE COMPLETE] 四个独立进程合计 `119 passed`；Phase 30 产品失败计数 0，可以进入 TDD。
+- [PWF GATE] 连续两次测试执行后立即同步 progress。
+- [NEXT] Task 30.1 cycle 1：新增 OwnedWorkerJob off-GUI + normal-release RED 测试。
+- [T30.1 RED 1] 新增真实 QObject worker 契约；focused run → `1 failed`，精确原因为 `ModuleNotFoundError: paleo_workbench.ui.owned_worker_job`。
+- [STRIKE] 预期 RED，不计产品实现 strike；Phase 30 实现失败计数仍为 0。
+- [PWF GATE] 一次测试代码 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] 实现最小 OwnedWorkerJob：创建线程、off-GUI run、terminal direct quit、identity relay 与正常释放。
+- [T30.1 GREEN 1] 最小 OwnedWorkerJob 实现完成；focused → `1 passed in 0.29s`。
+- [PWF GATE] 一次产品代码 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] Task 30.1 cycle 2：先写 blocked shutdown/cancel/disconnect/keeper RED，再扩展 API。
+- [T30.1 RED 2] blocked worker 契约 focused → `1 failed`；精确原因为 start 不支持 `result_connections`，尚未实现 cancel/target/shutdown。
+- [STRIKE] 预期 RED，不计实现 strike；Phase 30 实现失败计数仍为 0。
+- [PWF GATE] 一次测试 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] 最小实现 result connection registry、cancel/target、有限 wait 与超时 keeper adopt。
+- [T30.1 GREEN 2] result registry、cancel/target、有限 wait、超时 keeper adopt 完成；foundation suite → `2 passed in 0.31s`。
+- [PWF GATE] 一次产品 mutation + 一次 pytest 后立即同步 task_plan/progress。
+- [NEXT] Task 30.2：写 Preparation/Mapping contour 使用统一 handle 的 RED 页面契约。
+- [T30.2 RED 1] 新增共享 contour lifecycle 架构契约；focused → `1 failed`，PreparationPage 缺少 `_contour_job` 且仍有旧 token 字段。
+- [STRIKE] 预期 RED，不计实现 strike；Phase 30 实现失败计数仍为 0。
+- [PWF GATE] 一次测试 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] 同步迁移 Preparation/Mapping contour 到 OwnedWorkerJob，保留页面专属业务槽。
+- [AUDIT] 确认 Mapping 的 QThread/Qt/keeper 仅用于 contour，可全部移除；Preparation 仍因 factor job 暂时保留这些导入。
+- [PWF VIEW GATE] 两次源码检索后同步 findings/progress；产品迁移尚未开始。
+- [T30.2 GREEN] Preparation/Mapping contour 同构迁移完成；架构 + contour UI → `7 passed in 3.77s`。
+- [DEDUP] 两页删除 8 个裸生命周期字段及两套手工 wait/disconnect/adopt；专属 success/failure/commit 槽保持不变。
+- [PWF GATE] 一次产品 mutation + 一次 pytest 后立即同步 task_plan/progress。
+- [NEXT] Task 30.3：Preparation factor job 结构 RED→handle 迁移。
+- [T30.3 RED] factor ownership 契约 → `1 failed`；PreparationPage 尚无 `_prepare_job`，仍暴露旧 token 字段。
+- [STRIKE] 预期 RED，不计实现 strike；Phase 30 实现失败计数仍为 0。
+- [PWF GATE] 一次测试 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] 迁移 factor worker，并保持 snapshot stale/shutdown 既有回归语义。
+- [T30.3 GREEN] Preparation factor job 迁移完成；prep/integration/contour contracts → `20 passed in 2.71s`。
+- [DEDUP] PreparationPage 不再直接创建 QThread，factor/contour 统一使用两个 OwnedWorkerJob 实例。
+- [PWF GATE] 一次产品 mutation + 一次 pytest 后立即同步 task_plan/progress。
+- [NEXT] Task 30.4：DataPage import ownership RED→单 handle 迁移。
+- [T30.4 RED] Data import ownership 契约 → `1 failed`；DataPage 尚无 `_import_job`，仍使用 `_import_jobs`。
+- [STRIKE] 预期 RED，不计实现 strike；Phase 30 实现失败计数仍为 0。
+- [PWF GATE] 一次测试 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] 以单 OwnedWorkerJob 替代 import tuple list/sender lookup/manual wait，保留 queued GUI commit。
+- [T30.4 GREEN] DataPage import handle 迁移完成；完整 data page → `52 passed, 1 warning in 3.57s`。
+- [DEDUP] 删除 `_import_jobs`、sender tuple 查找和两套手工 cleanup；import business/status 逻辑不变。
+- [PWF GATE] 一次产品 mutation + 一次 pytest 后立即同步 task_plan/progress。
+- [NEXT] Task 30.5：PreviewController transport ownership RED→handle 迁移。
+- [T30.5 RED] Preview transport ownership 契约 → `1 failed`；controller 尚无 `_active_job`。
+- [STRIKE] 预期 RED，不计实现 strike；Phase 30 实现失败计数仍为 0。
+- [PWF GATE] 一次测试 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] 用 OwnedWorkerJob 替换 `_jobs/_active/_thread_stopped`，保持 pending/generation/cache/pump 顺序。
+- [T30.5 IMPLEMENT] PreviewController 已迁移 `_active_job`；shutdown 委托统一 handle，released 后仍 singleShot pump pending。
+- [TEST CONTRACT] Preview/Stress/GeoViz lifecycle 测试移除旧 `_jobs/_active` tuple 依赖，统一读取 `_active_job.thread`；no-terminate 契约改为检查 OwnedWorkerJob.shutdown。
+- [SELF REVIEW] 删除 `_start_job` 中残留的无用 `QThread(self)`，未保留兼容重复状态。
+- [PWF GATE] 连续两次代码/test mutation 后立即同步 progress；尚未运行 GREEN。
+- [NEXT] 运行 Preview async/cache/stress/lifecycle GREEN；失败按 Task 30.5 累计 strike。
+- [T30.5 GREEN attempt 1] `48 passed, 4 failed`；四项均为 page teardown 捕获 Qt event-loop exception：lambda 对已删除 handle 发 signal。
+- [STRIKE 1] Task 30.5 实现失败计数 1/3；根因已定位，非重复机械修改。
+- [FIX] thread.finished relay 改为 OwnedWorkerJob bound slot + QueuedConnection；receiver 删除时 Qt 自动断连，slot 以 sender identity 清理。
+- [PWF GATE] 一次 pytest + 一次产品修复后立即同步 findings/progress。
+- [NEXT] 重跑同一 Preview 五文件 gate，验证 teardown 与 latest-only 全绿。
+- [T30.5 GREEN attempt 2] Preview async/cache/stress/lifecycle/visualization → `52 passed, 1 warning in 6.27s`。
+- [CROSS MODULE] foundation + Preparation/Mapping/Data → `74 passed, 1 warning in 4.54s`。
+- [FOCUSED TOTAL] 两个独立进程合计 `126 passed`；Task 30.5 strike 保持 1/3，无第二次失败。
+- [PWF GATE] 连续两次 pytest 后立即同步 task_plan/progress。
+- [NEXT] Task 30.6：静态去重审查、identity 回归、compile/diff/full gates。
+- [STATIC DEDUP] 四个目标页面的线程原语检索为 0；仅 `owned_worker_job.py` 保留 QThread/interrupt/wait/keeper。
+- [DIFF CHECK] `git diff --check` exit 0；tracked diff 268 insertions / 423 deletions，另有 3 个预期新增文件。
+- [PWF VIEW GATE] 连续两次源码/diff 检索后同步 findings/progress。
+- [NEXT] 补齐 detached-old-vs-new identity 回归并校正 `is_running` ownership 语义。
+- [T30.1 RED 3] release-window 契约 → `1 failed`：thread 已停止但 queued release 未处理时 is_running 错误返回 false；old-detached identity 回归 `1 passed`。
+- [STRIKE] 预期 RED，不计实现 strike；Task 30.5 strike 仍为 1/3。
+- [PWF GATE] 一次测试 mutation + 一次 pytest 后立即同步 progress。
+- [NEXT] `is_running` 改为 ownership 状态（thread 引用存在），随后运行完整 foundation suite。
+- [T30.1 GREEN 3] `is_running` 改为 handle ownership；foundation 完整 suite → `4 passed in 0.18s`。
+- [PWF GATE] 一次产品 mutation + 一次 pytest 后立即同步 task_plan/progress。
+- [NEXT] compileall/diff-check + 受影响总回归，再执行 segmented full root gate。
+- [VERIFY STATIC] `python -m compileall -q paleo_workbench` + `git diff --check` → exit 0。
+- [VERIFY AFFECTED A] Foundation/Preparation/Mapping/Data → `76 passed, 1 warning in 4.56s`。
+- [PWF GATE] 连续两次验证执行后立即同步 progress。
+- [NEXT] 新鲜 Preview 52 项，再执行 root non-slow full/segmented gate。
+- [VERIFY AFFECTED B] Preview async/cache/stress/lifecycle/visualization → `52 passed, 1 warning in 6.25s`。
+- [FULL ROOT] standard non-slow → `1010 passed, 4 skipped, 8 deselected, 2 warnings in 34.84s`，exit 0；本次未复现 stall。
+- [PWF GATE] 连续两次 pytest 后立即同步 task_plan/progress。
+- [NEXT] 计划逐项复核、clean-checkout focused、代码审查、分支提交与集成。

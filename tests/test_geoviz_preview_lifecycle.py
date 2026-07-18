@@ -93,7 +93,10 @@ def test_page_teardown_leaves_no_preview_job_and_releases_each_engine_widget_onc
 
     page._set_selected_asset(project.resources[0])
     qtbot.waitUntil(lambda: page.reader_panel.current_mode == "geoviz", timeout=3000)
-    qtbot.waitUntil(lambda: not page._preview_controller._jobs, timeout=3000)
+    qtbot.waitUntil(
+        lambda: page._preview_controller._active_job.thread is None,
+        timeout=3000,
+    )
     assert len(engine.created) == 1
 
     # Keep the rendered widget alive while a second worker is active so close()
@@ -101,8 +104,8 @@ def test_page_teardown_leaves_no_preview_job_and_releases_each_engine_widget_onc
     page._preview_controller.loading.disconnect()
     page._set_selected_asset(project.resources[1])
     assert provider.second_started.wait(timeout=3.0)
-    assert page._preview_controller._active is not None
-    active_thread = page._preview_controller._active[0]
+    active_thread = page._preview_controller._active_job.thread
+    assert active_thread is not None
     engine.watched_thread = active_thread
     assert engine.released == []
 
@@ -112,8 +115,7 @@ def test_page_teardown_leaves_no_preview_job_and_releases_each_engine_widget_onc
     else:
         page.event(QEvent(QEvent.Type.DeferredDelete))
 
-    assert controller._jobs == []
-    assert controller._active is None
+    assert controller._active_job.thread is None
     assert controller._pending is None
     assert engine.released == engine.created
     assert engine.thread_running_at_release == [False]

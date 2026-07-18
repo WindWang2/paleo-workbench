@@ -149,6 +149,19 @@ def test_shutdown_workers_is_safe(qtbot):
     assert page.is_prepare_running() is False
 
 
+def test_preparation_factor_uses_owned_worker_job_lifecycle(qtbot):
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+    page = PreparationPage()
+    qtbot.addWidget(page)
+
+    assert isinstance(page._prepare_job, OwnedWorkerJob)
+    assert not hasattr(page, "_prepare_thread")
+    assert not hasattr(page, "_prepare_worker")
+    assert not hasattr(page, "_prepare_token")
+    assert not hasattr(page, "_prepare_target_project")
+
+
 def test_running_prepare_shutdown_is_kept_and_stale_snapshot_never_commits(
     qtbot,
     monkeypatch,
@@ -181,7 +194,7 @@ def test_running_prepare_shutdown_is_kept_and_stale_snapshot_never_commits(
     )
     page._start_prepare_worker("IDW")
     assert started.wait(timeout=2.0)
-    thread = page._prepare_thread
+    thread = page._prepare_job.thread
     assert thread is not None
 
     page.shutdown_workers(wait_ms=1)

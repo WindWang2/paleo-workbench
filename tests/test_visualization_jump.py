@@ -35,7 +35,7 @@ def _wait_preview_idle(qtbot, data_page, timeout: int = 5000) -> None:
     """Drain async data-page preview work before open_ref / teardown."""
     controller = data_page._preview_controller
     qtbot.waitUntil(
-        lambda: controller._active is None and controller._pending is None,
+        lambda: controller._active_job.thread is None and controller._pending is None,
         timeout=timeout,
     )
 

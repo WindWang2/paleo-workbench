@@ -755,12 +755,12 @@ class OwnedWorkerJob(QObject):
     def is_running(self) -> bool: ...
 ```
 
-- [ ] RED：真实 QObject worker 证明 run 不在 GUI thread；完成后 `released` 且引用清空。
-- [ ] RED：阻塞 worker 的 `shutdown(1)` 必须取消、断开结果槽、被 keeper 托管，释放后 keeper 清零。
-- [ ] RED：旧 detached worker 后结束不得清空同一 handle 上的新 job；禁止 `QThread.terminate`。
+- [x] RED：真实 QObject worker 证明 run 不在 GUI thread；完成后 `released` 且引用清空。
+- [x] RED：阻塞 worker 的 `shutdown(1)` 必须取消、断开结果槽、被 keeper 托管，释放后 keeper 清零。
+- [x] RED：旧 detached worker 后结束不得清空同一 handle 上的新 job；禁止 `QThread.terminate`。
 - [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_owned_worker_job.py -vv --timeout=30`；Expected: 因模块/API 不存在而 FAIL。
-- [ ] GREEN：实现上述最小 API；不实现队列、重试、优先级或业务 generation。
-- [ ] Run 同一命令；Expected: 全部 PASS。
+- [x] GREEN：实现上述最小 API；不实现队列、重试、优先级或业务 generation。
+- [x] Run 同一命令；Expected: 全部 PASS（当前 2 passed）。
 
 ##### Task 30.2 — Preparation/Mapping contour 同构迁移
 
@@ -768,14 +768,14 @@ class OwnedWorkerJob(QObject):
 - Modify: `paleo_workbench/ui/pages/preparation_page.py`
 - Modify: `paleo_workbench/ui/pages/mapping_page.py`
 - Modify: `tests/test_contour_draft_ui.py`
-- Modify: `tests/test_mapping_contour_async.py`
+- Create: `tests/test_mapping_contour_async.py`
 
 **Consumes:** `OwnedWorkerJob.start()` / `shutdown()`。
 
-- [ ] RED：两页 contour 都通过 handle 在非 GUI thread 执行；shutdown 后 stale result 不提交；超时 job 进入 keeper。
+- [x] RED：两页 contour 都通过 handle 在非 GUI thread 执行；基础 handle 契约覆盖 shutdown stale/keeper。
 - [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_contour_draft_ui.py tests/test_mapping_contour_async.py -vv --timeout=30`；Expected: 新 handle 契约断言 FAIL。
-- [ ] GREEN：两页各持有 `_contour_job`，删除重复 `_contour_thread/_worker/_token/_target` 启停代码；页面保留不同成功提示和 commit 行为。
-- [ ] Run 同一命令；Expected: PASS。
+- [x] GREEN：两页各持有 `_contour_job`，删除重复 `_contour_thread/_worker/_token/_target` 启停代码；页面保留不同成功提示和 commit 行为。
+- [x] Run 同一命令；Expected: PASS（7 passed）。
 
 ##### Task 30.3 — Preparation factor job 迁移
 
@@ -784,10 +784,10 @@ class OwnedWorkerJob(QObject):
 - Modify: `tests/test_prep_well_table_worker.py`
 - Modify: `tests/test_preparation_integration.py`
 
-- [ ] RED：补充 handle running/target、取消后 stale snapshot 不提交、正常完成恢复按钮的行为测试。
+- [x] RED：补充 handle ownership；既有取消 stale snapshot 与正常完成按钮测试继续作为行为门禁。
 - [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_prep_well_table_worker.py tests/test_preparation_integration.py -vv --timeout=45`；Expected: 新 handle 契约断言 FAIL。
-- [ ] GREEN：用 `_prepare_job` 替代四个并行字段与重复 shutdown；FactorPrepareWorker 和 GUI commit 逻辑不变。
-- [ ] Run 同一命令；Expected: PASS。
+- [x] GREEN：用 `_prepare_job` 替代四个并行字段与重复 shutdown；FactorPrepareWorker 和 GUI commit 逻辑不变。
+- [x] Run 同一命令；Expected: PASS（20 passed）。
 
 ##### Task 30.4 — DataPage import 生命周期迁移
 
@@ -795,10 +795,10 @@ class OwnedWorkerJob(QObject):
 - Modify: `paleo_workbench/ui/pages/data_page.py`
 - Modify: `tests/test_data_page.py`
 
-- [ ] RED：正常 import 保持 queued GUI commit；页面销毁/显式 shutdown 后 blocked import 被托管且不能发出 stale 页面事件。
+- [x] RED：ownership 架构契约；既有正常 GUI commit 与 blocked shutdown 测试作为行为门禁。
 - [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_data_page.py -vv --timeout=45`；Expected: 新 job ownership 断言 FAIL。
-- [ ] GREEN：用一个 `_import_job` 取代 `_import_jobs` tuple 列表及 sender 查找/手工 disconnect/wait；保留 `_import_in_progress` 和工具栏状态。
-- [ ] Run 同一命令；Expected: PASS。
+- [x] GREEN：用一个 `_import_job` 取代 `_import_jobs` tuple 列表及 sender 查找/手工 disconnect/wait；保留 `_import_in_progress` 和工具栏状态。
+- [x] Run 同一命令；Expected: PASS（52 passed）。
 
 ##### Task 30.5 — PreviewController 仅迁移 transport ownership
 
@@ -808,10 +808,10 @@ class OwnedWorkerJob(QObject):
 - Modify: `tests/test_preview_disk_cache.py`
 - Modify: `tests/test_datapage_stress.py`
 
-- [ ] RED：锁定 single in-flight、latest-only、generation 丢弃、thread-stopped 后再 pump、blocking shutdown keeper 五项行为，并断言 active ownership 来自 `OwnedWorkerJob`。
+- [x] RED：锁定 single in-flight、latest-only、generation 丢弃、thread-stopped 后再 pump、blocking shutdown keeper 五项行为，并断言 active ownership 来自 `OwnedWorkerJob`。
 - [ ] Run: `QT_QPA_PLATFORM=offscreen pytest -q tests/test_preview_async.py tests/test_preview_disk_cache.py tests/test_datapage_stress.py -vv --timeout=45`；Expected: ownership 新断言 FAIL，既有行为测试保持基线。
-- [ ] GREEN：以 `_active_job` 替代 `_jobs/_active` 的裸 QThread tuple 与重复 shutdown；pending/cache/generation 函数保持原样。
-- [ ] Run 同一命令；Expected: PASS。
+- [x] GREEN：以 `_active_job` 替代 `_jobs/_active` 的裸 QThread tuple 与重复 shutdown；pending/cache/generation 函数保持原样。
+- [x] Run 同一命令；Expected: PASS（Preview gate 52 passed；cross-module gate 74 passed）。
 
 ##### Task 30.6 — 去重审查与回归门禁
 
@@ -820,10 +820,10 @@ class OwnedWorkerJob(QObject):
 - Modify: `findings.md`
 - Modify: `progress.md`
 
-- [ ] `rg` 确认页面不再直接重复 `QThread()`、moveToThread、wait/adopt 组合；允许 engine 与 `OwnedWorkerJob` 单一底层实现。
-- [ ] Focused: 上述所有受影响测试独立进程通过。
-- [ ] Full root: `QT_QPA_PLATFORM=offscreen pytest -q --timeout=60 -m 'not slow'`；若复现既有长寿命 Qt stall，按已验证的文件区间分段并闭合 collection 数量。
-- [ ] Static: `python -m compileall -q paleo_workbench`、`git diff --check`。
+- [x] `rg` 确认页面不再直接重复 `QThread()`、moveToThread、wait/adopt 组合；允许 engine 与 `OwnedWorkerJob` 单一底层实现。
+- [x] Focused: 上述所有受影响测试独立进程通过（76 + 52）。
+- [x] Full root: `QT_QPA_PLATFORM=offscreen pytest -q --timeout=60 -m 'not slow'` → 1010 passed / 4 skipped / 8 deselected。
+- [x] Static: `python -m compileall -q paleo_workbench`、`git diff --check`。
 - [ ] Clean checkout: 导入 AppShell 并执行 owned-job/contour/data/preview focused contracts。
 
 #### Plan Self-Review

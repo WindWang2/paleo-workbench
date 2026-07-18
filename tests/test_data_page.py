@@ -477,7 +477,7 @@ def test_import_shutdown_transfers_running_job_to_application_keeper(
     qtbot.addWidget(page)
     assert page.begin_import_paths([path])
     assert started.wait(timeout=2.0)
-    thread = page._import_jobs[0][0]
+    thread = page._import_job.thread
 
     page._shutdown_import_jobs(wait_ms=1)
 
@@ -485,6 +485,16 @@ def test_import_shutdown_transfers_running_job_to_application_keeper(
     assert keeper.owns(thread)
     release.set()
     qtbot.waitUntil(lambda: not keeper.owns(thread), timeout=3000)
+
+
+def test_data_page_import_uses_owned_worker_job_lifecycle(qtbot):
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+    page = DataPage(ProjectDocument.new("ImportHandle"))
+    qtbot.addWidget(page)
+
+    assert isinstance(page._import_job, OwnedWorkerJob)
+    assert not hasattr(page, "_import_jobs")
 
 
 def test_data_page_import_folder_dialog_uses_selected_folder(
