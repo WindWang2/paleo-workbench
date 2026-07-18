@@ -985,6 +985,9 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - Clean-checkout attempt 2 的产品门禁可信通过：本地允许 file transport 后 submodule 精确 checkout `957cb3f5`，AppShell/OwnedWorkerJob 从临时 checkout 导入，8 个 focused contracts pass，status 为空。普通 worktree remove 因 submodule 元数据 exit 128，但 EXIT trap 的精确 force-remove 成功，后续 worktree/path 独立检查 exit 0。
 - 独立 reviewer 对 `13288e4..f86defc` 未发现 Critical/Important。唯一低置信 Minor 是 shutdown 捕获 RuntimeError 后视作 joined；该异常代表 Shiboken wrapper 已删除，线程对象已无法安全查询/托管，当前 defensive cleanup 与既有调用路径相符，接受而不扩展 API。
 - Thread batch 实际收敛结果：四个页面删除各自线程原语，统一到 142 行 OwnedWorkerJob；tracked+new 总 diff 为 592 insertions / 428 deletions，其中大量新增来自测试/PWF，产品页面净删除显著。
+- Merge-state standard full attempt 1 在约第 150 节点的 pytest-qt `_close_widgets` 发生原生 segfault（exit 139），无 Python 产品栈。collection 定位该区间位于 DataPage 尾部；DataPage 全文件独立进程随后 52 passed，且同一产品提交在 feature worktree full 1010 passed。当前根因假设为长寿命 Qt 进程的非确定性全局 teardown 污染，合并验证改用四段独立进程闭合集合。
+- Merge-state segmented gate 四段均通过并精确闭合：211 + 174 + 194 + 431 = 1010 passed，另 4 skipped / 8 deselected。A 段包含导致 full attempt 1 崩溃附近的完整前序/DataPage 链仍通过，支持“非确定性长进程 Qt teardown 污染”结论，无需产品修复。
+- Feature worktree 普通 remove 即使 submodule 未初始化仍被 Git 拒绝；在已确认 status clean、路径精确且为本轮自建后使用 `worktree remove --force` 成功。功能分支随后用非强制 `branch -d` 删除，最终仅 main worktree。
 - 计划自审通过：选定范围的启动/取消/托管/stale/正常结果顺序均有 RED 契约；无 engine 或业务算法变更。
 - 隔离 worktree 的首次 `submodule update --init` 失败：远端缺少父仓锁定的 `957cb3f5` 对象，但主工作区 engine 本地仓库拥有该 commit。已从精确本地仓库 fetch 并 detached checkout 到同一 SHA；这再次说明该 engine commit 尚未推送，属于 clean-clone 交付风险，但不改变 Phase 30 的 workbench-only 边界。
 - Phase 30 组合 baseline 在约 70% 后复现既有 Qt quiet-run 无输出 stall；此前已通过 Phase 29 节点隔离证明该类问题来自长寿命 pytest Qt 全局状态，而非单节点确定性失败。本轮基线改为 Preparation/Mapping、Data、Preview、Stress 四个独立进程。

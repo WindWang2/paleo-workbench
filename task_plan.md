@@ -716,6 +716,8 @@ Thin workbench host + thick geo-viz-engine modules. Visualization page no longer
 
 **Selected boundary:** 用户选择 Workbench 优先；Phase 30 第一批不修改 `geo-viz-engine`，仅保证其独立包契约不被破坏。
 
+**Thread batch delivery:** ✅ merged to `main`; feature worktree and branch cleaned. Remaining algorithm/preview-dispatch/geometry/large-module issues stay queued for later Phase 30 batches.
+
 #### Approved Architecture
 
 - 新建 `paleo_workbench/ui/owned_worker_job.py`，提供持久的 `OwnedWorkerJob(QObject)`；一个实例在任一时刻最多拥有一个 QThread/worker。

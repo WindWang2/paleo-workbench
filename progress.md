@@ -1645,3 +1645,22 @@ Failures:
 - [REVIEW HARNESS] 首个 reviewer 两次超时后中断；第二个只读 reviewer按要求不跑测试并返回有效分级结论。
 - [IMPLEMENTED · ISS-DEDUP-THREAD-01] Workbench thread lifecycle batch 完成；算法/preview dispatch/geometry/large-module issues 保留为 Phase 30 后续批次。
 - [NEXT] 提交纯 PWF 收尾，按 finishing-development-branch 菜单等待用户选择 merge/PR/keep/discard。
+- [INTEGRATE] 用户选择 option 1；main `git pull --ff-only` already up to date，随后 fast-forward 到 `e1aa52a`。
+- [MERGED FULL attempt 1] standard non-slow 在 15% pytest-qt widget teardown 原生 segfault，exit 139；记合并态验证 strike 1/3，暂停 cleanup。
+- [ISOLATION] `tests/test_data_page.py` 独立进程 → `52 passed, 1 warning in 3.29s`，排除该文件确定性失败。
+- [PWF GATE] 一次 full 失败 + 一次 isolated pytest 后立即同步 findings/progress。
+- [NEXT] 用四个独立进程跑完整 collection，验证合并提交并闭合 pass/skip/deselect 数量。
+- [MERGED SEGMENT A] files `< test_datapage_stress.py` → `211 passed, 1 warning in 9.21s`。
+- [MERGED SEGMENT B] `test_datapage_stress.py <= file < test_map*` → `174 passed, 8 deselected, 1 warning in 6.64s`。
+- [PWF GATE] 连续两次 pytest 后立即同步 progress。
+- [NEXT] 运行 map→preview 与 preview→末尾两个独立进程，汇总 collection 数量。
+- [MERGED SEGMENT C] `test_map* <= file < test_preview*` → `194 passed, 4 skipped in 7.56s`。
+- [MERGED SEGMENT D] `file >= test_preview*` → `431 passed, 2 warnings in 18.20s`。
+- [MERGED SEGMENTED TOTAL] `1010 passed, 4 skipped, 8 deselected`，数量与 feature full 精确一致。
+- [PWF GATE] 连续两次 pytest 后立即同步 findings/progress。
+- [NEXT] main compileall/diff-check，随后移除自建 worktree并删除已合并分支。
+- [MERGED STATIC] main `python -m compileall -q paleo_workbench` + `git diff --check` → exit 0。
+- [CLEANUP attempt 1] 普通 worktree remove 因 submodule metadata 被 Git 拒绝；未删除内容。
+- [CLEANUP PASS] 已确认 feature worktree clean 后精确 force-remove；`git branch -d refactor/owned-worker-job` 成功。
+- [WORKTREE FINAL] `git worktree list` 仅剩 `/home/kevin/projects/paleo_project e1aa52a [main]`。
+- [COMPLETED · ISS-DEDUP-THREAD-01] Workbench 线程生命周期去重已实现、审查、合并、复验并清理；Phase 30 后续保留算法/预览分派/几何/大模块批次。
