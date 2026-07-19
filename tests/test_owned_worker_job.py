@@ -137,3 +137,36 @@ def test_detached_old_worker_cannot_release_a_new_job(qtbot):
 
     second_release.set()
     qtbot.waitUntil(lambda: job.thread is None, timeout=3_000)
+
+
+def test_owned_worker_job_adopts_running_thread_on_destroy(qtbot):
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+    from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+    started = Event()
+    release = Event()
+    worker = _BlockingWorker(started, release)
+    
+    # We put job inside a parent widget to trigger QObject hierarchy deletion.
+    from PySide6.QtWidgets import QWidget
+    parent = QWidget()
+    job = OwnedWorkerJob(parent)
+    job.start(worker, terminal_signals=(worker.finished,))
+    
+    assert started.wait(timeout=2.0)
+    thread = job.thread
+    assert thread is not None
+    
+    # Destroy the parent widget, which deletes job.
+    from PySide6.QtCore import QCoreApplication, QEvent
+    parent.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QApplication.processEvents()
+    
+    # Verify the thread was adopted by detached_job_keeper.
+    keeper = detached_job_keeper()
+    assert keeper.owns(thread) is True
+    
+    # Let the thread finish.
+    release.set()
+    qtbot.waitUntil(lambda: not keeper.owns(thread), timeout=3_000)

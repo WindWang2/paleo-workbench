@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import weakref
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
@@ -21,6 +22,7 @@ class OwnedWorkerJob(QObject):
         self._cancel: Callable[[], None] | None = None
         self._target: object | None = None
         self._result_connections: list[tuple[object, object]] = []
+        self._destroyed_conn: object | None = None
 
     @property
     def thread(self) -> QThread | None:
@@ -66,6 +68,12 @@ class OwnedWorkerJob(QObject):
         thread.finished.connect(
             self._on_thread_stopped,
             Qt.ConnectionType.QueuedConnection,
+        )
+        thread_ref = weakref.ref(thread)
+        worker_ref = weakref.ref(worker)
+        self._destroyed_conn = self.destroyed.connect(
+            lambda _=None, thread_ref=thread_ref, worker_ref=worker_ref, cancel=cancel:
+            _safe_detach_on_destroy(thread_ref, worker_ref, cancel)
         )
         thread.start()
 
@@ -132,6 +140,12 @@ class OwnedWorkerJob(QObject):
         self._cancel = None
         self._target = None
         self._result_connections = []
+        if self._destroyed_conn is not None:
+            try:
+                self.destroyed.disconnect(self._destroyed_conn)
+            except (RuntimeError, TypeError):
+                pass
+            self._destroyed_conn = None
         if delete_thread:
             try:
                 thread.deleteLater()
@@ -146,3 +160,25 @@ class OwnedWorkerJob(QObject):
         if not isinstance(thread, QThread) or worker is None:
             return
         self._release_identity(thread, worker, delete_thread=True)
+
+
+def _safe_detach_on_destroy(
+    thread_ref: weakref.ref[QThread],
+    worker_ref: weakref.ref[QObject],
+    cancel: Callable[[], None] | None,
+) -> None:
+    thread = thread_ref()
+    worker = worker_ref()
+    if thread is not None and worker is not None:
+        try:
+            if thread.isRunning():
+                if cancel is not None:
+                    try:
+                        cancel()
+                    except Exception:
+                        pass
+                thread.requestInterruption()
+                thread.quit()
+                detached_job_keeper().adopt(thread, worker)
+        except Exception:
+            pass
