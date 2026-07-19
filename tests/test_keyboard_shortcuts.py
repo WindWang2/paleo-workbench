@@ -7,6 +7,9 @@ under test is: (a) the callbacks exist with the right behavior, and
 (b) digit shortcuts are blocked while a text field has focus.
 """
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, message=".*setActiveWindow.*")
+
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QLineEdit
 
@@ -53,9 +56,8 @@ def test_digit_shortcut_blocked_in_text_field(qtbot):
     """Digit shortcuts must NOT fire when a QLineEdit has focus."""
     shell = AppShell()
     qtbot.addWidget(shell)
-    # The widget must be shown for QApplication.focusWidget() to report the
-    # focused QLineEdit (offscreen otherwise returns None).
     shell.show()
+    QApplication.setActiveWindow(shell)
     # The data toolbar lives on page 1; switch there so its search box is the
     # current page and can actually take focus.
     shell.page_stack.setCurrentIndex(1)
@@ -71,9 +73,11 @@ def test_digit_shortcut_blocked_in_text_field(qtbot):
 
 def test_digit_shortcut_blocked_in_menu_bar_search(qtbot):
     """The header (menu-bar) search box is also a QLineEdit — must block."""
-    shell = AppShell()
-    qtbot.addWidget(shell)
-    shell.show()
+    window = PaleoWorkbenchWindow()
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.setActiveWindow(window)
+    shell = window.app_shell
     shell.menu_bar.search_box.setFocus()
     QApplication.processEvents()
     assert QApplication.focusWidget() is shell.menu_bar.search_box
@@ -136,6 +140,7 @@ def test_window_focus_search_targets_data_toolbar_when_data_page_active(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
+    QApplication.setActiveWindow(window)
     # Switch to data page and ensure it has a search box.
     window.app_shell.page_stack.setCurrentIndex(1)
     data_page = window.app_shell.data_page_widget()
@@ -153,6 +158,7 @@ def test_window_focus_search_falls_back_to_menu_bar(qtbot):
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     window.show()
+    QApplication.setActiveWindow(window)
     # Home page (index 0) has no data_toolbar.
     window.app_shell.page_stack.setCurrentIndex(0)
 
@@ -206,9 +212,17 @@ def test_data_page_delete_guarded_in_text_field(qtbot, tmp_path):
         name="r.txt", path=str(tmp_path / "r.txt"), type="document", format="txt"
     )
     project.resources.append(resource)
-    page = DataPage(project=project)
-    qtbot.addWidget(page)
-    page.show()
+
+    window = PaleoWorkbenchWindow()
+    window.project = project
+    window._refresh_shell()
+    qtbot.addWidget(window)
+    window.show()
+    QApplication.setActiveWindow(window)
+
+    # Switch to data page
+    window.app_shell.page_stack.setCurrentIndex(1)
+    page = window.app_shell.data_page_widget()
     page._set_selected_asset(resource)
     page.data_toolbar.search_box.setFocus()
     QApplication.processEvents()
