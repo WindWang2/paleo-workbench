@@ -37,6 +37,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "CurveData",
         "build_qpainter_tracks",
         "load_las_preview",
+        "inspect_las_file",
         "export_svg",
         "export_pdf",
         "export_png",

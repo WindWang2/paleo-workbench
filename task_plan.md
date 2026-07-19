@@ -841,3 +841,44 @@ class OwnedWorkerJob(QObject):
 - [x] DRY/YAGNI：通用层只有单 owned-job 生命周期；没有全局 scheduler、优先级或重试。
 - [x] Type/API consistency：所有迁移任务只依赖 Task 30.1 定义的 `start/shutdown/is_running/thread/worker/target/released`。
 - [x] Placeholder scan：无 TBD/TODO/“类似前项”占位描述。
+
+## Phase 38 — PaleoWorkbenchWindow (app.py) God-class Refactoring (COMPLETED)
+
+### 用户目标
+
+- 对 `app.py` 中的 `PaleoWorkbenchWindow` God-class 进行拆分，解决大文件职责堆叠和强耦合接线问题。
+- 保证 100% 后向兼容，无需修改任何现有测试或外部接口，所有测试必须依然顺利通过。
+
+### 锁定设计
+
+1. **项目生命周期控制器 (`ProjectController`)**：
+   - 新建 `paleo_workbench/ui/project_controller.py`。
+   - 提取所有项目文件 I/O 动作：`new_project`、`open_project_path`、`save_project`、`save_project_as`、`open_sample_project`、`_confirm_replace_project`、对话框弹出（选择/确认/保存）以及 `project_properties_text` 等。
+2. **工作流与页面跳转控制器 (`WorkflowController`)**：
+   - 新建 `paleo_workbench/ui/workflow_controller.py`。
+   - 提取所有页面接线、页面状态分发与 workflow 跳转逻辑：`_wire_menu_bar`、`_show_preview_settings`、`_apply_preview_settings`、各页面的 `_wire_` 和 `_on_` slot 槽函数。
+3. **主窗口壳体 (`PaleoWorkbenchWindow`)**：
+   - 实例化 `ProjectController` 与 `WorkflowController`。
+   - 保留与测试、`main.py` 强契约的 facade 属性/方法（如 `project`、`project_path`、`new_project`、`open_project_path` 等），采用简单委托以防破坏任何测试。
+   - 保留基本的 UI 初始化和快捷键接线（`_setup_shortcuts`）。
+
+### Implementation Plan
+
+#### Task 38.1 — 实现 ProjectController 并迁移项目 lifecycle
+- [x] 新建 `paleo_workbench/ui/project_controller.py`。
+- [x] 实现 `ProjectController(window)`，将 lifecycle 方法迁移至此，并把 `window.project`、`window.project_path` 作为代理属性/读写调用。
+- [x] 用单元测试/静态检查锁定 `ProjectController` 行为。
+
+#### Task 38.2 — 实现 WorkflowController 并迁移工作流/接线
+- [x] 新建 `paleo_workbench/ui/workflow_controller.py`。
+- [x] 实现 `WorkflowController(window)`，迁移 `_wire_...` 信号连接以及 `_on_...` 槽函数。
+
+#### Task 38.3 — 重构 app.py 整合控制器并提供代理接口
+- [x] 修改 `paleo_workbench/app.py`。
+- [x] 移除被移入 Controller 的所有代码。
+- [x] 在 `__init__` 中实例化并初始化控制器。
+- [x] 保留测试公开接口的代理（委托给相应的 Controller），确保不破坏任何外部依赖。
+
+#### Task 38.4 — 回归测试与验证
+- [x] 运行 `pytest tests/test_project_lifecycle.py`。
+- [x] 运行全量 `pytest` 套件，确保所有测试全数通过。

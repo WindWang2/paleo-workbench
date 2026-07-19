@@ -16,7 +16,7 @@ def _wait_controller_idle(qtbot, controller: PreviewRequestController, timeout: 
     """Block until in-flight preview workers finish (avoids Qt teardown aborts)."""
     qtbot.waitUntil(
         lambda: (
-            controller._active_job.thread is None
+            not controller._active_job.is_running
             and controller._pending is None
         ),
         timeout=timeout,
@@ -81,6 +81,538 @@ class FailingProvider(PreviewProvider):
         if asset is None:
             return super().preview(asset)
         raise RuntimeError("preview boom")
+
+
+class PurposeProvider(PreviewProvider):
+    def __init__(self):
+        super().__init__()
+        self.summary_calls: list[str] = []
+        self.visualization_calls: list[str] = []
+
+    def preview(self, asset):
+        raise AssertionError("purpose-specific controller must not call preview()")
+
+    def preview_summary(self, asset):
+        self.summary_calls.append(asset.name)
+        return PreviewResult(mode="table", title=f"summary:{asset.name}")
+
+    def preview_visualization(self, asset):
+        self.visualization_calls.append(asset.name)
+        return PreviewResult(mode="message", title=f"visual:{asset.name}")
+
+
+@pytest.mark.parametrize(
+    ("request_kind", "expected_title", "summary_calls", "visualization_calls"),
+    [
+        ("summary", "summary:sample.dat", ["sample.dat"], []),
+        ("visualization", "visual:sample.dat", [], ["sample.dat"]),
+    ],
+)
+def test_controller_routes_purpose_specific_provider_method(
+    qtbot,
+    tmp_path,
+    request_kind,
+    expected_title,
+    summary_calls,
+    visualization_calls,
+):
+    path = tmp_path / "sample.dat"
+    path.write_text("A 1\nB 2\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    provider = PurposeProvider()
+    controller = PreviewRequestController(provider, request_kind=request_kind)
+    results: list[PreviewResult] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(asset)
+    _wait_controller_idle(qtbot, controller)
+
+    assert [result.title for result in results] == [expected_title]
+    assert provider.summary_calls == summary_calls
+    assert provider.visualization_calls == visualization_calls
+
+
+def test_summary_controller_skips_professional_disk_cache_probe(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+):
+    import paleo_workbench.ui.pages.preview_worker as worker_module
+
+    path = tmp_path / "sample.dat"
+    path.write_text("A 1\nB 2\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    provider = PurposeProvider()
+    monkeypatch.setattr(
+        worker_module,
+        "is_disk_cacheable",
+        lambda _asset: (_ for _ in ()).throw(
+            AssertionError("summary must not probe professional disk cache")
+        ),
+    )
+    controller = PreviewRequestController(provider, request_kind="summary")
+    results: list[PreviewResult] = []
+    failures: list[str] = []
+    controller.result_ready.connect(results.append)
+    controller.failed.connect(failures.append)
+
+    controller.request(asset)
+    _wait_controller_idle(qtbot, controller)
+
+    assert failures == []
+    assert [result.title for result in results] == ["summary:sample.dat"]
+
+
+def test_invalidate_discards_active_visualization_without_starting_new_job(
+    qtbot,
+    tmp_path,
+):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingVisualizationProvider(PreviewProvider):
+        def preview_visualization(self, asset):
+            entered.set()
+            assert release.wait(timeout=3.0)
+            return PreviewResult(mode="message", title=f"stale:{asset.name}")
+
+    path = tmp_path / "sample.dat"
+    path.write_text("A 1\nB 2\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    controller = PreviewRequestController(
+        BlockingVisualizationProvider(),
+        request_kind="visualization",
+    )
+    results: list[PreviewResult] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(asset)
+    assert entered.wait(timeout=2.0)
+    generation = controller.generation
+    controller.invalidate()
+
+    assert controller.generation == generation + 1
+    assert controller._pending is None
+    release.set()
+    _wait_controller_idle(qtbot, controller)
+    assert results == []
+
+
+def test_retryable_visualization_result_is_not_cached(qtbot, tmp_path):
+    class RetryableProvider(PreviewProvider):
+        def __init__(self):
+            super().__init__()
+            self.calls: list[str] = []
+
+        def preview_visualization(self, asset):
+            self.calls.append(asset.name)
+            return PreviewResult(
+                mode="message",
+                title=asset.name,
+                message="temporary failure",
+                cacheable=False,
+            )
+
+    path = tmp_path / "retry.dat"
+    path.write_text("1 2\n3 4\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    provider = RetryableProvider()
+    controller = PreviewRequestController(
+        provider,
+        request_kind="visualization",
+    )
+    results: list[PreviewResult] = []
+    failures: list[str] = []
+    controller.result_ready.connect(results.append)
+    controller.failed.connect(failures.append)
+
+    controller.request(asset)
+    _wait_controller_idle(qtbot, controller)
+    controller.request(asset)
+    _wait_controller_idle(qtbot, controller)
+
+    assert provider.calls == ["retry.dat", "retry.dat"]
+    assert failures == []
+    assert [result.message for result in results] == [
+        "temporary failure",
+        "temporary failure",
+    ]
+    assert controller.cache._data == {}
+
+
+def test_clear_cache_preserves_inflight_result_but_blocks_cache_writes(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+):
+    import paleo_workbench.ui.pages.preview_worker as worker_module
+
+    entered = threading.Event()
+    release = threading.Event()
+    disk_stores: list[str] = []
+
+    class BlockingCacheableProvider(PreviewProvider):
+        def preview_visualization(self, asset):
+            entered.set()
+            assert release.wait(timeout=3.0)
+            prepared = PreparedPreview(
+                kind=PreviewKind.WELL_LOG,
+                title=asset.name,
+                payload={"depth": (0.0, 1.0)},
+                estimated_bytes=64,
+            )
+            return PreviewResult(
+                mode="geoviz",
+                title=asset.name,
+                engine_preview=prepared,
+                estimated_bytes=prepared.estimated_bytes,
+            )
+
+    def record_committed_store(_cache, asset, _result, *, commit_guard=None):
+        from contextlib import nullcontext
+
+        guard = commit_guard() if commit_guard is not None else nullcontext(True)
+        with guard as current:
+            if current:
+                disk_stores.append(asset.name)
+
+    monkeypatch.setattr(worker_module.PreviewDiskCache, "store", record_committed_store)
+    path = tmp_path / "cacheable.dat"
+    path.write_text("1 2\n3 4\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    controller = PreviewRequestController(
+        BlockingCacheableProvider(),
+        request_kind="visualization",
+    )
+    controller.set_project_root(tmp_path)
+    results: list[PreviewResult] = []
+    controller.result_ready.connect(results.append)
+
+    controller.request(asset)
+    assert entered.wait(timeout=2.0)
+    generation = controller.generation
+    controller.clear_disk_cache()
+    release.set()
+    _wait_controller_idle(qtbot, controller)
+
+    assert controller.generation == generation
+    assert [result.title for result in results] == ["cacheable.dat"]
+    assert disk_stores == []
+    assert controller.cache._data == {}
+
+
+def test_clear_cache_does_not_wait_for_disk_compression(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+):
+    import numpy as np
+    from geoviz.previews.dat import XYPreviewPayload
+    import paleo_workbench.ui.pages.preview_disk_cache as disk_module
+
+    compression_entered = threading.Event()
+    release_compression = threading.Event()
+    original_savez = disk_module.np.savez_compressed
+
+    def slow_savez(*args, **kwargs):
+        compression_entered.set()
+        assert release_compression.wait(timeout=3.0)
+        return original_savez(*args, **kwargs)
+
+    class DiskResultProvider(PreviewProvider):
+        def preview_visualization(self, asset):
+            prepared = PreparedPreview(
+                kind=PreviewKind.XY_SCATTER,
+                title=asset.name,
+                payload=XYPreviewPayload(
+                    names=("A1",),
+                    x=np.array([1.0]),
+                    y=np.array([2.0]),
+                ),
+                estimated_bytes=32,
+            )
+            return PreviewResult(
+                mode="geoviz",
+                title=asset.name,
+                path=asset.path,
+                engine_preview=prepared,
+                estimated_bytes=32,
+            )
+
+    monkeypatch.setattr(disk_module.np, "savez_compressed", slow_savez)
+    path = tmp_path / "slow-cache.dat"
+    path.write_text("1 2\n3 4\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    controller = PreviewRequestController(
+        DiskResultProvider(),
+        request_kind="visualization",
+    )
+    controller.set_project_root(tmp_path)
+    controller.request(asset)
+    assert compression_entered.wait(timeout=2.0)
+
+    timer = threading.Timer(0.5, release_compression.set)
+    timer.start()
+    started = time.monotonic()
+    controller.clear_disk_cache()
+    elapsed = time.monotonic() - started
+    timer.join(timeout=1.0)
+    _wait_controller_idle(qtbot, controller)
+
+    assert elapsed < 0.2
+    entries = tmp_path / ".preview_cache" / "entries"
+    assert not entries.exists() or not any(entries.iterdir())
+
+
+def test_data_page_clear_cache_does_not_strand_summary_loading(qtbot, tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingSummaryProvider(PreviewProvider):
+        def preview_summary(self, asset):
+            entered.set()
+            assert release.wait(timeout=3.0)
+            return PreviewResult(mode="table", title=asset.name)
+
+    path = tmp_path / "summary.dat"
+    path.write_text("1 2\n3 4\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    project = ProjectDocument.new("P")
+    project.resources = [asset]
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    provider = BlockingSummaryProvider()
+    page.reader_panel.provider = provider
+    page._preview_controller.provider = provider
+
+    page._set_selected_asset(asset)
+    assert entered.wait(timeout=2.0)
+    assert page.reader_panel.current_mode == "loading"
+    page.clear_preview_cache()
+    release.set()
+    _wait_controller_idle(qtbot, page._preview_controller)
+
+    assert page.reader_panel.current_mode == "table"
+    assert page.reader_panel.title_label.text() == "summary.dat"
+
+
+def test_data_page_clear_cache_does_not_strand_visualization_loading(
+    qtbot,
+    tmp_path,
+):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingVisualProvider(PreviewProvider):
+        def preview_summary(self, asset):
+            return PreviewResult(
+                mode="table",
+                title=asset.name,
+                table_headers=("X", "Y"),
+                table_rows=(("1", "2"),),
+                visualization_available=True,
+            )
+
+        def preview_visualization(self, asset):
+            entered.set()
+            assert release.wait(timeout=3.0)
+            return PreviewResult(
+                mode="message",
+                title=asset.name,
+                message="visual complete",
+            )
+
+    path = tmp_path / "visual.dat"
+    path.write_text("1 2\n3 4\n", encoding="utf-8")
+    asset = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    project = ProjectDocument.new("P")
+    project.resources = [asset]
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    provider = BlockingVisualProvider()
+    page.reader_panel.provider = provider
+    page._preview_controller.provider = provider
+    page._visualization_controller.provider = provider
+
+    page._set_selected_asset(asset)
+    _wait_controller_idle(qtbot, page._preview_controller)
+    tabs = page.reader_panel.lazy_visualization_tabs
+    tabs.setCurrentIndex(1)
+    assert entered.wait(timeout=2.0)
+    assert tabs.visual_stack.currentWidget() is tabs.loading_label
+    page.clear_preview_cache()
+    release.set()
+    _wait_controller_idle(qtbot, page._visualization_controller)
+
+    assert tabs.visual_stack.currentWidget() is tabs.message_label
+    assert tabs.message_label.text() == "visual complete"
+
+
+def test_data_page_defers_visualization_until_tab_activation(qtbot, tmp_path):
+    class PagePurposeProvider(PreviewProvider):
+        def __init__(self):
+            super().__init__()
+            self.summary_calls: list[str] = []
+            self.visualization_calls: list[str] = []
+
+        def preview(self, asset):
+            raise AssertionError("DataPage must use purpose-specific requests")
+
+        def preview_summary(self, asset):
+            self.summary_calls.append(asset.name)
+            return PreviewResult(
+                mode="table",
+                title=asset.name,
+                table_headers=["X", "Y"],
+                table_rows=[["1", "2"]],
+                visualization_available=True,
+            )
+
+        def preview_visualization(self, asset):
+            self.visualization_calls.append(asset.name)
+            return PreviewResult(
+                mode="message",
+                title=asset.name,
+                message=f"visual:{asset.name}",
+            )
+
+    path = tmp_path / "points.dat"
+    path.write_text("X Y\n1 2\n", encoding="utf-8")
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    project = ProjectDocument.new("P")
+    project.resources = [resource]
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    provider = PagePurposeProvider()
+    page.reader_panel.provider = provider
+    page._preview_controller.provider = provider
+    page._visualization_controller.provider = provider
+
+    page._set_selected_asset(resource)
+    qtbot.waitUntil(lambda: provider.summary_calls == ["points.dat"], timeout=3000)
+    _wait_controller_idle(qtbot, page._preview_controller)
+
+    tabs = page.reader_panel.lazy_visualization_tabs
+    assert provider.visualization_calls == []
+    assert tabs.currentIndex() == 0
+    assert tabs._host is None
+
+    tabs.setCurrentIndex(1)
+    qtbot.waitUntil(
+        lambda: provider.visualization_calls == ["points.dat"], timeout=3000
+    )
+    _wait_controller_idle(qtbot, page._visualization_controller)
+    assert tabs.message_label.text() == "visual:points.dat"
+
+    tabs.setCurrentIndex(0)
+    tabs.setCurrentIndex(1)
+    qtbot.wait(50)
+    assert provider.visualization_calls == ["points.dat"]
+
+
+def test_data_page_selection_discards_obsolete_visualization(qtbot, tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingPageProvider(PreviewProvider):
+        def preview_summary(self, asset):
+            return PreviewResult(
+                mode="table",
+                title=asset.name,
+                table_headers=["name"],
+                table_rows=[[asset.name]],
+                visualization_available=True,
+            )
+
+        def preview_visualization(self, asset):
+            entered.set()
+            assert release.wait(timeout=3.0)
+            return PreviewResult(
+                mode="message",
+                title=asset.name,
+                message=f"stale:{asset.name}",
+            )
+
+    paths = [tmp_path / "a.dat", tmp_path / "b.dat"]
+    for path in paths:
+        path.write_text("X Y\n1 2\n", encoding="utf-8")
+    resources = [
+        ResourceItem(
+            name=path.name,
+            path=str(path),
+            type="well_head",
+            format="dat",
+        )
+        for path in paths
+    ]
+    project = ProjectDocument.new("P")
+    project.resources = resources
+    page = DataPage(project)
+    qtbot.addWidget(page)
+    provider = BlockingPageProvider()
+    page.reader_panel.provider = provider
+    page._preview_controller.provider = provider
+    page._visualization_controller.provider = provider
+
+    page._set_selected_asset(resources[0])
+    qtbot.waitUntil(lambda: page.reader_panel.title_label.text() == "a.dat")
+    page.reader_panel.lazy_visualization_tabs.setCurrentIndex(1)
+    assert entered.wait(timeout=2.0)
+
+    page._set_selected_asset(resources[1])
+    qtbot.waitUntil(lambda: page.reader_panel.title_label.text() == "b.dat")
+    release.set()
+    _wait_controller_idle(qtbot, page._visualization_controller)
+
+    tabs = page.reader_panel.lazy_visualization_tabs
+    assert page.reader_panel.title_label.text() == "b.dat"
+    assert tabs.currentIndex() == 0
+    assert tabs.visual_stack.currentWidget() is tabs.prompt_label
 
 
 def test_preload_media_rejects_files_above_budget(tmp_path):
@@ -697,6 +1229,7 @@ def test_data_page_close_shuts_down_preview_controller(qtbot, tmp_path):
     qtbot.waitUntil(lambda: len(provider.started) >= 1, timeout=2000)
     page.close()
     assert page._preview_controller._active_job.thread is None
+    assert page._visualization_controller._active_job.thread is None
 
 
 def test_worker_uses_asset_snapshot(qtbot, tmp_path):

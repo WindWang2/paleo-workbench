@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QWidget,
+)
 
 from paleo_workbench.ui import tokens
 
@@ -15,11 +23,12 @@ class MenuBar(QFrame):
     open_sample_project_requested = Signal()
     save_project_requested = Signal()
     properties_requested = Signal()
+    preview_settings_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("MenuBar")
-        self.labels: list[QLabel] = []
+        self.labels: list[QWidget] = []
         layout = QHBoxLayout(self)
         layout.setContentsMargins(tokens.PAGE_MARGIN, 0, tokens.PAGE_MARGIN, 0)
         layout.setSpacing(tokens.SPACE_4)
@@ -47,6 +56,18 @@ class MenuBar(QFrame):
         layout.addWidget(self.project_menu_button)
 
         for text in _MENU_LABELS:
+            if text == "工具":
+                self.tools_menu_button = QPushButton(text)
+                self.tools_menu_button.setObjectName("ToolsMenuButton")
+                self.tools_menu = QMenu(self.tools_menu_button)
+                self.preview_settings_action = self.tools_menu.addAction("预览设置…")
+                self.preview_settings_action.triggered.connect(
+                    self.preview_settings_requested
+                )
+                self.tools_menu_button.setMenu(self.tools_menu)
+                self.labels.append(self.tools_menu_button)
+                layout.addWidget(self.tools_menu_button)
+                continue
             lbl = QLabel(text)
             self.labels.append(lbl)
             layout.addWidget(lbl)

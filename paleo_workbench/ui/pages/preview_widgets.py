@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import numpy as np
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, QUrl
-from PySide6.QtGui import QPixmap, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QImage, QPixmap, QStandardItem, QStandardItemModel
 try:
     from PySide6.QtPdf import QPdfDocument
 except ImportError:  # pragma: no cover
@@ -21,13 +22,16 @@ except ImportError:  # pragma: no cover
     QMediaPlayer = None
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QSlider,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextBrowser,
     QTextEdit,
     QTreeView,
@@ -58,6 +62,16 @@ class TextPreviewWidget(QTextEdit):
     def load_text(self, text: str) -> None:
         self.setPlainText(text)
 
+    def apply_settings(self, settings) -> None:
+        font = self.font()
+        font.setPointSize(settings.font_size)
+        self.setFont(font)
+        self.setLineWrapMode(
+            QTextEdit.LineWrapMode.WidgetWidth
+            if settings.wrap_text
+            else QTextEdit.LineWrapMode.NoWrap
+        )
+
 
 class RichTextPreviewWidget(QTextBrowser):
     """Read-only rich-text renderer for Markdown/HTML.
@@ -79,6 +93,16 @@ class RichTextPreviewWidget(QTextBrowser):
 
     def load_html(self, html: str) -> None:
         self.setHtml(html)
+
+    def apply_settings(self, settings) -> None:
+        font = self.font()
+        font.setPointSize(settings.font_size)
+        self.setFont(font)
+        self.setLineWrapMode(
+            QTextEdit.LineWrapMode.WidgetWidth
+            if settings.wrap_text
+            else QTextEdit.LineWrapMode.NoWrap
+        )
 
 
 class _LocalOnlyRequestInterceptor:
@@ -157,11 +181,27 @@ class WebDocumentPreviewWidget(QWidget):
         else:
             self._engine_view.load(QUrl.fromLocalFile(path))
 
+    def apply_settings(self, settings) -> None:
+        self._engine_view.setZoomFactor(settings.font_size / 12.0)
+
 
 class TablePreviewWidget(QTableWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.auto_fit_columns = True
+
+    def apply_settings(self, settings) -> None:
+        font = self.font()
+        font.setPointSize(settings.font_size)
+        self.setFont(font)
+        self.auto_fit_columns = settings.auto_fit_columns
+        mode = (
+            QHeaderView.ResizeMode.ResizeToContents
+            if self.auto_fit_columns
+            else QHeaderView.ResizeMode.Interactive
+        )
+        self.horizontalHeader().setSectionResizeMode(mode)
 
     def load_table(
         self,
@@ -175,7 +215,8 @@ class TablePreviewWidget(QTableWidget):
         for row_index, row in enumerate(rows):
             for column_index, value in enumerate(row):
                 self.setItem(row_index, column_index, QTableWidgetItem(value))
-        self.resizeColumnsToContents()
+        if self.auto_fit_columns:
+            self.resizeColumnsToContents()
 
 
 class SummaryTablePreviewWidget(QWidget):
@@ -189,10 +230,38 @@ class SummaryTablePreviewWidget(QWidget):
         self.message_label.setWordWrap(True)
         layout.addWidget(self.message_label)
 
+        self.tabs = QTabWidget(self)
+        self.tabs.setStyleSheet(
+            f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER};"
+            f" border-radius: {tokens.RADIUS_BUTTON}px; background: {tokens.BG_SEARCH}; }}"
+            f" QTabBar::tab {{ padding: 6px 12px; margin-top: 2px; }}"
+        )
+
+        # Tab 1: Curve definitions and metadata summary
+        self.info_tab = QWidget()
+        info_layout = QVBoxLayout(self.info_tab)
+        info_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        info_layout.setSpacing(tokens.SPACE_2)
+
         self.summary_table = TablePreviewWidget()
         self.detail_table = TablePreviewWidget()
-        layout.addWidget(self.summary_table)
-        layout.addWidget(self.detail_table, 1)
+        info_layout.addWidget(self.summary_table)
+        info_layout.addWidget(self.detail_table, 1)
+
+        self.tabs.addTab(self.info_tab, "曲线定义与元数据")
+
+        # Tab 2: Curve data rows preview
+        self.data_tab = QWidget()
+        data_layout = QVBoxLayout(self.data_tab)
+        data_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        data_layout.setSpacing(tokens.SPACE_2)
+
+        self.data_table = TablePreviewWidget()
+        data_layout.addWidget(self.data_table, 1)
+
+        self.tabs.addTab(self.data_tab, "数据内容")
+
+        layout.addWidget(self.tabs, 1)
 
     def load_summary(
         self,
@@ -200,10 +269,203 @@ class SummaryTablePreviewWidget(QWidget):
         detail_headers: tuple[str, ...],
         detail_rows: tuple[tuple[str, ...], ...],
         message: str = "",
+        data_headers: tuple[str, ...] = (),
+        data_rows: tuple[tuple[str, ...], ...] = (),
     ) -> None:
         self.message_label.setText(message)
         self.summary_table.load_table(("属性", "值"), summary_rows)
         self.detail_table.load_table(detail_headers, detail_rows)
+
+        if data_headers and data_rows:
+            self.data_table.load_table(data_headers, data_rows)
+            self.tabs.setTabEnabled(1, True)
+            self.tabs.setCurrentIndex(0)
+        else:
+            self.data_table.load_table(("",), ())
+            self.tabs.setTabEnabled(1, False)
+            self.tabs.setCurrentIndex(0)
+
+    def apply_settings(self, settings) -> None:
+        font = self.font()
+        font.setPointSize(settings.font_size)
+        self.setFont(font)
+        self.summary_table.apply_settings(settings)
+        self.detail_table.apply_settings(settings)
+        self.data_table.apply_settings(settings)
+
+
+class SeismicSlicePreviewWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._volume: np.ndarray | None = None
+        self._path = ""
+        self._revision = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(tokens.SPACE_2)
+
+        # Top Control Row
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(tokens.SPACE_3)
+
+        type_label = QLabel("切片方向:")
+        type_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-weight: 500;")
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Inline (剖面)", "Crossline (剖面)", "Time (切片)"])
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(0)
+        self.slider.setStyleSheet(
+            f"""
+            QSlider::groove:horizontal {{
+                border: 1px solid {tokens.BORDER};
+                height: 6px;
+                background: {tokens.BG_SEARCH};
+                border-radius: 3px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {tokens.PRIMARY};
+                border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #ffffff;
+                border: 2px solid {tokens.PRIMARY};
+                width: 14px;
+                height: 14px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 7px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {tokens.PRIMARY_HOVER};
+                border-color: {tokens.PRIMARY_HOVER};
+            }}
+            """
+        )
+        self.slider.valueChanged.connect(self._on_slider_changed)
+
+        self.index_label = QLabel("0 / 0")
+        self.index_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-family: monospace; font-weight: 500;")
+
+        control_layout.addWidget(type_label)
+        control_layout.addWidget(self.type_combo)
+        control_layout.addWidget(self.slider, 1)
+        control_layout.addWidget(self.index_label)
+
+        layout.addLayout(control_layout)
+
+        # Image display area
+        self.image_label = QLabel("请选择数据")
+        self.message_label = self.image_label  # Backwards compatibility
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet(
+            f"border: 1px solid {tokens.BORDER}; border-radius: {tokens.RADIUS_BUTTON}px;"
+            f" background: {tokens.BG_SEARCH};"
+        )
+        layout.addWidget(self.image_label, 1)
+
+    def load_seismic(
+        self,
+        path: str,
+        revision: tuple[object, ...] | None = None,
+        volume: np.ndarray | None = None,
+        message: str = "",
+    ) -> None:
+        self._path = path
+        self._revision = revision
+        self._volume = volume
+
+        if volume is None:
+            self.image_label.setText(message or "无地震数据或无法解析")
+            self.slider.setMaximum(0)
+            self.slider.setEnabled(False)
+            self.type_combo.setEnabled(False)
+            self.index_label.setText("0 / 0")
+            return
+
+        self.type_combo.setEnabled(True)
+        self.slider.setEnabled(True)
+        self._update_slider_range()
+        self._render_slice()
+
+    def _on_type_changed(self, index: int) -> None:
+        self._update_slider_range()
+        self._render_slice()
+
+    def _on_slider_changed(self, value: int) -> None:
+        if self._volume is not None:
+            self.index_label.setText(f"{value} / {self.slider.maximum()}")
+            self._render_slice()
+
+    def _update_slider_range(self) -> None:
+        if self._volume is None:
+            return
+        idx = self.type_combo.currentIndex()
+        max_val = self._volume.shape[idx] - 1
+        self.slider.setMaximum(max(0, max_val))
+        self.slider.setValue(max(0, max_val // 2))
+        self.index_label.setText(f"{self.slider.value()} / {self.slider.maximum()}")
+
+    def _render_slice(self) -> None:
+        if self._volume is None:
+            return
+
+        idx = self.type_combo.currentIndex()
+        val = self.slider.value()
+
+        if idx == 0:
+            slice_data = self._volume[val, :, :].T
+        elif idx == 1:
+            slice_data = self._volume[:, val, :].T
+        else:
+            slice_data = self._volume[:, :, val]
+
+        slice_data = np.nan_to_num(slice_data, nan=0.0, posinf=0.0, neginf=0.0)
+        min_val = slice_data.min()
+        max_val = slice_data.max()
+        if max_val > min_val:
+            norm = ((slice_data - min_val) / (max_val - min_val) * 255.0).astype(np.uint8)
+        else:
+            norm = np.zeros(slice_data.shape, dtype=np.uint8)
+
+        norm = np.ascontiguousarray(norm)
+        height, width = norm.shape
+        self._last_norm = norm  # Keep memory alive for QImage
+        qimg = QImage(norm.data, width, height, width, QImage.Format.Format_Indexed8)
+
+        if not hasattr(self, "_color_table"):
+            self._color_table = None
+            try:
+                import matplotlib.pyplot as plt
+                from PySide6.QtGui import qRgba
+                cmap = plt.get_cmap("seismic")
+                self._color_table = [qRgba(*(int(c * 255) for c in cmap(i / 255.0))) for i in range(256)]
+            except Exception:
+                pass
+        
+        if self._color_table:
+            qimg.setColorTable(self._color_table)
+
+        pixmap = QPixmap.fromImage(qimg)
+        scaled_pixmap = pixmap.scaled(
+            max(self.image_label.width() - 4, 10),
+            max(self.image_label.height() - 4, 10),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.image_label.setPixmap(scaled_pixmap)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._render_slice()
+
+    def apply_settings(self, settings) -> None:
+        font = self.font()
+        font.setPointSize(settings.font_size)
+        self.setFont(font)
 
 
 class ImagePreviewWidget(QLabel):
@@ -213,6 +475,15 @@ class ImagePreviewWidget(QLabel):
         self._path = ""
         self._revision: tuple[object, ...] | None = None
         self._pixmap: QPixmap | None = None
+        self.transformation_mode = Qt.TransformationMode.SmoothTransformation
+
+    def apply_settings(self, settings) -> None:
+        self.transformation_mode = (
+            Qt.TransformationMode.SmoothTransformation
+            if settings.smooth_images
+            else Qt.TransformationMode.FastTransformation
+        )
+        self.render_current()
 
     def load(
         self,
@@ -241,7 +512,7 @@ class ImagePreviewWidget(QLabel):
                 max(self.width(), 240),
                 max(self.height(), 180),
                 Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+                self.transformation_mode,
             )
         )
 
@@ -266,6 +537,8 @@ class PdfPreviewWidget(QWidget):
         self._load_pending = False
         # Keep buffer alive for the lifetime of a QPdfDocument loaded from bytes.
         self._source_buffer: QBuffer | None = None
+        self.fit_mode = "page"
+        self.zoom_percent = 100
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -298,6 +571,23 @@ class PdfPreviewWidget(QWidget):
             self.page_label.setText("0 / 0")
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
+
+    def apply_settings(self, settings) -> None:
+        self.fit_mode = settings.pdf_fit_mode
+        self.zoom_percent = settings.pdf_zoom_percent
+        if self.pdf_view is None or QPdfView is None:
+            return
+        # Lightweight test/embedding backends may only expose navigation.
+        # Keep PDF loading usable even when zoom controls are unavailable.
+        if not hasattr(self.pdf_view, "setZoomMode") or not hasattr(QPdfView, "ZoomMode"):
+            return
+        if self.fit_mode == "page":
+            self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitInView)
+        elif self.fit_mode == "width":
+            self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        else:
+            self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
+            self.pdf_view.setZoomFactor(self.zoom_percent / 100.0)
 
     def load(
         self,
@@ -476,6 +766,17 @@ class GeoTiffPreviewWidget(QWidget):
         self.summary_table = TablePreviewWidget()
         layout.addWidget(self.summary_table)
         self._pixmap: QPixmap | None = None
+        self._transformation_mode = Qt.TransformationMode.SmoothTransformation
+
+    def apply_settings(self, settings) -> None:
+        self.summary_table.setVisible(settings.show_geo_metadata)
+        self.summary_table.apply_settings(settings)
+        self._transformation_mode = (
+            Qt.TransformationMode.SmoothTransformation
+            if settings.smooth_images
+            else Qt.TransformationMode.FastTransformation
+        )
+        self._render_thumbnail()
 
     def load(
         self,
@@ -506,7 +807,7 @@ class GeoTiffPreviewWidget(QWidget):
                 max(self._image_label.width(), 240),
                 max(self._image_label.height(), 160),
                 Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+                self._transformation_mode,
             )
         )
 
@@ -532,8 +833,23 @@ class JsonTreePreviewWidget(QTreeView):
         self._model.setHorizontalHeaderLabels(["键", "值/类型"])
         self.setModel(self._model)
         self.expanded.connect(self._on_expanded)
+        self.array_collapse_threshold = 100
+        self.expand_depth = 2
+        self._payload: object | None = None
+        self._truncated = False
+
+    def apply_settings(self, settings) -> None:
+        self.array_collapse_threshold = settings.json_array_collapse_threshold
+        self.expand_depth = settings.json_expand_depth
+        font = self.font()
+        font.setPointSize(settings.font_size)
+        self.setFont(font)
+        if self._payload is not None:
+            self.load_payload(self._payload, self._truncated)
 
     def load_payload(self, payload: object, truncated: bool = False) -> None:
+        self._payload = payload
+        self._truncated = truncated
         self._model.clear()
         self._model.setHorizontalHeaderLabels(["键", "值/类型"])
         root = self._model.invisibleRootItem()
@@ -544,10 +860,9 @@ class JsonTreePreviewWidget(QTreeView):
             root.appendRow(self._build_row("[root]", payload))
         else:
             root.appendRow(self._build_row("[root]", payload))
+        self._expand_initial_depth()
 
     def _build_row(self, key: str, value: object):
-        from paleo_workbench.ui.pages.preview_provider import JSON_ARRAY_COLLAPSE_THRESHOLD
-
         key_item = QStandardItem(key)
         if isinstance(value, dict):
             val_item = QStandardItem(f"{{object · {len(value)} keys}}")
@@ -556,7 +871,7 @@ class JsonTreePreviewWidget(QTreeView):
                 key_item.appendRow(self._build_row(str(k), v))
             return [key_item, val_item]
         if isinstance(value, list):
-            if len(value) > JSON_ARRAY_COLLAPSE_THRESHOLD:
+            if len(value) > self.array_collapse_threshold:
                 # Collapsed placeholder: store the full list for lazy expansion.
                 # The expanded-signal handler materializes children on demand.
                 val_item = QStandardItem(f"[{len(value)} items]")
@@ -574,6 +889,18 @@ class JsonTreePreviewWidget(QTreeView):
         val_item.setEditable(False)
         key_item.setEditable(False)
         return [key_item, val_item]
+
+    def _expand_initial_depth(self) -> None:
+        def visit(parent, depth: int) -> None:
+            if depth >= self.expand_depth:
+                return
+            for row in range(self._model.rowCount(parent)):
+                index = self._model.index(row, 0, parent)
+                if self._model.hasChildren(index):
+                    self.expand(index)
+                    visit(index, depth + 1)
+
+        visit(self.rootIndex(), 0)
 
     def _on_expanded(self, index):
         """Lazily populate children for a collapsed-array node on first expand."""
@@ -595,6 +922,7 @@ class MediaPreviewWidget(QWidget):
         super().__init__(parent)
         self._player = QMediaPlayer(self) if QMediaPlayer is not None else None
         self._audio_out = QAudioOutput(self) if QAudioOutput is not None else None
+        self.autoplay = False
         if self._player is not None and self._audio_out is not None:
             self._player.setAudioOutput(self._audio_out)
             self._audio_out.setVolume(0.8)
@@ -641,6 +969,10 @@ class MediaPreviewWidget(QWidget):
         self._player.durationChanged.connect(self._on_duration)
         self._player.errorOccurred.connect(self._on_error)
 
+    def apply_settings(self, settings) -> None:
+        self.autoplay = settings.media_autoplay
+        self.volume_slider.setValue(settings.media_volume)
+
     def stop(self) -> None:
         """Stop playback when leaving the media preview (asset switch / loading)."""
         if self._player is None:
@@ -665,6 +997,9 @@ class MediaPreviewWidget(QWidget):
         self.status_label.setText("就绪")
         self.play_btn.setEnabled(True)
         self.play_btn.setText("播放")
+        if self.autoplay:
+            self._player.play()
+            self.play_btn.setText("暂停")
 
     def _toggle_play(self) -> None:
         if self._player is None:

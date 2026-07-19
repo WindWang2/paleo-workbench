@@ -991,3 +991,267 @@ Workbench **hosts** engine product surfaces; does not reimplement parse/render.
 - 计划自审通过：选定范围的启动/取消/托管/stale/正常结果顺序均有 RED 契约；无 engine 或业务算法变更。
 - 隔离 worktree 的首次 `submodule update --init` 失败：远端缺少父仓锁定的 `957cb3f5` 对象，但主工作区 engine 本地仓库拥有该 commit。已从精确本地仓库 fetch 并 detached checkout 到同一 SHA；这再次说明该 engine commit 尚未推送，属于 clean-clone 交付风险，但不改变 Phase 30 的 workbench-only 边界。
 - Phase 30 组合 baseline 在约 70% 后复现既有 Qt quiet-run 无输出 stall；此前已通过 Phase 29 节点隔离证明该类问题来自长寿命 pytest Qt 全局状态，而非单节点确定性失败。本轮基线改为 Preparation/Mapping、Data、Preview、Stress 四个独立进程。
+-
+## Phase 31 — 跨页项目数据流设计（初始记录）
+
+- 用户明确要求重点关注编图页和制备页的数据读入/输出，及其与 `.paleo.json` 项目文件、数据页项目数据之间的关联。
+- 当前先将问题限定为一条端到端数据契约：原始资产登记、制备派生、编图编辑、成果导出与回流；需要以现有实现证据确认每个边界，不能先假设重写。
+- `/brainstorm` 设计门禁已生效：本阶段仅审计与设计，不修改业务代码；最终设计只写入根目录三份 PWF 文件。
+- GUI 手工体验进程仍在既有终端会话中运行；本设计审计不干扰该进程。
+
+### 第一轮代码证据
+
+- 持久化对象图已有部分 lineage：`WellTable.source_resource_ids`、`FactorMapTask.input_resource_ids/output_resource_ids/well_table_id/input_snapshot_hash`、`ContourDraft.linked_factor_task_id/linked_map_document_id`、`PaleoMapDocument.linked_contour_draft_id`、`ExportArtifact.linked_id/source_task_ids`。
+- 数据页展示的原始资源与导出物直接取自同一个 `ProjectDocument.resources/export_artifacts`；导入完成后扩展 live project，再通过 `update_state()` 刷新表格与预览，因此不是独立数据库。
+- 制备页 Worker 使用项目快照计算，完成后在 GUI 线程替换 `factor_map_tasks` 或提交 `contour_drafts/paleomap_documents`；编图页也提供了一套等值线生成入口，二者复用 Worker/commit 服务，但页面触发与提示仍有重复。
+- 编图页面把 `PaleoMapDocument` 作为已提交状态，把 `MapEditScene` 作为未提交编辑态；壳层刷新同一对象时会保护 dirty scene，项目保存前是否统一 flush 仍需继续核对。
+- `.paleo.json` 保存具有原子替换，但路径规范化只显式覆盖 `resources`、`export_artifacts`、`reference_layers`；若专业计算参数或派生元数据中藏有文件路径，当前没有统一路径引用类型。
+- 当前主要架构缺口不是“没有模型”，而是缺少统一的资产/派生结果提交协议：稳定身份、来源版本、结果失效、项目 dirty、输出登记与下游重新绑定尚未由一个服务集中保证。
+
+### 用户确认
+
+- 用户选择“项目单一事实源”方案：页面可以有暂存态，但只有经过确认提交的结果才进入 live `ProjectDocument` 和后续 `.paleo.json` 保存链路。
+- 用户进一步限定制备页业务：同一项目需要制备多种单因素图，因此页面信息架构、任务组织和下游编图关联都要以“因素实例”为基本单位调整。
+
+### 多因素制备实现差距
+
+- `DEFAULT_FACTOR_TYPES` 目前固定为地层厚度、砂岩含量、砂地比、泥岩含量，但模型的 `factor_type: str` 没有限制扩展类型。
+- `FactorTaskPanel` 只显示不可交互任务行；全页只有一个 `method_combo`，触发 `batch_prepare_factor_maps()` 后会对项目全部任务采用同一方法。
+- `PreparationPage._resolve_display_well_table()` 取第一张井表，QC 在没有明确关联时也以第一项任务为回写目标；这会让多因素的字段选择、缺失值、异常值和砂地比约束混在一起。
+- `FactorPreviewGrid` 仅展示完成任务的摘要卡，不能进入单因素详情、比对输入版本、查看失败原因或选择推送编图的特定成果。
+- 制备成果网格留在任务 `parameters` 中，数据页只统一展示 `resources/export_artifacts`，因此“制备输出回流数据页”当前并未闭环。
+
+### 因素目录决策
+
+- 用户选择混合因素目录：内置标准模板保证地层厚度、砂岩厚度/含量、砂地比、泥岩含量等专业因素的字段语义、单位与 QC；同时允许新增孔隙度、渗透率、古水深等自定义因素。
+- 该决策要求把“因素定义”与“某层位下的一次因素制备任务”分开，避免把模板规则重复写入每个页面和 Worker。
+
+### 制备输入绑定决策
+
+- 用户确认所有制备输入先进入项目资产目录：无论从数据页还是制备页选择文件，都复用同一导入/去重/路径相对化链路。
+- 因素任务通过稳定 `resource_id` 和字段映射消费数据；文件路径只属于 `ResourceItem`，从而让项目移动、另存和重开后的引用仍可解析。
+- 计算 Worker 应接收由资源版本、字段映射、层位和参数组成的不可变输入快照；完成时校验快照仍为当前版本，再允许提交。
+
+### 制备成果版本决策
+
+- 用户确认每次成功且经确认的因素计算生成不可变成果版本；大型网格/预览放项目 artifacts 目录，`.paleo.json` 只保存元数据、校验和、来源快照和相对路径。
+- `FactorMapTask` 应作为长期任务身份，指向 active result version；`PaleoMapDocument`/参考图层固定引用某个 result version，而不是动态追随“最新版”。
+- 新版本出现时，编图显示“有更新可用”，由用户显式切换；旧版本仍可复现，避免地图无提示变化。
+
+### 总体架构路线确认
+
+- 用户确认采用项目资产图方案，不采用页面最小补丁或完整事件溯源。
+- 为兼容现有工程，设计应增量扩展现有模型：原始资源继续使用 `ResourceItem`，长期因素任务继续使用 `FactorMapTask`，重点新增因素定义、不可变结果版本和集中提交服务。
+- 专业插值与栅格输出继续下沉 geo-viz-engine；workbench 的服务层负责任务快照、项目 lineage、artifact 写入和提交事务，页面仅负责交互。
+
+### 多因素制备页设计提案
+
+- 用户已批准总体架构边界，制备 UI 应围绕“选择因素 → 绑定项目资产/字段 → 因素级 QC/参数 → 异步试算 → 预览 → 采用不可变版本”组织。
+- 为兼顾专家批量效率与单因素差异，左侧采用可多选任务导航，右侧保存任务级配置；批量默认参数可以覆盖未自定义任务，但不能静默替换已定制参数。
+- 计算成功不立即覆盖项目 active result；待采用结果与已提交版本必须视觉区分，取消或失败不改变已有可用成果。
+- 现有首张井表/首项任务假设必须移除，所有表格、QC、约束和预览均由当前 `factor_task_id` 与其显式关联解析。
+## Phase 32 — 统一预览设置面板（初始假设）
+
+- 用户要求所有预览格式共享一个内容设置面板，并授权直接采用推荐默认值执行到底。
+- 推荐持久化边界是用户级 `QSettings`：预览表现是本机查看偏好，不应污染项目业务文档或导致项目保存提示。
+- 设置必须进入预览请求身份/缓存键；否则修改内容上限、分页或渲染参数后可能命中旧缓存。
+- 本阶段先按真实代码盘点支持模式与渲染宿主，再固定字段，避免面板出现没有消费者的伪设置。
+- 用户“直接执行到结束”的授权覆盖 brainstorming 的交互确认步骤，但不取消设计自审和 TDD；推荐方案视为已批准。
+
+### 第一轮预览代码证据
+
+- `PreviewMode` 包含 `geoviz/pdf/image/text/table/well_log/seismic/rich_text/json_tree/geotiff/media/web_document`，另有 `empty/message` 状态；设置面板应覆盖实际内容模式，空态/错误态无需独立设置。
+- Provider 的读取/解析限制均是模块常量，适合由不可变 `PreviewSettings` 快照替代；默认值可保持当前行为，降低回归风险。
+- 异步控制器已有 generation 丢弃陈旧结果机制，但同一资产设置变化仍会命中旧 LRU/磁盘缓存，因此 settings fingerprint 必须同时进入两级缓存身份或设置变更时可靠清空。
+- 推荐双保险：内存 cache key 加 settings fingerprint；设置应用时递增 generation、清 pending、清两级缓存并重发当前资产。磁盘缓存 schema/key 是否支持指纹仍需继续审计。
+- 设置 UI 放入 `DataReaderPanel` 内部比新增独立 AppShell 页面更符合范围：入口始终与预览同处，且不挤占数据表主区。
+
+### Host 与控件审计
+
+- `DataReaderPanel` 是所有非映射数据资产的统一 mode 分发点，并保留 `_current_result`；它可在不重新解析文件时应用纯显示设置，也可发信号让 DataPage 对内容设置重新请求。
+- `DataPage` 已保留 `_selected_asset` 并独占 `PreviewRequestController`，因此 settings change → controller update → request current asset 可在一个页面闭环，无需 AppShell 全局协调。
+- `LocalVisualizationProvider` 当前固定调用 `engine.prepare(request, PreviewOptions.local())`；专业预览限制应从统一设置映射为 `PreviewOptions`，磁盘缓存已有 options fingerprint 结构，可参数化而无需重写格式。
+- `GeoVizPreviewHost` 只负责 PreparedPreview 的 UI-thread widget 生命周期；计算内容设置应在 prepare 前生效，Host 不应重复实现专业解析参数。
+- 普通 widgets 已集中在 `preview_widgets.py`：文本/富文本、表格/摘要、图片、PDF、JSON、GeoTIFF、媒体均有稳定控件实例，可增加 `apply_settings()` 而不重建页面。
+- 推荐默认值保持当前解析上限，并采用安全显示默认：文本不换行、图片平滑适配、PDF适合整页、JSON展开两层、媒体不自动播放/音量70。
+
+### 设置持久化与快照 API
+
+- 代码库没有既有 `QSettings` 使用或 QApplication organization/application 命名；Store 必须自行使用稳定 namespace，并允许依赖注入，才能进行隔离测试。
+- `PreviewOptions.local()` 的准确默认是 max_curves=12、max_depth_samples=2000、max_slice_axis=512、max_points=50000、surface_grid_size=256；统一设置默认直接复用这些值。
+- Provider 不能只持有可变 `self.settings`：旧 Worker 可能在切换后读取新设置，却把结果写入旧 cache key。请求必须显式携带 frozen settings snapshot，使 key、Worker 与结果属于同一配置版本。
+- `PreviewDiskCache` 已把 PreviewOptions 纳入 key，但目前硬编码 `PreviewOptions.local()`；改为实例持有当前 options 即可保持不同设置的磁盘条目隔离。
+- `MediaPreviewWidget` 当前音量默认80；新推荐默认70，并保持 autoplay=false，以避免切换资产时突然播放。
+
+### 兼容性与 fallback 结论
+
+- 现有 `SlowProvider/DelayedProvider/FailingProvider` 等扩展均覆盖 `preview(asset)`；若 Worker 改为传 `settings=` 会造成 TypeError。采用 `with_settings()` 浅拷贝快照可保持旧接口并让内置 Provider 读取 frozen settings。
+- 浅拷贝仅复制 Provider 外壳，GeoViz engine 仍共享；Worker 当前严格串行，因此不会增加 engine 并发风险。
+- fallback 中 SpreadsheetML、ZIP 目录属于用户可见内容数量，应服从统一文本/表格设置；ZIP结构、内嵌图片、中央目录限制属于安全防线，不能由设置面板调大。
+- 现有测试覆盖 Provider 纯度、bounded reads、异步 last-wins、ReaderPanel Host 生命周期和 cache LRU，可在这些契约上增量 TDD，无需重写测试体系。
+
+### TDD 记录
+
+- `T-PREVSET-01 RED-1`：`tests/test_preview_settings.py` 因 `ModuleNotFoundError: paleo_workbench.ui.pages.preview_settings` 收集失败，准确证明默认配置模块尚不存在。
+- `T-PREVSET-01 GREEN-1`：最小 frozen dataclass 提供完整推荐默认字段，定向测试 1 passed。
+- `T-PREVSET-01 RED-2`：新增校验、mapping/fingerprint、GeoViz options 与 QSettings round-trip/reset 契约；因 `PreviewSettingsStore` 不存在而收集失败，符合功能缺失预期。
+- `T-PREVSET-01 GREEN-2`：`PreviewSettings` 完成强类型/范围校验、mapping、16位稳定 fingerprint、GeoViz options 映射；Store 完成注入式 QSettings round-trip/reset，定向 5 passed。
+- PWF 同步曾因 Issue 清单锚点未匹配失败 1 次；改用 `rg` 精确定位当前文本后成功更新，未影响业务代码或测试。
+- `T-PREVSET-02 RED-1`：Provider 快照、文本/表格/ZIP限制、JSON超限和 GeoViz options 共 5 项均因 `with_settings` 缺失失败；已有配置 5 项保持通过。
+
+### Provider 细节
+
+- `_read_preview_chunk`、CSV、Excel dataframe、LAS 曲线、Markdown/HTML、GeoTIFF decimation 全部直接引用模块常量，需统一改为 `self.settings`，默认仍与旧常量等值。
+- JSON 当前先 `read_bytes()` 整文件，再按 5 MiB 截断并 `json.loads()`；既违背有界读取，也可能将合法大 JSON 误报为解析错误。新实现应先 stat/有界读取，超限直接给出可恢复提示。
+- 现有 JSON 测试只覆盖正常小文件和 Widget 展示，没有依赖“截断后解析”这一不可靠行为，允许安全修正。
+- JSON array collapse 属于 Widget 展示策略而非 Provider 解析策略，应由 `JsonTreePreviewWidget.apply_settings()` 接收阈值与初始展开深度。
+- `T-PREVSET-02 GREEN-1`：Provider 浅拷贝 settings snapshot 已贯穿文本、HTML/Markdown、CSV/Excel/LAS、SpreadsheetML/ZIP、JSON、GeoTIFF 与 GeoViz；相关 69 项测试通过。
+- JSON 超限路径现使用 stat + 有界读取，超过设置上限时给出可恢复提示，不再整文件读取或把截断 JSON 误报为格式损坏。
+- 第二次 PWF 同步也因组合补丁中的 Issue 锚点未匹配失败；已停止修改该行，改为只更新精确定位的任务行并追加日志，避免第三次同类尝试。
+- `T-PREVSET-03 RED-1`：settings fingerprint 参数、disk options 参数和 Controller settings 构造/更新接口均按预期缺失；结果 3 failed、10 passed。
+- `T-PREVSET-04 RED-1`：面板 apply/persist、22字段 round-trip、reset/default 和13种 mode→category 契约因目标模块不存在而收集失败，符合预期。
+- `T-PREVSET-04 FAIL-1`：面板实现后16项均在构造时因不存在的 `tokens.BG_PANEL` 失败；应使用现有 `BG_SIDEBAR`，行为逻辑尚未执行。
+- `T-PREVSET-04 GREEN-1`：改用既有 `BG_SIDEBAR` 后 16 passed；面板完整覆盖22字段、8类别、13种 mode 映射、apply/store 与 reset/default。
+- `T-PREVSET-05 RED-1`：普通 Widgets 缺少 `apply_settings()`，ReaderPanel 缺少 `settings_store` 注入/面板入口；3项按预期失败。
+- `T-PREVSET-05 GREEN-1`：各预览 Widget 已统一实现 `apply_settings()`，ReaderPanel 注入 Store、嵌入按格式分类的设置面板并同步 Provider/显示状态；定向测试 `3 passed in 0.81s`。
+- `T-PREVSET-06 AUDIT`：`DataPage` 当前创建 Controller 时未传 Reader 的设置快照，也未监听 `preview_settings_changed`；选中资产的唯一预览入口是 `_preview_controller.request(asset)`，因此正确接线应在设置变更时先 `set_settings()` 失效旧 generation，再重请求 `_selected_asset`，无需改动 ProjectDocument 或项目资产身份。
+- `T-PREVSET-06 RED-1`：设置变更信号测试失败于 Controller 仍保留旧 `text_limit_kib=256`，且未重请求选中资产，准确证明 DataPage 接线缺失。
+- `T-PREVSET-06 IMPLEMENTATION NOTE`：Controller `set_settings()` 本身负责 generation+1、清 pending、清内存缓存和更新磁盘缓存 options；DataPage 仅需传入初始 Reader settings，并在返回 `True` 时调用既有 `request(_selected_asset)`，避免重复实现生命周期逻辑。
+- `T-PREVSET-06 GREEN-1`：DataPage 以 Reader settings 初始化 Controller，并监听变更；新设置先使旧代次失效，再重请求当前资产。定向 `1 passed in 1.37s`。
+- `T-PREVSET-06 REGRESSION FAIL-1`：可见预览域首次回归 `3 failed, 82 passed`；三项均为测试/嵌入用 FakePdfView 不具备新 `setZoomMode/ZoomMode`，并非真实 PDF 加载失败。修复策略是在可选后端缺少缩放 API 时保留加载与导航能力，仅跳过设置缩放。
+- `T-PREVSET-06 REGRESSION GREEN-1`：PDF后端能力降级后，可见设置/Panel/Reader/Widgets `85 passed`；Provider/fallback/GeoViz/cache/disk/strategy `92 passed, 1 lasio deprecation warning`。
+- `T-PREVSET-06 ASYNC PLAN`：异步测试集中于 `tests/test_preview_async.py` 的27个函数（含参数化共31项）；鉴于此前单进程整文件在Qt teardown出现过一次segfault，继续按前14函数/后13函数两个独立进程覆盖，避免测试框架跨用例析构噪声掩盖业务断言。
+- `T-PREVSET-06 ASYNC GREEN`：两个独立进程分别 `17 passed`、`14 passed`，完整覆盖31项；设置代次、last-wins、资产快照、shutdown、media preload与缓存生命周期均通过。
+- `T-PREVSET-06 DATA GREEN`：DataPage + DataWorkspace `57 passed, 1 lasio deprecation warning`；compileall 与 `git diff --check` 均 exit 0。工作区中既有 `SCRATCH/` 与五个 docs plan 保持未跟踪、未触碰。
+- `T-PREVSET-06 SELF-REVIEW-1`：配置模型/面板、Reader、Provider、Controller与缓存diff未发现项目数据身份旁路；设置持久化明确独立于 `.paleo.json`，而资产读取仍使用同一个 ResourceItem/ExportArtifact。需进一步核对 JSON 大数组 lazy expand 与 QPdfView 实际枚举能力后再全量。
+- `T-PREVSET-06 SELF-REVIEW-2`：运行时 introspection 确认本机 QPdfView 同时具备 `Custom/FitInView/FitToWidth`、`setZoomMode`、`setZoomFactor`；兼容分支合理。JSON 大数组 lazy materialization 是既有实现并已有独立测试，本次仅将固定阈值参数化，不扩大重构范围。
+- `T-PREVSET-06 FULL GREEN`：最终 `QT_QPA_PLATFORM=offscreen pytest -q` 返回 exit 0：`1051 passed, 4 skipped, 2 warnings in 49.69s`；warnings 仅为 lasio/pkg_resources deprecation 与 GDAL exception-policy future warning。
+- `T-PREVSET-06 DELIVERY GATES`：已完整读取 requesting-code-review 模板与 verification-before-completion；因改动尚未提交，独立 reviewer 将以 HEAD `6b32b975` 对当前工作区 diff + 明确的新文件做只读审查，忽略既有无关 untracked。
+- `T-PREVSET-06 REVIEW`：独立审查无 Critical；两个 Important 为（1）WebDocumentPreviewWidget 懒创建后首次加载前未应用当前 settings；（2）GeoTIFF decimation 向下取整且 decim=1 时仍选 overview，可能超目标或无谓降质。另提醒新增模块/测试处于 untracked，交付清单必须明确，用户未授权故不擅自 commit。
+- `T-PREVSET-06 REVIEW FIX PLAN`：Web 回归需扩展现有隔离子进程 FakeWebWidget，记录 apply_settings 并断言先应用持久设置；GeoTIFF 回归用真实 rasterio 生成 513×257 栅格并检查PNG长边≤256，再生成带overview的64×32小图检查仍保留原尺寸。算法改为 `ceil(long_side/target)`，且仅 decim>1 时选择合适overview。
+- `T-PREVSET-06 REVIEW RED`：三个 reviewer 回归均准确失败：Web事件只有load无settings；511×257缩略图仍为511×257；64×32带overview小图被降至32×16。证明审查意见可复现。
+- `T-PREVSET-06 REVIEW GREEN`：Web懒创建立即应用当前settings再load；GeoTIFF使用整数ceil降采样且仅decim>1选择overview。三个回归 `3 passed, 4 NotGeoreferenced warnings`。
+- `T-PREVSET-06 RE-REVIEW`：Web项确认解决；GeoTIFF仍有“所需倍率大于最大overview却回退最大overview”的 Important。首轮最终全量同时发现既有隔离 FakeWebWidget 无apply_settings导致1失败（中止时583 passed），需能力检测保持嵌入兼容。已新增overview倍率不足回归。
+- `T-PREVSET-06 SECOND RED`：旧FakeWeb兼容与overview不足两节点 `2 failed`；最小修复为Web apply能力检测，以及仅在找到 `overview >= decim` 时替换计算倍率，否则保留严格ceil倍率。
+- `T-PREVSET-06 SECOND GREEN`：Web新/旧后端与GeoTIFF三种边界合计 `5 passed, 6 NotGeoreferenced warnings`。
+- `T-PREVSET-06 FINAL GREEN`：修复后的新鲜门禁 `python -m compileall -q paleo_workbench/ui/pages && git diff --check && QT_QPA_PLATFORM=offscreen pytest -q` 返回 exit 0：`1055 passed, 4 skipped, 8 warnings in 49.54s`。warnings 均为既知 deprecation/future 或测试栅格无地理参考提示。
+
+## Phase 33 — 对话框迁移初始判断
+
+- 用户明确指定应用工具菜单入口，设置应从 ReaderPanel 的局部展开区域移出；底层强类型配置和异步刷新链路无需变化。
+- 推荐采用“菜单只发请求信号、应用控制层管理Dialog、DataPage应用设置”的边界，避免菜单直接查找页面子控件。
+- brainstorming 的设计确认由此前“推荐默认、不用问、直接执行”授权覆盖；本阶段仍记录候选路线、自审与TDD，不创建PWF体系外设计文档。
+- 当前 `MenuBar` 的“工具”只是 QLabel，不具备 QMenu；必须升级为按钮+菜单，而不是把 QAction 挂到不可交互标签。
+- `PaleoWorkbenchWindow._wire_menu_bar()` 会在每次 AppShell 重建后重新接线，适合连接工具菜单；Dialog由Window持有并在回调中动态读取 `self.app_shell`，可避免打开/新建工程后指向已销毁DataPage。
+- `PreviewSettingsPanel` 已封装全部字段、Store持久化与reset/apply信号，Dialog只做容器和窗口语义；Reader不再依赖Panel，但继续从相同Store读取启动设置。
+- `T-PREVDLG-01 RED-1`：两个菜单节点因 `tools_menu_button` 与 `preview_settings_requested` 均不存在而失败，准确证明当前工具项不可交互。
+- `T-PREVDLG-01 GREEN-1`：真实工具QMenu、预览设置action和语义signal完成；菜单全文件 `6 passed`。
+- `T-PREVDLG-02 RED-1`：Dialog的modal/context/apply/reset三个契约因目标模块不存在而收集失败，符合预期。
+- `T-PREVDLG-02 GREEN-1`：Dialog复用Panel/Store；应用转发设置并accept，reset转发默认但保持打开；`3 passed`。
+- `T-PREVDLG-03 RED-1`：Reader仍含settings_panel；Window无 `_preview_settings_dialog` 且工具信号未接线。3项分别按预期失败，覆盖局部UI移除、当前mode同步和shell重建后动态应用。
+- `T-PREVDLG-03 GREEN-1`：Reader瘦化、菜单打开、当前mode同步、应用后DataPage Controller更新及shell重建动态路由均通过；定向3项、菜单/Dialog/Reader集成域70项全绿。
+- `T-PREVDLG-04 SELF-REVIEW`：全仓搜索确认生产代码无残留Reader `settings_panel/settings_button/_on_settings_applied` 引用；Panel现在仅被Dialog组合。Window回调始终在调用时读取当前 `self.app_shell.data_page`，Dialog跨shell重建安全；QSettings仍为唯一持久化源。
+- `T-PREVDLG-04 REGRESSION-1`：DataPage/ProjectLifecycle/AppShell `89 passed, 1 lasio warning`；全包compileall与`git diff --check` exit 0。新Dialog文件和Phase32设置文件仍为task-created untracked，最终交付需明确但不擅自commit。
+- `T-PREVDLG-04 REVIEW`：独立审查0 Critical；行为Important为Window集成测试使用生产Store导致真实QSettings被写font_size=21，必须注入临时Store。交付Important为新Dialog/测试尚未tracked（用户未要求git add/commit，最终明确列出）；Minor为ToolsMenuButton缺统一样式、未测reject丢弃暂存编辑。
+- `T-PREVDLG-04 REVIEW RED`：临时Store注入与Tools按钮样式两个节点 `2 failed`；分别为Window构造器无注入参数、QSS无Tools选择器。检查生产配置发现除font_size=21外其余均为推荐默认，可确认该值由本轮测试污染，修复测试后恢复为12。
+- `T-PREVDLG-04 REVIEW GREEN`：Window临时Store注入与Tools统一样式 `2 passed`；真实QSettings的测试污染已从font_size=21恢复为推荐默认12，后续集成测试只写tmp_path INI。
+- `T-PREVDLG-04 FINAL`：reviewer复核行为Critical/Important清零；compileall、`git diff --check`、全量offscreen pytest均exit 0，最终 `1063 passed, 4 skipped, 8 warnings in 57.93s`。新Dialog及测试必须在未来提交时显式包含，当前未按用户未授权擅自stage/commit。
+- `RUN OBSERVATION`：上一GUI会话退出前，地震3D渲染重复报告 `pyqtgraph.opengl.shaders` 缺少 `compileShader`，调用点为 `geoviz_seismic/renderer_3d.py:522`；进程最终exit 0。该兼容缺陷未在本次“运行”请求中擅自修改，需后续单独诊断。
+
+## Phase 34 — 地震预览性能根因调查
+
+- 复现日志不是单次慢计算，而是GLViewWidget每次paint都调用 `getCustomShaderProgram()`；因编译函数AttributeError发生在缓存赋值前，下一帧继续重试并打印完整traceback，形成高频异常/I/O洪泛。
+- 当前环境 `pyqtgraph==0.14.0`；`pyqtgraph.opengl.shaders` 仅暴露 `ShaderProgram/VertexShader/FragmentShader/getShaderProgram`，不暴露旧式 `compileShader/compileProgram`。
+- 同一环境的 `OpenGL.GL.shaders` 明确提供 `compileShader/compileProgram`；renderer当前使用raw GL纹理、uniform、attrib和 `with program:` 语义，仍需核对PyOpenGL返回Program对象是否支持上下文管理。
+- geo-viz-engine工作树目前已有用户/前序改动，修复只触碰明确的renderer/test，禁止覆盖无关dirty内容。
+- PyOpenGL `compileProgram()` 返回支持 `with program:` 的 `OpenGL.GL.shaders.ShaderProgram(int)`，与现有paint用法兼容；方案A不会破坏program上下文协议。
+- pyqtgraph 0.14自身的 `opengl/shaders.py` 顶部也从 `OpenGL.GL` 导入内部名 `shaders`，其高层ShaderProgram最终仍调用PyOpenGL编译器；当前renderer误把pyqtgraph模块本身当成编译器。
+- 额外风险：当前实际上下文是OpenGL ES 3.2，ES3 shader源码中定义了使用legacy `texture3D` 的函数（虽主路径调用modern函数）；需通过真实GL context最小实验确认驱动是否拒绝，再决定是否需同时清理源码。未验证前不修改。
+- 真实GLES3.2 monkeypatch实验确认第二根因：切换到正确PyOpenGL编译器后，fragment shader在未使用的`compute_normal_legacy()`处仍编译失败，驱动报`texture3D` ambiguous。说明必须同时修正编译器命名空间与modern/legacy GLSL分支污染，否则只修import会把异常从AttributeError变为ShaderCompilationError。
+- 第一次独立实验仅因未设置engine PYTHONPATH而未导入包；第二次显式包路径后成功建立GLES3.2 context并得到上述编译证据，策略已改变，未机械重复。
+- 根因链已闭合：错误模块API → program未缓存 → 每帧重试；修正API后现代shader含legacy符号 → 仍无法缓存。两者均位于engine renderer，不应在workbench页面做节流补丁。
+- `T-SEISPERF-01`测试文件已写入，但从`geo-viz-engine`根目录直接执行时，当前环境没有把`packages/geoviz_seismic`加入Python搜索路径，故首次RED停在`ModuleNotFoundError`。后续定向/engine测试必须显式设置`PYTHONPATH=packages/geoviz_seismic`（必要时追加相关workspace packages），以确保失败来自功能契约而非测试入口。
+- 显式包路径后的功能RED已确认：`getattr(renderer, "gl_shaders", None)`为`None`。该失败与运行日志的`pyqtgraph.opengl.shaders.compileShader` AttributeError完全一致，测试确实锁定同一根因。
+- 最小实现已完成：现代GLES/desktop源码不再包含`texture3D/texture2D` legacy helper，旧版源码不再包含`texture()` modern helper；编译统一调用`OpenGL.GL.shaders`。Fake context验证同一item两次取program只编译一次。
+- PySide6的`QOpenGLWidget`位于`PySide6.QtOpenGLWidgets`而不是`QtWidgets`；首次真实验证脚本在导入阶段退出，没有形成新的shader失败证据。修正诊断脚本导入后再测同一目标。
+- 修正诊断脚本后，真实GLES3.2驱动成功编译清理后的shader，返回program 3；再次调用返回同一PyOpenGL ShaderProgram对象。此前每帧重编译/异常的必要条件已消失。
+- engine地震渲染、视图、雕刻和山体阴影相关域24项全绿，说明编译器切换未破坏已有体渲染控制逻辑。
+- workbench从项目资产→GeoViz Provider→Host→Seismic View的预览链路124项全绿；本次engine修复无需改ProjectDocument或数据页资产身份，薄宿主边界保持不变。
+- 两个“单进程全量”门禁分别表现为engine在Qt poll长期等待、根套件在pytest-qt teardown段错误；均发生在大量GUI用例累积后的事件清理阶段，且没有shader traceback或业务断言失败。该仓此前已用分段async验证规避同类Qt teardown崩溃，因此本轮改用按文件批次的新进程策略，而不是机械重复全量命令。
+- 根测试前40个文件分成两个新进程后共358项全绿，包括此前单进程崩溃百分比覆盖的DataPage/Integration区域；支持“Qt对象跨大量文件累积析构”判断，而非本轮shader修复造成确定性崩溃。
+- 根测试前80个文件已在4个隔离进程覆盖557 passed、4 skipped，无断言失败或segfault。
+- 根测试前120个文件累计866 passed、4 skipped，预览异步、缓存、设置和项目生命周期均已在隔离进程稳定通过。
+- 根157个测试文件已全部覆盖，分段合计1063 passed、4 skipped，恰好等于Phase33单进程全量基线；没有遗漏测试文件，也没有新增失败。Qt teardown仅影响一次性超长组合进程。
+- Reviewer确认modern分支已清洁，但发现legacy GLES2与desktop分支的地平线采样仍写成generic `texture()`；这在GLSL ES 1.00/desktop 1.10–1.20不可用，即使雕刻关闭也会使整个shader编译失败。正确修复为两处`texture2D()`。
+- PyOpenGL `ShaderProgram`公开`check_linked()`；在绑定attribute后二次`glLinkProgram()`后调用该方法，可避免把二次链接失败的program写入缓存。测试同时将编译器断言从“属性存在”加严为与`OpenGL.GL.shaders`对象identity一致。
+- 实现时首次文本替换命中了modern GLES和legacy GLES两处；立即通过分支行号检查发现并纠正为精确矩阵：modern GLES/desktop=`texture()`，legacy GLES/desktop=`texture2D()`。未在错误中间态运行测试或交付。
+- Reviewer修复GREEN：Fake modern compiler identity/link/cache + GLES2/desktop legacy源码共3项通过；真实GLES3.2仍成功编译program=3且缓存identity保持true，`check_linked()`未引入driver回归。
+- Reviewer二次只读复核确认四分支纹理函数矩阵、PyOpenGL identity、link检查和缓存生命周期正确，Critical/Important均为0，Ready=Yes。真实legacy context未建立，但源码契约测试对本次函数名缺陷足够，真实现代GLES路径另有driver验证。
+- 最终workbench链路新鲜验证124项通过；源码扫描确认错误的pyqtgraph compiler import/call已彻底消失，generic horizon `texture()`只存在modern GLES3/desktop分支，legacy两处均由回归锁定为`texture2D()`。
+- 实际paint验证比单独编译更完整：Renderer3D真实显示、加载16³float32体、切换volume模式并处理30帧后，DualGLVolumeItem已缓存program=6；stderr只有pyqtgraph对GLES的通用RuntimeWarning，没有任何shader异常或每帧traceback。
+- 新发现的“地震三维体不显示”不是shader或数据读取失败；`SeismicView`初始化时 `_3d_mode_combo` 默认停在“正交切片”，而 `Renderer3D.load_volume()` 只会保留当前 `_mode`。在新会话里若没有显式切到“三维体”，volume item 会被正确创建但立即隐藏，表面表现就是 3D 区域空黑。
+
+## Phase 35 — 初始需求判断
+
+- 用户明确要求DAT、LAS等预览采用“数据列表在第一选项卡、可视化在第二选项卡”的渐进式界面；性能关键契约是第二选项卡未点击时不得启动重解析/渲染线程。
+- 当前目标不是简单延迟Widget显示：必须把重工作请求本身延后，并在资产切换/Reader关闭时复用现有generation与Owned Worker生命周期防陈旧结果。
+- 用户此前对预览设置目标授权“默认推荐、不用问、直接执行到结束”；本轮仍按superpowers记录候选设计和自审，但以当前明确请求作为双选项卡/懒启动设计批准，并遵守只用根三份PWF文件的更高优先级约束。
+- 当前`PreviewProvider.preview()`在一次后台请求中直接走`LocalVisualizationProvider`，LAS/SEG-Y/DAT若engine支持会先`engine.prepare()`并返回单一`mode="geoviz"`；这意味着资产选中时专业解析已经发生，Reader层“延迟创建Host”并不能防止后台重工作提前启动。
+- `DataReaderPanel`目前用一个`QStackedWidget`按mode显示单个widget；geoviz result会立即创建Host并render。它已有延迟import/Host创建、`_safe_clear_geoviz()`和稳定失败message状态，可作为双选项卡可视层基础，但请求触发必须上移到DataPage/Controller的新“可视化请求”入口。
+- `PreviewResult`已同时拥有summary/table字段和`engine_preview`，LAS fallback已生成摘要/曲线表；可复用DTO表达“轻量表格结果”，无需另建项目数据模型。DAT当前在基础Provider属于TEXT_FORMATS，但GeoViz engine也可能识别，需审计策略顺序决定哪些DAT启用双页。
+- `PreviewRequestController`已有generation、latest-only、settings快照和缓存；正确方向应复用它的worker契约或抽取请求purpose，避免Reader自行管理裸QThread。
+- `LocalVisualizationProvider._build_preview()`对任何engine-supported ResourceItem优先`engine.prepare()`，失败才调用基础Provider；因此LAS当前连轻量曲线表也被专业结果取代。要实现双页，必须提供明确的`preview_summary()`（绕过engine）与`preview_visualization()`（只走engine）两阶段契约。
+- Reader的`update_asset()`同步测试入口目前直接`provider.preview()`，DataPage生产路径走Controller；新设计需保留同步入口兼容，但生产懒启动信号不能让Reader自行直接读项目对象。推荐Reader接收轻量result，同时保存不可变资产快照/identity并发出“visualization_requested”，由DataPage路由到专用Controller。
+- `PreviewResult`的well_log/seismic模式已有`SummaryTablePreviewWidget`，最小UI可用一个只在可视化候选结果时出现的`QTabWidget`包住现有summary widget与懒加载容器；其他格式仍走原QStackedWidget，避免所有预览类型被无谓重构。
+- Controller当前一个实例只允许单线程、latest-only；若轻量表和可视化共用同一controller，则点击第二页会自然递增generation并替换结果，但结果返回后Reader无法区分“替换整个预览”还是“填充第二页”。最小清晰边界是第二个`PreviewRequestController`，使用仅执行engine prepare的provider；两个controller均由DataPage持有/关闭，互不阻塞。
+- 双controller必须共享同一资产selection generation语义：DataPage每次选择资产时先让visualization controller失效旧请求（可新增`invalidate()`而不启动任务），再请求summary；Reader发出的懒请求带不可变资产identity，DataPage只在identity仍等于当前选择时启动。
+- 可视化cache可继续使用现有key/settings fingerprint，第二次切回页同步命中；summary controller应改用基础PreviewProvider，否则仍会提前engine.prepare。Reader仍可保留LocalVisualizationProvider作可视化provider来源，DataPage分别注入其“summary facade”和“visualization facade”。
+- 已有async测试完整覆盖latest-only/cache/shutdown，Reader测试覆盖Host失败稳定态；新增测试应聚焦（1）选中LAS只调用summary；（2）首击visual tab才调用visual provider且loading留在第二页；（3）重复切tab只请求一次/命中缓存；（4）切资产使旧visual结果失效；（5）两个controller都shutdown。
+- GeoViz默认backends明确覆盖：LAS well_log、SGY/SEGY seismic，以及语义类型为well_head/time_depth/horizon/well_stratification的DAT；DAT `supports()`本身会读header，但比`prepare()`轻，仍不应在GUI线程反复调用。
+- DAT基础Provider当前按text展示，并非表格。用户要求“类似数据列表”，推荐新增通用有界DAT表格摘要解析：识别注释/header与首批数据行，按空白分列；若结构无法稳定识别则第一选项卡安全回退文本，不妨碍第二页专业可视化。
+- 引擎的`prepare()`纯解析可在线程执行，`create_widget/render/release`强制UI线程；现有分层正好符合懒任务要求：第二页点击→worker prepare→主线程Host render。
+- 一次广域`rg`误扫`web_dist/assets/index.js`导致输出超限；已收窄到engine.py和四个backend源文件，不再重复该搜索模式。
+- writing-plans自审后将Reader复杂度隔离到新`lazy_visualization_tabs.py`，避免继续膨胀已有420行Reader；该组件只管理tabs/局部状态/Host UI，不持有资产或线程。
+- DAT样例/测试表明格式含well_head、horizon、time_depth、well_stratification四种schema及大量注释/quoted token边界；基础轻量表只承诺有界列表展示，不重实现这些专业schema验证，专业判断继续由engine.supports/prepare负责。
+- worktree检测：当前`git_dir == git_common`且branch=main，不是隔离worktree；工作树有Phase32–34未提交依赖。用户此前已授权直接修改当前项目，故不创建会丢失这些依赖的新worktree，也不提交/stage。
+- Phase35相关6文件baseline单进程在约40%后于async wait发生Bus error，无断言失败；与已知Qt多文件累积析构问题同型。不能原样重跑，改用独立进程分段确认各域基线。
+- Task35.1两个Provider文件独立运行稳定全绿（36项）；现有RecordingEngine测试可直接扩展supports/prepare计数，现有bounded text/table测试可扩展DAT有界行为，无需新增测试文件。
+- DAT实际schema使用连续`#` header后跟数据行；井位/井分层有明确列名header，horizon用`# Field: N name`元数据，时深有`#TIME ...`。轻量解析策略锁定为：有界读取→shlex安全分词→从comment header中选择与首行宽度一致的最后候选列名；没有候选时生成“列1…列N”；数据行宽度不一致则回退text。
+- Task35.1功能RED准确成立：Local provider缺`preview_summary/preview_visualization`三项，结构化DAT仍走text。不可分列DAT回退text测试立即通过，因为这是需保持的现有行为而非新增能力，保留为重构防回归契约。
+- Task35.1最小实现：DTO仅新增bool capability；base Provider提供向后兼容两阶段默认；Local summary显式调用基础`_build_preview`以避免动态分派回engine；visualization单独supports/prepare。结构化DAT使用有界读取+shlex，宽度不稳定安全回退text。
+- Task35.1 Provider全文件41项通过。Task35.2测试应使用真实PreviewRequestController/OwnedWorkerJob与行为型RecordingProvider，只在disk facade边界用最小fake记录访问，避免断言mock存在或添加测试专用生产API。
+- `invalidate()`是生产所需生命周期API而非测试钩子：DataPage资产选择必须能使visual旧代次失效而不启动新任务；active worker继续合作式结束，其result因generation不匹配被丢弃。
+- Task35.2 RED在controller构造边界统一失败，尚未进入线程，说明测试先锁定公共API再验证路由/缓存/代次行为；实现后若下层断言失败可继续精确定位。
+- Task35.2最小实现用模块级`_build_for_request_kind`统一None/worker路由，避免三处重复分支；summary worker在判断`is_disk_cacheable`前短路，visual/default保持原disk行为。invalidate不强杀线程，只失效generation/pending。
+- preview_async全文件现收集35项，按互补-k两进程15+20完整覆盖；purpose路由、cache、media preload、latest-only、asset snapshot、shutdown和新invalidate均稳定通过。
+- Task35.3 RED验证普通text现有stack行为无需修改；三个新增行为分别在DataReader公共signal、组合tabs属性和局部visual render API处失败，适合由独立LazyVisualizationTabs组件一次收敛。
+- `LazyVisualizationTabs`已独立封装summary、prompt/loading/error、一次激活signal和惰性Host；Reader只负责结果路由、标题/警告与安全clear。直接geoviz兼容路径现在也落到双页并默认显示visual tab。
+- `T-PREVSET-03 FAIL-1`：实现后组合运行 settings/cache/disk/async 域，先出现 2 个失败，后在 `test_worker_uses_asset_snapshot` 等待 Controller idle 时发生 Qt segfault（exit 139），完整失败详情被崩溃截断。
+- 新策略：先单独运行 settings/cache/disk（不含 async）获得确定断言；再按测试节点隔离 async 契约。禁止原样重复组合命令。
+- 分段验证：settings/cache/disk 共 36 passed；新增运行中设置切换节点 1 passed。新 cache key、disk options 和 generation last-wins 功能本身已证实。
+- async `--maxfail=2` 精确定位两个失败：旧测试用 `make_preview_cache_key(asset)` 查默认 Controller 缓存时得到空指纹键。已将省略参数语义改为“推荐默认 fingerprint”，保留旧调用兼容。
+- 两个 cache 兼容失败节点复测 2 passed；async 文件收集为 31 项，后续按 16/15 分段，避免把多 QThread teardown 累积风险误判为单节点失败。
+- async 采用互补 `-k` 分段后 14 passed + 17 passed，完整覆盖31项且无崩溃；证明先前 exit139 是长组合进程的 teardown 累积，不是单个设置切换节点的可复现崩溃。
+## 2026-07-19 Phase 35 验证运行隔离
+
+- `tests/test_preview_async.py`整文件在同一Qt进程中可出现顺序相关挂起（本次19项后超过90秒无输出），而互补筛选的两个全覆盖进程为22+15全绿。该问题不是测试断言失败，也没有QThread destroyed日志；完成门禁必须使用独立进程分段，避免将Qt全局事件状态跨测试累积误判为产品逻辑回归。
+- 最终采用每个async节点一个独立Qt进程的最强隔离门禁，42/42节点全部exit 0；这覆盖新增cache/request双代次、DataPage两类clear-during-loading与错误重试语义，排除了单一功能节点的确定性失败。
+- 第三轮只读复核结论为0 Critical、0 Important、READY。复核确认压缩在epoch锁外、最终publish受guard保护、clear后旧epoch不可复活、UI结果仍按request generation交付。
+- 三项非阻断优化留档：LAS summary+visualization对超大文件仍有重复流式扫描；空LAS兼容依赖精确异常文本；超大/网络cache root的递归删除仍同步。它们不影响本轮“未点击不重解析”和并发正确性，后续宜用header元数据缓存、结构化错误码与rename后后台删除分别治理。
+- Phase35最终数据流：ProjectDocument/ResourceItem选择只触发summary controller→有界DAT/LAS列表→Reader Tab0；只有Tab1激活信号才由DataPage以同一当前ResourceItem快照启动visual controller→engine prepare→UI线程Host render。两个controller分别持有request generation，缓存另持cache epoch，因而选择变化可拒绝陈旧结果，清缓存又不会让当前页面永久loading。
+
+## Phase 36 — 首屏纯表格诊断
+
+- 用户所说“属性值”对应`SummaryTablePreviewWidget.summary_table`，该表固定以`("属性", "值")`渲染`PreviewResult.summary_rows`；下方`detail_table`才是LAS曲线列表、DAT字段列表等目标数据表。
+- 只需改变双选项卡首屏的组合组件，不应全局删除`SummaryTablePreviewWidget`的属性表：普通well_log/seismic单页预览及GeoTIFF元数据仍有独立既有语义。
+- 最小安全边界是在`LazyVisualizationTabs`中直接使用`TablePreviewWidget`承载`table_headers/table_rows`；text fallback保持TextPreviewWidget，第二页惰性请求不变。
+- 实现验证表明该边界成立：双页首屏不再消费`summary_rows/message`，但Provider仍可为普通单页预览保留这些DTO字段；项目资产、缓存键与线程generation均未改动。
+- Phase36完整根回归仍为`1091 passed, 4 skipped`。B段一次Qt Bus error通过stress文件独立5 passed + 其余144 passed闭环，E/async继续用既定逐进程隔离；无业务断言失败。
+- 最终UI语义：DAT/LAS等双页专业预览的Tab0只包含`table_headers/table_rows`，不再显示“属性/值”；普通非双页摘要组件保持原样，Tab1仍仅在用户激活后启动异步可视化。
+
+## Phase 37 — 可视化交互一致性初步调查
+
+- 引擎well backend的目标widget为`WellLogCanvas`，引擎seismic backend的目标widget为完整`SeismicView`；后二者都不是workbench复制实现。
+- `WellLogCanvas`和seismic `ProfileWidget`均定义mouse/wheel事件，`SeismicView`还定义两行toolbar。用户报告因此优先怀疑宿主容器的焦点/尺寸/事件传播或准备数据链路，而不是在workbench另造交互。
+- 根因已定位：`GeoVizPreviewHost`仅以零边距Stack承载engine widget，不截获鼠标；well backend却把原`QPainterWidget`降级为裸`WellLogCanvas`，遗漏`ZoomPanHandler.set_full_range`、滚轮转发、十字线和深度尺。Seismic backend则明确创建轻量`SeismicPreviewWidget`，并非engine原有的`SeismicView`，所以完整地震工具栏/3D/拾取等能力天然不可达。
+- 修复边界应在geo-viz-engine backend：well backend创建/渲染原`QPainterWidget`，seismic backend创建完整`SeismicView(auto_load=False)`并将异步加载、cancel/cleanup归属engine widget；workbench继续只当薄Host，不能复制或重写这些交互。

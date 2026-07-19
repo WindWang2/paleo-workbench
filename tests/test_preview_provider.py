@@ -104,6 +104,113 @@ def test_preview_provider_reads_bounded_csv_table(tmp_path: Path):
     assert all(isinstance(row, tuple) for row in result.table_rows)
 
 
+def test_preview_provider_reads_structured_dat_as_data_list(tmp_path: Path):
+    path = tmp_path / "wells.dat"
+    path.write_text(
+        "\n".join(
+            (
+                "#WellHead File From SMI",
+                "#Name X Y",
+                '"Alpha One" 100.0 500.0',
+                "Beta 130.0 480.0",
+            )
+        ),
+        encoding="utf-8-sig",
+    )
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "table"
+    assert result.table_headers == ("Name", "X", "Y")
+    assert result.table_rows == (
+        ("Alpha One", "100.0", "500.0"),
+        ("Beta", "130.0", "480.0"),
+    )
+
+
+def test_preview_provider_keeps_unstructured_dat_as_text(tmp_path: Path):
+    path = tmp_path / "notes.dat"
+    path.write_text(
+        "free form note\nsecond line has different width\n",
+        encoding="utf-8",
+    )
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="document",
+        format="dat",
+    )
+
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "text"
+    assert "free form note" in result.text
+
+
+@pytest.mark.parametrize("partial_tail", [b"999 ", b"999 8"])
+def test_dat_preview_discards_byte_truncated_partial_row(
+    tmp_path: Path,
+    partial_tail: bytes,
+):
+    from dataclasses import replace
+
+    limit = 16 * 1024
+    complete_line = b"1 2            \n"
+    complete_rows = complete_line * 1000
+    padding = b"\n" * (limit - len(complete_rows) - len(partial_tail))
+    path = tmp_path / "bounded.dat"
+    path.write_bytes(complete_rows + padding + partial_tail + b"88\n3 4\n")
+    settings = replace(
+        PreviewProvider().settings,
+        text_limit_kib=16,
+        table_max_rows=2000,
+    )
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+
+    result = PreviewProvider(settings).preview(resource)
+
+    assert result.mode == "table"
+    assert result.truncated is True
+    assert result.table_rows
+    assert set(result.table_rows) == {("1", "2")}
+
+
+def test_dat_preview_keeps_last_row_when_byte_limit_ends_on_newline(tmp_path: Path):
+    from dataclasses import replace
+
+    path = tmp_path / "newline.dat"
+    complete_line = b"1 2            \n"
+    path.write_bytes((complete_line * 1024) + b"3 4\n")
+    settings = replace(
+        PreviewProvider().settings,
+        text_limit_kib=16,
+        table_max_rows=2000,
+    )
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+
+    result = PreviewProvider(settings).preview(resource)
+
+    assert result.mode == "table"
+    assert len(result.table_rows) == 1024
+    assert result.table_rows[-1] == ("1", "2")
+
+
 def test_preview_provider_preserves_quoted_csv_newlines(tmp_path: Path):
     path = tmp_path / "quoted-newlines.csv"
     path.write_text('name,note\nalpha,"line one\nline two"\nbeta,plain', encoding="utf-8")
@@ -248,7 +355,13 @@ def test_preview_provider_reads_excel_first_sheet_as_table(tmp_path: Path):
     assert result.table_rows[0] == ("A1", "100.0")
 
 
-def test_preview_provider_reads_las_curve_summary(tmp_path: Path):
+def test_preview_provider_reads_las_curve_summary_without_lasio_matrix_load(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import sys
+    import types
+
     path = tmp_path / "well.las"
     path.write_text(
         """~Version Information
@@ -272,14 +385,55 @@ def test_preview_provider_reads_las_curve_summary(tmp_path: Path):
         encoding="utf-8",
     )
     resource = ResourceItem(name="well.las", path=str(path), type="well_log", format="las")
+    lasio_stub = types.ModuleType("lasio")
+    lasio_stub.read = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("summary must not perform a full lasio matrix load")
+    )
+    monkeypatch.setitem(sys.modules, "lasio", lasio_stub)
 
     result = PreviewProvider().preview(resource)
 
     assert result.mode == "well_log"
     assert ("井名", "A1") in result.summary_rows
     assert ("曲线数", "3") in result.summary_rows
+    assert ("采样点", "3") in result.summary_rows
     assert result.table_headers == ("曲线", "单位", "描述")
     assert ("GR", "API", "Gamma Ray") in result.table_rows
+
+
+def test_preview_provider_reads_las_data_rows_with_lasio(tmp_path: Path):
+    path = tmp_path / "well_with_data.las"
+    path.write_text(
+        """~Version Information
+ VERS. 2.0 : CWLS log ASCII Standard - VERSION 2.0
+ WRAP. NO : One line per depth step
+~Well Information
+ STRT.M 100.0 : START DEPTH
+ STOP.M 101.0 : STOP DEPTH
+ STEP.M 0.5 : STEP
+ NULL. -999.25 : NULL VALUE
+ WELL. A1 : WELL
+~Curve Information
+ DEPT.M : Depth
+ GR.API : Gamma Ray
+ RHOB.G/C3 : Bulk Density
+~ASCII
+100.0 80.0 2.45
+100.5 82.0 2.46
+101.0 84.0 2.47
+""",
+        encoding="utf-8",
+    )
+    resource = ResourceItem(name="well_with_data.las", path=str(path), type="well_log", format="las")
+    result = PreviewProvider().preview(resource)
+
+    assert result.mode == "well_log"
+    assert result.data_headers == ("DEPT", "GR", "RHOB")
+    assert result.data_rows == (
+        ("100", "80", "2.45"),
+        ("100.5", "82", "2.46"),
+        ("101", "84", "2.47"),
+    )
 
 
 def test_preview_provider_degrades_incomplete_las_without_crashing(tmp_path: Path):

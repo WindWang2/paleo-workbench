@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import weakref
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot, QCoreApplication
 
 from paleo_workbench.ui.thread_keeper import detached_job_keeper
 
@@ -23,6 +23,7 @@ class OwnedWorkerJob(QObject):
         self._target: object | None = None
         self._result_connections: list[tuple[object, object]] = []
         self._destroyed_conn: object | None = None
+        self._state: dict[str, bool] = {"released": False}
 
     @property
     def thread(self) -> QThread | None:
@@ -52,6 +53,7 @@ class OwnedWorkerJob(QObject):
         if self._thread is not None:
             raise RuntimeError("worker job already owns a thread")
 
+        self._state = {"released": False}
         thread = QThread()
         self._thread = thread
         self._worker = worker
@@ -64,16 +66,26 @@ class OwnedWorkerJob(QObject):
             signal.connect(slot)
         for signal in terminal_signals:
             signal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        thread.finished.connect(worker.deleteLater)
+        # Move worker back to the main thread on thread finish, executing on the worker's thread.
+        app = QCoreApplication.instance()
+        if app is not None:
+            worker_ref = weakref.ref(worker)
+            thread.finished.connect(
+                lambda: _safe_move_to_main_thread(worker_ref, app),
+                Qt.ConnectionType.DirectConnection,
+            )
+        # Defer worker deletion to _release_identity/detached_job_keeper after moving it back
+        # to the main thread, avoiding deferred deletion events on a stopped event loop.
         thread.finished.connect(
             self._on_thread_stopped,
             Qt.ConnectionType.QueuedConnection,
         )
         thread_ref = weakref.ref(thread)
         worker_ref = weakref.ref(worker)
+        state = self._state
         self._destroyed_conn = self.destroyed.connect(
-            lambda _=None, thread_ref=thread_ref, worker_ref=worker_ref, cancel=cancel:
-            _safe_detach_on_destroy(thread_ref, worker_ref, cancel)
+            lambda _=None, thread_ref=thread_ref, worker_ref=worker_ref, cancel=cancel, state=state:
+            not state["released"] and _safe_detach_on_destroy(thread_ref, worker_ref, cancel)
         )
         thread.start()
 
@@ -135,6 +147,7 @@ class OwnedWorkerJob(QObject):
     ) -> None:
         if self._thread is not thread or self._worker is not worker:
             return
+        self._state["released"] = True
         self._thread = None
         self._worker = None
         self._cancel = None
@@ -148,6 +161,16 @@ class OwnedWorkerJob(QObject):
             self._destroyed_conn = None
         if delete_thread:
             try:
+                app = QCoreApplication.instance()
+                if app is not None and worker.thread() is not app.thread():
+                    worker.moveToThread(app.thread())
+                worker.deleteLater()
+            except Exception:
+                try:
+                    worker.deleteLater()
+                except Exception:
+                    pass
+            try:
                 thread.deleteLater()
             except RuntimeError:
                 pass
@@ -155,9 +178,10 @@ class OwnedWorkerJob(QObject):
 
     @Slot()
     def _on_thread_stopped(self) -> None:
-        thread = self.sender()
+        # Avoid self.sender() to prevent C++ teardown segfaults on destroyed QThread wrappers.
+        thread = self._thread
         worker = self._worker
-        if not isinstance(thread, QThread) or worker is None:
+        if thread is None or worker is None:
             return
         self._release_identity(thread, worker, delete_thread=True)
 
@@ -167,9 +191,15 @@ def _safe_detach_on_destroy(
     worker_ref: weakref.ref[QObject],
     cancel: Callable[[], None] | None,
 ) -> None:
+    import shiboken6
     thread = thread_ref()
     worker = worker_ref()
-    if thread is not None and worker is not None:
+    if (
+        thread is not None
+        and shiboken6.isValid(thread)
+        and worker is not None
+        and shiboken6.isValid(worker)
+    ):
         try:
             if thread.isRunning():
                 if cancel is not None:
@@ -180,5 +210,18 @@ def _safe_detach_on_destroy(
                 thread.requestInterruption()
                 thread.quit()
                 detached_job_keeper().adopt(thread, worker)
+        except Exception:
+            pass
+
+
+def _safe_move_to_main_thread(
+    worker_ref: weakref.ref[QObject],
+    app: QCoreApplication,
+) -> None:
+    import shiboken6
+    worker = worker_ref()
+    if worker is not None and shiboken6.isValid(worker):
+        try:
+            worker.moveToThread(app.thread())
         except Exception:
             pass

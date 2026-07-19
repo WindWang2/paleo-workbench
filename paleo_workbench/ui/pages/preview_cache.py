@@ -33,12 +33,20 @@ def safe_file_stat(path: Path) -> tuple[int, int] | None:
 _safe_stat = safe_file_stat
 
 
-def make_preview_cache_key(asset: ResourceItem | ExportArtifact) -> tuple:
+def make_preview_cache_key(
+    asset: ResourceItem | ExportArtifact,
+    settings_fingerprint: str | None = None,
+) -> tuple:
     """Stable key for preview LRU entries.
 
     Includes type/format so rescan reclassification (same path/stat) is a miss.
     Filesystem (size, mtime_ns) invalidates on rewrite; checksum when present.
     """
+    if settings_fingerprint is None:
+        from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+
+        settings_fingerprint = PreviewSettings.defaults().fingerprint()
+
     if isinstance(asset, ExportArtifact):
         path = Path(asset.output_path)
         return (
@@ -48,6 +56,7 @@ def make_preview_cache_key(asset: ResourceItem | ExportArtifact) -> tuple:
             asset.format,
             "",
             safe_file_stat(path),
+            settings_fingerprint,
         )
     path = Path(asset.path)
     return (
@@ -58,6 +67,7 @@ def make_preview_cache_key(asset: ResourceItem | ExportArtifact) -> tuple:
         asset.format,
         asset.checksum or "",
         safe_file_stat(path),
+        settings_fingerprint,
     )
 
 

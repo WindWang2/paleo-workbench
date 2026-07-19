@@ -62,7 +62,13 @@ class _ArchiveSafetyError(ValueError):
     pass
 
 
-def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
+def spreadsheetml_preview(
+    resource: ResourceItem,
+    *,
+    max_text_bytes: int = MAX_TEXT_PREVIEW_BYTES,
+    max_rows: int = MAX_TABLE_ROWS,
+    max_columns: int = MAX_TABLE_COLUMNS,
+) -> PreviewResult | None:
     """Read one SpreadsheetML worksheet without claiming ordinary XML files."""
 
     path = Path(resource.path)
@@ -88,7 +94,7 @@ def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
 
     try:
         with raw:
-            reader = BoundedReader(raw)
+            reader = BoundedReader(raw, limit=max_text_bytes)
             for event, element in ET.iterparse(reader, events=("start", "end")):
                 namespace, local_name = _qualified_name(element.tag)
 
@@ -135,7 +141,7 @@ def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
                 if event == "start" and _is_spreadsheet_element(
                     namespace, local_name, "Row"
                 ):
-                    if len(rows) >= MAX_TABLE_ROWS + 1:
+                    if len(rows) >= max_rows + 1:
                         truncated = True
                         raise _FirstWorksheetComplete
                     current_row = []
@@ -162,7 +168,7 @@ def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
                     if desired_position < current_cell_position:
                         malformed_structure = True
                         desired_position = current_cell_position
-                    if desired_position <= MAX_TABLE_COLUMNS:
+                    if desired_position <= max_columns:
                         while len(current_row) < desired_position - 1:
                             current_row.append("")
                         current_row.append(_cell_text(element))
@@ -179,14 +185,14 @@ def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
                 ):
                     while (
                         next_row_position < current_row_position
-                        and len(rows) < MAX_TABLE_ROWS + 1
+                        and len(rows) < max_rows + 1
                     ):
                         rows.append(())
                         next_row_position += 1
                     if next_row_position < current_row_position:
                         truncated = True
                         raise _FirstWorksheetComplete
-                    rows.append(tuple(current_row[:MAX_TABLE_COLUMNS]))
+                    rows.append(tuple(current_row[:max_columns]))
                     next_row_position = current_row_position + 1
                     current_row = None
                     element.clear()
@@ -200,7 +206,7 @@ def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
         boundary_truncation = bool(
             reader is not None
             and reader.artificial_eof_received
-            and source_size > MAX_TEXT_PREVIEW_BYTES
+            and source_size > max_text_bytes
         )
         if boundary_truncation and first_worksheet_seen:
             truncated = True
@@ -217,7 +223,7 @@ def spreadsheetml_preview(resource: ResourceItem) -> PreviewResult | None:
         return _message(resource, "SpreadsheetML XML 没有可预览的工作表")
 
     headers = rows[0] if rows else ()
-    body = tuple(rows[1 : MAX_TABLE_ROWS + 1])
+    body = tuple(rows[1 : max_rows + 1])
     return PreviewResult(
         mode="table",
         title=resource.name,
@@ -374,13 +380,18 @@ def dfb_preview(resource: ResourceItem) -> PreviewResult:
     )
 
 
-def zip_preview(resource: ResourceItem) -> PreviewResult:
+def zip_preview(
+    resource: ResourceItem,
+    *,
+    max_rows: int = MAX_ARCHIVE_NAMES,
+) -> PreviewResult:
     path = Path(resource.path)
     try:
         _validate_zip_central_directory(path)
         with zipfile.ZipFile(path) as archive:
+            visible_limit = min(max_rows, MAX_ARCHIVE_NAMES)
             names = heapq.nsmallest(
-                MAX_ARCHIVE_NAMES + 1,
+                visible_limit + 1,
                 (info.filename for info in archive.infolist()),
             )
     except _ArchiveSafetyError as exc:
@@ -388,8 +399,8 @@ def zip_preview(resource: ResourceItem) -> PreviewResult:
     except (OSError, RuntimeError, ValueError, zipfile.BadZipFile):
         return _message(resource, "ZIP 包格式错误，无法读取目录")
 
-    truncated = len(names) > MAX_ARCHIVE_NAMES
-    visible_names = names[:MAX_ARCHIVE_NAMES]
+    truncated = len(names) > visible_limit
+    visible_names = names[:visible_limit]
     return PreviewResult(
         mode="table",
         title=resource.name,
@@ -401,7 +412,9 @@ def zip_preview(resource: ResourceItem) -> PreviewResult:
         table_headers=("ZIP 条目",),
         table_rows=tuple((name,) for name in visible_names),
         truncated=truncated,
-        warning="ZIP 目录仅显示排序后的前 500 个条目，已截断" if truncated else "",
+        warning=f"ZIP 目录仅显示排序后的前 {visible_limit} 个条目，已截断"
+        if truncated
+        else "",
     )
 
 

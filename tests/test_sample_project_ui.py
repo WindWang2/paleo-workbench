@@ -16,7 +16,7 @@ def test_open_sample_project_loads_resources(qtbot, tmp_path: Path, monkeypatch)
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     monkeypatch.setattr(
-        "paleo_workbench.app.resolve_sample_data_root",
+        "paleo_workbench.ui.project_controller.resolve_sample_data_root",
         lambda explicit=None, **kwargs: data,
     )
     monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
@@ -37,7 +37,7 @@ def test_open_sample_project_cancel_confirm_keeps_project(qtbot, monkeypatch, tm
     data.mkdir()
     (data / "A1.Las").write_text("x", encoding="utf-8")
     monkeypatch.setattr(
-        "paleo_workbench.app.resolve_sample_data_root",
+        "paleo_workbench.ui.project_controller.resolve_sample_data_root",
         lambda explicit=None, **kwargs: data,
     )
     monkeypatch.setattr(window, "_confirm_replace_project", lambda: False)
@@ -52,7 +52,7 @@ def test_open_sample_project_missing_data_returns_false(qtbot, monkeypatch, tmp_
     qtbot.addWidget(window)
     def _boom(explicit=None, **kwargs):
         raise FileNotFoundError("no data")
-    monkeypatch.setattr("paleo_workbench.app.resolve_sample_data_root", _boom)
+    monkeypatch.setattr("paleo_workbench.ui.project_controller.resolve_sample_data_root", _boom)
     monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)
     monkeypatch.setattr(window, "_show_project_error", lambda *a, **k: None)
 
@@ -69,7 +69,7 @@ def test_open_sample_project_binds_demo_prediction(qtbot, tmp_path: Path, monkey
     window = PaleoWorkbenchWindow()
     qtbot.addWidget(window)
     monkeypatch.setattr(
-        "paleo_workbench.app.resolve_sample_data_root",
+        "paleo_workbench.ui.project_controller.resolve_sample_data_root",
         lambda explicit=None, **kwargs: data,
     )
     monkeypatch.setattr(window, "_confirm_replace_project", lambda: True)

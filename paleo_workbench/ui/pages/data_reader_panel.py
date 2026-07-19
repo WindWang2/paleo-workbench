@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.lazy_visualization_tabs import LazyVisualizationTabs
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
+from paleo_workbench.ui.pages.preview_settings import PreviewSettingsStore
 from paleo_workbench.ui.pages.preview_widgets import (
     GeoTiffPreviewWidget,
     ImagePreviewWidget,
@@ -27,26 +29,37 @@ from paleo_workbench.ui.pages.preview_widgets import (
     TablePreviewWidget,
     TextPreviewWidget,
     WebDocumentPreviewWidget,
+    SeismicSlicePreviewWidget,
 )
 
 
 class DataReaderPanel(QFrame):
     reader_mode_changed = Signal(str)
+    preview_settings_changed = Signal(object)
+    visualization_requested = Signal()
 
-    def __init__(self, provider: PreviewProvider | None = None, parent=None):
+    def __init__(
+        self,
+        provider: PreviewProvider | None = None,
+        parent=None,
+        *,
+        settings_store: PreviewSettingsStore | None = None,
+    ):
         super().__init__(parent)
         self.setObjectName("DataReaderPanel")
         self.setMinimumWidth(320)
         # Default to LocalVisualizationProvider (contract + geoviz previews), but
         # import it lazily so cold DataPage startup does not pay the geoviz cost
         # when a custom lightweight provider is injected by tests.
+        self._settings_store = settings_store or PreviewSettingsStore()
+        self.preview_settings = self._settings_store.load()
         if provider is None:
             from paleo_workbench.ui.pages.geoviz_preview_provider import (
                 LocalVisualizationProvider,
             )
 
-            provider = LocalVisualizationProvider()
-        self.provider = provider
+            provider = LocalVisualizationProvider(settings=self.preview_settings)
+        self.provider = provider.with_settings(self.preview_settings)
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
         self.setStyleSheet(
@@ -74,12 +87,16 @@ class DataReaderPanel(QFrame):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
 
-        # Host is created on first geoviz use / clear so GeoVizPreviewHost import
-        # (and engine widgets) stay off the cold path.
+        # Host stays uncreated until the visualization tab has produced a
+        # PreparedPreview on the UI thread.
         self._geoviz_host = None
-        self._geoviz_placeholder = QLabel("GeoViz")
-        self._geoviz_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.stack.addWidget(self._geoviz_placeholder)
+        self.lazy_visualization_tabs = LazyVisualizationTabs(
+            getattr(self.provider, "engine", None)
+        )
+        self.lazy_visualization_tabs.visualization_requested.connect(
+            self.visualization_requested
+        )
+        self.stack.addWidget(self.lazy_visualization_tabs)
 
         self.empty_label = self._message_widget("从列表中选择一个数据、成果或文件")
         self.empty_label.setObjectName("EmptyStateLabel")
@@ -98,7 +115,7 @@ class DataReaderPanel(QFrame):
         self.well_log_preview = SummaryTablePreviewWidget()
         self.stack.addWidget(self.well_log_preview)
 
-        self.seismic_preview = SummaryTablePreviewWidget()
+        self.seismic_preview = SeismicSlicePreviewWidget()
         self.stack.addWidget(self.seismic_preview)
 
         self.image_preview_widget = ImagePreviewWidget()
@@ -135,10 +152,12 @@ class DataReaderPanel(QFrame):
         layout.addWidget(self.warning_label)
 
         self.stack.setCurrentWidget(self.empty_label)
+        self.apply_preview_settings(self.preview_settings)
 
     def show_loading(self, asset: ResourceItem | ExportArtifact | None = None) -> None:
         self._stop_media_if_needed()
         clear_warning = self._safe_clear_geoviz()
+        self.lazy_visualization_tabs.reset()
         title = "加载中…"
         if isinstance(asset, ResourceItem):
             title = f"加载中… {asset.name}"
@@ -154,28 +173,23 @@ class DataReaderPanel(QFrame):
 
     def update_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
         # Sync path for direct panel tests; DataPage uses PreviewRequestController.
-        self.render(self.provider.preview(asset))
+        self.render(self.provider.preview_summary(asset))
 
     @property
     def geoviz_host(self):
         """Lazily create the GeoViz preview host (defers heavy geoviz import)."""
         if self._geoviz_host is None:
-            from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
             from paleo_workbench.ui.pages.geoviz_preview_provider import (
                 LocalVisualizationProvider,
             )
 
             if not hasattr(self.provider, "engine"):
-                self.provider = LocalVisualizationProvider()
+                self.provider = LocalVisualizationProvider(
+                    settings=self.preview_settings
+                )
             provider_engine = getattr(self.provider, "engine", None)
-            self._geoviz_host = GeoVizPreviewHost(provider_engine)
-            # Replace the lightweight placeholder with the real host widget.
-            idx = self.stack.indexOf(self._geoviz_placeholder)
-            if idx >= 0:
-                self.stack.removeWidget(self._geoviz_placeholder)
-                self.stack.insertWidget(idx, self._geoviz_host)
-            else:
-                self.stack.addWidget(self._geoviz_host)
+            self.lazy_visualization_tabs.set_engine(provider_engine)
+            self._geoviz_host = self.lazy_visualization_tabs.host
         return self._geoviz_host
 
     @staticmethod
@@ -191,20 +205,35 @@ class DataReaderPanel(QFrame):
     def render(self, result: PreviewResult) -> None:
         if result.mode != "media":
             self._stop_media_if_needed()
+        if result.visualization_available and result.mode != "geoviz" and result.mode != "seismic":
+            clear_warning = self._safe_clear_geoviz()
+            if clear_warning:
+                result = replace(
+                    result,
+                    warning=self._merge_warning(result.warning, clear_warning),
+                )
+            self.lazy_visualization_tabs.load_summary(result)
+            self._commit_result(result, self.lazy_visualization_tabs)
+            return
         # Only PreparedPreview payloads enter the engine path; raw dicts/objects
         # fall through to clear + message (same contract as pre-lazy-load).
         if result.mode == "geoviz" and self._is_prepared_preview(result.engine_preview):
             try:
-                self.geoviz_host.render(result.engine_preview)
+                self.lazy_visualization_tabs.load_summary(result)
+                # Keep the owner-side reference even when host.render() raises;
+                # cleanup and subsequent diagnostics must not try to recreate it.
+                self.geoviz_host
+                self.lazy_visualization_tabs.show_preview(result.engine_preview)
             except Exception as error:
                 result = self._geoviz_failure_result(result, error)
                 target = self._load_target_widget(result)
                 self._commit_result(result, target)
                 return
-            self._commit_result(result, self.geoviz_host)
+            self._commit_result(result, self.lazy_visualization_tabs)
             return
 
         clear_warning = self._safe_clear_geoviz()
+        self.lazy_visualization_tabs.reset()
         if result.mode == "geoviz":
             result = replace(
                 result,
@@ -221,6 +250,44 @@ class DataReaderPanel(QFrame):
 
         target = self._load_target_widget(result)
         self._commit_result(result, target)
+
+    def show_visualization_loading(self) -> None:
+        self.lazy_visualization_tabs.show_loading()
+
+    def show_visualization_error(
+        self,
+        message: str,
+        *,
+        retryable: bool = True,
+    ) -> None:
+        self.lazy_visualization_tabs.show_error(message, retryable=retryable)
+
+    def render_visualization(self, result: PreviewResult) -> None:
+        if result.mode != "geoviz" or not self._is_prepared_preview(
+            result.engine_preview
+        ):
+            self.show_visualization_error(
+                result.message or "可视化预览不可用",
+                retryable=result.retryable,
+            )
+            if result.warning:
+                self.warning_label.setText(
+                    self._merge_warning(self.warning_label.text(), result.warning)
+                )
+            return
+        try:
+            self.geoviz_host
+            self.lazy_visualization_tabs.show_preview(
+                result.engine_preview,
+                activate=False,
+            )
+        except Exception as error:
+            self.show_visualization_error(self._error_text(error))
+            return
+        if result.warning:
+            self.warning_label.setText(
+                self._merge_warning(self.warning_label.text(), result.warning)
+            )
 
     def _stop_media_if_needed(self) -> None:
         stop = getattr(self.media_preview, "stop", None)
@@ -249,14 +316,16 @@ class DataReaderPanel(QFrame):
                 result.table_headers,
                 result.table_rows,
                 result.message,
+                data_headers=getattr(result, "data_headers", ()),
+                data_rows=getattr(result, "data_rows", ()),
             )
             return self.well_log_preview
 
         if result.mode == "seismic":
-            self.seismic_preview.load_summary(
-                result.summary_rows,
-                result.table_headers,
-                result.table_rows,
+            self.seismic_preview.load_seismic(
+                result.path,
+                result.revision,
+                getattr(result, "seismic_volume", None),
                 result.message,
             )
             return self.seismic_preview
@@ -284,6 +353,13 @@ class DataReaderPanel(QFrame):
         if result.mode == "web_document":
             if self.web_document_preview is None:
                 self.web_document_preview = WebDocumentPreviewWidget()
+                apply_settings = getattr(
+                    self.web_document_preview,
+                    "apply_settings",
+                    None,
+                )
+                if callable(apply_settings):
+                    apply_settings(self.preview_settings)
                 self.stack.addWidget(self.web_document_preview)
             self.web_document_preview.load_document(result.path, result.rich_html)
             return self.web_document_preview
@@ -318,6 +394,34 @@ class DataReaderPanel(QFrame):
         self.stack.setCurrentWidget(target)
         self.current_mode = result.mode
         self.reader_mode_changed.emit(result.mode)
+
+    def apply_preview_settings(self, settings) -> None:
+        self.preview_settings = settings
+        self.meta_label.setVisible(settings.show_metadata)
+        for widget in (
+            self.text_preview,
+            self.rich_text_preview,
+            self.table_preview,
+            self.well_log_preview,
+            self.seismic_preview,
+            self.image_preview_widget,
+            self.pdf_preview_widget,
+            self.json_tree_preview,
+            self.geotiff_preview,
+            self.media_preview,
+            self.lazy_visualization_tabs,
+        ):
+            apply = getattr(widget, "apply_settings", None)
+            if callable(apply):
+                apply(settings)
+        if self.web_document_preview is not None:
+            self.web_document_preview.apply_settings(settings)
+
+    def set_preview_settings(self, settings) -> None:
+        """Apply settings supplied by the application-level dialog."""
+        self.provider = self.provider.with_settings(settings)
+        self.apply_preview_settings(settings)
+        self.preview_settings_changed.emit(settings)
 
     def _safe_clear_geoviz(self) -> str:
         # Do not force-create the host just to clear an empty state.

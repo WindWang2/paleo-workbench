@@ -169,10 +169,12 @@ QFrame#MenuBar {{
     background: {BG_HEADER}; border-bottom: 1px solid {BORDER_STRONG};
     min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
 }}
-QPushButton#ProjectMenuButton {{
+QPushButton#ProjectMenuButton,
+QPushButton#ToolsMenuButton {{
     background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
 }}
-QPushButton#ProjectMenuButton:hover {{ color: {PRIMARY}; }}
+QPushButton#ProjectMenuButton:hover,
+QPushButton#ToolsMenuButton:hover {{ color: {PRIMARY}; }}
 /* Inline-styled PDF paging buttons keep their functional objectName; the
    focus rule below mirrors SecondaryButton so keyboard focus is visible. */
 QPushButton#DataPreviewPdfPrevious,

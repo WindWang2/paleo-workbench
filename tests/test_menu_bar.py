@@ -1,4 +1,5 @@
 from paleo_workbench.ui.menu_bar import MenuBar
+from paleo_workbench.ui import tokens
 
 
 def test_menu_bar_has_three_non_project_labels(qtbot):
@@ -39,3 +40,24 @@ def test_project_menu_actions_emit_semantic_signals(qtbot):
     for action, signal in cases:
         with qtbot.waitSignal(signal, timeout=1000):
             action.trigger()
+
+
+def test_tools_menu_contains_preview_settings_action(qtbot):
+    bar = MenuBar()
+    qtbot.addWidget(bar)
+
+    assert bar.tools_menu_button.text() == "工具"
+    assert [action.text() for action in bar.tools_menu.actions()] == ["预览设置…"]
+
+
+def test_preview_settings_action_emits_semantic_signal(qtbot):
+    bar = MenuBar()
+    qtbot.addWidget(bar)
+
+    with qtbot.waitSignal(bar.preview_settings_requested, timeout=1000):
+        bar.preview_settings_action.trigger()
+
+
+def test_tools_menu_button_uses_menu_bar_button_style():
+    assert "QPushButton#ProjectMenuButton," in tokens.QSS_TEMPLATE
+    assert "QPushButton#ToolsMenuButton" in tokens.QSS_TEMPLATE

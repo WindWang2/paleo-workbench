@@ -6,6 +6,8 @@ import logging
 import os
 import shutil
 import uuid
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,7 +49,10 @@ def _options_fingerprint(options: PreviewOptions | None = None) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def _entry_key_material(asset: ResourceItem) -> str:
+def _entry_key_material(
+    asset: ResourceItem,
+    options: PreviewOptions | None = None,
+) -> str:
     path = Path(asset.path).resolve()
     st = safe_file_stat(path)
     parts = [
@@ -55,7 +60,7 @@ def _entry_key_material(asset: ResourceItem) -> str:
         asset.type,
         asset.format,
         str(st),
-        _options_fingerprint(),
+        _options_fingerprint(options),
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
 
@@ -73,8 +78,17 @@ class PreviewDiskCache:
     deleted on read failure. Store failures never break live preview.
     """
 
-    def __init__(self, project_root: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path | str | None = None,
+        *,
+        options: PreviewOptions | None = None,
+    ) -> None:
         self.project_root = Path(project_root).resolve() if project_root else None
+        self.options = options
+
+    def set_options(self, options: PreviewOptions) -> None:
+        self.options = options
 
     def set_project_root(self, project_root: Path | str | None) -> None:
         self.project_root = Path(project_root).resolve() if project_root else None
@@ -91,7 +105,7 @@ class PreviewDiskCache:
         if entries is None:
             return None
         try:
-            key = _entry_key_material(asset)
+            key = _entry_key_material(asset, self.options)
         except Exception:
             logger.warning("preview disk cache key failed for %s", asset.path, exc_info=True)
             return None
@@ -133,7 +147,13 @@ class PreviewDiskCache:
             estimated_bytes=prepared.estimated_bytes,
         )
 
-    def store(self, asset: ResourceItem, result: PreviewResult) -> None:
+    def store(
+        self,
+        asset: ResourceItem,
+        result: PreviewResult,
+        *,
+        commit_guard: Callable[[], AbstractContextManager[bool]] | None = None,
+    ) -> None:
         if self.project_root is None or not is_disk_cacheable(asset):
             return
         if result.mode != "geoviz" or result.engine_preview is None:
@@ -148,7 +168,7 @@ class PreviewDiskCache:
         if entries is None:
             return
         try:
-            key = _entry_key_material(asset)
+            key = _entry_key_material(asset, self.options)
             prepared_meta, arrays = encode_prepared_preview(result.engine_preview)
             entries.mkdir(parents=True, exist_ok=True)
             # Stage under a unique sibling dir, then replace the entry.
@@ -166,10 +186,15 @@ class PreviewDiskCache:
                     encoding="utf-8",
                 )
                 np.savez_compressed(staging / "payload.npz", **arrays)
-                entry = entries / key
-                if entry.exists():
-                    shutil.rmtree(entry)
-                os.replace(str(staging), str(entry))
+                guard = commit_guard() if commit_guard is not None else nullcontext(True)
+                with guard as allowed:
+                    if not allowed:
+                        shutil.rmtree(staging, ignore_errors=True)
+                        return
+                    entry = entries / key
+                    if entry.exists():
+                        shutil.rmtree(entry)
+                    os.replace(str(staging), str(entry))
             except Exception:
                 if staging.exists():
                     shutil.rmtree(staging, ignore_errors=True)

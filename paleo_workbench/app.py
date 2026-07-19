@@ -1,29 +1,25 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from pydantic import ValidationError
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from paleo_workbench.pipeline.assets import ensure_demo_prediction
-from paleo_workbench.pipeline.bootstrap import (
-    bootstrap_sample_project,
-    resolve_sample_data_root,
-)
-from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui import AppShell
 from paleo_workbench.ui.pages.preview_settings import PreviewSettingsStore
-from paleo_workbench.ui.preview_settings_dialog import PreviewSettingsDialog
+from paleo_workbench.ui.project_controller import ProjectController
+from paleo_workbench.ui.workflow_controller import WorkflowController
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
-
-_PROJECT_SUFFIX = ".paleo.json"
-_PROJECT_FILTER = "Project (*.paleo.json)"
 
 
 class PaleoWorkbenchWindow(QWidget):
+    """The main application window for Paleogeography Workbench.
+
+    Delegates project lifecycle management to ProjectController and cross-page
+    workflow/wiring coordination to WorkflowController.
+    """
+
     def __init__(
         self,
         project: ProjectDocument | None = None,
@@ -31,11 +27,13 @@ class PaleoWorkbenchWindow(QWidget):
         preview_settings_store: PreviewSettingsStore | None = None,
     ):
         super().__init__()
-        self.project = project or ProjectDocument.new("Untitled Project")
-        self.project_path: Path | None = None
-        self._last_open_error: str | None = None
+        self._project = project or ProjectDocument.new("Untitled Project")
+        self._project_path: Path | None = None
         self._preview_settings_store = preview_settings_store
-        self._preview_settings_dialog: PreviewSettingsDialog | None = None
+
+        self.project_controller = ProjectController(self)
+        self.workflow_controller = WorkflowController(self)
+
         self.resize(1440, 900)
 
         self.outer_layout = QVBoxLayout(self)
@@ -48,6 +46,54 @@ class PaleoWorkbenchWindow(QWidget):
         self._setup_shortcuts()
         self._update_title()
 
+    @property
+    def project(self) -> ProjectDocument:
+        return self._project
+
+    @project.setter
+    def project(self, val: ProjectDocument) -> None:
+        self._project = val
+
+    @property
+    def project_path(self) -> Path | None:
+        return self._project_path
+
+    @project_path.setter
+    def project_path(self, val: Path | None) -> None:
+        self._project_path = val
+
+    @property
+    def _last_open_error(self) -> str | None:
+        return self.project_controller._last_open_error
+
+    @_last_open_error.setter
+    def _last_open_error(self, val: str | None) -> None:
+        self.project_controller._last_open_error = val
+
+    @property
+    def _confirm_title(self) -> str | None:
+        return self.project_controller._confirm_title
+
+    @_confirm_title.setter
+    def _confirm_title(self, val: str | None) -> None:
+        self.project_controller._confirm_title = val
+
+    @property
+    def _confirm_message(self) -> str | None:
+        return self.project_controller._confirm_message
+
+    @_confirm_message.setter
+    def _confirm_message(self, val: str | None) -> None:
+        self.project_controller._confirm_message = val
+
+    @property
+    def _preview_settings_dialog(self):
+        return self.workflow_controller._preview_settings_dialog
+
+    @_preview_settings_dialog.setter
+    def _preview_settings_dialog(self, val) -> None:
+        self.workflow_controller._preview_settings_dialog = val
+
     def _setup_shortcuts(self) -> None:
         """Window-scoped project-op shortcuts.
 
@@ -55,7 +101,7 @@ class PaleoWorkbenchWindow(QWidget):
         callbacks read the current ``self.app_shell`` at call-time.
         """
         QShortcut(QKeySequence("Ctrl+S"), self, self.save_project)
-        QShortcut(QKeySequence("Ctrl+N"), self, self.new_project)
+        QShortcut(QKeySequence("Ctrl+N"), self, self._on_new_project)
         QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_project)
         QShortcut(QKeySequence("Ctrl+F"), self, self._shortcut_focus_search)
 
@@ -72,84 +118,40 @@ class PaleoWorkbenchWindow(QWidget):
             return
         self.app_shell.menu_bar.search_box.setFocus()
 
-    # --- project lifecycle (path-based, no dialogs) ---
+    # --- project lifecycle delegates ---
 
     def new_project(self, name: str = "Untitled Project") -> None:
-        """Replace the in-memory project (no confirm — callers that need one ask first)."""
-        self.project = ProjectDocument.new(name)
-        self.project_path = None
-        self._refresh_shell()
+        self.project_controller.new_project(name)
 
     def open_project_path(self, path: str | Path) -> bool:
-        """Load project from path (no confirm — UI handlers ask before calling)."""
-        self._last_open_error: str | None = None
-        target = Path(path)
-        from paleo_workbench.project.paths import ProjectPathError
-
-        try:
-            loaded = ProjectManager(target).load()
-        except FileNotFoundError:
-            self._last_open_error = f"文件不存在：\n{target}"
-            return False
-        except json.JSONDecodeError as e:
-            self._last_open_error = f"工程文件 JSON 损坏：\n{target}\n{e}"
-            return False
-        except ValidationError as e:
-            self._last_open_error = f"工程文件格式无效：\n{target}\n{e}"
-            return False
-        except ProjectPathError as e:
-            self._last_open_error = (
-                f"工程内相对路径非法（疑似逃出工程目录）：\n{target}\n{e}"
-            )
-            return False
-        except OSError as e:
-            self._last_open_error = f"无法读取工程文件：\n{target}\n{e}"
-            return False
-        self.project = loaded
-        self.project.meta.project_root = str(target.resolve().parent)
-        self.project_path = target
-        self._refresh_shell()
-        return True
+        return self.project_controller.open_project_path(path)
 
     def save_project(self) -> Path | None:
-        if not self._flush_mapping_draft():
-            self._show_project_error(
-                "保存工程失败",
-                "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
-            )
-            return None
-        if self.project_path is not None:
-            try:
-                self.project.meta.project_root = str(
-                    self.project_path.resolve().parent
-                )
-                ProjectManager(self.project_path).save(self.project)
-            except OSError as e:
-                self._show_project_error("保存工程失败", str(e))
-                return None
-            return self.project_path
-        # No path yet: ask the user via the save dialog, then save to that path.
-        chosen = self._choose_save_project()
-        return self.save_project_as(chosen)
+        return self.project_controller.save_project()
 
     def save_project_as(self, path: str | Path | None) -> Path | None:
-        if path is None:
-            return None
-        if not self._flush_mapping_draft():
-            self._show_project_error(
-                "保存工程失败",
-                "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
-            )
-            return None
-        target = self._normalize_project_path(Path(path))
-        try:
-            self.project.meta.project_root = str(target.resolve().parent)
-            ProjectManager(target).save(self.project)
-        except OSError as e:
-            self._show_project_error("保存工程失败", str(e))
-            return None
-        self.project_path = target
-        return target
+        return self.project_controller.save_project_as(path)
+
+    def open_sample_project(self, data_root: Path | None = None) -> bool:
+        return self.project_controller.open_sample_project(data_root)
+
+    def _confirm_replace_project(self) -> bool:
+        return self.project_controller._confirm_replace_project()
+
+    def _choose_open_project(self) -> Path | None:
+        return self.project_controller._choose_open_project()
+
+    def _choose_save_project(self) -> Path | None:
+        return self.project_controller._choose_save_project()
+
+    def _show_project_error(self, title: str, message: str) -> None:
+        self.project_controller._show_project_error(title, message)
+
+    def project_properties_text(self) -> str:
+        return self.project_controller.project_properties_text()
+
+    def _show_properties(self) -> None:
+        self.project_controller._show_properties()
 
     def _flush_mapping_draft(self) -> bool:
         """Commit dirty map-scene geometry into the project before serialization.
@@ -164,121 +166,26 @@ class PaleoWorkbenchWindow(QWidget):
             return bool(page.save_draft())
         return True
 
-    # --- toolbar handlers (signals -> dialogs -> core methods) ---
-
-    def open_sample_project(self, data_root: Path | None = None) -> bool:
-        """Bootstrap sample data into the current window (no auto-save)."""
-        if not self._confirm_replace_project():
-            return False
-        try:
-            root = resolve_sample_data_root(data_root)
-            result = bootstrap_sample_project(root)
-        except (FileNotFoundError, ValueError, OSError) as e:
-            self._show_project_error("打开样例工程失败", str(e))
-            return False
-        self.project = result.document
-        ensure_demo_prediction(self.project, seed=0)
-        self.project_path = None
-        self._refresh_shell()
-        return True
-
-    def _confirm_replace_project(self) -> bool:
-        """Ask the user before discarding the current in-memory project.
-
-        Zero-arg signature is intentional so tests can monkeypatch with
-        ``lambda: True`` / ``lambda: False``.
-        """
-        title = getattr(self, "_confirm_title", "替换工程")
-        message = getattr(
-            self,
-            "_confirm_message",
-            "将替换当前工程（未保存更改会丢失）。是否继续？",
-        )
-        reply = QMessageBox.question(
-            self,
-            title,
-            message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return reply == QMessageBox.StandardButton.Yes
-
     def _on_new_project(self) -> None:
-        self._confirm_title = "新建工程"
-        self._confirm_message = (
-            "将创建新工程并替换当前内容（未保存更改会丢失）。是否继续？"
-        )
-        if not self._confirm_replace_project():
-            return
-        self.new_project()
+        self.project_controller._on_new_project()
 
     def _on_open_project(self) -> None:
-        path = self._choose_open_project()
-        if path is None:
-            return
-        self._confirm_title = "打开工程"
-        self._confirm_message = (
-            "将打开所选工程并替换当前内容（未保存更改会丢失）。是否继续？"
-        )
-        if not self._confirm_replace_project():
-            return
-        if not self.open_project_path(path):
-            detail = getattr(self, "_last_open_error", None) or f"无法打开工程文件：\n{path}"
-            self._show_project_error("打开工程失败", detail)
+        self.project_controller._on_open_project()
 
     def _on_open_sample_project(self) -> None:
-        self._confirm_title = "打开样例工程"
-        self._confirm_message = (
-            "将用样例数据替换当前工程（未保存更改会丢失）。是否继续？"
-        )
-        self.open_sample_project()
+        self.project_controller._on_open_sample_project()
 
     def _on_save_project(self) -> None:
-        self.save_project()
+        self.project_controller._on_save_project()
 
     def _on_properties(self) -> None:
-        self._show_properties()
+        self.project_controller._on_properties()
 
-    # --- file dialogs / message boxes ---
+    def _show_preview_settings(self) -> None:
+        self.workflow_controller._show_preview_settings()
 
-    def _choose_open_project(self) -> Path | None:
-        start_dir = str(self.project_path.parent) if self.project_path else str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(
-            self, "打开工程", start_dir, _PROJECT_FILTER
-        )
-        return Path(path) if path else None
-
-    def _choose_save_project(self) -> Path | None:
-        suggested = f"{self.project.meta.name}{_PROJECT_SUFFIX}"
-        start_dir = (
-            str(self.project_path.parent) if self.project_path else str(Path.home())
-        )
-        path, _ = QFileDialog.getSaveFileName(
-            self, "保存工程", str(Path(start_dir) / suggested), _PROJECT_FILTER
-        )
-        return Path(path) if path else None
-
-    def _show_project_error(self, title: str, message: str) -> None:
-        QMessageBox.critical(self, title, message)
-
-    def project_properties_text(self) -> str:
-        """Build the read-only summary shown by the properties dialog."""
-        project = self.project
-        path_str = str(self.project_path) if self.project_path is not None else "未保存"
-        return "\n".join(
-            [
-                f"工程名称: {project.meta.name}",
-                f"区域: {project.meta.region or '—'}",
-                f"工程文件: {path_str}",
-                f"资源数量: {len(project.resources)}",
-                f"导出图件: {len(project.export_artifacts)}",
-                f"显示坐标系: {project.coordinate.display_crs}",
-                f"版本: {project.meta.version}",
-            ]
-        )
-
-    def _show_properties(self) -> None:
-        QMessageBox.information(self, "工程属性", self.project_properties_text())
+    def _apply_preview_settings(self, settings) -> None:
+        self.workflow_controller._apply_preview_settings(settings)
 
     # --- signal wiring ---
 
@@ -295,247 +202,13 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
         menu_bar.preview_settings_requested.connect(self._show_preview_settings)
-        self._wire_data_visualization_jump()
-        self._wire_mapping_page()
-        self._wire_preparation_page()
-        self._wire_sequence_page()
-        self._wire_seismic_page()
-        self._wire_well_log_page()
-        self._wire_review_page()
-
-    def _show_preview_settings(self) -> None:
-        """Open the shared preview settings for the current DataPage."""
-        if self._preview_settings_dialog is None:
-            dialog = PreviewSettingsDialog(
-                self,
-                store=self._preview_settings_store,
-            )
-            dialog.settings_applied.connect(self._apply_preview_settings)
-            self._preview_settings_dialog = dialog
-        reader = self.app_shell.data_page.reader_panel
-        self._preview_settings_dialog.set_settings(reader.preview_settings)
-        self._preview_settings_dialog.set_preview_mode(reader.current_mode)
-        self._preview_settings_dialog.exec()
-
-    def _apply_preview_settings(self, settings) -> None:
-        """Route dialog output to the current shell, never a stale page."""
-        self.app_shell.data_page.reader_panel.set_preview_settings(settings)
-
-    def _wire_data_visualization_jump(self) -> None:
-        page = self.app_shell.data_page_widget()
-        if hasattr(page, "open_in_visualization"):
-            page.open_in_visualization.connect(self._on_open_in_visualization)
-
-    def _wire_mapping_page(self) -> None:
-        page = self.app_shell.mapping_page_widget()
-        if page is None:
-            return
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "generate_demo_draft_requested"):
-            page.generate_demo_draft_requested.connect(self._on_generate_demo_map_draft)
-        if hasattr(page, "contour_drafts_updated"):
-            page.contour_drafts_updated.connect(self._on_contour_drafts_updated)
-
-    def _wire_preparation_page(self) -> None:
-        page = self.app_shell.preparation_page_widget()
-        if page is None:
-            return
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "factor_maps_updated"):
-            page.factor_maps_updated.connect(self._on_factor_maps_updated)
-        if hasattr(page, "contour_drafts_updated"):
-            page.contour_drafts_updated.connect(self._on_contour_drafts_updated)
-
-    def _wire_sequence_page(self) -> None:
-        page = self.app_shell.sequence_framework_page_widget()
-        if page is None:
-            return
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "stratigraphy_updated"):
-            # Avoid duplicate connections across shell rebuilds of the same page
-            # instance is new each rebuild; connect once per shell.
-            page.stratigraphy_updated.connect(self._on_stratigraphy_updated)
-
-    def _wire_seismic_page(self) -> None:
-        page = self.app_shell.seismic_prediction_page_widget()
-        if page is None:
-            return
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "prediction_updated"):
-            page.prediction_updated.connect(self._on_seismic_prediction_updated)
-        if hasattr(page, "send_to_mapping_requested"):
-            page.send_to_mapping_requested.connect(self._on_seismic_send_to_mapping)
-
-    def _wire_well_log_page(self) -> None:
-        page = self.app_shell.well_log_prediction_page_widget()
-        if page is None:
-            return
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "prediction_updated"):
-            page.prediction_updated.connect(self._on_well_log_prediction_updated)
-        if hasattr(page, "send_to_preparation_requested"):
-            page.send_to_preparation_requested.connect(self._on_well_log_send_to_prep)
-
-    def _wire_review_page(self) -> None:
-        page = self.app_shell.review_export_page_widget()
-        if page is None:
-            return
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "reports_updated"):
-            page.reports_updated.connect(self._on_qc_reports_updated)
-
-    def _on_qc_reports_updated(self) -> None:
-        from paleo_workbench.workflow.qc import active_quality_reports
-
-        state = dashboard_state(self.project)
-        steps = home_workflow_steps(self.project)
-        self.app_shell.update_home_page(state, steps)
-        self.app_shell.update_review_export_page(
-            active_quality_reports(self.project),
-            self.project.paleomap_documents,
-            self.project.export_artifacts,
-        )
-
-    def _on_well_log_prediction_updated(self) -> None:
-        """Refresh well-log / seismic / viz pages after a new single-well task."""
-        self._on_seismic_prediction_updated()
-
-    def _on_well_log_send_to_prep(self) -> None:
-        """Batch-prepare factor maps from current project and open 制备 page."""
-        from paleo_workbench.ui.app_shell import PAGE_INDEX_PREPARATION
-        from paleo_workbench.workflow.factor_interpolation import batch_prepare_factor_maps
-
-        if not self.project.prediction_tasks:
-            QMessageBox.information(self, "发送制备", "请先运行测井预测")
-            return
-        try:
-            batch_prepare_factor_maps(self.project, method="IDW")
-        except Exception as exc:
-            QMessageBox.warning(
-                self,
-                "发送制备失败",
-                f"{exc.__class__.__name__}: {exc}",
-            )
-            return
-        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
-        self.app_shell.update_mapping_page(
-            self.project.paleomap_documents,
-            factor_tasks=self.project.factor_map_tasks,
-            project_crs=self.project.coordinate.project_crs,
-        )
-        self.app_shell.icon_rail.set_active(PAGE_INDEX_PREPARATION)
-        self.app_shell._switch_page(PAGE_INDEX_PREPARATION)
-
-    def _on_seismic_prediction_updated(self) -> None:
-        """Refresh seismic / visualization / home after a new facies task."""
-        state = dashboard_state(self.project)
-        steps = home_workflow_steps(self.project)
-        self.app_shell.update_home_page(state, steps)
-        self.app_shell.update_seismic_prediction_page(
-            self.project.prediction_tasks, project=self.project
-        )
-        self.app_shell.update_well_log_prediction_page(
-            self.project.prediction_tasks, project=self.project
-        )
-        self.app_shell.update_visualization_page(
-            self.project.resources,
-            self.project.prediction_tasks,
-            self.project.paleomap_documents,
-            project=self.project,
-        )
-
-    def _on_seismic_send_to_mapping(self) -> None:
-        """Compile a map draft from the latest prediction and open 编图."""
-        from paleo_workbench.pipeline.compile_map import compile_map_draft
-        from paleo_workbench.ui.app_shell import PAGE_INDEX_MAPPING
-
-        if not self.project.prediction_tasks:
-            QMessageBox.information(self, "发送编图", "请先运行地震预测")
-            return
-        compile_map_draft(self.project, seed=0)
-        self.app_shell.update_mapping_page(
-            self.project.paleomap_documents,
-            factor_tasks=self.project.factor_map_tasks,
-            project_crs=self.project.coordinate.project_crs,
-        )
-        self.app_shell.icon_rail.set_active(PAGE_INDEX_MAPPING)
-        self.app_shell._switch_page(PAGE_INDEX_MAPPING)
-
-    def _on_factor_maps_updated(self) -> None:
-        """Refresh preparation + mapping factor shelf after real IDW batch generate."""
-        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
-        self.app_shell.update_mapping_page(
-            self.project.paleomap_documents,
-            factor_tasks=self.project.factor_map_tasks,
-            project_crs=self.project.coordinate.project_crs,
-        )
-
-    def _on_contour_drafts_updated(self) -> None:
-        """Refresh mapping after ContourDraft isolines are pushed to map documents."""
-        page = self.app_shell.mapping_page_widget()
-        if page is not None and hasattr(page, "set_project"):
-            page.set_project(self.project)
-        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
-        self.app_shell.update_mapping_page(
-            self.project.paleomap_documents,
-            factor_tasks=self.project.factor_map_tasks,
-            project_crs=self.project.coordinate.project_crs,
-        )
-        state = dashboard_state(self.project)
-        steps = home_workflow_steps(self.project)
-        self.app_shell.update_home_page(state, steps)
-
-    def _on_stratigraphy_updated(self) -> None:
-        """Re-push stratigraphy-bound pages after sequence scheme save/target change."""
-        state = dashboard_state(self.project)
-        steps = home_workflow_steps(self.project)
-        self.app_shell.update_home_page(state, steps)
-        self.app_shell.update_sequence_framework_page(self.project.stratigraphy)
-        self.app_shell.update_stratigraphy_correlation_page(self.project)
-        self.app_shell.update_preparation_page(self.project.factor_map_tasks)
-        self.app_shell.update_mapping_page(
-            self.project.paleomap_documents,
-            factor_tasks=self.project.factor_map_tasks,
-            project_crs=self.project.coordinate.project_crs,
-        )
-
-    def _on_generate_demo_map_draft(self) -> None:
-        """Compile a deterministic demo draft; confirm if mapping scene is dirty."""
-        page = self.app_shell.mapping_page_widget()
-        if page is not None and hasattr(page, "is_dirty") and page.is_dirty():
-            reply = QMessageBox.question(
-                self,
-                "未保存的编图修改",
-                "当前图件有未保存修改。生成演示草稿将刷新编图页面。是否先保存草稿？",
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Save,
-            )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            if reply == QMessageBox.StandardButton.Save:
-                if not page.save_draft():
-                    return
-        from paleo_workbench.pipeline.compile_map import compile_map_draft
-
-        compile_map_draft(self.project, seed=0)
-        self._refresh_shell()
-
-    def _on_open_in_visualization(self, ref) -> None:
-        from paleo_workbench.ui.app_shell import PAGE_INDEX_VISUALIZATION
-
-        self.app_shell.icon_rail.set_active(PAGE_INDEX_VISUALIZATION)
-        self.app_shell._switch_page(PAGE_INDEX_VISUALIZATION)
-        viz = self.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)
-        if hasattr(viz, "open_ref"):
-            viz.open_ref(ref)
+        self.workflow_controller._wire_data_visualization_jump()
+        self.workflow_controller._wire_mapping_page()
+        self.workflow_controller._wire_preparation_page()
+        self.workflow_controller._wire_sequence_page()
+        self.workflow_controller._wire_seismic_page()
+        self.workflow_controller._wire_well_log_page()
+        self.workflow_controller._wire_review_page()
 
     # --- shell rebuild helpers ---
 
@@ -561,7 +234,9 @@ class PaleoWorkbenchWindow(QWidget):
     def _apply_project_to_shell(self) -> None:
         """Push ``self.project`` into the current shell's pages (set in __init__/_refresh)."""
         state = dashboard_state(self.project)
-        self.app_shell.set_project_name(state.get("project_name", self.project.meta.name))
+        self.app_shell.set_project_name(
+            state.get("project_name", self.project.meta.name)
+        )
         steps = home_workflow_steps(self.project)
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_data_page(
@@ -600,21 +275,4 @@ class PaleoWorkbenchWindow(QWidget):
         )
 
     def _update_title(self) -> None:
-        self.setWindowTitle(
-            f"{self.project.meta.name} - Paleogeography Workbench"
-        )
-
-    # --- internal utils ---
-
-    @staticmethod
-    def _normalize_project_path(path: Path) -> Path:
-        """Ensure the filename ends with ``.paleo.json`` without double-appending.
-
-        - "p"            -> "p.paleo.json"
-        - "p.json"       -> "p.paleo.json"
-        - "p.paleo.json" -> "p.paleo.json" (unchanged)
-        """
-        if path.name.endswith(_PROJECT_SUFFIX):
-            return path
-        stem = path.name[:-len(".json")] if path.name.endswith(".json") else path.name
-        return path.with_name(stem + _PROJECT_SUFFIX)
+        self.setWindowTitle(f"{self.project.meta.name} - Paleogeography Workbench")

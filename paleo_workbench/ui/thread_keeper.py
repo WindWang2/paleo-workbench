@@ -46,10 +46,17 @@ class DetachedJobKeeper(QObject):
             return
         thread, worker = job
         try:
+            app = QApplication.instance()
+            if app is not None and worker.thread() is not app.thread():
+                worker.moveToThread(app.thread())
             worker.deleteLater()
             thread.deleteLater()
-        except RuntimeError:
-            pass
+        except Exception:
+            try:
+                worker.deleteLater()
+                thread.deleteLater()
+            except Exception:
+                pass
 
 
 _KEEPER: DetachedJobKeeper | None = None

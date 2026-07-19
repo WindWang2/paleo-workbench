@@ -1664,3 +1664,463 @@ Failures:
 - [CLEANUP PASS] 已确认 feature worktree clean 后精确 force-remove；`git branch -d refactor/owned-worker-job` 成功。
 - [WORKTREE FINAL] `git worktree list` 仅剩 `/home/kevin/projects/paleo_project e1aa52a [main]`。
 - [COMPLETED · ISS-DEDUP-THREAD-01] Workbench 线程生命周期去重已实现、审查、合并、复验并清理；Phase 30 后续保留算法/预览分派/几何/大模块批次。
+- [MANUAL RUN] 用户要求启动应用体验；`python -m paleo_workbench.main` 已在图形会话启动并保持运行（PTY session 24941）。启动无异常退出；仅见 FFmpeg backend 与 OpenGL ES 3.2 compatibility warning。
+- [START · Phase 31] 用户通过 `/brainstorm` 要求设计项目文件、数据页、制备页与编图页之间的数据读入/输出关联；已完整读取 brainstorming 与 planning-with-files 技能说明。
+- [PWF SYNC] 已建立 `ISS-DFLOW-01`～`ISS-DFLOW-05` 审计清单与设计门禁；满足连续 2 次查看/检索后的 PWF 同步要求，下一步沿真实模型和调用链审计。
+- [AUDIT · Phase 31] 已完成模型、项目 I/O、数据页、制备页、编图页与 AppShell 状态分发的第一轮调用链检索；确认共享 live `ProjectDocument` 与现有 lineage 骨架。
+- [PWF SYNC] 已记录端到端数据图和核心缺口：页面信号能刷新内存视图，但稳定资产登记、派生版本失效、统一 dirty/commit 与输出回流尚缺集中契约；本轮未执行测试、未改业务代码。
+- [DECISION · Phase 31] 用户确认 `DEC-DFLOW-01`：采用 `ProjectDocument` 单一事实源、页面暂存、确认提交的事务模式。
+- [SCOPE · Phase 31] 用户明确制备页需面向多种单因素图分别管理；已新增 `DEC-PREP-01/02`，下一步审计现有因素类型与页面控件后确认因素目录模式。
+- [AUDIT · Phase 31] 已核对制备 UI、默认因素、插值批处理及相关测试：当前虽能批量生成多个 `FactorMapTask`，但方法、井表与 QC 仍以全局/首项为中心。
+- [PWF SYNC] 已记录制备页四项结构缺口：缺因素级选择与配置、缺因素级数据绑定、缺因素级 QC、缺派生成果向数据页登记；本轮未运行测试、未修改业务代码。
+- [DECISION · Phase 31] 用户确认 `DEC-PREP-02`：制备因素采用标准模板与自定义因素并存的混合目录。
+- [PWF SYNC] 已记录模板/任务分层要求；下一步确认制备输入与数据页项目资产的绑定边界，本轮未执行测试、未修改业务代码。
+- [DECISION · Phase 31] 用户确认 `DEC-PREP-03`：制备页外部文件先自动登记为项目资产，任务只绑定资源 ID 与字段映射。
+- [PWF SYNC] 已收敛制备输入路径边界及 Worker 快照要求；下一步确认重算版本策略，本轮未执行测试、未修改业务代码。
+- [DECISION · Phase 31] 用户确认 `DEC-PREP-04`：单因素重算保留不可变成果版本，编图引用固定版本并提示可更新。
+- [DESIGN · Phase 31] 已形成三种整体架构路线 A/B/C，推荐“项目资产图 + 不可变成果 + 统一提交服务”；等待用户确认后进入分段设计评审。
+- [DECISION · Phase 31] 用户确认架构路线 A：项目资产图、不变成果版本、统一提交服务和薄页面宿主。
+- [DESIGN · Phase 31] 已形成 `DES-ARCH-01` 总体架构提案并写入 PWF，等待用户逐段确认；本轮未执行测试、未修改业务代码。
+- [APPROVAL · Phase 31] 用户确认 `DES-ARCH-01` 总体架构与职责边界。
+- [DESIGN · Phase 31] 已形成 `DES-PREP-01` 多因素制备页提案，覆盖因素级导航、输入/QC/参数、异步试算、待采用结果和批量部分成功；等待用户确认。
+- [START · Phase 32] 用户通过 `/goal` 要求实现覆盖所有预览格式的统一设置面板，并授权采用推荐默认、无需询问、持续执行至完成。
+- [GOAL] 已创建持续目标；已读取 brainstorming 与 planning-with-files 规则，自动批准“强类型统一配置 + 用户级 QSettings + generation 重载”设计基线。
+- [PWF SYNC] 已建立 `ISS-PREVSET-01`～`ISS-PREVSET-06` 审计、TDD、实现与验证清单；当前未修改业务代码、未执行测试。
+- [METHOD · Phase 32] 已读取 writing-plans 与 test-driven-development；实现计划将按用户约束继续写入根 `task_plan.md`，业务实现严格执行 RED→GREEN→REFACTOR。
+- [PWF SYNC] 已记录自动批准设计与 TDD 门禁；下一步盘点预览代码地图和现有测试，本轮仍未修改业务代码、未执行测试。
+- [AUDIT · Phase 32] 已盘点 PreviewMode、Provider、ReaderPanel、异步控制器、内存缓存与 DataWorkspace；确认设置必须贯穿内容生成、缓存身份和当前请求重载。
+- [PWF SYNC] 已记录第一轮文件边界与缓存风险；下一步审计 PDF/图像/表格/专业 Host 的可调入口，本轮未执行测试、未改业务代码。
+- [AUDIT · Phase 32] 已完成普通 widgets、PDF/图片/GeoTIFF/JSON/媒体、LocalVisualizationProvider、GeoViz Host、磁盘缓存与 DataPage 重载入口审计。
+- [PLAN · Phase 32] 已锁定推荐默认字段及六个 TDD 原子任务；下一步确认现有 QSettings/PreviewOptions API 后开始 `T-PREVSET-01` RED。
+- [AUDIT · Phase 32] 已确认无既有 QSettings namespace，并读取 geo-viz-engine `PreviewOptions` 精确默认/API；未发现需要修改 engine contracts 的缺口。
+- [PWF SYNC] 已锁定 PreviewSettings/Store/Provider/Cache/Controller/Panel/Reader 接口及竞态规避方案；下一步补审 fallback 格式后进入第一个 RED。
+- [AUDIT · Phase 32] 已完成 fallback preview 与现有测试扩展点审计；确认安全预算保持硬编码，显示条数接入统一设置。
+- [PLAN REFINEMENT] 为兼容既有 `preview(asset)` 子类，Provider settings 注入改为 `with_settings()` 快照浅拷贝；下一步进入 `T-PREVSET-01` RED。
+- [RED · T-PREVSET-01] 新增推荐默认值契约测试；`QT_QPA_PLATFORM=offscreen pytest -q tests/test_preview_settings.py` 返回 exit 2，唯一原因是目标模块不存在，符合预期。
+- [PWF SYNC] 已满足测试文件 Mutation + RED 测试后的 2-Action 门禁；下一步创建最小 `PreviewSettings` 使默认测试转绿。
+- [GREEN · T-PREVSET-01] 创建 `preview_settings.py` 最小 frozen `PreviewSettings`；定向测试 `1 passed in 0.11s`。
+- [PWF SYNC] 已满足业务模块 Mutation + GREEN 测试后的 2-Action 门禁；下一步为校验/指纹/Store/GeoViz options 编写下一组 RED。
+- [RED · T-PREVSET-01] 扩展配置契约测试；定向 pytest exit 2，唯一收集错误为 `PreviewSettingsStore` 尚未实现。
+- [PWF SYNC] 已满足测试 Mutation + RED 测试后的 2-Action 门禁；下一步实现完整 PreviewSettings 契约与 Store。
+- [GREEN · T-PREVSET-01] 完成 `PreviewSettings` 与 `PreviewSettingsStore`；定向测试 `5 passed in 0.13s`。
+- [PWF ERROR] 首次同步因 task_plan 清单锚点未匹配失败；已用 `rg` 定位并改用精确锚点，无业务影响。
+- [PWF SYNC] 已满足生产模块 Mutation + GREEN 测试后的 2-Action 门禁；下一步为 Provider/fallback 内容设置编写 RED。
+- [AUDIT · T-PREVSET-02] 已定位 Provider 所有固定上限消费点，并确认大 JSON 当前存在整文件读取 + 任意字节截断解析缺陷。
+- [PWF SYNC] 已将 JSON 超限安全提示纳入 Provider 设置任务；下一步编写文本/表格/JSON/GeoViz Provider RED。
+- [RED · T-PREVSET-02] 新增 Provider 内容设置契约；定向结果 `5 failed, 5 passed`，失败根因统一为 `PreviewProvider.with_settings` 尚未实现。
+- [PWF SYNC] 已满足测试 Mutation + RED 测试后的 2-Action 门禁；下一步一次性实现已覆盖的 Provider/fallback 最小行为。
+- [GREEN · T-PREVSET-02] 修改 `preview_provider.py`、`geoviz_preview_provider.py`、`fallback_preview.py`；域测试 `69 passed, 1 warning in 1.23s`。
+- [PWF ERROR] 第二次组合同步因 Issue 文本锚点未匹配失败；已更换为“精确任务行 + 追加日志”策略，不再尝试同一锚点。
+- [PWF SYNC] 已满足 Provider Mutation + GREEN 测试后的 2-Action 门禁；下一步为 cache fingerprint、disk options 与 controller generation 编写 RED。
+- [RED · T-PREVSET-03] 新增内存/磁盘 cache 隔离与运行中设置切换契约；定向 `3 failed, 10 passed`，失败均为目标接口缺失。
+- [PWF SYNC] 已满足测试 Mutation + RED 测试后的 2-Action 门禁；下一步实现 cache/disk/controller settings snapshot 链路。
+- [FAIL-1 · T-PREVSET-03] 实现 cache fingerprint、disk options、Controller generation/settings snapshot 后运行组合域；输出显示 2 failed，随后 Qt teardown segfault，exit 139。
+- [PWF SYNC] 已记录第 1 次失败并更换为“无 async 断言 → async 节点隔离”策略；下一步先提取确定功能失败，不重复崩溃命令。
+- [SEGMENT GREEN · T-PREVSET-03] settings/cache/disk `36 passed`；新增 Controller settings 切换节点 `1 passed`，均 exit 0。
+- [PWF SYNC] 已满足连续 2 次测试后的门禁；下一步仅收集/运行 async 失败节点，定位兼容断言并规避整组 teardown 崩溃。
+- [FAIL DETAIL · T-PREVSET-03] async `--maxfail=2` 得到 `2 failed, 17 passed`；均为默认 cache key 兼容问题，无线程断言失败。
+- [FIX · T-PREVSET-03] `make_preview_cache_key(asset)` 省略设置参数时改用推荐默认 fingerprint，与默认 Controller 保持一致。
+- [PWF SYNC] 已满足 async 失败测试 + cache Mutation 后的 2-Action 门禁；下一步只复测两个失败节点。
+- [GREEN · T-PREVSET-03] 两个 async cache 兼容失败节点复测 `2 passed in 0.43s`。
+- [TEST MAP] 收集 `tests/test_preview_async.py` 共31项；下一步按前16/后15分段验证，避免既有 offscreen teardown 累积崩溃。
+- [PWF SYNC] 已满足复测 + collection 后的 2-Action 门禁。
+- [GREEN · T-PREVSET-03] async 分段 A `14 passed, 17 deselected`；分段 B `17 passed, 14 deselected`，两段完整覆盖31项。
+- [PWF SYNC] 已满足连续2次测试后的门禁；cache/settings链路阶段完成，下一步 `T-PREVSET-04` 设置面板 RED。
+- [RED · T-PREVSET-04] 新增 `tests/test_preview_settings_panel.py`；定向 exit 2，唯一错误为面板模块不存在。
+- [PWF SYNC] 已满足测试 Mutation + RED 测试后的2-Action门禁；下一步实现类别栈、全部设置控件、应用/默认行为。
+- [FAIL-1 · T-PREVSET-04] 创建完整面板后定向 `16 failed`；统一根因为样式 token `BG_PANEL` 不存在，无多重逻辑失败。
+- [PWF SYNC] 已满足面板 Mutation + 第1次失败测试后的2-Action门禁；下一步定点替换为既有 `BG_SIDEBAR` 后复测。
+- [GREEN · T-PREVSET-04] 修正设计 token 后面板定向 `16 passed in 0.24s`。
+- [PWF SYNC] 已满足样式 Mutation + GREEN 测试后的2-Action门禁；下一步 `T-PREVSET-05` Widgets/Reader显示设置 RED。
+- [RED · T-PREVSET-05] 新增 Widgets/Reader 显示设置契约；定向 `3 failed`，失败为目标接口缺失。
+- [GREEN · T-PREVSET-05] `preview_widgets.py` 与 `data_reader_panel.py` 完成显示设置应用、设置面板嵌入及 Provider 快照更新；定向 `3 passed in 0.81s`。
+- [PWF SYNC] 已满足 Widgets/Reader Mutation + 定向测试后的2-Action门禁；下一步进入 `T-PREVSET-06` DataPage信号接线 RED。
+- [RED · T-PREVSET-06] 新增 DataPage 设置变更失效旧 generation 并重载当前资产的契约；定向 `1 failed`，Controller仍保持旧设置，符合接线缺失预期。
+- [PWF SYNC] 已满足测试 Mutation + RED 测试后的2-Action门禁；下一步实现 DataPage 最小信号接线。
+- [GREEN · T-PREVSET-06] DataPage 完成初始设置快照和变更信号接线；定向 `1 passed in 1.37s`，确认 generation 失效及当前资产重载。
+- [PWF SYNC] 已满足 DataPage Mutation + GREEN 测试后的2-Action门禁；进入预览域回归与自审。
+- [FAIL-1 · T-PREVSET-06] 可见预览域 `3 failed, 82 passed`；失败统一来自 FakePdfView 无缩放 API。
+- [FIX · T-PREVSET-06] PDF设置应用增加可选后端能力检测，缺少 zoom API 时安全降级且不阻断 PDF 加载。
+- [PWF SYNC] 已满足回归测试 + PDF兼容修复后的2-Action门禁；下一步复测可见预览域。
+- [GREEN · T-PREVSET-06] 可见设置/Reader/Widgets 回归 `85 passed in 3.98s`。
+- [GREEN · T-PREVSET-06] Provider/fallback/GeoViz/cache/disk/strategy 回归 `92 passed, 1 warning in 1.66s`。
+- [PWF SYNC] 已满足连续2次回归测试后的门禁；下一步验证异步生命周期与 DataPage 全域。
+- [GREEN · T-PREVSET-06] 异步生命周期分段A `17 passed in 3.11s`；分段B `14 passed in 2.60s`，完整覆盖31项。
+- [PWF SYNC] 已满足连续2次异步测试后的门禁；下一步执行 DataPage 全文件与静态检查。
+- [GREEN · T-PREVSET-06] DataPage/DataWorkspace `57 passed in 3.96s`；项目资产选择、导入、移除、重扫、PDF及设置重载均通过。
+- [STATIC · T-PREVSET-06] `compileall` 与 `git diff --check` exit 0；确认未触碰既有无关未跟踪目录/文档。
+- [PWF SYNC] 已满足 DataPage测试 + 静态验证后的2-Action门禁；下一步代码自审后运行全量 offscreen pytest。
+- [FULL GREEN · Phase 32] `QT_QPA_PLATFORM=offscreen pytest -q`：`1051 passed, 4 skipped, 2 warnings in 49.69s`，exit 0。
+- [COMPLETE · Phase 32] 统一预览设置模型、持久化面板、全格式内容参数、异步代次/缓存隔离与当前项目资产重载全部完成；进入最终独立审查与交付核验。
+- [REVIEW · Phase 32] 按交付门禁已派发只读独立代码审查；等待 Critical/Important/Minor 结论后再执行最后新鲜验证。
+- [REOPEN · Phase 32] reviewer：0 Critical、2 Important；已重开T-PREVSET-06，按TDD修复 Web首次设置与GeoTIFF严格尺寸。
+- [RED · REVIEW FIX] 新增Web懒加载与GeoTIFF两项边界共3测试；结果 `3 failed`，分别复现未应用设置、超目标长边、原图被overview降质。
+- [PWF SYNC] 已满足测试Mutation + RED执行后的2-Action门禁；下一步实现最小修复。
+- [GREEN · REVIEW FIX] 完成Web首次设置与GeoTIFF严格长边/小图保真修复；定向 `3 passed in 0.96s`。
+- [PWF SYNC] 已满足生产Mutation + GREEN测试后的2-Action门禁；下一步最终新鲜全量验证。
+- [FAIL-1 · FINAL VERIFY] reviewer复核指出overview不足边界；全量在既有FakeWeb后端因无apply_settings失败，手动中止时 `1 failed, 583 passed, 4 skipped`。
+- [RED PREP] 新增GeoTIFF overview倍率不足测试；Web兼容已由既有失败覆盖。
+- [PWF SYNC] 已满足全量执行 + 测试Mutation后的2-Action门禁；下一步确认RED后做第二轮最小修复。
+- [RED · REVIEW FIX-2] 旧FakeWeb兼容与overview不足 `2 failed`，均为预期缺失行为。
+- [FIX · REVIEW FIX-2] Web使用apply_settings能力检测；GeoTIFF找不到足够倍率overview时保留ceil倍率。
+- [PWF SYNC] 已满足RED执行 + 生产Mutation后的2-Action门禁；下一步定向GREEN。
+- [GREEN · REVIEW FIX-2] Web新旧后端 + GeoTIFF非整除/小图/overview不足 `5 passed in 2.18s`。
+- [FINAL VERIFY · Phase 32] compileall、`git diff --check`、全量 offscreen pytest 全部 exit 0；最终 `1055 passed, 4 skipped, 8 warnings in 49.54s`。
+- [DONE · Phase 32] 所有用户目标与独立审查 Important 均已实现/修复；三份PWF文件同步完成，等待关闭目标并交付。
+- [RUN · Phase 32] 按用户要求通过 `python -m paleo_workbench.main` 启动GUI；进程持续运行（PTY session 8632），Qt Multimedia/FFmpeg初始化成功，仅报告OpenGL ES兼容性 RuntimeWarning，无启动异常。
+- [START · Phase 33] 用户要求把预览设置改为对话框并移入工具菜单；已读取 brainstorming/planning-with-files/TDD，建立自动批准设计与四项TDD清单，尚未修改业务代码。
+- [PLAN · Phase 33] 已读取 writing-plans 并将文件边界、接口及四阶段RED/GREEN计划写入根task_plan；按PWF唯一体系未创建额外spec/plan。
+- [RED · T-PREVDLG-01] 新增工具菜单内容与语义信号测试；`2 failed`，根因为工具仍是QLabel且无专用signal/action。
+- [PWF SYNC] 已满足测试Mutation + RED执行后的2-Action门禁；下一步实现真实工具菜单。
+- [IMPLEMENT · T-PREVDLG-01] MenuBar增加ToolsMenuButton/QMenu、“预览设置…”action及preview_settings_requested；保留labels顺序兼容既有测试。
+- [PWF SYNC] 已满足菜单实现与类型导入两次Mutation后的2-Action门禁；下一步运行GREEN。
+- [GREEN · T-PREVDLG-01] `tests/test_menu_bar.py`：`6 passed in 0.15s`。
+- [RED · T-PREVDLG-02] 新增Dialog窗口语义测试；因 `preview_settings_dialog` 模块不存在而collection exit 2。
+- [PWF SYNC] 已满足Dialog测试Mutation + RED执行后的2-Action门禁；下一步创建最小Dialog容器。
+- [GREEN · T-PREVDLG-02] 创建应用级modal PreviewSettingsDialog；定向 `3 passed in 0.20s`。
+- [PWF SYNC] 已满足Dialog生产Mutation + GREEN执行后的2-Action门禁；下一步Reader/Window迁移RED。
+- [RED · T-PREVDLG-03] 改写Reader契约并新增Window工具菜单集成/重建接线测试；`3 failed`，均为迁移目标尚未实现。
+- [PWF SYNC] 已满足集成测试Mutation + RED执行后的2-Action门禁；下一步实施Reader瘦化与Window Dialog接线。
+- [IMPLEMENT · T-PREVDLG-03] ReaderPanel已删除设置按钮/Panel和相关布局依赖，提供公共 `set_preview_settings()` 消费接口。
+- [IMPLEMENT · T-PREVDLG-03] AppWindow持有单实例Dialog，菜单打开时同步当前mode/settings，应用回调动态路由至当前shell DataPage。
+- [PWF SYNC] 已满足Reader + Window两次生产Mutation后的2-Action门禁；下一步定向GREEN与兼容回归。
+- [GREEN · T-PREVDLG-03] 三个迁移节点 `3 passed in 2.23s`。
+- [GREEN · Phase 33域] menu/dialog/panel/reader/data integration `70 passed in 4.40s`。
+- [PWF SYNC] 已满足连续2次测试后的门禁；下一步DataPage/生命周期、静态与全量验证。
+- [SELF-REVIEW · Phase 33] 残留引用与diff审查完成，未发现旧内嵌UI依赖或stale shell接线；下一步执行高风险回归。
+- [GREEN · T-PREVDLG-04] DataPage/ProjectLifecycle/AppShell `89 passed in 11.56s`。
+- [STATIC · T-PREVDLG-04] `compileall paleo_workbench` 与 `git diff --check` exit 0；下一步独立审查和最终全量。
+- [REVIEW · Phase 33] reviewer：0 Critical；确认Window/shell生命周期正确。开始按TDD修复测试QSettings污染，并补工具按钮样式。
+- [RED · REVIEW FIX] 集成测试改用临时Store并新增Tools样式契约；`2 failed`，准确证明注入API与统一QSS缺失。
+- [PWF SYNC] 已满足测试Mutation + RED执行后的2-Action门禁；下一步实现Store注入与样式，并撤销测试对生产配置的污染。
+- [IMPLEMENT · REVIEW FIX] PaleoWorkbenchWindow增加可选PreviewSettingsStore注入并传给Dialog；生产默认仍使用标准Store。
+- [IMPLEMENT · REVIEW FIX] QSS将ProjectMenuButton与ToolsMenuButton统一透明/hover样式。
+- [PWF SYNC] 已满足Window + tokens两处生产Mutation后的2-Action门禁；下一步GREEN并恢复被测试污染的生产字号。
+- [RECOVERY] 通过QSettings API将本轮测试误写的真实 `preview/settings/font_size` 从21恢复为推荐默认12。
+- [GREEN · REVIEW FIX] Store隔离与Tools样式 `2 passed in 2.24s`。
+- [FINAL VERIFY · Phase 33] reviewer行为Critical/Important清零；compileall/diff-check/full pytest exit 0，`1063 passed, 4 skipped, 8 warnings in 57.93s`。
+- [DONE · Phase 33] 工具菜单Dialog迁移完成，准备以新代码重启GUI。
+- [RUN · Phase 33] 新版GUI已通过 `python -m paleo_workbench.main` 启动并持续运行（PTY session 19595）；Qt Multimedia/FFmpeg初始化正常，无启动异常。用户可从“工具 → 预览设置…”打开模态设置对话框。
+- [RUN · USER RETRY] 会话19595已正常退出（exit 0），但退出前地震3D产生pyqtgraph shader兼容日志；已按用户要求重新启动GUI，当前PTY session 62159持续运行，启动无异常。
+- [START · Phase 34] 用户反馈地震剖面预览卡顿；已读取systematic-debugging/brainstorming/TDD/PWF并完成第一轮根因证据采集。
+- [EVIDENCE] pyqtgraph 0.14模块缺compileShader/compileProgram，导致每帧异常且shader program永不缓存；PyOpenGL模块具备目标API。尚未修改生产代码。
+- [PATTERN] PyOpenGL program对象确认支持现有context manager；pyqtgraph自身也依赖同一底层编译器。下一步在真实GLES3.2上下文运行最小monkeypatch实验，隔离是否还有GLSL源码错误。
+- [DIAGNOSTIC-1] 独立GL实验首次因缺engine PYTHONPATH失败，改用显式包路径。
+- [DIAGNOSTIC-2] 真实GLES3.2 context确认：正确编译器可调用，但modern shader因legacy texture3D helper编译失败；根因设计已锁定为编译器来源+GLSL分支隔离。
+- [PLAN · Phase 34] 已读取writing-plans并在根task_plan锁定单文件engine修复、Fake context RED、真实GLES验证及分层回归；未创建额外计划文件。
+- [RED ENV · T-SEISPERF-01] 新增Fake GLES3 compiler/source/cache回归；首次定向执行exit 1，唯一失败为`ModuleNotFoundError: geoviz_seismic`，目标断言尚未运行。
+- [PWF SYNC] 已满足测试Mutation + 首次RED执行后的2-Action门禁；下一步显式设置engine本地包路径重跑功能RED，不把环境失败计作渲染修复strike。
+- [RED · T-SEISPERF-01] 显式`PYTHONPATH=packages/geoviz_seismic`后，测试在目标断言失败：renderer未暴露PyOpenGL `gl_shaders`；功能RED成立。
+- [PWF SYNC] 已满足PWF环境记录Mutation + 功能RED执行后的2-Action门禁；下一步实施renderer最小根因修复。
+- [IMPLEMENT · T-SEISPERF-01] renderer改用PyOpenGL `gl_shaders`，并清除四个GLSL分支中不属于该版本的normal helper；未调整采样、纹理或UI链路。
+- [GREEN · T-SEISPERF-01] Fake GLES3 compiler/source/cache定向测试`1 passed in 0.66s`。
+- [PWF SYNC] 已满足生产Mutation + GREEN测试后的2-Action门禁；下一步运行renderer全文件和真实GLES3.2上下文验证。
+- [GREEN · T-SEISPERF-02] renderer完整测试`8 passed in 0.78s`。
+- [REAL GL ENV-1] 真实上下文脚本因`QOpenGLWidget`导入模块错误exit 1；尚未创建GL context，改从`PySide6.QtOpenGLWidgets`导入后重跑。
+- [PWF SYNC] 已满足连续2次测试/诊断执行后的2-Action门禁；下一步修正一次性诊断脚本并验证真实driver编译。
+- [REAL GL GREEN · T-SEISPERF-03] 真实DISPLAY/GLES3.2成功编译program=3，第二次调用`cache_identity=True`，无AttributeError或ShaderCompilationError。
+- [DOMAIN GREEN · T-SEISPERF-02] renderer/seismic/sculpting/hillshading 7个测试文件`24 passed in 3.65s`。
+- [PWF SYNC] 已满足真实GL诊断 + engine地震域测试后的2-Action门禁；下一步workbench预览域、静态检查与全量验证。
+- [WORKBENCH GREEN · T-SEISPERF-04] GeoViz/Seismic/Preview相关10个测试文件`124 passed in 24.33s`，1条既知lasio warning。
+- [STATIC GREEN · T-SEISPERF-04] engine/workbench compileall及父仓/子模块diff-check全部exit 0。
+- [PWF SYNC] 已满足workbench预览域 + 静态验证后的2-Action门禁；下一步engine全量与根全量offscreen回归。
+- [ENGINE FULL WAIT-1] engine单进程全量前24%断言全绿，随后Qt poll等待超过3分钟且无输出；精确终止本轮pytest，准备按文件分段。
+- [ROOT FULL FAIL-1] 根单进程全量约12%在pytest-qt teardown `_process_events` segfault；无断言失败、无shader异常，策略改为分段新进程。
+- [PWF SYNC] 已满足engine全量尝试 + 根全量尝试后的2-Action门禁；下一步先收集测试文件并分批执行，隔离Qt生命周期噪声。
+- [ROOT SEGMENT A GREEN] 排序文件1–20：`214 passed in 11.13s`，1条既知lasio warning。
+- [ROOT SEGMENT B GREEN] 排序文件21–40：`144 passed in 22.03s`，1条既知lasio warning。
+- [PWF SYNC] 已满足连续2次分段测试后的2-Action门禁；下一步继续文件41–80。
+- [ROOT SEGMENT C GREEN] 排序文件41–60：`100 passed, 4 skipped in 5.13s`。
+- [ROOT SEGMENT D GREEN] 排序文件61–80：`99 passed in 4.73s`。
+- [PWF SYNC] 已满足连续2次分段测试后的2-Action门禁；下一步继续文件81–120。
+- [ROOT SEGMENT E GREEN] 排序文件81–100：`210 passed in 17.19s`，7条既知lasio/rasterio warnings。
+- [ROOT SEGMENT F GREEN] 排序文件101–120：`99 passed in 4.07s`，1条既知GDAL future warning。
+- [PWF SYNC] 已满足连续2次分段测试后的2-Action门禁；下一步完成文件121–157并核对总数。
+- [ROOT SEGMENT G GREEN] 排序文件121–140：`116 passed in 4.92s`。
+- [ROOT SEGMENT H GREEN] 排序文件141–157：`81 passed in 5.16s`。
+- [ROOT COMPLETE · T-SEISPERF-04] 八段合计`1063 passed, 4 skipped`，与修复前基线总数一致；无断言失败。
+- [PWF SYNC] 已满足连续2次分段测试后的2-Action门禁；下一步独立审查、最终新鲜定向验证与GUI重启。
+- [REVIEW · Phase 34] 独立审查：0 Critical、1 Important（legacy horizon generic texture）、3项Minor覆盖建议；Ready=No until fix。
+- [RED · T-SEISPERF-REVIEW-01] 新增加严编译器identity、二次link检查、GLES2/desktop legacy纹理函数测试；结果`3 failed`，分别准确复现缺少check_linked与两处分支污染。
+- [PWF SYNC] 已满足review测试Mutation + RED执行后的2-Action门禁；下一步修复两处legacy采样并检查二次relink状态。
+- [IMPLEMENT · REVIEW FIX] legacy两个分支改用`texture2D`，现代两个分支保持generic `texture`；二次relink后增加`program.check_linked()`。
+- [SELF-CORRECTION] 首次宽泛替换误命中modern GLES；分支行号自检立即纠正，最终四分支函数矩阵正确，尚未运行GREEN。
+- [PWF SYNC] 已满足两次生产Mutation后的2-Action门禁；下一步定向GREEN与真实GLES复验。
+- [GREEN · REVIEW FIX] modern compiler/link/cache与两个legacy分支`3 passed in 0.69s`。
+- [REAL GL RE-GREEN] 修复后真实GLES3.2 program=3、cache identity=true，exit 0。
+- [PWF SYNC] 已满足定向GREEN + 真实driver复验后的2-Action门禁；下一步reviewer复核、最终新鲜门禁和GUI重启。
+- [RE-REVIEW · Phase 34] 原Important清零，0 Critical/Important，Ready=Yes；legacy真实context缺失仅为非阻塞测试边界说明。
+- [FINAL ENGINE TARGET] renderer全文件`10 passed in 0.65s`；renderer/seismic/sculpting/hillshading相关域`26 passed in 3.30s`。
+- [PWF SYNC] 已满足连续2次新鲜engine验证后的2-Action门禁；下一步workbench链路新鲜验证、静态门禁和重启运行观察。
+- [FINAL WORKBENCH TARGET] GeoViz/Seismic/Preview链路`124 passed in 24.35s`，1条既知lasio warning。
+- [FINAL STATIC] compileall、父仓与engine diff-check均exit 0；源码扫描确认编译器/四分支纹理函数矩阵符合设计。
+- [PWF SYNC] 已满足workbench新鲜验证 + 静态门禁后的2-Action规则；下一步停止旧GUI并以修复代码启动，观察实时日志。
+- [RESTART · Phase 34] 旧GUI PID 849341已精确TERM并退出；当前代码以PTY session 75620启动，持续运行，启动日志仅FFmpeg初始化。
+- [REAL PAINT · Phase 34] 真实GLES3.2 Renderer3D加载16³体数据并绘制30帧，`REAL_PAINT_OK program=6`，exit 0；无shader异常洪泛。
+- [DONE · Phase 34] 错误编译器API、modern/legacy GLSL污染与二次relink检查均已修复；独立审查0 Critical/Important，GUI已重启供用户使用。
+- [PWF SYNC] 已满足GUI重启 + 真实paint验证后的2-Action门禁；三份PWF文件最终同步完成。
+- [START · Phase 35] 用户要求DAT/LAS等专业预览改为“数据列表 + 可视化预览”双选项卡，可视化仅在首次点击时启动后台任务。
+- [SKILLS · Phase 35] 已启用using-superpowers、brainstorming、Planning with Files和TDD；按用户唯一PWF体系不创建额外design/spec文档。
+- [PWF SYNC] 已满足技能/PWF恢复阶段的2-view门禁；下一步完整读取技能余段并审计现有预览数据流。
+- [SKILL READ-1] 已完整读取brainstorming，并读取TDD前220行；确认实现硬门禁为“先审计→候选设计→批准→writing-plans→功能RED→生产代码”。
+- [PWF SYNC] 已满足连续2次skill view后的Planning with Files门禁；下一步读完TDD/PWF技能与writing-plans，再审计代码。
+- [SKILL READ-2] TDD已完整读取；Planning with Files已读前240行，确认还需遵守view类2-Action、错误全记录与3-Strike更换策略。
+- [PWF SYNC] 已满足连续2次skill view门禁；下一步读完PWF余段，并在设计批准后只调用writing-plans进入实现规划。
+- [SKILL READ-3] Planning with Files已完整读取；已完成第一轮preview/Reader/Controller/GeoViz代码搜索。
+- [AUDIT-1 · Phase 35] 发现当前重工作在Provider一次请求内已执行，Reader仅延迟Host import不足以实现“点击第二页才开线程”；需拆分轻量列表请求和惰性可视化请求。
+- [PWF SYNC] 已满足PWF余段 + 代码搜索2-view门禁；下一步读取关键实现和测试，锁定最小接口。
+- [AUDIT-2 · Phase 35] 已读LocalVisualizationProvider/PreviewResult/LAS/SEG-Y fallback和Reader完整实现；确认可复用现有summary widgets与Host clear/release，但必须拆Provider请求语义。
+- [PWF SYNC] 已满足provider + reader两个view门禁；下一步审计Controller/DataPage和已有异步测试，随后形成候选设计。
+- [AUDIT-3 · Phase 35] 已读PreviewRequestController/DataPage选择、设置、shutdown接线和关键async/Reader测试；锁定双controller + Reader语义信号方向。
+- [PWF SYNC] 已满足Controller/DataPage + tests两个view门禁；下一步核对GeoViz supports的格式覆盖与DAT引擎语义，完成候选设计。
+- [SEARCH ERROR] 首次GeoViz全包rg误包含web_dist大bundle并截断；更换为精确源文件范围后取得有效证据。
+- [AUDIT-4 · Phase 35] 确认双页候选格式为engine-supported LAS、SEGY与4类DAT语义；prepare在线程、render在UI线程的现有边界可直接复用。
+- [PWF SYNC] 已满足GeoViz广搜 + 定向源码两个view门禁；下一步形成候选方案与自动批准设计，并调用writing-plans。
+- [DESIGN · Phase 35] 已向用户呈现A/B/C三方案并采用双Controller推荐；Provider/DTO、Reader tabs、DataPage generation、错误和测试设计已写入task_plan。
+- [DESIGN APPROVAL] 当前需求明确指定双页与点击后启动，结合此前“默认推荐、直接执行”授权，推荐设计自动批准；按用户PWF限制不创建/commit额外spec。
+- [PLAN · Phase 35] 已完整读取writing-plans，并在task_plan写入5个可独立RED/GREEN的Task、精确文件/接口/测试门禁；选择inline execution以遵守直接执行与非委派约束。
+- [PLAN SELF-REVIEW] 覆盖/placeholder/type/scope四项自审通过；未创建docs plan、未commit，符合用户唯一PWF体系。
+- [PWF SYNC] 已满足DAT测试搜索 + plan复读后的2-view门禁；下一步读取executing-plans并执行Task35.1 RED。
+- [EXECUTION SKILLS] 已完整读取executing-plans与using-git-worktrees；计划采用当前会话inline执行，但先按门禁检测是否已隔离及分支状态。
+- [PWF SYNC] 已满足两个execution skill view门禁；下一步只读检测git目录/分支/dirty基线，决定安全执行位置。
+- [WORKSPACE · Phase 35] 检测到main普通工作区及既有dirty改动；依据用户授权在原工作区执行，不创建worktree、不commit，保留所有无关文件。
+- [BASELINE FAIL-1] Provider/Reader/async/DataPage/lifecycle 6文件组合在`test_cache_miss_after_file_rewrite`的Qt wait发生Bus error，约88项此前已通过且无断言失败。
+- [PWF SYNC] 已满足workspace检测 + baseline测试后的2-Action门禁；策略改为独立进程分段，先确认Task35.1 Provider基线再写RED。
+- [BASELINE GREEN · Task35.1] Provider两个测试文件`36 passed in 2.20s`，1条既知lasio warning。
+- [TEST MAP · Task35.1] 已读RecordingEngine与bounded provider测试，锁定4个最小RED节点。
+- [PWF SYNC] 已满足baseline测试 + test map view后的2-Action门禁；下一步写Task35.1测试Mutation并验证RED。
+- [DAT FIXTURE AUDIT] 已读取engine真实DAT markers/fixtures及Provider测试imports，确定well-head列表RED与不规则文本fallback RED。
+- [PWF SYNC] 已满足DAT fixture + test import两个view门禁；下一步正式写Provider两阶段/DAT列表测试。
+- [RED · Task35.1] 新增5项Provider/DAT测试；`4 failed, 1 passed`，失败均为计划功能缺失，fallback现有行为保持通过。
+- [PWF SYNC] 已满足测试Mutation + RED执行后的2-Action门禁；下一步实现最小Provider/DTO/DAT列表逻辑。
+- [IMPLEMENT · Task35.1] 完成PreviewResult capability、Provider两阶段契约、Local summary/visual拆分与DAT有界列表解析。
+- [GREEN-1 · Task35.1] 5个新增节点`5 passed in 0.66s`，1条既知lasio warning。
+- [PWF SYNC] 已满足生产Mutation + GREEN测试后的2-Action门禁；下一步两个Provider全文件回归并自审边界。
+- [DONE · Task35.1] Provider全文件`41 passed in 1.02s`，1条既知lasio warning；两阶段/DAT列表交付完成。
+- [TDD REFERENCE] 已完整读取testing-anti-patterns并审计async测试helpers，Task35.2将测试真实controller行为，不测试mock本身。
+- [PWF SYNC] 已满足Provider回归 + 两个test-design view后的门禁；下一步Task35.2测试Mutation与RED。
+- [RED · Task35.2] 新增request_kind路由、summary disk隔离、invalidate stale丢弃共4项；全部因构造参数缺失失败，功能RED成立。
+- [PWF SYNC] 已满足测试Mutation + RED执行后的2-Action门禁；下一步实现Controller/Worker最小purpose与invalidate。
+- [IMPLEMENT · Task35.2] Controller/Worker增加validated request_kind、统一provider method路由、summary disk短路和合作式invalidate。
+- [GREEN-1 · Task35.2] 新增4项`4 passed in 0.29s`，无线程警告。
+- [PWF SYNC] 已满足生产Mutation + GREEN测试后的2-Action门禁；下一步分段运行preview_async全文件。
+- [ASYNC GREEN-A · Task35.2] `15 passed, 20 deselected in 3.71s`。
+- [ASYNC GREEN-B · Task35.2] `20 passed, 15 deselected in 2.27s`；完整35项覆盖。
+- [DONE · Task35.2] request purpose、summary disk隔离与invalidate生命周期完成。
+- [PWF SYNC] 已满足连续2次async测试后的2-Action门禁；下一步Task35.3 Reader双页RED。
+- [RED · Task35.3] 新增4个Reader行为节点；3项按预期缺接口失败，普通text单页回归通过。
+- [PWF SYNC] 已满足Reader测试Mutation + RED执行后的2-Action门禁；下一步创建LazyVisualizationTabs并最小接入Reader。
+- [IMPLEMENT-1 · Task35.3] 新建LazyVisualizationTabs，完成两页文案、summary、visual局部状态、单次request signal、惰性Host与release接口。
+- [IMPLEMENT-2 · Task35.3] Reader组合新组件，新增semantic signal/loading/error/render_visualization，visualizable summary默认Tab0；普通预览保留旧stack。
+- [PWF SYNC] 已满足两个生产Mutation后的2-Action门禁；下一步运行Reader新增节点GREEN并修正真实缺陷。
+- [PWF SYNC] 已满足测试 Mutation + RED 测试后的2-Action门禁；下一步实现各 Widget apply_settings 与 ReaderPanel 内嵌设置面板。
+## 2026-07-19 Phase 35（DAT/LAS 双阶段懒预览）
+
+- Task 35.3 定向测试：`QT_QPA_PLATFORM=offscreen pytest -q tests/test_data_reader_panel.py -k 'visualizable_summary or visualization_loading or prepared_visualization or ordinary_text'`，结果 `4 passed`。
+- 随后执行完整 `tests/test_data_reader_panel.py`；终端输出因会话上下文截断且进程已结束，最终摘要未能可靠回收。按真实反馈记录为“结果待分段复验”，不据此宣称通过；下一步改用小批次回归定位兼容性差异。
+- Reader 4个遗留节点复跑为 `4 failed`：1项仅是旧直占面板断言；2项暴露Host在render异常后未被Reader持有，访问property会重复set_engine；1项暴露Web隔离测试的轻量Widget没有`apply_settings`。
+- 修复Host在render前即登记所有权，并令惰性summary设置调用保持可选；更新旧direct-geoviz断言为外层双Tab、内层Host的真实层级。
+- Task 35.3 精确复验 `4 passed`；完整 `tests/test_data_reader_panel.py` 为 `41 passed in 3.48s`。双选项卡、惰性Host、失败清理及Web隔离兼容均通过，Task35.3 DONE。
+- Task 35.4 接线审计：DataPage当前只有default controller，选择、重扫、右键预览、设置、project root、清缓存和shutdown均只路由该实例；需要保留`_preview_controller`名称作为summary兼容面，并为visual controller补齐全部失效与生命周期路径。
+- Task 35.4 RED：新增懒触发功能测试并扩展close/deferred-delete/settings生命周期断言；精确4节点均按预期失败，原因是`_visualization_controller`尚不存在或shutdown仅调用一次。
+- Task 35.4 实现：summary controller固定`request_kind=summary`，新增visualization controller及Reader信号接线；选择/重扫/右键摘要先invalidate visual，设置/project root/cache/shutdown双实例同步。
+- Task 35.4 首轮GREEN：懒触发、重复Tab不重复请求、双shutdown、设置双generation共4节点 `4 passed`。
+- Task 35.4 stale/cache门禁：真实阻塞A可视化期间切换B，A完成后未覆盖B；双controller的unknown/valid project root与内存/磁盘cache清理一致。精确4节点 `4 passed`。
+- 回归映射复核：App级预览设置重建测试与DataPage关闭异步测试仍只断言summary controller，需扩展visual settings与visual thread shutdown；既有普通文本异步Provider可继续通过`preview_summary -> preview`兼容契约。
+- 扩展App重建设置与真实DataPage close断言；精确2节点 `2 passed`，确认新页面visual controller收到设置且关闭后两个controller均无活动线程。
+- Task35.4 整文件回归A：`tests/test_data_page.py` 53 passed（1条既知lasio warning）；`tests/test_data_integration.py` 4 passed。
+- Task35.4 async完整分段：22 passed + 15 passed（互补deselection共37项）；无QThread销毁警告。Task35.4 DONE。
+- Task35.5 静态门禁：`python -m compileall -q paleo_workbench`、父仓`git diff --check`、engine `git diff --check`均返回0且无输出。
+- 完成流程：已完整读取requesting-code-review与verification-before-completion；将按要求先取diff范围、发起独立审查，再执行新鲜的完整相关域验证后才声明完成。
+- 已完整读取finishing-a-development-branch与reviewer模板；当前是main普通dirty工作区且用户未授权commit/merge/push，本轮仅执行验证与只读审查，不触发任何集成/清理动作。
+- 新鲜验证批次：Provider 35、GeoViz Provider 6、Reader 41、DataPage 53、integration 4 均通过；随后单进程完整async在输出19个点后超过90秒无进展，手动TERM精确pytest/shell PID，未删除或改写数据。
+- 该现象与既有Qt长序列事件循环不稳定一致；不计为断言失败，继续采用已验证的互补`-k`独立进程（22+15）策略，并单独运行project lifecycle。
+- 新鲜分段门禁：async A `22 passed, 15 deselected`，async B `15 passed, 22 deselected`，合计全覆盖37项；project lifecycle `22 passed`。三进程均exit 0。
+- 根全量策略复核：当前仍为157个排序测试文件，沿用已证实的每20文件独立进程A–H；包含`test_preview_async.py`的段将排除此文件并用两个互补子进程替代，避免已复现的单文件顺序挂起。
+- Phase35根全量 A/B：排序文件1–20为 `218 passed`；21–40为 `147 passed`；均exit 0，各1条既知lasio warning。
+- Phase35根全量 C/D：排序文件41–60为 `100 passed, 4 skipped`；61–80为 `99 passed`；均exit 0。
+- Phase35根全量 E-part1：排序文件81–100排除async为 `181 passed`（7条既知lasio/rasterio warning）；async互补A为 `22 passed, 15 deselected`。
+- [REVIEW · Phase35] 独立审查：0 Critical、5 Important、2 Minor，Assessment=DONE_WITH_CONCERNS；全量验证暂停在E-part1。
+- 已按receiving-code-review核对第一轮源码证据：engine确有`geoviz_well_log.inspect_las_file()`有界/非驻留检查API，workbench当前却调用`lasio.read()`；其余失败重试、DAT半行、text空页、cache重写路径也均能由现有代码直接复现，接受5项Important并逐项TDD修复。
+- Reviewer修复设计锁定：facade导出`inspect_las_file`供瘦Host摘要使用；PreviewResult增加显式cacheable语义；LazyTabs summary改为table/text子栈；controller增加共享cache epoch锁以原子协调clear与worker store；失败重试与“用户返回列表不抢Tab”在Tabs状态机内解决。
+- R35-01 RED：用会抛AssertionError的lasio stub证明summary仍调用完整matrix loader；目标节点返回message而非well_log，`1 failed`。
+- R35-01 GREEN：engine facade导出流式`inspect_las_file`，workbench摘要仅消费header/curve metadata/row_count；同一lasio禁用节点 `1 passed`。
+- R35-03/04 测试锚点已核对：DAT契约位于Provider文件前段，Reader双Tab契约位于visualizable summary节点；下一步补字节边界和text fallback RED。
+- R35-03/04 RED-ENV-1：4项在触达目标前失败，原因是fixture使用非法`text_limit_kib=1`（配置下限16）且Reader测试漏导入PreviewProvider；属于测试环境设计错误，不计实现strike。改用16KiB且每行16 bytes，使边界仍精确且行数低于2000上限。
+- R35-03/04 RED：字段间截断降级text、字段中截断保留损坏`('999','8')`、Reader缺summary text子栈，共3项真实失败；恰在换行边界节点1 passed。
+- R35-03/04 GREEN：DAT在decode前丢弃byte-truncated末尾半行，换行边界保留；LazyTabs数据页使用summary/text子栈。字段中/字段间/换行/text页共 `4 passed`。
+- R35-02/M01 RED：4节点失败，分别证明PreviewResult无cacheable、Reader无retryable参数、完成回调强制切回Tab1；controller节点另发现provider request-local浅拷贝使整数计数留在副本，测试将改用共享list后再触达缓存断言。
+- R35-02测试校正：provider计数改为浅拷贝共享list，并新增result/failure交付断言，防止“构造TypeError但调用次数正确”的假阳性。
+- R35-02校正后RED：两次请求均触达provider，但均因PreviewResult缺cacheable进入failed，真实目标节点 `1 failed`。
+- R35-02/M01实现：PreviewResult增加cacheable；GeoVizError标记noncacheable；worker与LRU跳过失败；Tabs错误状态允许离开/返回重试，异步完成仅更新visual stack且不抢用户当前数据Tab。
+- R35-02/M01 GREEN：noncacheable controller二次真实调用、GeoViz失败DTO、Tab重试、完成不抢Tab共 `4 passed`。
+- R35-05 RED已写：阻塞专业prepare期间clear cache，要求generation+1、无UI交付、无disk store、LRU空。
+- R35-05 RED：目标节点 `1 failed`，首个断言确认clear cache未提升generation；源码定位4处generation变更与worker disk store入口，准备以共享epoch锁原子协调。
+- R35-05 GREEN：controller共享CacheEpoch/RLock；clear在同一锁内advance+删除，worker仅在epoch仍当前时store；阻塞任务节点 `1 passed`，无UI交付/磁盘回写/LRU复活。
+- Provider整文件回归首轮：37 passed后1 fail，旧兼容契约要求只有`~Version`的空LAS仍显示0曲线/0采样well_log，而engine inspector严格抛no curve headers。
+- 兼容修复：仅识别engine稳定的“no curve headers”ValueError并构造空摘要+警告；其他ValueError仍保持失败消息，不回退lasio或复制解析器。
+- Reviewer修复回归A：Provider `38 passed`；GeoViz Provider `7 passed`，均exit 0且无新增warning。
+- Reader回归首轮：43 passed、1旧测试失败；旧测试直接注入visual result却未模拟用户点击/visual loading，与新“仅点击后请求”状态机不符。测试已补真实Tab激活与loading前置，不修改生产保护逻辑。
+- Reader复验 `44 passed`。随后async A仅输出5项后超过35秒无进展，已TERM精确pytest PID；这是CacheEpoch引入后相较此前22项/3秒的新回归信号，暂停其余测试并按`-vv -x`定位具体节点。
+- 系统调试Phase1：A段排序显示第5/6项为两个DataPage可视化测试；第6项`selection_discards_obsolete_visualization`单独运行 `1 passed in 1.51s`，说明不是该逻辑单测稳定死锁，而是前5项teardown/下项startup的顺序交互。下一步用前6项`-vv`复现并观察停点。
+- 系统调试Phase2/3：前6项同进程`6 passed in 1.65s`；随后A段同一命令加30s外部deadline复验`22 passed, 17 deselected in 3.01s`。挂起不可稳定复现，符合既有Qt teardown时序噪声而非CacheEpoch锁稳定死锁；保留分段+deadline门禁。
+- Async B在新增3项排到最前后稳定于5点处触发40s deadline（exit124）；排序显示停点边界是`rescan_invalidates_inflight_preview`完成后/`stale_generation_discarded`开始。下一步以B前6项`-vv -s`确认具体停在test body还是teardown。
+- B前6项详细模式全部通过（2.05s），随后完整B复验 `17 passed, 22 deselected in 3.19s`；与A同样未形成稳定代码死锁。当前async全覆盖为22+17=39项全绿，外部deadline保留用于最终验证。
+- Reviewer修复回归B：DataPage `53 passed`（1条既知lasio warning）；integration `4 passed`。
+- R35-M02 RED：RecordingEngine按真实engine contract在prepare阶段抛UNSUPPORTED；显式visual请求仍先调用supports，精确节点 `1 failed, 1 passed`，证明一次冗余backend/header resolution。
+- R35-M02实现：visual请求直接调用engine.prepare，按ErrorCode区分UNSUPPORTED稳定结果与其他noncacheable失败；3节点中2 passed，unsupported旧断言因test double在resolve失败前记录prepare_calls而1 fail，需校正计数语义为“backend prepare实际进入”。
+- R35-M02 GREEN：RecordingEngine计数移到unsupported resolution之后；GeoViz Provider全文件 `7 passed`，显式visual不再提前supports，减少一次DAT header resolution。
+- CacheEpoch性能RED：真实disk codec的`np.savez_compressed`阻塞0.5s时，UI线程`clear_disk_cache()`同步等待0.501s，目标节点 `1 failed`；根因是epoch锁包住整个store而非仅最终commit，违反不卡GUI目标。
+- CacheEpoch性能GREEN：disk store在锁外完成encode/compress，仅最终entry replace受commit_guard保护；clear不等待压缩且旧epoch不提交。保留/非阻塞两节点 `2 passed`。
+- Disk cache全文件 `10 passed`。随后async A在前4项通过后于DataPage lazy wait发生Qt Bus error（exit135，pytestqt exec栈，无Python断言/QThread destroyed）；这是既有长Qt进程原生崩溃模式，后续最终门禁将把DataPage两个重型节点与controller节点拆成独立进程，不继续原样重跑A。
+- Review复核新增Important：cache clear取消请求导致Reader永久loading；契约改为只advance cache epoch、保持request generation与UI交付。RED首断言确认当前generation由1变2，目标节点 `1 failed`。
+- Cache/request解耦实现范围复核：pending与inflight需同时携带request generation和cache generation；clear只advance后者，worker commit与UI-thread LRU分别检查cache epoch，result仍按request generation交付。
+- Cache/request解耦GREEN：pending/inflight携带双generation；clear不取消UI请求，仅阻断旧epoch disk/LRU；shutdown同时失效两者。结果交付与非阻塞压缩两节点 `2 passed`。
+- LAS WRAP/DLM RED：新增COMMA/TAB参数与WRAP.YES端到端inspection+preview测试；TAB因whitespace split现有通过，COMMA与WRAP各失败，结果 `2 failed, 1 passed`，准确复现兼容缺口。
+- LAS WRAP/DLM GREEN：engine header记录wrapped/delimiter；inspection与sample pass共享delimiter tokenization和逻辑行组装。COMMA/TAB/WRAP端到端 `3 passed`。
+- Engine LAS全文件首次因手工PYTHONPATH仅含well_log而9项缺`geoviz_seismic`失败（前10项含新功能均通过），属测试环境未触达实现；补齐8个engine package根后全文件 `19 passed`。
+- Cache clear UI集成：阻塞summary与阻塞visualization期间分别clear，释放后都正常交付且离开loading；DataPage两节点 `2 passed`。
+- Error语义解耦RED：IO_ERROR应retryable且显示真实消息，INVALID_DATA应nonretryable但仍noncacheable；两节点均因DTO无retryable字段失败。
+- Error语义解耦GREEN：DTO独立retryable；IO/RENDER可重试，INVALID_DATA/RESOURCE_LIMIT等不自动重试；所有GeoVizError仍不缓存并显示真实错误消息。2 passed。
+- 第三轮复核前回归：GeoViz Provider `8 passed`；Reader `44 passed`。
+- 第三轮复核前回归：Provider `38 passed`；disk cache `10 passed`。
+- 第三轮复核前回归：DataPage `53 passed`（1条既知lasio warning）；integration `4 passed`。
+- 第三轮独立只读复核：0 Critical、0 Important，结论READY；仅记录LAS重复流式扫描、空LAS异常文本协议、极大cache root同步删除3项Minor，当前交付不受阻。
+- Async最终强隔离门禁：收集42节点，每节点独立offscreen pytest进程并设20秒deadline，`ASYNC_NODES_PASSED=42`、总命令exit 0；无断言失败。
+- [PWF SYNC] 已满足最终async执行与审查反馈后的状态同步；Task35.5继续执行新鲜根分段全量回归。
+- 根全量新鲜A段（排序文件1–20）`221 passed, 1 warning`，exit 0。
+- 根全量新鲜B段（21–40）`148 passed, 1 failed, 1 warning`；唯一失败是package-independence静态门禁将`preview_provider.py`识别为未通过`geoviz` facade的生产导入。记为该缺陷Strike 1，先定位检测到的具体import，禁止盲目重跑。
+- [PWF SYNC] 已满足A/B两次测试执行后的2-Action门禁；进入静态import根因分析并补回归RED。
+- B段失败根因：生产代码已正确使用`from geoviz import inspect_las_file`公共facade；静态测试的`GEOVIZ_PUBLIC_FACADE`白名单未随新增兼容导出更新，属于测试契约滞后，不是workbench越层导入。
+- 将`inspect_las_file`纳入facade白名单；精确静态门禁 `1 passed`，Strike 1闭环。未改生产导入路径。
+- [PWF SYNC] 已满足测试契约Mutation + 精确GREEN后的2-Action门禁；下一步重跑B段并继续C–H。
+- 根全量新鲜B段修复后重跑 `149 passed, 1 warning`；C段 `100 passed, 4 skipped`；两者exit 0。
+- [PWF SYNC] 已满足B重跑/C段两次测试执行后的2-Action门禁；继续D与E（E排除async，async已由42独立节点覆盖）。
+- 根全量新鲜D段 `99 passed`、exit 0。
+- E-base在57个点后于`test_preview_disk_cache.py::test_second_request_uses_disk_without_prepare`的pytest-qt事件等待中发生原生Abort（exit134），无Python断言、无QThread-destroyed消息；与已记录的大量Qt文件同进程累积析构故障同型，不记为产品缺陷Strike。策略切换为E段逐测试文件独立进程，禁止原样重复。
+- [PWF SYNC] 已满足D/E两次测试执行后的2-Action门禁；E将按文件隔离并输出紧凑计数。
+- E逐文件脚本首轮在首文件通过后触发zsh只读变量`status`赋值错误，属于测试调度脚本错误、未触达后续产品测试；立即改用`test_exit`，不重复原命令。
+- E段排除async后的19个测试文件逐文件新进程全部通过，合计184 passed（其中settings已有6 warnings）；`E_FILES_PASSED=19`、总命令exit 0。async另有42/42节点独立通过。
+- [PWF SYNC] 已满足E隔离脚本校正前后两次测试执行后的2-Action门禁；继续F/G。
+- 根全量新鲜F段 `99 passed, 1 warning`；G段 `116 passed`；两者exit 0。
+- [PWF SYNC] 已满足F/G两次测试执行后的2-Action门禁；继续H与engine LAS全域。
+- 根全量新鲜H段 `81 passed`；engine LAS inspection/sample全域 `19 passed`；两者exit 0。
+- 根测试新鲜合计：A221 + B149 + C100 + D99 + E184 + async42 + F99 + G116 + H81 = `1091 passed, 4 skipped`；相对1063基线新增28项，全部来自后续预览/性能修复回归覆盖。
+- [PWF SYNC] 已满足H/engine两次测试执行后的2-Action门禁；下一步新鲜静态门禁与工作树核对。
+- 新鲜静态门禁：workbench + engine facade/well_log `compileall` exit 0；父仓与engine `git diff --check`均exit 0、无输出。
+- [PWF SYNC] 已满足compileall/diff-check两次验证后的2-Action门禁；下一步核对最终diff范围、完成PWF并启动GUI。
+- 最终工作树核对：Phase35新增`lazy_visualization_tabs.py`仍为未跟踪交付文件；engine facade/LAS parser与所有workbench/test改动均在共享dirty工作树中，未commit/stage，且保留用户既有`SCRATCH/`和旧docs plans不动。
+- 图形环境可用（DISPLAY=:1，WAYLAND_DISPLAY=wayland-0），当前无旧`paleo_workbench.main`进程；可安全启动本轮GUI。
+- [PWF SYNC] 已满足最终status与运行环境两次只读核对后的2-Action门禁；启动GUI后记录session并关闭Phase35。
+- [RUN · Phase35] `python -m paleo_workbench.main`已在图形会话启动并持续运行（PTY session 98063）；Qt Multimedia/FFmpeg初始化成功，仅有既知OpenGL ES兼容RuntimeWarning，无启动异常。
+- [COMPLETE · Phase35] DAT/LAS双页渐进预览、点击后异步可视化、stale/cache/lifecycle修复、三轮审查、1091+4根回归与engine验证全部闭环；GUI已交付体验。
+- [PWF SYNC] 根三份PWF最终同步完成；Phase35状态COMPLETED。
+
+## 2026-07-19 Phase 36（专业数据首屏纯表格）
+
+- 已读取brainstorming、TDD与Planning with Files技能；因用户禁止额外长期记忆文件，设计与计划继续只写根三份PWF，不创建/commit `docs/superpowers/specs`。
+- 已定位当前UI：双页首屏组合了属性摘要表和真实数据表；变更应局限`LazyVisualizationTabs`，避免影响GeoTIFF等确实需要元数据的普通预览。
+- [PWF SYNC] 已满足现状/源码两次查看后的2-Action门禁；当前停在brainstorming设计批准门禁，未修改生产代码。
+- 用户明确批准方案A；已使用writing-plans把单一组件边界、行为RED、最小GREEN、相关域回归与GUI重启步骤写入`task_plan.md`。
+- 计划自审通过：无额外文件、无DTO/engine改动、无普通元数据预览波及；下一步进入inline TDD执行。
+- executing-plans复核无阻断：当前main dirty工作树是用户已批准的共享执行环境；本轮不引入worktree/commit，不覆盖其他Phase改动。
+- 精确测试定位：现有visualizable测试直接依赖`tabs.summary.detail_table`；RED将把契约改为`tabs.summary`本身是`TablePreviewWidget/QTableWidget`并直接校验表头与数据。
+- [PWF SYNC] 已满足执行技能与测试/组件源码两次查看后的2-Action门禁；开始Task36.1测试Mutation。
+- Task36.1测试Mutation：visualizable首屏现断言纯`TablePreviewWidget`、真实表头/行，以及不存在属性摘要子表；同步更新同组件的loading/reset保留数据断言为直接表格API。
+- Task36.1 RED：精确节点 `1 failed`，失败点为`tabs.summary`实际仍是`SummaryTablePreviewWidget`，准确锁定待替换生产行为，记Strike 0（预期RED）。
+- [PWF SYNC] 已满足测试Mutation + RED执行后的2-Action门禁；进入Task36.2最小生产实现。
+- Task36.2生产Mutation：`LazyVisualizationTabs.summary`改为`TablePreviewWidget`，非text只加载`table_headers/table_rows`；删除该路径对`summary_rows/message`的渲染消费。
+- Task36.2精确GREEN：纯表格首屏节点 `1 passed`；表头“曲线/单位”和行“GR/API”直接位于首屏表格。
+- [PWF SYNC] 已满足生产Mutation + GREEN执行后的2-Action门禁；下一步Reader完整回归。
+- Task36 Reader完整回归 `44 passed`；DataPage + integration `57 passed, 1条既知lasio warning`；两命令均exit 0。
+- [PWF SYNC] 已满足Reader/Data两次测试执行后的2-Action门禁；继续async生命周期与静态门禁。
+- Async关键节点独立进程：Tab激活前不启动可视化 `1 passed`；切资产丢弃旧visual result `1 passed`。
+- [PWF SYNC] 已满足两个async测试执行后的2-Action门禁；继续clear-during-loading与静态检查。
+- Async clear生命周期独立进程：summary loading期间clear `1 passed`；visual loading期间clear `1 passed`；无stranded loading/QThread警告。
+- [PWF SYNC] 已满足两个clear async测试执行后的2-Action门禁；Task36.2相关域回归完成，进入compile/diff门禁。
+- Task36静态门禁：目标模块compileall exit 0；父仓与engine diff-check exit 0、无输出。
+- [PWF SYNC] 已满足compileall/diff-check两次验证后的2-Action门禁；下一步按finishing/verification流程复核并重启GUI。
+- 已完整读取finishing-a-development-branch与verification-before-completion；将以新鲜完整回归证据完成，不用先前结果替代。
+- 环境检测：普通仓库、branch=main、git_dir==git_common；用户未授权commit/merge/push，按既定“Keep as-is”保留共享dirty工作树，不执行集成或清理动作。
+- [PWF SYNC] 已满足finishing技能与git环境两次查看后的2-Action门禁；进入根测试分段验证。
+- 旧GUI session 98063对Ctrl-C未退出，已只对精确PID 917429发送TERM并确认session exit 1；未影响其他进程/文件。
+- Phase36根回归A段 `221 passed, 1 warning`。B段在第3项`test_datapage_stress.py::test_stress_s3_rapid_select`发生Qt原生Bus error（exit135），无业务断言；记为隔离策略故障而非纯表格缺陷Strike，禁止原样重跑B段。
+- [PWF SYNC] 已满足A/B两次测试执行后的2-Action门禁；B段切换为逐文件新进程，避免Qt stress与后续GUI文件共享原生状态。
+- B隔离复验：`test_datapage_stress.py`单独 `5 passed`；其余19文件 `144 passed, 1 warning`；合计149 passed、均exit 0，确认原生崩溃来自进程内Qt状态组合而非测试断言。
+- [PWF SYNC] 已满足B-stress/B-rest两次测试执行后的2-Action门禁；继续C/D。
+- 根回归C段 `100 passed, 4 skipped`；D段 `99 passed`；两者exit 0。
+- [PWF SYNC] 已满足C/D两次测试执行后的2-Action门禁；继续E-base与async独立门禁。
+- 根回归E-base排除async：19文件逐进程 `184 passed`；async 42节点逐进程 `ASYNC_NODES_PASSED=42`；所有子进程exit 0。
+- [PWF SYNC] 已满足E-base/async两次测试执行后的2-Action门禁；继续F/G。
+- 根回归F段 `99 passed, 1 warning`；G段 `116 passed`；两者exit 0。
+- [PWF SYNC] 已满足F/G两次测试执行后的2-Action门禁；继续H与最终目标门禁。
+- 根回归H段 `81 passed`；最终目标模块compileall + 父/engine diff-check组合exit 0。
+- Phase36根回归合计：A221 + B149 + C100 + D99 + E184 + async42 + F99 + G116 + H81 = `1091 passed, 4 skipped`，与Phase35完整覆盖总数一致。
+- [PWF SYNC] 已满足H/静态两次验证后的2-Action门禁；证据齐全，下一步启动新GUI并最终同步。
+- 最终diff复核确认Phase36生产范围仅为`lazy_visualization_tabs.py`内部summary组件/加载调用；测试直接锁定纯表格和既有惰性状态。
+- [RUN · Phase36] 新GUI通过`python -m paleo_workbench.main`启动并持续运行（PTY session 1344）；FFmpeg初始化成功，无启动异常。
+- [COMPLETE · Phase36] 纯表格首屏RED→GREEN、相关域与1091+4根回归、静态检查、GUI重启全部闭环；PWF最终同步。
+
+## 2026-07-19 Phase 37（专业可视化交互一致性）
+
+- 已使用brainstorming、systematic-debugging、TDD与Planning with Files；先完成engine/workbench边界诊断，不在无根因时添加页面级交互补丁。
+- 初步代码索引确认engine提供可交互`WellLogCanvas`和完整`SeismicView`；workbench通过GeoVizPreviewHost嵌入，下一步逐层核对宿主、backend render与payload。
+- [PWF SYNC] 已满足规划文件和引擎/宿主索引两次查看后的2-Action门禁；无生产修改。
+- 根因对照完成：Host不截获事件；well preview backend漏掉原`QPainterWidget`交互包装层；seismic preview backend以`SeismicPreviewWidget`替代完整`SeismicView`，导致原engine功能退化。
+- [PWF SYNC] 已满足Host/backend、Canvas/PreviewWidget、原始widget三组代码查看后的状态同步；进入brainstorming方案选择，未修改生产代码。
+- 用户已确认方案 A：交互与完整功能收敛到geo-viz-engine，workbench保持薄Host；将以安装包`WellLogView`替代裸canvas，并以惰性`SeismicView(auto_load=False)`替代轻量地震preview。
+- [PWF SYNC] 已依据批准设计写入Task37.1–37.4的RED/GREEN、惰性加载、取消生命周期和回归门禁；下一步读取执行规范后以测试先行实施。
+- Task37.1测试Mutation：well preview改为断言`WellLogView`完整范围/复位交互包装；seismic preview移除轻量单剖面控件断言，改为断言惰性完整`SeismicView(auto_load=False)`、异步路径委托与cleanup。
+- [PWF SYNC] 已满足计划/PWF与Task37.1测试两次Mutation的2-Action门禁；下一步运行精确RED。
+- Task37.1首次精确测试在父仓与engine根各执行一次，均于collection报`ModuleNotFoundError: geoviz_well_log/geoviz_seismic`；未进入测试函数或生产代码，根因是当前shell未带engine多包源码路径，属于调度环境错误，不计Strike。
+- [PWF SYNC] 已满足两次测试执行的2-Action门禁；下一步先复用仓内既有PYTHONPATH测试入口，再取得真实RED。
+- Task37.1真实RED：带engine多包`PYTHONPATH`后，收集在`from geoviz_well_log import WellLogView`准确失败；旧安装包没有交互视图导出，验证目标缺口。
+- Task37.2/37.3生产Mutation：新增包内`WellLogView`并把旧`QPainterWidget`改为兼容别名；well backend创建包装器。seismic backend保留有界prepare，但在`create_widget/render/release`局部导入完整`SeismicView(auto_load=False)`，分别委托`load_segy_async`和`cleanup`。
+- [PWF SYNC] 已满足真实RED执行与两项生产实现的2-Action门禁；下一步运行精确GREEN并处理实际接口错误。
+- Task37.2/37.3精确GREEN：交互well与完整seismic backend节点`2 passed`。
+- 相关engine回归：LAS preview、原`QPainterWidget`兼容入口、深度滚动条、SEGY有界prepare/惰性导入和SeismicView最新generation契约共`37 passed`；无异步销毁告警。
+- [PWF SYNC] 已满足两次测试执行的2-Action门禁；下一步补强真实滚轮事件断言，再跑最终相关域与静态检查。
+- Task37.1鼠标交互GREEN：包装器收到真实`QWheelEvent`后，第一track的depth span缩小且垂直深度滚动条启用，精确节点`1 passed`。
+- [PWF SYNC] 已满足滚轮测试Mutation与GREEN执行的2-Action门禁；Task37.1–37.3实现项已勾选，下一步进行engine全相关域与workbench薄Host链路验证。
+- Task37 engine相关域：well preview/兼容页面/scrollbar、seismic preview/worker/view/UI共`58 passed`。输出含一条既有`QThread: Destroyed while thread '' is still running`，发生于包含`SeismicView()`自动合成数据的旧UI测试组合；本次backend测试使用`auto_load=False`且无该警告，仍将在最终门禁前增加preview release的明确取消回归，不能仅以此视为无关。
+- Task37 workbench薄Host链路：PreviewHost、生命周期、Provider、Reader及async惰性相关筛选`46 passed, 63 deselected`；无QThread-destroyed输出，只有pytest-asyncio配置弃用警告。
+- [PWF SYNC] 已满足engine/workbench两次测试执行的2-Action门禁；下一步锁定完整SeismicView的preview release取消语义并定位组合测试中的既有线程告警。
+- 线程告警定位：`tests/test_seismic_ui.py`单独`1 passed`仍复现`QThread: Destroyed while thread '' is still running`。该测试直接构造默认`SeismicView()`（会启动`SyntheticWorker`）却未调用`cleanup()`或等待finished；这不是preview backend的`auto_load=False`路径，但暴露完整视图默认合成任务的测试/销毁生命周期缺口。
+- [PWF SYNC] 已满足隔离engine相关域与单测定位两次测试执行的2-Action门禁；下一步审计`SyntheticWorker`取消/完成和SeismicView销毁路径，优先以可验证的生命周期修复或测试夹具清理闭环。
+- 生命周期测试Mutation：仅验证图标的`test_seismic_ui`改为`SeismicView(auto_load=False)`，不再无关地启动合成QThread；这与preview backend的惰性构造策略一致，不改变默认产品`SeismicView()`行为。
+- 修复验证：UI图标、完整seismic preview backend及latest-generation取消测试`10 passed`，此前`QThread: Destroyed`输出消失。
+- [PWF SYNC] 已满足测试Mutation与验证执行的2-Action门禁；下一步重跑完整engine相关域，确认没有其他默认构造测试留下线程。
+- 完整engine相关域重跑仍为`58 passed`但保留QThread-destroyed输出；继续隔离后`tests/test_seismic_view.py`单独`5 passed`仍复现，根因缩小到该文件的默认`SeismicView()`构造测试。
+- [PWF SYNC] 已满足完整域与隔离文件两次测试执行的2-Action门禁；下一步逐个审查这些测试是否真的需要合成加载，并以`auto_load=False`消除无关线程。
+- 测试清理Mutation：`test_seismic_view`中仅UI/overlay场景应改惰性构造；初次机械替换同时命中`test_seismic_view_init`的默认加载契约。已通过逐行检查在运行前发现，未把该中间态用于测试或交付；下一步以测试名锚点恢复init默认构造，并将overlay测试改为惰性构造。
+- [PWF SYNC] 已满足两次测试Mutation的2-Action门禁；继续精确校正测试设置后再验证，避免将测试夹具错误误判为产品回归。
+- 校正后：保留`test_seismic_view_init`对默认异步合成加载的真实契约；其余仅验证demo替换、模式、工具栏和overlay的四项测试改为`auto_load=False`。`tests/test_seismic_view.py`为`5 passed`且QThread-destroyed输出消失。
+- [PWF SYNC] 已满足测试设置Mutation与精确验证的2-Action门禁；下一步最后重跑engine相关域和workbench Host链路，再执行静态门禁。
+- 最终engine相关域：`58 passed`，包含真实滚轮、旧页面shim、well/seismic preview、完整SeismicView与worker generation；无QThread-destroyed输出。
+- 工作台组合回归在43项后发生原生`Bus error`（trace停在既有`test_preview_async.py::test_data_page_selection_discards_obsolete_visualization`的Qt等待）；没有pytest业务断言。此模式与Phase35/36已记录的跨大量Qt测试对象累积故障一致，且本轮未改workbench线程代码；不作为本Bug Strike，策略切换为按文件/节点新进程隔离，禁止原样重复。
+- [PWF SYNC] 已满足engine/workbench两次测试执行的2-Action门禁；下一步以独立进程完成Host/Provider/Reader文件和async相关节点验证，再做静态门禁。
+- 隔离工作台验证首批：`test_geoviz_preview_host` 11、`test_geoviz_preview_lifecycle` 4、`test_geoviz_preview_provider` 8、`test_data_reader_panel` 44，均独立进程全绿；未再出现QThread-destroyed或Bus error。
+- async节点调度的首个历史函数名已不存在，pytest只报告`not found`、未运行任何测试；这是调度清单过期而非产品失败。后续以源码中真实函数定义续跑，且不重复已通过的四个文件。
+- [PWF SYNC] 已满足隔离多次测试执行的2-Action门禁；下一步核对真实async测试名并完成剩余惰性/陈旧结果节点。
+- async惰性/生命周期节点按独立进程全绿：purpose路由2项，以及invalidate、retryable、clear-during-visualization、Tab激活后请求、切资产丢弃陈旧结果、slow GeoViz latest-only、payload不提前加载共7项，合计`9 passed`；无QThread-destroyed或Bus error。
+- Task37.4功能回归项完成：engine 58项、workbench四个预览文件67项、async关键9项均通过。组合Bus error仅是已知Qt跨文件进程累积，已由全覆盖独立进程验证替代。
+- [PWF SYNC] 已满足隔离async多次测试执行的2-Action门禁；下一步执行目标compile/diff静态门禁并请求只读最终审查。
+- 静态门禁：engine preview/well-log/page兼容层`compileall`通过；父仓和engine `git diff --check`均exit 0、无输出。
+- 范围审计：父仓仍含用户既有Phase32–36及未跟踪设置/文档文件；本轮新增/变更限定engine的`WellLogView`、well/seismic preview backend、兼容页面入口及其测试。未stage/commit/push，也未触碰`SCRATCH/`或历史docs。
+- [PWF SYNC] 已满足compileall/diff-check两次验证的2-Action门禁；下一步请求Task37只读最终审查，然后重启GUI交付。
+- Task37只读终审：运行时Critical/Important为0；确认Seismic backend无顶层`SeismicView`导入、create时才`auto_load=False`、render/release委托完整视图的异步/cleanup，WellLogView保持wheel/zoom/pan/crosshair/ruler且旧`QPainterWidget`为同类兼容别名。
+- 审查发现发布限制：新增`well_log_view.py`在当前engine dirty submodule中仍未跟踪。用户未授权stage/commit，故不修改Git索引；当前工作区运行无缺失，未来clean checkout/合并必须将该文件提交并更新父仓gitlink。
+- [PWF SYNC] 最终审查已写入；下一步启动GUI。工作流按用户既有“Keep as-is、无commit/stage/push”授权结束，不执行finishing技能的merge/PR/discard选项。
+- [RUN · Phase37] `QT_QPA_PLATFORM=xcb python -m paleo_workbench.main`已在图形会话启动（PTY session 51797）；5秒健康轮询仅输出Qt FFmpeg初始化信息，进程持续运行，无Python异常或QThread-destroyed输出。
+- [COMPLETE · Phase37] 测井交互包装器与完整惰性地震视图已在共享工作区交付；engine 58项、workbench独立文件67项和async关键9项回归、compile/diff-check、只读终审及GUI启动均完成。PWF三文件同步；未stage/commit/push。
+- [RUN · Phase37-fix] 用户反馈“地震三维体不显示”；本地复现确认 `SeismicView.load_demo()` / `load_segy_async()` 后 `Renderer3D._mode` 仍停在 `"planes"`，导致 volume item 被默认隐藏。
+- [PWF SYNC] 已记录新的回归点并按2-Action门禁同步进度；下一步修正默认3D模式并补回归测试。
+- [RUN · Phase37-fix] 已完成默认 3D 模式修正回归：`tests/test_seismic_view.py` 5 passed，`tests/test_geoviz_seismic_preview.py` 2 passed。
+- [PWF SYNC] 当前修复链路已验证，下一步做静态检查并更新计划状态。
+- [RUN · Phase37-fix2] 预览链路回归通过：`tests/test_geoviz_seismic_preview.py` 2 passed，`tests/test_seismic_view.py` 5 passed。
+- [PWF SYNC] 已满足两次测试执行后的进度同步门禁；下一步执行静态检查并收尾。
+
+## 2026-07-19 Phase 38（app.py God-class 重构）
+
+- 已启动 Phase 38，针对 `app.py` 中的 `PaleoWorkbenchWindow` God-class 进行拆分，解决大文件职责堆叠和强耦合接线问题。
+- [PWF SYNC] 已将设计与计划更新至 `task_plan.md`，准备实施。

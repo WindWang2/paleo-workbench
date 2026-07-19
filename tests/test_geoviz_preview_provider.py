@@ -58,6 +58,8 @@ class RecordingEngine:
         return self.supported
 
     def prepare(self, request: PreviewRequest, options: PreviewOptions) -> PreparedPreview:
+        if not self.supported:
+            raise GeoVizError(ErrorCode.UNSUPPORTED, "unsupported")
         self.prepare_calls.append((request, options))
         if self.failure is not None:
             raise self.failure
@@ -123,3 +125,86 @@ def test_unsupported_resource_uses_ordinary_reader_without_preparing(tmp_path: P
     assert result.mode == "text"
     assert result.text == "ordinary reader"
     assert engine.prepare_calls == []
+
+
+def test_summary_probe_marks_visualization_without_preparing(tmp_path: Path):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    resource = _las_resource(tmp_path / "well.las")
+    engine = RecordingEngine()
+
+    result = LocalVisualizationProvider(engine).preview_summary(resource)
+
+    assert result.mode == "well_log"
+    assert result.visualization_available is True
+    assert result.table_headers == ("曲线", "单位", "描述")
+    assert engine.support_requests
+    assert engine.prepare_calls == []
+
+
+def test_visualization_request_prepares_only_on_explicit_call(tmp_path: Path):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    resource = _las_resource(tmp_path / "well.las")
+    engine = RecordingEngine()
+    provider = LocalVisualizationProvider(engine)
+
+    result = provider.preview_visualization(resource)
+
+    assert result.mode == "geoviz"
+    assert result.engine_preview is engine.prepared
+    assert len(engine.prepare_calls) == 1
+    assert engine.support_requests == []
+
+
+def test_visualization_request_returns_stable_message_when_unsupported(tmp_path: Path):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    path = tmp_path / "notes.txt"
+    path.write_text("ordinary reader", encoding="utf-8")
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="document",
+        format="txt",
+    )
+    engine = RecordingEngine(supported=False)
+
+    result = LocalVisualizationProvider(engine).preview_visualization(resource)
+
+    assert result.mode == "message"
+    assert result.message == "此数据不支持可视化预览"
+    assert engine.prepare_calls == []
+
+
+def test_visualization_engine_failure_returns_noncacheable_retry_result(tmp_path: Path):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    resource = _las_resource(tmp_path / "well.las")
+    engine = RecordingEngine(
+        failure=GeoVizError(ErrorCode.IO_ERROR, "LAS暂时被占用")
+    )
+
+    result = LocalVisualizationProvider(engine).preview_visualization(resource)
+
+    assert result.mode == "message"
+    assert result.cacheable is False
+    assert result.retryable is True
+    assert result.message == "LAS暂时被占用"
+    assert "LAS暂时被占用" in result.warning
+
+
+def test_visualization_invalid_data_failure_is_not_retryable(tmp_path: Path):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+
+    resource = _las_resource(tmp_path / "well.las")
+    engine = RecordingEngine(
+        failure=GeoVizError(ErrorCode.INVALID_DATA, "LAS曲线无效")
+    )
+
+    result = LocalVisualizationProvider(engine).preview_visualization(resource)
+
+    assert result.mode == "message"
+    assert result.cacheable is False
+    assert result.retryable is False
+    assert result.message == "LAS曲线无效"

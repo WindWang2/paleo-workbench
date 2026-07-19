@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import csv
+import copy
 import html
 import io
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
 try:
     import segyio
@@ -79,9 +82,25 @@ class PreviewResult:
     media_path: str = ""
     engine_preview: object | None = None
     estimated_bytes: int = 0
+    visualization_available: bool = False
+    # Transient build failures must be retried, never retained in memory/disk.
+    cacheable: bool = True
+    retryable: bool = False
+    data_headers: tuple[str, ...] = field(default_factory=tuple)
+    data_rows: tuple[tuple[str, ...], ...] = field(default_factory=tuple)
+    seismic_volume: np.ndarray | None = None
 
 
 class PreviewProvider:
+    def __init__(self, settings: PreviewSettings | None = None) -> None:
+        self.settings = settings or PreviewSettings.defaults()
+
+    def with_settings(self, settings: PreviewSettings) -> "PreviewProvider":
+        """Return a request-local provider snapshot without copying its engine."""
+        configured = copy.copy(self)
+        configured.settings = settings
+        return configured
+
     def clear(self) -> None:
         """No-op: caching lives on the UI-thread PreviewCache (Task 4)."""
 
@@ -96,6 +115,42 @@ class PreviewProvider:
         # Pure build — safe for worker threads. LRU cache is owned by
         # PreviewRequestController on the UI thread.
         return self._build_preview(asset)
+
+    def preview_summary(
+        self,
+        asset: ResourceItem | ExportArtifact | None,
+    ) -> PreviewResult:
+        """Build the lightweight reader payload for an asset."""
+        return self.preview(asset)
+
+    def preview_visualization(
+        self,
+        asset: ResourceItem | ExportArtifact | None,
+    ) -> PreviewResult:
+        """Return a stable result when no professional backend is available."""
+        if asset is None:
+            return self.preview(None)
+        if isinstance(asset, ResourceItem):
+            title = asset.name
+            path = asset.path
+            fmt = asset.format
+            status = asset.status
+            type_label = asset.type
+        else:
+            title = Path(asset.output_path).name or asset.output_path
+            path = asset.output_path
+            fmt = asset.format
+            status = "generated"
+            type_label = "成果"
+        return PreviewResult(
+            mode="message",
+            title=title,
+            path=path,
+            format=fmt,
+            status=status,
+            type_label=type_label,
+            message="此数据不支持可视化预览",
+        )
 
     def _resource_revision_token(self, asset: ResourceItem) -> tuple[object, ...]:
         path = Path(asset.path)
@@ -162,7 +217,7 @@ class PreviewProvider:
         if fmt == "zip":
             from paleo_workbench.ui.pages.fallback_preview import zip_preview
 
-            return zip_preview(asset)
+            return zip_preview(asset, max_rows=self.settings.table_max_rows)
 
         if fmt == "wlp":
             from paleo_workbench.ui.pages.fallback_preview import wlp_preview
@@ -204,7 +259,9 @@ class PreviewProvider:
             # Read at most MAX_TEXT_PREVIEW_BYTES to avoid blocking on huge files.
             preview_bytes, truncated = self._read_preview_chunk(path)
             raw_html = preview_bytes.decode("utf-8", errors="replace")
-            warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
+            warning = (
+                f"仅显示前 {self.settings.text_limit_kib} KiB" if truncated else ""
+            )
             return PreviewResult(
                 mode="rich_text",
                 title=title,
@@ -230,9 +287,17 @@ class PreviewProvider:
         if fmt == "xml":
             from paleo_workbench.ui.pages.fallback_preview import spreadsheetml_preview
 
-            spreadsheet = spreadsheetml_preview(asset)
+            spreadsheet = spreadsheetml_preview(
+                asset,
+                max_text_bytes=self.settings.text_limit_kib * 1024,
+                max_rows=self.settings.table_max_rows,
+                max_columns=self.settings.table_max_columns,
+            )
             if spreadsheet is not None:
                 return spreadsheet
+
+        if fmt == "dat":
+            return self._dat_preview(asset)
 
         if fmt in TEXT_FORMATS:
             return self._text_preview(asset)
@@ -282,11 +347,18 @@ class PreviewProvider:
                     ("数据类型", str(dataset.dtypes[0]) if dataset.dtypes else "未知"),
                     ("Nodata", str(dataset.nodata) if dataset.nodata is not None else "无"),
                 )
-                # Read a decimated overview for the thumbnail (~256px long side).
-                decim = max(1, max(dataset.width, dataset.height) // 256)
+                # Read a decimated overview bounded by the configured long side.
+                target_px = self.settings.geotiff_thumbnail_px
+                long_side = max(dataset.width, dataset.height)
+                decim = max(1, (long_side + target_px - 1) // target_px)
                 overviews = dataset.overviews(1)
-                if overviews:
-                    decim = overviews[0]
+                if decim > 1 and overviews:
+                    suitable_overview = next(
+                        (value for value in overviews if value >= decim),
+                        None,
+                    )
+                    if suitable_overview is not None:
+                        decim = suitable_overview
                 thumbnail = dataset.read(
                     1,
                     out_shape=(
@@ -343,7 +415,7 @@ class PreviewProvider:
         path = Path(resource.path)
         preview_bytes, truncated = self._read_preview_chunk(path)
         text = preview_bytes.decode("utf-8", errors="replace")
-        warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
+        warning = f"仅显示前 {self.settings.text_limit_kib} KiB" if truncated else ""
         return PreviewResult(
             mode="text",
             title=resource.name,
@@ -357,6 +429,74 @@ class PreviewProvider:
             truncated=truncated,
         )
 
+    def _dat_preview(self, resource: ResourceItem) -> PreviewResult:
+        """Read a bounded whitespace-delimited DAT list when structure is stable."""
+        path = Path(resource.path)
+        preview_bytes, byte_truncated = self._read_preview_chunk(path)
+        if byte_truncated and preview_bytes and not preview_bytes.endswith((b"\n", b"\r")):
+            # The byte budget may stop in the middle of a field or between
+            # fields.  Parse only complete logical records; the text fallback
+            # can still show the original bounded payload when structure is
+            # genuinely irregular.
+            last_break = max(preview_bytes.rfind(b"\n"), preview_bytes.rfind(b"\r"))
+            preview_bytes = preview_bytes[: last_break + 1] if last_break >= 0 else b""
+        preview_text = preview_bytes.decode("utf-8-sig", errors="replace")
+        header_candidates: list[tuple[str, ...]] = []
+        data_rows: list[tuple[str, ...]] = []
+
+        for raw_line in preview_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            is_comment = line.startswith("#")
+            token_source = line.lstrip("#").strip() if is_comment else line
+            try:
+                tokens = tuple(shlex.split(token_source))
+            except ValueError:
+                return self._text_preview(resource)
+            if not tokens:
+                continue
+            if is_comment:
+                first = tokens[0].casefold().rstrip(":")
+                marker = " ".join(tokens).casefold()
+                if first not in {"field", "type"} and "file from smi" not in marker:
+                    header_candidates.append(tokens)
+                continue
+            data_rows.append(tokens)
+
+        if len(data_rows) < 2:
+            return self._text_preview(resource)
+        row_width = len(data_rows[0])
+        if row_width < 2 or any(len(row) != row_width for row in data_rows):
+            return self._text_preview(resource)
+
+        header = next(
+            (candidate for candidate in reversed(header_candidates) if len(candidate) == row_width),
+            tuple(f"列 {index + 1}" for index in range(row_width)),
+        )
+        column_limit = self.settings.table_max_columns
+        row_limit = self.settings.table_max_rows
+        headers = tuple(header[:column_limit])
+        rows = tuple(tuple(value for value in row[:column_limit]) for row in data_rows[:row_limit])
+        truncated = (
+            byte_truncated
+            or len(data_rows) > row_limit
+            or row_width > column_limit
+        )
+        return PreviewResult(
+            mode="table",
+            title=resource.name,
+            path=resource.path,
+            revision=self._safe_stat(path),
+            format=resource.format,
+            status=resource.status,
+            type_label=resource.type,
+            table_headers=headers,
+            table_rows=rows,
+            warning="数据列表已按预览上限截断" if truncated else "",
+            truncated=truncated,
+        )
+
     def _table_preview(self, resource: ResourceItem, delimiter: str) -> PreviewResult:
         path = Path(resource.path)
         preview_bytes, truncated = self._read_preview_chunk(path)
@@ -366,13 +506,13 @@ class PreviewProvider:
         with io.StringIO(preview_text, newline="") as buffer:
             reader = csv.reader(buffer, delimiter=delimiter)
             for row_index, row in enumerate(reader):
-                if row_index > MAX_TABLE_ROWS:
+                if row_index > self.settings.table_max_rows:
                     truncated = True
                     break
 
-                if len(row) > MAX_TABLE_COLUMNS:
+                if len(row) > self.settings.table_max_columns:
                     truncated = True
-                parsed_rows.append(tuple(row[:MAX_TABLE_COLUMNS]))
+                parsed_rows.append(tuple(row[: self.settings.table_max_columns]))
 
         headers = parsed_rows[0] if parsed_rows else ()
         body = tuple(parsed_rows[1:]) if parsed_rows else ()
@@ -400,7 +540,11 @@ class PreviewProvider:
             sheets = tuple(str(sheet) for sheet in workbook.sheet_names)
             if not sheets:
                 return self._parse_error_preview(resource, "Excel 文件没有可预览的工作表")
-            frame = pd.read_excel(workbook, sheet_name=sheets[0], nrows=MAX_TABLE_ROWS + 1)
+            frame = pd.read_excel(
+                workbook,
+                sheet_name=sheets[0],
+                nrows=self.settings.table_max_rows + 1,
+            )
         except Exception as exc:
             return self._parse_error_preview(resource, f"Excel 预览失败: {exc.__class__.__name__}")
 
@@ -424,29 +568,73 @@ class PreviewProvider:
     def _las_preview(self, resource: ResourceItem) -> PreviewResult:
         path = Path(resource.path)
         try:
-            import lasio
+            # Professional LAS inspection belongs to geo-viz-engine.  This
+            # pass streams metadata/rows without retaining the sample matrix;
+            # bounded curve data is loaded only by explicit visualization.
+            from geoviz import inspect_las_file
 
-            las = lasio.read(path)
+            header = inspect_las_file(str(path))
+        except ValueError as exc:
+            if str(exc) == "LAS contains no curve headers":
+                return PreviewResult(
+                    mode="well_log",
+                    title=resource.name,
+                    path=resource.path,
+                    revision=self._safe_stat(path),
+                    format=resource.format,
+                    status=resource.status,
+                    type_label=resource.type,
+                    summary_rows=(
+                        ("井名", path.stem),
+                        ("曲线数", "0"),
+                        ("采样点", "0"),
+                    ),
+                    table_headers=("曲线", "单位", "描述"),
+                    warning="LAS 文件缺少曲线定义",
+                )
+            return self._parse_error_preview(resource, "LAS 预览失败: ValueError")
         except Exception as exc:
             return self._parse_error_preview(resource, f"LAS 预览失败: {exc.__class__.__name__}")
 
-        curves = list(getattr(las, "curves", []))
+        curves = header.curves
         rows = tuple(
             (
-                str(getattr(curve, "mnemonic", "") or ""),
-                str(getattr(curve, "unit", "") or ""),
-                str(getattr(curve, "descr", "") or ""),
+                str(curve.mnemonic or ""),
+                str(curve.unit or ""),
+                str(curve.description or ""),
             )
-            for curve in curves[:MAX_TABLE_ROWS]
+            for curve in curves[: self.settings.table_max_rows]
         )
-        well_name = self._las_well_value(las, "WELL") or Path(resource.path).stem
-        sample_count = str(self._las_sample_count(las))
+        well_name = header.well_name or Path(resource.path).stem
         summary_rows = (
             ("井名", str(well_name)),
             ("曲线数", str(len(curves))),
-            ("采样点", sample_count),
+            ("采样点", str(header.row_count)),
         )
-        truncated = len(curves) > MAX_TABLE_ROWS
+        truncated = len(curves) > self.settings.table_max_rows
+
+        # Fetch actual data preview rows using lasio
+        data_headers = ()
+        data_rows = ()
+        try:
+            import lasio
+            import numpy as np
+            las = lasio.read(str(path))
+            data_headers = tuple(c.mnemonic for c in las.curves)
+            limit = min(len(las.data), 100)
+            rows_list = []
+            for i in range(limit):
+                row_vals = []
+                for val in las.data[i]:
+                    if np.isnan(val):
+                        row_vals.append("NaN")
+                    else:
+                        row_vals.append(f"{val:.4f}".rstrip('0').rstrip('.'))
+                rows_list.append(tuple(row_vals))
+            data_rows = tuple(rows_list)
+        except Exception:
+            pass
+
         return PreviewResult(
             mode="well_log",
             title=resource.name,
@@ -458,6 +646,8 @@ class PreviewProvider:
             summary_rows=summary_rows,
             table_headers=("曲线", "单位", "描述"),
             table_rows=rows,
+            data_headers=data_headers,
+            data_rows=data_rows,
             warning="曲线列表已按行上限截断" if truncated else "",
             truncated=truncated,
         )
@@ -470,7 +660,8 @@ class PreviewProvider:
         try:
             with segyio.open(str(path), "r", ignore_geometry=True) as cube:
                 trace_count = int(getattr(cube, "tracecount", 0) or 0)
-                sample_count = len(getattr(cube, "samples", ()) or ())
+                _samples = getattr(cube, "samples", None)
+                sample_count = len(_samples) if _samples is not None else 0
                 interval = self._field_value(
                     getattr(cube, "bin", {}),
                     getattr(segyio.BinField, "Interval", None),
@@ -499,6 +690,13 @@ class PreviewProvider:
         if crossline is not None:
             table_rows.append(("Crossline", str(crossline)))
 
+        volume = None
+        try:
+            from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
+            volume, load_warning = load_seismic_volume_from_path(str(path))
+        except Exception:
+            pass
+
         return PreviewResult(
             mode="seismic",
             title=resource.name,
@@ -510,6 +708,7 @@ class PreviewProvider:
             summary_rows=tuple(summary_rows),
             table_headers=("字段", "值"),
             table_rows=tuple(table_rows),
+            seismic_volume=volume,
         )
 
     def _markdown_rich_preview(self, resource: ResourceItem) -> PreviewResult:
@@ -517,7 +716,7 @@ class PreviewProvider:
         path = Path(resource.path)
         preview_bytes, truncated = self._read_preview_chunk(path)
         markdown = preview_bytes.decode("utf-8", errors="replace")
-        warning = f"仅显示前 {MAX_TEXT_PREVIEW_BYTES // 1024} KiB" if truncated else ""
+        warning = f"仅显示前 {self.settings.text_limit_kib} KiB" if truncated else ""
         return PreviewResult(
             mode="rich_text",
             title=resource.name,
@@ -607,13 +806,16 @@ class PreviewProvider:
         self,
         frame,
     ) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...], bool]:
-        truncated = len(frame.index) > MAX_TABLE_ROWS
-        preview = frame.head(MAX_TABLE_ROWS)
-        headers = tuple(str(column) for column in preview.columns[:MAX_TABLE_COLUMNS])
+        truncated = len(frame.index) > self.settings.table_max_rows
+        preview = frame.head(self.settings.table_max_rows)
+        headers = tuple(
+            str(column)
+            for column in preview.columns[: self.settings.table_max_columns]
+        )
         rows = []
-        for _, row in preview.iloc[:, :MAX_TABLE_COLUMNS].iterrows():
+        for _, row in preview.iloc[:, : self.settings.table_max_columns].iterrows():
             rows.append(tuple("" if frame_value != frame_value else str(frame_value) for frame_value in row))
-        if len(frame.columns) > MAX_TABLE_COLUMNS:
+        if len(frame.columns) > self.settings.table_max_columns:
             truncated = True
         return headers, tuple(rows), truncated
 
@@ -660,24 +862,33 @@ class PreviewProvider:
         )
 
     def _read_preview_chunk(self, path: Path) -> tuple[bytes, bool]:
+        limit = self.settings.text_limit_kib * 1024
         stat = path.stat()
         with path.open("rb") as handle:
-            data = handle.read(MAX_TEXT_PREVIEW_BYTES)
-        return data, stat.st_size > MAX_TEXT_PREVIEW_BYTES
+            data = handle.read(limit)
+        return data, stat.st_size > limit
 
     def _json_preview(self, resource: ResourceItem) -> PreviewResult:
         import json as json_lib
 
         path = Path(resource.path)
+        limit = self.settings.json_limit_mib * 1024 * 1024
         try:
-            raw_bytes = path.read_bytes()
+            size = path.stat().st_size
         except OSError:
             return self._parse_error_preview(resource, "文件不存在")
-        truncated = len(raw_bytes) > MAX_JSON_PARSE_BYTES
-        if truncated:
-            raw = raw_bytes[:MAX_JSON_PARSE_BYTES].decode("utf-8", errors="ignore")
-        else:
-            raw = raw_bytes.decode("utf-8", errors="replace")
+        if size > limit:
+            return self._parse_error_preview(
+                resource,
+                f"JSON 文件超过预览设置上限 {self.settings.json_limit_mib} MiB，"
+                "请在预览设置中提高上限",
+            )
+        try:
+            with path.open("rb") as handle:
+                raw_bytes = handle.read(limit + 1)
+        except OSError:
+            return self._parse_error_preview(resource, "文件不存在")
+        raw = raw_bytes.decode("utf-8", errors="replace")
         try:
             payload = json_lib.loads(raw)
         except (json_lib.JSONDecodeError, ValueError) as exc:
@@ -693,10 +904,7 @@ class PreviewProvider:
             status=resource.status,
             type_label=resource.type,
             json_payload=payload,
-            json_truncated=truncated,
-            warning=f"文件超过 {MAX_JSON_PARSE_BYTES // (1024 * 1024)} MB，已截断解析"
-            if truncated
-            else "",
+            json_truncated=False,
         )
 
     def _audio_preview(self, resource: ResourceItem) -> PreviewResult:

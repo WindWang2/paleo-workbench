@@ -10,8 +10,12 @@ from PySide6.QtWidgets import QLabel, QTableWidget
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
-from paleo_workbench.ui.pages.preview_provider import PreviewResult
-from paleo_workbench.ui.pages.preview_widgets import RichTextPreviewWidget
+from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
+from paleo_workbench.ui.pages.preview_widgets import (
+    RichTextPreviewWidget,
+    TablePreviewWidget,
+    SummaryTablePreviewWidget,
+)
 
 
 def _prepared_well_preview():
@@ -114,8 +118,10 @@ def test_reader_panel_dispatches_prepared_geoviz_preview(qtbot, monkeypatch):
     )
 
     assert rendered == [prepared]
-    assert panel.stack.currentWidget() is panel.geoviz_host
-    assert committed == [("geoviz", panel.geoviz_host)]
+    assert panel.stack.currentWidget() is panel.lazy_visualization_tabs
+    assert panel.lazy_visualization_tabs.currentIndex() == 1
+    assert panel.lazy_visualization_tabs.visual_stack.currentWidget() is panel.geoviz_host
+    assert committed == [("geoviz", panel.lazy_visualization_tabs)]
 
 
 @pytest.mark.parametrize("failure_stage", ["create", "render"])
@@ -353,6 +359,7 @@ def test_reader_panel_dispatches_web_document(tmp_path):
             "GeoTiffPreviewWidget", "ImagePreviewWidget", "JsonTreePreviewWidget",
             "MediaPreviewWidget", "MessagePreviewWidget", "RichTextPreviewWidget",
             "SummaryTablePreviewWidget", "TablePreviewWidget", "TextPreviewWidget",
+            "SeismicSlicePreviewWidget",
         ):
             setattr(widgets, name, FakeWidget)
         widgets.PdfPreviewWidget = FakePdfWidget
@@ -456,6 +463,245 @@ def test_reader_panel_renders_well_log_summary(qtbot):
     assert panel.current_mode == "well_log"
     assert panel.well_log_preview.summary_table.item(0, 1).text() == "A1"
     assert panel.well_log_preview.detail_table.item(0, 0).text() == "GR"
+
+
+def test_reader_panel_renders_well_log_summary_with_tabs(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            summary_rows=(("井名", "A1"), ("曲线数", "2")),
+            table_headers=("曲线", "单位"),
+            table_rows=(("GR", "API"), ("RHOB", "G/C3")),
+            data_headers=("DEPT", "GR", "RHOB"),
+            data_rows=(("100.0", "15.0", "2.1"), ("101.0", "16.5", "2.2")),
+        )
+    )
+
+    assert panel.current_mode == "well_log"
+    assert panel.well_log_preview.tabs.count() == 2
+    assert panel.well_log_preview.tabs.isTabEnabled(1) is True
+    assert panel.well_log_preview.tabs.tabText(0) == "曲线定义与元数据"
+    assert panel.well_log_preview.tabs.tabText(1) == "数据内容"
+    assert panel.well_log_preview.data_table.item(0, 0).text() == "100.0"
+    assert panel.well_log_preview.data_table.item(1, 1).text() == "16.5"
+
+
+def test_reader_panel_renders_well_log_summary_without_data_disables_tab(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            summary_rows=(("井名", "A1"), ("曲线数", "2")),
+            table_headers=("曲线", "单位"),
+            table_rows=(("GR", "API"), ("RHOB", "G/C3")),
+            data_headers=(),
+            data_rows=(),
+        )
+    )
+
+    assert panel.current_mode == "well_log"
+    assert panel.well_log_preview.tabs.count() == 2
+    assert panel.well_log_preview.tabs.isTabEnabled(1) is False
+
+
+def test_reader_panel_visualizable_summary_defaults_to_data_list_and_requests_once(
+    qtbot,
+):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    requested: list[str] = []
+    panel.visualization_requested.connect(lambda: requested.append("visual"))
+
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            summary_rows=(("井名", "A1"),),
+            table_headers=("曲线", "单位"),
+            table_rows=(("GR", "API"),),
+            visualization_available=True,
+        )
+    )
+
+    tabs = panel.lazy_visualization_tabs
+    assert panel.stack.currentWidget() is tabs
+    assert tabs.tabText(0) == "数据列表"
+    assert tabs.tabText(1) == "可视化预览"
+    assert tabs.currentIndex() == 0
+    assert tabs.summary_stack.currentWidget() is tabs.well_log_summary
+    assert isinstance(tabs.well_log_summary, SummaryTablePreviewWidget)
+    assert tabs.well_log_summary.detail_table.horizontalHeaderItem(0).text() == "曲线"
+    assert tabs.well_log_summary.detail_table.horizontalHeaderItem(1).text() == "单位"
+    assert tabs.well_log_summary.detail_table.rowCount() == 1
+    assert tabs.well_log_summary.detail_table.item(0, 0).text() == "GR"
+    assert tabs.well_log_summary.detail_table.item(0, 1).text() == "API"
+    assert panel._geoviz_host is None
+    assert requested == []
+
+    tabs.setCurrentIndex(1)
+    tabs.setCurrentIndex(0)
+    tabs.setCurrentIndex(1)
+
+    assert requested == ["visual"]
+    assert panel._geoviz_host is None
+
+
+def test_reader_panel_visualizable_text_fallback_is_visible_in_data_tab(qtbot):
+    panel = DataReaderPanel(provider=PreviewProvider())
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="text",
+            title="single-line.dat",
+            text="ONLY ONE DAT ROW",
+            visualization_available=True,
+        )
+    )
+
+    tabs = panel.lazy_visualization_tabs
+    assert panel.stack.currentWidget() is tabs
+    assert tabs.currentIndex() == 0
+    assert tabs.summary_stack.currentWidget() is tabs.text
+    assert tabs.text.toPlainText() == "ONLY ONE DAT ROW"
+
+
+def test_reader_panel_visualization_loading_and_error_preserve_data_list(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+    panel.render(
+        PreviewResult(
+            mode="table",
+            title="points.dat",
+            table_headers=("X", "Y"),
+            table_rows=(("1", "2"),),
+            visualization_available=True,
+        )
+    )
+    tabs = panel.lazy_visualization_tabs
+
+    panel.show_visualization_loading()
+
+    assert tabs.currentIndex() == 1
+    assert "正在生成可视化预览" in tabs.loading_label.text()
+    assert tabs.summary.item(0, 0).text() == "1"
+
+    panel.show_visualization_error("prepare failed")
+
+    assert "prepare failed" in tabs.message_label.text()
+    assert tabs.summary.item(0, 0).text() == "1"
+
+
+def test_reader_panel_retryable_visualization_error_requests_again(qtbot):
+    panel = DataReaderPanel(provider=PreviewProvider())
+    qtbot.addWidget(panel)
+    requested: list[str] = []
+    panel.visualization_requested.connect(lambda: requested.append("visual"))
+    panel.render(
+        PreviewResult(
+            mode="table",
+            title="points.dat",
+            table_headers=("X", "Y"),
+            table_rows=(("1", "2"),),
+            visualization_available=True,
+        )
+    )
+    tabs = panel.lazy_visualization_tabs
+
+    tabs.setCurrentIndex(1)
+    panel.show_visualization_error("temporary", retryable=True)
+    tabs.setCurrentIndex(0)
+    tabs.setCurrentIndex(1)
+
+    assert requested == ["visual", "visual"]
+
+
+def test_reader_panel_visualization_completion_does_not_steal_data_tab(qtbot):
+    engine = ReaderEngine()
+    panel = _reader_with_engine(qtbot, engine)
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            summary_rows=(("井名", "A1"),),
+            visualization_available=True,
+        )
+    )
+    tabs = panel.lazy_visualization_tabs
+    tabs.setCurrentIndex(1)
+    panel.show_visualization_loading()
+    tabs.setCurrentIndex(0)
+
+    prepared = _prepared_well_preview()
+    panel.render_visualization(
+        PreviewResult(mode="geoviz", title="well.las", engine_preview=prepared)
+    )
+
+    assert tabs.currentIndex() == 0
+    assert tabs.visual_stack.currentWidget() is panel.geoviz_host
+
+
+def test_reader_panel_renders_lazy_visualization_and_new_summary_resets_it(qtbot):
+    engine = ReaderEngine()
+    panel = _reader_with_engine(qtbot, engine)
+    summary = PreviewResult(
+        mode="well_log",
+        title="well.las",
+        summary_rows=(("井名", "A1"),),
+        table_headers=("曲线", "单位"),
+        table_rows=(("GR", "API"),),
+        visualization_available=True,
+    )
+    panel.render(summary)
+    panel.lazy_visualization_tabs.setCurrentIndex(1)
+    panel.show_visualization_loading()
+
+    prepared = _prepared_well_preview()
+    panel.render_visualization(
+        PreviewResult(
+            mode="geoviz",
+            title="well.las",
+            engine_preview=prepared,
+            visualization_available=True,
+        )
+    )
+
+    assert panel.lazy_visualization_tabs.currentIndex() == 1
+    assert panel._geoviz_host is not None
+    assert engine.created
+    assert engine.created[0][0] is prepared.kind
+
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="next.las",
+            summary_rows=(("井名", "B1"),),
+            table_headers=("曲线", "单位"),
+            table_rows=(("RHOB", "G/C3"),),
+            visualization_available=True,
+        )
+    )
+
+    assert panel.lazy_visualization_tabs.currentIndex() == 0
+    assert panel.lazy_visualization_tabs.well_log_summary.detail_table.item(0, 0).text() == "RHOB"
+    assert engine.released
+
+
+def test_reader_panel_non_visual_text_keeps_existing_single_preview(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(PreviewResult(mode="text", title="notes", text="ordinary"))
+
+    assert panel.stack.currentWidget() is panel.text_preview
+    assert panel.current_mode == "text"
 
 
 def test_reader_panel_renders_seismic_summary_message(qtbot):
@@ -1182,3 +1428,54 @@ def test_reader_panel_media_dispatch_via_provider(qtbot, tmp_path: Path):
     from paleo_workbench.ui.pages.preview_widgets import MediaPreviewWidget
 
     assert isinstance(panel.stack.currentWidget(), MediaPreviewWidget)
+
+
+def test_reader_panel_lazy_visualization_renders_well_log_summary_with_tabs(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    panel.render(
+        PreviewResult(
+            mode="well_log",
+            title="well.las",
+            summary_rows=(("井名", "A1"), ("曲线数", "2")),
+            table_headers=("曲线", "单位"),
+            table_rows=(("GR", "API"), ("RHOB", "G/C3")),
+            data_headers=("DEPT", "GR", "RHOB"),
+            data_rows=(("100.0", "15.0", "2.1"), ("101.0", "16.5", "2.2")),
+            visualization_available=True,
+        )
+    )
+
+    tabs = panel.lazy_visualization_tabs
+    assert panel.stack.currentWidget() is tabs
+    assert tabs.summary_stack.currentWidget() is tabs.well_log_summary
+    assert tabs.well_log_summary.tabs.count() == 2
+    assert tabs.well_log_summary.tabs.isTabEnabled(1) is True
+    assert tabs.well_log_summary.data_table.item(0, 0).text() == "100.0"
+
+
+def test_reader_panel_renders_seismic_slice_preview(qtbot):
+    panel = DataReaderPanel()
+    qtbot.addWidget(panel)
+
+    import numpy as np
+    # Create dummy 3D volume: shape (10, 10, 10)
+    volume = np.random.rand(10, 10, 10).astype(np.float32)
+
+    panel.render(
+        PreviewResult(
+            mode="seismic",
+            title="cube.sgy",
+            seismic_volume=volume,
+        )
+    )
+
+    assert panel.current_mode == "seismic"
+    assert panel.seismic_preview.slider.maximum() == 9
+    assert panel.seismic_preview.type_combo.count() == 3
+    # Check default type is Inline (index 0)
+    assert panel.seismic_preview.type_combo.currentIndex() == 0
+    # Change type to Time (index 2)
+    panel.seismic_preview.type_combo.setCurrentIndex(2)
+    assert panel.seismic_preview.slider.maximum() == 9
