@@ -566,12 +566,16 @@ class DataPage(QWidget):
             )
             if not output_path:
                 return
-            result = export_project_inventory(
-                self.project,
-                Path(output_path),
-                project_path=project_file,
-                register=True,
-            )
+            try:
+                result = export_project_inventory(
+                    self.project,
+                    Path(output_path),
+                    project_path=project_file,
+                    register=True,
+                )
+            except Exception as exc:
+                self._set_action_status(f"导出失败：{exc}")
+                return
             self._set_action_status(result.message)
             if result.success:
                 self.update_state(
@@ -594,14 +598,18 @@ class DataPage(QWidget):
         )
         if not output_path:
             return
-        result = export_asset_to_path(
-            asset,
-            format_label,
-            Path(output_path),
-            project=self.project,
-            project_path=project_file,
-            register=True,
-        )
+        try:
+            result = export_asset_to_path(
+                asset,
+                format_label,
+                Path(output_path),
+                project=self.project,
+                project_path=project_file,
+                register=True,
+            )
+        except Exception as exc:
+            self._set_action_status(f"导出失败：{exc}")
+            return
         self._set_action_status(result.message)
         if result.success and result.artifact is not None:
             self.update_state(

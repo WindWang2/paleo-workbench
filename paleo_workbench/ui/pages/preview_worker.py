@@ -5,6 +5,7 @@ from copy import copy, deepcopy
 from dataclasses import replace
 from pathlib import Path
 import threading
+import traceback
 from typing import Literal
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
@@ -205,7 +206,7 @@ class _PreviewWorker(QObject):
                         ),
                     )
         except Exception as exc:  # pragma: no cover - defensive UI boundary
-            self.failed.emit(self._generation, str(exc))
+            self.failed.emit(self._generation, f"{exc}\n{traceback.format_exc()}")
             return
         self.finished.emit(self._generation, result)
 
@@ -226,7 +227,7 @@ class _MediaPreloadWorker(QObject):
         try:
             out = preload_media(self._result)
         except Exception as exc:  # pragma: no cover
-            self.failed.emit(self._generation, str(exc))
+            self.failed.emit(self._generation, f"{exc}\n{traceback.format_exc()}")
             return
         self.finished.emit(self._generation, out)
 

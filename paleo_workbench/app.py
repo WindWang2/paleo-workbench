@@ -15,6 +15,8 @@ from paleo_workbench.pipeline.bootstrap import (
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui import AppShell
+from paleo_workbench.ui.pages.preview_settings import PreviewSettingsStore
+from paleo_workbench.ui.preview_settings_dialog import PreviewSettingsDialog
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 
 _PROJECT_SUFFIX = ".paleo.json"
@@ -22,11 +24,18 @@ _PROJECT_FILTER = "Project (*.paleo.json)"
 
 
 class PaleoWorkbenchWindow(QWidget):
-    def __init__(self, project: ProjectDocument | None = None):
+    def __init__(
+        self,
+        project: ProjectDocument | None = None,
+        *,
+        preview_settings_store: PreviewSettingsStore | None = None,
+    ):
         super().__init__()
         self.project = project or ProjectDocument.new("Untitled Project")
         self.project_path: Path | None = None
         self._last_open_error: str | None = None
+        self._preview_settings_store = preview_settings_store
+        self._preview_settings_dialog: PreviewSettingsDialog | None = None
         self.resize(1440, 900)
 
         self.outer_layout = QVBoxLayout(self)
@@ -164,13 +173,7 @@ class PaleoWorkbenchWindow(QWidget):
         try:
             root = resolve_sample_data_root(data_root)
             result = bootstrap_sample_project(root)
-        except FileNotFoundError as e:
-            self._show_project_error("打开样例工程失败", str(e))
-            return False
-        except ValueError as e:
-            self._show_project_error("打开样例工程失败", str(e))
-            return False
-        except OSError as e:
+        except (FileNotFoundError, ValueError, OSError) as e:
             self._show_project_error("打开样例工程失败", str(e))
             return False
         self.project = result.document
@@ -291,6 +294,7 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.open_sample_project_requested.connect(self._on_open_sample_project)
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
+        menu_bar.preview_settings_requested.connect(self._show_preview_settings)
         self._wire_data_visualization_jump()
         self._wire_mapping_page()
         self._wire_preparation_page()
@@ -298,6 +302,24 @@ class PaleoWorkbenchWindow(QWidget):
         self._wire_seismic_page()
         self._wire_well_log_page()
         self._wire_review_page()
+
+    def _show_preview_settings(self) -> None:
+        """Open the shared preview settings for the current DataPage."""
+        if self._preview_settings_dialog is None:
+            dialog = PreviewSettingsDialog(
+                self,
+                store=self._preview_settings_store,
+            )
+            dialog.settings_applied.connect(self._apply_preview_settings)
+            self._preview_settings_dialog = dialog
+        reader = self.app_shell.data_page.reader_panel
+        self._preview_settings_dialog.set_settings(reader.preview_settings)
+        self._preview_settings_dialog.set_preview_mode(reader.current_mode)
+        self._preview_settings_dialog.exec()
+
+    def _apply_preview_settings(self, settings) -> None:
+        """Route dialog output to the current shell, never a stale page."""
+        self.app_shell.data_page.reader_panel.set_preview_settings(settings)
 
     def _wire_data_visualization_jump(self) -> None:
         page = self.app_shell.data_page_widget()

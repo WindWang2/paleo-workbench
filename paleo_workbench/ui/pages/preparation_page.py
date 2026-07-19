@@ -129,6 +129,16 @@ class PreparationPage(QWidget):
         if self._project is None:
             QMessageBox.information(self, "井点 QC", "请先打开或绑定工程。")
             return
+        try:
+            self._run_well_qc_impl()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "井点 QC 失败",
+                f"{exc.__class__.__name__}: {exc}",
+            )
+
+    def _run_well_qc_impl(self) -> None:
         from paleo_workbench.workflow.well_qc import run_well_table_qc, qc_summary
         from paleo_workbench.workflow.well_table import (
             attach_well_table_to_factor_task,
