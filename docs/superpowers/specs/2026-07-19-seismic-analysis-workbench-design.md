@@ -15,7 +15,7 @@ Restructure the existing desktop **地震预测** page into the dark, data-dense
 
 ### Top context toolbar
 
-The page gains a compact top bar containing the active task name, target horizon, current seismic attribute, display mode, and the existing actions to run a prediction and send the result to mapping.  It provides context without taking workspace width from the seismic view.
+The page gains a compact top bar containing the active task name, target horizon, current seismic attribute, display mode, and the existing primary action to run a prediction. It provides context without taking workspace width from the seismic view.
 
 ### Left attribute dock
 
