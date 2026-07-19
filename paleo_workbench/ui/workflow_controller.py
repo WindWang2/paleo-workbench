@@ -31,6 +31,13 @@ class WorkflowController:
         """Route dialog output to the current shell, never a stale page."""
         self.window.app_shell.data_page.reader_panel.set_preview_settings(settings)
 
+    def _wire_home_page(self) -> None:
+        page = self.window.app_shell.home_page_widget()
+        if page is None:
+            return
+        if hasattr(page, "navigation_requested"):
+            page.navigation_requested.connect(self._on_home_navigation)
+
     def _wire_data_visualization_jump(self) -> None:
         page = self.window.app_shell.data_page_widget()
         if hasattr(page, "open_in_visualization"):
@@ -262,3 +269,7 @@ class WorkflowController:
         viz = self.window.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)
         if hasattr(viz, "open_ref"):
             viz.open_ref(ref)
+
+    def _on_home_navigation(self, index: int) -> None:
+        self.window.app_shell.icon_rail.set_active(index)
+        self.window.app_shell._switch_page(index)

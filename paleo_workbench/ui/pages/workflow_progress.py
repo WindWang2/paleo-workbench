@@ -46,8 +46,9 @@ class WorkflowProgress(QWidget):
             layout.addWidget(card)
             if i < 5:
                 line = QFrame()
-                line.setFixedHeight(2)
-                line.setStyleSheet(f"background: {tokens.BORDER}; border: none;")
+                line.setFixedHeight(24)
+                line.setFixedWidth(30)
+                line.setStyleSheet(f"background: transparent; border-bottom: 2px solid {tokens.BORDER}; margin-bottom: 12px;")
                 layout.addWidget(line, 0, Qt.AlignmentFlag.AlignTop)
         layout.addStretch()
 

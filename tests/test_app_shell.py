@@ -50,7 +50,7 @@ def test_app_shell_hides_sidebar_on_data_page_and_restores_on_navigation(qtbot):
 
     shell.icon_rail.nav_buttons[4].click()
     assert shell.page_stack.currentIndex() == 4
-    assert not shell.sidebar.isHidden()
+    assert shell.sidebar.isHidden()
     assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
 
 

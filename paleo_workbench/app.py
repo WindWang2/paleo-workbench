@@ -202,6 +202,7 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
         menu_bar.preview_settings_requested.connect(self._show_preview_settings)
+        self.workflow_controller._wire_home_page()
         self.workflow_controller._wire_data_visualization_jump()
         self.workflow_controller._wire_mapping_page()
         self.workflow_controller._wire_preparation_page()

@@ -58,6 +58,7 @@ class AppShell(QWidget):
         middle.setSpacing(0)
         self.icon_rail = IconRail()
         self.sidebar = TextSidebar()
+        self.sidebar.setVisible(False)
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
         self.data_page = DataPage(project=self.project)
@@ -116,7 +117,7 @@ class AppShell(QWidget):
         if not 0 <= index < self.page_stack.count():
             return
         self.page_stack.setCurrentIndex(index)
-        self.sidebar.setVisible(index != PAGE_INDEX_DATA)
+        self.sidebar.setVisible(False)
         if index == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
         elif index == PAGE_INDEX_MAPPING:
@@ -179,6 +180,9 @@ class AppShell(QWidget):
 
     def data_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_DATA)
+
+    def home_page_widget(self):
+        return self.page_stack.widget(PAGE_INDEX_HOME)
 
     def mapping_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_MAPPING)
