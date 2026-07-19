@@ -384,29 +384,29 @@ QLabel#WorkFieldValue {{
     background: transparent;
 }}
 
-/* Seismic analysis workbench — scoped dark interpretation surface. */
+/* Seismic analysis workbench — light theme style. */
 QWidget#SeismicPredictionPage {{
-    background: #06131f;
+    background: {BG_BODY};
 }}
 QFrame#SeismicContextToolbar,
 QFrame#SeismicAttributePanel,
 QFrame#SeismicControlPanel,
 QFrame#SeismicViewPanel {{
-    background: #0a1c29;
-    border: 1px solid #1b3a4c;
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
     border-radius: {RADIUS_CARD}px;
 }}
 QWidget#SeismicPredictionPage QLabel#MapDockTitle,
 QWidget#SeismicPredictionPage QLabel#WorkFieldValue {{
-    color: #dcebf5;
+    color: {TEXT_PRIMARY};
 }}
 QWidget#SeismicPredictionPage QLabel#WorkFieldLabel {{
-    color: #87a5b8;
+    color: {TEXT_SECONDARY};
 }}
 QTreeWidget#SeismicAttributeTree {{
-    background: #081824;
-    color: #dcebf5;
-    border: 1px solid #1b3a4c;
+    background: {BG_SIDEBAR};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER};
     border-radius: {RADIUS_BUTTON}px;
     padding: 4px;
 }}
@@ -415,40 +415,40 @@ QTreeWidget#SeismicAttributeTree::item {{
     border-radius: 3px;
 }}
 QTreeWidget#SeismicAttributeTree::item:selected {{
-    background: #0d5d8c;
+    background: {PRIMARY};
     color: #ffffff;
 }}
 QTreeWidget#SeismicAttributeTree::item:hover {{
-    background: #123348;
+    background: {BG_SEARCH};
 }}
 QFrame#SeismicAttributeCard {{
-    background: #0e2738;
-    border: 1px solid #1c465d;
+    background: {BG_SEARCH};
+    border: 1px solid {BORDER};
     border-radius: {RADIUS_BUTTON}px;
 }}
 QFrame#SeismicViewHost {{
-    background: #06131f;
-    border: 1px solid #1b3a4c;
+    background: {BG_SIDEBAR};
+    border: 1px solid {BORDER};
     border-radius: {RADIUS_BUTTON}px;
 }}
 QLabel#SeismicAttributeCardLabel {{
-    color: #dcebf5;
+    color: {TEXT_PRIMARY};
     font-weight: 600;
     font-size: {FONT_SIZE_STATUS};
 }}
 QLabel#SeismicAttributeCardStatus {{
-    color: #45d6ad;
+    color: {SUCCESS};
     font-size: {FONT_SIZE_STATUS};
 }}
 QWidget#SeismicPredictionPage QPushButton#SecondaryButton {{
-    background: #0e2738;
-    color: #dcebf5;
-    border-color: #28536b;
+    background: {BG_SIDEBAR};
+    color: {TEXT_PRIMARY};
+    border-color: {BORDER};
 }}
 QWidget#SeismicPredictionPage QComboBox {{
-    background: #0e2738;
-    color: #dcebf5;
-    border-color: #28536b;
+    background: {BG_SIDEBAR};
+    color: {TEXT_PRIMARY};
+    border-color: {BORDER};
 }}
 """
 
