@@ -26,7 +26,7 @@ class DetachedJobKeeper(QObject):
         try:
             thread.setParent(self)
         except RuntimeError:
-            return
+            pass
         self._jobs[key] = (thread, worker)
         # QThread.finished may be emitted from the managed thread.  Emit a
         # relay signal so registry mutation and deleteLater happen on the
