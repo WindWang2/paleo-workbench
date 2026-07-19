@@ -19,6 +19,6 @@ def test_seismic_prediction_page_receives_project_prediction_tasks(qtbot):
     qtbot.addWidget(window)
     page = window.app_shell.page_stack.widget(3)
 
-    assert page.task_panel.name_value.text() == task.name
+    assert page.context_toolbar.task_value.text() == task.name
     assert page.view_panel.volume_shape == (8, 10, 12)
     assert page.control_panel.shape_value.text() == "8 × 10 × 12"

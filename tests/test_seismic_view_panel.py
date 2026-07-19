@@ -17,6 +17,14 @@ def test_seismic_view_panel_empty_state(qtbot):
     assert panel.volume_shape is None
 
 
+def test_seismic_view_panel_exposes_reference_attribute_strip(qtbot):
+    panel = SeismicViewPanel()
+    qtbot.addWidget(panel)
+
+    assert panel.attribute_strip.objectName() == "SeismicAttributeStrip"
+    assert panel.attribute_strip.layout().count() == 4
+
+
 def test_seismic_view_panel_loads_demo_volume(qtbot):
     project = ProjectDocument.new("Test")
     task = MockPredictionAdapter().run(project, [], seed=3)

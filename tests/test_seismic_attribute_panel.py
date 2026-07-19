@@ -1,0 +1,41 @@
+from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
+
+
+def test_attribute_panel_groups_all_supported_labels(qtbot):
+    panel = SeismicAttributePanel()
+    qtbot.addWidget(panel)
+
+    assert panel.objectName() == "SeismicAttributePanel"
+    assert [panel.attribute_tree.topLevelItem(i).text(0) for i in range(4)] == [
+        "振幅属性",
+        "频率属性",
+        "连续性属性",
+        "结构属性",
+    ]
+    leaves = [
+        panel.attribute_tree.topLevelItem(i).child(j).text(0)
+        for i in range(panel.attribute_tree.topLevelItemCount())
+        for j in range(panel.attribute_tree.topLevelItem(i).childCount())
+    ]
+    assert set(leaves) == {
+        "振幅",
+        "包络",
+        "瞬时相位",
+        "瞬时频率",
+        "RMS振幅",
+        "甜点",
+    }
+
+
+def test_attribute_panel_emits_leaf_selection_and_syncs_programmatically(qtbot):
+    panel = SeismicAttributePanel()
+    qtbot.addWidget(panel)
+    selected: list[str] = []
+    panel.attribute_changed.connect(selected.append)
+
+    panel.set_selected_attribute("包络")
+
+    assert panel.selected_attribute() == "包络"
+    item = panel.attribute_tree.topLevelItem(0).child(0)
+    panel.attribute_tree.itemClicked.emit(item, 0)
+    assert selected == ["振幅"]

@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from paleo_workbench.app import PaleoWorkbenchWindow
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPage
-from paleo_workbench.workflow.seismic_prediction import (
-    SEISMIC_ATTRIBUTE_LABELS,
-    run_seismic_facies_prediction,
-)
+from paleo_workbench.workflow.seismic_prediction import run_seismic_facies_prediction
 
 
 def test_run_seismic_facies_prediction_binds_assets_and_horizon():
@@ -30,24 +26,29 @@ def test_run_seismic_facies_prediction_binds_assets_and_horizon():
     assert "C6" in task.name
 
 
-def test_control_panel_emits_mode_and_attribute(qtbot):
+def test_workbench_controls_emit_mode_attribute_and_auto_tie(qtbot):
+    from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
     from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 
     panel = SeismicControlPanel()
+    attributes = SeismicAttributePanel()
     qtbot.addWidget(panel)
+    qtbot.addWidget(attributes)
     modes: list[str] = []
     attrs: list[str] = []
     ties: list[bool] = []
     panel.display_mode_changed.connect(modes.append)
-    panel.attribute_changed.connect(attrs.append)
+    attributes.attribute_changed.connect(attrs.append)
     panel.well_tie_toggled.connect(ties.append)
 
     panel.mode_combo.setCurrentText("wiggle")
-    panel.attribute_combo.setCurrentText(SEISMIC_ATTRIBUTE_LABELS[1])
+    attributes.attribute_tree.itemClicked.emit(
+        attributes.attribute_tree.topLevelItem(0).child(1), 0
+    )
     panel.well_tie_btn.setChecked(True)
 
     assert modes[-1] == "wiggle"
-    assert attrs[-1] == SEISMIC_ATTRIBUTE_LABELS[1]
+    assert attrs[-1] == "包络"
     assert ties[-1] is True
 
 
@@ -77,15 +78,17 @@ def test_page_run_creates_task_and_updates_view(qtbot):
     page.set_project(project)
     page.update_state([], project=project)
 
-    page.control_panel.run_btn.click()
+    page.context_toolbar.run_btn.click()
 
     assert len(project.prediction_tasks) == 1
     assert page.view_panel.volume_shape == (8, 10, 12)
     assert page.control_panel.horizon_value.text() == "H9"
-    assert "H9" in page.task_panel.name_value.text()
+    assert "H9" in page.context_toolbar.task_value.text()
 
 
 def test_app_send_to_mapping_compiles_draft(qtbot):
+    from paleo_workbench.app import PaleoWorkbenchWindow
+
     project = ProjectDocument.new("Send")
     project.stratigraphy.target_horizon = "ZJ2"
     run_seismic_facies_prediction(project, seed=1)
