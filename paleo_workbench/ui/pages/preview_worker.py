@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from copy import copy
+from contextlib import contextmanager
+from copy import copy, deepcopy
 from dataclasses import replace
 from pathlib import Path
+import threading
 from typing import Literal
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
@@ -14,6 +16,7 @@ from paleo_workbench.ui.pages.preview_disk_cache import (
     is_disk_cacheable,
 )
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
+from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 
 Asset = ResourceItem | ExportArtifact
@@ -23,13 +26,49 @@ MAX_CACHED_MEDIA_BYTES = 512 * 1024
 MAX_PRELOAD_MEDIA_BYTES = 64 * 1024 * 1024
 
 PendingKind = Literal["asset", "media"]
+RequestKind = Literal["default", "summary", "visualization"]
+
+
+class _CacheEpoch:
+    """Serialize cache clearing against request-local worker disk writes."""
+
+    def __init__(self) -> None:
+        self._current = 0
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def advance(self, generation: int):
+        with self._lock:
+            self._current = generation
+            yield
+
+    @contextmanager
+    def write_if_current(self, generation: int):
+        with self._lock:
+            yield self._current == generation
+
+    def is_current(self, generation: int) -> bool:
+        with self._lock:
+            return self._current == generation
+
+
+def _build_for_request_kind(
+    provider: PreviewProvider,
+    asset: Asset | None,
+    request_kind: RequestKind,
+) -> PreviewResult:
+    if request_kind == "summary":
+        return provider.preview_summary(asset)
+    if request_kind == "visualization":
+        return provider.preview_visualization(asset)
+    return provider.preview(asset)
 
 
 def snapshot_asset(asset: Asset) -> Asset:
     """Copy asset so worker threads never share mutable project state."""
     if hasattr(asset, "model_copy"):
         return asset.model_copy(deep=True)
-    return copy(asset)
+    return deepcopy(asset)
 
 
 def needs_media_preload(result: PreviewResult) -> bool:
@@ -106,18 +145,36 @@ class _PreviewWorker(QObject):
         parent=None,
         *,
         disk_cache: PreviewDiskCache | None = None,
+        settings: PreviewSettings | None = None,
+        request_kind: RequestKind = "default",
+        cache_epoch: _CacheEpoch | None = None,
+        cache_generation: int = 0,
     ):
         super().__init__(parent)
-        self._provider = provider
+        self._settings = settings or PreviewSettings.defaults()
+        self._provider = provider.with_settings(self._settings)
         # Always a snapshot — never the live project model object.
         self._asset = asset
         self._generation = generation
-        self._disk = disk_cache
+        self._request_kind = request_kind
+        self._cache_epoch = cache_epoch
+        self._cache_generation = cache_generation
+        if disk_cache is None:
+            self._disk = None
+        else:
+            # Request-local cache facade prevents an in-flight worker from
+            # observing options changed by a newer settings generation.
+            self._disk = PreviewDiskCache(
+                disk_cache.project_root,
+                options=self._settings.to_geoviz_options(),
+            )
 
     @Slot()
     def run(self) -> None:
         try:
             use_disk = (
+                self._request_kind != "summary"
+                and
                 self._disk is not None
                 and isinstance(self._asset, ResourceItem)
                 and is_disk_cacheable(self._asset)
@@ -128,12 +185,25 @@ class _PreviewWorker(QObject):
                     self.finished.emit(self._generation, hit)
                     return
 
-            result = self._provider.preview(self._asset)
+            result = _build_for_request_kind(
+                self._provider,
+                self._asset,
+                self._request_kind,
+            )
             if result.mode != "geoviz":
                 result = preload_media(result)
 
-            if use_disk:
-                self._disk.store(self._asset, result)
+            if use_disk and result.cacheable:
+                if self._cache_epoch is None:
+                    self._disk.store(self._asset, result)
+                else:
+                    self._disk.store(
+                        self._asset,
+                        result,
+                        commit_guard=lambda: self._cache_epoch.write_if_current(
+                            self._cache_generation
+                        ),
+                    )
         except Exception as exc:  # pragma: no cover - defensive UI boundary
             self.failed.emit(self._generation, str(exc))
             return
@@ -185,18 +255,31 @@ class PreviewRequestController(QObject):
         cache_max_size: int = 32,
         shutdown_wait_ms: int = 10_000,
         disk_cache: PreviewDiskCache | None = None,
+        settings: PreviewSettings | None = None,
+        request_kind: RequestKind = "default",
     ):
         super().__init__(parent)
         self.provider = provider or PreviewProvider()
+        self.settings = settings or getattr(
+            self.provider,
+            "settings",
+            PreviewSettings.defaults(),
+        )
         self.cache = cache if cache is not None else PreviewCache(max_size=cache_max_size)
         self.disk_cache = disk_cache if disk_cache is not None else PreviewDiskCache(None)
+        self.disk_cache.set_options(self.settings.to_geoviz_options())
+        if request_kind not in {"default", "summary", "visualization"}:
+            raise ValueError(f"unknown preview request kind: {request_kind}")
+        self.request_kind = request_kind
         self._shutdown_wait_ms = shutdown_wait_ms
         self._generation = 0
+        self._cache_epoch = _CacheEpoch()
+        self._cache_generation = 0
         self._active_job = OwnedWorkerJob(self)
         self._active_job.released.connect(self._on_thread_finished)
-        # Latest pending: ("asset", gen, Asset, key) | ("media", gen, PreviewResult, key)
-        self._pending: tuple[PendingKind, int, object, tuple] | None = None
-        self._inflight_keys: dict[int, tuple] = {}
+        # Latest pending carries request generation and cache generation.
+        self._pending: tuple[PendingKind, int, object, tuple, int] | None = None
+        self._inflight_keys: dict[int, tuple[tuple, int]] = {}
         self._shutting_down = False
 
     @property
@@ -208,31 +291,71 @@ class PreviewRequestController(QObject):
 
     def clear_disk_cache(self) -> None:
         """Clear project disk preview cache and in-memory LRU."""
+        if self._shutting_down:
+            return
+        self._advance_cache_generation()
         self.disk_cache.clear()
         self.cache.clear()
+
+    def _advance_generation(self) -> int:
+        self._generation += 1
+        return self._generation
+
+    def _advance_cache_generation(self) -> int:
+        self._cache_generation += 1
+        with self._cache_epoch.advance(self._cache_generation):
+            pass
+        return self._cache_generation
+
+    def set_settings(self, settings: PreviewSettings) -> bool:
+        """Invalidate old generations and install a new immutable profile."""
+        if settings == self.settings:
+            return False
+        self.settings = settings
+        self._advance_generation()
+        self._pending = None
+        self.cache.clear()
+        self.disk_cache.set_options(settings.to_geoviz_options())
+        return True
+
+    def invalidate(self) -> None:
+        """Invalidate pending/result delivery without starting another request."""
+        if self._shutting_down:
+            return
+        self._advance_generation()
+        self._pending = None
 
     def request(self, asset: Asset | None) -> None:
         if self._shutting_down:
             return
 
-        self._generation += 1
-        generation = self._generation
+        generation = self._advance_generation()
+        cache_generation = self._cache_generation
 
         if asset is None:
             self._pending = None
-            self.result_ready.emit(self.provider.preview(None))
+            configured = self.provider.with_settings(self.settings)
+            self.result_ready.emit(
+                _build_for_request_kind(configured, None, self.request_kind)
+            )
             return
 
-        key = make_preview_cache_key(asset)
+        key = make_preview_cache_key(asset, self.settings.fingerprint())
         hit = self.cache.get(key)
         if hit is not None:
             if needs_media_preload(hit):
                 # Path-only cache: re-read media off-thread, skip provider rebuild.
                 self.loading.emit()
                 if self._active_job.thread is not None:
-                    self._pending = ("media", generation, hit, key)
+                    self._pending = (
+                        "media",
+                        generation,
+                        hit,
+                        key,
+                        cache_generation,
+                    )
                     return
-                self._start_media_job(generation, hit, key)
+                self._start_media_job(generation, hit, key, cache_generation)
                 return
             self._pending = None
             self.result_ready.emit(hit)
@@ -241,16 +364,23 @@ class PreviewRequestController(QObject):
         snap = snapshot_asset(asset)
         self.loading.emit()
         if self._active_job.thread is not None:
-            self._pending = ("asset", generation, snap, key)
+            self._pending = (
+                "asset",
+                generation,
+                snap,
+                key,
+                cache_generation,
+            )
             return
 
-        self._start_job(generation, snap, key)
+        self._start_job(generation, snap, key, cache_generation)
 
     def shutdown(self, wait_ms: int | None = None) -> None:
         """Stop accepting work and wait for the active worker (no force-kill)."""
         self._shutting_down = True
         self._pending = None
-        self._generation += 1
+        self._advance_generation()
+        self._advance_cache_generation()
         self._inflight_keys.clear()
 
         if self._active_job.thread is None:
@@ -262,13 +392,23 @@ class PreviewRequestController(QObject):
         second_wait_ms = min(initial_wait_ms + 500, 2_000)
         self._active_job.shutdown(initial_wait_ms + second_wait_ms)
 
-    def _start_job(self, generation: int, asset: Asset, key: tuple) -> None:
-        self._inflight_keys[generation] = key
+    def _start_job(
+        self,
+        generation: int,
+        asset: Asset,
+        key: tuple,
+        cache_generation: int,
+    ) -> None:
+        self._inflight_keys[generation] = (key, cache_generation)
         worker = _PreviewWorker(
             self.provider,
             asset,
             generation,
             disk_cache=self.disk_cache,
+            settings=self.settings,
+            request_kind=self.request_kind,
+            cache_epoch=self._cache_epoch,
+            cache_generation=cache_generation,
         )
         self._active_job.start(
             worker,
@@ -279,8 +419,14 @@ class PreviewRequestController(QObject):
             ),
         )
 
-    def _start_media_job(self, generation: int, result: PreviewResult, key: tuple) -> None:
-        self._inflight_keys[generation] = key
+    def _start_media_job(
+        self,
+        generation: int,
+        result: PreviewResult,
+        key: tuple,
+        cache_generation: int,
+    ) -> None:
+        self._inflight_keys[generation] = (key, cache_generation)
         worker = _MediaPreloadWorker(result, generation)
         self._active_job.start(
             worker,
@@ -292,9 +438,15 @@ class PreviewRequestController(QObject):
         )
 
     def _on_finished(self, generation: int, result: object) -> None:
-        key = self._inflight_keys.pop(generation, None)
+        inflight = self._inflight_keys.pop(generation, None)
+        key, cache_generation = inflight if inflight is not None else (None, -1)
         if not self._shutting_down and generation == self._generation:
-            if key is not None and isinstance(result, PreviewResult):
+            if (
+                key is not None
+                and isinstance(result, PreviewResult)
+                and result.cacheable
+                and self._cache_epoch.is_current(cache_generation)
+            ):
                 self.cache.put(key, cacheable_result(result))
             self.result_ready.emit(result)
         # Do not start the next job here — wait for thread.finished.
@@ -318,7 +470,7 @@ class PreviewRequestController(QObject):
         self._pending = None
         if pending is None:
             return
-        kind, generation, payload, key = pending
+        kind, generation, payload, key, cache_generation = pending
         if generation != self._generation:
             return
         if kind == "media":
@@ -328,16 +480,21 @@ class PreviewRequestController(QObject):
                 self.result_ready.emit(hit)
                 return
             self.loading.emit()
-            self._start_media_job(generation, payload if hit is None else hit, key)
+            self._start_media_job(
+                generation,
+                payload if hit is None else hit,
+                key,
+                cache_generation,
+            )
             return
         hit = self.cache.get(key)
         if hit is not None:
             if needs_media_preload(hit):
                 self.loading.emit()
-                self._start_media_job(generation, hit, key)
+                self._start_media_job(generation, hit, key, cache_generation)
                 return
             self.result_ready.emit(hit)
             return
         self.loading.emit()
         assert not isinstance(payload, PreviewResult)
-        self._start_job(generation, payload, key)
+        self._start_job(generation, payload, key, cache_generation)

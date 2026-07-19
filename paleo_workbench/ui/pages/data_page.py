@@ -109,12 +109,29 @@ class DataPage(QWidget):
         self._preview_controller = PreviewRequestController(
             self.reader_panel.provider,
             self,
+            settings=self.reader_panel.preview_settings,
+            request_kind="summary",
         )
         self._preview_controller.loading.connect(
             lambda: self.reader_panel.show_loading(self._selected_asset)
         )
         self._preview_controller.result_ready.connect(self.reader_panel.render)
         self._preview_controller.failed.connect(self._handle_preview_failed)
+        self._visualization_controller = PreviewRequestController(
+            self.reader_panel.provider,
+            self,
+            settings=self.reader_panel.preview_settings,
+            request_kind="visualization",
+        )
+        self._visualization_controller.loading.connect(
+            self.reader_panel.show_visualization_loading
+        )
+        self._visualization_controller.result_ready.connect(
+            self.reader_panel.render_visualization
+        )
+        self._visualization_controller.failed.connect(
+            self.reader_panel.show_visualization_error
+        )
 
         self.navigation_tree.category_changed.connect(self.asset_table.set_category)
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
@@ -133,6 +150,12 @@ class DataPage(QWidget):
         self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
         self._sync_toolbar_toggle_state()
         self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
+        self.reader_panel.preview_settings_changed.connect(
+            self._handle_preview_settings_changed
+        )
+        self.reader_panel.visualization_requested.connect(
+            self._request_selected_visualization
+        )
 
         self.update_state(
             dashboard_state(self.project),
@@ -143,7 +166,12 @@ class DataPage(QWidget):
         # Delete removes the selected asset. Widget-scoped (parent=self) so it
         # only fires when the DataPage or a child has focus; guarded against
         # text-entry widgets so Delete-in-search isn't intercepted.
-        QShortcut(QKeySequence("Delete"), self, self._shortcut_remove_asset)
+        QShortcut(
+            QKeySequence("Delete"),
+            self,
+            self._shortcut_remove_asset,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut,
+        )
 
     def _shortcut_remove_asset(self) -> None:
         focus = QApplication.focusWidget()
@@ -164,6 +192,7 @@ class DataPage(QWidget):
     def _shutdown_workers(self) -> None:
         """Stop preview + import threads before the page is destroyed."""
         self._preview_controller.shutdown()
+        self._visualization_controller.shutdown()
         self.reader_panel.release_engine_widgets()
         self._shutdown_import_jobs()
 
@@ -180,7 +209,9 @@ class DataPage(QWidget):
     ) -> None:
         self._resources = resources
         self._artifacts = artifacts or []
-        self._preview_controller.set_project_root(self._preview_disk_project_root())
+        preview_root = self._preview_disk_project_root()
+        self._preview_controller.set_project_root(preview_root)
+        self._visualization_controller.set_project_root(preview_root)
         self.summary_bar.update_state(state)
         self.navigation_tree.update_counts(self._resources, self._artifacts)
         self.asset_table.update_assets(self._resources, self._artifacts)
@@ -201,6 +232,7 @@ class DataPage(QWidget):
     def clear_preview_cache(self) -> None:
         """Clear the project-scoped disk preview cache and in-memory LRU."""
         self._preview_controller.clear_disk_cache()
+        self._visualization_controller.clear_disk_cache()
         self._set_action_status("已清除预览缓存")
 
     def import_paths(self, paths: list[Path]) -> ImportReport:
@@ -384,7 +416,7 @@ class DataPage(QWidget):
                 self.project.export_artifacts,
             )
             # Participate in generation invalidation so in-flight previews cannot win.
-            self._preview_controller.request(resource)
+            self._request_summary(resource)
             self._set_action_status("文件不存在")
             return True
 
@@ -433,7 +465,7 @@ class DataPage(QWidget):
             self.project.export_artifacts,
         )
         # Participate in generation invalidation so in-flight previews cannot win.
-        self._preview_controller.request(resource)
+        self._request_summary(resource)
         self._set_action_status("已重新扫描")
         return True
 
@@ -466,7 +498,7 @@ class DataPage(QWidget):
 
         preview_act = menu.find_action("ctx_preview")
         if preview_act:
-            preview_act.triggered.connect(lambda: self._preview_controller.request(asset))
+            preview_act.triggered.connect(lambda: self._request_summary(asset))
 
         rescan_act = menu.find_action("ctx_rescan")
         if rescan_act:
@@ -605,10 +637,33 @@ class DataPage(QWidget):
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
         self.asset_table.set_selected_asset(asset)
-        self._preview_controller.request(asset)
+        self._request_summary(asset)
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
+
+    def _handle_preview_settings_changed(self, settings) -> None:
+        """Apply one settings generation and rebuild the selected preview."""
+        summary_changed = self._preview_controller.set_settings(settings)
+        visualization_changed = self._visualization_controller.set_settings(settings)
+        if not summary_changed and not visualization_changed:
+            return
+        if summary_changed:
+            self._preview_controller.request(self._selected_asset)
+        self._set_action_status("预览设置已应用")
+
+    def _request_summary(self, asset: object | None) -> None:
+        """Invalidate any old professional view before loading a new list."""
+        self._visualization_controller.invalidate()
+        self._preview_controller.request(asset)
+
+    def _request_selected_visualization(self) -> None:
+        """Start professional preparation only after the visual tab is opened."""
+        asset = self._selected_asset
+        if not isinstance(asset, ResourceItem):
+            self.reader_panel.show_visualization_error("当前数据不支持可视化预览")
+            return
+        self._visualization_controller.request(asset)
 
     def _sync_visualization_button(self) -> None:
         asset = self._selected_asset

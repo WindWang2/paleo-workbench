@@ -340,7 +340,15 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if scene is None:
             return None
-        new_id = scene.merge_selected_facies()
+        try:
+            new_id = scene.merge_selected_facies()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "合并相带",
+                f"合并操作失败：{exc}",
+            )
+            return None
         if new_id is None:
             QMessageBox.information(
                 self,
@@ -358,7 +366,15 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if scene is None:
             return None
-        new_ids = scene.split_selected_facies_by_line()
+        try:
+            new_ids = scene.split_selected_facies_by_line()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "分割相带",
+                f"分割操作失败：{exc}",
+            )
+            return None
         if not new_ids:
             QMessageBox.information(
                 self,

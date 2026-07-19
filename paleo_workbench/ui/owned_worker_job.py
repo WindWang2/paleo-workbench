@@ -77,6 +77,12 @@ class OwnedWorkerJob(QObject):
             return True
 
         self._disconnect_results()
+        # Disconnect our own slot so no queued thread.finished signal can
+        # arrive after identity is released (C-2 race-condition guard).
+        try:
+            thread.finished.disconnect(self._on_thread_stopped)
+        except (RuntimeError, TypeError):
+            pass
         cancel = self._cancel
         if cancel is not None:
             try:
