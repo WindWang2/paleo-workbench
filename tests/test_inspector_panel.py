@@ -50,3 +50,14 @@ def test_inspector_artifact_rows(qtbot):
     texts = [panel.metadata_table.item(r, 0).text() for r in range(panel.metadata_table.rowCount())]
     assert "格式" in texts
     assert "输出路径" in texts
+
+
+def test_format_size():
+    from paleo_workbench.ui.tokens import format_size
+    assert format_size(None) == "—"
+    assert format_size(512) == "512 B"
+    assert format_size(2048) == "2 K"
+    assert format_size(2560) == "2.5 K"
+    assert format_size(1048576) == "1 M"
+    assert format_size(1572864) == "1.5 M"
+

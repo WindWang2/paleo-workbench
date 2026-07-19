@@ -11,6 +11,7 @@ import zipfile
 import zlib
 
 from paleo_workbench.project.models import ResourceItem
+from paleo_workbench.ui.tokens import format_size
 from paleo_workbench.ui.pages.preview_provider import (
     MAX_TABLE_COLUMNS,
     MAX_TABLE_ROWS,
@@ -802,7 +803,7 @@ def _dfb_metadata(
         type_label=resource.type,
         message=message,
         warning=message,
-        summary_rows=(("文件大小", f"{size} bytes"), ("预览状态", "仅元数据")),
+        summary_rows=(("文件大小", format_size(size)), ("预览状态", "仅元数据")),
     )
 
 

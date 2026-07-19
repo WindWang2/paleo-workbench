@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.ui.tokens import format_size
 
 MAX_PREVIEW_BYTES = 8192
 MAX_PREVIEW_LINES = 20
@@ -46,7 +47,11 @@ def _display_path(path: str, base_path: Path | None = None) -> str:
 def _summary_lines(name: str, path: str, fmt: str, size: object = None) -> list[str]:
     lines = [f"文件: {name}", f"格式: {fmt}", f"路径: {path}"]
     if size is not None:
-        lines.append(f"大小: {size} bytes")
+        try:
+            formatted_size = format_size(int(size))
+        except (ValueError, TypeError):
+            formatted_size = str(size)
+        lines.append(f"大小: {formatted_size}")
     return lines
 
 

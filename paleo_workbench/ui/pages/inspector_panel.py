@@ -9,6 +9,9 @@ from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.preview_widgets import TablePreviewWidget
 
 
+from paleo_workbench.ui.tokens import format_size
+
+
 class InspectorPanel(QFrame):
     """Read-only metadata inspector for the selected asset."""
 
@@ -62,7 +65,7 @@ class InspectorPanel(QFrame):
             ("标签", tags),
             ("校验和", res.checksum or "—"),
             ("状态", res.status),
-            ("大小", str(size) if size is not None else "—"),
+            ("大小", format_size(size)),
             ("来源", res.source),
             ("外部", "是" if res.external else "否"),
         )

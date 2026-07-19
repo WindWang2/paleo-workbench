@@ -10,6 +10,7 @@ from paleo_workbench.ui.pages.data_table_columns import (
     COLUMN_BY_KEY,
     COLUMN_TOOLTIPS,
 )
+from paleo_workbench.ui.tokens import format_size
 
 RESOURCE_TYPE_LABELS = {
     **tokens.RESOURCE_LABELS,
@@ -122,7 +123,7 @@ class AssetTableModel(QAbstractTableModel):
             "format": asset.format,
             "status": asset.status,
             "role": self._role_label(role),
-            "size": str(size) if size is not None else "—",
+            "size": format_size(size),
             "source": asset.source,
             "path": asset.path,
         }

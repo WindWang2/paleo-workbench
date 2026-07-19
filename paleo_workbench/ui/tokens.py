@@ -451,3 +451,17 @@ QWidget#SeismicPredictionPage QComboBox {{
     border-color: #28536b;
 }}
 """
+
+
+def format_size(size_bytes: int | None) -> str:
+    if size_bytes is None:
+        return "—"
+    if size_bytes >= 1024 * 1024:
+        val = size_bytes / (1024 * 1024)
+        return f"{val:.1f} M" if val % 1 != 0 else f"{int(val)} M"
+    elif size_bytes >= 1024:
+        val = size_bytes / 1024
+        return f"{val:.1f} K" if val % 1 != 0 else f"{int(val)} K"
+    else:
+        return f"{size_bytes} B"
+
