@@ -254,7 +254,7 @@ class PreviewRequestController(QObject):
         *,
         cache: PreviewCache | None = None,
         cache_max_size: int = 32,
-        shutdown_wait_ms: int = 10_000,
+        shutdown_wait_ms: int = 100,
         disk_cache: PreviewDiskCache | None = None,
         settings: PreviewSettings | None = None,
         request_kind: RequestKind = "default",
