@@ -348,6 +348,9 @@ class DataPage(QWidget):
         self,
         report: ImportReport,
     ) -> None:
+        if report is None:
+            self._set_action_status("导入未返回有效报告")
+            return
         self._apply_import_report(report)
         self.import_finished.emit(report)
 
@@ -409,6 +412,8 @@ class DataPage(QWidget):
         path = self._resolve_resource_path(resource)
         if not path.exists():
             resource.status = "missing"
+            if resource.parsed_summary is None:
+                resource.parsed_summary = {}
             resource.parsed_summary["preview_warning"] = "文件不存在"
             self.update_state(
                 dashboard_state(self.project),
