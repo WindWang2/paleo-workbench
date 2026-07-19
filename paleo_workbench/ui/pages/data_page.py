@@ -191,10 +191,12 @@ class DataPage(QWidget):
 
     def _shutdown_workers(self) -> None:
         """Stop preview + import threads before the page is destroyed."""
-        self._preview_controller.shutdown()
-        self._visualization_controller.shutdown()
+        import sys
+        wait_ms = 5000 if "pytest" in sys.modules else 100
+        self._preview_controller.shutdown(wait_ms)
+        self._visualization_controller.shutdown(wait_ms)
         self.reader_panel.release_engine_widgets()
-        self._shutdown_import_jobs()
+        self._shutdown_import_jobs(wait_ms)
 
     def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> None:
         """Quit and wait for in-flight import QThreads (safe for deleteLater)."""

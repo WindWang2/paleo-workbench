@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
@@ -734,7 +735,7 @@ def test_data_page_close_shuts_down_preview_and_releases_engine_widgets(qtbot, m
     monkeypatch.setattr(
         type(page._preview_controller),
         "shutdown",
-        lambda self: calls.append("shutdown"),
+        lambda self, *args, **kwargs: calls.append("shutdown"),
     )
     monkeypatch.setattr(
         type(page.reader_panel),
@@ -744,7 +745,7 @@ def test_data_page_close_shuts_down_preview_and_releases_engine_widgets(qtbot, m
 
     page.close()
 
-    assert calls == ["shutdown", "release"]
+    assert calls == ["shutdown", "shutdown", "release"]
 
 
 def test_data_page_deferred_delete_shuts_down_preview_and_releases_engine_widgets(
@@ -757,7 +758,7 @@ def test_data_page_deferred_delete_shuts_down_preview_and_releases_engine_widget
     monkeypatch.setattr(
         type(page._preview_controller),
         "shutdown",
-        lambda self: calls.append("shutdown"),
+        lambda self, *args, **kwargs: calls.append("shutdown"),
     )
     monkeypatch.setattr(
         type(page.reader_panel),
@@ -767,7 +768,7 @@ def test_data_page_deferred_delete_shuts_down_preview_and_releases_engine_widget
 
     page.event(QEvent(QEvent.Type.DeferredDelete))
 
-    assert calls == ["shutdown", "release"]
+    assert calls == ["shutdown", "shutdown", "release"]
 
 
 def test_data_page_selection_updates_reader_and_context_signal(qtbot, tmp_path: Path):
@@ -1154,6 +1155,7 @@ def test_data_page_default_project_root_skips_disk_cache(qtbot):
 
     assert page._preview_disk_project_root() is None
     assert page._preview_controller.disk_cache.project_root is None
+    assert page._visualization_controller.disk_cache.project_root is None
 
 
 def test_data_page_empty_project_root_skips_disk_cache(qtbot):
@@ -1164,6 +1166,7 @@ def test_data_page_empty_project_root_skips_disk_cache(qtbot):
 
     assert page._preview_disk_project_root() is None
     assert page._preview_controller.disk_cache.project_root is None
+    assert page._visualization_controller.disk_cache.project_root is None
 
 
 def test_data_page_clear_preview_cache(tmp_path: Path, qtbot):
@@ -1176,6 +1179,7 @@ def test_data_page_clear_preview_cache(tmp_path: Path, qtbot):
     qtbot.addWidget(page)
 
     assert page._preview_controller.disk_cache.project_root == tmp_path.resolve()
+    assert page._visualization_controller.disk_cache.project_root == tmp_path.resolve()
 
     entry = tmp_path / ".preview_cache" / "entries" / "x"
     entry.mkdir(parents=True)
@@ -1185,7 +1189,12 @@ def test_data_page_clear_preview_cache(tmp_path: Path, qtbot):
         ("test-key",),
         PreviewResult(mode="text", title="cached"),
     )
+    page._visualization_controller.cache.put(
+        ("visual-key",),
+        PreviewResult(mode="message", title="visual cached"),
+    )
     assert page._preview_controller.cache._data
+    assert page._visualization_controller.cache._data
     assert (tmp_path / ".preview_cache").is_dir()
 
     page.clear_preview_cache()
@@ -1193,3 +1202,34 @@ def test_data_page_clear_preview_cache(tmp_path: Path, qtbot):
     assert not (tmp_path / ".preview_cache").exists()
     assert not page._preview_controller.cache._data
     assert page._preview_controller.cache.current_bytes == 0
+    assert not page._visualization_controller.cache._data
+    assert page._visualization_controller.cache.current_bytes == 0
+
+
+def test_preview_settings_change_invalidates_and_reloads_selected_asset(
+    qtbot, monkeypatch
+):
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    selected = object()
+    page._selected_asset = selected
+    requested: list[object] = []
+    monkeypatch.setattr(page._preview_controller, "request", requested.append)
+    visual_requests: list[object] = []
+    monkeypatch.setattr(
+        page._visualization_controller,
+        "request",
+        visual_requests.append,
+    )
+    previous_generation = page._preview_controller.generation
+    previous_visual_generation = page._visualization_controller.generation
+    settings = replace(page.reader_panel.preview_settings, text_limit_kib=128)
+
+    page.reader_panel.preview_settings_changed.emit(settings)
+
+    assert page._preview_controller.settings == settings
+    assert page._preview_controller.generation == previous_generation + 1
+    assert page._visualization_controller.settings == settings
+    assert page._visualization_controller.generation == previous_visual_generation + 1
+    assert requested == [selected]
+    assert visual_requests == []
