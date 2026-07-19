@@ -6,11 +6,12 @@ def test_attribute_panel_groups_all_supported_labels(qtbot):
     qtbot.addWidget(panel)
 
     assert panel.objectName() == "SeismicAttributePanel"
-    assert [panel.attribute_tree.topLevelItem(i).text(0) for i in range(4)] == [
+    assert [panel.attribute_tree.topLevelItem(i).text(0) for i in range(panel.attribute_tree.topLevelItemCount())] == [
         "振幅属性",
         "频率属性",
         "连续性属性",
         "结构属性",
+        "多属性融合",
     ]
     leaves = [
         panel.attribute_tree.topLevelItem(i).child(j).text(0)
@@ -24,6 +25,14 @@ def test_attribute_panel_groups_all_supported_labels(qtbot):
         "瞬时频率",
         "RMS振幅",
         "甜点",
+        "相对阻抗",
+        "Dip_IL",
+        "Dip_XL",
+        "方位角",
+        "平均曲率",
+        "高斯曲率",
+        "最大曲率",
+        "RGB融合",
     }
 
 

@@ -38,7 +38,7 @@ def test_preview_strategy_keeps_excel_summary_only(tmp_path: Path):
 
     assert state.mode == "metadata"
     assert "table.xlsx" in state.title
-    assert any("2048" in line for line in state.lines)
+    assert any("2 K" in line for line in state.lines)
     assert "安全摘要预览" in state.warning
 
 

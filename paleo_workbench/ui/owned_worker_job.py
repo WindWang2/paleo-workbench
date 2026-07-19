@@ -174,7 +174,10 @@ class OwnedWorkerJob(QObject):
                 thread.deleteLater()
             except RuntimeError:
                 pass
-        self.released.emit()
+        try:
+            self.released.emit()
+        except RuntimeError:
+            pass
 
     @Slot()
     def _on_thread_stopped(self) -> None:

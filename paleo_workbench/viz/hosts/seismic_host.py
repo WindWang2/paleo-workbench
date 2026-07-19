@@ -31,15 +31,30 @@ class SeismicHost:
             pass
 
     def apply(self, payload: VizPayload) -> bool:
-        # Prefer bounded volume from adapter (MAX_DIM budget).
-        if payload.seismic_volume is not None:
-            self.widget.load_demo(payload.seismic_volume)
-            return True
         path = (payload.seismic_path or "").strip()
+        has_segy = False
         if path and Path(path).is_file():
             try:
                 self.widget.load_segy_async(path)
-                return True
+                has_segy = True
             except Exception:
-                return False
-        return False
+                pass
+
+        if payload.seismic_volume is not None:
+            if has_segy:
+                def on_ready(*args, **kwargs):
+                    try:
+                        self.widget.load_overlay_volume(payload.seismic_volume)
+                    except Exception:
+                        pass
+                    try:
+                        self.widget.segy_loaded.disconnect(on_ready)
+                    except Exception:
+                        pass
+                self.widget.segy_loaded.connect(on_ready)
+            else:
+                self.widget.load_demo(payload.seismic_volume)
+            return True
+
+        return has_segy
+

@@ -114,7 +114,7 @@ class VizAdapter:
                         label=label,
                         message="未找到对应的预测任务",
                     )
-                return self.from_prediction(task)
+                return self.from_prediction(task, project)
             return VizPayload(
                 kind="message",
                 label=label,
@@ -127,7 +127,7 @@ class VizAdapter:
                 message=f"解析失败: {exc.__class__.__name__}",
             )
 
-    def from_prediction(self, task: Any) -> VizPayload:
+    def from_prediction(self, task: Any, project: Any = None) -> VizPayload:
         # Soft-fail like resolve(): never raise into UI handlers.
         name = str(getattr(task, "name", "") or "") or "prediction"
         try:
@@ -140,6 +140,18 @@ class VizAdapter:
 
             well_log = well_log_data_from_prediction(task)
             seismic_volume = seismic_volume_from_prediction(task)
+            
+            seismic_path = ""
+            if project is not None:
+                from paleo_workbench.pipeline.assets import SEISMIC_KEY
+                ids = (getattr(task, "input_refs", None) or {}).get(SEISMIC_KEY) or []
+                if ids:
+                    by_id = {r.id: r for r in (getattr(project, "resources", None) or [])}
+                    res = by_id.get(ids[0])
+                    if res is not None:
+                        path = getattr(res, "path", "") or ""
+                        seismic_path = self._absolute_path(path, project) if path else ""
+
             return VizPayload(
                 kind="prediction",
                 label=name,
@@ -147,6 +159,7 @@ class VizAdapter:
                 well_logs=[well_log] if well_log is not None else [],
                 well_names=[name],
                 seismic_volume=seismic_volume,
+                seismic_path=seismic_path,
             )
         except Exception as exc:
             return VizPayload(
