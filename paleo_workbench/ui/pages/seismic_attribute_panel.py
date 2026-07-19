@@ -38,7 +38,7 @@ class SeismicAttributePanel(QFrame):
         layout.addWidget(title)
 
         self.attribute_tree = QTreeWidget()
-        self.attribute_tree.setObjectName("WorkListWidget")
+        self.attribute_tree.setObjectName("SeismicAttributeTree")
         self.attribute_tree.setHeaderHidden(True)
         self._populate_tree()
         self.attribute_tree.expandAll()

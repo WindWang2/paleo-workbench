@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QStackedLayout, QVBoxLayout
 
 from geoviz import SeismicView
 
@@ -46,12 +46,22 @@ class SeismicViewPanel(QFrame):
         self.title_label.setObjectName("MapDockTitle")
         outer.addWidget(self.title_label)
 
+        self.attribute_strip = QFrame()
+        self.attribute_strip.setObjectName("SeismicAttributeStrip")
+        attribute_layout = QHBoxLayout(self.attribute_strip)
+        attribute_layout.setContentsMargins(0, 0, 0, 0)
+        attribute_layout.setSpacing(tokens.SPACE_2)
+        for label, status in (
+            ("振幅能量", "已加载"),
+            ("频率响应", "可选"),
+            ("连续性", "可选"),
+            ("构造特征", "可选"),
+        ):
+            attribute_layout.addWidget(self._attribute_card(label, status))
+        outer.addWidget(self.attribute_strip)
+
         host = QFrame()
-        host.setStyleSheet(
-            f"QFrame {{ background: {tokens.BG_SEARCH};"
-            f" border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; }}"
-        )
+        host.setObjectName("SeismicViewHost")
         self.stack = QStackedLayout(host)
         self.stack.setContentsMargins(0, 0, 0, 0)
 
@@ -65,6 +75,21 @@ class SeismicViewPanel(QFrame):
             self.view.segy_loaded.connect(self._on_segy_loaded)
         self.stack.addWidget(self.view)
         outer.addWidget(host, 1)
+
+    @staticmethod
+    def _attribute_card(label_text: str, status_text: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("SeismicAttributeCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1)
+        layout.setSpacing(0)
+        label = QLabel(label_text)
+        label.setObjectName("SeismicAttributeCardLabel")
+        status = QLabel(status_text)
+        status.setObjectName("SeismicAttributeCardStatus")
+        layout.addWidget(label)
+        layout.addWidget(status)
+        return card
 
     def is_view_ready(self) -> bool:
         return self.stack.currentWidget() is self.view and bool(

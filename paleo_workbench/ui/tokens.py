@@ -347,6 +347,8 @@ QFrame#WellLogCanvasPanel,
 QFrame#SeismicTaskPanel,
 QFrame#SeismicControlPanel,
 QFrame#SeismicViewPanel,
+QFrame#SeismicAttributePanel,
+QFrame#SeismicContextToolbar,
 QFrame#FactorTaskPanel,
 QFrame#BoundaryPanel,
 QFrame#VisualizationSummaryPanel,
@@ -378,5 +380,72 @@ QLabel#WorkFieldValue {{
     font-weight: 500;
     border: none;
     background: transparent;
+}}
+
+/* Seismic analysis workbench — scoped dark interpretation surface. */
+QWidget#SeismicPredictionPage {{
+    background: #06131f;
+}}
+QFrame#SeismicContextToolbar,
+QFrame#SeismicAttributePanel,
+QFrame#SeismicControlPanel,
+QFrame#SeismicViewPanel {{
+    background: #0a1c29;
+    border: 1px solid #1b3a4c;
+    border-radius: {RADIUS_CARD}px;
+}}
+QWidget#SeismicPredictionPage QLabel#MapDockTitle,
+QWidget#SeismicPredictionPage QLabel#WorkFieldValue {{
+    color: #dcebf5;
+}}
+QWidget#SeismicPredictionPage QLabel#WorkFieldLabel {{
+    color: #87a5b8;
+}}
+QTreeWidget#SeismicAttributeTree {{
+    background: #081824;
+    color: #dcebf5;
+    border: 1px solid #1b3a4c;
+    border-radius: {RADIUS_BUTTON}px;
+    padding: 4px;
+}}
+QTreeWidget#SeismicAttributeTree::item {{
+    padding: 5px 4px;
+    border-radius: 3px;
+}}
+QTreeWidget#SeismicAttributeTree::item:selected {{
+    background: #0d5d8c;
+    color: #ffffff;
+}}
+QTreeWidget#SeismicAttributeTree::item:hover {{
+    background: #123348;
+}}
+QFrame#SeismicAttributeCard {{
+    background: #0e2738;
+    border: 1px solid #1c465d;
+    border-radius: {RADIUS_BUTTON}px;
+}}
+QFrame#SeismicViewHost {{
+    background: #06131f;
+    border: 1px solid #1b3a4c;
+    border-radius: {RADIUS_BUTTON}px;
+}}
+QLabel#SeismicAttributeCardLabel {{
+    color: #dcebf5;
+    font-weight: 600;
+    font-size: {FONT_SIZE_STATUS};
+}}
+QLabel#SeismicAttributeCardStatus {{
+    color: #45d6ad;
+    font-size: {FONT_SIZE_STATUS};
+}}
+QWidget#SeismicPredictionPage QPushButton#SecondaryButton {{
+    background: #0e2738;
+    color: #dcebf5;
+    border-color: #28536b;
+}}
+QWidget#SeismicPredictionPage QComboBox {{
+    background: #0e2738;
+    color: #dcebf5;
+    border-color: #28536b;
 }}
 """

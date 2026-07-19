@@ -11,6 +11,8 @@ from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidenc
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
 from paleo_workbench.ui.pages.result_summary import ResultSummary
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
+from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
+from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
 from paleo_workbench.ui.pages.seismic_task_panel import SeismicTaskPanel
 from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
 from paleo_workbench.ui.pages.qc_issue_table import QCIssueTable
@@ -71,14 +73,20 @@ def test_well_log_and_seismic_centers_empty_state(qtbot):
 
 
 def test_seismic_side_panels_dock_titles(qtbot):
-    task = SeismicTaskPanel()
+    attributes = SeismicAttributePanel()
+    context = SeismicContextToolbar()
     control = SeismicControlPanel()
-    qtbot.addWidget(task)
+    qtbot.addWidget(attributes)
+    qtbot.addWidget(context)
     qtbot.addWidget(control)
-    assert _dock_titles(task)
+    assert _dock_titles(attributes)
+    assert _dock_titles(context)
     assert _dock_titles(control)
-    assert task.objectName() == "SeismicTaskPanel"
+    assert attributes.objectName() == "SeismicAttributePanel"
+    assert context.objectName() == "SeismicContextToolbar"
     assert control.objectName() == "SeismicControlPanel"
+    assert "SeismicAttributePanel" in tokens.QSS_TEMPLATE
+    assert "SeismicContextToolbar" in tokens.QSS_TEMPLATE
 
 
 def test_preparation_panels_presentation(qtbot):
