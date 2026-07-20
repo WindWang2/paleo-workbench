@@ -384,26 +384,26 @@ class LegendWidget(QFrame):
             layout.addLayout(lbl_layout)
 
 
-class ModuleRelationshipWidget(QWidget):
+class ModuleRelationshipCanvas(QWidget):
     navigation_requested = Signal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("ModuleRelationshipWidget")
-        
-        # Increase minimum height to accommodate expanded layout
-        self.setMinimumHeight(600)
+        self.setObjectName("ModuleRelationshipCanvas")
+
+        # Fixed width ensures diagram coordinates and arrow anchor points never drift when parent resizes
+        self.setFixedWidth(1180)
+        self.setMinimumHeight(580)
 
         # Grid layout
         self.grid = QGridLayout(self)
-        self.grid.setContentsMargins(20, 20, 20, 20)
+        self.grid.setContentsMargins(15, 10, 15, 10)
         
-        # Spans gaps of 120px horizontally and 75px vertically to avoid card/text overlapping
-        self.grid.setHorizontalSpacing(120)
-        self.grid.setVerticalSpacing(75)
+        # Spans gaps of 90px horizontally and 65px vertically to keep clean proportional spacing
+        self.grid.setHorizontalSpacing(90)
+        self.grid.setVerticalSpacing(65)
 
         # Row 0: 地层格架构建 (Centered at top)
-        # Widened to 480px so its horizontal span covers centers of column 1 and column 2 perfectly
         self.card_sequence = ModuleCard(
             title="地层格架构建",
             items=[
@@ -416,7 +416,7 @@ class ModuleRelationshipWidget(QWidget):
             page_index=4,
             parent=self,
         )
-        self.card_sequence.setFixedWidth(480)
+        self.card_sequence.setFixedWidth(500)
         self.grid.addWidget(self.card_sequence, 0, 1, 1, 2, Qt.AlignmentFlag.AlignCenter)
 
         # Row 1: Middle Row (AlignTop to keep a perfectly horizontal baseline)
@@ -477,7 +477,6 @@ class ModuleRelationshipWidget(QWidget):
         self.grid.addWidget(self.card_mapping, 1, 3, Qt.AlignmentFlag.AlignTop)
 
         # Row 2: 多源数据管理 (Centered under columns 0, 1, 2)
-        # Widened to 800px so it spans across column 0, 1, and 2 centers horizontally
         sub_items = [
             ("数据标准化", "📁", 1),
             ("质检管理", "🔍", 9),
@@ -545,6 +544,49 @@ class ModuleRelationshipWidget(QWidget):
         # 5. Database support dashed lines
         self._draw_database_support_arrows(painter, self.card_data)
         painter.end()
+
+
+class ModuleRelationshipWidget(QWidget):
+    navigation_requested = Signal(int)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ModuleRelationshipWidget")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.canvas = ModuleRelationshipCanvas(self)
+        self.canvas.navigation_requested.connect(self.navigation_requested.emit)
+        layout.addWidget(self.canvas, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def update_states(self, steps: list) -> None:
+        self.canvas.update_states(steps)
+
+    @property
+    def card_sequence(self):
+        return self.canvas.card_sequence
+
+    @property
+    def card_well(self):
+        return self.canvas.card_well
+
+    @property
+    def card_seismic(self):
+        return self.canvas.card_seismic
+
+    @property
+    def card_facies(self):
+        return self.canvas.card_facies
+
+    @property
+    def card_mapping(self):
+        return self.canvas.card_mapping
+
+    @property
+    def card_data(self):
+        return self.canvas.card_data
 
     def draw_directed_arrow(
         self,
@@ -747,3 +789,46 @@ class ModuleRelationshipWidget(QWidget):
             is_dashed=True,
             color_hex="#3b82f6",
         )
+
+
+class ModuleRelationshipWidget(QWidget):
+    navigation_requested = Signal(int)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("ModuleRelationshipWidget")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.canvas = ModuleRelationshipCanvas(self)
+        self.canvas.navigation_requested.connect(self.navigation_requested.emit)
+        layout.addWidget(self.canvas, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def update_states(self, steps: list) -> None:
+        self.canvas.update_states(steps)
+
+    @property
+    def card_sequence(self):
+        return self.canvas.card_sequence
+
+    @property
+    def card_well(self):
+        return self.canvas.card_well
+
+    @property
+    def card_seismic(self):
+        return self.canvas.card_seismic
+
+    @property
+    def card_facies(self):
+        return self.canvas.card_facies
+
+    @property
+    def card_mapping(self):
+        return self.canvas.card_mapping
+
+    @property
+    def card_data(self):
+        return self.canvas.card_data
