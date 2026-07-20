@@ -248,7 +248,14 @@ class PreviewProvider:
         if fmt in EXCEL_FORMATS:
             return self._excel_preview(asset)
 
-        if fmt in LAS_FORMATS or asset.type == "well_log":
+        if fmt in LAS_FORMATS:
+            return self._las_preview(asset)
+
+        if asset.type == "well_log":
+            if fmt == "xml":
+                xml_log = self._xml_well_log_preview(asset)
+                if xml_log is not None:
+                    return xml_log
             return self._las_preview(asset)
 
         if fmt in SEGY_FORMATS or asset.type == "seismic":
@@ -285,6 +292,10 @@ class PreviewProvider:
             return self._audio_preview(asset)
 
         if fmt == "xml":
+            xml_log = self._xml_well_log_preview(asset)
+            if xml_log is not None:
+                return xml_log
+
             from paleo_workbench.ui.pages.fallback_preview import spreadsheetml_preview
 
             spreadsheet = spreadsheetml_preview(
@@ -650,6 +661,121 @@ class PreviewProvider:
             data_rows=data_rows,
             warning="曲线列表已按行上限截断" if truncated else "",
             truncated=truncated,
+        )
+
+    def _xml_well_log_preview(self, resource: ResourceItem) -> PreviewResult | None:
+        path = Path(resource.path)
+        try:
+            import xml.etree.ElementTree as ET
+
+            tree = ET.parse(path)
+            root = tree.getroot()
+        except Exception:
+            return None
+
+        def clean_tag(tag: str) -> str:
+            return tag.split("}")[-1] if "}" in tag else tag
+
+        curve_infos: list[tuple[str, str, str]] = []
+        for elem in root.iter():
+            tag = clean_tag(elem.tag).lower()
+            if tag in ("logcurveinfo", "curveinfo", "curve"):
+                mnemonic = ""
+                unit = ""
+                desc = ""
+                for child in elem:
+                    ctag = clean_tag(child.tag).lower()
+                    if ctag in ("mnemonic", "mnem", "name"):
+                        mnemonic = (child.text or "").strip()
+                    elif ctag in ("unit", "unitstring"):
+                        unit = (child.text or "").strip()
+                    elif ctag in ("curvedescription", "description", "desc"):
+                        desc = (child.text or "").strip()
+                if mnemonic:
+                    curve_infos.append((mnemonic, unit, desc))
+
+        data_headers: list[str] = [c[0] for c in curve_infos]
+        data_rows: list[tuple[str, ...]] = []
+
+        # 1. Parse text lines inside <logData> or <data>
+        for elem in root.iter():
+            tag = clean_tag(elem.tag).lower()
+            if tag in ("logdata", "data"):
+                lines: list[str] = []
+                if elem.text:
+                    lines.extend(elem.text.strip().splitlines())
+                for child in elem:
+                    if clean_tag(child.tag).lower() in ("data", "row", "line") and child.text:
+                        lines.extend(child.text.strip().splitlines())
+                for line in lines:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = [p.strip() for p in re.split(r"[\s,;]+", line)]
+                    if parts:
+                        data_rows.append(tuple(parts))
+                    if len(data_rows) >= self.settings.table_max_rows:
+                        break
+                if data_rows:
+                    break
+
+        # 2. Alternative: repeated XML nodes <row> or <record>
+        if not data_rows:
+            rows_found: list[dict[str, str]] = []
+            for elem in root.iter():
+                tag = clean_tag(elem.tag).lower()
+                if tag in ("row", "record", "datapoint", "logdatapoint", "point"):
+                    row_vals: dict[str, str] = {}
+                    for child in elem:
+                        ctag = clean_tag(child.tag)
+                        row_vals[ctag] = (child.text or "").strip()
+                    if row_vals:
+                        rows_found.append(row_vals)
+                    if len(rows_found) >= self.settings.table_max_rows:
+                        break
+            if rows_found:
+                if not data_headers:
+                    data_headers = list(rows_found[0].keys())
+                data_rows = [tuple(r.get(h, "") for h in data_headers) for r in rows_found]
+
+        if not data_headers and not data_rows:
+            return None
+
+        if not curve_infos:
+            curve_infos = [
+                (h, "m" if h.upper() in ("DEPT", "DEPTH", "深度") else "", "")
+                for h in data_headers
+            ]
+
+        well_name = path.stem
+        for elem in root.iter():
+            tag = clean_tag(elem.tag).lower()
+            if tag in ("namewell", "wellname", "well", "name") and elem.text:
+                val = elem.text.strip()
+                if val and len(val) < 50:
+                    well_name = val
+                    break
+
+        summary_rows = (
+            ("井名", well_name),
+            ("曲线数", str(len(data_headers))),
+            ("采样点", str(len(data_rows))),
+        )
+
+        return PreviewResult(
+            mode="well_log",
+            title=resource.name,
+            path=resource.path,
+            revision=self._safe_stat(path),
+            format=resource.format,
+            status=resource.status,
+            type_label="测井数据",
+            summary_rows=summary_rows,
+            table_headers=("曲线", "单位", "描述"),
+            table_rows=tuple(curve_infos),
+            data_headers=tuple(data_headers),
+            data_rows=tuple(data_rows),
+            visualization_available=True,
         )
 
     def _segy_preview(self, resource: ResourceItem) -> PreviewResult:

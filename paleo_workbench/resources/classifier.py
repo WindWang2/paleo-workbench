@@ -37,7 +37,14 @@ def classify_path(path: Path) -> tuple[str, str, str]:
             return "well_head", ext, "indexed"
         return "tabular", ext, "indexed"
 
-    if ext in {"xlsx", "xls", "xml"}:
+    if ext in {"xlsx", "xls"}:
+        return "spreadsheet", ext, "indexed"
+
+    if ext == "xml":
+        if any(k in name for k in ("well", "log", "测井", "曲线", "witsml", "las")) or any(
+            any(k in part for k in ("well", "log", "测井", "曲线", "井曲线")) for part in path_parts
+        ):
+            return "well_log", ext, "indexed"
         return "spreadsheet", ext, "indexed"
 
     if ext == "csv":
