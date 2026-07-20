@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.resources.export_service import (
@@ -40,6 +48,25 @@ class VisualizationPage(QWidget):
             tokens.PAGE_MARGIN,
         )
         outer.setSpacing(tokens.SPACE_4)
+
+        # Top bar with asset selector dropdown
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(tokens.SPACE_2)
+
+        asset_label = QLabel("📊 选择数据资产:")
+        asset_label.setStyleSheet(f"font-weight: bold; color: {tokens.TEXT_SECONDARY};")
+        top_bar.addWidget(asset_label)
+
+        self.asset_combo = QComboBox()
+        self.asset_combo.setMinimumWidth(280)
+        self.asset_combo.setStyleSheet(
+            f"QComboBox {{ border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 4px 8px; background: {tokens.BG_SIDEBAR}; color: {tokens.TEXT_PRIMARY}; }}"
+        )
+        self.asset_combo.currentIndexChanged.connect(self._on_asset_combo_changed)
+        top_bar.addWidget(self.asset_combo)
+        top_bar.addStretch()
+
+        outer.addLayout(top_bar)
 
         content = QHBoxLayout()
         content.setSpacing(tokens.SPACE_4)
@@ -80,10 +107,48 @@ class VisualizationPage(QWidget):
         )
         self.trace_panel.update_state(self._prediction_tasks, self._map_documents)
 
+        # Update asset combo dropdown
+        self.asset_combo.blockSignals(True)
+        self.asset_combo.clear()
+        for res in self._resources:
+            ref = self._adapter.ref_from_resource(res)
+            if ref is not None:
+                icon = "📋 " if ref.kind == "well_log" else "📈 "
+                self.asset_combo.addItem(f"{icon}{ref.label}", ref)
+        for doc in self._map_documents:
+            ref = self._adapter.ref_from_map_document(doc)
+            self.asset_combo.addItem(f"🗺️ {ref.label}", ref)
+        self.asset_combo.blockSignals(False)
+
         if self._current_ref is None:
-            self.composite_panel.update_state(self._prediction_tasks)
+            first_ref = None
+            for idx in range(self.asset_combo.count()):
+                ref = self.asset_combo.itemData(idx)
+                if ref is not None and getattr(ref, "kind", "") == "well_log":
+                    first_ref = ref
+                    self.asset_combo.blockSignals(True)
+                    self.asset_combo.setCurrentIndex(idx)
+                    self.asset_combo.blockSignals(False)
+                    break
+            if first_ref is None and self.asset_combo.count() > 0:
+                first_ref = self.asset_combo.itemData(0)
+                self.asset_combo.blockSignals(True)
+                self.asset_combo.setCurrentIndex(0)
+                self.asset_combo.blockSignals(False)
+
+            if first_ref is not None:
+                self.open_ref(first_ref)
+            else:
+                self.composite_panel.update_state(self._prediction_tasks)
         else:
             self.open_ref(self._current_ref)
+
+    def _on_asset_combo_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        ref = self.asset_combo.itemData(index)
+        if ref is not None:
+            self.open_ref(ref)
 
     def open_ref(self, ref: VizRef | None) -> None:
         if ref is None:

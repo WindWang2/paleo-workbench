@@ -26,7 +26,7 @@ class VizAdapter:
     """
 
     WELL_TYPES = {"well_log"}
-    WELL_FORMATS = {"las"}
+    WELL_FORMATS = {"las", "xml"}
     SEISMIC_TYPES = {"seismic"}
     SEISMIC_FORMATS = {"sgy", "segy"}
     # Formats that go through GeoVizEngine PreviewKind backends.
@@ -37,6 +37,7 @@ class VizAdapter:
         "sgy",
         "segy",
         "las",
+        "xml",
     }
 
     def supports_resource(self, resource: Any) -> bool:
