@@ -127,11 +127,12 @@ class VisualizationPage(QWidget):
             for idx in range(self.asset_combo.count()):
                 ref = self.asset_combo.itemData(idx)
                 if ref is not None and getattr(ref, "kind", "") == "well_log":
-                    first_ref = ref
-                    self.asset_combo.blockSignals(True)
-                    self.asset_combo.setCurrentIndex(idx)
-                    self.asset_combo.blockSignals(False)
-                    break
+                    if ref.path and Path(ref.path).is_file():
+                        first_ref = ref
+                        self.asset_combo.blockSignals(True)
+                        self.asset_combo.setCurrentIndex(idx)
+                        self.asset_combo.blockSignals(False)
+                        break
 
             if first_ref is not None:
                 self.open_ref(first_ref)
