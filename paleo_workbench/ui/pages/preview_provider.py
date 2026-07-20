@@ -666,70 +666,59 @@ class PreviewProvider:
     def _xml_well_log_preview(self, resource: ResourceItem) -> PreviewResult | None:
         path = Path(resource.path)
         try:
-            import xml.etree.ElementTree as ET
+            try:
+                import lxml.etree as ET
+            except ImportError:
+                import xml.etree.ElementTree as ET
 
-            tree = ET.parse(path)
+            tree = ET.parse(str(path))
             root = tree.getroot()
         except Exception:
             return None
 
-        def clean_tag(tag: str) -> str:
-            return tag.split("}")[-1] if "}" in tag else tag
+        def local_tag(elem) -> str:
+            t = elem.tag
+            return t.rsplit("}", 1)[-1] if "}" in t else t
 
         curve_infos: list[tuple[str, str, str]] = []
-        for elem in root.iter():
-            tag = clean_tag(elem.tag).lower()
-            if tag in ("logcurveinfo", "curveinfo", "curve"):
-                mnemonic = ""
-                unit = ""
-                desc = ""
-                for child in elem:
-                    ctag = clean_tag(child.tag).lower()
-                    if ctag in ("mnemonic", "mnem", "name"):
-                        mnemonic = (child.text or "").strip()
-                    elif ctag in ("unit", "unitstring"):
-                        unit = (child.text or "").strip()
-                    elif ctag in ("curvedescription", "description", "desc"):
-                        desc = (child.text or "").strip()
-                if mnemonic:
-                    curve_infos.append((mnemonic, unit, desc))
-
-        data_headers: list[str] = [c[0] for c in curve_infos]
+        data_headers: list[str] = []
         data_rows: list[tuple[str, ...]] = []
-
-        # 1. Check SpreadsheetML / Excel XML format (<Table><Row><Cell><Data>)
-        all_rows: list[list[str]] = []
         parsed_sheets: list[tuple[str, tuple[str, ...], tuple[tuple[str, ...], ...]]] = []
+        all_rows: list[list[str]] = []
+        max_preview_rows = self.settings.table_max_rows
 
-        for worksheet_elem in root.iter():
-            if clean_tag(worksheet_elem.tag).lower() == "worksheet":
-                sheet_name = worksheet_elem.attrib.get(
+        # Fast direct-child traversal for SpreadsheetML (<Workbook> -> <Worksheet> -> <Table> -> <Row> -> <Cell> -> <Data>)
+        for child in root:
+            if local_tag(child) == "Worksheet":
+                sheet_name = child.attrib.get(
                     "{urn:schemas-microsoft-com:office:spreadsheet}Name",
-                    worksheet_elem.attrib.get("ss:Name", "工作表"),
+                    child.attrib.get("ss:Name", "工作表"),
                 )
                 sheet_rows: list[list[str]] = []
-                for table in worksheet_elem.iter():
-                    if clean_tag(table.tag).lower() == "table":
-                        for row in table.iter():
-                            if clean_tag(row.tag).lower() == "row":
+                for w_child in child:
+                    if local_tag(w_child) == "Table":
+                        for r_elem in w_child:
+                            if local_tag(r_elem) == "Row":
                                 row_vals: list[str] = []
-                                for cell in row.iter():
-                                    if clean_tag(cell.tag).lower() == "cell":
+                                for c_elem in r_elem:
+                                    if local_tag(c_elem) == "Cell":
                                         txt = ""
-                                        for d in cell.iter():
-                                            if clean_tag(d.tag).lower() == "data":
-                                                txt = (d.text or "").strip()
+                                        for d_elem in c_elem:
+                                            if local_tag(d_elem) == "Data":
+                                                txt = (d_elem.text or "").strip()
                                                 break
-                                        if not txt and cell.text:
-                                            txt = cell.text.strip()
+                                        if not txt and c_elem.text:
+                                            txt = c_elem.text.strip()
                                         row_vals.append(txt)
                                 if row_vals:
                                     sheet_rows.append(row_vals)
+                                    if len(sheet_rows) >= max_preview_rows + 1:
+                                        break
                 if sheet_rows and len(sheet_rows) > 1:
                     s_headers = tuple(str(h).strip() for h in sheet_rows[0] if str(h).strip())
                     s_data_rows = tuple(
                         tuple(r[: len(s_headers)])
-                        for r in sheet_rows[1 : self.settings.table_max_rows]
+                        for r in sheet_rows[1:max_preview_rows]
                     )
                     parsed_sheets.append((sheet_name, s_headers, s_data_rows))
                     if not all_rows and "测井曲线" in sheet_name:
@@ -758,13 +747,32 @@ class PreviewProvider:
         # 2. Parse WITSML text lines inside <logData> or <data>
         if not data_rows:
             for elem in root.iter():
-                tag = clean_tag(elem.tag).lower()
+                tag = local_tag(elem).lower()
+                if tag in ("logcurveinfo", "curveinfo", "curve"):
+                    mnemonic = ""
+                    unit = ""
+                    desc = ""
+                    for child in elem:
+                        ctag = local_tag(child).lower()
+                        if ctag in ("mnemonic", "mnem", "name"):
+                            mnemonic = (child.text or "").strip()
+                        elif ctag in ("unit", "unitstring"):
+                            unit = (child.text or "").strip()
+                        elif ctag in ("curvedescription", "description", "desc"):
+                            desc = (child.text or "").strip()
+                    if mnemonic:
+                        curve_infos.append((mnemonic, unit, desc))
+            if curve_infos and not data_headers:
+                data_headers = [c[0] for c in curve_infos]
+
+            for elem in root.iter():
+                tag = local_tag(elem).lower()
                 if tag in ("logdata",):
                     lines: list[str] = []
                     if elem.text:
                         lines.extend(elem.text.strip().splitlines())
                     for child in elem:
-                        if clean_tag(child.tag).lower() in ("data", "row", "line") and child.text:
+                        if local_tag(child).lower() in ("data", "row", "line") and child.text:
                             lines.extend(child.text.strip().splitlines())
                     for line in lines:
                         line = line.strip()
@@ -782,11 +790,11 @@ class PreviewProvider:
         if not data_rows:
             rows_found: list[dict[str, str]] = []
             for elem in root.iter():
-                tag = clean_tag(elem.tag).lower()
+                tag = local_tag(elem).lower()
                 if tag in ("record", "datapoint", "logdatapoint", "point"):
                     row_vals: dict[str, str] = {}
                     for child in elem:
-                        ctag = clean_tag(child.tag)
+                        ctag = local_tag(child)
                         val = (child.text or "").strip()
                         if val:
                             row_vals[ctag] = val
@@ -821,7 +829,7 @@ class PreviewProvider:
         if "well_name" not in locals():
             well_name = path.stem
             for elem in root.iter():
-                tag = clean_tag(elem.tag).lower()
+                tag = local_tag(elem).lower()
                 if tag in ("namewell", "wellname", "well", "name") and elem.text:
                     val = elem.text.strip()
                     if val and len(val) < 50:
