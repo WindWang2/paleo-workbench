@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 # Align bounds with geo-viz-engine WellLogPreviewBackend defaults.
-MAX_CURVES = 12
-MAX_SAMPLES = 2000
+MAX_CURVES = 30
+MAX_SAMPLES = 100_000
 
 
 def load_well_log_from_path(path: str) -> Any | None:
