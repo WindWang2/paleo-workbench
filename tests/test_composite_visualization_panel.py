@@ -16,14 +16,15 @@ def test_composite_visualization_panel_has_engine_aligned_tabs(qtbot):
     qtbot.addWidget(panel)
 
     assert panel.objectName() == "CompositeVisualizationPanel"
-    # Six tabs: five package canvases + GeoVizEngine prepare/render host.
-    assert panel.tabs.count() == 6
+    # Seven tabs: six package canvases + GeoVizEngine prepare/render host.
+    assert panel.tabs.count() == 7
     assert panel.tabs.tabText(0) == "测井"
-    assert panel.tabs.tabText(1) == "地震"
-    assert panel.tabs.tabText(2) == "连井"
-    assert panel.tabs.tabText(3) == "古地理"
-    assert panel.tabs.tabText(4) == "井震标定"
-    assert panel.tabs.tabText(5) == "引擎预览"
+    assert panel.tabs.tabText(1) == "多井对比剖面"
+    assert panel.tabs.tabText(2) == "地震"
+    assert panel.tabs.tabText(3) == "连井"
+    assert panel.tabs.tabText(4) == "古地理"
+    assert panel.tabs.tabText(5) == "井震标定"
+    assert panel.tabs.tabText(6) == "引擎预览"
     # Same primary public canvas types as geo-viz-engine domain pages.
     assert isinstance(panel.well_canvas, WellLogCanvas)
     assert isinstance(panel.seismic_view, SeismicView)

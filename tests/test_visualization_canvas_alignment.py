@@ -54,8 +54,8 @@ def test_composite_hosts_same_primary_canvases_as_geoviz_pages(qtbot):
     assert isinstance(panel.map_canvas, PaleoMapCanvas)
     assert isinstance(panel.well_tie_canvas, WellTieCanvas)
     # Tab widget hosts CrossWellCanvas (not bare CrossWellWidget)
-    assert panel.tabs.widget(2) is panel.cross_well_canvas
-    assert panel.tabs.widget(4) is panel.well_tie_canvas
+    assert panel.tabs.widget(panel._tab_index("连井")) is panel.cross_well_canvas
+    assert panel.tabs.widget(panel._tab_index("井震标定")) is panel.well_tie_canvas
 
 
 def test_open_ref_loads_las_into_well_log_canvas(qtbot, tmp_path: Path):

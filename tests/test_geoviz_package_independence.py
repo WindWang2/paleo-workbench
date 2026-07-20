@@ -33,6 +33,8 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "decode_prepared_preview",
         # Documented compatibility exports used by existing workbench panels.
         "WellLogCanvas",
+        "WellSectionCanvas",
+        "DatumTransformer",
         "WellLogData",
         "CurveData",
         "build_qpainter_tracks",
