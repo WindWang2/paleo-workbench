@@ -120,6 +120,8 @@ class VisualizationPage(QWidget):
             self.asset_combo.addItem(f"🗺️ {ref.label}", ref)
         self.asset_combo.blockSignals(False)
 
+        self.composite_panel.update_state(self._prediction_tasks)
+
         if self._current_ref is None:
             first_ref = None
             for idx in range(self.asset_combo.count()):
@@ -130,16 +132,9 @@ class VisualizationPage(QWidget):
                     self.asset_combo.setCurrentIndex(idx)
                     self.asset_combo.blockSignals(False)
                     break
-            if first_ref is None and self.asset_combo.count() > 0:
-                first_ref = self.asset_combo.itemData(0)
-                self.asset_combo.blockSignals(True)
-                self.asset_combo.setCurrentIndex(0)
-                self.asset_combo.blockSignals(False)
 
             if first_ref is not None:
                 self.open_ref(first_ref)
-            else:
-                self.composite_panel.update_state(self._prediction_tasks)
         else:
             self.open_ref(self._current_ref)
 
@@ -154,6 +149,19 @@ class VisualizationPage(QWidget):
         if ref is None:
             return
         self._current_ref = ref
+        for idx in range(self.asset_combo.count()):
+            item_ref = self.asset_combo.itemData(idx)
+            if item_ref == ref or (
+                isinstance(item_ref, VizRef)
+                and isinstance(ref, VizRef)
+                and item_ref.id == ref.id
+                and item_ref.path == ref.path
+            ):
+                self.asset_combo.blockSignals(True)
+                self.asset_combo.setCurrentIndex(idx)
+                self.asset_combo.blockSignals(False)
+                break
+
         project = self._project_stub()
         payload = self._adapter.resolve(ref, project)
         self.composite_panel.load_payload(payload)
