@@ -1,7 +1,7 @@
 # paleo_workbench 整体简化与重构设计
 
 日期：2026-07-20
-状态：已获用户批准
+状态：P1 已完成（2026-07-20，分支 refactor/p1-dedup-deadcode），P2-P4 待实施
 
 ## 背景与诊断
 
