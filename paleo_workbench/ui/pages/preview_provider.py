@@ -699,27 +699,48 @@ class PreviewProvider:
 
         # 1. Check SpreadsheetML / Excel XML format (<Table><Row><Cell><Data>)
         all_rows: list[list[str]] = []
-        for elem in root.iter():
-            if clean_tag(elem.tag).lower() == "table":
-                for child in elem:
-                    if clean_tag(child.tag).lower() == "row":
-                        row_vals: list[str] = []
-                        for cell in child:
-                            if clean_tag(cell.tag).lower() == "cell":
-                                cell_text = ""
-                                for data_node in cell:
-                                    if clean_tag(data_node.tag).lower() == "data":
-                                        cell_text = (data_node.text or "").strip()
-                                        break
-                                if not cell_text and cell.text:
-                                    cell_text = cell.text.strip()
-                                row_vals.append(cell_text)
-                        if row_vals:
-                            all_rows.append(row_vals)
-                if all_rows:
-                    break
+        parsed_sheets: list[tuple[str, tuple[str, ...], tuple[tuple[str, ...], ...]]] = []
 
-        if all_rows and len(all_rows) > 1:
+        for worksheet_elem in root.iter():
+            if clean_tag(worksheet_elem.tag).lower() == "worksheet":
+                sheet_name = worksheet_elem.attrib.get(
+                    "{urn:schemas-microsoft-com:office:spreadsheet}Name",
+                    worksheet_elem.attrib.get("ss:Name", "工作表"),
+                )
+                sheet_rows: list[list[str]] = []
+                for table in worksheet_elem.iter():
+                    if clean_tag(table.tag).lower() == "table":
+                        for row in table.iter():
+                            if clean_tag(row.tag).lower() == "row":
+                                row_vals: list[str] = []
+                                for cell in row.iter():
+                                    if clean_tag(cell.tag).lower() == "cell":
+                                        txt = ""
+                                        for d in cell.iter():
+                                            if clean_tag(d.tag).lower() == "data":
+                                                txt = (d.text or "").strip()
+                                                break
+                                        if not txt and cell.text:
+                                            txt = cell.text.strip()
+                                        row_vals.append(txt)
+                                if row_vals:
+                                    sheet_rows.append(row_vals)
+                if sheet_rows and len(sheet_rows) > 1:
+                    s_headers = tuple(str(h).strip() for h in sheet_rows[0] if str(h).strip())
+                    s_data_rows = tuple(
+                        tuple(r[: len(s_headers)])
+                        for r in sheet_rows[1 : self.settings.table_max_rows]
+                    )
+                    parsed_sheets.append((sheet_name, s_headers, s_data_rows))
+                    if not all_rows and "测井曲线" in sheet_name:
+                        all_rows = sheet_rows
+
+        if not all_rows and parsed_sheets:
+            # Fallback to first sheet's rows if 测井曲线 sheet wasn't found specifically
+            s_name, s_h, s_r = parsed_sheets[0]
+            data_headers = list(s_h)
+            data_rows = list(s_r)
+        elif all_rows and len(all_rows) > 1:
             data_headers = [str(h).strip() for h in all_rows[0] if str(h).strip()]
             raw_data_rows = all_rows[1:]
 
@@ -826,6 +847,7 @@ class PreviewProvider:
             table_rows=tuple(curve_infos),
             data_headers=tuple(data_headers),
             data_rows=tuple(data_rows),
+            sheets=tuple(parsed_sheets) if len(parsed_sheets) > 1 else (),
             visualization_available=True,
         )
 
