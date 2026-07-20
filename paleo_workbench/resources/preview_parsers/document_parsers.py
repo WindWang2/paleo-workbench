@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
 
-def resource_revision_token(asset: ResourceItem) -> tuple[object, ...]:
+def resource_revision_token(asset: ResourceItem, safe_stat_fn=safe_stat) -> tuple[object, ...]:
     path = Path(asset.path)
     return (
         "resource",
@@ -28,7 +28,7 @@ def resource_revision_token(asset: ResourceItem) -> tuple[object, ...]:
         asset.format,
         asset.status,
         asset.checksum,
-        safe_stat(path),
+        safe_stat_fn(path),
     )
 
 

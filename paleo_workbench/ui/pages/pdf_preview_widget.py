@@ -207,7 +207,11 @@ class PdfPreviewWidget(QWidget):
             return
         if self.pdf_view is not None:
             self._content_stack.setCurrentWidget(self.pdf_view)
-            self.pdf_view.setPageMode(QPdfView.PageMode.SinglePage)
+            import paleo_workbench.ui.pages.preview_widgets as preview_widgets
+            view_cls = getattr(preview_widgets, "QPdfView", QPdfView)
+            page_mode = getattr(getattr(view_cls, "PageMode", None), "SinglePage", None)
+            if hasattr(self.pdf_view, "setPageMode") and page_mode is not None:
+                self.pdf_view.setPageMode(page_mode)
             navigator = self.pdf_view.pageNavigator()
             navigator.jump(self._page, QPointF(), navigator.currentZoom())
         else:

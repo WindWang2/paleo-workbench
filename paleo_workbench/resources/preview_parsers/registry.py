@@ -62,12 +62,13 @@ class PreviewRegistry:
         self,
         asset: ResourceItem | ExportArtifact,
         settings: PreviewSettings,
+        safe_stat_fn: Callable[[Path], tuple[int, int] | None] = safe_stat,
     ) -> PreviewResult:
         if isinstance(asset, ExportArtifact):
             return artifact_preview(asset)
 
         path = Path(asset.path)
-        revision = resource_revision_token(asset)
+        revision = resource_revision_token(asset, safe_stat_fn=safe_stat_fn)
         fmt = asset.format.lower()
         title = asset.name
 
