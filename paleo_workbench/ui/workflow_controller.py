@@ -16,39 +16,39 @@ class WorkflowController:
 
     def __init__(self, window) -> None:
         self.window = window
-        self._preview_settings_dialog: PreviewSettingsDialog | None = None
+        self.preview_settings_dialog: PreviewSettingsDialog | None = None
 
-    def _show_preview_settings(self) -> None:
+    def show_preview_settings(self) -> None:
         """Open the shared preview settings for the current DataPage."""
-        if self._preview_settings_dialog is None:
+        if self.preview_settings_dialog is None:
             dialog = PreviewSettingsDialog(
                 self.window,
                 store=self.window._preview_settings_store,
             )
-            dialog.settings_applied.connect(self._apply_preview_settings)
-            self._preview_settings_dialog = dialog
+            dialog.settings_applied.connect(self.apply_preview_settings)
+            self.preview_settings_dialog = dialog
         reader = self.window.app_shell.data_page.reader_panel
-        self._preview_settings_dialog.set_settings(reader.preview_settings)
-        self._preview_settings_dialog.set_preview_mode(reader.current_mode)
-        self._preview_settings_dialog.exec()
+        self.preview_settings_dialog.set_settings(reader.preview_settings)
+        self.preview_settings_dialog.set_preview_mode(reader.current_mode)
+        self.preview_settings_dialog.exec()
 
-    def _apply_preview_settings(self, settings) -> None:
+    def apply_preview_settings(self, settings) -> None:
         """Route dialog output to the current shell, never a stale page."""
         self.window.app_shell.data_page.reader_panel.set_preview_settings(settings)
 
-    def _wire_home_page(self) -> None:
+    def wire_home_page(self) -> None:
         page = self.window.app_shell.home_page_widget()
         if page is None:
             return
         if hasattr(page, "navigation_requested"):
             page.navigation_requested.connect(self._on_home_navigation)
 
-    def _wire_data_visualization_jump(self) -> None:
+    def wire_data_visualization_jump(self) -> None:
         page = self.window.app_shell.data_page_widget()
         if hasattr(page, "open_in_visualization"):
             page.open_in_visualization.connect(self._on_open_in_visualization)
 
-    def _wire_mapping_page(self) -> None:
+    def wire_mapping_page(self) -> None:
         page = self.window.app_shell.mapping_page_widget()
         if page is None:
             return
@@ -61,7 +61,7 @@ class WorkflowController:
         if hasattr(page, "contour_drafts_updated"):
             page.contour_drafts_updated.connect(self._on_contour_drafts_updated)
 
-    def _wire_preparation_page(self) -> None:
+    def wire_preparation_page(self) -> None:
         page = self.window.app_shell.preparation_page_widget()
         if page is None:
             return
@@ -72,7 +72,7 @@ class WorkflowController:
         if hasattr(page, "contour_drafts_updated"):
             page.contour_drafts_updated.connect(self._on_contour_drafts_updated)
 
-    def _wire_sequence_page(self) -> None:
+    def wire_sequence_page(self) -> None:
         page = self.window.app_shell.sequence_framework_page_widget()
         if page is None:
             return
@@ -83,7 +83,7 @@ class WorkflowController:
             # instance is new each rebuild; connect once per shell.
             page.stratigraphy_updated.connect(self._on_stratigraphy_updated)
 
-    def _wire_seismic_page(self) -> None:
+    def wire_seismic_page(self) -> None:
         page = self.window.app_shell.seismic_prediction_page_widget()
         if page is None:
             return
@@ -94,7 +94,7 @@ class WorkflowController:
         if hasattr(page, "send_to_mapping_requested"):
             page.send_to_mapping_requested.connect(self._on_seismic_send_to_mapping)
 
-    def _wire_well_log_page(self) -> None:
+    def wire_well_log_page(self) -> None:
         page = self.window.app_shell.well_log_prediction_page_widget()
         if page is None:
             return
@@ -105,7 +105,7 @@ class WorkflowController:
         if hasattr(page, "send_to_preparation_requested"):
             page.send_to_preparation_requested.connect(self._on_well_log_send_to_prep)
 
-    def _wire_review_page(self) -> None:
+    def wire_review_page(self) -> None:
         page = self.window.app_shell.review_export_page_widget()
         if page is None:
             return

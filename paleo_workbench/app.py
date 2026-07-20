@@ -88,11 +88,11 @@ class PaleoWorkbenchWindow(QWidget):
 
     @property
     def _preview_settings_dialog(self):
-        return self.workflow_controller._preview_settings_dialog
+        return self.workflow_controller.preview_settings_dialog
 
     @_preview_settings_dialog.setter
     def _preview_settings_dialog(self, val) -> None:
-        self.workflow_controller._preview_settings_dialog = val
+        self.workflow_controller.preview_settings_dialog = val
 
     def _setup_shortcuts(self) -> None:
         """Window-scoped project-op shortcuts.
@@ -182,10 +182,10 @@ class PaleoWorkbenchWindow(QWidget):
         self.project_controller._on_properties()
 
     def _show_preview_settings(self) -> None:
-        self.workflow_controller._show_preview_settings()
+        self.workflow_controller.show_preview_settings()
 
     def _apply_preview_settings(self, settings) -> None:
-        self.workflow_controller._apply_preview_settings(settings)
+        self.workflow_controller.apply_preview_settings(settings)
 
     # --- signal wiring ---
 
@@ -202,14 +202,14 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
         menu_bar.preview_settings_requested.connect(self._show_preview_settings)
-        self.workflow_controller._wire_home_page()
-        self.workflow_controller._wire_data_visualization_jump()
-        self.workflow_controller._wire_mapping_page()
-        self.workflow_controller._wire_preparation_page()
-        self.workflow_controller._wire_sequence_page()
-        self.workflow_controller._wire_seismic_page()
-        self.workflow_controller._wire_well_log_page()
-        self.workflow_controller._wire_review_page()
+        self.workflow_controller.wire_home_page()
+        self.workflow_controller.wire_data_visualization_jump()
+        self.workflow_controller.wire_mapping_page()
+        self.workflow_controller.wire_preparation_page()
+        self.workflow_controller.wire_sequence_page()
+        self.workflow_controller.wire_seismic_page()
+        self.workflow_controller.wire_well_log_page()
+        self.workflow_controller.wire_review_page()
 
     # --- shell rebuild helpers ---
 
