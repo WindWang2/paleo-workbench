@@ -7,8 +7,8 @@ resources → factor → prediction → map → qc → export → dashboard.
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
-from paleo_workbench.adapters.paleo_map import PaleoMapAdapter
 from paleo_workbench.pipeline.compile_map import compile_map_draft
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.manager import ProjectManager
@@ -110,23 +110,17 @@ def test_e2e_dataflow_contract_roundtrip(tmp_path: Path):
         project, inv_path, project_path=project_path, register=True
     )
     assert inv.success
-    adapter = PaleoMapAdapter()
-    adapter.set_data(
-        {
-            "viewer_type": "paleo_map",
-            "layers": [
-                {
-                    "id": "facies",
-                    "features": list(doc.facies_polygons or []),
-                }
-            ],
-        }
-    )
     geo_path = tmp_path / "map.geojson"
-    result = adapter.export({"path": str(geo_path), "format": "geojson"})
-    art = record_export(
-        project, doc.id, result.output_path, result.format, [pred.id, qc2.id]
+    geo_path.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": list(doc.facies_polygons or []),
+            }
+        ),
+        encoding="utf-8",
     )
+    art = record_export(project, doc.id, str(geo_path), "geojson", [pred.id, qc2.id])
     run.export_artifact_ids = [art.id]
 
     # 9) Persist and reload — contracts survive

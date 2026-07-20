@@ -171,13 +171,6 @@ def attach_well_table_to_factor_task(
     return table
 
 
-def get_well_table(project: ProjectDocument, table_id: str) -> WellTable | None:
-    for table in project.well_tables:
-        if table.id == table_id:
-            return table
-    return None
-
-
 def well_table_from_factor_task(task: FactorMapTask) -> WellTable:
     """Recover a WellTable from a FactorMapTask's sample_points (no project write)."""
     params = task.parameters or {}

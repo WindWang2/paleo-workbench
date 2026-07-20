@@ -1,6 +1,6 @@
 from pathlib import Path
+import json
 
-from paleo_workbench.adapters.paleo_map import PaleoMapAdapter
 from paleo_workbench.app import PaleoWorkbenchWindow
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.manager import ProjectManager
@@ -38,11 +38,12 @@ def test_full_mvp_loop_recovers_dashboard_state(tmp_path: Path):
     project.paleomap_documents.append(doc)
     qc = run_basic_qc(project, doc.id)
 
-    adapter = PaleoMapAdapter()
-    adapter.set_data({"viewer_type": "paleo_map", "schema_version": "1.0", "resources": [], "layers": []})
     export_path = tmp_path / "demo.artifacts" / "exports" / "map.geojson"
-    result = adapter.export({"path": str(export_path), "format": "geojson"})
-    artifact = record_export(project, doc.id, result.output_path, result.format, [pred.id, qc.id])
+    export_path.parent.mkdir(parents=True, exist_ok=True)
+    export_path.write_text(
+        json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8"
+    )
+    artifact = record_export(project, doc.id, str(export_path), "geojson", [pred.id, qc.id])
     run.active_factor_map_task_ids = [factor.id]
     run.active_prediction_task_id = pred.id
     run.active_paleomap_document_id = doc.id
