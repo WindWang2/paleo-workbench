@@ -4,25 +4,23 @@ from datetime import datetime, timezone
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QKeyEvent, QPainterPath, QPen, QColor
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsSceneMouseEvent
+from PySide6.QtGui import QKeyEvent, QPainterPath
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
 
 from paleo_workbench.mapping import map_edit_api as api
 from paleo_workbench.mapping.document_io import features_from_document
-from paleo_workbench.mapping.geometry_schema import canonical_facies_geometry, new_feature_id
+from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.project.models import PaleoMapDocument
-from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_edit_commands import (
-    BatchVertexEditCommand,
-    CompositeCommand,
     CreateFeatureCommand,
-    DeleteFeatureCommand,
     EditCommandStack,
     MoveCommand,
     PropertyChangeCommand,
     RingEditCommand,
     VertexEditCommand,
 )
+from paleo_workbench.ui.pages.map_edit_draft import MapDraftManager
+from paleo_workbench.ui.pages.map_edit_factory import item_from_record
 from paleo_workbench.ui.pages.map_edit_items import (
     FaciesPolygonItem,
     FeatureItemMixin,
@@ -31,18 +29,20 @@ from paleo_workbench.ui.pages.map_edit_items import (
     VertexHandleItem,
     WellPointItem,
 )
+from paleo_workbench.ui.pages.map_edit_snap import MapSnapManager
+from paleo_workbench.ui.pages.map_edit_topology import (
+    apply_adjacency_warnings,
+    facies_geometry_issues,
+    plan_merge_facies,
+    plan_split_facies,
+    plan_topology_rebuild,
+)
 
 _DEFAULT_SCENE_RECT = QRectF(-5000, -5000, 10000, 10000)
 _SCENE_PAD = 50.0
 # Edge hit tolerance for double-click insert (scene units, squared compared via dist2).
 _EDGE_HIT_TOL2 = 0.75 * 0.75
 _DEFAULT_SNAP_TOL = 0.5
-_DRAFT_MIN_DIST = 1e-9
-
-_DRAFT_PEN = QPen(QColor(tokens.ACCENT), 0)
-_DRAFT_PEN.setCosmetic(True)
-_DRAFT_PEN.setWidth(1)
-_DRAFT_PEN.setStyle(Qt.PenStyle.DashLine)
 
 
 class MapEditScene(QGraphicsScene):
@@ -89,16 +89,8 @@ class MapEditScene(QGraphicsScene):
             "line": True,
             "label": True,
         }
-        # Snap
-        self._snap_enabled = False
-        self._snap_tolerance = _DEFAULT_SNAP_TOL
-        self._snap_candidate_cache: list[tuple[float, float]] | None = None
-        self._snap_candidate_builds = 0
-        self._reference_snap_points: list[tuple[float, float]] = []
-        # Draft polyline/polygon state (tool "line" or "facies")
-        self._draft_points: list[list[float]] = []
-        self._draft_kind: str | None = None  # "line" | "facies"
-        self._draft_preview: QGraphicsPathItem | None = None
+        self._snap_manager = MapSnapManager(_DEFAULT_SNAP_TOL)
+        self._draft_manager = MapDraftManager(self)
         self.selectionChanged.connect(self._on_selection_changed)
 
     # --- public API ---------------------------------------------------------
@@ -155,18 +147,37 @@ class MapEditScene(QGraphicsScene):
     def active_vertex_index(self) -> int | None:
         return self._active_vertex_index
 
+    @property
+    def _snap_enabled(self) -> bool:
+        return self._snap_manager.enabled
+
+    @_snap_enabled.setter
+    def _snap_enabled(self, value: bool) -> None:
+        self._snap_manager.enabled = value
+
+    @property
+    def _snap_tolerance(self) -> float:
+        return self._snap_manager.tolerance
+
+    @_snap_tolerance.setter
+    def _snap_tolerance(self, value: float) -> None:
+        self._snap_manager.tolerance = value
+
+    @property
+    def _reference_snap_points(self) -> list[tuple[float, float]]:
+        return self._snap_manager.reference_points
+
     def set_snap_enabled(self, enabled: bool) -> None:
-        self._snap_enabled = bool(enabled)
+        self._snap_manager.enabled = enabled
 
     def snap_enabled(self) -> bool:
-        return self._snap_enabled
+        return self._snap_manager.enabled
 
     def set_snap_tolerance(self, tol: float) -> None:
-        self._snap_tolerance = max(0.0, float(tol))
+        self._snap_manager.tolerance = tol
 
     def set_reference_snap_points(self, points: list[tuple[float, float]]) -> None:
-        self._reference_snap_points = [(float(x), float(y)) for x, y in points]
-        self._invalidate_snap_candidates()
+        self._snap_manager.set_reference_points(points)
 
     def set_layer_visible(self, kind: str, visible: bool) -> None:
         key = str(kind)
@@ -403,52 +414,30 @@ class MapEditScene(QGraphicsScene):
         self.command_stack_changed.emit()
         return fid
 
+    @property
+    def _draft_points(self) -> list[list[float]]:
+        return self._draft_manager.points
+
+    @property
+    def _draft_kind(self) -> str | None:
+        return self._draft_manager.kind
+
     def finish_line_draft(self) -> str | None:
         """Finish current line draft if it has at least 2 points. Returns new feature id."""
-        if self._draft_kind not in (None, "line"):
-            return None
-        points = [list(p) for p in self._draft_points]
-        self._cancel_draft()
-        if len(points) < 2:
-            return None
-        return self.create_feature({
-            "id": new_feature_id("line"),
-            "kind": "line",
-            "name": "",
-            "coordinates": points,
-        })
+        return self._draft_manager.finish_line(self.create_feature)
 
     def finish_facies_draft(self) -> str | None:
         """Finish facies polygon draft (min 3 unique points). Closes the ring."""
-        if self._draft_kind not in (None, "facies"):
-            return None
-        points = [list(p) for p in self._draft_points]
-        self._cancel_draft()
-        if len(points) < 3:
-            return None
-        ring = [list(p) for p in points]
-        # Close ring if open
-        if ring[0][0] != ring[-1][0] or ring[0][1] != ring[-1][1]:
-            ring.append([ring[0][0], ring[0][1]])
-        fid = self.create_feature({
-            "id": new_feature_id("facies"),
-            "kind": "facies",
-            "name": "新相带",
-            "coordinates": ring,
-            "style": {},
-        })
-        if fid:
-            self.refresh_topology(fid)
-        return fid
+        return self._draft_manager.finish_facies(self.create_feature, self.refresh_topology)
 
     def cancel_line_draft(self) -> None:
-        self._cancel_draft()
+        self._draft_manager.cancel()
 
     def draft_point_count(self) -> int:
-        return len(self._draft_points)
+        return self._draft_manager.point_count()
 
     def draft_kind(self) -> str | None:
-        return self._draft_kind
+        return self._draft_manager.kind
 
     def refresh_topology(self, feature_id: str | None = None) -> None:
         """Validate topology and set topology_status on facies (and optional lines)."""
@@ -483,33 +472,7 @@ class MapEditScene(QGraphicsScene):
         self,
         item: FaciesPolygonItem,
     ) -> list[dict[str, object]]:
-        issues: list[dict[str, object]] = []
-        for part_index, ring_index, ring in item.iter_ring_addresses():
-            for issue in api.validate_ring(ring):
-                issues.append({
-                    "feature_id": item.feature_id,
-                    "part_index": part_index,
-                    "ring_index": ring_index,
-                    "code": str(issue.get("code", "invalid_geometry")),
-                    "message": str(issue.get("message", "几何无效")),
-                    "severity": "error",
-                })
-        try:
-            from geoviz import validate_polygon_geometry
-
-            shape_issues = validate_polygon_geometry(
-                item.to_record()["geometry_type"], item.geometry_coordinates()
-            )
-        except (ImportError, AttributeError):
-            shape_issues = []
-        for issue in shape_issues:
-            issues.append({
-                "feature_id": item.feature_id,
-                "code": str(issue.get("code", "invalid_shape")),
-                "message": str(issue.get("message", "Shape 几何无效")),
-                "severity": "error",
-            })
-        return issues
+        return facies_geometry_issues(item)
 
     def validate_for_save(self) -> tuple[bool, list[dict[str, object]]]:
         issues = self.topology_issues()
@@ -521,61 +484,24 @@ class MapEditScene(QGraphicsScene):
             for item in self._items_by_id.values()
             if isinstance(item, FaciesPolygonItem)
         ]
-        if len(facies) < 2:
-            return
-        rings = [item.coordinates() for item in facies]
-        issues = api.validate_adjacency(rings, gap_tol=self._snap_tolerance)
-        flagged: set[int] = set()
-        for issue in issues:
-            pair = issue.get("pair")
-            if isinstance(pair, (list, tuple)) and len(pair) == 2:
-                flagged.add(int(pair[0]))
-                flagged.add(int(pair[1]))
-        for idx in flagged:
-            if 0 <= idx < len(facies) and facies[idx].topology_status == "ok":
-                facies[idx].set_topology_status("warning")
+        apply_adjacency_warnings(facies, gap_tol=self._snap_tolerance)
 
     def rebuild_topology_forced(self, snap_tol: float | None = None) -> dict[str, Any]:
-        """Snap shared nodes across facies, re-validate rings/adjacency, undoable.
-
-        Returns a report: ``snapped_count``, ``ring_warnings``, ``adjacency_issues``,
-        ``changed``.
-        """
+        """Snap shared nodes across facies, re-validate rings/adjacency, undoable."""
         tol = float(self._snap_tolerance if snap_tol is None else snap_tol)
         facies = [
             item
             for item in self._items_by_id.values()
             if isinstance(item, FaciesPolygonItem)
         ]
-        if not facies:
-            return {
-                "snapped_count": 0,
-                "ring_warnings": 0,
-                "adjacency_issues": 0,
-                "changed": False,
-            }
-        rings = [item.coordinates() for item in facies]
-        report = api.rebuild_topology(rings, snap_tol=tol, gap_tol=tol)
-        snapped_rings = report["rings"]
-        changes: list[tuple[str, list, list]] = []
-        for item, old_ring, new_ring in zip(facies, rings, snapped_rings):
-            if old_ring != new_ring:
-                changes.append((item.feature_id, old_ring, new_ring))
-        if changes:
-            cmd = BatchVertexEditCommand(changes, apply_coordinates=self._apply_coordinates)
+        report, cmd = plan_topology_rebuild(facies, tol, self._apply_coordinates)
+        if cmd is not None:
             self._command_stack.push(cmd)
             self.set_dirty(True)
             self.command_stack_changed.emit()
             self._refresh_vertex_handles()
         self.refresh_topology()
-        return {
-            "snapped_count": len(changes),
-            "ring_warnings": len(report.get("ring_issues") or []),
-            "adjacency_issues": len(report.get("adjacency_issues") or []),
-            "changed": bool(changes or report.get("changed")),
-            "ring_issues": report.get("ring_issues") or [],
-            "adjacency_issue_list": report.get("adjacency_issues") or [],
-        }
+        return report
 
     def merge_selected_facies(self) -> str | None:
         """Merge exactly two selected facies polygons into one. Returns new id."""
@@ -590,53 +516,21 @@ class MapEditScene(QGraphicsScene):
         a = self._items_by_id[facies_ids[0]]
         b = self._items_by_id[facies_ids[1]]
         assert isinstance(a, FaciesPolygonItem) and isinstance(b, FaciesPolygonItem)
-        if a.has_complex_geometry() or b.has_complex_geometry():
-            # The ring-only merge API cannot preserve holes or polygon parts.
-            return None
-        merged = api.merge_rings(a.coordinates(), b.coordinates())
-        if not merged:
-            return None
-        name = (
-            str(a.get_property("name") or "")
-            or str(b.get_property("name") or "")
-            or "合并相带"
+        new_id, cmd = plan_merge_facies(
+            a,
+            b,
+            self._add_feature_from_record,
+            self._remove_feature_by_id,
+            self._item_from_record,
         )
-        new_id = new_feature_id("facies")
-        style = dict(a.to_record().get("style") or {})
-        new_rec = {
-            "id": new_id,
-            "kind": "facies",
-            "name": name,
-            "coordinates": merged,
-            "style": style,
-        }
-        if self._item_from_record(new_rec) is None:
-            return None
-        cmd = CompositeCommand(
-            [
-                DeleteFeatureCommand(
-                    a.to_record(),
-                    add_feature=self._add_feature_from_record,
-                    remove_feature=self._remove_feature_by_id,
-                ),
-                DeleteFeatureCommand(
-                    b.to_record(),
-                    add_feature=self._add_feature_from_record,
-                    remove_feature=self._remove_feature_by_id,
-                ),
-                CreateFeatureCommand(
-                    new_rec,
-                    add_feature=self._add_feature_from_record,
-                    remove_feature=self._remove_feature_by_id,
-                ),
-            ]
-        )
-        self._command_stack.push(cmd)
-        self.set_dirty(True)
-        self.command_stack_changed.emit()
-        self.refresh_topology(new_id)
-        self._refresh_vertex_handles()
-        return new_id
+        if new_id and cmd:
+            self._command_stack.push(cmd)
+            self.set_dirty(True)
+            self.command_stack_changed.emit()
+            self.refresh_topology(new_id)
+            self._refresh_vertex_handles()
+            return new_id
+        return None
 
     def split_selected_facies_by_line(self) -> list[str] | None:
         """Split one selected facies using one selected line. Returns new ids."""
@@ -654,50 +548,22 @@ class MapEditScene(QGraphicsScene):
         poly_item = self._items_by_id[facies_ids[0]]
         line_item = self._items_by_id[line_ids[0]]
         assert isinstance(poly_item, FaciesPolygonItem) and isinstance(line_item, LineItem)
-        if poly_item.has_complex_geometry():
-            # The ring-only split API cannot preserve holes or polygon parts.
-            return None
-        parts = api.split_ring_by_line(poly_item.coordinates(), line_item.coordinates())
-        if not parts or len(parts) < 2:
-            return None
-        base_name = str(poly_item.get_property("name") or "") or "相带"
-        poly_style = dict(poly_item.to_record().get("style") or {})
-        new_recs = []
-        new_ids: list[str] = []
-        for i, ring in enumerate(parts):
-            nid = new_feature_id("facies")
-            new_ids.append(nid)
-            new_recs.append({
-                "id": nid,
-                "kind": "facies",
-                "name": f"{base_name}-{i + 1}",
-                "coordinates": ring,
-                "style": poly_style,
-            })
-        children: list = [
-            DeleteFeatureCommand(
-                poly_item.to_record(),
-                add_feature=self._add_feature_from_record,
-                remove_feature=self._remove_feature_by_id,
-            )
-        ]
-        for rec in new_recs:
-            if self._item_from_record(rec) is None:
-                return None
-            children.append(
-                CreateFeatureCommand(
-                    rec,
-                    add_feature=self._add_feature_from_record,
-                    remove_feature=self._remove_feature_by_id,
-                )
-            )
-        self._command_stack.push(CompositeCommand(children))
-        self.set_dirty(True)
-        self.command_stack_changed.emit()
-        for nid in new_ids:
-            self.refresh_topology(nid)
-        self._refresh_vertex_handles()
-        return new_ids
+        new_ids, cmd = plan_split_facies(
+            poly_item,
+            line_item,
+            self._add_feature_from_record,
+            self._remove_feature_by_id,
+            self._item_from_record,
+        )
+        if new_ids and cmd:
+            self._command_stack.push(cmd)
+            self.set_dirty(True)
+            self.command_stack_changed.emit()
+            for nid in new_ids:
+                self.refresh_topology(nid)
+            self._refresh_vertex_handles()
+            return new_ids
+        return None
 
     def undo(self) -> bool:
         if not self._command_stack.can_undo():
@@ -1193,15 +1059,7 @@ class MapEditScene(QGraphicsScene):
     # --- line draft ---------------------------------------------------------
 
     def _append_draft_point(self, x: float, y: float, kind: str = "line") -> None:
-        self._draft_kind = kind
-        if self._draft_points:
-            last = self._draft_points[-1]
-            if abs(last[0] - x) < _DRAFT_MIN_DIST and abs(last[1] - y) < _DRAFT_MIN_DIST:
-                return
-        self._draft_points.append([float(x), float(y)])
-        self._update_draft_preview(
-            float(x), float(y), close_preview=(kind == "facies")
-        )
+        self._draft_manager.append_point(x, y, kind=kind)
 
     def _update_draft_preview(
         self,
@@ -1209,166 +1067,36 @@ class MapEditScene(QGraphicsScene):
         cursor_y: float,
         close_preview: bool = False,
     ) -> None:
-        if self._draft_preview is None:
-            self._draft_preview = QGraphicsPathItem()
-            self._draft_preview.setPen(_DRAFT_PEN)
-            self._draft_preview.setZValue(50)
-            self.addItem(self._draft_preview)
-        path = QPainterPath()
-        pts = self._draft_points
-        if not pts:
-            self._draft_preview.setPath(path)
-            return
-        path.moveTo(pts[0][0], pts[0][1])
-        for p in pts[1:]:
-            path.lineTo(p[0], p[1])
-        path.lineTo(float(cursor_x), float(cursor_y))
-        if close_preview and len(pts) >= 2:
-            path.lineTo(pts[0][0], pts[0][1])
-        self._draft_preview.setPath(path)
+        self._draft_manager.update_preview(cursor_x, cursor_y, close_preview=close_preview)
 
     def _cancel_draft(self) -> None:
-        self._draft_points = []
-        self._draft_kind = None
-        if self._draft_preview is not None:
-            self.removeItem(self._draft_preview)
-            self._draft_preview = None
+        self._draft_manager.cancel()
 
     def _cancel_line_draft(self) -> None:
-        # Backward-compatible alias.
-        self._cancel_draft()
+        self._draft_manager.cancel()
 
     # --- snap ---------------------------------------------------------------
 
     def _snap_xy(self, x: float, y: float) -> tuple[float, float]:
-        if not self._snap_enabled:
-            return float(x), float(y)
-        candidates = self._snap_candidates()
-        return api.snap_point(candidates, float(x), float(y), tol=self._snap_tolerance)
+        return self._snap_manager.snap_xy(
+            x, y, self._items_by_id.values(), self.layer_is_visible, self._draft_manager.points
+        )
 
     def _invalidate_snap_candidates(self) -> None:
-        self._snap_candidate_cache = None
+        self._snap_manager.invalidate_candidates()
 
     def snap_candidate_build_count(self) -> int:
-        return self._snap_candidate_builds
+        return self._snap_manager.build_count()
 
     def _snap_candidates(self) -> list[tuple[float, float]]:
-        if self._snap_candidate_cache is not None:
-            return [*self._snap_candidate_cache, *(tuple(p) for p in self._draft_points)]
-        pts: list[tuple[float, float]] = []
-        for item in self._items_by_id.values():
-            if not self.layer_is_visible(getattr(item, "kind", "")):
-                continue
-            if isinstance(item, FaciesPolygonItem):
-                for ring in item.all_rings():
-                    for p in ring:
-                        pts.append((float(p[0]), float(p[1])))
-            elif isinstance(item, LineItem):
-                for p in item.coordinates():
-                    pts.append((float(p[0]), float(p[1])))
-            elif isinstance(item, WellPointItem):
-                rec = item.to_record()
-                c = rec.get("coordinates") or [0, 0]
-                pts.append((float(c[0]), float(c[1])))
-            elif isinstance(item, LabelItem):
-                rec = item.to_record()
-                c = rec.get("coordinates") or [0, 0]
-                pts.append((float(c[0]), float(c[1])))
-        pts.extend(self._reference_snap_points)
-        self._snap_candidate_cache = pts
-        self._snap_candidate_builds += 1
-        return [*pts, *(tuple(p) for p in self._draft_points)]
+        return self._snap_manager.get_candidates(
+            self._items_by_id.values(), self.layer_is_visible, self._draft_manager.points
+        )
 
     # --- item factories -----------------------------------------------------
 
     def _item_from_record(self, record: dict[str, Any]) -> FeatureItemMixin | None:
-        kind = record.get("kind")
-        feature_id = record.get("id")
-        if not feature_id:
-            return None
-        if kind == "facies":
-            return self._make_facies(record)
-        if kind == "well":
-            return self._make_well(record)
-        if kind == "line":
-            return self._make_line(record)
-        if kind == "label":
-            return self._make_label(record)
-        return None
-
-    def _make_facies(self, record: dict[str, Any]) -> FaciesPolygonItem | None:
-        geometry_type, polygons = canonical_facies_geometry(record)
-        if not polygons or not polygons[0] or len(polygons[0][0]) < 4:
-            return None
-        if any(len(ring) < 4 for polygon in polygons for ring in polygon):
-            return None
-        geometry_coordinates = polygons[0] if geometry_type == "Polygon" else polygons
-        extras = {}
-        for key in ("facies", "probability", "region_id", "properties"):
-            if key in record and record[key] is not None:
-                extras[key] = record[key]
-        return FaciesPolygonItem(
-            feature_id=str(record["id"]),
-            coordinates=polygons[0][0],
-            name=str(record.get("name") or ""),
-            style=record.get("style") or {},
-            extras=extras,
-            geometry_type=geometry_type,
-            geometry_coordinates=geometry_coordinates,
-        )
-
-    def _make_well(self, record: dict[str, Any]) -> WellPointItem | None:
-        coords = record.get("coordinates") or [0, 0]
-        if not isinstance(coords, (list, tuple)) or len(coords) < 2:
-            return None
-        try:
-            x = float(coords[0])
-            y = float(coords[1])
-        except (TypeError, ValueError):
-            return None
-        return WellPointItem(
-            feature_id=str(record["id"]),
-            x=x,
-            y=y,
-            name=str(record.get("name") or ""),
-        )
-
-    def _make_line(self, record: dict[str, Any]) -> LineItem | None:
-        coords = record.get("coordinates") or []
-        if not isinstance(coords, (list, tuple)) or len(coords) < 2:
-            return None
-        points: list[list[float]] = []
-        for p in coords:
-            if not isinstance(p, (list, tuple)) or len(p) < 2:
-                return None
-            try:
-                points.append([float(p[0]), float(p[1])])
-            except (TypeError, ValueError):
-                return None
-        return LineItem(
-            feature_id=str(record["id"]),
-            coordinates=points,
-            name=str(record.get("name") or ""),
-        )
-
-    def _make_label(self, record: dict[str, Any]) -> LabelItem | None:
-        coords = record.get("coordinates") or [0, 0]
-        if not isinstance(coords, (list, tuple)) or len(coords) < 2:
-            return None
-        try:
-            x = float(coords[0])
-            y = float(coords[1])
-        except (TypeError, ValueError):
-            return None
-        text = str(record.get("text") or record.get("name") or "")
-        name = str(record.get("name") or text)
-        return LabelItem(
-            feature_id=str(record["id"]),
-            x=x,
-            y=y,
-            text=text,
-            name=name,
-        )
+        return item_from_record(record)
 
     def _fit_scene_rect(self) -> None:
         if not self._items_by_id:
