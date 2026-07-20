@@ -545,49 +545,6 @@ class ModuleRelationshipCanvas(QWidget):
         self._draw_database_support_arrows(painter, self.card_data)
         painter.end()
 
-
-class ModuleRelationshipWidget(QWidget):
-    navigation_requested = Signal(int)
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setObjectName("ModuleRelationshipWidget")
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self.canvas = ModuleRelationshipCanvas(self)
-        self.canvas.navigation_requested.connect(self.navigation_requested.emit)
-        layout.addWidget(self.canvas, 0, Qt.AlignmentFlag.AlignCenter)
-
-    def update_states(self, steps: list) -> None:
-        self.canvas.update_states(steps)
-
-    @property
-    def card_sequence(self):
-        return self.canvas.card_sequence
-
-    @property
-    def card_well(self):
-        return self.canvas.card_well
-
-    @property
-    def card_seismic(self):
-        return self.canvas.card_seismic
-
-    @property
-    def card_facies(self):
-        return self.canvas.card_facies
-
-    @property
-    def card_mapping(self):
-        return self.canvas.card_mapping
-
-    @property
-    def card_data(self):
-        return self.canvas.card_data
-
     def draw_directed_arrow(
         self,
         self_painter: QPainter,
@@ -624,7 +581,6 @@ class ModuleRelationshipWidget(QWidget):
 
         # Draw label
         if text:
-            # Safe metrics resolving by explicitly instantiating QFontMetrics with widget font
             font = self.font()
             font.setPointSize(9)
             self_painter.setFont(font)
@@ -641,7 +597,6 @@ class ModuleRelationshipWidget(QWidget):
                 text_width = metrics.horizontalAdvance(line)
                 
                 if text_pos == "top":
-                    # Stack lines upwards: last line ends at mid_y - 6
                     offset_y = -(len(lines) - 1 - i) * line_height - 6
                     self_painter.drawText(
                         int(mid_x - text_width / 2),
@@ -649,7 +604,6 @@ class ModuleRelationshipWidget(QWidget):
                         line
                     )
                 elif text_pos == "bottom":
-                    # Stack lines downwards: first line starts at mid_y + 15
                     offset_y = i * line_height + 15
                     self_painter.drawText(
                         int(mid_x - text_width / 2),
@@ -657,7 +611,6 @@ class ModuleRelationshipWidget(QWidget):
                         line
                     )
                 elif text_pos == "left":
-                    # Center vertically relative to line midpoint
                     offset_y = int((i - len(lines) / 2.0 + 0.5) * line_height)
                     self_painter.drawText(
                         int(mid_x - text_width - 8),
@@ -665,7 +618,6 @@ class ModuleRelationshipWidget(QWidget):
                         line
                     )
                 elif text_pos == "right":
-                    # Center vertically relative to line midpoint
                     offset_y = int((i - len(lines) / 2.0 + 0.5) * line_height)
                     self_painter.drawText(
                         int(mid_x + 8),
@@ -677,21 +629,16 @@ class ModuleRelationshipWidget(QWidget):
         geom_well = card_well.geometry()
         geom_seismic = card_seismic.geometry()
 
-        # Since Row 1 cards are AlignTop, their top Y values are identical.
-        # Use geom_well.top() + 85 to cross precisely in the visual middle of both cards.
         y_center = geom_well.top() + 85
         y_top = y_center - 10
         y_bottom = y_center + 10
 
-        # Top arrow: Well -> Seismic (提供井控信息约束与验证)
-        # Shift start and end points slightly away from borders to make it look clean
         start_top = QPoint(geom_well.right() + 4, y_top)
         end_top = QPoint(geom_seismic.left() - 4, y_top)
         self.draw_directed_arrow(
             painter, start_top, end_top, text="提供井控信息\n约束与验证", text_pos="top"
         )
 
-        # Bottom arrow: Seismic -> Well (反馈地震相结果辅助单井解释)
         start_bottom = QPoint(geom_seismic.left() - 4, y_bottom)
         end_bottom = QPoint(geom_well.right() + 4, y_bottom)
         self.draw_directed_arrow(
@@ -702,7 +649,6 @@ class ModuleRelationshipWidget(QWidget):
         geom_seq = card_seq.geometry()
         geom_seismic = card_seismic.geometry()
 
-        # Vertical line between Framework (top) -> Seismic (bottom) (提供层序格架约束条件)
         x_center = geom_seismic.center().x()
         start = QPoint(x_center, geom_seq.bottom() + 4)
         end = QPoint(x_center, geom_seismic.top() - 4)
@@ -715,19 +661,16 @@ class ModuleRelationshipWidget(QWidget):
         geom_seq = card_seq.geometry()
         geom_facies = card_facies.geometry()
 
-        # Draw a double vertical path representing feedback and updates
         x_center = geom_facies.center().x()
         x_left = x_center - 12
         x_right = x_center + 12
 
-        # Left path (pointing up): Facies -> Framework (地层层序检查调整与更新)
         start_up = QPoint(x_left, geom_facies.top() - 4)
         end_up = QPoint(x_left, geom_seq.bottom() + 4)
         self.draw_directed_arrow(
             painter, start_up, end_up, text="地层层序检查\n调整与更新", text_pos="left"
         )
 
-        # Right path (pointing down): Framework -> Facies
         start_down = QPoint(x_right, geom_seq.bottom() + 4)
         end_down = QPoint(x_right, geom_facies.top() - 4)
         self.draw_directed_arrow(painter, start_down, end_down)
@@ -736,7 +679,6 @@ class ModuleRelationshipWidget(QWidget):
         geom_facies = card_facies.geometry()
         geom_mapping = card_mapping.geometry()
 
-        # Perfectly horizontal line aligned with y_center of Row 1
         y_center = geom_facies.top() + 85
         start = QPoint(geom_facies.right() + 4, y_center)
         end = QPoint(geom_mapping.left() - 4, y_center)
@@ -748,8 +690,6 @@ class ModuleRelationshipWidget(QWidget):
         geom_data = card_data.geometry()
         y_top = geom_data.top() - 4
 
-        # Draw dashed support lines pointing up to the bottoms of cards
-        # 1. To Well
         x_well = self.card_well.geometry().center().x()
         self.draw_directed_arrow(
             painter,
@@ -759,7 +699,6 @@ class ModuleRelationshipWidget(QWidget):
             color_hex="#3b82f6",
         )
 
-        # 2. To Seismic
         x_seismic = self.card_seismic.geometry().center().x()
         self.draw_directed_arrow(
             painter,
@@ -769,7 +708,6 @@ class ModuleRelationshipWidget(QWidget):
             color_hex="#3b82f6",
         )
 
-        # 3. To Facies
         x_facies = self.card_facies.geometry().center().x()
         self.draw_directed_arrow(
             painter,
@@ -779,8 +717,6 @@ class ModuleRelationshipWidget(QWidget):
             color_hex="#3b82f6",
         )
 
-        # 4. To Framework (Sequence)
-        # This line goes straight up through the space between seismic and facies cards
         x_seq = self.card_sequence.geometry().center().x()
         self.draw_directed_arrow(
             painter,
