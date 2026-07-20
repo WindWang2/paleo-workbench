@@ -34,12 +34,12 @@ class WellLogHost:
         self.track_bar = QLabel("测井道列表: 未加载数据")
         self.track_bar.setObjectName("WellLogTrackBar")
         self.track_bar.setStyleSheet(
-            f"QLabel {{ background: {tokens.BG_CONTAINER};"
+            f"QLabel {{ background: {tokens.BG_SEARCH};"
             f" border: 1px solid {tokens.BORDER};"
             f" border-radius: {tokens.RADIUS_BUTTON}px;"
             f" padding: 6px 12px;"
             f" color: {tokens.TEXT_SECONDARY};"
-            f" font-size: {tokens.FONT_SIZE_SM}px;"
+            f" font-size: {tokens.FONT_SIZE_BASE};"
             f" font-weight: 500; }}"
         )
         self.track_bar.setWordWrap(True)
