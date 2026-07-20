@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from geoviz import WellSectionCanvas
 
-from paleo_workbench.ui import tokens
+from paleo_workbench import tokens
 from paleo_workbench.viz.models import VizPayload
 
 

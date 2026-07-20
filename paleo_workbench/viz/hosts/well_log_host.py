@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from geoviz import WellLogCanvas, build_qpainter_tracks
 
-from paleo_workbench.ui import tokens
+from paleo_workbench import tokens
 from paleo_workbench.viz.models import VizPayload
 
 
