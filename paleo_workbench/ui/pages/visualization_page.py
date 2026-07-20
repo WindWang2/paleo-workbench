@@ -102,6 +102,17 @@ class VisualizationPage(QWidget):
         self._map_documents = list(map_documents or [])
         self._project = project
 
+        if not self._resources:
+            try:
+                from paleo_workbench.pipeline.bootstrap import resolve_sample_data_root
+                from paleo_workbench.resources.scanner import scan_resources
+
+                data_root = resolve_sample_data_root()
+                if data_root.is_dir():
+                    self._resources = scan_resources(data_root)
+            except Exception:
+                pass
+
         self.summary_panel.update_state(
             self._resources, self._prediction_tasks, self._map_documents
         )

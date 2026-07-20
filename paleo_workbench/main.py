@@ -24,7 +24,18 @@ from paleo_workbench.ui import tokens
 def main() -> int:
     app = QApplication(sys.argv)
     app.setStyleSheet(tokens.QSS_TEMPLATE)
-    window = PaleoWorkbenchWindow()
+    try:
+        from paleo_workbench.pipeline.bootstrap import (
+            bootstrap_sample_project,
+            resolve_sample_data_root,
+        )
+
+        data_root = resolve_sample_data_root()
+        project = bootstrap_sample_project(data_root).document
+    except Exception:
+        project = None
+
+    window = PaleoWorkbenchWindow(project=project)
     window.show()
     return app.exec()
 
