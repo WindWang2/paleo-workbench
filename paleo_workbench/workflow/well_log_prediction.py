@@ -9,14 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from paleo_workbench.pipeline.assets import (
-    WELL_KEY,
-    bind_prediction_assets,
-    suggest_assets_for_demo,
-)
-from paleo_workbench.prediction.adapters import LocalAssetPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument
-from paleo_workbench.workflow.stratigraphy import active_target_horizon
+from paleo_workbench.workflow.facies_prediction import run_facies_prediction
 
 # Simple facies → lithology heuristic for SVG pattern track
 _FACIES_LITHOLOGY = {
@@ -40,32 +34,12 @@ def run_well_log_facies_prediction(
     Uses :class:`LocalAssetPredictionAdapter` so readable LAS GR curves drive
     depth zones when present (ISS-PRED-01); otherwise falls back to mock.
     """
-    factor_ids = [
-        task.id
-        for task in project.factor_map_tasks
-        if getattr(task, "status", "") == "complete"
-    ]
-    adapter = LocalAssetPredictionAdapter()
-    task = adapter.run(project, factor_ids, seed=seed)
-    suggestion = suggest_assets_for_demo(project)
-    bind_prediction_assets(
+    return run_facies_prediction(
         project,
-        task,
-        well_log_ids=suggestion["well_log_ids"],
-        seismic_ids=suggestion["seismic_ids"],
+        seed=seed,
+        workflow="well_log_facies",
+        name_prefix="单井相预测",
     )
-    horizon = active_target_horizon(project) or project.stratigraphy.target_horizon or ""
-    task.name = f"单井相预测 · {horizon or 'demo'}"
-    meta = dict(task.model_metadata or {})
-    meta["workflow"] = "well_log_facies"
-    meta["target_horizon"] = horizon
-    meta["adapter"] = task.adapter_kind
-    task.model_metadata = meta
-    summary = dict(task.result_summary or {})
-    summary["workflow"] = "well_log_facies"
-    summary["target_horizon"] = horizon
-    task.result_summary = summary
-    return task
 
 
 def lithology_name_for_facies(facies: str) -> str:
