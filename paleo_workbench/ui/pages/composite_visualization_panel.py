@@ -11,6 +11,7 @@ from paleo_workbench.viz.hosts import (
     PaleoMapHost,
     SeismicHost,
     WellLogHost,
+    WellSectionHost,
     WellTieHost,
 )
 from paleo_workbench.viz.models import VizPayload
@@ -49,6 +50,7 @@ class CompositeVisualizationPanel(QFrame):
         )
 
         self.well_host = WellLogHost()
+        self.well_section_host = WellSectionHost()
         self.seismic_host = SeismicHost()
         self.cross_well_host = CrossWellHost()
         self.map_host = PaleoMapHost()
@@ -65,6 +67,7 @@ class CompositeVisualizationPanel(QFrame):
         self.engine_preview = self.engine_host.widget
 
         self.tabs.addTab(self.well_host.widget, WellLogHost.tab_title)
+        self.tabs.addTab(self.well_section_host.widget, WellSectionHost.tab_title)
         self.tabs.addTab(self.seismic_host.widget, SeismicHost.tab_title)
         self.tabs.addTab(self.cross_well_host.widget, CrossWellHost.tab_title)
         self.tabs.addTab(self.map_host.widget, PaleoMapHost.tab_title)
@@ -107,6 +110,8 @@ class CompositeVisualizationPanel(QFrame):
         if payload.kind in {"well_log", "prediction", "cross_well"}:
             if self.well_host.apply(payload):
                 applied.append(WellLogHost.tab_title)
+            if self.well_section_host.apply(payload):
+                applied.append(WellSectionHost.tab_title)
             if self.cross_well_host.apply(payload):
                 applied.append(CrossWellHost.tab_title)
 
@@ -152,6 +157,7 @@ class CompositeVisualizationPanel(QFrame):
 
     def _clear_all(self) -> None:
         self.well_host.clear()
+        self.well_section_host.clear()
         self.seismic_host.clear()
         self.cross_well_host.clear()
         self.map_host.clear()
