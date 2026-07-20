@@ -17,6 +17,12 @@ from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.factor_task_panel import FactorTaskPanel
 from paleo_workbench.ui.pages.well_table_panel import WellTablePanel
+from paleo_workbench.workflow.well_qc import qc_summary, run_well_table_qc
+from paleo_workbench.workflow.well_table import (
+    attach_well_table_to_factor_task,
+    sample_points_from_well_table,
+    well_table_from_factor_task,
+)
 
 
 class PreparationPage(QWidget):
@@ -120,8 +126,6 @@ class PreparationPage(QWidget):
             params = getattr(task, "parameters", None) or {}
             points = params.get("sample_points") if isinstance(params, dict) else None
             if points:
-                from paleo_workbench.workflow.well_table import well_table_from_factor_task
-
                 return well_table_from_factor_task(task)
         return None
 
@@ -139,12 +143,6 @@ class PreparationPage(QWidget):
             )
 
     def _run_well_qc_impl(self) -> None:
-        from paleo_workbench.workflow.well_qc import run_well_table_qc, qc_summary
-        from paleo_workbench.workflow.well_table import (
-            attach_well_table_to_factor_task,
-            well_table_from_factor_task,
-        )
-
         table = None
         if self._project.well_tables:
             table = self._project.well_tables[0]
@@ -164,8 +162,6 @@ class PreparationPage(QWidget):
         # Sync cleaned sample_points back onto linked tasks
         for task in self._project.factor_map_tasks:
             if task.well_table_id == table.id or task is self._project.factor_map_tasks[0]:
-                from paleo_workbench.workflow.well_table import sample_points_from_well_table
-
                 params = dict(task.parameters or {})
                 params["sample_points"] = sample_points_from_well_table(table)
                 task.parameters = params

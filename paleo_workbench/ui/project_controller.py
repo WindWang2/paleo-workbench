@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
+from paleo_workbench.project.paths import ProjectPathError
 from paleo_workbench.pipeline.assets import ensure_demo_prediction
 from paleo_workbench.pipeline.bootstrap import (
     bootstrap_sample_project,
@@ -36,8 +37,6 @@ class ProjectController:
         """Load project from path (no confirm — UI handlers ask before calling)."""
         self._last_open_error = None
         target = Path(path)
-        from paleo_workbench.project.paths import ProjectPathError
-
         try:
             loaded = ProjectManager(target).load()
         except FileNotFoundError:

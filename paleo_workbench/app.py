@@ -10,6 +10,7 @@ from paleo_workbench.ui import AppShell
 from paleo_workbench.ui.pages.preview_settings import PreviewSettingsStore
 from paleo_workbench.ui.project_controller import ProjectController
 from paleo_workbench.ui.workflow_controller import WorkflowController
+from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 
 
@@ -267,8 +268,6 @@ class PaleoWorkbenchWindow(QWidget):
             factor_tasks=self.project.factor_map_tasks,
             project_crs=self.project.coordinate.project_crs,
         )
-        from paleo_workbench.workflow.qc import active_quality_reports
-
         self.app_shell.update_review_export_page(
             active_quality_reports(self.project),
             self.project.paleomap_documents,

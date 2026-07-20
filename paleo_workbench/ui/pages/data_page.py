@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,17 +14,26 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
-from paleo_workbench.resources.exporters import get_available_formats
+from paleo_workbench.project.paths import resolve_project_path
+from paleo_workbench.resources.export_service import (
+    default_export_dir,
+    export_asset_to_path,
+    export_project_inventory,
+)
+from paleo_workbench.resources.exporters import extension_for_label, get_available_formats
 from paleo_workbench.resources.import_service import (
     ImportReport,
     import_files,
     import_folder,
 )
+from paleo_workbench.resources.io_registry import ROLE_BY_TYPE
 from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
+from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
+from paleo_workbench.ui.pages.filter_index import CATEGORIES
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
@@ -191,7 +201,6 @@ class DataPage(QWidget):
 
     def _shutdown_workers(self) -> None:
         """Stop preview + import threads before the page is destroyed."""
-        import sys
         wait_ms = 5000 if "pytest" in sys.modules else 100
         self._preview_controller.shutdown(wait_ms)
         self._visualization_controller.shutdown(wait_ms)
@@ -294,8 +303,6 @@ class DataPage(QWidget):
         raw = Path(resource.path)
         if raw.is_absolute() or self.project_path is None:
             return raw.expanduser()
-        from paleo_workbench.project.paths import resolve_project_path
-
         return Path(resolve_project_path(str(raw), self.project_path))
 
     def begin_import_paths(self, paths: list[Path]) -> bool:
@@ -435,8 +442,6 @@ class DataPage(QWidget):
             try:
                 item_path = Path(item.path)
                 if not item_path.is_absolute() and project_path is not None:
-                    from paleo_workbench.project.paths import resolve_project_path
-
                     item_path = Path(resolve_project_path(str(item.path), project_path))
                 if item_path.resolve() == path_resolved:
                     updated = item
@@ -538,7 +543,6 @@ class DataPage(QWidget):
 
         # Wire classify sub-actions (one per available type).
         if isinstance(asset, ResourceItem):
-            from paleo_workbench.ui.pages.filter_index import CATEGORIES
             for label, rtype in CATEGORIES.items():
                 if rtype is None or rtype == asset.type:
                     continue
@@ -557,13 +561,6 @@ class DataPage(QWidget):
             return
         if isinstance(asset, ExportArtifact):
             return
-        from paleo_workbench.resources.export_service import (
-            default_export_dir,
-            export_asset_to_path,
-            export_project_inventory,
-        )
-        from paleo_workbench.resources.exporters import extension_for_label
-
         project_file = self._project_file_for_io()
         if format_label == "INVENTORY":
             start = default_export_dir(project_file)
@@ -632,8 +629,6 @@ class DataPage(QWidget):
             return
         old_type = asset.type
         asset.type = new_type
-        from paleo_workbench.resources.io_registry import ROLE_BY_TYPE
-
         role = ROLE_BY_TYPE.get(new_type)
         asset.artifact_role = role
         # Keep a single role tag if present; preserve other free-form tags.
@@ -644,7 +639,6 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
-        from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
         old_label = RESOURCE_TYPE_LABELS.get(old_type, old_type)
         new_label = RESOURCE_TYPE_LABELS.get(new_type, new_type)
         self._set_action_status(f"已归类: {old_label} → {new_label}")

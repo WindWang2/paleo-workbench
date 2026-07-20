@@ -205,21 +205,25 @@ class PreviewProvider:
             )
 
         if fmt == "pptx":
+            # Deferred: circular pair — fallback_preview imports this module at top level.
             from paleo_workbench.ui.pages.fallback_preview import pptx_preview
 
             return pptx_preview(asset)
 
         if fmt == "dfb":
+            # Deferred: circular pair — fallback_preview imports this module at top level.
             from paleo_workbench.ui.pages.fallback_preview import dfb_preview
 
             return dfb_preview(asset)
 
         if fmt == "zip":
+            # Deferred: circular pair — fallback_preview imports this module at top level.
             from paleo_workbench.ui.pages.fallback_preview import zip_preview
 
             return zip_preview(asset, max_rows=self.settings.table_max_rows)
 
         if fmt == "wlp":
+            # Deferred: circular pair — fallback_preview imports this module at top level.
             from paleo_workbench.ui.pages.fallback_preview import wlp_preview
 
             return wlp_preview(asset)
@@ -296,6 +300,7 @@ class PreviewProvider:
             if xml_log is not None:
                 return xml_log
 
+            # Deferred: circular pair — fallback_preview imports this module at top level.
             from paleo_workbench.ui.pages.fallback_preview import spreadsheetml_preview
 
             spreadsheet = spreadsheetml_preview(
@@ -899,6 +904,7 @@ class PreviewProvider:
 
         volume = None
         try:
+            # Deferred: pulls in segyio/engine stack; keep lazy.
             from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
             volume, load_warning = load_seismic_volume_from_path(str(path))
         except Exception:

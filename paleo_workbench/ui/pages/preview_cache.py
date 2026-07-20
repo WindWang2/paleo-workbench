@@ -5,6 +5,7 @@ from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
+from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
 DEFAULT_PREVIEW_CACHE_BYTES = 128 * 1024 * 1024
 
@@ -43,8 +44,6 @@ def make_preview_cache_key(
     Filesystem (size, mtime_ns) invalidates on rewrite; checksum when present.
     """
     if settings_fingerprint is None:
-        from paleo_workbench.ui.pages.preview_settings import PreviewSettings
-
         settings_fingerprint = PreviewSettings.defaults().fingerprint()
 
     if isinstance(asset, ExportArtifact):

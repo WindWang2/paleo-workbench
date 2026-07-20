@@ -7,6 +7,10 @@ from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.sequence_boundary_table import SequenceBoundaryTable
 from paleo_workbench.ui.pages.sequence_scheme_summary import SequenceSchemeSummary
 from paleo_workbench.ui.pages.sequence_target_panel import SequenceTargetPanel
+from paleo_workbench.workflow.stratigraphy import (
+    apply_stratigraphy_scheme,
+    set_target_from_boundary,
+)
 
 
 class SequenceFrameworkPage(QWidget):
@@ -60,8 +64,6 @@ class SequenceFrameworkPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "层序方案", "未绑定工程，无法保存")
             return False
-        from paleo_workbench.workflow.stratigraphy import apply_stratigraphy_scheme
-
         target = self.target_panel.current_target()
         scheme = self.target_panel.current_scheme()
         if not target:
@@ -81,8 +83,6 @@ class SequenceFrameworkPage(QWidget):
     def _on_target_changed(self, target: str) -> None:
         if self._project is None or not target:
             return
-        from paleo_workbench.workflow.stratigraphy import apply_stratigraphy_scheme
-
         apply_stratigraphy_scheme(
             self._project,
             target_horizon=target,
@@ -96,8 +96,6 @@ class SequenceFrameworkPage(QWidget):
     def _on_scheme_changed(self, scheme: str) -> None:
         if self._project is None or not scheme:
             return
-        from paleo_workbench.workflow.stratigraphy import apply_stratigraphy_scheme
-
         apply_stratigraphy_scheme(
             self._project,
             systems_tract_scheme=scheme,
@@ -109,8 +107,6 @@ class SequenceFrameworkPage(QWidget):
     def _on_boundary_activated(self, boundary: str) -> None:
         if self._project is None:
             return
-        from paleo_workbench.workflow.stratigraphy import set_target_from_boundary
-
         set_target_from_boundary(self._project, boundary, bind_downstream=True)
         self.update_state(self._project.stratigraphy)
         self.scheme_summary.set_bind_status(f"已绑定 · 目标 {boundary}")

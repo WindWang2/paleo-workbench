@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 from geoviz import PaleoMapCanvas
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.viz.mapping_helpers import preview_payload_from_document
 
 
 class MapCanvasPanel(QFrame):
@@ -66,8 +67,6 @@ class MapCanvasPanel(QFrame):
             self.load_preview([], wells=[], period_name="")
             self.empty_label.setText("未选择古地理图")
             return
-
-        from paleo_workbench.viz.mapping_helpers import preview_payload_from_document
 
         features, wells, horizon = preview_payload_from_document(document)
         self.load_preview(features, wells=wells, period_name=horizon)

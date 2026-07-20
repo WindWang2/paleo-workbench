@@ -54,6 +54,7 @@ class DataReaderPanel(QFrame):
         self._settings_store = settings_store or PreviewSettingsStore()
         self.preview_settings = self._settings_store.load()
         if provider is None:
+            # Deferred: pulls in geoviz engine stack; keep startup cost lazy.
             from paleo_workbench.ui.pages.geoviz_preview_provider import (
                 LocalVisualizationProvider,
             )
@@ -179,6 +180,7 @@ class DataReaderPanel(QFrame):
     def geoviz_host(self):
         """Lazily create the GeoViz preview host (defers heavy geoviz import)."""
         if self._geoviz_host is None:
+            # Deferred: pulls in geoviz engine stack; keep startup cost lazy.
             from paleo_workbench.ui.pages.geoviz_preview_provider import (
                 LocalVisualizationProvider,
             )

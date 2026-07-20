@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QHeaderView, QTableWidget, QTableWidgetItem, QVBox
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.qc_helpers import derive_rule_result
+from paleo_workbench.workflow.qc import spatial_issues
 
 COLUMN_HEADERS = ["检查项目", "检查说明", "结果说明", "定位"]
 COLUMN_WIDTHS = [160, 0, 160, 100]  # 0 = stretch (检查说明)
@@ -40,8 +41,6 @@ class QCIssueTable(QWidget):
         if not reports:
             return
         report = reports[0]
-        from paleo_workbench.workflow.qc import spatial_issues
-
         for issue in spatial_issues(getattr(report, "issues", None)):
             rule = str(issue.get("rule") or "")
             self._spatial_by_rule.setdefault(rule, []).append(issue)

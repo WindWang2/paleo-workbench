@@ -49,6 +49,7 @@ class LazyVisualizationTabs(QTabWidget):
     @property
     def host(self):
         if self._host is None:
+            # Deferred: pulls in geoviz engine stack; keep startup cost lazy.
             from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
             self._host = GeoVizPreviewHost(self._engine)

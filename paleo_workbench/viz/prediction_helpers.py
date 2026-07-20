@@ -25,6 +25,7 @@ def well_log_data_from_prediction(task) -> WellLogData:
     Used when no LAS is bound. Real LAS path merges prediction onto loaded
     curves via ``merge_prediction_onto_well_log``.
     """
+    # Deferred: viz → workflow cross-layer edge; keep lazy until P3+ re-layering.
     from paleo_workbench.workflow.well_log_prediction import regions_to_depth_intervals
 
     regions = (field_value(task, "result_summary", {}) or {}).get("predicted_regions", [])
@@ -48,6 +49,7 @@ def well_log_data_from_prediction(task) -> WellLogData:
             )
         ],
     )
+    # Deferred: viz → workflow cross-layer edge; keep lazy until P3+ re-layering.
     from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
 
     return merge_prediction_onto_well_log(data, task)

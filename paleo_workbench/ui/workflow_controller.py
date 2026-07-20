@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox
 
+import paleo_workbench.workflow.factor_interpolation as factor_interpolation
+from paleo_workbench.pipeline.compile_map import compile_map_draft
+from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 from paleo_workbench.ui.navigation import (
     PAGE_INDEX_MAPPING,
@@ -115,8 +118,6 @@ class WorkflowController:
             page.reports_updated.connect(self._on_qc_reports_updated)
 
     def _on_qc_reports_updated(self) -> None:
-        from paleo_workbench.workflow.qc import active_quality_reports
-
         state = dashboard_state(self.window.project)
         steps = home_workflow_steps(self.window.project)
         self.window.app_shell.update_home_page(state, steps)
@@ -132,15 +133,11 @@ class WorkflowController:
 
     def _on_well_log_send_to_prep(self) -> None:
         """Batch-prepare factor maps from current project and open 制备 page."""
-        from paleo_workbench.workflow.factor_interpolation import (
-            batch_prepare_factor_maps,
-        )
-
         if not self.window.project.prediction_tasks:
             QMessageBox.information(self.window, "发送制备", "请先运行测井预测")
             return
         try:
-            batch_prepare_factor_maps(self.window.project, method="IDW")
+            factor_interpolation.batch_prepare_factor_maps(self.window.project, method="IDW")
         except Exception as exc:
             QMessageBox.warning(
                 self.window,
@@ -179,8 +176,6 @@ class WorkflowController:
 
     def _on_seismic_send_to_mapping(self) -> None:
         """Compile a map draft from the latest prediction and open 编图."""
-        from paleo_workbench.pipeline.compile_map import compile_map_draft
-
         if not self.window.project.prediction_tasks:
             QMessageBox.information(self.window, "发送编图", "请先运行地震预测")
             return
@@ -259,8 +254,6 @@ class WorkflowController:
             if reply == QMessageBox.StandardButton.Save:
                 if not page.save_draft():
                     return
-        from paleo_workbench.pipeline.compile_map import compile_map_draft
-
         compile_map_draft(self.window.project, seed=0)
         self.window._refresh_shell()
 

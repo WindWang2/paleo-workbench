@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMenu
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.resources.exporters import get_available_formats
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.pages.filter_index import CATEGORIES
 
 
 class AssetContextMenu(QMenu):
@@ -43,7 +44,6 @@ class AssetContextMenu(QMenu):
             # 归类为 (ResourceItem only) - 手动修改文件类型
             classify_menu = QMenu("归类为", self)
             current_type = asset.type
-            from paleo_workbench.ui.pages.filter_index import CATEGORIES
             for label, rtype in CATEGORIES.items():
                 if rtype is None or rtype == current_type:
                     continue

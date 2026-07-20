@@ -11,6 +11,10 @@ from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidenc
 from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
+from paleo_workbench.workflow.well_log_prediction import (
+    export_well_canvas,
+    run_well_log_facies_prediction,
+)
 
 
 class WellLogPredictionPage(QWidget):
@@ -93,10 +97,6 @@ class WellLogPredictionPage(QWidget):
             QMessageBox.warning(self, "测井预测", "未绑定工程，无法运行")
             return
         try:
-            from paleo_workbench.workflow.well_log_prediction import (
-                run_well_log_facies_prediction,
-            )
-
             run_well_log_facies_prediction(self._project, seed=len(self._tasks))
         except Exception as exc:
             QMessageBox.warning(
@@ -133,8 +133,6 @@ class WellLogPredictionPage(QWidget):
         if not path:
             return
         try:
-            from paleo_workbench.workflow.well_log_prediction import export_well_canvas
-
             export_well_canvas(self.canvas_panel.canvas, path, label)
         except Exception as exc:
             QMessageBox.warning(

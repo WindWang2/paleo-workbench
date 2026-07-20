@@ -9,6 +9,7 @@ from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePan
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
 from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
+from paleo_workbench.workflow.seismic_prediction import run_seismic_facies_prediction
 
 
 class SeismicPredictionPage(QWidget):
@@ -99,10 +100,6 @@ class SeismicPredictionPage(QWidget):
             QMessageBox.warning(self, "地震预测", "未绑定工程，无法运行")
             return
         try:
-            from paleo_workbench.workflow.seismic_prediction import (
-                run_seismic_facies_prediction,
-            )
-
             task = run_seismic_facies_prediction(self._project, seed=len(self._tasks))
         except Exception as exc:
             QMessageBox.warning(

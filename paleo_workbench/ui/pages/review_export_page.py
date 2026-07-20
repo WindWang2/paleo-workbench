@@ -18,6 +18,7 @@ from paleo_workbench.ui.pages.qc_issue_table import QCIssueTable
 from paleo_workbench.ui.pages.result_summary import ResultSummary
 from paleo_workbench.workflow.qc import active_quality_reports, run_basic_qc
 from paleo_workbench.workflow.qc_report_export import export_quality_report_json
+from paleo_workbench.workflow.versioning import finalize_map_version
 
 
 class ReviewExportPage(QWidget):
@@ -150,8 +151,6 @@ class ReviewExportPage(QWidget):
                     doc = d
                     break
         try:
-            from paleo_workbench.workflow.versioning import finalize_map_version
-
             vset = finalize_map_version(
                 self._project,
                 doc.id,
