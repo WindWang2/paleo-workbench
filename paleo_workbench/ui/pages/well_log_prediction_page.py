@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMessageBox, QVBoxLayout
 from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidencePanel
-from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task
+from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 

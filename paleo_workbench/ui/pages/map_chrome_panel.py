@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.mapping_helpers import field_value
+from paleo_workbench.viz.mapping_helpers import field_value
 
 
 DEFAULT_CHROME_ELEMENTS = ["图例", "指北针", "比例尺", "标题栏"]

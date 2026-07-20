@@ -49,7 +49,7 @@ class LazyVisualizationTabs(QTabWidget):
     @property
     def host(self):
         if self._host is None:
-            from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+            from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
             self._host = GeoVizPreviewHost(self._engine)
             self.visual_stack.addWidget(self._host)

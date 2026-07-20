@@ -4,7 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QFrame, QLabel, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.prediction_helpers import field_value
+from paleo_workbench.viz.prediction_helpers import field_value
 from paleo_workbench.workflow.seismic_prediction import SEISMIC_DISPLAY_MODES
 
 

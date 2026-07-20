@@ -1,6 +1,6 @@
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_document_panel import MapDocumentPanel
-from paleo_workbench.ui.pages.mapping_helpers import active_map_document
+from paleo_workbench.viz.mapping_helpers import active_map_document
 
 
 def test_active_map_document_selects_latest():

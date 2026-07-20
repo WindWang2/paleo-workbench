@@ -46,7 +46,7 @@ def _preview(kind: PreviewKind, title: str) -> PreparedPreview:
 
 
 def test_host_reuses_widget_for_consecutive_previews_of_same_kind(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)
@@ -63,7 +63,7 @@ def test_host_reuses_widget_for_consecutive_previews_of_same_kind(qtbot):
 
 
 def test_host_releases_and_hides_old_widget_when_kind_changes(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)
@@ -91,7 +91,7 @@ def test_host_releases_and_hides_old_widget_when_kind_changes(qtbot):
 
 
 def test_host_clear_completes_active_widget_lifecycle(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)
@@ -106,7 +106,7 @@ def test_host_clear_completes_active_widget_lifecycle(qtbot):
 
 
 def test_host_release_all_completes_cached_widget_lifecycle(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)
@@ -122,7 +122,7 @@ def test_host_release_all_completes_cached_widget_lifecycle(qtbot):
 
 
 def test_host_rejects_render_outside_ui_thread(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     host = GeoVizPreviewHost(RecordingEngine())
     qtbot.addWidget(host)
@@ -134,7 +134,7 @@ def test_host_rejects_render_outside_ui_thread(qtbot):
 
 
 def test_host_create_failure_leaves_no_cached_or_active_widget(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     create_error = RuntimeError("create failed")
@@ -153,7 +153,7 @@ def test_host_create_failure_leaves_no_cached_or_active_widget(qtbot):
 
 
 def test_host_new_widget_render_failure_terminally_disposes_widget(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     render_error = RuntimeError("render failed")
@@ -174,7 +174,7 @@ def test_host_new_widget_render_failure_terminally_disposes_widget(qtbot):
 
 
 def test_host_same_kind_render_failure_terminally_disposes_reused_widget(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)
@@ -196,7 +196,7 @@ def test_host_same_kind_render_failure_terminally_disposes_reused_widget(qtbot):
 
 
 def test_host_render_preserves_render_error_when_cleanup_release_also_fails(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     render_error = RuntimeError("render failed")
@@ -218,7 +218,7 @@ def test_host_render_preserves_render_error_when_cleanup_release_also_fails(qtbo
 
 
 def test_host_release_failure_still_completes_local_terminal_cleanup(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)
@@ -239,7 +239,7 @@ def test_host_release_failure_still_completes_local_terminal_cleanup(qtbot):
 
 
 def test_host_release_all_cleans_every_widget_then_reraises_first_error(qtbot):
-    from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+    from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
     engine = RecordingEngine()
     host = GeoVizPreviewHost(engine)

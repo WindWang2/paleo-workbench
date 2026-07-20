@@ -9,7 +9,7 @@ from geoviz import SeismicView
 
 from paleo_workbench.pipeline.assets import SEISMIC_KEY
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.seismic_prediction_helpers import seismic_volume_from_prediction
+from paleo_workbench.viz.seismic_prediction_helpers import seismic_volume_from_prediction
 from paleo_workbench.viz.adapter import VizAdapter
 
 

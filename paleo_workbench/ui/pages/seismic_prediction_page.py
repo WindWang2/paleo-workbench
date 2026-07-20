@@ -4,7 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task
+from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar

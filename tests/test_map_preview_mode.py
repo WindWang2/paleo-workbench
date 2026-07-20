@@ -2,7 +2,7 @@ from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
 from paleo_workbench.ui.pages.map_chrome_panel import MapChromePanel
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
-from paleo_workbench.ui.pages.mapping_helpers import (
+from paleo_workbench.viz.mapping_helpers import (
     facies_to_geojson,
     preview_payload_from_document,
     preview_payload_from_features,

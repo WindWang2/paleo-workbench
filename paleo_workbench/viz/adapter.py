@@ -132,10 +132,10 @@ class VizAdapter:
         # Soft-fail like resolve(): never raise into UI handlers.
         name = str(getattr(task, "name", "") or "") or "prediction"
         try:
-            from paleo_workbench.ui.pages.prediction_helpers import (
+            from paleo_workbench.viz.prediction_helpers import (
                 well_log_data_from_prediction,
             )
-            from paleo_workbench.ui.pages.seismic_prediction_helpers import (
+            from paleo_workbench.viz.seismic_prediction_helpers import (
                 seismic_volume_from_prediction,
             )
 

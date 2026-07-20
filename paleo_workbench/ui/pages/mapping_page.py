@@ -22,7 +22,7 @@ from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
-from paleo_workbench.ui.pages.mapping_helpers import (
+from paleo_workbench.viz.mapping_helpers import (
     active_map_document,
     field_value,
     preview_payload_from_document,

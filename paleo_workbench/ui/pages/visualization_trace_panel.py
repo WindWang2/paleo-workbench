@@ -4,8 +4,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.mapping_helpers import active_map_document
-from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task, field_value
+from paleo_workbench.viz.mapping_helpers import active_map_document
+from paleo_workbench.viz.prediction_helpers import active_prediction_task, field_value
 from paleo_workbench.viz.models import VizPayload, VizRef
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from paleo_workbench.ui.pages.prediction_helpers import field_value
+from paleo_workbench.viz.prediction_helpers import field_value
 
 
 def seismic_volume_from_prediction(task, shape: tuple[int, int, int] = (8, 10, 12)) -> np.ndarray:

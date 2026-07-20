@@ -108,7 +108,7 @@ def test_from_prediction_still_works():
 
 def test_from_prediction_soft_fails_on_helper_error(monkeypatch):
     from paleo_workbench.project.models import PredictionTask
-    import paleo_workbench.ui.pages.prediction_helpers as prediction_helpers
+    import paleo_workbench.viz.prediction_helpers as prediction_helpers
 
     def _boom(_task):
         raise RuntimeError("mock converter broken")

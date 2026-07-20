@@ -9,7 +9,7 @@ from geoviz import WellLogCanvas, build_qpainter_tracks
 
 from paleo_workbench.pipeline.assets import WELL_KEY
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.prediction_helpers import well_log_data_from_prediction
+from paleo_workbench.viz.prediction_helpers import well_log_data_from_prediction
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
 

@@ -4,7 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task, field_value
+from paleo_workbench.viz.prediction_helpers import active_prediction_task, field_value
 
 
 class TaskPanelBase(QFrame):

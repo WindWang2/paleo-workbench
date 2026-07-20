@@ -2,7 +2,7 @@ import numpy as np
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.ui.pages.seismic_prediction_helpers import seismic_volume_from_prediction
+from paleo_workbench.viz.seismic_prediction_helpers import seismic_volume_from_prediction
 
 
 def test_seismic_volume_from_prediction_is_deterministic():

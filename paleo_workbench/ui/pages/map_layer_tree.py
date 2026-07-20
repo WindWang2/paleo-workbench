@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.mapping_helpers import field_value
+from paleo_workbench.viz.mapping_helpers import field_value
 
 LAYER_KEYS = ("facies", "well", "line", "label")
 LAYER_LABELS = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from geoviz import GeoVizEngine, PreparedPreview
 
-from paleo_workbench.ui.pages.geoviz_preview_host import GeoVizPreviewHost
+from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 from paleo_workbench.viz.models import VizPayload
 
 

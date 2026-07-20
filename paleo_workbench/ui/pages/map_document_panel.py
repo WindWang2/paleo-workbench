@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QLabel, QListWidget, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.mapping_helpers import active_map_document, field_value
+from paleo_workbench.viz.mapping_helpers import active_map_document, field_value
 
 
 class MapDocumentPanel(QFrame):

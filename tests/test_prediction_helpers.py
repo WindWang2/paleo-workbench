@@ -2,7 +2,7 @@ from geoviz import WellLogData
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.ui.pages.prediction_helpers import (
+from paleo_workbench.viz.prediction_helpers import (
     active_prediction_task,
     well_log_data_from_prediction,
 )

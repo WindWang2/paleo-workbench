@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QTabWidget, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task
+from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.hosts import (
     CrossWellHost,

@@ -2,13 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def field_value(source: Any, name: str, default: Any = None) -> Any:
-    if source is None:
-        return default
-    if isinstance(source, dict):
-        return source.get(name, default)
-    return getattr(source, name, default)
+from paleo_workbench.viz.prediction_helpers import field_value  # noqa: F401  (re-export)
 
 
 def active_map_document(
