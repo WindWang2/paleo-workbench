@@ -14,6 +14,15 @@ from typing import Any
 import numpy as np
 
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
+from paleo_workbench.workflow.constraints import (
+    break_polylines_for_idw,
+    constraint_layers_for_project,
+    direction_line_params,
+)
+from paleo_workbench.workflow.directional_trend import (
+    extract_xy_z_weights,
+    resolve_anisotropy_params,
+)
 
 GENERATOR_VERSION = "factor-interp-v1"
 DEFAULT_FACTOR_TYPES = ("地层厚度", "砂岩含量", "砂地比", "泥岩含量")
@@ -231,8 +240,6 @@ def interpolate_factor_grid(
     backend = _METHOD_BACKEND.get(method, "idw")
     q = b_i = None
     if backend == "directional":
-        from paleo_workbench.workflow.directional_trend import extract_xy_z_weights
-
         x, y, z, q, b_i = extract_xy_z_weights(sample_points)
     else:
         x, y, z = extract_xy_values(sample_points)
@@ -316,13 +323,6 @@ def apply_interpolation_to_task(
     breaks = fault_polylines
     az, a_axis, b_axis = 0.0, 1.0, 0.4
     if project is not None:
-        from paleo_workbench.workflow.constraints import (
-            break_polylines_for_idw,
-            constraint_layers_for_project,
-            direction_line_params,
-        )
-        from paleo_workbench.workflow.directional_trend import resolve_anisotropy_params
-
         layers = constraint_layers_for_project(
             project, target_horizon=task.target_horizon
         )

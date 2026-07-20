@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import paleo_workbench.viz.prediction_helpers as prediction_helpers
+import paleo_workbench.viz.seismic_prediction_helpers as seismic_prediction_helpers
+from paleo_workbench.pipeline.assets import SEISMIC_KEY
+from paleo_workbench.project.paths import is_within_directory
 from paleo_workbench.viz.map_load import load_map_payload_from_document
 from paleo_workbench.viz.models import VizPayload, VizRef
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
@@ -132,19 +136,11 @@ class VizAdapter:
         # Soft-fail like resolve(): never raise into UI handlers.
         name = str(getattr(task, "name", "") or "") or "prediction"
         try:
-            from paleo_workbench.viz.prediction_helpers import (
-                well_log_data_from_prediction,
-            )
-            from paleo_workbench.viz.seismic_prediction_helpers import (
-                seismic_volume_from_prediction,
-            )
-
-            well_log = well_log_data_from_prediction(task)
-            seismic_volume = seismic_volume_from_prediction(task)
+            well_log = prediction_helpers.well_log_data_from_prediction(task)
+            seismic_volume = seismic_prediction_helpers.seismic_volume_from_prediction(task)
             
             seismic_path = ""
             if project is not None:
-                from paleo_workbench.pipeline.assets import SEISMIC_KEY
                 ids = (getattr(task, "input_refs", None) or {}).get(SEISMIC_KEY) or []
                 if ids:
                     by_id = {r.id: r for r in (getattr(project, "resources", None) or [])}
@@ -175,8 +171,6 @@ class VizAdapter:
 
         Relative joins are confined to ``project_root`` (no ``..`` escape).
         """
-        from paleo_workbench.project.paths import is_within_directory
-
         candidate = Path(path).expanduser()
         if candidate.is_file():
             return str(candidate.resolve())

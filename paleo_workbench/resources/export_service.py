@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
-from paleo_workbench.project.paths import ensure_artifact_layout, relativize_path
+from paleo_workbench.project.paths import (
+    ensure_artifact_layout,
+    relativize_path,
+    resolve_project_path,
+)
 from paleo_workbench.resources.exporters import ExportError, get_available_formats
 from paleo_workbench.resources.io_registry import TYPE_LABELS, VIEW_EXPORT_FORMATS
 from paleo_workbench.project.artifacts import record_export
@@ -137,8 +141,6 @@ def export_asset_to_path(
     input_path = Path(asset.path)
     if project_path is not None:
         try:
-            from paleo_workbench.project.paths import resolve_project_path
-
             input_path = Path(resolve_project_path(str(input_path), project_path))
         except Exception:
             pass

@@ -25,6 +25,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setStyleSheet(tokens.QSS_TEMPLATE)
     try:
+        # Deferred: keep CLI startup light (pulls in pipeline + project stack).
         from paleo_workbench.pipeline.bootstrap import (
             bootstrap_sample_project,
             resolve_sample_data_root,
