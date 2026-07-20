@@ -46,6 +46,7 @@ class WellLogHost:
         layout.addWidget(self.track_bar)
 
         self.canvas = WellLogCanvas()
+        self.widget.canvas = self.canvas
         layout.addWidget(self.canvas, 1)
 
     def clear(self) -> None:

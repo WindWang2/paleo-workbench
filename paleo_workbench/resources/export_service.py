@@ -74,6 +74,13 @@ def _resolve_export_target(widget: Any) -> Any:
         return widget
     if _is_paleo_map_canvas(widget):
         return widget
+    canvas = getattr(widget, "canvas", None)
+    if canvas is not None and (
+        hasattr(canvas, "export_composite")
+        or hasattr(canvas, "paint_all")
+        or _is_paleo_map_canvas(canvas)
+    ):
+        return canvas
     inner = getattr(widget, "widget", None)
     if inner is not None and (
         hasattr(inner, "export_composite")
