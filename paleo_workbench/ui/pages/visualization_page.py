@@ -45,7 +45,7 @@ class VisualizationPage(QWidget):
         content.setSpacing(tokens.SPACE_4)
 
         self.summary_panel = VisualizationSummaryPanel()
-        content.addWidget(self.summary_panel, 0)
+        self.summary_panel.setHidden(True)
 
         self.composite_panel = CompositeVisualizationPanel()
         content.addWidget(self.composite_panel, 1)
