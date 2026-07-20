@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, QSize, Qt, QUrl
-from PySide6.QtGui import QImage, QPixmap, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QColor, QFont, QImage, QPixmap, QStandardItem, QStandardItemModel
 try:
     from PySide6.QtPdf import QPdfDocument
 except ImportError:  # pragma: no cover
@@ -189,7 +189,60 @@ class TablePreviewWidget(QTableWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.setAlternatingRowColors(True)
+        self.setShowGrid(True)
         self.auto_fit_columns = True
+
+        self.setStyleSheet(
+            f"""
+            QTableWidget {{
+                background-color: #ffffff;
+                alternate-background-color: #f8fafc;
+                gridline-color: #e2e8f0;
+                border: 1px solid {tokens.BORDER};
+                border-radius: 6px;
+                font-family: {tokens.FONT_FAMILY};
+                font-size: 12px;
+                color: #1e293b;
+                selection-background-color: #e0f2fe;
+                selection-color: #0369a1;
+                outline: none;
+            }}
+            QTableWidget::item {{
+                padding: 5px 8px;
+                border-bottom: 1px solid #f1f5f9;
+            }}
+            QTableWidget::item:hover {{
+                background-color: #f1f5f9;
+            }}
+            QTableWidget::item:selected {{
+                background-color: #e0f2fe;
+                color: #0369a1;
+                font-weight: 600;
+            }}
+            QHeaderView::section {{
+                background-color: #f1f5f9;
+                color: #475569;
+                padding: 6px 8px;
+                font-weight: 600;
+                font-size: 12px;
+                border: none;
+                border-bottom: 2px solid #cbd5e1;
+                border-right: 1px solid #e2e8f0;
+            }}
+            QHeaderView::section:horizontal {{
+                border-top: none;
+            }}
+            QHeaderView::section:vertical {{
+                background-color: #f8fafc;
+                color: #94a3b8;
+                font-size: 11px;
+                font-weight: 500;
+                border-right: 1px solid #e2e8f0;
+            }}
+            """
+        )
+        self.verticalHeader().setDefaultSectionSize(28)
 
     def apply_settings(self, settings) -> None:
         font = self.font()
@@ -203,6 +256,16 @@ class TablePreviewWidget(QTableWidget):
         )
         self.horizontalHeader().setSectionResizeMode(mode)
 
+    @staticmethod
+    def _is_number(val: str) -> bool:
+        if val == "NaN":
+            return True
+        try:
+            float(val)
+            return True
+        except ValueError:
+            return False
+
     def load_table(
         self,
         headers: tuple[str, ...],
@@ -212,11 +275,50 @@ class TablePreviewWidget(QTableWidget):
         self.setColumnCount(len(headers))
         self.setHorizontalHeaderLabels(list(headers))
         self.setRowCount(len(rows))
+
+        is_curve_def = len(headers) >= 3 and headers[0] in ("曲线", "Mnemonic")
+
         for row_index, row in enumerate(rows):
+            self.setRowHeight(row_index, 28)
             for column_index, value in enumerate(row):
-                self.setItem(row_index, column_index, QTableWidgetItem(value))
+                val_str = str(value).strip() if value is not None else ""
+                item = QTableWidgetItem(val_str)
+                header_name = headers[column_index] if column_index < len(headers) else ""
+
+                # 1. Depth column (DEPT / DEPTH / 深度)
+                if header_name.upper() in ("DEPT", "DEPTH", "深度"):
+                    item.setFont(QFont("Cascadia Code", 9, QFont.Weight.Bold))
+                    item.setForeground(QColor("#1d4ed8"))
+                    item.setBackground(QColor("#f0f9ff"))
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+                # 2. Curve mnemonic tag formatting in curve definition table
+                elif is_curve_def and column_index == 0:
+                    item.setFont(QFont("Cascadia Code", 9, QFont.Weight.Bold))
+                    item.setForeground(QColor("#0f766e"))
+                    item.setBackground(QColor("#f0fdf4"))
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+
+                # 3. Unit column formatting
+                elif is_curve_def and column_index == 1:
+                    item.setFont(QFont("Cascadia Code", 9))
+                    item.setForeground(QColor("#64748b"))
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+
+                # 4. Numeric curve data formatting
+                elif self._is_number(val_str):
+                    item.setFont(QFont("Cascadia Code", 9))
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    if val_str == "NaN":
+                        item.setForeground(QColor("#94a3b8"))
+
+                self.setItem(row_index, column_index, item)
+
         if self.auto_fit_columns:
             self.resizeColumnsToContents()
+            for col in range(self.columnCount()):
+                width = max(self.columnWidth(col) + 16, 75)
+                self.setColumnWidth(col, width)
 
 
 class SummaryTablePreviewWidget(QWidget):
@@ -228,13 +330,40 @@ class SummaryTablePreviewWidget(QWidget):
 
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
+        self.message_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11.5px;")
         layout.addWidget(self.message_label)
 
         self.tabs = QTabWidget(self)
         self.tabs.setStyleSheet(
-            f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; background: {tokens.BG_SEARCH}; }}"
-            f" QTabBar::tab {{ padding: 6px 12px; margin-top: 2px; }}"
+            f"""
+            QTabWidget::pane {{
+                border: 1px solid {tokens.BORDER};
+                border-radius: 6px;
+                background: #ffffff;
+            }}
+            QTabBar::tab {{
+                background: #f8fafc;
+                color: #64748b;
+                border: 1px solid {tokens.BORDER};
+                border-bottom: none;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+                padding: 6px 14px;
+                margin-right: 3px;
+                font-weight: 500;
+                font-size: 12px;
+            }}
+            QTabBar::tab:selected {{
+                background: #ffffff;
+                color: {tokens.PRIMARY};
+                font-weight: 600;
+                border-bottom: 2px solid {tokens.PRIMARY};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: #f1f5f9;
+                color: #334155;
+            }}
+            """
         )
 
         # Tab 1: Curve definitions and metadata summary
@@ -243,8 +372,26 @@ class SummaryTablePreviewWidget(QWidget):
         info_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         info_layout.setSpacing(tokens.SPACE_2)
 
+        # Stat cards bar
+        self.stat_bar = QWidget()
+        stat_layout = QHBoxLayout(self.stat_bar)
+        stat_layout.setContentsMargins(2, 2, 2, 4)
+        stat_layout.setSpacing(8)
+
+        self.chip_well = self._create_stat_chip("📌 井名", "—", "#1e40af", "#eff6ff")
+        self.chip_curves = self._create_stat_chip("📊 曲线数", "0 条", "#0f766e", "#f0fdf4")
+        self.chip_samples = self._create_stat_chip("📏 采样点", "0 点", "#6b21a8", "#faf5ff")
+
+        stat_layout.addWidget(self.chip_well)
+        stat_layout.addWidget(self.chip_curves)
+        stat_layout.addWidget(self.chip_samples)
+        stat_layout.addStretch()
+
+        info_layout.addWidget(self.stat_bar)
+
         self.summary_table = TablePreviewWidget()
         self.detail_table = TablePreviewWidget()
+
         info_layout.addWidget(self.summary_table)
         info_layout.addWidget(self.detail_table, 1)
 
@@ -263,6 +410,44 @@ class SummaryTablePreviewWidget(QWidget):
 
         layout.addWidget(self.tabs, 1)
 
+    @staticmethod
+    def _create_stat_chip(title: str, default_val: str, fg_color: str, bg_color: str) -> QWidget:
+        box = QWidget()
+        box.setStyleSheet(
+            f"""
+            QWidget {{
+                background-color: {bg_color};
+                border: 1px solid {fg_color}33;
+                border-radius: 6px;
+            }}
+            """
+        )
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(8, 4, 10, 4)
+        lay.setSpacing(6)
+
+        t_lbl = QLabel(title)
+        t_lbl.setStyleSheet(f"color: {fg_color}; font-size: 11px; font-weight: 500;")
+        val_lbl = QLabel(default_val)
+        val_lbl.setObjectName("chip_val")
+        val_lbl.setStyleSheet(f"color: {fg_color}; font-size: 12px; font-weight: 700;")
+
+        lay.addWidget(t_lbl)
+        lay.addWidget(val_lbl)
+        return box
+
+    def _update_chip_val(self, chip: QWidget, text: str) -> None:
+        lbl = chip.findChild(QLabel, "chip_val")
+        if lbl:
+            lbl.setText(text)
+
+    def _adjust_summary_height(self) -> None:
+        total = self.summary_table.horizontalHeader().height() or 28
+        for row in range(self.summary_table.rowCount()):
+            total += self.summary_table.rowHeight(row)
+        total += 6
+        self.summary_table.setFixedHeight(min(max(total, 60), 120))
+
     def load_summary(
         self,
         summary_rows: tuple[tuple[str, str], ...],
@@ -274,6 +459,22 @@ class SummaryTablePreviewWidget(QWidget):
     ) -> None:
         self.message_label.setText(message)
         self.summary_table.load_table(("属性", "值"), summary_rows)
+        self._adjust_summary_height()
+
+        # Update stat chips from summary rows
+        row_map = {str(k).strip(): str(v).strip() for k, v in summary_rows}
+        if "井名" in row_map:
+            self._update_chip_val(self.chip_well, row_map["井名"])
+        if "曲线数" in row_map:
+            self._update_chip_val(self.chip_curves, f"{row_map['曲线数']} 条")
+        if "采样点" in row_map:
+            val_str = row_map["采样点"]
+            try:
+                val_str = f"{int(val_str):,}"
+            except ValueError:
+                pass
+            self._update_chip_val(self.chip_samples, f"{val_str} 点")
+
         self.detail_table.load_table(detail_headers, detail_rows)
 
         if data_headers and data_rows:
