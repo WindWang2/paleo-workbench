@@ -89,12 +89,15 @@ class WellLogCanvasPanel(QFrame):
     def _show_well_log(self, data, *, bound_las: bool = False) -> None:
         self.well_log_data = data
         self._bound_las = bound_las
-        self.canvas.set_tracks(build_qpainter_tracks(self.well_log_data))
+        tracks = build_qpainter_tracks(self.well_log_data)
+        self.canvas.set_tracks(tracks)
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.canvas)
         name = getattr(data, "well_name", "") or ""
         src = "LAS" if bound_las else "合成"
-        self.title_label.setText(f"测井预测剖面 · {name} ({src})" if name else "测井预测剖面")
+        track_names = [t.label for t in tracks if getattr(t, "label", None)]
+        t_str = f"  [{' | '.join(track_names)}]" if track_names else ""
+        self.title_label.setText(f"测井预测剖面 · {name} ({src}){t_str}" if name else f"测井预测剖面{t_str}")
         self.canvas_ready.emit(True)
 
     def update_state(self, task, project=None) -> None:

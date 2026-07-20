@@ -56,7 +56,7 @@ class CompositeVisualizationPanel(QFrame):
         self.engine_host = EnginePreviewHost()
 
         # Backward-compatible attributes used by tests and trace code.
-        self.well_canvas = self.well_host.widget
+        self.well_canvas = self.well_host.canvas
         self.seismic_view = self.seismic_host.widget
         self.cross_well_canvas = self.cross_well_host.widget
         self.cross_well_widget = self.cross_well_host.inner
