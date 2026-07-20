@@ -3,6 +3,11 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMessageBox
 
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
+from paleo_workbench.ui.navigation import (
+    PAGE_INDEX_MAPPING,
+    PAGE_INDEX_PREPARATION,
+    PAGE_INDEX_VISUALIZATION,
+)
 from paleo_workbench.ui.preview_settings_dialog import PreviewSettingsDialog
 
 
@@ -127,7 +132,6 @@ class WorkflowController:
 
     def _on_well_log_send_to_prep(self) -> None:
         """Batch-prepare factor maps from current project and open 制备 page."""
-        from paleo_workbench.ui.app_shell import PAGE_INDEX_PREPARATION
         from paleo_workbench.workflow.factor_interpolation import (
             batch_prepare_factor_maps,
         )
@@ -176,7 +180,6 @@ class WorkflowController:
     def _on_seismic_send_to_mapping(self) -> None:
         """Compile a map draft from the latest prediction and open 编图."""
         from paleo_workbench.pipeline.compile_map import compile_map_draft
-        from paleo_workbench.ui.app_shell import PAGE_INDEX_MAPPING
 
         if not self.window.project.prediction_tasks:
             QMessageBox.information(self.window, "发送编图", "请先运行地震预测")
@@ -262,8 +265,6 @@ class WorkflowController:
         self.window._refresh_shell()
 
     def _on_open_in_visualization(self, ref) -> None:
-        from paleo_workbench.ui.app_shell import PAGE_INDEX_VISUALIZATION
-
         self.window.app_shell.icon_rail.set_active(PAGE_INDEX_VISUALIZATION)
         self.window.app_shell._switch_page(PAGE_INDEX_VISUALIZATION)
         viz = self.window.app_shell.page_stack.widget(PAGE_INDEX_VISUALIZATION)

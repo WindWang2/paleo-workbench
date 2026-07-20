@@ -1,0 +1,14 @@
+"""Stable page indices for AppShell navigation (avoid magic numbers)."""
+
+from __future__ import annotations
+
+PAGE_INDEX_HOME = 0
+PAGE_INDEX_DATA = 1
+PAGE_INDEX_WELL_LOG = 2
+PAGE_INDEX_SEISMIC = 3
+PAGE_INDEX_SEQUENCE = 4
+PAGE_INDEX_STRATIGRAPHY = 5
+PAGE_INDEX_VISUALIZATION = 6
+PAGE_INDEX_PREPARATION = 7
+PAGE_INDEX_MAPPING = 8
+PAGE_INDEX_REVIEW = 9

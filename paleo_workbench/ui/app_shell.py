@@ -27,17 +27,20 @@ from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui import tokens
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
-# Stable page indices (avoid magic numbers in callers/tests).
-PAGE_INDEX_HOME = 0
-PAGE_INDEX_DATA = 1
-PAGE_INDEX_WELL_LOG = 2
-PAGE_INDEX_SEISMIC = 3
-PAGE_INDEX_SEQUENCE = 4
-PAGE_INDEX_STRATIGRAPHY = 5
-PAGE_INDEX_VISUALIZATION = 6
-PAGE_INDEX_PREPARATION = 7
-PAGE_INDEX_MAPPING = 8
-PAGE_INDEX_REVIEW = 9
+# Stable page indices, re-exported for backwards compatibility (callers/tests
+# import them from here); canonical definition lives in ui/navigation.py.
+from paleo_workbench.ui.navigation import (
+    PAGE_INDEX_DATA,
+    PAGE_INDEX_HOME,
+    PAGE_INDEX_MAPPING,
+    PAGE_INDEX_PREPARATION,
+    PAGE_INDEX_REVIEW,
+    PAGE_INDEX_SEISMIC,
+    PAGE_INDEX_SEQUENCE,
+    PAGE_INDEX_STRATIGRAPHY,
+    PAGE_INDEX_VISUALIZATION,
+    PAGE_INDEX_WELL_LOG,
+)
 
 
 class AppShell(QWidget):
