@@ -202,7 +202,6 @@ class TablePreviewWidget(QTableWidget):
                 border: 1px solid {tokens.BORDER};
                 border-radius: 6px;
                 font-family: {tokens.FONT_FAMILY};
-                font-size: 12px;
                 color: #1e293b;
                 selection-background-color: #e0f2fe;
                 selection-color: #0369a1;
