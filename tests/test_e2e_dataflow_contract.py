@@ -12,11 +12,11 @@ import json
 from paleo_workbench.pipeline.compile_map import compile_map_draft
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.manager import ProjectManager
+from paleo_workbench.project.artifacts import record_export
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
 from paleo_workbench.resources.export_service import export_project_inventory
 from paleo_workbench.resources.import_service import import_files
 from paleo_workbench.viz.adapter import VizAdapter
-from paleo_workbench.workflow.export import record_export
 from paleo_workbench.workflow.factors import create_mock_factor_map
 from paleo_workbench.workflow.qc import run_basic_qc
 from paleo_workbench.workflow.service import create_compilation_run, dashboard_state

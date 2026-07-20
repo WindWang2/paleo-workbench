@@ -3,10 +3,10 @@ import json
 
 from paleo_workbench.app import PaleoWorkbenchWindow
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
+from paleo_workbench.project.artifacts import record_export
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument
 from paleo_workbench.resources.scanner import scan_resources
-from paleo_workbench.workflow.export import record_export
 from paleo_workbench.workflow.factors import create_mock_factor_map
 from paleo_workbench.workflow.qc import run_basic_qc
 from paleo_workbench.workflow.service import create_compilation_run, dashboard_state

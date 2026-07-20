@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from paleo_workbench.project.artifacts import record_export
 from paleo_workbench.project.models import QualityReport
-from paleo_workbench.workflow.export import record_export
 
 
 def export_quality_report_json(

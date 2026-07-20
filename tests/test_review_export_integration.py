@@ -1,7 +1,7 @@
 from paleo_workbench.app import PaleoWorkbenchWindow
+from paleo_workbench.project.artifacts import record_export
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument
 from paleo_workbench.ui.pages.review_export_page import ReviewExportPage
-from paleo_workbench.workflow.export import record_export
 from paleo_workbench.workflow.qc import run_basic_qc
 
 

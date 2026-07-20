@@ -9,13 +9,9 @@ from typing import Any, Callable
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 from paleo_workbench.project.paths import ensure_artifact_layout, relativize_path
-from paleo_workbench.resources.exporters import (
-    ExportError,
-    extension_for_label,
-    get_available_formats,
-)
+from paleo_workbench.resources.exporters import ExportError, get_available_formats
 from paleo_workbench.resources.io_registry import TYPE_LABELS, VIEW_EXPORT_FORMATS
-from paleo_workbench.workflow.export import record_export
+from paleo_workbench.project.artifacts import record_export
 
 
 @dataclass
