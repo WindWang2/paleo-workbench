@@ -697,38 +697,78 @@ class PreviewProvider:
         data_headers: list[str] = [c[0] for c in curve_infos]
         data_rows: list[tuple[str, ...]] = []
 
-        # 1. Parse text lines inside <logData> or <data>
+        # 1. Check SpreadsheetML / Excel XML format (<Table><Row><Cell><Data>)
+        all_rows: list[list[str]] = []
         for elem in root.iter():
-            tag = clean_tag(elem.tag).lower()
-            if tag in ("logdata", "data"):
-                lines: list[str] = []
-                if elem.text:
-                    lines.extend(elem.text.strip().splitlines())
+            if clean_tag(elem.tag).lower() == "table":
                 for child in elem:
-                    if clean_tag(child.tag).lower() in ("data", "row", "line") and child.text:
-                        lines.extend(child.text.strip().splitlines())
-                for line in lines:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    parts = [p.strip() for p in re.split(r"[\s,;]+", line)]
-                    if parts:
-                        data_rows.append(tuple(parts))
-                    if len(data_rows) >= self.settings.table_max_rows:
-                        break
-                if data_rows:
+                    if clean_tag(child.tag).lower() == "row":
+                        row_vals: list[str] = []
+                        for cell in child:
+                            if clean_tag(cell.tag).lower() == "cell":
+                                cell_text = ""
+                                for data_node in cell:
+                                    if clean_tag(data_node.tag).lower() == "data":
+                                        cell_text = (data_node.text or "").strip()
+                                        break
+                                if not cell_text and cell.text:
+                                    cell_text = cell.text.strip()
+                                row_vals.append(cell_text)
+                        if row_vals:
+                            all_rows.append(row_vals)
+                if all_rows:
                     break
 
-        # 2. Alternative: repeated XML nodes <row> or <record>
+        if all_rows and len(all_rows) > 1:
+            data_headers = [str(h).strip() for h in all_rows[0] if str(h).strip()]
+            raw_data_rows = all_rows[1:]
+
+            # Check if first header is "井号" or well identifier
+            if data_headers and data_headers[0] in ("井号", "Well", "WELL_NAME", "WELL"):
+                well_names = [r[0] for r in raw_data_rows if r and r[0]]
+                if well_names:
+                    well_name = well_names[0]
+
+            data_rows = [
+                tuple(r[: len(data_headers)])
+                for r in raw_data_rows[: self.settings.table_max_rows]
+            ]
+
+        # 2. Parse WITSML text lines inside <logData> or <data>
+        if not data_rows:
+            for elem in root.iter():
+                tag = clean_tag(elem.tag).lower()
+                if tag in ("logdata",):
+                    lines: list[str] = []
+                    if elem.text:
+                        lines.extend(elem.text.strip().splitlines())
+                    for child in elem:
+                        if clean_tag(child.tag).lower() in ("data", "row", "line") and child.text:
+                            lines.extend(child.text.strip().splitlines())
+                    for line in lines:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = [p.strip() for p in re.split(r"[\s,;]+", line)]
+                        if parts:
+                            data_rows.append(tuple(parts))
+                        if len(data_rows) >= self.settings.table_max_rows:
+                            break
+                    if data_rows:
+                        break
+
+        # 3. Alternative: repeated XML nodes <row> or <record> with child tags
         if not data_rows:
             rows_found: list[dict[str, str]] = []
             for elem in root.iter():
                 tag = clean_tag(elem.tag).lower()
-                if tag in ("row", "record", "datapoint", "logdatapoint", "point"):
+                if tag in ("record", "datapoint", "logdatapoint", "point"):
                     row_vals: dict[str, str] = {}
                     for child in elem:
                         ctag = clean_tag(child.tag)
-                        row_vals[ctag] = (child.text or "").strip()
+                        val = (child.text or "").strip()
+                        if val:
+                            row_vals[ctag] = val
                     if row_vals:
                         rows_found.append(row_vals)
                     if len(rows_found) >= self.settings.table_max_rows:
@@ -742,19 +782,30 @@ class PreviewProvider:
             return None
 
         if not curve_infos:
-            curve_infos = [
-                (h, "m" if h.upper() in ("DEPT", "DEPTH", "深度") else "", "")
-                for h in data_headers
-            ]
+            for h in data_headers:
+                h_name = str(h).strip()
+                unit = ""
+                if h_name.upper() in ("DEPT", "DEPTH", "深度", "TVD", "TVDSS"):
+                    unit = "m"
+                elif "GR" in h_name.upper():
+                    unit = "gAPI"
+                elif "DT" in h_name.upper():
+                    unit = "us/m"
+                elif any(k in h_name for k in ("孔隙度", "POR", "PORO")):
+                    unit = "%"
+                elif any(k in h_name for k in ("渗透率", "PERM")):
+                    unit = "mD"
+                curve_infos.append((h_name, unit, h_name))
 
-        well_name = path.stem
-        for elem in root.iter():
-            tag = clean_tag(elem.tag).lower()
-            if tag in ("namewell", "wellname", "well", "name") and elem.text:
-                val = elem.text.strip()
-                if val and len(val) < 50:
-                    well_name = val
-                    break
+        if "well_name" not in locals():
+            well_name = path.stem
+            for elem in root.iter():
+                tag = clean_tag(elem.tag).lower()
+                if tag in ("namewell", "wellname", "well", "name") and elem.text:
+                    val = elem.text.strip()
+                    if val and len(val) < 50:
+                        well_name = val
+                        break
 
         summary_rows = (
             ("井名", well_name),

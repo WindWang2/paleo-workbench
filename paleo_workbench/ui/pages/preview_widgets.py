@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -241,6 +242,8 @@ class TablePreviewWidget(QTableWidget):
             }}
             """
         )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.horizontalHeader().setStretchLastSection(True)
         self.verticalHeader().setDefaultSectionSize(28)
 
     def apply_settings(self, settings) -> None:
