@@ -21,6 +21,8 @@ class WellLogHost:
     def __init__(self) -> None:
         self.widget = QFrame()
         self.widget.setObjectName("WellLogHostContainer")
+        self.widget.setStyleSheet("QFrame#WellLogHostContainer { background-color: #ffffff; }")
+        self.widget.setAutoFillBackground(True)
 
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(

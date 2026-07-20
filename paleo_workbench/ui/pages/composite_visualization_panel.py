@@ -45,7 +45,7 @@ class CompositeVisualizationPanel(QFrame):
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet(
             f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; background: {tokens.BG_SEARCH}; }}"
+            f" border-radius: {tokens.RADIUS_BUTTON}px; background: #ffffff; }}"
         )
 
         self.well_host = WellLogHost()
