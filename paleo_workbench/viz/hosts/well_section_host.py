@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
 )
@@ -95,10 +96,21 @@ class WellSectionHost:
 
         layout.addLayout(toolbar)
 
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("WellSectionScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(
+            f"QScrollArea#WellSectionScrollArea {{ border: 1px solid {tokens.BORDER};"
+            f" background-color: #ffffff; }}"
+        )
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         # Main 2D QPainter Section Canvas
         self.canvas = WellSectionCanvas()
         self.widget.canvas = self.canvas
-        layout.addWidget(self.canvas, 1)
+        self.scroll_area.setWidget(self.canvas)
+        layout.addWidget(self.scroll_area, 1)
 
     def _on_datum_changed(self) -> None:
         idx = self.datum_combo.currentIndex()

@@ -143,9 +143,20 @@ class WellLogHost:
 
         layout.addLayout(header_layout)
 
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("WellLogScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(
+            f"QScrollArea#WellLogScrollArea {{ border: 1px solid {tokens.BORDER};"
+            f" background-color: #ffffff; }}"
+        )
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         self.canvas = WellLogCanvas()
         self.widget.canvas = self.canvas
-        layout.addWidget(self.canvas, 1)
+        self.scroll_area.setWidget(self.canvas)
+        layout.addWidget(self.scroll_area, 1)
 
     def _open_track_settings(self) -> None:
         if not self.canvas.tracks:
