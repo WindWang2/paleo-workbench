@@ -33,7 +33,7 @@
 ## P2 — 分层修复
 
 1. 斩断 `viz → ui`：`mapping_helpers`、`prediction_helpers`、`seismic_prediction_helpers`、`geoviz_preview_host` 从 `ui/pages` 下沉到 `viz/`（机械移动 + 改 import）。
-2. 统一 export 三模块（`workflow/export.py`、`resources/exporters.py`、`resources/export_service.py`）为一个明确归属的 export 模块，消除 `resources → workflow` 反向边。
+2. 消除 `resources → workflow` 反向边：`record_export` 从 `workflow/export.py` 移入 `project/artifacts.py`（删除旧模块）。实施时经调查确认 `resources/exporters.py`（纯格式转换）与 `resources/export_service.py`（编排）分层清晰，**不合并**（原"统一为一个 export 模块"的表述以此为准）。
 3. 清理剩余函数内 import（30+ 处），能在模块顶层导入的全部上移；确为避免循环而保留的加注释说明。
 
 验收：pytest 全绿；依赖方向恢复为 `ui → viz/workflow/resources/mapping → project`。
