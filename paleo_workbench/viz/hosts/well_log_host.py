@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -99,6 +100,8 @@ class WellLogHost:
         self.widget.setObjectName("WellLogHostContainer")
         self.widget.setStyleSheet("QFrame#WellLogHostContainer { background-color: #ffffff; }")
         self.widget.setAutoFillBackground(True)
+        self.widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.widget.setMinimumSize(100, 100)
 
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(
@@ -146,6 +149,8 @@ class WellLogHost:
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("WellLogScrollArea")
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.scroll_area.setMinimumSize(100, 100)
         self.scroll_area.setStyleSheet(
             f"QScrollArea#WellLogScrollArea {{ border: 1px solid {tokens.BORDER};"
             f" background-color: #ffffff; }}"

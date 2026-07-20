@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QLabel, QTabWidget, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QTabWidget, QVBoxLayout
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.prediction_helpers import active_prediction_task
@@ -28,6 +28,8 @@ class CompositeVisualizationPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("CompositeVisualizationPanel")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(100, 100)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
@@ -44,6 +46,8 @@ class CompositeVisualizationPanel(QFrame):
         layout.addWidget(self.status_label)
 
         self.tabs = QTabWidget()
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.tabs.setMinimumSize(100, 100)
         self.tabs.setStyleSheet(
             f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER};"
             f" border-radius: {tokens.RADIUS_BUTTON}px; background: #ffffff; }}"

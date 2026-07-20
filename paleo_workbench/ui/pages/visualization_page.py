@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +33,8 @@ class VisualizationPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("VisualizationPage")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(100, 100)
 
         self._resources: list = []
         self._prediction_tasks: list = []

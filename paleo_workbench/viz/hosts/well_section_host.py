@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
 )
@@ -96,9 +97,14 @@ class WellSectionHost:
 
         layout.addLayout(toolbar)
 
+        self.widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.widget.setMinimumSize(100, 100)
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("WellSectionScrollArea")
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.scroll_area.setMinimumSize(100, 100)
         self.scroll_area.setStyleSheet(
             f"QScrollArea#WellSectionScrollArea {{ border: 1px solid {tokens.BORDER};"
             f" background-color: #ffffff; }}"
