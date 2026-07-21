@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
@@ -60,6 +60,10 @@ class SeismicSlicePreviewWidget(QWidget):
             }}
             """
         )
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(80)
+        self._render_timer.timeout.connect(self._render_slice)
         self.slider.valueChanged.connect(self._on_slider_changed)
 
         self.index_label = QLabel("0 / 0")
@@ -113,7 +117,7 @@ class SeismicSlicePreviewWidget(QWidget):
     def _on_slider_changed(self, value: int) -> None:
         if self._volume is not None:
             self.index_label.setText(f"{value} / {self.slider.maximum()}")
-            self._render_slice()
+            self._render_timer.start()
 
     def _update_slider_range(self) -> None:
         if self._volume is None:
@@ -141,18 +145,23 @@ class SeismicSlicePreviewWidget(QWidget):
         qimg = QImage(norm.data, width, height, width, QImage.Format.Format_Indexed8)
 
         if getattr(self, "_color_table", None) is None:
-            try:
-                import matplotlib.pyplot as plt
-                from PySide6.QtGui import qRgba
-                cmap = plt.get_cmap("seismic")
-                self._color_table = [qRgba(*(int(c * 255) for c in cmap(i / 255.0))) for i in range(256)]
-            except Exception:
-                self._color_table = []
+            from PySide6.QtGui import qRgba
+
+            t = np.linspace(0.0, 1.0, 256)
+            # Blue -> white -> red seismic ramp
+            r = np.clip(3.0 * t - 1.0, 0.0, 1.0)
+            b = np.clip(1.0 - 3.0 * t, 0.0, 1.0)
+            g = np.clip(1.5 - np.abs(3.0 * t - 1.5), 0.0, 1.0)
+            self._color_table = [
+                qRgba(int(ri * 255), int(gi * 255), int(bi * 255), 255)
+                for ri, gi, bi in zip(r, g, b)
+            ]
 
         if self._color_table:
             qimg.setColorTable(self._color_table)
 
         pixmap = QPixmap.fromImage(qimg)
+        self._last_pixmap = pixmap
         scaled_pixmap = pixmap.scaled(
             max(self.image_label.width() - 4, 10),
             max(self.image_label.height() - 4, 10),
@@ -163,7 +172,14 @@ class SeismicSlicePreviewWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._render_slice()
+        last = getattr(self, "_last_pixmap", None)
+        if last is not None and not last.isNull():
+            self.image_label.setPixmap(last.scaled(
+                max(self.image_label.width() - 4, 10),
+                max(self.image_label.height() - 4, 10),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
 
     def apply_settings(self, settings) -> None:
         font = self.font()
