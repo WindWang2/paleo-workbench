@@ -6,7 +6,6 @@ import pytest
 from paleo_workbench.viz.well_log_api import (
     HAS_CPP_WELL_LOG,
     fast_las_parse_data,
-    generate_crossover_fill,
     minmax_downsample,
 )
 
@@ -50,15 +49,3 @@ DEN.G/CC: Density
     assert data.shape == (3, 3)
     assert data[0, 0] == 1000.00
     assert np.isnan(data[2, 2])
-
-
-def test_generate_crossover_fill_vertices():
-    depth = np.array([100.0, 101.0, 102.0, 103.0], dtype=np.float32)
-    curve_a = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float32)
-    curve_b = np.array([15.0, 15.0, 25.0, 45.0], dtype=np.float32)
-
-    poly_a_greater, poly_b_greater = generate_crossover_fill(depth, curve_a, curve_b)
-    assert isinstance(poly_a_greater, np.ndarray)
-    assert isinstance(poly_b_greater, np.ndarray)
-    assert poly_a_greater.ndim == 2 and poly_a_greater.shape[1] == 2
-    assert poly_b_greater.ndim == 2 and poly_b_greater.shape[1] == 2

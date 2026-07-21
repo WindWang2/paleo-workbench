@@ -13,7 +13,6 @@ except ImportError:  # pragma: no cover
 __all__ = [
     "HAS_CPP_WELL_LOG",
     "fast_las_parse_data",
-    "generate_crossover_fill",
     "minmax_downsample",
 ]
 
@@ -108,31 +107,3 @@ def fast_las_parse_data(content: str, null_value: float = -999.0) -> tuple[tuple
 
     arr = np.array(rows, dtype=np.float64) if rows else np.zeros((0, len(headers)), dtype=np.float64)
     return tuple(headers), arr
-
-
-def generate_crossover_fill(
-    depth: np.ndarray,
-    curve_a: np.ndarray,
-    curve_b: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Generate 2D polygon vertices for crossover regions (A > B vs B > A)."""
-    if HAS_CPP_WELL_LOG and hasattr(well_log_core, "generate_crossover_fill"):
-        return well_log_core.generate_crossover_fill(depth, curve_a, curve_b)
-
-    d = np.asarray(depth, dtype=np.float32)
-    ca = np.asarray(curve_a, dtype=np.float32)
-    cb = np.asarray(curve_b, dtype=np.float32)
-
-    poly_a_gt = []
-    poly_b_gt = []
-
-    for i in range(len(d)):
-        if ca[i] >= cb[i]:
-            poly_a_gt.append([ca[i], d[i]])
-        if cb[i] >= ca[i]:
-            poly_b_gt.append([cb[i], d[i]])
-
-    arr_a = np.array(poly_a_gt, dtype=np.float32) if poly_a_gt else np.zeros((0, 2), dtype=np.float32)
-    arr_b = np.array(poly_b_gt, dtype=np.float32) if poly_b_gt else np.zeros((0, 2), dtype=np.float32)
-
-    return arr_a, arr_b

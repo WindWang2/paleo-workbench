@@ -232,53 +232,8 @@ py::tuple fast_las_parse_data(const std::string& content, double null_value = -9
     return py::make_tuple(py_headers, result);
 }
 
-// Crossover Fill Vertices Generator
-py::tuple generate_crossover_fill(
-    py::array_t<float, py::array::c_style | py::array::forcecast> depth,
-    py::array_t<float, py::array::c_style | py::array::forcecast> curve_a,
-    py::array_t<float, py::array::c_style | py::array::forcecast> curve_b
-) {
-    auto d_buf = depth.request();
-    auto ca_buf = curve_a.request();
-    auto cb_buf = curve_b.request();
-
-    size_t n_pts = d_buf.shape[0];
-    const float* d_ptr = static_cast<const float*>(d_buf.ptr);
-    const float* ca_ptr = static_cast<const float*>(ca_buf.ptr);
-    const float* cb_ptr = static_cast<const float*>(cb_buf.ptr);
-
-    std::vector<float> poly_a_gt;
-    std::vector<float> poly_b_gt;
-
-    {
-        py::gil_scoped_release release;
-        for (size_t i = 0; i < n_pts; ++i) {
-            if (ca_ptr[i] >= cb_ptr[i]) {
-                poly_a_gt.push_back(ca_ptr[i]);
-                poly_a_gt.push_back(d_ptr[i]);
-            }
-            if (cb_ptr[i] >= ca_ptr[i]) {
-                poly_b_gt.push_back(cb_ptr[i]);
-                poly_b_gt.push_back(d_ptr[i]);
-            }
-        }
-    }
-
-    size_t n_a = poly_a_gt.size() / 2;
-    size_t n_b = poly_b_gt.size() / 2;
-
-    auto r_a = py::array_t<float>({n_a, size_t(2)});
-    auto r_b = py::array_t<float>({n_b, size_t(2)});
-
-    std::copy(poly_a_gt.begin(), poly_a_gt.end(), static_cast<float*>(r_a.request().ptr));
-    std::copy(poly_b_gt.begin(), poly_b_gt.end(), static_cast<float*>(r_b.request().ptr));
-
-    return py::make_tuple(r_a, r_b);
-}
-
 PYBIND11_MODULE(well_log_core, m) {
     m.doc() = "Native well log curve processing, LOD downsampling and fast LAS parsing acceleration";
     m.def("minmax_downsample", &minmax_downsample, py::arg("depth"), py::arg("values"), py::arg("target_pixels") = 1000);
     m.def("fast_las_parse_data", &fast_las_parse_data, py::arg("content"), py::arg("null_value") = -999.0);
-    m.def("generate_crossover_fill", &generate_crossover_fill, py::arg("depth"), py::arg("curve_a"), py::arg("curve_b"));
 }

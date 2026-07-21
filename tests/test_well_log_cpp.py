@@ -9,7 +9,6 @@ from paleo_workbench.viz import well_log_api
 from paleo_workbench.viz.well_log_api import (
     HAS_CPP_WELL_LOG,
     fast_las_parse_data,
-    generate_crossover_fill,
     minmax_downsample,
 )
 
@@ -52,19 +51,3 @@ def test_fast_las_parse_data_parity_with_python():
     assert h_cpp == h_py
     np.testing.assert_array_equal(np.isnan(d_cpp), np.isnan(d_py))
     np.testing.assert_allclose(d_cpp[~np.isnan(d_cpp)], d_py[~np.isnan(d_py)], rtol=1e-5)
-
-
-def test_generate_crossover_fill_parity_with_python():
-    depth = np.array([10.0, 20.0, 30.0], dtype=np.float32)
-    ca = np.array([1.0, 5.0, 2.0], dtype=np.float32)
-    cb = np.array([2.0, 3.0, 2.0], dtype=np.float32)
-
-    # C++ path
-    pa_cpp, pb_cpp = generate_crossover_fill(depth, ca, cb)
-
-    # Force Python fallback path
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
-        pa_py, pb_py = generate_crossover_fill(depth, ca, cb)
-
-    np.testing.assert_array_equal(pa_cpp, pa_py)
-    np.testing.assert_array_equal(pb_cpp, pb_py)
