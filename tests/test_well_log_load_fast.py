@@ -100,6 +100,7 @@ def test_wrapped_las_falls_back_but_loads(tmp_path: Path, monkeypatch):
     def _boom(content, *args, **kwargs):
         raise AssertionError("fast channel should not run on wrapped LAS")
 
+    monkeypatch.setattr(mod, "fast_las_parse_data", _boom)
     # fast channel must bail BEFORE parsing data; fallback still loads
     data = mod.load_well_log_from_path(str(path))
     assert data is not None
