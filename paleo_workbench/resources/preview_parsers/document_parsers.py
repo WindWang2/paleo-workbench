@@ -95,15 +95,7 @@ def geotiff_preview(resource: ResourceItem, settings: PreviewSettings) -> Previe
                     (value for value in overviews if value >= decim),
                     None,
                 )
-                if suitable_overview is not None:
-                    decim = suitable_overview
-            thumbnail = dataset.read(
-                1,
-                out_shape=(
-                    max(1, dataset.height // decim),
-                    max(1, dataset.width // decim),
-                ),
-            )
+            thumbnail = dataset.read()[0][::decim, ::decim]
     except Exception:
         return image_fallback(resource, revision, "地理元数据读取失败，仅显示图像")
     try:
