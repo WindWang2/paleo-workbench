@@ -24,7 +24,6 @@ Thumbs.db
 .agents/
 .codex/
 .cache/
-.superpowers/
 .planning/
 
 # Project-local prepared preview disk cache
@@ -35,7 +34,6 @@ data/
 
 # Nested engine repo is tracked as a submodule (see .gitmodules)
 # geo-viz-engine/
-.gstack/
 .worktrees/
 
 # Native build artifacts
