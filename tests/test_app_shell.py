@@ -20,10 +20,10 @@ def test_app_shell_assembles_all_zones(qtbot):
     assert shell.status_bar is not None
 
 
-def test_app_shell_has_ten_pages(qtbot):
+def test_app_shell_has_eleven_pages(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.page_stack.count() == 10
+    assert shell.page_stack.count() == 11
 
 
 def test_app_shell_default_page_is_zero(qtbot):
@@ -38,6 +38,19 @@ def test_app_shell_icon_rail_switches_page(qtbot):
     shell.icon_rail.nav_buttons[4].click()
     assert shell.page_stack.currentIndex() == 4
     assert shell.sidebar.context_label.text() == tokens.PAGE_NAMES[4]
+
+
+def test_app_shell_geological_modeling_3d_page_navigation(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    # Click 11th button (index 10: 三维建模)
+    shell.icon_rail.nav_buttons[10].click()
+    assert shell.page_stack.currentIndex() == 10
+    geomodel_page = shell.page_stack.widget(10)
+    assert geomodel_page.objectName() == "GeologicalModeling3DPage"
+    assert geomodel_page.model_tree is not None
+    assert geomodel_page.gl_widget is not None
+    assert geomodel_page.btn_run is not None
 
 
 def test_app_shell_hides_sidebar_on_data_page_and_restores_on_navigation(qtbot):
