@@ -9,12 +9,11 @@ class WellSeismicTieCalibration:
 
     @staticmethod
     def compute_synthetic(sonic: np.ndarray, density: np.ndarray, wavelet_freq: float = 30.0, dt_s: float = 0.002) -> np.ndarray:
-        """Compute Ormsby/Ricker synthetic seismogram from Sonic DT and Density logs."""
+        """Compute Ricker synthetic seismogram from Sonic DT and Density logs."""
         if len(sonic) <= 1:
             return np.array([], dtype=np.float32)
 
         # 1. Compute Acoustic Impedance (AI)
-        # Avoid division by zero
         sonic_clipped = np.clip(sonic, 10.0, 1000.0)
         velocity = 1e6 / sonic_clipped  # convert us/m to m/s
         ai = velocity * density
@@ -33,7 +32,36 @@ class WellSeismicTieCalibration:
         return synthetic
 
     @staticmethod
-    def align_twt_depth(depths: np.ndarray, twt_times: np.ndarray, depth_shift: float) -> np.ndarray:
+    def auto_correlate(synthetic: np.ndarray, seismic_trace: np.ndarray) -> tuple[int, float]:
+        """Cross-correlate synthetic with a seismic trace to find optimal shift.
+
+        Returns:
+            (shift_samples, correlation_coefficient)
+        """
+        if len(synthetic) == 0 or len(seismic_trace) == 0:
+            return 0, 0.0
+
+        # Normalize both traces
+        s_std = np.std(synthetic)
+        t_std = np.std(seismic_trace)
+        if s_std < 1e-10 or t_std < 1e-10:
+            return 0, 0.0
+
+        s_norm = (synthetic - np.mean(synthetic)) / s_std
+        t_norm = (seismic_trace - np.mean(seismic_trace)) / t_std
+
+        # Cross-correlate
+        corr = np.correlate(t_norm, s_norm, mode="full")
+        corr /= max(len(s_norm), len(t_norm))
+
+        best_idx = int(np.argmax(corr))
+        shift = best_idx - (len(s_norm) - 1)
+        cc = float(corr[best_idx])
+
+        return shift, min(cc, 1.0)
+
+    @staticmethod
+    def align_twt_depth(depths: np.ndarray, depth_shift: float) -> np.ndarray:
         """Align depth index coordinates using a physical calibration offset shift."""
         return depths + depth_shift
 
@@ -61,7 +89,6 @@ class WellCurve3DGenerator:
                 tangent /= norm
 
             # Perpendicular vector in the horizontal plane (X-Y plane)
-            # Normal to tangent and Z-axis
             perp = np.array([-tangent[1], tangent[0], 0.0], dtype=np.float32)
             perp_norm = np.linalg.norm(perp)
             if perp_norm < 1e-5:

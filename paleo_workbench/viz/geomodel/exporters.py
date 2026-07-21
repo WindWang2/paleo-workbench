@@ -1,94 +1,102 @@
+"""FLAC3D and Abaqus structured grid exporters.
+
+Extracts the shared grid generation into _generate_structured_grid()
+to eliminate the Duplicated Code smell between the two exporters.
+"""
 from __future__ import annotations
 
 import logging
+import numpy as np
+
+from .models import GridSpec
 
 logger = logging.getLogger(__name__)
 
-def export_to_flac3d(filename: str, nx: int = 10, ny: int = 10, nz: int = 10, dx: float = 10.0, dy: float = 10.0, dz: float = 10.0) -> bool:
-    """Export a synthetic geological model structured grid to FLAC3D corner-point f3grid format."""
+
+def _generate_structured_grid(spec: GridSpec) -> tuple[np.ndarray, np.ndarray]:
+    """Generate a structured hexahedral grid with gentle geological fluctuation.
+
+    Returns:
+        (nodes, elements) where:
+        - nodes is (N_nodes, 3) float64 array of XYZ coordinates
+        - elements is (N_elements, 8) int32 array of node indices (0-based)
+    """
+    nx, ny, nz = spec.nx, spec.ny, spec.nz
+    dx, dy, dz = spec.dx, spec.dy, spec.dz
+
+    # Vectorized node generation
+    ii, jj, kk = np.meshgrid(
+        np.arange(nx + 1), np.arange(ny + 1), np.arange(nz + 1), indexing="ij"
+    )
+    x = ii * dx
+    y = jj * dy
+    z = kk * dz + 5.0 * (ii / max(nx, 1)) * (jj / max(ny, 1))
+
+    nodes = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1)
+
+    # Vectorized element generation
+    ei, ej, ek = np.meshgrid(
+        np.arange(nx), np.arange(ny), np.arange(nz), indexing="ij"
+    )
+    ei, ej, ek = ei.ravel(), ej.ravel(), ek.ravel()
+
+    def _nid(i, j, k):
+        return i * (ny + 1) * (nz + 1) + j * (nz + 1) + k
+
+    n0 = _nid(ei, ej, ek)
+    n1 = _nid(ei + 1, ej, ek)
+    n2 = _nid(ei, ej + 1, ek)
+    n3 = _nid(ei + 1, ej + 1, ek)
+    n4 = _nid(ei, ej, ek + 1)
+    n5 = _nid(ei + 1, ej, ek + 1)
+    n6 = _nid(ei, ej + 1, ek + 1)
+    n7 = _nid(ei + 1, ej + 1, ek + 1)
+
+    elements = np.stack([n0, n1, n2, n3, n4, n5, n6, n7], axis=1)
+    return nodes, elements
+
+
+def export_to_flac3d(filename: str, nx: int = 10, ny: int = 10, nz: int = 10,
+                     dx: float = 10.0, dy: float = 10.0, dz: float = 10.0) -> bool:
+    """Export a structured grid to FLAC3D corner-point f3grid format."""
+    spec = GridSpec(nx, ny, nz, dx, dy, dz)
     try:
+        nodes, elements = _generate_structured_grid(spec)
         with open(filename, 'w', encoding='utf-8') as f:
             f.write("* FLAC3D grid exported by PaleoWorkbench\n")
             f.write(f"* Grid dimensions: {nx} x {ny} x {nz}\n")
-            
-            # Nodes: index starts at 1
-            node_id = 1
-            node_map = {}
-            for k in range(nz + 1):
-                for j in range(ny + 1):
-                    for i in range(nx + 1):
-                        x = i * dx
-                        y = j * dy
-                        z = k * dz
-                        # Simulate geological layer fluctuation
-                        z += 5.0 * (i / nx) * (j / ny)
-                        f.write(f"GRID {node_id} {x:.4f} {y:.4f} {z:.4f}\n")
-                        node_map[(i, j, k)] = node_id
-                        node_id += 1
-            
-            # Zones (Hexahedra C3D8 style)
-            zone_id = 1
-            for k in range(nz):
-                for j in range(ny):
-                    for i in range(nx):
-                        n1 = node_map[(i, j, k)]
-                        n2 = node_map[(i+1, j, k)]
-                        n3 = node_map[(i, j+1, k)]
-                        n4 = node_map[(i+1, j+1, k)]
-                        n5 = node_map[(i, j, k+1)]
-                        n6 = node_map[(i+1, j, k+1)]
-                        n7 = node_map[(i, j+1, k+1)]
-                        n8 = node_map[(i+1, j+1, k+1)]
-                        f.write(f"ZON hex {zone_id} {n1} {n2} {n3} {n4} {n5} {n6} {n7} {n8}\n")
-                        zone_id += 1
-        logger.info(f"FLAC3D grid successfully exported to {filename}")
+            for node_id, (x, y, z) in enumerate(nodes, start=1):
+                f.write(f"GRID {node_id} {x:.4f} {y:.4f} {z:.4f}\n")
+            for zone_id, elem in enumerate(elements, start=1):
+                ids = " ".join(str(n + 1) for n in elem)  # 1-based
+                f.write(f"ZON hex {zone_id} {ids}\n")
+        logger.info("FLAC3D grid successfully exported to %s", filename)
         return True
     except Exception as e:
-        logger.error(f"Failed to export to FLAC3D: {e}")
-        raise e
+        logger.error("Failed to export to FLAC3D: %s", e)
+        raise
 
 
-def export_to_abaqus(filename: str, nx: int = 10, ny: int = 10, nz: int = 10, dx: float = 10.0, dy: float = 10.0, dz: float = 10.0) -> bool:
-    """Export a synthetic geological model structured grid to Abaqus INP mesh format."""
+def export_to_abaqus(filename: str, nx: int = 10, ny: int = 10, nz: int = 10,
+                     dx: float = 10.0, dy: float = 10.0, dz: float = 10.0) -> bool:
+    """Export a structured grid to Abaqus INP mesh format."""
+    spec = GridSpec(nx, ny, nz, dx, dy, dz)
     try:
+        nodes, elements = _generate_structured_grid(spec)
         with open(filename, 'w', encoding='utf-8') as f:
             f.write("*HEADING\n")
             f.write("** Abaqus mesh exported by PaleoWorkbench\n")
             f.write("*PART, NAME=GEOMODEL\n")
             f.write("*NODE\n")
-            
-            node_id = 1
-            node_map = {}
-            for k in range(nz + 1):
-                for j in range(ny + 1):
-                    for i in range(nx + 1):
-                        x = i * dx
-                        y = j * dy
-                        z = k * dz
-                        # Simulate geological layer fluctuation
-                        z += 5.0 * (i / nx) * (j / ny)
-                        f.write(f"{node_id}, {x:.4f}, {y:.4f}, {z:.4f}\n")
-                        node_map[(i, j, k)] = node_id
-                        node_id += 1
-                        
+            for node_id, (x, y, z) in enumerate(nodes, start=1):
+                f.write(f"{node_id}, {x:.4f}, {y:.4f}, {z:.4f}\n")
             f.write("*ELEMENT, TYPE=C3D8, ELSET=EALL\n")
-            zone_id = 1
-            for k in range(nz):
-                for j in range(ny):
-                    for i in range(nx):
-                        n1 = node_map[(i, j, k)]
-                        n2 = node_map[(i+1, j, k)]
-                        n3 = node_map[(i+1, j+1, k)]
-                        n4 = node_map[(i, j+1, k)]
-                        n5 = node_map[(i, j, k+1)]
-                        n6 = node_map[(i+1, j, k+1)]
-                        n7 = node_map[(i+1, j+1, k+1)]
-                        n8 = node_map[(i, j+1, k+1)]
-                        f.write(f"{zone_id}, {n1}, {n2}, {n3}, {n4}, {n5}, {n6}, {n7}, {n8}\n")
-                        zone_id += 1
+            for zone_id, elem in enumerate(elements, start=1):
+                ids = ", ".join(str(n + 1) for n in elem)
+                f.write(f"{zone_id}, {ids}\n")
             f.write("*END PART\n")
-        logger.info(f"Abaqus mesh successfully exported to {filename}")
+        logger.info("Abaqus mesh successfully exported to %s", filename)
         return True
     except Exception as e:
-        logger.error(f"Failed to export to Abaqus: {e}")
-        raise e
+        logger.error("Failed to export to Abaqus: %s", e)
+        raise
