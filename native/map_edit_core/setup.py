@@ -16,14 +16,18 @@ from pathlib import Path
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import setup
 
+import sys
+
 HERE = Path(__file__).resolve().parent
+
+extra_compile_args = ["/O2", "/fp:fast"] if sys.platform == "win32" else ["-O3"]
 
 ext_modules = [
     Pybind11Extension(
         "map_edit_core",
         [str(HERE / "src" / "map_edit_core.cpp")],
         cxx_std=17,
-        extra_compile_args=["-O3"],
+        extra_compile_args=extra_compile_args,
     ),
 ]
 
