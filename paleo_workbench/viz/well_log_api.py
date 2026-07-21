@@ -65,11 +65,7 @@ def minmax_downsample(
 def fast_las_parse_data(content: str, null_value: float = -999.0) -> tuple[tuple[str, ...], np.ndarray]:
     """Parse ASCII LAS data section (~A block) into headers and 2D float64 numpy array."""
     if HAS_CPP_WELL_LOG and hasattr(well_log_core, "fast_las_parse_data"):
-        try:
-            return well_log_core.fast_las_parse_data(content, null_value)
-        except TypeError:
-            if abs(null_value - (-999.0)) < 1e-4:
-                return well_log_core.fast_las_parse_data(content)
+        return well_log_core.fast_las_parse_data(content, float(null_value))
 
     lines = content.splitlines()
     in_data = False
