@@ -9,15 +9,18 @@ from geoviz_well_log.renderer.downsample import (
     set_downsample_provider,
 )
 
+import paleo_workbench.viz.render_accel as render_accel
 from paleo_workbench.viz.render_accel import install_geoviz_acceleration
 
 
 def setup_function():
     set_downsample_provider(None)
+    render_accel._installed_provider = None
 
 
 def teardown_function():
     set_downsample_provider(None)
+    render_accel._installed_provider = None
 
 
 def test_install_replaces_provider():
@@ -41,10 +44,11 @@ def test_injected_provider_preserves_extrema_and_order():
     rng = np.random.default_rng(42)
     values = (rng.random(n) * 100).tolist()
     out_d, out_v = provider(depths, values, 200)
+    values32 = np.asarray(values, dtype=np.float32).tolist()
     assert len(out_d) == len(out_v)
     assert len(out_d) <= 2 * 200 + 4
-    assert max(out_v) == max(values)
-    assert min(out_v) == min(values)
+    assert max(out_v) == max(values32)
+    assert min(out_v) == min(values32)
     assert all(b >= a for a, b in zip(out_d, out_d[1:]))
 
 
