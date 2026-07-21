@@ -31,16 +31,21 @@ def test_fast_slice_extract_parity_with_python():
     np.testing.assert_array_equal(slice_cpp, slice_py)
 
 
-def test_compute_coherence_3d_parity_with_python():
+@pytest.mark.parametrize("sample_window", [1, 3, 5])
+def test_compute_coherence_3d_parity_with_python(sample_window):
     np.random.seed(123)
     vol = np.random.randn(8, 8, 10).astype(np.float32)
 
     # C++ path
-    coh_cpp = compute_coherence_3d(vol, inline_window=3, crossline_window=3, sample_window=3)
+    coh_cpp = compute_coherence_3d(
+        vol, inline_window=3, crossline_window=3, sample_window=sample_window
+    )
 
     # Force Python fallback path
     with patch.object(seismic_3d_api, "HAS_CPP_SEISMIC", False):
-        coh_py = compute_coherence_3d(vol, inline_window=3, crossline_window=3, sample_window=3)
+        coh_py = compute_coherence_3d(
+            vol, inline_window=3, crossline_window=3, sample_window=sample_window
+        )
 
     np.testing.assert_allclose(coh_cpp, coh_py, rtol=1e-4, atol=1e-4)
 

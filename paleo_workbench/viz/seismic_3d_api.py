@@ -73,7 +73,7 @@ def compute_coherence_3d(
     crossline_window: int = 3,
     sample_window: int = 3,
 ) -> np.ndarray:
-    """Compute 3D seismic coherence/similarity volume."""
+    """Compute 3D seismic coherence/similarity volume (per-sample vertical window)."""
     if HAS_CPP_SEISMIC and hasattr(seismic_3d_core, "compute_coherence_3d"):
         return seismic_3d_core.compute_coherence_3d(
             volume, int(inline_window), int(crossline_window), int(sample_window)
@@ -85,6 +85,12 @@ def compute_coherence_3d(
 
     half_i = inline_window // 2
     half_x = crossline_window // 2
+    half_t = sample_window // 2
+
+    ks = np.arange(nt)
+    k0 = np.maximum(0, ks - half_t)
+    k1 = np.minimum(nt, ks + half_t + 1)  # exclusive upper bound
+    win_len = (k1 - k0).astype(np.float64)
 
     for i in range(half_i, ni - half_i):
         for j in range(half_x, nx - half_x):
@@ -92,11 +98,14 @@ def compute_coherence_3d(
                 i - half_i : i + half_i + 1,
                 j - half_x : j + half_x + 1,
                 :,
-            ]
-            num = np.sum(np.mean(sub, axis=(0, 1)) ** 2)
-            den = np.mean(np.sum(sub**2, axis=(0, 1))) + 1e-12
-            val = float(np.clip(num / den, 0.0, 1.0))
-            coh[i, j, :] = val
+            ].astype(np.float64)
+            mean_sq = np.mean(sub, axis=(0, 1)) ** 2  # (nt,)
+            sum_sq = np.sum(sub**2, axis=(0, 1))      # (nt,)
+            cs_num = np.concatenate([[0.0], np.cumsum(mean_sq)])
+            cs_den = np.concatenate([[0.0], np.cumsum(sum_sq)])
+            num = cs_num[k1] - cs_num[k0]
+            den = (cs_den[k1] - cs_den[k0]) / win_len + 1e-12
+            coh[i, j, :] = np.clip(num / den, 0.0, 1.0)
 
     return coh
 

@@ -60,3 +60,15 @@ def test_marching_cubes_3d_sphere_mesh():
     assert faces.ndim == 2 and faces.shape[1] == 3
     assert vertices.shape[0] > 0
     assert faces.shape[0] > 0
+
+
+def test_compute_coherence_3d_sample_window_takes_effect():
+    np.random.seed(7)
+    vol = np.random.randn(8, 8, 12).astype(np.float32)
+
+    coh_w1 = compute_coherence_3d(vol, inline_window=3, crossline_window=3, sample_window=1)
+    coh_w5 = compute_coherence_3d(vol, inline_window=3, crossline_window=3, sample_window=5)
+
+    assert coh_w1.shape == coh_w5.shape == vol.shape
+    # sample_window 生效后，不同垂直窗的结果必须不同
+    assert not np.allclose(coh_w1, coh_w5)
