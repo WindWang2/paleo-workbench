@@ -89,6 +89,13 @@ Phase 5 — Complete & Verified
 - [x] 离屏 canvas 跳过栅格化（QScrollArea 视口外延迟重绘）
 - **Status:** complete
 
+### Phase 12: 连井对比 P2 井分层接入 + 对比交互
+
+- [x] 新增 SMI WellTops 解析器与工作流接入（`load_well_tops` / `match_tops_to_wells` / `tops_to_intervals`）
+- [x] 引擎补 `set_well_spacing` / `set_tops_visible` / `set_track_visible_by_label` API 与 `FormationTop` facade 导出
+- [x] 地层对比页工具条：浏览/拾取/连线模式、层位与吸附选择、DTW 传播、撤销/重做、自动连线、分层顶线开关、井间距滑杆、轨道显隐、分层顶 CSV 导出
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
