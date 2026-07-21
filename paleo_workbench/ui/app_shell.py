@@ -73,9 +73,9 @@ class AppShell(QWidget):
         middle.setContentsMargins(0, 0, 0, 0)
         middle.setSpacing(0)
         self.icon_rail = IconRail()
-        self.icon_rail.setVisible(False)
+        self.icon_rail.setVisible(True)
         self.sidebar = ContextSidebar()
-        self.sidebar.setVisible(False)
+        self.sidebar.setVisible(True)
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
         self.data_page = DataPage(project=self.project)
