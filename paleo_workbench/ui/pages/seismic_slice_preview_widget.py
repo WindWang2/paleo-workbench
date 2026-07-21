@@ -108,10 +108,12 @@ class SeismicSlicePreviewWidget(QWidget):
         self.type_combo.setEnabled(True)
         self.slider.setEnabled(True)
         self._update_slider_range()
+        self._render_timer.stop()
         self._render_slice()
 
     def _on_type_changed(self, index: int) -> None:
         self._update_slider_range()
+        self._render_timer.stop()
         self._render_slice()
 
     def _on_slider_changed(self, value: int) -> None:
@@ -148,10 +150,10 @@ class SeismicSlicePreviewWidget(QWidget):
             from PySide6.QtGui import qRgba
 
             t = np.linspace(0.0, 1.0, 256)
-            # Blue -> white -> red seismic ramp
-            r = np.clip(3.0 * t - 1.0, 0.0, 1.0)
-            b = np.clip(1.0 - 3.0 * t, 0.0, 1.0)
-            g = np.clip(1.5 - np.abs(3.0 * t - 1.5), 0.0, 1.0)
+            # Blue -> white -> red seismic ramp (white at t=0.5)
+            r = np.clip(2.0 * t, 0.0, 1.0)
+            b = np.clip(2.0 * (1.0 - t), 0.0, 1.0)
+            g = np.minimum(r, b)
             self._color_table = [
                 qRgba(int(ri * 255), int(gi * 255), int(bi * 255), 255)
                 for ri, gi, bi in zip(r, g, b)
