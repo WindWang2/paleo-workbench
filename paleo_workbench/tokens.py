@@ -34,6 +34,14 @@ PRIMARY_PRESSED = "#1e40af"
 PRIMARY_DISABLED = "#93c5fd"
 FOCUS_RING = PRIMARY
 
+# Glassmorphism & Micro-interaction Tokens
+BG_GLASS = "rgba(255, 255, 255, 0.88)"
+BG_GLASS_BORDER = "rgba(255, 255, 255, 0.6)"
+SHADOW_SOFT = "0 4px 16px rgba(15, 23, 42, 0.08)"
+SHADOW_CARD = "0 2px 8px rgba(15, 23, 42, 0.05)"
+SHADOW_CARD_HOVER = "0 6px 20px rgba(37, 99, 235, 0.12)"
+HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(37, 99, 235, 0.08), stop:1 rgba(124, 58, 237, 0.04))"
+
 FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif'
 FONT_SIZE_BASE = "12.5px"
 FONT_SIZE_STATUS = "11px"
