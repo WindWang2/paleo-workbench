@@ -24,6 +24,10 @@ from paleo_workbench.ui import tokens
 def main() -> int:
     app = QApplication(sys.argv)
     app.setStyleSheet(tokens.QSS_TEMPLATE)
+
+    from paleo_workbench.viz.render_accel import install_geoviz_acceleration
+
+    install_geoviz_acceleration()
     try:
         # Deferred: keep CLI startup light (pulls in pipeline + project stack).
         from paleo_workbench.pipeline.bootstrap import (

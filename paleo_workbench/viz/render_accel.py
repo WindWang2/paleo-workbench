@@ -1,0 +1,36 @@
+"""Install C++-accelerated render hooks into the geoviz engine.
+
+Called once at application startup. The engine side
+(``geoviz_well_log.renderer.downsample``) defines the hook point; this module
+is the only place that knows about the workbench's C++ backend, keeping the
+engine free of reverse dependencies.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from paleo_workbench.viz.well_log_api import minmax_downsample
+
+_installed_provider = None
+
+
+def _cpp_minmax_provider(
+    depths: list[float], values: list[float], pixel_height: int
+) -> tuple[list[float], list[float]]:
+    if len(depths) <= pixel_height * 2:
+        return depths, values
+    d = np.asarray(depths, dtype=np.float32)
+    v = np.asarray(values, dtype=np.float32)
+    out_d, out_v = minmax_downsample(d, v, int(pixel_height))
+    return out_d.tolist(), out_v.tolist()
+
+
+def install_geoviz_acceleration() -> None:
+    """Inject the C++ min-max downsample provider into geoviz (idempotent)."""
+    global _installed_provider
+    if _installed_provider is not None:
+        return
+    from geoviz_well_log.renderer.downsample import set_downsample_provider
+
+    set_downsample_provider(_cpp_minmax_provider)
+    _installed_provider = _cpp_minmax_provider
