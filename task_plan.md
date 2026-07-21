@@ -41,12 +41,13 @@ Phase 5 — Complete & Verified
 - [x] `map_edit_scene.py` 代码行数从 1382 行降至 604 行（缩减 56%）
 - **Status:** complete (Commit `8974bbe`)
 
-### Phase 5: 文档整理与配置清理 (Documentation & Planning Cleanup)
+### Phase 6: 3D 地震核心算法 C++ 原生加速 (TDD 范式)
 
-- [x] 审计与清理过期导入路径（如 `tests/test_fallback_preview.py`）
-- [x] 规范化 `document_parsers.py` 中 `rasterio` read 的 2D shape 参数，消除 NumPy 2.5 废弃警告
-- [x] 整理与更新项目根目录 Planning 体系（`task_plan.md`、`findings.md`、`progress.md`）
-- [x] 验证全量 1109 个 Pytest 测试 100% 绿灯通过
+- [x] 编写 TDD 先行测试 `tests/test_seismic_3d_api.py` (RED) 验证算法契约
+- [x] 实现 `paleo_workbench/viz/seismic_3d_api.py` 纯 Python/NumPy 回退算法 (GREEN)
+- [x] 构建 C++ pybind11 原生扩展 `native/seismic_3d_core`（含 `fast_slice_extract`, `compute_coherence_3d`, `marching_cubes_3d`）
+- [x] 编写 C++ 契约与数值等价性测试 `tests/test_seismic_3d_cpp.py` (GREEN)
+- [x] 将 `fast_slice_extract` 接入 `SeismicSlicePreviewWidget` 预览控件
 - **Status:** complete
 
 ## Decisions Made
@@ -56,6 +57,7 @@ Phase 5 — Complete & Verified
 | 保留旧模块 (如 `preview_widgets.py`, `fallback_preview.py`) 作为 re-export 兼容门面 | 维持 100% 向后兼容性，避免对依赖第三方或动态 monkeypatch 的测试造成破坏。 |
 | 将 `resources/preview_parsers/` 下沉到 `resources/` | 保持 `resources` 作为基础资源/格式解析层，符合 `ui → viz/workflow/resources/mapping → project` 的分层依赖规则。 |
 | 拆分 `map_edit_scene.py` 为 4 个高内聚辅助模块 | 将几何工厂、草图状态机、吸附管理器、拓扑算法与主 Scene 事件路由解耦，提高可维护性。 |
+| 采用 pybind11 构建 `seismic_3d_core` 原生模块 | 在纯 Python / NumPy 算法保底的前提下，通过 C++ 多线程与内存连续性提供高效震相计算与切片提取。 |
 
 ## Errors Encountered & Resolved
 
@@ -64,3 +66,4 @@ Phase 5 — Complete & Verified
 | `AttributeError: '_safe_stat'` during test monkeypatch | 1 | 在 `PreviewProvider` 重新暴露 `_safe_stat` 并注入 `safe_stat_fn` 参数。 |
 | `setPageMode` failure on stub `QPdfView` | 1 | 统一通过 `preview_widgets.QPdfView` 动态反射获取 `PageMode` 枚举值。 |
 | `NumPy 2.5 DeprecationWarning` in `document_parsers.py` | 1 | 将 `dataset.read(1, out_shape=(1, h, w))` 的 3D shape 改为标准的 2D shape `(h, w)`。 |
+| `compute_coherence_3d` numerical parity discrepancy | 1 | 修正 C++ 相干性算法公式，使其与 Python 逐道均方根归一化一致。 |

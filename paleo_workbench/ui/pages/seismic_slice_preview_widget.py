@@ -6,6 +6,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
 from paleo_workbench.tokens import BG_SEARCH, BORDER, PRIMARY, PRIMARY_HOVER, RADIUS_BUTTON, SPACE_2, SPACE_3, TEXT_SECONDARY
+from paleo_workbench.viz.seismic_3d_api import fast_slice_extract
 
 
 class SeismicSlicePreviewWidget(QWidget):
@@ -130,12 +131,9 @@ class SeismicSlicePreviewWidget(QWidget):
         idx = self.type_combo.currentIndex()
         val = self.slider.value()
 
-        if idx == 0:
-            slice_data = self._volume[val, :, :].T
-        elif idx == 1:
-            slice_data = self._volume[:, val, :].T
-        else:
-            slice_data = self._volume[:, :, val]
+        slice_data = fast_slice_extract(self._volume, axis=idx, index=val)
+        if idx in (0, 1):
+            slice_data = slice_data.T
 
         slice_data = np.nan_to_num(slice_data, nan=0.0, posinf=0.0, neginf=0.0)
         min_val = slice_data.min()
