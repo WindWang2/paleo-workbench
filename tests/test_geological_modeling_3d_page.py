@@ -110,9 +110,10 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     assert page.btn_ai_advisor is not None
     assert page.btn_export is not None
     
-    # Verify tree population
-    assert page.model_tree.topLevelItemCount() == 4
+    # Verify tree population (now 5 groups including Well-Seismic calibration)
+    assert page.model_tree.topLevelItemCount() == 5
     assert page.model_tree.topLevelItem(0).text(0) == "地层构造格架"
+    assert page.model_tree.topLevelItem(4).text(0) == "井震融合标定与校正"
     
     # Check default interactive clipping sliders & checkboxes exist
     assert page.chk_clip_x is not None
@@ -126,3 +127,17 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     
     # Check that interactive clipping updates variables without crashing
     page._update_clipping()
+
+    # Check well-seismic calibration widgets exist
+    assert page.slider_wavelet_freq is not None
+    assert page.slider_td_shift is not None
+    assert page.btn_auto_tie is not None
+    
+    # Simulate slider tuning changes
+    page.slider_wavelet_freq.setValue(45)
+    page.slider_td_shift.setValue(-10)
+    page._on_tie_params_changed()
+    
+    # Simulate auto-tie calibration click
+    page._run_auto_tie()
+    assert page.slider_td_shift.value() == 12
