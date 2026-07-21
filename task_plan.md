@@ -111,6 +111,14 @@ Phase 5 — Complete & Verified
 - [x] LAS C++ 解析器 GIL 释放 + from_chars/strtod + 去双重解析
 - **Status:** complete
 
+### Phase 15: 地震切片交互性能加固（P4 阶段 B）
+
+- [x] 新增 SliceReadWorker（自有 loader、最新优先队列、±2 邻域预取、generation 失效）
+- [x] SeismicView 异步接线（缓存未命中不再阻塞 GUI）+ `_pending_slice` 按轴字典修复 `_on_jump` 三面板一致
+- [x] renderer_3d 按轴切片平面更新（`_update_slice_planes_for`）
+- [x] 预览控件 80ms 防抖、resize 缓存缩放、NumPy 色表
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
