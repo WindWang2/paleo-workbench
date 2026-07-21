@@ -15,15 +15,15 @@ BG_BODY = "#f6f8fa"
 BG_HEADER = "#ffffff"
 BG_SIDEBAR = "#ffffff"
 BG_SEARCH = "#f1f5f9"
-BG_RAIL = "#1e293b"
-BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e293b, stop:1 #0f172a)"
-BG_RAIL_TOP = "#1e293b"
-BG_RAIL_BOTTOM = "#0f172a"
+BG_RAIL = "#ffffff"
+BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8fafc)"
+BG_RAIL_TOP = "#ffffff"
+BG_RAIL_BOTTOM = "#f8fafc"
 TEXT_PRIMARY = "#0f172a"
 TEXT_SECONDARY = "#64748b"
 TEXT_DARK = "#020617"
-TEXT_ON_RAIL = "rgba(255, 255, 255, 0.75)"
-TEXT_ON_RAIL_ACTIVE = "#ffffff"
+TEXT_ON_RAIL = "#64748b"
+TEXT_ON_RAIL_ACTIVE = "#2563eb"
 BORDER = "#e2e8f0"
 BORDER_STRONG = "#cbd5e1"
 BORDER_LIGHT = "#f1f5f9"
@@ -278,6 +278,7 @@ QLabel#EmptyStateLabel {{
 }}
 QFrame#IconRail {{
     background: {BG_RAIL_GRADIENT};
+    border-right: 1px solid {BORDER};
     min-width: {ICON_RAIL_WIDTH}px; max-width: {ICON_RAIL_WIDTH}px;
 }}
 QToolButton[navItem="true"] {{
@@ -287,9 +288,9 @@ QToolButton[navItem="true"] {{
     min-height: {ICON_RAIL_ITEM_SIZE}px; max-height: {ICON_RAIL_ITEM_SIZE}px;
     font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
 }}
-QToolButton[navItem="true"]:hover {{ background: rgba(255, 255, 255, 0.08); }}
+QToolButton[navItem="true"]:hover {{ background: {BG_SEARCH}; color: {PRIMARY}; }}
 QToolButton[navItem="true"][active="true"] {{
-    background: rgba(255, 255, 255, 0.18); color: {TEXT_ON_RAIL_ACTIVE};
+    background: #eff6ff; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
 }}
 QFrame#TextSidebar {{
     background: {BG_SIDEBAR}; border-right: 1px solid {BORDER};
@@ -554,6 +555,43 @@ def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
         color: {PRIMARY};
         font-weight: 600;
         border-bottom: 2px solid {PRIMARY};
+    }}
+    QMenuBar {{
+        background-color: {BG_HEADER};
+        color: {TEXT_PRIMARY};
+        border-bottom: 1px solid {BORDER};
+    }}
+    QMenuBar::item {{
+        background-color: transparent;
+        padding: 6px 12px;
+        color: {TEXT_PRIMARY};
+        border-radius: 4px;
+    }}
+    QMenuBar::item:selected, QMenuBar::item:pressed {{
+        background-color: {BG_SEARCH};
+        color: {PRIMARY};
+    }}
+    QMenu {{
+        background-color: #ffffff;
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER_STRONG};
+        border-radius: 8px;
+        padding: 4px;
+    }}
+    QMenu::item {{
+        background-color: transparent;
+        padding: 6px 24px 6px 12px;
+        border-radius: 4px;
+        color: {TEXT_PRIMARY};
+    }}
+    QMenu::item:selected {{
+        background-color: #eff6ff;
+        color: {PRIMARY};
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background-color: {BORDER};
+        margin: 4px 0px;
     }}
     """
 
