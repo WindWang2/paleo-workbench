@@ -1,31 +1,152 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+)
 
-from paleo_workbench.ui import tokens
+from paleo_workbench import tokens
+from paleo_workbench.ui import navigation
 
 
-class TextSidebar(QFrame):
+class ContextSidebar(QFrame):
+    """Dynamic context-sensitive ergonomic sidebar.
+
+    Structure (Inverted-L Flow):
+    1. Top Sub-page Segmented Control (switching sub-pages within current stage)
+    2. Middle Context Information & Quick Actions
+    3. Bottom Collapse/Expand Toggle
+    """
+
+    subpage_selected = Signal(int)
+    collapsed_changed = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("TextSidebar")
-        layout = QVBoxLayout(self)
-        self._layout = layout
-        layout.setContentsMargins(
+        self.setObjectName("ContextSidebar")
+        self._is_collapsed = False
+        self._current_stage_index = 0
+        self._active_page_index = navigation.PAGE_INDEX_DATA
+        self.subpage_buttons: list[QPushButton] = []
+        self._content_labels: list[QLabel] = []
+
+        main_layout = QVBoxLayout(self)
+        self._main_layout = main_layout
+        self._layout = main_layout
+        main_layout.setContentsMargins(
             tokens.PAGE_MARGIN,
             tokens.PAGE_MARGIN,
             tokens.PAGE_MARGIN,
             tokens.PAGE_MARGIN,
         )
-        layout.setSpacing(tokens.SPACE_2)
+        main_layout.setSpacing(tokens.SPACE_2)
+
+        # 1. Top Section: Sub-page Segmented Navigation Bar
+        self.subpage_container = QWidget()
+        self.subpage_layout = QVBoxLayout(self.subpage_container)
+        self.subpage_layout.setContentsMargins(0, 0, 0, 0)
+        self.subpage_layout.setSpacing(tokens.SPACE_1)
+        main_layout.addWidget(self.subpage_container)
+
+        # 2. Middle Section: Context Header & Lines
         self.context_label = QLabel(tokens.PAGE_NAMES[0])
         self.context_label.setStyleSheet(
             f"color: {tokens.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;"
         )
-        layout.addWidget(self.context_label)
-        self._content_labels: list[QLabel] = []
+        main_layout.addWidget(self.context_label)
+
+        self.content_container = QWidget()
+        self.content_layout = QVBoxLayout(self.content_container)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(tokens.SPACE_2)
+        main_layout.addWidget(self.content_container)
+
+        main_layout.addStretch()
+
+        # 3. Bottom Section: Ergonomic Collapse/Expand Toggle Button
+        self.collapse_btn = QPushButton("◀ 收起")
+        self.collapse_btn.setObjectName("SidebarCollapseBtn")
+        self.collapse_btn.setToolTip("折叠/展开侧边栏")
+        self.collapse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.collapse_btn.setFixedHeight(32)
+        self.collapse_btn.clicked.connect(lambda: self.toggle_collapse())
+        main_layout.addWidget(self.collapse_btn)
+
+        # Initialize for default stage 0
+        self.set_stage(navigation.STAGE_INDEX_DATA, navigation.PAGE_INDEX_DATA)
         self._render_context(tokens.PAGE_NAMES[0])
-        layout.addStretch()
+
+    @property
+    def is_collapsed(self) -> bool:
+        return self._is_collapsed
+
+    def set_stage(self, stage_index: int, active_page_index: int = -1) -> None:
+        """Update segmented sub-page control buttons for the selected Stage."""
+        self._current_stage_index = stage_index
+        subpage_indices = navigation.get_subpages_for_stage(stage_index)
+
+        if active_page_index not in subpage_indices and subpage_indices:
+            active_page_index = subpage_indices[0]
+        self._active_page_index = active_page_index
+
+        # Clear existing buttons
+        for btn in self.subpage_buttons:
+            self.subpage_layout.removeWidget(btn)
+            btn.setParent(None)
+        self.subpage_buttons.clear()
+
+        for page_idx in subpage_indices:
+            page_name = tokens.PAGE_NAMES[page_idx] if page_idx < len(tokens.PAGE_NAMES) else f"Page {page_idx}"
+            btn = QPushButton(page_name)
+            btn.setProperty("subpageItem", True)
+            btn.setProperty("active", page_idx == active_page_index)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(34)
+            btn.clicked.connect(lambda _checked=False, p=page_idx: self._on_subpage_clicked(p))
+            self.subpage_buttons.append(btn)
+            self.subpage_layout.addWidget(btn)
+
+        self.subpage_container.setVisible(not self._is_collapsed and len(self.subpage_buttons) > 1)
+
+    def _on_subpage_clicked(self, page_index: int) -> None:
+        if page_index == self._active_page_index:
+            return
+        old_idx = self._active_page_index
+        self._active_page_index = page_index
+
+        for btn in self.subpage_buttons:
+            is_active = (btn.text() == tokens.PAGE_NAMES[page_index])
+            btn.setProperty("active", is_active)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+        self.subpage_selected.emit(page_index)
+
+    def toggle_collapse(self, collapsed: bool | None = None) -> None:
+        if collapsed is None:
+            collapsed = not self._is_collapsed
+        if collapsed == self._is_collapsed:
+            return
+
+        self._is_collapsed = collapsed
+        if collapsed:
+            self.setFixedWidth(40)
+            self.context_label.hide()
+            self.content_container.hide()
+            self.subpage_container.hide()
+            self.collapse_btn.setText("▶")
+        else:
+            self.setMinimumWidth(180)
+            self.setMaximumWidth(260)
+            self.setFixedWidth(200)
+            self.context_label.show()
+            self.content_container.show()
+            self.subpage_container.setVisible(len(self.subpage_buttons) > 1)
+            self.collapse_btn.setText("◀ 收起")
+
+        self.collapsed_changed.emit(self._is_collapsed)
+
+    # --- Backward compatibility context methods ---
 
     def set_context(self, name: str) -> None:
         self.context_label.setText(name)
@@ -76,7 +197,6 @@ class TextSidebar(QFrame):
         dirty: bool = False,
         preview: bool = False,
     ) -> None:
-        """Show active map name, horizon, dirty, and edit/preview mode for 编图."""
         self.context_label.setText("编图")
         name_text = map_name or "未选择"
         horizon_text = horizon or "—"
@@ -95,11 +215,6 @@ class TextSidebar(QFrame):
         )
 
     def update_context(self, name: str, progress: str = "", selection: str = "", tips: str = "") -> None:
-        """Generic context update for pages without dedicated context methods.
-
-        Renders the page's base lines, then appends optional 工作流 / 当前选择 /
-        快捷操作 sections below them. Absent (empty) fields are omitted entirely.
-        """
         self.context_label.setText(name)
         lines = self._page_lines(name)
         if progress:
@@ -166,16 +281,15 @@ class TextSidebar(QFrame):
         return page_lines.get(name, [(name, True)])
 
     def _render_context(self, name: str) -> None:
-        """Backward-compat delegate to ``update_context`` (no extra sections)."""
         self.update_context(name)
 
     def _render_lines(self, lines: list[tuple[str, bool]]) -> None:
+        # Clear existing content labels
         for label in self._content_labels:
-            self._layout.removeWidget(label)
+            self.content_layout.removeWidget(label)
             label.setParent(None)
-        self._content_labels = []
+        self._content_labels.clear()
 
-        insert_at = 1
         for text, heading in lines:
             label = QLabel(text)
             label.setWordWrap(True)
@@ -187,6 +301,14 @@ class TextSidebar(QFrame):
                 label.setStyleSheet(
                     f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
                 )
-            self._layout.insertWidget(insert_at, label)
+            self.content_layout.addWidget(label)
             self._content_labels.append(label)
-            insert_at += 1
+
+
+class TextSidebar(ContextSidebar):
+    """Backward compatibility subclass for TextSidebar."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("TextSidebar")
+

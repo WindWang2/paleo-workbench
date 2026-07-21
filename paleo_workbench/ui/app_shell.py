@@ -22,13 +22,13 @@ from paleo_workbench.ui.pages.seismic_prediction_page import SeismicPredictionPa
 from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyCorrelationPage
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
-from paleo_workbench.ui.sidebar import TextSidebar
+from paleo_workbench.ui.sidebar import ContextSidebar, TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
+from paleo_workbench.ui.workflow_stepper import WorkflowStepper
 from paleo_workbench import tokens
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
-# Stable page indices, re-exported for backwards compatibility (callers/tests
-# import them from here); canonical definition lives in ui/navigation.py.
+from paleo_workbench.ui import navigation
 from paleo_workbench.ui.navigation import (
     PAGE_INDEX_DATA,
     PAGE_INDEX_HOME,
@@ -50,6 +50,15 @@ class AppShell(QWidget):
         self.setStyleSheet(tokens.build_qss())
         self.project = project or ProjectDocument.new("Untitled Project")
         self._fade_anim: QPropertyAnimation | None = None
+
+        # Stage memory: track the last visited page for each stage
+        self._stage_subpage_memory: dict[int, int] = {
+            navigation.STAGE_INDEX_DATA: PAGE_INDEX_DATA,
+            navigation.STAGE_INDEX_INTERPRETATION: PAGE_INDEX_WELL_LOG,
+            navigation.STAGE_INDEX_MAPPING: PAGE_INDEX_MAPPING,
+            navigation.STAGE_INDEX_REVIEW: PAGE_INDEX_HOME,
+        }
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -57,11 +66,14 @@ class AppShell(QWidget):
         self.menu_bar = MenuBar()
         outer.addWidget(self.menu_bar)
 
+        self.workflow_stepper = WorkflowStepper()
+        outer.addWidget(self.workflow_stepper)
+
         middle = QHBoxLayout()
         middle.setContentsMargins(0, 0, 0, 0)
         middle.setSpacing(0)
         self.icon_rail = IconRail()
-        self.sidebar = TextSidebar()
+        self.sidebar = ContextSidebar()
         self.sidebar.setVisible(False)
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
@@ -88,39 +100,77 @@ class AppShell(QWidget):
         self.status_bar = StatusBar()
         outer.addWidget(self.status_bar)
 
+        # Signal connections
+        self.workflow_stepper.stage_changed.connect(self._on_stepper_stage_changed)
+        self.sidebar.subpage_selected.connect(self._switch_page)
         self.icon_rail.page_changed.connect(self._switch_page)
+
+        # Sync initial stage with default HomePage (index 0 -> Stage 3: 成图与审核)
+        initial_stage = navigation.get_stage_for_page(0)
+        self.workflow_stepper.set_active_stage(initial_stage)
+        self.sidebar.set_stage(initial_stage, active_page_index=0)
 
         self._setup_shortcuts()
 
     def _setup_shortcuts(self) -> None:
-        """Register 1-9 and 0 digit shortcuts for the ten AppShell pages.
-
-        The guard in :meth:`_shortcut_switch_page` blocks these while a text
-        field has focus so digit entry isn't hijacked.
-        """
+        """Register Stage (Ctrl+1~4), Subpage (Alt+1~4), and 1-9/0 digit shortcuts."""
+        # 1-9 and 0 digit shortcuts (backward compatibility)
         for i in range(min(10, len(tokens.PAGE_NAMES))):
             digit = str(i + 1) if i < 9 else "0"
             QShortcut(QKeySequence(digit), self,
                       lambda idx=i: self._shortcut_switch_page(idx))
 
-    def _shortcut_switch_page(self, idx: int) -> None:
-        """Page-switch handler bound to the 1-9 digit shortcuts.
+        # Stage shortcuts Ctrl+1 ~ Ctrl+4
+        for s in range(4):
+            QShortcut(QKeySequence(f"Ctrl+{s + 1}"), self,
+                      lambda stage_idx=s: self._shortcut_switch_stage(stage_idx))
 
-        No-op when a text-entry widget (QLineEdit/QTextEdit/QTextBrowser) has
-        focus, so typing digits into search/name fields isn't intercepted.
-        """
+        # Subpage shortcuts Alt+1 ~ Alt+4
+        for p in range(4):
+            QShortcut(QKeySequence(f"Alt+{p + 1}"), self,
+                      lambda sub_idx=p: self._shortcut_switch_subpage(sub_idx))
+
+    def _shortcut_switch_stage(self, stage_idx: int) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+            return
+        self._on_stepper_stage_changed(stage_idx)
+
+    def _shortcut_switch_subpage(self, sub_idx: int) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
+            return
+        curr_stage = self.workflow_stepper.active_stage_index
+        subpages = navigation.get_subpages_for_stage(curr_stage)
+        if 0 <= sub_idx < len(subpages):
+            self._switch_page(subpages[sub_idx])
+
+    def _shortcut_switch_page(self, idx: int) -> None:
         focus = QApplication.focusWidget()
         if isinstance(focus, (QLineEdit, QTextEdit, QTextBrowser)):
             return
         if 0 <= idx < self.page_stack.count():
-            # Keep the icon-rail's visual active state in sync with the page.
             self.icon_rail.set_active(idx)
             self._switch_page(idx)
+
+    def _on_stepper_stage_changed(self, stage_index: int) -> None:
+        target_page = self._stage_subpage_memory.get(
+            stage_index, navigation.get_subpages_for_stage(stage_index)[0]
+        )
+        self._switch_page(target_page)
 
     def _switch_page(self, index: int) -> None:
         if not 0 <= index < self.page_stack.count():
             return
         self.page_stack.setCurrentIndex(index)
+
+        # Update Stage & Subpage state memory
+        stage_idx = navigation.get_stage_for_page(index)
+        self._stage_subpage_memory[stage_idx] = index
+        self.workflow_stepper.set_active_stage(stage_idx)
+        self.sidebar.set_stage(stage_idx, active_page_index=index)
+        self.icon_rail.set_active(index)
+
         self.sidebar.setVisible(False)
         if index == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)

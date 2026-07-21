@@ -248,3 +248,42 @@ def test_app_shell_retains_data_sidebar_context_when_navigating_back(tmp_path, q
     assert "阅读器: text" in text
     assert "当前选择: 未选择" not in text
     assert "阅读器: empty" not in text
+
+
+def test_app_shell_has_workflow_stepper(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+    assert hasattr(shell, "workflow_stepper")
+    assert shell.workflow_stepper is not None
+    assert shell.workflow_stepper.objectName() == "WorkflowStepper"
+
+
+def test_app_shell_stepper_switches_stage_and_recalls_subpage(qtbot):
+    shell = AppShell()
+    qtbot.addWidget(shell)
+
+    # Initial stage is 3 (HomePage = index 0)
+    assert shell.workflow_stepper.active_stage_index == 3
+    assert shell.page_stack.currentIndex() == 0
+
+    # Click Stepper Stage 0 (Data & Prep) -> should switch to PAGE_INDEX_DATA (1)
+    shell.workflow_stepper.stage_buttons[0].click()
+    assert shell.page_stack.currentIndex() == 1
+    assert shell.workflow_stepper.active_stage_index == 0
+
+    # Click Stepper Stage 2 (Mapping) -> should switch to PAGE_INDEX_MAPPING (8)
+    shell.workflow_stepper.stage_buttons[2].click()
+    assert shell.page_stack.currentIndex() == 8
+    assert shell.workflow_stepper.active_stage_index == 2
+
+    # Switch subpage within Stage 2 to PAGE_INDEX_VISUALIZATION (6)
+    shell._switch_page(6)
+    assert shell.page_stack.currentIndex() == 6
+
+    # Switch back to Stage 0, then back to Stage 2 -> should recall PAGE_INDEX_VISUALIZATION (6)
+    shell.workflow_stepper.stage_buttons[0].click()
+    assert shell.page_stack.currentIndex() == 1
+
+    shell.workflow_stepper.stage_buttons[2].click()
+    assert shell.page_stack.currentIndex() == 6
+

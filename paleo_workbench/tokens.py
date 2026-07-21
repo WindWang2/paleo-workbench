@@ -454,6 +454,64 @@ def build_qss(density: str = "comfortable") -> str:
         border-radius: {RADIUS_BUTTON}px;
         padding: 2px;
     }}
+    QFrame#WorkflowStepper {{
+        background: {BG_HEADER};
+        border-bottom: 1px solid {BORDER};
+    }}
+    QPushButton[stageItem="true"] {{
+        background: transparent;
+        color: {TEXT_SECONDARY};
+        font-size: 12px;
+        font-weight: 500;
+        border: 1px solid transparent;
+        border-radius: 18px;
+        padding: 4px 12px;
+    }}
+    QPushButton[stageItem="true"]:hover {{
+        background: {BG_SEARCH};
+        color: {TEXT_PRIMARY};
+    }}
+    QPushButton[stageItem="true"][active="true"] {{
+        background: {PRIMARY};
+        color: #ffffff;
+        font-weight: 600;
+    }}
+    QLabel#StepperArrow {{
+        color: {TEXT_SECONDARY};
+        font-size: 14px;
+        font-weight: bold;
+    }}
+    QFrame#ContextSidebar {{
+        background: {BG_SIDEBAR};
+        border-right: 1px solid {BORDER};
+    }}
+    QPushButton[subpageItem="true"] {{
+        background: {BG_SEARCH};
+        color: {TEXT_PRIMARY};
+        font-size: 11.5px;
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px 8px;
+    }}
+    QPushButton[subpageItem="true"]:hover {{
+        border-color: {PRIMARY};
+    }}
+    QPushButton[subpageItem="true"][active="true"] {{
+        background: {PRIMARY};
+        color: #ffffff;
+        border-color: {PRIMARY};
+        font-weight: 600;
+    }}
+    QPushButton#SidebarCollapseBtn {{
+        background: transparent;
+        color: {TEXT_SECONDARY};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+    }}
+    QPushButton#SidebarCollapseBtn:hover {{
+        background: {BG_SEARCH};
+        color: {TEXT_PRIMARY};
+    }}
     QLabel#WorkFieldLabel {{
         color: {TEXT_SECONDARY};
         font-size: {FONT_SIZE_STATUS};
