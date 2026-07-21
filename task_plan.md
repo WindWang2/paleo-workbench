@@ -96,6 +96,13 @@ Phase 5 — Complete & Verified
 - [x] 地层对比页工具条：浏览/拾取/连线模式、层位与吸附选择、DTW 传播、撤销/重做、自动连线、分层顶线开关、井间距滑杆、轨道显隐、分层顶 CSV 导出
 - **Status:** complete
 
+### Phase 13: 连井对比 P3 导出增强
+
+- [x] 引擎 `export_composite` 增加仅关键字可选参数 `dpi` / `width_px` / `page_size`（默认行为不变，兼容 export_service 位置调用）
+- [x] 新增 `CrossWellExportDialog`（格式 SVG/PNG/PDF、DPI 96/150/300、宽度、PDF 纸张 A4/Letter）
+- [x] 地层对比页导出按钮改为对话框流程
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
