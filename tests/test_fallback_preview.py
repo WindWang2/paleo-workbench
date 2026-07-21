@@ -10,7 +10,7 @@ import zipfile
 import pytest
 
 from paleo_workbench.project.models import ResourceItem
-from paleo_workbench.ui.pages.fallback_preview import (
+from paleo_workbench.resources.preview_parsers.office_parsers import (
     dfb_preview,
     pptx_preview,
     spreadsheetml_preview,

@@ -100,7 +100,6 @@ def geotiff_preview(resource: ResourceItem, settings: PreviewSettings) -> Previe
             thumbnail = dataset.read(
                 1,
                 out_shape=(
-                    1,
                     max(1, dataset.height // decim),
                     max(1, dataset.width // decim),
                 ),
