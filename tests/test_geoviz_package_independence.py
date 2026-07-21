@@ -41,6 +41,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "load_las_preview",
         "load_xml_preview",
         "inspect_las_file",
+        "curve_data_from_arrays",
         "export_svg",
         "export_pdf",
         "export_png",
