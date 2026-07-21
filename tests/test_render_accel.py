@@ -1,4 +1,4 @@
-"""Tests for C++ downsample injection into the geoviz engine."""
+"""Tests for C++ downsample injection into the geoviz engine (ndarray protocol)."""
 from __future__ import annotations
 
 import numpy as np
@@ -40,21 +40,26 @@ def test_injected_provider_preserves_extrema_and_order():
     install_geoviz_acceleration()
     provider = get_downsample_provider()
     n = 5000
-    depths = [float(i) * 0.125 for i in range(n)]
+    depths = np.arange(n, dtype=np.float64) * 0.125
     rng = np.random.default_rng(42)
-    values = (rng.random(n) * 100).tolist()
+    values = rng.random(n) * 100
     out_d, out_v = provider(depths, values, 200)
-    values32 = np.asarray(values, dtype=np.float32).tolist()
+    assert isinstance(out_d, np.ndarray) and isinstance(out_v, np.ndarray)
     assert len(out_d) == len(out_v)
     assert len(out_d) <= 2 * 200 + 4
-    assert max(out_v) == max(values32)
-    assert min(out_v) == min(values32)
-    assert all(b >= a for a, b in zip(out_d, out_d[1:]))
+    # Provider casts to float32 at the C++ boundary; extrema are selections
+    # of the float32-cast inputs.
+    values32 = values.astype(np.float32)
+    assert out_v.max() == values32.max()
+    assert out_v.min() == values32.min()
+    assert np.all(np.diff(out_d) >= 0)
 
 
 def test_injected_provider_passthrough_when_small():
     install_geoviz_acceleration()
     provider = get_downsample_provider()
-    out_d, out_v = provider([1.0, 2.0], [3.0, 4.0], 100)
-    assert list(out_d) == [1.0, 2.0]
-    assert list(out_v) == [3.0, 4.0]
+    depths = np.array([1.0, 2.0])
+    values = np.array([3.0, 4.0])
+    out_d, out_v = provider(depths, values, 100)
+    np.testing.assert_array_equal(out_d, depths)
+    np.testing.assert_array_equal(out_v, values)

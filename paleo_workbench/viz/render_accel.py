@@ -15,14 +15,14 @@ _installed_provider = None
 
 
 def _cpp_minmax_provider(
-    depths: list[float], values: list[float], pixel_height: int
-) -> tuple[list[float], list[float]]:
+    depths: np.ndarray, values: np.ndarray, pixel_height: int
+) -> tuple[np.ndarray, np.ndarray]:
     if len(depths) <= pixel_height * 2:
         return depths, values
     d = np.asarray(depths, dtype=np.float32)
     v = np.asarray(values, dtype=np.float32)
     out_d, out_v = minmax_downsample(d, v, int(pixel_height))
-    return out_d.tolist(), out_v.tolist()
+    return np.asarray(out_d, dtype=np.float64), np.asarray(out_v, dtype=np.float64)
 
 
 def install_geoviz_acceleration() -> None:
