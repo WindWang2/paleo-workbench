@@ -26,17 +26,23 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         auto r_buf = result.request();
         float* r_ptr = static_cast<float*>(r_buf.ptr);
         size_t slice_size = dim1 * dim2;
-        std::copy(ptr + idx * slice_size, ptr + (idx + 1) * slice_size, r_ptr);
+        {
+            py::gil_scoped_release release;
+            std::copy(ptr + idx * slice_size, ptr + (idx + 1) * slice_size, r_ptr);
+        }
         return result;
     } else if (ax == 1) {
         int idx = std::max(0, std::min(index, static_cast<int>(dim1) - 1));
         auto result = py::array_t<float>({dim0, dim2});
         auto r_buf = result.request();
         float* r_ptr = static_cast<float*>(r_buf.ptr);
-        for (size_t i = 0; i < dim0; ++i) {
-            size_t src_offset = i * (dim1 * dim2) + idx * dim2;
-            size_t dst_offset = i * dim2;
-            std::copy(ptr + src_offset, ptr + src_offset + dim2, r_ptr + dst_offset);
+        {
+            py::gil_scoped_release release;
+            for (size_t i = 0; i < dim0; ++i) {
+                size_t src_offset = i * (dim1 * dim2) + idx * dim2;
+                size_t dst_offset = i * dim2;
+                std::copy(ptr + src_offset, ptr + src_offset + dim2, r_ptr + dst_offset);
+            }
         }
         return result;
     } else {
@@ -44,9 +50,12 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         auto result = py::array_t<float>({dim0, dim1});
         auto r_buf = result.request();
         float* r_ptr = static_cast<float*>(r_buf.ptr);
-        for (size_t i = 0; i < dim0; ++i) {
-            for (size_t j = 0; j < dim1; ++j) {
-                r_ptr[i * dim1 + j] = ptr[i * (dim1 * dim2) + j * dim2 + idx];
+        {
+            py::gil_scoped_release release;
+            for (size_t i = 0; i < dim0; ++i) {
+                for (size_t j = 0; j < dim1; ++j) {
+                    r_ptr[i * dim1 + j] = ptr[i * (dim1 * dim2) + j * dim2 + idx];
+                }
             }
         }
         return result;
@@ -65,11 +74,14 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
     float min_val = std::numeric_limits<float>::infinity();
     float max_val = -std::numeric_limits<float>::infinity();
 
-    for (size_t i = 0; i < total; ++i) {
-        float v = ptr[i];
-        if (std::isnan(v) || std::isinf(v)) continue;
-        if (v < min_val) min_val = v;
-        if (v > max_val) max_val = v;
+    {
+        py::gil_scoped_release release;
+        for (size_t i = 0; i < total; ++i) {
+            float v = ptr[i];
+            if (std::isnan(v) || std::isinf(v)) continue;
+            if (v < min_val) min_val = v;
+            if (v > max_val) max_val = v;
+        }
     }
 
     auto u8_result = py::array_t<uint8_t>({rows, cols});
@@ -82,13 +94,16 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
     }
 
     float inv_range = 255.0f / (max_val - min_val);
-    for (size_t i = 0; i < total; ++i) {
-        float v = ptr[i];
-        if (std::isnan(v) || std::isinf(v)) {
-            dst[i] = 0;
-        } else {
-            float norm = (v - min_val) * inv_range;
-            dst[i] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+    {
+        py::gil_scoped_release release;
+        for (size_t i = 0; i < total; ++i) {
+            float v = ptr[i];
+            if (std::isnan(v) || std::isinf(v)) {
+                dst[i] = 0;
+            } else {
+                float norm = (v - min_val) * inv_range;
+                dst[i] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+            }
         }
     }
 
@@ -119,13 +134,16 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
     float step1 = static_cast<float>(s1) / static_cast<float>(std::max<size_t>(1, t1));
     float step2 = static_cast<float>(s2) / static_cast<float>(std::max<size_t>(1, t2));
 
-    for (size_t i = 0; i < t0; ++i) {
-        size_t src_i = std::min(s0 - 1, static_cast<size_t>(i * step0));
-        for (size_t j = 0; j < t1; ++j) {
-            size_t src_j = std::min(s1 - 1, static_cast<size_t>(j * step1));
-            for (size_t k = 0; k < t2; ++k) {
-                size_t src_k = std::min(s2 - 1, static_cast<size_t>(k * step2));
-                dst[i * (t1 * t2) + j * t2 + k] = src[src_i * (s1 * s2) + src_j * s2 + src_k];
+    {
+        py::gil_scoped_release release;
+        for (size_t i = 0; i < t0; ++i) {
+            size_t src_i = std::min(s0 - 1, static_cast<size_t>(i * step0));
+            for (size_t j = 0; j < t1; ++j) {
+                size_t src_j = std::min(s1 - 1, static_cast<size_t>(j * step1));
+                for (size_t k = 0; k < t2; ++k) {
+                    size_t src_k = std::min(s2 - 1, static_cast<size_t>(k * step2));
+                    dst[i * (t1 * t2) + j * t2 + k] = src[src_i * (s1 * s2) + src_j * s2 + src_k];
+                }
             }
         }
     }
@@ -155,30 +173,33 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
     int half_x = crossline_window / 2;
     double n_spatial = static_cast<double>((2 * half_i + 1) * (2 * half_x + 1));
 
-    for (int i = half_i; i < static_cast<int>(ni) - half_i; ++i) {
-        for (int j = half_x; j < static_cast<int>(nx) - half_x; ++j) {
-            double num = 0.0;
-            double sum_sq_spatial_total = 0.0;
+    {
+        py::gil_scoped_release release;
+        for (int i = half_i; i < static_cast<int>(ni) - half_i; ++i) {
+            for (int j = half_x; j < static_cast<int>(nx) - half_x; ++j) {
+                double num = 0.0;
+                double sum_sq_spatial_total = 0.0;
 
-            for (size_t k = 0; k < nt; ++k) {
-                double trace_sum = 0.0;
-                double trace_sq_sum = 0.0;
-                for (int di = -half_i; di <= half_i; ++di) {
-                    for (int dj = -half_x; dj <= half_x; ++dj) {
-                        float v = src[(i + di) * (nx * nt) + (j + dj) * nt + k];
-                        trace_sum += v;
-                        trace_sq_sum += v * v;
+                for (size_t k = 0; k < nt; ++k) {
+                    double trace_sum = 0.0;
+                    double trace_sq_sum = 0.0;
+                    for (int di = -half_i; di <= half_i; ++di) {
+                        for (int dj = -half_x; dj <= half_x; ++dj) {
+                            float v = src[(i + di) * (nx * nt) + (j + dj) * nt + k];
+                            trace_sum += v;
+                            trace_sq_sum += v * v;
+                        }
                     }
+                    double mean_val = trace_sum / n_spatial;
+                    num += mean_val * mean_val;
+                    sum_sq_spatial_total += trace_sq_sum;
                 }
-                double mean_val = trace_sum / n_spatial;
-                num += mean_val * mean_val;
-                sum_sq_spatial_total += trace_sq_sum;
-            }
 
-            double den = (sum_sq_spatial_total / static_cast<double>(nt)) + 1e-12;
-            float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, num / den)));
-            for (size_t k = 0; k < nt; ++k) {
-                dst[i * (nx * nt) + j * nt + k] = coh_val;
+                double den = (sum_sq_spatial_total / static_cast<double>(nt)) + 1e-12;
+                float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, num / den)));
+                for (size_t k = 0; k < nt; ++k) {
+                    dst[i * (nx * nt) + j * nt + k] = coh_val;
+                }
             }
         }
     }
@@ -200,19 +221,22 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
     std::vector<float> verts;
     std::vector<int> faces;
 
-    for (size_t i = 0; i < ni; ++i) {
-        for (size_t j = 0; j < nx; ++j) {
-            for (size_t k = 0; k < nt; ++k) {
-                if (src[i * (nx * nt) + j * nt + k] >= isovalue) {
-                    int idx = static_cast<int>(verts.size() / 3);
-                    verts.push_back(static_cast<float>(i));
-                    verts.push_back(static_cast<float>(j));
-                    verts.push_back(static_cast<float>(k));
+    {
+        py::gil_scoped_release release;
+        for (size_t i = 0; i < ni; ++i) {
+            for (size_t j = 0; j < nx; ++j) {
+                for (size_t k = 0; k < nt; ++k) {
+                    if (src[i * (nx * nt) + j * nt + k] >= isovalue) {
+                        int idx = static_cast<int>(verts.size() / 3);
+                        verts.push_back(static_cast<float>(i));
+                        verts.push_back(static_cast<float>(j));
+                        verts.push_back(static_cast<float>(k));
 
-                    if (idx >= 2 && (idx % 3 == 2)) {
-                        faces.push_back(idx - 2);
-                        faces.push_back(idx - 1);
-                        faces.push_back(idx);
+                        if (idx >= 2 && (idx % 3 == 2)) {
+                            faces.push_back(idx - 2);
+                            faces.push_back(idx - 1);
+                            faces.push_back(idx);
+                        }
                     }
                 }
             }

@@ -37,37 +37,40 @@ py::tuple minmax_downsample(
     out_d.reserve(target_pixels * 2);
     out_v.reserve(target_pixels * 2);
 
-    for (size_t i = 0; i < n_pts; i += bin_size) {
-        size_t end = std::min(n_pts, i + bin_size);
-        size_t min_idx = i;
-        size_t max_idx = i;
-        float min_val = v_ptr[i];
-        float max_val = v_ptr[i];
+    {
+        py::gil_scoped_release release;
+        for (size_t i = 0; i < n_pts; i += bin_size) {
+            size_t end = std::min(n_pts, i + bin_size);
+            size_t min_idx = i;
+            size_t max_idx = i;
+            float min_val = v_ptr[i];
+            float max_val = v_ptr[i];
 
-        for (size_t j = i + 1; j < end; ++j) {
-            float val = v_ptr[j];
-            if (val < min_val) {
-                min_val = val;
-                min_idx = j;
+            for (size_t j = i + 1; j < end; ++j) {
+                float val = v_ptr[j];
+                if (val < min_val) {
+                    min_val = val;
+                    min_idx = j;
+                }
+                if (val > max_val) {
+                    max_val = val;
+                    max_idx = j;
+                }
             }
-            if (val > max_val) {
-                max_val = val;
-                max_idx = j;
-            }
-        }
 
-        if (min_idx <= max_idx) {
-            out_d.push_back(d_ptr[min_idx]);
-            out_v.push_back(v_ptr[min_idx]);
-            if (min_idx != max_idx) {
+            if (min_idx <= max_idx) {
+                out_d.push_back(d_ptr[min_idx]);
+                out_v.push_back(v_ptr[min_idx]);
+                if (min_idx != max_idx) {
+                    out_d.push_back(d_ptr[max_idx]);
+                    out_v.push_back(v_ptr[max_idx]);
+                }
+            } else {
                 out_d.push_back(d_ptr[max_idx]);
                 out_v.push_back(v_ptr[max_idx]);
+                out_d.push_back(d_ptr[min_idx]);
+                out_v.push_back(v_ptr[min_idx]);
             }
-        } else {
-            out_d.push_back(d_ptr[max_idx]);
-            out_v.push_back(v_ptr[max_idx]);
-            out_d.push_back(d_ptr[min_idx]);
-            out_v.push_back(v_ptr[min_idx]);
         }
     }
 
@@ -172,14 +175,17 @@ py::tuple generate_crossover_fill(
     std::vector<float> poly_a_gt;
     std::vector<float> poly_b_gt;
 
-    for (size_t i = 0; i < n_pts; ++i) {
-        if (ca_ptr[i] >= cb_ptr[i]) {
-            poly_a_gt.push_back(ca_ptr[i]);
-            poly_a_gt.push_back(d_ptr[i]);
-        }
-        if (cb_ptr[i] >= ca_ptr[i]) {
-            poly_b_gt.push_back(cb_ptr[i]);
-            poly_b_gt.push_back(d_ptr[i]);
+    {
+        py::gil_scoped_release release;
+        for (size_t i = 0; i < n_pts; ++i) {
+            if (ca_ptr[i] >= cb_ptr[i]) {
+                poly_a_gt.push_back(ca_ptr[i]);
+                poly_a_gt.push_back(d_ptr[i]);
+            }
+            if (cb_ptr[i] >= ca_ptr[i]) {
+                poly_b_gt.push_back(cb_ptr[i]);
+                poly_b_gt.push_back(d_ptr[i]);
+            }
         }
     }
 

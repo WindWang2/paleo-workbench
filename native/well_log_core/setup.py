@@ -8,7 +8,19 @@ from setuptools import setup
 
 HERE = Path(__file__).resolve().parent
 
-extra_compile_args = ["/O2", "/fp:fast"] if sys.platform == "win32" else ["-O3"]
+def _compile_args() -> list[str]:
+    """Return compiler flags, detecting MSVC vs GCC/Clang on all platforms."""
+    try:
+        from setuptools.command.build_ext import build_ext as _be
+        compiler = getattr(_be, 'compiler_type', None)
+    except Exception:
+        compiler = None
+    # On Windows default to MSVC unless evidence of GCC/MinGW
+    if sys.platform == "win32" and compiler != "unix":
+        return ["/O2", "/fp:fast"]
+    return ["-O3", "-ffast-math"]
+
+extra_compile_args = _compile_args()
 
 ext_modules = [
     Pybind11Extension(

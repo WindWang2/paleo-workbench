@@ -8,8 +8,9 @@ from __future__ import annotations
 PRIMARY = "#2563eb"
 ACCENT = "#7c3aed"
 SUCCESS = "#10b981"
-WARNING = "#f59e0b"
-ERROR = "#ef4444"
+WARNING = "#c47e12"
+ERROR = "#ef4444"  # general error color
+ERROR_RED = "#dc2626"  # severe/QC error color
 TEAL = "#0d9488"
 BG_BODY = "#f6f8fa"
 BG_HEADER = "#ffffff"
@@ -88,7 +89,7 @@ PAGE_DESCRIPTIONS = [
     "成图质检与成果导出",
 ]
 
-STEP_COLORS = ["#1f6fe0", "#0f93a4", "#6f47cf", "#c47e12", "#e2705b", "#7e8794"]
+STEP_COLORS = ["#1f6fe0", "#0f93a4", "#6f47cf", WARNING, "#e2705b", "#7e8794"]
 STEP_LABELS = [
     "数据管理", "数据转换", "制图数据制备",
     "沉积相预测", "古地理图编制", "质控与导出",
@@ -103,8 +104,6 @@ STATUS_TEXT = {
     "skipped": "已跳过",
     "mock": "Mock",
 }
-ERROR_RED = "#dc2626"
-WARNING = "#c47e12"  # amber, previously only embedded in STEP_COLORS
 
 QC_RESULT_COLORS = {
     "pass": SUCCESS,
@@ -161,324 +160,18 @@ SMOOTHING_LEVELS = ["弱", "中", "强"]
 SEQUENCE_SCHEMES = ["三级层序格架（推荐）", "四级高频层序", "体系域二分方案"]
 SYSTEMS_TRACT_LABELS = ["LST", "TST", "HST"]
 
-QSS_TEMPLATE = f"""
-QWidget {{
-    font-family: {FONT_FAMILY};
-    font-size: {FONT_SIZE_BASE};
-    color: {TEXT_PRIMARY};
-}}
-QFrame#MenuBar {{
-    background: {BG_HEADER}; border-bottom: 1px solid {BORDER_STRONG};
-    min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
-}}
-QPushButton#ProjectMenuButton,
-QPushButton#ToolsMenuButton {{
-    background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
-}}
-QPushButton#ProjectMenuButton:hover,
-QPushButton#ToolsMenuButton:hover {{ color: {PRIMARY}; }}
-/* Inline-styled PDF paging buttons keep their functional objectName; the
-   focus rule below mirrors SecondaryButton so keyboard focus is visible. */
-QPushButton#DataPreviewPdfPrevious,
-QPushButton#DataPreviewPdfNext {{
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 4px 12px;
-    min-height: {CONTROL_HEIGHT}px;
-    background: {BG_SIDEBAR};
-}}
-QPushButton#DataPreviewPdfPrevious:focus,
-QPushButton#DataPreviewPdfNext:focus {{
-    border: 1px solid {FOCUS_RING};
-}}
-QPushButton#PrimaryButton {{
-    background: {PRIMARY}; color: #ffffff; border: none;
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 4px 14px;
-    min-height: {CONTROL_HEIGHT_LG}px;
-}}
-QPushButton#PrimaryButton:hover {{ background: {PRIMARY_HOVER}; }}
-QPushButton#PrimaryButton:pressed {{ background: {PRIMARY_PRESSED}; }}
-QPushButton#PrimaryButton:disabled {{
-    background: {PRIMARY_DISABLED}; color: #ffffff;
-}}
-QPushButton#PrimaryButton:focus {{
-    border: 1px solid {FOCUS_RING};
-}}
-QPushButton#SecondaryButton {{
-    background: {BG_SIDEBAR}; color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 4px 12px;
-    min-height: {CONTROL_HEIGHT}px;
-}}
-QPushButton#SecondaryButton:hover {{ background: {BG_SEARCH}; }}
-QPushButton#SecondaryButton:pressed {{ background: {BORDER_LIGHT}; }}
-QPushButton#SecondaryButton:disabled {{
-    color: {TEXT_SECONDARY}; border-color: {BORDER};
-}}
-QPushButton#SecondaryButton:checked {{
-    background: {BG_SEARCH}; border-color: {PRIMARY}; color: {TEXT_PRIMARY};
-}}
-QPushButton#SecondaryButton:focus {{
-    border: 1px solid {FOCUS_RING};
-}}
-QLineEdit#SearchBox {{
-    background: {BG_SEARCH}; border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px; padding: 4px 8px; color: {TEXT_PRIMARY};
-    min-height: {CONTROL_HEIGHT}px;
-}}
-QLineEdit#SearchBox:focus {{ border: 1px solid {FOCUS_RING}; }}
-QLineEdit {{
-    min-height: {CONTROL_HEIGHT}px;
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 2px 8px;
-    background: {BG_SIDEBAR};
-}}
-QLineEdit:focus {{ border: 1px solid {FOCUS_RING}; }}
-QComboBox {{
-    min-height: {CONTROL_HEIGHT}px;
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 2px 8px;
-    background: {BG_SIDEBAR};
-}}
-QComboBox:focus {{ border: 1px solid {FOCUS_RING}; }}
-QHeaderView::section {{
-    background: {BG_HEADER};
-    color: {TEXT_PRIMARY};
-    border: none;
-    border-bottom: 1px solid {BORDER_STRONG};
-    border-right: 1px solid {BORDER};
-    padding: 4px 8px;
-    font-weight: 600;
-    min-height: {CONTROL_HEIGHT}px;
-}}
-QTableView, QTableWidget {{
-    gridline-color: {BORDER};
-    selection-background-color: #d6e6fb;
-    selection-color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    background: {BG_SIDEBAR};
-}}
-QFrame#PanelCard {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_CARD}px;
-}}
-QFrame#ToolbarStrip {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_CARD}px;
-}}
-QLabel#EmptyStateLabel {{
-    color: {TEXT_SECONDARY};
-    font-size: {FONT_SIZE_BASE};
-}}
-QFrame#IconRail {{
-    background: {BG_RAIL_GRADIENT};
-    border-right: 1px solid {BORDER};
-    min-width: {ICON_RAIL_WIDTH}px; max-width: {ICON_RAIL_WIDTH}px;
-}}
-QToolButton[navItem="true"] {{
-    background: transparent; color: {TEXT_ON_RAIL}; border: none;
-    border-radius: {RADIUS_NAV_ITEM}px;
-    min-width: {ICON_RAIL_ITEM_SIZE}px; max-width: {ICON_RAIL_ITEM_SIZE}px;
-    min-height: {ICON_RAIL_ITEM_SIZE}px; max-height: {ICON_RAIL_ITEM_SIZE}px;
-    font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
-}}
-QToolButton[navItem="true"]:hover {{ background: {BG_SEARCH}; color: {PRIMARY}; }}
-QToolButton[navItem="true"][active="true"] {{
-    background: #eff6ff; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
-}}
-QFrame#TextSidebar {{
-    background: {BG_SIDEBAR}; border-right: 1px solid {BORDER};
-    min-width: {TEXT_SIDEBAR_WIDTH}px; max-width: {TEXT_SIDEBAR_WIDTH}px;
-}}
-QFrame#StatusBar {{
-    background: {BG_SEARCH}; border-top: 1px solid {BORDER_STRONG};
-    min-height: {STATUS_BAR_HEIGHT}px; max-height: {STATUS_BAR_HEIGHT}px;
-    font-size: {FONT_SIZE_STATUS}; color: {TEXT_SECONDARY};
-}}
-QFrame#PagePlaceholder {{ background: {BG_BODY}; }}
-QWidget#MapEditToolbar {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_CARD}px;
-}}
-QFrame#ToolbarSeparator {{
-    background: {BORDER};
-    border: none;
-    max-width: 1px;
-    min-width: 1px;
-}}
-QFrame#MapLayerTree,
-QFrame#MapAttributeTable,
-QFrame#MapReferencePanel,
-QFrame#MapCanvasPanel,
-QFrame#MapChromePanel {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_CARD}px;
-}}
-QLabel#MapDockTitle {{
-    color: {TEXT_PRIMARY};
-    font-size: {FONT_SIZE_TITLE};
-    font-weight: {FONT_WEIGHT_TITLE};
-    border: none;
-    background: transparent;
-}}
-QTreeWidget#MapLayerTreeWidget {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 2px;
-}}
-QTableWidget#MapAttributeTableWidget {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-}}
-QLabel#StatusCoordLabel {{
-    color: {TEXT_SECONDARY};
-    font-size: {FONT_SIZE_STATUS};
-    font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
-}}
-/* Multi-panel work pages — shared dock chrome (prediction / prep / viz / sequence) */
-QFrame#PredictionTaskPanel,
-QFrame#PredictionEvidencePanel,
-QFrame#WellLogCanvasPanel,
-QFrame#SeismicTaskPanel,
-QFrame#SeismicControlPanel,
-QFrame#SeismicViewPanel,
-QFrame#SeismicAttributePanel,
-QFrame#SeismicContextToolbar,
-QFrame#FactorTaskPanel,
-QFrame#BoundaryPanel,
-QFrame#VisualizationSummaryPanel,
-QFrame#VisualizationTracePanel,
-QFrame#CompositeVisualizationPanel,
-QFrame#SequenceTargetPanel,
-QFrame#SequenceBoundaryTable,
-QFrame#QCIssueTable,
-QFrame#FactorPreviewCard {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_CARD}px;
-}}
-QListWidget#WorkListWidget {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 2px;
-}}
-QLabel#WorkFieldLabel {{
-    color: {TEXT_SECONDARY};
-    font-size: {FONT_SIZE_STATUS};
-    border: none;
-    background: transparent;
-}}
-QLabel#WorkFieldValue {{
-    color: {TEXT_PRIMARY};
-    font-size: {FONT_SIZE_TITLE};
-    font-weight: 500;
-    border: none;
-    background: transparent;
-}}
 
-/* Seismic analysis workbench — light theme style. */
-QWidget#SeismicPredictionPage {{
-    background: {BG_BODY};
-}}
-QFrame#SeismicContextToolbar,
-QFrame#SeismicAttributePanel,
-QFrame#SeismicControlPanel,
-QFrame#SeismicViewPanel {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_CARD}px;
-}}
-QWidget#SeismicPredictionPage QLabel#MapDockTitle,
-QWidget#SeismicPredictionPage QLabel#WorkFieldValue {{
-    color: {TEXT_PRIMARY};
-}}
-QWidget#SeismicPredictionPage QLabel#WorkFieldLabel {{
-    color: {TEXT_SECONDARY};
-}}
-QTreeWidget#SeismicAttributeTree {{
-    background: {BG_SIDEBAR};
-    color: {TEXT_PRIMARY};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-    padding: 4px;
-}}
-QTreeWidget#SeismicAttributeTree::item {{
-    padding: 5px 4px;
-    border-radius: 3px;
-}}
-QTreeWidget#SeismicAttributeTree::item:selected {{
-    background: {PRIMARY};
-    color: #ffffff;
-}}
-QTreeWidget#SeismicAttributeTree::item:hover {{
-    background: {BG_SEARCH};
-}}
-QFrame#SeismicAttributeCard {{
-    background: {BG_SEARCH};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-}}
-QFrame#SeismicViewHost {{
-    background: {BG_SIDEBAR};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS_BUTTON}px;
-}}
-QLabel#SeismicAttributeCardLabel {{
-    color: {TEXT_PRIMARY};
-    font-weight: 600;
-    font-size: {FONT_SIZE_STATUS};
-}}
-QLabel#SeismicAttributeCardStatus {{
-    color: {SUCCESS};
-    font-size: {FONT_SIZE_STATUS};
-}}
-QWidget#SeismicPredictionPage QPushButton#SecondaryButton {{
-    background: {BG_SIDEBAR};
-    color: {TEXT_PRIMARY};
-    border-color: {BORDER};
-}}
-QWidget#SeismicPredictionPage QComboBox {{
-    background: {BG_SIDEBAR};
-    color: {TEXT_PRIMARY};
-    border-color: {BORDER};
-}}
-"""
-
-
-def format_size(size_bytes: int | None) -> str:
-    if size_bytes is None:
-        return "—"
-    if size_bytes >= 1024 * 1024:
-        val = size_bytes / (1024 * 1024)
-        return f"{val:.1f} M" if val % 1 != 0 else f"{int(val)} M"
-    elif size_bytes >= 1024:
-        val = size_bytes / 1024
-        return f"{val:.1f} K" if val % 1 != 0 else f"{int(val)} K"
-    else:
-        return f"{size_bytes} B"
-
-
-def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
+def build_qss(density: str = "comfortable") -> str:
     padding_y = 6 if density == "comfortable" else 3
     padding_x = 12 if density == "comfortable" else 8
     btn_height = 30 if density == "comfortable" else 24
 
-    return f"""
+    return f'''
     QWidget {{
         font-family: {FONT_FAMILY};
         color: {TEXT_PRIMARY};
         background-color: transparent;
+        font-size: {FONT_SIZE_BASE};
     }}
     QMainWindow, QDialog {{
         background-color: {BG_BODY};
@@ -511,6 +204,12 @@ def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
     QPushButton#PrimaryButton:pressed {{
         background-color: {PRIMARY_PRESSED};
     }}
+    QPushButton#PrimaryButton:disabled {{
+        background-color: {PRIMARY_DISABLED}; color: #ffffff; border: none;
+    }}
+    QPushButton#PrimaryButton:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
     QLineEdit, QComboBox, QSpinBox {{
         background-color: {BG_SIDEBAR};
         color: {TEXT_PRIMARY};
@@ -519,15 +218,18 @@ def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
         padding: {padding_y}px {padding_x}px;
         selection-background-color: {PRIMARY};
         selection-color: #ffffff;
+        min-height: {CONTROL_HEIGHT}px;
     }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
         border: 1px solid {PRIMARY};
     }}
-    QTableWidget, QTreeView, QListView {{
+    QTableWidget, QTreeView, QListView, QTableView {{
         background-color: {BG_SIDEBAR};
         border: 1px solid {BORDER};
         border-radius: {RADIUS_CARD}px;
         gridline-color: {BORDER_LIGHT};
+        selection-background-color: #d6e6fb;
+        selection-color: {TEXT_PRIMARY};
     }}
     QHeaderView::section {{
         background-color: {BG_SEARCH};
@@ -535,7 +237,9 @@ def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
         padding: 6px 10px;
         border: none;
         border-bottom: 1px solid {BORDER};
+        border-right: 1px solid {BORDER};
         font-weight: 600;
+        min-height: {CONTROL_HEIGHT}px;
     }}
     QTabWidget::pane {{
         border: 1px solid {BORDER};
@@ -593,5 +297,248 @@ def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
         background-color: {BORDER};
         margin: 4px 0px;
     }}
-    """
 
+    QFrame#MenuBar {{
+        background: {BG_HEADER}; border-bottom: 1px solid {BORDER_STRONG};
+        min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
+    }}
+    QPushButton#ProjectMenuButton,
+    QPushButton#ToolsMenuButton {{
+        background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
+    }}
+    QPushButton#ProjectMenuButton:hover,
+    QPushButton#ToolsMenuButton:hover {{ color: {PRIMARY}; }}
+    QPushButton#DataPreviewPdfPrevious,
+    QPushButton#DataPreviewPdfNext {{
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px 12px;
+        min-height: {CONTROL_HEIGHT}px;
+        background: {BG_SIDEBAR};
+    }}
+    QPushButton#DataPreviewPdfPrevious:focus,
+    QPushButton#DataPreviewPdfNext:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
+    QPushButton#SecondaryButton {{
+        background: {BG_SIDEBAR}; color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px 12px;
+        min-height: {CONTROL_HEIGHT}px;
+    }}
+    QPushButton#SecondaryButton:hover {{ background: {BG_SEARCH}; }}
+    QPushButton#SecondaryButton:pressed {{ background: {BORDER_LIGHT}; }}
+    QPushButton#SecondaryButton:disabled {{
+        color: {TEXT_SECONDARY}; border-color: {BORDER};
+    }}
+    QPushButton#SecondaryButton:checked {{
+        background: {BG_SEARCH}; border-color: {PRIMARY}; color: {TEXT_PRIMARY};
+    }}
+    QPushButton#SecondaryButton:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
+    QLineEdit#SearchBox {{
+        background: {BG_SEARCH}; border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px; padding: 4px 8px; color: {TEXT_PRIMARY};
+        min-height: {CONTROL_HEIGHT}px;
+    }}
+    QLineEdit#SearchBox:focus {{ border: 1px solid {FOCUS_RING}; }}
+    QFrame#PanelCard {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QFrame#ToolbarStrip {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QLabel#EmptyStateLabel {{
+        color: {TEXT_SECONDARY};
+        font-size: {FONT_SIZE_BASE};
+    }}
+    QFrame#IconRail {{
+        background: {BG_RAIL_GRADIENT};
+        border-right: 1px solid {BORDER};
+        min-width: {ICON_RAIL_WIDTH}px; max-width: {ICON_RAIL_WIDTH}px;
+    }}
+    QToolButton[navItem="true"] {{
+        background: transparent; color: {TEXT_ON_RAIL}; border: none;
+        border-radius: {RADIUS_NAV_ITEM}px;
+        min-width: {ICON_RAIL_ITEM_SIZE}px; max-width: {ICON_RAIL_ITEM_SIZE}px;
+        min-height: {ICON_RAIL_ITEM_SIZE}px; max-height: {ICON_RAIL_ITEM_SIZE}px;
+        font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
+    }}
+    QToolButton[navItem="true"]:hover {{ background: {BG_SEARCH}; color: {PRIMARY}; }}
+    QToolButton[navItem="true"][active="true"] {{
+        background: #eff6ff; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
+    }}
+    QFrame#TextSidebar {{
+        background: {BG_SIDEBAR}; border-right: 1px solid {BORDER};
+        min-width: {TEXT_SIDEBAR_WIDTH}px; max-width: {TEXT_SIDEBAR_WIDTH}px;
+    }}
+    QFrame#StatusBar {{
+        background: {BG_SEARCH}; border-top: 1px solid {BORDER_STRONG};
+        min-height: {STATUS_BAR_HEIGHT}px; max-height: {STATUS_BAR_HEIGHT}px;
+        font-size: {FONT_SIZE_STATUS}; color: {TEXT_SECONDARY};
+    }}
+    QFrame#PagePlaceholder {{ background: {BG_BODY}; }}
+    QWidget#MapEditToolbar {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QFrame#ToolbarSeparator {{
+        background: {BORDER};
+        border: none;
+        max-width: 1px;
+        min-width: 1px;
+    }}
+    QFrame#MapLayerTree,
+    QFrame#MapAttributeTable,
+    QFrame#MapReferencePanel,
+    QFrame#MapCanvasPanel,
+    QFrame#MapChromePanel {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QLabel#MapDockTitle {{
+        color: {TEXT_PRIMARY};
+        font-size: {FONT_SIZE_TITLE};
+        font-weight: {FONT_WEIGHT_TITLE};
+        border: none;
+        background: transparent;
+    }}
+    QTreeWidget#MapLayerTreeWidget {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 2px;
+    }}
+    QTableWidget#MapAttributeTableWidget {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+    }}
+    QLabel#StatusCoordLabel {{
+        color: {TEXT_SECONDARY};
+        font-size: {FONT_SIZE_STATUS};
+        font-family: "SF Mono", "Menlo", "Consolas", "Courier New", monospace;
+    }}
+    QFrame#PredictionTaskPanel,
+    QFrame#PredictionEvidencePanel,
+    QFrame#WellLogCanvasPanel,
+    QFrame#SeismicTaskPanel,
+    QFrame#SeismicControlPanel,
+    QFrame#SeismicViewPanel,
+    QFrame#SeismicAttributePanel,
+    QFrame#SeismicContextToolbar,
+    QFrame#FactorTaskPanel,
+    QFrame#BoundaryPanel,
+    QFrame#VisualizationSummaryPanel,
+    QFrame#VisualizationTracePanel,
+    QFrame#CompositeVisualizationPanel,
+    QFrame#SequenceTargetPanel,
+    QFrame#SequenceBoundaryTable,
+    QFrame#QCIssueTable,
+    QFrame#FactorPreviewCard {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+    }}
+    QListWidget#WorkListWidget {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 2px;
+    }}
+    QLabel#WorkFieldLabel {{
+        color: {TEXT_SECONDARY};
+        font-size: {FONT_SIZE_STATUS};
+        border: none;
+        background: transparent;
+    }}
+    QLabel#WorkFieldValue {{
+        color: {TEXT_PRIMARY};
+        font-size: {FONT_SIZE_TITLE};
+        font-weight: 500;
+        border: none;
+        background: transparent;
+    }}
+
+    QWidget#SeismicPredictionPage {{
+        background: {BG_BODY};
+    }}
+    QWidget#SeismicPredictionPage QLabel#MapDockTitle,
+    QWidget#SeismicPredictionPage QLabel#WorkFieldValue {{
+        color: {TEXT_PRIMARY};
+    }}
+    QWidget#SeismicPredictionPage QLabel#WorkFieldLabel {{
+        color: {TEXT_SECONDARY};
+    }}
+    QTreeWidget#SeismicAttributeTree {{
+        background: {BG_SIDEBAR};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: 4px;
+    }}
+    QTreeWidget#SeismicAttributeTree::item {{
+        padding: 5px 4px;
+        border-radius: 3px;
+    }}
+    QTreeWidget#SeismicAttributeTree::item:selected {{
+        background: {PRIMARY};
+        color: #ffffff;
+    }}
+    QTreeWidget#SeismicAttributeTree::item:hover {{
+        background: {BG_SEARCH};
+    }}
+    QFrame#SeismicAttributeCard {{
+        background: {BG_SEARCH};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+    }}
+    QFrame#SeismicViewHost {{
+        background: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+    }}
+    QLabel#SeismicAttributeCardLabel {{
+        color: {TEXT_PRIMARY};
+        font-weight: 600;
+        font-size: {FONT_SIZE_STATUS};
+    }}
+    QLabel#SeismicAttributeCardStatus {{
+        color: {SUCCESS};
+        font-size: {FONT_SIZE_STATUS};
+    }}
+    QWidget#SeismicPredictionPage QPushButton#SecondaryButton {{
+        background: {BG_SIDEBAR};
+        color: {TEXT_PRIMARY};
+        border-color: {BORDER};
+    }}
+    QWidget#SeismicPredictionPage QComboBox {{
+        background: {BG_SIDEBAR};
+        color: {TEXT_PRIMARY};
+        border-color: {BORDER};
+    }}
+    '''
+
+QSS_TEMPLATE = build_qss()
+
+def format_size(size_bytes: int | None) -> str:
+    if size_bytes is None:
+        return "—"
+    if size_bytes >= 1024 * 1024:
+        val = size_bytes / (1024 * 1024)
+        return f"{val:.1f} M" if val % 1 != 0 else f"{int(val)} M"
+    elif size_bytes >= 1024:
+        val = size_bytes / 1024
+        return f"{val:.1f} K" if val % 1 != 0 else f"{int(val)} K"
+    else:
+        return f"{size_bytes} B"
+def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
+    return build_qss(density=density)

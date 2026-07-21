@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from paleo_workbench.project.models import PaleoMapDocument
@@ -10,6 +11,8 @@ from paleo_workbench.mapping.geometry_schema import (
     normalize_label,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def features_from_document(doc: PaleoMapDocument | None) -> list[dict[str, Any]]:
     if doc is None:
@@ -19,21 +22,25 @@ def features_from_document(doc: PaleoMapDocument | None) -> list[dict[str, Any]]
         try:
             out.append(normalize_facies(raw if isinstance(raw, dict) else dict(raw)))
         except Exception:
+            logger.warning("Skipping malformed %s feature during document import", "facies", exc_info=True)
             continue
     for raw in doc.well_overlays or []:
         try:
             out.append(normalize_well(raw if isinstance(raw, dict) else dict(raw)))
         except Exception:
+            logger.warning("Skipping malformed %s feature during document import", "well", exc_info=True)
             continue
     for raw in getattr(doc, "line_features", None) or []:
         try:
             out.append(normalize_line(raw if isinstance(raw, dict) else dict(raw)))
         except Exception:
+            logger.warning("Skipping malformed %s feature during document import", "line", exc_info=True)
             continue
     for raw in getattr(doc, "label_features", None) or []:
         try:
             out.append(normalize_label(raw if isinstance(raw, dict) else dict(raw)))
         except Exception:
+            logger.warning("Skipping malformed %s feature during document import", "label", exc_info=True)
             continue
     return out
 

@@ -47,7 +47,7 @@ class AppShell(QWidget):
     def __init__(self, project: ProjectDocument | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("AppShell")
-        self.setStyleSheet(tokens.QSS_TEMPLATE + tokens.build_modern_qss())
+        self.setStyleSheet(tokens.build_qss())
         self.project = project or ProjectDocument.new("Untitled Project")
         self._fade_anim: QPropertyAnimation | None = None
         outer = QVBoxLayout(self)

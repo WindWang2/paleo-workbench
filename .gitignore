@@ -43,3 +43,9 @@ native/**/*.so
 native/**/*.pyd
 native/**/build/
 native/**/*.egg-info/
+
+# AI agent workspace directories
+.gemini/
+.cursor/
+.claude/
+
