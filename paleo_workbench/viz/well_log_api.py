@@ -62,10 +62,10 @@ def minmax_downsample(
     return np.array(out_d, dtype=np.float32), np.array(out_v, dtype=np.float32)
 
 
-def fast_las_parse_data(content: str) -> tuple[tuple[str, ...], np.ndarray]:
-    """Parse ASCII LAS data section (~A block) into headers and 2D float32 numpy array."""
+def fast_las_parse_data(content: str, null_value: float = -999.0) -> tuple[tuple[str, ...], np.ndarray]:
+    """Parse ASCII LAS data section (~A block) into headers and 2D float64 numpy array."""
     if HAS_CPP_WELL_LOG and hasattr(well_log_core, "fast_las_parse_data"):
-        return well_log_core.fast_las_parse_data(content)
+        return well_log_core.fast_las_parse_data(content, null_value)
 
     lines = content.splitlines()
     in_data = False
@@ -77,10 +77,16 @@ def fast_las_parse_data(content: str) -> tuple[tuple[str, ...], np.ndarray]:
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith("~A") or stripped.startswith("~a"):
+            # Marks the start of the data section. Inline tokens only count as
+            # column headers when separated from `~A` by whitespace
+            # (`~A DEPT GR DEN`); a directly-attached suffix is part of the
+            # section name (`~Ascii` must not yield "scii").
             in_data = True
-            parts = stripped[2:].strip().split()
-            if parts:
-                headers = parts
+            rest = stripped[2:]
+            if rest and rest[0] in " \t":
+                headers = rest.split()
+            else:
+                headers = []
             continue
         if in_data:
             tokens = stripped.split()
@@ -88,7 +94,7 @@ def fast_las_parse_data(content: str) -> tuple[tuple[str, ...], np.ndarray]:
             for tok in tokens:
                 try:
                     val = float(tok)
-                    if math.isnan(val) or val <= -999.0:
+                    if math.isnan(val) or val <= -999.0 or val == null_value:
                         row.append(np.nan)
                     else:
                         row.append(val)
@@ -100,7 +106,7 @@ def fast_las_parse_data(content: str) -> tuple[tuple[str, ...], np.ndarray]:
     if not headers and rows:
         headers = [f"COL_{i}" for i in range(len(rows[0]))]
 
-    arr = np.array(rows, dtype=np.float32) if rows else np.zeros((0, len(headers)), dtype=np.float32)
+    arr = np.array(rows, dtype=np.float64) if rows else np.zeros((0, len(headers)), dtype=np.float64)
     return tuple(headers), arr
 
 

@@ -72,3 +72,35 @@ def test_fallback_when_fast_channel_raises(tmp_path: Path, monkeypatch):
     assert data is not None
     assert data.well_name == "WELL-01"
     assert {c.name for c in data.curves} == {"GR", "DT"}
+
+
+def test_fast_channel_actually_engages(tmp_path: Path, monkeypatch):
+    path = _write_las(tmp_path)
+    import paleo_workbench.viz.well_log_load as mod
+
+    calls = []
+    real = mod.fast_las_parse_data
+
+    def _spy(content, *args, **kwargs):
+        calls.append(len(content))
+        return real(content, *args, **kwargs)
+
+    monkeypatch.setattr(mod, "fast_las_parse_data", _spy)
+    data = mod._load_las_fast(path)
+    assert calls, "fast channel never called fast_las_parse_data"
+    assert data is not None, "fast channel bailed to fallback"
+    assert {c.name for c in data.curves} == {"GR", "DT"}
+
+
+def test_wrapped_las_falls_back_but_loads(tmp_path: Path, monkeypatch):
+    path = tmp_path / "wrapped.las"
+    path.write_text(SAMPLE_LAS.replace("WRAP .                  NO", "WRAP .                 YES"), encoding="utf-8")
+    import paleo_workbench.viz.well_log_load as mod
+
+    def _boom(content, *args, **kwargs):
+        raise AssertionError("fast channel should not run on wrapped LAS")
+
+    # fast channel must bail BEFORE parsing data; fallback still loads
+    data = mod.load_well_log_from_path(str(path))
+    assert data is not None
+    assert data.well_name == "WELL-01"

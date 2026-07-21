@@ -22,11 +22,13 @@ def _load_las_fast(file_path: Path) -> Any | None:
     from geoviz import curve_data_from_arrays, inspect_las_file
 
     header = inspect_las_file(str(file_path))
+    if header.wrapped:
+        return None  # wrapped LAS: fall back to the engine loader
     selected = header.non_depth_curves[:MAX_CURVES]
     if not selected:
         return None
     content = file_path.read_text(encoding="utf-8", errors="replace")
-    _headers, arr = fast_las_parse_data(content)
+    _headers, arr = fast_las_parse_data(content, header.null_value)
     if arr.ndim != 2 or arr.shape[0] < 2:
         return None
     max_index = max(item.index for item in selected + (header.curves[header.depth_index],))

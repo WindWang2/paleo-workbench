@@ -85,12 +85,12 @@ py::tuple minmax_downsample(
 }
 
 // Fast LAS ASCII Data Parser
-py::tuple fast_las_parse_data(const std::string& content) {
+py::tuple fast_las_parse_data(const std::string& content, double null_value = -999.0) {
     std::istringstream stream(content);
     std::string line;
     bool in_data = false;
     std::vector<std::string> headers;
-    std::vector<std::vector<float>> rows;
+    std::vector<std::vector<double>> rows;
 
     while (std::getline(stream, line)) {
         size_t start = line.find_first_not_of(" \t\r\n");
@@ -100,30 +100,36 @@ py::tuple fast_las_parse_data(const std::string& content) {
         if (stripped[0] == '#') continue;
 
         if (stripped.rfind("~A", 0) == 0 || stripped.rfind("~a", 0) == 0) {
+            // Marks the start of the data section. Inline tokens are only
+            // treated as column headers when separated from `~A` by
+            // whitespace (`~A DEPT GR DEN`); a directly-attached suffix is
+            // part of the section name (`~Ascii` must not yield "scii").
             in_data = true;
-            std::istringstream h_stream(stripped.substr(2));
-            std::string token;
             headers.clear();
-            while (h_stream >> token) {
-                headers.push_back(token);
+            if (stripped.size() > 2 && (stripped[2] == ' ' || stripped[2] == '\t')) {
+                std::istringstream h_stream(stripped.substr(2));
+                std::string token;
+                while (h_stream >> token) {
+                    headers.push_back(token);
+                }
             }
             continue;
         }
 
         if (in_data) {
             std::istringstream d_stream(stripped);
-            std::vector<float> row;
+            std::vector<double> row;
             std::string token;
             while (d_stream >> token) {
                 try {
-                    float val = std::stof(token);
-                    if (std::isnan(val) || val <= -999.0f) {
-                        row.push_back(std::numeric_limits<float>::quiet_NaN());
+                    double val = std::stod(token);
+                    if (std::isnan(val) || val <= -999.0 || val == null_value) {
+                        row.push_back(std::numeric_limits<double>::quiet_NaN());
                     } else {
                         row.push_back(val);
                     }
                 } catch (...) {
-                    row.push_back(std::numeric_limits<float>::quiet_NaN());
+                    row.push_back(std::numeric_limits<double>::quiet_NaN());
                 }
             }
             if (!row.empty()) {
@@ -135,16 +141,16 @@ py::tuple fast_las_parse_data(const std::string& content) {
     size_t num_rows = rows.size();
     size_t num_cols = headers.empty() ? (num_rows > 0 ? rows[0].size() : 0) : headers.size();
 
-    auto result = py::array_t<float>({num_rows, num_cols});
+    auto result = py::array_t<double>({num_rows, num_cols});
     auto r_buf = result.request();
-    float* ptr = static_cast<float*>(r_buf.ptr);
+    double* ptr = static_cast<double*>(r_buf.ptr);
 
     for (size_t r = 0; r < num_rows; ++r) {
         for (size_t c = 0; c < num_cols; ++c) {
             if (c < rows[r].size()) {
                 ptr[r * num_cols + c] = rows[r][c];
             } else {
-                ptr[r * num_cols + c] = std::numeric_limits<float>::quiet_NaN();
+                ptr[r * num_cols + c] = std::numeric_limits<double>::quiet_NaN();
             }
         }
     }
@@ -204,6 +210,6 @@ py::tuple generate_crossover_fill(
 PYBIND11_MODULE(well_log_core, m) {
     m.doc() = "Native well log curve processing, LOD downsampling and fast LAS parsing acceleration";
     m.def("minmax_downsample", &minmax_downsample, py::arg("depth"), py::arg("values"), py::arg("target_pixels") = 1000);
-    m.def("fast_las_parse_data", &fast_las_parse_data, py::arg("content"));
+    m.def("fast_las_parse_data", &fast_las_parse_data, py::arg("content"), py::arg("null_value") = -999.0);
     m.def("generate_crossover_fill", &generate_crossover_fill, py::arg("depth"), py::arg("curve_a"), py::arg("curve_b"));
 }
