@@ -15,3 +15,4 @@
 | Full Pytest Suite | 1109 | 1109 | 0 | 12 | ✅ PASSED |
 | Map Edit Tests | 68 | 68 | 0 | 0 | ✅ PASSED |
 | Preview Tests | 62 | 62 | 0 | 1 | ✅ PASSED |
+- **连井对比 P1 性能优化**：引擎可注入 downsample 钩子 + 启动时注入 C++ `minmax_downsample`；`set_depth_range` 无操作守卫消除全井缓存级联失效；LAS 加载接入 C++ `fast_las_parse_data` 快速通道（修复 `~ASCII` 节头解析 bug、支持声明 NULL 值、包装文件回退）；离屏 canvas 跳过栅格化。全量 1113 测试通过（Commits: workbench `1fc79ea..77178d5`，engine `7ff4a96..74a7b841`）。
