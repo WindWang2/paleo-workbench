@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from geoviz import FormationTop
 
 from paleo_workbench.resources.export_service import default_export_dir
+from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDialog
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
 from paleo_workbench.viz.models import VizPayload
@@ -224,7 +225,7 @@ class StratigraphyCorrelationPage(QWidget):
         self.track_list.itemChanged.connect(self._on_track_item_changed)
         right.addWidget(self.track_list)
         right.addStretch()
-        self.export_btn = QPushButton("导出连井 SVG")
+        self.export_btn = QPushButton("导出连井剖面")
         self.export_btn.setObjectName("PrimaryButton")
         self.export_btn.clicked.connect(self._export_section)
         right.addWidget(self.export_btn)
@@ -471,6 +472,11 @@ class StratigraphyCorrelationPage(QWidget):
         if not getattr(inner, "_canvases", None):
             QMessageBox.warning(self, "导出", "请先加载连井剖面")
             return
+        dialog = CrossWellExportDialog(self)
+        if not dialog.exec():
+            return
+        opts = dialog.options()
+        fmt = opts["fmt"]
         start_dir = default_export_dir(
             Path(self._project.meta.project_root) / "x.paleo.json"
             if self._project and self._project.meta.project_root not in ("", ".")
@@ -478,14 +484,20 @@ class StratigraphyCorrelationPage(QWidget):
         )
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "导出连井剖面 SVG",
-            str(start_dir / "cross_well_correlation.svg"),
-            "SVG (*.svg)",
+            "导出连井剖面",
+            str(start_dir / f"cross_well_correlation.{fmt}"),
+            f"{fmt.upper()} (*.{fmt})",
         )
         if not path:
             return
         try:
-            inner.export_composite(str(path), fmt="svg")
+            inner.export_composite(
+                path,
+                fmt=fmt,
+                dpi=opts["dpi"],
+                width_px=opts["width_px"],
+                page_size=opts["page_size"],
+            )
         except Exception as exc:
             QMessageBox.warning(self, "导出失败", f"{exc.__class__.__name__}: {exc}")
             return
