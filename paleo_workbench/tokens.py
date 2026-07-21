@@ -170,10 +170,10 @@ def build_qss(density: str = "comfortable") -> str:
     QWidget {{
         font-family: {FONT_FAMILY};
         color: {TEXT_PRIMARY};
-        background-color: transparent;
+        background-color: {BG_BODY};
         font-size: {FONT_SIZE_BASE};
     }}
-    QMainWindow, QDialog {{
+    QMainWindow, QDialog, QStackedWidget, QScrollArea, QWidget#AppShell, QWidget#HomePage, QWidget#HomeContainer, QWidget#ModuleRelationshipWidget, QWidget#ModuleRelationshipCanvas {{
         background-color: {BG_BODY};
     }}
     QPushButton {{

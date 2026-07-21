@@ -73,6 +73,7 @@ class AppShell(QWidget):
         middle.setContentsMargins(0, 0, 0, 0)
         middle.setSpacing(0)
         self.icon_rail = IconRail()
+        self.icon_rail.setVisible(False)
         self.sidebar = ContextSidebar()
         self.sidebar.setVisible(False)
         self.page_stack = QStackedWidget()
