@@ -74,6 +74,9 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "IntervalItem",
         "LithologyInterval",
         "WellIntervals",
+        "set_downsample_provider",
+        "get_downsample_provider",
+        "numpy_minmax_downsample",
     }
 )
 

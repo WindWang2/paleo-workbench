@@ -30,7 +30,7 @@ def install_geoviz_acceleration() -> None:
     global _installed_provider
     if _installed_provider is not None:
         return
-    from geoviz_well_log.renderer.downsample import set_downsample_provider
+    from geoviz import set_downsample_provider
 
     set_downsample_provider(_cpp_minmax_provider)
     _installed_provider = _cpp_minmax_provider
