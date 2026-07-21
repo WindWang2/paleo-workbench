@@ -73,6 +73,14 @@ Phase 5 — Complete & Verified
 - [x] 完成 1129/1129 全量回归测试 (含 C++ perf parity 测试)
 - **Status:** complete
 
+### Phase 10: 连井对比视图 `QScrollArea` 视口滚动隔离
+
+- [x] 限制连井对比 (`StratigraphyCorrelationPage` & `CompositeVisualizationPanel`) 画布控件尺寸扩张
+- [x] 嵌入自适应 `QScrollArea` 视口与滚动条 (`ScrollBarAsNeeded`)
+- [x] 确保多井连井 (5-20+ 口井) 加载时不会改变或拉伸主程序窗口大小
+- [x] 完成 1130/1130 全量回归测试 (含视口滚动测试)
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |

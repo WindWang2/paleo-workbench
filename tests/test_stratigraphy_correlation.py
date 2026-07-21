@@ -105,3 +105,19 @@ def test_page_lists_wells_and_loads_section(qtbot, monkeypatch):
     page.load_btn.click()
     assert page.cross_host.inner.canvas_count >= 2
     assert "2 口井" in page.loaded_value.text()
+
+
+def test_stratigraphy_correlation_page_has_scroll_area(qtbot):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QScrollArea
+
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+    assert hasattr(page, "scroll_area")
+    assert isinstance(page.scroll_area, QScrollArea)
+    assert page.scroll_area.widget() is page.cross_host.widget
+    assert page.scroll_area.widgetResizable() is True
+    assert (
+        page.scroll_area.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )

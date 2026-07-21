@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -102,7 +104,23 @@ class StratigraphyCorrelationPage(QWidget):
         self.status_label.setObjectName("WorkFieldLabel")
         self.status_label.setWordWrap(True)
         center_layout.addWidget(self.status_label)
-        center_layout.addWidget(self.cross_host.widget, 1)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("StratCrossScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll_area.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll_area.setWidget(self.cross_host.widget)
+
+        center_layout.addWidget(self.scroll_area, 1)
         content.addWidget(center, 1)
 
         # Right: actions

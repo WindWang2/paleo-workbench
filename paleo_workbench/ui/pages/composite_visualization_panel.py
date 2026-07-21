@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QTabWidget, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QTabWidget, QVBoxLayout
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.prediction_helpers import active_prediction_task
@@ -73,7 +74,20 @@ class CompositeVisualizationPanel(QFrame):
         self.tabs.addTab(self.well_host.widget, WellLogHost.tab_title)
         self.tabs.addTab(self.well_section_host.widget, WellSectionHost.tab_title)
         self.tabs.addTab(self.seismic_host.widget, SeismicHost.tab_title)
-        self.tabs.addTab(self.cross_well_host.widget, CrossWellHost.tab_title)
+
+        self.cross_well_scroll = QScrollArea()
+        self.cross_well_scroll.setObjectName("CrossWellTabScrollArea")
+        self.cross_well_scroll.setWidgetResizable(True)
+        self.cross_well_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.cross_well_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.cross_well_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.cross_well_scroll.setWidget(self.cross_well_host.widget)
+        self.tabs.addTab(self.cross_well_scroll, CrossWellHost.tab_title)
+
         self.tabs.addTab(self.map_host.widget, PaleoMapHost.tab_title)
         self.tabs.addTab(self.well_tie_host.widget, WellTieHost.tab_title)
         self.tabs.addTab(self.engine_host.widget, EnginePreviewHost.tab_title)
