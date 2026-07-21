@@ -13,6 +13,36 @@ if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
 
+class _UseLasio(Exception):
+    """Internal signal: fall back to the lasio parser for this file."""
+
+
+def _lasio_data_table(path: Path) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    """Parse the LAS data section via lasio (handles wrapped files).
+
+    Returns ((), ()) on any failure.
+    """
+    try:
+        import lasio
+        import numpy as np
+
+        las = lasio.read(str(path))
+        data_headers = tuple(c.mnemonic for c in las.curves)
+        limit = min(len(las.data), 100)
+        rows_list = []
+        for i in range(limit):
+            row_vals = []
+            for val in las.data[i]:
+                if np.isnan(val):
+                    row_vals.append("NaN")
+                else:
+                    row_vals.append(f"{val:.4f}".rstrip('0').rstrip('.'))
+            rows_list.append(tuple(row_vals))
+        return data_headers, tuple(rows_list)
+    except Exception:
+        return (), ()
+
+
 def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewResult:
     path = Path(resource.path)
     try:
@@ -63,6 +93,8 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
     try:
         import numpy as np
 
+        if getattr(header, "wrapped", False):
+            raise _UseLasio  # wrapped LAS: fast channel cannot handle it
         content = path.read_text(encoding="utf-8", errors="replace")
         _headers, arr = fast_las_parse_data(content, header.null_value)
         if arr.ndim == 2 and arr.shape[0] > 0:
@@ -78,6 +110,8 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
                         row_vals.append(f"{val:.4f}".rstrip('0').rstrip('.'))
                 rows_list.append(tuple(row_vals))
             data_rows = tuple(rows_list)
+    except _UseLasio:
+        data_headers, data_rows = _lasio_data_table(path)
     except Exception:
         pass
 

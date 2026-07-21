@@ -50,3 +50,27 @@ def test_preview_data_rows_without_lasio(tmp_path: Path, monkeypatch):
     # NULL -> NaN display
     assert result.data_rows[1][2] == "NaN"
     assert result.data_rows[3][1] == "NaN"
+
+
+def test_wrapped_las_preview_uses_lasio_fallback(tmp_path: Path):
+    # Genuinely wrapped data section: each depth step spans two lines.
+    header_part, data_part = SAMPLE_LAS.split("~ASCII\n")
+    wrapped_lines = []
+    for line in data_part.strip().splitlines():
+        vals = line.split()
+        wrapped_lines.append(" " + vals[0])
+        wrapped_lines.append(" " + "   ".join(vals[1:]))
+    wrapped = (
+        header_part.replace("WRAP .                  NO", "WRAP .                 YES")
+        + "~ASCII\n"
+        + "\n".join(wrapped_lines)
+        + "\n"
+    )
+    path = tmp_path / "wrapped.las"
+    path.write_text(wrapped, encoding="utf-8")
+    resource = ResourceItem(name="wrapped.las", path=str(path), type="well_log", format="las")
+    result = las_preview(resource, _Settings())
+    # Wrapped file: table still populated (via lasio fallback)
+    assert result.data_headers == ("DEPT", "GR", "DT")
+    assert len(result.data_rows) == 6
+    assert result.data_rows[0] == ("2000", "45.2", "220")
