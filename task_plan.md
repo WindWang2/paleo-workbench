@@ -50,6 +50,15 @@ Phase 5 — Complete & Verified
 - [x] 将 `fast_slice_extract` 接入 `SeismicSlicePreviewWidget` 预览控件
 - **Status:** complete
 
+### Phase 7: 测井显示与计算 C++ 原生加速 (TDD 范式与模块化架构)
+
+- [x] 编写 TDD 先行测试 `tests/test_well_log_api.py` (RED) 验证算法契约
+- [x] 实现 `paleo_workbench/viz/well_log_api.py` 纯 Python/NumPy 保底算法 (GREEN)
+- [x] 构建 C++ pybind11 跨平台原生扩展 `native/well_log_core`（含 `minmax_downsample`, `fast_las_parse_data`, `generate_crossover_fill`）
+- [x] 编写 C++ 契约与数值等价性测试 `tests/test_well_log_cpp.py` (GREEN)
+- [x] 将 `fast_las_parse_data` 接入 `well_log_parsers.py` 解析通道
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
@@ -58,6 +67,7 @@ Phase 5 — Complete & Verified
 | 将 `resources/preview_parsers/` 下沉到 `resources/` | 保持 `resources` 作为基础资源/格式解析层，符合 `ui → viz/workflow/resources/mapping → project` 的分层依赖规则。 |
 | 拆分 `map_edit_scene.py` 为 4 个高内聚辅助模块 | 将几何工厂、草图状态机、吸附管理器、拓扑算法与主 Scene 事件路由解耦，提高可维护性。 |
 | 采用 pybind11 构建 `seismic_3d_core` 原生模块 | 在纯 Python / NumPy 算法保底的前提下，通过 C++ 多线程与内存连续性提供高效震相计算与切片提取。 |
+| 采用 pybind11 构建 `well_log_core` 测井原生扩展 | 将视口 Min-Max LOD 抽稀、ASCII 解析与交叠填色下沉到 `viz/` 算法层与原生扩展，保障 60 FPS 渲染。 |
 
 ## Errors Encountered & Resolved
 
@@ -67,3 +77,4 @@ Phase 5 — Complete & Verified
 | `setPageMode` failure on stub `QPdfView` | 1 | 统一通过 `preview_widgets.QPdfView` 动态反射获取 `PageMode` 枚举值。 |
 | `NumPy 2.5 DeprecationWarning` in `document_parsers.py` | 1 | 将 `dataset.read(1, out_shape=(1, h, w))` 的 3D shape 改为标准的 2D shape `(h, w)`。 |
 | `compute_coherence_3d` numerical parity discrepancy | 1 | 修正 C++ 相干性算法公式，使其与 Python 逐道均方根归一化一致。 |
+| `fast_las_parse_data` return type discrepancy | 1 | 统一 C++ 原生扩展 headers 返回类型为 Python tuple 保持类型完全一致。 |

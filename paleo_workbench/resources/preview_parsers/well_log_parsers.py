@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.resources.preview_parsers.models import PreviewResult
 from paleo_workbench.resources.preview_parsers.table_parsers import parse_error_preview, safe_stat
+from paleo_workbench.viz.well_log_api import fast_las_parse_data
 
 if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
