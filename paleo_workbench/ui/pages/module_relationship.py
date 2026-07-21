@@ -109,6 +109,7 @@ class ModuleCard(QFrame):
                 }
                 QLabel#ModuleCardTitle {
                     color: white;
+                    background-color: transparent;
                     font-weight: bold;
                     font-size: 12.5px;
                 }
@@ -134,6 +135,7 @@ class ModuleCard(QFrame):
                 }
                 QLabel#ModuleCardTitle {
                     color: white;
+                    background-color: transparent;
                     font-weight: bold;
                     font-size: 12.5px;
                 }
@@ -293,6 +295,7 @@ class DatabaseModuleCard(QFrame):
             }
             QLabel#ModuleCardTitle {
                 color: white;
+                background-color: transparent;
                 font-weight: bold;
                 font-size: 12.5px;
             }

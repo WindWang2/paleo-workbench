@@ -173,6 +173,9 @@ def build_qss(density: str = "comfortable") -> str:
         background-color: {BG_BODY};
         font-size: {FONT_SIZE_BASE};
     }}
+    QLabel {{
+        background-color: transparent;
+    }}
     QMainWindow, QDialog, QStackedWidget, QScrollArea, QWidget#AppShell, QWidget#HomePage, QWidget#HomeContainer, QWidget#ModuleRelationshipWidget, QWidget#ModuleRelationshipCanvas {{
         background-color: {BG_BODY};
     }}
