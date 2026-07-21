@@ -62,8 +62,14 @@ class PreviewSettings:
     geoviz_max_slice_axis: int = 512
     geoviz_max_points: int = 50_000
     geoviz_surface_grid_size: int = 256
+    density: Literal["comfortable", "compact"] = "comfortable"
+    theme_mode: Literal["light", "system"] = "light"
 
     def __post_init__(self) -> None:
+        if self.density not in ("comfortable", "compact"):
+            raise ValueError("density must be 'comfortable' or 'compact'")
+        if self.theme_mode not in ("light", "system"):
+            raise ValueError("theme_mode must be 'light' or 'system'")
         for name in _BOOLEAN_FIELDS:
             if type(getattr(self, name)) is not bool:
                 raise TypeError(f"{name} must be a boolean")

@@ -24,7 +24,7 @@ from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.ui.sidebar import TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
-from paleo_workbench.ui import tokens
+from paleo_workbench import tokens
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
 
 # Stable page indices, re-exported for backwards compatibility (callers/tests
@@ -47,6 +47,7 @@ class AppShell(QWidget):
     def __init__(self, project: ProjectDocument | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("AppShell")
+        self.setStyleSheet(tokens.QSS_TEMPLATE + tokens.build_modern_qss())
         self.project = project or ProjectDocument.new("Untitled Project")
         self._fade_anim: QPropertyAnimation | None = None
         outer = QVBoxLayout(self)

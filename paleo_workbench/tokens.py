@@ -5,30 +5,32 @@ computed-CSS inspection. See docs/superpowers/specs/2026-07-05-appshell-design.m
 """
 from __future__ import annotations
 
-PRIMARY = "#1f6fe0"
-ACCENT = "#6f47cf"
-SUCCESS = "#1f9d57"
-TEAL = "#0f93a4"
-BG_BODY = "#eef0f4"
-BG_HEADER = "#f3f5f9"
+PRIMARY = "#2563eb"
+ACCENT = "#7c3aed"
+SUCCESS = "#10b981"
+WARNING = "#f59e0b"
+ERROR = "#ef4444"
+TEAL = "#0d9488"
+BG_BODY = "#f6f8fa"
+BG_HEADER = "#ffffff"
 BG_SIDEBAR = "#ffffff"
-BG_SEARCH = "#eef2f7"
-BG_RAIL = "#1b3a6b"
-BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1f5fbf, stop:1 #184c97)"
-BG_RAIL_TOP = "#1f5fbf"
-BG_RAIL_BOTTOM = "#184c97"
-TEXT_PRIMARY = "#28323f"
-TEXT_SECONDARY = "#7e8794"
-TEXT_DARK = "#1b2330"
-TEXT_ON_RAIL = "rgba(255, 255, 255, 0.66)"
+BG_SEARCH = "#f1f5f9"
+BG_RAIL = "#1e293b"
+BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e293b, stop:1 #0f172a)"
+BG_RAIL_TOP = "#1e293b"
+BG_RAIL_BOTTOM = "#0f172a"
+TEXT_PRIMARY = "#0f172a"
+TEXT_SECONDARY = "#64748b"
+TEXT_DARK = "#020617"
+TEXT_ON_RAIL = "rgba(255, 255, 255, 0.75)"
 TEXT_ON_RAIL_ACTIVE = "#ffffff"
-BORDER = "#e2e6ec"
-BORDER_STRONG = "#dde2e9"
-BORDER_LIGHT = "#d8dee6"
+BORDER = "#e2e8f0"
+BORDER_STRONG = "#cbd5e1"
+BORDER_LIGHT = "#f1f5f9"
 
-PRIMARY_HOVER = "#2b7cf0"
-PRIMARY_PRESSED = "#1a5fc4"
-PRIMARY_DISABLED = "#a8c4f0"
+PRIMARY_HOVER = "#1d4ed8"
+PRIMARY_PRESSED = "#1e40af"
+PRIMARY_DISABLED = "#93c5fd"
 FOCUS_RING = PRIMARY
 
 FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif'
@@ -46,8 +48,8 @@ ICON_RAIL_WIDTH = 60
 TEXT_SIDEBAR_WIDTH = 248
 STATUS_BAR_HEIGHT = 24
 ICON_RAIL_ITEM_SIZE = 46
-RADIUS_BUTTON = 5
-RADIUS_CARD = 9
+RADIUS_BUTTON = 6
+RADIUS_CARD = 10
 RADIUS_BADGE = 8
 RADIUS_PANEL = 10
 RADIUS_NAV_ITEM = 8
@@ -464,4 +466,97 @@ def format_size(size_bytes: int | None) -> str:
         return f"{val:.1f} K" if val % 1 != 0 else f"{int(val)} K"
     else:
         return f"{size_bytes} B"
+
+
+def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
+    padding_y = 6 if density == "comfortable" else 3
+    padding_x = 12 if density == "comfortable" else 8
+    btn_height = 30 if density == "comfortable" else 24
+
+    return f"""
+    * {{
+        font-family: {FONT_FAMILY};
+        font-size: {font_size}px;
+        color: {TEXT_PRIMARY};
+    }}
+    QWidget {{
+        background-color: transparent;
+    }}
+    QMainWindow, QDialog {{
+        background-color: {BG_BODY};
+    }}
+    QPushButton {{
+        background-color: {BG_SIDEBAR};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: {padding_y}px {padding_x}px;
+        min-height: {btn_height}px;
+        font-weight: 500;
+    }}
+    QPushButton:hover {{
+        background-color: {BG_SEARCH};
+        border-color: {BORDER_STRONG};
+    }}
+    QPushButton:pressed {{
+        background-color: {BORDER_LIGHT};
+    }}
+    QPushButton#PrimaryButton {{
+        background-color: {PRIMARY};
+        color: #ffffff;
+        border: 1px solid {PRIMARY};
+    }}
+    QPushButton#PrimaryButton:hover {{
+        background-color: {PRIMARY_HOVER};
+        border-color: {PRIMARY_HOVER};
+    }}
+    QPushButton#PrimaryButton:pressed {{
+        background-color: {PRIMARY_PRESSED};
+    }}
+    QLineEdit, QComboBox, QSpinBox {{
+        background-color: {BG_SIDEBAR};
+        color: {TEXT_PRIMARY};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_BUTTON}px;
+        padding: {padding_y}px {padding_x}px;
+        selection-background-color: {PRIMARY};
+        selection-color: #ffffff;
+    }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+        border: 1px solid {PRIMARY};
+    }}
+    QTableWidget, QTreeView, QListView {{
+        background-color: {BG_SIDEBAR};
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+        gridline-color: {BORDER_LIGHT};
+    }}
+    QHeaderView::section {{
+        background-color: {BG_SEARCH};
+        color: {TEXT_SECONDARY};
+        padding: 6px 10px;
+        border: none;
+        border-bottom: 1px solid {BORDER};
+        font-weight: 600;
+    }}
+    QTabWidget::pane {{
+        border: 1px solid {BORDER};
+        border-radius: {RADIUS_CARD}px;
+        background-color: {BG_SIDEBAR};
+    }}
+    QTabBar::tab {{
+        background-color: {BG_SEARCH};
+        color: {TEXT_SECONDARY};
+        padding: 8px 16px;
+        border-top-left-radius: {RADIUS_BUTTON}px;
+        border-top-right-radius: {RADIUS_BUTTON}px;
+        margin-right: 2px;
+    }}
+    QTabBar::tab:selected {{
+        background-color: {BG_SIDEBAR};
+        color: {PRIMARY};
+        font-weight: 600;
+        border-bottom: 2px solid {PRIMARY};
+    }}
+    """
 

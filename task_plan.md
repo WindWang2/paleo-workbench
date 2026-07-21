@@ -59,6 +59,12 @@ Phase 5 — Complete & Verified
 - [x] 将 `fast_las_parse_data` 接入 `well_log_parsers.py` 解析通道
 - **Status:** complete
 
+### Phase 8: 现代轻量化主题与 UI 交互增强
+
+- [x] 实现 `paleo_workbench/ui/tokens.py` 设计系统与 `build_modern_qss` 动态样式引擎
+- [x] 完成 1127/1127 全量回归测试，确认 UI 主题切换不影响逻辑状态
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
