@@ -103,6 +103,14 @@ Phase 5 — Complete & Verified
 - [x] 地层对比页导出按钮改为对话框流程
 - **Status:** complete
 
+### Phase 14: 测井渲染通道性能加固（P4 阶段 A）
+
+- [x] CurveTrack ndarray 化 + downsample 钩子协议升级（ndarray 进 ndarray 出）+ render_accel 迁移
+- [x] 表头 min/max 预计算（修复 NaN `nan~nan` bug）+ path cache 量化键修复
+- [x] LAS 表格预览去 lasio（C++ fast channel）
+- [x] LAS C++ 解析器 GIL 释放 + from_chars/strtod + 去双重解析
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
