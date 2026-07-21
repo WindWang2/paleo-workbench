@@ -61,21 +61,23 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
     data_headers = ()
     data_rows = ()
     try:
-        import lasio
         import numpy as np
-        las = lasio.read(str(path))
-        data_headers = tuple(c.mnemonic for c in las.curves)
-        limit = min(len(las.data), 100)
-        rows_list = []
-        for i in range(limit):
-            row_vals = []
-            for val in las.data[i]:
-                if np.isnan(val):
-                    row_vals.append("NaN")
-                else:
-                    row_vals.append(f"{val:.4f}".rstrip('0').rstrip('.'))
-            rows_list.append(tuple(row_vals))
-        data_rows = tuple(rows_list)
+
+        content = path.read_text(encoding="utf-8", errors="replace")
+        _headers, arr = fast_las_parse_data(content, header.null_value)
+        if arr.ndim == 2 and arr.shape[0] > 0:
+            data_headers = tuple(c.mnemonic for c in curves[: arr.shape[1]])
+            limit = min(arr.shape[0], 100)
+            rows_list = []
+            for i in range(limit):
+                row_vals = []
+                for val in arr[i]:
+                    if np.isnan(val):
+                        row_vals.append("NaN")
+                    else:
+                        row_vals.append(f"{val:.4f}".rstrip('0').rstrip('.'))
+                rows_list.append(tuple(row_vals))
+            data_rows = tuple(rows_list)
     except Exception:
         pass
 
