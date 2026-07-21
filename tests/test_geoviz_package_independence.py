@@ -72,6 +72,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "extract_filled_contours",
         "FaciesData",
         "FaciesInterval",
+        "FormationTop",
         "IntervalItem",
         "LithologyInterval",
         "WellIntervals",
