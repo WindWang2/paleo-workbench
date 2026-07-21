@@ -51,7 +51,6 @@ class StratigraphyCorrelationPage(QWidget):
         self.setObjectName("StratigraphyCorrelationPage")
         self._project = None
         self._loaded_names: list[str] = []
-        self._manual_link_on = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -285,10 +284,7 @@ class StratigraphyCorrelationPage(QWidget):
     def _on_mode_changed(self) -> None:
         canvas = self.cross_host.widget
         canvas.pick_mode = self.pick_btn.isChecked()
-        want_link = self.link_btn.isChecked()
-        if want_link != self._manual_link_on:
-            self.cross_host.inner.toggle_manual_link()
-            self._manual_link_on = want_link
+        self.cross_host.inner.set_manual_link(self.link_btn.isChecked())
 
     def _on_formation_changed(self, text: str) -> None:
         self.cross_host.widget.active_formation = text.strip() or None
@@ -321,6 +317,7 @@ class StratigraphyCorrelationPage(QWidget):
         ref = picks[-1]
         wells = ref.connected_wells()
         if not wells:
+            self.status_label.setText("参考拾取点没有关联井")
             return
         ref_well = wells[0]
         ref_depth = ref.depth_for_well(ref_well)
@@ -358,13 +355,7 @@ class StratigraphyCorrelationPage(QWidget):
     def _refresh_track_list(self) -> None:
         self.track_list.blockSignals(True)
         self.track_list.clear()
-        seen: list[str] = []
-        for canvas in self.cross_host.inner._canvases:
-            for track in canvas.tracks:
-                label = track.label or ""
-                if label and label not in seen:
-                    seen.append(label)
-        for label in seen:
+        for label in self.cross_host.inner.track_labels():
             item = QListWidgetItem(label)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
@@ -442,7 +433,7 @@ class StratigraphyCorrelationPage(QWidget):
             well_names=names,
         )
         ok = self.cross_host.apply(payload)
-        top_notices = self._inject_well_tops(names)
+        top_notices = self._inject_well_tops(names) if ok else []
         self._refresh_track_list()
         self._loaded_names = names
         self.loaded_value.setText(f"已加载: {len(names)} 口井")

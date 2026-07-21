@@ -7,9 +7,28 @@ from typing import Any
 
 from paleo_workbench.pipeline.assets import WELL_KEY
 from paleo_workbench.project.models import ProjectDocument
+from paleo_workbench.project.paths import is_within_directory
 from paleo_workbench.resources.well_tops_parser import parse_well_tops
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
+
+
+def _resource_path(project: ProjectDocument, resource) -> Path:
+    """Resolve a resource path, mirroring VizAdapter._absolute_path.
+
+    Relative paths are resolved against ``project.meta.project_root``
+    (joins are confined to the root; ``..`` escapes are not followed).
+    """
+    candidate = Path(resource.path).expanduser()
+    if candidate.is_file() or candidate.is_absolute():
+        return candidate
+    root = str(getattr(project.meta, "project_root", "") or "").strip()
+    if root and root not in {".", ".."}:
+        root_path = Path(root).expanduser().resolve()
+        joined = (root_path / candidate).resolve()
+        if is_within_directory(joined, root_path):
+            return joined
+    return candidate
 
 
 def list_well_log_resources(project: ProjectDocument) -> list[Any]:
@@ -79,7 +98,7 @@ def load_well_tops(project: ProjectDocument) -> tuple[dict[str, list[tuple[str, 
     warnings: list[str] = []
     resources = [r for r in project.resources if r.type == "well_stratification"]
     for resource in resources:
-        path = Path(resource.path)
+        path = _resource_path(project, resource)
         if not path.is_file():
             warnings.append(f"分层文件不存在: {resource.name}")
             continue

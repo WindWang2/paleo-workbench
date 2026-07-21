@@ -162,3 +162,13 @@ def test_clear_section_resets_models(qtbot, tmp_path, monkeypatch):
     assert page.cross_host.widget.picks_model.all_picks() == []
     assert page.track_list.count() == 0
     assert page.formation_combo.count() == 0
+
+
+def test_browse_after_completed_link_does_not_reactivate(qtbot, tmp_path, monkeypatch):
+    page = _load_page(qtbot, tmp_path, monkeypatch)
+    page.link_btn.setChecked(True)
+    assert page.cross_host.inner._manual_link_active is True
+    # Engine auto-exits link mode after a completed link (simulate)
+    page.cross_host.inner._manual_link_active = False
+    page.browse_btn.setChecked(True)
+    assert page.cross_host.inner._manual_link_active is False

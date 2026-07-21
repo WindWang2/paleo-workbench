@@ -68,3 +68,17 @@ def test_tops_to_intervals_spans_and_last_thickness():
 def test_tops_to_intervals_single_top_default_thickness():
     intervals = tops_to_intervals([("X", 850.0)])
     assert [(iv.top, iv.bottom, iv.name) for iv in intervals] == [(850.0, 860.0, "X")]
+
+
+def test_load_well_tops_resolves_project_relative_path(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "DC.dat").write_text(DAT, encoding="utf-8")
+    project = ProjectDocument.new("T")
+    project.meta.project_root = str(tmp_path)
+    project.resources.append(
+        ResourceItem(name="DC.dat", path="data/DC.dat", type="well_stratification", format="dat")
+    )
+    tops, warnings = load_well_tops(project)
+    assert warnings == []
+    assert set(tops) == {"A1", "A2", "GHOST"}
