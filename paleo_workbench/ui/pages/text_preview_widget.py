@@ -17,6 +17,9 @@ class TextPreviewWidget(QTextEdit):
         font = self.font()
         font.setPointSize(settings.font_size)
         self.setFont(font)
+        self.setStyleSheet(
+            f"font-family: Consolas, 'Courier New', monospace; font-size: {settings.font_size}pt;"
+        )
         self.setLineWrapMode(
             QTextEdit.LineWrapMode.WidgetWidth
             if settings.wrap_text

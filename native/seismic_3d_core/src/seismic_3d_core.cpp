@@ -3,6 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace py = pybind11;
 
@@ -50,6 +51,86 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         }
         return result;
     }
+}
+
+// Fast 2D Slice Extraction directly into normalized uint8 Indexed8 array
+py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::array::forcecast> input, int axis, int index) {
+    py::array_t<float> raw_slice = fast_slice_extract(input, axis, index);
+    auto buf = raw_slice.request();
+    size_t rows = buf.shape[0];
+    size_t cols = buf.shape[1];
+    size_t total = rows * cols;
+    const float* ptr = static_cast<const float*>(buf.ptr);
+
+    float min_val = std::numeric_limits<float>::infinity();
+    float max_val = -std::numeric_limits<float>::infinity();
+
+    for (size_t i = 0; i < total; ++i) {
+        float v = ptr[i];
+        if (std::isnan(v) || std::isinf(v)) continue;
+        if (v < min_val) min_val = v;
+        if (v > max_val) max_val = v;
+    }
+
+    auto u8_result = py::array_t<uint8_t>({rows, cols});
+    auto u8_buf = u8_result.request();
+    uint8_t* dst = static_cast<uint8_t*>(u8_buf.ptr);
+
+    if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+        std::fill(dst, dst + total, static_cast<uint8_t>(0));
+        return py::make_tuple(u8_result, 0.0f, 0.0f);
+    }
+
+    float inv_range = 255.0f / (max_val - min_val);
+    for (size_t i = 0; i < total; ++i) {
+        float v = ptr[i];
+        if (std::isnan(v) || std::isinf(v)) {
+            dst[i] = 0;
+        } else {
+            float norm = (v - min_val) * inv_range;
+            dst[i] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+        }
+    }
+
+    return py::make_tuple(u8_result, min_val, max_val);
+}
+
+// Fast 3D Volume Resampling
+py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style | py::array::forcecast> input, py::tuple target_shape) {
+    auto buf = input.request();
+    if (buf.ndim != 3) {
+        throw std::runtime_error("Input volume must be 3D");
+    }
+
+    size_t s0 = buf.shape[0];
+    size_t s1 = buf.shape[1];
+    size_t s2 = buf.shape[2];
+    const float* src = static_cast<const float*>(buf.ptr);
+
+    size_t t0 = target_shape[0].cast<size_t>();
+    size_t t1 = target_shape[1].cast<size_t>();
+    size_t t2 = target_shape[2].cast<size_t>();
+
+    auto result = py::array_t<float>({t0, t1, t2});
+    auto r_buf = result.request();
+    float* dst = static_cast<float*>(r_buf.ptr);
+
+    float step0 = static_cast<float>(s0) / static_cast<float>(std::max<size_t>(1, t0));
+    float step1 = static_cast<float>(s1) / static_cast<float>(std::max<size_t>(1, t1));
+    float step2 = static_cast<float>(s2) / static_cast<float>(std::max<size_t>(1, t2));
+
+    for (size_t i = 0; i < t0; ++i) {
+        size_t src_i = std::min(s0 - 1, static_cast<size_t>(i * step0));
+        for (size_t j = 0; j < t1; ++j) {
+            size_t src_j = std::min(s1 - 1, static_cast<size_t>(j * step1));
+            for (size_t k = 0; k < t2; ++k) {
+                size_t src_k = std::min(s2 - 1, static_cast<size_t>(k * step2));
+                dst[i * (t1 * t2) + j * t2 + k] = src[src_i * (s1 * s2) + src_j * s2 + src_k];
+            }
+        }
+    }
+
+    return result;
 }
 
 // 3D Coherence Attribute Calculation
@@ -104,7 +185,7 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
     return result;
 }
 
-// 3D Marching Cubes Isosurface Mesh Extraction (Native C++ Acceleration)
+// 3D Marching Cubes Isosurface Mesh Extraction
 py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::forcecast> input, float isovalue) {
     auto buf = input.request();
     if (buf.ndim != 3) {
@@ -153,6 +234,8 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
 PYBIND11_MODULE(seismic_3d_core, m) {
     m.doc() = "Native 3D seismic volume processing and slice extraction acceleration";
     m.def("fast_slice_extract", &fast_slice_extract, py::arg("volume"), py::arg("axis"), py::arg("index"));
+    m.def("fast_slice_to_indexed8", &fast_slice_to_indexed8, py::arg("volume"), py::arg("axis"), py::arg("index"));
+    m.def("fast_resample_volume_3d", &fast_resample_volume_3d, py::arg("volume"), py::arg("target_shape"));
     m.def("compute_coherence_3d", &compute_coherence_3d, py::arg("volume"), py::arg("inline_window") = 3, py::arg("crossline_window") = 3, py::arg("sample_window") = 3);
     m.def("marching_cubes_3d", &marching_cubes_3d, py::arg("volume"), py::arg("isovalue") = 0.0);
 }

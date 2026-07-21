@@ -100,6 +100,8 @@ def _load_pseudo_3d_ignore_geometry(path: str) -> tuple[np.ndarray | None, str]:
 
 
 def _bound_volume(volume: np.ndarray) -> tuple[np.ndarray, bool]:
+    from paleo_workbench.viz.seismic_3d_api import fast_resample_volume_3d
+
     vol = np.asarray(volume, dtype=np.float32)
     if vol.ndim == 1:
         vol = vol.reshape(1, 1, -1)
@@ -108,23 +110,14 @@ def _bound_volume(volume: np.ndarray) -> tuple[np.ndarray, bool]:
     elif vol.ndim > 3:
         vol = vol.reshape(-1, vol.shape[-2], vol.shape[-1])
 
-    truncated = False
-    slices: list[slice] = []
-    for dim in vol.shape:
-        if dim > MAX_DIM:
-            step = max(1, math.ceil(dim / MAX_DIM))
-            slices.append(slice(None, None, step))
-            truncated = True
-        else:
-            slices.append(slice(None))
-    out = vol[tuple(slices)]
-    while int(np.prod(out.shape)) > MAX_BUDGET and out.size > 1:
-        axis = int(np.argmax(out.shape))
-        indexer = [slice(None)] * out.ndim
-        indexer[axis] = slice(None, None, 2)
-        out = out[tuple(indexer)]
-        truncated = True
-    if any(d > MAX_DIM for d in out.shape):
-        out = out[tuple(slice(0, MAX_DIM) for _ in out.shape)]
-        truncated = True
+    s0, s1, s2 = vol.shape
+    truncated = s0 > MAX_DIM or s1 > MAX_DIM or s2 > MAX_DIM
+    if truncated:
+        t0 = min(s0, MAX_DIM)
+        t1 = min(s1, MAX_DIM)
+        t2 = min(s2, MAX_DIM)
+        out = fast_resample_volume_3d(vol, (t0, t1, t2))
+    else:
+        out = vol
+
     return out.astype(np.float32, copy=False), truncated

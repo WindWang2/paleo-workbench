@@ -474,12 +474,9 @@ def build_modern_qss(font_size: int = 12, density: str = "comfortable") -> str:
     btn_height = 30 if density == "comfortable" else 24
 
     return f"""
-    * {{
-        font-family: {FONT_FAMILY};
-        font-size: {font_size}px;
-        color: {TEXT_PRIMARY};
-    }}
     QWidget {{
+        font-family: {FONT_FAMILY};
+        color: {TEXT_PRIMARY};
         background-color: transparent;
     }}
     QMainWindow, QDialog {{

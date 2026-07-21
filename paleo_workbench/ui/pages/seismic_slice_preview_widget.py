@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
 from paleo_workbench.tokens import BG_SEARCH, BORDER, PRIMARY, PRIMARY_HOVER, RADIUS_BUTTON, SPACE_2, SPACE_3, TEXT_SECONDARY
-from paleo_workbench.viz.seismic_3d_api import fast_slice_extract
+from paleo_workbench.viz.seismic_3d_api import fast_slice_to_indexed8
 
 
 class SeismicSlicePreviewWidget(QWidget):
@@ -131,33 +131,24 @@ class SeismicSlicePreviewWidget(QWidget):
         idx = self.type_combo.currentIndex()
         val = self.slider.value()
 
-        slice_data = fast_slice_extract(self._volume, axis=idx, index=val)
+        norm, _, _ = fast_slice_to_indexed8(self._volume, axis=idx, index=val)
         if idx in (0, 1):
-            slice_data = slice_data.T
-
-        slice_data = np.nan_to_num(slice_data, nan=0.0, posinf=0.0, neginf=0.0)
-        min_val = slice_data.min()
-        max_val = slice_data.max()
-        if max_val > min_val:
-            norm = ((slice_data - min_val) / (max_val - min_val) * 255.0).astype(np.uint8)
-        else:
-            norm = np.zeros(slice_data.shape, dtype=np.uint8)
+            norm = norm.T
 
         norm = np.ascontiguousarray(norm)
         height, width = norm.shape
         self._last_norm = norm  # Keep memory alive for QImage
         qimg = QImage(norm.data, width, height, width, QImage.Format.Format_Indexed8)
 
-        if not hasattr(self, "_color_table"):
-            self._color_table = None
+        if getattr(self, "_color_table", None) is None:
             try:
                 import matplotlib.pyplot as plt
                 from PySide6.QtGui import qRgba
                 cmap = plt.get_cmap("seismic")
                 self._color_table = [qRgba(*(int(c * 255) for c in cmap(i / 255.0))) for i in range(256)]
             except Exception:
-                pass
-        
+                self._color_table = []
+
         if self._color_table:
             qimg.setColorTable(self._color_table)
 
@@ -166,7 +157,7 @@ class SeismicSlicePreviewWidget(QWidget):
             max(self.image_label.width() - 4, 10),
             max(self.image_label.height() - 4, 10),
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
+            Qt.TransformationMode.FastTransformation if self.slider.isSliderDown() else Qt.TransformationMode.SmoothTransformation
         )
         self.image_label.setPixmap(scaled_pixmap)
 

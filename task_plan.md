@@ -65,6 +65,14 @@ Phase 5 — Complete & Verified
 - [x] 完成 1127/1127 全量回归测试，确认 UI 主题切换不影响逻辑状态
 - **Status:** complete
 
+### Phase 9: 地震预览与可视化 C++ / GPU 原生双重加速
+
+- [x] C++ 拓展实现 `fast_slice_to_indexed8` 与 `fast_resample_volume_3d`
+- [x] 重构 `SeismicSlicePreviewWidget` 切片实时渲染通道与 Colormap 预缓存
+- [x] 重构 `seismic_load.py` 3D 数据加载下采样通道
+- [x] 完成 1129/1129 全量回归测试 (含 C++ perf parity 测试)
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
