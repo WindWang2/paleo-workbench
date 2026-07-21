@@ -81,6 +81,14 @@ Phase 5 — Complete & Verified
 - [x] 完成 1130/1130 全量回归测试 (含视口滚动测试)
 - **Status:** complete
 
+### Phase 11: 连井对比 P1 性能优化
+
+- [x] 引擎曲线渲染接入可注入 downsample 钩子，启动时注入 C++ `minmax_downsample`
+- [x] 修复 `set_depth_range` 无操作导致的全井缓存级联失效
+- [x] LAS 加载切换 C++ `fast_las_parse_data` 快速通道（保留引擎保底回退）
+- [x] 离屏 canvas 跳过栅格化（QScrollArea 视口外延迟重绘）
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
