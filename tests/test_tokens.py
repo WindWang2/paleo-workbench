@@ -25,9 +25,9 @@ def test_modern_light_theme_tokens():
 def test_build_modern_qss_generator():
     qss_comfortable = build_modern_qss(font_size=13, density="comfortable")
     assert isinstance(qss_comfortable, str)
-    assert "font-size: 13px" in qss_comfortable
+    assert "padding: 6px 12px" in qss_comfortable
     assert "#2563eb" in qss_comfortable
     assert "QPushButton" in qss_comfortable
 
     qss_compact = build_modern_qss(font_size=11, density="compact")
-    assert "font-size: 11px" in qss_compact
+    assert "padding: 3px 8px" in qss_compact
