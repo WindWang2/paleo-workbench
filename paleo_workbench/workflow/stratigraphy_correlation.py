@@ -7,6 +7,7 @@ from typing import Any
 
 from paleo_workbench.pipeline.assets import WELL_KEY
 from paleo_workbench.project.models import ProjectDocument
+from paleo_workbench.resources.well_tops_parser import parse_well_tops
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.well_log_prediction import merge_prediction_onto_well_log
 
@@ -67,3 +68,71 @@ def prediction_bound_well_ids(project: ProjectDocument) -> list[str]:
         return []
     task = project.prediction_tasks[-1]
     return list((task.input_refs or {}).get(WELL_KEY) or [])
+
+
+def load_well_tops(project: ProjectDocument) -> tuple[dict[str, list[tuple[str, float]]], list[str]]:
+    """Load 井分层 tops from well_stratification resources.
+
+    Returns ({well_name: [(top_name, depth_md)] sorted by depth}, warnings).
+    """
+    tops_by_well: dict[str, list[tuple[str, float]]] = {}
+    warnings: list[str] = []
+    resources = [r for r in project.resources if r.type == "well_stratification"]
+    for resource in resources:
+        path = Path(resource.path)
+        if not path.is_file():
+            warnings.append(f"分层文件不存在: {resource.name}")
+            continue
+        try:
+            rows = parse_well_tops(path)
+        except Exception as exc:
+            warnings.append(f"分层解析失败 {resource.name}: {exc.__class__.__name__}")
+            continue
+        for row in rows:
+            tops_by_well.setdefault(row.well_name, []).append((row.top_name, row.md))
+    for well in tops_by_well:
+        tops_by_well[well].sort(key=lambda t: t[1])
+    return tops_by_well, warnings
+
+
+def match_tops_to_wells(
+    tops_by_well: dict[str, list[tuple[str, float]]],
+    well_names: list[str],
+) -> tuple[dict[str, list[tuple[str, float]]], list[str]]:
+    """Match tops well names to section well names (exact, then case-insensitive).
+
+    Returns ({section_well_name: tops}, unmatched_top_well_names).
+    """
+    lookup: dict[str, str] = {}
+    for name in well_names:
+        lookup[name] = name
+        lookup.setdefault(name.upper(), name)
+    matched: dict[str, list[tuple[str, float]]] = {}
+    unmatched: list[str] = []
+    for top_well, tops in tops_by_well.items():
+        target = lookup.get(top_well) or lookup.get(top_well.upper())
+        if target is None:
+            unmatched.append(top_well)
+        else:
+            matched[target] = tops
+    return matched, unmatched
+
+
+def tops_to_intervals(tops: list[tuple[str, float]]) -> list[Any]:
+    """Convert [(name, depth)] tops into IntervalItems for auto_link.
+
+    Interval i spans tops[i]..tops[i+1]; the last top reuses the previous
+    thickness (a single top gets a default 10.0 m thickness).
+    """
+    from geoviz import IntervalItem
+
+    intervals: list[Any] = []
+    for i, (name, depth) in enumerate(tops):
+        if i + 1 < len(tops):
+            bottom = tops[i + 1][1]
+        elif i > 0:
+            bottom = depth + (depth - tops[i - 1][1])
+        else:
+            bottom = depth + 10.0
+        intervals.append(IntervalItem(top=float(depth), bottom=float(bottom), name=name))
+    return intervals
