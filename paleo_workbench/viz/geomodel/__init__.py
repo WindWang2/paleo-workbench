@@ -16,7 +16,13 @@ from .engine import (
 )
 from .borehole_tunnel import BoreholeTraceGenerator, TunnelMeshGenerator
 from .fault_dislocation import FaultCuttingEngine
-from .well_seismic import WellSeismicTieCalibration, WellCurve3DGenerator
+from .well_seismic import (
+    WellSeismicTieCalibration,
+    WellCurve3DGenerator,
+    RGBAttributeFusion,
+    LithologyCrossplotEngine,
+    CrossWellFenceGenerator,
+)
 from .advisor import check_boreholes, check_coplanar_faults
 from .exporters import export_to_flac3d, export_to_abaqus
 
@@ -39,6 +45,9 @@ __all__ = [
     "FaultCuttingEngine",
     "WellSeismicTieCalibration",
     "WellCurve3DGenerator",
+    "RGBAttributeFusion",
+    "LithologyCrossplotEngine",
+    "CrossWellFenceGenerator",
     # Advisor
     "check_boreholes",
     "check_coplanar_faults",

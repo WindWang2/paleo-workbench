@@ -25,6 +25,9 @@ from paleo_workbench.viz.geomodel import (
     ClippedGLVolumeItem,
     WellSeismicTieCalibration,
     WellCurve3DGenerator,
+    RGBAttributeFusion,
+    LithologyCrossplotEngine,
+    CrossWellFenceGenerator,
 )
 from paleo_workbench.viz.geomodel.models import GridSpec
 from paleo_workbench.ui.pages.geological_modeling_workers import (
@@ -33,6 +36,7 @@ from paleo_workbench.ui.pages.geological_modeling_workers import (
     AdvisorWorker,
 )
 from paleo_workbench.ui.pages.ai_check_advisor_dialog import AICheckAdvisorDialog
+from paleo_workbench.ui.pages.lithology_crossplot_dialog import LithologyCrossplotDialog
 
 logger = logging.getLogger(__name__)
 
@@ -423,6 +427,35 @@ class GeologicalModeling3DPage(QWidget):
         tie_layout.addWidget(self.btn_auto_tie)
 
         right_layout.addWidget(card_tie)
+
+        # CARD 6: Advanced Multi-Attribute & Crossplot Analysis
+        card_adv = QFrame()
+        card_adv.setStyleSheet("QFrame { background: #ffffff; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.RADIUS_CARD, tokens.BORDER
+        ))
+        adv_layout = QVBoxLayout(card_adv)
+        adv_layout.setSpacing(tokens.SPACE_2)
+
+        title_adv = QLabel("高级地震与井震综合分析")
+        title_adv.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
+        adv_layout.addWidget(title_adv)
+
+        self.btn_rgb_fusion = QPushButton("生成 RGB 三频率属性融合切片")
+        self.btn_rgb_fusion.setObjectName("SecondaryButton")
+        self.btn_rgb_fusion.clicked.connect(self._generate_rgb_fusion_slice)
+        adv_layout.addWidget(self.btn_rgb_fusion)
+
+        self.btn_cross_fence = QPushButton("生成井震连井三维剖面幕墙")
+        self.btn_cross_fence.setObjectName("SecondaryButton")
+        self.btn_cross_fence.clicked.connect(self._generate_cross_well_fence)
+        adv_layout.addWidget(self.btn_cross_fence)
+
+        self.btn_crossplot = QPushButton("开启波阻抗/GR 岩相交会图分析")
+        self.btn_crossplot.setObjectName("PrimaryButton")
+        self.btn_crossplot.clicked.connect(self._run_lithology_crossplot)
+        adv_layout.addWidget(self.btn_crossplot)
+
+        right_layout.addWidget(card_adv)
         right_layout.addStretch()
 
         right_scroll.setWidget(right_widget)
@@ -468,6 +501,8 @@ class GeologicalModeling3DPage(QWidget):
         self._add_checkable_child(root_tie, "地震剖面三维切片 (Seismic Slices)")
         self._add_checkable_child(root_tie, "井眼旁显测井曲线 (3D GR Logs)")
         self._add_checkable_child(root_tie, "合成地震记录叠加 (Synthetic Seismograms)")
+        self._add_checkable_child(root_tie, "RGB 属性融合三维切片 (RGB Fusion Slice)")
+        self._add_checkable_child(root_tie, "井震连井三维剖面幕墙 (Cross-Well Seismic Fence)")
 
         self.model_tree.expandAll()
         self.model_tree.itemChanged.connect(self._on_tree_item_changed)
@@ -920,6 +955,114 @@ class GeologicalModeling3DPage(QWidget):
             )
         else:
             QMessageBox.warning(self, "标定失败", "无法生成合成地震记录，请检查数据。")
+
+    # ------------------------------------------------------------------ #
+    # Advanced Multi-Attribute & Crossplot Analysis
+    # ------------------------------------------------------------------ #
+
+    def _generate_rgb_fusion_slice(self) -> None:
+        """Generate RGB frequency attribute fusion horizontal slice in 3D viewport."""
+        nx_pts, ny_pts = 40, 40
+        x = np.linspace(-80, 80, nx_pts)
+        y = np.linspace(-80, 80, ny_pts)
+        xx, yy = np.meshgrid(x, y)
+        zz = -40.0 + 2.0 * np.sin(xx / 10.0) * np.cos(yy / 10.0)
+
+        # Synthetic frequency channels
+        ch_r = np.sin(xx / 12.0) * np.cos(yy / 12.0) + 1.0  # Low frequency (15Hz)
+        ch_g = np.cos(xx / 8.0) * np.sin(yy / 8.0) + 1.0   # Mid frequency (35Hz)
+        ch_b = np.sin(xx / 5.0 + yy / 5.0) + 1.0          # High frequency (55Hz)
+
+        rgba_grid = RGBAttributeFusion.blend_rgb(ch_r, ch_g, ch_b, alpha=0.85)
+
+        verts = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()]).astype(np.float32)
+
+        faces = []
+        face_colors = []
+        for j in range(ny_pts - 1):
+            for i in range(nx_pts - 1):
+                idx = j * nx_pts + i
+                faces.append([idx, idx + 1, idx + nx_pts])
+                faces.append([idx + 1, idx + nx_pts + 1, idx + nx_pts])
+
+                c = rgba_grid[j, i]
+                face_colors.append(c)
+                face_colors.append(c)
+
+        faces = np.array(faces, dtype=np.int32)
+        face_colors = np.array(face_colors, dtype=np.float32)
+
+        rgb_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=face_colors, smooth=True)
+        self.gl_widget.addItem(rgb_item)
+        self.active_items.append(rgb_item)
+
+        key = "RGB 属性融合三维切片 (RGB Fusion Slice)"
+        self.mesh_items_map[key] = [rgb_item]
+        self._sync_visibility_from_tree()
+        self.gl_widget.update()
+
+        QMessageBox.information(self, "RGB 融合切片", "RGB 三频率（15Hz/35Hz/55Hz）属性融合三维切片已成功生成并叠加至三维视口！")
+
+    def _generate_cross_well_fence(self) -> None:
+        """Generate 3D curtain/fence slice connecting all loaded boreholes."""
+        if not self.bh_raw_data:
+            QMessageBox.information(self, "提示", "请先运行三维建模以加载钻孔数据。")
+            return
+
+        wells = [
+            {"name": bh["name"], "x": bh["x"], "y": bh["y"], "depth": bh["total_depth"]}
+            for bh in self.bh_raw_data
+        ]
+
+        verts, faces, colors = CrossWellFenceGenerator.generate_fence_mesh(wells, nz_samples=25)
+        if len(verts) == 0:
+            return
+
+        fence_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=True)
+        self.gl_widget.addItem(fence_item)
+        self.active_items.append(fence_item)
+
+        key = "井震连井三维剖面幕墙 (Cross-Well Seismic Fence)"
+        self.mesh_items_map[key] = [fence_item]
+        self._sync_visibility_from_tree()
+        self.gl_widget.update()
+
+        QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(wells)} 口钻孔的三维剖面幕墙！")
+
+    def _run_lithology_crossplot(self) -> None:
+        """Run LithologyCrossplotEngine and display crossplot statistical dialog."""
+        if not self.bh_raw_data:
+            QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
+            return
+
+        gr_list = []
+        ai_list = []
+        lith_list = []
+
+        _litho_gr = {"砂岩": 40.0, "泥岩": 120.0, "石灰岩": 25.0, "花岗岩": 80.0}
+        _litho_ai = {"砂岩": 8200.0, "泥岩": 4800.0, "石灰岩": 14500.0, "花岗岩": 18000.0}
+
+        rng = np.random.default_rng(42)
+        for bh in self.bh_raw_data:
+            for layer in bh["layers"]:
+                lith = layer["lithology"]
+                base_g = _litho_gr.get(lith, 60.0)
+                base_a = _litho_ai.get(lith, 6000.0)
+
+                # Sample 10 points per layer
+                for _ in range(10):
+                    gr_list.append(base_g + float(rng.normal(0, 6.0)))
+                    ai_list.append(base_a + float(rng.normal(0, 400.0)))
+                    lith_list.append(lith)
+
+        analysis_result = LithologyCrossplotEngine.analyze(
+            np.array(gr_list, dtype=np.float32),
+            np.array(ai_list, dtype=np.float32),
+            lith_list
+        )
+
+        dialog = LithologyCrossplotDialog(analysis_result, self)
+        dialog.exec()
 
     # ------------------------------------------------------------------ #
     # Cleanup

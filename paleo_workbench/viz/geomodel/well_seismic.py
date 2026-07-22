@@ -1,4 +1,4 @@
-"""Well-Seismic Tie and 3D Curve overlay generation algorithms."""
+"""Well-Seismic Tie, 3D Curve overlay, and Advanced Seismic Analysis algorithms."""
 from __future__ import annotations
 
 import numpy as np
@@ -101,3 +101,126 @@ class WellCurve3DGenerator:
             offset_pts[i] += perp * curve_values[i] * scale
 
         return offset_pts
+
+
+class RGBAttributeFusion:
+    """Fuses 3 scalar seismic attribute arrays (R, G, B) into RGBA mesh color array."""
+
+    @staticmethod
+    def blend_rgb(r_channel: np.ndarray, g_channel: np.ndarray, b_channel: np.ndarray, alpha: float = 0.85) -> np.ndarray:
+        """Normalize and blend 3 attribute channels into an RGBA color matrix."""
+        def norm(arr: np.ndarray) -> np.ndarray:
+            min_val, max_val = np.min(arr), np.max(arr)
+            if max_val - min_val < 1e-8:
+                return np.zeros_like(arr, dtype=np.float32)
+            return (arr - min_val) / (max_val - min_val)
+
+        r_norm = norm(r_channel).astype(np.float32)
+        g_norm = norm(g_channel).astype(np.float32)
+        b_norm = norm(b_channel).astype(np.float32)
+        a_norm = np.full_like(r_norm, fill_value=alpha, dtype=np.float32)
+
+        return np.stack([r_norm, g_norm, b_norm, a_norm], axis=-1)
+
+
+class LithologyCrossplotEngine:
+    """Computes 2D/3D crossplot statistics and cluster centroids for reservoir lithology discrimination."""
+
+    @staticmethod
+    def analyze(gr: np.ndarray, ai: np.ndarray, lithology: list[str]) -> dict:
+        """Analyze GR vs Acoustic Impedance (AI) arrays grouped by lithology."""
+        points = []
+        clusters: dict[str, dict] = {}
+
+        for i in range(len(gr)):
+            lith = lithology[i] if i < len(lithology) else "Unknown"
+            g_val = float(gr[i])
+            a_val = float(ai[i])
+            points.append({"gr": g_val, "ai": a_val, "lithology": lith})
+
+            if lith not in clusters:
+                clusters[lith] = {"gr_list": [], "ai_list": []}
+            clusters[lith]["gr_list"].append(g_val)
+            clusters[lith]["ai_list"].append(a_val)
+
+        summary_clusters = {}
+        for lith, data in clusters.items():
+            g_arr = np.array(data["gr_list"])
+            a_arr = np.array(data["ai_list"])
+            summary_clusters[lith] = {
+                "count": len(g_arr),
+                "mean_gr": float(np.mean(g_arr)),
+                "mean_ai": float(np.mean(a_arr)),
+                "std_gr": float(np.std(g_arr)),
+                "std_ai": float(np.std(a_arr)),
+            }
+
+        return {
+            "points": points,
+            "clusters": summary_clusters,
+        }
+
+
+class CrossWellFenceGenerator:
+    """Generates 3D curtain/fence surface meshes connecting adjacent borehole paths."""
+
+    @staticmethod
+    def generate_fence_mesh(wells: list[dict], nz_samples: int = 20) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Generate 3D triangulated quad strip mesh curtain connecting consecutive wells.
+
+        Each well dict should contain: 'name', 'x', 'y', 'depth'.
+        Returns:
+            (vertices, faces, face_colors)
+        """
+        if len(wells) < 2:
+            return np.empty((0, 3), dtype=np.float32), np.empty((0, 3), dtype=np.int32), np.empty((0, 4), dtype=np.float32)
+
+        vertices = []
+        faces = []
+        face_colors = []
+
+        vert_offset = 0
+        for w_idx in range(len(wells) - 1):
+            w1 = wells[w_idx]
+            w2 = wells[w_idx + 1]
+
+            x1, y1, d1 = w1["x"], w1["y"], w1["depth"]
+            x2, y2, d2 = w2["x"], w2["y"], w2["depth"]
+
+            max_depth = max(d1, d2)
+            z_levels = np.linspace(0.0, -max_depth, nz_samples, dtype=np.float32)
+
+            # Left side (well 1) and Right side (well 2) vertices
+            v_left = np.column_stack([np.full(nz_samples, x1), np.full(nz_samples, y1), z_levels])
+            v_right = np.column_stack([np.full(nz_samples, x2), np.full(nz_samples, y2), z_levels])
+
+            # Add to vertex list
+            panel_verts = np.vstack([v_left, v_right])
+            vertices.append(panel_verts)
+
+            # Generate quad triangles
+            for k in range(nz_samples - 1):
+                idx_l1 = vert_offset + k
+                idx_l2 = vert_offset + k + 1
+                idx_r1 = vert_offset + nz_samples + k
+                idx_r2 = vert_offset + nz_samples + k + 1
+
+                # Quad triangle 1
+                faces.append([idx_l1, idx_r1, idx_l2])
+                # Quad triangle 2
+                faces.append([idx_r1, idx_r2, idx_l2])
+
+                # Depth-gradient color (light cyan/teal to dark blue)
+                depth_ratio = abs(float(z_levels[k])) / max_depth
+                c1 = [0.1, 0.4 + 0.5 * (1 - depth_ratio), 0.7 + 0.3 * depth_ratio, 0.75]
+                c2 = [0.1, 0.4 + 0.5 * (1 - depth_ratio), 0.7 + 0.3 * depth_ratio, 0.75]
+                face_colors.append(c1)
+                face_colors.append(c2)
+
+            vert_offset += 2 * nz_samples
+
+        all_verts = np.vstack(vertices).astype(np.float32)
+        all_faces = np.array(faces, dtype=np.int32)
+        all_colors = np.array(face_colors, dtype=np.float32)
+
+        return all_verts, all_faces, all_colors
