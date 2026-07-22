@@ -41,6 +41,5 @@ A single-point registration specification data structure that bundles an asset f
 - **ScreenSpaceAdaptiveLOD**: Automatic density transition switching between pure VD texture mapping (when trace screen width < 2px) and instanced Wiggle waveforms (>= 3px/trace).
 - **AdaptiveVectorExport**: Hybrid SVG/PDF export policy outputting pure vector `<polyline>`/`<polygon>` nodes when trace count < 500, and High-DPI raster embedding when >= 500 traces.
 
-### Paleogeographic Vector Map
-- **FaciesPolygon**: 2D polygon representing paleogeographic depositional environment bounds.
-- **FeatureEditor**: Stateful transactional geometry editor handling selection, snapping, vertex manipulation, and ring re-closure topology invariants.
+### FeatureEditor
+A stateful, transactional layer-level map geometry editor module (`paleo_workbench/mapping/feature_editor.py`) encapsulating spatial hit testing, multi-polygon vertex snapping, coincident shared-node synchronized movement, strict topology re-closure/non-self-intersection validation (`TopologyError` auto-rollback), and transaction undo/redo history behind a clean 6-method interface (`load_layer`, `select_at`, `move_selected_vertex`, `add_vertex`, `delete_vertex`, `commit`).
