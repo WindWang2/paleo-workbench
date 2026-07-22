@@ -104,39 +104,30 @@ def _py_compute_coherence_3d(
 
     vol = np.asarray(volume, dtype=np.float32)
     ni, nx, nt = vol.shape
-    half_i = inline_window // 2
-    half_j = crossline_window // 2
-    half_k = sample_window // 2
+    coh = np.ones_like(vol, dtype=np.float32)
 
-    out = np.ones((ni, nx, nt), dtype=np.float32)
-    for i in range(ni):
-        i0 = max(0, i - half_i)
-        i1 = min(ni, i + half_i + 1)
-        for j in range(nx):
-            j0 = max(0, j - half_j)
-            j1 = min(nx, j + half_j + 1)
-            num_traces = (i1 - i0) * (j1 - j0)
-            if num_traces <= 1:
-                continue
+    hi = inline_window // 2
+    hx = crossline_window // 2
+    ht = sample_window // 2
+    n_spatial = float((2 * hi + 1) * (2 * hx + 1))
 
-            traces = vol[i0:i1, j0:j1, :]
-            flat_traces = traces.reshape(num_traces, nt)
+    for i in range(hi, ni - hi):
+        for j in range(hx, nx - hx):
+            sub = vol[i - hi : i + hi + 1, j - hx : j + hx + 1, :].astype(np.float64)
+            trace_sum = np.sum(sub, axis=(0, 1))
+            trace_sq_sum = np.sum(sub**2, axis=(0, 1))
+            mean_sq = (trace_sum / n_spatial) ** 2
+            sum_sq = trace_sq_sum
 
             for k in range(nt):
-                k0 = max(0, k - half_k)
-                k1 = min(nt, k + half_k + 1)
-                sub_traces = flat_traces[:, k0:k1]
+                k0 = max(0, k - ht)
+                k1 = min(nt - 1, k + ht)
+                vert_len = float(k1 - k0 + 1)
+                run_num = np.sum(mean_sq[k0 : k1 + 1])
+                run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
+                coh[i, j, k] = float(np.clip(run_num / run_den, 0.0, 1.0))
 
-                mean_trace = np.mean(sub_traces, axis=0)
-                num = np.sum(mean_trace**2) * num_traces
-                denom = np.sum(sub_traces**2)
-
-                if denom > 1e-12:
-                    out[i, j, k] = float(np.clip(num / denom, 0.0, 1.0))
-                else:
-                    out[i, j, k] = 1.0
-
-    return out
+    return coh
 
 
 def _py_marching_cubes_3d(
@@ -375,31 +366,28 @@ class NativeEngineBackend:
         return fallback_fn(*args, **kwargs)
 
     def install_all_hooks(self) -> None:
-        """Idempotently inject C++ acceleration hooks into the geoviz engine."""
-        if self._installed_hooks:
-            return
-
+        """Inject C++ acceleration hooks into the geoviz engine."""
         try:
             from geoviz import set_downsample_provider, set_isosurface_extractor
         except ImportError:  # pragma: no cover
             return
 
-        def _cpp_minmax_provider(
-            depths: np.ndarray, values: np.ndarray, pixel_height: int
-        ) -> tuple[np.ndarray, np.ndarray]:
-            if len(depths) <= pixel_height * 2:
-                return depths, values
-            d = np.asarray(depths, dtype=np.float32)
-            v = np.asarray(values, dtype=np.float32)
-            out_d, out_v = self.dispatch("minmax_downsample", d, v, int(pixel_height))
-            return np.asarray(out_d, dtype=np.float64), np.asarray(out_v, dtype=np.float64)
-
-        def _isosurface_wrapper(volume: np.ndarray, isovalue: float = 0.0):
-            return self.dispatch("marching_cubes_3d", volume, isovalue)
+        from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
 
         set_downsample_provider(_cpp_minmax_provider)
-        set_isosurface_extractor(_isosurface_wrapper)
+        set_isosurface_extractor(marching_cubes_3d)
         self._installed_hooks = True
+
+
+def _cpp_minmax_provider(
+    depths: np.ndarray, values: np.ndarray, pixel_height: int
+) -> tuple[np.ndarray, np.ndarray]:
+    if len(depths) <= pixel_height * 2:
+        return depths, values
+    d = np.asarray(depths, dtype=np.float32)
+    v = np.asarray(values, dtype=np.float32)
+    out_d, out_v = native_backend.dispatch("minmax_downsample", d, v, int(pixel_height))
+    return np.asarray(out_d, dtype=np.float64), np.asarray(out_v, dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------
