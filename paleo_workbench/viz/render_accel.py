@@ -26,11 +26,14 @@ def _cpp_minmax_provider(
 
 
 def install_geoviz_acceleration() -> None:
-    """Inject the C++ min-max downsample provider into geoviz (idempotent)."""
+    """Inject the C++ providers into geoviz (idempotent)."""
     global _installed_provider
     if _installed_provider is not None:
         return
-    from geoviz import set_downsample_provider
+    from geoviz import set_downsample_provider, set_isosurface_extractor
+
+    from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
 
     set_downsample_provider(_cpp_minmax_provider)
+    set_isosurface_extractor(marching_cubes_3d)
     _installed_provider = _cpp_minmax_provider

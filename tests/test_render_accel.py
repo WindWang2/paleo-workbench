@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
+import geoviz
 from geoviz_well_log.renderer.downsample import (
     get_downsample_provider,
     numpy_minmax_downsample,
@@ -11,15 +12,18 @@ from geoviz_well_log.renderer.downsample import (
 
 import paleo_workbench.viz.render_accel as render_accel
 from paleo_workbench.viz.render_accel import install_geoviz_acceleration
+from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
 
 
 def setup_function():
     set_downsample_provider(None)
+    geoviz.set_isosurface_extractor(None)
     render_accel._installed_provider = None
 
 
 def teardown_function():
     set_downsample_provider(None)
+    geoviz.set_isosurface_extractor(None)
     render_accel._installed_provider = None
 
 
@@ -63,3 +67,15 @@ def test_injected_provider_passthrough_when_small():
     out_d, out_v = provider(depths, values, 100)
     np.testing.assert_array_equal(out_d, depths)
     np.testing.assert_array_equal(out_v, values)
+
+
+def test_install_injects_isosurface_extractor():
+    install_geoviz_acceleration()
+    assert geoviz.get_isosurface_extractor() is marching_cubes_3d
+
+
+def test_install_isosurface_injection_is_idempotent():
+    install_geoviz_acceleration()
+    first = geoviz.get_isosurface_extractor()
+    install_geoviz_acceleration()
+    assert geoviz.get_isosurface_extractor() is first

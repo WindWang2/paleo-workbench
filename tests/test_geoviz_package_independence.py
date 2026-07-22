@@ -79,6 +79,8 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "set_downsample_provider",
         "get_downsample_provider",
         "numpy_minmax_downsample",
+        "set_isosurface_extractor",
+        "get_isosurface_extractor",
     }
 )
 
