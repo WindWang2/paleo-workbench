@@ -62,4 +62,5 @@ def test_get_subpages_for_stage():
     assert navigation.get_subpages_for_stage(3) == [
         navigation.PAGE_INDEX_REVIEW,
         navigation.PAGE_INDEX_HOME,
+        navigation.PAGE_INDEX_GEOMODEL,
     ]
