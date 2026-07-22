@@ -153,7 +153,6 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
 
 // 3D Coherence Attribute Calculation
 py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | py::array::forcecast> input, int inline_window, int crossline_window, int sample_window) {
-    (void)sample_window;
     auto buf = input.request();
     if (buf.ndim != 3) {
         throw std::runtime_error("Input volume must be 3D");
@@ -171,15 +170,17 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
 
     int half_i = inline_window / 2;
     int half_x = crossline_window / 2;
+    int half_t = sample_window / 2;
     double n_spatial = static_cast<double>((2 * half_i + 1) * (2 * half_x + 1));
+
+    std::vector<double> mean_sq(nt);
+    std::vector<double> sum_sq(nt);
 
     {
         py::gil_scoped_release release;
         for (int i = half_i; i < static_cast<int>(ni) - half_i; ++i) {
             for (int j = half_x; j < static_cast<int>(nx) - half_x; ++j) {
-                double num = 0.0;
-                double sum_sq_spatial_total = 0.0;
-
+                // Per-sample spatial statistics for this trace column (computed once).
                 for (size_t k = 0; k < nt; ++k) {
                     double trace_sum = 0.0;
                     double trace_sq_sum = 0.0;
@@ -191,14 +192,39 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                         }
                     }
                     double mean_val = trace_sum / n_spatial;
-                    num += mean_val * mean_val;
-                    sum_sq_spatial_total += trace_sq_sum;
+                    mean_sq[k] = mean_val * mean_val;
+                    sum_sq[k] = trace_sq_sum;
                 }
 
-                double den = (sum_sq_spatial_total / static_cast<double>(nt)) + 1e-12;
-                float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, num / den)));
+                // Running-sum over the clamped vertical window [k0, k1].
+                int k0 = 0;
+                int k1 = std::min(static_cast<int>(nt) - 1, half_t);
+                double run_num = 0.0;
+                double run_den = 0.0;
+                for (int k = k0; k <= k1; ++k) {
+                    run_num += mean_sq[k];
+                    run_den += sum_sq[k];
+                }
                 for (size_t k = 0; k < nt; ++k) {
+                    double den = run_den / static_cast<double>(k1 - k0 + 1) + 1e-12;
+                    float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
                     dst[i * (nx * nt) + j * nt + k] = coh_val;
+
+                    // Advance window for k+1.
+                    if (static_cast<int>(k) + 1 < static_cast<int>(nt)) {
+                        int new_lo = std::max(0, static_cast<int>(k) + 1 - half_t);
+                        int new_hi = std::min(static_cast<int>(nt) - 1, static_cast<int>(k) + 1 + half_t);
+                        while (k1 < new_hi) {
+                            ++k1;
+                            run_num += mean_sq[k1];
+                            run_den += sum_sq[k1];
+                        }
+                        while (k0 < new_lo) {
+                            run_num -= mean_sq[k0];
+                            run_den -= sum_sq[k0];
+                            ++k0;
+                        }
+                    }
                 }
             }
         }
