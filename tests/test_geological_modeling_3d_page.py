@@ -5,6 +5,7 @@ import tempfile
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QSplitter
 
 from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
 from paleo_workbench.ui.pages.geological_modeling_workers import (
@@ -118,6 +119,21 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     # Check default interactive clipping sliders & checkboxes exist
     assert page.chk_clip_x is not None
     assert page.slide_clip_x is not None
+
+
+def test_geological_modeling_3d_page_splitter_layout(qtbot):
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page.resize(1600, 900)
+    page.show()
+
+    splitter = page.findChild(QSplitter)
+    assert splitter is not None
+
+    sizes = splitter.sizes()
+    # 3D Center Viewport (index 1) MUST take up > 50% of the total width
+    assert sizes[1] > (sum(sizes) * 0.5)
+
     assert page.combo_clip_x_dir is not None
     
     # Test setting clipping values

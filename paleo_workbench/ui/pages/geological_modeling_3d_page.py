@@ -460,15 +460,23 @@ class GeologicalModeling3DPage(QWidget):
 
         right_scroll.setWidget(right_widget)
 
+        # Constrain side panel widths so central 3D viewport retains maximum space
+        left_widget.setMinimumWidth(220)
+        left_widget.setMaximumWidth(320)
+
+        right_scroll.setMinimumWidth(320)
+        right_scroll.setMaximumWidth(440)
+
         # Add widgets to splitter
         splitter.addWidget(left_widget)
         splitter.addWidget(center_widget)
         splitter.addWidget(right_scroll)
 
-        # Layout weights
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
-        splitter.setStretchFactor(2, 1)
+        # Center widget (3D canvas) expands to fill available space; side panels maintain fixed widths
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([260, 1000, 360])
 
         main_layout.addWidget(splitter)
 
