@@ -16,6 +16,12 @@ An architectural invariant requiring that every native C++ algorithm has an iden
 ### DisabledAccelerationSeam
 A context-manager seam (`with native_backend.disabled_acceleration():`) allowing tests and diagnostic code to temporarily bypass C++ native extensions and execute pure-Python fallback paths cleanly without monkey-patching private module variables.
 
+### DataAssetRegistry
+A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_registry.py`) that encapsulates asset classification, directory scanning, format provider registration (`FormatSpec`), preview widget parsing, and export formatting behind a small 4-method interface (`inspect`, `scan_directory`, `parse_preview`, `export`).
+
+### FormatSpec
+A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
+
 ---
 
 ## Domain Concepts
