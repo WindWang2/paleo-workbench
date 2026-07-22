@@ -1,0 +1,64 @@
+"""TDD Tests for 3D Well-Seismic Tie Calibration (Issue #5 / Refactor)."""
+import numpy as np
+import pytest
+
+from paleo_workbench.viz.geomodel.well_seismic import WellSeismicTieCalibration
+
+
+def test_compute_synthetic_seismogram():
+    # Synthetic logs: 100 samples
+    sonic = np.full(100, 300.0, dtype=np.float32)  # dt = 300 us/m
+    density = np.full(100, 2.3, dtype=np.float32)  # rho = 2.3 g/cm3
+    
+    # Introduce a reflector at index 50
+    sonic[50:] = 200.0
+    density[50:] = 2.7
+    
+    synthetic = WellSeismicTieCalibration.compute_synthetic(
+        sonic, density, wavelet_freq=30.0, dt_s=0.002
+    )
+    
+    # Seismogram must have reflectivity pulse convolved with Ricker wavelet
+    assert len(synthetic) > 0
+    # Peak response should be around the reflector depth mapping
+    assert np.max(np.abs(synthetic)) > 0.0
+
+
+def test_align_twt_depth_shift():
+    depths = np.linspace(0.0, 1000.0, 11)
+
+    # Shifts depth coordinates by +10 meters (simulating shift calibration)
+    calibrated_depths = WellSeismicTieCalibration.align_twt_depth(
+        depths, depth_shift=10.0
+    )
+
+    assert len(calibrated_depths) == len(depths)
+    assert calibrated_depths[0] == 10.0
+    assert calibrated_depths[-1] == 1010.0
+
+
+def test_auto_correlate_recovers_known_shift():
+    """auto_correlate should recover the shift used to create a delayed copy."""
+    # Create a synthetic trace with a known reflector
+    sonic = np.full(100, 300.0, dtype=np.float32)
+    density = np.full(100, 2.3, dtype=np.float32)
+    sonic[50:] = 200.0
+    density[50:] = 2.7
+
+    synthetic = WellSeismicTieCalibration.compute_synthetic(sonic, density, wavelet_freq=30.0)
+    # Create field trace as shifted copy
+    true_shift = 5
+    seismic_trace = np.roll(synthetic, true_shift)
+
+    shift, cc = WellSeismicTieCalibration.auto_correlate(synthetic, seismic_trace)
+
+    # Shift should be close to the known value
+    assert abs(shift - true_shift) <= 2
+    # Correlation should be high
+    assert cc > 0.8
+
+
+def test_auto_correlate_empty_inputs():
+    shift, cc = WellSeismicTieCalibration.auto_correlate(np.array([]), np.array([1.0, 2.0]))
+    assert shift == 0
+    assert cc == 0.0

@@ -76,12 +76,13 @@ ICON_FILES = [
     "home.svg", "data.svg", "well-log.svg", "seismic.svg", "sequence.svg",
     "stratigraphy.svg",
     "visualization.svg", "preparation.svg", "mapping.svg", "review.svg",
+    "visualization.svg",  # fallback for 3d-modeling icon
 ]
 
 PAGE_NAMES = [
     "首页", "数据", "测井预测", "地震预测", "层序格架",
     "地层对比",
-    "可视化", "制备", "编图", "成图审核",
+    "可视化", "制备", "编图", "成图审核", "三维建模",
 ]
 # Brief Chinese descriptions for nav-icon tooltips.
 PAGE_DESCRIPTIONS = [
@@ -95,6 +96,7 @@ PAGE_DESCRIPTIONS = [
     "制图数据制备与清洗",
     "古地理图编制工作台",
     "成图质检与成果导出",
+    "三维地质建模与剖面雕刻",
 ]
 
 STEP_COLORS = ["#1f6fe0", "#0f93a4", "#6f47cf", WARNING, "#e2705b", "#7e8794"]

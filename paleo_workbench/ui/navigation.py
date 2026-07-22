@@ -13,6 +13,7 @@ PAGE_INDEX_VISUALIZATION = 6
 PAGE_INDEX_PREPARATION = 7
 PAGE_INDEX_MAPPING = 8
 PAGE_INDEX_REVIEW = 9
+PAGE_INDEX_GEOMODEL = 10
 
 # Stage indices (0 ~ 3)
 STAGE_INDEX_DATA = 0
@@ -49,7 +50,7 @@ STAGE_DEFINITIONS: list[dict] = [
         "index": STAGE_INDEX_REVIEW,
         "name": "成图与审核",
         "badge": "❹",
-        "pages": [PAGE_INDEX_REVIEW, PAGE_INDEX_HOME],
+        "pages": [PAGE_INDEX_REVIEW, PAGE_INDEX_HOME, PAGE_INDEX_GEOMODEL],
     },
 ]
 
