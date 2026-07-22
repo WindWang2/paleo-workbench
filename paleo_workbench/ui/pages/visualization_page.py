@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -52,7 +53,7 @@ class VisualizationPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_4)
 
-        # Top bar with asset selector dropdown
+        # Top bar with asset selector dropdown + Coordinate System Toggle
         top_bar = QHBoxLayout()
         top_bar.setSpacing(tokens.SPACE_2)
 
@@ -67,6 +68,17 @@ class VisualizationPage(QWidget):
         )
         self.asset_combo.currentIndexChanged.connect(self._on_asset_combo_changed)
         top_bar.addWidget(self.asset_combo)
+
+        # 1-Click Geographic / Grid coordinate toggle
+        self.btn_coord = QPushButton("📍 网格(IL/XL)")
+        self.btn_coord.setCheckable(True)
+        self.btn_coord.setStyleSheet(
+            f"QPushButton {{ border: 1px solid {tokens.BORDER}; border-radius: 4px; padding: 5px 14px; background: {tokens.BG_SIDEBAR}; color: {tokens.TEXT_PRIMARY}; font-weight: bold; }}"
+            f"QPushButton:checked {{ background: #2563eb; color: #ffffff; border-color: #1d4ed8; }}"
+        )
+        self.btn_coord.clicked.connect(self._on_coord_toggle_clicked)
+        top_bar.addWidget(self.btn_coord)
+
         top_bar.addStretch()
 
         outer.addLayout(top_bar)
@@ -242,3 +254,12 @@ class VisualizationPage(QWidget):
         doc.prediction_tasks = list(self._prediction_tasks)
         doc.paleomap_documents = list(self._map_documents)
         return doc
+
+    def _on_coord_toggle_clicked(self) -> None:
+        """Dispatch Geographic/Grid coordinate mode toggle to embedded seismic views."""
+        is_geo = self.btn_coord.isChecked()
+        self.btn_coord.setText("🌐 地理(X/Y)" if is_geo else "📍 网格(IL/XL)")
+        sv = getattr(self.composite_panel, "seismic_view", None)
+        if sv is not None and hasattr(sv, "btn_coord"):
+            sv.btn_coord.setChecked(is_geo)
+            sv._toggle_coord_mode()
