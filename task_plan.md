@@ -119,6 +119,15 @@ Phase 5 — Complete & Verified
 - [x] 预览控件 80ms 防抖、resize 缓存缩放、NumPy 色表
 - **Status:** complete
 
+### Phase 16: P5 等值面与相干性 3D 接入
+
+- [x] `marching_cubes_3d` 重写为 Marching Tetrahedra（水密，替换点汤实现），Python 保底去点汤改 skimage/ImportError
+- [x] 引擎 `Renderer3D.set_isosurface` + `geoviz_seismic.isosurface` 注入钩子 + facade 导出
+- [x] SeismicView 等值面工具栏控件（checkbox + 阈值 + 200ms 防抖）
+- [x] workbench 启动注入 C++ 提取器（`render_accel`）
+- [x] 相干性 C3 接入属性下拉（`attribute_pipeline`）
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
