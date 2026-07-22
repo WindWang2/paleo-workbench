@@ -126,7 +126,7 @@ Phase 5 — Complete & Verified
 | 保留旧模块 (如 `preview_widgets.py`, `fallback_preview.py`) 作为 re-export 兼容门面 | 维持 100% 向后兼容性，避免对依赖第三方或动态 monkeypatch 的测试造成破坏。 |
 | 将 `resources/preview_parsers/` 下沉到 `resources/` | 保持 `resources` 作为基础资源/格式解析层，符合 `ui → viz/workflow/resources/mapping → project` 的分层依赖规则。 |
 | 拆分 `map_edit_scene.py` 为 4 个高内聚辅助模块 | 将几何工厂、草图状态机、吸附管理器、拓扑算法与主 Scene 事件路由解耦，提高可维护性。 |
-| 采用 pybind11 构建 `seismic_3d_core` 原生模块 | 在纯 Python / NumPy 算法保底的前提下，通过 C++ 多线程与内存连续性提供高效震相计算与切片提取。 |
+| 采用 pybind11 构建 `seismic_3d_core` 原生模块 | 在纯 Python / NumPy 算法保底的前提下，通过 C++ 单线程计算（释放 GIL）与内存连续性提供高效震相计算与切片提取。 |
 | 采用 pybind11 构建 `well_log_core` 测井原生扩展 | 将视口 Min-Max LOD 抽稀、ASCII 解析与交叠填色下沉到 `viz/` 算法层与原生扩展，保障 60 FPS 渲染。 |
 
 ## Errors Encountered & Resolved
