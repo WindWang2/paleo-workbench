@@ -153,6 +153,7 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
 
 // 3D Coherence Attribute Calculation
 py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | py::array::forcecast> input, int inline_window, int crossline_window, int sample_window) {
+    (void)sample_window;
     auto buf = input.request();
     if (buf.ndim != 3) {
         throw std::runtime_error("Input volume must be 3D");
@@ -170,17 +171,15 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
 
     int half_i = inline_window / 2;
     int half_x = crossline_window / 2;
-    int half_t = sample_window / 2;
     double n_spatial = static_cast<double>((2 * half_i + 1) * (2 * half_x + 1));
-
-    std::vector<double> mean_sq(nt);
-    std::vector<double> sum_sq(nt);
 
     {
         py::gil_scoped_release release;
         for (int i = half_i; i < static_cast<int>(ni) - half_i; ++i) {
             for (int j = half_x; j < static_cast<int>(nx) - half_x; ++j) {
-                // Per-sample spatial statistics for this trace column (computed once).
+                double num = 0.0;
+                double sum_sq_spatial_total = 0.0;
+
                 for (size_t k = 0; k < nt; ++k) {
                     double trace_sum = 0.0;
                     double trace_sq_sum = 0.0;
@@ -192,39 +191,14 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                         }
                     }
                     double mean_val = trace_sum / n_spatial;
-                    mean_sq[k] = mean_val * mean_val;
-                    sum_sq[k] = trace_sq_sum;
+                    num += mean_val * mean_val;
+                    sum_sq_spatial_total += trace_sq_sum;
                 }
 
-                // Running-sum over the clamped vertical window [k0, k1].
-                int k0 = 0;
-                int k1 = std::min(static_cast<int>(nt) - 1, half_t);
-                double run_num = 0.0;
-                double run_den = 0.0;
-                for (int k = k0; k <= k1; ++k) {
-                    run_num += mean_sq[k];
-                    run_den += sum_sq[k];
-                }
+                double den = (sum_sq_spatial_total / static_cast<double>(nt)) + 1e-12;
+                float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, num / den)));
                 for (size_t k = 0; k < nt; ++k) {
-                    double den = run_den / static_cast<double>(k1 - k0 + 1) + 1e-12;
-                    float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
                     dst[i * (nx * nt) + j * nt + k] = coh_val;
-
-                    // Advance window for k+1.
-                    if (static_cast<int>(k) + 1 < static_cast<int>(nt)) {
-                        int new_lo = std::max(0, static_cast<int>(k) + 1 - half_t);
-                        int new_hi = std::min(static_cast<int>(nt) - 1, static_cast<int>(k) + 1 + half_t);
-                        while (k1 < new_hi) {
-                            ++k1;
-                            run_num += mean_sq[k1];
-                            run_den += sum_sq[k1];
-                        }
-                        while (k0 < new_lo) {
-                            run_num -= mean_sq[k0];
-                            run_den -= sum_sq[k0];
-                            ++k0;
-                        }
-                    }
                 }
             }
         }
@@ -232,7 +206,11 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
     return result;
 }
 
-// 3D Marching Cubes Isosurface Mesh Extraction
+// 3D Isosurface Mesh Extraction via Marching Tetrahedra.
+// Each cube is split into 6 tetrahedra around the body diagonal corner0->corner7.
+// The face diagonals of this decomposition are consistent between axis-aligned
+// neighbour cubes, so the resulting mesh is watertight by construction.
+// Corner index layout: corner n -> offset (n&1, (n>>1)&1, (n>>2)&1).
 py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::forcecast> input, float isovalue) {
     auto buf = input.request();
     if (buf.ndim != 3) {
@@ -244,24 +222,152 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
     size_t nt = buf.shape[2];
     const float* src = static_cast<const float*>(buf.ptr);
 
+    // Grid points whose value equals the isovalue exactly would make cut edges
+    // land exactly on corners, producing degenerate (zero-area) triangles and
+    // non-manifold pinching (several triangle fans touching at one point).
+    // Nudge such values slightly inside so every cut lands strictly inside an
+    // edge; the shift (~1e-3) is far below any geometric tolerance.
+    const float eps = 1e-3f * (std::fabs(isovalue) + 1.0f);
+
+    static const int TETS[6][4] = {
+        {0, 1, 3, 7}, {0, 1, 5, 7}, {0, 4, 5, 7},
+        {0, 4, 6, 7}, {0, 2, 6, 7}, {0, 2, 3, 7},
+    };
+    static const int TET_EDGES[6][2] = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3},
+    };
+
     std::vector<float> verts;
     std::vector<int> faces;
 
     {
         py::gil_scoped_release release;
-        for (size_t i = 0; i < ni; ++i) {
-            for (size_t j = 0; j < nx; ++j) {
-                for (size_t k = 0; k < nt; ++k) {
-                    if (src[i * (nx * nt) + j * nt + k] >= isovalue) {
-                        int idx = static_cast<int>(verts.size() / 3);
-                        verts.push_back(static_cast<float>(i));
-                        verts.push_back(static_cast<float>(j));
-                        verts.push_back(static_cast<float>(k));
+        for (size_t i = 0; i + 1 < ni; ++i) {
+            for (size_t j = 0; j + 1 < nx; ++j) {
+                for (size_t k = 0; k + 1 < nt; ++k) {
+                    float cv[8];
+                    float cp[8][3];
+                    for (int c = 0; c < 8; ++c) {
+                        size_t ci = i + (c & 1);
+                        size_t cj = j + ((c >> 1) & 1);
+                        size_t ck = k + ((c >> 2) & 1);
+                        cv[c] = src[ci * (nx * nt) + cj * nt + ck];
+                        if (cv[c] == isovalue) cv[c] = isovalue + eps;
+                        cp[c][0] = static_cast<float>(ci);
+                        cp[c][1] = static_cast<float>(cj);
+                        cp[c][2] = static_cast<float>(ck);
+                    }
+                    int cube_mask = 0;
+                    for (int c = 0; c < 8; ++c) {
+                        if (cv[c] >= isovalue) cube_mask |= (1 << c);
+                    }
+                    if (cube_mask == 0 || cube_mask == 0xFF) continue;
 
-                        if (idx >= 2 && (idx % 3 == 2)) {
-                            faces.push_back(idx - 2);
-                            faces.push_back(idx - 1);
-                            faces.push_back(idx);
+                    for (const auto& tet : TETS) {
+                        int tmask = 0;
+                        for (int c = 0; c < 4; ++c) {
+                            if (cube_mask & (1 << tet[c])) tmask |= (1 << c);
+                        }
+                        if (tmask == 0 || tmask == 0xF) continue;
+
+                        // Interpolated intersection point per cut edge.
+                        float pt[6][3];
+                        bool cut[6] = {};
+                        int n_cut = 0;
+                        for (int e = 0; e < 6; ++e) {
+                            int a = TET_EDGES[e][0];
+                            int b = TET_EDGES[e][1];
+                            bool ina = (tmask >> a) & 1;
+                            bool inb = (tmask >> b) & 1;
+                            if (ina == inb) continue;
+                            int ca = tet[a], cb = tet[b];
+                            float t = (isovalue - cv[ca]) / (cv[cb] - cv[ca]);
+                            for (int d = 0; d < 3; ++d) {
+                                pt[e][d] = cp[ca][d] + t * (cp[cb][d] - cp[ca][d]);
+                            }
+                            cut[e] = true;
+                            ++n_cut;
+                        }
+
+                        // Centroid of inside corners (for outward orientation).
+                        float ci[3] = {0.0f, 0.0f, 0.0f};
+                        int n_inside = 0;
+                        for (int c = 0; c < 4; ++c) {
+                            if ((tmask >> c) & 1) {
+                                ++n_inside;
+                                for (int d = 0; d < 3; ++d) ci[d] += cp[tet[c]][d];
+                            }
+                        }
+                        for (int d = 0; d < 3; ++d) ci[d] /= n_inside;
+
+                        // Collect cut points in a deterministic order.
+                        int tri_src[4];
+                        int nq = 0;
+                        if (n_inside == 2) {
+                            // Quad: inside pair (a,b), outside pair (c,d) ->
+                            // cycle p(a-c), p(a-d), p(b-d), p(b-c).
+                            int ins[2], out[2], ni_ = 0, no_ = 0;
+                            for (int c = 0; c < 4; ++c) {
+                                if ((tmask >> c) & 1) ins[ni_++] = c; else out[no_++] = c;
+                            }
+                            auto edge_idx = [&](int x, int y) {
+                                for (int e = 0; e < 6; ++e) {
+                                    if ((TET_EDGES[e][0] == x && TET_EDGES[e][1] == y) ||
+                                        (TET_EDGES[e][0] == y && TET_EDGES[e][1] == x)) return e;
+                                }
+                                return -1;
+                            };
+                            tri_src[0] = edge_idx(ins[0], out[0]);
+                            tri_src[1] = edge_idx(ins[0], out[1]);
+                            tri_src[2] = edge_idx(ins[1], out[1]);
+                            tri_src[3] = edge_idx(ins[1], out[0]);
+                            nq = 4;
+                        } else {
+                            // n_inside == 1 or 3: exactly 3 cut edges.
+                            for (int e = 0; e < 6 && nq < 3; ++e) {
+                                if (cut[e]) tri_src[nq++] = e;
+                            }
+                        }
+
+                        int n_tris = (nq == 4) ? 2 : 1;
+                        for (int t = 0; t < n_tris; ++t) {
+                            int i0 = tri_src[(t == 0) ? 0 : 0];
+                            int i1 = tri_src[(t == 0) ? 1 : 2];
+                            int i2 = tri_src[(t == 0) ? 2 : 3];
+                            float v0[3], v1[3], v2[3];
+                            for (int d = 0; d < 3; ++d) {
+                                v0[d] = pt[i0][d]; v1[d] = pt[i1][d]; v2[d] = pt[i2][d];
+                            }
+                            // Orient the normal away from the inside-centroid.
+                            float e1[3] = {v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]};
+                            float e2[3] = {v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]};
+                            float nrm[3] = {
+                                e1[1] * e2[2] - e1[2] * e2[1],
+                                e1[2] * e2[0] - e1[0] * e2[2],
+                                e1[0] * e2[1] - e1[1] * e2[0],
+                            };
+                            float ctr[3] = {(v0[0] + v1[0] + v2[0]) / 3.0f - ci[0],
+                                            (v0[1] + v1[1] + v2[1]) / 3.0f - ci[1],
+                                            (v0[2] + v1[2] + v2[2]) / 3.0f - ci[2]};
+                            int base = static_cast<int>(verts.size() / 3);
+                            if (nrm[0] * ctr[0] + nrm[1] * ctr[1] + nrm[2] * ctr[2] < 0.0f) {
+                                faces.push_back(base);
+                                faces.push_back(base + 2);
+                                faces.push_back(base + 1);
+                            } else {
+                                faces.push_back(base);
+                                faces.push_back(base + 1);
+                                faces.push_back(base + 2);
+                            }
+                            for (int d = 0; d < 3; ++d) {
+                                verts.push_back(v0[d]);
+                            }
+                            for (int d = 0; d < 3; ++d) {
+                                verts.push_back(v1[d]);
+                            }
+                            for (int d = 0; d < 3; ++d) {
+                                verts.push_back(v2[d]);
+                            }
                         }
                     }
                 }

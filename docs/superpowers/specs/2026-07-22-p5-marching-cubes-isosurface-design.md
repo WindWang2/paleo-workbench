@@ -15,7 +15,7 @@
 
 | 决策点 | 结论 |
 |---|---|
-| MC 实现路线 | C++ 自研完整 MC（公共域查找表），不引新依赖 |
+| MC 实现路线 | C++ 自研 Marching Tetrahedra（水密、无外部查找表），不引新依赖 |
 | 等值面交互范围 | 仅当前振幅体；SeismicView 工具栏控件组 |
 | 相干性实现 | 引擎 C3 接入属性管线；workbench semblance 版不进 UI |
 | 跨仓库架构 | 注入模式（引擎 API + 钩子，workbench 启动注入 C++ MC） |
@@ -25,8 +25,8 @@
 ### 1. C++ Marching Cubes 重写（workbench 仓库）
 
 - 替换 `seismic_3d_core.cpp` 点汤实现，签名不变：`(volume: float32 3D, isovalue: float) -> (verts float32 [N,3], faces int32 [M,3])`。
-- 经典 Lorensen-Cline MC + 公共域查找表（edgeTable/triTable，含 MC33 歧义修正）；逐 cube 8 角点建 case index，棱上线性插值；计算段释放 GIL。
-- 顶点坐标为 voxel 索引坐标——与引擎层位 mesh 同坐标系，叠加无需变换。
+- Marching Tetrahedra：逐 cube 剖 6 四面体（主对角线分解，邻接面对角线一致，天然水密），棱上线性插值，法线统一朝外；计算段释放 GIL。
+- 输出 voxel 索引坐标；`Renderer3D.set_isosurface` 内部按 volume spacing/origin 变换到物理坐标后叠加。
 - 第一版不做顶点去重（YAGNI；128³ 体典型输出几十万三角形，可接受）。
 - Python 保底：保留 skimage 可选路径作参考实现；删除点汤降级，无 C++ 且无 skimage 时抛 `ImportError`。
 

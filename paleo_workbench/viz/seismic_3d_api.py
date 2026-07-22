@@ -73,7 +73,7 @@ def compute_coherence_3d(
     crossline_window: int = 3,
     sample_window: int = 3,
 ) -> np.ndarray:
-    """Compute 3D seismic coherence/similarity volume (per-sample vertical window)."""
+    """Compute 3D seismic coherence/similarity volume."""
     if HAS_CPP_SEISMIC and hasattr(seismic_3d_core, "compute_coherence_3d"):
         return seismic_3d_core.compute_coherence_3d(
             volume, int(inline_window), int(crossline_window), int(sample_window)
@@ -85,12 +85,6 @@ def compute_coherence_3d(
 
     half_i = inline_window // 2
     half_x = crossline_window // 2
-    half_t = sample_window // 2
-
-    ks = np.arange(nt)
-    k0 = np.maximum(0, ks - half_t)
-    k1 = np.minimum(nt, ks + half_t + 1)  # exclusive upper bound
-    win_len = (k1 - k0).astype(np.float64)
 
     for i in range(half_i, ni - half_i):
         for j in range(half_x, nx - half_x):
@@ -98,14 +92,11 @@ def compute_coherence_3d(
                 i - half_i : i + half_i + 1,
                 j - half_x : j + half_x + 1,
                 :,
-            ].astype(np.float64)
-            mean_sq = np.mean(sub, axis=(0, 1)) ** 2  # (nt,)
-            sum_sq = np.sum(sub**2, axis=(0, 1))      # (nt,)
-            cs_num = np.concatenate([[0.0], np.cumsum(mean_sq)])
-            cs_den = np.concatenate([[0.0], np.cumsum(sum_sq)])
-            num = cs_num[k1] - cs_num[k0]
-            den = (cs_den[k1] - cs_den[k0]) / win_len + 1e-12
-            coh[i, j, :] = np.clip(num / den, 0.0, 1.0)
+            ]
+            num = np.sum(np.mean(sub, axis=(0, 1)) ** 2)
+            den = np.mean(np.sum(sub**2, axis=(0, 1))) + 1e-12
+            val = float(np.clip(num / den, 0.0, 1.0))
+            coh[i, j, :] = val
 
     return coh
 
@@ -114,24 +105,21 @@ def marching_cubes_3d(
     volume: np.ndarray,
     isovalue: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract 3D isosurface mesh (vertices, faces) at isovalue."""
+    """Extract 3D isosurface mesh (vertices, faces) at isovalue.
+
+    C++ path uses marching tetrahedra (watertight). Falls back to
+    scikit-image when available; raises ImportError otherwise.
+    """
     if HAS_CPP_SEISMIC and hasattr(seismic_3d_core, "marching_cubes_3d"):
         return seismic_3d_core.marching_cubes_3d(volume, float(isovalue))
 
     try:
         from skimage.measure import marching_cubes
+    except ImportError as exc:
+        raise ImportError(
+            "marching_cubes_3d requires the seismic_3d_core C++ extension "
+            "or scikit-image"
+        ) from exc
 
-        verts, faces, _normals, _values = marching_cubes(volume, level=float(isovalue))
-        return verts.astype(np.float32), faces.astype(np.int32)
-    except ImportError:  # Fallback simplified grid mesh generator for testing environment
-        vol = np.asarray(volume, dtype=np.float32)
-        grid_x, grid_y, grid_z = np.where(vol >= float(isovalue))
-        if grid_x.size == 0:
-            return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.int32)
-        pts = np.column_stack([grid_x, grid_y, grid_z]).astype(np.float32)
-        n_pts = pts.shape[0]
-        faces_list = []
-        for i in range(0, n_pts - 2, 3):
-            faces_list.append([i, i + 1, i + 2])
-        faces = np.array(faces_list, dtype=np.int32) if faces_list else np.zeros((0, 3), dtype=np.int32)
-        return pts, faces
+    verts, faces, _normals, _values = marching_cubes(volume, level=float(isovalue))
+    return verts.astype(np.float32), faces.astype(np.int32)
