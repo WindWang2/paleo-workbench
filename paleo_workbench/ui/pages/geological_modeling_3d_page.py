@@ -502,6 +502,8 @@ class GeologicalModeling3DPage(QWidget):
         else:
             self._coord_mode = "grid"
             self.btn_coord.setText("📍 网格(IL/XL)")
+        if hasattr(self.gl_widget, "set_coord_mode"):
+            self.gl_widget.set_coord_mode(self._coord_mode)
 
     # ------------------------------------------------------------------ #
     # Model Tree
