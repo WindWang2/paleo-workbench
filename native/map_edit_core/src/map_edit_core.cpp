@@ -81,8 +81,13 @@ bool point_in_ring(double px, double py, const py::list& ring) {
         const double yi = pi[1].cast<double>();
         const double xj = pj[0].cast<double>();
         const double yj = pj[1].cast<double>();
+        // Standard ray-cast: the (yi > py) != (yj > py) guard already excludes
+        // horizontal edges (yi == yj), so yj - yi is provably non-zero here and
+        // no division guard is needed (the previous 1e-30 fallback was dead
+        // code — cpp-core-review M16). Points exactly on an edge/vertex have
+        // unspecified inside/outside, which is fine for hit-test use.
         if (((yi > py) != (yj > py))
-            && (px < (xj - xi) * (py - yi) / ((yj - yi) != 0.0 ? (yj - yi) : 1e-30) + xi)) {
+            && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
             inside = !inside;
         }
         j = i;
@@ -110,6 +115,13 @@ std::optional<std::string> hit_test(
     double y,
     double tol
 ) {
+    // Tolerance semantics (cpp-core-review I6, intentionally shared with the
+    // Python fallback `_hit_test_python`): when tol <= 0 (the default),
+    //   - points hit within a small radius (1e-9, squared -> tol2),
+    //   - open-line vertices hit on near-exact match (1e-18, squared -> ~1e-9),
+    //   - ring/line edges hit within max(tol^2, 1e-18).
+    // These three thresholds differ by design (bare points need a usable pick
+    // radius; open lines default to exact-vertex snaps). Both backends agree.
     const double px = x;
     const double py = y;
     const double point_tol = tol > 0.0 ? tol : 1e-9;
@@ -135,47 +147,59 @@ std::optional<std::string> hit_test(
         // Point: [x, y] — first element is a number
         if (py::isinstance<py::float_>(first) || py::isinstance<py::int_>(first)) {
             if (py::len(coords) >= 2) {
-                const double cx = coords[0].cast<double>();
-                const double cy = coords[1].cast<double>();
-                if (dist2(px, py, cx, cy) <= tol2) {
-                    return fid;
+                try {
+                    const double cx = coords[0].cast<double>();
+                    const double cy = coords[1].cast<double>();
+                    if (dist2(px, py, cx, cy) <= tol2) {
+                        return fid;
+                    }
+                } catch (const py::error_already_set&) {
+                    continue;  // M11: malformed coordinate -> skip feature
                 }
             }
             continue;
         }
-        // Ring / line
-        py::ssize_t n = py::len(coords);
-        if (n < 2) {
-            continue;
-        }
-        const bool closed = is_closed_ring(coords);
-        if (closed && point_in_ring(px, py, coords)) {
-            return fid;
-        }
-        if (edge_tol2 <= 0.0 && !closed) {
-            for (py::ssize_t i = 0; i < n; ++i) {
-                py::sequence p = coords[static_cast<size_t>(i)].cast<py::sequence>();
-                if (dist2(px, py, p[0].cast<double>(), p[1].cast<double>()) <= 1e-18) {
-                    return fid;
-                }
+        // Ring / line: wrap the whole feature body so ANY malformed coordinate
+        // (a string like "ab" reaching is_closed_ring, a non-numeric element,
+        // etc.) skips the feature instead of propagating a hard cast/index
+        // error. Matches the Python fallback's lenient isinstance filtering
+        // (cpp-core-review M11).
+        try {
+            py::ssize_t n = py::len(coords);
+            if (n < 2) {
+                continue;
             }
-            continue;
-        }
-        const py::ssize_t seg_count = n - 1;
-        for (py::ssize_t i = 0; i < seg_count; ++i) {
-            py::sequence a = coords[static_cast<size_t>(i)].cast<py::sequence>();
-            py::sequence b = coords[static_cast<size_t>(i + 1)].cast<py::sequence>();
-            const double d2 = point_to_segment_dist2(
-                px,
-                py,
-                a[0].cast<double>(),
-                a[1].cast<double>(),
-                b[0].cast<double>(),
-                b[1].cast<double>()
-            );
-            if (d2 <= std::max(edge_tol2, 1e-18)) {
+            const bool closed = is_closed_ring(coords);
+            if (closed && point_in_ring(px, py, coords)) {
                 return fid;
             }
+            if (edge_tol2 <= 0.0 && !closed) {
+                for (py::ssize_t i = 0; i < n; ++i) {
+                    py::sequence p = coords[static_cast<size_t>(i)].cast<py::sequence>();
+                    if (dist2(px, py, p[0].cast<double>(), p[1].cast<double>()) <= 1e-18) {
+                        return fid;
+                    }
+                }
+                continue;
+            }
+            const py::ssize_t seg_count = n - 1;
+            for (py::ssize_t i = 0; i < seg_count; ++i) {
+                py::sequence a = coords[static_cast<size_t>(i)].cast<py::sequence>();
+                py::sequence b = coords[static_cast<size_t>(i + 1)].cast<py::sequence>();
+                const double d2 = point_to_segment_dist2(
+                    px,
+                    py,
+                    a[0].cast<double>(),
+                    a[1].cast<double>(),
+                    b[0].cast<double>(),
+                    b[1].cast<double>()
+                );
+                if (d2 <= std::max(edge_tol2, 1e-18)) {
+                    return fid;
+                }
+            }
+        } catch (const py::error_already_set&) {
+            continue;  // M11: skip feature with malformed coordinates
         }
     }
     return std::nullopt;
@@ -187,11 +211,16 @@ std::pair<double, double> snap(
     double y,
     double tol
 ) {
+    // Contract (cpp-core-review M12, shared with the Python fallback
+    // `_snap_point_python`): returns the nearest candidate within tol. When no
+    // candidate is within tol, the ORIGINAL (x, y) is returned unchanged — a
+    // miss is indistinguishable from a perfect snap at distance 0. Callers
+    // that need to distinguish a miss must check the distance themselves; the
+    // public `snap_point` wrapper documents this.
     const double px = x;
     const double py = y;
     const double tol_f = std::max(0.0, tol);
     double best_d2 = tol_f * tol_f;
-    bool found = false;
     double bx = px;
     double by = py;
     for (const auto& raw : candidates) {
@@ -209,10 +238,8 @@ std::pair<double, double> snap(
             best_d2 = d2;
             bx = cx;
             by = cy;
-            found = true;
         }
     }
-    (void)found;
     return {bx, by};
 }
 
@@ -230,15 +257,41 @@ void move_feature(py::list coordinates, double dx, double dy) {
     }
     for (py::ssize_t i = 0; i < py::len(coordinates); ++i) {
         py::object pt = coordinates[static_cast<size_t>(i)];
-        if (!py::isinstance<py::list>(pt) && !py::isinstance<py::sequence>(pt)) {
-            continue;
+        if (py::isinstance<py::list>(pt)) {
+            // list: mutate in place, preserve type.
+            py::list point = py::cast<py::list>(pt);
+            if (py::len(point) >= 2) {
+                point[0] = point[0].cast<double>() + dx;
+                point[1] = point[1].cast<double>() + dy;
+            }
+        } else if (py::isinstance<py::tuple>(pt)) {
+            // tuple: immutable, so write back a NEW tuple of the same element
+            // type rather than silently converting to list (cpp-core-review
+            // M13 — the old py::list(pt) mutated the caller's element type).
+            py::tuple point = py::cast<py::tuple>(pt);
+            if (py::len(point) >= 2) {
+                py::tuple moved = py::make_tuple(
+                    point[0].cast<double>() + dx,
+                    point[1].cast<double>() + dy
+                );
+                coordinates[static_cast<size_t>(i)] = moved;
+            }
         }
-        py::list point = py::list(pt);
-        if (py::len(point) >= 2) {
-            point[0] = point[0].cast<double>() + dx;
-            point[1] = point[1].cast<double>() + dy;
-            coordinates[static_cast<size_t>(i)] = point;
-        }
+        // Other sequence types: skip (match the Python fallback's isinstance filter).
+    }
+}
+
+// Helper: write (x, y) to ring[i], preserving the element's Python type
+// (list mutated in place; tuple replaced with a new tuple). cpp-core-review M13.
+void write_vertex(py::list& ring, py::ssize_t i, double x, double y) {
+    py::object pt = ring[i];
+    if (py::isinstance<py::list>(pt)) {
+        py::list point = py::cast<py::list>(pt);
+        set_xy(point, x, y);
+    } else if (py::isinstance<py::tuple>(pt)) {
+        ring[i] = py::make_tuple(x, y);
+    } else {
+        ring[i] = py::make_tuple(x, y);  // fallback
     }
 }
 
@@ -248,18 +301,12 @@ void set_vertex(py::list ring, int index, double x, double y) {
         throw py::index_error("vertex index out of range");
     }
     const bool closed = is_closed_ring(ring);
-    py::list point = py::list(ring[static_cast<size_t>(index)]);
-    set_xy(point, x, y);
-    ring[static_cast<size_t>(index)] = point;
+    write_vertex(ring, static_cast<py::ssize_t>(index), x, y);
     if (closed) {
         if (index == 0) {
-            py::list last = py::list(ring[static_cast<size_t>(n - 1)]);
-            set_xy(last, x, y);
-            ring[static_cast<size_t>(n - 1)] = last;
+            write_vertex(ring, n - 1, x, y);
         } else if (index == n - 1) {
-            py::list first = py::list(ring[0]);
-            set_xy(first, x, y);
-            ring[0] = first;
+            write_vertex(ring, 0, x, y);
         }
     }
 }
@@ -269,10 +316,30 @@ void insert_vertex(py::list ring, int index, double x, double y) {
     if (index < 0 || index > n) {
         throw py::index_error("insert index out of range");
     }
+    const bool closed = is_closed_ring(ring);
+    // On a closed ring, inserting at index==n would insert AFTER the closing
+    // duplicate vertex and open the ring (first != last). Treat it as insert
+    // before the close, then re-close so first/last stay synchronized —
+    // matches the Python fallback (cpp-core-review M15).
+    int insert_at = index;
+    if (closed && index == n) {
+        insert_at = static_cast<int>(n) - 1;
+    }
     py::list pt;
     pt.append(x);
     pt.append(y);
-    ring.insert(static_cast<size_t>(index), pt);
+    ring.insert(static_cast<size_t>(insert_at), pt);
+    if (closed && py::len(ring) >= 1) {
+        // Re-close: keep the last point identical to the first after insert.
+        py::ssize_t last = py::len(ring) - 1;
+        py::object first_pt = ring[0];
+        if (py::isinstance<py::list>(first_pt)) {
+            py::list first = py::cast<py::list>(first_pt);
+            if (py::len(first) >= 2) {
+                write_vertex(ring, last, first[0].cast<double>(), first[1].cast<double>());
+            }
+        }
+    }
 }
 
 bool delete_vertex(py::list ring, int index) {
@@ -317,18 +384,6 @@ double orient(
     return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
 }
 
-bool on_segment(
-    double ax,
-    double ay,
-    double bx,
-    double by,
-    double cx,
-    double cy
-) {
-    return std::min(ax, cx) - kEps <= bx && bx <= std::max(ax, cx) + kEps
-        && std::min(ay, cy) - kEps <= by && by <= std::max(ay, cy) + kEps;
-}
-
 bool segments_properly_intersect(
     double a1x,
     double a1y,
@@ -348,9 +403,12 @@ bool segments_properly_intersect(
         && ((o3 > kEps && o4 < -kEps) || (o3 < -kEps && o4 > kEps))) {
         return true;
     }
-    // Proper intersection only — skip collinear endpoint-only touches
-    // (matches Python validate_ring which uses proper intersection).
-    (void)on_segment;
+    // Proper intersection only: collinear overlaps and endpoint (T-)touches
+    // are deliberately not reported (cpp-core-review M17). The Python
+    // fallback `_segments_properly_intersect` additionally reports collinear
+    // overlaps, so two polygonal faults sharing a collinear segment validate
+    // as clean here but may surface in the Python path — intentional, since
+    // the C++ hot path favours speed over the rare collinear case.
     return false;
 }
 
@@ -360,7 +418,15 @@ py::list validate(const py::list& ring) {
     if (n < 4) {
         return issues;
     }
-    // Use sequential segments; for closed rings last segment is close.
+    // Segment model: sequential segments [i, i+1] over all n points. For a
+    // CLOSED ring (first == last duplicated), the final segment [n-2, n-1]
+    // IS the closing edge, so every edge including the close is tested —
+    // and the i==0 / j==seg_count-1 adjacency skip below correctly treats
+    // them as sharing the closing vertex. For an OPEN polyline there is no
+    // implicit closing edge to test (cpp-core-review M14: the previous
+    // comment claimed the close was untested, but it is in fact covered for
+    // closed rings; open rings have no close by definition). Matches the
+    // Python fallback `_validate_ring_python`.
     const py::ssize_t seg_count = n - 1;
     for (py::ssize_t i = 0; i < seg_count; ++i) {
         py::sequence a = ring[static_cast<size_t>(i)].cast<py::sequence>();

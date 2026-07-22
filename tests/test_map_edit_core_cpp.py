@@ -49,3 +49,31 @@ def test_cpp_vertex_ops_and_move():
     recs = {"p1": {"id": "p1", "coordinates": [1.0, 1.0]}}
     api.move_features(recs, ["p1"], 2.0, 3.0)
     assert recs["p1"]["coordinates"] == [3.0, 4.0]
+
+
+def test_m11_hit_test_malformed_coords_skipped():
+    records = [
+        {"id": "bad1", "coordinates": "ab"},
+        {"id": "bad2", "coordinates": [["invalid", "type"]]},
+        {"id": "w1", "coordinates": [5.0, 5.0]},
+    ]
+    assert api.hit_test(records, 5.0, 5.0, 0.1) == "w1"
+
+
+def test_m12_snap_miss_returns_original():
+    x, y = api.snap_point([(0.0, 0.0)], 10.0, 10.0, 0.5)
+    assert (x, y) == (10.0, 10.0)
+
+
+def test_m13_move_feature_preserves_tuple_type():
+    recs = {"p1": {"id": "p1", "coordinates": [(1.0, 1.0), (2.0, 2.0)]}}
+    api.move_features(recs, ["p1"], 1.0, 1.0)
+    assert isinstance(recs["p1"]["coordinates"][0], tuple)
+    assert recs["p1"]["coordinates"][0] == (2.0, 2.0)
+
+
+def test_m15_insert_vertex_closed_ring_reclosure():
+    ring = [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 0.0]]
+    api.insert_vertex(ring, 4, 1.0, 1.0)  # insert at end of closed ring
+    assert ring[0] == ring[-1]  # first == last maintained
+

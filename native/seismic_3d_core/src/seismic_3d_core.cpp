@@ -20,8 +20,23 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
     const float* ptr = static_cast<const float*>(buf.ptr);
 
     int ax = (axis % 3 + 3) % 3;
+    // Reject out-of-range index instead of silently clamping: a caller bug
+    // (off-by-one, wrong axis) should surface, not return the last slice as
+    // if requested. The Python-level API would raise IndexError.
+    if (index < 0) {
+        throw std::out_of_range("slice index is negative");
+    }
     if (ax == 0) {
-        int idx = std::max(0, std::min(index, static_cast<int>(dim0) - 1));
+        // Guard zero-sized axis (shape (0,N,M), axis=0): without this the
+        // clamp yields idx=0 and std::copy reads dim1*dim2 floats from an
+        // empty buffer (OOB heap read).
+        if (dim0 == 0) {
+            throw std::out_of_range("cannot slice axis 0 of an empty volume");
+        }
+        if (static_cast<size_t>(index) >= dim0) {
+            throw std::out_of_range("slice index out of range for axis 0");
+        }
+        size_t idx = static_cast<size_t>(index);
         auto result = py::array_t<float>({dim1, dim2});
         auto r_buf = result.request();
         float* r_ptr = static_cast<float*>(r_buf.ptr);
@@ -32,7 +47,13 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         }
         return result;
     } else if (ax == 1) {
-        int idx = std::max(0, std::min(index, static_cast<int>(dim1) - 1));
+        if (dim1 == 0) {
+            throw std::out_of_range("cannot slice axis 1 of an empty volume");
+        }
+        if (static_cast<size_t>(index) >= dim1) {
+            throw std::out_of_range("slice index out of range for axis 1");
+        }
+        size_t idx = static_cast<size_t>(index);
         auto result = py::array_t<float>({dim0, dim2});
         auto r_buf = result.request();
         float* r_ptr = static_cast<float*>(r_buf.ptr);
@@ -46,7 +67,13 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         }
         return result;
     } else {
-        int idx = std::max(0, std::min(index, static_cast<int>(dim2) - 1));
+        if (dim2 == 0) {
+            throw std::out_of_range("cannot slice axis 2 of an empty volume");
+        }
+        if (static_cast<size_t>(index) >= dim2) {
+            throw std::out_of_range("slice index out of range for axis 2");
+        }
+        size_t idx = static_cast<size_t>(index);
         auto result = py::array_t<float>({dim0, dim1});
         auto r_buf = result.request();
         float* r_ptr = static_cast<float*>(r_buf.ptr);
@@ -122,9 +149,27 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
     size_t s2 = buf.shape[2];
     const float* src = static_cast<const float*>(buf.ptr);
 
-    size_t t0 = target_shape[0].cast<size_t>();
-    size_t t1 = target_shape[1].cast<size_t>();
-    size_t t2 = target_shape[2].cast<size_t>();
+    // Reject empty source volumes: otherwise std::min(s0-1, ...) underflows
+    // size_t to SIZE_MAX and the read index goes far out of bounds. Also
+    // validate target_shape: a negative element (e.g. -1) casts to SIZE_MAX
+    // and py::array_t throws std::bad_alloc / length_error instead of a
+    // clean error.
+    if (s0 == 0 || s1 == 0 || s2 == 0) {
+        throw std::invalid_argument("cannot resample a volume with a zero-sized dimension");
+    }
+    if (target_shape.size() != 3) {
+        throw std::invalid_argument("target_shape must have exactly 3 elements");
+    }
+    // Cast through py::ssize_t (signed) first so negatives are visible.
+    py::ssize_t st0 = target_shape[0].cast<py::ssize_t>();
+    py::ssize_t st1 = target_shape[1].cast<py::ssize_t>();
+    py::ssize_t st2 = target_shape[2].cast<py::ssize_t>();
+    if (st0 <= 0 || st1 <= 0 || st2 <= 0) {
+        throw std::invalid_argument("target_shape elements must all be positive");
+    }
+    size_t t0 = static_cast<size_t>(st0);
+    size_t t1 = static_cast<size_t>(st1);
+    size_t t2 = static_cast<size_t>(st2);
 
     auto result = py::array_t<float>({t0, t1, t2});
     auto r_buf = result.request();
@@ -163,14 +208,37 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
     size_t nt = buf.shape[2];
     const float* src = static_cast<const float*>(buf.ptr);
 
+    // Validate window parameters: negative/zero windows produced OOB reads
+    // and writes (half = w/2 went negative -> negative int -> size_t index)
+    // and even windows were silently floored to an effective odd window.
+    // The algorithm assumes odd windows; reject anything else so caller bugs
+    // surface instead of silently corrupting the output.
+    auto validate_window = [](int w, const char* name) {
+        if (w <= 0) {
+            throw std::invalid_argument(
+                std::string(name) + " must be a positive odd integer (got " + std::to_string(w) + ")");
+        }
+        if (w % 2 == 0) {
+            throw std::invalid_argument(
+                std::string(name) + " must be odd (got " + std::to_string(w) +
+                "); even windows are not supported");
+        }
+    };
+    validate_window(inline_window, "inline_window");
+    validate_window(crossline_window, "crossline_window");
+    validate_window(sample_window, "sample_window");
+
     auto result = py::array_t<float>({ni, nx, nt});
     auto r_buf = result.request();
     float* dst = static_cast<float*>(r_buf.ptr);
     std::fill(dst, dst + ni * nx * nt, 1.0f);
 
-    int half_i = inline_window / 2;
-    int half_x = crossline_window / 2;
-    int half_t = sample_window / 2;
+    // size_t loop variables avoid the int->size_t sign-conversion hazard at
+    // extremely large dims (review M2) and keep the running-sum window math
+    // in unsigned space consistently.
+    size_t half_i = static_cast<size_t>(inline_window / 2);
+    size_t half_x = static_cast<size_t>(crossline_window / 2);
+    size_t half_t = static_cast<size_t>(sample_window / 2);
     double n_spatial = static_cast<double>((2 * half_i + 1) * (2 * half_x + 1));
 
     std::vector<double> mean_sq(nt);
@@ -178,15 +246,23 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
 
     {
         py::gil_scoped_release release;
-        for (int i = half_i; i < static_cast<int>(ni) - half_i; ++i) {
-            for (int j = half_x; j < static_cast<int>(nx) - half_x; ++j) {
+        // Iterate in size_t throughout: the outer-loop guards
+        // (i < ni - half_i etc.) now use unsigned arithmetic, which is
+        // correct for any dim size (no int overflow for huge volumes — M2).
+        // half_* are validated small positives, so ni - half_i does not
+        // underflow as long as ni >= 1 (guaranteed: a 0-dim volume has no
+        // slices to iterate, and the loop body is simply skipped).
+        for (size_t i = half_i; i + half_i < ni; ++i) {
+            for (size_t j = half_x; j + half_x < nx; ++j) {
                 // Per-sample spatial statistics for this trace column (computed once).
                 for (size_t k = 0; k < nt; ++k) {
                     double trace_sum = 0.0;
                     double trace_sq_sum = 0.0;
-                    for (int di = -half_i; di <= half_i; ++di) {
-                        for (int dj = -half_x; dj <= half_x; ++dj) {
-                            float v = src[(i + di) * (nx * nt) + (j + dj) * nt + k];
+                    for (size_t di = 0; di <= 2 * half_i; ++di) {
+                        size_t ii = i + di - half_i;  // spans [i-half_i, i+half_i]
+                        for (size_t dj = 0; dj <= 2 * half_x; ++dj) {
+                            size_t jj = j + dj - half_x;  // spans [j-half_x, j+half_x]
+                            float v = src[ii * (nx * nt) + jj * nt + k];
                             trace_sum += v;
                             trace_sq_sum += v * v;
                         }
@@ -197,11 +273,11 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                 }
 
                 // Running-sum over the clamped vertical window [k0, k1].
-                int k0 = 0;
-                int k1 = std::min(static_cast<int>(nt) - 1, half_t);
+                size_t k0 = 0;
+                size_t k1 = std::min(nt - 1, half_t);
                 double run_num = 0.0;
                 double run_den = 0.0;
-                for (int k = k0; k <= k1; ++k) {
+                for (size_t k = k0; k <= k1; ++k) {
                     run_num += mean_sq[k];
                     run_den += sum_sq[k];
                 }
@@ -211,9 +287,9 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                     dst[i * (nx * nt) + j * nt + k] = coh_val;
 
                     // Advance window for k+1.
-                    if (static_cast<int>(k) + 1 < static_cast<int>(nt)) {
-                        int new_lo = std::max(0, static_cast<int>(k) + 1 - half_t);
-                        int new_hi = std::min(static_cast<int>(nt) - 1, static_cast<int>(k) + 1 + half_t);
+                    if (k + 1 < nt) {
+                        size_t new_lo = (k + 1 >= half_t) ? k + 1 - half_t : 0;
+                        size_t new_hi = std::min(nt - 1, k + 1 + half_t);
                         while (k1 < new_hi) {
                             ++k1;
                             run_num += mean_sq[k1];
@@ -252,7 +328,11 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
     // land exactly on corners, producing degenerate (zero-area) triangles and
     // non-manifold pinching (several triangle fans touching at one point).
     // Nudge such values slightly inside so every cut lands strictly inside an
-    // edge; the shift (~1e-3) is far below any geometric tolerance.
+    // edge; the shift (~1e-3) is far below any geometric tolerance. A grid
+    // point exactly on the isovalue is therefore classified as *inside*
+    // (value becomes isovalue + eps); the classification is consistent across
+    // neighbouring cubes (same source value -> same nudge) so watertightness
+    // holds. (cpp-core-review M6.)
     const float eps = 1e-3f * (std::fabs(isovalue) + 1.0f);
 
     static const int TETS[6][4] = {
@@ -273,16 +353,30 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
                 for (size_t k = 0; k + 1 < nt; ++k) {
                     float cv[8];
                     float cp[8][3];
+                    bool cube_has_nan = false;
                     for (int c = 0; c < 8; ++c) {
                         size_t ci = i + (c & 1);
                         size_t cj = j + ((c >> 1) & 1);
                         size_t ck = k + ((c >> 2) & 1);
-                        cv[c] = src[ci * (nx * nt) + cj * nt + ck];
+                        float v = src[ci * (nx * nt) + cj * nt + ck];
+                        // NaN voxels: a cube touching missing data has
+                        // undefined inside/outside at those corners, and the
+                        // edge interpolation t = (iso-cv[ca])/(cv[cb]-cv[ca])
+                        // would go NaN and poison up to 8 neighbouring cubes'
+                        // triangles (cpp-core-review I2). Skip the whole cube
+                        // — the surface simply has a hole where data is
+                        // missing, rather than emitting NaN vertices.
+                        if (std::isnan(v)) {
+                            cube_has_nan = true;
+                            break;
+                        }
+                        cv[c] = v;
                         if (cv[c] == isovalue) cv[c] = isovalue + eps;
                         cp[c][0] = static_cast<float>(ci);
                         cp[c][1] = static_cast<float>(cj);
                         cp[c][2] = static_cast<float>(ck);
                     }
+                    if (cube_has_nan) continue;
                     int cube_mask = 0;
                     for (int c = 0; c < 8; ++c) {
                         if (cv[c] >= isovalue) cube_mask |= (1 << c);
@@ -299,7 +393,6 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
                         // Interpolated intersection point per cut edge.
                         float pt[6][3];
                         bool cut[6] = {};
-                        int n_cut = 0;
                         for (int e = 0; e < 6; ++e) {
                             int a = TET_EDGES[e][0];
                             int b = TET_EDGES[e][1];
@@ -312,7 +405,6 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
                                 pt[e][d] = cp[ca][d] + t * (cp[cb][d] - cp[ca][d]);
                             }
                             cut[e] = true;
-                            ++n_cut;
                         }
 
                         // Centroid of inside corners (for outward orientation).
@@ -394,6 +486,10 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
                             for (int d = 0; d < 3; ++d) {
                                 verts.push_back(v2[d]);
                             }
+                            // Note: every triangle emits 3 fresh vertices
+                            // (no shared-vertex deduplication), so a large
+                            // volume uses ~3x the memory of an indexed mesh.
+                            // Intentional simplicity — see cpp-core-review M5.
                         }
                     }
                 }

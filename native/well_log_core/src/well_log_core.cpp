@@ -31,11 +31,32 @@ py::tuple minmax_downsample(
     auto d_buf = depth.request();
     auto v_buf = values.request();
 
+    // Validate shapes (cpp-core-review C4): n_pts was taken from depth only and
+    // v_ptr[j] read for j<n_pts with no check that values matches length ->
+    // OOB read when len(values)<len(depth). Also no ndim check: a 0-d array
+    // made d_buf.shape[0] UB and a 2-d array was silently mis-flattened.
+    if (d_buf.ndim != 1 || v_buf.ndim != 1) {
+        throw std::invalid_argument("depth and values must be 1-D arrays");
+    }
+    if (d_buf.shape[0] != v_buf.shape[0]) {
+        throw std::invalid_argument(
+            "depth and values must have the same length (got " +
+            std::to_string(d_buf.shape[0]) + " and " + std::to_string(v_buf.shape[0]) + ")");
+    }
+    // Validate target_pixels (cpp-core-review I5): <=0 gave n_pts/0 -> UB,
+    // and *2 overflowed int for large values.
+    if (target_pixels <= 0) {
+        throw std::invalid_argument("target_pixels must be positive (got " + std::to_string(target_pixels) + ")");
+    }
+    if (target_pixels > (std::numeric_limits<int>::max)() / 2) {
+        throw std::invalid_argument("target_pixels too large (would overflow)");
+    }
+
     size_t n_pts = d_buf.shape[0];
     const float* d_ptr = static_cast<const float*>(d_buf.ptr);
     const float* v_ptr = static_cast<const float*>(v_buf.ptr);
 
-    if (n_pts <= static_cast<size_t>(target_pixels * 2)) {
+    if (n_pts <= static_cast<size_t>(target_pixels) * 2) {
         auto r_d = py::array_t<float>(n_pts);
         auto r_v = py::array_t<float>(n_pts);
         std::copy(d_ptr, d_ptr + n_pts, static_cast<float*>(r_d.request().ptr));
@@ -47,20 +68,33 @@ py::tuple minmax_downsample(
 
     std::vector<float> out_d;
     std::vector<float> out_v;
-    out_d.reserve(target_pixels * 2);
-    out_v.reserve(target_pixels * 2);
+    out_d.reserve(static_cast<size_t>(target_pixels) * 2);
+    out_v.reserve(static_cast<size_t>(target_pixels) * 2);
 
     {
         py::gil_scoped_release release;
         for (size_t i = 0; i < n_pts; i += bin_size) {
             size_t end = std::min(n_pts, i + bin_size);
+            // NaN policy (cpp-core-review M7): initialise min/max from the
+            // first FINITE value in the bucket and skip NaNs/Infs in the scan.
+            // Previously a leading NaN survived as both min and max and was
+            // emitted (silent garbage in the LOD output).
             size_t min_idx = i;
             size_t max_idx = i;
-            float min_val = v_ptr[i];
-            float max_val = v_ptr[i];
-
-            for (size_t j = i + 1; j < end; ++j) {
+            float min_val = std::numeric_limits<float>::quiet_NaN();
+            float max_val = std::numeric_limits<float>::quiet_NaN();
+            bool bucket_finite = false;
+            for (size_t j = i; j < end; ++j) {
                 float val = v_ptr[j];
+                if (std::isnan(val) || std::isinf(val)) continue;  // M7 + M9
+                if (!bucket_finite) {
+                    min_val = val;
+                    max_val = val;
+                    min_idx = j;
+                    max_idx = j;
+                    bucket_finite = true;
+                    continue;
+                }
                 if (val < min_val) {
                     min_val = val;
                     min_idx = j;
@@ -69,6 +103,13 @@ py::tuple minmax_downsample(
                     max_val = val;
                     max_idx = j;
                 }
+            }
+            if (!bucket_finite) {
+                // All-NaN/Inf bucket: emit NaN depth+value to preserve row
+                // structure (a gap in the curve), rather than dropping it.
+                out_d.push_back(d_ptr[i]);
+                out_v.push_back(std::numeric_limits<float>::quiet_NaN());
+                continue;
             }
 
             if (min_idx <= max_idx) {
@@ -138,6 +179,12 @@ inline WlToken wl_parse_token(const char* p, const char* end) {
             val = nan;
         }
     }
+    // strtod accepts "inf"/"infinity" spellings (from_chars does not), and
+    // those leak infinite values into the output array (cpp-core-review M9).
+    // Map any Inf to NaN so downstream curves see a gap, not infinity.
+    if (std::isinf(val)) {
+        val = nan;
+    }
     return {val, tok_end};
 }
 
@@ -195,7 +242,13 @@ py::tuple fast_las_parse_data(const std::string& content, double null_value = -9
                     if (p >= end) break;
                     WlToken tok = wl_parse_token(p, end);
                     double val = tok.value;
-                    if (std::isnan(val) || val <= -999.0 || val == null_value) {
+                    // Null masking (cpp-core-review I4): only mask the value
+                    // that equals null_value. The previous hard-coded
+                    // `val <= -999.0` silently NaN'd legitimate measurements
+                    // (e.g. -1000.0, -999.25) even when the caller passed a
+                    // different null_value — silent data corruption that the
+                    // default null_value=-999.0 hid from tests.
+                    if (std::isnan(val) || std::isinf(val) || val == null_value) {
                         val = nan;
                     }
                     values.push_back(val);
@@ -215,13 +268,26 @@ py::tuple fast_las_parse_data(const std::string& content, double null_value = -9
     double* ptr = static_cast<double*>(result.request().ptr);
 
     const double* src = values.data();
+    size_t truncated_rows = 0;  // cpp-core-review M8: surface dropped columns
     for (size_t r = 0; r < num_rows; ++r) {
         const size_t width = row_widths[r];
         double* dst = ptr + r * num_cols;
         const size_t copy = std::min(width, num_cols);
         for (size_t c = 0; c < copy; ++c) dst[c] = src[c];
         for (size_t c = copy; c < num_cols; ++c) dst[c] = nan;
+        if (width > num_cols) ++truncated_rows;
         src += width;
+    }
+
+    // Surface long-row truncation (M8): previously extra columns vanished
+    // silently. py::warn requires the GIL, which is held again here.
+    if (truncated_rows > 0 && !headers.empty()) {
+        PyErr_WarnEx(
+            PyExc_UserWarning,
+            ("LAS data has " + std::to_string(truncated_rows) + " row(s) with more "
+             "columns than the " + std::to_string(num_cols) + " declared header(s); "
+             "extra columns were truncated").c_str(),
+            1);
     }
 
     py::tuple py_headers(headers.size());

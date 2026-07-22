@@ -18,7 +18,12 @@ def _compile_args() -> list[str]:
     # On Windows default to MSVC unless evidence of GCC/MinGW
     if sys.platform == "win32" and compiler != "unix":
         return ["/O2", "/fp:fast"]
-    return ["-O3", "-ffast-math"]
+    # -ffast-math implies -ffinite-math-only, which lets the compiler assume
+    # NaN/Inf never occur — optimising std::isnan/std::isinf to constant false.
+    # The extension deliberately filters NaN/Inf (LAS token parsing, null
+    # masking, downsample bucketing), so re-enable finite-math handling with
+    # -fno-finite-math-only while keeping the rest of -ffast-math's wins.
+    return ["-O3", "-ffast-math", "-fno-finite-math-only"]
 
 extra_compile_args = _compile_args()
 
