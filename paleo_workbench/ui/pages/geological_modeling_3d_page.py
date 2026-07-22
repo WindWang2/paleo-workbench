@@ -146,7 +146,7 @@ class GeologicalModeling3DPage(QWidget):
             }
         """ % (tokens.BG_GLASS, tokens.BG_GLASS_BORDER, tokens.RADIUS_BUTTON, tokens.HOVER_GLOW))
         self.floating_bar.setFixedHeight(38)
-        self.floating_bar.setFixedWidth(240)
+        self.floating_bar.setFixedWidth(360)
 
         f_layout = QHBoxLayout(self.floating_bar)
         f_layout.setContentsMargins(tokens.SPACE_1, 0, tokens.SPACE_1, 0)
@@ -154,13 +154,19 @@ class GeologicalModeling3DPage(QWidget):
         self.btn_orbit = QPushButton("透视视角")
         self.btn_pan = QPushButton("俯瞰视角")
         self.btn_reset = QPushButton("复位")
+        self.btn_coord = QPushButton("📍 网格(IL/XL)")
+        self.btn_coord.setCheckable(True)
+        self._coord_mode = "grid"
+
         self.btn_orbit.clicked.connect(lambda: self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE))
         self.btn_pan.clicked.connect(lambda: self.gl_widget.setCameraPosition(**_CAMERA_TOP_DOWN))
         self.btn_reset.clicked.connect(lambda: self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE))
+        self.btn_coord.clicked.connect(self._toggle_coord_mode)
 
         f_layout.addWidget(self.btn_orbit)
         f_layout.addWidget(self.btn_pan)
         f_layout.addWidget(self.btn_reset)
+        f_layout.addWidget(self.btn_coord)
         self.floating_bar.move(12, 12)
 
         center_layout.addWidget(self.view_container)
@@ -479,6 +485,15 @@ class GeologicalModeling3DPage(QWidget):
         splitter.setSizes([260, 1000, 360])
 
         main_layout.addWidget(splitter)
+
+    def _toggle_coord_mode(self) -> None:
+        """Toggle between Grid coordinates (IL/XL) and Geographic coordinates (Easting/Northing in meters)."""
+        if self.btn_coord.isChecked():
+            self._coord_mode = "geo"
+            self.btn_coord.setText("🌐 地理(X/Y)")
+        else:
+            self._coord_mode = "grid"
+            self.btn_coord.setText("📍 网格(IL/XL)")
 
     # ------------------------------------------------------------------ #
     # Model Tree
