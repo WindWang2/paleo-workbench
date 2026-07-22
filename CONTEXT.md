@@ -1,0 +1,36 @@
+# Paleo Workbench Domain Model & Vocabulary
+
+This document records the ubiquitous domain language and module architecture for the Paleo Workbench codebase.
+
+## Core Modules & Architecture Vocabulary
+
+### NativeEngineBackend
+A deep, centralized backend module (`paleo_workbench/native_backend.py`) that encapsulates C++ native extension loading (`seismic_3d_core`, `well_log_core`, `map_edit_core`), GIL-release execution policies, pure-Python fallback implementations, and visualization engine hook injections (`install_all_hooks()`).
+
+### AccelerationProvider
+A high-performance algorithm provider (such as C++ 4-point LOD downsampling `minmax_downsample`, fast 2D slice extraction `fast_slice_extract`, or Marching Tetrahedra `marching_cubes_3d`) injected into the `geoviz` engine or called by workbench UI widgets.
+
+### SymmetricParityContract
+An architectural invariant requiring that every native C++ algorithm has an identical pure-Python fallback implementation, verified by unit tests asserting `C++ output == Python output` within floating-point tolerance.
+
+### DisabledAccelerationSeam
+A context-manager seam (`with native_backend.disabled_acceleration():`) allowing tests and diagnostic code to temporarily bypass C++ native extensions and execute pure-Python fallback paths cleanly without monkey-patching private module variables.
+
+---
+
+## Domain Concepts
+
+### Well Log Visualization
+- **CurveTrack**: Native QPainter track widget displaying depth-aligned log curves with 4-point Min-Max LOD downsampling.
+- **LithologyTrack**: Track displaying geological lithology patterns (sandstone, mudstone, limestone, dolomite).
+- **WellIntervals**: Formation tops, series, system, and facies interval data mapped along well depth.
+
+### Seismic 3D & 2D Profile
+- **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.
+- **SliceReadWorker**: Asynchronous QThread worker using priority queues and neighborhood prefetching for stutter-free slice navigation.
+- **Coherence3D**: 3D seismic attribute calculating similarity/coherence across inline, crossline, and sample vertical windows.
+- **Isosurface**: 3D triangle mesh extracted via Marching Tetrahedra from volume scalar fields.
+
+### Paleogeographic Vector Map
+- **FaciesPolygon**: 2D polygon representing paleogeographic depositional environment bounds.
+- **FeatureEditor**: Stateful transactional geometry editor handling selection, snapping, vertex manipulation, and ring re-closure topology invariants.

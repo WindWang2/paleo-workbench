@@ -1,39 +1,12 @@
 """Install C++-accelerated render hooks into the geoviz engine.
 
-Called once at application startup. The engine side
-(``geoviz_well_log.renderer.downsample``) defines the hook point; this module
-is the only place that knows about the workbench's C++ backend, keeping the
-engine free of reverse dependencies.
+Delegates hook installation to ``native_backend.install_all_hooks()``.
 """
 from __future__ import annotations
 
-import numpy as np
-
-from paleo_workbench.viz.well_log_api import minmax_downsample
-
-_installed_provider = None
-
-
-def _cpp_minmax_provider(
-    depths: np.ndarray, values: np.ndarray, pixel_height: int
-) -> tuple[np.ndarray, np.ndarray]:
-    if len(depths) <= pixel_height * 2:
-        return depths, values
-    d = np.asarray(depths, dtype=np.float32)
-    v = np.asarray(values, dtype=np.float32)
-    out_d, out_v = minmax_downsample(d, v, int(pixel_height))
-    return np.asarray(out_d, dtype=np.float64), np.asarray(out_v, dtype=np.float64)
+from paleo_workbench.native_backend import install_all_hooks
 
 
 def install_geoviz_acceleration() -> None:
     """Inject the C++ providers into geoviz (idempotent)."""
-    global _installed_provider
-    if _installed_provider is not None:
-        return
-    from geoviz import set_downsample_provider, set_isosurface_extractor
-
-    from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
-
-    set_downsample_provider(_cpp_minmax_provider)
-    set_isosurface_extractor(marching_cubes_3d)
-    _installed_provider = _cpp_minmax_provider
+    install_all_hooks()

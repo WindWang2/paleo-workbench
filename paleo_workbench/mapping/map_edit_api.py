@@ -9,19 +9,21 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    import map_edit_core as _map_edit_core  # type: ignore
-    HAS_CPP = True
-except ImportError:
-    _map_edit_core = None  # type: ignore[assignment]
-    HAS_CPP = False
+from paleo_workbench.native_backend import native_backend
+
+HAS_CPP = native_backend.has_cpp("map_edit")
 
 
 def _cpp_fn(name: str):
-    """Return a callable from map_edit_core if present, else None."""
-    if not HAS_CPP or _map_edit_core is None:
+    """Return a callable from map_edit_core if present and accelerated, else None."""
+    if not native_backend.is_accelerated("map_edit"):
         return None
-    return getattr(_map_edit_core, name, None)
+    try:
+        import map_edit_core
+        return getattr(map_edit_core, name, None)
+    except ImportError:
+        return None
+
 
 
 # ---------------------------------------------------------------------------
