@@ -163,5 +163,22 @@ def test_feature_editor_transaction_commit_undo_redo(sample_feature_collection):
     assert ring_redo[0] == [-1.0, -1.0]
 
 
+def test_feature_editor_vertex_snapping(sample_feature_collection):
+    editor = FeatureEditor()
+    editor.load_layer(sample_feature_collection)
+
+    # Move vertex (0.0, 0.0) on poly1 to near (10.0, 0.0) -> (9.8, 0.2)
+    editor.select_at(0.0, 0.0, tolerance=1.0)
+
+    # Move near poly2's vertex at (10.0, 0.0) within snap_tolerance 2.0
+    success = editor.move_selected_vertex(9.8, 0.1, snap=True, snap_tolerance=2.0)
+    assert success is True
+
+    # Vertex should automatically snap exactly to target vertex at (10.0, 0.0)
+    ring1 = editor.features["poly1"]["geometry"]["coordinates"][0]
+    assert ring1[0] == [10.0, 0.0]
+
+
+
 
 

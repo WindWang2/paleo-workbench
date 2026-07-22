@@ -122,33 +122,70 @@ class FeatureEditor:
 
         return best_selection
 
+    @staticmethod
+    def _extract_ring(feat: dict[str, Any]) -> list[list[float]] | None:
+        """Extract polygon ring coordinates from feature dict."""
+        geom = feat.get("geometry", {})
+        coords = geom.get("coordinates", [])
+        if not coords:
+            return None
+        return coords[0] if geom.get("type") == "Polygon" else coords
+
     def _find_coincident_vertices(self, target_point: list[float], tol: float = 1e-4) -> list[tuple[str, int]]:
         """Find all (feature_id, vertex_index) tuples matching target_point."""
         coincident = []
         tx, ty = target_point[0], target_point[1]
         for fid, feat in self.features.items():
-            geom = feat.get("geometry", {})
-            coords = geom.get("coordinates", [])
-            if not coords:
+            ring = self._extract_ring(feat)
+            if ring is None:
                 continue
-            ring = coords[0] if geom.get("type") == "Polygon" else coords
             for idx, pt in enumerate(ring):
                 if math.hypot(pt[0] - tx, pt[1] - ty) <= tol:
                     coincident.append((fid, idx))
         return coincident
 
-    def move_selected_vertex(self, x: float, y: float, snap: bool = True) -> bool:
-        """Move selected vertex and coincident shared vertices with ring closure and TopologyError auto-rollback."""
+    def find_snap_target(
+        self,
+        x: float,
+        y: float,
+        exclude_targets: set[tuple[str, int]] | None = None,
+        snap_tolerance: float = 5.0,
+    ) -> tuple[float, float]:
+        """Find nearest vertex target for snapping within tolerance."""
+        exclude = exclude_targets or set()
+        best_pt = (x, y)
+        min_dist = snap_tolerance
+
+        for fid, feat in self.features.items():
+            ring = self._extract_ring(feat)
+            if ring is None:
+                continue
+            for idx, pt in enumerate(ring):
+                if (fid, idx) in exclude:
+                    continue
+                dist = math.hypot(pt[0] - x, pt[1] - y)
+                if dist <= min_dist:
+                    min_dist = dist
+                    best_pt = (float(pt[0]), float(pt[1]))
+
+        return best_pt
+
+    def move_selected_vertex(
+        self,
+        x: float,
+        y: float,
+        snap: bool = True,
+        snap_tolerance: float = 5.0,
+    ) -> bool:
+        """Move selected vertex and coincident shared vertices with snapping, ring closure, and TopologyError auto-rollback."""
         if self.selected_feature_id is None or self.selected_vertex_index is None:
             raise ValueError("No vertex currently selected")
 
         feat = self.features[self.selected_feature_id]
-        geom = feat.get("geometry", {})
-        coords = geom.get("coordinates", [])
-        if not coords:
+        ring = self._extract_ring(feat)
+        if ring is None:
             return False
 
-        ring = coords[0] if geom.get("type") == "Polygon" else coords
         orig_point = list(ring[self.selected_vertex_index])
 
         # Snapshot for auto-rollback
@@ -159,22 +196,31 @@ class FeatureEditor:
         if not coincident_targets:
             coincident_targets = [(self.selected_feature_id, self.selected_vertex_index)]
 
+        coincident_set = set(coincident_targets)
+
+        # Apply vertex snapping if enabled
+        target_x, target_y = x, y
+        if snap:
+            target_x, target_y = self.find_snap_target(
+                x, y, exclude_targets=coincident_set, snap_tolerance=snap_tolerance
+            )
+
         # Apply new coordinate to all coincident vertices
         touched_feature_ids = set()
         for fid, v_idx in coincident_targets:
             touched_feature_ids.add(fid)
-            f_geom = self.features[fid].get("geometry", {})
-            f_coords = f_geom.get("coordinates", [])
-            f_ring = f_coords[0] if f_geom.get("type") == "Polygon" else f_coords
+            f_ring = self._extract_ring(self.features[fid])
+            if f_ring is None:
+                continue
             n_pts = len(f_ring)
 
-            f_ring[v_idx] = [float(x), float(y)]
+            f_ring[v_idx] = [float(target_x), float(target_y)]
 
             # Maintain ring closure (ring[0] == ring[-1])
             if v_idx == 0:
-                f_ring[-1] = [float(x), float(y)]
+                f_ring[-1] = [float(target_x), float(target_y)]
             elif v_idx == n_pts - 1:
-                f_ring[0] = [float(x), float(y)]
+                f_ring[0] = [float(target_x), float(target_y)]
 
         # Topology Validation for all touched polygon rings
         for fid in touched_feature_ids:
