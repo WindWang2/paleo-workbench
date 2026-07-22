@@ -7,12 +7,10 @@ Findings reference .superpowers/sdd/cpp-core-review.md §1.
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
-from paleo_workbench.viz import seismic_3d_api
+from paleo_workbench.native_backend import disabled_acceleration
 from paleo_workbench.viz.seismic_3d_api import (
     HAS_CPP_SEISMIC,
     compute_coherence_3d,
@@ -33,7 +31,11 @@ def _both_paths(fn, *args, **kwargs):
         cpp = fn(*args, **kwargs)
     except Exception as exc:  # noqa: BLE001 — parity test wants any error
         cpp = exc
-    with patch.object(seismic_3d_api, "HAS_CPP_SEISMIC", False):
+    # Force the Python fallback via the native_backend seam. The old
+    # patch.object(HAS_CPP_SEISMIC, False) idiom was dead after the façade
+    # migrated to native_backend.dispatch (which reads is_accelerated, not
+    # the module flag) — it ran the C++ path twice.
+    with disabled_acceleration():
         try:
             py = fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001

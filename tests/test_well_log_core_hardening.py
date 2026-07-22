@@ -7,12 +7,11 @@ path and Python fallback behave identically. Findings reference
 from __future__ import annotations
 
 import warnings
-from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from paleo_workbench.viz import well_log_api
+from paleo_workbench.native_backend import disabled_acceleration
 from paleo_workbench.viz.well_log_api import (
     HAS_CPP_WELL_LOG,
     fast_las_parse_data,
@@ -33,7 +32,10 @@ def _both_paths(fn, *args, **kwargs):
             cpp = fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
             cpp = exc
-        with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+        # Force the Python fallback via the native_backend seam. The old
+        # patch.object(HAS_CPP_WELL_LOG, False) idiom was dead after the façade
+        # migrated to native_backend.dispatch — it ran the C++ path twice.
+        with disabled_acceleration():
             try:
                 py = fn(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001
@@ -114,8 +116,8 @@ def test_m9_inf_treated_as_nan_in_las_parsing():
     content = "~A DEPT GR\n1.0 inf\n2.0 5.0\n"
     _h_cpp, d_cpp = well_log_core.fast_las_parse_data(content)
     assert np.isnan(d_cpp[0, 1]), "C++ LAS parser leaked inf"
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
-        _h_py, d_py = well_log_api.fast_las_parse_data(content)
+    with disabled_acceleration():
+        _h_py, d_py = fast_las_parse_data(content)
     assert np.isnan(d_py[0, 1]), "Python LAS fallback leaked inf"
 
 
@@ -130,8 +132,8 @@ def test_i4_value_below_minus_999_is_kept_with_default_null():
     _h_cpp, d_cpp = well_log_core.fast_las_parse_data(content)
     assert not np.isnan(d_cpp[0, 1])
     assert d_cpp[0, 1] == -999.25
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
-        _h_py, d_py = well_log_api.fast_las_parse_data(content)
+    with disabled_acceleration():
+        _h_py, d_py = fast_las_parse_data(content)
     assert d_py[0, 1] == -999.25
 
 
