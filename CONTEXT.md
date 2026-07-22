@@ -36,6 +36,10 @@ A single-point registration specification data structure that bundles an asset f
 - **SliceReadWorker**: Asynchronous QThread worker using priority queues and neighborhood prefetching for stutter-free slice navigation.
 - **Coherence3D**: 3D seismic attribute calculating similarity/coherence across inline, crossline, and sample vertical windows.
 - **Isosurface**: 3D triangle mesh extracted via Marching Tetrahedra from volume scalar fields.
+- **WiggleTraceRenderer**: GPU Instancing rendering engine (`geoviz_seismic/renderer/wiggle_instanced.py` & `wiggle_instanced.glsl`) handling 50,000+ seismic traces $\times$ 4,000 samples at 60 FPS.
+- **WiggleDisplayModes**: 4 rendering modes: Wiggle Only, Wiggle + Positive Fill, Wiggle + Dual Fill (Variable Area), and Overlaid Wiggle + VD (Variable Density).
+- **ScreenSpaceAdaptiveLOD**: Automatic density transition switching between pure VD texture mapping (when trace screen width < 2px) and instanced Wiggle waveforms (>= 3px/trace).
+- **AdaptiveVectorExport**: Hybrid SVG/PDF export policy outputting pure vector `<polyline>`/`<polygon>` nodes when trace count < 500, and High-DPI raster embedding when >= 500 traces.
 
 ### Paleogeographic Vector Map
 - **FaciesPolygon**: 2D polygon representing paleogeographic depositional environment bounds.
