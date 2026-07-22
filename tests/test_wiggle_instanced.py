@@ -146,6 +146,26 @@ def test_renderer_adaptive_vector_export():
     assert export_spec_large["dpi"] == 300
 
 
+def test_renderer_nan_validation():
+    renderer = WiggleTraceRenderer()
+    with pytest.raises(ValueError):
+        renderer.set_gain(float("nan"))
+
+    with pytest.raises(ValueError):
+        renderer.set_clip_limit(float("nan"))
+
+
+def test_renderer_render_export():
+    renderer = WiggleTraceRenderer()
+    slice_data = np.random.randn(50, 100).astype(np.float32)
+    renderer.set_data(slice_data, mock_gl=True)
+
+    img_bytes = renderer.render_export(dpi=300)
+    assert isinstance(img_bytes, bytes)
+    assert len(img_bytes) > 0
+
+
+
 
 
 

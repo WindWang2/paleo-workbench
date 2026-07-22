@@ -328,13 +328,12 @@ class NativeEngineBackend:
 
     def has_cpp(self, feature: str) -> bool:
         """Check if native C++ extension for a feature is installed."""
-        if feature == "seismic_3d":
-            return _HAS_SEISMIC_3D_CPP
-        elif feature == "well_log":
-            return _HAS_WELL_LOG_CPP
-        elif feature == "map_edit":
-            return _HAS_MAP_EDIT_CPP
-        return False
+        feature_map = {
+            "seismic_3d": _HAS_SEISMIC_3D_CPP,
+            "well_log": _HAS_WELL_LOG_CPP,
+            "map_edit": _HAS_MAP_EDIT_CPP,
+        }
+        return feature_map.get(feature, False)
 
     def is_accelerated(self, feature: str) -> bool:
         """Check if C++ acceleration for feature is currently active."""

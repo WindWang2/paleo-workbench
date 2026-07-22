@@ -50,6 +50,10 @@ class DataAssetRegistry:
             return spec.resource_type, ext, spec.status
         return _classify_path(path)
 
+    def inspect(self, path: Path) -> tuple[str, str, str]:
+        """Inspect and classify file path into (resource_type, format, status). Alias for classify_path."""
+        return self.classify_path(path)
+
     def scan_directory(
         self,
         root: Path,
