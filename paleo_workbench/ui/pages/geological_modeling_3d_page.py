@@ -129,22 +129,30 @@ class GeologicalModeling3DPage(QWidget):
         self.floating_bar = QFrame(self.view_container)
         self.floating_bar.setStyleSheet("""
             QFrame {
-                background-color: %s;
-                border: 1px solid %s;
+                background-color: rgba(15, 23, 42, 0.88);
+                border: 1px solid rgba(51, 65, 85, 0.85);
                 border-radius: %dpx;
             }
             QPushButton {
                 background: transparent;
                 border: none;
                 padding: 4px 10px;
-                color: #e2e8f0;
-                font-weight: bold;
+                color: #f8fafc;
+                font-weight: 600;
+                font-size: 12px;
             }
             QPushButton:hover {
-                background: %s;
+                background: rgba(51, 65, 85, 0.8);
                 border-radius: 4px;
+                color: #38bdf8;
             }
-        """ % (tokens.BG_GLASS, tokens.BG_GLASS_BORDER, tokens.RADIUS_BUTTON, tokens.HOVER_GLOW))
+            QPushButton:checked {
+                background: #2563eb;
+                color: #ffffff;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+        """ % tokens.RADIUS_BUTTON)
         self.floating_bar.setFixedHeight(38)
         self.floating_bar.setFixedWidth(360)
 
