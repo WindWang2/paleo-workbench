@@ -17,6 +17,25 @@ def test_status_bar_coord_label(qtbot):
     assert bar.coord_label.isHidden()
 
 
+def test_status_bar_update_context_empty_hides(qtbot):
+    bar = StatusBar()
+    qtbot.addWidget(bar)
+    bar.update_context(coords="X: 1")
+    assert not bar.coord_label.isHidden()
+    bar.update_context()
+    assert bar.coord_label.isHidden()
+
+
+def test_status_bar_engine_badge(qtbot):
+    bar = StatusBar()
+    qtbot.addWidget(bar)
+    assert bar.engine_label is not None
+    assert ("GPU" in bar.engine_label.text() or "CPU" in bar.engine_label.text())
+
+    bar.update_engine_status("⚡ GPU: OpenGL")
+    assert bar.engine_label.text() == "⚡ GPU: OpenGL"
+
+
 def test_status_bar_update_context_coords(qtbot):
     bar = StatusBar()
     qtbot.addWidget(bar)
