@@ -54,11 +54,28 @@ def _load_las_fast(file_path: Path) -> Any | None:
     depth_s = depth[idx]
 
     from geoviz import WellLogData
+    from geoviz_well_log.models import CurveData, LineStyle
+    from geoviz_well_log.robust_scale import compute_robust_display_range
 
-    curves = [
-        curve_data_from_arrays(item, depth_s, arr[idx, item.index].astype(np.float64))
-        for item in selected
-    ]
+    # Convert depth to list ONCE (was converted per-curve inside
+    # curve_data_from_arrays — 19x redundant tolist() on the same array).
+    depth_list = depth_s.tolist()
+
+    # Build curves with model_construct (skips per-element Pydantic validation
+    # — the data is already float64 from the C++ parser, validation is pure
+    # overhead here). This is the trusted-source fast path.
+    curves = []
+    for item in selected:
+        vals = arr[idx, item.index].astype(np.float64)
+        curves.append(CurveData.model_construct(
+            name=item.mnemonic,
+            unit=item.unit,
+            depth=depth_list,
+            values=vals.tolist(),
+            display_range=compute_robust_display_range(vals, item.mnemonic),
+            color="#63b3ed",
+            line_style=LineStyle.SOLID,
+        ))
     return WellLogData(
         well_name=header.well_name or file_path.stem,
         top_depth=float(np.nanmin(depth_s)),
