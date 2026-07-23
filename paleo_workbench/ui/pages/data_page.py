@@ -167,11 +167,7 @@ class DataPage(QWidget):
             self._request_selected_visualization
         )
 
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
+        self._refresh()
 
         # Delete removes the selected asset. Widget-scoped (parent=self) so it
         # only fires when the DataPage or a child has focus; guarded against
@@ -229,6 +225,18 @@ class DataPage(QWidget):
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
+
+    def _refresh(self) -> None:
+        """Re-push the current project state into the page after a mutation.
+
+        Shortcut for the dashboard_state + resources + artifacts incantation
+        that follows every local edit (remove/rescan/import/export/classify).
+        """
+        self.update_state(
+            dashboard_state(self.project),
+            self.project.resources,
+            self.project.export_artifacts,
+        )
 
     def _preview_disk_project_root(self) -> str | Path | None:
         """Resolve a real project root for disk cache; treat placeholders as unknown."""
@@ -405,11 +413,7 @@ class DataPage(QWidget):
 
         if removed:
             self._set_selected_asset(None)
-            self.update_state(
-                dashboard_state(self.project),
-                self.project.resources,
-                self.project.export_artifacts,
-            )
+            self._refresh()
             self._set_action_status("已移出项目")
         return removed
 
@@ -424,11 +428,7 @@ class DataPage(QWidget):
             if resource.parsed_summary is None:
                 resource.parsed_summary = {}
             resource.parsed_summary["preview_warning"] = "文件不存在"
-            self.update_state(
-                dashboard_state(self.project),
-                self.project.resources,
-                self.project.export_artifacts,
-            )
+            self._refresh()
             # Participate in generation invalidation so in-flight previews cannot win.
             self._request_summary(resource)
             self._set_action_status("文件不存在")
@@ -471,11 +471,7 @@ class DataPage(QWidget):
             resource.type = keep_type
             resource.artifact_role = keep_role
             resource.tags = keep_tags
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
+        self._refresh()
         # Participate in generation invalidation so in-flight previews cannot win.
         self._request_summary(resource)
         self._set_action_status("已重新扫描")
@@ -582,11 +578,7 @@ class DataPage(QWidget):
                 return
             self._set_action_status(result.message)
             if result.success:
-                self.update_state(
-                    dashboard_state(self.project),
-                    self.project.resources,
-                    self.project.export_artifacts,
-                )
+                self._refresh()
             return
 
         formats = get_available_formats(asset)
@@ -616,11 +608,7 @@ class DataPage(QWidget):
             return
         self._set_action_status(result.message)
         if result.success and result.artifact is not None:
-            self.update_state(
-                dashboard_state(self.project),
-                self.project.resources,
-                self.project.export_artifacts,
-            )
+            self._refresh()
 
     def _classify_selected_asset(self, new_type: str) -> None:
         """Change the selected resource's type (manual reclassification)."""
@@ -634,11 +622,7 @@ class DataPage(QWidget):
         # Keep a single role tag if present; preserve other free-form tags.
         other = [t for t in (asset.tags or []) if t not in ROLE_BY_TYPE.values()]
         asset.tags = ([role] if role else []) + other
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
+        self._refresh()
         old_label = RESOURCE_TYPE_LABELS.get(old_type, old_type)
         new_label = RESOURCE_TYPE_LABELS.get(new_type, new_type)
         self._set_action_status(f"已归类: {old_label} → {new_label}")
@@ -756,11 +740,7 @@ class DataPage(QWidget):
         rebuild the reader; selection may keep prior preview content.
         """
         self.project.resources.extend(report.added)
-        self.update_state(
-            dashboard_state(self.project),
-            self.project.resources,
-            self.project.export_artifacts,
-        )
+        self._refresh()
         self._set_import_status(report)
 
     def _set_action_status(self, text: str) -> None:
