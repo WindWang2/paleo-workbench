@@ -21,7 +21,11 @@ def _load_las_fast(file_path: Path) -> Any | None:
     """
     from geoviz import curve_data_from_arrays, inspect_las_file
 
-    header = inspect_las_file(str(file_path))
+    # header_only=True: skip the O(n_rows) Python data-row scan in inspect_las_file
+    # (303ms on a 50k-row file) — _load_las_fast parses the data itself via
+    # fast_las_parse_data, so it only needs the header metadata (curve names,
+    # null value, depth index). This keeps the header parse under 5ms.
+    header = inspect_las_file(str(file_path), header_only=True)
     if header.wrapped:
         return None  # wrapped LAS: fall back to the engine loader
     selected = header.non_depth_curves[:MAX_CURVES]
