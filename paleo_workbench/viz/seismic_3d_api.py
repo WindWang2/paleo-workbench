@@ -74,12 +74,16 @@ class AttributePipeline:
         if attribute_type in {"coherence", "coherence_3d"}:
             if progress_callback:
                 progress_callback(50.0)
+            if cancel_token and cancel_token():
+                return np.zeros_like(volume, dtype=np.float32)
             res = compute_coherence_3d(volume, **kwargs)
             if progress_callback:
                 progress_callback(100.0)
             return res.astype(np.float32)
 
         # Fallback for other spectral or amplitude attributes
+        if cancel_token and cancel_token():
+            return np.zeros_like(volume, dtype=np.float32)
         if progress_callback:
             progress_callback(100.0)
         return np.abs(volume).astype(np.float32)

@@ -63,6 +63,11 @@ class SeismicVolumeState(QObject):
         return self._sample_idx
 
     @property
+    def t_slice_idx(self) -> int:
+        """Alias for sample_idx to align with domain model vocabulary."""
+        return self._sample_idx
+
+    @property
     def active_horizon(self) -> str | None:
         return self._active_horizon
 

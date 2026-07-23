@@ -192,7 +192,7 @@ class VisualizationWorkspace(QFrame):
             "cross_well": CrossWellHost.tab_title,
             "map": PaleoMapHost.tab_title,
             "engine_preview": EnginePreviewHost.tab_title,
-            "prediction": WellLogHost.tab_title,
+            "prediction": SeismicHost.tab_title if payload.seismic_volume is not None else WellLogHost.tab_title,
         }.get(payload.kind)
         if kind_tab:
             self.tabs.setCurrentIndex(self._tab_index(kind_tab))
