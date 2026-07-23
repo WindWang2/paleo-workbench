@@ -590,6 +590,48 @@ def test_json_corrupt_falls_back(tmp_path):
     assert "JSON" in result.message or "解析" in result.message
 
 
+def test_json_oversized_parses_truncated_prefix_and_warns(tmp_path):
+    """Spec: a JSON file over the limit parses its first ``limit`` bytes.
+
+    When the truncated prefix happens to be valid JSON (e.g. a small object
+    padded with trailing whitespace), the preview returns the partial payload
+    with ``json_truncated=True`` and a truncation warning.
+    """
+    from dataclasses import replace
+
+    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+
+    settings = replace(PreviewSettings.defaults(), json_limit_mib=1)
+    path = tmp_path / "big.json"
+    head = '{"a": 1, "b": [1, 2, 3]}\n'
+    path.write_bytes(head.encode() + b" " * (2 * 1024 * 1024))
+    res = ResourceItem(name="big.json", path=str(path), type="document", format="json")
+
+    result = PreviewProvider(settings).preview(res)
+
+    assert result.mode == "json_tree"
+    assert result.json_truncated is True
+    assert result.json_payload == {"a": 1, "b": [1, 2, 3]}
+    assert "MiB" in result.warning
+
+
+def test_json_oversized_unparseable_prefix_falls_back_to_error(tmp_path):
+    """When the truncated prefix cannot be parsed, fall back to the limit error."""
+    from dataclasses import replace
+
+    from paleo_workbench.ui.pages.preview_settings import PreviewSettings
+
+    settings = replace(PreviewSettings.defaults(), json_limit_mib=1)
+    path = tmp_path / "bad.json"
+    path.write_bytes(b'{"a": ' + b"1" * (2 * 1024 * 1024))
+    res = ResourceItem(name="bad.json", path=str(path), type="document", format="json")
+
+    result = PreviewProvider(settings).preview(res)
+
+    assert result.mode == "message"
+    assert "MiB" in result.message
+
+
 def test_geotiff_preview_metadata(tmp_path):
     rasterio = pytest.importorskip("rasterio")
     import numpy as np

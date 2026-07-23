@@ -220,21 +220,27 @@ def json_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRe
         size = path.stat().st_size
     except OSError:
         return parse_error_preview(resource, "文件不存在")
-    if size > limit:
-        return parse_error_preview(
-            resource,
-            f"JSON 文件超过预览设置上限 {settings.json_limit_mib} MiB，"
-            "请在预览设置中提高上限",
-        )
+    truncated = size > limit
     try:
         with path.open("rb") as handle:
-            raw_bytes = handle.read(limit + 1)
+            # Read only up to the limit; for oversized files this yields the
+            # first ``limit`` bytes so we can attempt a truncated parse below.
+            raw_bytes = handle.read(limit if truncated else limit + 1)
     except OSError:
         return parse_error_preview(resource, "文件不存在")
     raw = raw_bytes.decode("utf-8", errors="replace")
     try:
         payload = json_lib.loads(raw)
     except (json_lib.JSONDecodeError, ValueError) as exc:
+        if truncated:
+            # Spec: oversized files parse the first ``limit`` bytes and show a
+            # truncation warning; only fall back to an error when the truncated
+            # prefix genuinely cannot be parsed.
+            return parse_error_preview(
+                resource,
+                f"JSON 文件超过预览设置上限 {settings.json_limit_mib} MiB，"
+                "请在预览设置中提高上限",
+            )
         return parse_error_preview(
             resource, f"JSON 解析失败: {exc.__class__.__name__}"
         )
@@ -247,7 +253,11 @@ def json_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRe
         status=resource.status,
         type_label=resource.type,
         json_payload=payload,
-        json_truncated=False,
+        json_truncated=truncated,
+        warning=(
+            f"JSON 文件超过预览设置上限 {settings.json_limit_mib} MiB，仅解析前 "
+            f"{settings.json_limit_mib} MiB" if truncated else ""
+        ),
     )
 
 
