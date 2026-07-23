@@ -28,6 +28,9 @@ A centralized, event-driven state observer module (`paleo_workbench/viz/seismic_
 ### FormatSpec
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
 
+### WorkflowOrchestrator
+A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orchestrator.py`) that encapsulates step transitions, prerequisite evidence validation, and automatic state saving behind a 2-method interface (`next_step`, `get_step_context`).
+
 ---
 
 ## Domain Concepts
