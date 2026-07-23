@@ -155,6 +155,25 @@ class DataReaderPanel(QFrame):
         self.stack.setCurrentWidget(self.empty_label)
         self.apply_preview_settings(self.preview_settings)
 
+        # Dispatch table for _load_target_widget: each handler loads the result
+        # into its widget and returns the widget. Unknown modes fall through to
+        # _render_message (the message_label fallback).
+        self._mode_handlers: dict[str, callable] = {
+            "empty": self._render_empty,
+            "message": self._render_message,
+            "text": self._render_text,
+            "table": self._render_table,
+            "well_log": self._render_well_log,
+            "seismic": self._render_seismic,
+            "image": self._render_image,
+            "pdf": self._render_pdf,
+            "rich_text": self._render_rich_text,
+            "web_document": self._render_web_document,
+            "json_tree": self._render_json_tree,
+            "geotiff": self._render_geotiff,
+            "media": self._render_media,
+        }
+
     def show_loading(self, asset: ResourceItem | ExportArtifact | None = None) -> None:
         self._stop_media_if_needed()
         clear_warning = self._safe_clear_geoviz()
@@ -297,96 +316,99 @@ class DataReaderPanel(QFrame):
             stop()
 
     def _load_target_widget(self, result: PreviewResult):
-        if result.mode == "empty":
-            return self.empty_label
-
-        if result.mode == "message":
-            self.message_label.set_message(result.message)
+        handler = self._mode_handlers.get(result.mode)
+        if handler is None:
+            self.message_label.set_message(result.message or "预览不可用")
             return self.message_label
+        return handler(result)
 
-        if result.mode == "text":
-            self.text_preview.load_text(result.text)
-            return self.text_preview
+    def _render_empty(self, result: PreviewResult):
+        return self.empty_label
 
-        if result.mode == "table":
-            self.table_preview.load_table(result.table_headers, result.table_rows)
-            return self.table_preview
-
-        if result.mode == "well_log":
-            self.well_log_preview.load_summary(
-                result.summary_rows,
-                result.table_headers,
-                result.table_rows,
-                result.message,
-                data_headers=getattr(result, "data_headers", ()),
-                data_rows=getattr(result, "data_rows", ()),
-            )
-            return self.well_log_preview
-
-        if result.mode == "seismic":
-            self.seismic_preview.load_seismic(
-                result.path,
-                result.revision,
-                getattr(result, "seismic_volume", None),
-                result.message,
-            )
-            return self.seismic_preview
-
-        if result.mode == "image":
-            self.image_preview_widget.load(
-                result.path,
-                result.revision,
-                image_bytes=result.image_bytes,
-            )
-            return self.image_preview_widget
-
-        if result.mode == "pdf":
-            self.pdf_preview_widget.load(
-                result.path,
-                result.revision,
-                pdf_bytes=result.pdf_bytes,
-            )
-            return self.pdf_preview_widget
-
-        if result.mode == "rich_text":
-            self.rich_text_preview.load_html(result.rich_html)
-            return self.rich_text_preview
-
-        if result.mode == "web_document":
-            if self.web_document_preview is None:
-                self.web_document_preview = WebDocumentPreviewWidget()
-                apply_settings = getattr(
-                    self.web_document_preview,
-                    "apply_settings",
-                    None,
-                )
-                if callable(apply_settings):
-                    apply_settings(self.preview_settings)
-                self.stack.addWidget(self.web_document_preview)
-            self.web_document_preview.load_document(result.path, result.rich_html)
-            return self.web_document_preview
-
-        if result.mode == "json_tree":
-            self.json_tree_preview.load_payload(result.json_payload, result.json_truncated)
-            return self.json_tree_preview
-
-        if result.mode == "geotiff":
-            self.geotiff_preview.load(
-                result.path,
-                result.revision,
-                result.image_bytes,
-                result.geo_metadata,
-            )
-            return self.geotiff_preview
-
-        if result.mode == "media":
-            # QMediaPlayer is UI-thread-only: the provider only returns the path;
-            # setSource happens here on the UI thread.
-            self.media_preview.set_media_path(result.media_path)
-            return self.media_preview
-
-        self.message_label.set_message(result.message or "预览不可用")
+    def _render_message(self, result: PreviewResult):
+        self.message_label.set_message(result.message)
         return self.message_label
+
+    def _render_text(self, result: PreviewResult):
+        self.text_preview.load_text(result.text)
+        return self.text_preview
+
+    def _render_table(self, result: PreviewResult):
+        self.table_preview.load_table(result.table_headers, result.table_rows)
+        return self.table_preview
+
+    def _render_well_log(self, result: PreviewResult):
+        self.well_log_preview.load_summary(
+            result.summary_rows,
+            result.table_headers,
+            result.table_rows,
+            result.message,
+            data_headers=getattr(result, "data_headers", ()),
+            data_rows=getattr(result, "data_rows", ()),
+        )
+        return self.well_log_preview
+
+    def _render_seismic(self, result: PreviewResult):
+        self.seismic_preview.load_seismic(
+            result.path,
+            result.revision,
+            getattr(result, "seismic_volume", None),
+            result.message,
+        )
+        return self.seismic_preview
+
+    def _render_image(self, result: PreviewResult):
+        self.image_preview_widget.load(
+            result.path,
+            result.revision,
+            image_bytes=result.image_bytes,
+        )
+        return self.image_preview_widget
+
+    def _render_pdf(self, result: PreviewResult):
+        self.pdf_preview_widget.load(
+            result.path,
+            result.revision,
+            pdf_bytes=result.pdf_bytes,
+        )
+        return self.pdf_preview_widget
+
+    def _render_rich_text(self, result: PreviewResult):
+        self.rich_text_preview.load_html(result.rich_html)
+        return self.rich_text_preview
+
+    def _render_web_document(self, result: PreviewResult):
+        if self.web_document_preview is None:
+            self.web_document_preview = WebDocumentPreviewWidget()
+            apply_settings = getattr(
+                self.web_document_preview,
+                "apply_settings",
+                None,
+            )
+            if callable(apply_settings):
+                apply_settings(self.preview_settings)
+            self.stack.addWidget(self.web_document_preview)
+        self.web_document_preview.load_document(result.path, result.rich_html)
+        return self.web_document_preview
+
+    def _render_json_tree(self, result: PreviewResult):
+        self.json_tree_preview.load_payload(result.json_payload, result.json_truncated)
+        return self.json_tree_preview
+
+    def _render_geotiff(self, result: PreviewResult):
+        self.geotiff_preview.load(
+            result.path,
+            result.revision,
+            result.image_bytes,
+            result.geo_metadata,
+        )
+        return self.geotiff_preview
+
+    def _render_media(self, result: PreviewResult):
+        # QMediaPlayer is UI-thread-only: the provider only returns the path;
+        # setSource happens here on the UI thread.
+        self.media_preview.set_media_path(result.media_path)
+        return self.media_preview
 
     def _commit_result(self, result: PreviewResult, target) -> None:
         self._current_result = result
