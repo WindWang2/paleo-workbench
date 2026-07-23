@@ -239,6 +239,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.app_shell.set_project_name(
             state.get("project_name", self.project.meta.name)
         )
+        self._update_status_context()
         steps = home_workflow_steps(self.project)
         self.app_shell.update_home_page(state, steps)
         self.app_shell.update_data_page(
@@ -273,6 +274,18 @@ class PaleoWorkbenchWindow(QWidget):
             self.project.paleomap_documents,
             self.project.export_artifacts,
         )
+
+    def _update_status_context(self) -> None:
+        """Push always-available context (CRS + active target horizon) to the status bar.
+
+        Canvas coords/scale are page-specific and stay with each canvas; this
+        wires the two project-level fields that should follow the open project.
+        """
+        project = self.project
+        crs = project.coordinate.display_crs
+        active_run = project.compilation_runs[-1] if project.compilation_runs else None
+        horizon = active_run.target_horizon if active_run else ""
+        self.app_shell.status_bar.update_context(crs=crs, horizon=horizon)
 
     def _update_title(self) -> None:
         self.setWindowTitle(f"{self.project.meta.name} - Paleogeography Workbench")
