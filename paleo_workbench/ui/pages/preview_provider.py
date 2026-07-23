@@ -67,9 +67,6 @@ class PreviewProvider:
         configured.settings = settings
         return configured
 
-    def clear(self) -> None:
-        """No-op: caching lives on the UI-thread PreviewCache."""
-
     def preview(self, asset: ResourceItem | ExportArtifact | None) -> PreviewResult:
         if asset is None:
             return PreviewResult(
@@ -118,25 +115,5 @@ class PreviewProvider:
             message="此数据不支持可视化预览",
         )
 
-    def _resource_revision_token(self, asset: ResourceItem) -> tuple[object, ...]:
-        path = Path(asset.path)
-        return (
-            "resource",
-            asset.id,
-            asset.path,
-            asset.type,
-            asset.format,
-            asset.status,
-            asset.checksum,
-            self._safe_stat(path),
-        )
-
-    def _safe_stat(self, path: Path) -> tuple[int, int] | None:
-        try:
-            stat = path.stat()
-        except OSError:
-            return None
-        return (stat.st_size, stat.st_mtime_ns)
-
     def _build_preview(self, asset: ResourceItem | ExportArtifact) -> PreviewResult:
-        return default_registry().build_preview(asset, self.settings, safe_stat_fn=self._safe_stat)
+        return default_registry().build_preview(asset, self.settings)

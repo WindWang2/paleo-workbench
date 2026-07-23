@@ -1192,7 +1192,10 @@ def test_reader_panel_reload_image_preview_when_same_path_stat_stays_constant_bu
     panel.resize(420, 320)
     panel.show()
     qtbot.waitExposed(panel)
-    monkeypatch.setattr(panel.provider, "_safe_stat", lambda _path: (12, 100))
+    # Pin the filesystem stat so the checksum is the only revision differentiator.
+    import paleo_workbench.resources.preview_parsers.registry as _registry
+
+    monkeypatch.setattr(_registry, "safe_file_stat", lambda _path: (12, 100))
 
     panel.update_asset(resource)
     initial_color = panel.image_label.pixmap().toImage().pixelColor(8, 8).rgb()

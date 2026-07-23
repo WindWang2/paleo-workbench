@@ -290,7 +290,6 @@ def test_preview_provider_is_pure_no_internal_cache(tmp_path: Path):
     assert first == second
     assert first.mode == "text"
     assert first.text == "first"
-    provider.clear()  # no-op cleanup still callable
 
 
 def test_preview_provider_export_artifact_message(tmp_path: Path):
@@ -315,11 +314,15 @@ def test_preview_provider_image_revision_changes_when_resource_checksum_changes(
     )
     provider = PreviewProvider()
 
-    provider._safe_stat = lambda _path: (12, 100)  # type: ignore[method-assign]
-    first = provider.preview(resource)
-    resource.checksum = "checksum-2"
-    path.write_bytes(b"second-image-with-new-bytes")
-    second = provider.preview(resource)
+    # Pin the filesystem stat so the checksum is the only revision differentiator.
+    with patch(
+        "paleo_workbench.resources.preview_parsers.registry.safe_file_stat",
+        lambda _path: (12, 100),
+    ):
+        first = provider.preview(resource)
+        resource.checksum = "checksum-2"
+        path.write_bytes(b"second-image-with-new-bytes")
+        second = provider.preview(resource)
 
     assert first.mode == "image"
     assert second.mode == "image"
