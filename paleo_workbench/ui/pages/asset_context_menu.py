@@ -12,11 +12,21 @@ from paleo_workbench.ui.pages.filter_index import CATEGORIES
 class AssetContextMenu(QMenu):
     """Right-click context menu for the data page asset table.
 
-    The menu exposes 6 logical items (预览, 重新扫描, 导出, 打开目录,
-    在可视化页面打开, 移出项目) whose visibility is driven by the selected
-    asset and the ``viz_supported`` flag. DataPage connects each action's
-    ``triggered`` signal to its handler; actions are located via
-    :meth:`find_action` / :meth:`find_export_action` using stable objectNames.
+    The menu exposes up to 7 logical items whose visibility is driven by the
+    selected asset and the ``viz_supported`` flag:
+
+    1. 预览 (preview) — always
+    2. 重新扫描 (rescan) — ResourceItem only
+    3. 归类为 (classify) — ResourceItem only; submenu of reclassification targets
+    4. 导出 (export) — only when at least one converter applies; submenu of
+       converter formats plus 工程清单 (JSON) inventory for resources
+    5. 打开目录 (open folder) — always
+    6. 在可视化页面打开 (open in visualization) — when ``viz_supported``
+    7. 移出项目 (remove from project) — always
+
+    DataPage connects each action's ``triggered`` signal to its handler;
+    actions are located via :meth:`find_action` / :meth:`find_export_action`
+    using stable objectNames.
     """
 
     def __init__(self, parent=None):
