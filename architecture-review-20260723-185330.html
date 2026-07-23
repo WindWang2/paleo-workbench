@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paleo Workbench — Architecture Deepening Opportunities Review</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+  </script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans p-8">
+  <div class="max-w-6xl mx-auto space-y-10">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 pb-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-sky-400">Paleo Workbench — Architecture Review</h1>
+          <p class="text-slate-400 mt-1">Deepening opportunities for testability, locality, and AI-navigability</p>
+        </div>
+        <span class="bg-sky-950 text-sky-300 border border-sky-700 text-xs px-3 py-1.5 rounded-full font-mono">2026-07-23</span>
+      </div>
+    </header>
+
+    <!-- Overview -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+      <h2 class="text-xl font-semibold text-slate-200 mb-3">Executive Summary</h2>
+      <p class="text-slate-300 leading-relaxed">
+        Following recent developments across <strong>Seismic Time Profile Acceleration</strong>, <strong>3D Geological Modeling</strong>, and <strong>Multi-Well Correlation</strong>, the core domain logic has grown significantly. We identified 3 key areas where shallow helper classes and manual PySide6 UI state orchestration create friction. Deepening these modules will concentrate complexity behind clean domain seams.
+      </p>
+    </section>
+
+    <!-- Candidates Grid -->
+    <div class="space-y-8">
+
+      <!-- Candidate 1 -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <span class="text-2xl font-bold text-sky-400">#1</span>
+            <h3 class="text-xl font-bold text-slate-100">Unified Stratigraphic Correlation Engine</h3>
+          </div>
+          <span class="bg-emerald-950 text-emerald-300 border border-emerald-700 text-xs font-semibold px-3 py-1 rounded-full">Strong</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+          <div>
+            <h4 class="font-semibold text-slate-300 mb-1">Involved Files</h4>
+            <ul class="font-mono text-xs text-slate-400 space-y-1">
+              <li>• paleo_workbench/viz/well_section_datum.py</li>
+              <li>• paleo_workbench/viz/formation_top_correlator.py</li>
+              <li>• paleo_workbench/viz/dtw_log_matcher.py</li>
+            </ul>
+
+            <h4 class="font-semibold text-slate-300 mt-4 mb-1">Problem</h4>
+            <p class="text-slate-400">
+              Multi-well stratigraphic correlation currently relies on 3 separate thin helper classes. Callers must manually orchestrate datum shift transformations, DTW curve normalization, index transfers, and polygon quad calculations across separate calls.
+            </p>
+          </div>
+
+          <div>
+            <h4 class="font-semibold text-slate-300 mb-1">Solution</h4>
+            <p class="text-slate-400">
+              Unify DTW matching, datum flattening, and inter-well polygon quad calculation into a deep <code>StratigraphicCorrelationEngine</code> module behind a simple <code>correlate_section(wells, mode, target_horizon)</code> interface.
+            </p>
+
+            <h4 class="font-semibold text-slate-300 mt-4 mb-1">Benefits (Locality & Leverage)</h4>
+            <p class="text-slate-400">
+              Concentrates depth coordinate math, DTW alignment, and polygon quad generation into a single deep module. Tests can verify multi-well correlation logic through a headless domain interface without UI setup.
+            </p>
+          </div>
+        </div>
+
+        <!-- Before / After Diagram -->
+        <div class="bg-slate-950 border border-slate-800 rounded-lg p-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <div class="font-mono text-amber-400 font-semibold mb-2">BEFORE (Shallow Helpers)</div>
+              <div class="mermaid text-center">
+                graph TD
+                  UI[StratigraphyCorrelationPage] -->|Manual Call 1| D[WellSectionDatum]
+                  UI -->|Manual Call 2| M[DTWLogMatcher]
+                  UI -->|Manual Call 3| C[FormationTopCorrelator]
+              </div>
+            </div>
+            <div>
+              <div class="font-mono text-emerald-400 font-semibold mb-2">AFTER (Deepened Engine)</div>
+              <div class="mermaid text-center">
+                graph TD
+                  UI[StratigraphyCorrelationPage] -->|correlate_section| S[StratigraphicCorrelationEngine]
+                  subgraph Deep Engine
+                    S --> D[WellSectionDatum]
+                    S --> M[DTWLogMatcher]
+                    S --> C[FormationTopCorrelator]
+                  end
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Candidate 2 -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <span class="text-2xl font-bold text-sky-400">#2</span>
+            <h3 class="text-xl font-bold text-slate-100">Geological 3D Scene Management Engine</h3>
+          </div>
+          <span class="bg-sky-950 text-sky-300 border border-sky-700 text-xs font-semibold px-3 py-1 rounded-full">Worth exploring</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+          <div>
+            <h4 class="font-semibold text-slate-300 mb-1">Involved Files</h4>
+            <ul class="font-mono text-xs text-slate-400 space-y-1">
+              <li>• paleo_workbench/ui/pages/geological_modeling_3d_page.py</li>
+              <li>• paleo_workbench/viz/geomodel/engine.py</li>
+              <li>• paleo_workbench/viz/geomodel/well_seismic.py</li>
+            </ul>
+
+            <h4 class="font-semibold text-slate-300 mt-4 mb-1">Problem</h4>
+            <p class="text-slate-400">
+              <code>GeologicalModeling3DPage</code> directly manages pyqtgraph.opengl <code>GLGraphicsItem</code> instances in raw python lists and dict maps (<code>active_items</code>, <code>mesh_items_map</code>, <code>_well_curve_items</code>), entangling UI host code with OpenGL item lifecycle management.
+            </p>
+          </div>
+
+          <div>
+            <h4 class="font-semibold text-slate-300 mb-1">Solution</h4>
+            <p class="text-slate-400">
+              Encapsulate OpenGL items, volume clipping, camera positioning, and tree visibility synchronization behind a deep <code>Geological3DSceneEngine</code> adapter.
+            </p>
+
+            <h4 class="font-semibold text-slate-300 mt-4 mb-1">Benefits (Locality & Leverage)</h4>
+            <p class="text-slate-400">
+              Maximizes UI locality by removing raw OpenGL item manipulation from PySide6 page handlers. Enables headless testing of 3D scene node creation and visibility trees.
+            </p>
+          </div>
+        </div>
+
+        <!-- Before / After Diagram -->
+        <div class="bg-slate-950 border border-slate-800 rounded-lg p-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <div class="font-mono text-amber-400 font-semibold mb-2">BEFORE (Raw List Tracking)</div>
+              <div class="mermaid text-center">
+                graph TD
+                  P[GeologicalModeling3DPage] -->|manages| L1[active_items]
+                  P -->|manages| L2[mesh_items_map]
+                  P -->|manages| L3[_well_curve_items]
+              </div>
+            </div>
+            <div>
+              <div class="font-mono text-emerald-400 font-semibold mb-2">AFTER (Scene Engine Seam)</div>
+              <div class="mermaid text-center">
+                graph TD
+                  P[GeologicalModeling3DPage] -->|update_scene| SE[Geological3DSceneEngine]
+                  subgraph Internal Scene State
+                    SE --> L1[active_items]
+                    SE --> L2[mesh_items_map]
+                  end
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Candidate 3 -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <span class="text-2xl font-bold text-sky-400">#3</span>
+            <h3 class="text-xl font-bold text-slate-100">Paleo Map Topology & Repair Kernel</h3>
+          </div>
+          <span class="bg-indigo-950 text-indigo-300 border border-indigo-700 text-xs font-semibold px-3 py-1 rounded-full">Speculative</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+          <div>
+            <h4 class="font-semibold text-slate-300 mb-1">Involved Files</h4>
+            <ul class="font-mono text-xs text-slate-400 space-y-1">
+              <li>• paleo_workbench/ui/pages/map_edit_topology.py</li>
+              <li>• paleo_workbench/ui/pages/map_edit_scene.py</li>
+              <li>• paleo_workbench/ui/pages/map_edit_commands.py</li>
+            </ul>
+
+            <h4 class="font-semibold text-slate-300 mt-4 mb-1">Problem</h4>
+            <p class="text-slate-400">
+              2D map editing snapping, node alignment, topology validation, and draft undo/redo commands are split across 5 separate modules, requiring message chains between scene items and topology panels.
+            </p>
+          </div>
+
+          <div>
+            <h4 class="font-semibold text-slate-300 mb-1">Solution</h4>
+            <p class="text-slate-400">
+              Consolidate shared-node topology validation, vertex snapping, and self-intersection repair into a unified <code>PaleoMapTopologyEngine</code>.
+            </p>
+
+            <h4 class="font-semibold text-slate-300 mt-4 mb-1">Benefits (Locality & Leverage)</h4>
+            <p class="text-slate-400">
+              Eliminates shotgun surgery during map editing feature additions and centralizes topology repair algorithms into a pure, testable domain kernel.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Top Recommendation -->
+    <section class="bg-gradient-to-r from-sky-950 via-slate-900 to-indigo-950 border border-sky-700 rounded-xl p-6 shadow-xl">
+      <h2 class="text-xl font-bold text-sky-300 mb-2">Top Recommendation: Candidate #1</h2>
+      <p class="text-slate-200 leading-relaxed text-sm">
+        We recommend starting with <strong>Candidate #1 (Unified Stratigraphic Correlation Engine)</strong>. Following the recent implementation of <code>WellSectionDatum</code>, <code>FormationTopCorrelator</code>, and <code>DTWLogMatcher</code>, consolidating them into a deep <code>StratigraphicCorrelationEngine</code> will immediately simplify <code>StratigraphyCorrelationPage</code> and provide high leverage for future multi-well features.
+      </p>
+    </section>
+
+  </div>
+</body>
+</html>

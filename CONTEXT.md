@@ -42,6 +42,7 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **WellSectionDatum**: A multi-mode vertical alignment policy (`paleo_workbench/viz/well_section_datum.py`) supporting Measured Depth (MD/TVD), Subsea Elevation (TVDSS), and Key Marker Horizon Flattening ($Z=0$ at target marker top) across multi-well correlation sections (`WellSectionHost`).
 - **FormationTopCorrelator**: An interactive multi-well formation top correlation engine (`paleo_workbench/viz/formation_top_correlator.py`) managing inter-well correlation polygon bands, marker line drag-adjustments, and `DTWLogMatcher` automated depth transfer recommendations.
 - **CrossWellFenceGenerator**: A 3D curtain/fence mesh generator (`paleo_workbench/viz/geomodel/fence_generator.py`) that extracts inter-well seismic slices along multi-well trajectory paths and projects 2D correlation sections into 3D OpenGL viewports.
+- **StratigraphicCorrelationEngine**: A deepened fluent correlation engine (`paleo_workbench/viz/stratigraphic_correlation_engine.py`) unifying `WellSectionDatum`, `DTWLogMatcher`, and `FormationTopCorrelator` into an expressive pipeline.
 
 ### Seismic 3D & 2D Profile
 - **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.
