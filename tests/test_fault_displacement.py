@@ -1,4 +1,4 @@
-"""Unit tests for FaultDisplacement vector offset engine (Ticket 03)."""
+"""Unit tests for FaultDisplacement vector offset engine (Ticket 02 & 03)."""
 
 from __future__ import annotations
 
@@ -32,6 +32,26 @@ def test_fault_displacement_offsets_hanging_wall():
     assert np.allclose(displaced[hangingwall_mask, 2], 85.0)
 
 
+def test_fault_displacement_distance_decay():
+    engine = FaultDisplacement()
+    vertices = np.array([
+        [4.0, 5.0, 100.0],  # Footwall
+        [5.1, 5.0, 100.0],  # Near Fault Hanging Wall
+        [10.0, 5.0, 100.0], # Far Hanging Wall
+    ], dtype=np.float32)
+
+    displaced = engine.apply_fault_throw(
+        vertices=vertices,
+        fault_line_x=5.0,
+        throw_z=-20.0,
+        decay_radius=3.0,
+    )
+
+    assert displaced[0, 2] == 100.0  # Unchanged
+    assert displaced[1, 2] < 100.0   # Near fault displaced significantly
+    assert displaced[2, 2] > displaced[1, 2]  # Far hanging wall decays
+
+
 def test_fault_displacement_preserves_topology():
     engine = FaultDisplacement()
     vertices = np.array([
@@ -40,6 +60,5 @@ def test_fault_displacement_preserves_topology():
     ], dtype=np.float32)
 
     displaced = engine.apply_fault_throw(vertices, fault_line_x=5.0, throw_z=-20.0)
-    # Check footwall and hangingwall order preserves non-intersection
     assert displaced[0, 2] == 100.0
     assert displaced[1, 2] == 80.0

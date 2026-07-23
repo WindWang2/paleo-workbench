@@ -2,7 +2,115 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import numpy as np
+
+
+@dataclass
+class SparseDeltaPatch:
+    """Sparse vertex height delta patch for memory-efficient undo/redo."""
+    indices: np.ndarray
+    old_z: np.ndarray
+    new_z: np.ndarray
+
+
+class SculptableHorizonMesh:
+    """Stateful 3D horizon surface mesh with RBF sculpting and sparse undo/redo."""
+
+    def __init__(
+        self,
+        vertices: np.ndarray,
+        faces: np.ndarray | None = None,
+        grid_shape: tuple[int, int] | None = None,
+    ):
+        if vertices.ndim != 2 or vertices.shape[1] != 3:
+            raise ValueError("Vertices array must have shape (N, 3)")
+
+        self.vertices = vertices.astype(np.float32, copy=True)
+        self.faces = faces if faces is not None else np.zeros((0, 3), dtype=np.int32)
+        self.grid_shape = grid_shape
+        self._undo_stack: list[SparseDeltaPatch] = []
+        self._redo_stack: list[SparseDeltaPatch] = []
+
+    def sculpt_surface(
+        self,
+        center_xy: tuple[float, float],
+        delta_z: float,
+        radius: float = 5.0,
+    ) -> np.ndarray:
+        """Deform surface vertex elevations within a radial influence sphere and record delta patch."""
+        cx, cy = center_xy
+        dx = self.vertices[:, 0] - cx
+        dy = self.vertices[:, 1] - cy
+        dist = np.hypot(dx, dy)
+
+        within_mask = dist <= radius
+        indices = np.where(within_mask)[0]
+
+        if len(indices) > 0:
+            weights = np.exp(-((dist[within_mask] / (radius * 0.5)) ** 2))
+            old_z = self.vertices[indices, 2].copy()
+            new_z = old_z + delta_z * weights
+            self.vertices[indices, 2] = new_z
+
+            patch = SparseDeltaPatch(indices=indices, old_z=old_z, new_z=new_z)
+            self._undo_stack.append(patch)
+            self._redo_stack.clear()
+
+        return self.vertices
+
+    def smooth_anneal(self, iterations: int = 1) -> np.ndarray:
+        """Apply laplacian smooth annealing to mesh height values."""
+        if self.grid_shape is None:
+            n_pts = len(self.vertices)
+            side = int(np.round(np.sqrt(n_pts)))
+            if side * side == n_pts:
+                self.grid_shape = (side, side)
+            else:
+                raise ValueError("grid_shape is required for smooth_anneal on unstructured mesh")
+
+        rows, cols = self.grid_shape
+        grid = self.vertices[:, 2].reshape((rows, cols)).copy()
+
+        for _ in range(iterations):
+            padded = np.pad(grid, pad_width=1, mode="edge")
+            smoothed = (
+                padded[:-2, 1:-1] + padded[2:, 1:-1] +
+                padded[1:-1, :-2] + padded[1:-1, 2:] +
+                padded[1:-1, 1:-1] * 4.0
+            ) / 8.0
+            grid = smoothed
+
+        old_z = self.vertices[:, 2].copy()
+        new_z = grid.ravel()
+        self.vertices[:, 2] = new_z
+
+        patch = SparseDeltaPatch(indices=np.arange(len(self.vertices)), old_z=old_z, new_z=new_z)
+        self._undo_stack.append(patch)
+        self._redo_stack.clear()
+        return self.vertices
+
+    def can_undo(self) -> bool:
+        return len(self._undo_stack) > 0
+
+    def can_redo(self) -> bool:
+        return len(self._redo_stack) > 0
+
+    def undo(self) -> bool:
+        if not self._undo_stack:
+            return False
+        patch = self._undo_stack.pop()
+        self.vertices[patch.indices, 2] = patch.old_z
+        self._redo_stack.append(patch)
+        return True
+
+    def redo(self) -> bool:
+        if not self._redo_stack:
+            return False
+        patch = self._redo_stack.pop()
+        self.vertices[patch.indices, 2] = patch.new_z
+        self._undo_stack.append(patch)
+        return True
 
 
 class HorizonSculpting:
@@ -16,38 +124,15 @@ class HorizonSculpting:
         radius: float = 5.0,
     ) -> np.ndarray:
         """Deform surface vertex elevations within a radial influence brush sphere."""
-        if vertices.ndim != 2 or vertices.shape[1] != 3:
-            raise ValueError("Vertices array must have shape (N, 3)")
-
-        res = vertices.copy()
-        cx, cy = center_xy
-        dx = res[:, 0] - cx
-        dy = res[:, 1] - cy
-        dist = np.hypot(dx, dy)
-
-        # Gaussian RBF radial weighting: w = exp(-(d / radius)^2)
-        within_mask = dist <= radius
-        weights = np.exp(-((dist[within_mask] / (radius * 0.5)) ** 2))
-        res[within_mask, 2] += delta_z * weights
-
-        return res
+        mesh = SculptableHorizonMesh(vertices)
+        mesh.sculpt_surface(center_xy, delta_z, radius)
+        return mesh.vertices
 
     def smooth_anneal(self, z_grid: np.ndarray, iterations: int = 1) -> np.ndarray:
         """Apply laplacian smooth annealing to a 2D height grid."""
-        if z_grid.ndim != 2:
-            raise ValueError("z_grid must be a 2D array")
-
-        grid = z_grid.copy()
-        rows, cols = grid.shape
-
-        for _ in range(iterations):
-            padded = np.pad(grid, pad_width=1, mode="edge")
-            # 3x3 box blur mean smoothing
-            smoothed = (
-                padded[:-2, 1:-1] + padded[2:, 1:-1] +
-                padded[1:-1, :-2] + padded[1:-1, 2:] +
-                padded[1:-1, 1:-1] * 4.0
-            ) / 8.0
-            grid = smoothed
-
-        return grid
+        rows, cols = z_grid.shape
+        x, y = np.meshgrid(np.arange(cols, dtype=np.float32), np.arange(rows, dtype=np.float32))
+        verts = np.column_stack([x.ravel(), y.ravel(), z_grid.ravel()])
+        mesh = SculptableHorizonMesh(verts, grid_shape=(rows, cols))
+        mesh.smooth_anneal(iterations)
+        return mesh.vertices[:, 2].reshape((rows, cols))
