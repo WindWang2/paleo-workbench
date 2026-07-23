@@ -22,6 +22,7 @@ class MapEditToolbar(QWidget):
     tool_changed = Signal(str)
     snap_toggled = Signal(bool)
     preview_toggled = Signal(bool)
+    canvas_priority_toggled = Signal(bool)
     topology_rebuild_requested = Signal()
     merge_facies_requested = Signal()
     split_facies_requested = Signal()
@@ -89,6 +90,14 @@ class MapEditToolbar(QWidget):
         self.preview_btn.setToolTip("切换 PaleoMapCanvas 图面预览（含图例/指北针/比例尺）")
         self.preview_btn.toggled.connect(self.preview_toggled.emit)
         layout.addWidget(self.preview_btn)
+
+        self.canvas_priority_btn = QPushButton("画布优先")
+        self.canvas_priority_btn.setObjectName("SecondaryButton")
+        self.canvas_priority_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.canvas_priority_btn.setCheckable(True)
+        self.canvas_priority_btn.setToolTip("最大化编辑画布，折叠侧边面板")
+        self.canvas_priority_btn.toggled.connect(self.canvas_priority_toggled.emit)
+        layout.addWidget(self.canvas_priority_btn)
         self._add_separator(layout)
 
         self.topology_btn = QPushButton("重建拓扑")

@@ -181,3 +181,95 @@ def test_generate_demo_map_draft_save_when_dirty(qtbot, monkeypatch):
     assert existing.facies_polygons[0]["coordinates"][0][0] == 3.0
     assert len(window.project.paleomap_documents) == 2
     assert window.project.paleomap_documents[-1].view_state.get("is_demo_draft") is True
+
+
+def test_reference_layers_persist_through_document_save_and_reload(qtbot):
+    """Reference layer descriptors survive PaleoMapDocument JSON round-trip."""
+    from paleo_workbench.project.models import MapReferenceLayer
+
+    layer = MapReferenceLayer(
+        name="断层参考",
+        source_path="/tmp/faults.geojson",
+        source_kind="vector",
+        source_crs="EPSG:4326",
+        project_crs="EPSG:3857",
+        participates_in_snap=True,
+        opacity=0.8,
+        cache_key="test-key-123",
+    )
+    doc = PaleoMapDocument(
+        name="Ref Test",
+        linked_target_horizon="H1",
+        reference_layers=[layer],
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 0], [2, 2], [0, 0]],
+        }],
+    )
+    project = ProjectDocument.new("Persistence Test")
+    project.paleomap_documents.append(doc)
+
+    # Round-trip through JSON
+    restored = ProjectDocument.model_validate(project.model_dump())
+
+    assert len(restored.paleomap_documents) == 1
+    ref_layers = restored.paleomap_documents[0].reference_layers
+    assert len(ref_layers) == 1
+    ref = ref_layers[0]
+    assert ref.name == "断层参考"
+    assert ref.source_kind == "vector"
+    assert ref.participates_in_snap is True
+    assert ref.opacity == 0.8
+    assert ref.cache_key == "test-key-123"
+
+
+def test_mapping_page_project_crs_propagation(qtbot):
+    """update_state with project_crs is accepted and doesn't crash."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    doc = PaleoMapDocument(name="CRS Test", linked_target_horizon="H1")
+    page.update_state([doc], project_crs="EPSG:3857", factor_tasks=[])
+    assert page.active_document() is doc
+
+
+def test_mapping_page_bottom_workbench_tab_preserved_after_update(qtbot):
+    """Changing documents does not reset the active bottom tab."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    doc1 = PaleoMapDocument(name="M1", linked_target_horizon="H1")
+    doc2 = PaleoMapDocument(name="M2", linked_target_horizon="H2")
+    page.update_state([doc1, doc2])
+
+    # Switch to topology tab
+    page.bottom_workbench.setCurrentIndex(1)
+    assert page.bottom_workbench.currentIndex() == 1
+
+    # Re-push same documents
+    page.update_state([doc1, doc2])
+    assert page.bottom_workbench.currentIndex() == 1
+
+
+def test_mapping_page_reference_dock_assignment(qtbot):
+    """Reference panel receives layers from active document."""
+    from paleo_workbench.project.models import MapReferenceLayer
+
+    layer = MapReferenceLayer(
+        name="地形图",
+        source_path="/tmp/dem.tif",
+        source_kind="raster",
+        source_crs="EPSG:4326",
+        project_crs="EPSG:3857",
+        status="ready",
+    )
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        reference_layers=[layer],
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state([doc])
+
+    assert page.reference_panel.layer_list.count() == 1
+    assert "地形图" in page.reference_panel.layer_list.item(0).text()

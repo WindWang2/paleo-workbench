@@ -121,10 +121,12 @@ class MapLayerTree(QFrame):
 
             if active is not None and doc is active:
                 self._populate_layers(item)
+                self._populate_reference_layers(item, doc)
 
         if active is None and self._doc_items:
             # Fallback: attach layers to last document if no explicit active
             self._populate_layers(self._doc_items[-1])
+            self._populate_reference_layers(self._doc_items[-1], self._documents[-1])
 
         self._suppress_item_changed = False
 
@@ -148,6 +150,31 @@ class MapLayerTree(QFrame):
             parent.addChild(layer_item)
             self._layer_items[key] = layer_item
             parent.setExpanded(True)
+
+    def _populate_reference_layers(self, parent: QTreeWidgetItem, document: Any) -> None:
+        ref_layers = getattr(document, "reference_layers", [])
+        if not ref_layers:
+            return
+
+        ref_group = QTreeWidgetItem(["参考图层"])
+        ref_group.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        parent.addChild(ref_group)
+
+        for layer in ref_layers:
+            name = getattr(layer, "name", "未命名参考图层")
+            status = getattr(layer, "status", "")
+            
+            if status == "offline":
+                name = f"{name} (离线)"
+            elif status == "failed":
+                name = f"{name} (失败)"
+
+            item = QTreeWidgetItem([name, ""])
+            item.setData(0, Qt.ItemDataRole.UserRole, ("reference_layer", layer))
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            ref_group.addChild(item)
+            
+        ref_group.setExpanded(True)
 
     def _on_current_item_changed(
         self,

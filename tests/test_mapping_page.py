@@ -165,3 +165,69 @@ def test_mapping_page_overlay_request_shows_matching_reference_layer(qtbot):
     layer.visible = False
     page.reference_panel.overlay_requested.emit("ref_grid")
     assert layer.visible is True
+
+
+def test_canvas_priority_mode_collapses_side_panels(qtbot):
+    """Canvas-priority hides layer tree, reference panel, and bottom shelf."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H1")
+    page.update_state([doc])
+
+    page.set_canvas_priority(True)
+
+    assert page.layer_tree.isHidden()
+    assert page.reference_panel.isHidden()
+    assert page.bottom_workbench.isHidden()
+    assert not page.edit_view.isHidden()
+    assert page.is_canvas_priority()
+
+
+def test_canvas_priority_mode_restores_panels(qtbot):
+    """Leaving canvas-priority restores all panels."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H1")
+    page.update_state([doc])
+
+    page.set_canvas_priority(True)
+    page.set_canvas_priority(False)
+
+    assert not page.layer_tree.isHidden()
+    assert not page.reference_panel.isHidden()
+    assert not page.bottom_workbench.isHidden()
+    assert not page.is_canvas_priority()
+
+
+def test_canvas_priority_preserves_dirty_state(qtbot):
+    """Toggling canvas-priority does not lose dirty state."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[0, 0], [5, 0], [5, 5], [0, 0]],
+        }],
+    )
+    page.update_state([doc])
+    page.edit_view.scene().translate_features(["f1"], 1.0, 0.0)
+    assert page.is_dirty()
+
+    page.set_canvas_priority(True)
+    assert page.is_dirty()
+
+    page.set_canvas_priority(False)
+    assert page.is_dirty()
+
+
+def test_canvas_priority_toolbar_button_toggles_mode(qtbot):
+    """Toolbar canvas_priority_btn toggles the mode."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.toolbar.canvas_priority_btn.setChecked(True)
+    assert page.is_canvas_priority()
+    page.toolbar.canvas_priority_btn.setChecked(False)
+    assert not page.is_canvas_priority()

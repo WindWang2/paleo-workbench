@@ -52,6 +52,7 @@ class MappingPage(QWidget):
         self._active_document = None
         self._project = None
         self._preview_mode = False
+        self._canvas_priority = False
         self._reference_service = ReferenceLayerService()
         self._contour_job = OwnedWorkerJob(self)
         self._contour_job.released.connect(self._clear_contour_job)
@@ -107,6 +108,7 @@ class MappingPage(QWidget):
         self.toolbar.redo_requested.connect(self._on_redo)
         self.toolbar.snap_toggled.connect(self._on_snap_toggled)
         self.toolbar.preview_toggled.connect(self._on_preview_toggled)
+        self.toolbar.canvas_priority_toggled.connect(self.set_canvas_priority)
         self.toolbar.topology_rebuild_requested.connect(self.rebuild_topology)
         self.toolbar.merge_facies_requested.connect(self.merge_selected_facies)
         self.toolbar.split_facies_requested.connect(self.split_selected_facies)
@@ -173,6 +175,24 @@ class MappingPage(QWidget):
         self._apply_mode_ui()
         if enabled:
             self._refresh_preview()
+        self._emit_mapping_context()
+
+    def is_canvas_priority(self) -> bool:
+        return self._canvas_priority
+
+    def set_canvas_priority(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._canvas_priority == enabled:
+            return
+        self._canvas_priority = enabled
+        self.layer_tree.setVisible(not enabled)
+        self.reference_panel.setVisible(not enabled)
+        if not self._preview_mode:
+            self.bottom_workbench.setVisible(not enabled)
+        if self.toolbar.canvas_priority_btn.isChecked() != enabled:
+            self.toolbar.canvas_priority_btn.blockSignals(True)
+            self.toolbar.canvas_priority_btn.setChecked(enabled)
+            self.toolbar.canvas_priority_btn.blockSignals(False)
         self._emit_mapping_context()
 
     def active_document(self):
@@ -415,7 +435,10 @@ class MappingPage(QWidget):
 
     def _apply_mode_ui(self) -> None:
         self.center_stack.setCurrentIndex(1 if self._preview_mode else 0)
-        self.bottom_workbench.setVisible(not self._preview_mode)
+        if self._canvas_priority:
+            self.bottom_workbench.setVisible(False)
+        else:
+            self.bottom_workbench.setVisible(not self._preview_mode)
 
     def _refresh_preview(self) -> None:
         doc = self._active_document

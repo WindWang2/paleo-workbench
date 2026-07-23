@@ -83,3 +83,80 @@ def test_layer_tree_visibility_and_lock_signals(qtbot):
     # Toggle lock via tree helper / column 1
     tree.set_layer_locked("facies", True)
     assert ("facies", True) in locks
+
+def test_layer_tree_shows_reference_layers_under_active_document(qtbot):
+    """Reference layers appear in a separate '参考图层' group below editable layers."""
+    from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
+    from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+
+    tree = MapLayerTree()
+    qtbot.addWidget(tree)
+    layer = MapReferenceLayer(
+        name="断层参考",
+        source_path="/tmp/faults.geojson",
+        source_kind="vector",
+        source_crs="EPSG:4326",
+        project_crs="EPSG:3857",
+        status="ready",
+    )
+    doc = PaleoMapDocument(
+        name="Map A",
+        linked_target_horizon="H1",
+        reference_layers=[layer],
+    )
+    tree.set_documents([doc])
+    tree.set_active_document(doc)
+
+    root = tree.tree.topLevelItem(0)
+    doc_item = root.child(0)
+    # 4 editable layers + 1 reference group
+    assert doc_item.childCount() == 5
+    ref_group = doc_item.child(4)
+    assert ref_group.text(0) == "参考图层"
+    assert ref_group.childCount() == 1
+    assert "断层参考" in ref_group.child(0).text(0)
+
+
+def test_layer_tree_reference_layers_show_offline_status(qtbot):
+    from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
+    from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+
+    tree = MapLayerTree()
+    qtbot.addWidget(tree)
+    layer = MapReferenceLayer(
+        name="地形图",
+        source_path="/tmp/missing.tif",
+        source_kind="raster",
+        source_crs="EPSG:4326",
+        project_crs="EPSG:3857",
+        status="offline",
+    )
+    doc = PaleoMapDocument(
+        name="Map A",
+        linked_target_horizon="H1",
+        reference_layers=[layer],
+    )
+    tree.set_documents([doc])
+    tree.set_active_document(doc)
+
+    root = tree.tree.topLevelItem(0)
+    doc_item = root.child(0)
+    ref_group = doc_item.child(4)
+    ref_item = ref_group.child(0)
+    assert "离线" in ref_item.text(0)
+
+
+def test_layer_tree_no_reference_group_when_empty(qtbot):
+    from paleo_workbench.project.models import PaleoMapDocument
+    from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+
+    tree = MapLayerTree()
+    qtbot.addWidget(tree)
+    doc = PaleoMapDocument(name="Map A", linked_target_horizon="H1")
+    tree.set_documents([doc])
+    tree.set_active_document(doc)
+
+    root = tree.tree.topLevelItem(0)
+    doc_item = root.child(0)
+    # Only 4 editable layers, no reference group
+    assert doc_item.childCount() == 4
