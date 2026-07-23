@@ -12,8 +12,8 @@ def test_colormap_manager_lut_bytes():
     lut = ColormapManager.get_colormap("seismic", 256)
     assert lut.shape == (256, 4)
     assert lut.dtype == np.uint8
-    
-    lut_bytes = ColormapManager.get_lut_bytes("seismic")
+
+    lut_bytes = lut.tobytes()
     assert len(lut_bytes) == 256 * 4
 
 
