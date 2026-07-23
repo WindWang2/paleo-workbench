@@ -8,7 +8,21 @@ from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
 ensure_geoviz_on_path()
 
-from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
+from paleo_workbench.viz.seismic_3d_api import HAS_CPP_SEISMIC, marching_cubes_3d
+
+# marching_cubes_3d needs either the seismic_3d_core C++ extension or
+# scikit-image as a Python fallback. CI builds neither, so skip the whole
+# module when both are unavailable.
+try:
+    import skimage  # noqa: F401
+    _HAS_SKIMAGE = True
+except ImportError:
+    _HAS_SKIMAGE = False
+
+pytestmark = pytest.mark.skipif(
+    not HAS_CPP_SEISMIC and not _HAS_SKIMAGE,
+    reason="marching_cubes_3d needs seismic_3d_core C++ extension or scikit-image",
+)
 
 
 def test_marching_cubes_3d_sphere_mesh_extraction():

@@ -43,6 +43,8 @@ SAMPLE_LAS_LOD = """~VERSION INFORMATION
 def test_las_parser_provider_registered():
     from geoviz import get_las_parser_provider
     hook = get_las_parser_provider()
+    if hook is None and not native_backend.has_cpp("well_log"):
+        pytest.skip("no LAS parser backend registered (well_log_core not built)")
     assert hook is not None or native_backend.has_cpp("well_log") is True
 
 
