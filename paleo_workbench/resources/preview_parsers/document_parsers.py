@@ -7,18 +7,18 @@ import re
 from typing import TYPE_CHECKING
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.project.paths import safe_file_stat
 from paleo_workbench.resources.preview_parsers.models import PreviewResult
 from paleo_workbench.resources.preview_parsers.table_parsers import (
     parse_error_preview,
     read_preview_chunk,
-    safe_stat,
 )
 
 if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
 
-def resource_revision_token(asset: ResourceItem, safe_stat_fn=safe_stat) -> tuple[object, ...]:
+def resource_revision_token(asset: ResourceItem, safe_stat_fn=safe_file_stat) -> tuple[object, ...]:
     path = Path(asset.path)
     return (
         "resource",
@@ -38,7 +38,7 @@ def artifact_preview(artifact: ExportArtifact) -> PreviewResult:
         mode="message",
         title=title,
         path=artifact.output_path,
-        revision=safe_stat(Path(artifact.output_path)),
+        revision=safe_file_stat(Path(artifact.output_path)),
         format=artifact.format,
         status="generated",
         type_label="成果",
@@ -129,7 +129,7 @@ def markdown_rich_preview(resource: ResourceItem, settings: PreviewSettings) -> 
         mode="rich_text",
         title=resource.name,
         path=resource.path,
-        revision=safe_stat(path),
+        revision=safe_file_stat(path),
         format=resource.format,
         status=resource.status,
         type_label=resource.type,

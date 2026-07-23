@@ -7,18 +7,15 @@ import shlex
 from typing import TYPE_CHECKING
 
 from paleo_workbench.project.models import ResourceItem
+from paleo_workbench.project.paths import safe_file_stat
 from paleo_workbench.resources.preview_parsers.models import PreviewResult
 
 if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
 
-def safe_stat(path: Path) -> tuple[int, int] | None:
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    return (stat.st_size, stat.st_mtime_ns)
+# Backward-compatible alias: several modules import ``safe_stat`` from here.
+safe_stat = safe_file_stat
 
 
 def parse_error_preview(resource: ResourceItem, message: str) -> PreviewResult:

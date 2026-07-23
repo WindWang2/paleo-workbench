@@ -7,6 +7,20 @@ class ProjectPathError(ValueError):
     """Raised when a stored path is invalid or escapes the project directory."""
 
 
+def safe_file_stat(path: Path) -> tuple[int, int] | None:
+    """Return ``(size, mtime_ns)`` for cache keys, or None if the path is unreadable.
+
+    Canonical stat helper shared by preview parsers, the in-memory preview cache,
+    and the disk preview cache. ``OSError`` (missing file / permission) → None
+    so callers can treat unreadable paths as cache misses.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
 def artifact_dir_for(project_path: Path) -> Path:
     project_name = project_path.name.removesuffix(".paleo.json")
     return project_path.with_name(f"{project_name}.artifacts")

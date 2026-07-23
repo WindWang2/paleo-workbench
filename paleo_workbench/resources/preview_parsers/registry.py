@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.project.paths import safe_file_stat
 from paleo_workbench.resources.preview_parsers.document_parsers import (
     artifact_preview,
     audio_preview,
@@ -39,7 +40,6 @@ from paleo_workbench.resources.preview_parsers.seismic_parsers import segy_previ
 from paleo_workbench.resources.preview_parsers.table_parsers import (
     dat_preview,
     excel_preview,
-    safe_stat,
     table_preview,
     text_preview,
 )
@@ -62,7 +62,7 @@ class PreviewRegistry:
         self,
         asset: ResourceItem | ExportArtifact,
         settings: PreviewSettings,
-        safe_stat_fn: Callable[[Path], tuple[int, int] | None] = safe_stat,
+        safe_stat_fn: Callable[[Path], tuple[int, int] | None] = safe_file_stat,
     ) -> PreviewResult:
         if isinstance(asset, ExportArtifact):
             return artifact_preview(asset)

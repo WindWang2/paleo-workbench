@@ -4,6 +4,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
+from paleo_workbench.project.paths import safe_file_stat
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
@@ -19,15 +20,6 @@ def preview_result_weight(value: PreviewResult) -> int:
         + len(value.image_bytes)
         + len(value.pdf_bytes)
     )
-
-
-def safe_file_stat(path: Path) -> tuple[int, int] | None:
-    """Return ``(size, mtime_ns)`` for cache keys, or None if the path is unreadable."""
-    try:
-        st = path.stat()
-        return (st.st_size, getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
-    except OSError:
-        return None
 
 
 # Backward-compatible alias for internal call sites / older imports.
