@@ -18,15 +18,16 @@ def _compile_args() -> list[str]:
         compiler = None
     # On Windows default to MSVC unless evidence of GCC/MinGW
     if sys.platform == "win32" and compiler != "unix":
-        return ["/O2", "/fp:fast"]
-    # -ffast-math implies -ffinite-math-only, which lets the compiler assume
-    # NaN/Inf never occur — optimising std::isnan/std::isinf to constant false.
-    # The extension deliberately filters NaN/Inf (slice normalisation, isosurface
-    # cube skipping, LAS token parsing), so re-enable finite-math handling with
-    # -fno-finite-math-only while keeping the rest of -ffast-math's wins.
-    return ["-O3", "-ffast-math", "-fno-finite-math-only"]
+        return ["/O2", "/fp:fast", "/openmp"]
+    return ["-O3", "-ffast-math", "-fno-finite-math-only", "-fopenmp"]
+
+def _link_args() -> list[str]:
+    if sys.platform == "win32":
+        return []
+    return ["-fopenmp"]
 
 extra_compile_args = _compile_args()
+extra_link_args = _link_args()
 
 ext_modules = [
     Pybind11Extension(
@@ -34,6 +35,7 @@ ext_modules = [
         [str(HERE / "src" / "seismic_3d_core.cpp")],
         cxx_std=17,
         extra_compile_args=extra_compile_args,
+        extra_link_args=extra_link_args,
     ),
 ]
 

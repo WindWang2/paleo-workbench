@@ -62,7 +62,7 @@ class SeismicSlicePreviewWidget(QWidget):
         )
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
-        self._render_timer.setInterval(80)
+        self._render_timer.setInterval(16)
         self._render_timer.timeout.connect(self._render_slice)
         self.slider.valueChanged.connect(self._on_slider_changed)
 

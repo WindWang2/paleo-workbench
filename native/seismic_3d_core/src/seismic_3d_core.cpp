@@ -20,16 +20,10 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
     const float* ptr = static_cast<const float*>(buf.ptr);
 
     int ax = (axis % 3 + 3) % 3;
-    // Reject out-of-range index instead of silently clamping: a caller bug
-    // (off-by-one, wrong axis) should surface, not return the last slice as
-    // if requested. The Python-level API would raise IndexError.
     if (index < 0) {
         throw std::out_of_range("slice index is negative");
     }
     if (ax == 0) {
-        // Guard zero-sized axis (shape (0,N,M), axis=0): without this the
-        // clamp yields idx=0 and std::copy reads dim1*dim2 floats from an
-        // empty buffer (OOB heap read).
         if (dim0 == 0) {
             throw std::out_of_range("cannot slice axis 0 of an empty volume");
         }
@@ -59,6 +53,9 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         float* r_ptr = static_cast<float*>(r_buf.ptr);
         {
             py::gil_scoped_release release;
+            #if defined(_OPENMP)
+            #pragma omp parallel for schedule(static)
+            #endif
             for (size_t i = 0; i < dim0; ++i) {
                 size_t src_offset = i * (dim1 * dim2) + idx * dim2;
                 size_t dst_offset = i * dim2;
@@ -79,10 +76,15 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         float* r_ptr = static_cast<float*>(r_buf.ptr);
         {
             py::gil_scoped_release release;
-            for (size_t i = 0; i < dim0; ++i) {
-                for (size_t j = 0; j < dim1; ++j) {
-                    r_ptr[i * dim1 + j] = ptr[i * (dim1 * dim2) + j * dim2 + idx];
-                }
+            size_t total_elem = dim0 * dim1;
+            #if defined(_OPENMP)
+            #pragma omp parallel for schedule(static)
+            #endif
+            for (size_t k = 0; k < total_elem; ++k) {
+#if defined(__GNUC__) || defined(__clang__)
+                __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
+#endif
+                r_ptr[k] = ptr[k * dim2 + idx];
             }
         }
         return result;
@@ -91,49 +93,155 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
 
 // Fast 2D Slice Extraction directly into normalized uint8 Indexed8 array
 py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::array::forcecast> input, int axis, int index) {
-    py::array_t<float> raw_slice = fast_slice_extract(input, axis, index);
-    auto buf = raw_slice.request();
-    size_t rows = buf.shape[0];
-    size_t cols = buf.shape[1];
-    size_t total = rows * cols;
+    auto buf = input.request();
+    if (buf.ndim != 3) {
+        throw std::runtime_error("Input volume must be 3D");
+    }
+
+    size_t dim0 = buf.shape[0];
+    size_t dim1 = buf.shape[1];
+    size_t dim2 = buf.shape[2];
     const float* ptr = static_cast<const float*>(buf.ptr);
+
+    int ax = (axis % 3 + 3) % 3;
+    if (index < 0) {
+        throw std::out_of_range("slice index is negative");
+    }
+
+    size_t rows = 0, cols = 0;
+    if (ax == 0) {
+        if (dim0 == 0) throw std::out_of_range("cannot slice axis 0 of an empty volume");
+        if (static_cast<size_t>(index) >= dim0) throw std::out_of_range("slice index out of range for axis 0");
+        rows = dim1; cols = dim2;
+    } else if (ax == 1) {
+        if (dim1 == 0) throw std::out_of_range("cannot slice axis 1 of an empty volume");
+        if (static_cast<size_t>(index) >= dim1) throw std::out_of_range("slice index out of range for axis 1");
+        rows = dim0; cols = dim2;
+    } else {
+        if (dim2 == 0) throw std::out_of_range("cannot slice axis 2 of an empty volume");
+        if (static_cast<size_t>(index) >= dim2) throw std::out_of_range("slice index out of range for axis 2");
+        rows = dim0; cols = dim1;
+    }
+
+    size_t idx = static_cast<size_t>(index);
+    size_t total = rows * cols;
+    auto u8_result = py::array_t<uint8_t>({rows, cols});
+    auto u8_buf = u8_result.request();
+    uint8_t* dst = static_cast<uint8_t*>(u8_buf.ptr);
 
     float min_val = std::numeric_limits<float>::infinity();
     float max_val = -std::numeric_limits<float>::infinity();
 
     {
         py::gil_scoped_release release;
-        for (size_t i = 0; i < total; ++i) {
-            float v = ptr[i];
-            if (std::isnan(v) || std::isinf(v)) continue;
-            if (v < min_val) min_val = v;
-            if (v > max_val) max_val = v;
-        }
-    }
 
-    auto u8_result = py::array_t<uint8_t>({rows, cols});
-    auto u8_buf = u8_result.request();
-    uint8_t* dst = static_cast<uint8_t*>(u8_buf.ptr);
+        if (ax == 0) {
+            const float* src = ptr + idx * (dim1 * dim2);
+            #if defined(_OPENMP)
+            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+            #endif
+            for (size_t i = 0; i < total; ++i) {
+                float v = src[i];
+                if (std::isnan(v) || std::isinf(v)) continue;
+                if (v < min_val) min_val = v;
+                if (v > max_val) max_val = v;
+            }
 
-    if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
-        std::fill(dst, dst + total, static_cast<uint8_t>(0));
-        return py::make_tuple(u8_result, 0.0f, 0.0f);
-    }
-
-    float inv_range = 255.0f / (max_val - min_val);
-    {
-        py::gil_scoped_release release;
-        for (size_t i = 0; i < total; ++i) {
-            float v = ptr[i];
-            if (std::isnan(v) || std::isinf(v)) {
-                dst[i] = 0;
+            if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+                std::fill(dst, dst + total, static_cast<uint8_t>(0));
             } else {
-                float norm = (v - min_val) * inv_range;
-                dst[i] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+                float inv_range = 255.0f / (max_val - min_val);
+                #if defined(_OPENMP)
+                #pragma omp parallel for schedule(static)
+                #endif
+                for (size_t i = 0; i < total; ++i) {
+                    float v = src[i];
+                    if (std::isnan(v) || std::isinf(v)) {
+                        dst[i] = 0;
+                    } else {
+                        float norm = (v - min_val) * inv_range;
+                        dst[i] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+                    }
+                }
+            }
+        } else if (ax == 1) {
+            #if defined(_OPENMP)
+            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+            #endif
+            for (size_t i = 0; i < dim0; ++i) {
+                size_t src_offset = i * (dim1 * dim2) + idx * dim2;
+                for (size_t j = 0; j < dim2; ++j) {
+                    float v = ptr[src_offset + j];
+                    if (std::isnan(v) || std::isinf(v)) continue;
+                    if (v < min_val) min_val = v;
+                    if (v > max_val) max_val = v;
+                }
+            }
+
+            if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+                std::fill(dst, dst + total, static_cast<uint8_t>(0));
+            } else {
+                float inv_range = 255.0f / (max_val - min_val);
+                #if defined(_OPENMP)
+                #pragma omp parallel for schedule(static)
+                #endif
+                for (size_t i = 0; i < dim0; ++i) {
+                    size_t src_offset = i * (dim1 * dim2) + idx * dim2;
+                    size_t dst_offset = i * dim2;
+                    for (size_t j = 0; j < dim2; ++j) {
+                        float v = ptr[src_offset + j];
+                        if (std::isnan(v) || std::isinf(v)) {
+                            dst[dst_offset + j] = 0;
+                        } else {
+                            float norm = (v - min_val) * inv_range;
+                            dst[dst_offset + j] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+                        }
+                    }
+                }
+            }
+        } else {
+            // axis == 2 (Time slice)
+            // Strided min/max sample pass to avoid double full-volume cache miss
+            size_t step = (total > 65536) ? 4 : 1;
+            #if defined(_OPENMP)
+            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+            #endif
+            for (size_t k = 0; k < total; k += step) {
+#if defined(__GNUC__) || defined(__clang__)
+                __builtin_prefetch(&ptr[(k + 16 * step) * dim2 + idx], 0, 0);
+#endif
+                float v = ptr[k * dim2 + idx];
+                if (std::isnan(v) || std::isinf(v)) continue;
+                if (v < min_val) min_val = v;
+                if (v > max_val) max_val = v;
+            }
+
+            if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+                std::fill(dst, dst + total, static_cast<uint8_t>(0));
+            } else {
+                float inv_range = 255.0f / (max_val - min_val);
+                #if defined(_OPENMP)
+                #pragma omp parallel for schedule(static)
+                #endif
+                for (size_t k = 0; k < total; ++k) {
+#if defined(__GNUC__) || defined(__clang__)
+                    __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
+#endif
+                    float v = ptr[k * dim2 + idx];
+                    if (std::isnan(v) || std::isinf(v)) {
+                        dst[k] = 0;
+                    } else {
+                        float norm = (v - min_val) * inv_range;
+                        dst[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
+                    }
+                }
             }
         }
     }
 
+    if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+        return py::make_tuple(u8_result, 0.0f, 0.0f);
+    }
     return py::make_tuple(u8_result, min_val, max_val);
 }
 
