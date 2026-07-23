@@ -107,8 +107,8 @@ class GeologicalModeling3DPage(QWidget):
 
         self.view_container = QFrame()
         self.view_container.setFrameShape(QFrame.StyledPanel)
-        self.view_container.setStyleSheet("QFrame { background: #020617; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        self.view_container.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_CANVAS, tokens.RADIUS_CARD, tokens.BORDER
         ))
 
         view_layout = QVBoxLayout(self.view_container)
@@ -129,30 +129,35 @@ class GeologicalModeling3DPage(QWidget):
         self.floating_bar = QFrame(self.view_container)
         self.floating_bar.setStyleSheet("""
             QFrame {
-                background-color: rgba(15, 23, 42, 0.88);
-                border: 1px solid rgba(51, 65, 85, 0.85);
+                background-color: %s;
+                border: 1px solid %s;
                 border-radius: %dpx;
             }
             QPushButton {
                 background: transparent;
                 border: none;
                 padding: 4px 10px;
-                color: #f8fafc;
+                color: %s;
                 font-weight: 600;
                 font-size: 12px;
             }
             QPushButton:hover {
                 background: rgba(51, 65, 85, 0.8);
                 border-radius: 4px;
-                color: #38bdf8;
+                color: %s;
             }
             QPushButton:checked {
-                background: #2563eb;
-                color: #ffffff;
+                background: %s;
+                color: %s;
                 border-radius: 4px;
                 font-weight: bold;
             }
-        """ % tokens.RADIUS_BUTTON)
+        """ % (
+            tokens.BG_CANVAS_PANEL, tokens.BORDER_CANVAS, tokens.RADIUS_BUTTON,
+            tokens.TEXT_ON_CANVAS,
+            tokens.ACCENT,
+            tokens.ACCENT, tokens.TEXT_ON_CANVAS,
+        ))
         self.floating_bar.setFixedHeight(38)
         self.floating_bar.setFixedWidth(360)
 
@@ -197,8 +202,8 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 1: Modeling Config
         card_config = QFrame()
-        card_config.setStyleSheet("QFrame { background: #ffffff; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        card_config.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
         ))
         cfg_layout = QVBoxLayout(card_config)
         cfg_layout.setSpacing(tokens.SPACE_2)
@@ -240,8 +245,8 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 2: 3-Way Interactive Clipping
         card_clip = QFrame()
-        card_clip.setStyleSheet("QFrame { background: #ffffff; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        card_clip.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
         ))
         clip_layout = QVBoxLayout(card_clip)
         clip_layout.setSpacing(tokens.SPACE_2)
@@ -298,8 +303,8 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 3: Simulator Mesh Exporters
         card_export = QFrame()
-        card_export.setStyleSheet("QFrame { background: #ffffff; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        card_export.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
         ))
         exp_layout = QVBoxLayout(card_export)
         exp_layout.setSpacing(tokens.SPACE_2)
@@ -382,8 +387,8 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 4: AI Check Advisor Side Dialog
         card_ai = QFrame()
-        card_ai.setStyleSheet("QFrame { background: #f8fafc; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        card_ai.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_SEARCH, tokens.RADIUS_CARD, tokens.BORDER
         ))
         ai_layout = QVBoxLayout(card_ai)
         ai_layout.setSpacing(tokens.SPACE_2)
@@ -394,7 +399,7 @@ class GeologicalModeling3DPage(QWidget):
 
         desc_ai = QLabel("通过 AI 自动分析当前项目下所有钻孔的深度分层完整性，并校验平行断层共面问题。")
         desc_ai.setWordWrap(True)
-        desc_ai.setStyleSheet("font-size: 11px; color: #64748b;")
+        desc_ai.setStyleSheet("font-size: 11px; color: %s;" % tokens.TEXT_SECONDARY)
         ai_layout.addWidget(desc_ai)
 
         self.btn_ai_advisor = QPushButton("开启 AI 一致性诊断")
@@ -407,8 +412,8 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 5: Well-Seismic Tie Calibration & Analysis Controls
         card_tie = QFrame()
-        card_tie.setStyleSheet("QFrame { background: #ffffff; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        card_tie.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
         ))
         tie_layout = QVBoxLayout(card_tie)
         tie_layout.setSpacing(tokens.SPACE_2)
@@ -432,7 +437,7 @@ class GeologicalModeling3DPage(QWidget):
         tie_layout.addWidget(self.slider_td_shift)
 
         self.label_correlation = QLabel("互相关系数 (Cross-Correlation CC): —")
-        self.label_correlation.setStyleSheet("font-size: 11px; color: #10b981; font-weight: bold;")
+        self.label_correlation.setStyleSheet("font-size: 11px; color: %s; font-weight: bold;" % tokens.SUCCESS)
         tie_layout.addWidget(self.label_correlation)
 
         self.btn_auto_tie = QPushButton("自动互相关对齐 (Auto-Tie)")
@@ -444,8 +449,8 @@ class GeologicalModeling3DPage(QWidget):
 
         # CARD 6: Advanced Multi-Attribute & Crossplot Analysis
         card_adv = QFrame()
-        card_adv.setStyleSheet("QFrame { background: #ffffff; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.RADIUS_CARD, tokens.BORDER
+        card_adv.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
+            tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER
         ))
         adv_layout = QVBoxLayout(card_adv)
         adv_layout.setSpacing(tokens.SPACE_2)

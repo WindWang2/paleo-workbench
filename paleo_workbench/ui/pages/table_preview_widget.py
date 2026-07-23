@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QHeaderView, QSizePolicy, QTableWidget, QTableWidgetItem
 
-from paleo_workbench.tokens import BORDER, FONT_FAMILY
+from paleo_workbench.ui import tokens
 
 
 class TablePreviewWidget(QTableWidget):
@@ -15,51 +15,15 @@ class TablePreviewWidget(QTableWidget):
         self.setShowGrid(True)
         self.auto_fit_columns = True
 
+        # The global QSS (tokens.build_qss) already styles QTableWidget
+        # (background, border, radius, gridline, selection) and QHeaderView::section.
+        # We only add the alternating-row tint here, since
+        # setAlternatingRowColors(True) is enabled and the global sheet has no
+        # alternate-background-color rule.
         self.setStyleSheet(
             f"""
             QTableWidget {{
-                background-color: #ffffff;
-                alternate-background-color: #f8fafc;
-                gridline-color: #e2e8f0;
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                font-family: {FONT_FAMILY};
-                color: #1e293b;
-                selection-background-color: #e0f2fe;
-                selection-color: #0369a1;
-                outline: none;
-            }}
-            QTableWidget::item {{
-                padding: 5px 8px;
-                border-bottom: 1px solid #f1f5f9;
-            }}
-            QTableWidget::item:hover {{
-                background-color: #f1f5f9;
-            }}
-            QTableWidget::item:selected {{
-                background-color: #e0f2fe;
-                color: #0369a1;
-                font-weight: 600;
-            }}
-            QHeaderView::section {{
-                background-color: #f1f5f9;
-                color: #475569;
-                padding: 6px 8px;
-                font-weight: 600;
-                font-size: 12px;
-                border: none;
-                border-bottom: 2px solid #cbd5e1;
-                border-right: 1px solid #e2e8f0;
-            }}
-            QHeaderView::section:horizontal {{
-                border-top: none;
-            }}
-            QHeaderView::section:vertical {{
-                background-color: #f8fafc;
-                color: #94a3b8;
-                font-size: 11px;
-                font-weight: 500;
-                border-right: 1px solid #e2e8f0;
+                alternate-background-color: {tokens.BG_SEARCH};
             }}
             """
         )
@@ -111,21 +75,21 @@ class TablePreviewWidget(QTableWidget):
                 # 1. Depth column (DEPT / DEPTH / 深度)
                 if header_name.upper() in ("DEPT", "DEPTH", "深度"):
                     item.setFont(QFont("Cascadia Code", 9, QFont.Weight.Bold))
-                    item.setForeground(QColor("#1d4ed8"))
-                    item.setBackground(QColor("#f0f9ff"))
+                    item.setForeground(QColor(tokens.PRIMARY))
+                    item.setBackground(QColor(tokens.BG_SELECTION))
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
                 # 2. Curve mnemonic tag formatting in curve definition table
                 elif is_curve_def and column_index == 0:
                     item.setFont(QFont("Cascadia Code", 9, QFont.Weight.Bold))
-                    item.setForeground(QColor("#0f766e"))
-                    item.setBackground(QColor("#f0fdf4"))
+                    item.setForeground(QColor(tokens.TEAL))
+                    item.setBackground(QColor(tokens.BG_SEARCH))
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
 
                 # 3. Unit column formatting
                 elif is_curve_def and column_index == 1:
                     item.setFont(QFont("Cascadia Code", 9))
-                    item.setForeground(QColor("#64748b"))
+                    item.setForeground(QColor(tokens.TEXT_SECONDARY))
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
 
                 # 4. Numeric curve data formatting
@@ -133,7 +97,7 @@ class TablePreviewWidget(QTableWidget):
                     item.setFont(QFont("Cascadia Code", 9))
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                     if val_str == "NaN":
-                        item.setForeground(QColor("#94a3b8"))
+                        item.setForeground(QColor(tokens.PRIMARY_DISABLED))
 
                 self.setItem(row_index, column_index, item)
 

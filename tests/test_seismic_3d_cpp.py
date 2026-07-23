@@ -16,6 +16,13 @@ from paleo_workbench.viz.seismic_3d_api import (
 
 from paleo_workbench.native_backend import disabled_acceleration
 
+# These tests assert C++ seismic_3d_core behaviour; CI only builds map_edit_core,
+# so skip the whole module when the seismic extension is absent.
+pytestmark = pytest.mark.skipif(
+    not HAS_CPP_SEISMIC,
+    reason="seismic_3d_core C++ extension not built in this environment",
+)
+
 
 def test_cpp_extension_is_loaded():
     assert HAS_CPP_SEISMIC is True

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QTabWidget, QVBoxLayout, QWidget
 
-from paleo_workbench.tokens import BORDER, PRIMARY, SPACE_2, TEXT_SECONDARY
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.table_preview_widget import TablePreviewWidget
 
 
@@ -11,51 +11,24 @@ class SummaryTablePreviewWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACE_2)
+        layout.setSpacing(tokens.SPACE_2)
 
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
-        self.message_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11.5px;")
+        self.message_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 11.5px;"
+        )
         layout.addWidget(self.message_label)
 
+        # Tabs inherit their styling from the global QSS (tokens.build_qss),
+        # which already covers QTabWidget::pane and QTabBar::tab adequately.
         self.tabs = QTabWidget(self)
-        self.tabs.setStyleSheet(
-            f"""
-            QTabWidget::pane {{
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                background: #ffffff;
-            }}
-            QTabBar::tab {{
-                background: #f8fafc;
-                color: #64748b;
-                border: 1px solid {BORDER};
-                border-bottom: none;
-                border-top-left-radius: 5px;
-                border-top-right-radius: 5px;
-                padding: 6px 14px;
-                margin-right: 3px;
-                font-weight: 500;
-                font-size: 12px;
-            }}
-            QTabBar::tab:selected {{
-                background: #ffffff;
-                color: {PRIMARY};
-                font-weight: 600;
-                border-bottom: 2px solid {PRIMARY};
-            }}
-            QTabBar::tab:hover:!selected {{
-                background: #f1f5f9;
-                color: #334155;
-            }}
-            """
-        )
 
         # Tab 1: Curve definitions and metadata summary
         self.info_tab = QWidget()
         info_layout = QVBoxLayout(self.info_tab)
-        info_layout.setContentsMargins(SPACE_2, SPACE_2, SPACE_2, SPACE_2)
-        info_layout.setSpacing(SPACE_2)
+        info_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        info_layout.setSpacing(tokens.SPACE_2)
 
         # Stat cards bar
         self.stat_bar = QWidget()
@@ -63,9 +36,15 @@ class SummaryTablePreviewWidget(QWidget):
         stat_layout.setContentsMargins(2, 2, 2, 4)
         stat_layout.setSpacing(8)
 
-        self.chip_well = self._create_stat_chip("📌 井名", "—", "#1e40af", "#eff6ff")
-        self.chip_curves = self._create_stat_chip("📊 曲线数", "0 条", "#0f766e", "#f0fdf4")
-        self.chip_samples = self._create_stat_chip("📏 采样点", "0 点", "#6b21a8", "#faf5ff")
+        self.chip_well = self._create_stat_chip(
+            "📌 井名", "—", tokens.PRIMARY, tokens.BG_SELECTION
+        )
+        self.chip_curves = self._create_stat_chip(
+            "📊 曲线数", "0 条", tokens.TEAL, tokens.BG_SEARCH
+        )
+        self.chip_samples = self._create_stat_chip(
+            "📏 采样点", "0 点", tokens.SUCCESS, tokens.BG_SEARCH
+        )
 
         stat_layout.addWidget(self.chip_well)
         stat_layout.addWidget(self.chip_curves)
@@ -85,8 +64,8 @@ class SummaryTablePreviewWidget(QWidget):
         # Tab 2: Curve data rows preview
         self.data_tab = QWidget()
         data_layout = QVBoxLayout(self.data_tab)
-        data_layout.setContentsMargins(SPACE_2, SPACE_2, SPACE_2, SPACE_2)
-        data_layout.setSpacing(SPACE_2)
+        data_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
+        data_layout.setSpacing(tokens.SPACE_2)
 
         self.data_table = TablePreviewWidget()
         data_layout.addWidget(self.data_table, 1)
@@ -103,7 +82,7 @@ class SummaryTablePreviewWidget(QWidget):
             QWidget {{
                 background-color: {bg_color};
                 border: 1px solid {fg_color}33;
-                border-radius: 6px;
+                border-radius: {tokens.RADIUS_BUTTON}px;
             }}
             """
         )

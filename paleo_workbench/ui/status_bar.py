@@ -15,12 +15,18 @@ def get_engine_status_info() -> tuple[str, str]:
     except Exception:
         has_gl = False
 
+    # Badge colors use the BADGE_* tokens (deeper shades) so white text clears
+    # WCAG 3:1 at bold 11px; the main WARNING/SUCCESS tokens are for body text.
+    _base = (
+        f"color: #ffffff; padding: 2px 8px; border-radius: 4px;"
+        f" font-weight: 600; font-size: {tokens.FONT_SIZE_STATUS};"
+    )
     if has_gl and has_cpp:
-        return "⚡ GPU: OpenGL + C++", "background-color: #059669; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+        return "⚡ GPU: OpenGL + C++", f"background-color: {tokens.BADGE_SUCCESS}; {_base}"
     elif has_cpp:
-        return "💻 CPU: Native C++", "background-color: #2563eb; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+        return "💻 CPU: Native C++", f"background-color: {tokens.BADGE_PRIMARY}; {_base}"
     else:
-        return "🟡 CPU: Python", "background-color: #d97706; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+        return "🟡 CPU: Python", f"background-color: {tokens.BADGE_WARNING}; {_base}"
 
 
 class StatusBar(QFrame):

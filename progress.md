@@ -24,3 +24,24 @@
 - **P4-C coherence 修正 + crossover_fill 删除（2026-07-22）**：`compute_coherence_3d` 的 `sample_window` 生效（垂直窗参与相干计算，边缘截断窗），内层改按列计算 + running-sum 消除逐点重算窗口的冗余，保持 GIL 释放；C++/Python parity 扩展至 sample_window ∈ {1,3,5} 并新增语义测试（不同垂直窗结果必须不同）。`generate_crossover_fill` 删除（无生产调用者且算法不正确）：C++ 函数、pybind 绑定、`well_log_api.py` wrapper 与相关测试一并移除（git 历史可恢复）。`task_plan.md` Phase 9 "C++ 多线程"表述纠偏为"单线程计算（释放 GIL）"（Commits: workbench `2dd6ec8..3275b00`）。
 - **P5 等值面 + 相干性 3D 接入（2026-07-22）**：`marching_cubes_3d` 重写为 Marching Tetrahedra（6 四面体主对角线分解、邻接面一致、法线朝外，水密无孔洞；精确等值点 1e-3 相对偏移消除退化三角形；球面半径/封闭性/空阈值语义测试），Python 保底去点汤改 skimage/ImportError。引擎新增 `Renderer3D.set_isosurface`（GLMeshItem，spacing/origin 变换）与 `geoviz_seismic.isosurface` 注入钩子（仿 downsample 模式，facade 导出），SeismicView 工具栏等值面 checkbox + 阈值 spinbox（200ms 防抖、异常自动取消勾选）；workbench `render_accel` 启动注入 C++ 提取器；相干性 C3 经 `attribute_pipeline` 接入属性下拉。Task 1 曾发生并行会话 feature 分支 coherence 代码混入，经 b2d72b2 修复恢复 P4-C 语义（Commits: engine `134a6d93..664c0c45`，workbench `5d1f1d6..6d1ea6b`）。
 - **连井/地震 P4-B 地震切片交互性能加固**：新增 `SliceReadWorker`（自有 loader、最新优先队列、±2 邻域预取、generation 失效、失败可见化）；SeismicView 缓存未命中改异步（消除 GUI 线程 segyio 卡顿），`_pending_slice` 按轴字典修复 `_on_jump` 三面板不一致；renderer_3d 按轴平面更新；预览控件 80ms 防抖 + resize 缓存缩放 + NumPy 蓝-白-红色表（去 matplotlib）。终审修复 worker 失败路径与面板新鲜度门控。引擎 112+ 通过、workbench 全量 1174 通过（Commits: engine `53d36297..b4e24f23`，workbench `dec3c6a..0ec2906`）。
+
+## Session: 2026-07-23 — 浅色专业 GIS 风视觉系统重设计
+
+将整个应用视觉系统从通用蓝色浅色（Linear/Notion 感）重做为 **Slate 石墨专业 GIS 风**（深板岩蓝主色 `#334155` + 天青强调 `#0ea5e9`，ArcGIS Pro 浅色质感），数据画布区保留深色。架构健康（单一 `tokens.py` 真相源 + 全局 QSS），令牌改动即时全局生效。
+
+| Phase | 内容 | 结果 |
+|-------|------|------|
+| 1 | `tokens.py` 调色板换 Slate；新增 `BG_CANVAS`/`BG_CANVAS_PANEL`/`TEXT_ON_CANVAS`/`BORDER_CANVAS`/`BG_NAV_ACTIVE`/`BG_MENU_HOVER`/`BG_SELECTION` 语义令牌；`build_qss()` 内 4 处内联色（菜单/nav 激活/表格选中）迁令牌；`STEP_COLORS` 重新平衡 | 全局 11 页即时变色 |
+| 2 | 样板页（首页+数据页）：架构零硬编码，Phase 1 后自动就位；仅修首页标题 `#1e56a0`→`tokens.PRIMARY` | 无需额外打磨 |
+| 3 | 迁移 6 文件 ~165 处硬编码 hex 到令牌：`module_relationship.py`（自有调色板→tokens，删 2 处 status_colors dict 复用 `tokens.STATUS_TEXT`）、两个深色对话框（`ai_check_advisor_dialog`/`lithology_crossplot_dialog`）翻浅色 + inline HTML 翻转、两个 table 预览（删冗余内联 QSS 改继承全局规则）、`geological_modeling_3d_page`（画布深色保留→`BG_CANVAS*` 令牌） | 硬编码从 165→4（仅岩性图例语义色） |
+| 3+ | 额外清理：`well_table_panel`（删 `hasattr` 死代码 fallback）、`visualization_page`（旧蓝 checked 态→`PRIMARY`）、`composite_visualization_panel`（`#ffffff`→`BG_SIDEBAR`） | — |
+| 4 | 全量回归 + Python regex 审计确认 `ui/pages/` 硬编码归零（除 4 个岩性图例色） | 1382 passed, 2 skipped |
+
+**新增语义令牌的意义**：`BG_CANVAS*` 系列首次为"数据画布深色区 vs UI 浅色区"建立明确语义边界，替代此前散落在 3D 页的 `#020617`/`rgba(...)` 硬编码；未来地图/地震视口的深色背景可统一引用。
+
+**保留的语义色**（有意为之，非技术债）：`lithology_crossplot_dialog` 的 4 个岩性聚类色（砂岩绿 `#059669`/泥岩红 `#dc2626`/石灰岩蓝 `#2563eb`/花岗岩琥珀 `#d97706`）——图例辨识色，在浅底上调暗以保证可读性。
+
+**验证**：`QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q` → **1382 passed, 2 skipped**（与重设计前基线一致，零回归）。改动 13 文件（`tokens.py` + 9 页面 + 2 测试 + 还原 1 无关文件）。
+
+**下一步**：样板页（首页+数据页）已确认 Slate 效果；剩余 9 页因 token 驱动已自动跟随，可按需单独打磨（mapping GIS 壳、地震页等）。
+

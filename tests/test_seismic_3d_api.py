@@ -10,6 +10,18 @@ from paleo_workbench.viz.seismic_3d_api import (
     marching_cubes_3d,
 )
 
+# marching_cubes_3d needs the C++ extension or scikit-image; CI has neither.
+try:
+    import skimage  # noqa: F401
+    _HAS_SKIMAGE = True
+except ImportError:
+    _HAS_SKIMAGE = False
+
+needs_marching_backend = pytest.mark.skipif(
+    not HAS_CPP_SEISMIC and not _HAS_SKIMAGE,
+    reason="marching_cubes_3d needs seismic_3d_core C++ extension or scikit-image",
+)
+
 
 def test_has_cpp_seismic_flag_is_bool():
     assert isinstance(HAS_CPP_SEISMIC, bool)
@@ -46,6 +58,7 @@ def test_compute_coherence_3d_bounds_and_shape():
     assert np.all(coh <= 1.0)
 
 
+@needs_marching_backend
 def test_marching_cubes_3d_sphere_mesh():
     # Create a 3D grid with a sphere of radius 5 at center (10, 10, 10)
     x, y, z = np.ogrid[:20, :20, :20]
@@ -79,6 +92,7 @@ def _sphere_volume() -> np.ndarray:
     return (25.0 - ((x - 10) ** 2 + (y - 10) ** 2 + (z - 10) ** 2)).astype(np.float32)
 
 
+@needs_marching_backend
 def test_marching_cubes_3d_sphere_surface_radius():
     vol = _sphere_volume()
     verts, faces = marching_cubes_3d(vol, isovalue=0.0)
@@ -91,6 +105,7 @@ def test_marching_cubes_3d_sphere_surface_radius():
     assert np.all(dist <= 5.5)
 
 
+@needs_marching_backend
 def test_marching_cubes_3d_faces_within_bounds():
     vol = _sphere_volume()
     verts, faces = marching_cubes_3d(vol, isovalue=0.0)
@@ -98,6 +113,7 @@ def test_marching_cubes_3d_faces_within_bounds():
     assert faces.max() < verts.shape[0]
 
 
+@needs_marching_backend
 def test_marching_cubes_3d_sphere_mesh_is_watertight():
     from collections import Counter
 
@@ -115,6 +131,7 @@ def test_marching_cubes_3d_sphere_mesh_is_watertight():
     assert all(v == 2 for v in edge_count.values())
 
 
+@needs_marching_backend
 def test_marching_cubes_3d_empty_when_threshold_out_of_range():
     vol = _sphere_volume()
     verts, faces = marching_cubes_3d(vol, isovalue=1.0e9)
@@ -122,6 +139,7 @@ def test_marching_cubes_3d_empty_when_threshold_out_of_range():
     assert faces.shape == (0, 3)
 
 
+@needs_marching_backend
 def test_marching_cubes_3d_parity_with_skimage():
     skm = pytest.importorskip("skimage.measure")
     vol = _sphere_volume()

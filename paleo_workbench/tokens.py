@@ -5,50 +5,68 @@ computed-CSS inspection. See docs/superpowers/specs/2026-07-05-appshell-design.m
 """
 from __future__ import annotations
 
-PRIMARY = "#2563eb"
-ACCENT = "#7c3aed"
-SUCCESS = "#10b981"
-WARNING = "#c47e12"
-ERROR = "#ef4444"  # general error color
-ERROR_RED = "#dc2626"  # severe/QC error color
+# Slate 石墨专业调色板 (ArcGIS Pro 浅色质感): 深板岩蓝主色 + 天青强调。
+PRIMARY = "#334155"        # 深板岩蓝 — 主色 / 强调控件 / 激活态
+ACCENT = "#0ea5e9"         # 天青 — hover 强调 / 微交互高光
+SUCCESS = "#059669"
+WARNING = "#d97706"
+ERROR = "#dc2626"          # general error color
+ERROR_RED = "#b91c1c"      # severe/QC error color
 TEAL = "#0d9488"
-BG_BODY = "#f6f8fa"
+# UI 框架背景层（浅色）
+BG_BODY = "#f1f5f9"        # 冷灰 — 页面画布区底色
 BG_HEADER = "#ffffff"
 BG_SIDEBAR = "#ffffff"
-BG_SEARCH = "#f1f5f9"
+BG_SEARCH = "#f1f5f9"      # 输入框 / hover 底色
 BG_RAIL = "#ffffff"
 BG_RAIL_GRADIENT = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8fafc)"
 BG_RAIL_TOP = "#ffffff"
 BG_RAIL_BOTTOM = "#f8fafc"
 TEXT_PRIMARY = "#0f172a"
-TEXT_SECONDARY = "#64748b"
+TEXT_SECONDARY = "#475569"
 TEXT_DARK = "#020617"
-TEXT_ON_RAIL = "#64748b"
-TEXT_ON_RAIL_ACTIVE = "#2563eb"
+TEXT_ON_RAIL = "#475569"
+TEXT_ON_RAIL_ACTIVE = "#334155"
 BORDER = "#e2e8f0"
 BORDER_STRONG = "#cbd5e1"
 BORDER_LIGHT = "#f1f5f9"
 
-PRIMARY_HOVER = "#1d4ed8"
-PRIMARY_PRESSED = "#1e40af"
-PRIMARY_DISABLED = "#93c5fd"
-FOCUS_RING = PRIMARY
+# 数据画布深色区语义令牌（地图编辑 / 3D 视口 / 地震剖面背景）
+BG_CANVAS = "#1e293b"                # 画布深色底
+BG_CANVAS_PANEL = "rgba(15, 23, 42, 0.88)"   # 画布上浮层栏
+TEXT_ON_CANVAS = "#f1f5f9"           # 画布上文字
+BORDER_CANVAS = "rgba(51, 65, 85, 0.85)"     # 画布上边框
+# QSS 内联语义色（菜单/nav 激活底 / 表格选中）
+BG_NAV_ACTIVE = "#e2e8f0"            # 冷灰中性激活底（非蓝调）
+BG_MENU_HOVER = "#f1f5f9"
+BG_SELECTION = "#dbeafe"             # 表格选中（天青浅）
+# 徽章专用深色（配白字达 WCAG 3:1+；主 WARNING/SUCCESS 用于正文文字色用浅色）
+BADGE_WARNING = "#b45309"            # white-on ≈ 4.0:1
+BADGE_SUCCESS = "#047857"            # white-on ≈ 4.5:1
+BADGE_PRIMARY = "#1e40af"            # white-on ≈ 7.4:1
+
+PRIMARY_HOVER = "#1e293b"
+PRIMARY_PRESSED = "#0f172a"
+PRIMARY_DISABLED = "#94a3b8"
+FOCUS_RING = ACCENT
 
 # Glassmorphism & Micro-interaction Tokens
 BG_GLASS = "rgba(255, 255, 255, 0.88)"
 BG_GLASS_BORDER = "rgba(255, 255, 255, 0.6)"
 SHADOW_SOFT = "0 4px 16px rgba(15, 23, 42, 0.08)"
 SHADOW_CARD = "0 2px 8px rgba(15, 23, 42, 0.05)"
-SHADOW_CARD_HOVER = "0 6px 20px rgba(37, 99, 235, 0.12)"
-HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(37, 99, 235, 0.08), stop:1 rgba(124, 58, 237, 0.04))"
+SHADOW_CARD_HOVER = "0 6px 20px rgba(14, 165, 233, 0.14)"
+HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(14, 165, 233, 0.08), stop:1 rgba(51, 65, 85, 0.04))"
 
 FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif'
-FONT_SIZE_BASE = "12.5px"
-FONT_SIZE_STATUS = "11px"
-FONT_SIZE_SIDEBAR_SECONDARY = "10.5px"
-FONT_SIZE_NAV_LABEL = "9.5px"
+# Modular type scale (base 13px, Minor Third 1.2): ms(-2)=9, ms(-1)=11, ms(0)=13.
+# Professional GIS density: 13px body (not 16px); title distinguished by weight.
+FONT_SIZE_BASE = "13px"              # ms(0) — 正文 / 默认
+FONT_SIZE_STATUS = "11px"            # ms(-1) — 状态栏 / 次要 / 徽章
+FONT_SIZE_SIDEBAR_SECONDARY = "11px"  # ms(-1) — 对齐刻度（原 10.5）
+FONT_SIZE_NAV_LABEL = "9px"          # ms(-2) — 导航标签
 FONT_WEIGHT_NAV_LABEL = "500"
-FONT_SIZE_TITLE = "13px"
+FONT_SIZE_TITLE = "13px"             # ms(0) — 标题靠 weight(600) 区分，非 size
 FONT_WEIGHT_TITLE = "600"
 
 MENU_BAR_HEIGHT = 36
@@ -99,7 +117,7 @@ PAGE_DESCRIPTIONS = [
     "三维地质建模与剖面雕刻",
 ]
 
-STEP_COLORS = ["#1f6fe0", "#0f93a4", "#6f47cf", WARNING, "#e2705b", "#7e8794"]
+STEP_COLORS = ["#334155", "#0ea5e9", "#6366f1", WARNING, "#e2705b", "#7e8794"]
 STEP_LABELS = [
     "数据管理", "数据转换", "制图数据制备",
     "沉积相预测", "古地理图编制", "质控与导出",
@@ -205,6 +223,9 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton:pressed {{
         background-color: {BORDER_LIGHT};
     }}
+    QPushButton:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
     QPushButton#PrimaryButton {{
         background-color: {PRIMARY};
         color: #ffffff;
@@ -218,7 +239,7 @@ def build_qss(density: str = "comfortable") -> str:
         background-color: {PRIMARY_PRESSED};
     }}
     QPushButton#PrimaryButton:disabled {{
-        background-color: {PRIMARY_DISABLED}; color: #ffffff; border: none;
+        background-color: {BG_SEARCH}; color: {TEXT_SECONDARY}; border: 1px solid {BORDER};
     }}
     QPushButton#PrimaryButton:focus {{
         border: 1px solid {FOCUS_RING};
@@ -241,7 +262,7 @@ def build_qss(density: str = "comfortable") -> str:
         border: 1px solid {BORDER};
         border-radius: {RADIUS_CARD}px;
         gridline-color: {BORDER_LIGHT};
-        selection-background-color: #d6e6fb;
+        selection-background-color: {BG_SELECTION};
         selection-color: {TEXT_PRIMARY};
     }}
     QHeaderView::section {{
@@ -273,6 +294,9 @@ def build_qss(density: str = "comfortable") -> str:
         font-weight: 600;
         border-bottom: 2px solid {PRIMARY};
     }}
+    QTabBar::tab:focus {{
+        border-bottom: 2px solid {FOCUS_RING};
+    }}
     QMenuBar {{
         background-color: {BG_HEADER};
         color: {TEXT_PRIMARY};
@@ -289,7 +313,7 @@ def build_qss(density: str = "comfortable") -> str:
         color: {PRIMARY};
     }}
     QMenu {{
-        background-color: #ffffff;
+        background-color: {BG_HEADER};
         color: {TEXT_PRIMARY};
         border: 1px solid {BORDER_STRONG};
         border-radius: 8px;
@@ -302,7 +326,7 @@ def build_qss(density: str = "comfortable") -> str:
         color: {TEXT_PRIMARY};
     }}
     QMenu::item:selected {{
-        background-color: #eff6ff;
+        background-color: {BG_MENU_HOVER};
         color: {PRIMARY};
     }}
     QMenu::separator {{
@@ -316,11 +340,15 @@ def build_qss(density: str = "comfortable") -> str:
         min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
     }}
     QPushButton#ProjectMenuButton,
-    QPushButton#ToolsMenuButton {{
+    QPushButton#ViewMenuButton,
+    QPushButton#ToolsMenuButton,
+    QPushButton#HelpMenuButton {{
         background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
     }}
     QPushButton#ProjectMenuButton:hover,
-    QPushButton#ToolsMenuButton:hover {{ color: {PRIMARY}; }}
+    QPushButton#ViewMenuButton:hover,
+    QPushButton#ToolsMenuButton:hover,
+    QPushButton#HelpMenuButton:hover {{ color: {PRIMARY}; }}
     QPushButton#DataPreviewPdfPrevious,
     QPushButton#DataPreviewPdfNext {{
         border: 1px solid {BORDER};
@@ -384,9 +412,12 @@ def build_qss(density: str = "comfortable") -> str:
         font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
     }}
     QToolButton[navItem="true"]:hover {{ background: {BG_SEARCH}; color: {PRIMARY}; }}
+    QToolButton[navItem="true"]:focus {{ outline: 2px solid {FOCUS_RING}; }}
     QToolButton[navItem="true"][active="true"] {{
-        background: #eff6ff; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
+        background: {BG_NAV_ACTIVE}; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
     }}
+    /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
+    QToolButton:focus {{ border: 1px solid {FOCUS_RING}; }}
     QFrame#TextSidebar {{
         background: {BG_SIDEBAR}; border-right: 1px solid {BORDER};
         min-width: {TEXT_SIDEBAR_WIDTH}px; max-width: {TEXT_SIDEBAR_WIDTH}px;
@@ -474,7 +505,7 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton[stageItem="true"] {{
         background: transparent;
         color: {TEXT_SECONDARY};
-        font-size: 12px;
+        font-size: {FONT_SIZE_BASE};
         font-weight: 500;
         border: 1px solid transparent;
         border-radius: 18px;
@@ -491,7 +522,7 @@ def build_qss(density: str = "comfortable") -> str:
     }}
     QLabel#StepperArrow {{
         color: {TEXT_SECONDARY};
-        font-size: 14px;
+        font-size: 13px;
         font-weight: bold;
     }}
     QFrame#ContextSidebar {{
@@ -501,7 +532,7 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton[subpageItem="true"] {{
         background: {BG_SEARCH};
         color: {TEXT_PRIMARY};
-        font-size: 11.5px;
+        font-size: {FONT_SIZE_STATUS};
         border: 1px solid {BORDER};
         border-radius: {RADIUS_BUTTON}px;
         padding: 4px 8px;

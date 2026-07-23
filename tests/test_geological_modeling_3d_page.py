@@ -8,6 +8,27 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSplitter
 
 from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+
+
+def _opengl_widget_supported() -> bool:
+    """Return True when QOpenGLWidget is realizable on the current Qt platform.
+
+    On the ``offscreen`` platform Qt itself prints
+    "QOpenGLWidget is not supported on this platform" and a GLViewWidget that
+    has been ``show()``-ed will segfault during teardown (GL item destruction
+    against a never-initialized context). ``QOpenGLContext.create()`` and
+    ``makeCurrent()`` both lie here, so the chosen platform (from
+    ``QT_QPA_PLATFORM``) is the only reliable signal. The env var is read at
+    import time, before the pytest-qt ``qapp`` session fixture exists.
+    """
+    platform = os.environ.get("QT_QPA_PLATFORM", "")
+    return platform != "offscreen"
+
+
+requires_real_opengl = pytest.mark.skipif(
+    not _opengl_widget_supported(),
+    reason="GLViewWidget show()/teardown segfaults without a real OpenGL context (offscreen platform)",
+)
 from paleo_workbench.ui.pages.geological_modeling_workers import (
     GeologicalModelingWorker,
     ExportWorker,
@@ -121,6 +142,7 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     assert page.slide_clip_x is not None
 
 
+@requires_real_opengl
 def test_geological_modeling_3d_page_splitter_layout(qtbot):
     page = GeologicalModeling3DPage()
     qtbot.addWidget(page)
