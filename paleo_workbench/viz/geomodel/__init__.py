@@ -21,8 +21,8 @@ from .well_seismic import (
     WellCurve3DGenerator,
     RGBAttributeFusion,
     LithologyCrossplotEngine,
-    CrossWellFenceGenerator,
 )
+from .fence_generator import CrossWellFenceGenerator
 from .advisor import check_boreholes, check_coplanar_faults
 from .exporters import export_to_flac3d, export_to_abaqus
 

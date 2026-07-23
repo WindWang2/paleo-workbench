@@ -1,0 +1,106 @@
+"""FormationTopCorrelator: Interactive multi-well formation top correlation and DTW recommendation engine."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+import numpy as np
+
+from paleo_workbench.viz.dtw_log_matcher import DTWLogMatcher
+
+
+@dataclass
+class TopRecommendation:
+    """DTW automated formation top recommendation."""
+    suggested_depth: float
+    confidence: float
+    dtw_cost: float
+
+
+class FormationTopCorrelator:
+    """Inter-well formation top correlation geometry generator and DTW auto-recommender."""
+
+    def __init__(self, dtw_matcher: DTWLogMatcher | None = None):
+        self.dtw_matcher = dtw_matcher or DTWLogMatcher()
+
+    def compute_correlation_polygons(
+        self,
+        well_a: dict[str, Any],
+        well_b: dict[str, Any],
+        x_a: float,
+        x_b: float,
+        top_names: list[str],
+        shifts: dict[str, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compute polygon quad coordinates for matching top intervals between two adjacent wells.
+
+        Args:
+            well_a: Dict containing well 'name' and 'tops'.
+            well_b: Dict containing well 'name' and 'tops'.
+            x_a: Horizontal X layout position of well A.
+            x_b: Horizontal X layout position of well B.
+            top_names: Ordered list of marker top names (e.g. ["H1", "H2", "H3"]).
+            shifts: Optional dict mapping well name to vertical depth shift value.
+
+        Returns:
+            List of dicts with 'name', 'polygon' array (4, 2), and 'color'.
+        """
+        shift_a = (shifts or {}).get(well_a.get("name", ""), 0.0)
+        shift_b = (shifts or {}).get(well_b.get("name", ""), 0.0)
+
+        tops_a = {t.get("name"): float(t.get("depth", 0.0)) + shift_a for t in well_a.get("tops", [])}
+        tops_b = {t.get("name"): float(t.get("depth", 0.0)) + shift_b for t in well_b.get("tops", [])}
+
+        polygons: list[dict[str, Any]] = []
+
+        for i in range(len(top_names) - 1):
+            t_curr = top_names[i]
+            t_next = top_names[i + 1]
+
+            if t_curr in tops_a and t_next in tops_a and t_curr in tops_b and t_next in tops_b:
+                y1_a = tops_a[t_curr]
+                y2_a = tops_a[t_next]
+                y1_b = tops_b[t_curr]
+                y2_b = tops_b[t_next]
+
+                quad = np.array([
+                    [x_a, y1_a],
+                    [x_b, y1_b],
+                    [x_b, y2_b],
+                    [x_a, y2_a],
+                ], dtype=np.float32)
+
+                polygons.append({
+                    "name": f"{t_curr}-{t_next}",
+                    "polygon": quad,
+                    "color": (0.3, 0.6, 0.9, 0.4),
+                })
+
+        return polygons
+
+    def recommend_top_depth(
+        self,
+        ref_curve: np.ndarray,
+        target_curve: np.ndarray,
+        ref_top_depth: float,
+        start_depth: float = 0.0,
+        depth_step: float = 0.5,
+    ) -> TopRecommendation:
+        """Use DTW curve alignment to recommend corresponding marker top depth in target well."""
+        if len(ref_curve) == 0 or len(target_curve) == 0:
+            return TopRecommendation(suggested_depth=ref_top_depth, confidence=0.0, dtw_cost=999.0)
+
+        # Convert ref_top_depth to index
+        ref_idx = int(np.clip((ref_top_depth - start_depth) / depth_step, 0, len(ref_curve) - 1))
+
+        alignment = self.dtw_matcher.match_curves(ref_curve, target_curve)
+        target_idx = self.dtw_matcher.transfer_top_index(ref_idx, alignment.path_ref, alignment.path_target)
+
+        suggested_depth = start_depth + target_idx * depth_step
+        confidence = float(np.exp(-alignment.cost / (len(ref_curve) * 2.0)))
+
+        return TopRecommendation(
+            suggested_depth=float(suggested_depth),
+            confidence=min(1.0, max(0.0, confidence)),
+            dtw_cost=alignment.cost,
+        )

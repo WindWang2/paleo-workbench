@@ -224,3 +224,53 @@ class CrossWellFenceGenerator:
         all_colors = np.array(face_colors, dtype=np.float32)
 
         return all_verts, all_faces, all_colors
+
+    @staticmethod
+    def extract_seismic_slice(
+        seismic_data: np.ndarray,
+        wells: list[dict],
+        n_samples_per_segment: int = 50,
+    ) -> np.ndarray:
+        """Extract 2D seismic amplitude section along piecewise multi-well trajectory path.
+
+        Args:
+            seismic_data: (NI, NX, NZ) 3D seismic volume array.
+            wells: List of well dicts with 'x' and 'y' grid indices.
+            n_samples_per_segment: Number of spatial interpolation steps per inter-well segment.
+
+        Returns:
+            2D numpy array of shape (NZ, Total_Path_Points) containing extracted seismic amplitude values.
+        """
+        if len(wells) < 2 or seismic_data.ndim != 3:
+            return np.zeros((0, 0), dtype=np.float32)
+
+        ni, nx, nz = seismic_data.shape
+        path_x = []
+        path_y = []
+
+        for i in range(len(wells) - 1):
+            w1 = wells[i]
+            w2 = wells[i + 1]
+            x1, y1 = float(w1.get("x", 0)), float(w1.get("y", 0))
+            x2, y2 = float(w2.get("x", 0)), float(w2.get("y", 0))
+
+            xs = np.linspace(x1, x2, n_samples_per_segment)
+            ys = np.linspace(y1, y2, n_samples_per_segment)
+
+            if i > 0:
+                xs = xs[1:]
+                ys = ys[1:]
+
+            path_x.extend(xs)
+            path_y.extend(ys)
+
+        n_pts = len(path_x)
+        slice_2d = np.zeros((nz, n_pts), dtype=np.float32)
+
+        for p in range(n_pts):
+            ix = int(np.clip(path_x[p], 0, ni - 1))
+            iy = int(np.clip(path_y[p], 0, nx - 1))
+            slice_2d[:, p] = seismic_data[ix, iy, :]
+
+        return slice_2d
+
