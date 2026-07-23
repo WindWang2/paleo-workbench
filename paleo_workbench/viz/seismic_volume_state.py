@@ -1,16 +1,35 @@
-"""SeismicVolumeState: Centralized observer module for 2D/3D slice coordinates & coordinate transforms."""
-
-from __future__ import annotations
-
+import math
+from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
-ensure_geoviz_on_path()
+@dataclass
+class BinGridGeometry:
+    """Bin-grid geometry for mapping inline/crossline to world coordinates."""
 
-from geoviz_seismic.models import BinGridGeometry
+    x_origin: float = 500000.0
+    y_origin: float = 3000000.0
+    il_azimuth_deg: float = 0.0
+    il_spacing_m: float = 25.0
+    xl_spacing_m: float = 25.0
+
+    def xy_to_il_xl(self, x: float, y: float) -> tuple[float, float]:
+        dx = x - self.x_origin
+        dy = y - self.y_origin
+        az = math.radians(self.il_azimuth_deg)
+        cos_a, sin_a = math.cos(az), math.sin(az)
+        il_frac = (-dx * sin_a + dy * cos_a) / self.il_spacing_m
+        xl_frac = (dx * cos_a + dy * sin_a) / self.xl_spacing_m
+        return il_frac, xl_frac
+
+    def il_xl_to_xy(self, il_frac: float, xl_frac: float) -> tuple[float, float]:
+        az = math.radians(self.il_azimuth_deg)
+        cos_a, sin_a = math.cos(az), math.sin(az)
+        x = self.x_origin - il_frac * self.il_spacing_m * sin_a + xl_frac * self.xl_spacing_m * cos_a
+        y = self.y_origin + il_frac * self.il_spacing_m * cos_a + xl_frac * self.xl_spacing_m * sin_a
+        return x, y
 
 
 class SeismicVolumeState(QObject):
