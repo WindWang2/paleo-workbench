@@ -20,7 +20,7 @@ A context-manager seam (`with native_backend.disabled_acceleration():`) allowing
 A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_registry.py`) that encapsulates asset classification, directory scanning, format provider registration (`FormatSpec`), preview widget parsing, and export formatting behind a small 4-method interface (`inspect`, `scan_directory`, `parse_preview`, `export`).
 
 ### VisualizationWorkspace
-A deep composite visualization module (`paleo_workbench/ui/pages/composite_visualization_panel.py` / `viz/workspace.py`) that encapsulates multi-tab widget instantiation, dataset payload routing, synchronized cross-canvas viewports, and snapshot vector/raster exports behind a 2-method interface (`load`, `export_snapshot`), replacing shallow host adapters.
+A deep composite visualization module (`paleo_workbench/ui/pages/composite_visualization_panel.py`) that encapsulates multi-tab widget instantiation, dataset payload routing, synchronized cross-canvas viewports, and snapshot vector/raster exports behind a 2-method interface (`load`, `export_snapshot`), replacing shallow host adapters.
 
 ### FormatSpec
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
@@ -45,7 +45,7 @@ A single-point registration specification data structure that bundles an asset f
 - **AdaptiveVectorExport**: Hybrid SVG/PDF export policy outputting pure vector `<polyline>`/`<polygon>` nodes when trace count < 500, and High-DPI raster embedding when >= 500 traces.
 
 ### FeatureEditor
-A stateful, transactional layer-level map geometry editor module (`paleo_workbench/mapping/feature_editor.py`) encapsulating spatial hit testing, multi-polygon vertex snapping, coincident shared-node synchronized movement, strict topology re-closure/non-self-intersection validation (`TopologyError` auto-rollback), and transaction undo/redo history behind a clean 6-method interface (`load_layer`, `select_at`, `move_selected_vertex`, `add_vertex`, `delete_vertex`, `commit`).
+A stateful, transactional layer-level map geometry editor module (`paleo_workbench/mapping/feature_editor.py`) encapsulating spatial hit testing, multi-polygon vertex snapping, coincident shared-node synchronized movement, strict topology re-closure/non-self-intersection validation (`TopologyError` auto-rollback), event pointer handlers (`on_pointer_down`, `on_pointer_move`, `on_pointer_up`), and transaction undo/redo history (`load_layer`, `select_at`, `move_selected_vertex`, `add_vertex`, `delete_vertex`, `commit`, `undo`, `redo`).
 
 ### ColormapManager
 A deep colormap pipeline module (`geo-viz-engine/.../geoviz_seismic/colormap.py`) that encapsulates colormap construction, LUT caching (keyed on `name:n_colors`, not `id(lut)`), normalize→uint8-index conversion, RGBA color gathering, and GPU/CPU dispatch (lazy cupy import, `_GPU_MIN_ELEMENTS` size guard) behind a two-method interface: `normalize_to_index(data, lut_size, value_range)` returns a uint8 index array; `apply_colormap(data, name, value_range)` returns RGBA. Three rendering backends (QImage Indexed8, GL_R8+GLSL LUT shader, cupy gather) consume these methods as thin display-medium adapters.

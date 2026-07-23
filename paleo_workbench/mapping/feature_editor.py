@@ -267,6 +267,30 @@ class FeatureEditor:
         feat = self.features[feature_id]
         geom = feat.get("geometry", {})
         coords = geom.get("coordinates", [])
+    def _validate_ring_topology_or_rollback(
+        self,
+        feature_id: str,
+        backup_features: dict[str, dict[str, Any]],
+        action_context: str = "operation",
+    ) -> None:
+        """Validate feature ring topology and perform automatic rollback on error."""
+        geom = self.features[feature_id].get("geometry", {})
+        coords = geom.get("coordinates", [])
+        ring = coords[0] if geom.get("type") == "Polygon" else coords
+        errors = native_backend.dispatch("validate_ring", ring)
+        if errors:
+            self.features = backup_features
+            err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
+            raise TopologyError(f"Invalid topology after {action_context} on '{feature_id}': {err_msg}")
+
+    def add_vertex(self, feature_id: str, x: float, y: float, insert_index: int | None = None) -> bool:
+        """Insert a new vertex into polygon ring."""
+        if feature_id not in self.features:
+            raise KeyError(f"Feature '{feature_id}' not found")
+
+        feat = self.features[feature_id]
+        geom = feat.get("geometry", {})
+        coords = geom.get("coordinates", [])
         if not coords:
             return False
 
@@ -276,12 +300,7 @@ class FeatureEditor:
         idx = insert_index if insert_index is not None else len(ring) - 1
         ring.insert(idx, [float(x), float(y)])
 
-        errors = native_backend.dispatch("validate_ring", ring)
-        if errors:
-            self.features = backup_features
-            err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
-            raise TopologyError(f"Invalid topology after vertex insert: {err_msg}")
-
+        self._validate_ring_topology_or_rollback(feature_id, backup_features, "vertex insert")
         return True
 
     def delete_vertex(self, feature_id: str, vertex_index: int) -> bool:
@@ -308,10 +327,5 @@ class FeatureEditor:
         if ring[0] != ring[-1]:
             ring[-1] = list(ring[0])
 
-        errors = native_backend.dispatch("validate_ring", ring)
-        if errors:
-            self.features = backup_features
-            err_msg = ", ".join(e.get("message", e.get("code", "invalid")) for e in errors)
-            raise TopologyError(f"Invalid topology after vertex deletion: {err_msg}")
-
+        self._validate_ring_topology_or_rollback(feature_id, backup_features, "vertex deletion")
         return True

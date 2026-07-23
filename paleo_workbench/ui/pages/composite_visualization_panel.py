@@ -110,13 +110,39 @@ class VisualizationWorkspace(QFrame):
         self.load(payload)
 
     def load(self, payload_or_ref: VizPayload | VizRef) -> None:
-        """Deep interface method: load dataset payload into workspace."""
+        """Deep interface method 1/2: load dataset payload into workspace."""
         if isinstance(payload_or_ref, VizRef):
             payload = VizAdapter().from_ref(payload_or_ref)
         else:
             payload = payload_or_ref
 
         self.load_payload(payload)
+
+    def export_snapshot(
+        self,
+        tab_name: str | None = None,
+        path: Path | str | None = None,
+        format_label: str = "PNG",
+    ) -> Any:
+        """Deep interface method 2/2: export active tab snapshot image or vector file."""
+        widget = self.tabs.currentWidget()
+        if widget is None:
+            return None
+
+        from paleo_workbench.resources.export_service import (
+            export_widget_snapshot,
+            view_export_capabilities,
+        )
+
+        if path is None:
+            return view_export_capabilities(widget)
+
+        return export_widget_snapshot(
+            widget,
+            Path(path),
+            format_label,
+            linked_id="viz_workspace",
+        )
 
     def load_payload(self, payload: VizPayload) -> None:
         if payload.kind == "message":
