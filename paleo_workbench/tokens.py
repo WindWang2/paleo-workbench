@@ -40,6 +40,10 @@ BORDER_CANVAS = "rgba(51, 65, 85, 0.85)"     # 画布上边框
 BG_NAV_ACTIVE = "#e2e8f0"            # 冷灰中性激活底（非蓝调）
 BG_MENU_HOVER = "#f1f5f9"
 BG_SELECTION = "#dbeafe"             # 表格选中（天青浅）
+# 徽章专用深色（配白字达 WCAG 3:1+；主 WARNING/SUCCESS 用于正文文字色用浅色）
+BADGE_WARNING = "#b45309"            # white-on ≈ 4.0:1
+BADGE_SUCCESS = "#047857"            # white-on ≈ 4.5:1
+BADGE_PRIMARY = "#1e40af"            # white-on ≈ 7.4:1
 
 PRIMARY_HOVER = "#1e293b"
 PRIMARY_PRESSED = "#0f172a"
@@ -55,12 +59,14 @@ SHADOW_CARD_HOVER = "0 6px 20px rgba(14, 165, 233, 0.14)"
 HOVER_GLOW = "qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(14, 165, 233, 0.08), stop:1 rgba(51, 65, 85, 0.04))"
 
 FONT_FAMILY = '"PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif'
-FONT_SIZE_BASE = "12.5px"
-FONT_SIZE_STATUS = "11px"
-FONT_SIZE_SIDEBAR_SECONDARY = "10.5px"
-FONT_SIZE_NAV_LABEL = "9.5px"
+# Modular type scale (base 13px, Minor Third 1.2): ms(-2)=9, ms(-1)=11, ms(0)=13.
+# Professional GIS density: 13px body (not 16px); title distinguished by weight.
+FONT_SIZE_BASE = "13px"              # ms(0) — 正文 / 默认
+FONT_SIZE_STATUS = "11px"            # ms(-1) — 状态栏 / 次要 / 徽章
+FONT_SIZE_SIDEBAR_SECONDARY = "11px"  # ms(-1) — 对齐刻度（原 10.5）
+FONT_SIZE_NAV_LABEL = "9px"          # ms(-2) — 导航标签
 FONT_WEIGHT_NAV_LABEL = "500"
-FONT_SIZE_TITLE = "13px"
+FONT_SIZE_TITLE = "13px"             # ms(0) — 标题靠 weight(600) 区分，非 size
 FONT_WEIGHT_TITLE = "600"
 
 MENU_BAR_HEIGHT = 36
@@ -217,6 +223,9 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton:pressed {{
         background-color: {BORDER_LIGHT};
     }}
+    QPushButton:focus {{
+        border: 1px solid {FOCUS_RING};
+    }}
     QPushButton#PrimaryButton {{
         background-color: {PRIMARY};
         color: #ffffff;
@@ -230,7 +239,7 @@ def build_qss(density: str = "comfortable") -> str:
         background-color: {PRIMARY_PRESSED};
     }}
     QPushButton#PrimaryButton:disabled {{
-        background-color: {PRIMARY_DISABLED}; color: #ffffff; border: none;
+        background-color: {BG_SEARCH}; color: {TEXT_SECONDARY}; border: 1px solid {BORDER};
     }}
     QPushButton#PrimaryButton:focus {{
         border: 1px solid {FOCUS_RING};
@@ -284,6 +293,9 @@ def build_qss(density: str = "comfortable") -> str:
         color: {PRIMARY};
         font-weight: 600;
         border-bottom: 2px solid {PRIMARY};
+    }}
+    QTabBar::tab:focus {{
+        border-bottom: 2px solid {FOCUS_RING};
     }}
     QMenuBar {{
         background-color: {BG_HEADER};
@@ -400,9 +412,12 @@ def build_qss(density: str = "comfortable") -> str:
         font-size: {FONT_SIZE_NAV_LABEL}; font-weight: {FONT_WEIGHT_NAV_LABEL};
     }}
     QToolButton[navItem="true"]:hover {{ background: {BG_SEARCH}; color: {PRIMARY}; }}
+    QToolButton[navItem="true"]:focus {{ outline: 2px solid {FOCUS_RING}; }}
     QToolButton[navItem="true"][active="true"] {{
         background: {BG_NAV_ACTIVE}; color: {TEXT_ON_RAIL_ACTIVE}; font-weight: 600;
     }}
+    /* Generic QToolButton focus (covers QToolButton beyond the icon rail) */
+    QToolButton:focus {{ border: 1px solid {FOCUS_RING}; }}
     QFrame#TextSidebar {{
         background: {BG_SIDEBAR}; border-right: 1px solid {BORDER};
         min-width: {TEXT_SIDEBAR_WIDTH}px; max-width: {TEXT_SIDEBAR_WIDTH}px;
@@ -490,7 +505,7 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton[stageItem="true"] {{
         background: transparent;
         color: {TEXT_SECONDARY};
-        font-size: 12px;
+        font-size: {FONT_SIZE_BASE};
         font-weight: 500;
         border: 1px solid transparent;
         border-radius: 18px;
@@ -507,7 +522,7 @@ def build_qss(density: str = "comfortable") -> str:
     }}
     QLabel#StepperArrow {{
         color: {TEXT_SECONDARY};
-        font-size: 14px;
+        font-size: 13px;
         font-weight: bold;
     }}
     QFrame#ContextSidebar {{
@@ -517,7 +532,7 @@ def build_qss(density: str = "comfortable") -> str:
     QPushButton[subpageItem="true"] {{
         background: {BG_SEARCH};
         color: {TEXT_PRIMARY};
-        font-size: 11.5px;
+        font-size: {FONT_SIZE_STATUS};
         border: 1px solid {BORDER};
         border-radius: {RADIUS_BUTTON}px;
         padding: 4px 8px;
