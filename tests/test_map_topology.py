@@ -1,8 +1,12 @@
 from paleo_workbench.mapping.map_edit_api import (
+    SnapCandidateIndex,
+    _snap_point_python,
     snap_point,
+    snap_point_indexed,
     validate_adjacency,
     validate_ring,
 )
+from paleo_workbench.native_backend import native_backend
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 
@@ -70,6 +74,105 @@ def test_snap_outside_tolerance_keeps_point():
     pts = [(0.0, 0.0), (10.0, 0.0)]
     x, y = snap_point(pts, 2.0, 2.0, tol=0.5)
     assert (x, y) == (2.0, 2.0)
+
+
+def _indexed_fixture():
+    records = [
+        {"id": "w1", "kind": "well", "coordinates": [1.0, 2.0]},
+        {
+            "id": "l1",
+            "kind": "line",
+            "coordinates": [[0.0, 0.0], [5.0, 0.0], [5.0, 5.0]],
+        },
+        {
+            "id": "f1",
+            "kind": "facies",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[10.0, 10.0], [12.0, 10.0], [12.0, 12.0], [10.0, 10.0]]],
+            },
+        },
+    ]
+    reference = [(3.0, 3.0)]
+    flat = [
+        (1.0, 2.0),
+        (0.0, 0.0),
+        (5.0, 0.0),
+        (5.0, 5.0),
+        (10.0, 10.0),
+        (12.0, 10.0),
+        (12.0, 12.0),
+        (3.0, 3.0),
+    ]
+    return records, reference, flat
+
+
+def test_snap_point_indexed_matches_snap_point_semantics():
+    records, reference, flat = _indexed_fixture()
+    queries = [
+        (1.1, 2.1, 0.5),      # hit near a point record
+        (50.0, 50.0, 0.5),    # miss: returns the original point
+        (4.9, 0.2, 0.5),      # hit near a line vertex
+        (3.2, 3.1, 0.4),      # hit near a reference point
+        (11.9, 12.1, 0.5),    # hit near a polygon vertex
+        (0.0, 0.0, 0.0),      # zero tolerance, exact vertex
+    ]
+    for qx, qy, tol in queries:
+        assert snap_point_indexed(records, reference, qx, qy, tol) == snap_point(
+            flat, qx, qy, tol=tol
+        )
+
+
+def test_snap_point_indexed_tie_prefers_last_candidate():
+    # Two candidates equidistant from the query: snap_point keeps the LAST one
+    # (linear scan updates on <=). The indexed path must match exactly.
+    records = [
+        {"id": "a", "coordinates": [1.0, 0.0]},
+        {"id": "b", "coordinates": [-1.0, 0.0]},
+    ]
+    expected = snap_point([(1.0, 0.0), (-1.0, 0.0)], 0.0, 0.0, tol=1.0)
+    assert expected == (-1.0, 0.0)
+    assert snap_point_indexed(records, [], 0.0, 0.0, 1.0) == expected
+
+
+def test_snap_point_indexed_uses_reference_points_only_when_provided():
+    records: list[dict[str, object]] = []
+    # Without reference points there is nothing to snap to.
+    assert snap_point_indexed(records, [], 10.1, 20.1, 0.5) == (10.1, 20.1)
+    # Once provided, reference points participate like any other candidate.
+    assert snap_point_indexed(records, [(10.0, 20.0)], 10.1, 20.1, 0.5) == (10.0, 20.0)
+    # Tolerance still applies to reference points.
+    assert snap_point_indexed(records, [(10.0, 20.0)], 11.0, 21.0, 0.5) == (11.0, 21.0)
+
+
+def test_snap_point_indexed_python_grid_fallback_matches_linear():
+    """With acceleration disabled, the cached Python grid must reproduce the
+    pure-Python linear scan exactly (SymmetricParityContract fallback leg)."""
+    records, reference, flat = _indexed_fixture()
+    queries = [
+        (1.1, 2.1, 0.5),
+        (50.0, 50.0, 0.5),
+        (4.9, 0.2, 0.5),
+        (3.2, 3.1, 0.4),
+        (0.0, 0.0, 0.0),
+    ]
+    with native_backend.disabled_acceleration():
+        for qx, qy, tol in queries:
+            assert snap_point_indexed(records, reference, qx, qy, tol) == _snap_point_python(
+                flat, qx, qy, tol
+            )
+
+
+def test_snap_candidate_index_extras_win_ties_like_appended_candidates():
+    """Draft points act as candidates appended after the cached base set."""
+    base = [(float(i), 0.0) for i in range(20)]
+    extras = [(2.1, 0.1), (100.0, 100.0)]
+    index = SnapCandidateIndex(base)
+    with native_backend.disabled_acceleration():
+        for qx, qy, tol in [(2.05, 0.05, 0.5), (50.0, 50.0, 0.5), (0.0, 0.0, 0.0)]:
+            assert index.snap(qx, qy, tol, extras) == _snap_point_python(
+                [*base, *extras], qx, qy, tol
+            )
 
 
 def test_scene_snap_when_enabled(qtbot):

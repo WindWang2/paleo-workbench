@@ -1,10 +1,11 @@
-from paleo_workbench.project.models import PaleoMapDocument
+from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_items import FaciesPolygonItem, WellPointItem
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.mapping.map_edit_api import HAS_CPP, hit_test
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 
 
 def test_has_cpp_is_bool():
@@ -354,3 +355,167 @@ def test_edit_history_appended_on_command_push(qtbot):
     assert doc.edit_history[-1]["action"] == "undo"
     scene.redo()
     assert doc.edit_history[-1]["action"] == "redo"
+
+
+def _big_facies_polygons(count: int = 200, vertices: int = 100) -> list[dict]:
+    """Generate ``count`` polygons with ``vertices`` points each (20,000 total)."""
+    polygons = []
+    for i in range(count):
+        x0 = float((i % 20) * 100)
+        y0 = float((i // 20) * 100)
+        ring = [[x0 + j, y0 + (j % 7)] for j in range(vertices - 1)]
+        ring.append(list(ring[0]))
+        polygons.append({"id": f"f{i}", "name": f"p{i}", "coordinates": ring})
+    return polygons
+
+
+def test_snap_candidate_preparation_once_per_scene_generation(qtbot):
+    """200 features / 20,000 vertices: snap candidates (and the grid index) are
+    prepared once per scene generation, not once per mouse move."""
+    scene = MapEditScene()
+    scene.load_document(
+        PaleoMapDocument(
+            name="big",
+            linked_target_horizon="H",
+            facies_polygons=_big_facies_polygons(),
+        )
+    )
+    assert scene.feature_count() == 200
+    scene.set_snap_enabled(True)
+    scene.set_snap_tolerance(1.0)
+
+    snapped = None
+    for _ in range(50):  # simulated mouse moves
+        snapped = scene._snap_xy(0.4, 0.4)
+    assert scene.snap_candidate_build_count() == 1
+    assert scene._snap_index is not None  # grid index built with the same generation
+    assert snapped == (0.0, 0.0)
+    # Far from every vertex: no snap, still no rebuild.
+    assert scene._snap_xy(37.5, 41.5) == (37.5, 41.5)
+    assert scene.snap_candidate_build_count() == 1
+
+    # A geometry change starts a new generation.
+    scene.translate_features(["f0"], 1000.0, 1000.0)
+    scene._snap_xy(0.4, 0.4)
+    assert scene.snap_candidate_build_count() == 2
+
+
+def test_reference_snap_points_follow_layer_snap_opt_in(qtbot, tmp_path, monkeypatch):
+    """A vector reference point is used for snapping only when its layer opts in."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    source = tmp_path / "ref.geojson"
+    source.write_text("{}")  # must exist so refresh_status keeps "ready"
+    opt_in = MapReferenceLayer(
+        name="snap-on",
+        source_path=str(source),
+        source_kind="vector",
+        source_crs="EPSG:3857",
+        project_crs="EPSG:3857",
+        cache_key="k1",
+        participates_in_snap=True,
+    )
+    opt_out = MapReferenceLayer(
+        name="snap-off",
+        source_path=str(source),
+        source_kind="vector",
+        source_crs="EPSG:3857",
+        project_crs="EPSG:3857",
+        cache_key="k2",
+        participates_in_snap=False,
+    )
+
+    class StubReferenceService:
+        def vector_snap_points(self, layer):
+            return [(0.0, 0.0)] if layer.name == "snap-on" else [(50.0, 50.0)]
+
+    monkeypatch.setattr(page, "_reference_service", StubReferenceService())
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        reference_layers=[opt_in, opt_out],
+    )
+    page.update_state([doc])
+    scene = page.edit_view.scene()
+    assert isinstance(scene, MapEditScene)
+    scene.set_snap_enabled(True)
+    scene.set_snap_tolerance(0.5)
+    # Opt-in layer contributes its snap point...
+    assert scene._snap_xy(0.2, 0.1) == (0.0, 0.0)
+    # ...the opt-out layer's point is never offered to the scene.
+    assert scene._snap_xy(50.1, 50.1) == (50.1, 50.1)
+
+
+def _wheel_up(view, pos=QPointF(100.0, 100.0)) -> None:
+    event = QWheelEvent(
+        pos,
+        pos,
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    view.wheelEvent(event)
+
+
+def test_navigation_lod_engages_on_wheel_and_restores_after_idle(qtbot):
+    view = MapEditView()
+    qtbot.addWidget(view)
+    scene = view.scene()
+    assert isinstance(scene, MapEditScene)
+    scene.load_document(
+        PaleoMapDocument(
+            name="M",
+            linked_target_horizon="H",
+            facies_polygons=[{
+                "id": "f1",
+                "name": "A",
+                "coordinates": [[0, 0], [10, 0], [10, 10], [0, 0]],
+            }],
+        )
+    )
+    before = scene.item_by_id("f1").to_record()["coordinates"]
+    assert view.navigation_lod_active() is False
+
+    _wheel_up(view)
+    assert view.navigation_lod_active() is True
+    assert scene.navigation_lod() is True
+    # LOD is display-only: stored coordinates and the undo stack are untouched.
+    assert scene.item_by_id("f1").to_record()["coordinates"] == before
+    assert scene.command_stack().can_undo() is False
+
+    qtbot.waitUntil(lambda: not view.navigation_lod_active(), timeout=3000)
+    assert scene.navigation_lod() is False
+    assert scene.item_by_id("f1").to_record()["coordinates"] == before
+
+
+def test_navigation_lod_paints_simplified_geometry(qtbot):
+    view = MapEditView()
+    qtbot.addWidget(view)
+    scene = view.scene()
+    assert isinstance(scene, MapEditScene)
+    scene.load_document(
+        PaleoMapDocument(
+            name="M",
+            linked_target_horizon="H",
+            facies_polygons=[{
+                "id": "f1",
+                "name": "A",
+                "coordinates": [[0, 0], [10, 0], [10, 10], [0, 0]],
+            }],
+            well_overlays=[{"id": "w1", "name": "W", "x": 5, "y": 5}],
+        )
+    )
+    before = scene.item_by_id("f1").to_record()["coordinates"]
+    view.resize(320, 240)
+    view._begin_navigation_lod()
+    assert view.navigation_lod_active() is True
+    # Force a repaint through the low-detail draw path (bounding-rect culling
+    # plus simplified geometry for path items).
+    pixmap = view.grab()
+    assert not pixmap.isNull()
+    view._end_navigation_lod()
+    assert view.navigation_lod_active() is False
+    assert scene.item_by_id("f1").to_record()["coordinates"] == before

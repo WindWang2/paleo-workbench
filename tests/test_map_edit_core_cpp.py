@@ -77,3 +77,28 @@ def test_m15_insert_vertex_closed_ring_reclosure():
     api.insert_vertex(ring, 4, 1.0, 1.0)  # insert at end of closed ring
     assert ring[0] == ring[-1]  # first == last maintained
 
+
+def test_snap_indexed_cpp_matches_python_grid():
+    """SymmetricParityContract: map_edit_core.snap_indexed == Python grid."""
+    import map_edit_core
+
+    assert hasattr(map_edit_core, "snap_indexed")
+    candidates = [(float(i), float((i * 7) % 13)) for i in range(64)]
+    records = [
+        {"id": f"p{i}", "coordinates": [x, y]}
+        for i, (x, y) in enumerate(candidates)
+    ]
+    reference = [(3.5, 4.5)]
+    flat = [*candidates, *reference]
+    xs = [p[0] for p in flat]
+    ys = [p[1] for p in flat]
+    for qx, qy, tol in [
+        (0.2, 0.1, 0.5),      # hit
+        (100.0, 100.0, 0.5),  # miss: original point returned
+        (3.4, 4.4, 0.3),      # reference point hit
+    ]:
+        expected = api.snap_point(flat, qx, qy, tol=tol)
+        assert api.snap_point_indexed(records, reference, qx, qy, tol) == expected
+        cx, cy = map_edit_core.snap_indexed(xs, ys, qx, qy, tol)
+        assert (cx, cy) == pytest.approx(expected)
+

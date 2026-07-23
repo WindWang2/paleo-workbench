@@ -243,6 +243,36 @@ std::pair<double, double> snap(
     return {bx, by};
 }
 
+std::pair<double, double> snap_indexed(
+    const std::vector<double>& xs,
+    const std::vector<double>& ys,
+    double x,
+    double y,
+    double tol
+) {
+    // Compact-buffer twin of Python SnapCandidateIndex.snap (parity contract
+    // shared with `_snap_point_python`): nearest candidate within tol wins;
+    // ties resolve to the LAST candidate in buffer order (the scan keeps
+    // updating on <=). A miss returns the ORIGINAL (x, y) unchanged. Buffers
+    // arrive pre-filtered/coerced by the Python façade, so a linear scan over
+    // cache-friendly double arrays is both exact and fast; the grid lives on
+    // the Python fallback side.
+    const double tol_f = std::max(0.0, tol);
+    double best_d2 = tol_f * tol_f;
+    double bx = x;
+    double by = y;
+    const size_t n = std::min(xs.size(), ys.size());
+    for (size_t i = 0; i < n; ++i) {
+        const double d2 = dist2(xs[i], ys[i], x, y);
+        if (d2 <= best_d2) {
+            best_d2 = d2;
+            bx = xs[i];
+            by = ys[i];
+        }
+    }
+    return {bx, by};
+}
+
 void move_feature(py::list coordinates, double dx, double dy) {
     if (py::len(coordinates) == 0) {
         return;
@@ -478,6 +508,15 @@ PYBIND11_MODULE(map_edit_core, m) {
         "snap",
         &snap,
         py::arg("candidates"),
+        py::arg("x"),
+        py::arg("y"),
+        py::arg("tol") = 0.5
+    );
+    m.def(
+        "snap_indexed",
+        &snap_indexed,
+        py::arg("xs"),
+        py::arg("ys"),
         py::arg("x"),
         py::arg("y"),
         py::arg("tol") = 0.5

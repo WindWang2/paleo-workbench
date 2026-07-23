@@ -90,6 +90,13 @@ class MapEditScene(QGraphicsScene):
             "label": True,
         }
         self._snap_manager = MapSnapManager(_DEFAULT_SNAP_TOL)
+        # Grid snap index, rebuilt only when the snap candidate generation
+        # (MapSnapManager.build_count) changes — never per mouse move.
+        self._snap_index: api.SnapCandidateIndex | None = None
+        self._snap_index_build = -1
+        # Navigation display LOD: while active, path items paint simplified
+        # bounding-box geometry. Display-only — never touches coordinates.
+        self._navigation_lod = False
         self._draft_manager = MapDraftManager(self)
         self.selectionChanged.connect(self._on_selection_changed)
 
@@ -1078,9 +1085,20 @@ class MapEditScene(QGraphicsScene):
     # --- snap ---------------------------------------------------------------
 
     def _snap_xy(self, x: float, y: float) -> tuple[float, float]:
-        return self._snap_manager.snap_xy(
-            x, y, self._items_by_id.values(), self.layer_is_visible, self._draft_manager.points
-        )
+        manager = self._snap_manager
+        if not manager.enabled:
+            return float(x), float(y)
+        # Candidate preparation happens once per scene generation: the manager
+        # rebuilds its cache (bumping build_count) only after geometry,
+        # reference-snap, or visibility changes; the grid index follows it.
+        candidates = manager.get_candidates(self._items_by_id.values(), self.layer_is_visible)
+        build = manager.build_count()
+        if self._snap_index is None or self._snap_index_build != build:
+            self._snap_index = api.SnapCandidateIndex(candidates)
+            self._snap_index_build = build
+        draft = self._draft_manager.points
+        extras = [tuple(p) for p in draft] if draft else []
+        return self._snap_index.snap(float(x), float(y), manager.tolerance, extras)
 
     def _invalidate_snap_candidates(self) -> None:
         self._snap_manager.invalidate_candidates()
@@ -1092,6 +1110,51 @@ class MapEditScene(QGraphicsScene):
         return self._snap_manager.get_candidates(
             self._items_by_id.values(), self.layer_is_visible, self._draft_manager.points
         )
+
+    # --- navigation display LOD ----------------------------------------------
+
+    def set_navigation_lod(self, active: bool) -> None:
+        """Toggle low-detail navigation rendering (display-only).
+
+        While active, path items paint simplified bounding-box geometry; stored
+        coordinates and command objects are never modified.
+        """
+        active_b = bool(active)
+        if self._navigation_lod == active_b:
+            return
+        self._navigation_lod = active_b
+        self.update()
+
+    def navigation_lod(self) -> bool:
+        return self._navigation_lod
+
+    def drawItems(self, painter, items, options, widget=None) -> None:
+        if not self._navigation_lod:
+            super().drawItems(painter, items, options, widget)
+            return
+        inverted, ok = painter.combinedTransform().inverted()
+        exposed = (
+            inverted.mapRect(QRectF(painter.viewport()))
+            if ok
+            else self.sceneRect()
+        )
+        for item, option in zip(items, options):
+            if not isinstance(item, (FaciesPolygonItem, LineItem)):
+                painter.save()
+                painter.setWorldTransform(item.sceneTransform(), True)
+                item.paint(painter, option, widget)
+                painter.restore()
+                continue
+            # Cull against the item's existing bounding rectangle before
+            # painting its simplified (bounding-box) stand-in geometry.
+            if not item.sceneBoundingRect().intersects(exposed):
+                continue
+            painter.save()
+            painter.setWorldTransform(item.sceneTransform(), True)
+            painter.setPen(item.pen())
+            painter.setBrush(item.brush())
+            painter.drawRect(item.boundingRect())
+            painter.restore()
 
     # --- item factories -----------------------------------------------------
 

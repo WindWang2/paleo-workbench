@@ -7,6 +7,7 @@ which backend is active. See ``CPP_EXTENSION.md`` for native signatures.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from paleo_workbench.native_backend import native_backend
@@ -443,6 +444,198 @@ def snap_point(
         except Exception:
             pass
     return _snap_point_python(candidates, x, y, tol)
+
+
+def _coerce_snap_point(raw: object) -> tuple[float, float] | None:
+    """Coerce one candidate to (x, y); None when malformed (same filter as
+    ``_snap_point_python``: skip None / short / non-numeric entries)."""
+    if raw is None:
+        return None
+    try:
+        if len(raw) < 2:  # type: ignore[arg-type]
+            return None
+    except TypeError:
+        return None
+    try:
+        return float(raw[0]), float(raw[1])  # type: ignore[index]
+    except (TypeError, ValueError):
+        return None
+
+
+def _snap_candidates_from_records(
+    records: list[dict[str, Any]] | None,
+) -> list[tuple[float, float]]:
+    """Flatten editable feature records to snap candidate vertices, in order.
+
+    Point records contribute one vertex; ring/line records contribute every
+    vertex; Polygon/MultiPolygon ``geometry`` records contribute every ring
+    vertex. Matches the candidate order MapSnapManager builds from scene items.
+    """
+    pts: list[tuple[float, float]] = []
+    for record in records or []:
+        if not isinstance(record, dict):
+            continue
+        geometry = record.get("geometry")
+        if isinstance(geometry, dict) and geometry.get("type") in {"Polygon", "MultiPolygon"}:
+            raw_polygons = geometry.get("coordinates") or []
+            polygons = [raw_polygons] if geometry.get("type") == "Polygon" else raw_polygons
+            for polygon in polygons:
+                if not isinstance(polygon, list):
+                    continue
+                for ring in polygon:
+                    if not isinstance(ring, list):
+                        continue
+                    for raw in ring:
+                        point = _coerce_snap_point(raw)
+                        if point is not None:
+                            pts.append(point)
+            continue
+        coords = record.get("coordinates")
+        if not isinstance(coords, list) or not coords:
+            continue
+        first = coords[0]
+        if isinstance(first, (int, float)):
+            point = _coerce_snap_point(coords)
+            if point is not None:
+                pts.append(point)
+            continue
+        for raw in coords:
+            point = _coerce_snap_point(raw)
+            if point is not None:
+                pts.append(point)
+    return pts
+
+
+class SnapCandidateIndex:
+    """Uniform-grid index over snap candidates; built once, queried per mouse move.
+
+    Semantics are identical to ``snap_point`` over the same candidate list:
+    the nearest candidate within tolerance wins, ties resolve to the LAST
+    candidate in input order, and a miss returns the original point. When
+    ``map_edit_core.snap_indexed`` is available it answers over the compact
+    ``xs``/``ys`` buffers; any native error falls back to the Python grid.
+    """
+
+    __slots__ = ("_xs", "_ys", "_grid", "_grid_cell")
+
+    def __init__(
+        self,
+        candidates: list[tuple[float, float]] | list[list[float]] | None = None,
+    ) -> None:
+        xs: list[float] = []
+        ys: list[float] = []
+        for raw in candidates or []:
+            point = _coerce_snap_point(raw)
+            if point is not None:
+                xs.append(point[0])
+                ys.append(point[1])
+        self._xs = xs
+        self._ys = ys
+        self._grid: dict[tuple[int, int], list[int]] | None = None
+        self._grid_cell = 0.0
+
+    def __len__(self) -> int:
+        return len(self._xs)
+
+    def candidates(self) -> list[tuple[float, float]]:
+        return list(zip(self._xs, self._ys))
+
+    def _ensure_grid(self, cell: float) -> dict[tuple[int, int], list[int]]:
+        if self._grid is not None and self._grid_cell == cell:
+            return self._grid
+        grid: dict[tuple[int, int], list[int]] = {}
+        for i in range(len(self._xs)):
+            key = (math.floor(self._xs[i] / cell), math.floor(self._ys[i] / cell))
+            grid.setdefault(key, []).append(i)
+        self._grid = grid
+        self._grid_cell = cell
+        return grid
+
+    def snap(
+        self,
+        x: float,
+        y: float,
+        tol: float = 0.5,
+        extra_candidates: list[tuple[float, float]] | list[list[float]] | None = None,
+    ) -> tuple[float, float]:
+        """Snap (x, y); ``extra_candidates`` act as if appended after the base
+        candidates (they win ties), without invalidating the cached grid."""
+        px, py = float(x), float(y)
+        tol_f = max(0.0, float(tol))
+        extras: list[tuple[float, float]] = []
+        for raw in extra_candidates or []:
+            point = _coerce_snap_point(raw)
+            if point is not None:
+                extras.append(point)
+        if not extras:
+            cpp = _cpp_fn("snap_indexed")
+            if cpp is not None:
+                try:
+                    result = cpp(self._xs, self._ys, px, py, tol_f)
+                    if result is not None and len(result) >= 2:
+                        return float(result[0]), float(result[1])
+                except Exception:
+                    pass
+        best_d2 = tol_f * tol_f
+        best: tuple[float, float] | None = None
+        best_idx = -1
+        if self._xs:
+            cell = max(tol_f, 1e-9)
+            grid = self._ensure_grid(cell)
+            # Any candidate within tol lies in the cells overlapping the
+            # tolerance-expanded query box, so only those need scanning.
+            cx0 = math.floor((px - tol_f) / cell)
+            cx1 = math.floor((px + tol_f) / cell)
+            cy0 = math.floor((py - tol_f) / cell)
+            cy1 = math.floor((py + tol_f) / cell)
+            for cx in range(cx0, cx1 + 1):
+                for cy in range(cy0, cy1 + 1):
+                    for idx in grid.get((cx, cy), ()):
+                        dx = self._xs[idx] - px
+                        dy = self._ys[idx] - py
+                        d2 = dx * dx + dy * dy
+                        # Reproduce the linear scan's <= update: the smallest
+                        # d2 wins; among equals the LAST candidate in order.
+                        if d2 < best_d2 or (d2 == best_d2 and idx > best_idx):
+                            best_d2 = d2
+                            best = (self._xs[idx], self._ys[idx])
+                            best_idx = idx
+        for i, (ex, ey) in enumerate(extras):
+            idx = len(self._xs) + i
+            dx = ex - px
+            dy = ey - py
+            d2 = dx * dx + dy * dy
+            if d2 < best_d2 or (d2 == best_d2 and idx > best_idx):
+                best_d2 = d2
+                best = (ex, ey)
+                best_idx = idx
+        return best if best is not None else (px, py)
+
+
+def snap_point_indexed(
+    editable_records: list[dict[str, object]],
+    reference_points: list[tuple[float, float]],
+    x: float,
+    y: float,
+    tolerance: float,
+) -> tuple[float, float]:
+    """Snap (x, y) to the nearest vertex of ``editable_records`` or ``reference_points``.
+
+    Identical semantics to ``snap_point`` over the flattened candidate set
+    (record vertices in record order, then reference points). Queries go
+    through a uniform grid index — or ``map_edit_core.snap_indexed`` over
+    compact coordinate buffers when the extension is built — so repeated
+    snaps do not pay a full linear scan per mouse move.
+    """
+    candidates: list[tuple[float, float]] = _snap_candidates_from_records(
+        editable_records  # type: ignore[arg-type]
+    )
+    for raw in reference_points or []:
+        point = _coerce_snap_point(raw)
+        if point is not None:
+            candidates.append(point)
+    index = SnapCandidateIndex(candidates)
+    return index.snap(x, y, tolerance)
 
 
 # ---------------------------------------------------------------------------
