@@ -17,7 +17,14 @@ from paleo_workbench.viz.seismic_3d_api import (
     fast_resample_volume_3d,
     fast_slice_extract,
 )
-import seismic_3d_core
+
+# Defer the hard C++ import so missing extensions skip via pytestmark below
+# instead of crashing collection. ``seismic_3d_core`` is only referenced inside
+# test bodies guarded by ``HAS_CPP_SEISMIC``.
+try:
+    import seismic_3d_core  # noqa: F401
+except ImportError:
+    pass
 
 pytestmark = pytest.mark.skipif(
     not HAS_CPP_SEISMIC,

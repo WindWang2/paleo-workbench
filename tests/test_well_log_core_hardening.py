@@ -17,7 +17,14 @@ from paleo_workbench.viz.well_log_api import (
     fast_las_parse_data,
     minmax_downsample,
 )
-import well_log_core
+
+# Defer the hard C++ import so missing extensions skip via pytestmark below
+# instead of crashing collection. ``well_log_core`` is only referenced inside
+# test bodies guarded by ``HAS_CPP_WELL_LOG``.
+try:
+    import well_log_core  # noqa: F401
+except ImportError:
+    pass
 
 pytestmark = pytest.mark.skipif(
     not HAS_CPP_WELL_LOG,
