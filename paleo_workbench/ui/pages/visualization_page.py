@@ -256,10 +256,13 @@ class VisualizationPage(QWidget):
         return doc
 
     def _on_coord_toggle_clicked(self) -> None:
-        """Dispatch Geographic/Grid coordinate mode toggle to embedded seismic views."""
+        """Toggle Geographic/Grid coordinate mode label.
+
+        Note: the actual coordinate-mode propagation happens on the 3D
+        geological-modeling page (which owns the GL widget's set_coord_mode).
+        This button on the visualization page only relabels itself — the
+        seismic view panel does not expose a coord-mode toggle (the dead
+        hasattr(sv, "btn_coord") branch was removed).
+        """
         is_geo = self.btn_coord.isChecked()
         self.btn_coord.setText("🌐 地理(X/Y)" if is_geo else "📍 网格(IL/XL)")
-        sv = getattr(self.composite_panel, "seismic_view", None)
-        if sv is not None and hasattr(sv, "btn_coord"):
-            sv.btn_coord.setChecked(is_geo)
-            sv._toggle_coord_mode()

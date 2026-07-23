@@ -84,15 +84,31 @@ def _load_las_fast(file_path: Path) -> Any | None:
     )
 
 
+# File-level cache: parse each LAS/XML once, reuse on subsequent page switches
+# or re-renders. Keyed on (path, mtime) so a file change invalidates. The parse
+# is ~112ms (after header_only + model_construct optimizations) which is
+# noticeable on the GUI thread; caching avoids re-paying it every time the user
+# switches tabs or the visualization page refreshes.
+_las_cache: dict[tuple[str, float], Any] = {}
+
+
 def load_well_log_from_path(path: str) -> Any | None:
     """Return engine ``WellLogData``; LAS prefers the C++ fast channel.
 
     Supports both LAS and XML well log files. Falls back to the engine's
     bounded preview loader whenever the fast channel cannot handle a file.
+    Results are cached per (path, mtime) to avoid re-parsing on repeat access.
     """
     file_path = Path(path)
     if not file_path.is_file():
         return None
+
+    # Cache check: if we've parsed this file before and it hasn't changed,
+    # return the cached result without touching disk again.
+    cache_key = (str(file_path), file_path.stat().st_mtime)
+    cached = _las_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         from geoviz import load_las_preview, load_xml_preview
     except Exception:
@@ -100,21 +116,26 @@ def load_well_log_from_path(path: str) -> Any | None:
 
     try:
         if file_path.suffix.lower() == ".xml":
-            return load_xml_preview(
+            result = load_xml_preview(
                 str(file_path),
                 max_curves=MAX_CURVES,
                 max_samples=MAX_SAMPLES,
             )
-        try:
-            fast = _load_las_fast(file_path)
-        except Exception:
-            fast = None
-        if fast is not None:
-            return fast
-        return load_las_preview(
-            str(file_path),
-            max_curves=MAX_CURVES,
-            max_samples=MAX_SAMPLES,
-        )
+        else:
+            try:
+                fast = _load_las_fast(file_path)
+            except Exception:
+                fast = None
+            if fast is not None:
+                result = fast
+            else:
+                result = load_las_preview(
+                    str(file_path),
+                    max_curves=MAX_CURVES,
+                    max_samples=MAX_SAMPLES,
+                )
+        if result is not None:
+            _las_cache[cache_key] = result
+        return result
     except Exception:
         return None
