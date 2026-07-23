@@ -74,82 +74,82 @@ class ModuleCard(QFrame):
         for item in items:
             lbl = QLabel(item)
             lbl.setWordWrap(True)
-            lbl.setStyleSheet("font-size: 11.5px; color: #28323f;")
+            lbl.setStyleSheet(f"font-size: 11.5px; color: {tokens.TEXT_PRIMARY};")
             body_layout.addWidget(lbl)
 
         # Inputs & Outputs section
         if inputs or outputs:
             divider = QFrame()
             divider.setFrameShape(QFrame.Shape.HLine)
-            divider.setStyleSheet("color: #e2e6ec; background-color: #e2e6ec; max-height: 1px;")
+            divider.setStyleSheet(f"color: {tokens.BORDER}; background-color: {tokens.BORDER}; max-height: 1px;")
             body_layout.addWidget(divider)
 
         if inputs:
             inp_lbl = QLabel(f"<b>输入:</b> " + ", ".join(inputs))
             inp_lbl.setWordWrap(True)
-            inp_lbl.setStyleSheet("color: #7e8794; font-size: 10.5px;")
+            inp_lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 10.5px;")
             body_layout.addWidget(inp_lbl)
 
         if outputs:
             out_lbl = QLabel(f"<b>输出:</b> " + ", ".join(outputs))
             out_lbl.setWordWrap(True)
-            out_lbl.setStyleSheet("color: #1f6fe0; font-size: 10.5px; font-weight: 500;")
+            out_lbl.setStyleSheet(f"color: {tokens.ACCENT}; font-size: 10.5px; font-weight: 500;")
             body_layout.addWidget(out_lbl)
 
         layout.addWidget(self.body)
 
         # Styling
         if is_accented:
-            # Golden card styling for Mapping
-            self.header.setStyleSheet("""
-                QFrame#ModuleCardHeader {
-                    background-color: #ff9f1c;
+            # Accent card styling for Mapping (天青强调，slate 调色板下的高亮卡片)
+            self.header.setStyleSheet(f"""
+                QFrame#ModuleCardHeader {{
+                    background-color: {tokens.ACCENT};
                     border-top-left-radius: 8px;
                     border-top-right-radius: 8px;
-                }
-                QLabel#ModuleCardTitle {
+                }}
+                QLabel#ModuleCardTitle {{
                     color: white;
                     background-color: transparent;
                     font-weight: bold;
                     font-size: 12.5px;
-                }
+                }}
             """)
-            self.setStyleSheet("""
-                QFrame#ModuleCard {
-                    background-color: #fffaf0;
-                    border: 1px solid #ffcc80;
+            self.setStyleSheet(f"""
+                QFrame#ModuleCard {{
+                    background-color: {tokens.BG_SEARCH};
+                    border: 1px solid {tokens.BORDER_STRONG};
                     border-radius: 8px;
-                }
-                QFrame#ModuleCard:hover {
-                    border-color: #ff9f1c;
-                    background-color: #fff5e6;
-                }
+                }}
+                QFrame#ModuleCard:hover {{
+                    border-color: {tokens.ACCENT};
+                    background-color: {tokens.BG_NAV_ACTIVE};
+                }}
             """)
         else:
-            # Blue card styling
-            self.header.setStyleSheet("""
-                QFrame#ModuleCardHeader {
-                    background-color: #1e56a0;
+            # Slate card styling (默认深板岩蓝头部)
+            self.header.setStyleSheet(f"""
+                QFrame#ModuleCardHeader {{
+                    background-color: {tokens.PRIMARY};
                     border-top-left-radius: 8px;
                     border-top-right-radius: 8px;
-                }
-                QLabel#ModuleCardTitle {
+                }}
+                QLabel#ModuleCardTitle {{
                     color: white;
                     background-color: transparent;
                     font-weight: bold;
                     font-size: 12.5px;
-                }
+                }}
             """)
-            self.setStyleSheet("""
-                QFrame#ModuleCard {
-                    background-color: #f7faff;
-                    border: 1px solid #c8d6e5;
+            self.setStyleSheet(f"""
+                QFrame#ModuleCard {{
+                    background-color: {tokens.BG_SIDEBAR};
+                    border: 1px solid {tokens.BORDER};
                     border-radius: 8px;
-                }
-                QFrame#ModuleCard:hover {
-                    border-color: #1e56a0;
-                    background-color: #edf4fe;
-                }
+                }}
+                QFrame#ModuleCard:hover {{
+                    border-color: {tokens.PRIMARY};
+                    background-color: {tokens.BG_NAV_ACTIVE};
+                }}
             """)
 
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -160,22 +160,16 @@ class ModuleCard(QFrame):
         super().mousePressEvent(event)
 
     def set_status(self, status: str) -> None:
-        status_text = {
-            "complete": "完成",
-            "running": "进行中",
-            "pending": "待开始",
-            "warning": "警告",
-            "failed": "失败",
-        }
+        status_text = tokens.STATUS_TEXT
         status_colors = {
-            "complete": "#22c55e",  # green
-            "running": "#3b82f6",   # blue
-            "pending": "#7e8794",   # gray
-            "warning": "#eab308",   # amber
-            "failed": "#ef4444",    # red
+            "complete": tokens.SUCCESS,
+            "running": tokens.PRIMARY,
+            "pending": tokens.TEXT_SECONDARY,
+            "warning": tokens.WARNING,
+            "failed": tokens.ERROR_RED,
         }
         txt = status_text.get(status, "待开始")
-        color = status_colors.get(status, "#7e8794")
+        color = status_colors.get(status, tokens.TEXT_SECONDARY)
         self.status_badge.setText(txt)
         self.status_badge.setStyleSheet(f"""
             font-size: 10px;
@@ -195,16 +189,16 @@ class SubCard(QFrame):
         super().__init__(parent)
         self.page_index = page_index
         self.setObjectName("SubCard")
-        self.setStyleSheet("""
-            QFrame#SubCard {
-                background-color: white;
-                border: 1px solid #dce0e6;
+        self.setStyleSheet(f"""
+            QFrame#SubCard {{
+                background-color: {tokens.BG_SIDEBAR};
+                border: 1px solid {tokens.BORDER};
                 border-radius: 6px;
-            }
-            QFrame#SubCard:hover {
-                border-color: #1f6fe0;
-                background-color: #f7faff;
-            }
+            }}
+            QFrame#SubCard:hover {{
+                border-color: {tokens.ACCENT};
+                background-color: {tokens.BG_NAV_ACTIVE};
+            }}
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -215,7 +209,7 @@ class SubCard(QFrame):
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         text_lbl = QLabel(title)
-        text_lbl.setStyleSheet("font-weight: 500; font-size: 11px; color: #28323f;")
+        text_lbl.setStyleSheet(f"font-weight: 500; font-size: 11px; color: {tokens.TEXT_PRIMARY};")
         text_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(icon_lbl)
@@ -287,44 +281,38 @@ class DatabaseModuleCard(QFrame):
 
         layout.addWidget(self.body)
 
-        self.header.setStyleSheet("""
-            QFrame#ModuleCardHeader {
-                background-color: #1e56a0;
+        self.header.setStyleSheet(f"""
+            QFrame#ModuleCardHeader {{
+                background-color: {tokens.PRIMARY};
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
-            }
-            QLabel#ModuleCardTitle {
+            }}
+            QLabel#ModuleCardTitle {{
                 color: white;
                 background-color: transparent;
                 font-weight: bold;
                 font-size: 12.5px;
-            }
+            }}
         """)
-        self.setStyleSheet("""
-            QFrame#DatabaseModuleCard {
-                background-color: #f7faff;
-                border: 1px solid #c8d6e5;
+        self.setStyleSheet(f"""
+            QFrame#DatabaseModuleCard {{
+                background-color: {tokens.BG_SIDEBAR};
+                border: 1px solid {tokens.BORDER};
                 border-radius: 8px;
-            }
+            }}
         """)
 
     def set_status(self, status: str) -> None:
-        status_text = {
-            "complete": "完成",
-            "running": "进行中",
-            "pending": "待开始",
-            "warning": "警告",
-            "failed": "失败",
-        }
+        status_text = tokens.STATUS_TEXT
         status_colors = {
-            "complete": "#22c55e",  # green
-            "running": "#3b82f6",   # blue
-            "pending": "#7e8794",   # gray
-            "warning": "#eab308",   # amber
-            "failed": "#ef4444",    # red
+            "complete": tokens.SUCCESS,
+            "running": tokens.PRIMARY,
+            "pending": tokens.TEXT_SECONDARY,
+            "warning": tokens.WARNING,
+            "failed": tokens.ERROR_RED,
         }
         txt = status_text.get(status, "待开始")
-        color = status_colors.get(status, "#7e8794")
+        color = status_colors.get(status, tokens.TEXT_SECONDARY)
         self.status_badge.setText(txt)
         self.status_badge.setStyleSheet(f"""
             font-size: 10px;
@@ -341,12 +329,12 @@ class LegendWidget(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("LegendWidget")
-        self.setStyleSheet("""
-            QFrame#LegendWidget {
-                background-color: #f8fafc;
-                border: 1px solid #e2e8f0;
+        self.setStyleSheet(f"""
+            QFrame#LegendWidget {{
+                background-color: {tokens.BG_RAIL_BOTTOM};
+                border: 1px solid {tokens.BORDER};
                 border-radius: 6px;
-            }
+            }}
         """)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 6, 16, 6)
@@ -367,20 +355,20 @@ class LegendWidget(QFrame):
             indicator = QLabel()
             if style == "solid":
                 indicator.setText("──➤")
-                indicator.setStyleSheet("color: #1e56a0; font-weight: bold; font-size: 11px;")
+                indicator.setStyleSheet(f"color: {tokens.PRIMARY}; font-weight: bold; font-size: 11px;")
             elif style == "double":
                 indicator.setText("◀──▶")
-                indicator.setStyleSheet("color: #1e56a0; font-weight: bold; font-size: 11px;")
+                indicator.setStyleSheet(f"color: {tokens.PRIMARY}; font-weight: bold; font-size: 11px;")
             elif style == "dashed":
                 indicator.setText("· · ➤")
-                indicator.setStyleSheet("color: #1e56a0; font-weight: bold; font-size: 11px;")
+                indicator.setStyleSheet(f"color: {tokens.ACCENT}; font-weight: bold; font-size: 11px;")
             elif style == "rect":
                 indicator.setText(" ")
                 indicator.setFixedSize(14, 10)
-                indicator.setStyleSheet("background-color: #f7faff; border: 1px solid #c8d6e5; border-radius: 2px;")
+                indicator.setStyleSheet(f"background-color: {tokens.BG_SIDEBAR}; border: 1px solid {tokens.BORDER}; border-radius: 2px;")
 
             lbl = QLabel(text)
-            lbl.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 500;")
+            lbl.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px; font-weight: 500;")
 
             lbl_layout.addWidget(indicator)
             lbl_layout.addWidget(lbl)
@@ -556,8 +544,10 @@ class ModuleRelationshipCanvas(QWidget):
         text: str = "",
         text_pos: str = "top",
         is_dashed: bool = False,
-        color_hex: str = "#1e56a0",
+        color_hex: str | None = None,
     ) -> None:
+        if color_hex is None:
+            color_hex = tokens.PRIMARY
         color = QColor(color_hex)
         pen = QPen(color, 1.5)
         if is_dashed:
@@ -587,7 +577,7 @@ class ModuleRelationshipCanvas(QWidget):
             font = self.font()
             font.setPointSize(9)
             self_painter.setFont(font)
-            self_painter.setPen(QColor("#64748b"))
+            self_painter.setPen(QColor(tokens.TEXT_SECONDARY))
 
             mid_x = (start.x() + end.x()) / 2
             mid_y = (start.y() + end.y()) / 2
@@ -699,7 +689,7 @@ class ModuleRelationshipCanvas(QWidget):
             QPoint(x_well, y_top),
             QPoint(x_well, self.card_well.geometry().bottom() + 4),
             is_dashed=True,
-            color_hex="#3b82f6",
+            color_hex=tokens.ACCENT,
         )
 
         x_seismic = self.card_seismic.geometry().center().x()
@@ -708,7 +698,7 @@ class ModuleRelationshipCanvas(QWidget):
             QPoint(x_seismic, y_top),
             QPoint(x_seismic, self.card_seismic.geometry().bottom() + 4),
             is_dashed=True,
-            color_hex="#3b82f6",
+            color_hex=tokens.ACCENT,
         )
 
         x_facies = self.card_facies.geometry().center().x()
@@ -717,7 +707,7 @@ class ModuleRelationshipCanvas(QWidget):
             QPoint(x_facies, y_top),
             QPoint(x_facies, self.card_facies.geometry().bottom() + 4),
             is_dashed=True,
-            color_hex="#3b82f6",
+            color_hex=tokens.ACCENT,
         )
 
         x_seq = self.card_sequence.geometry().center().x()
@@ -726,7 +716,7 @@ class ModuleRelationshipCanvas(QWidget):
             QPoint(x_seq, y_top),
             QPoint(x_seq, self.card_sequence.geometry().bottom() + 4),
             is_dashed=True,
-            color_hex="#3b82f6",
+            color_hex=tokens.ACCENT,
         )
 
 

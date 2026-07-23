@@ -14,8 +14,8 @@ from paleo_workbench.tokens import (
 
 
 def test_modern_light_theme_tokens():
-    assert PRIMARY == "#2563eb"
-    assert BG_BODY == "#f6f8fa"
+    assert PRIMARY == "#334155"
+    assert BG_BODY == "#f1f5f9"
     assert BG_HEADER == "#ffffff"
     assert BORDER == "#e2e8f0"
     assert RADIUS_BUTTON == 6
@@ -26,7 +26,7 @@ def test_build_modern_qss_generator():
     qss_comfortable = build_modern_qss(font_size=13, density="comfortable")
     assert isinstance(qss_comfortable, str)
     assert "padding: 6px 12px" in qss_comfortable
-    assert "#2563eb" in qss_comfortable
+    assert "#334155" in qss_comfortable
     assert "QPushButton" in qss_comfortable
 
     qss_compact = build_modern_qss(font_size=11, density="compact")

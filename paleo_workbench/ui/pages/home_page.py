@@ -51,7 +51,7 @@ class HomePage(QWidget):
         title_label.setStyleSheet(f"""
             font-size: 14.5px;
             font-weight: bold;
-            color: #1e56a0;
+            color: {tokens.PRIMARY};
             font-family: {tokens.FONT_FAMILY};
         """)
         title_container.addWidget(title_label)

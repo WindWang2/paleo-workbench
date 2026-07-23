@@ -32,8 +32,8 @@ _COLUMNS = (
 
 _QC_COLORS = {
     "ok": tokens.SUCCESS,
-    "outlier": tokens.WARNING if hasattr(tokens, "WARNING") else "#c47e12",
-    "invalid_ratio": tokens.ERROR_RED if hasattr(tokens, "ERROR_RED") else "#c0392b",
+    "outlier": tokens.WARNING,
+    "invalid_ratio": tokens.ERROR_RED,
     "missing": tokens.TEXT_SECONDARY,
 }
 

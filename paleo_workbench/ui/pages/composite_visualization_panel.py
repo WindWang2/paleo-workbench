@@ -51,7 +51,7 @@ class VisualizationWorkspace(QFrame):
         self.tabs.setMinimumSize(100, 100)
         self.tabs.setStyleSheet(
             f"QTabWidget::pane {{ border: 1px solid {tokens.BORDER};"
-            f" border-radius: {tokens.RADIUS_BUTTON}px; background: #ffffff; }}"
+            f" border-radius: {tokens.RADIUS_BUTTON}px; background: {tokens.BG_SIDEBAR}; }}"
         )
 
         self.well_host = WellLogHost()
