@@ -53,9 +53,12 @@ def _load_las_fast(file_path: Path) -> Any | None:
         idx = np.append(idx, n - 1)
     depth_s = depth[idx]
 
-    from geoviz import WellLogData
-    from geoviz_well_log.models import CurveData, LineStyle
-    from geoviz_well_log.robust_scale import compute_robust_display_range
+    from geoviz import (
+        CurveData,
+        LineStyle,
+        WellLogData,
+        compute_robust_display_range,
+    )
 
     # Convert depth to list ONCE (was converted per-curve inside
     # curve_data_from_arrays — 19x redundant tolist() on the same array).
