@@ -1,4 +1,6 @@
-from paleo_workbench.project.models import FactorMapTask, PaleoMapDocument
+import pytest
+
+from paleo_workbench.project.models import FactorMapTask, MapReferenceLayer, PaleoMapDocument
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
@@ -78,3 +80,88 @@ def test_mapping_page_loads_completed_factor_maps_into_bottom_shelf(qtbot):
         FactorPreviewGrid.FactorPreviewCard
     )
     assert len(cards) == 1
+
+
+def _bowtie_map_doc():
+    return PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "bowtie",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]],
+        }],
+    )
+
+
+def test_mapping_page_pushes_topology_issues_to_panel(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state([_bowtie_map_doc()])
+    scene = page.edit_view.scene()
+    scene.refresh_topology()
+    panel = page.bottom_workbench.topology_panel
+    assert panel.table.rowCount() >= 1
+    assert panel.table.item(0, 0).text() == "bowtie"
+
+
+def test_mapping_page_locates_topology_issue_feature(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.resize(800, 600)
+    page.show()
+    qtbot.waitExposed(page)
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[100, 100], [200, 100], [200, 200], [100, 100]],
+        }],
+    )
+    page.update_state([doc])
+
+    page.bottom_workbench.topology_panel.locate_requested.emit("f1")
+
+    scene = page.edit_view.scene()
+    assert scene.selected_feature_ids() == ["f1"]
+    center = page.edit_view.mapToScene(page.edit_view.viewport().rect().center())
+    assert center.x() == pytest.approx(150.0, abs=10.0)
+    assert center.y() == pytest.approx(150.0, abs=10.0)
+
+
+def test_mapping_page_wires_cursor_and_view_state_to_factor_shelf(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    shelf = page.bottom_workbench.factor_shelf
+    page.edit_view.cursor_position_changed.emit((12.0, 34.0))
+    assert shelf.cursor_position() == (12.0, 34.0)
+    page.edit_view.view_state_changed.emit({"center": (5.0, 6.0), "scale": 2.0})
+    assert shelf.view_state() == {"center": (5.0, 6.0), "scale": 2.0}
+
+
+def test_mapping_page_overlay_request_shows_matching_reference_layer(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    layer = MapReferenceLayer(
+        id="ref_grid",
+        name="参考网格",
+        source_path="/tmp/ref.tif",
+        source_kind="raster",
+        source_crs="EPSG:3857",
+        project_crs="EPSG:3857",
+        status="ready",
+        visible=False,
+    )
+    doc = PaleoMapDocument(name="M", linked_target_horizon="H1", reference_layers=[layer])
+    page.update_state([doc])
+
+    # Both the factor shelf and the (previously dangling) reference dock signal
+    # route through the same overlay path.
+    page.bottom_workbench.factor_shelf.factor_overlay_requested.emit("ref_grid")
+    assert layer.visible is True
+
+    layer.visible = False
+    page.reference_panel.overlay_requested.emit("ref_grid")
+    assert layer.visible is True

@@ -22,6 +22,9 @@ A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_reg
 ### VisualizationWorkspace
 A deep composite visualization module (`paleo_workbench/ui/pages/composite_visualization_panel.py`) that encapsulates multi-tab widget instantiation, dataset payload routing, synchronized cross-canvas viewports, and snapshot vector/raster exports behind a 2-method interface (`load`, `export_snapshot`), replacing shallow host adapters.
 
+### SeismicVolumeState
+A centralized, event-driven state observer module (`paleo_workbench/viz/seismic_volume_state.py`) that encapsulates current slice coordinates (`inline_idx`, `crossline_idx`, `t_slice_idx`), active horizon selections, and `BinGridGeometry` spatial coordinate transformations (grid (IL, XL) <-> geographic (Easting, Northing)) with dual 2D/3D profile view synchronization.
+
 ### FormatSpec
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
 
@@ -38,6 +41,10 @@ A single-point registration specification data structure that bundles an asset f
 - **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.
 - **SliceReadWorker**: Asynchronous QThread worker using priority queues and neighborhood prefetching for stutter-free slice navigation.
 - **Coherence3D**: 3D seismic attribute calculating similarity/coherence across inline, crossline, and sample vertical windows.
+- **AttributePipeline**: Asynchronous, GIL-releasing seismic attribute calculation engine (`paleo_workbench/viz/seismic_3d_api.py` / `geoviz_seismic/attribute_pipeline.py`) that dispatches C++ accelerated filtering (3D Coherence, Spectral Decomposition, Dip/Azimuth) via `NativeEngineBackend` workers with progress reporting and cancellation tokens.
+- **SeismicPredictionTask**: Stateful AI interpretation task model (`paleo_workbench/services/prediction_service.py`) binding a target `SeismicVolume` and well constraints to deep neural network inference.
+- **ClassMap**: Discrete uint8 3D volume or 2D horizon grid representing predicted geological facies/fracture codes (e.g., 1: Fan Delta, 2: Shoreface, 3: Lacustrine Mud).
+- **ProbMap**: Continuous float32 3D volume or 2D grid storing model Softmax confidence probabilities (0.0 to 1.0) used for alpha-blended transparency rendering in `VisualizationWorkspace`.
 - **Isosurface**: 3D triangle mesh extracted via Marching Tetrahedra from volume scalar fields.
 - **WiggleTraceRenderer**: GPU Instancing rendering engine (`geoviz_seismic/renderer/wiggle_instanced.py` & `wiggle_instanced.glsl`) handling 50,000+ seismic traces $\times$ 4,000 samples at 60 FPS.
 - **WiggleDisplayModes**: 4 rendering modes: Wiggle Only, Wiggle + Positive Fill, Wiggle + Dual Fill (Variable Area), and Overlaid Wiggle + VD (Variable Density).
