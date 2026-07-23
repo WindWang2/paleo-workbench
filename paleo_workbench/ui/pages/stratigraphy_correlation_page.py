@@ -31,6 +31,7 @@ from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDia
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
 from paleo_workbench.viz.models import VizPayload
+from paleo_workbench.viz.stratigraphic_correlation_engine import StratigraphicCorrelationEngine
 from paleo_workbench.workflow.stratigraphy import active_target_horizon
 from paleo_workbench.workflow.stratigraphy_correlation import (
     list_well_log_resources,
@@ -52,6 +53,7 @@ class StratigraphyCorrelationPage(QWidget):
         self.setObjectName("StratigraphyCorrelationPage")
         self._project = None
         self._loaded_names: list[str] = []
+        self.correlation_engine = StratigraphicCorrelationEngine()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -322,9 +324,17 @@ class StratigraphyCorrelationPage(QWidget):
             return
         ref_well = wells[0]
         ref_depth = ref.depth_for_well(ref_well)
+
+        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence
+        rec = self.correlation_engine.recommend_top(
+            ref_well=ref_well,
+            target_well=wells[1] if len(wells) > 1 else ref_well,
+            ref_top_depth=ref_depth,
+        )
+
         created = canvas.propagate_pick_via_dtw(ref_well, ref_depth, ref.formation_name)
         self.status_label.setText(
-            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取"
+            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 (置信度: {rec.confidence:.2f})"
             "（点击接受 / 右键拒绝）"
         )
 

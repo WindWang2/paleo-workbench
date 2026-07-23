@@ -66,3 +66,13 @@ def test_composite_panel_includes_well_section_tab(qtbot):
 
     tab_titles = [panel.tabs.tabText(i) for i in range(panel.tabs.count())]
     assert "多井对比剖面" in tab_titles
+
+
+def test_stratigraphy_correlation_page_has_correlation_engine(qtbot):
+    from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyCorrelationPage
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+
+    assert hasattr(page, "correlation_engine")
+    assert page.correlation_engine is not None
+
