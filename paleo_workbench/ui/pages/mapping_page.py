@@ -341,10 +341,12 @@ class MappingPage(QWidget):
             from PySide6.QtWidgets import QMessageBox
 
             n = len(issues) if issues else 0
+            if issues and issues[0].get("feature_id"):
+                self._on_topology_locate_requested(str(issues[0]["feature_id"]))
             QMessageBox.warning(
                 self,
                 "无法保存编图草稿",
-                f"拓扑检查未通过（{n} 项问题）。请查看底部拓扑面板并修复后再保存。",
+                f"拓扑检查未通过（{n} 项问题）。已定位至首项几何问题，请查看底部拓扑面板修复后再保存。",
             )
             return False
         features = scene.export_features()

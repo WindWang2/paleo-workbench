@@ -139,3 +139,33 @@ def test_export_features_matches_scene_items(qtbot):
     ids = {r["id"] for r in exported}
     assert ids == {"f1", "w1", "ln1", "lb1"}
     assert scene.features_to_records() == exported
+
+
+def test_save_draft_locates_first_invalid_feature_on_topology_error(qtbot, monkeypatch):
+    """Saving a document with a self-intersection centers on the invalid feature."""
+    from PySide6.QtWidgets import QMessageBox
+
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "bowtie",
+            "name": "Self Intersecting",
+            "coordinates": [[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]],
+        }],
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state([doc])
+    page.edit_view.scene().translate_features(["bowtie"], 0.1, 0.0)
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: None,
+    )
+
+    assert page.save_draft() is False
+    scene = page.edit_view.scene()
+    assert scene.selected_feature_ids() == ["bowtie"]
+
