@@ -367,7 +367,11 @@ class NativeEngineBackend:
     def install_all_hooks(self) -> None:
         """Inject C++ acceleration hooks into the geoviz engine."""
         try:
-            from geoviz import set_downsample_provider, set_isosurface_extractor
+            from geoviz import (
+                set_downsample_provider,
+                set_isosurface_extractor,
+                set_las_parser_provider,
+            )
         except ImportError:  # pragma: no cover
             return
 
@@ -375,6 +379,7 @@ class NativeEngineBackend:
 
         set_downsample_provider(_cpp_minmax_provider)
         set_isosurface_extractor(marching_cubes_3d)
+        set_las_parser_provider(_cpp_las_parser_provider)
         self._installed_hooks = True
 
 
@@ -387,6 +392,12 @@ def _cpp_minmax_provider(
     v = np.asarray(values, dtype=np.float32)
     out_d, out_v = native_backend.dispatch("minmax_downsample", d, v, int(pixel_height))
     return np.asarray(out_d, dtype=np.float64), np.asarray(out_v, dtype=np.float64)
+
+
+def _cpp_las_parser_provider(
+    content: str, null_value: float
+) -> tuple[tuple[str, ...], np.ndarray]:
+    return native_backend.dispatch("fast_las_parse_data", content, float(null_value))
 
 
 # ---------------------------------------------------------------------------

@@ -61,47 +61,77 @@ def test_fast_channel_null_values_become_nan(tmp_path: Path):
 
 def test_fallback_when_fast_channel_raises(tmp_path: Path, monkeypatch):
     path = _write_las(tmp_path)
-    import paleo_workbench.viz.well_log_load as mod
+    from geoviz import set_las_parser_provider
 
-    def _boom(content):
+    def _boom(content, null_val):
         raise RuntimeError("cpp broken")
 
-    monkeypatch.setattr(mod, "fast_las_parse_data", _boom)
-    data = load_well_log_from_path(str(path))
-    # Falls back to engine load_las_preview — still loads
-    assert data is not None
-    assert data.well_name == "WELL-01"
-    assert {c.name for c in data.curves} == {"GR", "DT"}
+    set_las_parser_provider(_boom)
+    try:
+        data = load_well_log_from_path(str(path))
+        # Falls back to engine load_las_preview — still loads
+        assert data is not None
+        assert data.well_name == "WELL-01"
+        assert {c.name for c in data.curves} == {"GR", "DT"}
+    finally:
+        set_las_parser_provider(None)
 
 
-def test_fast_channel_actually_engages(tmp_path: Path, monkeypatch):
+def test_fast_channel_actually_engages(tmp_path: Path):
     path = _write_las(tmp_path)
-    import paleo_workbench.viz.well_log_load as mod
+    from geoviz import set_las_parser_provider
 
     calls = []
-    real = mod.fast_las_parse_data
 
-    def _spy(content, *args, **kwargs):
+    def _spy(content, null_val):
         calls.append(len(content))
-        return real(content, *args, **kwargs)
+        return ("DEPT", "GR", "DT"), np.array([
+            [2000.0, 45.2, 220.0],
+            [2001.0, 52.1, -999.25],
+            [2002.0, 61.8, 215.4],
+            [2003.0, -999.25, 210.1],
+            [2004.0, 75.3, 205.0],
+            [2005.0, 80.0, 200.0],
+        ])
 
-    monkeypatch.setattr(mod, "fast_las_parse_data", _spy)
-    data = mod._load_las_fast(path)
-    assert calls, "fast channel never called fast_las_parse_data"
-    assert data is not None, "fast channel bailed to fallback"
-    assert {c.name for c in data.curves} == {"GR", "DT"}
+    set_las_parser_provider(_spy)
+    try:
+        # Pass a unique path to bypass cache
+        p = tmp_path / "unique_spy.las"
+        p.write_text(SAMPLE_LAS, encoding="utf-8")
+        data = load_well_log_from_path(str(p))
+        assert calls, "fast channel provider hook was never called"
+        assert data is not None
+        assert {c.name for c in data.curves} == {"GR", "DT"}
+    finally:
+        set_las_parser_provider(None)
 
 
-def test_wrapped_las_falls_back_but_loads(tmp_path: Path, monkeypatch):
+def test_wrapped_las_falls_back_but_loads(tmp_path: Path):
     path = tmp_path / "wrapped.las"
     path.write_text(SAMPLE_LAS.replace("WRAP .                  NO", "WRAP .                 YES"), encoding="utf-8")
-    import paleo_workbench.viz.well_log_load as mod
+    from geoviz import set_las_parser_provider
 
-    def _boom(content, *args, **kwargs):
+    def _boom(content, null_val):
         raise AssertionError("fast channel should not run on wrapped LAS")
 
-    monkeypatch.setattr(mod, "fast_las_parse_data", _boom)
-    # fast channel must bail BEFORE parsing data; fallback still loads
-    data = mod.load_well_log_from_path(str(path))
-    assert data is not None
-    assert data.well_name == "WELL-01"
+    set_las_parser_provider(_boom)
+    try:
+        # fast channel must bail BEFORE parsing data; fallback still loads
+        data = load_well_log_from_path(str(path))
+        assert data is not None
+        assert data.well_name == "WELL-01"
+    finally:
+        set_las_parser_provider(None)
+
+
+def test_well_log_cache_is_bounded(tmp_path: Path):
+    import paleo_workbench.viz.well_log_load as mod
+
+    for i in range(25):
+        p = tmp_path / f"well_{i}.las"
+        p.write_text(SAMPLE_LAS, encoding="utf-8")
+        load_well_log_from_path(str(p))
+
+    assert len(mod._las_cache) <= 16
+
