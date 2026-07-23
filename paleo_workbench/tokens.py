@@ -328,11 +328,15 @@ def build_qss(density: str = "comfortable") -> str:
         min-height: {MENU_BAR_HEIGHT}px; max-height: {MENU_BAR_HEIGHT}px;
     }}
     QPushButton#ProjectMenuButton,
-    QPushButton#ToolsMenuButton {{
+    QPushButton#ViewMenuButton,
+    QPushButton#ToolsMenuButton,
+    QPushButton#HelpMenuButton {{
         background: transparent; border: none; color: {TEXT_PRIMARY}; padding: 0;
     }}
     QPushButton#ProjectMenuButton:hover,
-    QPushButton#ToolsMenuButton:hover {{ color: {PRIMARY}; }}
+    QPushButton#ViewMenuButton:hover,
+    QPushButton#ToolsMenuButton:hover,
+    QPushButton#HelpMenuButton:hover {{ color: {PRIMARY}; }}
     QPushButton#DataPreviewPdfPrevious,
     QPushButton#DataPreviewPdfNext {{
         border: 1px solid {BORDER};

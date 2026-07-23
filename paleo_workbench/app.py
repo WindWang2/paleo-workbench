@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui import AppShell
+from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.preview_settings import PreviewSettingsStore
 from paleo_workbench.ui.project_controller import ProjectController
 from paleo_workbench.ui.workflow_controller import WorkflowController
@@ -203,6 +204,11 @@ class PaleoWorkbenchWindow(QWidget):
         menu_bar.save_project_requested.connect(self._on_save_project)
         menu_bar.properties_requested.connect(self._on_properties)
         menu_bar.preview_settings_requested.connect(self._show_preview_settings)
+        menu_bar.reset_layout_requested.connect(self._on_reset_layout)
+        menu_bar.toggle_sidebar_requested.connect(self._on_toggle_sidebar)
+        menu_bar.density_changed.connect(self._on_density_changed)
+        menu_bar.about_requested.connect(self._on_about)
+        menu_bar.search_submitted.connect(self._on_global_search)
         self.workflow_controller.wire_home_page()
         self.workflow_controller.wire_data_visualization_jump()
         self.workflow_controller.wire_mapping_page()
@@ -211,6 +217,55 @@ class PaleoWorkbenchWindow(QWidget):
         self.workflow_controller.wire_seismic_page()
         self.workflow_controller.wire_well_log_page()
         self.workflow_controller.wire_review_page()
+
+    # --- view / help / search handlers ---
+
+    def _on_reset_layout(self) -> None:
+        """Reset the contextual sidebar to its expanded state."""
+        sidebar = getattr(self.app_shell, "sidebar", None)
+        if sidebar is not None and hasattr(sidebar, "toggle_collapse"):
+            sidebar.toggle_collapse(False)
+
+    def _on_toggle_sidebar(self) -> None:
+        sidebar = getattr(self.app_shell, "sidebar", None)
+        if sidebar is not None and hasattr(sidebar, "toggle_collapse"):
+            sidebar.toggle_collapse()
+
+    def _on_density_changed(self, density: str) -> None:
+        """Rebuild the global QSS at the requested density (comfortable|compact)."""
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(tokens.build_qss(density=density))
+        self.app_shell.menu_bar.set_density_checked(density)
+
+    def _on_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "关于",
+            "智能岩相古地理重建系统\n"
+            "Paleogeography Workbench\n\n"
+            "数据管理 · 沉积相预测 · 古地理编图 · 三维地质建模",
+        )
+
+    def _on_global_search(self, text: str) -> None:
+        """Delegate the global search box to the current page's filter, if any.
+
+        Only pages exposing searchable content (today: the data page's
+        ``asset_table.set_search_text``) react. Other pages silently ignore
+        the query rather than pretending to search.
+        """
+        page = self.app_shell.page_stack.currentWidget()
+        # Data page: drive its asset table filter and keep the page-local
+        # toolbar search box in sync so the two inputs never disagree.
+        asset_table = getattr(page, "asset_table", None)
+        if asset_table is not None and hasattr(asset_table, "set_search_text"):
+            asset_table.set_search_text(text)
+            toolbar = getattr(page, "data_toolbar", None)
+            if toolbar is not None and hasattr(toolbar, "search_box"):
+                if toolbar.search_box.text() != text:
+                    toolbar.search_box.blockSignals(True)
+                    toolbar.search_box.setText(text)
+                    toolbar.search_box.blockSignals(False)
 
     # --- shell rebuild helpers ---
 
