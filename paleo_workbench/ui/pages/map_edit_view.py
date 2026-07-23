@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtWidgets import QGraphicsView
@@ -9,6 +11,19 @@ from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 
 # Idle delay before full-detail rendering is restored after navigation.
 _NAV_LOD_IDLE_MS = 120
+
+
+def _same_view_state(a: dict, b: dict) -> bool:
+    """Tolerant view-state equality (integer scrollbars round the center)."""
+    ac = a.get("center", (0.0, 0.0))
+    bc = b.get("center", (0.0, 0.0))
+    return (
+        math.isclose(float(ac[0]), float(bc[0]), abs_tol=1.5)
+        and math.isclose(float(ac[1]), float(bc[1]), abs_tol=1.5)
+        and math.isclose(
+            float(a.get("scale", 1.0)), float(b.get("scale", 1.0)), rel_tol=1e-9
+        )
+    )
 
 
 class MapEditView(QGraphicsView):
@@ -70,6 +85,13 @@ class MapEditView(QGraphicsView):
         if isinstance(scene, MapEditScene):
             scene.set_navigation_lod(False)
         self.viewport().update()
+        # Pan only reaches the view state here (wheel emits directly in
+        # wheelEvent). Publish the settled state, but skip when unchanged so
+        # apply_view_state(emit=False) and idle LOD cycles never echo.
+        new_state = self._read_view_state()
+        if not _same_view_state(new_state, self._shared_view_state):
+            self._shared_view_state = new_state
+            self.view_state_changed.emit(self.view_state())
 
     # --- events ---------------------------------------------------------------
 

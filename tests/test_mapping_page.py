@@ -131,6 +131,40 @@ def test_mapping_page_locates_topology_issue_feature(qtbot):
     assert center.y() == pytest.approx(150.0, abs=10.0)
 
 
+def test_mapping_page_locate_skips_malformed_location_for_later_valid_issue(qtbot, monkeypatch):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.resize(800, 600)
+    page.show()
+    qtbot.waitExposed(page)
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "A",
+            "coordinates": [[100, 100], [200, 100], [200, 200], [100, 100]],
+        }],
+    )
+    page.update_state([doc])
+    scene = page.edit_view.scene()
+    # Two issues for the same feature: first has a malformed location, the
+    # second a valid one — the valid location must win over the fallback.
+    monkeypatch.setattr(scene, "topology_issues", lambda: [
+        {"feature_id": "f1", "location": "malformed"},
+        {"feature_id": "f1", "location": [1600.0, 1400.0]},
+    ])
+
+    centered: list[QPointF] = []
+    monkeypatch.setattr(page.edit_view, "centerOn", lambda pt: centered.append(pt))
+
+    page.bottom_workbench.topology_panel.locate_requested.emit("f1")
+
+    assert len(centered) == 1
+    assert centered[0].x() == pytest.approx(1600.0, abs=1e-3)
+    assert centered[0].y() == pytest.approx(1400.0, abs=1e-3)
+
+
 def test_mapping_page_wires_cursor_and_view_state_to_factor_shelf(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)

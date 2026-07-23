@@ -1,3 +1,5 @@
+import pytest
+
 from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_items import FaciesPolygonItem, WellPointItem
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
@@ -519,6 +521,44 @@ def test_navigation_lod_paints_simplified_geometry(qtbot):
     view._end_navigation_lod()
     assert view.navigation_lod_active() is False
     assert scene.item_by_id("f1").to_record()["coordinates"] == before
+
+
+def test_pan_emits_view_state_after_navigation_lod_ends(qtbot):
+    view = MapEditView()
+    qtbot.addWidget(view)
+    view.resize(400, 300)
+    # Establish a known shared state (as if applied/restored).
+    view.apply_view_state({"center": (500.0, 500.0), "scale": 1.0})
+    seen: list[dict] = []
+    view.view_state_changed.connect(seen.append)
+
+    # Pan via centerOn — the scrollbar path engages navigation LOD.
+    view.centerOn(900.0, 700.0)
+    assert view.navigation_lod_active() is True
+    view._end_navigation_lod()
+
+    assert seen, "pan must publish the new view state once navigation settles"
+    state = seen[-1]
+    assert state["center"][0] == pytest.approx(900.0, abs=1.0)
+    assert state["center"][1] == pytest.approx(700.0, abs=1.0)
+    assert view.view_state()["center"] == state["center"]
+
+
+def test_navigation_lod_end_without_view_change_does_not_emit(qtbot):
+    view = MapEditView()
+    qtbot.addWidget(view)
+    view.resize(400, 300)
+    view.show()
+    qtbot.waitExposed(view)
+    view.apply_view_state({"center": (500.0, 500.0), "scale": 1.0})
+    view._begin_navigation_lod()
+    seen: list[dict] = []
+    view.view_state_changed.connect(seen.append)
+
+    # LOD cycle without any pan/zoom must not re-emit (no echo).
+    view._end_navigation_lod()
+
+    assert seen == []
 
 
 def test_view_emits_cursor_position_on_mouse_move(qtbot):

@@ -610,8 +610,11 @@ class MappingPage(QWidget):
                 continue
             location = issue.get("location")
             if isinstance(location, (list, tuple)) and len(location) >= 2:
-                target = QPointF(float(location[0]), float(location[1]))
-            break
+                try:
+                    target = QPointF(float(location[0]), float(location[1]))
+                    break
+                except (ValueError, TypeError):
+                    continue
         if target is None:
             target = item.sceneBoundingRect().center()
         self.edit_view.centerOn(target)

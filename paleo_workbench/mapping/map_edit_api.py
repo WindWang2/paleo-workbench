@@ -624,8 +624,10 @@ def snap_point_indexed(
     Identical semantics to ``snap_point`` over the flattened candidate set
     (record vertices in record order, then reference points). Queries go
     through a uniform grid index — or ``map_edit_core.snap_indexed`` over
-    compact coordinate buffers when the extension is built — so repeated
-    snaps do not pay a full linear scan per mouse move.
+    compact coordinate buffers when the extension is built. This module-level
+    facade rebuilds the index on every call, so repeated snaps here still pay
+    the build cost; repeated-call index reuse lives in ``MapEditScene._snap_xy``,
+    which keeps one ``SnapCandidateIndex`` across mouse moves.
     """
     candidates: list[tuple[float, float]] = _snap_candidates_from_records(
         editable_records  # type: ignore[arg-type]
