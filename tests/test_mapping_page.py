@@ -1,5 +1,7 @@
 import pytest
 
+from PySide6.QtCore import QPointF
+
 from paleo_workbench.project.models import FactorMapTask, MapReferenceLayer, PaleoMapDocument
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
 from paleo_workbench.ui.pages.map_edit_toolbar import MapEditToolbar
