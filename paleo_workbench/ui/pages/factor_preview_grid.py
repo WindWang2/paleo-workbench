@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -15,13 +17,18 @@ from paleo_workbench.ui import tokens
 class FactorPreviewGrid(QWidget):
     """Center panel grid of completed factor map preview cards."""
 
+    card_clicked = Signal(object)
+
     class FactorPreviewCard(QFrame):
         """A single preview card for one completed factor map."""
+
+        clicked = Signal(object)
 
         def __init__(self, task, parent=None):
             super().__init__(parent)
             self.setObjectName("FactorPreviewCard")
             self.setMinimumSize(160, 100)
+            self.task = task
 
             layout = QVBoxLayout(self)
             layout.setContentsMargins(
@@ -61,6 +68,13 @@ class FactorPreviewGrid(QWidget):
                 self.rsquared_label.hide()
             layout.addWidget(self.rsquared_label)
             layout.addStretch()
+
+        def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.clicked.emit(self.task)
+                event.accept()
+                return
+            super().mouseReleaseEvent(event)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -127,6 +141,7 @@ class FactorPreviewGrid(QWidget):
         cols = 2
         for index, task in enumerate(completed):
             card = FactorPreviewGrid.FactorPreviewCard(task)
+            card.clicked.connect(self.card_clicked.emit)
             row = index // cols
             col = index % cols
             self.grid_layout.addWidget(card, row, col)

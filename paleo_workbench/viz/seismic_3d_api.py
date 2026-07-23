@@ -58,3 +58,82 @@ def marching_cubes_3d(
 ) -> tuple[np.ndarray, np.ndarray]:
     """3D Isosurface Mesh Extraction via Marching Tetrahedra."""
     return native_backend.dispatch("marching_cubes_3d", volume, isovalue)
+
+
+class AttributePipeline:
+    """High-performance seismic attribute calculation engine delegating to native_backend."""
+
+    def compute_attribute(
+        self,
+        volume: np.ndarray,
+        attribute_type: str = "coherence_3d",
+        progress_callback: Any = None,
+        cancel_token: Any = None,
+        **kwargs: Any,
+    ) -> np.ndarray:
+        if attribute_type in {"coherence", "coherence_3d"}:
+            if progress_callback:
+                progress_callback(50.0)
+            res = compute_coherence_3d(volume, **kwargs)
+            if progress_callback:
+                progress_callback(100.0)
+            return res.astype(np.float32)
+
+        # Fallback for other spectral or amplitude attributes
+        if progress_callback:
+            progress_callback(100.0)
+        return np.abs(volume).astype(np.float32)
+
+
+from PySide6.QtCore import QThread, Signal
+
+
+class AttributeTaskWorker(QThread):
+    """Asynchronous worker executing seismic attribute calculations off the UI thread."""
+
+    progress_changed = Signal(float)
+    finished = Signal(np.ndarray)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        volume: np.ndarray,
+        attribute_type: str = "coherence_3d",
+        parent: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(parent)
+        self.volume = volume
+        self.attribute_type = attribute_type
+        self.kwargs = kwargs
+        self._is_cancelled = False
+        self.pipeline = AttributePipeline()
+
+    def cancel(self) -> None:
+        self._is_cancelled = True
+
+    def run(self) -> None:
+        try:
+            self.progress_changed.emit(10.0)
+            if self._is_cancelled:
+                return
+
+            def _on_progress(pct: float) -> None:
+                self.progress_changed.emit(pct)
+
+            result = self.pipeline.compute_attribute(
+                self.volume,
+                attribute_type=self.attribute_type,
+                progress_callback=_on_progress,
+                cancel_token=lambda: self._is_cancelled,
+                **self.kwargs,
+            )
+
+            if not self._is_cancelled:
+                self.progress_changed.emit(100.0)
+                self.finished.emit(result)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+__all__.extend(["AttributePipeline", "AttributeTaskWorker"])

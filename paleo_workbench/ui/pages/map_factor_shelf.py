@@ -11,6 +11,7 @@ class MapFactorShelf(QWidget):
     """Mapping bottom-tab shelf: factor cards + contour draft action."""
 
     contour_draft_requested = Signal()
+    factor_overlay_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,7 +33,33 @@ class MapFactorShelf(QWidget):
         layout.addLayout(actions)
 
         self.grid = FactorPreviewGrid()
+        self.grid.card_clicked.connect(self._on_card_clicked)
         layout.addWidget(self.grid, 1)
+
+        # Latest edit-view state, mirrored for card extent/cursor display.
+        # FactorPreviewGrid has no extent/cursor paint hook, so the state is
+        # stored only (display-only consumers can read it later).
+        self._view_state: dict = {"center": (0.0, 0.0), "scale": 1.0}
+        self._cursor_position: tuple[float, float] = (0.0, 0.0)
 
     def update_state(self, tasks: list) -> None:
         self.grid.update_state(tasks)
+
+    def set_view_state(self, state: dict) -> None:
+        self._view_state = dict(state)
+
+    def view_state(self) -> dict:
+        return dict(self._view_state)
+
+    def set_cursor_position(self, xy: tuple[float, float]) -> None:
+        self._cursor_position = (float(xy[0]), float(xy[1]))
+
+    def cursor_position(self) -> tuple[float, float]:
+        return self._cursor_position
+
+    def _on_card_clicked(self, task) -> None:
+        """Request the clicked factor card's output as a map overlay."""
+        outputs = list(getattr(task, "output_resource_ids", None) or [])
+        overlay_id = str(outputs[0]) if outputs else str(getattr(task, "id", "") or "")
+        if overlay_id:
+            self.factor_overlay_requested.emit(overlay_id)

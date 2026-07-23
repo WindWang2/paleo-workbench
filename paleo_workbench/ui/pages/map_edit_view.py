@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QPainter, QWheelEvent
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from PySide6.QtWidgets import QGraphicsView
 
 from paleo_workbench.ui import tokens
@@ -28,6 +28,7 @@ class MapEditView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
         self._shared_view_state = {"center": (0.0, 0.0), "scale": 1.0}
         # Navigation display LOD state (display-only; restored after idle).
         self._nav_lod_active = False
@@ -85,6 +86,12 @@ class MapEditView(QGraphicsView):
         self.view_state_changed.emit(self.view_state())
         event.accept()
 
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """Publish the cursor in scene coordinates (project CRS)."""
+        pos = self.mapToScene(event.position().toPoint())
+        self.cursor_position_changed.emit((float(pos.x()), float(pos.y())))
+        super().mouseMoveEvent(event)
+
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         # Any pan (scrollbars, keyboard, centerOn) engages navigation LOD.
         if dx or dy:
@@ -127,3 +134,4 @@ class MapEditView(QGraphicsView):
                 Qt.AspectRatioMode.KeepAspectRatio,
             )
     view_state_changed = Signal(dict)
+    cursor_position_changed = Signal(tuple)

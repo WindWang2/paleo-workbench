@@ -51,6 +51,7 @@ class MapEditScene(QGraphicsScene):
     selection_ids_changed = Signal(list)
     document_dirty_changed = Signal(bool)
     command_stack_changed = Signal()
+    topology_issues_changed = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -97,6 +98,8 @@ class MapEditScene(QGraphicsScene):
         # Navigation display LOD: while active, path items paint simplified
         # bounding-box geometry. Display-only — never touches coordinates.
         self._navigation_lod = False
+        # Last published topology issue list; emitted only on content change.
+        self._last_published_issues: list[dict[str, object]] | None = None
         self._draft_manager = MapDraftManager(self)
         self.selectionChanged.connect(self._on_selection_changed)
 
@@ -465,6 +468,14 @@ class MapEditScene(QGraphicsScene):
         # Full refresh also applies adjacency warnings across facies.
         if feature_id is None:
             self._apply_adjacency_warnings()
+        self._publish_topology_issues()
+
+    def _publish_topology_issues(self) -> None:
+        """Emit topology_issues_changed only when the issue content changed."""
+        issues = self.topology_issues()
+        if issues != self._last_published_issues:
+            self._last_published_issues = issues
+            self.topology_issues_changed.emit(issues)
 
     def topology_issues(self) -> list[dict[str, object]]:
         """Return structured issues for the bottom workbench and save gate."""

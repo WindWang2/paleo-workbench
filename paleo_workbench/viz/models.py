@@ -54,3 +54,6 @@ class VizPayload:
     well_names: list[str] = field(default_factory=list)
     # Engine PreparedPreview for plots / formation / SEGY-2D scrub widget.
     prepared: Any = None
+    # Dual tensor outputs for AI prediction interpretation
+    class_map: np.ndarray | None = None
+    prob_map: np.ndarray | None = None

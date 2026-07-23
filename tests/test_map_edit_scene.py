@@ -4,8 +4,8 @@ from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.mapping.map_edit_api import HAS_CPP, hit_test
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QMouseEvent, QWheelEvent
 
 
 def test_has_cpp_is_bool():
@@ -519,3 +519,59 @@ def test_navigation_lod_paints_simplified_geometry(qtbot):
     view._end_navigation_lod()
     assert view.navigation_lod_active() is False
     assert scene.item_by_id("f1").to_record()["coordinates"] == before
+
+
+def test_view_emits_cursor_position_on_mouse_move(qtbot):
+    view = MapEditView()
+    qtbot.addWidget(view)
+    assert view.hasMouseTracking()
+    seen: list[tuple] = []
+    view.cursor_position_changed.connect(seen.append)
+    move = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(10.0, 20.0),
+        QPointF(10.0, 20.0),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    view.mouseMoveEvent(move)
+    # Identity transform: viewport coordinates map 1:1 to scene (project CRS).
+    assert seen == [(10.0, 20.0)]
+
+
+def _bowtie_doc():
+    return PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H",
+        facies_polygons=[{
+            "id": "bowtie",
+            "name": "A",
+            "coordinates": [[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]],
+        }],
+    )
+
+
+def test_topology_issues_changed_emitted_on_refresh(qtbot):
+    scene = MapEditScene()
+    scene.load_document(_bowtie_doc())
+    seen: list[list] = []
+    scene.topology_issues_changed.connect(seen.append)
+    scene.refresh_topology()
+    assert len(seen) == 1
+    assert any(issue["feature_id"] == "bowtie" for issue in seen[0])
+    # Unchanged content must not re-emit.
+    scene.refresh_topology()
+    assert len(seen) == 1
+
+
+def test_topology_issues_changed_emits_when_issues_cleared(qtbot):
+    scene = MapEditScene()
+    scene.load_document(_bowtie_doc())
+    scene.refresh_topology()
+    seen: list[list] = []
+    scene.topology_issues_changed.connect(seen.append)
+    item = scene.item_by_id("bowtie")
+    square = [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]
+    assert scene._push_vertex_edit("bowtie", item.coordinates(), square) is True
+    assert seen[-1] == []

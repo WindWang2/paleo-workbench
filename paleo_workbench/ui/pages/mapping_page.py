@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QPointF, Signal
 from PySide6.QtWidgets import (
+    QGraphicsItem,
     QGraphicsView,
     QHBoxLayout,
     QMessageBox,
@@ -115,6 +116,12 @@ class MappingPage(QWidget):
         self.bottom_workbench.factor_shelf.contour_draft_requested.connect(
             self._on_contour_draft_requested
         )
+        self.bottom_workbench.factor_shelf.factor_overlay_requested.connect(
+            self._on_overlay_requested
+        )
+        self.bottom_workbench.topology_panel.locate_requested.connect(
+            self._on_topology_locate_requested
+        )
 
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)
         self.layer_tree.document_selected.connect(self._on_document_selected)
@@ -122,12 +129,23 @@ class MappingPage(QWidget):
         self.reference_panel.reference_visibility_changed.connect(self._on_reference_visibility_changed)
         self.reference_panel.reference_opacity_changed.connect(self._on_reference_opacity_changed)
         self.edit_view.view_state_changed.connect(self.reference_panel.set_view_state)
+        self.edit_view.view_state_changed.connect(
+            self.bottom_workbench.factor_shelf.set_view_state
+        )
+        self.edit_view.cursor_position_changed.connect(
+            self.bottom_workbench.factor_shelf.set_cursor_position
+        )
+        # The reference dock's overlay request shares the factor overlay path.
+        self.reference_panel.overlay_requested.connect(self._on_overlay_requested)
 
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             scene.selection_ids_changed.connect(self._on_selection_ids_changed)
             scene.document_dirty_changed.connect(self._on_document_dirty_changed)
             scene.command_stack_changed.connect(self._sync_undo_redo_enabled)
+            scene.topology_issues_changed.connect(
+                self.bottom_workbench.topology_panel.set_issues
+            )
 
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
@@ -536,6 +554,42 @@ class MappingPage(QWidget):
         if layer is not None:
             layer.opacity = max(0.0, min(1.0, float(opacity)))
             self._emit_mapping_context()
+
+    def _on_overlay_requested(self, resource_id: str) -> None:
+        """Shared overlay path for the reference dock and the factor shelf.
+
+        Resolves the requested id against the active document's reference
+        layers and ensures the matching layer is visible. Ids without a
+        matching reference layer are ignored (no overlay renderer yet).
+        """
+        layer = self._reference_layer(str(resource_id))
+        if layer is None:
+            return
+        layer.visible = True
+        self._publish_reference_layers(self._active_document)
+        self._emit_mapping_context()
+
+    def _on_topology_locate_requested(self, feature_id: str) -> None:
+        """Select the flagged feature and center the edit view on it."""
+        scene = self._edit_scene()
+        if scene is None:
+            return
+        item = scene.item_by_id(str(feature_id))
+        if not isinstance(item, QGraphicsItem):
+            return
+        scene.clearSelection()
+        item.setSelected(True)
+        target = None
+        for issue in scene.topology_issues():
+            if issue.get("feature_id") != item.feature_id:
+                continue
+            location = issue.get("location")
+            if isinstance(location, (list, tuple)) and len(location) >= 2:
+                target = QPointF(float(location[0]), float(location[1]))
+            break
+        if target is None:
+            target = item.sceneBoundingRect().center()
+        self.edit_view.centerOn(target)
 
     def _sync_reference_snap_points(self, scene: MapEditScene, document) -> None:
         points: list[tuple[float, float]] = []
