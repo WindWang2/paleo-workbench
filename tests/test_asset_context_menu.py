@@ -29,13 +29,15 @@ def test_menu_rescan_only_for_resource(qtbot):
     assert any(a.text() == "重新扫描" for a in menu2.actions())
 
 
-def test_menu_export_shows_inventory_even_without_converters(qtbot):
-    """Resource items always get at least '工程清单' under 导出."""
+def test_menu_export_hidden_when_no_converters(qtbot):
+    """Spec: 导出 is hidden when no converters apply, even for a resource.
+
+    A resource whose format has no converters must not show the 导出 menu
+    (the always-available 工程清单 inventory cannot surface it on its own).
+    """
     menu = AssetContextMenu()
     menu.build(_res(fmt="unknown"), viz_supported=False)
-    export_action = next(a for a in menu.actions() if a.text() == "导出")
-    sub_labels = [a.text() for a in export_action.menu().actions()]
-    assert any("清单" in t for t in sub_labels)
+    assert not any(a.text() == "导出" for a in menu.actions())
 
 
 def test_menu_export_shown_with_subitems(qtbot):
