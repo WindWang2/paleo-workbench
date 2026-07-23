@@ -43,3 +43,9 @@ A single-point registration specification data structure that bundles an asset f
 
 ### FeatureEditor
 A stateful, transactional layer-level map geometry editor module (`paleo_workbench/mapping/feature_editor.py`) encapsulating spatial hit testing, multi-polygon vertex snapping, coincident shared-node synchronized movement, strict topology re-closure/non-self-intersection validation (`TopologyError` auto-rollback), and transaction undo/redo history behind a clean 6-method interface (`load_layer`, `select_at`, `move_selected_vertex`, `add_vertex`, `delete_vertex`, `commit`).
+
+### ColormapManager
+A deep colormap pipeline module (`geo-viz-engine/.../geoviz_seismic/colormap.py`) that encapsulates colormap construction, LUT caching (keyed on `name:n_colors`, not `id(lut)`), normalize→uint8-index conversion, RGBA color gathering, and GPU/CPU dispatch (lazy cupy import, `_GPU_MIN_ELEMENTS` size guard) behind a two-method interface: `normalize_to_index(data, lut_size, value_range)` returns a uint8 index array; `apply_colormap(data, name, value_range)` returns RGBA. Three rendering backends (QImage Indexed8, GL_R8+GLSL LUT shader, cupy gather) consume these methods as thin display-medium adapters.
+
+### LASParserProvider
+An AccelerationProvider hook (`set_las_parser_provider` / `get_las_parser_provider`) injected by the workbench at startup, enabling the engine's `load_las_preview(path, fast=True)` to use the C++ `fast_las_parse_data` for header-only parse + full-block data extraction + `CurveData.model_construct` (skipping Pydantic validation for the trusted C++ source). When the provider is absent or the file is wrapped/malformed, the engine falls back internally to the pure-Python `inspect_las_file` + `read_sampled_ascii` path.
