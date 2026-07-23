@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -80,6 +80,10 @@ class MenuBar(QFrame):
         self.toggle_sidebar_action.triggered.connect(self.toggle_sidebar_requested)
         self.view_menu.addSeparator()
         self._density_menu = self.view_menu.addMenu("界面密度")
+        # QActionGroup enforces mutual exclusivity (one-at-a-time) natively,
+        # replacing fragile manual setChecked bookkeeping.
+        self._density_group = QActionGroup(self)
+        self._density_group.setExclusive(True)
         self.density_comfortable_action = self._density_menu.addAction("舒适")
         self.density_comfortable_action.setCheckable(True)
         self.density_comfortable_action.setChecked(True)
@@ -91,15 +95,8 @@ class MenuBar(QFrame):
         self.density_compact_action.triggered.connect(
             lambda: self.density_changed.emit("compact")
         )
-        # Keep the two density options mutually exclusive.
-        self.density_comfortable_action.triggered.connect(
-            lambda checked: self.density_compact_action.setChecked(not checked)
-            if checked else None
-        )
-        self.density_compact_action.triggered.connect(
-            lambda checked: self.density_comfortable_action.setChecked(not checked)
-            if checked else None
-        )
+        self._density_group.addAction(self.density_comfortable_action)
+        self._density_group.addAction(self.density_compact_action)
         self.view_menu_button.setMenu(self.view_menu)
         self.labels.append(self.view_menu_button)
         layout.addWidget(self.view_menu_button)
