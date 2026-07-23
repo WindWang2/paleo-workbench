@@ -23,7 +23,7 @@ A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_reg
 A deep composite visualization module (`paleo_workbench/ui/pages/composite_visualization_panel.py`) that encapsulates multi-tab widget instantiation, dataset payload routing, synchronized cross-canvas viewports, and snapshot vector/raster exports behind a 2-method interface (`load`, `export_snapshot`), replacing shallow host adapters.
 
 ### SeismicVolumeState
-A centralized, event-driven state observer module (`paleo_workbench/viz/seismic_volume_state.py`) that encapsulates current slice coordinates (`inline_idx`, `crossline_idx`, `t_slice_idx`), active horizon selections, and `BinGridGeometry` spatial coordinate transformations (grid (IL, XL) <-> geographic (Easting, Northing)) with dual 2D/3D profile view synchronization.
+A centralized, event-driven state observer module (`paleo_workbench/viz/seismic_volume_state.py`) that encapsulates 3D slice coordinates (`inline_idx`, `crossline_idx`, `t_slice_idx`), active horizon selections, and `BinGridGeometry` spatial coordinate transformations behind a 2-method interface (`sync_slice`, `convert_coord`) with dual 2D/3D profile view synchronization.
 
 ### FormatSpec
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.

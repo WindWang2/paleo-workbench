@@ -52,3 +52,33 @@ def test_seismic_volume_state_coordinate_conversion():
     il, xl = state.geographic_to_grid(east, north)
     assert il == pytest.approx(10.0)
     assert xl == pytest.approx(20.0)
+
+
+def test_seismic_volume_state_deep_interface():
+    state = SeismicVolumeState(
+        inline_range=(0, 100),
+        crossline_range=(0, 100),
+        sample_range=(0, 100),
+    )
+
+    seen: list[tuple[int, int, int]] = []
+    state.slice_changed.connect(lambda il, xl, z: seen.append((il, xl, z)))
+
+    # Test sync_slice method (2-Method interface)
+    state.sync_slice(axis=0, index=50)
+    state.sync_slice(axis=1, index=60)
+    state.sync_slice(axis=2, index=70)
+
+    assert state.inline_idx == 50
+    assert state.crossline_idx == 60
+    assert state.t_slice_idx == 70
+    assert seen[-1] == (50, 60, 70)
+
+    # Test convert_coord 2-Method interface
+    east, north = state.convert_coord(10.0, 20.0, mode="grid_to_geo")
+    assert east == pytest.approx(500500.0)
+    assert north == pytest.approx(3000250.0)
+
+    il, xl = state.convert_coord(east, north, mode="geo_to_grid")
+    assert il == pytest.approx(10.0)
+    assert xl == pytest.approx(20.0)

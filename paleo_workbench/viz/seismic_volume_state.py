@@ -120,6 +120,23 @@ class SeismicVolumeState(QObject):
         if changed:
             self.slice_changed.emit(self._inline_idx, self._crossline_idx, self._sample_idx)
 
+    def sync_slice(self, axis: int, index: int) -> None:
+        """Deep interface method 1/2: sync slice index along specified axis (0=inline, 1=crossline, 2=sample)."""
+        if axis == 0:
+            self.set_slice(inline=index)
+        elif axis == 1:
+            self.set_slice(crossline=index)
+        elif axis == 2:
+            self.set_slice(sample=index)
+
+    def convert_coord(self, x: float, y: float, mode: str = "grid_to_geo") -> tuple[float, float]:
+        """Deep interface method 2/2: convert between grid (IL, XL) and geographic (Easting, Northing) coordinates."""
+        if mode in {"grid_to_geo", "grid_to_geographic"}:
+            return self.grid_to_geographic(x, y)
+        elif mode in {"geo_to_grid", "geographic_to_grid"}:
+            return self.geographic_to_grid(x, y)
+        return (x, y)
+
     def select_horizon(self, horizon_id: str) -> None:
         """Select active horizon and emit horizon_selected signal."""
         if horizon_id != self._active_horizon:
