@@ -179,6 +179,29 @@ def test_feature_editor_vertex_snapping(sample_feature_collection):
     assert ring1[0] == [10.0, 0.0]
 
 
+def test_feature_editor_pointer_events(sample_feature_collection):
+    editor = FeatureEditor()
+    editor.load_layer(sample_feature_collection)
+
+    # Pointer Down -> selects vertex
+    sel = editor.on_pointer_down(0.0, 0.0, tolerance=5.0)
+    assert sel is not None
+    assert sel["feature_id"] == "poly1"
+
+    # Pointer Move -> moves vertex
+    moved = editor.on_pointer_move(5.0, 5.0, snap=False)
+    assert moved is True
+
+    ring = editor.features["poly1"]["geometry"]["coordinates"][0]
+    assert ring[0] == [5.0, 5.0]
+
+    # Pointer Up -> commits move transaction
+    committed = editor.on_pointer_up()
+    assert committed is True
+    assert editor.can_undo is True
+
+
+
 
 
 

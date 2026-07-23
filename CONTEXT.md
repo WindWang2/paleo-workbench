@@ -19,6 +19,9 @@ A context-manager seam (`with native_backend.disabled_acceleration():`) allowing
 ### DataAssetRegistry
 A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_registry.py`) that encapsulates asset classification, directory scanning, format provider registration (`FormatSpec`), preview widget parsing, and export formatting behind a small 4-method interface (`inspect`, `scan_directory`, `parse_preview`, `export`).
 
+### VisualizationWorkspace
+A deep composite visualization module (`paleo_workbench/ui/pages/composite_visualization_panel.py` / `viz/workspace.py`) that encapsulates multi-tab widget instantiation, dataset payload routing, synchronized cross-canvas viewports, and snapshot vector/raster exports behind a 2-method interface (`load`, `export_snapshot`), replacing shallow host adapters.
+
 ### FormatSpec
 A single-point registration specification data structure that bundles an asset format's classification rules (extensions/magic bytes), preview parser callable, and exporter provider into one place.
 

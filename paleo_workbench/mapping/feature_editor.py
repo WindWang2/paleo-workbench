@@ -122,6 +122,29 @@ class FeatureEditor:
 
         return best_selection
 
+    def on_pointer_down(self, x: float, y: float, tolerance: float = 5.0) -> dict[str, Any] | None:
+        """Handle pointer press event: select vertex at (x, y) and start transaction."""
+        return self.select_at(x, y, tolerance=tolerance)
+
+    def on_pointer_move(
+        self,
+        x: float,
+        y: float,
+        snap: bool = True,
+        snap_tolerance: float = 5.0,
+    ) -> bool:
+        """Handle pointer move event: update selected vertex position with snapping and topology checks."""
+        if self.selected_feature_id is None or self.selected_vertex_index is None:
+            return False
+        return self.move_selected_vertex(x, y, snap=snap, snap_tolerance=snap_tolerance)
+
+    def on_pointer_up(self) -> bool:
+        """Handle pointer release event: commit current move transaction and clear active drag."""
+        if self.selected_feature_id is not None and self.selected_vertex_index is not None:
+            self.commit()
+            return True
+        return False
+
     @staticmethod
     def _extract_ring(feat: dict[str, Any]) -> list[list[float]] | None:
         """Extract polygon ring coordinates from feature dict."""

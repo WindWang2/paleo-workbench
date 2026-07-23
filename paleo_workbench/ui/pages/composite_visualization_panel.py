@@ -1,29 +1,29 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QTabWidget, QVBoxLayout
 
 from paleo_workbench.ui import tokens
-from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.viz.adapter import VizAdapter
-from paleo_workbench.viz.hosts import (
-    CrossWellHost,
-    EnginePreviewHost,
-    PaleoMapHost,
-    SeismicHost,
-    WellLogHost,
-    WellSectionHost,
-    WellTieHost,
-)
-from paleo_workbench.viz.models import VizPayload
+from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
+from paleo_workbench.viz.hosts.engine_preview_host import EnginePreviewHost
+from paleo_workbench.viz.hosts.paleo_map_host import PaleoMapHost
+from paleo_workbench.viz.hosts.seismic_host import SeismicHost
+from paleo_workbench.viz.hosts.well_log_host import WellLogHost
+from paleo_workbench.viz.hosts.well_section_host import WellSectionHost
+from paleo_workbench.viz.hosts.well_tie_host import WellTieHost
+from paleo_workbench.viz.models import VizPayload, VizRef
+from paleo_workbench.viz.prediction_helpers import active_prediction_task
 
 
-class CompositeVisualizationPanel(QFrame):
-    """Thin tab coordinator over modular geo-viz-engine hosts.
+class VisualizationWorkspace(QFrame):
+    """Deep composite visualization module for Paleo Workbench.
 
-    Each tab is an engine product surface (WellLog / SeismicView / CrossWell /
-    PaleoMap / WellTie / GeoVizEngine preview). Payload routing is kind-driven;
-    hosts own widget APIs so the workbench does not reimplement render logic.
+    Encapsulates dataset payload routing, multi-tab lazy widget instantiation,
+    in-place hydration, synchronized cross-canvas viewports, and snapshot
+    exports behind a small 2-method interface (``load``, ``export_snapshot``).
     """
 
     def __init__(self, parent=None):
@@ -107,6 +107,15 @@ class CompositeVisualizationPanel(QFrame):
             self.status_label.setText("选择左侧资产或等待预测任务…")
             return
         payload = VizAdapter().from_prediction(task)
+        self.load(payload)
+
+    def load(self, payload_or_ref: VizPayload | VizRef) -> None:
+        """Deep interface method: load dataset payload into workspace."""
+        if isinstance(payload_or_ref, VizRef):
+            payload = VizAdapter().from_ref(payload_or_ref)
+        else:
+            payload = payload_or_ref
+
         self.load_payload(payload)
 
     def load_payload(self, payload: VizPayload) -> None:
@@ -115,14 +124,11 @@ class CompositeVisualizationPanel(QFrame):
             self.status_label.setText(payload.message or "无可视化数据")
             return
 
-        # Clear all hosts so switching asset kinds never leaves stale graphics.
         self._clear_all()
-
         parts: list[str] = []
         if payload.warning:
             parts.append(payload.warning)
 
-        # Always attempt relevant hosts; kind selects primary tab.
         applied: list[str] = []
 
         if payload.kind in {"well_log", "prediction", "cross_well"}:
@@ -141,7 +147,6 @@ class CompositeVisualizationPanel(QFrame):
             if self.map_host.apply(payload):
                 applied.append(PaleoMapHost.tab_title)
 
-        # Well-tie workspace: any well log and/or seismic volume can seed the 7 tracks.
         if (
             payload.kind in {"well_log", "seismic", "prediction", "cross_well"}
             or payload.well_log is not None
@@ -155,7 +160,6 @@ class CompositeVisualizationPanel(QFrame):
             if self.engine_host.apply(payload):
                 applied.append(EnginePreviewHost.tab_title)
 
-        # Primary tab by kind
         kind_tab = {
             "well_log": WellLogHost.tab_title,
             "seismic": SeismicHost.tab_title,
@@ -185,3 +189,9 @@ class CompositeVisualizationPanel(QFrame):
     def _clear_canvases(self) -> None:
         """Alias kept for older tests / callers."""
         self._clear_all()
+
+
+# Backward-compatible alias
+CompositeVisualizationPanel = VisualizationWorkspace
+
+
