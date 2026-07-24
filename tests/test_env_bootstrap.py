@@ -10,6 +10,9 @@ def test_ensure_geoviz_on_path_makes_geoviz_importable():
     import geoviz
 
     assert geoviz is not None
+    import geoviz_well_seismic_3d  # noqa: F401 — joint package on bootstrap path
+
+    assert geoviz_well_seismic_3d is not None
     status = geoviz_bootstrap_status()
     assert status["importable"] is True
     assert "requirements-geoviz.txt" in str(status["preferred_install"])
@@ -36,6 +39,7 @@ def test_bootstrap_relative_paths_match_pytest_pythonpath():
         "geo-viz-engine/packages/geoviz_well_log",
         "geo-viz-engine/packages/geoviz_cross_well",
         "geo-viz-engine/packages/geoviz_well_tie",
+        "geo-viz-engine/packages/geoviz_well_seismic_3d",
         "geo-viz-engine/packages/geoviz_map",
     }
     assert set(_GEOVIZ_RELATIVE_PATHS) == expected

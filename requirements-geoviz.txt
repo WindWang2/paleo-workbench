@@ -6,6 +6,7 @@
 -e geo-viz-engine/packages/geoviz_well_tie
 -e geo-viz-engine/packages/geoviz_paleo_map
 -e geo-viz-engine/packages/geoviz_seismic
+-e geo-viz-engine/packages/geoviz_well_seismic_3d
 -e geo-viz-engine/packages/geoviz_cross_well
 -e geo-viz-engine/packages/geoviz_plots
 -e geo-viz-engine/packages/geoviz_map

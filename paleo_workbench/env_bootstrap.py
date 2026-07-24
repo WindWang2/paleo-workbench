@@ -27,6 +27,7 @@ _GEOVIZ_RELATIVE_PATHS = (
     "geo-viz-engine/packages/geoviz_well_log",
     "geo-viz-engine/packages/geoviz_cross_well",
     "geo-viz-engine/packages/geoviz_well_tie",
+    "geo-viz-engine/packages/geoviz_well_seismic_3d",
     "geo-viz-engine/packages/geoviz_map",
 )
 
@@ -51,28 +52,26 @@ def _geoviz_importable() -> bool:
 
 
 def ensure_geoviz_on_path() -> bool:
-    """Make ``import geoviz`` succeed when running from a source checkout.
+    """Make ``import geoviz`` (and monorepo geoviz_* packages) succeed from a source checkout.
 
-    Returns True if geoviz is importable after the call (already installed or
-    path-bootstrapped). Returns False only when neither install nor checkout
-    layout is available.
+    Always prepends checkout package roots when the monorepo layout is found, so
+    newly added packages (e.g. geoviz_well_seismic_3d) are importable even if a
+    partial ``geoviz`` install already exists on ``sys.path``.
+
+    Returns True if geoviz is importable after the call. Returns False only when
+    neither install nor checkout layout is available.
     """
     global _BOOTSTRAPPED
-    if _geoviz_importable():
-        _BOOTSTRAPPED = True
-        return True
 
     root = _repo_root()
-    if root is None:
-        return False
-
-    for rel in _GEOVIZ_RELATIVE_PATHS:
-        path = root / rel
-        if not path.is_dir():
-            continue
-        text = str(path)
-        if text not in sys.path:
-            sys.path.insert(0, text)
+    if root is not None:
+        for rel in _GEOVIZ_RELATIVE_PATHS:
+            path = root / rel
+            if not path.is_dir():
+                continue
+            text = str(path)
+            if text not in sys.path:
+                sys.path.insert(0, text)
 
     ok = _geoviz_importable()
     if ok:

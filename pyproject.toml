@@ -61,5 +61,6 @@ pythonpath = [
     "geo-viz-engine/packages/geoviz_well_log",
     "geo-viz-engine/packages/geoviz_cross_well",
     "geo-viz-engine/packages/geoviz_well_tie",
+    "geo-viz-engine/packages/geoviz_well_seismic_3d",
     "geo-viz-engine/packages/geoviz_map",
 ]
