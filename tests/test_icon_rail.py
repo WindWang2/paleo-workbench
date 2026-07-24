@@ -5,7 +5,7 @@ from paleo_workbench.ui import tokens
 def test_icon_rail_has_nine_buttons(qtbot):
     rail = IconRail()
     qtbot.addWidget(rail)
-    assert len(rail.nav_buttons) == 11
+    assert len(rail.nav_buttons) == len(tokens.PAGE_NAMES)
     texts = [btn.text() for btn in rail.nav_buttons]
     assert texts == tokens.PAGE_NAMES
 

@@ -32,9 +32,9 @@ def test_context_sidebar_set_stage(qapp):
     assert sidebar.subpage_buttons[0].property("active") is True
     assert sidebar.subpage_buttons[1].property("active") is False
 
-    # Stage 1: Interpretation -> 4 subpages
+    # Stage 1: Interpretation -> 5 subpages (incl. 井震联合)
     sidebar.set_stage(1, active_page_index=navigation.PAGE_INDEX_WELL_LOG)
-    assert len(sidebar.subpage_buttons) == 4
+    assert len(sidebar.subpage_buttons) == 5
 
 
 def test_context_sidebar_subpage_click(qapp):
