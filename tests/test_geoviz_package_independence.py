@@ -92,6 +92,10 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "InMemoryVolumeAccess",
         "VerticalDomain",
         "FenceSection",
+        "VolumeRegistration",
+        "survey_corners_from_segy",
+        "horizon_corners_from_dat",
+        "select_depth_transform",
     }
 )
 

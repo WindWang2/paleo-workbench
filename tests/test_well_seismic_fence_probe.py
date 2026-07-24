@@ -115,3 +115,39 @@ def test_depth_domain_and_v0_warning():
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
     assert scene.depth_transform.approximate_warning is not None
+
+
+def test_registration_scales_preview_volume_indices():
+    """Preview shape 8x8x16 vs full survey 411x641x901 — indices stay in range."""
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(P1, P2, P3, n_samples=901, dt_ms=2.0)
+    vol = np.zeros((8, 8, 16), dtype=np.float32)
+    vol[4, 4, 8] = 1.0
+    scene.set_volume_access(InMemoryVolumeAccess(vol))
+    reg = scene.registration
+    assert reg is not None
+    assert reg.n_inline == 8 and reg.n_sample == 16
+    # Survey mid-point should map near center of preview
+    vi, vx = reg.xy_to_volume_idx(6400.0, 8200.0)
+    assert 0 <= vi < 8 and 0 <= vx < 8
+    ii, xi, ti = reg.clamp_indices(vi, vx, reg.time_ms_to_sample_idx(900.0))
+    assert 0 <= ii < 8 and 0 <= xi < 8 and 0 <= ti < 16
+    # Fence extract uses registration
+    scene.add_fence(
+        FenceSection("F", np.array([[0.0, 0.0], [12793.0, 16406.0]], dtype=float))
+    )
+    ext = scene.extract_active_fence(n_along=16)
+    assert ext is not None
+    assert ext.amplitude.shape == (16, 16)
+
+
+def test_probe_uses_registration_for_slice_indices():
+    scene = _scene_with_volume()
+    scene.add_fence(
+        FenceSection("F", np.array([[0.0, 0.0], [10000.0, 10000.0]], dtype=float))
+    )
+    scene.set_probe(50.0, 10.0)
+    idx = scene.probe_slice_indices()
+    assert idx is not None
+    il, xl, t = idx
+    assert 0 <= il < 8 and 0 <= xl < 8 and 0 <= t < 16
