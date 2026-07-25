@@ -43,7 +43,7 @@ def test_app_shell_icon_rail_switches_page(qtbot):
 def test_app_shell_geological_modeling_3d_page_navigation(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    # Click 11th button (index 10: 三维建模)
+    # Click 11th button (index 10: 井震联合)
     shell.icon_rail.nav_buttons[10].click()
     assert shell.page_stack.currentIndex() == 10
     geomodel_page = shell.page_stack.widget(10)

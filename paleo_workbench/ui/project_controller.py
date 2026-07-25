@@ -105,12 +105,12 @@ class ProjectController:
         return target
 
     def _flush_joint_analysis_state(self) -> None:
-        """Persist joint presentation from 三维建模 page before project write.
+        """Persist joint presentation from 井震联合 page before project write.
 
         Only flush when the hybrid joint UI has actually been loaded/shown
         (``_joint_loaded_once``). Otherwise a pristine page defaults to Time
         and would clobber a previously saved Depth/fence/tree state when the
-        user saves from another page without revisiting 三维建模.
+        user saves from another page without revisiting 井震联合.
         """
         shell = getattr(self.window, "app_shell", None)
         page = getattr(shell, "geomodel_page", None) if shell is not None else None

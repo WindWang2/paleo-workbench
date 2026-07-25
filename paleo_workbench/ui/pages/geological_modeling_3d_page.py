@@ -48,12 +48,12 @@ _CAMERA_TOP_DOWN = dict(distance=250, elevation=90, azimuth=0)
 
 
 class GeologicalModeling3DPage(QWidget):
-    """3D Geological Modeling Workbench Page.
+    """Well–seismic joint workbench page (nav: 井震联合).
 
-    Features (G1 unified viewport — PRD #106):
-    - Left: Scene tree (geoviz checks interactive; other groups disabled).
+    Features (PRD #120 / ticket #121):
+    - Left: Scene tree — geoviz joint layers only.
     - Center: single joint 3D host + toolbar/status + collapsible fence 2D strip.
-    - Right: Modeling params / export / advisor (no second 3D, no clip card in G1).
+    - No right rail (modeling/export/AI chrome removed from this page).
     """
 
     def __init__(self, parent=None):
@@ -86,24 +86,24 @@ class GeologicalModeling3DPage(QWidget):
         main_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         main_layout.setSpacing(tokens.SPACE_2)
 
-        # Horizontal Splitter for 3 Panels
+        # Horizontal splitter: left tree | center joint (no right rail — #121)
         splitter = QSplitter(Qt.Horizontal, self)
         splitter.setStyleSheet("QSplitter::handle { background: %s; width: 1px; }" % tokens.BORDER)
 
-        # 1. Left Panel: Model Hierarchy
+        # 1. Left Panel: geoviz scene tree only
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(tokens.SPACE_2)
 
-        left_header = QLabel("模型层次与资产")
+        left_header = QLabel("场景对象")
         left_header.setStyleSheet("font-size: %s; font-weight: %s; color: %s;" % (
             tokens.FONT_SIZE_TITLE, tokens.FONT_WEIGHT_TITLE, tokens.TEXT_PRIMARY
         ))
         left_layout.addWidget(left_header)
 
         self.model_tree = QTreeWidget()
-        self.model_tree.setHeaderLabel("三维场景对象")
+        self.model_tree.setHeaderLabel("井震联合图层")
         self.model_tree.setStyleSheet("QTreeView { border: 1px solid %s; border-radius: %dpx; }" % (
             tokens.BORDER, tokens.RADIUS_CARD
         ))
@@ -598,23 +598,22 @@ class GeologicalModeling3DPage(QWidget):
         right_layout.addStretch()
 
         right_scroll.setWidget(right_widget)
+        # Off-layout legacy modeling chrome (params/export/AI) — not in page splitter (#121)
+        right_scroll.setParent(self)
+        right_scroll.hide()
+        self._right_rail = right_scroll
 
-        # Constrain side panel widths so central 3D viewport retains maximum space
+        # Constrain left tree; center takes remaining width
         left_widget.setMinimumWidth(220)
         left_widget.setMaximumWidth(320)
 
-        right_scroll.setMinimumWidth(320)
-        right_scroll.setMaximumWidth(440)
-
-        # G1: left | center (joint 3D + 2D) | params
+        # Two columns: left tree | center (joint 3D + 2D)
         splitter.addWidget(left_widget)
         splitter.addWidget(center_column)
-        splitter.addWidget(right_scroll)
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-        splitter.setSizes([240, 900, 340])
+        splitter.setSizes([240, 1200])
         self._main_splitter = splitter
 
         main_layout.addWidget(splitter)
@@ -655,27 +654,9 @@ class GeologicalModeling3DPage(QWidget):
     # ------------------------------------------------------------------ #
 
     def _populate_model_tree(self) -> None:
+        """Build geoviz joint layers only (#121 / #114 C1)."""
         self.model_tree.clear()
 
-        root_struct = QTreeWidgetItem(self.model_tree, ["地层构造格架"])
-        self._add_checkable_child(root_struct, "LST 顶底面")
-        self._add_checkable_child(root_struct, "TST 顶底面")
-
-        root_fault = QTreeWidgetItem(self.model_tree, ["断层格架模型"])
-        self._add_checkable_child(root_fault, "断层 F1 Surface")
-        self._add_checkable_child(root_fault, "断层 F2 Surface")
-
-        root_tunnels = QTreeWidgetItem(self.model_tree, ["巷道与井下系统"])
-        self._add_checkable_child(root_tunnels, "巷道 A")
-        self._add_checkable_child(root_tunnels, "巷道 B")
-
-        root_wells = QTreeWidgetItem(self.model_tree, ["钻孔与井迹"])
-        self._add_checkable_child(root_wells, "钻孔 HZ21-1")
-        self._add_checkable_child(root_wells, "钻孔 HZ19-6")
-        self._add_checkable_child(root_wells, "钻孔 XJ24-3")
-        self._add_checkable_child(root_wells, "钻孔 HZ25-2")
-
-        # Dual stack: geomodel well-seismic (existing) + geoviz joint (#88)
         root_joint = QTreeWidgetItem(self.model_tree, ["井震联合 (geoviz)"])
         self._add_checkable_child(root_joint, "地震预览体 (geoviz)")
         self._add_checkable_child(root_joint, "联合井轨迹 (geoviz)")
@@ -683,15 +664,7 @@ class GeologicalModeling3DPage(QWidget):
         self._add_checkable_child(root_joint, "井震 3D 视口")
         self._add_checkable_child(root_joint, "井震 2D 剖面条")
 
-        root_tie = QTreeWidgetItem(self.model_tree, ["井震标定与综合 (geomodel)"])
-        self._add_checkable_child(root_tie, "地震剖面三维切片 (Seismic Slices)")
-        self._add_checkable_child(root_tie, "井眼旁显测井曲线 (3D GR Logs)")
-        self._add_checkable_child(root_tie, "合成地震记录叠加 (Synthetic Seismograms)")
-        self._add_checkable_child(root_tie, "RGB 属性融合三维切片 (RGB Fusion Slice)")
-        self._add_checkable_child(root_tie, "井震连井三维剖面幕墙 (Cross-Well Seismic Fence)")
-
         self.model_tree.expandAll()
-        self._apply_g1_tree_interactivity()
         if not getattr(self, "_tree_changed_hooked", False):
             self.model_tree.itemChanged.connect(self._on_tree_item_changed)
             self._tree_changed_hooked = True
@@ -700,30 +673,6 @@ class GeologicalModeling3DPage(QWidget):
         item = QTreeWidgetItem(parent_item, [name])
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
         item.setCheckState(0, Qt.Checked)
-
-    def _apply_g1_tree_interactivity(self) -> None:
-        """Only 井震联合 (geoviz) remains checkable in G1 (#109)."""
-        tip = "G1 主视口仅井震图层；该类将于后续版本叠入主视口"
-        root = self.model_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            group = root.child(i)
-            if "井震联合 (geoviz)" in group.text(0):
-                group.setFlags(group.flags() | Qt.ItemIsEnabled)
-                group.setToolTip(0, "")
-                for j in range(group.childCount()):
-                    child = group.child(j)
-                    child.setFlags(
-                        (child.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-                        & ~Qt.ItemIsEditable
-                    )
-                    child.setToolTip(0, "")
-                continue
-            group.setFlags(group.flags() & ~Qt.ItemIsEnabled)
-            group.setToolTip(0, tip)
-            for j in range(group.childCount()):
-                child = group.child(j)
-                child.setFlags(child.flags() & ~Qt.ItemIsEnabled)
-                child.setToolTip(0, tip)
 
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
@@ -817,6 +766,7 @@ class GeologicalModeling3DPage(QWidget):
         self._project.joint_analysis = self.collect_joint_analysis_state()
 
     def _apply_joint_tree_checks_from_project(self) -> None:
+        """Restore known geoviz check keys only; unknown keys are ignored (#121)."""
         if self._project is None:
             return
         state = getattr(self._project, "joint_analysis", None)
@@ -839,6 +789,7 @@ class GeologicalModeling3DPage(QWidget):
                         child.setCheckState(
                             0, Qt.Checked if checks[name] else Qt.Unchecked
                         )
+                    # else: unknown / stale keys in `checks` are ignored
         finally:
             self.model_tree.blockSignals(False)
         self._sync_joint_visibility_from_tree()

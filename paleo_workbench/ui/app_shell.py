@@ -96,7 +96,7 @@ class AppShell(QWidget):
         self.page_stack.addWidget(ReviewExportPage()) # index 9 = 成图审核
         self.geomodel_page = GeologicalModeling3DPage()
         self.geomodel_page.set_project(self.project)
-        self.page_stack.addWidget(self.geomodel_page)  # index 10 = 三维建模 (+ 井震联合)
+        self.page_stack.addWidget(self.geomodel_page)  # index 10 = 井震联合
         self._mapping_context = self._build_mapping_context()
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)
