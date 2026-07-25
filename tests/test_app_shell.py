@@ -20,10 +20,10 @@ def test_app_shell_assembles_all_zones(qtbot):
     assert shell.status_bar is not None
 
 
-def test_app_shell_has_twelve_pages(qtbot):
+def test_app_shell_has_eleven_pages(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
-    assert shell.page_stack.count() == 12
+    assert shell.page_stack.count() == 11
 
 
 def test_app_shell_default_page_is_zero(qtbot):

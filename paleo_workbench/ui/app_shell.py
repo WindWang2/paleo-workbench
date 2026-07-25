@@ -23,7 +23,6 @@ from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyC
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
-from paleo_workbench.ui.pages.well_seismic_joint_page import WellSeismicJointPage
 from paleo_workbench.ui.sidebar import ContextSidebar, TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workflow_stepper import WorkflowStepper
@@ -43,7 +42,6 @@ from paleo_workbench.ui.navigation import (
     PAGE_INDEX_VISUALIZATION,
     PAGE_INDEX_WELL_LOG,
     PAGE_INDEX_GEOMODEL,
-    PAGE_INDEX_WELL_SEISMIC_JOINT,
 )
 
 
@@ -96,9 +94,9 @@ class AppShell(QWidget):
         self.mapping_page.mapping_context_changed.connect(self.update_mapping_context)
         self.page_stack.addWidget(self.mapping_page)  # index 8 = 编图
         self.page_stack.addWidget(ReviewExportPage()) # index 9 = 成图审核
-        self.page_stack.addWidget(GeologicalModeling3DPage()) # index 10 = 三维建模
-        self.joint_page = WellSeismicJointPage(project=self.project)
-        self.page_stack.addWidget(self.joint_page)  # index 11 = 井震联合
+        self.geomodel_page = GeologicalModeling3DPage()
+        self.geomodel_page.set_project(self.project)
+        self.page_stack.addWidget(self.geomodel_page)  # index 10 = 三维建模 (+ 井震联合)
         self._mapping_context = self._build_mapping_context()
         middle.addWidget(self.icon_rail)
         middle.addWidget(self.sidebar)

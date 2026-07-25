@@ -36,7 +36,7 @@ def test_get_stage_for_page():
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_SEISMIC) == 1
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_SEQUENCE) == 1
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_STRATIGRAPHY) == 1
-    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_WELL_SEISMIC_JOINT) == 1
+    assert navigation.get_stage_for_page(navigation.PAGE_INDEX_GEOMODEL) == 3
 
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_MAPPING) == 2
     assert navigation.get_stage_for_page(navigation.PAGE_INDEX_VISUALIZATION) == 2
@@ -55,7 +55,6 @@ def test_get_subpages_for_stage():
         navigation.PAGE_INDEX_SEISMIC,
         navigation.PAGE_INDEX_SEQUENCE,
         navigation.PAGE_INDEX_STRATIGRAPHY,
-        navigation.PAGE_INDEX_WELL_SEISMIC_JOINT,
     ]
     assert navigation.get_subpages_for_stage(2) == [
         navigation.PAGE_INDEX_MAPPING,
