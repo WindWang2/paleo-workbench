@@ -99,11 +99,16 @@ class GeologicalModeling3DPage(QWidget):
         self._populate_model_tree()
         left_layout.addWidget(self.model_tree)
 
-        # 2. Center Panel: 3D Viewport
-        center_widget = QWidget()
-        center_layout = QVBoxLayout(center_widget)
-        center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(0)
+        # 2. Center column: modeling GL (top) + collapsible joint 2D (bottom) — PRD #85 / #87
+        center_column = QWidget()
+        center_column_layout = QVBoxLayout(center_column)
+        center_column_layout.setContentsMargins(0, 0, 0, 0)
+        center_column_layout.setSpacing(0)
+
+        self._center_v_split = QSplitter(Qt.Vertical, center_column)
+        self._center_v_split.setStyleSheet(
+            "QSplitter::handle { background: %s; height: 3px; }" % tokens.BORDER
+        )
 
         self.view_container = QFrame()
         self.view_container.setFrameShape(QFrame.StyledPanel)
@@ -182,7 +187,79 @@ class GeologicalModeling3DPage(QWidget):
         f_layout.addWidget(self.btn_coord)
         self.floating_bar.move(12, 12)
 
-        center_layout.addWidget(self.view_container)
+        self._center_v_split.addWidget(self.view_container)
+
+        # Bottom: collapsible joint fence 2D strip (host mounts content in S1.3)
+        self._joint_2d_panel = QFrame()
+        self._joint_2d_panel.setObjectName("JointFence2DPanel")
+        self._joint_2d_panel.setStyleSheet(
+            "QFrame#JointFence2DPanel { background: %s; border: 1px solid %s; border-radius: %dpx; }"
+            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
+        )
+        j2_layout = QVBoxLayout(self._joint_2d_panel)
+        j2_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        j2_layout.setSpacing(tokens.SPACE_1)
+        j2_header = QHBoxLayout()
+        j2_title = QLabel("井震剖面 (2D)")
+        j2_title.setStyleSheet("font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY)
+        j2_header.addWidget(j2_title)
+        j2_header.addStretch()
+        self.btn_toggle_joint_2d = QPushButton("折叠")
+        self.btn_toggle_joint_2d.setCheckable(True)
+        self.btn_toggle_joint_2d.setChecked(False)
+        self.btn_toggle_joint_2d.clicked.connect(self._toggle_joint_2d_panel)
+        j2_header.addWidget(self.btn_toggle_joint_2d)
+        j2_layout.addLayout(j2_header)
+        self.joint_2d_host = QWidget()
+        self.joint_2d_host.setObjectName("Joint2DHost")
+        j2_host_layout = QVBoxLayout(self.joint_2d_host)
+        j2_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._joint_2d_placeholder = QLabel("井震 2D 剖面将在此挂载（S1.3）")
+        self._joint_2d_placeholder.setAlignment(Qt.AlignCenter)
+        self._joint_2d_placeholder.setStyleSheet("color: %s; padding: 12px;" % tokens.TEXT_SECONDARY)
+        j2_host_layout.addWidget(self._joint_2d_placeholder)
+        j2_layout.addWidget(self.joint_2d_host, 1)
+        self._center_v_split.addWidget(self._joint_2d_panel)
+        self._center_v_split.setStretchFactor(0, 3)
+        self._center_v_split.setStretchFactor(1, 1)
+        self._center_v_split.setSizes([700, 220])
+        self._joint_2d_expanded_sizes = [700, 220]
+
+        center_column_layout.addWidget(self._center_v_split)
+
+        # 2b. Collapsible joint 3D strip (between center column and param panel)
+        self._joint_3d_panel = QFrame()
+        self._joint_3d_panel.setObjectName("Joint3DPanel")
+        self._joint_3d_panel.setStyleSheet(
+            "QFrame#Joint3DPanel { background: %s; border: 1px solid %s; border-radius: %dpx; }"
+            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
+        )
+        j3_layout = QVBoxLayout(self._joint_3d_panel)
+        j3_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        j3_layout.setSpacing(tokens.SPACE_1)
+        j3_header = QHBoxLayout()
+        j3_title = QLabel("井震 3D")
+        j3_title.setStyleSheet("font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY)
+        j3_header.addWidget(j3_title)
+        j3_header.addStretch()
+        self.btn_toggle_joint_3d = QPushButton("折叠")
+        self.btn_toggle_joint_3d.setCheckable(True)
+        self.btn_toggle_joint_3d.setChecked(False)
+        self.btn_toggle_joint_3d.clicked.connect(self._toggle_joint_3d_panel)
+        j3_header.addWidget(self.btn_toggle_joint_3d)
+        j3_layout.addLayout(j3_header)
+        self.joint_3d_host = QWidget()
+        self.joint_3d_host.setObjectName("Joint3DHost")
+        j3_host_layout = QVBoxLayout(self.joint_3d_host)
+        j3_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._joint_3d_placeholder = QLabel("井震联合 3D 将在此挂载（S1.3）")
+        self._joint_3d_placeholder.setAlignment(Qt.AlignCenter)
+        self._joint_3d_placeholder.setWordWrap(True)
+        self._joint_3d_placeholder.setStyleSheet("color: %s; padding: 12px;" % tokens.TEXT_SECONDARY)
+        j3_host_layout.addWidget(self._joint_3d_placeholder)
+        j3_layout.addWidget(self.joint_3d_host, 1)
+        self._joint_3d_panel.setMinimumWidth(200)
+        self._joint_3d_panel.setMaximumWidth(480)
 
         # 3. Right Panel: Parameters & Exporters (Scrollable)
         right_scroll = QScrollArea()
@@ -486,18 +563,52 @@ class GeologicalModeling3DPage(QWidget):
         right_scroll.setMinimumWidth(320)
         right_scroll.setMaximumWidth(440)
 
-        # Add widgets to splitter
+        # Add widgets to splitter: left | center (GL+2D) | joint 3D | params
         splitter.addWidget(left_widget)
-        splitter.addWidget(center_widget)
+        splitter.addWidget(center_column)
+        splitter.addWidget(self._joint_3d_panel)
         splitter.addWidget(right_scroll)
 
-        # Center widget (3D canvas) expands to fill available space; side panels maintain fixed widths
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([260, 1000, 360])
+        splitter.setStretchFactor(3, 0)
+        splitter.setSizes([240, 720, 280, 340])
+        self._main_splitter = splitter
+        self._joint_3d_expanded_width = 280
 
         main_layout.addWidget(splitter)
+
+    def _toggle_joint_2d_panel(self) -> None:
+        """Collapse/expand bottom joint fence 2D strip (#87)."""
+        collapsed = self.btn_toggle_joint_2d.isChecked()
+        self.joint_2d_host.setVisible(not collapsed)
+        self.btn_toggle_joint_2d.setText("展开" if collapsed else "折叠")
+        if collapsed:
+            self._joint_2d_expanded_sizes = self._center_v_split.sizes()
+            total = sum(self._joint_2d_expanded_sizes) or 900
+            self._center_v_split.setSizes([max(total - 36, 100), 36])
+        else:
+            sizes = getattr(self, "_joint_2d_expanded_sizes", None) or [700, 220]
+            self._center_v_split.setSizes(sizes)
+
+    def _toggle_joint_3d_panel(self) -> None:
+        """Collapse/expand right joint 3D strip (#87)."""
+        collapsed = self.btn_toggle_joint_3d.isChecked()
+        self.joint_3d_host.setVisible(not collapsed)
+        self.btn_toggle_joint_3d.setText("展开" if collapsed else "折叠")
+        sizes = self._main_splitter.sizes()
+        if collapsed:
+            self._joint_3d_expanded_width = max(sizes[2], 200)
+            # Keep a thin chrome strip
+            sizes[2] = 40
+            self._joint_3d_panel.setMaximumWidth(48)
+            self._joint_3d_panel.setMinimumWidth(40)
+        else:
+            self._joint_3d_panel.setMinimumWidth(200)
+            self._joint_3d_panel.setMaximumWidth(480)
+            sizes[2] = getattr(self, "_joint_3d_expanded_width", 280)
+        self._main_splitter.setSizes(sizes)
 
     def _toggle_coord_mode(self) -> None:
         """Toggle between Grid coordinates (IL/XL) and Geographic coordinates (Easting/Northing in meters)."""
