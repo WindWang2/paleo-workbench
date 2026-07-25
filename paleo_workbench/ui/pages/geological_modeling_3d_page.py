@@ -709,8 +709,28 @@ class GeologicalModeling3DPage(QWidget):
         if not self._joint_loaded_once and self.isVisible():
             self._joint_loaded_once = True
             self._ensure_joint_widget()
-            self._apply_joint_state_from_project()
-            self._joint_host.reload()
+            # Apply tree checks first; domain via preferred_domain so reload
+            # does not force Time (code-review Spec fix).
+            self._apply_joint_tree_checks_from_project()
+            domain = "Time"
+            if self._project is not None:
+                state = getattr(self._project, "joint_analysis", None)
+                domain = getattr(state, "vertical_domain", None) or "Time"
+            if hasattr(self, "_joint_domain"):
+                self._joint_domain.blockSignals(True)
+                idx = self._joint_domain.findText(domain)
+                if idx >= 0:
+                    self._joint_domain.setCurrentIndex(idx)
+                self._joint_domain.blockSignals(False)
+            restoring_fence = False
+            if self._project is not None:
+                state = getattr(self._project, "joint_analysis", None)
+                wells = list(getattr(state, "active_fence_wells", None) or [])
+                restoring_fence = len(wells) >= 2
+            self._joint_host.reload(
+                preferred_domain=domain,
+                auto_default_fence=not restoring_fence,
+            )
             self._restore_joint_fence_from_project()
 
     def collect_joint_analysis_state(self):
@@ -753,39 +773,32 @@ class GeologicalModeling3DPage(QWidget):
             return
         self._project.joint_analysis = self.collect_joint_analysis_state()
 
-    def _apply_joint_state_from_project(self) -> None:
+    def _apply_joint_tree_checks_from_project(self) -> None:
         if self._project is None:
             return
         state = getattr(self._project, "joint_analysis", None)
         if state is None:
             return
-        domain = getattr(state, "vertical_domain", None) or "Time"
-        if hasattr(self, "_joint_domain"):
-            self._joint_domain.blockSignals(True)
-            idx = self._joint_domain.findText(domain)
-            if idx >= 0:
-                self._joint_domain.setCurrentIndex(idx)
-            self._joint_domain.blockSignals(False)
-            self._joint_host.set_vertical_domain(domain)
         checks = getattr(state, "tree_checks", None) or {}
-        if checks:
-            root = self.model_tree.invisibleRootItem()
-            self.model_tree.blockSignals(True)
-            try:
-                for i in range(root.childCount()):
-                    group = root.child(i)
-                    if "井震联合" not in group.text(0):
-                        continue
-                    for j in range(group.childCount()):
-                        child = group.child(j)
-                        name = child.text(0)
-                        if name in checks:
-                            child.setCheckState(
-                                0, Qt.Checked if checks[name] else Qt.Unchecked
-                            )
-            finally:
-                self.model_tree.blockSignals(False)
-            self._sync_joint_visibility_from_tree()
+        if not checks:
+            return
+        root = self.model_tree.invisibleRootItem()
+        self.model_tree.blockSignals(True)
+        try:
+            for i in range(root.childCount()):
+                group = root.child(i)
+                if "井震联合" not in group.text(0):
+                    continue
+                for j in range(group.childCount()):
+                    child = group.child(j)
+                    name = child.text(0)
+                    if name in checks:
+                        child.setCheckState(
+                            0, Qt.Checked if checks[name] else Qt.Unchecked
+                        )
+        finally:
+            self.model_tree.blockSignals(False)
+        self._sync_joint_visibility_from_tree()
 
     def _restore_joint_fence_from_project(self) -> None:
         if self._project is None:
@@ -808,8 +821,9 @@ class GeologicalModeling3DPage(QWidget):
             from geoviz import WellSeismicJointWidget
 
             self._joint_widget = WellSeismicJointWidget(self.joint_3d_host)
-            # Reparent fence profile into bottom strip when present
-            profile = getattr(self._joint_widget, "_profile", None)
+            # Public detach of fence profile into bottom strip
+            take = getattr(self._joint_widget, "take_profile_widget", None)
+            profile = take() if callable(take) else self._joint_widget.profile_widget
             layout_3d = self.joint_3d_host.layout()
             if self._joint_3d_placeholder is not None:
                 self._joint_3d_placeholder.setParent(None)
@@ -821,6 +835,11 @@ class GeologicalModeling3DPage(QWidget):
                     self._joint_2d_placeholder = None
                 profile.setParent(self.joint_2d_host)
                 self.joint_2d_host.layout().insertWidget(0, profile, 1)
+                # Keep reference so set_scene can still refresh profile
+                self._joint_profile = profile
+                if hasattr(self._joint_widget, "_profile"):
+                    # Widget still needs profile for set_scene sync if reattached
+                    pass
         except Exception as exc:
             logger.exception("joint widget mount failed")
             self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
@@ -832,6 +851,10 @@ class GeologicalModeling3DPage(QWidget):
         self._ensure_joint_widget()
         if self._joint_widget is not None and self._joint_host.scene is not None:
             self._joint_widget.set_scene(self._joint_host.scene)
+            # Profile may have been detached into bottom host
+            profile = getattr(self, "_joint_profile", None)
+            if profile is not None and hasattr(profile, "set_scene"):
+                profile.set_scene(self._joint_host.scene)
         self._fill_joint_well_combos()
         self._sync_joint_visibility_from_tree()
 
@@ -1149,10 +1172,12 @@ class GeologicalModeling3DPage(QWidget):
         return True
 
     def _sync_joint_visibility_from_tree(self) -> None:
-        """Apply geoviz joint tree checks to embedded joint chrome (#88)."""
+        """Apply geoviz joint tree checks to embedded joint chrome + layers."""
         show_3d = self._tree_item_checked("井震 3D 视口")
         show_2d = self._tree_item_checked("井震 2D 剖面条")
         show_vol = self._tree_item_checked("地震预览体 (geoviz)")
+        show_wells = self._tree_item_checked("联合井轨迹 (geoviz)")
+        show_fence = self._tree_item_checked("井间剖面 fence (geoviz)")
         # Panel chrome
         if hasattr(self, "_joint_3d_panel"):
             self._joint_3d_panel.setVisible(show_3d or show_vol)
@@ -1164,9 +1189,12 @@ class GeologicalModeling3DPage(QWidget):
             self.joint_2d_host.setVisible(show_2d)
         if self._joint_widget is not None:
             self._joint_widget.setVisible(show_3d or show_vol)
-            renderer = getattr(self._joint_widget, "renderer", None)
-            if renderer is not None:
-                renderer.setVisible(show_vol or show_3d)
+            set_vis = getattr(self._joint_widget, "set_layer_visibility", None)
+            if callable(set_vis):
+                set_vis(wells=show_wells, fences=show_fence, volume=show_vol)
+            profile = getattr(self, "_joint_profile", None)
+            if profile is not None:
+                profile.setVisible(show_2d and show_fence)
 
     def _update_clipping(self) -> None:
         """Update 3D interactive user clipping parameters based on UI sliders."""
@@ -1211,10 +1239,12 @@ class GeologicalModeling3DPage(QWidget):
             ni, nx, nt = vol.shape
         except Exception:
             return
-        r = getattr(self._joint_widget, "renderer", None)
-        cur_il = int(getattr(r, "_il_pos", 0) or 0) if r is not None else 0
-        cur_xl = int(getattr(r, "_xl_pos", 0) or 0) if r is not None else 0
-        cur_t = int(getattr(r, "_t_pos", 0) or 0) if r is not None else 0
+        cur_il = cur_xl = cur_t = 0
+        get_idx = getattr(self._joint_widget, "slice_indices", None)
+        if callable(get_idx):
+            cur = get_idx()
+            if cur is not None:
+                cur_il, cur_xl, cur_t = cur
         clip = ModelingClipState(
             x_enabled=self.chk_clip_x.isChecked(),
             x_value=self.slide_clip_x.value(),

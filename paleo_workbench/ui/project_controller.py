@@ -69,6 +69,7 @@ class ProjectController:
                 "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
             )
             return None
+        self._flush_joint_analysis_state()
         if self.window.project_path is not None:
             try:
                 self.window.project.meta.project_root = str(
@@ -92,6 +93,7 @@ class ProjectController:
                 "编图草稿未通过拓扑检查，工程文件未写入。请修复拓扑问题后重试。",
             )
             return None
+        self._flush_joint_analysis_state()
         target = self._normalize_project_path(Path(path))
         try:
             self.window.project.meta.project_root = str(target.resolve().parent)
@@ -101,6 +103,19 @@ class ProjectController:
             return None
         self.window.project_path = target
         return target
+
+    def _flush_joint_analysis_state(self) -> None:
+        """Persist joint presentation from 三维建模 page before project write."""
+        shell = getattr(self.window, "app_shell", None)
+        page = getattr(shell, "geomodel_page", None) if shell is not None else None
+        if page is not None and hasattr(page, "save_joint_analysis_to_project"):
+            try:
+                # Keep page project pointer aligned with window project
+                if hasattr(page, "set_project"):
+                    page.set_project(self.window.project)
+                page.save_joint_analysis_to_project()
+            except Exception:
+                pass
 
     def open_sample_project(self, data_root: Path | None = None) -> bool:
         """Bootstrap sample data into the current window (no auto-save)."""

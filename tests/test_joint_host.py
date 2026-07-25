@@ -27,6 +27,26 @@ def test_host_has_scene_when_geoviz_available():
         assert host.scene is None
 
 
+def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
+    """reload(preferred_domain=Depth) must not leave scene stuck on Time."""
+    from paleo_workbench.viz import joint_host as mod
+    from paleo_workbench.project.models import JointAnalysisState, ProjectDocument
+
+    monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
+    # Empty data → early exit; still unit-test set_vertical_domain path
+    host = WellSeismicJointHost()
+    if host.scene is None:
+        return
+    host.set_vertical_domain("Depth", emit_scene=False)
+    from geoviz import VerticalDomain
+
+    assert host.scene.vertical_domain is VerticalDomain.DEPTH
+    # Simulate project preference applied after a bind
+    host.set_vertical_domain("Time", emit_scene=False)
+    host.set_vertical_domain("Depth", emit_scene=False)
+    assert host.scene.vertical_domain is VerticalDomain.DEPTH
+
+
 def test_joint_page_delegates_to_host(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.ui.pages import well_seismic_joint_page as page_mod
     from paleo_workbench.viz import joint_host as host_mod

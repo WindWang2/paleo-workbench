@@ -36,3 +36,18 @@ def test_project_resources_prefer_over_data(tmp_path: Path):
     paths = resolve_joint_assets(project, data_root=data)
     assert paths.segy == proj_segy
     assert paths.source in {"project", "mixed"}
+
+
+def test_path_hints_override_when_files_exist(tmp_path: Path):
+    from paleo_workbench.project.models import JointAnalysisState
+
+    data = tmp_path / "data"
+    (data / "地震体").mkdir(parents=True)
+    demo = data / "地震体" / "demo.sgy"
+    demo.write_bytes(b"d")
+    hinted = tmp_path / "hinted.sgy"
+    hinted.write_bytes(b"h")
+    project = ProjectDocument.new("t")
+    project.joint_analysis = JointAnalysisState(path_hints={"segy": str(hinted)})
+    paths = resolve_joint_assets(project, data_root=data)
+    assert paths.segy == hinted

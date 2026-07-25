@@ -39,3 +39,22 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     assert state.vertical_domain == "Depth"
     page.save_joint_analysis_to_project()
     assert page._project.joint_analysis.vertical_domain == "Depth"
+
+
+def test_project_controller_flushes_joint_on_save(qtbot, tmp_path, monkeypatch):
+    from paleo_workbench.app import PaleoWorkbenchWindow
+    from paleo_workbench.project.models import ProjectDocument
+
+    win = PaleoWorkbenchWindow()
+    qtbot.addWidget(win)
+    doc = ProjectDocument.new("save-test")
+    win.project = doc
+    win.project_path = tmp_path / "save-test.json"
+    page = win.app_shell.geomodel_page
+    page.set_project(doc)
+    page._joint_domain.setCurrentText("Depth")
+    # Avoid mapping topology flush issues
+    monkeypatch.setattr(win, "_flush_mapping_draft", lambda: True)
+    path = win.project_controller.save_project()
+    assert path is not None
+    assert win.project.joint_analysis.vertical_domain == "Depth"

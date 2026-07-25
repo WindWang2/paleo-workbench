@@ -48,6 +48,27 @@ def resolve_joint_assets(
     result.horizons = from_project.horizons or from_data.horizons
     result.las_files = from_project.las_files or from_data.las_files
 
+    # Optional path_hints from joint_analysis persistence (code-review Spec fix)
+    if project is not None:
+        state = getattr(project, "joint_analysis", None)
+        hints = dict(getattr(state, "path_hints", None) or {})
+        for key, attr in (
+            ("segy", "segy"),
+            ("well_head", "well_head"),
+            ("td_dir", "td_dir"),
+            ("tops", "tops"),
+        ):
+            raw = hints.get(key)
+            if not raw:
+                continue
+            p = Path(raw)
+            if p.exists():
+                setattr(result, attr, p)
+        if hints.get("horizons"):
+            hp = Path(hints["horizons"])
+            if hp.exists():
+                result.horizons = [hp] if hp.is_file() else list(hp.glob("*.dat"))[:20]
+
     used_p = any(
         [
             from_project.segy,

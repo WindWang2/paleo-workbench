@@ -102,12 +102,27 @@ class WellSeismicJointHost(QObject):
             return []
         return list(self._scene.well_trajectories().keys())
 
-    def reload(self) -> None:
+    def reload(
+        self,
+        *,
+        preferred_domain: str | None = None,
+        auto_default_fence: bool = True,
+    ) -> None:
+        """Reload hybrid assets into the scene.
+
+        preferred_domain:
+            If set ('Time'/'Depth'), applied after survey/wells bind so restore
+            is not clobbered by a forced Time default (code-review Spec fix).
+        auto_default_fence:
+            When False, skip auto well-to-well fence on volume ready (restore path).
+        """
         if self._scene is None:
             self.status_changed.emit(
                 f"联合场景不可用: {self._engine_error or 'unknown'}"
             )
             return
+        self._auto_default_fence = bool(auto_default_fence)
+        self._pending_domain = preferred_domain
         repo = _repo_root()
         self._paths = resolve_joint_assets(self._project, repo_root=repo)
         paths = self._paths
@@ -119,6 +134,13 @@ class WellSeismicJointHost(QObject):
         try:
             self._apply_wells_and_survey(paths)
             self._apply_tops_and_curves(paths)
+            # Restore domain after bind (survey apply no longer hard-forces UI domain)
+            domain = preferred_domain
+            if domain is None and self._project is not None:
+                state = getattr(self._project, "joint_analysis", None)
+                domain = getattr(state, "vertical_domain", None) if state else None
+            if domain:
+                self.set_vertical_domain(domain, emit_scene=False)
         except Exception as exc:
             self.status_changed.emit(f"加载失败: {exc}")
             logger.exception("joint load failed")
@@ -131,7 +153,7 @@ class WellSeismicJointHost(QObject):
             self.status_changed.emit(f"已加载井/测网（无 SEGY）· 来源={paths.source}")
             self.scene_updated.emit()
 
-    def set_vertical_domain(self, domain: str) -> None:
+    def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> None:
         """domain: 'Time' or 'Depth' (case-insensitive prefix)."""
         from geoviz import VerticalDomain, select_depth_transform
 
@@ -147,7 +169,8 @@ class WellSeismicJointHost(QObject):
         else:
             self._scene.set_vertical_domain(VerticalDomain.TIME)
             self.status_changed.emit("竖直域=Time")
-        self.scene_updated.emit()
+        if emit_scene:
+            self.scene_updated.emit()
 
     def add_well_to_well_fence(self, well_a: str, well_b: str, *, name: str | None = None) -> None:
         if self._scene is None:
@@ -174,14 +197,13 @@ class WellSeismicJointHost(QObject):
 
     def _apply_wells_and_survey(self, paths: JointAssetPaths) -> None:
         from geoviz import (
-            VerticalDomain,
             align_horizon_corners_to_loader_axes,
             horizon_corners_from_dat,
             survey_corners_from_segy,
         )
 
         assert self._scene is not None
-        self._scene.set_vertical_domain(VerticalDomain.TIME)
+        # Domain is applied by reload(preferred_domain=...) after this bind.
         self._survey_meta = {}
 
         if paths.segy is not None:
@@ -303,7 +325,11 @@ class WellSeismicJointHost(QObject):
         self._scene.set_volume_access(InMemoryVolumeAccess(volume))
         self._scene.set_preview_mode(True)
         names = list(self._scene.well_trajectories().keys())
-        if len(names) >= 2 and not self._scene.fences:
+        if (
+            getattr(self, "_auto_default_fence", True)
+            and len(names) >= 2
+            and not self._scene.fences
+        ):
             try:
                 self._scene.add_well_to_well_fence(names[:2], name="默认井间")
             except Exception:
