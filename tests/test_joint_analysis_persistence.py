@@ -103,9 +103,38 @@ def test_project_controller_flushes_joint_on_save(qtbot, tmp_path, monkeypatch):
     win.project_path = tmp_path / "save-test.json"
     page = win.app_shell.geomodel_page
     page.set_project(doc)
+    page._joint_loaded_once = True  # simulate visited 三维建模 hybrid
     page._joint_domain.setCurrentText("Depth")
     # Avoid mapping topology flush issues
     monkeypatch.setattr(win, "_flush_mapping_draft", lambda: True)
     path = win.project_controller.save_project()
     assert path is not None
     assert win.project.joint_analysis.vertical_domain == "Depth"
+
+
+def test_project_controller_skips_joint_flush_until_page_loaded(qtbot, tmp_path, monkeypatch):
+    """Saving from another page must not clobber saved joint domain with UI defaults."""
+    from paleo_workbench.app import PaleoWorkbenchWindow
+    from paleo_workbench.project.models import JointAnalysisState, ProjectDocument
+
+    win = PaleoWorkbenchWindow()
+    qtbot.addWidget(win)
+    doc = ProjectDocument.new("preserve-joint")
+    doc.joint_analysis = JointAnalysisState(
+        vertical_domain="Depth",
+        active_fence_wells=["A1", "A2"],
+        tree_checks={"地震预览体 (geoviz)": False},
+    )
+    win.project = doc
+    win.project_path = tmp_path / "preserve-joint.json"
+    page = win.app_shell.geomodel_page
+    page.set_project(doc)
+    assert page._joint_loaded_once is False
+    # Pristine domain combo is Time — must not overwrite project
+    assert page._joint_domain.currentText() == "Time"
+    monkeypatch.setattr(win, "_flush_mapping_draft", lambda: True)
+    path = win.project_controller.save_project()
+    assert path is not None
+    assert win.project.joint_analysis.vertical_domain == "Depth"
+    assert win.project.joint_analysis.active_fence_wells == ["A1", "A2"]
+    assert win.project.joint_analysis.tree_checks.get("地震预览体 (geoviz)") is False
