@@ -135,25 +135,72 @@ class GeologicalModeling3DPage(QWidget):
             "QSplitter::handle { background: %s; height: 3px; }" % tokens.BORDER
         )
 
+        # Light chrome around dark 3D host (toolbar/status match app light theme)
         self.view_container = QFrame()
         self.view_container.setFrameShape(QFrame.StyledPanel)
         self.view_container.setStyleSheet(
             "QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }"
-            % (tokens.BG_CANVAS, tokens.RADIUS_CARD, tokens.BORDER)
+            % (tokens.BG_SIDEBAR, tokens.RADIUS_CARD, tokens.BORDER)
         )
         view_layout = QVBoxLayout(self.view_container)
         view_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
         view_layout.setSpacing(tokens.SPACE_1)
 
-        # Single-row joint toolbar (G1 #101)
+        # Single-row joint toolbar — light surface (not canvas black)
         self.floating_bar = QFrame()
         self.floating_bar.setObjectName("JointTopToolbar")
         self.floating_bar.setStyleSheet(
-            "QFrame#JointTopToolbar { background: %s; border: 1px solid %s; border-radius: %dpx; }"
-            % (tokens.BG_CANVAS_PANEL, tokens.BORDER_CANVAS, tokens.RADIUS_BUTTON)
+            """
+            QFrame#JointTopToolbar {
+                background: %s;
+                border: 1px solid %s;
+                border-radius: %dpx;
+            }
+            QFrame#JointTopToolbar QLabel {
+                color: %s;
+                background: transparent;
+                padding: 0 2px;
+            }
+            QFrame#JointTopToolbar QPushButton {
+                background: %s;
+                color: %s;
+                border: 1px solid %s;
+                border-radius: %dpx;
+                padding: 4px 10px;
+                font-weight: 600;
+            }
+            QFrame#JointTopToolbar QPushButton:hover {
+                background: %s;
+                border-color: %s;
+            }
+            QFrame#JointTopToolbar QComboBox {
+                background: %s;
+                color: %s;
+                border: 1px solid %s;
+                border-radius: %dpx;
+                padding: 2px 8px;
+                min-height: 24px;
+            }
+            """
+            % (
+                tokens.BG_SIDEBAR,
+                tokens.BORDER,
+                tokens.RADIUS_BUTTON,
+                tokens.TEXT_PRIMARY,
+                tokens.BG_SEARCH,
+                tokens.TEXT_PRIMARY,
+                tokens.BORDER,
+                tokens.RADIUS_BUTTON,
+                tokens.BG_SELECTION,
+                tokens.PRIMARY,
+                tokens.BG_SIDEBAR,
+                tokens.TEXT_PRIMARY,
+                tokens.BORDER,
+                tokens.RADIUS_BUTTON,
+            )
         )
         f_layout = QHBoxLayout(self.floating_bar)
-        f_layout.setContentsMargins(tokens.SPACE_1, 2, tokens.SPACE_1, 2)
+        f_layout.setContentsMargins(tokens.SPACE_2, 4, tokens.SPACE_2, 4)
         f_layout.setSpacing(tokens.SPACE_1)
         f_layout.addWidget(QLabel("域"))
         self._joint_domain = QComboBox()
@@ -185,22 +232,30 @@ class GeologicalModeling3DPage(QWidget):
         f_layout.addStretch()
         view_layout.addWidget(self.floating_bar)
 
-        # Status row under toolbar (S1)
+        # Status row under toolbar — light chrome, not canvas black
         self._joint_status.setWordWrap(True)
+        self._joint_status.setObjectName("JointStatusRow")
         self._joint_status.setStyleSheet(
-            "color: %s; padding: 2px 4px; font-size: 11px;" % tokens.TEXT_SECONDARY
+            "QLabel#JointStatusRow {"
+            " color: %s; background: %s; border: 1px solid %s; border-radius: %dpx;"
+            " padding: 4px 8px; font-size: 11px; }"
+            % (tokens.TEXT_SECONDARY, tokens.BG_SEARCH, tokens.BORDER, tokens.RADIUS_BUTTON)
         )
         view_layout.addWidget(self._joint_status)
 
         self.joint_3d_host = QWidget()
         self.joint_3d_host.setObjectName("Joint3DHost")
+        self.joint_3d_host.setStyleSheet(
+            "QWidget#Joint3DHost { background: %s; border-radius: %dpx; }"
+            % (tokens.BG_CANVAS, tokens.RADIUS_CARD)
+        )
         j3_host_layout = QVBoxLayout(self.joint_3d_host)
         j3_host_layout.setContentsMargins(0, 0, 0, 0)
         self._joint_3d_placeholder = QLabel("井震联合 3D（主视口）")
         self._joint_3d_placeholder.setAlignment(Qt.AlignCenter)
         self._joint_3d_placeholder.setWordWrap(True)
         self._joint_3d_placeholder.setStyleSheet(
-            "color: %s; padding: 12px;" % tokens.TEXT_SECONDARY
+            "color: %s; padding: 12px; background: transparent;" % tokens.TEXT_ON_CANVAS
         )
         j3_host_layout.addWidget(self._joint_3d_placeholder)
         view_layout.addWidget(self.joint_3d_host, 1)
