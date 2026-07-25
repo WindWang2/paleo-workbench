@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (
 import pyqtgraph.opengl as gl
 
 from paleo_workbench import tokens
+from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.viz.joint_host import WellSeismicJointHost
 from paleo_workbench.viz.geomodel import (
     ClippedGLMeshItem,
     ClippedGLVolumeItem,
@@ -70,6 +72,15 @@ class GeologicalModeling3DPage(QWidget):
         self._well_curve_items: list[gl.GLLinePlotItem] = []
         self._synthetic_items: list[gl.GLLinePlotItem] = []
         self._seismic_slice_items: list[gl.GLMeshItem] = []
+
+        # Joint analysis host (geoviz) — PRD #85 / #88
+        self._project: ProjectDocument | None = None
+        self._joint_loaded_once = False
+        self._joint_widget = None
+        self._joint_status = QLabel("")
+        self._joint_host = WellSeismicJointHost(self)
+        self._joint_host.status_changed.connect(self._on_joint_status)
+        self._joint_host.scene_updated.connect(self._on_joint_scene_updated)
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
@@ -214,10 +225,13 @@ class GeologicalModeling3DPage(QWidget):
         self.joint_2d_host.setObjectName("Joint2DHost")
         j2_host_layout = QVBoxLayout(self.joint_2d_host)
         j2_host_layout.setContentsMargins(0, 0, 0, 0)
-        self._joint_2d_placeholder = QLabel("井震 2D 剖面将在此挂载（S1.3）")
+        self._joint_2d_placeholder = QLabel("井震 2D 剖面将在此挂载")
         self._joint_2d_placeholder.setAlignment(Qt.AlignCenter)
         self._joint_2d_placeholder.setStyleSheet("color: %s; padding: 12px;" % tokens.TEXT_SECONDARY)
         j2_host_layout.addWidget(self._joint_2d_placeholder)
+        self._joint_status.setWordWrap(True)
+        self._joint_status.setStyleSheet("color: %s; padding: 4px;" % tokens.TEXT_SECONDARY)
+        j2_host_layout.addWidget(self._joint_status)
         j2_layout.addWidget(self.joint_2d_host, 1)
         self._center_v_split.addWidget(self._joint_2d_panel)
         self._center_v_split.setStretchFactor(0, 3)
@@ -646,7 +660,15 @@ class GeologicalModeling3DPage(QWidget):
         self._add_checkable_child(root_wells, "钻孔 XJ24-3")
         self._add_checkable_child(root_wells, "钻孔 HZ25-2")
 
-        root_tie = QTreeWidgetItem(self.model_tree, ["井震融合标定与校正"])
+        # Dual stack: geomodel well-seismic (existing) + geoviz joint (#88)
+        root_joint = QTreeWidgetItem(self.model_tree, ["井震联合 (geoviz)"])
+        self._add_checkable_child(root_joint, "地震预览体 (geoviz)")
+        self._add_checkable_child(root_joint, "联合井轨迹 (geoviz)")
+        self._add_checkable_child(root_joint, "井间剖面 fence (geoviz)")
+        self._add_checkable_child(root_joint, "井震 3D 视口")
+        self._add_checkable_child(root_joint, "井震 2D 剖面条")
+
+        root_tie = QTreeWidgetItem(self.model_tree, ["井震标定与综合 (geomodel)"])
         self._add_checkable_child(root_tie, "地震剖面三维切片 (Seismic Slices)")
         self._add_checkable_child(root_tie, "井眼旁显测井曲线 (3D GR Logs)")
         self._add_checkable_child(root_tie, "合成地震记录叠加 (Synthetic Seismograms)")
@@ -654,11 +676,63 @@ class GeologicalModeling3DPage(QWidget):
         self._add_checkable_child(root_tie, "井震连井三维剖面幕墙 (Cross-Well Seismic Fence)")
 
         self.model_tree.expandAll()
-        self.model_tree.itemChanged.connect(self._on_tree_item_changed)
+        if not getattr(self, "_tree_changed_hooked", False):
+            self.model_tree.itemChanged.connect(self._on_tree_item_changed)
+            self._tree_changed_hooked = True
 
     def _add_checkable_child(self, parent_item: QTreeWidgetItem, name: str) -> None:
         item = QTreeWidgetItem(parent_item, [name])
         item.setCheckState(0, Qt.Checked)
+
+    def set_project(self, project: ProjectDocument | None) -> None:
+        self._project = project
+        self._joint_host.set_project(project)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._joint_loaded_once and self.isVisible():
+            self._joint_loaded_once = True
+            self._ensure_joint_widget()
+            self._joint_host.reload()
+
+    def _ensure_joint_widget(self) -> None:
+        """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
+        if self._joint_widget is not None:
+            return
+        if self._joint_host.scene is None:
+            self._joint_3d_placeholder.setText(
+                f"联合引擎不可用: {self._joint_host.engine_error or 'unknown'}"
+            )
+            return
+        try:
+            from geoviz import WellSeismicJointWidget
+
+            self._joint_widget = WellSeismicJointWidget(self.joint_3d_host)
+            # Reparent fence profile into bottom strip when present
+            profile = getattr(self._joint_widget, "_profile", None)
+            layout_3d = self.joint_3d_host.layout()
+            if self._joint_3d_placeholder is not None:
+                self._joint_3d_placeholder.setParent(None)
+                self._joint_3d_placeholder = None
+            layout_3d.addWidget(self._joint_widget, 1)
+            if profile is not None:
+                if self._joint_2d_placeholder is not None:
+                    self._joint_2d_placeholder.setParent(None)
+                    self._joint_2d_placeholder = None
+                profile.setParent(self.joint_2d_host)
+                self.joint_2d_host.layout().insertWidget(0, profile, 1)
+        except Exception as exc:
+            logger.exception("joint widget mount failed")
+            self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
+
+    def _on_joint_status(self, text: str) -> None:
+        self._joint_status.setText(text)
+
+    def _on_joint_scene_updated(self) -> None:
+        self._ensure_joint_widget()
+        if self._joint_widget is not None and self._joint_host.scene is not None:
+            self._joint_widget.set_scene(self._joint_host.scene)
+        self._sync_joint_visibility_from_tree()
 
     # ------------------------------------------------------------------ #
     # Modeling
@@ -935,6 +1009,37 @@ class GeologicalModeling3DPage(QWidget):
             self.model_tree.blockSignals(False)
 
         self._sync_visibility_from_tree()
+        self._sync_joint_visibility_from_tree()
+
+    def _tree_item_checked(self, name: str) -> bool:
+        root = self.model_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            group = root.child(i)
+            for j in range(group.childCount()):
+                child = group.child(j)
+                if child.text(0) == name:
+                    return child.checkState(0) == Qt.Checked
+        return True
+
+    def _sync_joint_visibility_from_tree(self) -> None:
+        """Apply geoviz joint tree checks to embedded joint chrome (#88)."""
+        show_3d = self._tree_item_checked("井震 3D 视口")
+        show_2d = self._tree_item_checked("井震 2D 剖面条")
+        show_vol = self._tree_item_checked("地震预览体 (geoviz)")
+        # Panel chrome
+        if hasattr(self, "_joint_3d_panel"):
+            self._joint_3d_panel.setVisible(show_3d or show_vol)
+        if hasattr(self, "joint_3d_host"):
+            self.joint_3d_host.setVisible(show_3d or show_vol)
+        if hasattr(self, "_joint_2d_panel"):
+            self._joint_2d_panel.setVisible(show_2d)
+        if hasattr(self, "joint_2d_host"):
+            self.joint_2d_host.setVisible(show_2d)
+        if self._joint_widget is not None:
+            self._joint_widget.setVisible(show_3d or show_vol)
+            renderer = getattr(self._joint_widget, "renderer", None)
+            if renderer is not None:
+                renderer.setVisible(show_vol or show_3d)
 
     def _update_clipping(self) -> None:
         """Update 3D interactive user clipping parameters based on UI sliders."""
