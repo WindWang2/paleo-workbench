@@ -95,6 +95,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "VolumeRegistration",
         "survey_corners_from_segy",
         "horizon_corners_from_dat",
+        "align_horizon_corners_to_loader_axes",
         "select_depth_transform",
     }
 )

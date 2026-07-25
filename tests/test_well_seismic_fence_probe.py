@@ -118,27 +118,87 @@ def test_depth_domain_and_v0_warning():
 
 
 def test_registration_scales_preview_volume_indices():
-    """Preview shape 8x8x16 vs full survey 411x641x901 — indices stay in range."""
+    """Preview shape vs full survey — IL/XL fractions scale into volume range."""
+    # Loader-aligned: IL along +X (641), XL along +Y (411)
     scene = WellSeismicScene()
-    scene.set_survey_from_corners(P1, P2, P3, n_samples=901, dt_ms=2.0)
-    vol = np.zeros((8, 8, 16), dtype=np.float32)
-    vol[4, 4, 8] = 1.0
+    lp1 = (4165, 1315, 0.0, 0.0)
+    lp2 = (4165, 1725, 0.0, 16406.0)
+    lp3 = (4805, 1725, 12793.0, 16406.0)
+    scene.set_survey_from_corners(lp1, lp2, lp3, n_samples=901, dt_ms=2.0)
+    assert scene.survey.n_inlines == 641
+    assert scene.survey.n_crosslines == 411
+    # Preview downsampled from loader 641×411
+    vol = np.zeros((107, 103, 113), dtype=np.float32)
     scene.set_volume_access(InMemoryVolumeAccess(vol))
     reg = scene.registration
     assert reg is not None
-    assert reg.n_inline == 8 and reg.n_sample == 16
-    # Survey mid-point should map near center of preview
-    vi, vx = reg.xy_to_volume_idx(6400.0, 8200.0)
-    assert 0 <= vi < 8 and 0 <= vx < 8
-    ii, xi, ti = reg.clamp_indices(vi, vx, reg.time_ms_to_sample_idx(900.0))
-    assert 0 <= ii < 8 and 0 <= xi < 8 and 0 <= ti < 16
-    # Fence extract uses registration
+    vi, vx = reg.xy_to_volume_idx(6396.5, 8203.0)
+    assert 0 <= vi < 107 and 0 <= vx < 103
+    vi2, vx2 = reg.xy_to_volume_idx(5288.67, 8219.94)
+    ii, xi, ti = reg.clamp_indices(vi2, vx2, reg.time_ms_to_sample_idx(900.0))
+    assert 0 <= ii < 107 and 0 <= xi < 103 and 0 <= ti < 113
     scene.add_fence(
         FenceSection("F", np.array([[0.0, 0.0], [12793.0, 16406.0]], dtype=float))
     )
     ext = scene.extract_active_fence(n_along=16)
     assert ext is not None
-    assert ext.amplitude.shape == (16, 16)
+    assert ext.amplitude.shape == (16, 113)
+
+
+def test_survey_matches_loader_volume_axes_on_real_segy():
+    """#81/#84: survey n_il/n_xl match SeismicLoader; preview keeps axis order."""
+    from pathlib import Path
+
+    from geoviz_seismic.loader import SeismicLoader
+    from geoviz_well_seismic_3d import survey_corners_from_segy
+    from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
+
+    segy = Path("data/地震体/200P_seismic.sgy")
+    if not segy.is_file():
+        pytest.skip("no demo SEGY")
+    p1, p2, p3, meta = survey_corners_from_segy(segy)
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(
+        p1, p2, p3, n_samples=meta["n_samples"], dt_ms=meta["dt_ms"]
+    )
+    loader = SeismicLoader(str(segy))
+    try:
+        m = loader.inspect()
+    finally:
+        loader.close()
+    assert scene.survey.n_inlines == m.n_inlines == 641
+    assert scene.survey.n_crosslines == m.n_crosslines == 411
+    assert scene.survey.iline_start == m.iline_start
+    assert scene.survey.xline_start == m.xline_start
+    vol, _ = load_seismic_volume_from_path(str(segy))
+    assert vol is not None
+    # No transpose: preview axis0 aspect matches loader IL count
+    assert vol.shape[0] > vol.shape[1]  # 107 > 103 ≈ 641/411
+    scene.set_volume_access(InMemoryVolumeAccess(vol))
+    reg = scene.registration
+    assert reg is not None
+    # Mid-survey XY and a well-like XY land inside preview indices
+    for x, y in ((6396.5, 8203.0), (5288.67, 8219.94)):
+        vi, vx = reg.xy_to_volume_idx(x, y)
+        assert 0 <= vi < vol.shape[0], (x, y, vi)
+        assert 0 <= vx < vol.shape[1], (x, y, vx)
+    # Axis contract: survey full counts track volume axes (preview scaled)
+    assert reg.n_inline == vol.shape[0]
+    assert reg.n_crossline == vol.shape[1]
+
+
+def test_signed_bingrid_loader_orientation():
+    """Loader-aligned corners: IL +X / XL +Y with consistent xy↔il_xl."""
+    lp1 = (4165.0, 1315.0, 0.0, 0.0)
+    lp2 = (4165.0, 1725.0, 0.0, 16406.0)
+    lp3 = (4805.0, 1725.0, 12793.0, 16406.0)
+    s = survey_from_corners(lp1, lp2, lp3, n_samples=901, dt_ms=2.0)
+    assert s.n_inlines == 641 and s.n_crosslines == 411
+    x, y = s.il_xl_to_xy(4805.0, 1725.0)
+    assert abs(x - 12793.0) < 1.0 and abs(y - 16406.0) < 1.0
+    il, xl = s.xy_to_il_xl(6396.5, 8203.0)
+    assert 4165 <= il <= 4805
+    assert 1315 <= xl <= 1725
 
 
 def test_probe_uses_registration_for_slice_indices():

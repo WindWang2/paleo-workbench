@@ -155,6 +155,7 @@ class WellSeismicJointPage(QWidget):
     def _apply_wells_and_survey(self, paths: JointAssetPaths) -> None:
         from geoviz import (
             VerticalDomain,
+            align_horizon_corners_to_loader_axes,
             horizon_corners_from_dat,
             survey_corners_from_segy,
         )
@@ -167,6 +168,7 @@ class WellSeismicJointPage(QWidget):
 
         if paths.segy is not None:
             p1, p2, p3, meta = survey_corners_from_segy(paths.segy)
+            self._survey_meta = meta
             self._scene.set_survey_from_corners(
                 p1,
                 p2,
@@ -178,7 +180,10 @@ class WellSeismicJointPage(QWidget):
             if paths.horizons:
                 corners = horizon_corners_from_dat(paths.horizons[0])
                 if corners is not None:
-                    ok, msg = self._scene.validate_against_corners(*corners, tol_m=50.0)
+                    corners = align_horizon_corners_to_loader_axes(*corners)
+                    ok, msg = self._scene.validate_against_corners(
+                        *corners, tol_m=50.0, tol_il_xl=1.0
+                    )
                     if not ok:
                         raise RuntimeError(f"测网与层位角点不一致（已中止）: {msg}")
 
@@ -293,6 +298,7 @@ class WellSeismicJointPage(QWidget):
             self._status.setText(f"预览体加载失败: {warning or 'unknown'}")
             self._joint.set_scene(self._scene)
             return
+        # Wayfinder #84: survey already matches loader volume axes; no transpose.
         self._scene.set_volume_access(InMemoryVolumeAccess(volume))
         self._scene.set_preview_mode(True)
         # Auto well-to-well fence for first two wells when possible
