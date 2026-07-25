@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import numpy as np
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QObject, QEvent
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QComboBox, QSlider, QSplitter, QProgressBar,
@@ -22,6 +22,11 @@ from paleo_workbench import tokens
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.viz.joint_host import WellSeismicJointHost
+from paleo_workbench.viz.joint_well_pick import (
+    WellPickController,
+    build_well_screen_geoms,
+    pick_well_name,
+)
 from paleo_workbench.viz.geomodel import (
     ClippedGLMeshItem,
     ClippedGLVolumeItem,
@@ -81,6 +86,11 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_host = WellSeismicJointHost(self)
         self._joint_host.status_changed.connect(self._on_joint_status)
         self._joint_host.scene_updated.connect(self._on_joint_scene_updated)
+        # 3D well pick (#123): two-click → host fence
+        self._well_pick = WellPickController()
+        self._joint_pick_filter: QObject | None = None
+        self._joint_pick_press: tuple[float, float] | None = None
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
@@ -871,9 +881,127 @@ class GeologicalModeling3DPage(QWidget):
                 self.joint_2d_host.layout().insertWidget(0, profile, 1)
                 self._joint_profile = profile
                 self._apply_profile_time_only_policy(profile)
+            self._install_joint_well_pick()
         except Exception as exc:
             logger.exception("joint widget mount failed")
             self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
+
+    def _install_joint_well_pick(self) -> None:
+        """Install click filter on joint 3D renderer for well hit-test (#123)."""
+        if self._joint_pick_filter is not None:
+            return
+        if self._joint_widget is None:
+            return
+        renderer = getattr(self._joint_widget, "renderer", None)
+        if renderer is None:
+            return
+        view = getattr(renderer, "_view", None)
+        target = view if view is not None else renderer
+        page = self
+
+        class _PickFilter(QObject):
+            def eventFilter(self, obj, event):  # noqa: N802
+                et = event.type()
+                if et == QEvent.Type.MouseButtonPress:
+                    if event.button() == Qt.MouseButton.LeftButton:
+                        pos = event.position() if hasattr(event, "position") else event.pos()
+                        page._joint_pick_press = (float(pos.x()), float(pos.y()))
+                elif et == QEvent.Type.MouseButtonRelease:
+                    if event.button() != Qt.MouseButton.LeftButton:
+                        return False
+                    press = page._joint_pick_press
+                    page._joint_pick_press = None
+                    if press is None:
+                        return False
+                    pos = event.position() if hasattr(event, "position") else event.pos()
+                    sx, sy = float(pos.x()), float(pos.y())
+                    dx, dy = sx - press[0], sy - press[1]
+                    if dx * dx + dy * dy > 25:  # drag → leave to orbit camera
+                        return False
+                    handled = page._on_joint_3d_click(sx, sy, target)
+                    return bool(handled)
+                elif et == QEvent.Type.KeyPress:
+                    if event.key() == Qt.Key.Key_Escape:
+                        msg = page._well_pick.on_escape()
+                        if msg:
+                            page._on_joint_status(msg)
+                            return True
+                return False
+
+        filt = _PickFilter(self)
+        self._joint_pick_filter = filt
+        target.installEventFilter(filt)
+        # Also filter on renderer widget for keyboard
+        if target is not renderer:
+            renderer.installEventFilter(filt)
+        try:
+            target.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        except Exception:
+            pass
+
+    def _on_joint_3d_click(self, sx: float, sy: float, view_widget) -> bool:
+        """Hit-test wells; two-click builds fence via host. Returns True if consumed."""
+        name = self._hit_test_well_at(sx, sy, view_widget)
+        if name is None:
+            if self._well_pick.half_select is not None:
+                self._on_joint_status(self._well_pick.on_blank_click())
+                return True
+            return False
+        self._handle_joint_well_pick(name)
+        return True
+
+    def _hit_test_well_at(self, sx: float, sy: float, view_widget) -> str | None:
+        scene = self._joint_host.scene
+        if scene is None:
+            return None
+        try:
+            trajs = scene.well_trajectories()
+        except Exception:
+            return None
+        if not trajs:
+            return None
+        w = float(getattr(view_widget, "width", lambda: 0)() or 0)
+        h = float(getattr(view_widget, "height", lambda: 0)() or 0)
+        if w <= 0 or h <= 0:
+            return None
+        try:
+            vm = view_widget.viewMatrix()
+            pm = view_widget.projectionMatrix()
+        except Exception:
+            return None
+
+        def w2r(x, y, z):
+            return scene.world_to_render_xyz(float(x), float(y), float(z))
+
+        geoms = build_well_screen_geoms(
+            trajs,
+            world_to_render=w2r,
+            view_matrix=vm,
+            projection_matrix=pm,
+            width=w,
+            height=h,
+        )
+        return pick_well_name(sx, sy, geoms)
+
+    def _handle_joint_well_pick(self, name: str) -> None:
+        """Apply two-click pick; create fence through host when pair completes."""
+        status, pair = self._well_pick.on_well_click(name)
+        if status:
+            self._on_joint_status(status)
+        if pair is None:
+            return
+        a, b = pair
+        self._joint_host.add_well_to_well_fence(a, b)
+        self._select_joint_wells(a, b)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            msg = self._well_pick.on_escape()
+            if msg:
+                self._on_joint_status(msg)
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def _apply_profile_time_only_policy(self, profile) -> None:
         """Force 2D fence extract on Time even if scene domain is Depth (#122)."""
