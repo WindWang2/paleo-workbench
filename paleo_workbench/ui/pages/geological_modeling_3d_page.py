@@ -276,6 +276,13 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_fence_btn = QPushButton("井间剖面")
         self._joint_fence_btn.clicked.connect(self._on_joint_fence)
         j3_tools.addWidget(self._joint_fence_btn)
+        self._joint_align_btn = QPushButton("对齐视角")
+        self._joint_align_btn.clicked.connect(self._align_joint_camera)
+        j3_tools.addWidget(self._joint_align_btn)
+        self._joint_add_btn = QPushButton("从工程/数据刷新")
+        self._joint_add_btn.setToolTip("重新解析并挂载 SEGY / 井 / tops / LAS（hybrid）")
+        self._joint_add_btn.clicked.connect(self._on_joint_add_from_project)
+        j3_tools.addWidget(self._joint_add_btn)
         j3_tools.addStretch()
         j3_layout.addLayout(j3_tools)
         self.joint_3d_host = QWidget()
@@ -761,6 +768,12 @@ class GeologicalModeling3DPage(QWidget):
                 hints["segy"] = str(paths.segy)
             if paths.well_head:
                 hints["well_head"] = str(paths.well_head)
+            if paths.td_dir:
+                hints["td_dir"] = str(paths.td_dir)
+            if paths.tops:
+                hints["tops"] = str(paths.tops)
+            if paths.horizons:
+                hints["horizons"] = str(paths.horizons[0])
         return JointAnalysisState(
             tree_checks=checks,
             vertical_domain=domain,
@@ -807,6 +820,29 @@ class GeologicalModeling3DPage(QWidget):
         wells = list(getattr(state, "active_fence_wells", None) or [])
         if len(wells) >= 2:
             self._joint_host.add_well_to_well_fence(wells[0], wells[1])
+            self._select_joint_wells(wells[0], wells[1])
+
+    def _select_joint_wells(self, well_a: str, well_b: str) -> None:
+        """Set toolbar combos to a saved well pair without resetting to index 0/1."""
+        if not hasattr(self, "_joint_well_a"):
+            return
+        names = self._joint_host.well_names()
+        self._joint_well_a.blockSignals(True)
+        self._joint_well_b.blockSignals(True)
+        self._joint_well_a.clear()
+        self._joint_well_b.clear()
+        self._joint_well_a.addItems(names)
+        self._joint_well_b.addItems(names)
+        ia = self._joint_well_a.findText(well_a)
+        ib = self._joint_well_b.findText(well_b)
+        if ia >= 0:
+            self._joint_well_a.setCurrentIndex(ia)
+        if ib >= 0:
+            self._joint_well_b.setCurrentIndex(ib)
+        elif len(names) >= 2:
+            self._joint_well_b.setCurrentIndex(1)
+        self._joint_well_a.blockSignals(False)
+        self._joint_well_b.blockSignals(False)
 
     def _ensure_joint_widget(self) -> None:
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
@@ -835,11 +871,7 @@ class GeologicalModeling3DPage(QWidget):
                     self._joint_2d_placeholder = None
                 profile.setParent(self.joint_2d_host)
                 self.joint_2d_host.layout().insertWidget(0, profile, 1)
-                # Keep reference so set_scene can still refresh profile
                 self._joint_profile = profile
-                if hasattr(self._joint_widget, "_profile"):
-                    # Widget still needs profile for set_scene sync if reattached
-                    pass
         except Exception as exc:
             logger.exception("joint widget mount failed")
             self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
@@ -861,6 +893,14 @@ class GeologicalModeling3DPage(QWidget):
     def _fill_joint_well_combos(self) -> None:
         if not hasattr(self, "_joint_well_a"):
             return
+        # Prefer current selection or project-saved pair over "first two wells"
+        prev_a = self._joint_well_a.currentText()
+        prev_b = self._joint_well_b.currentText()
+        if self._project is not None:
+            state = getattr(self._project, "joint_analysis", None)
+            saved = list(getattr(state, "active_fence_wells", None) or [])
+            if len(saved) >= 2:
+                prev_a, prev_b = saved[0], saved[1]
         names = self._joint_host.well_names()
         self._joint_well_a.blockSignals(True)
         self._joint_well_b.blockSignals(True)
@@ -868,13 +908,20 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_well_b.clear()
         self._joint_well_a.addItems(names)
         self._joint_well_b.addItems(names)
-        if len(names) >= 2:
+        ia = self._joint_well_a.findText(prev_a) if prev_a else -1
+        ib = self._joint_well_b.findText(prev_b) if prev_b else -1
+        if ia >= 0:
+            self._joint_well_a.setCurrentIndex(ia)
+        if ib >= 0:
+            self._joint_well_b.setCurrentIndex(ib)
+        elif len(names) >= 2:
             self._joint_well_b.setCurrentIndex(1)
         self._joint_well_a.blockSignals(False)
         self._joint_well_b.blockSignals(False)
 
     def _on_joint_domain_changed(self, text: str) -> None:
         self._joint_host.set_vertical_domain(text)
+        self._update_domain_z_guard(text)
 
     def _on_joint_fence(self) -> None:
         if not hasattr(self, "_joint_well_a"):
@@ -882,6 +929,63 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_host.add_well_to_well_fence(
             self._joint_well_a.currentText(),
             self._joint_well_b.currentText(),
+        )
+
+    def _update_domain_z_guard(self, domain: str) -> None:
+        """Warn / soft-hide model volume when joint domain is Time (#97)."""
+        is_time = not str(domain).lower().startswith("depth")
+        for item in list(getattr(self, "active_items", []) or []):
+            name = type(item).__name__
+            if "Volume" in name or "volume" in name.lower():
+                try:
+                    item.setVisible(not is_time)
+                except Exception:
+                    pass
+        if hasattr(self, "_joint_status") and is_time:
+            msg = self._joint_status.text() or ""
+            note = "竖直域=Time：已弱化深度网格体（Z 语义可能不一致）"
+            if note not in msg:
+                self._joint_status.setText((msg + " · " + note).strip(" ·"))
+        self.gl_widget.update()
+
+    def _align_joint_camera(self) -> None:
+        """Copy modeling camera distance/elevation/azimuth toward joint renderer (#97)."""
+        if self._joint_widget is None:
+            return
+        r = getattr(self._joint_widget, "renderer", None)
+        if r is None:
+            return
+        opts = dict(self.gl_widget.opts)
+        view = getattr(r, "_view", None)
+        if view is None:
+            set_cam = getattr(r, "setCameraPosition", None)
+            if callable(set_cam):
+                try:
+                    set_cam(
+                        distance=opts.get("distance", 250),
+                        elevation=opts.get("elevation", 30),
+                        azimuth=opts.get("azimuth", 45),
+                    )
+                except Exception:
+                    pass
+            return
+        try:
+            view.setCameraPosition(
+                distance=float(opts.get("distance", 250) or 250),
+                elevation=float(opts.get("elevation", 30) or 30),
+                azimuth=float(opts.get("azimuth", 45) or 45),
+            )
+        except Exception:
+            logger.debug("align joint camera failed", exc_info=True)
+
+    def _on_joint_add_from_project(self) -> None:
+        """Re-resolve hybrid assets (tree add entry point) (#97)."""
+        domain = "Time"
+        if hasattr(self, "_joint_domain"):
+            domain = self._joint_domain.currentText() or "Time"
+        self._joint_host.reload(preferred_domain=domain, auto_default_fence=False)
+        self._joint_status.setText(
+            (self._joint_status.text() or "") + " · 已从工程/数据重新解析联合资产"
         )
 
     # ------------------------------------------------------------------ #
