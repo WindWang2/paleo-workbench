@@ -43,6 +43,21 @@ def test_geomodel_joint_auto_reload_empty(qtbot, tmp_path, monkeypatch):
     assert "空状态" in page._joint_status.text() or "未找到" in page._joint_status.text()
 
 
+def test_geomodel_joint_toolbar_domain_and_fence_api(qtbot, tmp_path, monkeypatch):
+    from paleo_workbench.viz import joint_host as host_mod
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    assert hasattr(page, "_joint_domain")
+    assert hasattr(page, "_joint_fence_btn")
+    page._on_joint_domain_changed("Depth")
+    # Without scene wells, fence request is soft-fail status
+    page._on_joint_fence()
+    assert page._joint_status.text()  # status updated by host
+
+
 def test_geomodel_joint_panels_collapse(qtbot):
     from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
 

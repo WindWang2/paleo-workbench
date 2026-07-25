@@ -262,6 +262,22 @@ class GeologicalModeling3DPage(QWidget):
         self.btn_toggle_joint_3d.clicked.connect(self._toggle_joint_3d_panel)
         j3_header.addWidget(self.btn_toggle_joint_3d)
         j3_layout.addLayout(j3_header)
+        j3_tools = QHBoxLayout()
+        j3_tools.addWidget(QLabel("域"))
+        self._joint_domain = QComboBox()
+        self._joint_domain.addItems(["Time", "Depth"])
+        self._joint_domain.currentTextChanged.connect(self._on_joint_domain_changed)
+        j3_tools.addWidget(self._joint_domain)
+        j3_tools.addWidget(QLabel("井间"))
+        self._joint_well_a = QComboBox()
+        self._joint_well_b = QComboBox()
+        j3_tools.addWidget(self._joint_well_a)
+        j3_tools.addWidget(self._joint_well_b)
+        self._joint_fence_btn = QPushButton("井间剖面")
+        self._joint_fence_btn.clicked.connect(self._on_joint_fence)
+        j3_tools.addWidget(self._joint_fence_btn)
+        j3_tools.addStretch()
+        j3_layout.addLayout(j3_tools)
         self.joint_3d_host = QWidget()
         self.joint_3d_host.setObjectName("Joint3DHost")
         j3_host_layout = QVBoxLayout(self.joint_3d_host)
@@ -732,7 +748,34 @@ class GeologicalModeling3DPage(QWidget):
         self._ensure_joint_widget()
         if self._joint_widget is not None and self._joint_host.scene is not None:
             self._joint_widget.set_scene(self._joint_host.scene)
+        self._fill_joint_well_combos()
         self._sync_joint_visibility_from_tree()
+
+    def _fill_joint_well_combos(self) -> None:
+        if not hasattr(self, "_joint_well_a"):
+            return
+        names = self._joint_host.well_names()
+        self._joint_well_a.blockSignals(True)
+        self._joint_well_b.blockSignals(True)
+        self._joint_well_a.clear()
+        self._joint_well_b.clear()
+        self._joint_well_a.addItems(names)
+        self._joint_well_b.addItems(names)
+        if len(names) >= 2:
+            self._joint_well_b.setCurrentIndex(1)
+        self._joint_well_a.blockSignals(False)
+        self._joint_well_b.blockSignals(False)
+
+    def _on_joint_domain_changed(self, text: str) -> None:
+        self._joint_host.set_vertical_domain(text)
+
+    def _on_joint_fence(self) -> None:
+        if not hasattr(self, "_joint_well_a"):
+            return
+        self._joint_host.add_well_to_well_fence(
+            self._joint_well_a.currentText(),
+            self._joint_well_b.currentText(),
+        )
 
     # ------------------------------------------------------------------ #
     # Modeling
