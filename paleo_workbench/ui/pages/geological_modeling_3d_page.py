@@ -50,10 +50,10 @@ _CAMERA_TOP_DOWN = dict(distance=250, elevation=90, azimuth=0)
 class GeologicalModeling3DPage(QWidget):
     """3D Geological Modeling Workbench Page.
 
-    Features:
-    - Left: Interactive checkable model hierarchy tree.
-    - Center: pyqtgraph.opengl 3D interactive viewport + floating glassmorphic view toolbar.
-    - Right: Dynamic parameter configuration, 3-way clipping, AI Check advisor, and Numerical simulator exporter.
+    Features (G1 unified viewport — PRD #106):
+    - Left: Scene tree (geoviz checks interactive; other groups disabled).
+    - Center: single joint 3D host + toolbar/status + collapsible fence 2D strip.
+    - Right: Modeling params / export / advisor (no second 3D, no clip card in G1).
     """
 
     def __init__(self, parent=None):
@@ -110,7 +110,21 @@ class GeologicalModeling3DPage(QWidget):
         self._populate_model_tree()
         left_layout.addWidget(self.model_tree)
 
-        # 2. Center column: modeling GL (top) + collapsible joint 2D (bottom) — PRD #85 / #87
+        # Off-layout modeling GL (G1a): keep for legacy modeling helpers; not main viewport
+        self.gl_widget = gl.GLViewWidget(self)
+        self.gl_widget.hide()
+        self.gl_widget.opts["distance"] = 250
+        self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE)
+        grid = gl.GLGridItem()
+        grid.setSize(300, 300, 300)
+        grid.setSpacing(10, 10, 10)
+        self.gl_widget.addItem(grid)
+        self.btn_coord = None  # G1: no grid/geo coord toggle on chrome
+        self._coord_mode = "grid"
+        self._joint_align_btn = None
+        self._joint_3d_panel = None
+
+        # 2. Center column: joint 3D (top) + collapsible joint 2D (bottom) — G1 #106
         center_column = QWidget()
         center_column_layout = QVBoxLayout(center_column)
         center_column_layout.setContentsMargins(0, 0, 0, 0)
@@ -123,84 +137,77 @@ class GeologicalModeling3DPage(QWidget):
 
         self.view_container = QFrame()
         self.view_container.setFrameShape(QFrame.StyledPanel)
-        self.view_container.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
-            tokens.BG_CANVAS, tokens.RADIUS_CARD, tokens.BORDER
-        ))
-
+        self.view_container.setStyleSheet(
+            "QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }"
+            % (tokens.BG_CANVAS, tokens.RADIUS_CARD, tokens.BORDER)
+        )
         view_layout = QVBoxLayout(self.view_container)
-        view_layout.setContentsMargins(0, 0, 0, 0)
+        view_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        view_layout.setSpacing(tokens.SPACE_1)
 
-        self.gl_widget = gl.GLViewWidget()
-        self.gl_widget.opts['distance'] = 250
-        self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE)
-        view_layout.addWidget(self.gl_widget)
-
-        # Default baseline grid
-        grid = gl.GLGridItem()
-        grid.setSize(300, 300, 300)
-        grid.setSpacing(10, 10, 10)
-        self.gl_widget.addItem(grid)
-
-        # Floating View Control Bar
-        self.floating_bar = QFrame(self.view_container)
-        self.floating_bar.setStyleSheet("""
-            QFrame {
-                background-color: %s;
-                border: 1px solid %s;
-                border-radius: %dpx;
-            }
-            QPushButton {
-                background: transparent;
-                border: none;
-                padding: 4px 10px;
-                color: %s;
-                font-weight: 600;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background: rgba(51, 65, 85, 0.8);
-                border-radius: 4px;
-                color: %s;
-            }
-            QPushButton:checked {
-                background: %s;
-                color: %s;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-        """ % (
-            tokens.BG_CANVAS_PANEL, tokens.BORDER_CANVAS, tokens.RADIUS_BUTTON,
-            tokens.TEXT_ON_CANVAS,
-            tokens.ACCENT,
-            tokens.ACCENT, tokens.TEXT_ON_CANVAS,
-        ))
-        self.floating_bar.setFixedHeight(38)
-        self.floating_bar.setFixedWidth(360)
-
+        # Single-row joint toolbar (G1 #101)
+        self.floating_bar = QFrame()
+        self.floating_bar.setObjectName("JointTopToolbar")
+        self.floating_bar.setStyleSheet(
+            "QFrame#JointTopToolbar { background: %s; border: 1px solid %s; border-radius: %dpx; }"
+            % (tokens.BG_CANVAS_PANEL, tokens.BORDER_CANVAS, tokens.RADIUS_BUTTON)
+        )
         f_layout = QHBoxLayout(self.floating_bar)
-        f_layout.setContentsMargins(tokens.SPACE_1, 0, tokens.SPACE_1, 0)
-
+        f_layout.setContentsMargins(tokens.SPACE_1, 2, tokens.SPACE_1, 2)
+        f_layout.setSpacing(tokens.SPACE_1)
+        f_layout.addWidget(QLabel("域"))
+        self._joint_domain = QComboBox()
+        self._joint_domain.addItems(["Time", "Depth"])
+        self._joint_domain.currentTextChanged.connect(self._on_joint_domain_changed)
+        f_layout.addWidget(self._joint_domain)
+        f_layout.addWidget(QLabel("井间"))
+        self._joint_well_a = QComboBox()
+        self._joint_well_b = QComboBox()
+        f_layout.addWidget(self._joint_well_a)
+        f_layout.addWidget(self._joint_well_b)
+        self._joint_fence_btn = QPushButton("井间剖面")
+        self._joint_fence_btn.clicked.connect(self._on_joint_fence)
+        f_layout.addWidget(self._joint_fence_btn)
+        self._joint_add_btn = QPushButton("从工程/数据刷新")
+        self._joint_add_btn.setToolTip("重新解析并挂载 SEGY / 井 / tops / LAS（hybrid）")
+        self._joint_add_btn.clicked.connect(self._on_joint_add_from_project)
+        f_layout.addWidget(self._joint_add_btn)
+        f_layout.addSpacing(8)
         self.btn_orbit = QPushButton("透视视角")
         self.btn_pan = QPushButton("俯瞰视角")
         self.btn_reset = QPushButton("复位")
-        self.btn_coord = QPushButton("📍 网格(IL/XL)")
-        self.btn_coord.setCheckable(True)
-        self._coord_mode = "grid"
-
-        self.btn_orbit.clicked.connect(lambda: self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE))
-        self.btn_pan.clicked.connect(lambda: self.gl_widget.setCameraPosition(**_CAMERA_TOP_DOWN))
-        self.btn_reset.clicked.connect(lambda: self.gl_widget.setCameraPosition(**_CAMERA_PERSPECTIVE))
-        self.btn_coord.clicked.connect(self._toggle_coord_mode)
-
+        self.btn_orbit.clicked.connect(lambda: self._apply_joint_camera_preset(_CAMERA_PERSPECTIVE))
+        self.btn_pan.clicked.connect(lambda: self._apply_joint_camera_preset(_CAMERA_TOP_DOWN))
+        self.btn_reset.clicked.connect(lambda: self._apply_joint_camera_preset(_CAMERA_PERSPECTIVE))
         f_layout.addWidget(self.btn_orbit)
         f_layout.addWidget(self.btn_pan)
         f_layout.addWidget(self.btn_reset)
-        f_layout.addWidget(self.btn_coord)
-        self.floating_bar.move(12, 12)
+        f_layout.addStretch()
+        view_layout.addWidget(self.floating_bar)
+
+        # Status row under toolbar (S1)
+        self._joint_status.setWordWrap(True)
+        self._joint_status.setStyleSheet(
+            "color: %s; padding: 2px 4px; font-size: 11px;" % tokens.TEXT_SECONDARY
+        )
+        view_layout.addWidget(self._joint_status)
+
+        self.joint_3d_host = QWidget()
+        self.joint_3d_host.setObjectName("Joint3DHost")
+        j3_host_layout = QVBoxLayout(self.joint_3d_host)
+        j3_host_layout.setContentsMargins(0, 0, 0, 0)
+        self._joint_3d_placeholder = QLabel("井震联合 3D（主视口）")
+        self._joint_3d_placeholder.setAlignment(Qt.AlignCenter)
+        self._joint_3d_placeholder.setWordWrap(True)
+        self._joint_3d_placeholder.setStyleSheet(
+            "color: %s; padding: 12px;" % tokens.TEXT_SECONDARY
+        )
+        j3_host_layout.addWidget(self._joint_3d_placeholder)
+        view_layout.addWidget(self.joint_3d_host, 1)
 
         self._center_v_split.addWidget(self.view_container)
 
-        # Bottom: collapsible joint fence 2D strip (host mounts content in S1.3)
+        # Bottom: collapsible joint fence 2D strip
         self._joint_2d_panel = QFrame()
         self._joint_2d_panel.setObjectName("JointFence2DPanel")
         self._joint_2d_panel.setStyleSheet(
@@ -227,11 +234,10 @@ class GeologicalModeling3DPage(QWidget):
         j2_host_layout.setContentsMargins(0, 0, 0, 0)
         self._joint_2d_placeholder = QLabel("井震 2D 剖面将在此挂载")
         self._joint_2d_placeholder.setAlignment(Qt.AlignCenter)
-        self._joint_2d_placeholder.setStyleSheet("color: %s; padding: 12px;" % tokens.TEXT_SECONDARY)
+        self._joint_2d_placeholder.setStyleSheet(
+            "color: %s; padding: 12px;" % tokens.TEXT_SECONDARY
+        )
         j2_host_layout.addWidget(self._joint_2d_placeholder)
-        self._joint_status.setWordWrap(True)
-        self._joint_status.setStyleSheet("color: %s; padding: 4px;" % tokens.TEXT_SECONDARY)
-        j2_host_layout.addWidget(self._joint_status)
         j2_layout.addWidget(self.joint_2d_host, 1)
         self._center_v_split.addWidget(self._joint_2d_panel)
         self._center_v_split.setStretchFactor(0, 3)
@@ -240,63 +246,6 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_2d_expanded_sizes = [700, 220]
 
         center_column_layout.addWidget(self._center_v_split)
-
-        # 2b. Collapsible joint 3D strip (between center column and param panel)
-        self._joint_3d_panel = QFrame()
-        self._joint_3d_panel.setObjectName("Joint3DPanel")
-        self._joint_3d_panel.setStyleSheet(
-            "QFrame#Joint3DPanel { background: %s; border: 1px solid %s; border-radius: %dpx; }"
-            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
-        )
-        j3_layout = QVBoxLayout(self._joint_3d_panel)
-        j3_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
-        j3_layout.setSpacing(tokens.SPACE_1)
-        j3_header = QHBoxLayout()
-        j3_title = QLabel("井震 3D")
-        j3_title.setStyleSheet("font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY)
-        j3_header.addWidget(j3_title)
-        j3_header.addStretch()
-        self.btn_toggle_joint_3d = QPushButton("折叠")
-        self.btn_toggle_joint_3d.setCheckable(True)
-        self.btn_toggle_joint_3d.setChecked(False)
-        self.btn_toggle_joint_3d.clicked.connect(self._toggle_joint_3d_panel)
-        j3_header.addWidget(self.btn_toggle_joint_3d)
-        j3_layout.addLayout(j3_header)
-        j3_tools = QHBoxLayout()
-        j3_tools.addWidget(QLabel("域"))
-        self._joint_domain = QComboBox()
-        self._joint_domain.addItems(["Time", "Depth"])
-        self._joint_domain.currentTextChanged.connect(self._on_joint_domain_changed)
-        j3_tools.addWidget(self._joint_domain)
-        j3_tools.addWidget(QLabel("井间"))
-        self._joint_well_a = QComboBox()
-        self._joint_well_b = QComboBox()
-        j3_tools.addWidget(self._joint_well_a)
-        j3_tools.addWidget(self._joint_well_b)
-        self._joint_fence_btn = QPushButton("井间剖面")
-        self._joint_fence_btn.clicked.connect(self._on_joint_fence)
-        j3_tools.addWidget(self._joint_fence_btn)
-        self._joint_align_btn = QPushButton("对齐视角")
-        self._joint_align_btn.clicked.connect(self._align_joint_camera)
-        j3_tools.addWidget(self._joint_align_btn)
-        self._joint_add_btn = QPushButton("从工程/数据刷新")
-        self._joint_add_btn.setToolTip("重新解析并挂载 SEGY / 井 / tops / LAS（hybrid）")
-        self._joint_add_btn.clicked.connect(self._on_joint_add_from_project)
-        j3_tools.addWidget(self._joint_add_btn)
-        j3_tools.addStretch()
-        j3_layout.addLayout(j3_tools)
-        self.joint_3d_host = QWidget()
-        self.joint_3d_host.setObjectName("Joint3DHost")
-        j3_host_layout = QVBoxLayout(self.joint_3d_host)
-        j3_host_layout.setContentsMargins(0, 0, 0, 0)
-        self._joint_3d_placeholder = QLabel("井震联合 3D 将在此挂载（S1.3）")
-        self._joint_3d_placeholder.setAlignment(Qt.AlignCenter)
-        self._joint_3d_placeholder.setWordWrap(True)
-        self._joint_3d_placeholder.setStyleSheet("color: %s; padding: 12px;" % tokens.TEXT_SECONDARY)
-        j3_host_layout.addWidget(self._joint_3d_placeholder)
-        j3_layout.addWidget(self.joint_3d_host, 1)
-        self._joint_3d_panel.setMinimumWidth(200)
-        self._joint_3d_panel.setMaximumWidth(480)
 
         # 3. Right Panel: Parameters & Exporters (Scrollable)
         right_scroll = QScrollArea()
@@ -402,7 +351,7 @@ class GeologicalModeling3DPage(QWidget):
         clip_layout.addWidget(self.slide_clip_z)
         clip_layout.addWidget(self.combo_clip_z_dir)
 
-        # Wire clipping events
+        # Wire clipping events (helpers retained; card hidden in G1 — #110)
         self.chk_clip_x.stateChanged.connect(self._update_clipping)
         self.slide_clip_x.valueChanged.connect(self._update_clipping)
         self.combo_clip_x_dir.currentIndexChanged.connect(self._update_clipping)
@@ -413,7 +362,9 @@ class GeologicalModeling3DPage(QWidget):
         self.slide_clip_z.valueChanged.connect(self._update_clipping)
         self.combo_clip_z_dir.currentIndexChanged.connect(self._update_clipping)
 
-        right_layout.addWidget(card_clip)
+        self._card_clip = card_clip
+        card_clip.hide()
+        # G1: do not add clip card to right rail
 
         # CARD 3: Simulator Mesh Exporters
         card_export = QFrame()
@@ -600,19 +551,16 @@ class GeologicalModeling3DPage(QWidget):
         right_scroll.setMinimumWidth(320)
         right_scroll.setMaximumWidth(440)
 
-        # Add widgets to splitter: left | center (GL+2D) | joint 3D | params
+        # G1: left | center (joint 3D + 2D) | params
         splitter.addWidget(left_widget)
         splitter.addWidget(center_column)
-        splitter.addWidget(self._joint_3d_panel)
         splitter.addWidget(right_scroll)
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setStretchFactor(3, 0)
-        splitter.setSizes([240, 720, 280, 340])
+        splitter.setSizes([240, 900, 340])
         self._main_splitter = splitter
-        self._joint_3d_expanded_width = 280
 
         main_layout.addWidget(splitter)
 
@@ -629,34 +577,23 @@ class GeologicalModeling3DPage(QWidget):
             sizes = getattr(self, "_joint_2d_expanded_sizes", None) or [700, 220]
             self._center_v_split.setSizes(sizes)
 
-    def _toggle_joint_3d_panel(self) -> None:
-        """Collapse/expand right joint 3D strip (#87)."""
-        collapsed = self.btn_toggle_joint_3d.isChecked()
-        self.joint_3d_host.setVisible(not collapsed)
-        self.btn_toggle_joint_3d.setText("展开" if collapsed else "折叠")
-        sizes = self._main_splitter.sizes()
-        if collapsed:
-            self._joint_3d_expanded_width = max(sizes[2], 200)
-            # Keep a thin chrome strip
-            sizes[2] = 40
-            self._joint_3d_panel.setMaximumWidth(48)
-            self._joint_3d_panel.setMinimumWidth(40)
-        else:
-            self._joint_3d_panel.setMinimumWidth(200)
-            self._joint_3d_panel.setMaximumWidth(480)
-            sizes[2] = getattr(self, "_joint_3d_expanded_width", 280)
-        self._main_splitter.setSizes(sizes)
-
-    def _toggle_coord_mode(self) -> None:
-        """Toggle between Grid coordinates (IL/XL) and Geographic coordinates (Easting/Northing in meters)."""
-        if self.btn_coord.isChecked():
-            self._coord_mode = "geo"
-            self.btn_coord.setText("🌐 地理(X/Y)")
-        else:
-            self._coord_mode = "grid"
-            self.btn_coord.setText("📍 网格(IL/XL)")
-        if hasattr(self.gl_widget, "set_coord_mode"):
-            self.gl_widget.set_coord_mode(self._coord_mode)
+    def _apply_joint_camera_preset(self, preset: dict) -> None:
+        """Map toolbar camera buttons to joint widget public set_camera_pose."""
+        if self._joint_widget is None:
+            self._ensure_joint_widget()
+        w = self._joint_widget
+        if w is None:
+            return
+        set_pose = getattr(w, "set_camera_pose", None)
+        if callable(set_pose):
+            try:
+                set_pose(
+                    distance=float(preset.get("distance", 250) or 250),
+                    elevation=float(preset.get("elevation", 30) or 30),
+                    azimuth=float(preset.get("azimuth", 45) or 45),
+                )
+            except Exception:
+                logger.debug("joint camera preset failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
     # Model Tree
@@ -699,13 +636,39 @@ class GeologicalModeling3DPage(QWidget):
         self._add_checkable_child(root_tie, "井震连井三维剖面幕墙 (Cross-Well Seismic Fence)")
 
         self.model_tree.expandAll()
+        self._apply_g1_tree_interactivity()
         if not getattr(self, "_tree_changed_hooked", False):
             self.model_tree.itemChanged.connect(self._on_tree_item_changed)
             self._tree_changed_hooked = True
 
     def _add_checkable_child(self, parent_item: QTreeWidgetItem, name: str) -> None:
         item = QTreeWidgetItem(parent_item, [name])
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
         item.setCheckState(0, Qt.Checked)
+
+    def _apply_g1_tree_interactivity(self) -> None:
+        """Only 井震联合 (geoviz) remains checkable in G1 (#109)."""
+        tip = "G1 主视口仅井震图层；该类将于后续版本叠入主视口"
+        root = self.model_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            group = root.child(i)
+            if "井震联合 (geoviz)" in group.text(0):
+                group.setFlags(group.flags() | Qt.ItemIsEnabled)
+                group.setToolTip(0, "")
+                for j in range(group.childCount()):
+                    child = group.child(j)
+                    child.setFlags(
+                        (child.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                        & ~Qt.ItemIsEditable
+                    )
+                    child.setToolTip(0, "")
+                continue
+            group.setFlags(group.flags() & ~Qt.ItemIsEnabled)
+            group.setToolTip(0, tip)
+            for j in range(group.childCount()):
+                child = group.child(j)
+                child.setFlags(child.flags() & ~Qt.ItemIsEnabled)
+                child.setToolTip(0, tip)
 
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
@@ -961,22 +924,8 @@ class GeologicalModeling3DPage(QWidget):
         self.gl_widget.update()
 
     def _align_joint_camera(self) -> None:
-        """Copy modeling camera pose to joint 3D via public API (no private digs)."""
-        if self._joint_widget is None:
-            return
-        opts = dict(self.gl_widget.opts)
-        pose = dict(
-            distance=float(opts.get("distance", 250) or 250),
-            elevation=float(opts.get("elevation", 30) or 30),
-            azimuth=float(opts.get("azimuth", 45) or 45),
-        )
-        set_pose = getattr(self._joint_widget, "set_camera_pose", None)
-        if callable(set_pose):
-            try:
-                set_pose(**pose)
-                return
-            except Exception:
-                logger.debug("align joint camera failed", exc_info=True)
+        """G1: no modeling camera to copy — apply default joint preset."""
+        self._apply_joint_camera_preset(_CAMERA_PERSPECTIVE)
 
     def _on_joint_add_from_project(self) -> None:
         """Re-resolve hybrid assets (tree add entry point) (#97)."""
@@ -1282,9 +1231,6 @@ class GeologicalModeling3DPage(QWidget):
         show_vol = self._tree_item_checked("地震预览体 (geoviz)")
         show_wells = self._tree_item_checked("联合井轨迹 (geoviz)")
         show_fence = self._tree_item_checked("井间剖面 fence (geoviz)")
-        # Panel chrome
-        if hasattr(self, "_joint_3d_panel"):
-            self._joint_3d_panel.setVisible(show_3d or show_vol)
         if hasattr(self, "joint_3d_host"):
             self.joint_3d_host.setVisible(show_3d or show_vol)
         if hasattr(self, "_joint_2d_panel"):
@@ -1301,7 +1247,7 @@ class GeologicalModeling3DPage(QWidget):
                 profile.setVisible(show_2d and show_fence)
 
     def _update_clipping(self) -> None:
-        """Update 3D interactive user clipping parameters based on UI sliders."""
+        """Legacy modeling-item clip (G1: clip card hidden; not wired to joint)."""
         def val_to_coord(val: int) -> float:
             return -80.0 + (val / 100.0) * 160.0
 
@@ -1317,64 +1263,17 @@ class GeologicalModeling3DPage(QWidget):
         z_coord = val_to_coord(self.slide_clip_z.value())
         z_dir = 1.0 if self.combo_clip_z_dir.currentIndex() == 0 else -1.0
 
-        self._apply_clip_to_joint_slices()
-
         for item in self.active_items:
             if hasattr(item, "set_clipping"):
                 item.set_clipping('x', x_enabled, x_coord, x_dir)
                 item.set_clipping('y', y_enabled, y_coord, y_dir)
                 item.set_clipping('z', z_enabled, z_coord, z_dir)
-        self.gl_widget.update()
+        if self.gl_widget is not None:
+            self.gl_widget.update()
 
     def _apply_clip_to_joint_slices(self) -> None:
-        """One-way: modeling clip sliders → joint orthogonal indices (#92)."""
-        from paleo_workbench.viz.joint_clip_map import (
-            ModelingClipState,
-            modeling_clip_to_joint_slices,
-        )
-
-        scene = self._joint_host.scene
-        if scene is None or self._joint_widget is None:
-            return
-        vol = scene.volume_access
-        if vol is None:
-            return
-        try:
-            ni, nx, nt = vol.shape
-        except Exception:
-            return
-        cur_il = cur_xl = cur_t = 0
-        get_idx = getattr(self._joint_widget, "slice_indices", None)
-        if callable(get_idx):
-            cur = get_idx()
-            if cur is not None:
-                cur_il, cur_xl, cur_t = cur
-        clip = ModelingClipState(
-            x_enabled=self.chk_clip_x.isChecked(),
-            x_value=self.slide_clip_x.value(),
-            x_keep_positive=self.combo_clip_x_dir.currentIndex() == 0,
-            y_enabled=self.chk_clip_y.isChecked(),
-            y_value=self.slide_clip_y.value(),
-            y_keep_positive=self.combo_clip_y_dir.currentIndex() == 0,
-            z_enabled=self.chk_clip_z.isChecked(),
-            z_value=self.slide_clip_z.value(),
-            z_keep_positive=self.combo_clip_z_dir.currentIndex() == 0,
-        )
-        focus = modeling_clip_to_joint_slices(
-            clip,
-            n_inline=ni,
-            n_crossline=nx,
-            n_sample=nt,
-            current_il=cur_il,
-            current_xl=cur_xl,
-            current_t=cur_t,
-        )
-        set_idx = getattr(self._joint_widget, "set_slice_indices", None)
-        if callable(set_idx):
-            try:
-                set_idx(focus.il_index, focus.xl_index, focus.t_index)
-            except Exception:
-                logger.debug("joint set_slice_indices failed", exc_info=True)
+        """G1 unwired (#110). Kept for possible G2 geomodel stack."""
+        return
 
     # ------------------------------------------------------------------ #
     # Export

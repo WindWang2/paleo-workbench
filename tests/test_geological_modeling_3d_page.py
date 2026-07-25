@@ -132,10 +132,11 @@ def test_geological_modeling_3d_page_ui_elements(qtbot):
     assert page.btn_ai_advisor is not None
     assert page.btn_export is not None
     
-    # Verify tree population (now 5 groups including Well-Seismic calibration)
-    assert page.model_tree.topLevelItemCount() == 5
+    # Tree: structure groups + geoviz joint + geomodel calibration (G1)
+    assert page.model_tree.topLevelItemCount() == 6
     assert page.model_tree.topLevelItem(0).text(0) == "地层构造格架"
-    assert page.model_tree.topLevelItem(4).text(0) == "井震融合标定与校正"
+    assert "井震联合 (geoviz)" in page.model_tree.topLevelItem(4).text(0)
+    assert "井震标定与综合 (geomodel)" in page.model_tree.topLevelItem(5).text(0)
     
     # Check default interactive clipping sliders & checkboxes exist
     assert page.chk_clip_x is not None

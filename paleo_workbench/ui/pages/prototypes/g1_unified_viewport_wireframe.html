@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PROTOTYPE — G1 单视口布局线框 (#104)</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3b82f6;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --dis: #4b5563;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 13px/1.4 system-ui, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .banner {
+      background: #7c2d12;
+      color: #ffedd5;
+      padding: 6px 12px;
+      font-weight: 600;
+      font-size: 12px;
+      flex: 0 0 auto;
+    }
+    .banner code { background: rgba(0,0,0,.25); padding: 1px 6px; border-radius: 4px; }
+    .app { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .stages {
+      display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border);
+      color: var(--muted); font-size: 12px;
+    }
+    .stages .on { color: var(--text); background: #243044; padding: 4px 10px; border-radius: 999px; }
+    .main { flex: 1; display: flex; min-height: 0; }
+    .tree {
+      width: 240px; border-right: 1px solid var(--border); background: var(--panel);
+      padding: 8px; overflow: auto; flex: 0 0 auto;
+    }
+    .tree h3 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+    .group { margin-bottom: 10px; }
+    .group-title { font-weight: 600; margin-bottom: 4px; }
+    .group.disabled .group-title,
+    .group.disabled label { color: var(--dis); }
+    .group.disabled label { cursor: not-allowed; }
+    label { display: flex; gap: 6px; align-items: center; padding: 2px 0; cursor: pointer; }
+    input:disabled { opacity: 0.45; }
+    .center { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      padding: 6px 8px; border-bottom: 1px solid var(--border); background: #151c27;
+    }
+    .toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+    .btn, select {
+      background: #243044; border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: 4px 8px; font-size: 12px;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .status {
+      padding: 4px 8px; font-size: 11px; color: var(--muted);
+      border-bottom: 1px solid var(--border); background: #121820;
+    }
+    .status .ok { color: var(--ok); }
+    .view3d {
+      flex: 1; position: relative; background:
+        radial-gradient(ellipse at 50% 40%, #1e3a5f 0%, #0b1220 70%);
+      min-height: 120px;
+    }
+    .view3d .label {
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0,0,0,.55); padding: 4px 8px; border-radius: 6px;
+      font-size: 11px; color: #93c5fd;
+    }
+    .cube {
+      position: absolute; left: 50%; top: 48%; width: 180px; height: 140px;
+      transform: translate(-50%, -50%) perspective(400px) rotateX(55deg) rotateZ(-20deg);
+      border: 1px solid #60a5fa; background: rgba(59,130,246,.15);
+      box-shadow: 0 0 40px rgba(59,130,246,.2);
+    }
+    .wells {
+      position: absolute; inset: 20% 25%;
+      background: repeating-linear-gradient(90deg, transparent, transparent 18px, rgba(34,197,94,.35) 18px, rgba(34,197,94,.35) 20px);
+      opacity: .6; pointer-events: none;
+    }
+    .slice-bar {
+      position: absolute; bottom: 8px; left: 12px; right: 12px;
+      display: flex; gap: 12px; font-size: 11px; color: var(--muted);
+      background: rgba(0,0,0,.4); padding: 6px 10px; border-radius: 8px;
+    }
+    .slice-bar input[type=range] { flex: 1; }
+    .fence2d {
+      height: 160px; border-top: 1px solid var(--border); background: #111827;
+      display: flex; flex-direction: column;
+    }
+    .fence2d.collapsed { height: 32px; }
+    .fence2d .hdr {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 8px; font-size: 12px; border-bottom: 1px solid var(--border);
+    }
+    .profile {
+      flex: 1; margin: 8px; border: 1px dashed #334155; border-radius: 6px;
+      background: linear-gradient(#1e293b, #0f172a);
+      display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px;
+    }
+    .right {
+      width: 280px; border-left: 1px solid var(--border); background: var(--panel);
+      padding: 10px; overflow: auto; flex: 0 0 auto;
+    }
+    .right h3 { margin: 0 0 8px; font-size: 13px; }
+    .card {
+      background: #121a26; border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px; margin-bottom: 10px;
+    }
+    .card.ghost { opacity: 0.45; border-style: dashed; }
+    .card h4 { margin: 0 0 6px; font-size: 12px; }
+    .primary {
+      width: 100%; padding: 8px; background: var(--accent); border: none;
+      color: white; border-radius: 8px; font-weight: 600; cursor: pointer;
+    }
+    .note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+    .strike { text-decoration: line-through; color: var(--dis); }
+
+    /* Variant B: 2D as side tab under center */
+    .vB .center { flex-direction: row; }
+    .vB .stack { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .vB .fence2d { width: 220px; height: auto; border-top: none; border-left: 1px solid var(--border); }
+
+    /* Variant C: no dedicated status row; denser toolbar includes status chip */
+    .vC .status { display: none; }
+    .vC .status-chip {
+      display: inline-flex !important; font-size: 11px; color: var(--muted);
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .switcher {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: #0b1220; border: 1px solid var(--accent); border-radius: 999px;
+      padding: 8px 12px; display: flex; gap: 10px; align-items: center;
+      box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 50;
+    }
+    .switcher button {
+      background: transparent; border: none; color: var(--text); font-size: 16px; cursor: pointer;
+    }
+    .switcher .meta { font-size: 12px; color: #93c5fd; min-width: 220px; text-align: center; }
+    .q {
+      position: fixed; top: 48px; right: 16px; max-width: 280px;
+      background: #1e293b; border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px; font-size: 12px; z-index: 40; color: var(--muted);
+    }
+    .q strong { color: var(--text); display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    PROTOTYPE · throwaway · wayfinder
+    <a href="https://github.com/WindWang2/paleo-workbench/issues/104" style="color:#fdba74">#104</a>
+    · open with: <code>xdg-open paleo_workbench/ui/pages/prototypes/g1_unified_viewport_wireframe.html</code>
+    · switch variants with bottom bar or <code>?variant=A|B|C</code>
+  </div>
+
+  <div class="q">
+    <strong>要回答的问题</strong>
+    用户是否一眼明白：一个 3D、底 2D、左树图层、顶栏井震工具、右栏建模参数（无第二 3D、无剖切卡）？
+  </div>
+
+  <div id="root" class="app vA"></div>
+
+  <div class="switcher">
+    <button type="button" id="prev" title="Prev">←</button>
+    <div class="meta" id="label">A — 决议标准稿</div>
+    <button type="button" id="next" title="Next">→</button>
+  </div>
+
+  <script>
+    const VARIANTS = [
+      {
+        key: "A",
+        name: "决议标准稿",
+        blurb: "3 栏 · joint 中央 3D · 底 2D · 顶栏 T1 · 无剖切卡 · 树仅 geoviz 可勾",
+      },
+      {
+        key: "B",
+        name: "2D 侧挂",
+        blurb: "同一决策内容，2D 贴在 3D 右侧而非底部（对照可读性）",
+      },
+      {
+        key: "C",
+        name: "状态并入顶栏",
+        blurb: "去掉独立状态行，状态 chip 挤进工具条（更省高）",
+      },
+    ];
+
+    function treeHtml() {
+      return `
+        <aside class="tree">
+          <h3>三维场景对象</h3>
+          <div class="group disabled" title="G1 主视口仅井震图层；后续叠入">
+            <div class="group-title">地层构造格架</div>
+            <label><input type="checkbox" disabled checked /> LST 顶底面</label>
+            <label><input type="checkbox" disabled checked /> TST 顶底面</label>
+          </div>
+          <div class="group disabled" title="G1 主视口仅井震图层；后续叠入">
+            <div class="group-title">断层 / 巷道 / 钻孔 …</div>
+            <label><input type="checkbox" disabled checked /> （灰显占位）</label>
+          </div>
+          <div class="group">
+            <div class="group-title">井震联合 (geoviz)</div>
+            <label><input type="checkbox" checked /> 地震预览体 (geoviz)</label>
+            <label><input type="checkbox" checked /> 联合井轨迹 (geoviz)</label>
+            <label><input type="checkbox" checked /> 井间剖面 fence</label>
+            <label><input type="checkbox" checked /> 井震 3D 视口</label>
+            <label><input type="checkbox" checked /> 井震 2D 剖面条</label>
+          </div>
+          <div class="group disabled" title="G1 主视口仅井震图层；后续叠入">
+            <div class="group-title">井震标定与综合 (geomodel)</div>
+            <label><input type="checkbox" disabled checked /> 合成记录 / RGB …</label>
+          </div>
+        </aside>`;
+    }
+
+    function toolbarHtml(withChip) {
+      return `
+        <div class="toolbar">
+          <span>域</span>
+          <select><option>Time</option><option>Depth</option></select>
+          <span>井间</span>
+          <select><option>A1</option></select>
+          <select><option>A11</option></select>
+          <button class="btn" type="button">井间剖面</button>
+          <button class="btn" type="button">从工程/数据刷新</button>
+          <span class="sep"></span>
+          <button class="btn" type="button">透视视角</button>
+          <button class="btn" type="button">俯瞰视角</button>
+          <button class="btn" type="button">复位</button>
+          ${withChip ? `<span class="sep"></span><span class="status-chip" style="display:none">shape=(107,103,113) · fences=1</span>` : ""}
+          <span class="sep"></span>
+          <span class="strike" title="已删">对齐视角</span>
+          <span class="strike" title="已删">网格(IL/XL)</span>
+        </div>`;
+    }
+
+    function centerHtml(opts) {
+      const status = opts.hideStatus
+        ? ""
+        : `<div class="status"><span class="ok">已加载预览体</span> shape=(107,103,113) · 来源=data · fences=1 · 竖直域=Time</div>`;
+      const fence = `
+        <div class="fence2d" id="fence">
+          <div class="hdr">
+            <span>井震剖面 (2D)</span>
+            <button class="btn" type="button" id="fold2d">折叠</button>
+          </div>
+          <div class="profile">A1 — A11 fence profile (placeholder)</div>
+        </div>`;
+      const view = `
+        <div class="view3d" id="Joint3DHost">
+          <div class="label">Joint3DHost · 唯一主 3D（无第二窗）</div>
+          <div class="cube"></div>
+          <div class="wells"></div>
+          <div class="slice-bar">
+            <span>IL</span><input type="range" />
+            <span>XL</span><input type="range" />
+            <span>T</span><input type="range" />
+          </div>
+        </div>`;
+      if (opts.side2d) {
+        return `
+          <section class="center">
+            ${toolbarHtml(false)}
+            ${status}
+            <div class="stack" style="flex:1;display:flex;min-height:0">
+              <div style="flex:1;display:flex;flex-direction:column;min-width:0">${view}</div>
+              ${fence}
+            </div>
+          </section>`;
+      }
+      return `
+        <section class="center">
+          ${toolbarHtml(opts.chip)}
+          ${status}
+          ${view}
+          ${fence}
+        </section>`;
+    }
+
+    function rightHtml() {
+      return `
+        <aside class="right">
+          <h3>三维可视化与建模</h3>
+          <div class="card">
+            <h4>建模计算参数</h4>
+            <div class="note">网格密度 / 算法 …</div>
+            <button class="primary" type="button" style="margin-top:8px">开始三维建模</button>
+            <div class="note">G1：结果不进主 GL 窗（chrome G1a）</div>
+          </div>
+          <div class="card ghost">
+            <h4 class="strike">三向交互剖切 (GPU Clipping)</h4>
+            <div class="note">G1 隐藏 — 切片用 joint IL/XL/T</div>
+          </div>
+          <div class="card">
+            <h4>数值模拟 / 导出</h4>
+            <div class="note">FLAC3D / Abaqus …</div>
+          </div>
+          <div class="card">
+            <h4>AI 专家复核</h4>
+          </div>
+        </aside>`;
+    }
+
+    function render(key) {
+      const root = document.getElementById("root");
+      root.className = "app v" + key;
+      const opts = {
+        side2d: key === "B",
+        hideStatus: key === "C",
+        chip: key === "C",
+      };
+      root.innerHTML = `
+        <div class="stages">
+          <span>数据与预处理</span>
+          <span>综合解释</span>
+          <span>古地理编图</span>
+          <span class="on">④ 成图与审核 · 三维建模</span>
+        </div>
+        <div class="main">
+          ${treeHtml()}
+          ${centerHtml(opts)}
+          ${rightHtml()}
+        </div>`;
+      const fold = document.getElementById("fold2d");
+      if (fold) {
+        fold.onclick = () => {
+          document.getElementById("fence").classList.toggle("collapsed");
+          fold.textContent = document.getElementById("fence").classList.contains("collapsed")
+            ? "展开" : "折叠";
+        };
+      }
+      const v = VARIANTS.find((x) => x.key === key);
+      document.getElementById("label").textContent = key + " — " + v.name + " · " + v.blurb;
+    }
+
+    function getVariant() {
+      const p = new URLSearchParams(location.search).get("variant") || "A";
+      return VARIANTS.some((v) => v.key === p) ? p : "A";
+    }
+    function setVariant(k) {
+      const u = new URL(location.href);
+      u.searchParams.set("variant", k);
+      history.replaceState(null, "", u);
+      render(k);
+    }
+    function cycle(d) {
+      const keys = VARIANTS.map((v) => v.key);
+      const i = keys.indexOf(getVariant());
+      setVariant(keys[(i + d + keys.length) % keys.length]);
+    }
+    document.getElementById("prev").onclick = () => cycle(-1);
+    document.getElementById("next").onclick = () => cycle(1);
+    window.addEventListener("keydown", (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      if (e.key === "ArrowLeft") cycle(-1);
+      if (e.key === "ArrowRight") cycle(1);
+    });
+    render(getVariant());
+  </script>
+</body>
+</html>
