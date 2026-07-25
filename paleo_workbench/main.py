@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import sys
 
+# Prefer Wayland on Wayland sessions; clear accidental QT_QPA_PLATFORM=xcb
+# before any QGuiApplication is constructed.
+from paleo_workbench.qt_platform import configure_qt_platform_for_session
+
+configure_qt_platform_for_session()
+
 # Bootstrap geoviz paths before other workbench imports (ISS-ENV-01).
 from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 

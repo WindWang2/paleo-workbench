@@ -25,10 +25,24 @@ again at the `python -m paleo_workbench.main` entry point.
 python -m paleo_workbench.main
 ```
 
+### Qt display platform (Linux)
+
+| Context | `QT_QPA_PLATFORM` |
+|---------|-------------------|
+| **Desktop app** (normal use) | **Unset** — on Wayland sessions Qt uses **wayland** (default today). |
+| **CI / headless pytest** | `offscreen` (not X11). |
+| **XWayland debug only** | `xcb` plus `PALEO_FORCE_XCB=1` if the session is Wayland. |
+
+Do **not** set `QT_QPA_PLATFORM=xcb` as a general default. `DISPLAY=:N` under a Wayland session usually means XWayland compatibility, not “the app should run as X11”. The app entry point clears accidental `xcb` on Wayland unless `PALEO_FORCE_XCB=1`.
+
 ## Tests
 
 ```bash
+# CI / headless (recommended default for automated runs)
 QT_QPA_PLATFORM=offscreen python -m pytest -q
+
+# Local GUI-session tests: leave QT_QPA_PLATFORM unset (Wayland on Wayland sessions)
+python -m pytest -q
 ```
 
 ## 3D Geological Modeling (`viz/geomodel`)
