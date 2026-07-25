@@ -154,7 +154,12 @@ class WellSeismicJointHost(QObject):
             self.scene_updated.emit()
 
     def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> None:
-        """domain: 'Time' or 'Depth' (case-insensitive prefix)."""
+        """Set scene (3D) vertical domain: 'Time' or 'Depth' (case-insensitive prefix).
+
+        Workbench product policy (#122): the detached 2D fence profile forces
+        Time extract via FenceProfile2D.set_extract_domain — this method does
+        **not** flip the 2D strip to Depth.
+        """
         from geoviz import VerticalDomain, select_depth_transform
 
         if self._scene is None:
@@ -165,12 +170,17 @@ class WellSeismicJointHost(QObject):
             )
             self._scene.set_vertical_domain(VerticalDomain.DEPTH)
             warn = self._scene.depth_transform.approximate_warning or ""
-            self.status_changed.emit(f"竖直域=Depth · {warn}")
+            self.status_changed.emit(f"竖直域=Depth（3D）· 2D 剖面仍 Time · {warn}")
         else:
             self._scene.set_vertical_domain(VerticalDomain.TIME)
             self.status_changed.emit("竖直域=Time")
         if emit_scene:
             self.scene_updated.emit()
+
+    @property
+    def auto_default_fence(self) -> bool:
+        """Whether reload will auto-create a default well pair fence when empty."""
+        return bool(getattr(self, "_auto_default_fence", True))
 
     def add_well_to_well_fence(self, well_a: str, well_b: str, *, name: str | None = None) -> None:
         if self._scene is None:

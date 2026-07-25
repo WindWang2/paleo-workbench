@@ -54,6 +54,27 @@ def test_shared_fence_extract_identity():
     np.testing.assert_array_equal(a.amplitude, b.amplitude)
 
 
+def test_extract_active_fence_domain_override_time_while_scene_depth():
+    """2D Time-only policy: extract Time sample axis while scene is Depth (#122)."""
+    scene = _scene_with_volume()
+    scene.add_fence(
+        FenceSection(
+            name="F1",
+            vertices_xy=np.array([[0.0, 0.0], [5000.0, 5000.0]], dtype=np.float64),
+        )
+    )
+    scene.set_depth_transform(select_depth_transform(has_external_volume=False, v0_m_s=3000.0))
+    scene.set_vertical_domain(VerticalDomain.DEPTH)
+    assert scene.vertical_domain is VerticalDomain.DEPTH
+    time_ext = scene.extract_active_fence(n_along=16, domain=VerticalDomain.TIME)
+    depth_ext = scene.extract_active_fence(n_along=16, domain=VerticalDomain.DEPTH)
+    assert time_ext is not None and depth_ext is not None
+    # Time axis is ms-scale (survey t0 + n*dt); Depth axis is metres via V0
+    assert float(time_ext.sample_axis[-1]) != float(depth_ext.sample_axis[-1])
+    # Scene domain still Depth after override extract
+    assert scene.vertical_domain is VerticalDomain.DEPTH
+
+
 def test_multi_fence_active_and_well_to_well():
     scene = _scene_with_volume()
     f1 = scene.add_fence(

@@ -273,9 +273,21 @@ class GeologicalModeling3DPage(QWidget):
         j2_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
         j2_layout.setSpacing(tokens.SPACE_1)
         j2_header = QHBoxLayout()
-        j2_title = QLabel("井震剖面 (2D)")
-        j2_title.setStyleSheet("font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY)
-        j2_header.addWidget(j2_title)
+        self._joint_2d_title = QLabel("井震剖面 (2D)")
+        self._joint_2d_title.setStyleSheet(
+            "font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY
+        )
+        j2_header.addWidget(self._joint_2d_title)
+        # Time-only chip (#122): 2D always Time even when 3D domain is Depth
+        self._joint_2d_time_chip = QLabel("2D: Time")
+        self._joint_2d_time_chip.setObjectName("Joint2DTimeChip")
+        self._joint_2d_time_chip.setStyleSheet(
+            "QLabel#Joint2DTimeChip {"
+            " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
+            " padding: 2px 8px; font-size: 11px; }"
+            % (tokens.PRIMARY, tokens.BG_SEARCH, tokens.BORDER)
+        )
+        j2_header.addWidget(self._joint_2d_time_chip)
         j2_header.addStretch()
         self.btn_toggle_joint_2d = QPushButton("折叠")
         self.btn_toggle_joint_2d.setCheckable(True)
@@ -287,8 +299,13 @@ class GeologicalModeling3DPage(QWidget):
         self.joint_2d_host.setObjectName("Joint2DHost")
         j2_host_layout = QVBoxLayout(self.joint_2d_host)
         j2_host_layout.setContentsMargins(0, 0, 0, 0)
-        self._joint_2d_placeholder = QLabel("井震 2D 剖面将在此挂载")
+        self._joint_2d_placeholder = QLabel(
+            "无活动剖面。加载后将自动建默认井对 fence；"
+            "也可在 3D 点选两口井或用顶栏「井间剖面」。"
+        )
         self._joint_2d_placeholder.setAlignment(Qt.AlignCenter)
+        self._joint_2d_placeholder.setWordWrap(True)
+        self._joint_2d_placeholder.setObjectName("Joint2DEmptyHint")
         self._joint_2d_placeholder.setStyleSheet(
             "color: %s; padding: 12px;" % tokens.TEXT_SECONDARY
         )
@@ -853,9 +870,46 @@ class GeologicalModeling3DPage(QWidget):
                 profile.setParent(self.joint_2d_host)
                 self.joint_2d_host.layout().insertWidget(0, profile, 1)
                 self._joint_profile = profile
+                self._apply_profile_time_only_policy(profile)
         except Exception as exc:
             logger.exception("joint widget mount failed")
             self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
+
+    def _apply_profile_time_only_policy(self, profile) -> None:
+        """Force 2D fence extract on Time even if scene domain is Depth (#122)."""
+        set_dom = getattr(profile, "set_extract_domain", None)
+        if not callable(set_dom):
+            return
+        try:
+            from geoviz import VerticalDomain
+
+            set_dom(VerticalDomain.TIME)
+        except Exception:
+            logger.debug("profile Time-only policy unavailable", exc_info=True)
+
+    def _sync_joint_2d_time_chip(self, domain: str | None = None) -> None:
+        """Surface 2D Time-only vs 3D Depth in the bottom strip header."""
+        chip = getattr(self, "_joint_2d_time_chip", None)
+        if chip is None:
+            return
+        if domain is None and hasattr(self, "_joint_domain"):
+            domain = self._joint_domain.currentText()
+        domain = domain or "Time"
+        if str(domain).lower().startswith("depth"):
+            chip.setText("2D: Time-only · Depth 仅 3D")
+            chip.setStyleSheet(
+                "QLabel#Joint2DTimeChip {"
+                " color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa;"
+                " border-radius: 999px; padding: 2px 8px; font-size: 11px; }"
+            )
+        else:
+            chip.setText("2D: Time")
+            chip.setStyleSheet(
+                "QLabel#Joint2DTimeChip {"
+                " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
+                " padding: 2px 8px; font-size: 11px; }"
+                % (tokens.PRIMARY, tokens.BG_SEARCH, tokens.BORDER)
+            )
 
     def _on_joint_status(self, text: str) -> None:
         self._joint_status.setText(text)
@@ -867,9 +921,12 @@ class GeologicalModeling3DPage(QWidget):
             # Profile may have been detached into bottom host
             profile = getattr(self, "_joint_profile", None)
             if profile is not None and hasattr(profile, "set_scene"):
+                self._apply_profile_time_only_policy(profile)
                 profile.set_scene(self._joint_host.scene)
         self._fill_joint_well_combos()
         self._sync_joint_visibility_from_tree()
+        if hasattr(self, "_joint_domain"):
+            self._sync_joint_2d_time_chip(self._joint_domain.currentText())
 
     def _fill_joint_well_combos(self) -> None:
         if not hasattr(self, "_joint_well_a"):
@@ -901,8 +958,17 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_well_b.blockSignals(False)
 
     def _on_joint_domain_changed(self, text: str) -> None:
+        # 3D / scene domain follows toolbar; 2D profile stays Time (#122)
         self._joint_host.set_vertical_domain(text)
         self._update_domain_z_guard(text)
+        self._sync_joint_2d_time_chip(text)
+        profile = getattr(self, "_joint_profile", None)
+        if profile is not None:
+            self._apply_profile_time_only_policy(profile)
+            if hasattr(profile, "refresh"):
+                profile.refresh()
+            elif hasattr(profile, "set_scene") and self._joint_host.scene is not None:
+                profile.set_scene(self._joint_host.scene)
 
     def _on_joint_fence(self) -> None:
         if not hasattr(self, "_joint_well_a"):

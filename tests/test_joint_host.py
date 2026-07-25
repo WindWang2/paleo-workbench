@@ -47,6 +47,33 @@ def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
     assert host.scene.vertical_domain is VerticalDomain.DEPTH
 
 
+def test_host_auto_default_fence_defaults_true(tmp_path, monkeypatch):
+    """#122: keep auto default fence on reload unless restore disables it."""
+    from paleo_workbench.viz import joint_host as mod
+
+    monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
+    host = WellSeismicJointHost()
+    assert host.auto_default_fence is True
+    host.reload(auto_default_fence=False)
+    assert host.auto_default_fence is False
+    host.reload(auto_default_fence=True)
+    assert host.auto_default_fence is True
+
+
+def test_host_depth_status_mentions_2d_stays_time(tmp_path, monkeypatch):
+    from paleo_workbench.viz import joint_host as mod
+
+    monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
+    host = WellSeismicJointHost()
+    if host.scene is None:
+        return
+    statuses: list[str] = []
+    host.status_changed.connect(statuses.append)
+    host.set_vertical_domain("Depth", emit_scene=False)
+    assert statuses
+    assert "2D" in statuses[-1] and "Time" in statuses[-1]
+
+
 def test_joint_page_delegates_to_host(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.ui.pages import well_seismic_joint_page as page_mod
     from paleo_workbench.viz import joint_host as host_mod

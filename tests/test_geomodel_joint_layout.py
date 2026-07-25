@@ -156,3 +156,61 @@ def test_nav_label_is_joint_workbench():
 
     assert tokens.PAGE_NAMES[10] == "井震联合"
     assert "井震" in tokens.PAGE_DESCRIPTIONS[10]
+
+
+def test_joint_2d_time_only_chip_and_empty_hint(qtbot):
+    """#122: 2D strip chrome exposes Time-only; empty hint guides fence creation."""
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    assert hasattr(page, "_joint_2d_time_chip")
+    assert "Time" in page._joint_2d_time_chip.text()
+    # Before profile mount: empty-state guidance on placeholder
+    ph = getattr(page, "_joint_2d_placeholder", None)
+    if ph is not None:
+        assert "fence" in ph.text().lower() or "井" in ph.text()
+    page._on_joint_domain_changed("Depth")
+    assert "Depth" in page._joint_2d_time_chip.text() or "仅 3D" in page._joint_2d_time_chip.text()
+    assert "Time" in page._joint_2d_time_chip.text()
+    page._on_joint_domain_changed("Time")
+    assert page._joint_2d_time_chip.text() == "2D: Time"
+
+
+def test_profile_force_time_extract_domain(qtbot):
+    """FenceProfile2D can force Time extract while scene is Depth (#122)."""
+    from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
+
+    ensure_geoviz_on_path()
+    from geoviz_well_seismic_3d import (
+        FenceSection,
+        InMemoryVolumeAccess,
+        VerticalDomain,
+        WellHead,
+        WellSeismicScene,
+        select_depth_transform,
+    )
+    from geoviz_well_seismic_3d.profile_2d import FenceProfile2D
+    import numpy as np
+
+    scene = WellSeismicScene()
+    p1, p2, p3 = (1315, 4165, 0.0, 0.0), (1315, 4805, 12793.0, 0.0), (1725, 4805, 12793.0, 16406.0)
+    scene.set_survey_from_corners(p1, p2, p3, n_samples=16, dt_ms=2.0)
+    scene.set_volume_access(InMemoryVolumeAccess(np.random.randn(8, 8, 16).astype(np.float32)))
+    scene.set_preview_mode(True)
+    scene.set_wells(
+        [WellHead("A1", 1000, 2000, 1000, 2000, 100), WellHead("A2", 3000, 4000, 3000, 4000, 100)]
+    )
+    scene.add_fence(
+        FenceSection("F", np.array([[0.0, 0.0], [5000.0, 5000.0]], dtype=np.float64))
+    )
+    scene.set_depth_transform(select_depth_transform(has_external_volume=False, v0_m_s=3000.0))
+    scene.set_vertical_domain(VerticalDomain.DEPTH)
+
+    profile = FenceProfile2D()
+    qtbot.addWidget(profile)
+    profile.set_extract_domain(VerticalDomain.TIME)
+    profile.set_scene(scene)
+    # Not empty: has fence + volume
+    assert profile._label.pixmap() is not None and not profile._label.pixmap().isNull()
+    assert scene.vertical_domain is VerticalDomain.DEPTH
