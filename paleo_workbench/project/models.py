@@ -340,6 +340,21 @@ class ExportArtifact(BaseModel):
     source_task_ids: list[str] = Field(default_factory=list)
 
 
+class JointAnalysisState(BaseModel):
+    """Persisted joint presentation on Geological Modeling 3D (PRD #85 / #90).
+
+    Paths are optional hints; hybrid resolve still prefers project.resources.
+    Never stores preview voxels.
+    """
+
+    tree_checks: dict[str, bool] = Field(default_factory=dict)
+    vertical_domain: str = "Time"
+    active_fence_wells: list[str] = Field(default_factory=list)
+    active_fence_name: str | None = None
+    # Optional absolute/relative path hints (segy, well_head, …)
+    path_hints: dict[str, str] = Field(default_factory=dict)
+
+
 class ProjectDocument(BaseModel):
     meta: ProjectMeta
     coordinate: CoordinateReference = Field(default_factory=CoordinateReference)
@@ -355,6 +370,7 @@ class ProjectDocument(BaseModel):
     quality_reports: list[QualityReport] = Field(default_factory=list)
     version_sets: list[VersionSet] = Field(default_factory=list)
     export_artifacts: list[ExportArtifact] = Field(default_factory=list)
+    joint_analysis: JointAnalysisState = Field(default_factory=JointAnalysisState)
 
     @classmethod
     def new(cls, name: str, region: str = "") -> "ProjectDocument":

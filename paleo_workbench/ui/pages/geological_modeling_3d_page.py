@@ -709,7 +709,91 @@ class GeologicalModeling3DPage(QWidget):
         if not self._joint_loaded_once and self.isVisible():
             self._joint_loaded_once = True
             self._ensure_joint_widget()
+            self._apply_joint_state_from_project()
             self._joint_host.reload()
+            self._restore_joint_fence_from_project()
+
+    def collect_joint_analysis_state(self):
+        """Snapshot joint UI into project model (no voxels) — #90."""
+        from paleo_workbench.project.models import JointAnalysisState
+
+        checks: dict[str, bool] = {}
+        root = self.model_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            group = root.child(i)
+            if "井震联合" not in group.text(0):
+                continue
+            for j in range(group.childCount()):
+                child = group.child(j)
+                checks[child.text(0)] = child.checkState(0) == Qt.Checked
+        domain = "Time"
+        if hasattr(self, "_joint_domain"):
+            domain = self._joint_domain.currentText() or "Time"
+        wells: list[str] = []
+        if hasattr(self, "_joint_well_a"):
+            a, b = self._joint_well_a.currentText(), self._joint_well_b.currentText()
+            if a and b:
+                wells = [a, b]
+        paths = self._joint_host.paths
+        hints: dict[str, str] = {}
+        if paths is not None:
+            if paths.segy:
+                hints["segy"] = str(paths.segy)
+            if paths.well_head:
+                hints["well_head"] = str(paths.well_head)
+        return JointAnalysisState(
+            tree_checks=checks,
+            vertical_domain=domain,
+            active_fence_wells=wells,
+            path_hints=hints,
+        )
+
+    def save_joint_analysis_to_project(self) -> None:
+        if self._project is None:
+            return
+        self._project.joint_analysis = self.collect_joint_analysis_state()
+
+    def _apply_joint_state_from_project(self) -> None:
+        if self._project is None:
+            return
+        state = getattr(self._project, "joint_analysis", None)
+        if state is None:
+            return
+        domain = getattr(state, "vertical_domain", None) or "Time"
+        if hasattr(self, "_joint_domain"):
+            self._joint_domain.blockSignals(True)
+            idx = self._joint_domain.findText(domain)
+            if idx >= 0:
+                self._joint_domain.setCurrentIndex(idx)
+            self._joint_domain.blockSignals(False)
+            self._joint_host.set_vertical_domain(domain)
+        checks = getattr(state, "tree_checks", None) or {}
+        if checks:
+            root = self.model_tree.invisibleRootItem()
+            self.model_tree.blockSignals(True)
+            try:
+                for i in range(root.childCount()):
+                    group = root.child(i)
+                    if "井震联合" not in group.text(0):
+                        continue
+                    for j in range(group.childCount()):
+                        child = group.child(j)
+                        name = child.text(0)
+                        if name in checks:
+                            child.setCheckState(
+                                0, Qt.Checked if checks[name] else Qt.Unchecked
+                            )
+            finally:
+                self.model_tree.blockSignals(False)
+            self._sync_joint_visibility_from_tree()
+
+    def _restore_joint_fence_from_project(self) -> None:
+        if self._project is None:
+            return
+        state = getattr(self._project, "joint_analysis", None)
+        wells = list(getattr(state, "active_fence_wells", None) or [])
+        if len(wells) >= 2:
+            self._joint_host.add_well_to_well_fence(wells[0], wells[1])
 
     def _ensure_joint_widget(self) -> None:
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
