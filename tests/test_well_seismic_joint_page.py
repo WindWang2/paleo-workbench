@@ -22,9 +22,9 @@ def test_joint_page_index_and_nav(qtbot):
 
 
 def test_joint_page_empty_without_data(qtbot, tmp_path, monkeypatch):
-    from paleo_workbench.ui.pages import well_seismic_joint_page as mod
+    from paleo_workbench.viz import joint_host as host_mod
 
-    monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
     from paleo_workbench.ui.pages.well_seismic_joint_page import WellSeismicJointPage
 
     page = WellSeismicJointPage(project=None)
