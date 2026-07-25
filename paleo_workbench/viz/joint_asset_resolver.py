@@ -65,9 +65,16 @@ def resolve_joint_assets(
             if p.exists():
                 setattr(result, attr, p)
         if hints.get("horizons"):
-            hp = Path(hints["horizons"])
-            if hp.exists():
-                result.horizons = [hp] if hp.is_file() else list(hp.glob("*.dat"))[:20]
+            raw_h = hints["horizons"]
+            # Support single path or pipe-separated multi-horizon list
+            candidates = [Path(p.strip()) for p in str(raw_h).split("|") if p.strip()]
+            found = [p for p in candidates if p.exists()]
+            if found:
+                result.horizons = found
+            else:
+                hp = Path(raw_h)
+                if hp.exists():
+                    result.horizons = [hp] if hp.is_file() else list(hp.glob("*.dat"))[:20]
 
     used_p = any(
         [

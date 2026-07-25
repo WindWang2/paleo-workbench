@@ -739,6 +739,7 @@ class GeologicalModeling3DPage(QWidget):
                 auto_default_fence=not restoring_fence,
             )
             self._restore_joint_fence_from_project()
+            self._update_domain_z_guard(domain)
 
     def collect_joint_analysis_state(self):
         """Snapshot joint UI into project model (no voxels) — #90."""
@@ -761,6 +762,15 @@ class GeologicalModeling3DPage(QWidget):
             a, b = self._joint_well_a.currentText(), self._joint_well_b.currentText()
             if a and b:
                 wells = [a, b]
+        fence_name = None
+        scene = self._joint_host.scene
+        if scene is not None and getattr(scene, "fences", None):
+            for f in scene.fences:
+                if getattr(f, "id", None) == getattr(scene, "active_fence_id", None):
+                    fence_name = getattr(f, "name", None) or str(f.id)
+                    break
+            if fence_name is None and scene.fences:
+                fence_name = getattr(scene.fences[0], "name", None)
         paths = self._joint_host.paths
         hints: dict[str, str] = {}
         if paths is not None:
@@ -773,11 +783,13 @@ class GeologicalModeling3DPage(QWidget):
             if paths.tops:
                 hints["tops"] = str(paths.tops)
             if paths.horizons:
-                hints["horizons"] = str(paths.horizons[0])
+                # Multi-horizon: pipe-separated absolute paths
+                hints["horizons"] = "|".join(str(p) for p in paths.horizons if p)
         return JointAnalysisState(
             tree_checks=checks,
             vertical_domain=domain,
             active_fence_wells=wells,
+            active_fence_name=fence_name,
             path_hints=hints,
         )
 
@@ -949,34 +961,22 @@ class GeologicalModeling3DPage(QWidget):
         self.gl_widget.update()
 
     def _align_joint_camera(self) -> None:
-        """Copy modeling camera distance/elevation/azimuth toward joint renderer (#97)."""
+        """Copy modeling camera pose to joint 3D via public API (no private digs)."""
         if self._joint_widget is None:
             return
-        r = getattr(self._joint_widget, "renderer", None)
-        if r is None:
-            return
         opts = dict(self.gl_widget.opts)
-        view = getattr(r, "_view", None)
-        if view is None:
-            set_cam = getattr(r, "setCameraPosition", None)
-            if callable(set_cam):
-                try:
-                    set_cam(
-                        distance=opts.get("distance", 250),
-                        elevation=opts.get("elevation", 30),
-                        azimuth=opts.get("azimuth", 45),
-                    )
-                except Exception:
-                    pass
-            return
-        try:
-            view.setCameraPosition(
-                distance=float(opts.get("distance", 250) or 250),
-                elevation=float(opts.get("elevation", 30) or 30),
-                azimuth=float(opts.get("azimuth", 45) or 45),
-            )
-        except Exception:
-            logger.debug("align joint camera failed", exc_info=True)
+        pose = dict(
+            distance=float(opts.get("distance", 250) or 250),
+            elevation=float(opts.get("elevation", 30) or 30),
+            azimuth=float(opts.get("azimuth", 45) or 45),
+        )
+        set_pose = getattr(self._joint_widget, "set_camera_pose", None)
+        if callable(set_pose):
+            try:
+                set_pose(**pose)
+                return
+            except Exception:
+                logger.debug("align joint camera failed", exc_info=True)
 
     def _on_joint_add_from_project(self) -> None:
         """Re-resolve hybrid assets (tree add entry point) (#97)."""
