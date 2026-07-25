@@ -1185,12 +1185,62 @@ class GeologicalModeling3DPage(QWidget):
         z_coord = val_to_coord(self.slide_clip_z.value())
         z_dir = 1.0 if self.combo_clip_z_dir.currentIndex() == 0 else -1.0
 
+        self._apply_clip_to_joint_slices()
+
         for item in self.active_items:
             if hasattr(item, "set_clipping"):
                 item.set_clipping('x', x_enabled, x_coord, x_dir)
                 item.set_clipping('y', y_enabled, y_coord, y_dir)
                 item.set_clipping('z', z_enabled, z_coord, z_dir)
         self.gl_widget.update()
+
+    def _apply_clip_to_joint_slices(self) -> None:
+        """One-way: modeling clip sliders → joint orthogonal indices (#92)."""
+        from paleo_workbench.viz.joint_clip_map import (
+            ModelingClipState,
+            modeling_clip_to_joint_slices,
+        )
+
+        scene = self._joint_host.scene
+        if scene is None or self._joint_widget is None:
+            return
+        vol = scene.volume_access
+        if vol is None:
+            return
+        try:
+            ni, nx, nt = vol.shape
+        except Exception:
+            return
+        r = getattr(self._joint_widget, "renderer", None)
+        cur_il = int(getattr(r, "_il_pos", 0) or 0) if r is not None else 0
+        cur_xl = int(getattr(r, "_xl_pos", 0) or 0) if r is not None else 0
+        cur_t = int(getattr(r, "_t_pos", 0) or 0) if r is not None else 0
+        clip = ModelingClipState(
+            x_enabled=self.chk_clip_x.isChecked(),
+            x_value=self.slide_clip_x.value(),
+            x_keep_positive=self.combo_clip_x_dir.currentIndex() == 0,
+            y_enabled=self.chk_clip_y.isChecked(),
+            y_value=self.slide_clip_y.value(),
+            y_keep_positive=self.combo_clip_y_dir.currentIndex() == 0,
+            z_enabled=self.chk_clip_z.isChecked(),
+            z_value=self.slide_clip_z.value(),
+            z_keep_positive=self.combo_clip_z_dir.currentIndex() == 0,
+        )
+        focus = modeling_clip_to_joint_slices(
+            clip,
+            n_inline=ni,
+            n_crossline=nx,
+            n_sample=nt,
+            current_il=cur_il,
+            current_xl=cur_xl,
+            current_t=cur_t,
+        )
+        set_idx = getattr(self._joint_widget, "set_slice_indices", None)
+        if callable(set_idx):
+            try:
+                set_idx(focus.il_index, focus.xl_index, focus.t_index)
+            except Exception:
+                logger.debug("joint set_slice_indices failed", exc_info=True)
 
     # ------------------------------------------------------------------ #
     # Export
