@@ -112,3 +112,93 @@ def test_page_esc_clears_half(qtbot, tmp_path, monkeypatch):
     assert page._well_pick.half_select == "A1"
     page.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
     assert page._well_pick.half_select is None
+
+
+def test_pick_controller_draw_mode_drag_snap():
+    c = WellPickController()
+    assert "选井" in c.set_mode("pick") or c.mode == "pick"
+    c.set_mode("draw")
+    assert c.mode == "draw"
+    assert c.half_select is None
+    s = c.on_draw_press("A1")
+    assert c.draw_from == "A1"
+    assert "A1" in s
+    s, pair = c.on_draw_release("A11")
+    assert pair == ("A1", "A11")
+    assert c.draw_from is None
+
+
+def test_pick_controller_draw_same_well_and_miss():
+    c = WellPickController()
+    c.set_mode("draw")
+    c.on_draw_press("A1")
+    s, pair = c.on_draw_release("A1")
+    assert pair is None
+    assert "同一口" in s
+    c.on_draw_press("A1")
+    s, pair = c.on_draw_release(None)
+    assert pair is None
+    assert "未吸附" in s
+
+
+def test_pick_mode_blocks_draw_click_path():
+    c = WellPickController()
+    c.set_mode("draw")
+    s, pair = c.on_well_click("A1")
+    assert pair is None
+    assert "画线" in s
+
+
+def test_hit_test_head_only_skips_traj():
+    wells = [
+        WellScreenGeom("A", head=(500.0, 500.0), traj=()),
+        WellScreenGeom("B", head=(400.0, 400.0), traj=((50.0, 100.0), (150.0, 100.0))),
+    ]
+    assert pick_well_name(100.0, 100.0, wells, head_only=True, head_radius_px=16.0) is None
+    assert pick_well_name(100.0, 100.0, wells, head_only=False, traj_radius_px=12.0) == "B"
+
+
+def test_page_mode_switch_and_delete_active(qtbot, tmp_path, monkeypatch):
+    from paleo_workbench.viz import joint_host as host_mod
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    assert hasattr(page, "_joint_pick_mode")
+    assert page._joint_pick_mode.currentData() == "pick"
+    assert hasattr(page, "_joint_del_fence_btn")
+    page._joint_pick_mode.setCurrentIndex(1)  # draw
+    assert page._well_pick.mode == "draw"
+    page._joint_pick_mode.setCurrentIndex(0)
+    assert page._well_pick.mode == "pick"
+    removed: list[bool] = []
+    page._joint_host.remove_active_fence = lambda: removed.append(True)  # type: ignore
+    page._on_joint_delete_active_fence()
+    assert removed == [True]
+
+
+def test_host_remove_active_fence(tmp_path, monkeypatch):
+    from paleo_workbench.viz import joint_host as host_mod
+    from paleo_workbench.viz.joint_host import WellSeismicJointHost
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    host = WellSeismicJointHost()
+    if host.scene is None:
+        return
+    from geoviz_well_seismic_3d import FenceSection, WellHead
+    import numpy as np
+
+    scene = host.scene
+    scene.set_wells([WellHead("A1", 0, 0, 0, 0, 0), WellHead("A2", 100, 100, 100, 100, 0)])
+    scene.add_well_to_well_fence(["A1", "A2"], name="f1")
+    scene.add_fence(
+        FenceSection("f2", np.array([[0.0, 0.0], [50.0, 0.0]], dtype=float)),
+        activate=True,
+    )
+    assert len(scene.fences) == 2
+    host.remove_active_fence()
+    assert len(scene.fences) == 1
+    host.remove_active_fence()
+    assert len(scene.fences) == 0
+    host.remove_active_fence()  # no-op

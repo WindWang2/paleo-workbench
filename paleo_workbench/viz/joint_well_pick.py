@@ -1,4 +1,4 @@
-"""Well pick for joint 3D: hit-test priority + two-click fence state (#123).
+"""Well pick for joint 3D: two-click + draw-snap fence state (#123 / #124).
 
 Pure logic (no GL). Hosts project wells to screen space, then call
 ``pick_well_name`` / ``WellPickController``. Fence creation still goes through
@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Sequence
+from typing import Literal, Sequence
+
+PickMode = Literal["pick", "draw"]
 
 
 @dataclass(frozen=True)
@@ -23,16 +25,31 @@ class WellScreenGeom:
 
 @dataclass
 class WellPickController:
-    """Two-click well pair state machine (mode=pick only for #123)."""
+    """Well-pair interaction: pick (two-click) or draw (drag-snap) modes."""
 
+    mode: PickMode = "pick"
     half_select: str | None = None
+    draw_from: str | None = None
     status: str = ""
 
+    def set_mode(self, mode: str) -> str:
+        m: PickMode = "draw" if str(mode).lower().startswith("draw") else "pick"
+        self.mode = m
+        self.half_select = None
+        self.draw_from = None
+        if m == "draw":
+            self.status = "模式：画线吸附 — 从井头拖到另一口井"
+        else:
+            self.status = "模式：选井两点"
+        return self.status
+
     def clear_half(self, reason: str = "已取消半选") -> str:
-        if self.half_select is None:
+        had = self.half_select is not None or self.draw_from is not None
+        self.half_select = None
+        self.draw_from = None
+        if not had:
             self.status = ""
             return ""
-        self.half_select = None
         self.status = reason
         return self.status
 
@@ -43,7 +60,7 @@ class WellPickController:
         return self.clear_half("点空白 — 取消半选")
 
     def on_well_click(self, name: str) -> tuple[str, tuple[str, str] | None]:
-        """Process a well hit.
+        """Process a well hit in **pick** mode.
 
         Returns
         -------
@@ -52,6 +69,9 @@ class WellPickController:
         fence_pair :
             ``(a, b)`` when a pair is complete; else ``None``.
         """
+        if self.mode != "pick":
+            self.status = "当前为画线模式 — 请拖线或切换到选井两点"
+            return self.status, None
         well = (name or "").strip()
         if not well:
             self.status = "未命中井"
@@ -67,6 +87,38 @@ class WellPickController:
         self.half_select = None
         self.status = f"建 fence {a}–{b}"
         return self.status, (a, b)
+
+    def on_draw_press(self, name: str | None) -> str:
+        """Start drag-line from a well (draw mode)."""
+        if self.mode != "draw":
+            return ""
+        well = (name or "").strip()
+        if not well:
+            self.draw_from = None
+            self.status = "画线：请在井头按下"
+            return self.status
+        self.draw_from = well
+        self.status = f"拖线：从 {well} …"
+        return self.status
+
+    def on_draw_release(self, name: str | None) -> tuple[str, tuple[str, str] | None]:
+        """Finish drag-line; snap to well head preferred."""
+        if self.mode != "draw":
+            return "", None
+        origin = self.draw_from
+        self.draw_from = None
+        if not origin:
+            self.status = "画线未开始"
+            return self.status, None
+        well = (name or "").strip()
+        if not well:
+            self.status = "未吸附到另一口井"
+            return self.status, None
+        if well == origin:
+            self.status = "同一口井 — 请拖到另一口"
+            return self.status, None
+        self.status = f"建 fence {origin}–{well}"
+        return self.status, (origin, well)
 
 
 def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -107,9 +159,12 @@ def pick_well_name(
     *,
     head_radius_px: float = 16.0,
     traj_radius_px: float = 10.0,
+    head_only: bool = False,
 ) -> str | None:
     """Hit-test: well **head preferred**, then trajectory (#123).
 
+    head_only:
+        If True, only snap to well heads (draw-mode release snap, larger radius).
     Returns well name or None. Free-screen pick (not timeslice-locked).
     """
     p = (float(sx), float(sy))
@@ -121,6 +176,8 @@ def pick_well_name(
             head_best = (d, w.name)
     if head_best is not None:
         return head_best[1]
+    if head_only:
+        return None
     # Trajectories second
     traj_best: tuple[float, str] | None = None
     for w in wells:

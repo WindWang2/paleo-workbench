@@ -94,6 +94,26 @@ def test_multi_fence_active_and_well_to_well():
     assert len(ww.vertices_xy) == 2
 
 
+def test_remove_active_fence_keeps_others():
+    """#124: delete active; remaining fences stay; active moves to last."""
+    scene = _scene_with_volume()
+    f1 = scene.add_fence(
+        FenceSection("A", np.array([[0, 0], [1000, 0]], dtype=float)), activate=True
+    )
+    f2 = scene.add_fence(
+        FenceSection("B", np.array([[0, 0], [0, 1000]], dtype=float)), activate=True
+    )
+    assert scene.active_fence_id == f2.id
+    assert scene.remove_active_fence() is True
+    assert len(scene.fences) == 1
+    assert scene.fences[0].id == f1.id
+    assert scene.active_fence_id == f1.id
+    assert scene.remove_active_fence() is True
+    assert scene.fences == []
+    assert scene.active_fence_id is None
+    assert scene.remove_active_fence() is False
+
+
 def test_near_well_filter_and_curve_fallback():
     scene = _scene_with_volume()
     scene.add_fence(

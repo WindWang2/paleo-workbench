@@ -197,6 +197,25 @@ class WellSeismicJointHost(QObject):
         except Exception as exc:
             self.status_changed.emit(f"创建剖面失败: {exc}")
 
+    def remove_active_fence(self) -> None:
+        """Delete active fence; leave remaining fences (new active = last)."""
+        if self._scene is None:
+            return
+        remove = getattr(self._scene, "remove_active_fence", None)
+        if not callable(remove):
+            self.status_changed.emit("引擎不支持删除 fence")
+            return
+        try:
+            ok = bool(remove())
+            if not ok:
+                self.status_changed.emit("无活动剖面可删")
+            else:
+                n = len(getattr(self._scene, "fences", []) or [])
+                self.status_changed.emit(f"已删 active fence · 剩余 {n}")
+            self.scene_updated.emit()
+        except Exception as exc:
+            self.status_changed.emit(f"删除剖面失败: {exc}")
+
     def shutdown(self) -> None:
         if self._volume_job.is_running:
             self._volume_job.shutdown()

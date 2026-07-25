@@ -217,6 +217,14 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_domain.addItems(["Time", "Depth"])
         self._joint_domain.currentTextChanged.connect(self._on_joint_domain_changed)
         f_layout.addWidget(self._joint_domain)
+        # Interaction mode: pick (default) vs draw-snap (#124)
+        f_layout.addWidget(QLabel("交互"))
+        self._joint_pick_mode = QComboBox()
+        self._joint_pick_mode.setObjectName("JointPickMode")
+        self._joint_pick_mode.addItem("选井两点", "pick")
+        self._joint_pick_mode.addItem("画线吸附", "draw")
+        self._joint_pick_mode.currentIndexChanged.connect(self._on_joint_pick_mode_changed)
+        f_layout.addWidget(self._joint_pick_mode)
         f_layout.addWidget(QLabel("井间"))
         self._joint_well_a = QComboBox()
         self._joint_well_b = QComboBox()
@@ -225,6 +233,10 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_fence_btn = QPushButton("井间剖面")
         self._joint_fence_btn.clicked.connect(self._on_joint_fence)
         f_layout.addWidget(self._joint_fence_btn)
+        self._joint_del_fence_btn = QPushButton("删 active")
+        self._joint_del_fence_btn.setToolTip("删除当前活动井间剖面（保留其它 fence）")
+        self._joint_del_fence_btn.clicked.connect(self._on_joint_delete_active_fence)
+        f_layout.addWidget(self._joint_del_fence_btn)
         self._joint_add_btn = QPushButton("从工程/数据刷新")
         self._joint_add_btn.setToolTip("重新解析并挂载 SEGY / 井 / tops / LAS（hybrid）")
         self._joint_add_btn.clicked.connect(self._on_joint_add_from_project)
@@ -887,7 +899,7 @@ class GeologicalModeling3DPage(QWidget):
             self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
 
     def _install_joint_well_pick(self) -> None:
-        """Install click filter on joint 3D renderer for well hit-test (#123)."""
+        """Install click/drag filter on joint 3D for pick + draw-snap (#123/#124)."""
         if self._joint_pick_filter is not None:
             return
         if self._joint_widget is None:
@@ -905,16 +917,21 @@ class GeologicalModeling3DPage(QWidget):
                 if et == QEvent.Type.MouseButtonPress:
                     if event.button() == Qt.MouseButton.LeftButton:
                         pos = event.position() if hasattr(event, "position") else event.pos()
-                        page._joint_pick_press = (float(pos.x()), float(pos.y()))
+                        sx, sy = float(pos.x()), float(pos.y())
+                        page._joint_pick_press = (sx, sy)
+                        if page._well_pick.mode == "draw":
+                            return page._on_joint_3d_draw_press(sx, sy, target)
                 elif et == QEvent.Type.MouseButtonRelease:
                     if event.button() != Qt.MouseButton.LeftButton:
                         return False
                     press = page._joint_pick_press
                     page._joint_pick_press = None
-                    if press is None:
-                        return False
                     pos = event.position() if hasattr(event, "position") else event.pos()
                     sx, sy = float(pos.x()), float(pos.y())
+                    if page._well_pick.mode == "draw":
+                        return page._on_joint_3d_draw_release(sx, sy, target)
+                    if press is None:
+                        return False
                     dx, dy = sx - press[0], sy - press[1]
                     if dx * dx + dy * dy > 25:  # drag → leave to orbit camera
                         return False
@@ -939,6 +956,19 @@ class GeologicalModeling3DPage(QWidget):
         except Exception:
             pass
 
+    def _on_joint_pick_mode_changed(self, _index: int = 0) -> None:
+        if not hasattr(self, "_joint_pick_mode"):
+            return
+        mode = self._joint_pick_mode.currentData()
+        if mode is None:
+            mode = "pick" if self._joint_pick_mode.currentIndex() == 0 else "draw"
+        msg = self._well_pick.set_mode(str(mode))
+        if msg:
+            self._on_joint_status(msg)
+
+    def _on_joint_delete_active_fence(self) -> None:
+        self._joint_host.remove_active_fence()
+
     def _on_joint_3d_click(self, sx: float, sy: float, view_widget) -> bool:
         """Hit-test wells; two-click builds fence via host. Returns True if consumed."""
         name = self._hit_test_well_at(sx, sy, view_widget)
@@ -950,7 +980,42 @@ class GeologicalModeling3DPage(QWidget):
         self._handle_joint_well_pick(name)
         return True
 
-    def _hit_test_well_at(self, sx: float, sy: float, view_widget) -> str | None:
+    def _on_joint_3d_draw_press(self, sx: float, sy: float, view_widget) -> bool:
+        """Start drag-line from well head/traj; consume event when started."""
+        name = self._hit_test_well_at(sx, sy, view_widget, head_only=False)
+        msg = self._well_pick.on_draw_press(name)
+        if msg:
+            self._on_joint_status(msg)
+        return self._well_pick.draw_from is not None
+
+    def _on_joint_3d_draw_release(self, sx: float, sy: float, view_widget) -> bool:
+        if self._well_pick.draw_from is None and self._well_pick.mode == "draw":
+            return False
+        # Prefer well-head snap with larger radius on release
+        name = self._hit_test_well_at(
+            sx, sy, view_widget, head_only=True, head_radius_px=28.0
+        )
+        if name is None:
+            name = self._hit_test_well_at(sx, sy, view_widget, head_radius_px=20.0)
+        status, pair = self._well_pick.on_draw_release(name)
+        if status:
+            self._on_joint_status(status)
+        if pair is not None:
+            a, b = pair
+            self._joint_host.add_well_to_well_fence(a, b)
+            self._select_joint_wells(a, b)
+        return True
+
+    def _hit_test_well_at(
+        self,
+        sx: float,
+        sy: float,
+        view_widget,
+        *,
+        head_only: bool = False,
+        head_radius_px: float = 16.0,
+        traj_radius_px: float = 10.0,
+    ) -> str | None:
         scene = self._joint_host.scene
         if scene is None:
             return None
@@ -981,7 +1046,14 @@ class GeologicalModeling3DPage(QWidget):
             width=w,
             height=h,
         )
-        return pick_well_name(sx, sy, geoms)
+        return pick_well_name(
+            sx,
+            sy,
+            geoms,
+            head_radius_px=head_radius_px,
+            traj_radius_px=traj_radius_px,
+            head_only=head_only,
+        )
 
     def _handle_joint_well_pick(self, name: str) -> None:
         """Apply two-click pick; create fence through host when pair completes."""
