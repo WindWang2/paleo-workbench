@@ -24,6 +24,40 @@ def _well_preview() -> PreparedPreview:
     )
 
 
+def _named_well_preview(
+    names: tuple[str, ...],
+    *,
+    record_ids: tuple[int, ...],
+) -> PreparedPreview:
+    count = len(names)
+    return PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="Well locations",
+        payload=XYPreviewPayload(
+            names=names,
+            x=np.arange(count, dtype=float) * 10.0,
+            y=np.arange(count, dtype=float) * 20.0,
+            resource_id="well-head-1",
+            record_ids=record_ids,
+        ),
+    )
+
+
+def _show_well_preview(
+    qtbot,
+    prepared: PreparedPreview,
+    *,
+    size: tuple[int, int] = (900, 600),
+) -> WellLocationPreview:
+    preview = WellLocationPreview(GeoVizEngine.default())
+    qtbot.addWidget(preview)
+    preview.resize(*size)
+    preview.render(prepared)
+    preview.show()
+    qtbot.wait(10)
+    return preview
+
+
 def _move_mouse(widget, point: QPoint) -> None:
     event = QMouseEvent(
         QEvent.MouseMove,
@@ -64,6 +98,187 @@ def _drag_mouse(widget, start: QPoint, end: QPoint) -> None:
         ),
     ):
         QCoreApplication.sendEvent(widget, event)
+
+
+def test_well_list_is_persistent_naturally_sorted_and_stable(qtbot):
+    preview = _show_well_preview(
+        qtbot,
+        _named_well_preview(
+            ("A10", "A2", "A1", "A2"),
+            record_ids=(10, 42, 3, 7),
+        ),
+    )
+
+    assert preview.well_list.count() == 4
+    assert [
+        preview.well_list.item(index).text()
+        for index in range(preview.well_list.count())
+    ] == ["A1", "A2 · 记录 42", "A2 · 记录 7", "A10"]
+    assert preview.well_list.isVisible()
+    assert preview.well_list.mapTo(preview, QPoint()).x() > preview.plot.x()
+    assert len(preview.plot.series_list[0].x) == 4
+
+
+def test_well_search_filters_names_only_and_preserves_plot_points(qtbot):
+    preview = _show_well_preview(
+        qtbot,
+        _named_well_preview(
+            ("North-A1", "south-a10", "Beta"),
+            record_ids=(1, 2, 3),
+        ),
+    )
+
+    preview.well_search.setText("A1")
+
+    assert [
+        preview.well_list.item(index).text()
+        for index in range(preview.well_list.count())
+        if not preview.well_list.item(index).isHidden()
+    ] == ["North-A1", "south-a10"]
+    assert len(preview.plot.series_list[0].x) == 3
+
+    preview.well_search.clear()
+
+    assert all(
+        not preview.well_list.item(index).isHidden()
+        for index in range(preview.well_list.count())
+    )
+
+
+def test_plot_and_list_replace_the_same_single_active_well(qtbot):
+    prepared = _named_well_preview(
+        ("A10", "A2", "A1"),
+        record_ids=(10, 2, 1),
+    )
+    preview = _show_well_preview(qtbot, prepared)
+
+    px, py = preview.plot.data_to_pixel(
+        float(prepared.payload.x[0]),
+        float(prepared.payload.y[0]),
+    )
+    qtbot.mouseClick(
+        preview.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+
+    assert preview.active_well is not None
+    assert preview.active_well.name == "A10"
+    assert preview.well_list.currentItem().text() == "A10"
+
+    a1_item = preview.well_list.item(0)
+    qtbot.mouseClick(
+        preview.well_list.viewport(),
+        Qt.LeftButton,
+        pos=preview.well_list.visualItemRect(a1_item).center(),
+    )
+
+    assert preview.active_well is not None
+    assert preview.active_well.name == "A1"
+    assert preview.active_well.point_index == 2
+    assert preview.plot.selected_point == ("Well locations", 2)
+    assert preview.plot.selected_label == "A1"
+    assert preview.well_list.selectedItems() == [a1_item]
+    assert (preview.plot.view_xmin + preview.plot.view_xmax) / 2.0 == (
+        pytest.approx(float(prepared.payload.x[2]))
+    )
+    assert (preview.plot.view_ymin + preview.plot.view_ymax) / 2.0 == (
+        pytest.approx(float(prepared.payload.y[2]))
+    )
+
+    _drag_mouse(preview.plot, QPoint(300, 250), QPoint(340, 275))
+    assert (preview.plot.view_xmin + preview.plot.view_xmax) / 2.0 != (
+        pytest.approx(float(prepared.payload.x[2]))
+    )
+
+    qtbot.mouseClick(
+        preview.well_list.viewport(),
+        Qt.LeftButton,
+        pos=preview.well_list.visualItemRect(a1_item).center(),
+    )
+
+    assert (preview.plot.view_xmin + preview.plot.view_xmax) / 2.0 == (
+        pytest.approx(float(prepared.payload.x[2]))
+    )
+    assert (preview.plot.view_ymin + preview.plot.view_ymax) / 2.0 == (
+        pytest.approx(float(prepared.payload.y[2]))
+    )
+
+
+def test_plot_selection_scrolls_to_list_row_without_stealing_focus(qtbot):
+    prepared = _named_well_preview(
+        tuple(f"A{index}" for index in range(1, 51)),
+        record_ids=tuple(range(1, 51)),
+    )
+    preview = _show_well_preview(qtbot, prepared, size=(900, 340))
+    last_index = len(prepared.payload.names) - 1
+    px, py = preview.plot.data_to_pixel(
+        float(prepared.payload.x[last_index]),
+        float(prepared.payload.y[last_index]),
+    )
+
+    qtbot.mouseClick(
+        preview.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+
+    selected_item = preview.well_list.currentItem()
+    assert selected_item is not None
+    assert selected_item.text() == "A50"
+    assert preview.well_list.visualItemRect(selected_item).intersects(
+        preview.well_list.viewport().rect()
+    )
+    assert preview.focusWidget() is preview.plot
+
+
+def test_filter_reports_when_active_well_is_hidden_from_list(qtbot):
+    preview = _show_well_preview(qtbot, _well_preview())
+    px, py = preview.plot.data_to_pixel(30.0, 40.0)
+    qtbot.mouseClick(
+        preview.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+
+    preview.well_search.setText("A1")
+
+    assert preview.active_well is not None
+    assert preview.active_well.name == "A2"
+    assert preview.plot.selected_point == ("Well locations", 1)
+    assert preview.well_list.currentItem().isHidden()
+    assert preview.filter_status.isVisible()
+    assert "A2" in preview.filter_status.text()
+    assert "图中高亮" in preview.filter_status.text()
+
+    preview.well_search.clear()
+
+    assert not preview.well_list.currentItem().isHidden()
+    assert not preview.filter_status.isVisible()
+
+
+def test_keyboard_row_navigation_keeps_active_well_synchronized(qtbot):
+    preview = _show_well_preview(qtbot, _well_preview())
+    px, py = preview.plot.data_to_pixel(30.0, 40.0)
+    qtbot.mouseClick(
+        preview.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+
+    preview.well_list.setFocus()
+    qtbot.keyClick(preview.well_list, Qt.Key_Up)
+
+    assert preview.well_list.currentItem().text() == "A1"
+    assert preview.active_well is not None
+    assert preview.active_well.name == "A1"
+    assert preview.plot.selected_point == ("Well locations", 0)
+    assert preview.plot.selected_label == "A1"
+
+    preview.well_search.setText("A2")
+
+    assert preview.filter_status.isVisible()
+    assert "A1" in preview.filter_status.text()
 
 
 def test_user_can_hover_select_focus_and_reset_a_well(qtbot):
@@ -115,6 +330,9 @@ def test_user_can_hover_select_focus_and_reset_a_well(qtbot):
 
     assert preview.active_well is None
     assert preview.plot.selected_point is None
+    assert preview.well_list.currentItem() is None
+    assert preview.well_list.selectedItems() == []
+    assert not preview.filter_status.isVisible()
     assert (
         preview.plot.view_xmin,
         preview.plot.view_xmax,
