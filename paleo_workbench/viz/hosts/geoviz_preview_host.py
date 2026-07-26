@@ -24,12 +24,12 @@ class GeoVizPreviewHost(QWidget):
 
         widget = self.widgets.get(preview.kind)
         if widget is None:
-            widget = self.engine.create_widget(preview.kind, self.stack)
+            widget = self._create_widget(preview)
             self.widgets[preview.kind] = widget
             self.stack.addWidget(widget)
 
         try:
-            self.engine.render(widget, preview)
+            self._render_widget(widget, preview)
         except Exception:
             try:
                 self._dispose_widget(preview.kind, widget)
@@ -68,7 +68,16 @@ class GeoVizPreviewHost(QWidget):
 
     def _dispose_widget(self, kind: PreviewKind, widget: QWidget) -> None:
         try:
-            self.engine.release(widget)
+            if kind is PreviewKind.XY_SCATTER:
+                from paleo_workbench.viz.hosts.well_location_preview import (
+                    WellLocationPreview,
+                )
+
+                if not isinstance(widget, WellLocationPreview):
+                    raise TypeError("XY preview host widget type mismatch")
+                widget.release()
+            else:
+                self.engine.release(widget)
         finally:
             widget.hide()
             self.stack.removeWidget(widget)
@@ -77,6 +86,31 @@ class GeoVizPreviewHost(QWidget):
             if self._active_kind is kind:
                 self._active_kind = None
             widget.deleteLater()
+
+    def _create_widget(self, preview: PreparedPreview) -> QWidget:
+        if preview.kind is PreviewKind.XY_SCATTER:
+            from paleo_workbench.viz.hosts.well_location_preview import (
+                WellLocationPreview,
+            )
+
+            return WellLocationPreview(self.engine, self.stack)
+        return self.engine.create_widget(preview.kind, self.stack)
+
+    def _render_widget(
+        self,
+        widget: QWidget,
+        preview: PreparedPreview,
+    ) -> None:
+        if preview.kind is PreviewKind.XY_SCATTER:
+            from paleo_workbench.viz.hosts.well_location_preview import (
+                WellLocationPreview,
+            )
+
+            if not isinstance(widget, WellLocationPreview):
+                raise TypeError("XY preview host widget type mismatch")
+            widget.render(preview)
+            return
+        self.engine.render(widget, preview)
 
     @staticmethod
     def _require_ui_thread() -> None:
