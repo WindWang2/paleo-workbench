@@ -149,3 +149,21 @@ def test_identity_registry_rejects_ambiguous_duplicate_corrections(tmp_path):
 
     with pytest.raises(WellIdentityAmbiguityError):
         _parse(source, registry)
+
+
+def test_identity_registry_rejects_cross_name_geometry_ambiguity(tmp_path):
+    source = tmp_path / "ExportWellHead.dat"
+    registry = WellIdentityRegistry(asset_id="res:wells", entries={})
+    source.write_text(
+        "A 1 2 3 4 5 6\nB 11 12 13 14 15 16\n",
+        encoding="utf-8",
+    )
+    _, registry = _parse(source, registry)
+
+    source.write_text(
+        "A 11 12 13 14 15 16\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WellIdentityAmbiguityError):
+        _parse(source, registry)

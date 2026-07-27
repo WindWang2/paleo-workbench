@@ -45,9 +45,7 @@ class WellIdentityRegistry:
         active = {
             key: self.entries[key] for key in keys if key in self.entries
         }
-        self._migrate_unique(keys, active, field="geometry")
-        self._migrate_unique(keys, active, field="name")
-        self._raise_on_ambiguous_overlap(keys, active)
+        self._migrate_unambiguous(keys, active)
 
         for key in keys:
             if key not in active:
@@ -96,61 +94,68 @@ class WellIdentityRegistry:
             sort_keys=True,
         )
 
-    def _migrate_unique(
-        self,
-        current_keys: list[str],
-        active: dict[str, str],
-        *,
-        field: str,
-    ) -> None:
-        current = self._unmatched_by_field(current_keys, active, field=field)
-        previous = self._unmatched_by_field(
-            list(self.entries),
-            active,
-            field=field,
-            previous=True,
-        )
-        for lineage, candidates in current.items():
-            old_candidates = previous.get(lineage, [])
-            if len(candidates) == 1 and len(old_candidates) == 1:
-                active[candidates[0]] = self.entries[old_candidates[0]]
-
-    def _raise_on_ambiguous_overlap(
+    def _migrate_unambiguous(
         self, current_keys: list[str], active: dict[str, str]
     ) -> None:
-        for field in ("geometry", "name"):
-            current = self._unmatched_by_field(
-                current_keys, active, field=field
-            )
-            previous = self._unmatched_by_field(
-                list(self.entries),
-                active,
-                field=field,
-                previous=True,
-            )
-            overlap = set(current) & set(previous)
-            if overlap:
-                values = ", ".join(repr(value[1]) for value in overlap)
-                raise WellIdentityAmbiguityError(
-                    "Cannot safely reconcile changed duplicate wells by "
-                    f"{field} ({values}); provide immutable source record IDs."
-                )
+        remaining_current = {key for key in current_keys if key not in active}
+        used_ids = set(active.values())
+        remaining_previous = {
+            key
+            for key, well_id in self.entries.items()
+            if well_id not in used_ids
+        }
 
-    def _unmatched_by_field(
-        self,
-        keys: list[str],
-        active: dict[str, str],
-        *,
-        field: str,
-        previous: bool = False,
-    ) -> dict[tuple[str, str], list[str]]:
-        grouped: dict[tuple[str, str], list[str]] = {}
-        for key in keys:
-            if key in active:
-                continue
-            if previous and self.entries[key] in active.values():
-                continue
-            payload = json.loads(key)
-            lineage = (str(payload["asset_id"]), str(payload[field]))
-            grouped.setdefault(lineage, []).append(key)
-        return grouped
+        while True:
+            candidates = self._candidate_graph(
+                remaining_current, remaining_previous
+            )
+            reverse: dict[str, set[str]] = {}
+            for current_key, previous_keys in candidates.items():
+                for previous_key in previous_keys:
+                    reverse.setdefault(previous_key, set()).add(current_key)
+            pairs = [
+                (current_key, next(iter(previous_keys)))
+                for current_key, previous_keys in candidates.items()
+                if len(previous_keys) == 1
+                and len(reverse[next(iter(previous_keys))]) == 1
+            ]
+            if not pairs:
+                break
+            for current_key, previous_key in pairs:
+                active[current_key] = self.entries[previous_key]
+                remaining_current.remove(current_key)
+                remaining_previous.remove(previous_key)
+
+        candidates = self._candidate_graph(
+            remaining_current, remaining_previous
+        )
+        if any(candidates.values()):
+            raise WellIdentityAmbiguityError(
+                "Cannot safely reconcile changed wells: name and geometry "
+                "produce multiple valid identity mappings."
+            )
+
+    @staticmethod
+    def _candidate_graph(
+        current_keys: set[str], previous_keys: set[str]
+    ) -> dict[str, set[str]]:
+        current_payloads = {
+            key: json.loads(key) for key in current_keys
+        }
+        previous_payloads = {
+            key: json.loads(key) for key in previous_keys
+        }
+        return {
+            current_key: {
+                previous_key
+                for previous_key, previous in previous_payloads.items()
+                if (
+                    current["asset_id"] == previous["asset_id"]
+                    and (
+                        current["name"] == previous["name"]
+                        or current["geometry"] == previous["geometry"]
+                    )
+                )
+            }
+            for current_key, current in current_payloads.items()
+        }
