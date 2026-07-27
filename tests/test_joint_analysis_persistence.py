@@ -9,6 +9,7 @@ def test_joint_analysis_state_roundtrip_in_project():
     doc = ProjectDocument.new("demo")
     doc.joint_analysis = JointAnalysisState(
         tree_checks={"地震预览体 (geoviz)": True, "井震 2D 剖面条": False},
+        well_visibility={"A1": False, "A2": True},
         vertical_domain="Depth",
         active_fence_wells=["A1", "A2"],
         path_hints={"segy": "/tmp/x.sgy"},
@@ -20,6 +21,7 @@ def test_joint_analysis_state_roundtrip_in_project():
     assert restored.joint_analysis.vertical_domain == "Depth"
     assert restored.joint_analysis.active_fence_wells == ["A1", "A2"]
     assert restored.joint_analysis.tree_checks["井震 2D 剖面条"] is False
+    assert restored.joint_analysis.well_visibility == {"A1": False, "A2": True}
     # No voxel payload
     assert "shape" not in data["joint_analysis"]
 
@@ -39,6 +41,71 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     assert state.vertical_domain == "Depth"
     page.save_joint_analysis_to_project()
     assert page._project.joint_analysis.vertical_domain == "Depth"
+
+
+def test_geomodel_restores_known_well_visibility_and_drops_stale_ids(
+    qtbot, tmp_path, monkeypatch
+):
+    from geoviz_well_seismic_3d import WellHead
+    from paleo_workbench.viz import joint_host as host_mod
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    project = ProjectDocument.new("visibility")
+    project.joint_analysis = JointAnalysisState(
+        well_visibility={"A1": False, "REMOVED": False}
+    )
+    page.set_project(project)
+    page._joint_host.scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("NEW", 10, 10, 10, 10, 100),
+        ]
+    )
+
+    page._joint_host.scene_updated.emit()
+
+    assert (
+        [(well.id, well.visible) for well in page._joint_host.scene.well_presentations()],
+        page.collect_joint_analysis_state().well_visibility,
+    ) == (
+        [("A1", False), ("NEW", True)],
+        {"A1": False, "NEW": True},
+    )
+
+
+def test_geomodel_migrates_legacy_all_wells_hidden_state(qtbot, tmp_path, monkeypatch):
+    from geoviz_well_seismic_3d import WellHead
+    from paleo_workbench.viz import joint_host as host_mod
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    project = ProjectDocument.new("legacy-visibility")
+    project.joint_analysis = JointAnalysisState(
+        tree_checks={"联合井轨迹 (geoviz)": False}
+    )
+    page.set_project(project)
+    page._apply_joint_tree_checks_from_project()
+    page._joint_host.scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("B1", 10, 10, 10, 10, 100),
+        ]
+    )
+
+    page._joint_host.scene_updated.emit()
+
+    assert [
+        well.visible for well in page._joint_host.scene.well_presentations()
+    ] == [False, False]
 
 
 def test_fill_joint_combos_preserves_saved_fence_pair(qtbot, tmp_path, monkeypatch):

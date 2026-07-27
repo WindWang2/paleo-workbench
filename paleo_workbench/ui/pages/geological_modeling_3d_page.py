@@ -81,6 +81,7 @@ class GeologicalModeling3DPage(QWidget):
         # Joint analysis host (geoviz) — PRD #85 / #88
         self._project: ProjectDocument | None = None
         self._joint_loaded_once = False
+        self._joint_well_visibility_restored = False
         self._joint_widget = None
         self._joint_status = QLabel("")
         self._joint_host = WellSeismicJointHost(self)
@@ -698,7 +699,9 @@ class GeologicalModeling3DPage(QWidget):
 
         root_joint = QTreeWidgetItem(self.model_tree, ["井震联合 (geoviz)"])
         self._add_checkable_child(root_joint, "地震预览体 (geoviz)")
-        self._add_checkable_child(root_joint, "联合井轨迹 (geoviz)")
+        self._joint_wells_tree_item = self._add_checkable_child(
+            root_joint, "联合井轨迹 (geoviz)"
+        )
         self._add_checkable_child(root_joint, "井间剖面 fence (geoviz)")
         self._add_checkable_child(root_joint, "井震 3D 视口")
         self._add_checkable_child(root_joint, "井震 2D 剖面条")
@@ -708,13 +711,70 @@ class GeologicalModeling3DPage(QWidget):
             self.model_tree.itemChanged.connect(self._on_tree_item_changed)
             self._tree_changed_hooked = True
 
-    def _add_checkable_child(self, parent_item: QTreeWidgetItem, name: str) -> None:
+    def _add_checkable_child(
+        self, parent_item: QTreeWidgetItem, name: str
+    ) -> QTreeWidgetItem:
         item = QTreeWidgetItem(parent_item, [name])
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
         item.setCheckState(0, Qt.Checked)
+        return item
+
+    def _refresh_joint_well_tree(self) -> None:
+        """Rebuild per-well checkbox children from the scene presentation model."""
+        parent = getattr(self, "_joint_wells_tree_item", None)
+        scene = self._joint_host.scene
+        if parent is None or scene is None:
+            return
+        presentations = scene.well_presentations()
+        if (
+            presentations
+            and not self._joint_well_visibility_restored
+            and self._project is not None
+        ):
+            state = getattr(self._project, "joint_analysis", None)
+            saved = dict(getattr(state, "well_visibility", None) or {})
+            for presentation in presentations:
+                if presentation.id in saved:
+                    scene.set_well_visibility(
+                        presentation.id, bool(saved[presentation.id])
+                    )
+            if not saved:
+                legacy_checks = dict(
+                    getattr(state, "tree_checks", None) or {}
+                )
+                if legacy_checks.get("联合井轨迹 (geoviz)") is False:
+                    for presentation in presentations:
+                        scene.set_well_visibility(presentation.id, False)
+            self._joint_well_visibility_restored = True
+            presentations = scene.well_presentations()
+        self.model_tree.blockSignals(True)
+        try:
+            parent.takeChildren()
+            for presentation in presentations:
+                item = self._add_checkable_child(parent, presentation.display_name)
+                item.setData(0, Qt.ItemDataRole.UserRole, presentation.id)
+                item.setCheckState(
+                    0,
+                    Qt.Checked if presentation.visible else Qt.Unchecked,
+                )
+            states = [
+                parent.child(index).checkState(0)
+                for index in range(parent.childCount())
+            ]
+            if states:
+                if all(state == Qt.Checked for state in states):
+                    parent.setCheckState(0, Qt.Checked)
+                elif all(state == Qt.Unchecked for state in states):
+                    parent.setCheckState(0, Qt.Unchecked)
+                else:
+                    parent.setCheckState(0, Qt.PartiallyChecked)
+        finally:
+            self.model_tree.blockSignals(False)
+        parent.setExpanded(True)
 
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
+        self._joint_well_visibility_restored = False
         self._joint_host.set_project(project)
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -765,9 +825,10 @@ class GeologicalModeling3DPage(QWidget):
             domain = self._joint_domain.currentText() or "Time"
         wells: list[str] = []
         if hasattr(self, "_joint_well_a"):
-            a, b = self._joint_well_a.currentText(), self._joint_well_b.currentText()
+            a = self._joint_well_a.currentData() or self._joint_well_a.currentText()
+            b = self._joint_well_b.currentData() or self._joint_well_b.currentText()
             if a and b:
-                wells = [a, b]
+                wells = [str(a), str(b)]
         fence_name = None
         scene = self._joint_host.scene
         if scene is not None and getattr(scene, "fences", None):
@@ -793,6 +854,12 @@ class GeologicalModeling3DPage(QWidget):
                 hints["horizons"] = "|".join(str(p) for p in paths.horizons if p)
         return JointAnalysisState(
             tree_checks=checks,
+            well_visibility={
+                presentation.id: presentation.visible
+                for presentation in (
+                    scene.well_presentations() if scene is not None else []
+                )
+            },
             vertical_domain=domain,
             active_fence_wells=wells,
             active_fence_name=fence_name,
@@ -846,20 +913,21 @@ class GeologicalModeling3DPage(QWidget):
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""
         if not hasattr(self, "_joint_well_a"):
             return
-        names = self._joint_host.well_names()
+        options = self._joint_well_options()
         self._joint_well_a.blockSignals(True)
         self._joint_well_b.blockSignals(True)
         self._joint_well_a.clear()
         self._joint_well_b.clear()
-        self._joint_well_a.addItems(names)
-        self._joint_well_b.addItems(names)
-        ia = self._joint_well_a.findText(well_a)
-        ib = self._joint_well_b.findText(well_b)
+        for well_id, display_name in options:
+            self._joint_well_a.addItem(display_name, well_id)
+            self._joint_well_b.addItem(display_name, well_id)
+        ia = self._joint_well_a.findData(well_a)
+        ib = self._joint_well_b.findData(well_b)
         if ia >= 0:
             self._joint_well_a.setCurrentIndex(ia)
         if ib >= 0:
             self._joint_well_b.setCurrentIndex(ib)
-        elif len(names) >= 2:
+        elif len(options) >= 2:
             self._joint_well_b.setCurrentIndex(1)
         self._joint_well_a.blockSignals(False)
         self._joint_well_b.blockSignals(False)
@@ -1020,7 +1088,7 @@ class GeologicalModeling3DPage(QWidget):
         if scene is None:
             return None
         try:
-            trajs = scene.well_trajectories()
+            trajs = scene.well_trajectories(visible_only=True)
         except Exception:
             return None
         if not trajs:
@@ -1123,6 +1191,7 @@ class GeologicalModeling3DPage(QWidget):
             if profile is not None and hasattr(profile, "set_scene"):
                 self._apply_profile_time_only_policy(profile)
                 profile.set_scene(self._joint_host.scene)
+        self._refresh_joint_well_tree()
         self._fill_joint_well_combos()
         self._sync_joint_visibility_from_tree()
         if hasattr(self, "_joint_domain"):
@@ -1132,30 +1201,45 @@ class GeologicalModeling3DPage(QWidget):
         if not hasattr(self, "_joint_well_a"):
             return
         # Prefer current selection or project-saved pair over "first two wells"
-        prev_a = self._joint_well_a.currentText()
-        prev_b = self._joint_well_b.currentText()
+        prev_a = self._joint_well_a.currentData() or self._joint_well_a.currentText()
+        prev_b = self._joint_well_b.currentData() or self._joint_well_b.currentText()
         if self._project is not None:
             state = getattr(self._project, "joint_analysis", None)
             saved = list(getattr(state, "active_fence_wells", None) or [])
             if len(saved) >= 2:
                 prev_a, prev_b = saved[0], saved[1]
-        names = self._joint_host.well_names()
+        options = self._joint_well_options()
         self._joint_well_a.blockSignals(True)
         self._joint_well_b.blockSignals(True)
         self._joint_well_a.clear()
         self._joint_well_b.clear()
-        self._joint_well_a.addItems(names)
-        self._joint_well_b.addItems(names)
-        ia = self._joint_well_a.findText(prev_a) if prev_a else -1
-        ib = self._joint_well_b.findText(prev_b) if prev_b else -1
+        for well_id, display_name in options:
+            self._joint_well_a.addItem(display_name, well_id)
+            self._joint_well_b.addItem(display_name, well_id)
+        ia = self._joint_well_a.findData(prev_a) if prev_a else -1
+        ib = self._joint_well_b.findData(prev_b) if prev_b else -1
         if ia >= 0:
             self._joint_well_a.setCurrentIndex(ia)
         if ib >= 0:
             self._joint_well_b.setCurrentIndex(ib)
-        elif len(names) >= 2:
+        elif len(options) >= 2:
             self._joint_well_b.setCurrentIndex(1)
         self._joint_well_a.blockSignals(False)
         self._joint_well_b.blockSignals(False)
+
+    def _joint_well_options(self) -> list[tuple[str, str]]:
+        """Return ``(JointWellId, display label)`` pairs for toolbar controls."""
+        scene = self._joint_host.scene
+        presentations = scene.well_presentations() if scene is not None else []
+        if presentations:
+            return [
+                (presentation.id, presentation.display_name)
+                for presentation in presentations
+            ]
+        return [
+            (str(well_id), str(well_id))
+            for well_id in self._joint_host.well_names()
+        ]
 
     def _on_joint_domain_changed(self, text: str) -> None:
         # 3D / scene domain follows toolbar; 2D profile stays Time (#122)
@@ -1174,8 +1258,8 @@ class GeologicalModeling3DPage(QWidget):
         if not hasattr(self, "_joint_well_a"):
             return
         self._joint_host.add_well_to_well_fence(
-            self._joint_well_a.currentText(),
-            self._joint_well_b.currentText(),
+            str(self._joint_well_a.currentData() or self._joint_well_a.currentText()),
+            str(self._joint_well_b.currentData() or self._joint_well_b.currentText()),
         )
 
     def _update_domain_z_guard(self, domain: str) -> None:
@@ -1475,13 +1559,59 @@ class GeologicalModeling3DPage(QWidget):
         if column != 0:
             return
 
-        # Block signals to prevent recursive checking logic
-        self.model_tree.blockSignals(True)
-        try:
-            for i in range(item.childCount()):
-                item.child(i).setCheckState(0, item.checkState(0))
-        finally:
-            self.model_tree.blockSignals(False)
+        wells_parent = getattr(self, "_joint_wells_tree_item", None)
+        well_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if item is wells_parent:
+            visible = item.checkState(0) != Qt.Unchecked
+            self.model_tree.blockSignals(True)
+            try:
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    child.setCheckState(
+                        0, Qt.Checked if visible else Qt.Unchecked
+                    )
+                    child_id = child.data(0, Qt.ItemDataRole.UserRole)
+                    if child_id is not None and self._joint_host.scene is not None:
+                        self._joint_host.scene.set_well_visibility(
+                            str(child_id), visible
+                        )
+            finally:
+                self.model_tree.blockSignals(False)
+            if not visible:
+                self._well_pick.clear_half("隐藏全部井 — 已取消半选")
+        elif well_id is not None and item.parent() is wells_parent:
+            visible = item.checkState(0) == Qt.Checked
+            if self._joint_host.scene is not None:
+                self._joint_host.scene.set_well_visibility(str(well_id), visible)
+            if not visible and str(well_id) in {
+                self._well_pick.half_select,
+                self._well_pick.draw_from,
+            }:
+                self._well_pick.clear_half("隐藏已选井 — 已取消半选")
+            states = [
+                wells_parent.child(index).checkState(0)
+                for index in range(wells_parent.childCount())
+            ]
+            if states:
+                if all(state == Qt.Checked for state in states):
+                    parent_state = Qt.Checked
+                elif all(state == Qt.Unchecked for state in states):
+                    parent_state = Qt.Unchecked
+                else:
+                    parent_state = Qt.PartiallyChecked
+                self.model_tree.blockSignals(True)
+                try:
+                    wells_parent.setCheckState(0, parent_state)
+                finally:
+                    self.model_tree.blockSignals(False)
+        else:
+            # Block signals to prevent recursive checking logic
+            self.model_tree.blockSignals(True)
+            try:
+                for i in range(item.childCount()):
+                    item.child(i).setCheckState(0, item.checkState(0))
+            finally:
+                self.model_tree.blockSignals(False)
 
         self._sync_visibility_from_tree()
         self._sync_joint_visibility_from_tree()
@@ -1501,7 +1631,11 @@ class GeologicalModeling3DPage(QWidget):
         show_3d = self._tree_item_checked("井震 3D 视口")
         show_2d = self._tree_item_checked("井震 2D 剖面条")
         show_vol = self._tree_item_checked("地震预览体 (geoviz)")
-        show_wells = self._tree_item_checked("联合井轨迹 (geoviz)")
+        wells_parent = getattr(self, "_joint_wells_tree_item", None)
+        show_wells = (
+            wells_parent is None
+            or wells_parent.checkState(0) != Qt.Unchecked
+        )
         show_fence = self._tree_item_checked("井间剖面 fence (geoviz)")
         if hasattr(self, "joint_3d_host"):
             self.joint_3d_host.setVisible(show_3d or show_vol)
@@ -1517,6 +1651,9 @@ class GeologicalModeling3DPage(QWidget):
             profile = getattr(self, "_joint_profile", None)
             if profile is not None:
                 profile.setVisible(show_2d and show_fence)
+                refresh = getattr(profile, "refresh", None)
+                if callable(refresh):
+                    refresh()
 
     def _update_clipping(self) -> None:
         """Legacy modeling-item clip (G1: clip card hidden; not wired to joint)."""

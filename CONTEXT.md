@@ -46,6 +46,8 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 
 ### Seismic 3D & 2D Profile
 - **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.
+- **Per-Well Visibility（逐井可见性）**: 在同一个井震联合工作台中，每口井各自拥有独立的显示状态，并由一处控制其在 3D、Time 连井剖面及点选交互中的全部呈现。它不表示为每口井创建独立视窗。
+- **JointWellId（联合井身份）**: 在井震联合场景中唯一且稳定地标识一口源井，不以可重复的井名充当身份。井名只用于显示；重名井仍拥有不同的 JointWellId。
 - **SliceReadWorker**: Asynchronous QThread worker using priority queues and neighborhood prefetching for stutter-free slice navigation.
 - **Coherence3D**: 3D seismic attribute calculating similarity/coherence across inline, crossline, and sample vertical windows.
 - **AttributePipeline**: Asynchronous, GIL-releasing seismic attribute calculation engine (`paleo_workbench/viz/seismic_3d_api.py` / `geoviz_seismic/attribute_pipeline.py`) that dispatches C++ accelerated filtering (3D Coherence, Spectral Decomposition, Dip/Azimuth) via `NativeEngineBackend` workers with progress reporting and cancellation tokens.

@@ -94,6 +94,23 @@ def test_multi_fence_active_and_well_to_well():
     assert len(ww.vertices_xy) == 2
 
 
+def test_well_to_well_fence_accepts_joint_well_ids_for_duplicate_names():
+    scene = _scene_with_volume()
+    scene.set_wells(
+        [
+            WellHead("A1", 1000, 2000, 1000, 2000, 100),
+            WellHead("A1", 3000, 4000, 3000, 4000, 100),
+        ]
+    )
+
+    fence = scene.add_well_to_well_fence(["A1#1", "A1#2"])
+
+    np.testing.assert_array_equal(
+        fence.vertices_xy,
+        np.array([[1000.0, 2000.0], [3000.0, 4000.0]]),
+    )
+
+
 def test_remove_active_fence_keeps_others():
     """#124: delete active; remaining fences stay; active moves to last."""
     scene = _scene_with_volume()
@@ -136,6 +153,30 @@ def test_near_well_filter_and_curve_fallback():
     a1 = next(h for h in hits if h.name == "A1")
     assert a1.curve_name == "GR"
     assert a1.tops[0][0] == "C3"
+
+
+def test_profile_assembly_uses_per_well_visibility_and_identity():
+    scene = _scene_with_volume()
+    scene.set_wells(
+        [
+            WellHead("A1", 1000, 2000, 1000, 2000, 100),
+            WellHead("A1", 2000, 3000, 2000, 3000, 100),
+            WellHead("B1", 3000, 4000, 3000, 4000, 100),
+        ]
+    )
+    scene.add_fence(
+        FenceSection(
+            "F",
+            np.array([[1000.0, 2000.0], [3000.0, 4000.0]], dtype=float),
+        )
+    )
+
+    scene.set_well_visibility("A1#2", False)
+
+    assert [
+        (hit.id, hit.display_name)
+        for hit in scene.assemble_active_profile_wells()
+    ] == [("A1#1", "A1 (1)"), ("B1", "B1")]
 
 
 def test_probe_slice_indices():

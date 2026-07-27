@@ -119,6 +119,60 @@ def test_well_trajectory_missing_td_safe_behaviour():
     assert traj.points[0, 1] == pytest.approx(2000.0)
 
 
+def test_scene_assigns_distinct_stable_ids_and_labels_to_duplicate_well_names():
+    scene = WellSeismicScene()
+    scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("A1", 10, 10, 10, 10, 100),
+            WellHead("B1", 20, 20, 20, 20, 100),
+        ]
+    )
+
+    assert [
+        (well.id, well.name, well.display_name)
+        for well in scene.well_presentations()
+    ] == [
+        ("A1#1", "A1", "A1 (1)"),
+        ("A1#2", "A1", "A1 (2)"),
+        ("B1", "B1", "B1"),
+    ]
+
+
+def test_scene_visibility_filters_3d_trajectories_without_deleting_analysis():
+    scene = WellSeismicScene()
+    scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("B1", 10, 10, 10, 10, 100),
+        ]
+    )
+    fence = scene.add_well_to_well_fence(["A1", "B1"])
+
+    scene.set_well_visibility("A1", False)
+
+    assert (
+        set(scene.well_trajectories(visible_only=True)),
+        set(scene.well_trajectories()),
+        [saved.id for saved in scene.fences],
+    ) == ({"B1"}, {"A1", "B1"}, [fence.id])
+
+
+def test_scene_reload_preserves_known_visibility_and_shows_new_wells():
+    scene = WellSeismicScene()
+    a1 = WellHead("A1", 0, 0, 0, 0, 100)
+    b1 = WellHead("B1", 10, 10, 10, 10, 100)
+    scene.set_wells([a1, b1])
+    scene.set_well_visibility("A1", False)
+
+    scene.set_wells([a1, b1, WellHead("C1", 20, 20, 20, 20, 100)])
+
+    assert [
+        (well.id, well.visible)
+        for well in scene.well_presentations()
+    ] == [("A1", False), ("B1", True), ("C1", True)]
+
+
 def test_deviated_well_head_to_bottom_xy():
     scene = WellSeismicScene()
     scene.set_survey_from_corners(P1, P2, P3, n_samples=100, dt_ms=2.0)

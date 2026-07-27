@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTreeWidgetItem
 
 
 def test_geomodel_page_chrome_two_columns(qtbot):
@@ -66,6 +65,122 @@ def test_geomodel_tree_geoviz_layers_checkable(qtbot):
         child = group.child(j)
         assert child.flags() & Qt.ItemIsUserCheckable
         assert child.flags() & Qt.ItemIsEnabled
+
+
+def test_geomodel_tree_lists_each_joint_well_as_an_independent_checkbox(qtbot):
+    from geoviz_well_seismic_3d import WellHead
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page._joint_host.scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("A1", 10, 10, 10, 10, 100),
+            WellHead("B1", 20, 20, 20, 20, 100),
+        ]
+    )
+
+    page._joint_host.scene_updated.emit()
+
+    group = page.model_tree.invisibleRootItem().child(0)
+    wells = next(
+        group.child(index)
+        for index in range(group.childCount())
+        if group.child(index).text(0) == "联合井轨迹 (geoviz)"
+    )
+    assert [
+        (wells.child(index).text(0), wells.child(index).checkState(0))
+        for index in range(wells.childCount())
+    ] == [
+        ("A1 (1)", Qt.Checked),
+        ("A1 (2)", Qt.Checked),
+        ("B1", Qt.Checked),
+    ]
+
+
+def test_geomodel_tree_hides_one_well_updates_parent_and_clears_selection(qtbot):
+    from geoviz_well_seismic_3d import WellHead
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page._joint_host.scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("B1", 10, 10, 10, 10, 100),
+        ]
+    )
+    page._joint_host.scene_updated.emit()
+    page._well_pick.on_well_click("A1")
+    wells = page._joint_wells_tree_item
+
+    wells.child(0).setCheckState(0, Qt.Unchecked)
+
+    assert (
+        [(well.id, well.visible) for well in page._joint_host.scene.well_presentations()],
+        wells.checkState(0),
+        page._well_pick.half_select,
+    ) == (
+        [("A1", False), ("B1", True)],
+        Qt.PartiallyChecked,
+        None,
+    )
+
+
+def test_geomodel_well_parent_checkbox_controls_all_wells(qtbot):
+    from geoviz_well_seismic_3d import WellHead
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page._joint_host.scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("B1", 10, 10, 10, 10, 100),
+        ]
+    )
+    page._joint_host.scene_updated.emit()
+
+    page._joint_wells_tree_item.setCheckState(0, Qt.Unchecked)
+    hidden = [
+        well.visible for well in page._joint_host.scene.well_presentations()
+    ]
+    page._joint_wells_tree_item.setCheckState(0, Qt.Checked)
+
+    assert (
+        hidden,
+        [well.visible for well in page._joint_host.scene.well_presentations()],
+    ) == ([False, False], [True, True])
+
+
+def test_geomodel_toolbar_displays_duplicate_labels_but_keeps_joint_well_ids(qtbot):
+    from geoviz_well_seismic_3d import WellHead
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page._joint_host.scene.set_wells(
+        [
+            WellHead("A1", 0, 0, 0, 0, 100),
+            WellHead("A1", 10, 10, 10, 10, 100),
+        ]
+    )
+
+    page._joint_host.scene_updated.emit()
+
+    assert [
+        (page._joint_well_a.itemText(index), page._joint_well_a.itemData(index))
+        for index in range(page._joint_well_a.count())
+    ] == [("A1 (1)", "A1#1"), ("A1 (2)", "A1#2")]
 
 
 def test_geomodel_tree_checks_ignore_unknown_keys(qtbot):
