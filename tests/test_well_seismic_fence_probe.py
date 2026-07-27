@@ -33,8 +33,24 @@ def _scene_with_volume() -> WellSeismicScene:
     scene.set_preview_mode(True)
     scene.set_wells(
         [
-            WellHead("A1", 1000, 2000, 1000, 2000, 100),
-            WellHead("A2", 3000, 4000, 3000, 4000, 100),
+            WellHead(
+                "A1",
+                1000,
+                2000,
+                1000,
+                2000,
+                100,
+                id=JointWellId("source:a1"),
+            ),
+            WellHead(
+                "A2",
+                3000,
+                4000,
+                3000,
+                4000,
+                100,
+                id=JointWellId("source:a2"),
+            ),
         ]
     )
     return scene

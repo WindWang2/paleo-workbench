@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
@@ -10,13 +11,19 @@ from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
 ensure_geoviz_on_path()
 
-from geoviz import TimeDepthTable, WellHead  # noqa: E402
+from geoviz import JointWellId, TimeDepthTable, WellHead  # noqa: E402
 
 
 def parse_well_heads(path: Path | str) -> list[WellHead]:
     """Parse SMI ExportWellHead.dat style file."""
+    source_path = Path(path)
+    asset_key = sha256(
+        str(source_path.resolve()).encode("utf-8")
+    ).hexdigest()[:20]
     wells: list[WellHead] = []
-    for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in source_path.read_text(
+        encoding="utf-8", errors="replace"
+    ).splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
             continue
@@ -40,6 +47,7 @@ def parse_well_heads(path: Path | str) -> list[WellHead]:
                 bottom_y=by,
                 total_depth_m=td,
                 kb_m=kb,
+                id=JointWellId(f"well-head:{asset_key}:{len(wells)}"),
             )
         )
     return wells

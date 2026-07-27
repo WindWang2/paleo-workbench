@@ -86,6 +86,7 @@ def test_well_trajectory_time_domain_with_td():
         bottom_y=8219.94,
         total_depth_m=2000.0,
         kb_m=0.0,
+        id=JointWellId("source:a1"),
     )
     scene.set_wells([well], td_tables={"A1": td})
 
@@ -109,6 +110,7 @@ def test_well_trajectory_missing_td_safe_behaviour():
         bottom_x=1000.0,
         bottom_y=2000.0,
         total_depth_m=2100.0,
+        id=JointWellId("source:a2"),
     )
     scene.set_wells([well], td_tables={})
 
@@ -123,8 +125,8 @@ def test_well_trajectory_missing_td_safe_behaviour():
 def test_scene_keeps_source_ids_stable_when_duplicate_wells_are_renamed_or_reordered():
     scene = WellSeismicScene()
     scene.set_wells([
-        WellHead("A1", 0, 0, 0, 0, 100),
-        WellHead("A1", 10, 10, 10, 10, 100),
+        WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:7")),
+        WellHead("A1", 10, 10, 10, 10, 100, id=JointWellId("source:8")),
     ])
     source_7, source_8 = [
         presentation.id for presentation in scene.well_presentations()
@@ -132,8 +134,10 @@ def test_scene_keeps_source_ids_stable_when_duplicate_wells_are_renamed_or_reord
     scene.set_well_visibility(source_8, False)
 
     scene.set_wells([
-        WellHead("RENAMED", 10, 10, 10, 10, 100),
-        WellHead("A1", 0, 0, 0, 0, 100),
+        WellHead(
+            "RENAMED", 99, 99, 99, 99, 999, id=JointWellId("source:8")
+        ),
+        WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:7")),
     ])
 
     assert [
@@ -213,6 +217,7 @@ def test_deviated_well_head_to_bottom_xy():
         bottom_x=10457.533,
         bottom_y=11189.500,
         total_depth_m=2000.0,
+        id=JointWellId("source:a10"),
     )
     scene.set_wells([well], td_tables={"A10": td})
     pts = next(iter(scene.well_trajectories().values())).points
@@ -263,6 +268,7 @@ def test_package_importable_and_joint_widget_facades_renderer(qtbot):
                 bottom_x=1000.0,
                 bottom_y=2000.0,
                 total_depth_m=100.0,
+                id=JointWellId("source:w1"),
             )
         ],
         td_tables={"W1": td},
