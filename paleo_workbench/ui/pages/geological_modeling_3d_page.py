@@ -10,9 +10,10 @@ from __future__ import annotations
 import logging
 import numpy as np
 
-from PySide6.QtCore import Qt, QObject, QEvent
+from PySide6.QtCore import QRectF, Qt, QObject, QEvent
+from PySide6.QtGui import QBrush, QColor, QIcon, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton,
+    QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QComboBox, QSlider, QSplitter, QProgressBar,
     QCheckBox, QSpinBox, QDoubleSpinBox, QScrollArea, QFileDialog, QMessageBox,
 )
@@ -81,6 +82,7 @@ class GeologicalModeling3DPage(QWidget):
         # Joint analysis host (geoviz) — PRD #85 / #88
         self._project: ProjectDocument | None = None
         self._joint_loaded_once = False
+        self._joint_well_visibility_restored = False
         self._joint_widget = None
         self._joint_status = QLabel("")
         self._joint_host = WellSeismicJointHost(self)
@@ -217,6 +219,13 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_domain.addItems(["Time", "Depth"])
         self._joint_domain.currentTextChanged.connect(self._on_joint_domain_changed)
         f_layout.addWidget(self._joint_domain)
+        self._joint_slice_card_btn = QPushButton("正交切片")
+        self._joint_slice_card_btn.setCheckable(True)
+        self._joint_slice_card_btn.setChecked(True)
+        self._joint_slice_card_btn.setToolTip(
+            "设置 Inline、Crossline 与多张 Time 切片"
+        )
+        f_layout.addWidget(self._joint_slice_card_btn)
         # Interaction mode: pick (default) vs draw-snap (#124)
         f_layout.addWidget(QLabel("交互"))
         self._joint_pick_mode = QComboBox()
@@ -253,6 +262,8 @@ class GeologicalModeling3DPage(QWidget):
         f_layout.addWidget(self.btn_reset)
         f_layout.addStretch()
         view_layout.addWidget(self.floating_bar)
+        self._joint_slice_card = self._build_joint_slice_card()
+        view_layout.addWidget(self._joint_slice_card)
 
         # Status row under toolbar — light chrome, not canvas black
         self._joint_status.setWordWrap(True)
@@ -311,12 +322,77 @@ class GeologicalModeling3DPage(QWidget):
         )
         j2_header.addWidget(self._joint_2d_time_chip)
         j2_header.addStretch()
+        self._joint_color_card_btn = QPushButton("色标")
+        self._joint_color_card_btn.setCheckable(True)
+        self._joint_color_card_btn.setToolTip("选择地震/GR 色标并调整井轨迹宽度")
+        j2_header.addWidget(self._joint_color_card_btn)
         self.btn_toggle_joint_2d = QPushButton("折叠")
         self.btn_toggle_joint_2d.setCheckable(True)
         self.btn_toggle_joint_2d.setChecked(False)
         self.btn_toggle_joint_2d.clicked.connect(self._toggle_joint_2d_panel)
         j2_header.addWidget(self.btn_toggle_joint_2d)
         j2_layout.addLayout(j2_header)
+
+        self._joint_color_card = QFrame()
+        self._joint_color_card.setObjectName("JointColorScaleCard")
+        self._joint_color_card.setStyleSheet(
+            "QFrame#JointColorScaleCard {"
+            " background: %s; border: 1px solid %s; border-radius: %dpx;"
+            " padding: 4px; }"
+            % (tokens.BG_SEARCH, tokens.BORDER, tokens.RADIUS_BUTTON)
+        )
+        color_layout = QGridLayout(self._joint_color_card)
+        color_layout.setContentsMargins(
+            tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
+        )
+        color_layout.setHorizontalSpacing(tokens.SPACE_2)
+        color_layout.setVerticalSpacing(tokens.SPACE_1)
+        color_layout.addWidget(QLabel("地震振幅"), 0, 0)
+        self._joint_seismic_color = QComboBox()
+        self._populate_color_scale_combo(
+            self._joint_seismic_color,
+            (
+                ("蓝—白—红", "blue-white-red", ((33, 102, 172), (255, 255, 255), (178, 24, 43))),
+                ("灰度", "gray", ((0, 0, 0), (128, 128, 128), (255, 255, 255))),
+                ("红—白—蓝", "red-white-blue", ((178, 24, 43), (255, 255, 255), (33, 102, 172))),
+            ),
+        )
+        color_layout.addWidget(self._joint_seismic_color, 0, 1)
+        color_layout.addWidget(QLabel("GR 井轨迹"), 1, 0)
+        self._joint_gr_color = QComboBox()
+        self._populate_color_scale_combo(
+            self._joint_gr_color,
+            (
+                ("viridis", "viridis", ((68, 1, 84), (33, 145, 140), (253, 231, 37))),
+                ("cividis", "cividis", ((0, 34, 78), (122, 123, 120), (254, 232, 56))),
+                ("plasma", "plasma", ((13, 8, 135), (204, 71, 120), (240, 249, 33))),
+                ("turbo", "turbo", ((48, 18, 59), (26, 228, 182), (234, 42, 20))),
+            ),
+        )
+        color_layout.addWidget(self._joint_gr_color, 1, 1)
+        color_layout.addWidget(QLabel("井轨迹宽度"), 0, 2)
+        self._joint_well_width = QSpinBox()
+        self._joint_well_width.setRange(2, 10)
+        self._joint_well_width.setValue(5)
+        self._joint_well_width.setSuffix(" px")
+        color_layout.addWidget(self._joint_well_width, 0, 3)
+        color_layout.setColumnStretch(1, 1)
+        color_layout.setColumnStretch(3, 1)
+        self._joint_color_card.setVisible(False)
+        self._joint_color_card_btn.toggled.connect(
+            self._joint_color_card.setVisible
+        )
+        self._joint_seismic_color.currentIndexChanged.connect(
+            self._apply_joint_display_settings
+        )
+        self._joint_gr_color.currentIndexChanged.connect(
+            self._apply_joint_display_settings
+        )
+        self._joint_well_width.valueChanged.connect(
+            self._apply_joint_display_settings
+        )
+        j2_layout.addWidget(self._joint_color_card)
+
         self.joint_2d_host = QWidget()
         self.joint_2d_host.setObjectName("Joint2DHost")
         j2_host_layout = QVBoxLayout(self.joint_2d_host)
@@ -657,6 +733,26 @@ class GeologicalModeling3DPage(QWidget):
 
         main_layout.addWidget(splitter)
 
+    @staticmethod
+    def _populate_color_scale_combo(
+        combo: QComboBox,
+        choices: tuple[
+            tuple[str, str, tuple[tuple[int, int, int], ...]], ...
+        ],
+    ) -> None:
+        for label, key, colors in choices:
+            pix = QPixmap(72, 14)
+            gradient = QLinearGradient(0.0, 0.0, 72.0, 0.0)
+            for index, color in enumerate(colors):
+                gradient.setColorAt(
+                    index / max(len(colors) - 1, 1),
+                    QColor(*color),
+                )
+            painter = QPainter(pix)
+            painter.fillRect(QRectF(0, 0, 72, 14), QBrush(gradient))
+            painter.end()
+            combo.addItem(QIcon(pix), label, key)
+
     def _toggle_joint_2d_panel(self) -> None:
         """Collapse/expand bottom joint fence 2D strip (#87)."""
         collapsed = self.btn_toggle_joint_2d.isChecked()
@@ -698,7 +794,9 @@ class GeologicalModeling3DPage(QWidget):
 
         root_joint = QTreeWidgetItem(self.model_tree, ["井震联合 (geoviz)"])
         self._add_checkable_child(root_joint, "地震预览体 (geoviz)")
-        self._add_checkable_child(root_joint, "联合井轨迹 (geoviz)")
+        self._joint_wells_tree_item = self._add_checkable_child(
+            root_joint, "联合井轨迹 (geoviz)"
+        )
         self._add_checkable_child(root_joint, "井间剖面 fence (geoviz)")
         self._add_checkable_child(root_joint, "井震 3D 视口")
         self._add_checkable_child(root_joint, "井震 2D 剖面条")
@@ -708,14 +806,510 @@ class GeologicalModeling3DPage(QWidget):
             self.model_tree.itemChanged.connect(self._on_tree_item_changed)
             self._tree_changed_hooked = True
 
-    def _add_checkable_child(self, parent_item: QTreeWidgetItem, name: str) -> None:
+    def _add_checkable_child(
+        self, parent_item: QTreeWidgetItem, name: str
+    ) -> QTreeWidgetItem:
         item = QTreeWidgetItem(parent_item, [name])
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
         item.setCheckState(0, Qt.Checked)
+        return item
+
+    def _refresh_joint_well_tree(self) -> None:
+        """Rebuild per-well checkbox children from the scene presentation model."""
+        parent = getattr(self, "_joint_wells_tree_item", None)
+        scene = self._joint_host.scene
+        if parent is None or scene is None:
+            return
+        presentations = scene.well_presentations()
+        if (
+            presentations
+            and not self._joint_well_visibility_restored
+            and self._project is not None
+        ):
+            state = getattr(self._project, "joint_analysis", None)
+            saved = dict(getattr(state, "well_visibility", None) or {})
+            for presentation in presentations:
+                if presentation.id in saved:
+                    scene.set_well_visibility(
+                        presentation.id, bool(saved[presentation.id])
+                    )
+            if not saved:
+                legacy_checks = dict(
+                    getattr(state, "tree_checks", None) or {}
+                )
+                if legacy_checks.get("联合井轨迹 (geoviz)") is False:
+                    for presentation in presentations:
+                        scene.set_well_visibility(presentation.id, False)
+            self._joint_well_visibility_restored = True
+            presentations = scene.well_presentations()
+        self.model_tree.blockSignals(True)
+        try:
+            parent.takeChildren()
+            for presentation in presentations:
+                item = self._add_checkable_child(parent, presentation.display_name)
+                item.setData(0, Qt.ItemDataRole.UserRole, presentation.id)
+                item.setCheckState(
+                    0,
+                    Qt.Checked if presentation.visible else Qt.Unchecked,
+                )
+            parent_state = self._joint_well_parent_state()
+            if parent_state is not None:
+                parent.setCheckState(0, parent_state)
+        finally:
+            self.model_tree.blockSignals(False)
+        parent.setExpanded(True)
+
+    def _joint_well_parent_state(self):
+        """Derive the parent checkbox state from its current well children."""
+        parent = getattr(self, "_joint_wells_tree_item", None)
+        if parent is None or parent.childCount() == 0:
+            return None
+        states = [
+            parent.child(index).checkState(0)
+            for index in range(parent.childCount())
+        ]
+        if all(state == Qt.Checked for state in states):
+            return Qt.Checked
+        if all(state == Qt.Unchecked for state in states):
+            return Qt.Unchecked
+        return Qt.PartiallyChecked
 
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
+        self._joint_well_visibility_restored = False
         self._joint_host.set_project(project)
+        self._restore_joint_display_settings()
+        self._restore_joint_slice_settings()
+
+    def _build_joint_slice_card(self) -> QFrame:
+        """Build a one-row control surface for orthogonal slices."""
+        card = QFrame()
+        card.setObjectName("JointOrthogonalSliceCard")
+        card.setMaximumHeight(52)
+        card.setStyleSheet(
+            "QFrame#JointOrthogonalSliceCard {"
+            " background: %s; border: 1px solid %s; border-radius: %dpx;"
+            " padding: 3px; }"
+            % (tokens.BG_SEARCH, tokens.BORDER, tokens.RADIUS_BUTTON)
+        )
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(
+            tokens.SPACE_2,
+            tokens.SPACE_1,
+            tokens.SPACE_2,
+            tokens.SPACE_1,
+        )
+        layout.setSpacing(tokens.SPACE_1)
+
+        layout.addWidget(QLabel("IL"))
+        self._joint_inline_slice = QSpinBox()
+        self._joint_inline_slice.setRange(0, 0)
+        self._joint_inline_slice.setMaximumWidth(92)
+        self._joint_inline_slice.setAccessibleName("Inline 切片位置")
+        layout.addWidget(self._joint_inline_slice)
+        layout.addWidget(QLabel("XL"))
+        self._joint_crossline_slice = QSpinBox()
+        self._joint_crossline_slice.setRange(0, 0)
+        self._joint_crossline_slice.setMaximumWidth(92)
+        self._joint_crossline_slice.setAccessibleName(
+            "Crossline 切片位置"
+        )
+        layout.addWidget(self._joint_crossline_slice)
+
+        layout.addSpacing(tokens.SPACE_1)
+        layout.addWidget(QLabel("Time"))
+        self._joint_time_selector = QComboBox()
+        self._joint_time_selector.setMaximumWidth(126)
+        self._joint_time_selector.setAccessibleName("活动 Time 切片")
+        self._joint_time_selector.setToolTip(
+            "选择当前要编辑和交互的 Time 切片"
+        )
+        layout.addWidget(self._joint_time_selector)
+        self._joint_active_time_editor = QDoubleSpinBox()
+        self._joint_active_time_editor.setDecimals(3)
+        self._joint_active_time_editor.setRange(0.0, 0.0)
+        self._joint_active_time_editor.setSuffix(" ms")
+        self._joint_active_time_editor.setMaximumWidth(126)
+        self._joint_active_time_editor.setAccessibleName(
+            "活动 Time 切片时间"
+        )
+        layout.addWidget(self._joint_active_time_editor)
+        self._joint_active_time_visible = QCheckBox("显示")
+        self._joint_active_time_visible.setAccessibleName(
+            "活动 Time 切片可见性"
+        )
+        layout.addWidget(self._joint_active_time_visible)
+        self._joint_delete_time_slice = QPushButton("删除")
+        self._joint_delete_time_slice.setAccessibleName(
+            "删除活动 Time 切片"
+        )
+        layout.addWidget(self._joint_delete_time_slice)
+
+        layout.addSpacing(tokens.SPACE_1)
+        layout.addWidget(QLabel("新增"))
+        self._joint_new_time = QDoubleSpinBox()
+        self._joint_new_time.setDecimals(3)
+        self._joint_new_time.setRange(0.0, 0.0)
+        self._joint_new_time.setSuffix(" ms")
+        self._joint_new_time.setMaximumWidth(126)
+        self._joint_new_time.setAccessibleName("新增 Time 切片时间")
+        layout.addWidget(self._joint_new_time)
+        self._joint_add_time_slice = QPushButton("+")
+        self._joint_add_time_slice.setToolTip("添加 Time 切片")
+        self._joint_add_time_slice.setAccessibleName("添加 Time 切片")
+        layout.addWidget(self._joint_add_time_slice)
+
+        layout.addSpacing(tokens.SPACE_1)
+        layout.addWidget(QLabel("透明度"))
+        self._joint_time_opacity = QSpinBox()
+        self._joint_time_opacity.setRange(10, 100)
+        self._joint_time_opacity.setValue(80)
+        self._joint_time_opacity.setSuffix("%")
+        self._joint_time_opacity.setMaximumWidth(84)
+        self._joint_time_opacity.setAccessibleName("Time 切片透明度")
+        layout.addWidget(self._joint_time_opacity)
+
+        self._joint_time_domain_note = QLabel("")
+        self._joint_time_domain_note.setWordWrap(False)
+        self._joint_time_domain_note.setStyleSheet(
+            "color: %s; background: transparent;" % tokens.TEXT_SECONDARY
+        )
+        self._joint_time_domain_note.setToolTip(
+            "时间会自动吸附到可显示的 SEG-Y 样点"
+        )
+        layout.addWidget(self._joint_time_domain_note)
+        layout.addStretch(1)
+
+        self._joint_slice_card_btn.toggled.connect(card.setVisible)
+        self._joint_inline_slice.valueChanged.connect(
+            self._on_joint_inline_slice_changed
+        )
+        self._joint_crossline_slice.valueChanged.connect(
+            self._on_joint_crossline_slice_changed
+        )
+        self._joint_add_time_slice.clicked.connect(
+            self._on_joint_add_time_slice
+        )
+        self._joint_time_selector.currentIndexChanged.connect(
+            self._on_joint_time_selector_changed
+        )
+        self._joint_active_time_editor.editingFinished.connect(
+            self._on_joint_active_time_edited
+        )
+        self._joint_active_time_visible.toggled.connect(
+            self._on_joint_active_time_visibility_changed
+        )
+        self._joint_delete_time_slice.clicked.connect(
+            self._on_joint_delete_active_time_slice
+        )
+        self._joint_time_opacity.valueChanged.connect(
+            self._on_joint_time_opacity_changed
+        )
+        card.setVisible(True)
+        return card
+
+    def _restore_joint_slice_settings(self) -> None:
+        from geoviz import OrthogonalSliceState, TimeSliceState
+
+        state = (
+            getattr(self._project, "joint_analysis", None)
+            if self._project is not None
+            else None
+        )
+        if state is None:
+            restored = OrthogonalSliceState()
+        else:
+            restored = OrthogonalSliceState(
+                inline_index=getattr(
+                    state, "orthogonal_inline_index", None
+                ),
+                crossline_index=getattr(
+                    state, "orthogonal_crossline_index", None
+                ),
+                time_slices=tuple(
+                    TimeSliceState(
+                        time_ms=float(item.time_ms),
+                        visible=bool(item.visible),
+                    )
+                    for item in (
+                        getattr(state, "time_slices", None) or []
+                    )
+                ),
+                active_time_ms=getattr(
+                    state, "active_time_slice_ms", None
+                ),
+                time_opacity=(
+                    int(getattr(state, "time_slice_opacity", 80))
+                    / 100.0
+                ),
+            )
+        self._joint_host.scene.restore_orthogonal_slice_state(restored)
+        self._refresh_joint_slice_card()
+
+    def _refresh_joint_slice_card(self) -> None:
+        """Refresh controls from the scene-owned slice state."""
+        scene = self._joint_host.scene
+        registration = scene.registration
+        state = scene.orthogonal_slice_state
+        ready = registration is not None
+        time_domain = scene.vertical_domain.value == "time"
+
+        for control in (
+            self._joint_inline_slice,
+            self._joint_crossline_slice,
+            self._joint_time_selector,
+            self._joint_active_time_editor,
+            self._joint_active_time_visible,
+            self._joint_new_time,
+            self._joint_time_opacity,
+        ):
+            control.blockSignals(True)
+        try:
+            if registration is not None:
+                self._joint_inline_slice.setRange(
+                    0, max(registration.n_inline - 1, 0)
+                )
+                self._joint_crossline_slice.setRange(
+                    0, max(registration.n_crossline - 1, 0)
+                )
+                self._joint_inline_slice.setValue(
+                    int(state.inline_index or 0)
+                )
+                self._joint_crossline_slice.setValue(
+                    int(state.crossline_index or 0)
+                )
+                survey = registration.survey
+                t_min = float(survey.t0_ms)
+                t_max = float(
+                    survey.t0_ms
+                    + max(survey.n_samples - 1, 0) * survey.dt_ms
+                )
+                self._joint_new_time.setRange(t_min, t_max)
+                self._joint_new_time.setSingleStep(
+                    max(float(survey.dt_ms), 0.001)
+                )
+                self._joint_active_time_editor.setRange(t_min, t_max)
+                self._joint_active_time_editor.setSingleStep(
+                    max(float(survey.dt_ms), 0.001)
+                )
+                if state.active_time_ms is not None:
+                    self._joint_new_time.setValue(
+                        float(state.active_time_ms)
+                    )
+            self._joint_time_selector.clear()
+            active_index = -1
+            active_slice = None
+            for index, time_slice in enumerate(state.time_slices):
+                self._joint_time_selector.addItem(
+                    f"{time_slice.time_ms:g} ms",
+                    float(time_slice.time_ms),
+                )
+                if (
+                    state.active_time_ms is not None
+                    and np.isclose(
+                        time_slice.time_ms,
+                        state.active_time_ms,
+                        atol=1e-7,
+                    )
+                ):
+                    active_index = index
+                    active_slice = time_slice
+            self._joint_time_selector.setCurrentIndex(active_index)
+            if active_slice is not None:
+                self._joint_active_time_editor.setValue(
+                    float(active_slice.time_ms)
+                )
+                self._joint_active_time_visible.setChecked(
+                    bool(active_slice.visible)
+                )
+            self._joint_time_opacity.setValue(
+                int(round(state.time_opacity * 100))
+            )
+        finally:
+            for control in (
+                self._joint_inline_slice,
+                self._joint_crossline_slice,
+                self._joint_time_selector,
+                self._joint_active_time_editor,
+                self._joint_active_time_visible,
+                self._joint_new_time,
+                self._joint_time_opacity,
+            ):
+                control.blockSignals(False)
+
+        self._joint_inline_slice.setEnabled(ready)
+        self._joint_crossline_slice.setEnabled(ready)
+        time_ready = ready and time_domain
+        self._joint_time_selector.setEnabled(time_ready)
+        self._joint_active_time_editor.setEnabled(time_ready)
+        self._joint_active_time_visible.setEnabled(time_ready)
+        self._joint_delete_time_slice.setEnabled(
+            time_ready and len(state.time_slices) > 1
+        )
+        self._joint_new_time.setEnabled(time_ready)
+        self._joint_time_opacity.setEnabled(time_ready)
+        self._joint_add_time_slice.setEnabled(
+            time_ready and len(state.time_slices) < 8
+        )
+        if not ready:
+            note = "未加载"
+        elif not time_domain:
+            note = "Depth · Time 已隐藏"
+        else:
+            note = f"{len(state.time_slices)}/8"
+        self._joint_time_domain_note.setText(note)
+
+    def _sync_joint_slice_renderer(self) -> None:
+        widget = self._joint_widget
+        if widget is not None:
+            sync = getattr(widget, "sync_orthogonal_slices", None)
+            if callable(sync):
+                sync()
+
+    def _on_joint_inline_slice_changed(self, value: int) -> None:
+        self._joint_host.scene.set_orthogonal_slice_indices(
+            inline_index=int(value)
+        )
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_crossline_slice_changed(self, value: int) -> None:
+        self._joint_host.scene.set_orthogonal_slice_indices(
+            crossline_index=int(value)
+        )
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_add_time_slice(self) -> None:
+        scene = self._joint_host.scene
+        before = len(scene.orthogonal_slice_state.time_slices)
+        try:
+            snapped = scene.add_time_slice(self._joint_new_time.value())
+        except ValueError as exc:
+            self._on_joint_status(str(exc))
+            return
+        after = len(scene.orthogonal_slice_state.time_slices)
+        self._on_joint_status(
+            (
+                f"已添加 Time 切片 {snapped:g} ms"
+                if after > before
+                else f"已激活已有 Time 切片 {snapped:g} ms"
+            )
+        )
+        self._refresh_joint_slice_card()
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_activate_time_slice(self, time_ms: float) -> None:
+        self._joint_host.scene.set_active_time_slice(time_ms)
+        self._refresh_joint_slice_card()
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_time_selector_changed(self, index: int) -> None:
+        time_ms = self._joint_time_selector.itemData(index)
+        if time_ms is not None:
+            self._on_joint_activate_time_slice(float(time_ms))
+
+    def _on_joint_active_time_edited(self) -> None:
+        current_time_ms = self._joint_time_selector.currentData()
+        if current_time_ms is not None:
+            self._on_joint_edit_time_slice(
+                float(current_time_ms),
+                self._joint_active_time_editor.value(),
+            )
+
+    def _on_joint_active_time_visibility_changed(
+        self, visible: bool
+    ) -> None:
+        time_ms = self._joint_time_selector.currentData()
+        if time_ms is not None:
+            self._on_joint_time_slice_visibility(
+                float(time_ms), visible
+            )
+
+    def _on_joint_delete_active_time_slice(self) -> None:
+        time_ms = self._joint_time_selector.currentData()
+        if time_ms is not None:
+            self._on_joint_delete_time_slice(float(time_ms))
+
+    def _on_joint_time_slice_visibility(
+        self, time_ms: float, visible: bool
+    ) -> None:
+        self._joint_host.scene.set_time_slice_visible(time_ms, visible)
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_edit_time_slice(
+        self, current_time_ms: float, new_time_ms: float
+    ) -> None:
+        snapped = self._joint_host.scene.update_time_slice(
+            current_time_ms, new_time_ms
+        )
+        self._on_joint_status(f"Time 切片已移动到 {snapped:g} ms")
+        self._refresh_joint_slice_card()
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_delete_time_slice(self, time_ms: float) -> None:
+        if self._joint_host.scene.remove_time_slice(time_ms):
+            self._on_joint_status(f"已删除 Time 切片 {time_ms:g} ms")
+        self._refresh_joint_slice_card()
+        self._sync_joint_slice_renderer()
+
+    def _on_joint_time_opacity_changed(self, value: int) -> None:
+        self._joint_host.scene.set_time_slice_opacity(value / 100.0)
+        self._sync_joint_slice_renderer()
+
+    def _restore_joint_display_settings(self) -> None:
+        state = (
+            getattr(self._project, "joint_analysis", None)
+            if self._project is not None
+            else None
+        )
+        seismic = getattr(
+            state, "seismic_color_scale", "blue-white-red"
+        )
+        gr = getattr(state, "gr_color_scale", "viridis")
+        width = int(getattr(state, "well_width_px", 5))
+        controls = (
+            self._joint_seismic_color,
+            self._joint_gr_color,
+            self._joint_well_width,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        try:
+            seismic_index = self._joint_seismic_color.findData(seismic)
+            gr_index = self._joint_gr_color.findData(gr)
+            self._joint_seismic_color.setCurrentIndex(
+                max(seismic_index, 0)
+            )
+            self._joint_gr_color.setCurrentIndex(max(gr_index, 0))
+            self._joint_well_width.setValue(
+                max(2, min(10, width))
+            )
+        finally:
+            for control in controls:
+                control.blockSignals(False)
+        self._apply_joint_display_settings()
+
+    def _apply_joint_display_settings(self, *_args) -> None:
+        scene = self._joint_host.scene
+        if scene is None:
+            return
+        from geoviz import JointDisplaySettings
+
+        settings = JointDisplaySettings(
+            seismic_color_scale=str(
+                self._joint_seismic_color.currentData()
+                or "blue-white-red"
+            ),
+            gr_color_scale=str(
+                self._joint_gr_color.currentData() or "viridis"
+            ),
+            well_width_px=self._joint_well_width.value(),
+        )
+        scene.set_display_settings(settings)
+        if self._joint_widget is not None:
+            self._joint_widget.set_scene(scene)
+        profile = getattr(self, "_joint_profile", None)
+        if profile is not None:
+            profile.set_scene(scene)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -749,7 +1343,10 @@ class GeologicalModeling3DPage(QWidget):
 
     def collect_joint_analysis_state(self):
         """Snapshot joint UI into project model (no voxels) — #90."""
-        from paleo_workbench.project.models import JointAnalysisState
+        from paleo_workbench.project.models import (
+            JointAnalysisState,
+            JointTimeSliceState,
+        )
 
         checks: dict[str, bool] = {}
         root = self.model_tree.invisibleRootItem()
@@ -765,9 +1362,10 @@ class GeologicalModeling3DPage(QWidget):
             domain = self._joint_domain.currentText() or "Time"
         wells: list[str] = []
         if hasattr(self, "_joint_well_a"):
-            a, b = self._joint_well_a.currentText(), self._joint_well_b.currentText()
+            a = self._joint_well_a.currentData() or self._joint_well_a.currentText()
+            b = self._joint_well_b.currentData() or self._joint_well_b.currentText()
             if a and b:
-                wells = [a, b]
+                wells = [str(a), str(b)]
         fence_name = None
         scene = self._joint_host.scene
         if scene is not None and getattr(scene, "fences", None):
@@ -791,8 +1389,38 @@ class GeologicalModeling3DPage(QWidget):
             if paths.horizons:
                 # Multi-horizon: pipe-separated absolute paths
                 hints["horizons"] = "|".join(str(p) for p in paths.horizons if p)
+        slice_state = self._joint_host.scene.orthogonal_slice_state
         return JointAnalysisState(
             tree_checks=checks,
+            well_visibility={
+                presentation.id: presentation.visible
+                for presentation in (
+                    scene.well_presentations() if scene is not None else []
+                )
+            },
+            well_identity_asset_id=self._joint_host.well_identity_asset_id,
+            well_identity_map=self._joint_host.well_identity_map,
+            seismic_color_scale=str(
+                self._joint_seismic_color.currentData()
+                or "blue-white-red"
+            ),
+            gr_color_scale=str(
+                self._joint_gr_color.currentData() or "viridis"
+            ),
+            well_width_px=self._joint_well_width.value(),
+            orthogonal_inline_index=slice_state.inline_index,
+            orthogonal_crossline_index=slice_state.crossline_index,
+            time_slices=[
+                JointTimeSliceState(
+                    time_ms=item.time_ms,
+                    visible=item.visible,
+                )
+                for item in slice_state.time_slices
+            ],
+            active_time_slice_ms=slice_state.active_time_ms,
+            time_slice_opacity=int(
+                round(slice_state.time_opacity * 100)
+            ),
             vertical_domain=domain,
             active_fence_wells=wells,
             active_fence_name=fence_name,
@@ -846,23 +1474,7 @@ class GeologicalModeling3DPage(QWidget):
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""
         if not hasattr(self, "_joint_well_a"):
             return
-        names = self._joint_host.well_names()
-        self._joint_well_a.blockSignals(True)
-        self._joint_well_b.blockSignals(True)
-        self._joint_well_a.clear()
-        self._joint_well_b.clear()
-        self._joint_well_a.addItems(names)
-        self._joint_well_b.addItems(names)
-        ia = self._joint_well_a.findText(well_a)
-        ib = self._joint_well_b.findText(well_b)
-        if ia >= 0:
-            self._joint_well_a.setCurrentIndex(ia)
-        if ib >= 0:
-            self._joint_well_b.setCurrentIndex(ib)
-        elif len(names) >= 2:
-            self._joint_well_b.setCurrentIndex(1)
-        self._joint_well_a.blockSignals(False)
-        self._joint_well_b.blockSignals(False)
+        self._rebuild_joint_well_combos(well_a, well_b)
 
     def _ensure_joint_widget(self) -> None:
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
@@ -1020,7 +1632,7 @@ class GeologicalModeling3DPage(QWidget):
         if scene is None:
             return None
         try:
-            trajs = scene.well_trajectories()
+            trajs = scene.well_trajectories(visible_only=True)
         except Exception:
             return None
         if not trajs:
@@ -1115,6 +1727,7 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_status.setText(text)
 
     def _on_joint_scene_updated(self) -> None:
+        self._apply_joint_display_settings()
         self._ensure_joint_widget()
         if self._joint_widget is not None and self._joint_host.scene is not None:
             self._joint_widget.set_scene(self._joint_host.scene)
@@ -1123,8 +1736,15 @@ class GeologicalModeling3DPage(QWidget):
             if profile is not None and hasattr(profile, "set_scene"):
                 self._apply_profile_time_only_policy(profile)
                 profile.set_scene(self._joint_host.scene)
+        self._refresh_joint_well_tree()
         self._fill_joint_well_combos()
         self._sync_joint_visibility_from_tree()
+        self._refresh_joint_slice_card()
+        warning = self._joint_host.scene.slice_state_warning
+        if warning and warning not in self._joint_status.text():
+            self._joint_status.setText(
+                (self._joint_status.text() + " · " + warning).strip(" ·")
+            )
         if hasattr(self, "_joint_domain"):
             self._sync_joint_2d_time_chip(self._joint_domain.currentText())
 
@@ -1132,36 +1752,59 @@ class GeologicalModeling3DPage(QWidget):
         if not hasattr(self, "_joint_well_a"):
             return
         # Prefer current selection or project-saved pair over "first two wells"
-        prev_a = self._joint_well_a.currentText()
-        prev_b = self._joint_well_b.currentText()
+        prev_a = self._joint_well_a.currentData() or self._joint_well_a.currentText()
+        prev_b = self._joint_well_b.currentData() or self._joint_well_b.currentText()
         if self._project is not None:
             state = getattr(self._project, "joint_analysis", None)
             saved = list(getattr(state, "active_fence_wells", None) or [])
             if len(saved) >= 2:
                 prev_a, prev_b = saved[0], saved[1]
-        names = self._joint_host.well_names()
+        self._rebuild_joint_well_combos(str(prev_a), str(prev_b))
+
+    def _rebuild_joint_well_combos(
+        self, preferred_a: str, preferred_b: str
+    ) -> None:
+        """Rebuild both selectors while retaining stable JointWellId choices."""
+        options = self._joint_well_options()
         self._joint_well_a.blockSignals(True)
         self._joint_well_b.blockSignals(True)
         self._joint_well_a.clear()
         self._joint_well_b.clear()
-        self._joint_well_a.addItems(names)
-        self._joint_well_b.addItems(names)
-        ia = self._joint_well_a.findText(prev_a) if prev_a else -1
-        ib = self._joint_well_b.findText(prev_b) if prev_b else -1
+        for well_id, display_name in options:
+            self._joint_well_a.addItem(display_name, well_id)
+            self._joint_well_b.addItem(display_name, well_id)
+        ia = self._joint_well_a.findData(preferred_a) if preferred_a else -1
+        ib = self._joint_well_b.findData(preferred_b) if preferred_b else -1
         if ia >= 0:
             self._joint_well_a.setCurrentIndex(ia)
         if ib >= 0:
             self._joint_well_b.setCurrentIndex(ib)
-        elif len(names) >= 2:
+        elif len(options) >= 2:
             self._joint_well_b.setCurrentIndex(1)
         self._joint_well_a.blockSignals(False)
         self._joint_well_b.blockSignals(False)
+
+    def _joint_well_options(self) -> list[tuple[str, str]]:
+        """Return ``(JointWellId, display label)`` pairs for toolbar controls."""
+        scene = self._joint_host.scene
+        presentations = scene.well_presentations() if scene is not None else []
+        if presentations:
+            return [
+                (presentation.id, presentation.display_name)
+                for presentation in presentations
+            ]
+        return [
+            (str(well_id), str(well_id))
+            for well_id in self._joint_host.well_names()
+        ]
 
     def _on_joint_domain_changed(self, text: str) -> None:
         # 3D / scene domain follows toolbar; 2D profile stays Time (#122)
         self._joint_host.set_vertical_domain(text)
         self._update_domain_z_guard(text)
         self._sync_joint_2d_time_chip(text)
+        self._refresh_joint_slice_card()
+        self._sync_joint_slice_renderer()
         profile = getattr(self, "_joint_profile", None)
         if profile is not None:
             self._apply_profile_time_only_policy(profile)
@@ -1174,8 +1817,8 @@ class GeologicalModeling3DPage(QWidget):
         if not hasattr(self, "_joint_well_a"):
             return
         self._joint_host.add_well_to_well_fence(
-            self._joint_well_a.currentText(),
-            self._joint_well_b.currentText(),
+            str(self._joint_well_a.currentData() or self._joint_well_a.currentText()),
+            str(self._joint_well_b.currentData() or self._joint_well_b.currentText()),
         )
 
     def _update_domain_z_guard(self, domain: str) -> None:
@@ -1475,13 +2118,50 @@ class GeologicalModeling3DPage(QWidget):
         if column != 0:
             return
 
-        # Block signals to prevent recursive checking logic
-        self.model_tree.blockSignals(True)
-        try:
-            for i in range(item.childCount()):
-                item.child(i).setCheckState(0, item.checkState(0))
-        finally:
-            self.model_tree.blockSignals(False)
+        wells_parent = getattr(self, "_joint_wells_tree_item", None)
+        well_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if item is wells_parent:
+            visible = item.checkState(0) != Qt.Unchecked
+            self.model_tree.blockSignals(True)
+            try:
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    child.setCheckState(
+                        0, Qt.Checked if visible else Qt.Unchecked
+                    )
+                    child_id = child.data(0, Qt.ItemDataRole.UserRole)
+                    if child_id is not None and self._joint_host.scene is not None:
+                        self._joint_host.scene.set_well_visibility(
+                            str(child_id), visible
+                        )
+            finally:
+                self.model_tree.blockSignals(False)
+            if not visible:
+                self._well_pick.clear_half("隐藏全部井 — 已取消半选")
+        elif well_id is not None and item.parent() is wells_parent:
+            visible = item.checkState(0) == Qt.Checked
+            if self._joint_host.scene is not None:
+                self._joint_host.scene.set_well_visibility(str(well_id), visible)
+            if not visible and str(well_id) in {
+                self._well_pick.half_select,
+                self._well_pick.draw_from,
+            }:
+                self._well_pick.clear_half("隐藏已选井 — 已取消半选")
+            parent_state = self._joint_well_parent_state()
+            if parent_state is not None:
+                self.model_tree.blockSignals(True)
+                try:
+                    wells_parent.setCheckState(0, parent_state)
+                finally:
+                    self.model_tree.blockSignals(False)
+        else:
+            # Block signals to prevent recursive checking logic
+            self.model_tree.blockSignals(True)
+            try:
+                for i in range(item.childCount()):
+                    item.child(i).setCheckState(0, item.checkState(0))
+            finally:
+                self.model_tree.blockSignals(False)
 
         self._sync_visibility_from_tree()
         self._sync_joint_visibility_from_tree()
@@ -1501,7 +2181,11 @@ class GeologicalModeling3DPage(QWidget):
         show_3d = self._tree_item_checked("井震 3D 视口")
         show_2d = self._tree_item_checked("井震 2D 剖面条")
         show_vol = self._tree_item_checked("地震预览体 (geoviz)")
-        show_wells = self._tree_item_checked("联合井轨迹 (geoviz)")
+        wells_parent = getattr(self, "_joint_wells_tree_item", None)
+        show_wells = (
+            wells_parent is None
+            or wells_parent.checkState(0) != Qt.Unchecked
+        )
         show_fence = self._tree_item_checked("井间剖面 fence (geoviz)")
         if hasattr(self, "joint_3d_host"):
             self.joint_3d_host.setVisible(show_3d or show_vol)
@@ -1517,6 +2201,9 @@ class GeologicalModeling3DPage(QWidget):
             profile = getattr(self, "_joint_profile", None)
             if profile is not None:
                 profile.setVisible(show_2d and show_fence)
+                refresh = getattr(profile, "refresh", None)
+                if callable(refresh):
+                    refresh()
 
     def _update_clipping(self) -> None:
         """Legacy modeling-item clip (G1: clip card hidden; not wired to joint)."""

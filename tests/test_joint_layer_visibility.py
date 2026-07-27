@@ -42,3 +42,45 @@ def test_renderer_set_planes_visible_toggles_plane_attrs():
     r._line_arb = None
     Renderer3D.set_planes_visible(r, False)
     assert plane.setVisible.call_count >= 3
+
+
+def test_renderer_tracks_multiple_time_planes_and_global_visibility():
+    from geoviz_seismic.renderer_3d import Renderer3D
+
+    r = Renderer3D.__new__(Renderer3D)
+    r._loaded = False
+    r._time_plane_items = {}
+    r._time_slice_positions = []
+    r._time_slice_visibility = {}
+    r._active_time_pos = None
+    r._time_slice_opacity = 0.8
+    r._t_pos = 0
+
+    Renderer3D.set_time_slices(
+        r,
+        [(8, True), (2, False), (8, True)],
+        active=8,
+        opacity=0.65,
+    )
+
+    assert r.get_time_slices() == ((2, False), (8, True))
+    assert r._active_time_pos == 8
+    assert r._t_pos == 8
+    assert r._time_slice_opacity == 0.65
+
+    first_image, first_line = MagicMock(), MagicMock()
+    second_image, second_line = MagicMock(), MagicMock()
+    r._time_plane_items = {
+        2: (first_image, first_line),
+        8: (second_image, second_line),
+    }
+    r._img_il = r._img_xl = None
+    r._img_t = second_image
+    r._line_il = r._line_xl = None
+    r._line_t = second_line
+    r._volume_visual = r._img_arb = r._line_arb = None
+
+    Renderer3D.set_planes_visible(r, False)
+
+    for item in (first_image, first_line, second_image, second_line):
+        item.setVisible.assert_called_with(False)

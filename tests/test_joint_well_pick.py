@@ -186,11 +186,26 @@ def test_host_remove_active_fence(tmp_path, monkeypatch):
     host = WellSeismicJointHost()
     if host.scene is None:
         return
-    from geoviz_well_seismic_3d import FenceSection, WellHead
+    from geoviz_well_seismic_3d import FenceSection, JointWellId, WellHead
     import numpy as np
 
     scene = host.scene
-    scene.set_wells([WellHead("A1", 0, 0, 0, 0, 0), WellHead("A2", 100, 100, 100, 100, 0)])
+    scene.set_wells(
+        [
+            WellHead(
+                "A1", 0, 0, 0, 0, 0, id=JointWellId("source:a1")
+            ),
+            WellHead(
+                "A2",
+                100,
+                100,
+                100,
+                100,
+                0,
+                id=JointWellId("source:a2"),
+            ),
+        ]
+    )
     scene.add_well_to_well_fence(["A1", "A2"], name="f1")
     scene.add_fence(
         FenceSection("f2", np.array([[0.0, 0.0], [50.0, 0.0]], dtype=float)),

@@ -1,0 +1,161 @@
+"""Stable source-well identity reconciliation for the joint workbench."""
+
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import dataclass
+from hashlib import sha256
+import json
+
+
+class WellIdentityAmbiguityError(ValueError):
+    """Raised when changed source records cannot be matched without guessing."""
+
+
+@dataclass(frozen=True)
+class SourceWellRecord:
+    """Identity-relevant snapshot of one imported source record."""
+
+    name: str
+    geometry: tuple[float, float, float, float, float, float]
+
+
+@dataclass(frozen=True)
+class WellIdentityRegistry:
+    """Own matching, migration, validation, and persistence of source-well IDs."""
+
+    asset_id: str
+    entries: dict[str, str]
+
+    @classmethod
+    def restore(
+        cls,
+        *,
+        asset_id: str,
+        persisted_asset_id: str | None,
+        entries: dict[str, str] | None,
+    ) -> WellIdentityRegistry:
+        restored = dict(entries or {}) if persisted_asset_id == asset_id else {}
+        return cls(asset_id=asset_id, entries=restored)
+
+    def reconcile(
+        self, records: list[SourceWellRecord]
+    ) -> tuple[list[str], WellIdentityRegistry]:
+        keys = self._record_keys(records)
+        active = {
+            key: self.entries[key] for key in keys if key in self.entries
+        }
+        self._migrate_unambiguous(keys, active)
+
+        for key in keys:
+            if key not in active:
+                digest = sha256(
+                    f"{self.asset_id}\0{key}".encode("utf-8")
+                ).hexdigest()[:24]
+                active[key] = f"well-head:{digest}"
+
+        updated = WellIdentityRegistry(
+            asset_id=self.asset_id,
+            entries={key: active[key] for key in keys},
+        )
+        return [updated.entries[key] for key in keys], updated
+
+    def _record_keys(self, records: list[SourceWellRecord]) -> list[str]:
+        bases = [self._record_key(record) for record in records]
+        counts = Counter(bases)
+        occurrences: Counter[str] = Counter()
+        keys: list[str] = []
+        for base in bases:
+            occurrences[base] += 1
+            duplicate = occurrences[base] if counts[base] > 1 else None
+            payload = json.loads(base)
+            payload["duplicate"] = duplicate
+            keys.append(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+        return keys
+
+    def _record_key(self, record: SourceWellRecord) -> str:
+        geometry = "|".join(f"{value:.17g}" for value in record.geometry)
+        payload = {
+            "asset_id": self.asset_id,
+            "geometry": sha256(geometry.encode("utf-8")).hexdigest()[:20],
+            "name": record.name,
+        }
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def _migrate_unambiguous(
+        self, current_keys: list[str], active: dict[str, str]
+    ) -> None:
+        remaining_current = {key for key in current_keys if key not in active}
+        used_ids = set(active.values())
+        remaining_previous = {
+            key
+            for key, well_id in self.entries.items()
+            if well_id not in used_ids
+        }
+
+        while True:
+            candidates = self._candidate_graph(
+                remaining_current, remaining_previous
+            )
+            reverse: dict[str, set[str]] = {}
+            for current_key, previous_keys in candidates.items():
+                for previous_key in previous_keys:
+                    reverse.setdefault(previous_key, set()).add(current_key)
+            pairs = [
+                (current_key, next(iter(previous_keys)))
+                for current_key, previous_keys in candidates.items()
+                if len(previous_keys) == 1
+                and len(reverse[next(iter(previous_keys))]) == 1
+            ]
+            if not pairs:
+                break
+            for current_key, previous_key in pairs:
+                active[current_key] = self.entries[previous_key]
+                remaining_current.remove(current_key)
+                remaining_previous.remove(previous_key)
+
+        candidates = self._candidate_graph(
+            remaining_current, remaining_previous
+        )
+        if any(candidates.values()):
+            raise WellIdentityAmbiguityError(
+                "Cannot safely reconcile changed wells: name and geometry "
+                "produce multiple valid identity mappings."
+            )
+
+    @staticmethod
+    def _candidate_graph(
+        current_keys: set[str], previous_keys: set[str]
+    ) -> dict[str, set[str]]:
+        current_payloads = {
+            key: json.loads(key) for key in current_keys
+        }
+        previous_payloads = {
+            key: json.loads(key) for key in previous_keys
+        }
+        return {
+            current_key: {
+                previous_key
+                for previous_key, previous in previous_payloads.items()
+                if (
+                    current["asset_id"] == previous["asset_id"]
+                    and (
+                        current["name"] == previous["name"]
+                        or current["geometry"] == previous["geometry"]
+                    )
+                )
+            }
+            for current_key, current in current_payloads.items()
+        }

@@ -35,6 +35,14 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 
 ## Domain Concepts
 
+### Well Location Preview
+- **ActiveWell（当前井）**: 数据页 `well_head` 二维 XY 预览中唯一承载当前交互焦点的井。单击散点图中的井点或常驻井名列表中的对应行，都会设置同一个 ActiveWell；图与列表共享并同步这一状态。设置另一口井会替换当前井，不形成多选集合。
+- **WellLocationPreviewState（井位预览状态）**: 绑定到单个 `well_head` 资产的预览互动上下文，包含 ActiveWell、井名搜索词、列表滚动位置和用户最后看到的平移/缩放视口。在当前数据页会话内，离开资产、刷新预览或重建临时预览组件后仍可恢复精确快照；不同资产的状态彼此隔离。资产源数据变化、关闭项目或退出应用会使其失效，不跨会话持久化。
+- **RenderableWellLocation（可预览井位）**: `well_head` 文件中名称非空且 X/Y 坐标均为有限数值的井记录。结构完整的文件允许跳过不满足条件的个别记录并预览其余可预览井位；文件为空、缺少必需列或没有任何可预览井位时，井位预览整体不可用。
+- **WellLocationId（井位身份）**: 在单个 `well_head` 资产版本内唯一标识一条源井位记录的身份，由资产版本与源记录序号确定，不由井名或坐标充当。重名或同坐标记录仍拥有不同身份；源数据变化时旧身份随旧井位预览状态一起失效。
+- **SourceXY（源 XY）**: `well_head` 文件中原样记录的 X/Y 坐标域。数据页井位预览忠实绘制 SourceXY，不将其自动解释或转换为经纬度、项目 CRS 或 survey 坐标；重投影与跨数据叠加属于其他工作流。
+- **SourceCRS（源坐标系）**: 对 SourceXY 坐标域的明确坐标参考系声明，只能来自井位文件自身或 `well_head` 资产的显式元数据。项目默认 CRS、显示 CRS、survey CRS 与数值范围都不能替代缺失的 SourceCRS，也不能用于推断 SourceXY 的含义。
+
 ### Well Log Visualization
 - **CurveTrack**: Native QPainter track widget displaying depth-aligned log curves with 4-point Min-Max LOD downsampling.
 - **LithologyTrack**: Track displaying geological lithology patterns (sandstone, mudstone, limestone, dolomite).
@@ -46,6 +54,14 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 
 ### Seismic 3D & 2D Profile
 - **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.
+- **Orthogonal Slice Set（正交切片组）**: 井震联合三维视口中的默认地震切片组合，由一张 Inline 切片、一张 Crossline 切片和至少一张 Time 切片构成；三个方向共享同一个地震体空间。
+- **Time Slice Stack（Time 切片栈）**: 正交切片组中可同时显示的多张水平 Time 切片集合。每张切片以地震双程时间（ms）表达独立位置并拥有独立可见状态；其中一张作为 ActiveTimeSlice 接收当前的时间调整、显示切换和删除操作，样点序号不作为用户可见位置。它只在 Time 竖直域中显示和接受编辑，切换到 Depth 时保留原配置但不呈现。
+- **ActiveTimeSlice（活动 Time 切片）**: Time 切片栈中当前接收编辑和二维剖面探针联动的唯一切片；切换活动切片不会改变其它切片的位置或可见状态。
+- **Per-Well Visibility（逐井可见性）**: 在同一个井震联合工作台中，每口井各自拥有独立的显示状态，并由一处控制其在 3D、Time 连井剖面及点选交互中的全部呈现。它不表示为每口井创建独立视窗。
+- **JointWellId（联合井身份）**: 在井震联合场景中唯一且稳定地标识一口源井，不以可重复的井名充当身份。井名只用于显示；重名井仍拥有不同的 JointWellId。
+- **Seismic Amplitude Color Scale（地震振幅色标）**: 表达井间地震剖面的振幅值与颜色关系，零振幅为语义中心；它只解释地震底图，不解释井曲线。
+- **GR Well Color Scale（GR 井色标）**: 表达自然伽马值（API）与井轨迹沿程颜色的关系；它独立于地震振幅色标，同一口井可因不同深度的 GR 值而呈现不同颜色。
+- **GR-Colored Well Trajectory（GR 着色井轨迹）**: 井轨迹本体按对应深度的自然伽马值连续着色，而不是在井旁偏移绘制一条 GR 波形；无有效 GR 的区间使用中性灰色，且不跨缺测区伪造插值。
 - **SliceReadWorker**: Asynchronous QThread worker using priority queues and neighborhood prefetching for stutter-free slice navigation.
 - **Coherence3D**: 3D seismic attribute calculating similarity/coherence across inline, crossline, and sample vertical windows.
 - **AttributePipeline**: Asynchronous, GIL-releasing seismic attribute calculation engine (`paleo_workbench/viz/seismic_3d_api.py` / `geoviz_seismic/attribute_pipeline.py`) that dispatches C++ accelerated filtering (3D Coherence, Spectral Decomposition, Dip/Azimuth) via `NativeEngineBackend` workers with progress reporting and cancellation tokens.

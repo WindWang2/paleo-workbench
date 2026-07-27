@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import numpy as np
-
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
@@ -163,3 +161,33 @@ def test_ref_from_resource_unsupported_returns_none():
     adapter = VizAdapter()
     res = ResourceItem(name="c.txt", path="/x/c.txt", type="document", format="txt")
     assert adapter.ref_from_resource(res) is None
+
+
+def test_engine_preview_uses_shared_version_and_coordinate_request_rules(
+    tmp_path: Path,
+):
+    path = tmp_path / "wells.dat"
+    path.write_text(
+        "#WellHead File From SMI\n#Name X Y\nA1 10 20\n",
+        encoding="utf-8",
+    )
+    project = ProjectDocument.new("P")
+    resource = ResourceItem(
+        name="wells.dat",
+        path=str(path),
+        type="well_head",
+        format="dat",
+        checksum="abc123",
+        crs="EPSG:32648",
+        parsed_summary={"coordinate_units": "m"},
+    )
+    project.resources.append(resource)
+    ref = VizAdapter().ref_from_resource(resource)
+    assert ref is not None
+
+    payload = VizAdapter().resolve(ref, project)
+
+    assert payload.kind == "engine_preview"
+    assert payload.prepared.payload.source_version == "checksum:abc123"
+    assert payload.prepared.payload.source_crs == "EPSG:32648"
+    assert payload.prepared.payload.coordinate_units == "m"

@@ -2,21 +2,39 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
+from paleo_workbench.viz.joint_well_identity import (
+    SourceWellRecord,
+    WellIdentityRegistry,
+)
 
 ensure_geoviz_on_path()
 
-from geoviz import TimeDepthTable, WellHead  # noqa: E402
+from geoviz import JointWellId, TimeDepthTable, WellHead  # noqa: E402
 
 
-def parse_well_heads(path: Path | str) -> list[WellHead]:
-    """Parse SMI ExportWellHead.dat style file."""
-    wells: list[WellHead] = []
-    for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+@dataclass(frozen=True)
+class ParsedWellHeads:
+    wells: list[WellHead]
+    identity_registry: WellIdentityRegistry
+
+
+def parse_well_heads(
+    path: Path | str,
+    *,
+    identity_registry: WellIdentityRegistry,
+) -> ParsedWellHeads:
+    """Parse SMI well heads and explicitly return the reconciled registry."""
+    source_path = Path(path)
+    records: list[tuple[str, float, float, float, float, float, float]] = []
+    for line in source_path.read_text(
+        encoding="utf-8", errors="replace"
+    ).splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
             continue
@@ -31,6 +49,19 @@ def parse_well_heads(path: Path | str) -> list[WellHead]:
             bx, by = float(parts[5]), float(parts[6])
         except ValueError:
             continue
+        records.append((name, x, y, kb, td, bx, by))
+
+    source_records = [
+        SourceWellRecord(
+            name=name,
+            geometry=(x, y, kb, td, bx, by),
+        )
+        for name, x, y, kb, td, bx, by in records
+    ]
+    well_ids, updated_registry = identity_registry.reconcile(source_records)
+    wells: list[WellHead] = []
+    for record, well_id in zip(records, well_ids, strict=True):
+        name, x, y, kb, td, bx, by = record
         wells.append(
             WellHead(
                 name=name,
@@ -40,9 +71,13 @@ def parse_well_heads(path: Path | str) -> list[WellHead]:
                 bottom_y=by,
                 total_depth_m=td,
                 kb_m=kb,
+                id=JointWellId(well_id),
             )
         )
-    return wells
+    return ParsedWellHeads(
+        wells=wells,
+        identity_registry=updated_registry,
+    )
 
 
 def parse_td_table(path: Path | str, well_name: str | None = None) -> TimeDepthTable | None:

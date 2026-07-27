@@ -75,12 +75,14 @@ def test_provider_maps_resource_to_facade_request_and_returns_prepared_preview(t
     result = LocalVisualizationProvider(engine).preview(resource)
 
     request = engine.support_requests[0]
+    stat = Path(resource.path).stat()
     assert request == PreviewRequest(
         resource_id=resource.id,
         path=resource.path,
         semantic_type=resource.type,
         format=resource.format,
         label=resource.name,
+        source_version=f"stat:{stat.st_size}:{stat.st_mtime_ns}",
     )
     assert type(request) is PreviewRequest
     assert engine.prepare_calls == [(request, PreviewOptions.local())]
@@ -90,6 +92,37 @@ def test_provider_maps_resource_to_facade_request_and_returns_prepared_preview(t
     assert result.summary_rows == (("井名", "TEST"),)
     assert not hasattr(result, "widget")
     assert not hasattr(result, "file_handle")
+
+
+def test_resource_request_carries_versioned_source_coordinate_metadata(
+    tmp_path: Path,
+):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import (
+        request_from_resource,
+    )
+
+    path = tmp_path / "wells.dat"
+    path.write_text("well data", encoding="utf-8")
+    resource = ResourceItem(
+        id="well-head-1",
+        name="wells.dat",
+        path=str(path),
+        type="well_head",
+        format="dat",
+        checksum="abc123",
+        crs="EPSG:32648",
+        parsed_summary={
+            "coordinate_units": "m",
+            "comparison_crs": "EPSG:4326",
+        },
+    )
+
+    request = request_from_resource(resource)
+
+    assert request.source_version == "checksum:abc123"
+    assert request.source_crs == "EPSG:32648"
+    assert request.coordinate_units == "m"
+    assert request.comparison_crs == "EPSG:4326"
 
 
 def test_geoviz_error_falls_back_to_las_summary_and_merges_warning(tmp_path: Path):

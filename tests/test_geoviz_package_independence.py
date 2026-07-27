@@ -56,6 +56,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "WellTieCanvas",
         "PlotWidget",
         "SurfaceWidget",
+        "XYPreviewPayload",
         "interpolate_idw",
         "interpolate_scipy",
         "azimuth_to_rad",

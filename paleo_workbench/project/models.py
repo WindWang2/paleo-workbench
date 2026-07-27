@@ -340,6 +340,13 @@ class ExportArtifact(BaseModel):
     source_task_ids: list[str] = Field(default_factory=list)
 
 
+class JointTimeSliceState(BaseModel):
+    """Persisted Time slice position and its individual visibility."""
+
+    time_ms: float
+    visible: bool = True
+
+
 class JointAnalysisState(BaseModel):
     """Persisted joint presentation on Geological Modeling 3D (PRD #85 / #90).
 
@@ -348,6 +355,20 @@ class JointAnalysisState(BaseModel):
     """
 
     tree_checks: dict[str, bool] = Field(default_factory=dict)
+    well_visibility: dict[str, bool] = Field(default_factory=dict)
+    well_identity_asset_id: str | None = None
+    well_identity_map: dict[str, str] = Field(default_factory=dict)
+    seismic_color_scale: str = "blue-white-red"
+    gr_color_scale: str = "viridis"
+    well_width_px: int = Field(default=5, ge=2, le=10)
+    orthogonal_inline_index: int | None = None
+    orthogonal_crossline_index: int | None = None
+    time_slices: list[JointTimeSliceState] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    active_time_slice_ms: float | None = None
+    time_slice_opacity: int = Field(default=80, ge=10, le=100)
     vertical_domain: str = "Time"
     active_fence_wells: list[str] = Field(default_factory=list)
     active_fence_name: str | None = None
