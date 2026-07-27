@@ -867,6 +867,7 @@ class GeologicalModeling3DPage(QWidget):
                     scene.well_presentations() if scene is not None else []
                 )
             },
+            well_identity_map=self._joint_host.well_identity_map,
             vertical_domain=domain,
             active_fence_wells=wells,
             active_fence_name=fence_name,

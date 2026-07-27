@@ -10,6 +10,7 @@ def test_joint_analysis_state_roundtrip_in_project():
     doc.joint_analysis = JointAnalysisState(
         tree_checks={"地震预览体 (geoviz)": True, "井震 2D 剖面条": False},
         well_visibility={"A1": False, "A2": True},
+        well_identity_map={"name:A1": "source:a1", "name:A2": "source:a2"},
         vertical_domain="Depth",
         active_fence_wells=["A1", "A2"],
         path_hints={"segy": "/tmp/x.sgy"},
@@ -22,6 +23,10 @@ def test_joint_analysis_state_roundtrip_in_project():
     assert restored.joint_analysis.active_fence_wells == ["A1", "A2"]
     assert restored.joint_analysis.tree_checks["井震 2D 剖面条"] is False
     assert restored.joint_analysis.well_visibility == {"A1": False, "A2": True}
+    assert restored.joint_analysis.well_identity_map == {
+        "name:A1": "source:a1",
+        "name:A2": "source:a2",
+    }
     # No voxel payload
     assert "shape" not in data["joint_analysis"]
 
@@ -35,10 +40,16 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     page = GeologicalModeling3DPage()
     qtbot.addWidget(page)
     doc = ProjectDocument.new("t")
+    doc.joint_analysis.well_identity_map = {
+        "asset:test|name:A1": "source:a1"
+    }
     page.set_project(doc)
     page._joint_domain.setCurrentText("Depth")
     state = page.collect_joint_analysis_state()
     assert state.vertical_domain == "Depth"
+    assert state.well_identity_map == {
+        "asset:test|name:A1": "source:a1"
+    }
     page.save_joint_analysis_to_project()
     assert page._project.joint_analysis.vertical_domain == "Depth"
 

@@ -61,6 +61,7 @@ class WellSeismicJointHost(QObject):
         self._volume_job = OwnedWorkerJob(self)
         self._paths: JointAssetPaths | None = None
         self._survey_meta: dict = {}
+        self._well_identity_map: dict[str, str] = {}
         self._scene = None
         self._engine_error: str | None = None
 
@@ -91,11 +92,19 @@ class WellSeismicJointHost(QObject):
         return dict(self._survey_meta)
 
     @property
+    def well_identity_map(self) -> dict[str, str]:
+        return dict(self._well_identity_map)
+
+    @property
     def engine_error(self) -> str | None:
         return self._engine_error
 
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
+        state = getattr(project, "joint_analysis", None)
+        self._well_identity_map = dict(
+            getattr(state, "well_identity_map", None) or {}
+        )
 
     def well_names(self) -> list[str]:
         if self._scene is None:
@@ -258,7 +267,10 @@ class WellSeismicJointHost(QObject):
 
         wells = []
         if paths.well_head is not None:
-            wells = parse_well_heads(paths.well_head)
+            wells = parse_well_heads(
+                paths.well_head,
+                identity_map=self._well_identity_map,
+            )
         td_tables = {}
         if paths.td_dir is not None:
             td_tables = load_td_tables(paths.td_dir)

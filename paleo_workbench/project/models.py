@@ -349,6 +349,7 @@ class JointAnalysisState(BaseModel):
 
     tree_checks: dict[str, bool] = Field(default_factory=dict)
     well_visibility: dict[str, bool] = Field(default_factory=dict)
+    well_identity_map: dict[str, str] = Field(default_factory=dict)
     vertical_domain: str = "Time"
     active_fence_wells: list[str] = Field(default_factory=list)
     active_fence_name: str | None = None
