@@ -149,6 +149,36 @@ def test_scene_keeps_source_ids_stable_when_duplicate_wells_are_renamed_or_reord
     ]
 
 
+def test_scene_rejects_invalid_source_ids_without_replacing_current_wells():
+    scene = WellSeismicScene()
+    original = WellHead(
+        "A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")
+    )
+    scene.set_wells([original])
+
+    with pytest.raises(ValueError, match="stable source JointWellId"):
+        scene.set_wells([WellHead("MISSING", 1, 1, 1, 1, 100)])
+    with pytest.raises(ValueError, match="must be unique"):
+        scene.set_wells(
+            [
+                original,
+                WellHead(
+                    "DUP",
+                    2,
+                    2,
+                    2,
+                    2,
+                    100,
+                    id=JointWellId("source:a1"),
+                ),
+            ]
+        )
+
+    assert [
+        (well.id, well.name) for well in scene.well_presentations()
+    ] == [(JointWellId("source:a1"), "A1")]
+
+
 def test_scene_visibility_filters_3d_trajectories_without_deleting_analysis():
     scene = WellSeismicScene()
     scene.set_wells(
