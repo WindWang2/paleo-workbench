@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROTOTYPE — 井位平面预览（点井定位）</title>
+  <!--
+    PROTOTYPE — THROWAWAY.
+    Question: which information hierarchy makes "click a well to locate it" obvious at a glance?
+    Three variants of the existing data preview, switchable via ?variant=A|B|C.
+    Run from the repository root:
+      python3 -m http.server 8765
+    Then open:
+      http://127.0.0.1:8765/paleo_workbench/ui/pages/prototypes/well_location_preview_wireframe.html?variant=A
+  -->
+  <style>
+    :root {
+      --bg: #f3f5f8;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --border: #d8dee8;
+      --text: #172033;
+      --muted: #667085;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --point: #0891b2;
+      --active: #ea580c;
+      --warning: #b45309;
+      --warning-bg: #fff7ed;
+      --danger: #b91c1c;
+      --shadow: 0 10px 28px rgba(15, 23, 42, .10);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--bg);
+      font: 13px/1.45 system-ui, "Segoe UI", "PingFang SC", sans-serif;
+    }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .prototype-banner {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      color: #ffedd5;
+      background: #7c2d12;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .prototype-banner a { color: #fdba74; }
+    .prototype-banner code {
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(0,0,0,.24);
+      font-weight: 500;
+    }
+    #root { height: calc(100% - 34px); min-height: 0; }
+    .variant {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      flex: 0 0 auto;
+    }
+    .page-head h1 { margin: 0; font-size: 17px; }
+    .page-head .sub { color: var(--muted); margin-top: 2px; }
+    .meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      padding: 3px 8px;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      color: #1d4ed8;
+      background: #eff6ff;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .chip.warn {
+      border-color: #fed7aa;
+      color: #c2410c;
+      background: var(--warning-bg);
+    }
+    .status-strip {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 34px;
+      padding: 6px 16px;
+      border-bottom: 1px solid #fed7aa;
+      color: #9a3412;
+      background: var(--warning-bg);
+      font-size: 12px;
+      flex: 0 0 auto;
+    }
+    .status-strip button {
+      padding: 2px 7px;
+      border: 1px solid #fdba74;
+      border-radius: 5px;
+      color: #9a3412;
+      background: white;
+    }
+    .workspace { flex: 1; min-height: 0; padding: 12px; }
+    .plot-card, .well-panel, .selection-card {
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+    }
+    .plot-card { position: relative; overflow: hidden; }
+    .plot-toolbar {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-soft);
+    }
+    .plot-toolbar strong { font-size: 13px; }
+    .plot-help { color: var(--muted); font-size: 11px; }
+    .ghost-btn {
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      background: white;
+    }
+    .plot-wrap { position: absolute; inset: 43px 0 0; }
+    #plot {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background:
+        linear-gradient(#e2e8f0 1px, transparent 1px),
+        linear-gradient(90deg, #e2e8f0 1px, transparent 1px),
+        #fbfdff;
+      background-size: 40px 40px;
+      touch-action: none;
+      user-select: none;
+    }
+    .axis-line { stroke: #64748b; stroke-width: 1.4; }
+    .axis-tick { stroke: #94a3b8; stroke-width: 1; }
+    .tick-label, .axis-label { fill: #64748b; font-size: 13px; }
+    .axis-label { font-weight: 700; }
+    .well-dot {
+      fill: var(--point);
+      stroke: white;
+      stroke-width: 3;
+      cursor: pointer;
+      vector-effect: non-scaling-stroke;
+    }
+    .well-dot:hover { fill: #0e7490; }
+    .well-dot.active {
+      fill: var(--active);
+      stroke: white;
+      stroke-width: 4;
+      filter: drop-shadow(0 0 5px rgba(234, 88, 12, .8));
+    }
+    .active-ring {
+      fill: none;
+      stroke: var(--active);
+      stroke-width: 3;
+      stroke-dasharray: 5 4;
+      vector-effect: non-scaling-stroke;
+    }
+    .active-label {
+      fill: #9a3412;
+      font-size: 15px;
+      font-weight: 800;
+      paint-order: stroke;
+      stroke: white;
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+    .viewport-badge {
+      position: absolute;
+      left: 12px;
+      bottom: 10px;
+      z-index: 3;
+      padding: 5px 8px;
+      border: 1px solid rgba(37, 99, 235, .25);
+      border-radius: 6px;
+      color: #1d4ed8;
+      background: rgba(255,255,255,.92);
+      font-size: 11px;
+      pointer-events: none;
+    }
+    .tooltip {
+      position: fixed;
+      z-index: 80;
+      display: none;
+      min-width: 150px;
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      background: rgba(255,255,255,.97);
+      box-shadow: var(--shadow);
+      pointer-events: none;
+      font-size: 12px;
+    }
+    .well-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-head { padding: 10px; border-bottom: 1px solid var(--border); }
+    .panel-head h2 { margin: 0 0 7px; font-size: 14px; }
+    .search {
+      width: 100%;
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      outline: none;
+      color: var(--text);
+      background: white;
+    }
+    .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .panel-note {
+      min-height: 29px;
+      padding: 6px 10px;
+      color: var(--muted);
+      background: var(--panel-soft);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+    }
+    .panel-note.hidden-active { color: #9a3412; background: var(--warning-bg); }
+    .well-list { flex: 1; overflow: auto; padding: 5px; }
+    .well-row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--text);
+      background: transparent;
+      text-align: left;
+    }
+    .well-row:hover { background: #f1f5f9; }
+    .well-row.active {
+      color: #9a3412;
+      border-color: #fdba74;
+      background: #fff7ed;
+      font-weight: 700;
+    }
+    .well-row small { color: var(--muted); font-weight: 400; }
+    .empty-search { padding: 18px 10px; color: var(--muted); text-align: center; }
+    .selection-card {
+      padding: 10px;
+      color: var(--muted);
+      background: #fff;
+    }
+    .selection-card strong { color: var(--text); }
+    .selection-card .active-name { color: #c2410c; font-size: 18px; font-weight: 800; }
+    .state-panel {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 60;
+      border: 1px solid #334155;
+      border-radius: 9px;
+      color: #cbd5e1;
+      background: rgba(15, 23, 42, .94);
+      box-shadow: var(--shadow);
+      font-size: 10px;
+    }
+    .state-panel[open] {
+      width: 270px;
+      padding-bottom: 9px;
+    }
+    .state-panel summary {
+      padding: 8px 10px;
+      color: white;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      list-style-position: inside;
+    }
+    .state-panel pre {
+      max-height: 310px;
+      margin: 0;
+      padding: 0 10px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    .switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 14px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      transform: translateX(-50%);
+      border: 1px solid #475569;
+      border-radius: 999px;
+      color: #e2e8f0;
+      background: #0f172a;
+      box-shadow: 0 12px 34px rgba(0,0,0,.32);
+    }
+    .switcher button {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 50%;
+      color: white;
+      background: #334155;
+      font-size: 16px;
+    }
+    .switcher .label { min-width: 245px; text-align: center; font-size: 12px; }
+
+    /* A — balanced two-column explorer */
+    .v-a .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 10px;
+    }
+    .v-a .selection-card { display: none; }
+
+    /* B — map-first with a persistent horizontal well tray */
+    .v-b .page-head {
+      position: absolute;
+      top: 46px;
+      left: 28px;
+      right: 300px;
+      z-index: 8;
+      border: 1px solid rgba(216,222,232,.9);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      background: rgba(255,255,255,.94);
+    }
+    .v-b .status-strip {
+      position: absolute;
+      top: 116px;
+      left: 28px;
+      z-index: 8;
+      width: 520px;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.07);
+    }
+    .v-b .workspace {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) 185px;
+      gap: 10px;
+      padding-top: 12px;
+    }
+    .v-b .plot-card { grid-row: 1; }
+    .v-b .well-panel {
+      grid-row: 2;
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      grid-template-rows: auto 1fr;
+    }
+    .v-b .panel-head { grid-row: 1 / span 2; border-right: 1px solid var(--border); border-bottom: 0; }
+    .v-b .panel-note { grid-column: 2; }
+    .v-b .well-list {
+      grid-column: 2;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+      gap: 3px;
+    }
+    .v-b .well-row { padding: 6px 7px; }
+    .v-b .selection-card { display: none; }
+
+    /* C — index-first master/detail */
+    .v-c .workspace {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      grid-template-rows: 118px minmax(0, 1fr);
+      gap: 10px;
+    }
+    .v-c .well-panel { grid-row: 1 / span 2; grid-column: 1; }
+    .v-c .selection-card { grid-row: 1; grid-column: 2; display: flex; align-items: center; justify-content: space-between; }
+    .v-c .plot-card { grid-row: 2; grid-column: 2; }
+
+    @media (max-width: 900px) {
+      .v-a .workspace, .v-c .workspace { grid-template-columns: minmax(0, 1fr) 230px; }
+      .v-c .selection-card { display: none; }
+      .v-c .plot-card { grid-row: 1 / span 2; }
+      .v-b .page-head { right: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-banner">
+    PROTOTYPE · THROWAWAY ·
+    <a href="https://github.com/WindWang2/paleo-workbench/issues/129">井位平面预览线框</a>
+    <code>?variant=A|B|C</code>
+    <span>问题：是否一眼明白“点井定位”？</span>
+  </div>
+  <main id="root"></main>
+  <details class="state-panel">
+    <summary id="state-summary">State</summary>
+    <pre id="state-dump"></pre>
+  </details>
+  <div class="tooltip" id="tooltip"></div>
+  <nav class="switcher" aria-label="Prototype variants">
+    <button id="prev" type="button" aria-label="上一方案">←</button>
+    <div class="label" id="variant-label"></div>
+    <button id="next" type="button" aria-label="下一方案">→</button>
+  </nav>
+
+  <script>
+    const WELLS = [
+      { id: "row-3",  name: "A1",  x: 5288.670,  y: 8219.940,  line: 3 },
+      { id: "row-4",  name: "A2",  x: 3720.830,  y: 3899.600,  line: 4 },
+      { id: "row-5",  name: "A3",  x: 605.460,   y: 5131.180,  line: 5 },
+      { id: "row-6",  name: "A4",  x: 5627.180,  y: 5359.590,  line: 6 },
+      { id: "row-7",  name: "A5",  x: 3529.680,  y: 15162.100, line: 7 },
+      { id: "row-8",  name: "A6",  x: 1189.140,  y: 13567.650, line: 8 },
+      { id: "row-9",  name: "A7",  x: 12741.820, y: 4205.550,  line: 9 },
+      { id: "row-10", name: "A8",  x: 8644.910,  y: 15882.800, line: 10 },
+      { id: "row-11", name: "A9",  x: 328.150,   y: 9190.240,  line: 11 },
+      { id: "row-12", name: "A10", x: 10547.090, y: 11754.190, line: 12 },
+      { id: "row-13", name: "A11", x: 5566.730,  y: 14552.500, line: 13 },
+      { id: "row-14", name: "A12", x: 6533.510,  y: 12189.220, line: 14 },
+      { id: "row-15", name: "A13", x: 3886.400,  y: 6401.030,  line: 15 },
+      { id: "row-16", name: "A14", x: 11828.290, y: 5827.430,  line: 16 },
+      { id: "row-17", name: "A15", x: 10844.740, y: 13045.110, line: 17 },
+      { id: "row-18", name: "A16", x: 12843.240, y: 9856.750,  line: 18 },
+      { id: "row-19", name: "A17", x: 11625.760, y: 15443.260, line: 19 },
+      { id: "row-20", name: "A18", x: 8941.950,  y: 6866.630,  line: 20 },
+      { id: "row-21", name: "A19", x: 9629.280,  y: 1264.180,  line: 21 },
+      { id: "row-22", name: "A20", x: 12501.090, y: 1944.650,  line: 22 },
+      { id: "row-23", name: "A10", x: 10120.420, y: 10880.240, line: 23 }
+    ];
+
+    const VARIANTS = [
+      { key: "A", name: "平衡双栏", blurb: "图面为主 · 右侧常驻井名列表" },
+      { key: "B", name: "地图优先", blurb: "全宽图面 · 底部常驻井名条" },
+      { key: "C", name: "查井优先", blurb: "左侧宽索引 · 右侧聚焦图" }
+    ];
+
+    const fullDataBounds = (() => {
+      const xs = WELLS.map(w => w.x);
+      const ys = WELLS.map(w => w.y);
+      const dx = Math.max(...xs) - Math.min(...xs);
+      const dy = Math.max(...ys) - Math.min(...ys);
+      return {
+        xmin: Math.min(...xs) - dx * .05,
+        xmax: Math.max(...xs) + dx * .05,
+        ymin: Math.min(...ys) - dy * .05,
+        ymax: Math.max(...ys) + dy * .05
+      };
+    })();
+
+    const state = {
+      variant: validVariant(new URLSearchParams(location.search).get("variant")),
+      activeId: null,
+      search: "",
+      view: { ...fullDataBounds },
+      viewMode: "全井（5% 边距）",
+      invalidRows: 2,
+      duplicateGroups: 1,
+      sourceCrs: null
+    };
+    let drag = null;
+
+    function validVariant(key) {
+      return VARIANTS.some(v => v.key === key) ? key : "A";
+    }
+    function variantInfo() {
+      return VARIANTS.find(v => v.key === state.variant);
+    }
+    function activeWell() {
+      return WELLS.find(w => w.id === state.activeId) || null;
+    }
+    function naturalCompare(a, b) {
+      const byName = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+      return byName || a.line - b.line;
+    }
+    function duplicateCount(name) {
+      return WELLS.filter(w => w.name === name).length;
+    }
+    function displayName(well) {
+      if (duplicateCount(well.name) === 1) return well.name;
+      return `${well.name} — ${well.x.toFixed(3)}, ${well.y.toFixed(3)}`;
+    }
+    function pageHeader() {
+      return `
+        <header class="page-head">
+          <div>
+            <h1>ExportWellHead.dat · 井位预览</h1>
+            <div class="sub">21 口可预览井位 · SourceXY · 点击井点或井名定位</div>
+          </div>
+          <div class="meta-row">
+            <span class="chip">X / Y · 单位未知</span>
+            <span class="chip warn">SourceCRS 未声明</span>
+          </div>
+        </header>
+        <div class="status-strip">
+          <strong>数据质量：</strong>
+          已跳过 2 行无效井位 · 发现 1 组重名井，已按坐标区分
+          <button type="button" data-action="details">查看明细</button>
+        </div>`;
+    }
+    function plotMarkup() {
+      return `
+        <section class="plot-card">
+          <div class="plot-toolbar">
+            <div><strong>井位 XY 平面</strong> <span class="plot-help">悬停查看 · 单击定位 · 拖拽平移 · 滚轮缩放</span></div>
+            <button class="ghost-btn" type="button" data-action="reset">全井视图</button>
+          </div>
+          <div class="plot-wrap">
+            <svg id="plot" viewBox="0 0 1000 650" role="img" aria-label="井位 XY 散点图"></svg>
+            <div class="viewport-badge" id="viewport-badge"></div>
+          </div>
+        </section>`;
+    }
+    function panelMarkup() {
+      return `
+        <aside class="well-panel">
+          <div class="panel-head">
+            <h2>井名列表</h2>
+            <input class="search" id="well-search" value="${escapeHtml(state.search)}"
+              placeholder="搜索井名，例如 A10" aria-label="搜索井名" />
+          </div>
+          <div class="panel-note" id="panel-note"></div>
+          <div class="well-list" id="well-list"></div>
+        </aside>`;
+    }
+    function selectionMarkup() {
+      const well = activeWell();
+      return `
+        <section class="selection-card">
+          <div>
+            <div>当前井 ActiveWell</div>
+            <div class="active-name">${well ? escapeHtml(displayName(well)) : "尚未选择"}</div>
+          </div>
+          <div>${well
+            ? `X ${well.x.toFixed(3)}<br>Y ${well.y.toFixed(3)}`
+            : "从左侧列表或图中单击一口井"} </div>
+          <button class="ghost-btn" type="button" data-action="reset">清除并返回全井</button>
+        </section>`;
+    }
+    function renderVariant() {
+      const root = document.getElementById("root");
+      let body = "";
+      if (state.variant === "A") {
+        body = `${pageHeader()}<div class="workspace">${plotMarkup()}${panelMarkup()}${selectionMarkup()}</div>`;
+      } else if (state.variant === "B") {
+        body = `${pageHeader()}<div class="workspace">${plotMarkup()}${panelMarkup()}${selectionMarkup()}</div>`;
+      } else {
+        body = `${pageHeader()}<div class="workspace">${panelMarkup()}${selectionMarkup()}${plotMarkup()}</div>`;
+      }
+      root.className = `variant v-${state.variant.toLowerCase()}`;
+      root.innerHTML = body;
+      bindControls();
+      renderList();
+      renderPlot();
+      renderState();
+      const info = variantInfo();
+      document.getElementById("variant-label").textContent = `${info.key} — ${info.name} · ${info.blurb}`;
+    }
+
+    function bindControls() {
+      document.querySelectorAll("[data-action=reset]").forEach(button => {
+        button.addEventListener("click", resetView);
+      });
+      document.querySelector("[data-action=details]").addEventListener("click", () => {
+        alert("无效行明细（原型）\\n第 24 行：X 非数值\\n第 25 行：Y 非有限值\\n\\n最多显示前 20 条。");
+      });
+      const search = document.getElementById("well-search");
+      search.addEventListener("input", event => {
+        state.search = event.target.value;
+        renderList();
+        renderState();
+      });
+      const svg = document.getElementById("plot");
+      svg.addEventListener("dblclick", event => {
+        if (event.target === svg || event.target.classList.contains("plot-bg")) resetView();
+      });
+      svg.addEventListener("wheel", onWheel, { passive: false });
+      svg.addEventListener("pointerdown", onPointerDown);
+    }
+
+    function renderList() {
+      const list = document.getElementById("well-list");
+      const query = state.search.trim().toLocaleLowerCase();
+      const wells = WELLS.filter(w => w.name.toLocaleLowerCase().includes(query)).sort(naturalCompare);
+      list.innerHTML = wells.length ? wells.map(w => `
+        <button type="button" class="well-row ${w.id === state.activeId ? "active" : ""}"
+          data-well-id="${w.id}">
+          <span>${escapeHtml(displayName(w))}</span>
+          <small>行 ${w.line}</small>
+        </button>`).join("") : `<div class="empty-search">没有匹配的井</div>`;
+      list.querySelectorAll("[data-well-id]").forEach(button => {
+        button.addEventListener("click", () => activateWell(button.dataset.wellId, "列表"));
+      });
+      const active = activeWell();
+      const hidden = active && !wells.some(w => w.id === active.id);
+      const note = document.getElementById("panel-note");
+      note.className = `panel-note ${hidden ? "hidden-active" : ""}`;
+      note.textContent = hidden
+        ? `当前井 ${active.name} 已被筛选隐藏；图上高亮仍保留`
+        : `${wells.length} / ${WELLS.length} 口井 · 自然排序 · 单选`;
+      if (active && !hidden) {
+        requestAnimationFrame(() => {
+          const row = list.querySelector(`[data-well-id="${active.id}"]`);
+          row?.scrollIntoView({ block: "nearest" });
+        });
+      }
+    }
+
+    function adjustedView(view) {
+      const plotAspect = 840 / 530;
+      const cx = (view.xmin + view.xmax) / 2;
+      const cy = (view.ymin + view.ymax) / 2;
+      let width = view.xmax - view.xmin;
+      let height = view.ymax - view.ymin;
+      if (width / height < plotAspect) width = height * plotAspect;
+      else height = width / plotAspect;
+      return { xmin: cx - width/2, xmax: cx + width/2, ymin: cy - height/2, ymax: cy + height/2 };
+    }
+    function renderPlot() {
+      const svg = document.getElementById("plot");
+      const view = adjustedView(state.view);
+      const rect = { x: 90, y: 38, w: 840, h: 530 };
+      const px = x => rect.x + (x - view.xmin) / (view.xmax - view.xmin) * rect.w;
+      const py = y => rect.y + rect.h - (y - view.ymin) / (view.ymax - view.ymin) * rect.h;
+      const ticks = 5;
+      let markup = `<rect class="plot-bg" x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}" fill="transparent"/>`;
+      markup += `<line class="axis-line" x1="${rect.x}" y1="${rect.y+rect.h}" x2="${rect.x+rect.w}" y2="${rect.y+rect.h}"/>`;
+      markup += `<line class="axis-line" x1="${rect.x}" y1="${rect.y}" x2="${rect.x}" y2="${rect.y+rect.h}"/>`;
+      for (let i=0; i<=ticks; i++) {
+        const tx = rect.x + rect.w * i/ticks;
+        const ty = rect.y + rect.h - rect.h * i/ticks;
+        const xv = view.xmin + (view.xmax-view.xmin)*i/ticks;
+        const yv = view.ymin + (view.ymax-view.ymin)*i/ticks;
+        markup += `<line class="axis-tick" x1="${tx}" y1="${rect.y+rect.h}" x2="${tx}" y2="${rect.y+rect.h+7}"/>`;
+        markup += `<text class="tick-label" x="${tx}" y="${rect.y+rect.h+25}" text-anchor="middle">${Math.round(xv)}</text>`;
+        markup += `<line class="axis-tick" x1="${rect.x-7}" y1="${ty}" x2="${rect.x}" y2="${ty}"/>`;
+        markup += `<text class="tick-label" x="${rect.x-12}" y="${ty+4}" text-anchor="end">${Math.round(yv)}</text>`;
+      }
+      markup += `<text class="axis-label" x="${rect.x+rect.w/2}" y="628" text-anchor="middle">X（单位未知） →</text>`;
+      markup += `<text class="axis-label" transform="translate(24 ${rect.y+rect.h/2}) rotate(-90)" text-anchor="middle">Y（单位未知） →</text>`;
+      for (const well of WELLS) {
+        const x = px(well.x), y = py(well.y);
+        if (x < rect.x || x > rect.x+rect.w || y < rect.y || y > rect.y+rect.h) continue;
+        if (well.id === state.activeId) {
+          markup += `<circle class="active-ring" cx="${x}" cy="${y}" r="13"/>`;
+        }
+        markup += `<circle class="well-dot ${well.id === state.activeId ? "active" : ""}"
+          data-well-id="${well.id}" cx="${x}" cy="${y}" r="${well.id === state.activeId ? 8 : 6}"/>`;
+        if (well.id === state.activeId) {
+          markup += `<text class="active-label" x="${x+15}" y="${y-14}">${escapeHtml(displayName(well))}</text>`;
+        }
+      }
+      svg.innerHTML = markup;
+      svg.querySelectorAll("[data-well-id]").forEach(dot => {
+        dot.addEventListener("click", event => {
+          event.stopPropagation();
+          activateWell(dot.dataset.wellId, "图点");
+        });
+        dot.addEventListener("pointerenter", event => showTooltip(event, dot.dataset.wellId));
+        dot.addEventListener("pointermove", event => moveTooltip(event));
+        dot.addEventListener("pointerleave", hideTooltip);
+      });
+      document.getElementById("viewport-badge").textContent =
+        `${state.viewMode} · 1:1 比例 · X→ / Y↑`;
+    }
+
+    function activateWell(id, source) {
+      const well = WELLS.find(w => w.id === id);
+      if (!well) return;
+      state.activeId = id;
+      const fullWidth = fullDataBounds.xmax - fullDataBounds.xmin;
+      const fullHeight = fullDataBounds.ymax - fullDataBounds.ymin;
+      state.view = {
+        xmin: well.x - fullWidth/8,
+        xmax: well.x + fullWidth/8,
+        ymin: well.y - fullHeight/8,
+        ymax: well.y + fullHeight/8
+      };
+      state.viewMode = `固定约 4× 聚焦 · ${source}`;
+      renderList();
+      renderPlot();
+      renderSelectionCard();
+      renderState();
+    }
+    function resetView() {
+      state.activeId = null;
+      state.view = { ...fullDataBounds };
+      state.viewMode = "全井（5% 边距）";
+      renderList();
+      renderPlot();
+      renderSelectionCard();
+      renderState();
+    }
+    function renderSelectionCard() {
+      const old = document.querySelector(".selection-card");
+      if (!old) return;
+      const holder = document.createElement("div");
+      holder.innerHTML = selectionMarkup();
+      const next = holder.firstElementChild;
+      old.replaceWith(next);
+      next.querySelectorAll("[data-action=reset]").forEach(button => {
+        button.addEventListener("click", resetView);
+      });
+    }
+    function showTooltip(event, id) {
+      const well = WELLS.find(w => w.id === id);
+      const tooltip = document.getElementById("tooltip");
+      tooltip.innerHTML = `<strong>${escapeHtml(displayName(well))}</strong><br>X ${well.x.toFixed(3)}<br>Y ${well.y.toFixed(3)}<br><small>悬停仅提示 · 单击才定位</small>`;
+      tooltip.style.display = "block";
+      moveTooltip(event);
+    }
+    function moveTooltip(event) {
+      const tooltip = document.getElementById("tooltip");
+      tooltip.style.left = `${event.clientX + 14}px`;
+      tooltip.style.top = `${event.clientY + 14}px`;
+    }
+    function hideTooltip() {
+      document.getElementById("tooltip").style.display = "none";
+    }
+    function onWheel(event) {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? .86 : 1.16;
+      const svg = document.getElementById("plot");
+      const box = svg.getBoundingClientRect();
+      const fx = (event.clientX - box.left) / box.width;
+      const fy = 1 - (event.clientY - box.top) / box.height;
+      const width = state.view.xmax - state.view.xmin;
+      const height = state.view.ymax - state.view.ymin;
+      const cx = state.view.xmin + width * fx;
+      const cy = state.view.ymin + height * fy;
+      state.view = {
+        xmin: cx - width*factor*fx,
+        xmax: cx + width*factor*(1-fx),
+        ymin: cy - height*factor*fy,
+        ymax: cy + height*factor*(1-fy)
+      };
+      state.viewMode = "用户手动缩放";
+      renderPlot();
+      renderState();
+    }
+    function onPointerDown(event) {
+      if (event.target.closest("[data-well-id]")) return;
+      const svg = document.getElementById("plot");
+      if (!svg || !svg.contains(event.target)) return;
+      drag = { x: event.clientX, y: event.clientY, view: { ...state.view } };
+    }
+    function onPointerMove(event) {
+      if (!drag) return;
+      const svg = document.getElementById("plot");
+      const box = svg.getBoundingClientRect();
+      const dx = (event.clientX - drag.x) / box.width * (drag.view.xmax - drag.view.xmin);
+      const dy = (event.clientY - drag.y) / box.height * (drag.view.ymax - drag.view.ymin);
+      state.view = {
+        xmin: drag.view.xmin - dx, xmax: drag.view.xmax - dx,
+        ymin: drag.view.ymin + dy, ymax: drag.view.ymax + dy
+      };
+      state.viewMode = "用户手动平移";
+      renderPlot();
+      renderState();
+    }
+    function onPointerUp() { drag = null; }
+    function renderState() {
+      const well = activeWell();
+      document.getElementById("state-summary").textContent =
+        `State · ${state.variant} · ActiveWell: ${well ? displayName(well) : "—"} · ${state.viewMode}`;
+      document.getElementById("state-dump").textContent = JSON.stringify({
+        variant: state.variant,
+        ActiveWell: well ? { WellLocationId: well.id, name: well.name } : null,
+        search: state.search,
+        viewport: {
+          mode: state.viewMode,
+          xmin: Math.round(state.view.xmin),
+          xmax: Math.round(state.view.xmax),
+          ymin: Math.round(state.view.ymin),
+          ymax: Math.round(state.view.ymax)
+        },
+        SourceCRS: state.sourceCrs,
+        valid: WELLS.length,
+        skipped: state.invalidRows
+      }, null, 2);
+    }
+    function cycleVariant(delta) {
+      const index = VARIANTS.findIndex(v => v.key === state.variant);
+      state.variant = VARIANTS[(index + delta + VARIANTS.length) % VARIANTS.length].key;
+      const url = new URL(location.href);
+      url.searchParams.set("variant", state.variant);
+      history.replaceState(null, "", url);
+      renderVariant();
+    }
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
+      }[char]));
+    }
+
+    document.getElementById("prev").addEventListener("click", () => cycleVariant(-1));
+    document.getElementById("next").addEventListener("click", () => cycleVariant(1));
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("keydown", event => {
+      const target = event.target;
+      if (target.matches("input, textarea, [contenteditable=true]")) return;
+      if (event.key === "ArrowLeft") cycleVariant(-1);
+      if (event.key === "ArrowRight") cycleVariant(1);
+      if (event.key === "Escape") resetView();
+    });
+    renderVariant();
+  </script>
+</body>
+</html>
