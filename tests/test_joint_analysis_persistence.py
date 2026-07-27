@@ -10,6 +10,7 @@ def test_joint_analysis_state_roundtrip_in_project():
     doc.joint_analysis = JointAnalysisState(
         tree_checks={"地震预览体 (geoviz)": True, "井震 2D 剖面条": False},
         well_visibility={"A1": False, "A2": True},
+        well_identity_asset_id="res:wells",
         well_identity_map={"name:A1": "source:a1", "name:A2": "source:a2"},
         vertical_domain="Depth",
         active_fence_wells=["A1", "A2"],
@@ -23,6 +24,7 @@ def test_joint_analysis_state_roundtrip_in_project():
     assert restored.joint_analysis.active_fence_wells == ["A1", "A2"]
     assert restored.joint_analysis.tree_checks["井震 2D 剖面条"] is False
     assert restored.joint_analysis.well_visibility == {"A1": False, "A2": True}
+    assert restored.joint_analysis.well_identity_asset_id == "res:wells"
     assert restored.joint_analysis.well_identity_map == {
         "name:A1": "source:a1",
         "name:A2": "source:a2",
@@ -40,6 +42,7 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     page = GeologicalModeling3DPage()
     qtbot.addWidget(page)
     doc = ProjectDocument.new("t")
+    doc.joint_analysis.well_identity_asset_id = "res:wells"
     doc.joint_analysis.well_identity_map = {
         "asset:test|name:A1": "source:a1"
     }
@@ -50,6 +53,7 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     assert state.well_identity_map == {
         "asset:test|name:A1": "source:a1"
     }
+    assert state.well_identity_asset_id == "res:wells"
     page.save_joint_analysis_to_project()
     assert page._project.joint_analysis.vertical_domain == "Depth"
 
@@ -173,6 +177,7 @@ def test_collect_path_hints_includes_td_tops(qtbot, tmp_path, monkeypatch):
 def test_project_controller_flushes_joint_on_save(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.app import PaleoWorkbenchWindow
     from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.viz.joint_well_identity import WellIdentityRegistry
 
     win = PaleoWorkbenchWindow()
     qtbot.addWidget(win)
@@ -180,7 +185,16 @@ def test_project_controller_flushes_joint_on_save(qtbot, tmp_path, monkeypatch):
     win.project = doc
     win.project_path = tmp_path / "save-test.json"
     page = win.app_shell.geomodel_page
+    doc.joint_analysis.well_identity_asset_id = "res:wells"
+    doc.joint_analysis.well_identity_map = {
+        "stale:a": "source:a",
+        "stale:removed": "source:removed",
+    }
     page.set_project(doc)
+    page._joint_host._well_identity_registry = WellIdentityRegistry(
+        asset_id="res:wells",
+        entries={"current:a": "source:a"},
+    )
     page._joint_loaded_once = True  # simulate visited 三维建模 hybrid
     page._joint_domain.setCurrentText("Depth")
     # Avoid mapping topology flush issues
@@ -188,6 +202,10 @@ def test_project_controller_flushes_joint_on_save(qtbot, tmp_path, monkeypatch):
     path = win.project_controller.save_project()
     assert path is not None
     assert win.project.joint_analysis.vertical_domain == "Depth"
+    assert win.project.joint_analysis.well_identity_asset_id == "res:wells"
+    assert win.project.joint_analysis.well_identity_map == {
+        "current:a": "source:a"
+    }
 
 
 def test_project_controller_skips_joint_flush_until_page_loaded(qtbot, tmp_path, monkeypatch):

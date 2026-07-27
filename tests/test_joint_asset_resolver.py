@@ -38,6 +38,27 @@ def test_project_resources_prefer_over_data(tmp_path: Path):
     assert paths.source in {"project", "mixed"}
 
 
+def test_well_head_asset_identity_uses_project_resource_id(tmp_path: Path):
+    well_head = tmp_path / "one" / "ExportWellHead.dat"
+    well_head.parent.mkdir()
+    well_head.write_text("A 1 2 3 4 5 6\n", encoding="utf-8")
+    project = ProjectDocument.new("t")
+    project.resources.append(
+        ResourceItem(
+            id="res:stable-wells",
+            name="ExportWellHead.dat",
+            path=str(well_head),
+            type="well_head",
+            format="dat",
+        )
+    )
+
+    paths = resolve_joint_assets(project)
+
+    assert paths.well_head == well_head
+    assert paths.well_head_asset_id == "res:stable-wells"
+
+
 def test_path_hints_override_when_files_exist(tmp_path: Path):
     from paleo_workbench.project.models import JointAnalysisState
 

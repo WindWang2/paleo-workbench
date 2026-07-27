@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 
 from paleo_workbench.project.models import ProjectDocument, ResourceItem
@@ -14,6 +15,7 @@ class JointAssetPaths:
 
     segy: Path | None = None
     well_head: Path | None = None
+    well_head_asset_id: str | None = None
     td_dir: Path | None = None
     tops: Path | None = None
     horizons: list[Path] = field(default_factory=list)
@@ -43,6 +45,9 @@ def resolve_joint_assets(
 
     result.segy = from_project.segy or from_data.segy
     result.well_head = from_project.well_head or from_data.well_head
+    result.well_head_asset_id = (
+        from_project.well_head_asset_id or from_data.well_head_asset_id
+    )
     result.td_dir = from_project.td_dir or from_data.td_dir
     result.tops = from_project.tops or from_data.tops
     result.horizons = from_project.horizons or from_data.horizons
@@ -63,7 +68,13 @@ def resolve_joint_assets(
                 continue
             p = Path(raw)
             if p.exists():
+                previous_path = getattr(result, attr)
                 setattr(result, attr, p)
+                if key == "well_head" and (
+                    previous_path is None
+                    or previous_path.resolve() != p.resolve()
+                ):
+                    result.well_head_asset_id = _path_asset_id(p)
         if hints.get("horizons"):
             raw_h = hints["horizons"]
             # Support single path or pipe-separated multi-horizon list
@@ -126,6 +137,7 @@ def _from_project(project: ProjectDocument) -> JointAssetPaths:
         elif rtype in {"well_head", "wellhead"} or "wellhead" in name or "井位" in str(path):
             if out.well_head is None:
                 out.well_head = path
+                out.well_head_asset_id = res.id
         elif "td" in name or "时深" in str(path) or rtype in {"time_depth", "td"}:
             if path.is_dir() and out.td_dir is None:
                 out.td_dir = path
@@ -155,6 +167,7 @@ def _from_data_layout(data_root: Path) -> JointAssetPaths:
     wh = data_root / "井位" / "ExportWellHead.dat"
     if wh.is_file():
         out.well_head = wh
+        out.well_head_asset_id = "demo:well-head"
     # TD
     td = data_root / "时深" / "TD"
     if td.is_dir():
@@ -172,3 +185,8 @@ def _from_data_layout(data_root: Path) -> JointAssetPaths:
     if las_dir.is_dir():
         out.las_files = sorted(las_dir.glob("*.[Ll][Aa][Ss]"))
     return out
+
+
+def _path_asset_id(path: Path) -> str:
+    digest = sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:24]
+    return f"path:{digest}"

@@ -16,6 +16,7 @@ from paleo_workbench.env_bootstrap import ensure_geoviz_on_path, _repo_root
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.viz.joint_asset_resolver import JointAssetPaths, resolve_joint_assets
+from paleo_workbench.viz.joint_well_identity import WellIdentityRegistry
 from paleo_workbench.viz.joint_well_parsers import load_td_tables, parse_well_heads
 from paleo_workbench.viz.seismic_load import load_seismic_volume_from_path
 
@@ -61,7 +62,9 @@ class WellSeismicJointHost(QObject):
         self._volume_job = OwnedWorkerJob(self)
         self._paths: JointAssetPaths | None = None
         self._survey_meta: dict = {}
-        self._well_identity_map: dict[str, str] = {}
+        self._well_identity_registry: WellIdentityRegistry | None = None
+        self._persisted_well_identity_asset_id: str | None = None
+        self._persisted_well_identity_map: dict[str, str] = {}
         self._scene = None
         self._engine_error: str | None = None
 
@@ -93,18 +96,32 @@ class WellSeismicJointHost(QObject):
 
     @property
     def well_identity_map(self) -> dict[str, str]:
-        return dict(self._well_identity_map)
+        if self._well_identity_registry is None:
+            return dict(self._persisted_well_identity_map)
+        return dict(self._well_identity_registry.entries)
+
+    @property
+    def well_identity_asset_id(self) -> str | None:
+        if self._well_identity_registry is None:
+            return self._persisted_well_identity_asset_id
+        return self._well_identity_registry.asset_id
 
     @property
     def engine_error(self) -> str | None:
         return self._engine_error
 
     def set_project(self, project: ProjectDocument | None) -> None:
+        if project is self._project:
+            return
         self._project = project
         state = getattr(project, "joint_analysis", None)
-        self._well_identity_map = dict(
+        self._persisted_well_identity_asset_id = getattr(
+            state, "well_identity_asset_id", None
+        )
+        self._persisted_well_identity_map = dict(
             getattr(state, "well_identity_map", None) or {}
         )
+        self._well_identity_registry = None
 
     def well_names(self) -> list[str]:
         if self._scene is None:
@@ -267,10 +284,22 @@ class WellSeismicJointHost(QObject):
 
         wells = []
         if paths.well_head is not None:
-            wells = parse_well_heads(
+            asset_id = paths.well_head_asset_id
+            if not asset_id:
+                raise RuntimeError("井位资产缺少稳定的项目资源 ID")
+            registry = self._well_identity_registry
+            if registry is None or registry.asset_id != asset_id:
+                registry = WellIdentityRegistry.restore(
+                    asset_id=asset_id,
+                    persisted_asset_id=self._persisted_well_identity_asset_id,
+                    entries=self._persisted_well_identity_map,
+                )
+            parsed = parse_well_heads(
                 paths.well_head,
-                identity_map=self._well_identity_map,
+                identity_registry=registry,
             )
+            wells = parsed.wells
+            self._well_identity_registry = parsed.identity_registry
         td_tables = {}
         if paths.td_dir is not None:
             td_tables = load_td_tables(paths.td_dir)
