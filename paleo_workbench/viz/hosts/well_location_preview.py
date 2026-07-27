@@ -4,7 +4,14 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QModelIndex,
+    QSignalBlocker,
+    QSortFilterProxyModel,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -12,8 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
+    QListView,
     QVBoxLayout,
     QWidget,
 )
@@ -31,15 +37,170 @@ _WELL_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
 @dataclass(frozen=True)
+class _WellListEntry:
+    point_index: int
+    name: str
+    label: str
+
+
+class _WellListModel(QAbstractListModel):
+    """Lightweight rows; QListView creates delegates only for visible wells."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._entries: tuple[_WellListEntry, ...] = ()
+        self._row_by_point_index: dict[int, int] = {}
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._entries)
+
+    def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or not 0 <= index.row() < len(self._entries):
+            return None
+        entry = self._entries[index.row()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return entry.label
+        if role == _POINT_INDEX_ROLE:
+            return entry.point_index
+        if role == _WELL_NAME_ROLE:
+            return entry.name
+        return None
+
+    def set_payload(self, payload: XYPreviewPayload) -> None:
+        duplicate_counts = Counter(payload.names)
+        coordinate_counts = Counter(
+            (
+                name,
+                float(payload.x[index]),
+                float(payload.y[index]),
+            )
+            for index, name in enumerate(payload.names)
+        )
+        entries = []
+        for point_index, name in enumerate(payload.names):
+            label = _well_list_label(
+                payload,
+                point_index,
+                name,
+                duplicate_counts[name],
+                coordinate_counts[
+                    (
+                        name,
+                        float(payload.x[point_index]),
+                        float(payload.y[point_index]),
+                    )
+                ],
+            )
+            entries.append(_WellListEntry(point_index, name, label))
+        entries.sort(key=lambda entry: _natural_name_key(entry.name))
+        self.beginResetModel()
+        self._entries = tuple(entries)
+        self._row_by_point_index = {
+            entry.point_index: row
+            for row, entry in enumerate(self._entries)
+        }
+        self.endResetModel()
+
+    def index_for_point(self, point_index: int) -> QModelIndex:
+        row = self._row_by_point_index.get(point_index)
+        return QModelIndex() if row is None else self.index(row, 0)
+
+
+class _WellFilterProxyModel(QSortFilterProxyModel):
+    def filterAcceptsRow(
+        self,
+        source_row: int,
+        source_parent: QModelIndex,
+    ) -> bool:
+        source = self.sourceModel()
+        if source is None:
+            return False
+        name = source.data(
+            source.index(source_row, 0, source_parent),
+            _WELL_NAME_ROLE,
+        )
+        return self.filterRegularExpression().match(str(name)).hasMatch()
+
+
+@dataclass(frozen=True)
+class WellLocationId:
+    """Stable identity for one source record in one asset version."""
+
+    resource_id: str
+    source_version: str
+    record_id: int
+
+
+@dataclass(frozen=True)
 class ActiveWell:
     """The selected well record for the lifetime of one prepared preview."""
 
-    resource_id: str
-    record_id: int
+    identity: WellLocationId
     point_index: int
     name: str
     x: float
     y: float
+
+    @property
+    def resource_id(self) -> str:
+        return self.identity.resource_id
+
+    @property
+    def record_id(self) -> int:
+        return self.identity.record_id
+
+
+@dataclass(frozen=True)
+class WellLocationPreviewState:
+    active_well_id: WellLocationId | None = None
+    search_text: str = ""
+    list_scroll_position: int = 0
+    viewport: tuple[float, float, float, float] | None = None
+
+
+class WellLocationPreviewStateStore:
+    """Session state keyed by resource and immutable source version."""
+
+    def __init__(self) -> None:
+        self._states: dict[
+            tuple[str, str], WellLocationPreviewState
+        ] = {}
+        self._latest_versions: dict[str, str] = {}
+
+    def load(
+        self,
+        resource_id: str,
+        source_version: str,
+    ) -> WellLocationPreviewState | None:
+        self._accept_version(resource_id, source_version)
+        return self._states.get((resource_id, source_version))
+
+    def save(
+        self,
+        resource_id: str,
+        source_version: str,
+        state: WellLocationPreviewState,
+    ) -> None:
+        self._accept_version(resource_id, source_version)
+        self._states[(resource_id, source_version)] = state
+
+    def clear(self) -> None:
+        self._states.clear()
+        self._latest_versions.clear()
+
+    def _accept_version(
+        self,
+        resource_id: str,
+        source_version: str,
+    ) -> None:
+        previous = self._latest_versions.get(resource_id)
+        if previous is not None and previous != source_version:
+            self._states = {
+                key: state
+                for key, state in self._states.items()
+                if key[0] != resource_id
+            }
+        self._latest_versions[resource_id] = source_version
 
 
 class WellLocationPreview(QWidget):
@@ -51,6 +212,8 @@ class WellLocationPreview(QWidget):
         self,
         engine: GeoVizEngine | None = None,
         parent: QWidget | None = None,
+        *,
+        state_store: WellLocationPreviewStateStore | None = None,
     ) -> None:
         super().__init__(parent)
         self.engine = engine or GeoVizEngine.default()
@@ -73,6 +236,13 @@ class WellLocationPreview(QWidget):
         panel_title = QLabel("井名", self.well_panel)
         panel_title.setObjectName("MapDockTitle")
         panel_layout.addWidget(panel_title)
+        self.source_status = QLabel(self.well_panel)
+        self.source_status.setAccessibleName("井位源坐标与解析诊断")
+        self.source_status.setWordWrap(True)
+        self.source_status.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        panel_layout.addWidget(self.source_status)
         self.well_search = QLineEdit(self.well_panel)
         self.well_search.setAccessibleName("搜索井名")
         self.well_search.setPlaceholderText("搜索井名…")
@@ -84,16 +254,23 @@ class WellLocationPreview(QWidget):
         self.filter_status.setWordWrap(True)
         self.filter_status.hide()
         panel_layout.addWidget(self.filter_status)
-        self.well_list = QListWidget(self.well_panel)
+        self.well_list = QListView(self.well_panel)
         self.well_list.setAccessibleName("井名列表")
         self.well_list.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.well_list.currentItemChanged.connect(
+        self._well_model = _WellListModel(self.well_list)
+        self._well_filter = _WellFilterProxyModel(self.well_list)
+        self._well_filter.setSourceModel(self._well_model)
+        self._well_filter.setFilterCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive
+        )
+        self.well_list.setModel(self._well_filter)
+        self.well_list.selectionModel().currentChanged.connect(
             self._activate_current_list_well
         )
-        self.well_list.itemClicked.connect(self._activate_list_well)
-        self.well_list.itemActivated.connect(self._activate_list_well)
+        self.well_list.clicked.connect(self._activate_list_well)
+        self.well_list.activated.connect(self._activate_list_well)
         panel_layout.addWidget(self.well_list, 1)
 
         layout = QHBoxLayout(self)
@@ -105,6 +282,7 @@ class WellLocationPreview(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self._preview: PreparedPreview | None = None
         self._payload: XYPreviewPayload | None = None
+        self._state_store = state_store or WellLocationPreviewStateStore()
         self.active_well: ActiveWell | None = None
         self._released = False
 
@@ -117,21 +295,21 @@ class WellLocationPreview(QWidget):
         if self._released:
             raise RuntimeError("cannot render a released WellLocationPreview")
 
-        had_active_well = self.active_well is not None
+        self._save_state()
         self._preview = preview
         self._payload = preview.payload
         self.active_well = None
         self.plot.setToolTip("")
         self.engine.render(self.plot, preview)
-        self.well_search.clear()
         self._populate_well_list(preview.payload)
+        self._update_source_status(preview.payload)
+        self._restore_state()
         self._update_filter_status()
-        if had_active_well:
-            self.active_well_changed.emit(None)
 
     def release(self) -> None:
         if self._released:
             return
+        self._save_state()
         self._released = True
         self.engine.release(self.plot)
 
@@ -141,7 +319,7 @@ class WellLocationPreview(QWidget):
         self.plot.clear_selected_point()
         self.plot.reset_view()
         self.well_list.clearSelection()
-        self.well_list.setCurrentItem(None)
+        self.well_list.setCurrentIndex(QModelIndex())
         self._update_filter_status()
         if had_active_well:
             self.active_well_changed.emit(None)
@@ -172,42 +350,57 @@ class WellLocationPreview(QWidget):
         self.plot.setToolTip("")
 
     def _populate_well_list(self, payload: XYPreviewPayload) -> None:
-        duplicate_counts = Counter(payload.names)
-        indexed_names = sorted(
-            enumerate(payload.names),
-            key=lambda item: _natural_name_key(item[1]),
-        )
-        self.well_list.clear()
-        for point_index, name in indexed_names:
-            label = name
-            if duplicate_counts[name] > 1:
-                record_id = (
-                    payload.record_ids[point_index]
-                    if point_index < len(payload.record_ids)
-                    else point_index
+        self._well_model.set_payload(payload)
+
+    def _update_source_status(self, payload: XYPreviewPayload) -> None:
+        diagnostics = payload.diagnostics
+        total_records = diagnostics.total_records or len(payload.names)
+        valid_records = diagnostics.valid_records or len(payload.names)
+        skipped_count = total_records - valid_records
+        lines = [
+            " · ".join(
+                (
+                    f"SourceCRS: {payload.source_crs or '未声明'}",
+                    f"坐标单位: {payload.coordinate_units or '未知'}",
                 )
-                label = f"{name} · 记录 {record_id}"
-            item = QListWidgetItem(label)
-            item.setData(_POINT_INDEX_ROLE, point_index)
-            item.setData(_WELL_NAME_ROLE, name)
-            self.well_list.addItem(item)
+            ),
+            (
+                f"有效 {valid_records}/"
+                f"{total_records}，"
+                f"跳过 {skipped_count}"
+            ),
+        ]
+        lines.extend(
+            f"源行 {issue.source_row}: {issue.reason}"
+            for issue in diagnostics.issues
+        )
+        if diagnostics.omitted_issue_count:
+            lines.append(
+                f"另有 {diagnostics.omitted_issue_count} 条诊断未展开"
+            )
+        self.source_status.setText("\n".join(lines))
 
     def _filter_well_list(self, search_text: str) -> None:
-        query = search_text.casefold()
-        for row in range(self.well_list.count()):
-            item = self.well_list.item(row)
-            well_name = str(item.data(_WELL_NAME_ROLE))
-            item.setHidden(query not in well_name.casefold())
+        blocker = QSignalBlocker(self.well_list.selectionModel())
+        self._well_filter.setFilterFixedString(search_text)
+        if self.active_well is not None:
+            active_index = self._list_index_for_point_index(
+                self.active_well.point_index
+            )
+            self.well_list.setCurrentIndex(active_index)
+            if not active_index.isValid():
+                self.well_list.clearSelection()
+        del blocker
         self._update_filter_status()
 
     def _activate_list_well(
         self,
-        item: QListWidgetItem,
+        index: QModelIndex,
     ) -> None:
         preview = self._preview
-        if preview is None:
+        if preview is None or not index.isValid():
             return
-        point_index = int(item.data(_POINT_INDEX_ROLE))
+        point_index = int(index.data(_POINT_INDEX_ROLE))
         if (
             self.active_well is not None
             and self.active_well.point_index == point_index
@@ -222,11 +415,11 @@ class WellLocationPreview(QWidget):
 
     def _activate_current_list_well(
         self,
-        item: QListWidgetItem | None,
-        _previous: QListWidgetItem | None,
+        index: QModelIndex,
+        _previous: QModelIndex,
     ) -> None:
-        if item is not None:
-            self._activate_list_well(item)
+        if index.isValid():
+            self._activate_list_well(index)
 
     def _activate_clicked_well(
         self,
@@ -248,11 +441,14 @@ class WellLocationPreview(QWidget):
         ):
             return
         active_well = ActiveWell(
-            resource_id=payload.resource_id or preview.title,
-            record_id=(
-                payload.record_ids[index]
-                if index < len(payload.record_ids)
-                else index
+            identity=WellLocationId(
+                resource_id=payload.resource_id,
+                source_version=payload.source_version,
+                record_id=(
+                    payload.record_ids[index]
+                    if index < len(payload.record_ids)
+                    else index
+                ),
             ),
             point_index=index,
             name=payload.names[index],
@@ -274,35 +470,90 @@ class WellLocationPreview(QWidget):
         self._update_filter_status()
         self.active_well_changed.emit(active_well)
 
+    def _save_state(self) -> None:
+        payload = self._payload
+        if (
+            payload is None
+            or not payload.resource_id
+            or not payload.source_version
+        ):
+            return
+        self._state_store.save(
+            payload.resource_id,
+            payload.source_version,
+            WellLocationPreviewState(
+                active_well_id=(
+                    self.active_well.identity
+                    if self.active_well is not None
+                    else None
+                ),
+                search_text=self.well_search.text(),
+                list_scroll_position=(
+                    self.well_list.verticalScrollBar().value()
+                ),
+                viewport=self.plot.view_bounds(),
+            ),
+        )
+
+    def _restore_state(self) -> None:
+        payload = self._payload
+        if (
+            payload is None
+            or not payload.resource_id
+            or not payload.source_version
+        ):
+            self.well_search.clear()
+            return
+        state = self._state_store.load(
+            payload.resource_id,
+            payload.source_version,
+        )
+        if state is None:
+            self.well_search.clear()
+            return
+        self.well_search.setText(state.search_text)
+        identity = state.active_well_id
+        if identity is not None:
+            try:
+                point_index = payload.record_ids.index(identity.record_id)
+            except ValueError:
+                point_index = -1
+            if point_index >= 0:
+                assert self._preview is not None
+                self._activate_well(point_index, self._preview.title)
+        if state.viewport is not None:
+            self.plot.set_view_bounds(state.viewport)
+        self.well_list.verticalScrollBar().setValue(
+            state.list_scroll_position
+        )
+
     def _sync_list_selection(self, point_index: int) -> None:
-        item = self._list_item_for_point_index(point_index)
-        if item is None:
+        index = self._list_index_for_point_index(point_index)
+        if not index.isValid():
             return
         blocker = QSignalBlocker(self.well_list)
-        self.well_list.setCurrentItem(item)
+        self.well_list.setCurrentIndex(index)
+        self.well_list.scrollTo(
+            index,
+            QAbstractItemView.ScrollHint.EnsureVisible,
+        )
         del blocker
 
-    def _list_item_for_point_index(
+    def _list_index_for_point_index(
         self,
         point_index: int,
-    ) -> QListWidgetItem | None:
-        for row in range(self.well_list.count()):
-            item = self.well_list.item(row)
-            if int(item.data(_POINT_INDEX_ROLE)) == point_index:
-                return item
-        return None
+    ) -> QModelIndex:
+        return self._well_filter.mapFromSource(
+            self._well_model.index_for_point(point_index)
+        )
 
     def _update_filter_status(self) -> None:
-        item = (
-            self._list_item_for_point_index(self.active_well.point_index)
+        index = (
+            self._list_index_for_point_index(self.active_well.point_index)
             if self.active_well is not None
-            else None
+            else QModelIndex()
         )
-        if (
-            self.active_well is None
-            or item is None
-            or not item.isHidden()
-        ):
+        if self.active_well is None or index.isValid():
             self.filter_status.clear()
             self.filter_status.hide()
             return
@@ -319,4 +570,31 @@ def _natural_name_key(name: str) -> tuple[tuple[int, str | int], ...]:
     )
 
 
-__all__ = ["ActiveWell", "WellLocationPreview"]
+def _well_list_label(
+    payload: XYPreviewPayload,
+    point_index: int,
+    name: str,
+    duplicate_count: int,
+    coordinate_count: int,
+) -> str:
+    if duplicate_count <= 1:
+        return name
+    x = float(payload.x[point_index])
+    y = float(payload.y[point_index])
+    if coordinate_count == 1:
+        return f"{name} · X {x:g}, Y {y:g}"
+    source_row = (
+        payload.source_rows[point_index]
+        if point_index < len(payload.source_rows)
+        else point_index + 1
+    )
+    return f"{name} · 源行 {source_row}"
+
+
+__all__ = [
+    "ActiveWell",
+    "WellLocationId",
+    "WellLocationPreview",
+    "WellLocationPreviewState",
+    "WellLocationPreviewStateStore",
+]
