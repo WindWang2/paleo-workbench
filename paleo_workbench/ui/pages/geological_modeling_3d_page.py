@@ -757,20 +757,27 @@ class GeologicalModeling3DPage(QWidget):
                     0,
                     Qt.Checked if presentation.visible else Qt.Unchecked,
                 )
-            states = [
-                parent.child(index).checkState(0)
-                for index in range(parent.childCount())
-            ]
-            if states:
-                if all(state == Qt.Checked for state in states):
-                    parent.setCheckState(0, Qt.Checked)
-                elif all(state == Qt.Unchecked for state in states):
-                    parent.setCheckState(0, Qt.Unchecked)
-                else:
-                    parent.setCheckState(0, Qt.PartiallyChecked)
+            parent_state = self._joint_well_parent_state()
+            if parent_state is not None:
+                parent.setCheckState(0, parent_state)
         finally:
             self.model_tree.blockSignals(False)
         parent.setExpanded(True)
+
+    def _joint_well_parent_state(self):
+        """Derive the parent checkbox state from its current well children."""
+        parent = getattr(self, "_joint_wells_tree_item", None)
+        if parent is None or parent.childCount() == 0:
+            return None
+        states = [
+            parent.child(index).checkState(0)
+            for index in range(parent.childCount())
+        ]
+        if all(state == Qt.Checked for state in states):
+            return Qt.Checked
+        if all(state == Qt.Unchecked for state in states):
+            return Qt.Unchecked
+        return Qt.PartiallyChecked
 
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
@@ -913,24 +920,7 @@ class GeologicalModeling3DPage(QWidget):
         """Set toolbar combos to a saved well pair without resetting to index 0/1."""
         if not hasattr(self, "_joint_well_a"):
             return
-        options = self._joint_well_options()
-        self._joint_well_a.blockSignals(True)
-        self._joint_well_b.blockSignals(True)
-        self._joint_well_a.clear()
-        self._joint_well_b.clear()
-        for well_id, display_name in options:
-            self._joint_well_a.addItem(display_name, well_id)
-            self._joint_well_b.addItem(display_name, well_id)
-        ia = self._joint_well_a.findData(well_a)
-        ib = self._joint_well_b.findData(well_b)
-        if ia >= 0:
-            self._joint_well_a.setCurrentIndex(ia)
-        if ib >= 0:
-            self._joint_well_b.setCurrentIndex(ib)
-        elif len(options) >= 2:
-            self._joint_well_b.setCurrentIndex(1)
-        self._joint_well_a.blockSignals(False)
-        self._joint_well_b.blockSignals(False)
+        self._rebuild_joint_well_combos(well_a, well_b)
 
     def _ensure_joint_widget(self) -> None:
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
@@ -1208,6 +1198,12 @@ class GeologicalModeling3DPage(QWidget):
             saved = list(getattr(state, "active_fence_wells", None) or [])
             if len(saved) >= 2:
                 prev_a, prev_b = saved[0], saved[1]
+        self._rebuild_joint_well_combos(str(prev_a), str(prev_b))
+
+    def _rebuild_joint_well_combos(
+        self, preferred_a: str, preferred_b: str
+    ) -> None:
+        """Rebuild both selectors while retaining stable JointWellId choices."""
         options = self._joint_well_options()
         self._joint_well_a.blockSignals(True)
         self._joint_well_b.blockSignals(True)
@@ -1216,8 +1212,8 @@ class GeologicalModeling3DPage(QWidget):
         for well_id, display_name in options:
             self._joint_well_a.addItem(display_name, well_id)
             self._joint_well_b.addItem(display_name, well_id)
-        ia = self._joint_well_a.findData(prev_a) if prev_a else -1
-        ib = self._joint_well_b.findData(prev_b) if prev_b else -1
+        ia = self._joint_well_a.findData(preferred_a) if preferred_a else -1
+        ib = self._joint_well_b.findData(preferred_b) if preferred_b else -1
         if ia >= 0:
             self._joint_well_a.setCurrentIndex(ia)
         if ib >= 0:
@@ -1588,17 +1584,8 @@ class GeologicalModeling3DPage(QWidget):
                 self._well_pick.draw_from,
             }:
                 self._well_pick.clear_half("隐藏已选井 — 已取消半选")
-            states = [
-                wells_parent.child(index).checkState(0)
-                for index in range(wells_parent.childCount())
-            ]
-            if states:
-                if all(state == Qt.Checked for state in states):
-                    parent_state = Qt.Checked
-                elif all(state == Qt.Unchecked for state in states):
-                    parent_state = Qt.Unchecked
-                else:
-                    parent_state = Qt.PartiallyChecked
+            parent_state = self._joint_well_parent_state()
+            if parent_state is not None:
                 self.model_tree.blockSignals(True)
                 try:
                     wells_parent.setCheckState(0, parent_state)

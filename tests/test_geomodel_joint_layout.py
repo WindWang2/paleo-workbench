@@ -68,7 +68,7 @@ def test_geomodel_tree_geoviz_layers_checkable(qtbot):
 
 
 def test_geomodel_tree_lists_each_joint_well_as_an_independent_checkbox(qtbot):
-    from geoviz_well_seismic_3d import WellHead
+    from geoviz_well_seismic_3d import JointWellId, WellHead
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
     )
@@ -77,9 +77,9 @@ def test_geomodel_tree_lists_each_joint_well_as_an_independent_checkbox(qtbot):
     qtbot.addWidget(page)
     page._joint_host.scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("A1", 10, 10, 10, 10, 100),
-            WellHead("B1", 20, 20, 20, 20, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:1")),
+            WellHead("A1", 10, 10, 10, 10, 100, id=JointWellId("source:2")),
+            WellHead("B1", 20, 20, 20, 20, 100, id=JointWellId("source:3")),
         ]
     )
 
@@ -102,7 +102,7 @@ def test_geomodel_tree_lists_each_joint_well_as_an_independent_checkbox(qtbot):
 
 
 def test_geomodel_tree_hides_one_well_updates_parent_and_clears_selection(qtbot):
-    from geoviz_well_seismic_3d import WellHead
+    from geoviz_well_seismic_3d import JointWellId, WellHead
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
     )
@@ -111,12 +111,12 @@ def test_geomodel_tree_hides_one_well_updates_parent_and_clears_selection(qtbot)
     qtbot.addWidget(page)
     page._joint_host.scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("B1", 10, 10, 10, 10, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")),
+            WellHead("B1", 10, 10, 10, 10, 100, id=JointWellId("source:b1")),
         ]
     )
     page._joint_host.scene_updated.emit()
-    page._well_pick.on_well_click("A1")
+    page._well_pick.on_well_click("source:a1")
     wells = page._joint_wells_tree_item
 
     wells.child(0).setCheckState(0, Qt.Unchecked)
@@ -126,14 +126,14 @@ def test_geomodel_tree_hides_one_well_updates_parent_and_clears_selection(qtbot)
         wells.checkState(0),
         page._well_pick.half_select,
     ) == (
-        [("A1", False), ("B1", True)],
+        [("source:a1", False), ("source:b1", True)],
         Qt.PartiallyChecked,
         None,
     )
 
 
 def test_geomodel_well_parent_checkbox_controls_all_wells(qtbot):
-    from geoviz_well_seismic_3d import WellHead
+    from geoviz_well_seismic_3d import JointWellId, WellHead
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
     )
@@ -142,8 +142,8 @@ def test_geomodel_well_parent_checkbox_controls_all_wells(qtbot):
     qtbot.addWidget(page)
     page._joint_host.scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("B1", 10, 10, 10, 10, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")),
+            WellHead("B1", 10, 10, 10, 10, 100, id=JointWellId("source:b1")),
         ]
     )
     page._joint_host.scene_updated.emit()
@@ -161,7 +161,7 @@ def test_geomodel_well_parent_checkbox_controls_all_wells(qtbot):
 
 
 def test_geomodel_toolbar_displays_duplicate_labels_but_keeps_joint_well_ids(qtbot):
-    from geoviz_well_seismic_3d import WellHead
+    from geoviz_well_seismic_3d import JointWellId, WellHead
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
     )
@@ -170,8 +170,8 @@ def test_geomodel_toolbar_displays_duplicate_labels_but_keeps_joint_well_ids(qtb
     qtbot.addWidget(page)
     page._joint_host.scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("A1", 10, 10, 10, 10, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:1")),
+            WellHead("A1", 10, 10, 10, 10, 100, id=JointWellId("source:2")),
         ]
     )
 
@@ -180,7 +180,7 @@ def test_geomodel_toolbar_displays_duplicate_labels_but_keeps_joint_well_ids(qtb
     assert [
         (page._joint_well_a.itemText(index), page._joint_well_a.itemData(index))
         for index in range(page._joint_well_a.count())
-    ] == [("A1 (1)", "A1#1"), ("A1 (2)", "A1#2")]
+    ] == [("A1 (1)", "source:1"), ("A1 (2)", "source:2")]
 
 
 def test_geomodel_tree_checks_ignore_unknown_keys(qtbot):

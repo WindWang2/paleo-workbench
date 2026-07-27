@@ -46,7 +46,7 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
 def test_geomodel_restores_known_well_visibility_and_drops_stale_ids(
     qtbot, tmp_path, monkeypatch
 ):
-    from geoviz_well_seismic_3d import WellHead
+    from geoviz_well_seismic_3d import JointWellId, WellHead
     from paleo_workbench.viz import joint_host as host_mod
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
@@ -57,13 +57,13 @@ def test_geomodel_restores_known_well_visibility_and_drops_stale_ids(
     qtbot.addWidget(page)
     project = ProjectDocument.new("visibility")
     project.joint_analysis = JointAnalysisState(
-        well_visibility={"A1": False, "REMOVED": False}
+        well_visibility={"source:a1": False, "REMOVED": False}
     )
     page.set_project(project)
     page._joint_host.scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("NEW", 10, 10, 10, 10, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")),
+            WellHead("NEW", 10, 10, 10, 10, 100, id=JointWellId("source:new")),
         ]
     )
 
@@ -73,13 +73,13 @@ def test_geomodel_restores_known_well_visibility_and_drops_stale_ids(
         [(well.id, well.visible) for well in page._joint_host.scene.well_presentations()],
         page.collect_joint_analysis_state().well_visibility,
     ) == (
-        [("A1", False), ("NEW", True)],
-        {"A1": False, "NEW": True},
+        [("source:a1", False), ("source:new", True)],
+        {"source:a1": False, "source:new": True},
     )
 
 
 def test_geomodel_migrates_legacy_all_wells_hidden_state(qtbot, tmp_path, monkeypatch):
-    from geoviz_well_seismic_3d import WellHead
+    from geoviz_well_seismic_3d import JointWellId, WellHead
     from paleo_workbench.viz import joint_host as host_mod
     from paleo_workbench.ui.pages.geological_modeling_3d_page import (
         GeologicalModeling3DPage,
@@ -96,8 +96,8 @@ def test_geomodel_migrates_legacy_all_wells_hidden_state(qtbot, tmp_path, monkey
     page._apply_joint_tree_checks_from_project()
     page._joint_host.scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("B1", 10, 10, 10, 10, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")),
+            WellHead("B1", 10, 10, 10, 10, 100, id=JointWellId("source:b1")),
         ]
     )
 

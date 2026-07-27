@@ -12,6 +12,7 @@ ensure_geoviz_on_path()
 from geoviz_well_seismic_3d import (
     FenceSection,
     InMemoryVolumeAccess,
+    JointWellId,
     VerticalDomain,
     WellHead,
     WellSeismicScene,
@@ -98,12 +99,30 @@ def test_well_to_well_fence_accepts_joint_well_ids_for_duplicate_names():
     scene = _scene_with_volume()
     scene.set_wells(
         [
-            WellHead("A1", 1000, 2000, 1000, 2000, 100),
-            WellHead("A1", 3000, 4000, 3000, 4000, 100),
+            WellHead(
+                "A1",
+                1000,
+                2000,
+                1000,
+                2000,
+                100,
+                id=JointWellId("source:a1-left"),
+            ),
+            WellHead(
+                "A1",
+                3000,
+                4000,
+                3000,
+                4000,
+                100,
+                id=JointWellId("source:a1-right"),
+            ),
         ]
     )
 
-    fence = scene.add_well_to_well_fence(["A1#1", "A1#2"])
+    fence = scene.add_well_to_well_fence(
+        [JointWellId("source:a1-left"), JointWellId("source:a1-right")]
+    )
 
     np.testing.assert_array_equal(
         fence.vertices_xy,
@@ -159,9 +178,15 @@ def test_profile_assembly_uses_per_well_visibility_and_identity():
     scene = _scene_with_volume()
     scene.set_wells(
         [
-            WellHead("A1", 1000, 2000, 1000, 2000, 100),
-            WellHead("A1", 2000, 3000, 2000, 3000, 100),
-            WellHead("B1", 3000, 4000, 3000, 4000, 100),
+            WellHead(
+                "A1", 1000, 2000, 1000, 2000, 100, id=JointWellId("source:a1-left")
+            ),
+            WellHead(
+                "A1", 2000, 3000, 2000, 3000, 100, id=JointWellId("source:a1-mid")
+            ),
+            WellHead(
+                "B1", 3000, 4000, 3000, 4000, 100, id=JointWellId("source:b1")
+            ),
         ]
     )
     scene.add_fence(
@@ -171,12 +196,15 @@ def test_profile_assembly_uses_per_well_visibility_and_identity():
         )
     )
 
-    scene.set_well_visibility("A1#2", False)
+    scene.set_well_visibility(JointWellId("source:a1-mid"), False)
 
     assert [
         (hit.id, hit.display_name)
         for hit in scene.assemble_active_profile_wells()
-    ] == [("A1#1", "A1 (1)"), ("B1", "B1")]
+    ] == [
+        (JointWellId("source:a1-left"), "A1 (1)"),
+        (JointWellId("source:b1"), "B1"),
+    ]
 
 
 def test_probe_slice_indices():

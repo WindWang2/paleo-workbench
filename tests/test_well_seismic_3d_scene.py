@@ -11,6 +11,7 @@ ensure_geoviz_on_path()
 
 from geoviz_well_seismic_3d import (  # noqa: E402
     InMemoryVolumeAccess,
+    JointWellId,
     TimeDepthTable,
     VerticalDomain,
     WellHead,
@@ -88,7 +89,7 @@ def test_well_trajectory_time_domain_with_td():
     )
     scene.set_wells([well], td_tables={"A1": td})
 
-    traj = scene.well_trajectories()["A1"]
+    traj = next(iter(scene.well_trajectories().values()))
     assert traj.has_td is True
     assert traj.warning is None
     assert traj.points.shape[1] == 3
@@ -111,7 +112,7 @@ def test_well_trajectory_missing_td_safe_behaviour():
     )
     scene.set_wells([well], td_tables={})
 
-    traj = scene.well_trajectories()["A2"]
+    traj = next(iter(scene.well_trajectories().values()))
     assert traj.has_td is False
     assert traj.warning is not None
     assert len(traj.points) == 1
@@ -119,23 +120,28 @@ def test_well_trajectory_missing_td_safe_behaviour():
     assert traj.points[0, 1] == pytest.approx(2000.0)
 
 
-def test_scene_assigns_distinct_stable_ids_and_labels_to_duplicate_well_names():
+def test_scene_keeps_source_ids_stable_when_duplicate_wells_are_renamed_or_reordered():
     scene = WellSeismicScene()
-    scene.set_wells(
-        [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("A1", 10, 10, 10, 10, 100),
-            WellHead("B1", 20, 20, 20, 20, 100),
-        ]
-    )
+    scene.set_wells([
+        WellHead("A1", 0, 0, 0, 0, 100),
+        WellHead("A1", 10, 10, 10, 10, 100),
+    ])
+    source_7, source_8 = [
+        presentation.id for presentation in scene.well_presentations()
+    ]
+    scene.set_well_visibility(source_8, False)
+
+    scene.set_wells([
+        WellHead("RENAMED", 10, 10, 10, 10, 100),
+        WellHead("A1", 0, 0, 0, 0, 100),
+    ])
 
     assert [
-        (well.id, well.name, well.display_name)
+        (well.id, well.name, well.visible)
         for well in scene.well_presentations()
     ] == [
-        ("A1#1", "A1", "A1 (1)"),
-        ("A1#2", "A1", "A1 (2)"),
-        ("B1", "B1", "B1"),
+        (source_8, "RENAMED", False),
+        (source_7, "A1", True),
     ]
 
 
@@ -143,34 +149,52 @@ def test_scene_visibility_filters_3d_trajectories_without_deleting_analysis():
     scene = WellSeismicScene()
     scene.set_wells(
         [
-            WellHead("A1", 0, 0, 0, 0, 100),
-            WellHead("B1", 10, 10, 10, 10, 100),
+            WellHead("A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")),
+            WellHead("B1", 10, 10, 10, 10, 100, id=JointWellId("source:b1")),
         ]
     )
     fence = scene.add_well_to_well_fence(["A1", "B1"])
 
-    scene.set_well_visibility("A1", False)
+    scene.set_well_visibility(JointWellId("source:a1"), False)
 
     assert (
         set(scene.well_trajectories(visible_only=True)),
         set(scene.well_trajectories()),
         [saved.id for saved in scene.fences],
-    ) == ({"B1"}, {"A1", "B1"}, [fence.id])
+    ) == (
+        {JointWellId("source:b1")},
+        {JointWellId("source:a1"), JointWellId("source:b1")},
+        [fence.id],
+    )
 
 
 def test_scene_reload_preserves_known_visibility_and_shows_new_wells():
     scene = WellSeismicScene()
-    a1 = WellHead("A1", 0, 0, 0, 0, 100)
-    b1 = WellHead("B1", 10, 10, 10, 10, 100)
+    a1 = WellHead(
+        "A1", 0, 0, 0, 0, 100, id=JointWellId("source:a1")
+    )
+    b1 = WellHead(
+        "B1", 10, 10, 10, 10, 100, id=JointWellId("source:b1")
+    )
     scene.set_wells([a1, b1])
-    scene.set_well_visibility("A1", False)
+    scene.set_well_visibility(JointWellId("source:a1"), False)
 
-    scene.set_wells([a1, b1, WellHead("C1", 20, 20, 20, 20, 100)])
+    scene.set_wells([
+        a1,
+        b1,
+        WellHead(
+            "C1", 20, 20, 20, 20, 100, id=JointWellId("source:c1")
+        ),
+    ])
 
     assert [
         (well.id, well.visible)
         for well in scene.well_presentations()
-    ] == [("A1", False), ("B1", True), ("C1", True)]
+    ] == [
+        (JointWellId("source:a1"), False),
+        (JointWellId("source:b1"), True),
+        (JointWellId("source:c1"), True),
+    ]
 
 
 def test_deviated_well_head_to_bottom_xy():
@@ -191,7 +215,7 @@ def test_deviated_well_head_to_bottom_xy():
         total_depth_m=2000.0,
     )
     scene.set_wells([well], td_tables={"A10": td})
-    pts = scene.well_trajectories()["A10"].points
+    pts = next(iter(scene.well_trajectories().values())).points
     assert pts[0, 0] == pytest.approx(10547.09)
     assert pts[0, 1] == pytest.approx(11754.19)
     assert pts[-1, 0] == pytest.approx(10457.533)
