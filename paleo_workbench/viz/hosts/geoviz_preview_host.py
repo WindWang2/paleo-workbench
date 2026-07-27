@@ -5,6 +5,60 @@ from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from geoviz import GeoVizEngine, PreparedPreview, PreviewKind
 
+from paleo_workbench.viz.hosts.well_location_preview import (
+    WellLocationPreview,
+    WellLocationPreviewStateStore,
+)
+
+
+class _EnginePreviewLifecycle:
+    def __init__(self, engine) -> None:
+        self.engine = engine
+
+    def create(self, kind: PreviewKind, parent: QWidget) -> QWidget:
+        return self.engine.create_widget(kind, parent)
+
+    def render(
+        self,
+        widget: QWidget,
+        preview: PreparedPreview,
+    ) -> None:
+        self.engine.render(widget, preview)
+
+    def release(self, widget: QWidget) -> None:
+        self.engine.release(widget)
+
+
+class _WellLocationLifecycle:
+    def __init__(
+        self,
+        engine,
+        state_store: WellLocationPreviewStateStore,
+    ) -> None:
+        self.engine = engine
+        self.state_store = state_store
+
+    def create(self, _kind: PreviewKind, parent: QWidget) -> QWidget:
+        return WellLocationPreview(
+            self.engine,
+            parent,
+            state_store=self.state_store,
+        )
+
+    def render(
+        self,
+        widget: QWidget,
+        preview: PreparedPreview,
+    ) -> None:
+        if not isinstance(widget, WellLocationPreview):
+            raise TypeError("XY preview host widget type mismatch")
+        widget.render(preview)
+
+    def release(self, widget: QWidget) -> None:
+        if not isinstance(widget, WellLocationPreview):
+            raise TypeError("XY preview host widget type mismatch")
+        widget.release()
+
 
 class GeoVizPreviewHost(QWidget):
     def __init__(self, engine: GeoVizEngine | None = None, parent=None) -> None:
@@ -16,6 +70,14 @@ class GeoVizPreviewHost(QWidget):
         layout.addWidget(self.stack)
         self.widgets: dict[PreviewKind, QWidget] = {}
         self._active_kind: PreviewKind | None = None
+        self._well_state_store = WellLocationPreviewStateStore()
+        self._default_lifecycle = _EnginePreviewLifecycle(self.engine)
+        self._lifecycles = {
+            PreviewKind.XY_SCATTER: _WellLocationLifecycle(
+                self.engine,
+                self._well_state_store,
+            )
+        }
 
     def render(self, preview: PreparedPreview) -> QWidget:
         self._require_ui_thread()
@@ -58,6 +120,10 @@ class GeoVizPreviewHost(QWidget):
         if first_error is not None:
             raise first_error
 
+    def clear_session_state(self) -> None:
+        """Forget per-asset preview state, for example when closing a project."""
+        self._well_state_store.clear()
+
     def _release_kind(self, kind: PreviewKind) -> None:
         widget = self.widgets.get(kind)
         if widget is None:
@@ -68,16 +134,7 @@ class GeoVizPreviewHost(QWidget):
 
     def _dispose_widget(self, kind: PreviewKind, widget: QWidget) -> None:
         try:
-            if kind is PreviewKind.XY_SCATTER:
-                from paleo_workbench.viz.hosts.well_location_preview import (
-                    WellLocationPreview,
-                )
-
-                if not isinstance(widget, WellLocationPreview):
-                    raise TypeError("XY preview host widget type mismatch")
-                widget.release()
-            else:
-                self.engine.release(widget)
+            self._lifecycle(kind).release(widget)
         finally:
             widget.hide()
             self.stack.removeWidget(widget)
@@ -88,29 +145,20 @@ class GeoVizPreviewHost(QWidget):
             widget.deleteLater()
 
     def _create_widget(self, preview: PreparedPreview) -> QWidget:
-        if preview.kind is PreviewKind.XY_SCATTER:
-            from paleo_workbench.viz.hosts.well_location_preview import (
-                WellLocationPreview,
-            )
-
-            return WellLocationPreview(self.engine, self.stack)
-        return self.engine.create_widget(preview.kind, self.stack)
+        return self._lifecycle(preview.kind).create(
+            preview.kind,
+            self.stack,
+        )
 
     def _render_widget(
         self,
         widget: QWidget,
         preview: PreparedPreview,
     ) -> None:
-        if preview.kind is PreviewKind.XY_SCATTER:
-            from paleo_workbench.viz.hosts.well_location_preview import (
-                WellLocationPreview,
-            )
+        self._lifecycle(preview.kind).render(widget, preview)
 
-            if not isinstance(widget, WellLocationPreview):
-                raise TypeError("XY preview host widget type mismatch")
-            widget.render(preview)
-            return
-        self.engine.render(widget, preview)
+    def _lifecycle(self, kind: PreviewKind):
+        return self._lifecycles.get(kind, self._default_lifecycle)
 
     @staticmethod
     def _require_ui_thread() -> None:

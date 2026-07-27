@@ -114,6 +114,10 @@ class WellSeismicJointHost(QObject):
         if project is self._project:
             return
         self._project = project
+        if self._scene is not None:
+            # Prevent the incoming project's saved slice state from being
+            # snapped against the previous project's preview cube.
+            self._scene.set_volume_access(None)
         state = getattr(project, "joint_analysis", None)
         self._persisted_well_identity_asset_id = getattr(
             state, "well_identity_asset_id", None
@@ -149,6 +153,9 @@ class WellSeismicJointHost(QObject):
             return
         self._auto_default_fence = bool(auto_default_fence)
         self._pending_domain = preferred_domain
+        # A replacement project/SEGY must not reconcile saved slice times
+        # against the previous preview shape while the new survey is binding.
+        self._scene.set_volume_access(None)
         repo = _repo_root()
         self._paths = resolve_joint_assets(self._project, repo_root=repo)
         paths = self._paths
@@ -342,24 +349,25 @@ class WellSeismicJointHost(QObject):
                 from geoviz import load_las_preview
 
                 data = load_las_preview(str(las_path), fast=True)
-                wname = Path(las_path).stem
                 if data is None:
                     continue
+                wname = str(
+                    getattr(data, "well_name", None)
+                    or Path(las_path).stem
+                )
                 well_curves: dict[str, tuple] = {}
                 curves_list = getattr(data, "curves", None) or []
-                depth = None
-                for c in curves_list:
-                    name = getattr(c, "name", "") or getattr(c, "mnemonic", "")
-                    vals = np.asarray(getattr(c, "values", getattr(c, "data", [])), dtype=float)
-                    if name.upper() in {"DEPT", "DEPTH", "MD"}:
-                        depth = vals
-                if depth is None:
-                    continue
                 for c in curves_list:
                     name = str(getattr(c, "name", "") or getattr(c, "mnemonic", ""))
                     if name.upper() in {"DEPT", "DEPTH", "MD"}:
                         continue
-                    vals = np.asarray(getattr(c, "values", getattr(c, "data", [])), dtype=float)
+                    depth = np.asarray(
+                        getattr(c, "depth", []), dtype=float
+                    )
+                    vals = np.asarray(
+                        getattr(c, "values", getattr(c, "data", [])),
+                        dtype=float,
+                    )
                     if vals.size == depth.size:
                         well_curves[name] = (depth, vals)
                 if well_curves:

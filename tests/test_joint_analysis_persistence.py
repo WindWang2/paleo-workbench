@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from paleo_workbench.project.models import JointAnalysisState, ProjectDocument
+from paleo_workbench.project.models import (
+    JointAnalysisState,
+    JointTimeSliceState,
+    ProjectDocument,
+)
 
 
 def test_joint_analysis_state_roundtrip_in_project():
@@ -12,6 +16,14 @@ def test_joint_analysis_state_roundtrip_in_project():
         well_visibility={"A1": False, "A2": True},
         well_identity_asset_id="res:wells",
         well_identity_map={"name:A1": "source:a1", "name:A2": "source:a2"},
+        orthogonal_inline_index=12,
+        orthogonal_crossline_index=34,
+        time_slices=[
+            JointTimeSliceState(time_ms=800.0),
+            JointTimeSliceState(time_ms=1200.0, visible=False),
+        ],
+        active_time_slice_ms=1200.0,
+        time_slice_opacity=65,
         vertical_domain="Depth",
         active_fence_wells=["A1", "A2"],
         path_hints={"segy": "/tmp/x.sgy"},
@@ -29,6 +41,14 @@ def test_joint_analysis_state_roundtrip_in_project():
         "name:A1": "source:a1",
         "name:A2": "source:a2",
     }
+    assert restored.joint_analysis.orthogonal_inline_index == 12
+    assert restored.joint_analysis.orthogonal_crossline_index == 34
+    assert [
+        (item.time_ms, item.visible)
+        for item in restored.joint_analysis.time_slices
+    ] == [(800.0, True), (1200.0, False)]
+    assert restored.joint_analysis.active_time_slice_ms == 1200.0
+    assert restored.joint_analysis.time_slice_opacity == 65
     # No voxel payload
     assert "shape" not in data["joint_analysis"]
 
@@ -56,6 +76,167 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     assert state.well_identity_asset_id == "res:wells"
     page.save_joint_analysis_to_project()
     assert page._project.joint_analysis.vertical_domain == "Depth"
+
+
+def test_color_scale_card_updates_scene_and_roundtrips_project_settings(
+    qtbot, tmp_path, monkeypatch
+):
+    from geoviz_well_seismic_3d import JointDisplaySettings
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+    from paleo_workbench.viz import joint_host as host_mod
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    project = ProjectDocument.new("colors")
+    project.joint_analysis = JointAnalysisState(
+        seismic_color_scale="gray",
+        gr_color_scale="plasma",
+        well_width_px=7,
+    )
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+
+    page.set_project(project)
+    page._joint_color_card_btn.click()
+
+    assert page._joint_color_card.isVisibleTo(page)
+    assert page._joint_seismic_color.currentData() == "gray"
+    assert page._joint_gr_color.currentData() == "plasma"
+    assert page._joint_well_width.value() == 7
+    assert page._joint_host.scene.display_settings == JointDisplaySettings(
+        seismic_color_scale="gray",
+        gr_color_scale="plasma",
+        well_width_px=7,
+    )
+    state = page.collect_joint_analysis_state()
+    assert (
+        state.seismic_color_scale,
+        state.gr_color_scale,
+        state.well_width_px,
+    ) == ("gray", "plasma", 7)
+
+
+def test_orthogonal_slice_card_restores_stack_domain_and_project_state(
+    qtbot, tmp_path, monkeypatch
+):
+    import numpy as np
+
+    from geoviz_well_seismic_3d import InMemoryVolumeAccess
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+    from paleo_workbench.viz import joint_host as host_mod
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    project = ProjectDocument.new("slice-stack")
+    project.joint_analysis = JointAnalysisState(
+        orthogonal_inline_index=1,
+        orthogonal_crossline_index=2,
+        time_slices=[
+            JointTimeSliceState(time_ms=40.0),
+            JointTimeSliceState(time_ms=160.0, visible=False),
+        ],
+        active_time_slice_ms=160.0,
+        time_slice_opacity=65,
+    )
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page.set_project(project)
+    page._joint_host.scene.set_survey_from_corners(
+        (0, 0, 0.0, 0.0),
+        (0, 4, 40.0, 0.0),
+        (4, 4, 40.0, 40.0),
+        n_samples=101,
+        dt_ms=2.0,
+    )
+    page._joint_host.scene.set_volume_access(
+        InMemoryVolumeAccess(np.zeros((5, 7, 11), dtype=np.float32))
+    )
+    page._refresh_joint_slice_card()
+
+    assert page._joint_slice_card_btn.isChecked()
+    assert not page._joint_slice_card.isHidden()
+    assert (
+        page._joint_inline_slice.value(),
+        page._joint_crossline_slice.value(),
+    ) == (1, 2)
+    assert page._joint_slice_card.maximumHeight() == 52
+    assert page._joint_slice_card.sizeHint().height() <= 52
+    assert page._joint_time_selector.count() == 2
+    assert [
+        page._joint_time_selector.itemData(index)
+        for index in range(page._joint_time_selector.count())
+    ] == [40.0, 160.0]
+    assert page._joint_time_selector.currentData() == 160.0
+    assert page._joint_active_time_editor.value() == 160.0
+    assert not page._joint_active_time_visible.isChecked()
+    assert page._joint_time_opacity.value() == 65
+
+    page._joint_domain.setCurrentText("Depth")
+    assert not page._joint_time_selector.isEnabled()
+
+    state = page.collect_joint_analysis_state()
+    assert (
+        state.orthogonal_inline_index,
+        state.orthogonal_crossline_index,
+        [(item.time_ms, item.visible) for item in state.time_slices],
+        state.active_time_slice_ms,
+        state.time_slice_opacity,
+    ) == (
+        1,
+        2,
+        [(40.0, True), (160.0, False)],
+        160.0,
+        65,
+    )
+
+
+def test_orthogonal_slice_card_adds_and_activates_snapped_time(
+    qtbot, tmp_path, monkeypatch
+):
+    import numpy as np
+
+    from geoviz_well_seismic_3d import InMemoryVolumeAccess
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+    from paleo_workbench.viz import joint_host as host_mod
+
+    monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page.set_project(ProjectDocument.new("slice-add"))
+    page._joint_host.scene.set_survey_from_corners(
+        (0, 0, 0.0, 0.0),
+        (0, 4, 40.0, 0.0),
+        (4, 4, 40.0, 40.0),
+        n_samples=101,
+        dt_ms=2.0,
+    )
+    page._joint_host.scene.set_volume_access(
+        InMemoryVolumeAccess(np.zeros((5, 7, 11), dtype=np.float32))
+    )
+    page._refresh_joint_slice_card()
+
+    page._joint_new_time.setValue(147.0)
+    page._joint_add_time_slice.click()
+
+    assert [
+        item.time_ms
+        for item in page._joint_host.scene.orthogonal_slice_state.time_slices
+    ] == [100.0, 140.0]
+    assert (
+        page._joint_host.scene.orthogonal_slice_state.active_time_ms
+        == 140.0
+    )
+    assert page._joint_time_selector.count() == 2
+    assert page._joint_time_selector.currentData() == 140.0
+
+    page._joint_new_time.setValue(141.0)
+    page._joint_add_time_slice.click()
+    assert page._joint_time_selector.count() == 2
+    assert "已有" in page._joint_status.text()
 
 
 def test_geomodel_restores_known_well_visibility_and_drops_stale_ids(

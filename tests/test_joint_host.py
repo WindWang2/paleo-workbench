@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from paleo_workbench.viz.joint_host import WellSeismicJointHost
 
 
@@ -30,7 +32,6 @@ def test_host_has_scene_when_geoviz_available():
 def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
     """reload(preferred_domain=Depth) must not leave scene stuck on Time."""
     from paleo_workbench.viz import joint_host as mod
-    from paleo_workbench.project.models import JointAnalysisState, ProjectDocument
 
     monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
     # Empty data → early exit; still unit-test set_vertical_domain path
@@ -74,8 +75,65 @@ def test_host_depth_status_mentions_2d_stays_time(tmp_path, monkeypatch):
     assert "2D" in statuses[-1] and "Time" in statuses[-1]
 
 
+def test_host_loads_gr_using_each_las_curve_depth_samples(tmp_path, monkeypatch):
+    from paleo_workbench.project.models import ProjectDocument, ResourceItem
+    from paleo_workbench.viz import joint_host as mod
+
+    monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
+    well_head = tmp_path / "ExportWellHead.dat"
+    well_head.write_text("A1 0 0 0 100 0 0\n", encoding="utf-8")
+    las = tmp_path / "A1.las"
+    las.write_text(
+        "\n".join(
+            [
+                "~Version",
+                "VERS. 2.0",
+                "WRAP. NO",
+                "~Well",
+                "STRT.M 0",
+                "STOP.M 100",
+                "STEP.M 50",
+                "NULL. -999.25",
+                "WELL. A1",
+                "~Curve",
+                "DEPT.M : Depth",
+                "GR.API : Gamma Ray",
+                "~Ascii",
+                "0 10",
+                "50 20",
+                "100 30",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    project = ProjectDocument.new("gr")
+    project.resources.extend(
+        [
+            ResourceItem(
+                id="res:wells",
+                name=well_head.name,
+                path=str(well_head),
+                type="well_head",
+                format="dat",
+            ),
+            ResourceItem(
+                id="res:las",
+                name=las.name,
+                path=str(las),
+                type="well_log",
+                format="las",
+            ),
+        ]
+    )
+    host = WellSeismicJointHost()
+    host.set_project(project)
+
+    host.reload()
+
+    assert host.scene.gr_value_range() == pytest.approx((10.4, 29.6))
+
+
 def test_joint_page_delegates_to_host(qtbot, tmp_path, monkeypatch):
-    from paleo_workbench.ui.pages import well_seismic_joint_page as page_mod
     from paleo_workbench.viz import joint_host as host_mod
 
     monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)

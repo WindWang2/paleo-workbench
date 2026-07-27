@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PROTOTYPE — 井震联合工作台（无右栏 + Time 2D）#118</title>
+  <!--
+    Question: 用户是否一眼明白工作流？
+    Two-col · tree geoviz-only · 3D pick/draw fence · bottom Time profile.
+    Throwaway. Open: xdg-open this file  OR  python3 -m http.server (from repo root).
+    Variants: ?variant=A|B|C
+  -->
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --panel: #ffffff;
+      --border: #d8dee6;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --ok: #059669;
+      --warn: #d97706;
+      --well: #dc2626;
+      --well-hi: #f59e0b;
+      --fence: #7c3aed;
+      --time: #0ea5e9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 13px/1.4 system-ui, "Segoe UI", "PingFang SC", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .banner {
+      background: #7c2d12;
+      color: #ffedd5;
+      padding: 6px 12px;
+      font-weight: 600;
+      font-size: 12px;
+      flex: 0 0 auto;
+    }
+    .banner a { color: #fdba74; }
+    .banner code { background: rgba(0,0,0,.25); padding: 1px 6px; border-radius: 4px; }
+    .app { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .stages {
+      display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border);
+      background: var(--panel); color: var(--muted); font-size: 12px;
+    }
+    .stages .on {
+      color: var(--text); background: #e8eef8; padding: 4px 10px; border-radius: 999px;
+      font-weight: 600;
+    }
+    .main { flex: 1; display: flex; min-height: 0; }
+    .tree {
+      width: 220px; border-right: 1px solid var(--border); background: var(--panel);
+      padding: 10px; overflow: auto; flex: 0 0 auto;
+    }
+    .tree h3 { margin: 0 0 8px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .group-title { font-weight: 600; margin-bottom: 4px; }
+    label { display: flex; gap: 6px; align-items: center; padding: 2px 0; cursor: pointer; }
+    .center { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      padding: 6px 10px; border-bottom: 1px solid var(--border); background: #fafbfc;
+    }
+    .toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+    .btn, select, .seg button {
+      background: #fff; border: 1px solid var(--border); color: var(--text);
+      border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+    }
+    .btn:hover, .seg button:hover { border-color: var(--accent); }
+    .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn.danger { color: #b91c1c; border-color: #fecaca; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .seg button { border: none; border-radius: 0; background: #fff; }
+    .seg button.on { background: var(--accent); color: #fff; }
+    .chip {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;
+    }
+    .chip.warn { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+    .status {
+      padding: 4px 10px; font-size: 11px; color: var(--muted);
+      border-bottom: 1px solid var(--border); background: #fff;
+    }
+    .status .ok { color: var(--ok); font-weight: 600; }
+    .view3d {
+      flex: 1; position: relative; min-height: 140px;
+      background:
+        linear-gradient(180deg, #dbeafe 0%, #e0e7ff 40%, #f1f5f9 100%);
+      overflow: hidden;
+    }
+    .view3d .label {
+      position: absolute; top: 10px; left: 10px; z-index: 3;
+      background: rgba(255,255,255,.9); padding: 4px 8px; border-radius: 6px;
+      font-size: 11px; color: #1d4ed8; border: 1px solid #bfdbfe;
+    }
+    .cube {
+      position: absolute; left: 50%; top: 46%; width: 220px; height: 150px;
+      transform: translate(-50%, -50%) perspective(480px) rotateX(58deg) rotateZ(-22deg);
+      border: 1px solid #60a5fa; background: rgba(59,130,246,.12);
+      box-shadow: 0 12px 40px rgba(37,99,235,.15);
+    }
+    .slice-bar {
+      position: absolute; bottom: 8px; left: 12px; right: 12px; z-index: 3;
+      display: flex; gap: 10px; align-items: center; font-size: 11px; color: var(--muted);
+      background: rgba(255,255,255,.92); padding: 6px 10px; border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .slice-bar input[type=range] { flex: 1; }
+    .well-dot {
+      position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px;
+      border-radius: 50%; background: var(--well); border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.25); cursor: crosshair; z-index: 4;
+    }
+    .well-dot::after {
+      content: attr(data-name);
+      position: absolute; left: 16px; top: -2px; font-size: 11px; font-weight: 600;
+      color: #7f1d1d; white-space: nowrap; text-shadow: 0 0 4px #fff;
+    }
+    .well-dot.hover, .well-dot:hover { background: var(--well-hi); transform: scale(1.15); }
+    .well-dot.selected { background: var(--fence); box-shadow: 0 0 0 3px rgba(124,58,237,.35); }
+    .well-dot.endpoint { outline: 2px solid var(--fence); }
+    .fence-line {
+      position: absolute; height: 3px; background: var(--fence); transform-origin: left center;
+      z-index: 2; pointer-events: none; opacity: .85;
+      box-shadow: 0 0 8px rgba(124,58,237,.4);
+    }
+    .fence-line.preview { background: var(--well-hi); opacity: .7; stroke-dasharray: 4; }
+    .rubber {
+      position: absolute; pointer-events: none; z-index: 2;
+      border-top: 2px dashed var(--fence); transform-origin: left center;
+    }
+    .fence2d {
+      height: 168px; border-top: 1px solid var(--border); background: var(--panel);
+      display: flex; flex-direction: column; flex: 0 0 auto;
+    }
+    .fence2d.collapsed { height: 34px; }
+    .fence2d .hdr {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      padding: 4px 10px; font-size: 12px; border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+    }
+    .fence2d .hdr .title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .profile {
+      flex: 1; margin: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+      position: relative; overflow: hidden;
+      background: linear-gradient(180deg, #0c4a6e 0%, #082f49 100%);
+      color: #e0f2fe;
+    }
+    .profile.empty {
+      background: #f8fafc; color: var(--muted); border-style: dashed;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    }
+    .profile.empty .hint { font-size: 12px; text-align: center; max-width: 360px; }
+    .profile canvas { width: 100%; height: 100%; display: block; }
+    .profile .axis {
+      position: absolute; left: 8px; top: 6px; font-size: 10px; color: #7dd3fc;
+      background: rgba(0,0,0,.25); padding: 2px 6px; border-radius: 4px;
+    }
+    .profile .wells-lbl {
+      position: absolute; bottom: 4px; left: 0; right: 0; display: flex;
+      justify-content: space-between; padding: 0 24px; font-size: 11px; color: #bae6fd;
+    }
+    .state-panel {
+      position: fixed; top: 52px; right: 12px; width: 260px; z-index: 40;
+      background: #fff; border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px; font-size: 12px; color: var(--muted);
+      box-shadow: 0 8px 24px rgba(0,0,0,.08);
+    }
+    .state-panel strong { color: var(--text); display: block; margin-bottom: 4px; }
+    .state-panel pre {
+      margin: 8px 0 0; padding: 8px; background: #0f172a; color: #e2e8f0;
+      border-radius: 6px; font-size: 10px; overflow: auto; max-height: 180px;
+    }
+    .switcher {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: #0f172a; border: 1px solid #3b82f6; border-radius: 999px;
+      padding: 8px 12px; display: flex; gap: 10px; align-items: center;
+      box-shadow: 0 8px 30px rgba(0,0,0,.35); z-index: 50; color: #e2e8f0;
+    }
+    .switcher button {
+      background: transparent; border: none; color: #e2e8f0; font-size: 16px; cursor: pointer;
+    }
+    .switcher .meta { font-size: 12px; color: #93c5fd; min-width: 280px; text-align: center; }
+
+    /* B: taller profile first */
+    .vB .fence2d { height: 240px; }
+    .vB .view3d { min-height: 100px; }
+
+    /* C: mode dock on 3D */
+    .vC .toolbar .mode-block { display: none; }
+    .mode-dock {
+      display: none; position: absolute; top: 10px; right: 10px; z-index: 5;
+      background: rgba(255,255,255,.95); border: 1px solid var(--border);
+      border-radius: 10px; padding: 6px; flex-direction: column; gap: 4px;
+    }
+    .vC .mode-dock { display: flex; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    PROTOTYPE · throwaway ·
+    <a href="https://github.com/WindWang2/paleo-workbench/issues/118">#118</a>
+    · map <a href="https://github.com/WindWang2/paleo-workbench/issues/112">#112</a>
+    · <code>xdg-open paleo_workbench/ui/pages/prototypes/joint_workbench_no_right_rail_wireframe.html</code>
+    · variants <code>?variant=A|B|C</code>
+  </div>
+
+  <div class="state-panel">
+    <strong>要回答的问题</strong>
+    两栏无右栏、树仅 geoviz、3D 点选/画线建 fence、底栏 Time 连井剖面 —— 是否一眼明白工作流？
+    <div style="margin-top:8px">
+      <button class="btn" type="button" id="btn-reset">重置场景</button>
+      <button class="btn" type="button" id="btn-clear-fences">清空 fences</button>
+    </div>
+    <pre id="state-dump">{}</pre>
+  </div>
+
+  <div id="root" class="app vA"></div>
+
+  <div class="switcher">
+    <button type="button" id="prev">←</button>
+    <div class="meta" id="label">A</div>
+    <button type="button" id="next">→</button>
+  </div>
+
+  <script>
+    /** PROTOTYPE state — in memory only */
+    const WELLS = [
+      { id: "A1", x: 32, y: 38 },
+      { id: "A11", x: 48, y: 52 },
+      { id: "B3", x: 62, y: 34 },
+      { id: "C7", x: 55, y: 68 },
+      { id: "D2", x: 40, y: 62 },
+    ];
+
+    const VARIANTS = [
+      {
+        key: "A",
+        name: "决议标准稿",
+        blurb: "2 栏 · 树 geoviz · 顶栏模式 · 底 Time 剖面 · auto 默认 fence",
+        autoFence: true,
+        tall2d: false,
+      },
+      {
+        key: "B",
+        name: "高 2D 优先",
+        blurb: "同布局，底栏更高，强调 Time 剖面是主阅读面",
+        autoFence: true,
+        tall2d: true,
+      },
+      {
+        key: "C",
+        name: "模式贴 3D",
+        blurb: "选井/画线 dock 在 3D 角；无 auto fence，先进空态引导",
+        autoFence: false,
+        tall2d: false,
+      },
+    ];
+
+    const state = {
+      variant: "A",
+      mode: "pick", // pick | draw
+      domain: "Time", // Time | Depth — 2D always Time
+      halfSelect: null,
+      fences: [], // {a,b, id}
+      activeId: null,
+      hover: null,
+      dragFrom: null,
+      status: "就绪",
+    };
+
+    function uid() {
+      return "f" + Math.random().toString(36).slice(2, 7);
+    }
+
+    function resetScene(auto) {
+      state.halfSelect = null;
+      state.dragFrom = null;
+      state.fences = [];
+      state.activeId = null;
+      state.mode = "pick";
+      state.domain = "Time";
+      if (auto) {
+        const f = { id: uid(), a: "A1", b: "A11" };
+        state.fences.push(f);
+        state.activeId = f.id;
+        state.status = "已加载 · auto 默认 fence A1–A11";
+      } else {
+        state.status = "已加载 · 无 fence — 点两口井或画线";
+      }
+      render();
+    }
+
+    function activeFence() {
+      return state.fences.find((f) => f.id === state.activeId) || null;
+    }
+
+    function addFence(a, b) {
+      if (!a || !b || a === b) {
+        state.status = "无效井对（需两口不同井）";
+        dump();
+        return;
+      }
+      const f = { id: uid(), a, b };
+      state.fences.push(f);
+      state.activeId = f.id;
+      state.halfSelect = null;
+      state.dragFrom = null;
+      state.status = `已追加 fence ${a}–${b}（active）`;
+      render();
+    }
+
+    function wellById(id) {
+      return WELLS.find((w) => w.id === id);
+    }
+
+    function pctToPx(view, wx, wy) {
+      const r = view.getBoundingClientRect();
+      return { x: (wx / 100) * r.width, y: (wy / 100) * r.height };
+    }
+
+    function drawProfile(canvas, fence) {
+      if (!canvas || !fence) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = "#0c4a6e";
+      ctx.fillRect(0, 0, w, h);
+      // fake seismic
+      for (let i = 0; i < 40; i++) {
+        const x = (i / 40) * w;
+        const amp = 8 + Math.sin(i * 0.7) * 6 + Math.cos(i * 1.3) * 4;
+        ctx.strokeStyle = i % 3 === 0 ? "rgba(125,211,252,.55)" : "rgba(14,165,233,.35)";
+        ctx.beginPath();
+        for (let y = 0; y < h; y += 2) {
+          const ox = Math.sin(y * 0.08 + i) * amp;
+          if (y === 0) ctx.moveTo(x + ox, y);
+          else ctx.lineTo(x + ox, y);
+        }
+        ctx.stroke();
+      }
+      // well ticks
+      ctx.fillStyle = "#fbbf24";
+      ctx.fillRect(w * 0.12 - 1, 0, 2, h);
+      ctx.fillRect(w * 0.88 - 1, 0, 2, h);
+      ctx.fillStyle = "#e0f2fe";
+      ctx.font = "11px system-ui";
+      ctx.fillText(fence.a, w * 0.12 - 8, h - 6);
+      ctx.fillText(fence.b, w * 0.88 - 12, h - 6);
+      ctx.fillStyle = "#7dd3fc";
+      ctx.fillText("Time (ms) ↓", 8, 14);
+    }
+
+    function dump() {
+      const el = document.getElementById("state-dump");
+      if (!el) return;
+      el.textContent = JSON.stringify(
+        {
+          variant: state.variant,
+          mode: state.mode,
+          domain3d: state.domain,
+          profileDomain: "Time",
+          halfSelect: state.halfSelect,
+          active: activeFence(),
+          fences: state.fences,
+          status: state.status,
+        },
+        null,
+        2
+      );
+    }
+
+    function treeHtml() {
+      return `
+        <aside class="tree">
+          <h3>场景对象</h3>
+          <div class="group">
+            <div class="group-title">井震联合 (geoviz)</div>
+            <label><input type="checkbox" checked /> 地震预览体</label>
+            <label><input type="checkbox" checked /> 联合井轨迹</label>
+            <label><input type="checkbox" checked /> 井间剖面 fence</label>
+            <label><input type="checkbox" checked /> 井震 3D 视口</label>
+            <label><input type="checkbox" checked /> 井震 2D 剖面条</label>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:12px">
+            仅 geoviz 组（#114 C1）。无建模/断层/综合组。
+          </p>
+        </aside>`;
+    }
+
+    function toolbarHtml() {
+      return `
+        <div class="toolbar">
+          <span class="mode-block">
+            <span style="color:var(--muted)">交互</span>
+            <span class="seg" id="mode-seg">
+              <button type="button" data-mode="pick" class="${state.mode === "pick" ? "on" : ""}">选井两点</button>
+              <button type="button" data-mode="draw" class="${state.mode === "draw" ? "on" : ""}">画线吸附</button>
+            </span>
+          </span>
+          <span class="sep mode-block"></span>
+          <span style="color:var(--muted)">域</span>
+          <select id="domain-sel">
+            <option value="Time" ${state.domain === "Time" ? "selected" : ""}>Time</option>
+            <option value="Depth" ${state.domain === "Depth" ? "selected" : ""}>Depth</option>
+          </select>
+          <span class="chip" title="2D 强制 Time">2D: Time-only</span>
+          ${state.domain === "Depth" ? `<span class="chip warn">Depth → 仅 3D</span>` : ""}
+          <span class="sep"></span>
+          <span style="color:var(--muted)">井对快捷</span>
+          <select id="pair-a">${WELLS.map((w) => `<option ${w.id === "A1" ? "selected" : ""}>${w.id}</option>`).join("")}</select>
+          <select id="pair-b">${WELLS.map((w) => `<option ${w.id === "A11" ? "selected" : ""}>${w.id}</option>`).join("")}</select>
+          <button class="btn primary" type="button" id="btn-pair">井间剖面</button>
+          <button class="btn danger" type="button" id="btn-del-active" title="删除 active">删 active</button>
+          <span class="sep"></span>
+          <button class="btn" type="button">透视</button>
+          <button class="btn" type="button">俯瞰</button>
+          <button class="btn" type="button">复位</button>
+        </div>`;
+    }
+
+    function fenceLinesHtml(view) {
+      // lines rendered after layout via JS
+      return `<div id="fence-lines"></div><div id="rubber" class="rubber" style="display:none"></div>`;
+    }
+
+    function wellsHtml() {
+      return WELLS.map((w) => {
+        const cls = [
+          "well-dot",
+          state.hover === w.id ? "hover" : "",
+          state.halfSelect === w.id ? "selected" : "",
+          activeFence() && (activeFence().a === w.id || activeFence().b === w.id) ? "endpoint" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<div class="${cls}" data-id="${w.id}" data-name="${w.id}"
+          style="left:${w.x}%;top:${w.y}%"></div>`;
+      }).join("");
+    }
+
+    function profileHtml() {
+      const af = activeFence();
+      if (!af) {
+        return `
+          <div class="fence2d" id="fence">
+            <div class="hdr">
+              <span class="title">井震剖面 (2D) <span class="chip">Time</span></span>
+              <button class="btn" type="button" id="fold2d">折叠</button>
+            </div>
+            <div class="profile empty">
+              <strong>无活动剖面</strong>
+              <div class="hint">在 3D 上<strong>点选两口井</strong>，或切换「画线吸附」拖线；也可顶栏选井对点「井间剖面」。</div>
+            </div>
+          </div>`;
+      }
+      return `
+        <div class="fence2d" id="fence">
+          <div class="hdr">
+            <span class="title">井震剖面 (2D) <span class="chip">Time</span>
+              · active ${af.a}–${af.b}
+              · fences=${state.fences.length}
+            </span>
+            <button class="btn" type="button" id="fold2d">折叠</button>
+          </div>
+          <div class="profile">
+            <canvas id="prof-canvas"></canvas>
+            <div class="axis">Time (ms) · 不受 3D 域=Depth 影响</div>
+          </div>
+        </div>`;
+    }
+
+    function layoutFenceLines() {
+      const view = document.getElementById("view3d");
+      const host = document.getElementById("fence-lines");
+      if (!view || !host) return;
+      host.innerHTML = "";
+      const r = view.getBoundingClientRect();
+      state.fences.forEach((f) => {
+        const wa = wellById(f.a);
+        const wb = wellById(f.b);
+        if (!wa || !wb) return;
+        const x1 = (wa.x / 100) * r.width;
+        const y1 = (wa.y / 100) * r.height;
+        const x2 = (wb.x / 100) * r.width;
+        const y2 = (wb.y / 100) * r.height;
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const ang = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+        const el = document.createElement("div");
+        el.className = "fence-line" + (f.id === state.activeId ? "" : "");
+        el.style.left = x1 + "px";
+        el.style.top = y1 + "px";
+        el.style.width = len + "px";
+        el.style.transform = `rotate(${ang}deg)`;
+        el.style.opacity = f.id === state.activeId ? "0.9" : "0.35";
+        host.appendChild(el);
+      });
+    }
+
+    function bindInteractions() {
+      document.querySelectorAll("#mode-seg button, .mode-dock button[data-mode]").forEach((btn) => {
+        btn.onclick = () => {
+          state.mode = btn.dataset.mode;
+          state.halfSelect = null;
+          state.dragFrom = null;
+          state.status = state.mode === "pick" ? "模式：选井两点" : "模式：画线吸附";
+          render();
+        };
+      });
+      const dom = document.getElementById("domain-sel");
+      if (dom) {
+        dom.onchange = () => {
+          state.domain = dom.value;
+          state.status =
+            state.domain === "Depth"
+              ? "3D=Depth · 底栏 2D 仍 Time extract"
+              : "3D=Time · 2D=Time";
+          render();
+        };
+      }
+      const pairBtn = document.getElementById("btn-pair");
+      if (pairBtn) {
+        pairBtn.onclick = () => {
+          const a = document.getElementById("pair-a").value;
+          const b = document.getElementById("pair-b").value;
+          addFence(a, b);
+        };
+      }
+      const del = document.getElementById("btn-del-active");
+      if (del) {
+        del.onclick = () => {
+          if (!state.activeId) return;
+          state.fences = state.fences.filter((f) => f.id !== state.activeId);
+          state.activeId = state.fences.length ? state.fences[state.fences.length - 1].id : null;
+          state.status = "已删 active fence";
+          render();
+        };
+      }
+      const fold = document.getElementById("fold2d");
+      if (fold) {
+        fold.onclick = () => {
+          document.getElementById("fence").classList.toggle("collapsed");
+          fold.textContent = document.getElementById("fence").classList.contains("collapsed")
+            ? "展开"
+            : "折叠";
+        };
+      }
+
+      document.querySelectorAll(".well-dot").forEach((dot) => {
+        const id = dot.dataset.id;
+        dot.onmouseenter = () => {
+          state.hover = id;
+          dump();
+        };
+        dot.onmouseleave = () => {
+          state.hover = null;
+          dump();
+        };
+        dot.onmousedown = (e) => {
+          if (state.mode !== "draw") return;
+          e.preventDefault();
+          state.dragFrom = id;
+          state.status = `拖线：从 ${id} …`;
+          dump();
+        };
+        dot.onclick = (e) => {
+          e.stopPropagation();
+          if (state.mode !== "pick") return;
+          if (!state.halfSelect) {
+            state.halfSelect = id;
+            state.status = `已选 ${id} — 再点另一口井（Esc 取消）`;
+            render();
+            return;
+          }
+          if (state.halfSelect === id) {
+            state.status = "同一口井 — 请选另一口";
+            dump();
+            return;
+          }
+          addFence(state.halfSelect, id);
+        };
+        dot.oncontextmenu = (e) => {
+          e.preventDefault();
+          // right-click well: if endpoint of active, delete active (sim)
+          const af = activeFence();
+          if (af && (af.a === id || af.b === id)) {
+            state.fences = state.fences.filter((f) => f.id !== state.activeId);
+            state.activeId = state.fences.length ? state.fences[state.fences.length - 1].id : null;
+            state.status = "右键井 — 删 active（示意）";
+            render();
+          }
+        };
+      });
+
+      const view = document.getElementById("view3d");
+      if (view) {
+        view.onclick = (e) => {
+          if (e.target.classList.contains("well-dot")) return;
+          if (state.halfSelect) {
+            state.halfSelect = null;
+            state.status = "点空白 — 取消半选";
+            render();
+          }
+        };
+        view.onmousemove = (e) => {
+          if (state.mode !== "draw" || !state.dragFrom) return;
+          const rubber = document.getElementById("rubber");
+          const wa = wellById(state.dragFrom);
+          if (!rubber || !wa) return;
+          const r = view.getBoundingClientRect();
+          const x1 = (wa.x / 100) * r.width;
+          const y1 = (wa.y / 100) * r.height;
+          const x2 = e.clientX - r.left;
+          const y2 = e.clientY - r.top;
+          const len = Math.hypot(x2 - x1, y2 - y1);
+          const ang = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+          rubber.style.display = "block";
+          rubber.style.left = x1 + "px";
+          rubber.style.top = y1 + "px";
+          rubber.style.width = len + "px";
+          rubber.style.transform = `rotate(${ang}deg)`;
+        };
+        view.onmouseup = (e) => {
+          if (state.mode !== "draw" || !state.dragFrom) return;
+          const target = e.target.classList.contains("well-dot")
+            ? e.target.dataset.id
+            : nearestWell(view, e.clientX, e.clientY, 28);
+          const from = state.dragFrom;
+          state.dragFrom = null;
+          const rubber = document.getElementById("rubber");
+          if (rubber) rubber.style.display = "none";
+          if (target && target !== from) addFence(from, target);
+          else {
+            state.status = "未吸附到另一口井";
+            dump();
+          }
+        };
+      }
+
+      const canvas = document.getElementById("prof-canvas");
+      if (canvas && activeFence()) drawProfile(canvas, activeFence());
+      layoutFenceLines();
+      dump();
+    }
+
+    function nearestWell(view, clientX, clientY, threshPx) {
+      const r = view.getBoundingClientRect();
+      let best = null;
+      let bestD = threshPx;
+      WELLS.forEach((w) => {
+        const x = r.left + (w.x / 100) * r.width;
+        const y = r.top + (w.y / 100) * r.height;
+        const d = Math.hypot(clientX - x, clientY - y);
+        if (d < bestD) {
+          bestD = d;
+          best = w.id;
+        }
+      });
+      return best;
+    }
+
+    function render() {
+      const root = document.getElementById("root");
+      const v = VARIANTS.find((x) => x.key === state.variant) || VARIANTS[0];
+      root.className = "app v" + state.variant;
+      root.innerHTML = `
+        <div class="stages">
+          <span>数据与预处理</span>
+          <span>综合解释</span>
+          <span>古地理编图</span>
+          <span class="on">④ 成图与审核 · 井震联合</span>
+        </div>
+        <div class="main">
+          ${treeHtml()}
+          <section class="center">
+            ${toolbarHtml()}
+            <div class="status"><span class="ok">●</span> ${state.status}
+              · 3D域=${state.domain} · 2D=Time · mode=${state.mode}
+              ${state.halfSelect ? ` · 半选=<b>${state.halfSelect}</b>` : ""}
+            </div>
+            <div class="view3d" id="view3d">
+              <div class="label">3D · 自由 pick 井头（#115）· 无右栏</div>
+              <div class="mode-dock">
+                <button type="button" class="btn ${state.mode === "pick" ? "primary" : ""}" data-mode="pick">选井两点</button>
+                <button type="button" class="btn ${state.mode === "draw" ? "primary" : ""}" data-mode="draw">画线吸附</button>
+              </div>
+              <div class="cube"></div>
+              ${fenceLinesHtml()}
+              ${wellsHtml()}
+              <div class="slice-bar">
+                <span>IL</span><input type="range" />
+                <span>XL</span><input type="range" />
+                <span>T</span><input type="range" />
+              </div>
+            </div>
+            ${profileHtml()}
+          </section>
+        </div>`;
+      document.getElementById("label").textContent =
+        state.variant + " — " + v.name + " · " + v.blurb;
+      bindInteractions();
+    }
+
+    function setVariant(key, init) {
+      const v = VARIANTS.find((x) => x.key === key) || VARIANTS[0];
+      state.variant = v.key;
+      const url = new URL(location.href);
+      url.searchParams.set("variant", v.key);
+      history.replaceState(null, "", url);
+      if (init || !state._booted) {
+        resetScene(v.autoFence);
+        state._booted = true;
+      } else {
+        render();
+      }
+    }
+
+    document.getElementById("prev").onclick = () => {
+      const i = VARIANTS.findIndex((x) => x.key === state.variant);
+      setVariant(VARIANTS[(i - 1 + VARIANTS.length) % VARIANTS.length].key, true);
+    };
+    document.getElementById("next").onclick = () => {
+      const i = VARIANTS.findIndex((x) => x.key === state.variant);
+      setVariant(VARIANTS[(i + 1) % VARIANTS.length].key, true);
+    };
+    document.getElementById("btn-reset").onclick = () => {
+      const v = VARIANTS.find((x) => x.key === state.variant);
+      resetScene(v.autoFence);
+    };
+    document.getElementById("btn-clear-fences").onclick = () => {
+      state.fences = [];
+      state.activeId = null;
+      state.halfSelect = null;
+      state.status = "fences 已清空 — 底栏占位引导";
+      render();
+    };
+
+    window.addEventListener("keydown", (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable))
+        return;
+      if (e.key === "Escape") {
+        state.halfSelect = null;
+        state.dragFrom = null;
+        state.status = "Esc — 取消半选";
+        render();
+      }
+      if (e.key === "ArrowLeft") document.getElementById("prev").click();
+      if (e.key === "ArrowRight") document.getElementById("next").click();
+    });
+
+    const initial = new URLSearchParams(location.search).get("variant") || "A";
+    setVariant(initial, true);
+  </script>
+</body>
+</html>

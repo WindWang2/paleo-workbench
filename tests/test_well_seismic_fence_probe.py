@@ -13,6 +13,7 @@ from geoviz_well_seismic_3d import (
     FenceSection,
     InMemoryVolumeAccess,
     JointWellId,
+    TimeDepthTable,
     VerticalDomain,
     WellHead,
     WellSeismicScene,
@@ -223,6 +224,53 @@ def test_profile_assembly_uses_per_well_visibility_and_identity():
     ]
 
 
+def test_profile_assembly_maps_gr_measurement_depths_to_time():
+    scene = WellSeismicScene()
+    scene.set_wells(
+        [
+            WellHead(
+                "A1",
+                0,
+                0,
+                0,
+                0,
+                100,
+                id=JointWellId("source:a1"),
+            )
+        ],
+        td_tables={
+            "A1": TimeDepthTable(
+                well_name="A1",
+                time_ms=np.array([0.0, 1000.0]),
+                md_m=np.array([0.0, 100.0]),
+            )
+        },
+    )
+    scene.set_well_curves(
+        {
+            "A1": {
+                "GR": (
+                    np.array([0.0, 50.0, 100.0]),
+                    np.array([10.0, 20.0, 30.0]),
+                )
+            }
+        }
+    )
+    scene.add_fence(
+        FenceSection(
+            "F",
+            np.array([[0.0, 0.0], [100.0, 0.0]], dtype=float),
+        )
+    )
+
+    hit = scene.assemble_active_profile_wells(
+        domain=VerticalDomain.TIME
+    )[0]
+
+    assert hit.curve_name == "GR"
+    assert hit.curve_z.tolist() == [0.0, 500.0, 1000.0]
+
+
 def test_probe_slice_indices():
     scene = _scene_with_volume()
     scene.add_fence(
@@ -337,3 +385,96 @@ def test_probe_uses_registration_for_slice_indices():
     assert idx is not None
     il, xl, t = idx
     assert 0 <= il < 8 and 0 <= xl < 8 and 0 <= t < 16
+
+
+def test_profile_amplitude_color_scale_is_blue_white_red_and_zero_centered():
+    from geoviz_well_seismic_3d.profile_2d import FenceProfile2D
+
+    image = FenceProfile2D.amplitude_image(
+        np.array([[-1.0, 0.0, 1.0]], dtype=np.float32),
+        color_scale="blue-white-red",
+    )
+
+    top = image.pixelColor(0, 0)
+    middle = image.pixelColor(0, image.height() // 2)
+    bottom = image.pixelColor(0, image.height() - 1)
+    assert (top.red(), top.green(), top.blue()) == (33, 102, 172)
+    assert (middle.red(), middle.green(), middle.blue()) == (255, 255, 255)
+    assert (bottom.red(), bottom.green(), bottom.blue()) == (178, 24, 43)
+
+
+def test_profile_gr_color_scale_uses_viridis_and_gray_for_missing_values():
+    from geoviz_well_seismic_3d.profile_2d import FenceProfile2D
+
+    colors = FenceProfile2D.gr_colors(
+        np.array([0.0, 50.0, np.nan, 100.0]),
+        value_range=(0.0, 100.0),
+        color_scale="viridis",
+    )
+
+    assert tuple(colors[0, :3]) == (68, 1, 84)
+    assert tuple(colors[-1, :3]) == (253, 231, 37)
+    assert tuple(colors[2, :3]) == (115, 115, 115)
+
+
+def test_profile_renders_thick_depth_varying_gr_well_and_two_legends(qtbot):
+    from geoviz_well_seismic_3d import JointDisplaySettings
+    from geoviz_well_seismic_3d.profile_2d import FenceProfile2D
+
+    scene = _scene_with_volume()
+    scene.set_wells(
+        [
+            WellHead(
+                "A1",
+                2000,
+                3000,
+                2000,
+                3000,
+                100,
+                id=JointWellId("source:a1"),
+            )
+        ],
+        td_tables={
+            "A1": TimeDepthTable(
+                well_name="A1",
+                time_ms=np.array([0.0, 30.0]),
+                md_m=np.array([0.0, 100.0]),
+            )
+        },
+    )
+    scene.set_well_curves(
+        {
+            "A1": {
+                "GR": (
+                    np.array([0.0, 33.0, 66.0, 100.0]),
+                    np.array([0.0, 33.0, 66.0, 100.0]),
+                )
+            }
+        }
+    )
+    scene.set_display_settings(
+        JointDisplaySettings(well_width_px=5)
+    )
+    scene.add_fence(
+        FenceSection(
+            "F",
+            np.array([[1000.0, 2000.0], [3000.0, 4000.0]]),
+        )
+    )
+    profile = FenceProfile2D()
+    qtbot.addWidget(profile)
+    profile.set_extract_domain(VerticalDomain.TIME)
+    profile.set_scene(scene)
+
+    image = profile.rendered_image
+    x = profile.plot_width // 2
+    upper = image.pixelColor(x, image.height() // 4)
+    lower = image.pixelColor(x, image.height() * 3 // 4)
+
+    assert profile.legend_titles == ("地震振幅", "GR (API)")
+    assert image.width() > profile.plot_width
+    assert upper != lower
+    assert sum(
+        image.pixelColor(x + dx, image.height() // 4) == upper
+        for dx in range(-3, 4)
+    ) >= 4
