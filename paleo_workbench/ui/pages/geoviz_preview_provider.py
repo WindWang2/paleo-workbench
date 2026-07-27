@@ -7,22 +7,11 @@ from geoviz import (
     GeoVizEngine,
     GeoVizError,
     PreparedPreview,
-    PreviewOptions,
-    PreviewRequest,
 )
 
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.ui.pages.preview_provider import PreviewProvider, PreviewResult
-
-
-def request_from_resource(resource: ResourceItem) -> PreviewRequest:
-    return PreviewRequest(
-        resource_id=resource.id,
-        path=resource.path,
-        semantic_type=resource.type,
-        format=resource.format,
-        label=resource.name,
-    )
+from paleo_workbench.viz.preview_request import request_from_resource
 
 
 class LocalVisualizationProvider(PreviewProvider):

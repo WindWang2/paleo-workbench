@@ -9,6 +9,7 @@ from paleo_workbench.pipeline.assets import SEISMIC_KEY
 from paleo_workbench.project.paths import is_within_directory
 from paleo_workbench.viz.map_load import load_map_payload_from_document
 from paleo_workbench.viz.models import VizPayload, VizRef
+from paleo_workbench.viz.preview_request import request_from_resource
 from paleo_workbench.viz.well_log_load import load_well_log_from_path
 
 # Resource type / format → engine-aligned viz kind.
@@ -313,7 +314,7 @@ class VizAdapter:
                 message="预览文件不存在或不可读",
             )
         try:
-            from geoviz import GeoVizEngine, PreviewOptions, PreviewRequest
+            from geoviz import GeoVizEngine, PreviewOptions
         except Exception:
             return VizPayload(
                 kind="message",
@@ -325,13 +326,23 @@ class VizAdapter:
         if rtype == "formation_tops":
             rtype = "well_stratification"
         fmt = str(getattr(resource, "format", "") or Path(path).suffix).lstrip(".")
-        request = PreviewRequest(
-            resource_id=ref.id or "viz",
-            path=path,
-            semantic_type=rtype or "unknown",
-            format=fmt,
-            label=label,
-        )
+        if resource is not None:
+            request = request_from_resource(
+                resource,
+                path=path,
+                semantic_type=rtype or "unknown",
+                label=label,
+            )
+        else:
+            from geoviz import PreviewRequest
+
+            request = PreviewRequest(
+                resource_id=ref.id or "viz",
+                path=path,
+                semantic_type=rtype or "unknown",
+                format=fmt,
+                label=label,
+            )
         engine = GeoVizEngine.default()
         if not engine.supports(request):
             return VizPayload(
