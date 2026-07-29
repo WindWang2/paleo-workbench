@@ -10,9 +10,21 @@ file(REMOVE_RECURSE "${TEST_ROOT}")
 
 set(config_args)
 set(ctest_config_args)
+set(generator_args)
 if(DEFINED TEST_CONFIG AND NOT TEST_CONFIG STREQUAL "")
     list(APPEND config_args --config "${TEST_CONFIG}")
     list(APPEND ctest_config_args -C "${TEST_CONFIG}")
+endif()
+if(DEFINED ENGINE_GENERATOR AND NOT ENGINE_GENERATOR STREQUAL "")
+    list(APPEND generator_args -G "${ENGINE_GENERATOR}")
+endif()
+if(DEFINED ENGINE_GENERATOR_PLATFORM AND
+   NOT ENGINE_GENERATOR_PLATFORM STREQUAL "")
+    list(APPEND generator_args -A "${ENGINE_GENERATOR_PLATFORM}")
+endif()
+if(DEFINED ENGINE_GENERATOR_TOOLSET AND
+   NOT ENGINE_GENERATOR_TOOLSET STREQUAL "")
+    list(APPEND generator_args -T "${ENGINE_GENERATOR_TOOLSET}")
 endif()
 
 execute_process(
@@ -31,6 +43,7 @@ execute_process(
         "${CMAKE_COMMAND}"
         -S "${CONSUMER_SOURCE_DIR}"
         -B "${consumer_build_dir}"
+        ${generator_args}
         "-DCMAKE_PREFIX_PATH=${prefix_dir}"
         "-DCMAKE_CXX_COMPILER=${ENGINE_CXX_COMPILER}"
         "-DCMAKE_CXX_FLAGS=${ENGINE_CXX_FLAGS}"
