@@ -106,6 +106,61 @@ jobs:
           ctest --test-dir build/well-log-engine-qt
           --output-on-failure
 
+  python-wheel:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }} wheel
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.1"
+          cache: true
+
+      - name: Install binding toolchain
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy \
+            PySide6==6.11.1 \
+            shiboken6==6.11.1 \
+            build \
+            "scikit-build-core>=0.11,<0.12"
+          python -m pip install \
+            --index-url=https://download.qt.io/official_releases/QtForPython/ \
+            --trusted-host download.qt.io \
+            shiboken6_generator==6.11.1
+
+      - name: Build wheel
+        run: >
+          python -m build well-log-engine
+          --wheel
+          --no-isolation
+          --outdir dist
+
+      - name: Install wheel
+        shell: bash
+        run: python -m pip install --no-deps --force-reinstall dist/*.whl
+
+      - name: Smoke test installed wheel
+        env:
+          QT_QPA_PLATFORM: minimal
+        run: python well-log-engine/tests/python/wheel_smoke.py
+
   pinned-vcpkg:
     name: Ubuntu / pinned vcpkg manifest
     runs-on: ubuntu-latest

@@ -20,7 +20,7 @@ namespace welllog {
 
 WELLLOG_QTWIDGETS_API void configure_well_log_surface_format();
 
-class WELLLOG_QTWIDGETS_API WellLogView final : public QOpenGLWidget {
+class WELLLOG_QTWIDGETS_API WellLogView : public QOpenGLWidget {
   Q_OBJECT
 
 public:
@@ -43,6 +43,10 @@ public slots:
 signals:
   void capabilityChanged();
   void fatalViewError();
+  void viewError(const QString &code, const QString &message);
+  void documentChanged(const QString &document_id, quint64 revision);
+  void diagnosticPublished(const QString &code, const QString &document_id,
+                           quint64 revision);
   void viewportChanged();
   void crosshairChanged();
   void hoverChanged();
@@ -62,6 +66,7 @@ protected:
   void keyPressEvent(QKeyEvent *event) override;
 
 private:
+  void publish_fatal_error();
   void cleanup_context() noexcept;
   void handle_session_event(ViewEvent event) noexcept;
   void schedule_coalesced_signals() noexcept;

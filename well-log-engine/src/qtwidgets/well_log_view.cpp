@@ -12,6 +12,7 @@
 #include <QOpenGLFunctions>
 #include <QResizeEvent>
 #include <QShowEvent>
+#include <QString>
 #include <QSurfaceFormat>
 #include <QThread>
 #include <QTimer>
@@ -141,6 +142,21 @@ const WellLogSession &WellLogView::session() const noexcept {
   return *impl_->session;
 }
 
+void WellLogView::publish_fatal_error() {
+  const auto capability_failure =
+      impl_->capability_report.initialization_complete &&
+      !impl_->capability_report.graphics_available;
+  const auto code = capability_failure
+                        ? QStringLiteral("capability_unavailable")
+                        : QStringLiteral("render_failure");
+  const auto message =
+      impl_->capability_report.unavailable_reason.empty()
+          ? QStringLiteral("WellLogView rendering failed")
+          : QString::fromStdString(impl_->capability_report.unavailable_reason);
+  emit viewError(code, message);
+  emit fatalViewError();
+}
+
 void WellLogView::set_document_id(EntityId document_id) noexcept {
   if (QThread::currentThread() != thread()) {
     QMetaObject::invokeMethod(
@@ -182,14 +198,14 @@ void WellLogView::initializeGL() {
     if (current == nullptr || current != context()) {
       impl_->capability_report =
           failed_capability_report("no current OpenGL context is available");
-      emit fatalViewError();
+      publish_fatal_error();
       return;
     }
     auto *functions = current->functions();
     if (functions == nullptr) {
       impl_->capability_report =
           failed_capability_report("OpenGL functions are unavailable");
-      emit fatalViewError();
+      publish_fatal_error();
       return;
     }
     functions->initializeOpenGLFunctions();
@@ -236,13 +252,13 @@ void WellLogView::initializeGL() {
     update_capability_overlay();
     emit capabilityChanged();
     if (!impl_->capability_report.graphics_available) {
-      emit fatalViewError();
+      publish_fatal_error();
     }
   } catch (...) {
     impl_->capability_report =
         failed_capability_report("OpenGL capability detection failed");
     update_capability_overlay();
-    emit fatalViewError();
+    publish_fatal_error();
   }
 }
 
@@ -276,7 +292,7 @@ void WellLogView::paintGL() {
     update_capability_overlay();
     emit capabilityChanged();
     if (!impl_->capability_report.graphics_available) {
-      emit fatalViewError();
+      publish_fatal_error();
     }
   }
   if (!impl_->capability_report.graphics_available) {
@@ -285,7 +301,7 @@ void WellLogView::paintGL() {
   try {
     auto *current = QOpenGLContext::currentContext();
     if (current == nullptr || current != context()) {
-      emit fatalViewError();
+      publish_fatal_error();
       return;
     }
     std::shared_ptr<const PreparedScene> scene;
@@ -298,7 +314,7 @@ void WellLogView::paintGL() {
     }
     if (scene != nullptr && scene != impl_->uploaded_scene) {
       if (!impl_->renderer.upload(*scene)) {
-        emit fatalViewError();
+        publish_fatal_error();
         return;
       }
       impl_->uploaded_scene = scene;
@@ -338,10 +354,10 @@ void WellLogView::paintGL() {
                     : std::nullopt,
             .draw_scene = scene != nullptr,
         })) {
-      emit fatalViewError();
+      publish_fatal_error();
     }
   } catch (...) {
-    emit fatalViewError();
+    publish_fatal_error();
   }
 }
 
@@ -355,7 +371,7 @@ void WellLogView::showEvent(QShowEvent *event) {
         "an OpenGL 3.3 Core context could not be created");
     update_capability_overlay();
     emit capabilityChanged();
-    emit fatalViewError();
+    publish_fatal_error();
   });
 }
 
@@ -539,7 +555,7 @@ void WellLogView::update_pointer(double left, double top) noexcept {
     schedule_coalesced_signals();
     update();
   } catch (...) {
-    emit fatalViewError();
+    publish_fatal_error();
   }
 }
 
@@ -558,11 +574,19 @@ void WellLogView::handle_session_event(ViewEvent event) noexcept {
     update();
     break;
   case ViewEventKind::documents_changed:
+    emit documentChanged(QString::fromStdString(event.document_id.to_string()),
+                         static_cast<quint64>(event.document_revision.value));
+    update();
+    break;
   case ViewEventKind::presentation_changed:
   case ViewEventKind::frame_ready:
     update();
     break;
   case ViewEventKind::diagnostic_published:
+    emit diagnosticPublished(
+        QStringLiteral("missing_samples"),
+        QString::fromStdString(event.document_id.to_string()),
+        static_cast<quint64>(event.document_revision.value));
     break;
   }
   schedule_coalesced_signals();

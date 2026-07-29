@@ -1,0 +1,327 @@
+#ifdef Py_LIMITED_API
+#undef Py_LIMITED_API
+#endif
+#define Py_LIMITED_API 0x030b0000
+#include <Python.h>
+
+#include "numpy_bridge.hpp"
+
+#include <welllog/core/document.hpp>
+#include <welllog/qtwidgets/well_log_view.hpp>
+
+#include <QThread>
+
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace welllog::python {
+namespace {
+
+class PythonBufferOwner final {
+public:
+  PythonBufferOwner() = default;
+  PythonBufferOwner(const PythonBufferOwner &) = delete;
+  PythonBufferOwner &operator=(const PythonBufferOwner &) = delete;
+
+  ~PythonBufferOwner() {
+    if (view_.obj == nullptr || !Py_IsInitialized()) {
+      return;
+    }
+    const auto state = PyGILState_Ensure();
+    PyBuffer_Release(&view_);
+    PyGILState_Release(state);
+  }
+
+  [[nodiscard]] bool acquire(PyObject *object) noexcept {
+    return PyObject_GetBuffer(object, &view_, PyBUF_FORMAT | PyBUF_STRIDES) ==
+           0;
+  }
+
+  [[nodiscard]] const Py_buffer &view() const noexcept { return view_; }
+
+private:
+  Py_buffer view_{};
+};
+
+struct AdaptedBuffer {
+  BufferView buffer;
+  std::string dtype;
+  std::uint64_t address{};
+};
+
+void set_welllog_error(const char *type_name, const char *code,
+                       const char *message) {
+  auto *module = PyImport_ImportModule("welllog.errors");
+  if (module == nullptr) {
+    return;
+  }
+  auto *type = PyObject_GetAttrString(module, type_name);
+  Py_DECREF(module);
+  if (type == nullptr) {
+    return;
+  }
+  auto *instance = PyObject_CallFunction(type, "ss", message, code);
+  if (instance != nullptr) {
+    PyErr_SetObject(type, instance);
+    Py_DECREF(instance);
+  }
+  Py_DECREF(type);
+}
+
+[[nodiscard]] std::optional<ScalarType>
+scalar_type_for_buffer(const Py_buffer &view) noexcept {
+  if (view.format == nullptr) {
+    return std::nullopt;
+  }
+  auto format = std::string_view{view.format};
+  if (format.size() == 2 && (format.front() == '@' || format.front() == '=' ||
+                             format.front() == '<' || format.front() == '>')) {
+    if ((format.front() == '<' || format.front() == '>') &&
+        (format.front() == '<') !=
+#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
+            true
+#else
+            false
+#endif
+    ) {
+      return std::nullopt;
+    }
+    format.remove_prefix(1);
+  }
+  if (format == "f" && view.itemsize == 4) {
+    return ScalarType::float32;
+  }
+  if (format == "d" && view.itemsize == 8) {
+    return ScalarType::float64;
+  }
+  if (format == "h" && view.itemsize == 2) {
+    return ScalarType::int16;
+  }
+  if (format == "i" && view.itemsize == 4) {
+    return ScalarType::int32;
+  }
+  if (format == "q" && view.itemsize == 8) {
+    return ScalarType::int64;
+  }
+  if (format == "B" && view.itemsize == 1) {
+    return ScalarType::uint8;
+  }
+  if (format == "H" && view.itemsize == 2) {
+    return ScalarType::uint16;
+  }
+  if (format == "I" && view.itemsize == 4) {
+    return ScalarType::uint32;
+  }
+  if (format == "Q" && view.itemsize == 8) {
+    return ScalarType::uint64;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<AdaptedBuffer> adapt_buffer(PyObject *object,
+                                                        const char *role) {
+  auto owner = std::make_shared<PythonBufferOwner>();
+  if (!owner->acquire(object)) {
+    PyErr_Clear();
+    set_welllog_error("WellLogValidationError", "invalid_buffer",
+                      "object does not expose a compatible buffer");
+    return std::nullopt;
+  }
+  const auto &view = owner->view();
+  if (view.ndim != 1 || view.shape == nullptr || view.shape[0] <= 0 ||
+      view.buf == nullptr || view.itemsize <= 0) {
+    const auto message =
+        std::string{role} + " must be a non-empty one-dimensional buffer";
+    set_welllog_error("WellLogValidationError", "invalid_buffer",
+                      message.c_str());
+    return std::nullopt;
+  }
+  const auto scalar_type = scalar_type_for_buffer(view);
+  if (!scalar_type.has_value()) {
+    const auto message =
+        std::string{role} + " uses an unsupported or non-native scalar dtype";
+    set_welllog_error("WellLogValidationError", "invalid_buffer",
+                      message.c_str());
+    return std::nullopt;
+  }
+  const auto stride = view.strides == nullptr ? view.itemsize : view.strides[0];
+  if (stride < view.itemsize || stride <= 0) {
+    const auto message =
+        std::string{role} + " must use a positive stride of at least one item";
+    set_welllog_error("WellLogValidationError", "invalid_buffer",
+                      message.c_str());
+    return std::nullopt;
+  }
+  const auto length = static_cast<std::uint64_t>(view.shape[0]);
+  const auto stride_bytes = static_cast<std::uint64_t>(stride);
+  const auto item_size = static_cast<std::uint64_t>(view.itemsize);
+  if (length - 1 >
+      (std::numeric_limits<std::uint64_t>::max() - item_size) / stride_bytes) {
+    const auto message = std::string{role} + " buffer extent is too large";
+    set_welllog_error("WellLogValidationError", "arithmetic_overflow",
+                      message.c_str());
+    return std::nullopt;
+  }
+  const auto capacity = (length - 1) * stride_bytes + item_size;
+  const auto address =
+      static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(view.buf));
+  const auto dtype = std::string{scalar_type_name(*scalar_type)};
+  return AdaptedBuffer{
+      .buffer = BufferView::from_raw(view.buf, length, stride_bytes,
+                                     *scalar_type, capacity, SharedOwner{owner},
+                                     {}, BufferAccessMode::zero_copy),
+      .dtype = dtype,
+      .address = address,
+  };
+}
+
+[[nodiscard]] std::optional<EntityId> parse_id(const QString &text,
+                                               const char *role) {
+  const auto encoded = text.toUtf8();
+  const auto result = EntityId::parse(std::string_view{
+      encoded.constData(), static_cast<std::size_t>(encoded.size())});
+  if (!result.has_value() || result->is_nil()) {
+    const auto message = std::string{role} + " must be a non-nil UUID";
+    set_welllog_error("WellLogValidationError", "invalid_document",
+                      message.c_str());
+  }
+  return result;
+}
+
+[[nodiscard]] PyObject *buffer_report(const AdaptedBuffer &buffer) {
+  auto *report = PyDict_New();
+  if (report == nullptr) {
+    return nullptr;
+  }
+  auto put = [report](const char *key, PyObject *value) {
+    if (value == nullptr || PyDict_SetItemString(report, key, value) != 0) {
+      Py_XDECREF(value);
+      return false;
+    }
+    Py_DECREF(value);
+    return true;
+  };
+  if (!put("access_mode", PyUnicode_FromString("zero_copy")) ||
+      !put("dtype", PyUnicode_FromString(buffer.dtype.c_str())) ||
+      !put("length", PyLong_FromUnsignedLongLong(buffer.buffer.length())) ||
+      !put("stride_bytes",
+           PyLong_FromUnsignedLongLong(buffer.buffer.stride_bytes())) ||
+      !put("address", PyLong_FromUnsignedLongLong(buffer.address))) {
+    Py_DECREF(report);
+    return nullptr;
+  }
+  return report;
+}
+
+} // namespace
+
+PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
+                       const QString &document_id_text,
+                       const QString &axis_id_text,
+                       const QString &curve_id_text, const QString &mnemonic,
+                       const QString &depth_unit, const QString &value_unit) {
+  if (view == nullptr) {
+    set_welllog_error("WellLogValidationError", "invalid_view",
+                      "WellLogView is no longer valid");
+    return nullptr;
+  }
+  if (QThread::currentThread() != view->thread()) {
+    set_welllog_error("WellLogThreadError", "thread_violation",
+                      "curve submission must run on the Qt GUI thread");
+    return nullptr;
+  }
+  const auto document_id = parse_id(document_id_text, "document_id");
+  const auto axis_id = parse_id(axis_id_text, "axis_id");
+  const auto curve_id = parse_id(curve_id_text, "curve_id");
+  if (!document_id || !axis_id || !curve_id) {
+    return nullptr;
+  }
+  auto depth_buffer = adapt_buffer(depth, "depth");
+  auto value_buffer = adapt_buffer(values, "values");
+  if (!depth_buffer || !value_buffer) {
+    return nullptr;
+  }
+  if (depth_buffer->buffer.length() != value_buffer->buffer.length()) {
+    set_welllog_error("WellLogValidationError", "length_mismatch",
+                      "depth and values must have the same length");
+    return nullptr;
+  }
+
+  WellLogDocumentBuilder builder(*document_id, DocumentRevision{1});
+  const auto depth_unit_utf8 = depth_unit.toUtf8();
+  const auto value_unit_utf8 = value_unit.toUtf8();
+  const auto mnemonic_utf8 = mnemonic.toUtf8();
+  builder.add_sampling_axis(SamplingAxis{
+      .id = *axis_id,
+      .coordinates = depth_buffer->buffer,
+      .domain = DepthDomain::measured_depth,
+      .unit = depth_unit_utf8.constData(),
+      .direction = AxisDirection::increasing,
+  });
+  builder.add_curve(Curve{
+      .id = *curve_id,
+      .mnemonic = mnemonic_utf8.constData(),
+      .display_name = mnemonic_utf8.constData(),
+      .unit = value_unit_utf8.constData(),
+      .sampling_axis_id = *axis_id,
+      .values = value_buffer->buffer,
+      .nulls = {},
+  });
+  const auto result =
+      view->session().execute(SetDocumentCommand{builder.build()});
+  if (!result.has_value()) {
+    const auto message =
+        "document submission failed with code " +
+        std::to_string(static_cast<unsigned int>(result.error().code));
+    set_welllog_error("WellLogValidationError", "invalid_document",
+                      message.c_str());
+    return nullptr;
+  }
+  view->set_document_id(*document_id);
+
+  auto *report = PyDict_New();
+  auto *depth_report = buffer_report(*depth_buffer);
+  auto *curve_report = buffer_report(*value_buffer);
+  if (report == nullptr || depth_report == nullptr || curve_report == nullptr ||
+      PyDict_SetItemString(report, "depth", depth_report) != 0 ||
+      PyDict_SetItemString(report, "curve", curve_report) != 0) {
+    Py_XDECREF(report);
+    Py_XDECREF(depth_report);
+    Py_XDECREF(curve_report);
+    return nullptr;
+  }
+  Py_DECREF(depth_report);
+  Py_DECREF(curve_report);
+  return report;
+}
+
+PyObject *sample_value(WellLogView *view, const QString &curve_id_text,
+                       unsigned long long sample_index) {
+  if (view == nullptr || !view->document_id().has_value()) {
+    Py_RETURN_NONE;
+  }
+  const auto curve_id = parse_id(curve_id_text, "curve_id");
+  if (!curve_id) {
+    return nullptr;
+  }
+  const auto document = view->session().document(*view->document_id());
+  if (document == nullptr) {
+    Py_RETURN_NONE;
+  }
+  for (const auto &curve : document->curves()) {
+    if (curve.id == *curve_id) {
+      const auto value = curve.values.value_as_double(
+          static_cast<std::uint64_t>(sample_index));
+      return value.has_value() ? PyFloat_FromDouble(*value)
+                               : Py_NewRef(Py_None);
+    }
+  }
+  Py_RETURN_NONE;
+}
+
+} // namespace welllog::python

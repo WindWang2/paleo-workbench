@@ -32,6 +32,16 @@ option(
     "Build the optional Qt Widgets/OpenGL adapter"
     OFF
 )
+option(
+    WELLLOG_BUILD_PYTHON
+    "Build the optional PySide6/Shiboken6 bindings"
+    OFF
+)
+
+if(WELLLOG_BUILD_PYTHON)
+    set(WELLLOG_BUILD_QT_WIDGETS ON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 
 if(WELLLOG_BUILD_QT_WIDGETS)
     find_package(
@@ -43,6 +53,82 @@ if(WELLLOG_BUILD_QT_WIDGETS)
         find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
     endif()
     qt_standard_project_setup(REQUIRES 6.8)
+endif()
+
+if(WELLLOG_BUILD_PYTHON)
+    find_package(
+        Python 3.12
+        REQUIRED
+        COMPONENTS Interpreter Development
+    )
+    if(Python_VERSION VERSION_GREATER_EQUAL 3.14)
+        message(FATAL_ERROR "WellLog Python bindings support CPython 3.12 and 3.13")
+    endif()
+    execute_process(
+        COMMAND
+            "${Python_EXECUTABLE}"
+            -c
+            "import pathlib, PySide6, shiboken6, shiboken6_generator; print(pathlib.Path(PySide6.__file__).parent / 'lib' / 'cmake'); print(pathlib.Path(shiboken6.__file__).parent / 'lib' / 'cmake'); print(pathlib.Path(shiboken6_generator.__file__).parent / 'lib' / 'cmake')"
+        RESULT_VARIABLE WELLLOG_PYTHON_PROFILE_RESULT
+        OUTPUT_VARIABLE WELLLOG_PYTHON_CMAKE_PATHS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT WELLLOG_PYTHON_PROFILE_RESULT EQUAL 0)
+        message(
+            FATAL_ERROR
+            "PySide6, shiboken6 and shiboken6_generator must be installed for the selected Python"
+        )
+    endif()
+    string(REPLACE "\n" ";" WELLLOG_PYTHON_CMAKE_PATHS "${WELLLOG_PYTHON_CMAKE_PATHS}")
+    list(PREPEND CMAKE_PREFIX_PATH ${WELLLOG_PYTHON_CMAKE_PATHS})
+    find_package(Shiboken6 REQUIRED CONFIG)
+    find_package(Shiboken6Tools REQUIRED CONFIG)
+    find_package(PySide6 REQUIRED CONFIG)
+    get_target_property(
+        WELLLOG_SHIBOKEN_GENERATOR_RELEASE
+        Shiboken6::shiboken6
+        IMPORTED_LOCATION_RELEASE
+    )
+    if(
+        CMAKE_BUILD_TYPE STREQUAL "Debug"
+        AND WELLLOG_SHIBOKEN_GENERATOR_RELEASE
+    )
+        set_target_properties(
+            Shiboken6::shiboken6
+            PROPERTIES
+                IMPORTED_LOCATION_DEBUG
+                    "${WELLLOG_SHIBOKEN_GENERATOR_RELEASE}"
+        )
+    endif()
+    if(NOT PySide6_VERSION VERSION_EQUAL Shiboken6_VERSION)
+        message(
+            FATAL_ERROR
+            "PySide6 ${PySide6_VERSION} and Shiboken6 ${Shiboken6_VERSION} must match"
+        )
+    endif()
+    if(NOT Qt6_VERSION VERSION_EQUAL PySide6_VERSION)
+        message(
+            FATAL_ERROR
+            "Qt ${Qt6_VERSION} and PySide6 ${PySide6_VERSION} must use the same SDK profile"
+        )
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=include
+        OUTPUT_VARIABLE WELLLOG_COMPILER_BUILTIN_INCLUDE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    set(
+        WELLLOG_SHIBOKEN_COMPILER_OPTIONS
+        "--compiler-path=${CMAKE_CXX_COMPILER}"
+    )
+    if(IS_DIRECTORY "${WELLLOG_COMPILER_BUILTIN_INCLUDE}")
+        list(
+            APPEND
+            WELLLOG_SHIBOKEN_COMPILER_OPTIONS
+            "-isystem${WELLLOG_COMPILER_BUILTIN_INCLUDE}"
+        )
+    endif()
 endif()
 
 if(WELLLOG_BUILD_SHARED)
@@ -279,6 +365,55 @@ if(WELLLOG_BUILD_QT_WIDGETS)
     endif()
 endif()
 
+if(WELLLOG_BUILD_PYTHON)
+    set(WELLLOG_PYTHON_GENERATED_SOURCES
+        "${CMAKE_CURRENT_BINARY_DIR}/welllog/_QtWidgets/_qtwidgets_module_wrapper.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/welllog/_QtWidgets/welllog_wrapper.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/welllog/_QtWidgets/welllog_welllogview_wrapper.cpp"
+    )
+    set(FORCE_LIMITED_API OFF)
+    shiboken_generator_create_binding(
+        EXTENSION_TARGET _QtWidgets
+        GENERATED_SOURCES ${WELLLOG_PYTHON_GENERATED_SOURCES}
+        HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/python/bindings.hpp"
+        TYPESYSTEM_FILE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/python/typesystem_welllog.xml"
+        LIBRARY_TARGET welllog_qtwidgets
+        QT_MODULES Core Gui Widgets OpenGLWidgets
+        SHIBOKEN_EXTRA_OPTIONS
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/src/python"
+            "--language-level=c++20"
+            ${WELLLOG_SHIBOKEN_COMPILER_OPTIONS}
+    )
+    target_sources(
+        _QtWidgets
+        PRIVATE
+            src/python/numpy_bridge.cpp
+            src/python/numpy_bridge.hpp
+    )
+    target_include_directories(
+        _QtWidgets
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/python"
+    )
+    set_target_properties(
+        _QtWidgets
+        PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/python/welllog"
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/python/welllog"
+    )
+    file(
+        COPY
+            "${CMAKE_CURRENT_SOURCE_DIR}/python/welllog/__init__.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/python/welllog/errors.py"
+        DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/python/welllog"
+    )
+endif()
+
 install(
     TARGETS
         welllog_core
@@ -301,6 +436,23 @@ if(WELLLOG_BUILD_QT_WIDGETS)
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+endif()
+if(WELLLOG_BUILD_PYTHON)
+    install(
+        TARGETS _QtWidgets
+        LIBRARY DESTINATION welllog COMPONENT Python
+        RUNTIME DESTINATION welllog COMPONENT Python
+    )
+    install(
+        FILES
+            python/welllog/__init__.py
+            python/welllog/__init__.pyi
+            python/welllog/errors.py
+            python/welllog/errors.pyi
+            python/welllog/py.typed
+        DESTINATION welllog
+        COMPONENT Python
     )
 endif()
 install(
@@ -416,6 +568,17 @@ if(WELLLOG_BUILD_TESTS)
                 PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1"
             )
         endif()
+    endif()
+    if(WELLLOG_BUILD_PYTHON)
+        add_test(
+            NAME welllog.python.qt-embedding
+            COMMAND
+                "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python"
+                "QT_QPA_PLATFORM=minimal"
+                "${Python_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_qt_embedding.py"
+        )
     endif()
 
     add_test(
