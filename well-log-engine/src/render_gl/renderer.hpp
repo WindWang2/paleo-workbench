@@ -5,6 +5,7 @@
 #include <optional>
 
 #include <welllog/render_gl/export.hpp>
+#include <welllog/render_gl/upload.hpp>
 #include <welllog/scene/scene.hpp>
 
 namespace welllog::detail {
@@ -33,6 +34,13 @@ struct GlRenderFrame {
   bool draw_scene{};
 };
 
+struct GlUploadProgress {
+  std::uint64_t bytes_uploaded{};
+  std::uint64_t total_bytes{};
+  bool pending{};
+  bool completed{};
+};
+
 class WELLLOG_RENDER_GL_API GlRenderer {
 public:
   GlRenderer();
@@ -45,6 +53,9 @@ public:
   [[nodiscard]] bool initialize(GlProcResolver resolver,
                                 void *resolver_context) noexcept;
   [[nodiscard]] bool upload(const PreparedScene &scene) noexcept;
+  [[nodiscard]] bool queue_upload(const PreparedScene &scene,
+                                  GpuUploadBudgets budgets) noexcept;
+  [[nodiscard]] GlUploadProgress upload_next() noexcept;
   [[nodiscard]] bool render(const GlRenderFrame &frame) noexcept;
   void release() noexcept;
   void abandon() noexcept;

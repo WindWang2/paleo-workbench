@@ -47,7 +47,7 @@ int main() {
       supported.maximum_vertex_attributes != 16 ||
       !supported.buffer_storage_supported ||
       supported.persistent_mapping_enabled ||
-      supported.active_upload_path != "OpenGL 3.3 static VBO") {
+      supported.active_upload_path != "OpenGL 3.3 budgeted double-buffer VBO") {
     fail("supported OpenGL capabilities were rejected");
   }
 

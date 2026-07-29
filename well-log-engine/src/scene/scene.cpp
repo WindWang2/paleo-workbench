@@ -417,6 +417,18 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
 Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
                                const ScenePresentation &presentation) noexcept {
+  return prepare_impl(document, presentation, nullptr, nullptr);
+}
+
+Result<PreparedScene> detail::ScenePreparer::prepare(
+    const WellLogDocument &document, const ScenePresentation &presentation,
+    const CurveLodMap &curve_lods, const CurveLodQuery &query) noexcept {
+  return prepare_impl(document, presentation, &curve_lods, &query);
+}
+
+Result<PreparedScene> detail::ScenePreparer::prepare_impl(
+    const WellLogDocument &document, const ScenePresentation &presentation,
+    const CurveLodMap *curve_lods, const CurveLodQuery *query) noexcept {
   try {
     const auto depth_range = presentation.reference_depth_range();
     if (presentation.document_id() != document.id() ||
@@ -557,9 +569,7 @@ detail::ScenePreparer::prepare(const WellLogDocument &document,
         segment_start.reset();
       };
 
-      const auto sample_count = curve->values.length();
-      for (std::uint64_t offset = 0; offset < sample_count; ++offset) {
-        const auto sample_index = offset;
+      const auto append_sample = [&](std::uint64_t sample_index) {
         const auto depth = axis->coordinates.value_as_double(sample_index);
         const auto value = curve->values.value_as_double(sample_index);
         const auto missing =
@@ -568,7 +578,7 @@ detail::ScenePreparer::prepare(const WellLogDocument &document,
             !std::isfinite(*depth) || !std::isfinite(*value);
         if (missing) {
           close_segment();
-          continue;
+          return true;
         }
 
         if (!segment_start.has_value()) {
@@ -591,7 +601,7 @@ detail::ScenePreparer::prepare(const WellLogDocument &document,
             !std::isfinite(normalized_depth) ||
             !std::isfinite(horizontal_offset) ||
             !std::isfinite(left_position) || !std::isfinite(top_position)) {
-          return presentation_error(layer.id);
+          return false;
         }
         scene->curve_points.push_back(PreparedCurvePoint{
             .position =
@@ -603,6 +613,38 @@ detail::ScenePreparer::prepare(const WellLogDocument &document,
             .reference_depth = *depth,
             .value = *value,
         });
+        return true;
+      };
+
+      const auto lod = curve_lods == nullptr ? CurveLodMap::const_iterator{}
+                                             : curve_lods->find(curve->id);
+      if (curve_lods != nullptr && query != nullptr &&
+          lod != curve_lods->end()) {
+        const auto selection = lod->second.query(*query);
+        if (!selection.has_value()) {
+          return selection.error();
+        }
+        for (const auto &segment : selection.value().segments()) {
+          close_segment();
+          for (std::uint64_t offset = 0; offset < segment.point_count;
+               ++offset) {
+            const auto &point =
+                selection.value().points()[static_cast<std::size_t>(
+                    segment.first_point + offset)];
+            if (!append_sample(point.sample_index)) {
+              return presentation_error(layer.id);
+            }
+          }
+          close_segment();
+        }
+      } else {
+        const auto sample_count = curve->values.length();
+        for (std::uint64_t sample_index = 0; sample_index < sample_count;
+             ++sample_index) {
+          if (!append_sample(sample_index)) {
+            return presentation_error(layer.id);
+          }
+        }
       }
       close_segment();
 

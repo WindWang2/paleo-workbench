@@ -2,15 +2,25 @@
 
 #include "scene/prepare.hpp"
 
+#include <welllog/scene/curve_lod.hpp>
+
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <mutex>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace welllog {
 namespace {
+
+constexpr std::uint32_t default_frame_pixel_height = 2160;
 
 [[nodiscard]] Result<std::uint64_t> required_bytes(const BufferView &buffer) {
   if (!buffer.has_owner()) {
@@ -303,20 +313,81 @@ validate_document(const WellLogDocument &document) {
          std::isfinite(crosshair.display_depth);
 }
 
+struct LodBuildOutput {
+  bool cancelled{};
+  bool failed{};
+  std::uint64_t derived_bytes{};
+  std::unordered_map<EntityId, CurveLodPyramid, EntityIdHash> pyramids;
+};
+
+struct LodTaskState {
+  std::mutex mutex;
+  bool finished{};
+  LodBuildOutput output;
+};
+
+struct LodTask {
+  EntityId document_id;
+  DocumentRevision revision;
+  std::uint64_t generation{};
+  std::shared_ptr<LodTaskState> state;
+  std::jthread worker;
+};
+
+struct FrameBuildOutput {
+  bool cancelled{};
+  bool failed{};
+  std::shared_ptr<const PreparedScene> scene;
+};
+
+struct FrameTaskState {
+  std::mutex mutex;
+  bool finished{};
+  FrameBuildOutput output;
+};
+
+struct FrameTask {
+  EntityId document_id;
+  DocumentRevision revision;
+  std::uint64_t generation{};
+  std::shared_ptr<FrameTaskState> state;
+  std::jthread worker;
+};
+
+struct CurvePreparation {
+  DocumentRevision revision;
+  std::uint64_t generation{};
+  PreparationState state{PreparationState::unavailable};
+  std::uint64_t derived_bytes{};
+  std::uint64_t maximum_derived_bytes{};
+  std::unordered_map<EntityId, CurveLodPyramid, EntityIdHash> pyramids;
+};
+
 } // namespace
 
 struct WellLogSession::Impl {
+  PerformanceBudgets budgets;
   std::uint64_t state_version{};
   std::uint64_t next_diagnostic_id{1};
+  std::uint64_t next_lod_generation{1};
+  std::uint64_t next_frame_generation{1};
+  std::uint64_t completed_lod_tasks{};
+  std::uint64_t cancelled_lod_tasks{};
+  std::uint64_t discarded_lod_tasks{};
   std::unordered_map<EntityId, std::shared_ptr<const WellLogDocument>,
                      EntityIdHash>
       documents;
   std::unordered_map<EntityId, std::shared_ptr<const PreparedScene>,
                      EntityIdHash>
       prepared_scenes;
+  std::unordered_map<EntityId, ScenePresentation, EntityIdHash> presentations;
   std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewports;
   std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewport_defaults;
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
+  std::unordered_map<EntityId, CurvePreparation, EntityIdHash> preparations;
+  std::unordered_map<EntityId, std::uint64_t, EntityIdHash> frame_generations;
+  std::vector<std::unique_ptr<LodTask>> lod_tasks;
+  std::vector<std::unique_ptr<FrameTask>> frame_tasks;
   std::vector<ViewEvent> events;
   std::vector<Diagnostic> diagnostics;
   ViewEventObserverId next_observer_id{1};
@@ -341,7 +412,11 @@ struct WellLogSession::Impl {
   }
 };
 
-WellLogSession::WellLogSession() : impl_(std::make_unique<Impl>()) {}
+WellLogSession::WellLogSession() : WellLogSession(PerformanceBudgets{}) {}
+WellLogSession::WellLogSession(PerformanceBudgets budgets)
+    : impl_(std::make_unique<Impl>()) {
+  impl_->budgets = budgets;
+}
 WellLogSession::~WellLogSession() = default;
 WellLogSession::WellLogSession(WellLogSession &&) noexcept = default;
 WellLogSession &WellLogSession::operator=(WellLogSession &&) noexcept = default;
@@ -365,6 +440,99 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
         std::make_shared<const WellLogDocument>(std::move(command.document));
     const auto document_id = document->id();
     const auto revision = document->revision();
+    const auto asynchronous =
+        std::any_of(document->curves().begin(), document->curves().end(),
+                    [&](const Curve &curve) {
+                      return curve.values.length() >=
+                             impl_->budgets.asynchronous_sample_threshold;
+                    });
+    if (asynchronous && impl_->next_lod_generation ==
+                            std::numeric_limits<std::uint64_t>::max()) {
+      return Error{
+          .code = ErrorCode::internal_error,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::internal_error,
+          .arguments = {},
+      };
+    }
+    const auto generation =
+        asynchronous ? impl_->next_lod_generation : std::uint64_t{};
+    auto task = std::unique_ptr<LodTask>{};
+    auto maximum_derived_bytes = impl_->budgets.maximum_cpu_derived_bytes;
+    if (asynchronous) {
+      if (maximum_derived_bytes == 0) {
+        for (const auto &curve : document->curves()) {
+          const auto axis =
+              std::find_if(document->sampling_axes().begin(),
+                           document->sampling_axes().end(),
+                           [&](const SamplingAxis &candidate) {
+                             return candidate.id == curve.sampling_axis_id;
+                           });
+          if (axis != document->sampling_axes().end()) {
+            maximum_derived_bytes +=
+                (axis->coordinates.length() *
+                     scalar_size_bytes(axis->coordinates.scalar_type()) +
+                 curve.values.length() *
+                     scalar_size_bytes(curve.values.scalar_type())) /
+                4;
+          }
+        }
+      }
+      auto state = std::make_shared<LodTaskState>();
+      task = std::make_unique<LodTask>();
+      task->document_id = document_id;
+      task->revision = revision;
+      task->generation = generation;
+      task->state = state;
+      const auto curve_count =
+          static_cast<std::uint64_t>(document->curves().size());
+      const auto per_curve_budget =
+          std::max(std::uint64_t{1}, maximum_derived_bytes / curve_count);
+      task->worker = std::jthread([document, state, per_curve_budget](
+                                      std::stop_token stop_token) {
+        auto output = LodBuildOutput{};
+        try {
+          for (const auto &curve : document->curves()) {
+            if (stop_token.stop_requested()) {
+              output.cancelled = true;
+              break;
+            }
+            const auto axis =
+                std::find_if(document->sampling_axes().begin(),
+                             document->sampling_axes().end(),
+                             [&](const SamplingAxis &candidate) {
+                               return candidate.id == curve.sampling_axis_id;
+                             });
+            if (axis == document->sampling_axes().end()) {
+              output.failed = true;
+              break;
+            }
+            auto pyramid = CurveLodPyramid::build(
+                *axis, curve,
+                CurveLodBuildOptions{
+                    .algorithm = CurveLodAlgorithm::hierarchical,
+                    .base_bucket_samples = 16,
+                    .maximum_derived_bytes = per_curve_budget,
+                },
+                stop_token);
+            if (!pyramid.has_value()) {
+              output.cancelled =
+                  pyramid.error().code == ErrorCode::operation_cancelled;
+              output.failed = !output.cancelled;
+              break;
+            }
+            output.derived_bytes += pyramid.value().statistics().derived_bytes;
+            output.pyramids.emplace(curve.id, std::move(pyramid).value());
+          }
+        } catch (...) {
+          output.failed = true;
+        }
+        const auto guard = std::lock_guard{state->mutex};
+        state->output = std::move(output);
+        state->finished = true;
+      });
+    }
     const auto next_state_version = impl_->state_version + 1;
     std::vector<ViewEvent> pending_events;
     std::vector<Diagnostic> pending_diagnostics;
@@ -419,11 +587,42 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
     impl_->events.reserve(impl_->events.size() + pending_events.size());
     impl_->diagnostics.reserve(impl_->diagnostics.size() +
                                pending_diagnostics.size());
-    impl_->documents.insert_or_assign(document_id, std::move(document));
+    if (asynchronous) {
+      impl_->preparations.reserve(impl_->preparations.size() + 1);
+      impl_->lod_tasks.reserve(impl_->lod_tasks.size() + 1);
+    }
+    for (auto &existing_task : impl_->lod_tasks) {
+      if (existing_task->document_id == document_id) {
+        existing_task->worker.request_stop();
+      }
+    }
+    for (auto &existing_task : impl_->frame_tasks) {
+      if (existing_task->document_id == document_id) {
+        existing_task->worker.request_stop();
+      }
+    }
+    impl_->documents.insert_or_assign(document_id, document);
     impl_->prepared_scenes.erase(document_id);
+    impl_->presentations.erase(document_id);
     impl_->viewports.erase(document_id);
     impl_->viewport_defaults.erase(document_id);
     impl_->crosshairs.erase(document_id);
+    impl_->frame_generations.erase(document_id);
+    if (asynchronous) {
+      impl_->preparations.insert_or_assign(
+          document_id, CurvePreparation{
+                           .revision = revision,
+                           .generation = generation,
+                           .state = PreparationState::pending,
+                           .derived_bytes = 0,
+                           .maximum_derived_bytes = maximum_derived_bytes,
+                           .pyramids = {},
+                       });
+      impl_->lod_tasks.push_back(std::move(task));
+      ++impl_->next_lod_generation;
+    } else {
+      impl_->preparations.erase(document_id);
+    }
     impl_->state_version = next_state_version;
     impl_->next_diagnostic_id += pending_diagnostics.size();
     impl_->events.insert(impl_->events.end(), pending_events.begin(),
@@ -439,7 +638,7 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
         .state_version = next_state_version,
         .document_id = document_id,
         .document_revision = revision,
-        .asynchronous_preparation_started = false,
+        .asynchronous_preparation_started = asynchronous,
         .diagnostic_id = first_diagnostic_id,
     };
   } catch (const std::bad_alloc &) {
@@ -484,8 +683,70 @@ WellLogSession::execute(const SetPresentationCommand &command) {
           .arguments = {},
       };
     }
-    auto prepared =
-        detail::ScenePreparer::prepare(*document->second, command.presentation);
+    const auto revision = document->second->revision();
+    const auto depth_range = command.presentation.reference_depth_range();
+    const auto initial_viewport =
+        DepthViewport{.top = depth_range.top, .bottom = depth_range.bottom};
+    const auto preparation = impl_->preparations.find(document_id);
+    if (preparation != impl_->preparations.end() &&
+        preparation->second.state == PreparationState::pending) {
+      const auto next_state_version = impl_->state_version + 1;
+      std::vector<ViewEvent> pending_events{
+          ViewEvent{
+              .kind = ViewEventKind::presentation_changed,
+              .state_version = next_state_version,
+              .document_id = document_id,
+              .document_revision = revision,
+          },
+          ViewEvent{
+              .kind = ViewEventKind::viewport_changed,
+              .state_version = next_state_version,
+              .document_id = document_id,
+              .document_revision = revision,
+          },
+      };
+      impl_->events.reserve(impl_->events.size() + pending_events.size());
+      impl_->presentations.reserve(impl_->presentations.size() + 1);
+      impl_->viewports.reserve(impl_->viewports.size() + 1);
+      impl_->viewport_defaults.reserve(impl_->viewport_defaults.size() + 1);
+      for (auto &existing_task : impl_->frame_tasks) {
+        if (existing_task->document_id == document_id) {
+          existing_task->worker.request_stop();
+        }
+      }
+      impl_->frame_generations.erase(document_id);
+      impl_->presentations.insert_or_assign(document_id, command.presentation);
+      impl_->viewports.insert_or_assign(document_id, initial_viewport);
+      impl_->viewport_defaults.insert_or_assign(document_id, initial_viewport);
+      impl_->crosshairs.erase(document_id);
+      impl_->state_version = next_state_version;
+      impl_->events.insert(impl_->events.end(), pending_events.begin(),
+                           pending_events.end());
+      for (const auto &event : pending_events) {
+        impl_->notify_observers(event);
+      }
+      return CommandReceipt{
+          .state_version = next_state_version,
+          .document_id = document_id,
+          .document_revision = revision,
+          .asynchronous_preparation_started = true,
+          .diagnostic_id = std::nullopt,
+      };
+    }
+
+    auto prepared = preparation != impl_->preparations.end() &&
+                            preparation->second.state == PreparationState::ready
+                        ? detail::ScenePreparer::prepare(
+                              *document->second, command.presentation,
+                              preparation->second.pyramids,
+                              CurveLodQuery{
+                                  .viewport_top = initial_viewport.top,
+                                  .viewport_bottom = initial_viewport.bottom,
+                                  .pixel_height = default_frame_pixel_height,
+                                  .prefetch_viewports = 0.0,
+                              })
+                        : detail::ScenePreparer::prepare(*document->second,
+                                                         command.presentation);
     if (!prepared) {
       return prepared.error();
     }
@@ -493,10 +754,6 @@ WellLogSession::execute(const SetPresentationCommand &command) {
     auto scene =
         std::make_shared<const PreparedScene>(std::move(prepared).value());
     const auto next_state_version = impl_->state_version + 1;
-    const auto revision = document->second->revision();
-    const auto depth_range = command.presentation.reference_depth_range();
-    const auto initial_viewport =
-        DepthViewport{.top = depth_range.top, .bottom = depth_range.bottom};
     std::vector<ViewEvent> pending_events{
         ViewEvent{
             .kind = ViewEventKind::presentation_changed,
@@ -519,9 +776,17 @@ WellLogSession::execute(const SetPresentationCommand &command) {
     };
     impl_->events.reserve(impl_->events.size() + pending_events.size());
     impl_->prepared_scenes.reserve(impl_->prepared_scenes.size() + 1);
+    impl_->presentations.reserve(impl_->presentations.size() + 1);
     impl_->viewports.reserve(impl_->viewports.size() + 1);
     impl_->viewport_defaults.reserve(impl_->viewport_defaults.size() + 1);
+    for (auto &existing_task : impl_->frame_tasks) {
+      if (existing_task->document_id == document_id) {
+        existing_task->worker.request_stop();
+      }
+    }
+    impl_->frame_generations.erase(document_id);
     impl_->prepared_scenes.insert_or_assign(document_id, std::move(scene));
+    impl_->presentations.insert_or_assign(document_id, command.presentation);
     impl_->viewports.insert_or_assign(document_id, initial_viewport);
     impl_->viewport_defaults.insert_or_assign(document_id, initial_viewport);
     impl_->crosshairs.erase(document_id);
@@ -572,9 +837,76 @@ WellLogSession::execute(const SetViewportCommand &command) {
     if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
       return viewport_error(command.document_id);
     }
+    auto frame_task = std::unique_ptr<FrameTask>{};
+    auto frame_generation = std::uint64_t{};
+    const auto preparation = impl_->preparations.find(command.document_id);
+    const auto presentation = impl_->presentations.find(command.document_id);
+    if (preparation != impl_->preparations.end() &&
+        preparation->second.state == PreparationState::ready &&
+        presentation != impl_->presentations.end()) {
+      if (impl_->next_frame_generation ==
+          std::numeric_limits<std::uint64_t>::max()) {
+        return viewport_error(command.document_id);
+      }
+      frame_generation = impl_->next_frame_generation;
+      auto state = std::make_shared<FrameTaskState>();
+      frame_task = std::make_unique<FrameTask>();
+      frame_task->document_id = command.document_id;
+      frame_task->revision = document->second->revision();
+      frame_task->generation = frame_generation;
+      frame_task->state = state;
+      const auto task_document = document->second;
+      const auto task_presentation = presentation->second;
+      const auto task_pyramids = preparation->second.pyramids;
+      const auto query = CurveLodQuery{
+          .viewport_top = command.viewport.top,
+          .viewport_bottom = command.viewport.bottom,
+          .pixel_height = default_frame_pixel_height,
+          .prefetch_viewports = impl_->budgets.prefetch_viewports,
+      };
+      frame_task->worker =
+          std::jthread([task_document, task_presentation, task_pyramids, query,
+                        state](std::stop_token stop_token) {
+            auto output = FrameBuildOutput{};
+            if (stop_token.stop_requested()) {
+              output.cancelled = true;
+            } else {
+              try {
+                auto prepared = detail::ScenePreparer::prepare(
+                    *task_document, task_presentation, task_pyramids, query);
+                if (stop_token.stop_requested()) {
+                  output.cancelled = true;
+                } else if (prepared.has_value()) {
+                  output.scene = std::make_shared<const PreparedScene>(
+                      std::move(prepared).value());
+                } else {
+                  output.failed = true;
+                }
+              } catch (...) {
+                output.failed = true;
+              }
+            }
+            const auto guard = std::lock_guard{state->mutex};
+            state->output = std::move(output);
+            state->finished = true;
+          });
+    }
     const auto next_state_version = impl_->state_version + 1;
     const auto revision = document->second->revision();
     impl_->events.reserve(impl_->events.size() + 1);
+    if (frame_task != nullptr) {
+      impl_->frame_tasks.reserve(impl_->frame_tasks.size() + 1);
+      impl_->frame_generations.reserve(impl_->frame_generations.size() + 1);
+      for (auto &existing_task : impl_->frame_tasks) {
+        if (existing_task->document_id == command.document_id) {
+          existing_task->worker.request_stop();
+        }
+      }
+      impl_->frame_generations.insert_or_assign(command.document_id,
+                                                frame_generation);
+      impl_->frame_tasks.push_back(std::move(frame_task));
+      ++impl_->next_frame_generation;
+    }
     viewport->second = command.viewport;
     impl_->state_version = next_state_version;
     const auto event = ViewEvent{
@@ -589,7 +921,7 @@ WellLogSession::execute(const SetViewportCommand &command) {
         .state_version = next_state_version,
         .document_id = command.document_id,
         .document_revision = revision,
-        .asynchronous_preparation_started = false,
+        .asynchronous_preparation_started = frame_generation != 0,
         .diagnostic_id = std::nullopt,
     };
   } catch (const std::bad_alloc &) {
@@ -723,6 +1055,162 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
         .arguments = {},
     };
   }
+}
+
+void WellLogSession::poll_async() noexcept {
+  try {
+    auto task = impl_->lod_tasks.begin();
+    while (task != impl_->lod_tasks.end()) {
+      auto output = LodBuildOutput{};
+      {
+        const auto guard = std::lock_guard{(*task)->state->mutex};
+        if (!(*task)->state->finished) {
+          ++task;
+          continue;
+        }
+        output = std::move((*task)->state->output);
+      }
+      auto completed_task = std::move(*task);
+      task = impl_->lod_tasks.erase(task);
+
+      const auto preparation =
+          impl_->preparations.find(completed_task->document_id);
+      const auto current =
+          preparation != impl_->preparations.end() &&
+          preparation->second.revision == completed_task->revision &&
+          preparation->second.generation == completed_task->generation;
+      if (output.cancelled) {
+        ++impl_->cancelled_lod_tasks;
+      } else if (!current) {
+        ++impl_->discarded_lod_tasks;
+      } else if (output.failed) {
+        preparation->second.state = PreparationState::unavailable;
+      } else {
+        preparation->second.state = PreparationState::ready;
+        preparation->second.derived_bytes = output.derived_bytes;
+        preparation->second.pyramids = std::move(output.pyramids);
+        auto frame_ready = false;
+        const auto document =
+            impl_->documents.find(completed_task->document_id);
+        const auto presentation =
+            impl_->presentations.find(completed_task->document_id);
+        const auto viewport =
+            impl_->viewports.find(completed_task->document_id);
+        if (document != impl_->documents.end() &&
+            presentation != impl_->presentations.end() &&
+            viewport != impl_->viewports.end()) {
+          auto prepared = detail::ScenePreparer::prepare(
+              *document->second, presentation->second,
+              preparation->second.pyramids,
+              CurveLodQuery{
+                  .viewport_top = viewport->second.top,
+                  .viewport_bottom = viewport->second.bottom,
+                  .pixel_height = default_frame_pixel_height,
+                  .prefetch_viewports = impl_->budgets.prefetch_viewports,
+              });
+          if (prepared.has_value()) {
+            impl_->prepared_scenes.insert_or_assign(
+                completed_task->document_id,
+                std::make_shared<const PreparedScene>(
+                    std::move(prepared).value()));
+            frame_ready = true;
+          } else {
+            preparation->second.state = PreparationState::unavailable;
+          }
+        }
+        ++impl_->completed_lod_tasks;
+        if (frame_ready &&
+            impl_->state_version < std::numeric_limits<std::uint64_t>::max()) {
+          ++impl_->state_version;
+          const auto event = ViewEvent{
+              .kind = ViewEventKind::frame_ready,
+              .state_version = impl_->state_version,
+              .document_id = completed_task->document_id,
+              .document_revision = completed_task->revision,
+          };
+          impl_->events.push_back(event);
+          impl_->notify_observers(event);
+        }
+      }
+    }
+
+    auto frame_task = impl_->frame_tasks.begin();
+    while (frame_task != impl_->frame_tasks.end()) {
+      auto output = FrameBuildOutput{};
+      {
+        const auto guard = std::lock_guard{(*frame_task)->state->mutex};
+        if (!(*frame_task)->state->finished) {
+          ++frame_task;
+          continue;
+        }
+        output = std::move((*frame_task)->state->output);
+      }
+      auto completed_task = std::move(*frame_task);
+      frame_task = impl_->frame_tasks.erase(frame_task);
+      const auto generation =
+          impl_->frame_generations.find(completed_task->document_id);
+      const auto document = impl_->documents.find(completed_task->document_id);
+      const auto current =
+          generation != impl_->frame_generations.end() &&
+          generation->second == completed_task->generation &&
+          document != impl_->documents.end() &&
+          document->second->revision() == completed_task->revision;
+      if (output.cancelled) {
+        ++impl_->cancelled_lod_tasks;
+      } else if (!current) {
+        ++impl_->discarded_lod_tasks;
+      } else if (output.failed || output.scene == nullptr) {
+        impl_->frame_generations.erase(generation);
+      } else {
+        impl_->prepared_scenes.insert_or_assign(completed_task->document_id,
+                                                std::move(output.scene));
+        impl_->frame_generations.erase(generation);
+        ++impl_->completed_lod_tasks;
+        if (impl_->state_version < std::numeric_limits<std::uint64_t>::max()) {
+          ++impl_->state_version;
+          const auto event = ViewEvent{
+              .kind = ViewEventKind::frame_ready,
+              .state_version = impl_->state_version,
+              .document_id = completed_task->document_id,
+              .document_revision = completed_task->revision,
+          };
+          impl_->events.push_back(event);
+          impl_->notify_observers(event);
+        }
+      }
+    }
+  } catch (...) {
+  }
+}
+
+std::optional<PerformanceSnapshot>
+WellLogSession::performance_snapshot(EntityId document_id) const noexcept {
+  try {
+    const auto preparation = impl_->preparations.find(document_id);
+    if (preparation == impl_->preparations.end()) {
+      return std::nullopt;
+    }
+    return PerformanceSnapshot{
+        .document_revision = preparation->second.revision,
+        .preparation_state = preparation->second.state,
+        .cpu_derived_bytes = preparation->second.derived_bytes,
+        .maximum_cpu_derived_bytes = preparation->second.maximum_derived_bytes,
+        .maximum_gpu_cache_bytes = impl_->budgets.maximum_gpu_cache_bytes,
+        .maximum_upload_bytes_per_frame =
+            impl_->budgets.maximum_upload_bytes_per_frame,
+        .completed_tasks = impl_->completed_lod_tasks,
+        .cancelled_tasks = impl_->cancelled_lod_tasks,
+        .discarded_tasks = impl_->discarded_lod_tasks,
+        .frame_preparation_pending =
+            impl_->frame_generations.contains(document_id),
+    };
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+PerformanceBudgets WellLogSession::performance_budgets() const noexcept {
+  return impl_->budgets;
 }
 
 std::span<const ViewEvent> WellLogSession::events() const noexcept {

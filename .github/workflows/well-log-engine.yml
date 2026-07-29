@@ -75,6 +75,39 @@ jobs:
           ctest --test-dir build/well-log-engine-clang
           --output-on-failure
 
+  dense-curve-benchmark:
+    name: Ubuntu / 500k curve / 4K metrics
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure benchmark
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine-benchmark -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=OFF
+          -DWELLLOG_BUILD_BENCHMARKS=ON
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build benchmark
+        run: >
+          cmake --build build/well-log-engine-benchmark
+          --target welllog_dense_curve_benchmark
+
+      - name: Record structured metrics
+        shell: bash
+        run: >
+          build/well-log-engine-benchmark/welllog_dense_curve_benchmark
+          | tee dense-curve-benchmark.json
+
+      - name: Upload benchmark metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: dense-curve-benchmark
+          path: dense-curve-benchmark.json
+
   qt-rendering:
     name: Ubuntu / Qt 6.8 / Mesa
     runs-on: ubuntu-latest

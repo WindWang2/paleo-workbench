@@ -108,6 +108,8 @@ void set_welllog_error(const char *type_name, const char *code,
     return "invalid_manifest";
   case ErrorCode::unresolved_buffer:
     return "unresolved_buffer";
+  case ErrorCode::operation_cancelled:
+    return "operation_cancelled";
   case ErrorCode::resource_exhausted:
     return "resource_exhausted";
   case ErrorCode::internal_error:

@@ -71,6 +71,7 @@ struct WellLogView::Impl {
   CapabilityReport capability_report;
   detail::GlRenderer renderer;
   std::shared_ptr<const PreparedScene> uploaded_scene;
+  std::shared_ptr<const PreparedScene> queued_scene;
   QMetaObject::Connection context_cleanup_connection;
   std::optional<CurvePick> hover_pick;
   std::optional<CurvePick> click_pick;
@@ -166,6 +167,8 @@ void WellLogView::set_document_id(EntityId document_id) noexcept {
   }
   impl_->document_id =
       document_id.is_nil() ? std::nullopt : std::optional{document_id};
+  impl_->uploaded_scene.reset();
+  impl_->queued_scene.reset();
   const auto had_hover = impl_->hover_pick.has_value();
   impl_->hover_pick.reset();
   impl_->click_pick.reset();
@@ -268,6 +271,16 @@ void WellLogView::resizeGL(int width, int height) {
 }
 
 void WellLogView::paintGL() {
+  if (impl_->document_id.has_value()) {
+    impl_->session->poll_async();
+    const auto snapshot =
+        impl_->session->performance_snapshot(*impl_->document_id);
+    if (snapshot.has_value() &&
+        (snapshot->preparation_state == PreparationState::pending ||
+         snapshot->frame_preparation_pending)) {
+      QTimer::singleShot(1, this, [this]() { update(); });
+    }
+  }
   if (impl_->capability_report.graphics_available &&
       !impl_->framebuffer_stencil_verified) {
     auto *current = QOpenGLContext::currentContext();
@@ -312,12 +325,31 @@ void WellLogView::paintGL() {
       viewport = impl_->session->viewport(*impl_->document_id);
       crosshair = impl_->session->crosshair(*impl_->document_id);
     }
-    if (scene != nullptr && scene != impl_->uploaded_scene) {
-      if (!impl_->renderer.upload(*scene)) {
+    if (scene != nullptr && scene != impl_->uploaded_scene &&
+        scene != impl_->queued_scene) {
+      const auto budgets = impl_->session->performance_budgets();
+      if (!impl_->renderer.queue_upload(
+              *scene,
+              GpuUploadBudgets{
+                  .maximum_cache_bytes = budgets.maximum_gpu_cache_bytes,
+                  .maximum_bytes_per_frame =
+                      budgets.maximum_upload_bytes_per_frame,
+              })) {
         publish_fatal_error();
         return;
       }
-      impl_->uploaded_scene = scene;
+      impl_->queued_scene = scene;
+    }
+    if (impl_->queued_scene != nullptr) {
+      const auto progress = impl_->renderer.upload_next();
+      if (progress.completed) {
+        impl_->uploaded_scene = std::move(impl_->queued_scene);
+      } else if (progress.pending) {
+        QTimer::singleShot(1, this, [this]() { update(); });
+      } else {
+        publish_fatal_error();
+        return;
+      }
     }
     const auto fallback_viewport =
         scene == nullptr ? DepthViewport{.top = 0.0, .bottom = 1.0}
@@ -352,7 +384,7 @@ void WellLogView::paintGL() {
                           .display_depth = crosshair->display_depth,
                       }}
                     : std::nullopt,
-            .draw_scene = scene != nullptr,
+            .draw_scene = impl_->uploaded_scene != nullptr,
         })) {
       publish_fatal_error();
     }
@@ -635,6 +667,7 @@ void WellLogView::cleanup_context() noexcept {
     impl_->renderer.abandon();
   }
   impl_->uploaded_scene.reset();
+  impl_->queued_scene.reset();
   impl_->framebuffer_stencil_verified = false;
   impl_->capability_report = {};
   update_capability_overlay();

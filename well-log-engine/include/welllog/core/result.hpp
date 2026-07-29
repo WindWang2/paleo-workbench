@@ -24,6 +24,7 @@ enum class ErrorCode : std::uint16_t {
   document_not_found,
   invalid_manifest,
   unresolved_buffer,
+  operation_cancelled,
   resource_exhausted,
   internal_error,
 };
@@ -56,6 +57,7 @@ enum class MessageKey : std::uint16_t {
   manifest_resolver_required,
   manifest_buffer_mismatch,
   external_buffer_unresolved,
+  operation_cancelled,
   resource_exhausted,
   internal_error,
 };

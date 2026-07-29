@@ -90,6 +90,33 @@ enum class DiagnosticCode : std::uint16_t {
   missing_samples,
 };
 
+struct PerformanceBudgets {
+  std::uint64_t maximum_cpu_derived_bytes{};
+  std::uint64_t maximum_gpu_cache_bytes{256ULL * 1024ULL * 1024ULL};
+  std::uint64_t maximum_upload_bytes_per_frame{4ULL * 1024ULL * 1024ULL};
+  double prefetch_viewports{2.0};
+  std::uint64_t asynchronous_sample_threshold{16'384};
+};
+
+enum class PreparationState : std::uint8_t {
+  unavailable,
+  pending,
+  ready,
+};
+
+struct PerformanceSnapshot {
+  DocumentRevision document_revision;
+  PreparationState preparation_state{PreparationState::unavailable};
+  std::uint64_t cpu_derived_bytes{};
+  std::uint64_t maximum_cpu_derived_bytes{};
+  std::uint64_t maximum_gpu_cache_bytes{};
+  std::uint64_t maximum_upload_bytes_per_frame{};
+  std::uint64_t completed_tasks{};
+  std::uint64_t cancelled_tasks{};
+  std::uint64_t discarded_tasks{};
+  bool frame_preparation_pending{};
+};
+
 struct Diagnostic {
   std::uint64_t id{};
   DiagnosticCode code{DiagnosticCode::missing_samples};
@@ -103,6 +130,7 @@ struct Diagnostic {
 class WELLLOG_SESSION_API WellLogSession {
 public:
   WellLogSession();
+  explicit WellLogSession(PerformanceBudgets budgets);
   ~WellLogSession();
   WellLogSession(WellLogSession &&) noexcept;
   WellLogSession &operator=(WellLogSession &&) noexcept;
@@ -135,6 +163,10 @@ public:
   [[nodiscard]] ViewEventObserverId
   subscribe_view_events(ViewEventObserver observer) noexcept;
   void unsubscribe_view_events(ViewEventObserverId observer_id) noexcept;
+  void poll_async() noexcept;
+  [[nodiscard]] PerformanceBudgets performance_budgets() const noexcept;
+  [[nodiscard]] std::optional<PerformanceSnapshot>
+  performance_snapshot(EntityId document_id) const noexcept;
 
 private:
   struct Impl;

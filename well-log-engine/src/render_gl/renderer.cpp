@@ -30,7 +30,7 @@ using GlSizePointer = std::ptrdiff_t;
 using GlUInt = unsigned int;
 
 constexpr GlEnum gl_array_buffer = 0x8892;
-constexpr GlEnum gl_static_draw = 0x88E4;
+constexpr GlEnum gl_dynamic_draw = 0x88E8;
 constexpr GlEnum gl_float = 0x1406;
 constexpr GlEnum gl_false = 0;
 constexpr GlEnum gl_vertex_shader = 0x8B31;
@@ -57,6 +57,8 @@ using GlGenBuffers = void(WELLLOG_GL_CALL *)(GlSize, GlUInt *);
 using GlBindBuffer = void(WELLLOG_GL_CALL *)(GlEnum, GlUInt);
 using GlBufferData = void(WELLLOG_GL_CALL *)(GlEnum, GlSizePointer,
                                              const void *, GlEnum);
+using GlBufferSubData = void(WELLLOG_GL_CALL *)(GlEnum, GlSizePointer,
+                                                GlSizePointer, const void *);
 using GlDeleteBuffers = void(WELLLOG_GL_CALL *)(GlSize, const GlUInt *);
 using GlCreateShader = GlUInt(WELLLOG_GL_CALL *)(GlEnum);
 using GlShaderSource = void(WELLLOG_GL_CALL *)(GlUInt, GlSize,
@@ -109,6 +111,7 @@ struct GlFunctions {
   GlGenBuffers gen_buffers{};
   GlBindBuffer bind_buffer{};
   GlBufferData buffer_data{};
+  GlBufferSubData buffer_sub_data{};
   GlDeleteBuffers delete_buffers{};
   GlCreateShader create_shader{};
   GlShaderSource shader_source{};
@@ -144,13 +147,13 @@ struct GlFunctions {
     return gen_vertex_arrays != nullptr && bind_vertex_array != nullptr &&
            delete_vertex_arrays != nullptr && gen_buffers != nullptr &&
            bind_buffer != nullptr && buffer_data != nullptr &&
-           delete_buffers != nullptr && create_shader != nullptr &&
-           shader_source != nullptr && compile_shader != nullptr &&
-           get_shader_iv != nullptr && delete_shader != nullptr &&
-           create_program != nullptr && attach_shader != nullptr &&
-           link_program != nullptr && get_program_iv != nullptr &&
-           delete_program != nullptr && use_program != nullptr &&
-           enable_vertex_attrib_array != nullptr &&
+           buffer_sub_data != nullptr && delete_buffers != nullptr &&
+           create_shader != nullptr && shader_source != nullptr &&
+           compile_shader != nullptr && get_shader_iv != nullptr &&
+           delete_shader != nullptr && create_program != nullptr &&
+           attach_shader != nullptr && link_program != nullptr &&
+           get_program_iv != nullptr && delete_program != nullptr &&
+           use_program != nullptr && enable_vertex_attrib_array != nullptr &&
            vertex_attrib_pointer != nullptr &&
            get_uniform_location != nullptr && uniform_1f != nullptr &&
            uniform_2f != nullptr && uniform_4f != nullptr &&
@@ -178,6 +181,8 @@ struct GlFunctions {
           load<GlBindBuffer>(resolver, resolver_context, "glBindBuffer"),
       .buffer_data =
           load<GlBufferData>(resolver, resolver_context, "glBufferData"),
+      .buffer_sub_data =
+          load<GlBufferSubData>(resolver, resolver_context, "glBufferSubData"),
       .delete_buffers =
           load<GlDeleteBuffers>(resolver, resolver_context, "glDeleteBuffers"),
       .create_shader =
@@ -301,6 +306,8 @@ struct CurveVertex {
   GlFloat side{};
 };
 
+static_assert(sizeof(CurveVertex) == 6 * sizeof(float));
+
 struct CurveBatch {
   GlInt first_vertex{};
   GlSize vertex_count{};
@@ -344,10 +351,16 @@ void append_segment_vertices(std::vector<CurveVertex> &vertices,
 } // namespace
 
 struct GlRenderer::Impl {
+  struct BufferSlot {
+    GlUInt vertex_array{};
+    GlUInt vertex_buffer{};
+  };
+
   GlFunctions gl;
   std::thread::id owner_thread;
-  GlUInt vertex_array{};
-  GlUInt vertex_buffer{};
+  std::array<BufferSlot, 2> buffers;
+  std::size_t active_buffer{};
+  std::size_t staging_buffer{1};
   GlUInt program{};
   GlInt viewport_pixels_uniform{-1};
   GlInt viewport_center_uniform{-1};
@@ -356,7 +369,16 @@ struct GlRenderer::Impl {
   GlInt color_uniform{-1};
   double physical_width{};
   double scene_depth_center{};
+  std::uint64_t active_bytes{};
   std::vector<CurveBatch> batches;
+  std::vector<CurveVertex> pending_vertices;
+  std::vector<CurveBatch> pending_batches;
+  std::vector<GpuUploadChunk> pending_chunks;
+  std::size_t next_pending_chunk{};
+  double pending_physical_width{};
+  double pending_scene_depth_center{};
+  std::uint64_t pending_bytes_uploaded{};
+  bool upload_pending{};
 };
 
 GlRenderer::GlRenderer() : impl_(std::make_unique<Impl>()) {}
@@ -407,23 +429,25 @@ bool GlRenderer::initialize(GlProcResolver resolver,
     }
 
     impl_->owner_thread = std::this_thread::get_id();
-    impl_->gl.gen_vertex_arrays(1, &impl_->vertex_array);
-    impl_->gl.gen_buffers(1, &impl_->vertex_buffer);
-    if (impl_->vertex_array == 0 || impl_->vertex_buffer == 0) {
-      release();
-      return false;
+    for (auto &buffer : impl_->buffers) {
+      impl_->gl.gen_vertex_arrays(1, &buffer.vertex_array);
+      impl_->gl.gen_buffers(1, &buffer.vertex_buffer);
+      if (buffer.vertex_array == 0 || buffer.vertex_buffer == 0) {
+        release();
+        return false;
+      }
+      impl_->gl.bind_vertex_array(buffer.vertex_array);
+      impl_->gl.bind_buffer(gl_array_buffer, buffer.vertex_buffer);
+      impl_->gl.enable_vertex_attrib_array(0);
+      impl_->gl.vertex_attrib_pointer(
+          0, 4, gl_float, static_cast<GlBoolean>(gl_false),
+          static_cast<GlSize>(sizeof(CurveVertex)), nullptr);
+      impl_->gl.enable_vertex_attrib_array(1);
+      impl_->gl.vertex_attrib_pointer(
+          1, 2, gl_float, static_cast<GlBoolean>(gl_false),
+          static_cast<GlSize>(sizeof(CurveVertex)),
+          reinterpret_cast<const void *>(offsetof(CurveVertex, along)));
     }
-    impl_->gl.bind_vertex_array(impl_->vertex_array);
-    impl_->gl.bind_buffer(gl_array_buffer, impl_->vertex_buffer);
-    impl_->gl.enable_vertex_attrib_array(0);
-    impl_->gl.vertex_attrib_pointer(
-        0, 4, gl_float, static_cast<GlBoolean>(gl_false),
-        static_cast<GlSize>(sizeof(CurveVertex)), nullptr);
-    impl_->gl.enable_vertex_attrib_array(1);
-    impl_->gl.vertex_attrib_pointer(
-        1, 2, gl_float, static_cast<GlBoolean>(gl_false),
-        static_cast<GlSize>(sizeof(CurveVertex)),
-        reinterpret_cast<const void *>(offsetof(CurveVertex, along)));
     impl_->viewport_pixels_uniform =
         impl_->gl.get_uniform_location(impl_->program, "viewportPixels");
     impl_->viewport_center_uniform =
@@ -442,11 +466,36 @@ bool GlRenderer::initialize(GlProcResolver resolver,
 }
 
 bool GlRenderer::upload(const PreparedScene &scene) noexcept {
+  if (!queue_upload(scene, GpuUploadBudgets{
+                               .maximum_cache_bytes =
+                                   std::numeric_limits<std::uint64_t>::max(),
+                               .maximum_bytes_per_frame =
+                                   std::numeric_limits<std::uint64_t>::max(),
+                           })) {
+    return false;
+  }
+  while (true) {
+    const auto progress = upload_next();
+    if (progress.completed) {
+      return true;
+    }
+    if (!progress.pending) {
+      return false;
+    }
+  }
+}
+
+bool GlRenderer::queue_upload(const PreparedScene &scene,
+                              GpuUploadBudgets budgets) noexcept {
   if (!initialized() || std::this_thread::get_id() != impl_->owner_thread ||
       scene.physical_width().value <= 0.0) {
     return false;
   }
   try {
+    auto schedule = GpuUploadSchedule::plan(scene, budgets);
+    if (!schedule.has_value()) {
+      return false;
+    }
     std::vector<CurveVertex> vertices;
     std::vector<CurveBatch> batches;
     const auto depth_range = scene.reference_depth_range();
@@ -498,18 +547,103 @@ bool GlRenderer::upload(const PreparedScene &scene) noexcept {
             static_cast<GlSizePointer>(sizeof(CurveVertex)))) {
       return false;
     }
-    impl_->gl.bind_vertex_array(impl_->vertex_array);
-    impl_->gl.bind_buffer(gl_array_buffer, impl_->vertex_buffer);
-    impl_->gl.buffer_data(
-        gl_array_buffer,
-        static_cast<GlSizePointer>(vertices.size() * sizeof(CurveVertex)),
-        vertices.empty() ? nullptr : vertices.data(), gl_static_draw);
-    impl_->physical_width = scene.physical_width().value;
-    impl_->scene_depth_center = scene_depth_center;
-    impl_->batches = std::move(batches);
+    const auto byte_count = vertices.size() * sizeof(CurveVertex);
+    if (byte_count != schedule.value().total_bytes()) {
+      return false;
+    }
+    if (impl_->active_bytes >
+        budgets.maximum_cache_bytes - static_cast<std::uint64_t>(byte_count)) {
+      const auto &active = impl_->buffers[impl_->active_buffer];
+      impl_->gl.bind_vertex_array(active.vertex_array);
+      impl_->gl.bind_buffer(gl_array_buffer, active.vertex_buffer);
+      impl_->gl.buffer_data(gl_array_buffer, 0, nullptr, gl_dynamic_draw);
+      impl_->batches.clear();
+      impl_->active_bytes = 0;
+    }
+    impl_->staging_buffer = 1U - impl_->active_buffer;
+    const auto &staging = impl_->buffers[impl_->staging_buffer];
+    impl_->gl.bind_vertex_array(staging.vertex_array);
+    impl_->gl.bind_buffer(gl_array_buffer, staging.vertex_buffer);
+    impl_->gl.buffer_data(gl_array_buffer,
+                          static_cast<GlSizePointer>(byte_count), nullptr,
+                          gl_dynamic_draw);
+    impl_->pending_vertices = std::move(vertices);
+    impl_->pending_batches = std::move(batches);
+    const auto chunks = schedule.value().chunks();
+    impl_->pending_chunks.assign(chunks.begin(), chunks.end());
+    impl_->next_pending_chunk = 0;
+    impl_->pending_physical_width = scene.physical_width().value;
+    impl_->pending_scene_depth_center = scene_depth_center;
+    impl_->pending_bytes_uploaded = 0;
+    impl_->upload_pending = true;
     return true;
   } catch (...) {
     return false;
+  }
+}
+
+GlUploadProgress GlRenderer::upload_next() noexcept {
+  if (!initialized() || std::this_thread::get_id() != impl_->owner_thread ||
+      !impl_->upload_pending) {
+    return {};
+  }
+  try {
+    const auto total_bytes =
+        static_cast<std::uint64_t>(impl_->pending_vertices.size()) *
+        sizeof(CurveVertex);
+    if (impl_->next_pending_chunk < impl_->pending_chunks.size()) {
+      const auto chunk = impl_->pending_chunks[impl_->next_pending_chunk];
+      if (chunk.byte_offset > total_bytes ||
+          chunk.byte_count > total_bytes - chunk.byte_offset ||
+          chunk.byte_offset > static_cast<std::uint64_t>(
+                                  std::numeric_limits<GlSizePointer>::max()) ||
+          chunk.byte_count > static_cast<std::uint64_t>(
+                                 std::numeric_limits<GlSizePointer>::max())) {
+        impl_->upload_pending = false;
+        return {};
+      }
+      const auto &staging = impl_->buffers[impl_->staging_buffer];
+      impl_->gl.bind_vertex_array(staging.vertex_array);
+      impl_->gl.bind_buffer(gl_array_buffer, staging.vertex_buffer);
+      const auto *bytes =
+          reinterpret_cast<const std::byte *>(impl_->pending_vertices.data());
+      impl_->gl.buffer_sub_data(
+          gl_array_buffer, static_cast<GlSizePointer>(chunk.byte_offset),
+          static_cast<GlSizePointer>(chunk.byte_count),
+          bytes + static_cast<std::size_t>(chunk.byte_offset));
+      impl_->pending_bytes_uploaded += chunk.byte_count;
+      ++impl_->next_pending_chunk;
+    }
+    if (impl_->next_pending_chunk < impl_->pending_chunks.size()) {
+      return GlUploadProgress{
+          .bytes_uploaded = impl_->pending_bytes_uploaded,
+          .total_bytes = total_bytes,
+          .pending = true,
+          .completed = false,
+      };
+    }
+    impl_->active_buffer = impl_->staging_buffer;
+    impl_->staging_buffer = 1U - impl_->active_buffer;
+    impl_->physical_width = impl_->pending_physical_width;
+    impl_->scene_depth_center = impl_->pending_scene_depth_center;
+    impl_->batches = std::move(impl_->pending_batches);
+    impl_->active_bytes = total_bytes;
+    const auto &old = impl_->buffers[impl_->staging_buffer];
+    impl_->gl.bind_vertex_array(old.vertex_array);
+    impl_->gl.bind_buffer(gl_array_buffer, old.vertex_buffer);
+    impl_->gl.buffer_data(gl_array_buffer, 0, nullptr, gl_dynamic_draw);
+    impl_->pending_vertices.clear();
+    impl_->pending_chunks.clear();
+    impl_->upload_pending = false;
+    return GlUploadProgress{
+        .bytes_uploaded = total_bytes,
+        .total_bytes = total_bytes,
+        .pending = false,
+        .completed = true,
+    };
+  } catch (...) {
+    impl_->upload_pending = false;
+    return {};
   }
 }
 
@@ -549,7 +683,8 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
   impl_->gl.blend_func_separate(gl_src_alpha, gl_one_minus_src_alpha, gl_one,
                                 gl_one_minus_src_alpha);
   impl_->gl.use_program(impl_->program);
-  impl_->gl.bind_vertex_array(impl_->vertex_array);
+  impl_->gl.bind_vertex_array(
+      impl_->buffers[impl_->active_buffer].vertex_array);
   impl_->gl.uniform_2f(impl_->viewport_pixels_uniform,
                        static_cast<GlFloat>(frame.pixel_width),
                        static_cast<GlFloat>(frame.pixel_height));
@@ -618,11 +753,13 @@ void GlRenderer::release() noexcept {
     abandon();
     return;
   }
-  if (impl_->vertex_buffer != 0) {
-    impl_->gl.delete_buffers(1, &impl_->vertex_buffer);
-  }
-  if (impl_->vertex_array != 0) {
-    impl_->gl.delete_vertex_arrays(1, &impl_->vertex_array);
+  for (auto &buffer : impl_->buffers) {
+    if (buffer.vertex_buffer != 0) {
+      impl_->gl.delete_buffers(1, &buffer.vertex_buffer);
+    }
+    if (buffer.vertex_array != 0) {
+      impl_->gl.delete_vertex_arrays(1, &buffer.vertex_array);
+    }
   }
   if (impl_->program != 0) {
     impl_->gl.delete_program(impl_->program);
@@ -631,16 +768,26 @@ void GlRenderer::release() noexcept {
 }
 
 void GlRenderer::abandon() noexcept {
-  impl_->vertex_buffer = 0;
-  impl_->vertex_array = 0;
+  impl_->buffers = {};
   impl_->program = 0;
   impl_->batches.clear();
+  impl_->pending_vertices.clear();
+  impl_->pending_batches.clear();
+  impl_->pending_chunks.clear();
+  impl_->upload_pending = false;
+  impl_->active_buffer = 0;
+  impl_->staging_buffer = 1;
+  impl_->active_bytes = 0;
   impl_->owner_thread = {};
 }
 
 bool GlRenderer::initialized() const noexcept {
-  return impl_ != nullptr && impl_->program != 0 && impl_->vertex_array != 0 &&
-         impl_->vertex_buffer != 0;
+  return impl_ != nullptr && impl_->program != 0 &&
+         std::all_of(impl_->buffers.begin(), impl_->buffers.end(),
+                     [](const Impl::BufferSlot &buffer) {
+                       return buffer.vertex_array != 0 &&
+                              buffer.vertex_buffer != 0;
+                     });
 }
 
 } // namespace welllog::detail

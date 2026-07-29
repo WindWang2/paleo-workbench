@@ -23,10 +23,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
+find_package(Threads REQUIRED)
 
 option(WELLLOG_BUILD_TESTS "Build WellLogEngine tests" ${BUILD_TESTING})
 option(WELLLOG_BUILD_SHARED "Build WellLogEngine shared libraries" OFF)
 option(WELLLOG_WARNINGS_AS_ERRORS "Treat WellLogEngine warnings as errors" OFF)
+option(WELLLOG_BUILD_BENCHMARKS "Build WellLogEngine performance benchmarks" OFF)
 option(
     WELLLOG_BUILD_QT_WIDGETS
     "Build the optional Qt Widgets/OpenGL adapter"
@@ -195,6 +197,7 @@ if(WELLLOG_BUILD_SHARED)
 endif()
 
 add_library(welllog_scene ${WELLLOG_LIBRARY_TYPE}
+    src/scene/curve_lod.cpp
     src/scene/scene.cpp
 )
 add_library(WellLog::Scene ALIAS welllog_scene)
@@ -265,7 +268,11 @@ set_target_properties(welllog_session PROPERTIES
 )
 target_compile_features(welllog_session PUBLIC cxx_std_20)
 welllog_enable_warnings(welllog_session)
-target_link_libraries(welllog_session PUBLIC WellLog::Core WellLog::Scene)
+target_link_libraries(
+    welllog_session
+    PUBLIC WellLog::Core WellLog::Scene
+    PRIVATE Threads::Threads
+)
 target_include_directories(welllog_session
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -311,6 +318,7 @@ endif()
 add_library(welllog_render_gl ${WELLLOG_LIBRARY_TYPE}
     src/render_gl/capability.cpp
     src/render_gl/renderer.cpp
+    src/render_gl/upload.cpp
 )
 add_library(WellLog::RenderGL ALIAS welllog_render_gl)
 set_target_properties(welllog_render_gl PROPERTIES
@@ -426,6 +434,21 @@ if(WELLLOG_BUILD_PYTHON)
     )
 endif()
 
+if(WELLLOG_BUILD_BENCHMARKS)
+    add_executable(welllog_dense_curve_benchmark
+        benchmarks/dense_curve_benchmark.cpp
+    )
+    target_compile_features(
+        welllog_dense_curve_benchmark
+        PRIVATE cxx_std_20
+    )
+    welllog_enable_warnings(welllog_dense_curve_benchmark)
+    target_link_libraries(
+        welllog_dense_curve_benchmark
+        PRIVATE WellLog::RenderGL WellLog::Session
+    )
+endif()
+
 install(
     TARGETS
         welllog_core
@@ -501,6 +524,31 @@ install(
 )
 
 if(WELLLOG_BUILD_TESTS)
+    add_executable(welllog_curve_lod_tests
+        tests/scene/curve_lod_test.cpp
+    )
+    target_compile_features(welllog_curve_lod_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_curve_lod_tests)
+    target_link_libraries(welllog_curve_lod_tests PRIVATE WellLog::Scene)
+    add_test(NAME welllog.curve-lod COMMAND welllog_curve_lod_tests)
+
+    add_executable(welllog_dense_curve_pipeline_tests
+        tests/integration/dense_curve_pipeline_test.cpp
+    )
+    target_compile_features(
+        welllog_dense_curve_pipeline_tests
+        PRIVATE cxx_std_20
+    )
+    welllog_enable_warnings(welllog_dense_curve_pipeline_tests)
+    target_link_libraries(
+        welllog_dense_curve_pipeline_tests
+        PRIVATE WellLog::RenderGL WellLog::Session
+    )
+    add_test(
+        NAME welllog.dense-curve-pipeline
+        COMMAND welllog_dense_curve_pipeline_tests
+    )
+
     add_executable(welllog_session_tests
         tests/integration/session_submission_test.cpp
     )

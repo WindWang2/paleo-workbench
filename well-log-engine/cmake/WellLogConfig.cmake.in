@@ -1,6 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+find_dependency(Threads)
 if(@WELLLOG_BUILD_QT_WIDGETS@)
     find_dependency(Qt6 6.8 COMPONENTS Widgets OpenGLWidgets)
 endif()

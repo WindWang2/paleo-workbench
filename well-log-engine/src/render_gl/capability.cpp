@@ -58,7 +58,7 @@ evaluate_capabilities(OpenGlContextCapabilities capabilities) noexcept {
         .renderer = std::move(capabilities.renderer),
         .open_gl_version = std::move(capabilities.open_gl_version),
         .glsl_version = std::move(capabilities.glsl_version),
-        .active_upload_path = "OpenGL 3.3 static VBO",
+        .active_upload_path = "OpenGL 3.3 budgeted double-buffer VBO",
         .unavailable_reason = {},
     };
     const auto version_available =
