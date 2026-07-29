@@ -260,6 +260,74 @@ void view_event_observers_receive_committed_state_changes() {
           "unsubscribed observer must receive no further events");
 }
 
+void reentrant_observers_cannot_invalidate_command_receipts() {
+  const auto replace_document_on = [](ViewEventKind observed_kind) {
+    auto fixture = prepared_session();
+    auto replacement_submitted = false;
+    const auto observer_id =
+        fixture.session.subscribe_view_events([&](const ViewEvent &event) {
+          if (event.kind != observed_kind || replacement_submitted) {
+            return;
+          }
+          replacement_submitted = true;
+          const auto replacement_axis_id =
+              id("50000000-0000-4000-8000-000000000010");
+          const auto replacement_curve_id =
+              id("50000000-0000-4000-8000-000000000011");
+          auto replacement_depths = std::make_shared<const std::vector<double>>(
+              std::initializer_list<double>{1000.0, 1100.0});
+          auto replacement_values = std::make_shared<const std::vector<double>>(
+              std::initializer_list<double>{10.0, 20.0});
+          WellLogDocumentBuilder replacement_builder(fixture.document_id,
+                                                     DocumentRevision{2});
+          replacement_builder.add_sampling_axis(SamplingAxis{
+              .id = replacement_axis_id,
+              .coordinates = BufferView::from_vector(replacement_depths),
+              .domain = DepthDomain::measured_depth,
+              .unit = "m",
+              .direction = AxisDirection::increasing,
+          });
+          replacement_builder.add_curve(Curve{
+              .id = replacement_curve_id,
+              .mnemonic = "GR2",
+              .display_name = "Replacement Gamma Ray",
+              .unit = "API",
+              .sampling_axis_id = replacement_axis_id,
+              .values = BufferView::from_vector(replacement_values),
+              .nulls = {},
+          });
+          require(fixture.session
+                      .execute(SetDocumentCommand{replacement_builder.build()})
+                      .has_value(),
+                  "reentrant replacement document must be accepted");
+        });
+    require(observer_id != 0, "reentrant observer must subscribe");
+
+    const auto result = observed_kind == ViewEventKind::viewport_changed
+                            ? fixture.session.execute(PanDepthCommand{
+                                  .document_id = fixture.document_id,
+                                  .display_depth_delta = 1.0,
+                              })
+                            : fixture.session.execute(SetCrosshairCommand{
+                                  .document_id = fixture.document_id,
+                                  .crosshair =
+                                      CrosshairState{
+                                          .track_fraction = 0.5,
+                                          .display_depth = 1050.0,
+                                      },
+                              });
+    require(result.has_value(), "outer observed command must succeed");
+    require(result.value().document_revision == DocumentRevision{1},
+            "command receipt must retain its committed revision snapshot");
+    require(fixture.session.document(fixture.document_id)->revision() ==
+                DocumentRevision{2},
+            "observer must have replaced the document reentrantly");
+  };
+
+  replace_document_on(ViewEventKind::viewport_changed);
+  replace_document_on(ViewEventKind::crosshair_changed);
+}
+
 } // namespace
 
 int main() {
@@ -267,6 +335,7 @@ int main() {
   session_owns_crosshair_state();
   invalid_view_commands_leave_session_state_unchanged();
   view_event_observers_receive_committed_state_changes();
+  reentrant_observers_cannot_invalidate_command_receipts();
   std::cout << "PASS: session viewport interaction behavior\n";
   return EXIT_SUCCESS;
 }

@@ -573,6 +573,7 @@ WellLogSession::execute(const SetViewportCommand &command) {
       return viewport_error(command.document_id);
     }
     const auto next_state_version = impl_->state_version + 1;
+    const auto revision = document->second->revision();
     impl_->events.reserve(impl_->events.size() + 1);
     viewport->second = command.viewport;
     impl_->state_version = next_state_version;
@@ -580,14 +581,14 @@ WellLogSession::execute(const SetViewportCommand &command) {
         .kind = ViewEventKind::viewport_changed,
         .state_version = next_state_version,
         .document_id = command.document_id,
-        .document_revision = document->second->revision(),
+        .document_revision = revision,
     };
     impl_->events.push_back(event);
     impl_->notify_observers(event);
     return CommandReceipt{
         .state_version = next_state_version,
         .document_id = command.document_id,
-        .document_revision = document->second->revision(),
+        .document_revision = revision,
         .asynchronous_preparation_started = false,
         .diagnostic_id = std::nullopt,
     };
@@ -680,6 +681,7 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
       return viewport_error(command.document_id);
     }
     const auto next_state_version = impl_->state_version + 1;
+    const auto revision = document->second->revision();
     impl_->events.reserve(impl_->events.size() + 1);
     if (command.crosshair.has_value()) {
       impl_->crosshairs.reserve(impl_->crosshairs.size() + 1);
@@ -693,14 +695,14 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
         .kind = ViewEventKind::crosshair_changed,
         .state_version = next_state_version,
         .document_id = command.document_id,
-        .document_revision = document->second->revision(),
+        .document_revision = revision,
     };
     impl_->events.push_back(event);
     impl_->notify_observers(event);
     return CommandReceipt{
         .state_version = next_state_version,
         .document_id = command.document_id,
-        .document_revision = document->second->revision(),
+        .document_revision = revision,
         .asynchronous_preparation_started = false,
         .diagnostic_id = std::nullopt,
     };
