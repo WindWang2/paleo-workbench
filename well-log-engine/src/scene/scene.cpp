@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -331,6 +332,13 @@ struct PreparedScene::Impl {
   std::vector<PreparedMarker> markers;
   std::vector<PreparedSymbolLayer> symbol_layers;
   std::vector<PreparedSymbol> symbols;
+  std::vector<PreparedTextLayer> text_layers;
+  std::vector<PreparedTextRun> text_runs;
+  std::vector<PreparedGlyph> glyphs;
+  std::vector<PreparedTextFont> text_fonts;
+  std::vector<PreparedGlyphOutline> glyph_outlines;
+  std::vector<OutlineCommand> outline_commands;
+  std::vector<SceneTextIssue> text_issues;
 };
 
 PreparedScene::PreparedScene() = default;
@@ -444,6 +452,50 @@ std::span<const PreparedSymbol> PreparedScene::symbols() const noexcept {
   return impl_ == nullptr
              ? std::span<const PreparedSymbol>{}
              : std::span<const PreparedSymbol>{impl_->symbols};
+}
+
+std::span<const PreparedTextLayer> PreparedScene::text_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedTextLayer>{}
+             : std::span<const PreparedTextLayer>{impl_->text_layers};
+}
+
+std::span<const PreparedTextRun> PreparedScene::text_runs() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedTextRun>{}
+             : std::span<const PreparedTextRun>{impl_->text_runs};
+}
+
+std::span<const PreparedGlyph> PreparedScene::glyphs() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedGlyph>{}
+             : std::span<const PreparedGlyph>{impl_->glyphs};
+}
+
+std::span<const PreparedTextFont> PreparedScene::text_fonts() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedTextFont>{}
+             : std::span<const PreparedTextFont>{impl_->text_fonts};
+}
+
+std::span<const PreparedGlyphOutline>
+PreparedScene::glyph_outlines() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedGlyphOutline>{}
+             : std::span<const PreparedGlyphOutline>{impl_->glyph_outlines};
+}
+
+std::span<const OutlineCommand>
+PreparedScene::outline_commands() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const OutlineCommand>{}
+             : std::span<const OutlineCommand>{impl_->outline_commands};
+}
+
+std::span<const SceneTextIssue> PreparedScene::text_issues() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const SceneTextIssue>{}
+             : std::span<const SceneTextIssue>{impl_->text_issues};
 }
 
 std::optional<CurvePick>
@@ -589,21 +641,24 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
 
 Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
-                               const ScenePresentation &presentation) noexcept {
-  return prepare_impl(document, presentation, nullptr, nullptr, {});
+                               const ScenePresentation &presentation,
+                               TextEngine *text_engine) noexcept {
+  return prepare_impl(document, presentation, nullptr, nullptr, {},
+                      text_engine);
 }
 
 Result<PreparedScene> detail::ScenePreparer::prepare(
     const WellLogDocument &document, const ScenePresentation &presentation,
     const CurveLodMap &curve_lods, const CurveLodQuery &query,
-    std::stop_token stop_token) noexcept {
-  return prepare_impl(document, presentation, &curve_lods, &query, stop_token);
+    std::stop_token stop_token, TextEngine *text_engine) noexcept {
+  return prepare_impl(document, presentation, &curve_lods, &query, stop_token,
+                      text_engine);
 }
 
 Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     const WellLogDocument &document, const ScenePresentation &presentation,
     const CurveLodMap *curve_lods, const CurveLodQuery *query,
-    std::stop_token stop_token) noexcept {
+    std::stop_token stop_token, TextEngine *text_engine) noexcept {
   try {
     if (stop_token.stop_requested()) {
       return cancellation_error();
@@ -1226,11 +1281,371 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       });
     }
 
+    std::vector<const TextLayerSpec *> ordered_text_layers;
+    ordered_text_layers.reserve(presentation.text_layers().size());
     for (const auto &layer : presentation.text_layers()) {
       if (layer.id.is_nil() || !ids.insert(layer.id).second ||
           !track_bounds.contains(layer.track_id)) {
         return presentation_error(layer.id);
       }
+      ordered_text_layers.push_back(&layer);
+    }
+    std::stable_sort(
+        ordered_text_layers.begin(), ordered_text_layers.end(),
+        [](const TextLayerSpec *left_layer, const TextLayerSpec *right_layer) {
+          if (left_layer->z_order != right_layer->z_order) {
+            return left_layer->z_order < right_layer->z_order;
+          }
+          return left_layer->id < right_layer->id;
+        });
+
+    // Text preparation. Shaping goes through the injected TextEngine so
+    // the core stays free of text-rendering dependencies (ADR 0029); the
+    // same glyph positions feed the screen and vector backends.
+    std::uint64_t suppressed_runs = 0;
+    std::set<std::pair<std::uint32_t, std::uint32_t>> used_glyph_keys;
+    std::set<std::uint32_t> used_font_indices;
+    const auto append_text_run = [&](EntityId layer_id, EntityId source_id,
+                                     std::string_view text,
+                                     std::string_view language,
+                                     TextOrientation orientation,
+                                     double rotation_degrees,
+                                     Millimetres font_size, PhysicalPoint anchor,
+                                     RgbaColor color) -> Result<std::uint64_t> {
+      const auto direction = orientation == TextOrientation::vertical
+                                 ? TextDirection::top_to_bottom
+                                 : TextDirection::left_to_right;
+      auto shaped = text_engine->shape(TextShapeRequest{
+          .text = text,
+          .language = language,
+          .direction = direction,
+      });
+      if (!shaped.has_value()) {
+        return shaped.error();
+      }
+      const auto scale = font_size.value;
+      const auto theta = orientation == TextOrientation::rotated
+                             ? rotation_degrees * 3.14159265358979323846 / 180.0
+                             : 0.0;
+      const auto cos_t = std::cos(theta);
+      const auto sin_t = std::sin(theta);
+      const auto first_glyph =
+          static_cast<std::uint64_t>(scene->glyphs.size());
+      auto pen_x = 0.0;
+      auto pen_y = 0.0;
+      auto minimum_x = std::numeric_limits<double>::infinity();
+      auto minimum_y = std::numeric_limits<double>::infinity();
+      auto maximum_x = -std::numeric_limits<double>::infinity();
+      auto maximum_y = -std::numeric_limits<double>::infinity();
+      for (const auto &glyph : shaped.value().glyphs) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
+        // Run space is y-down millimetres relative to the anchor. Upright
+        // glyphs in vertical runs are centered on the pen line; rotated
+        // glyphs keep their shaped origin and turn 90 degrees.
+        auto offset_x = glyph.offset_x * scale;
+        auto offset_y = -glyph.offset_y * scale;
+        auto glyph_rotation =
+            orientation == TextOrientation::rotated ? rotation_degrees : 0.0;
+        if (orientation == TextOrientation::vertical) {
+          glyph_rotation = glyph.upright ? 0.0 : 90.0;
+          if (glyph.upright) {
+            offset_x -= 0.5 * scale;
+            offset_y += 0.5 * scale;
+          }
+        }
+        const auto run_x = pen_x + offset_x;
+        const auto run_y = pen_y + offset_y;
+        const auto scene_x =
+            anchor.left.value + run_x * cos_t - run_y * sin_t;
+        const auto scene_y =
+            anchor.top.value + run_x * sin_t + run_y * cos_t;
+        if (!std::isfinite(scene_x) || !std::isfinite(scene_y)) {
+          return presentation_error(source_id);
+        }
+        used_glyph_keys.emplace(glyph.font_index, glyph.glyph_id);
+        used_font_indices.insert(glyph.font_index);
+        scene->glyphs.push_back(PreparedGlyph{
+            .font_index = glyph.font_index,
+            .glyph_id = glyph.glyph_id,
+            .code_point = glyph.code_point,
+            .origin =
+                PhysicalPoint{
+                    .left = Millimetres{scene_x},
+                    .top = Millimetres{scene_y},
+                },
+            .rotation_degrees = glyph_rotation,
+            .upright = glyph.upright,
+        });
+        minimum_x = std::min(minimum_x, scene_x);
+        minimum_y = std::min(minimum_y, scene_y);
+        maximum_x = std::max(maximum_x, scene_x);
+        maximum_y = std::max(maximum_y, scene_y);
+        pen_x += glyph.advance_x * scale;
+        pen_y += -glyph.advance_y * scale;
+      }
+      if (scene->glyphs.size() == first_glyph) {
+        // Nothing shaped: keep an empty run so indices stay stable.
+        minimum_x = anchor.left.value;
+        minimum_y = anchor.top.value;
+        maximum_x = anchor.left.value;
+        maximum_y = anchor.top.value;
+      }
+      if (!shaped.value().missing_code_points.empty()) {
+        scene->text_issues.push_back(SceneTextIssue{
+            .code = TextIssueCode::missing_glyphs,
+            .entity_id = source_id,
+            .occurrence_count = static_cast<std::uint32_t>(
+                shaped.value().missing_code_points.size()),
+        });
+      }
+      if (shaped.value().used_fallback_font) {
+        scene->text_issues.push_back(SceneTextIssue{
+            .code = TextIssueCode::fallback_font_used,
+            .entity_id = source_id,
+            .occurrence_count = 1,
+        });
+      }
+      const auto run_index =
+          static_cast<std::uint64_t>(scene->text_runs.size());
+      scene->text_runs.push_back(PreparedTextRun{
+          .layer_id = layer_id,
+          .source_entity_id = source_id,
+          .anchor = anchor,
+          .orientation = orientation,
+          .rotation_degrees = rotation_degrees,
+          .color = color,
+          .font_size = font_size,
+          .bounds =
+              PhysicalRect{
+                  .left = Millimetres{minimum_x},
+                  .top = Millimetres{minimum_y - scale},
+                  .width = Millimetres{maximum_x - minimum_x + scale},
+                  .height = Millimetres{maximum_y - minimum_y + 2.0 * scale},
+              },
+          .first_glyph = first_glyph,
+          .glyph_count = static_cast<std::uint64_t>(scene->glyphs.size()) -
+                         first_glyph,
+          .text = std::string{text},
+      });
+      return run_index;
+    };
+
+    for (const auto *layer_pointer : ordered_text_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      const auto first_run =
+          static_cast<std::uint64_t>(scene->text_runs.size());
+      for (const auto &annotation : document.annotations()) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
+        PhysicalPoint anchor;
+        switch (annotation.anchor) {
+        case AnnotationAnchor::reference_depth: {
+          if (annotation.reference_depth < depth_range.top ||
+              annotation.reference_depth > depth_range.bottom) {
+            continue;
+          }
+          const auto bounds = track_bounds.at(layer.track_id);
+          anchor = PhysicalPoint{
+              .left = Millimetres{bounds.left.value +
+                                  annotation.track_fraction *
+                                      bounds.width.value},
+              .top = Millimetres{depth_to_top(annotation.reference_depth)},
+          };
+          break;
+        }
+        case AnnotationAnchor::track: {
+          const auto bounds = track_bounds.find(annotation.track_id);
+          if (bounds == track_bounds.end()) {
+            return presentation_error(annotation.id);
+          }
+          anchor = PhysicalPoint{
+              .left = Millimetres{bounds->second.left.value +
+                                  annotation.horizontal_fraction *
+                                      bounds->second.width.value},
+              .top = Millimetres{annotation.depth_fraction *
+                                 presentation.physical_height().value},
+          };
+          break;
+        }
+        case AnnotationAnchor::scene_point:
+          anchor = annotation.scene_point;
+          break;
+        }
+        if (!std::isfinite(anchor.left.value) ||
+            !std::isfinite(anchor.top.value)) {
+          return presentation_error(annotation.id);
+        }
+        if (text_engine == nullptr) {
+          ++suppressed_runs;
+          continue;
+        }
+        const auto run = append_text_run(
+            layer.id, annotation.id, annotation.text, annotation.language,
+            annotation.orientation, annotation.rotation_degrees,
+            annotation.font_size, anchor, layer.color);
+        if (!run.has_value()) {
+          return run.error();
+        }
+      }
+      scene->text_layers.push_back(PreparedTextLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .z_order = layer.z_order,
+          .color = layer.color,
+          .first_run = first_run,
+          .run_count = static_cast<std::uint64_t>(scene->text_runs.size()) -
+                       first_run,
+      });
+    }
+
+    // Interval and marker labels share the same text pipeline so glyphs
+    // are shaped once for screen and export.
+    const auto &interval_specs = presentation.interval_layers();
+    for (std::size_t layer_index = 0;
+         layer_index < scene->interval_layers.size(); ++layer_index) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      auto &prepared_layer = scene->interval_layers[layer_index];
+      const auto spec = std::find_if(
+          interval_specs.begin(), interval_specs.end(),
+          [&](const IntervalLayerSpec &candidate) {
+            return candidate.id == prepared_layer.id;
+          });
+      if (spec == interval_specs.end() || !spec->draw_labels) {
+        continue;
+      }
+      for (std::uint64_t offset = 0; offset < prepared_layer.interval_count;
+           ++offset) {
+        auto &interval =
+            scene->intervals[static_cast<std::size_t>(
+                prepared_layer.first_interval + offset)];
+        const auto source = std::find_if(
+            document.intervals().begin(), document.intervals().end(),
+            [&](const Interval &candidate) {
+              return candidate.id == interval.interval_id;
+            });
+        if (source == document.intervals().end() || source->label.empty()) {
+          continue;
+        }
+        if (text_engine == nullptr) {
+          ++suppressed_runs;
+          continue;
+        }
+        const auto anchor = PhysicalPoint{
+            .left = Millimetres{interval.rect.left.value + 1.0},
+            .top = Millimetres{interval.rect.top.value + 0.5 +
+                               spec->label_font_size.value * 0.85},
+        };
+        const auto run = append_text_run(
+            prepared_layer.id, interval.interval_id, source->label, "",
+            TextOrientation::horizontal, 0.0, spec->label_font_size, anchor,
+            spec->label_color);
+        if (!run.has_value()) {
+          return run.error();
+        }
+        interval.label_run_index = run.value();
+      }
+    }
+    const auto &marker_specs = presentation.marker_layers();
+    for (std::size_t layer_index = 0;
+         layer_index < scene->marker_layers.size(); ++layer_index) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      auto &prepared_layer = scene->marker_layers[layer_index];
+      const auto spec = std::find_if(
+          marker_specs.begin(), marker_specs.end(),
+          [&](const MarkerLayerSpec &candidate) {
+            return candidate.id == prepared_layer.id;
+          });
+      if (spec == marker_specs.end() || !spec->draw_labels) {
+        continue;
+      }
+      const auto bounds = track_bounds.at(prepared_layer.track_id);
+      for (std::uint64_t offset = 0; offset < prepared_layer.marker_count;
+           ++offset) {
+        auto &marker = scene->markers[static_cast<std::size_t>(
+            prepared_layer.first_marker + offset)];
+        const auto source = std::find_if(
+            document.markers().begin(), document.markers().end(),
+            [&](const Marker &candidate) {
+              return candidate.id == marker.marker_id;
+            });
+        if (source == document.markers().end() || source->label.empty()) {
+          continue;
+        }
+        if (text_engine == nullptr) {
+          ++suppressed_runs;
+          continue;
+        }
+        const auto anchor = PhysicalPoint{
+            .left = Millimetres{bounds.left.value + 1.0},
+            .top = Millimetres{marker.display_top.value - 0.6},
+        };
+        const auto run = append_text_run(
+            prepared_layer.id, marker.marker_id, source->label, "",
+            TextOrientation::horizontal, 0.0, spec->label_font_size, anchor,
+            spec->label_color);
+        if (!run.has_value()) {
+          return run.error();
+        }
+        marker.label_run_index = run.value();
+      }
+    }
+
+    if (suppressed_runs > 0) {
+      scene->text_issues.push_back(SceneTextIssue{
+          .code = TextIssueCode::text_engine_unavailable,
+          .entity_id = document.id(),
+          .occurrence_count = static_cast<std::uint32_t>(suppressed_runs),
+      });
+    }
+
+    // Resolve outlines and font metadata for every glyph the runs use so
+    // the prepared scene is self-contained for both backends.
+    for (const auto font_index : used_font_indices) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      scene->text_fonts.push_back(PreparedTextFont{
+          .index = font_index,
+          .fingerprint = text_engine->font_fingerprint(font_index),
+          .family_name = text_engine->font_family_name(font_index),
+      });
+    }
+    for (const auto &[font_index, glyph_id] : used_glyph_keys) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      auto outline = text_engine->glyph_outline(font_index, glyph_id);
+      if (!outline.has_value()) {
+        return outline.error();
+      }
+      const auto first_command =
+          static_cast<std::uint64_t>(scene->outline_commands.size());
+      for (const auto &command : outline.value().commands) {
+        scene->outline_commands.push_back(command);
+      }
+      scene->glyph_outlines.push_back(PreparedGlyphOutline{
+          .font_index = font_index,
+          .glyph_id = glyph_id,
+          .advance_x = outline.value().advance_x,
+          .left = outline.value().left,
+          .bottom = outline.value().bottom,
+          .right = outline.value().right,
+          .top = outline.value().top,
+          .first_command = first_command,
+          .command_count =
+              static_cast<std::uint64_t>(scene->outline_commands.size()) -
+              first_command,
+      });
     }
     return PreparedScene{std::move(scene)};
   } catch (const std::bad_alloc &) {

@@ -14,6 +14,7 @@
 #include <welllog/core/result.hpp>
 #include <welllog/core/units.hpp>
 #include <welllog/scene/export.hpp>
+#include <welllog/scene/text_engine.hpp>
 
 namespace welllog {
 
@@ -113,6 +114,7 @@ struct IntervalLayerSpec {
   std::int32_t z_order{};
   bool draw_labels{true};
   Millimetres label_font_size{3.0};
+  RgbaColor label_color{0, 0, 0, 255};
 };
 
 // Displays document Markers as zero-thickness horizontal lines across the
@@ -125,6 +127,7 @@ struct MarkerLayerSpec {
   Millimetres line_width{0.3};
   bool draw_labels{true};
   Millimetres label_font_size{3.0};
+  RgbaColor label_color{0, 0, 0, 255};
 };
 
 // Displays document SymbolOccurrences at their depth and track fraction.
@@ -307,6 +310,76 @@ struct PreparedSymbol {
   double reference_depth{};
 };
 
+// Metadata for one font face used by the prepared text runs. The index
+// matches PreparedGlyph::font_index and PreparedGlyphOutline::font_index.
+struct PreparedTextFont {
+  std::uint32_t index{};
+  std::string fingerprint;
+  std::string family_name;
+};
+
+// One positioned glyph. `origin` is the baseline origin in scene
+// millimetres with the run rotation already applied to the pen position;
+// `rotation_degrees` rotates the glyph itself around `origin` (run
+// rotation plus 90 degrees for rotated glyphs in vertical typesetting).
+struct PreparedGlyph {
+  std::uint32_t font_index{};
+  std::uint32_t glyph_id{};
+  char32_t code_point{};
+  PhysicalPoint origin{};
+  double rotation_degrees{};
+  bool upright{true};
+};
+
+struct PreparedTextRun {
+  EntityId layer_id;
+  EntityId source_entity_id;
+  PhysicalPoint anchor{};
+  TextOrientation orientation{TextOrientation::horizontal};
+  double rotation_degrees{};
+  RgbaColor color{};
+  Millimetres font_size{};
+  PhysicalRect bounds{};
+  std::uint64_t first_glyph{};
+  std::uint64_t glyph_count{};
+  std::string text;
+};
+
+struct PreparedTextLayer {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  RgbaColor color{};
+  std::uint64_t first_run{};
+  std::uint64_t run_count{};
+};
+
+// Vector outline of one glyph in em fractions (y-up, glyph-local), shared
+// by the vector exporters and by the screen backend's atlas rasterizer.
+struct PreparedGlyphOutline {
+  std::uint32_t font_index{};
+  std::uint32_t glyph_id{};
+  double advance_x{};
+  double left{};
+  double bottom{};
+  double right{};
+  double top{};
+  std::uint64_t first_command{};
+  std::uint64_t command_count{};
+};
+
+enum class TextIssueCode : std::uint8_t {
+  missing_glyphs,
+  fallback_font_used,
+  text_engine_unavailable,
+};
+
+struct SceneTextIssue {
+  TextIssueCode code{};
+  EntityId entity_id;
+  std::uint32_t occurrence_count{};
+};
+
 struct CurvePick {
   EntityId layer_id;
   EntityId curve_id;
@@ -360,6 +433,16 @@ public:
   [[nodiscard]] std::span<const PreparedSymbolLayer>
   symbol_layers() const noexcept;
   [[nodiscard]] std::span<const PreparedSymbol> symbols() const noexcept;
+  [[nodiscard]] std::span<const PreparedTextLayer>
+  text_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedTextRun> text_runs() const noexcept;
+  [[nodiscard]] std::span<const PreparedGlyph> glyphs() const noexcept;
+  [[nodiscard]] std::span<const PreparedTextFont> text_fonts() const noexcept;
+  [[nodiscard]] std::span<const PreparedGlyphOutline>
+  glyph_outlines() const noexcept;
+  [[nodiscard]] std::span<const OutlineCommand>
+  outline_commands() const noexcept;
+  [[nodiscard]] std::span<const SceneTextIssue> text_issues() const noexcept;
   [[nodiscard]] std::optional<CurvePick>
   pick_curve(const CurvePickQuery &query) const noexcept;
 

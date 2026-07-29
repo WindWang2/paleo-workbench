@@ -684,6 +684,30 @@ if(WELLLOG_BUILD_TESTS)
         )
     endif()
 
+    if(WELLLOG_BUILD_TEXT)
+        add_executable(welllog_text_scene_tests
+            tests/integration/text_scene_test.cpp
+        )
+        target_compile_features(
+            welllog_text_scene_tests
+            PRIVATE cxx_std_20
+        )
+        welllog_enable_warnings(welllog_text_scene_tests)
+        target_compile_definitions(
+            welllog_text_scene_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_link_libraries(
+            welllog_text_scene_tests
+            PRIVATE WellLog::Text WellLog::Session
+        )
+        add_test(
+            NAME welllog.text-scene
+            COMMAND welllog_text_scene_tests
+        )
+    endif()
+
     add_executable(welllog_manifest_tests
         tests/integration/manifest_roundtrip_test.cpp
     )

@@ -15,18 +15,20 @@ public:
 
   [[nodiscard]] static Result<PreparedScene>
   prepare(const WellLogDocument &document,
-          const ScenePresentation &presentation) noexcept;
+          const ScenePresentation &presentation,
+          TextEngine *text_engine = nullptr) noexcept;
   [[nodiscard]] static Result<PreparedScene>
   prepare(const WellLogDocument &document,
           const ScenePresentation &presentation, const CurveLodMap &curve_lods,
-          const CurveLodQuery &query, std::stop_token stop_token = {}) noexcept;
+          const CurveLodQuery &query, std::stop_token stop_token = {},
+          TextEngine *text_engine = nullptr) noexcept;
 
 private:
   [[nodiscard]] static Result<PreparedScene>
   prepare_impl(const WellLogDocument &document,
                const ScenePresentation &presentation,
                const CurveLodMap *curve_lods, const CurveLodQuery *query,
-               std::stop_token stop_token) noexcept;
+               std::stop_token stop_token, TextEngine *text_engine) noexcept;
 };
 
 } // namespace welllog::detail

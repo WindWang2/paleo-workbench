@@ -10,6 +10,7 @@
 #include <welllog/core/document.hpp>
 #include <welllog/core/result.hpp>
 #include <welllog/scene/scene.hpp>
+#include <welllog/scene/text_engine.hpp>
 #include <welllog/session/export.hpp>
 
 namespace welllog {
@@ -95,6 +96,9 @@ using ViewEventObserver = std::function<void(const ViewEvent &)>;
 enum class DiagnosticCode : std::uint16_t {
   missing_samples,
   asynchronous_preparation_failed,
+  missing_glyphs,
+  fallback_font_used,
+  text_engine_unavailable,
 };
 
 struct PerformanceBudgets {
@@ -158,6 +162,10 @@ public:
   execute(const ResetViewportCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetCrosshairCommand &command);
+  // Installs the text pipeline used to shape annotations and labels during
+  // scene preparation (ADR 0029). Without an engine, text layers prepare
+  // empty and a text_engine_unavailable diagnostic is published.
+  void set_text_engine(std::shared_ptr<TextEngine> text_engine) noexcept;
   [[nodiscard]] std::span<const ViewEvent> events() const noexcept;
   void clear_events() noexcept;
   [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept;

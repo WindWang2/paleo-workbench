@@ -482,7 +482,8 @@ struct FrameTask {
     std::shared_ptr<const WellLogDocument> document,
     ScenePresentation presentation,
     std::shared_ptr<const detail::ScenePreparer::CurveLodMap> pyramids,
-    CurveLodQuery query) {
+    CurveLodQuery query, std::shared_ptr<TextEngine> text_engine,
+    std::mutex *text_engine_mutex) {
   auto state = std::make_shared<FrameTaskState>();
   auto task = std::make_unique<FrameTask>();
   task->document_id = document_id;
@@ -492,14 +493,31 @@ struct FrameTask {
   task->worker = std::jthread(
       [document = std::move(document), presentation = std::move(presentation),
        pyramids = std::move(pyramids), query,
+       text_engine = std::move(text_engine), text_engine_mutex,
        state = std::move(state)](std::stop_token stop_token) {
         auto output = FrameBuildOutput{};
         if (stop_token.stop_requested()) {
           output.cancelled = true;
         } else {
           try {
-            auto prepared = detail::ScenePreparer::prepare(
-                *document, presentation, *pyramids, query, stop_token);
+            Result<PreparedScene> prepared = Error{
+                .code = ErrorCode::internal_error,
+                .severity = Severity::error,
+                .entity_id = std::nullopt,
+                .message = MessageKey::internal_error,
+                .arguments = {},
+            };
+            {
+              // Text engines are single-threaded; serialize shaping across
+              // concurrent frame preparations.
+              const auto text_guard =
+                  text_engine == nullptr
+                      ? std::unique_lock<std::mutex>{}
+                      : std::unique_lock<std::mutex>{*text_engine_mutex};
+              prepared = detail::ScenePreparer::prepare(
+                  *document, presentation, *pyramids, query, stop_token,
+                  text_engine.get());
+            }
             if (stop_token.stop_requested()) {
               output.cancelled = true;
             } else if (prepared.has_value()) {
@@ -576,6 +594,8 @@ struct WellLogSession::Impl {
   std::vector<ViewEvent> events;
   std::vector<Diagnostic> diagnostics;
   std::unordered_map<std::uint64_t, Error> diagnostic_errors;
+  std::shared_ptr<TextEngine> text_engine;
+  std::mutex text_engine_mutex;
   ViewEventObserverId next_observer_id{1};
   std::unordered_map<ViewEventObserverId, ViewEventObserver> observers;
 
@@ -630,6 +650,78 @@ struct WellLogSession::Impl {
     events.push_back(event);
     notifications.push_back(event);
   }
+
+  // Publishes prepared-scene text issues (missing glyphs, fallback fonts,
+  // unavailable engines) into the diagnostic stream. Returns the first
+  // published diagnostic identity, if any.
+  [[nodiscard]] std::optional<std::uint64_t>
+  publish_text_issues(EntityId document_id, DocumentRevision revision,
+                      const PreparedScene &scene,
+                      std::vector<ViewEvent> &notifications) noexcept {
+    std::optional<std::uint64_t> first_diagnostic;
+    try {
+      for (const auto &issue : scene.text_issues()) {
+        if (state_version == std::numeric_limits<std::uint64_t>::max() ||
+            next_diagnostic_id == std::numeric_limits<std::uint64_t>::max()) {
+          break;
+        }
+        DiagnosticCode code = DiagnosticCode::missing_glyphs;
+        MessageKey message = MessageKey::glyphs_missing_from_fonts;
+        switch (issue.code) {
+        case TextIssueCode::missing_glyphs:
+          code = DiagnosticCode::missing_glyphs;
+          message = MessageKey::glyphs_missing_from_fonts;
+          break;
+        case TextIssueCode::fallback_font_used:
+          code = DiagnosticCode::fallback_font_used;
+          message = MessageKey::font_fallback_used;
+          break;
+        case TextIssueCode::text_engine_unavailable:
+          code = DiagnosticCode::text_engine_unavailable;
+          message = MessageKey::text_engine_unavailable;
+          break;
+        }
+        const auto diagnostic_id = next_diagnostic_id;
+        diagnostics.reserve(diagnostics.size() + 1);
+        diagnostic_errors.reserve(diagnostic_errors.size() + 1);
+        events.reserve(events.size() + 1);
+        notifications.reserve(notifications.size() + 1);
+        diagnostic_errors.emplace(
+            diagnostic_id,
+            Error{
+                .code = ErrorCode::invalid_font,
+                .severity = Severity::warning,
+                .entity_id = issue.entity_id,
+                .message = message,
+                .arguments = {},
+            });
+        ++state_version;
+        diagnostics.push_back(Diagnostic{
+            .id = diagnostic_id,
+            .code = code,
+            .severity = Severity::warning,
+            .document_id = document_id,
+            .entity_id = issue.entity_id,
+            .document_revision = revision,
+            .occurrence_count = issue.occurrence_count,
+        });
+        ++next_diagnostic_id;
+        if (!first_diagnostic.has_value()) {
+          first_diagnostic = diagnostic_id;
+        }
+        const auto event = ViewEvent{
+            .kind = ViewEventKind::diagnostic_published,
+            .state_version = state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        };
+        events.push_back(event);
+        notifications.push_back(event);
+      }
+    } catch (...) {
+    }
+    return first_diagnostic;
+  }
 };
 
 WellLogSession::WellLogSession() : WellLogSession(PerformanceBudgets{}) {}
@@ -640,6 +732,15 @@ WellLogSession::WellLogSession(PerformanceBudgets budgets)
 WellLogSession::~WellLogSession() = default;
 WellLogSession::WellLogSession(WellLogSession &&) noexcept = default;
 WellLogSession &WellLogSession::operator=(WellLogSession &&) noexcept = default;
+
+void WellLogSession::set_text_engine(
+    std::shared_ptr<TextEngine> text_engine) noexcept {
+  try {
+    const auto guard = std::lock_guard{impl_->text_engine_mutex};
+    impl_->text_engine = std::move(text_engine);
+  } catch (...) {
+  }
+}
 
 Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
   try {
@@ -963,7 +1064,8 @@ WellLogSession::execute(const SetPresentationCommand &command) {
                 .viewport_bottom = initial_viewport.bottom,
                 .pixel_height = default_frame_pixel_height,
                 .prefetch_viewports = impl_->budgets.prefetch_viewports,
-            });
+            },
+            impl_->text_engine, &impl_->text_engine_mutex);
       }
       const auto next_state_version = impl_->state_version + 1;
       std::vector<ViewEvent> pending_events{
@@ -1026,14 +1128,31 @@ WellLogSession::execute(const SetPresentationCommand &command) {
       };
     }
 
-    auto prepared =
-        detail::ScenePreparer::prepare(*document->second, command.presentation);
+    Result<PreparedScene> prepared = Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = std::nullopt,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+    {
+      const auto text_guard =
+          impl_->text_engine == nullptr
+              ? std::unique_lock<std::mutex>{}
+              : std::unique_lock<std::mutex>{impl_->text_engine_mutex};
+      prepared = detail::ScenePreparer::prepare(*document->second,
+                                                command.presentation,
+                                                impl_->text_engine.get());
+    }
     if (!prepared) {
       return prepared.error();
     }
 
     auto scene =
         std::make_shared<const PreparedScene>(std::move(prepared).value());
+    std::vector<ViewEvent> text_notifications;
+    const auto text_diagnostic = impl_->publish_text_issues(
+        document_id, revision, *scene, text_notifications);
     const auto next_state_version = impl_->state_version + 1;
     std::vector<ViewEvent> pending_events{
         ViewEvent{
@@ -1081,12 +1200,15 @@ WellLogSession::execute(const SetPresentationCommand &command) {
     for (const auto &event : pending_events) {
       impl_->notify_observers(event);
     }
+    for (const auto &event : text_notifications) {
+      impl_->notify_observers(event);
+    }
     return CommandReceipt{
         .state_version = next_state_version,
         .document_id = document_id,
         .document_revision = revision,
         .asynchronous_preparation_started = false,
-        .diagnostic_id = std::nullopt,
+        .diagnostic_id = text_diagnostic,
     };
   } catch (const std::bad_alloc &) {
     return Error{
@@ -1158,7 +1280,8 @@ WellLogSession::execute(const SetViewportMetricsCommand &command) {
               .viewport_bottom = command.viewport.bottom,
               .pixel_height = command.pixel_height,
               .prefetch_viewports = impl_->budgets.prefetch_viewports,
-          });
+          },
+          impl_->text_engine, &impl_->text_engine_mutex);
     }
     const auto next_state_version = impl_->state_version + 1;
     const auto revision = document->second->revision();
@@ -1403,7 +1526,8 @@ void WellLogSession::poll_async() noexcept {
                       .viewport_bottom = viewport->second.bottom,
                       .pixel_height = viewport_pixel_height->second,
                       .prefetch_viewports = impl_->budgets.prefetch_viewports,
-                  });
+                  },
+                  impl_->text_engine, &impl_->text_engine_mutex);
               impl_->frame_tasks.reserve(impl_->frame_tasks.size() + 1);
               impl_->frame_generations.reserve(impl_->frame_generations.size() +
                                                1);
@@ -1489,6 +1613,10 @@ void WellLogSession::poll_async() noexcept {
                                                   std::move(output.scene));
           impl_->frame_generations.erase(generation);
           ++impl_->completed_lod_tasks;
+          static_cast<void>(impl_->publish_text_issues(
+              completed_task->document_id, completed_task->revision,
+              *impl_->prepared_scenes.at(completed_task->document_id),
+              notifications));
           if (impl_->state_version <
               std::numeric_limits<std::uint64_t>::max()) {
             ++impl_->state_version;

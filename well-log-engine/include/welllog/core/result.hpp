@@ -66,6 +66,9 @@ enum class MessageKey : std::uint16_t {
   annotation_anchor_invalid,
   font_load_failed,
   font_glyph_unavailable,
+  glyphs_missing_from_fonts,
+  font_fallback_used,
+  text_engine_unavailable,
 };
 
 struct ErrorArgument {
