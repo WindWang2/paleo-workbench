@@ -1,9 +1,11 @@
 #include <welllog/export/svg.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -85,6 +87,317 @@ void append_rect(std::string &output, const PhysicalRect &rect) {
   output += "\" height=\"";
   append_number(output, rect.height.value);
   output += "\"/>";
+}
+
+// Clips a tile-local segment to the pattern tile rect (Liang-Barsky).
+[[nodiscard]] std::optional<std::pair<PhysicalPoint, PhysicalPoint>>
+clip_line_to_tile(PhysicalPoint from, PhysicalPoint to, double width,
+                  double height) {
+  const auto delta_x = to.left.value - from.left.value;
+  const auto delta_y = to.top.value - from.top.value;
+  double enter = 0.0;
+  double leave = 1.0;
+  const auto clip_side = [&](double p, double q) {
+    if (p == 0.0) {
+      return q >= 0.0;
+    }
+    const auto ratio = q / p;
+    if (p < 0.0) {
+      if (ratio > leave) {
+        return false;
+      }
+      enter = std::max(enter, ratio);
+    } else {
+      if (ratio < enter) {
+        return false;
+      }
+      leave = std::min(leave, ratio);
+    }
+    return true;
+  };
+  if (!clip_side(-delta_x, from.left.value) ||
+      !clip_side(delta_x, width - from.left.value) ||
+      !clip_side(-delta_y, from.top.value) ||
+      !clip_side(delta_y, height - from.top.value)) {
+    return std::nullopt;
+  }
+  return std::pair{
+      PhysicalPoint{
+          .left = Millimetres{from.left.value + enter * delta_x},
+          .top = Millimetres{from.top.value + enter * delta_y},
+      },
+      PhysicalPoint{
+          .left = Millimetres{from.left.value + leave * delta_x},
+          .top = Millimetres{from.top.value + leave * delta_y},
+      },
+  };
+}
+
+void append_tile_line(std::string &output, PhysicalPoint from, PhysicalPoint to,
+                      const PatternDefinition &pattern) {
+  const auto clipped =
+      clip_line_to_tile(from, to, pattern.tile_width.value,
+                        pattern.tile_height.value);
+  if (!clipped.has_value()) {
+    return;
+  }
+  output += "<line x1=\"";
+  append_number(output, clipped->first.left.value);
+  output += "\" y1=\"";
+  append_number(output, clipped->first.top.value);
+  output += "\" x2=\"";
+  append_number(output, clipped->second.left.value);
+  output += "\" y2=\"";
+  append_number(output, clipped->second.top.value);
+  output += "\" stroke=\"";
+  append_color(output, pattern.foreground);
+  output += "\" stroke-opacity=\"";
+  append_number(output,
+                static_cast<double>(pattern.foreground.alpha) / 255.0);
+  output += "\" stroke-width=\"";
+  append_number(output, pattern.stroke_width.value);
+  output += "\"/>";
+}
+
+// Emits the constrained vector tile exactly once, anchored to scene
+// coordinates via patternUnits="userSpaceOnUse" so adjacent intervals and
+// scrolling share phase (ADR 0020).
+void append_pattern_definition(std::string &output,
+                               const PatternDefinition &pattern) {
+  output += "<pattern id=\"pat-";
+  output += pattern.id.to_string();
+  output += "\" patternUnits=\"userSpaceOnUse\" x=\"";
+  append_number(output, pattern.scene_anchor.left.value);
+  output += "\" y=\"";
+  append_number(output, pattern.scene_anchor.top.value);
+  output += "\" width=\"";
+  append_number(output, pattern.tile_width.value);
+  output += "\" height=\"";
+  append_number(output, pattern.tile_height.value);
+  output += "\" patternTransform=\"rotate(";
+  append_number(output, pattern.rotation_degrees);
+  output += ")\">";
+  if (pattern.background.alpha > 0) {
+    output += "<rect x=\"0\" y=\"0\" width=\"";
+    append_number(output, pattern.tile_width.value);
+    output += "\" height=\"";
+    append_number(output, pattern.tile_height.value);
+    output += "\" fill=\"";
+    append_color(output, pattern.background);
+    output += "\" fill-opacity=\"";
+    append_number(output,
+                  static_cast<double>(pattern.background.alpha) / 255.0);
+    output += "\"/>";
+  }
+  for (const auto &primitive : pattern.primitives) {
+    if (const auto *line = std::get_if<PatternLine>(&primitive)) {
+      append_tile_line(output, line->from, line->to, pattern);
+    } else if (const auto *polyline =
+                   std::get_if<PatternPolyline>(&primitive)) {
+      for (std::size_t index = 0; index + 1 < polyline->points.size();
+           ++index) {
+        append_tile_line(output, polyline->points[index],
+                         polyline->points[index + 1], pattern);
+      }
+      if (polyline->closed && polyline->points.size() > 2) {
+        append_tile_line(output, polyline->points.back(),
+                         polyline->points.front(), pattern);
+      }
+    } else {
+      const auto &circle = std::get<PatternCircle>(primitive);
+      output += "<circle cx=\"";
+      append_number(output, circle.center.left.value);
+      output += "\" cy=\"";
+      append_number(output, circle.center.top.value);
+      output += "\" r=\"";
+      append_number(output, circle.radius.value);
+      if (circle.filled) {
+        output += "\" fill=\"";
+        append_color(output, pattern.foreground);
+        output += "\" fill-opacity=\"";
+        append_number(output,
+                      static_cast<double>(pattern.foreground.alpha) / 255.0);
+      } else {
+        output += "\" fill=\"none\" stroke=\"";
+        append_color(output, pattern.foreground);
+        output += "\" stroke-opacity=\"";
+        append_number(output,
+                      static_cast<double>(pattern.foreground.alpha) / 255.0);
+        output += "\" stroke-width=\"";
+        append_number(output, pattern.stroke_width.value);
+      }
+      output += "\"/>";
+    }
+  }
+  output += "</pattern>";
+}
+
+// Serializes a glyph outline in em fractions as an SVG path. Scaling,
+// y-flipping, rotation and placement happen at the <use> site so every
+// run shares one definition.
+void append_outline_path_data(std::string &output,
+                              std::span<const OutlineCommand> commands) {
+  bool first = true;
+  for (const auto &command : commands) {
+    if (!first) {
+      output.push_back(' ');
+    }
+    first = false;
+    switch (command.verb) {
+    case OutlineVerb::move_to:
+      output += "M ";
+      append_number(output, command.coordinates[0]);
+      output.push_back(' ');
+      append_number(output, command.coordinates[1]);
+      break;
+    case OutlineVerb::line_to:
+      output += "L ";
+      append_number(output, command.coordinates[0]);
+      output.push_back(' ');
+      append_number(output, command.coordinates[1]);
+      break;
+    case OutlineVerb::quadratic_to:
+      output += "Q ";
+      append_number(output, command.coordinates[0]);
+      output.push_back(' ');
+      append_number(output, command.coordinates[1]);
+      output.push_back(' ');
+      append_number(output, command.coordinates[2]);
+      output.push_back(' ');
+      append_number(output, command.coordinates[3]);
+      break;
+    case OutlineVerb::cubic_to:
+      output += "C ";
+      for (const auto coordinate : command.coordinates) {
+        append_number(output, coordinate);
+        output.push_back(' ');
+      }
+      output.pop_back();
+      break;
+    case OutlineVerb::close:
+      output.push_back('Z');
+      break;
+    }
+  }
+}
+
+void append_symbol(std::string &output, const PreparedSymbol &symbol,
+                   const PreparedSymbolLayer &layer) {
+  const auto half = layer.symbol_size.value / 2.0;
+  const auto center_x = symbol.center.left.value;
+  const auto center_y = symbol.center.top.value;
+  output += "<path id=\"symbol-";
+  output += symbol.symbol_id.to_string();
+  output += "\" data-layer-id=\"";
+  output += layer.id.to_string();
+  switch (symbol.kind) {
+  case SymbolKind::circle:
+    output += "\" fill=\"";
+    append_color(output, layer.color);
+    output += "\" d=\"M ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y);
+    output += " A ";
+    append_number(output, half);
+    output.push_back(' ');
+    append_number(output, half);
+    output += " 0 1 0 ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y);
+    output += " A ";
+    append_number(output, half);
+    output.push_back(' ');
+    append_number(output, half);
+    output += " 0 1 0 ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y);
+    output += " Z\"/>";
+    return;
+  case SymbolKind::cross:
+    output += "\" fill=\"none\" stroke=\"";
+    append_color(output, layer.color);
+    output += "\" stroke-width=\"";
+    append_number(output, layer.symbol_size.value / 6.0);
+    output += "\" d=\"M ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y - half);
+    output += " L ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += " M ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y - half);
+    output += " L ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += "\"/>";
+    return;
+  case SymbolKind::square:
+  case SymbolKind::triangle_up:
+  case SymbolKind::diamond:
+    break;
+  }
+  output += "\" fill=\"";
+  append_color(output, layer.color);
+  output += "\" d=\"";
+  if (symbol.kind == SymbolKind::square) {
+    output += "M ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y - half);
+    output += " L ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y - half);
+    output += " L ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += " L ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += " Z\"/>";
+  } else if (symbol.kind == SymbolKind::triangle_up) {
+    output += "M ";
+    append_number(output, center_x);
+    output.push_back(' ');
+    append_number(output, center_y - half);
+    output += " L ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += " L ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += " Z\"/>";
+  } else {
+    output += "M ";
+    append_number(output, center_x);
+    output.push_back(' ');
+    append_number(output, center_y - half);
+    output += " L ";
+    append_number(output, center_x + half);
+    output.push_back(' ');
+    append_number(output, center_y);
+    output += " L ";
+    append_number(output, center_x);
+    output.push_back(' ');
+    append_number(output, center_y + half);
+    output += " L ";
+    append_number(output, center_x - half);
+    output.push_back(' ');
+    append_number(output, center_y);
+    output += " Z\"/>";
+  }
 }
 
 void append_path_data(std::string &output, const PreparedScene &scene,
@@ -178,6 +491,23 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
       append_rect(output, track.clip);
       output += "</clipPath>";
     }
+    for (const auto &pattern : scene.patterns()) {
+      append_pattern_definition(output, pattern);
+    }
+    const auto outline_commands = scene.outline_commands();
+    for (const auto &outline : scene.glyph_outlines()) {
+      output += "<path id=\"g";
+      append_integer(output, outline.font_index);
+      output.push_back('-');
+      append_integer(output, outline.glyph_id);
+      output += "\" d=\"";
+      append_outline_path_data(
+          output,
+          outline_commands.subspan(
+              static_cast<std::size_t>(outline.first_command),
+              static_cast<std::size_t>(outline.command_count)));
+      output += "\"/>";
+    }
     output += "</defs>";
 
     for (const auto &track : scene.tracks()) {
@@ -188,6 +518,89 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
       output += ")\" data-z-order=\"";
       append_integer(output, track.z_order);
       output += "\">";
+      for (const auto &layer : scene.interval_layers()) {
+        if (layer.track_id != track.id) {
+          continue;
+        }
+        for (std::uint64_t offset = 0; offset < layer.interval_count;
+             ++offset) {
+          const auto &interval = scene.intervals()[static_cast<std::size_t>(
+              layer.first_interval + offset)];
+          output += "<rect id=\"interval-";
+          output += interval.interval_id.to_string();
+          output += "\" data-layer-id=\"";
+          output += layer.id.to_string();
+          output += "\" data-top-depth=\"";
+          append_number(output, interval.top_reference_depth);
+          output += "\" data-bottom-depth=\"";
+          append_number(output, interval.bottom_reference_depth);
+          output += "\" x=\"";
+          append_number(output, interval.rect.left.value);
+          output += "\" y=\"";
+          append_number(output, interval.rect.top.value);
+          output += "\" width=\"";
+          append_number(output, interval.rect.width.value);
+          output += "\" height=\"";
+          append_number(output, interval.rect.height.value);
+          if (interval.pattern_id.is_nil()) {
+            output += "\" fill=\"";
+            append_color(output, interval.fill_color);
+            output += "\" fill-opacity=\"";
+            append_number(
+                output,
+                static_cast<double>(interval.fill_color.alpha) / 255.0);
+          } else {
+            output += "\" fill=\"url(#pat-";
+            output += interval.pattern_id.to_string();
+            output += ")";
+          }
+          output += "\"/>";
+        }
+      }
+      for (const auto &layer : scene.marker_layers()) {
+        if (layer.track_id != track.id) {
+          continue;
+        }
+        const auto right = track.clip.left.value + track.clip.width.value;
+        for (std::uint64_t offset = 0; offset < layer.marker_count;
+             ++offset) {
+          const auto &marker = scene.markers()[static_cast<std::size_t>(
+              layer.first_marker + offset)];
+          output += "<line id=\"marker-";
+          output += marker.marker_id.to_string();
+          output += "\" data-layer-id=\"";
+          output += layer.id.to_string();
+          output += "\" data-reference-depth=\"";
+          append_number(output, marker.reference_depth);
+          output += "\" x1=\"";
+          append_number(output, track.clip.left.value);
+          output += "\" y1=\"";
+          append_number(output, marker.display_top.value);
+          output += "\" x2=\"";
+          append_number(output, right);
+          output += "\" y2=\"";
+          append_number(output, marker.display_top.value);
+          output += "\" stroke=\"";
+          append_color(output, layer.line_color);
+          output += "\" stroke-opacity=\"";
+          append_number(output,
+                        static_cast<double>(layer.line_color.alpha) / 255.0);
+          output += "\" stroke-width=\"";
+          append_number(output, layer.line_width.value);
+          output += "\"/>";
+        }
+      }
+      for (const auto &layer : scene.symbol_layers()) {
+        if (layer.track_id != track.id) {
+          continue;
+        }
+        for (std::uint64_t offset = 0; offset < layer.symbol_count;
+             ++offset) {
+          const auto &symbol = scene.symbols()[static_cast<std::size_t>(
+              layer.first_symbol + offset)];
+          append_symbol(output, symbol, layer);
+        }
+      }
       for (const auto &layer : scene.curve_layers()) {
         if (layer.track_id != track.id) {
           continue;
@@ -209,6 +622,61 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
         output += "\" d=\"";
         append_path_data(output, scene, layer);
         output += "\"/>";
+      }
+      const auto glyphs = scene.glyphs();
+      for (const auto &run : scene.text_runs()) {
+        const auto in_text_layer =
+            std::any_of(scene.text_layers().begin(), scene.text_layers().end(),
+                        [&](const PreparedTextLayer &layer) {
+                          return layer.track_id == track.id &&
+                                 layer.id == run.layer_id;
+                        });
+        const auto in_interval_layer = std::any_of(
+            scene.interval_layers().begin(), scene.interval_layers().end(),
+            [&](const PreparedIntervalLayer &layer) {
+              return layer.track_id == track.id && layer.id == run.layer_id;
+            });
+        const auto in_marker_layer = std::any_of(
+            scene.marker_layers().begin(), scene.marker_layers().end(),
+            [&](const PreparedMarkerLayer &layer) {
+              return layer.track_id == track.id && layer.id == run.layer_id;
+            });
+        if (!in_text_layer && !in_interval_layer && !in_marker_layer) {
+          continue;
+        }
+        output += "<g id=\"run-";
+        output += run.source_entity_id.to_string();
+        output += "\" data-layer-id=\"";
+        output += run.layer_id.to_string();
+        output += "\" data-orientation=\"";
+        append_integer(output,
+                       static_cast<std::uint8_t>(run.orientation));
+        output += "\" fill=\"";
+        append_color(output, run.color);
+        output += "\" fill-opacity=\"";
+        append_number(output,
+                      static_cast<double>(run.color.alpha) / 255.0);
+        output += "\">";
+        for (std::uint64_t offset = 0; offset < run.glyph_count; ++offset) {
+          const auto &glyph = glyphs[static_cast<std::size_t>(
+              run.first_glyph + offset)];
+          output += "<use href=\"#g";
+          append_integer(output, glyph.font_index);
+          output.push_back('-');
+          append_integer(output, glyph.glyph_id);
+          output += "\" transform=\"translate(";
+          append_number(output, glyph.origin.left.value);
+          output.push_back(' ');
+          append_number(output, glyph.origin.top.value);
+          output += ") rotate(";
+          append_number(output, glyph.rotation_degrees);
+          output += ") scale(";
+          append_number(output, run.font_size.value);
+          output += " -";
+          append_number(output, run.font_size.value);
+          output += ")\"/>";
+        }
+        output += "</g>";
       }
       output += "</g>";
     }
