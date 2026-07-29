@@ -1,0 +1,98 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <optional>
+#include <utility>
+#include <variant>
+
+#include <welllog/core/entity_id.hpp>
+
+namespace welllog {
+
+enum class ErrorCode : std::uint16_t {
+  missing_owner,
+  invalid_buffer,
+  arithmetic_overflow,
+  invalid_sampling_axis,
+  length_mismatch,
+  duplicate_entity_id,
+  missing_sampling_axis,
+  invalid_document,
+  invalid_manifest,
+  unresolved_buffer,
+  resource_exhausted,
+  internal_error,
+};
+
+enum class Severity : std::uint8_t {
+  warning,
+  error,
+};
+
+enum class MessageKey : std::uint16_t {
+  buffer_owner_required,
+  buffer_data_required,
+  buffer_stride_too_small,
+  buffer_extent_overflow,
+  buffer_extent_exceeds_capacity,
+  null_bitmap_owner_required,
+  null_bitmap_too_short,
+  null_bitmap_extent_overflow,
+  null_bitmap_extent_exceeds_capacity,
+  document_structure_invalid,
+  entity_identity_duplicated,
+  sampling_axis_direction_invalid,
+  sampling_axis_missing,
+  curve_length_mismatch,
+  manifest_invalid,
+  manifest_schema_unsupported,
+  manifest_resolver_required,
+  manifest_buffer_mismatch,
+  external_buffer_unresolved,
+  resource_exhausted,
+  internal_error,
+};
+
+struct ErrorArgument {
+  std::array<char, 32> name{};
+  std::array<char, 96> value{};
+};
+
+struct PropertyMap {
+  std::array<ErrorArgument, 4> values{};
+  std::uint8_t size{};
+};
+
+struct Error {
+  ErrorCode code{};
+  Severity severity{Severity::error};
+  std::optional<EntityId> entity_id;
+  MessageKey message{MessageKey::internal_error};
+  PropertyMap arguments;
+};
+
+template <typename T> class Result {
+public:
+  Result(T value) : value_(std::move(value)) {}
+  Result(Error error) : value_(std::move(error)) {}
+
+  [[nodiscard]] bool has_value() const noexcept {
+    return std::holds_alternative<T>(value_);
+  }
+
+  [[nodiscard]] explicit operator bool() const noexcept { return has_value(); }
+
+  [[nodiscard]] const T &value() const & { return std::get<T>(value_); }
+
+  [[nodiscard]] T &value() & { return std::get<T>(value_); }
+
+  [[nodiscard]] T &&value() && { return std::get<T>(std::move(value_)); }
+
+  [[nodiscard]] const Error &error() const & { return std::get<Error>(value_); }
+
+private:
+  std::variant<T, Error> value_;
+};
+
+} // namespace welllog

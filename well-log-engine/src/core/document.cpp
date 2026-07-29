@@ -1,0 +1,323 @@
+#include <welllog/core/document.hpp>
+
+namespace welllog {
+
+std::uint64_t scalar_size_bytes(ScalarType type) noexcept {
+  switch (type) {
+  case ScalarType::float32:
+  case ScalarType::int32:
+  case ScalarType::uint32:
+    return 4;
+  case ScalarType::float64:
+  case ScalarType::int64:
+  case ScalarType::uint64:
+    return 8;
+  case ScalarType::int16:
+  case ScalarType::uint16:
+    return 2;
+  case ScalarType::uint8:
+    return 1;
+  }
+  return 0;
+}
+
+std::string_view scalar_type_name(ScalarType type) noexcept {
+  switch (type) {
+  case ScalarType::float32:
+    return "float32";
+  case ScalarType::float64:
+    return "float64";
+  case ScalarType::int16:
+    return "int16";
+  case ScalarType::int32:
+    return "int32";
+  case ScalarType::int64:
+    return "int64";
+  case ScalarType::uint8:
+    return "uint8";
+  case ScalarType::uint16:
+    return "uint16";
+  case ScalarType::uint32:
+    return "uint32";
+  case ScalarType::uint64:
+    return "uint64";
+  }
+  return {};
+}
+
+std::optional<ScalarType> parse_scalar_type(std::string_view name) noexcept {
+  constexpr ScalarType types[] = {
+      ScalarType::float32, ScalarType::float64, ScalarType::int16,
+      ScalarType::int32,   ScalarType::int64,   ScalarType::uint8,
+      ScalarType::uint16,  ScalarType::uint32,  ScalarType::uint64,
+  };
+  for (const auto type : types) {
+    if (scalar_type_name(type) == name) {
+      return type;
+    }
+  }
+  return std::nullopt;
+}
+
+struct SharedOwner::Impl {
+  std::shared_ptr<const void> owner;
+};
+
+SharedOwner::SharedOwner() = default;
+SharedOwner::~SharedOwner() = default;
+SharedOwner::SharedOwner(const SharedOwner &) = default;
+SharedOwner &SharedOwner::operator=(const SharedOwner &) = default;
+SharedOwner::SharedOwner(SharedOwner &&) noexcept = default;
+SharedOwner &SharedOwner::operator=(SharedOwner &&) noexcept = default;
+
+SharedOwner::SharedOwner(std::shared_ptr<const void> owner) noexcept {
+  try {
+    impl_ = std::make_shared<Impl>(Impl{.owner = std::move(owner)});
+  } catch (...) {
+    impl_.reset();
+  }
+}
+
+bool SharedOwner::has_value() const noexcept {
+  return impl_ != nullptr && static_cast<bool>(impl_->owner);
+}
+
+struct BufferView::Impl {
+  const std::byte *data{};
+  std::uint64_t length{};
+  std::uint64_t stride_bytes{};
+  ScalarType scalar_type{ScalarType::float64};
+  std::uint64_t byte_capacity{};
+  SharedOwner owner;
+  BufferSourceReference source;
+  BufferAccessMode access_mode{BufferAccessMode::zero_copy};
+};
+
+BufferView::BufferView() = default;
+BufferView::~BufferView() = default;
+BufferView::BufferView(const BufferView &) = default;
+BufferView &BufferView::operator=(const BufferView &) = default;
+BufferView::BufferView(BufferView &&) noexcept = default;
+BufferView &BufferView::operator=(BufferView &&) noexcept = default;
+
+BufferView::BufferView(std::shared_ptr<const Impl> impl)
+    : impl_(std::move(impl)) {}
+
+BufferView BufferView::from_raw(const void *data, std::uint64_t length,
+                                std::uint64_t stride_bytes,
+                                ScalarType scalar_type,
+                                std::uint64_t byte_capacity, SharedOwner owner,
+                                BufferSourceReference source,
+                                BufferAccessMode access_mode) noexcept {
+  try {
+    return BufferView{std::make_shared<Impl>(Impl{
+        .data = static_cast<const std::byte *>(data),
+        .length = length,
+        .stride_bytes = stride_bytes,
+        .scalar_type = scalar_type,
+        .byte_capacity = byte_capacity,
+        .owner = std::move(owner),
+        .source = std::move(source),
+        .access_mode = access_mode,
+    })};
+  } catch (...) {
+    return {};
+  }
+}
+
+const std::byte *BufferView::data() const noexcept {
+  return impl_ == nullptr ? nullptr : impl_->data;
+}
+
+std::uint64_t BufferView::length() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->length;
+}
+
+std::uint64_t BufferView::stride_bytes() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->stride_bytes;
+}
+
+ScalarType BufferView::scalar_type() const noexcept {
+  return impl_ == nullptr ? ScalarType::float64 : impl_->scalar_type;
+}
+
+std::uint64_t BufferView::byte_capacity() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->byte_capacity;
+}
+
+bool BufferView::has_owner() const noexcept {
+  return impl_ != nullptr && impl_->owner.has_value();
+}
+
+const BufferSourceReference &BufferView::source() const noexcept {
+  static const BufferSourceReference empty;
+  return impl_ == nullptr ? empty : impl_->source;
+}
+
+BufferAccessMode BufferView::access_mode() const noexcept {
+  return impl_ == nullptr ? BufferAccessMode::zero_copy : impl_->access_mode;
+}
+
+struct NullBitmapView::Impl {
+  const std::uint8_t *data{};
+  std::uint64_t bit_length{};
+  std::uint64_t byte_capacity{};
+  SharedOwner owner;
+  BufferSourceReference source;
+};
+
+NullBitmapView::NullBitmapView() = default;
+NullBitmapView::~NullBitmapView() = default;
+NullBitmapView::NullBitmapView(const NullBitmapView &) = default;
+NullBitmapView &NullBitmapView::operator=(const NullBitmapView &) = default;
+NullBitmapView::NullBitmapView(NullBitmapView &&) noexcept = default;
+NullBitmapView &NullBitmapView::operator=(NullBitmapView &&) noexcept = default;
+
+NullBitmapView::NullBitmapView(std::shared_ptr<const Impl> impl)
+    : impl_(std::move(impl)) {}
+
+NullBitmapView NullBitmapView::from_raw(const std::uint8_t *data,
+                                        std::uint64_t bit_length,
+                                        std::uint64_t byte_capacity,
+                                        SharedOwner owner,
+                                        BufferSourceReference source) noexcept {
+  try {
+    return NullBitmapView{std::make_shared<Impl>(Impl{
+        .data = data,
+        .bit_length = bit_length,
+        .byte_capacity = byte_capacity,
+        .owner = std::move(owner),
+        .source = std::move(source),
+    })};
+  } catch (...) {
+    return {};
+  }
+}
+
+bool NullBitmapView::empty() const noexcept {
+  return impl_ == nullptr || impl_->bit_length == 0;
+}
+
+bool NullBitmapView::is_null(std::uint64_t index) const noexcept {
+  return impl_ != nullptr && index < impl_->bit_length &&
+         (impl_->data[index / 8] & (std::uint8_t{1} << (index % 8))) != 0;
+}
+
+const std::uint8_t *NullBitmapView::data() const noexcept {
+  return impl_ == nullptr ? nullptr : impl_->data;
+}
+
+std::uint64_t NullBitmapView::bit_length() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->bit_length;
+}
+
+std::uint64_t NullBitmapView::byte_capacity() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->byte_capacity;
+}
+
+bool NullBitmapView::has_owner() const noexcept {
+  return impl_ != nullptr && impl_->owner.has_value();
+}
+
+const BufferSourceReference &NullBitmapView::source() const noexcept {
+  static const BufferSourceReference empty;
+  return impl_ == nullptr ? empty : impl_->source;
+}
+
+struct WellLogDocument::Impl {
+  EntityId id;
+  DocumentRevision revision;
+  std::vector<SamplingAxis> axes;
+  std::vector<Curve> curves;
+};
+
+WellLogDocument::WellLogDocument() = default;
+
+WellLogDocument::WellLogDocument(std::shared_ptr<const Impl> impl)
+    : impl_(std::move(impl)) {}
+
+EntityId WellLogDocument::id() const noexcept {
+  return impl_ == nullptr ? EntityId{} : impl_->id;
+}
+
+DocumentRevision WellLogDocument::revision() const noexcept {
+  return impl_ == nullptr ? DocumentRevision{} : impl_->revision;
+}
+
+std::span<const SamplingAxis> WellLogDocument::sampling_axes() const noexcept {
+  return impl_ == nullptr ? std::span<const SamplingAxis>{}
+                          : std::span<const SamplingAxis>{impl_->axes};
+}
+
+std::span<const Curve> WellLogDocument::curves() const noexcept {
+  return impl_ == nullptr ? std::span<const Curve>{}
+                          : std::span<const Curve>{impl_->curves};
+}
+
+struct WellLogDocumentBuilder::Impl {
+  EntityId id;
+  DocumentRevision revision;
+  std::vector<SamplingAxis> axes;
+  std::vector<Curve> curves;
+  bool allocation_failed{};
+};
+
+WellLogDocumentBuilder::WellLogDocumentBuilder(
+    EntityId id, DocumentRevision revision) noexcept {
+  try {
+    impl_ = std::make_unique<Impl>(
+        Impl{.id = id, .revision = revision, .axes = {}, .curves = {}});
+  } catch (...) {
+    impl_.reset();
+  }
+}
+
+WellLogDocumentBuilder::~WellLogDocumentBuilder() = default;
+WellLogDocumentBuilder::WellLogDocumentBuilder(
+    WellLogDocumentBuilder &&) noexcept = default;
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::operator=(WellLogDocumentBuilder &&) noexcept = default;
+
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_sampling_axis(const SamplingAxis &axis) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->axes.push_back(axis);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_curve(const Curve &curve) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->curves.push_back(curve);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+WellLogDocument WellLogDocumentBuilder::build() const noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return {};
+  }
+  try {
+    auto document = std::make_shared<WellLogDocument::Impl>();
+    document->id = impl_->id;
+    document->revision = impl_->revision;
+    document->axes = impl_->axes;
+    document->curves = impl_->curves;
+    return WellLogDocument{std::move(document)};
+  } catch (...) {
+    return {};
+  }
+}
+
+} // namespace welllog

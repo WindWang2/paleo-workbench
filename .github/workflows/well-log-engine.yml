@@ -1,0 +1,108 @@
+name: WellLogEngine C++
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "well-log-engine/**"
+      - ".github/workflows/well-log-engine.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "well-log-engine/**"
+      - ".github/workflows/well-log-engine.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / shared=${{ matrix.shared }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        shared: ["OFF", "ON"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build/well-log-engine
+
+      - name: Test
+        run: ctest --test-dir build/well-log-engine --output-on-failure
+
+  clang-sanitizers:
+    name: Ubuntu / Clang / ASan+UBSan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine-clang -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build/well-log-engine-clang
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: >
+          ctest --test-dir build/well-log-engine-clang
+          --output-on-failure
+
+  pinned-vcpkg:
+    name: Ubuntu / pinned vcpkg manifest
+    runs-on: ubuntu-latest
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 9d7f79f56ae1a9b4704d6a7fb8237e347a974133
+          path: .vcpkg
+
+      - name: Bootstrap vcpkg
+        run: .vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Configure
+        working-directory: well-log-engine
+        run: cmake --preset dev-vcpkg
+
+      - name: Build
+        working-directory: well-log-engine
+        run: cmake --build --preset dev-vcpkg
+
+      - name: Test
+        working-directory: well-log-engine
+        run: ctest --preset dev-vcpkg
