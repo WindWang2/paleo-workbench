@@ -32,6 +32,7 @@ struct GpuUploadSchedule::Impl {
   std::uint64_t source_segment_count{};
   std::uint64_t vertex_count{};
   std::uint64_t total_bytes{};
+  std::uint64_t fill_triangle_count{};
   std::vector<GpuUploadChunk> chunks;
 };
 
@@ -83,6 +84,23 @@ GpuUploadSchedule::plan(const PreparedScene &scene,
     impl->source_segment_count = source_segments;
     impl->vertex_count = source_segments * vertices_per_curve_segment;
     impl->total_bytes = total_bytes;
+    // Account for crossover fill triangles so the schedule reports the same
+    // primitive geometry the GL renderer walks (ADR 0036 parity).
+    std::uint64_t fill_triangles{};
+    for (const auto &layer : scene.fill_layers()) {
+      for (std::uint64_t offset = 0; offset < layer.region_count; ++offset) {
+        const auto &region = scene.fill_regions()[static_cast<std::size_t>(
+            layer.first_region + offset)];
+        if (fill_triangles >
+            std::numeric_limits<std::uint64_t>::max() -
+                region.triangle_count) {
+          return upload_error(ErrorCode::arithmetic_overflow,
+                              MessageKey::buffer_extent_overflow);
+        }
+        fill_triangles += region.triangle_count;
+      }
+    }
+    impl->fill_triangle_count = fill_triangles;
     const auto chunk_capacity =
         budgets.maximum_bytes_per_frame -
         budgets.maximum_bytes_per_frame % bytes_per_curve_segment;
@@ -116,6 +134,10 @@ std::uint64_t GpuUploadSchedule::vertex_count() const noexcept {
 
 std::uint64_t GpuUploadSchedule::total_bytes() const noexcept {
   return impl_ == nullptr ? 0 : impl_->total_bytes;
+}
+
+std::uint64_t GpuUploadSchedule::fill_triangle_count() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->fill_triangle_count;
 }
 
 std::uint64_t GpuUploadSchedule::chunk_count() const noexcept {

@@ -1106,6 +1106,93 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         });
       }
     }
+    // Crossover fill regions (rendering.md section 6). Each region is already
+    // triangulated in the prepared scene, so GL emits those triangles into a
+    // solid batch (color fill) or a pattern batch (tile fill). The pattern
+    // shader derives tile coords from the vertex scene position + anchor, so
+    // the triangle UVs are unused (left at 0,0 by append_triangle).
+    const auto fill_vertices = scene.fill_vertices();
+    for (const auto &fill_layer : scene.fill_layers()) {
+      const auto clip = clip_for_track(fill_layer.track_id);
+      for (std::uint64_t offset = 0; offset < fill_layer.region_count;
+           ++offset) {
+        const auto &region = scene.fill_regions()[static_cast<std::size_t>(
+            fill_layer.first_region + offset)];
+        if (region.triangle_count == 0) {
+          continue;
+        }
+        const auto triangles = scene.fill_triangles();
+        if (region.pattern_id.is_nil()) {
+          const auto first_vertex = primitive_vertices.size();
+          for (std::uint64_t t = 0; t < region.triangle_count; ++t) {
+            const auto &tri = triangles[static_cast<std::size_t>(
+                region.first_triangle + t)];
+            const auto &a = fill_vertices[tri.a];
+            const auto &b = fill_vertices[tri.b];
+            const auto &c = fill_vertices[tri.c];
+            append_triangle(primitive_vertices, a.position.left.value,
+                            a.position.top.value, b.position.left.value,
+                            b.position.top.value, c.position.left.value,
+                            c.position.top.value);
+          }
+          primitive_batches.push_back(PrimitiveBatch{
+              .kind = PrimitiveKind::solid,
+              .first_vertex = static_cast<GlInt>(first_vertex),
+              .vertex_count =
+                  static_cast<GlSize>(region.triangle_count * 3),
+              .color = region.fill_color,
+              .clip = clip,
+          });
+          continue;
+        }
+        const auto pattern_uv = pattern_uvs.find(region.pattern_id);
+        const auto pattern =
+            pattern_uv == pattern_uvs.end()
+                ? nullptr
+                : std::find_if(
+                      scene.patterns().begin(), scene.patterns().end(),
+                      [&](const PatternDefinition &candidate) {
+                        return candidate.id == region.pattern_id;
+                      })
+                      .operator->();
+        if (pattern_uv == pattern_uvs.end() || pattern == nullptr) {
+          continue;
+        }
+        const auto first_vertex = primitive_vertices.size();
+        for (std::uint64_t t = 0; t < region.triangle_count; ++t) {
+          const auto &tri = triangles[static_cast<std::size_t>(
+              region.first_triangle + t)];
+          const auto &a = fill_vertices[tri.a];
+          const auto &b = fill_vertices[tri.b];
+          const auto &c = fill_vertices[tri.c];
+          append_triangle(primitive_vertices, a.position.left.value,
+                          a.position.top.value, b.position.left.value,
+                          b.position.top.value, c.position.left.value,
+                          c.position.top.value);
+        }
+        const auto theta =
+            pattern->rotation_degrees * 3.14159265358979323846 / 180.0;
+        const auto &uv = pattern_uv->second;
+        primitive_batches.push_back(PrimitiveBatch{
+            .kind = PrimitiveKind::pattern,
+            .first_vertex = static_cast<GlInt>(first_vertex),
+            .vertex_count =
+                static_cast<GlSize>(region.triangle_count * 3),
+            .color = {},
+            .clip = clip,
+            .anchor_left = pattern->scene_anchor.left.value,
+            .anchor_top = pattern->scene_anchor.top.value,
+            .tile_width = pattern->tile_width.value,
+            .tile_height = pattern->tile_height.value,
+            .rotation_cos = std::cos(theta),
+            .rotation_sin = std::sin(theta),
+            .atlas_u = uv[0],
+            .atlas_v = uv[1],
+            .atlas_du = uv[2],
+            .atlas_dv = uv[3],
+        });
+      }
+    }
     for (const auto &layer : scene.marker_layers()) {
       const auto clip = clip_for_track(layer.track_id);
       for (std::uint64_t offset = 0; offset < layer.marker_count;

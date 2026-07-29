@@ -425,6 +425,27 @@ void append_path_data(std::string &output, const PreparedScene &scene,
   }
 }
 
+// Emits the closed boundary ring of one fill region as an SVG path d
+// (M ... L ... Z). The ring is the crossover boundary shared by GL and SVG.
+void append_fill_ring_path(std::string &output, const PreparedScene &scene,
+                           const PreparedFillRegion &region) {
+  const auto vertices = scene.fill_vertices();
+  bool first = true;
+  for (std::uint64_t offset = 0; offset < region.vertex_count; ++offset) {
+    const auto &vertex = vertices[static_cast<std::size_t>(
+        region.first_vertex + offset)];
+    if (!first) {
+      output.push_back(' ');
+    }
+    output += offset == 0 ? "M " : " L ";
+    append_number(output, vertex.position.left.value);
+    output.push_back(' ');
+    append_number(output, vertex.position.top.value);
+    first = false;
+  }
+  output += " Z";
+}
+
 [[nodiscard]] Error svg_error(ErrorCode code, MessageKey message) {
   return Error{
       .code = code,
@@ -622,6 +643,41 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
         output += "\" d=\"";
         append_path_data(output, scene, layer);
         output += "\"/>";
+      }
+      // Crossover fill regions (rendering.md section 6): each region's
+      // closed boundary ring is emitted as one <path>, filled with a solid
+      // color or a pattern reference, tagged with both dependent curves.
+      for (const auto &fill_layer : scene.fill_layers()) {
+        if (fill_layer.track_id != track.id) {
+          continue;
+        }
+        for (std::uint64_t offset = 0; offset < fill_layer.region_count;
+             ++offset) {
+          const auto &region = scene.fill_regions()[static_cast<std::size_t>(
+              fill_layer.first_region + offset)];
+          output += "<path id=\"fill-";
+          output += fill_layer.id.to_string();
+          output += "\" data-upper-curve-layer-id=\"";
+          output += region.upper_curve_layer_id.to_string();
+          output += "\" data-lower-curve-layer-id=\"";
+          output += region.lower_curve_layer_id.to_string();
+          output += "\" data-z-order=\"";
+          append_integer(output, fill_layer.z_order);
+          if (region.pattern_id.is_nil()) {
+            output += "\" fill=\"";
+            append_color(output, region.fill_color);
+            output += "\" fill-opacity=\"";
+            append_number(
+                output, static_cast<double>(region.fill_color.alpha) / 255.0);
+          } else {
+            output += "\" fill=\"url(#pat-";
+            output += region.pattern_id.to_string();
+            output += ")";
+          }
+          output += "\" d=\"";
+          append_fill_ring_path(output, scene, region);
+          output += "\"/>";
+        }
       }
       const auto glyphs = scene.glyphs();
       for (const auto &run : scene.text_runs()) {

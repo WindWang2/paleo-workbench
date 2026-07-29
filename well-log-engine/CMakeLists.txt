@@ -217,6 +217,7 @@ endif()
 add_library(welllog_scene ${WELLLOG_LIBRARY_TYPE}
     src/scene/curve_lod.cpp
     src/scene/scene.cpp
+    src/scene/triangulate.cpp
 )
 add_library(WellLog::Scene ALIAS welllog_scene)
 set_target_properties(welllog_scene PROPERTIES
@@ -779,6 +780,20 @@ if(WELLLOG_BUILD_TESTS)
     add_test(
         NAME welllog.multi-scale-track
         COMMAND welllog_multi_scale_tests
+    )
+
+    add_executable(welllog_crossover_fill_tests
+        tests/integration/crossover_fill_test.cpp
+    )
+    target_compile_features(welllog_crossover_fill_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_crossover_fill_tests)
+    target_link_libraries(
+        welllog_crossover_fill_tests
+        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Session
+    )
+    add_test(
+        NAME welllog.crossover-fill
+        COMMAND welllog_crossover_fill_tests
     )
 
     add_executable(welllog_manifest_tests

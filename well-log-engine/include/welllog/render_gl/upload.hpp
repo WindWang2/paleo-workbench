@@ -37,6 +37,9 @@ public:
   [[nodiscard]] std::uint64_t total_bytes() const noexcept;
   [[nodiscard]] std::uint64_t chunk_count() const noexcept;
   [[nodiscard]] std::span<const GpuUploadChunk> chunks() const noexcept;
+  // Total prepared fill-region triangles the GL primitive stream will walk.
+  // Used by parity tests asserting GL and SVG consume the same fill geometry.
+  [[nodiscard]] std::uint64_t fill_triangle_count() const noexcept;
 
 private:
   struct Impl;

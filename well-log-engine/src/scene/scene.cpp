@@ -1,4 +1,5 @@
 #include "scene/prepare.hpp"
+#include "scene/triangulate.hpp"
 
 #include <algorithm>
 #include <array>
@@ -66,6 +67,7 @@ struct ScenePresentation::Impl {
   std::vector<CurveLayerSpec> curve_layers;
   std::vector<PatternDefinition> patterns;
   std::vector<IntervalLayerSpec> interval_layers;
+  std::vector<CrossoverFillLayerSpec> crossover_fill_layers;
   std::vector<MarkerLayerSpec> marker_layers;
   std::vector<SymbolLayerSpec> symbol_layers;
   std::vector<TextLayerSpec> text_layers;
@@ -137,6 +139,14 @@ ScenePresentation::interval_layers() const noexcept {
              : std::span<const IntervalLayerSpec>{impl_->interval_layers};
 }
 
+std::span<const CrossoverFillLayerSpec>
+ScenePresentation::crossover_fill_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const CrossoverFillLayerSpec>{}
+             : std::span<const CrossoverFillLayerSpec>{
+                   impl_->crossover_fill_layers};
+}
+
 std::span<const MarkerLayerSpec>
 ScenePresentation::marker_layers() const noexcept {
   return impl_ == nullptr
@@ -183,6 +193,7 @@ ScenePresentationBuilder::ScenePresentationBuilder(
                 .curve_layers = {},
                 .patterns = {},
                 .interval_layers = {},
+                .crossover_fill_layers = {},
                 .marker_layers = {},
                 .symbol_layers = {},
                 .text_layers = {},
@@ -259,6 +270,20 @@ ScenePresentationBuilder &ScenePresentationBuilder::add_interval_layer(
   }
   try {
     impl_->presentation.interval_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &
+ScenePresentationBuilder::add_crossover_fill_layer(
+    const CrossoverFillLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.crossover_fill_layers.push_back(layer);
   } catch (...) {
     impl_->allocation_failed = true;
   }
@@ -346,6 +371,10 @@ struct PreparedScene::Impl {
   std::vector<PatternDefinition> patterns;
   std::vector<PreparedIntervalLayer> interval_layers;
   std::vector<PreparedInterval> intervals;
+  std::vector<PreparedFillLayer> fill_layers;
+  std::vector<PreparedFillRegion> fill_regions;
+  std::vector<PreparedFillVertex> fill_vertices;
+  std::vector<PreparedFillTriangle> fill_triangles;
   std::vector<PreparedMarkerLayer> marker_layers;
   std::vector<PreparedMarker> markers;
   std::vector<PreparedSymbolLayer> symbol_layers;
@@ -360,6 +389,187 @@ struct PreparedScene::Impl {
   std::vector<SceneValueIssue> value_issues;
   std::vector<PreparedTrackHeaderEntry> track_header_entries;
 };
+
+// ---- Crossover fill geometry (rendering.md section 6) ---------------------
+namespace {
+
+// Two curve layers map to track-x via their own TrackScaleSpec. A crossover
+// fill encloses the region between them where one is to the right of the
+// other, between consecutive crossings of their mapped-x polylines. The
+// boundary is computed from mapped x-coordinates only (never raw values),
+// and breaks wherever either curve is missing a sample.
+
+// One mapped sample of a curve, as needed for crossover math: the scene
+// position and the reference depth it came from.
+struct AlignedSample {
+  double left{};
+  double top{};
+  double reference_depth{};
+};
+
+// Collects the valid mapped points of one prepared curve layer, in depth
+// order, as AlignedSamples. A curve may have several (broken) segments; we
+// concatenate them and sort defensively by depth.
+[[nodiscard]] std::vector<AlignedSample>
+collect_layer_samples(std::span<const PreparedCurveSegment> segments,
+                      std::span<const PreparedCurvePoint> points,
+                      const PreparedCurveLayer &layer) {
+  std::vector<AlignedSample> samples;
+  for (std::uint64_t s = 0; s < layer.segment_count; ++s) {
+    const auto &segment =
+        segments[static_cast<std::size_t>(layer.first_segment + s)];
+    for (std::uint64_t p = 0; p < segment.point_count; ++p) {
+      const auto &point =
+          points[static_cast<std::size_t>(segment.first_point + p)];
+      samples.push_back(AlignedSample{
+          .left = point.position.left.value,
+          .top = point.position.top.value,
+          .reference_depth = point.reference_depth,
+      });
+    }
+  }
+  std::sort(samples.begin(), samples.end(),
+            [](const AlignedSample &a, const AlignedSample &b) {
+              return a.reference_depth < b.reference_depth;
+            });
+  return samples;
+}
+
+// Linear interpolation of the lower curve's mapped left at a given depth,
+// within one contiguous valid run of lower samples. Returns nullopt when
+// the depth lies outside the run (so the caller can break the region).
+[[nodiscard]] std::optional<double>
+interpolate_left_at_depth(const std::vector<AlignedSample> &lower,
+                          std::size_t run_begin, std::size_t run_end,
+                          double depth) {
+  if (run_begin >= run_end || run_end > lower.size()) {
+    return std::nullopt;
+  }
+  if (depth < lower[run_begin].reference_depth ||
+      depth > lower[run_end - 1].reference_depth) {
+    return std::nullopt;
+  }
+  for (std::size_t i = run_begin; i + 1 < run_end; ++i) {
+    const auto &a = lower[i];
+    const auto &b = lower[i + 1];
+    if (depth >= a.reference_depth && depth <= b.reference_depth) {
+      const auto span = b.reference_depth - a.reference_depth;
+      if (span <= 0.0) {
+        return a.left; // repeated depth: take the lower sample
+      }
+      const auto t = (depth - a.reference_depth) / span;
+      return a.left + t * (b.left - a.left);
+    }
+  }
+  return std::nullopt;
+}
+
+// One closed region between two crossings: the upper polyline samples
+// (upper-to-the-right of lower) then the lower edge reversed.
+struct CrossoverRegion {
+  std::vector<PhysicalPoint> ring;
+  double top_reference_depth{};
+  double bottom_reference_depth{};
+};
+
+// Build the regions for one crossover fill layer. `upper` provides the
+// depth grid; `lower` is interpolated onto it. A region is emitted wherever
+// the upper-left-minus-lower-left stays non-negative between crossings
+// (CrossoverFillRule::upper_minus_lower).
+[[nodiscard]] std::vector<CrossoverRegion>
+build_crossover_regions(const std::vector<AlignedSample> &upper,
+                        const std::vector<AlignedSample> &lower) {
+  std::vector<CrossoverRegion> regions;
+  if (upper.empty() || lower.empty()) {
+    return regions;
+  }
+  const auto lower_run_begin = std::size_t{0};
+  const auto lower_run_end = lower.size();
+
+  struct RingPoint {
+    PhysicalPoint position{};
+    double reference_depth{};
+  };
+  std::vector<RingPoint> upper_run;
+  std::vector<RingPoint> lower_run;
+  std::optional<double> last_diff_sign;
+
+  const auto flush_region = [&](double region_top_depth,
+                                double region_bottom_depth) {
+    if (upper_run.size() < 2 || lower_run.size() < 2) {
+      upper_run.clear();
+      lower_run.clear();
+      return;
+    }
+    CrossoverRegion region;
+    region.top_reference_depth = region_top_depth;
+    region.bottom_reference_depth = region_bottom_depth;
+    region.ring.reserve(upper_run.size() + lower_run.size());
+    for (const auto &p : upper_run) {
+      region.ring.push_back(p.position);
+    }
+    for (auto it = lower_run.rbegin(); it != lower_run.rend(); ++it) {
+      region.ring.push_back(it->position);
+    }
+    if (region.ring.size() >= 3) {
+      regions.push_back(std::move(region));
+    }
+    upper_run.clear();
+    lower_run.clear();
+  };
+
+  for (const auto &u : upper) {
+    const auto lower_left = interpolate_left_at_depth(lower, lower_run_begin,
+                                                      lower_run_end,
+                                                      u.reference_depth);
+    if (!lower_left.has_value()) {
+      if (!upper_run.empty()) {
+        flush_region(upper_run.front().reference_depth,
+                     upper_run.back().reference_depth);
+      }
+      last_diff_sign.reset();
+      continue;
+    }
+    const auto diff = u.left - *lower_left;
+    const auto sign = diff > 0.0 ? 1.0 : (diff < 0.0 ? -1.0 : 0.0);
+    if (!last_diff_sign.has_value()) {
+      if (sign > 0.0) {
+        upper_run.push_back(RingPoint{PhysicalPoint{.left = Millimetres{u.left},
+                                                    .top = Millimetres{u.top}},
+                                      u.reference_depth});
+        lower_run.push_back(
+            RingPoint{PhysicalPoint{.left = Millimetres{*lower_left},
+                                    .top = Millimetres{u.top}},
+                      u.reference_depth});
+        last_diff_sign = sign;
+      }
+      continue;
+    }
+    if (sign >= 0.0) {
+      upper_run.push_back(RingPoint{PhysicalPoint{.left = Millimetres{u.left},
+                                                  .top = Millimetres{u.top}},
+                                    u.reference_depth});
+      lower_run.push_back(
+          RingPoint{PhysicalPoint{.left = Millimetres{*lower_left},
+                                  .top = Millimetres{u.top}},
+                    u.reference_depth});
+      last_diff_sign = sign > 0.0 ? sign : *last_diff_sign;
+    } else {
+      // Sign flipped: a crossing closed the region.
+      flush_region(upper_run.empty() ? u.reference_depth
+                                     : upper_run.front().reference_depth,
+                   u.reference_depth);
+      last_diff_sign.reset();
+    }
+  }
+  if (!upper_run.empty()) {
+    flush_region(upper_run.front().reference_depth,
+                 upper_run.back().reference_depth);
+  }
+  return regions;
+}
+
+} // namespace
 
 PreparedScene::PreparedScene() = default;
 PreparedScene::~PreparedScene() = default;
@@ -446,6 +656,34 @@ std::span<const PreparedInterval> PreparedScene::intervals() const noexcept {
   return impl_ == nullptr
              ? std::span<const PreparedInterval>{}
              : std::span<const PreparedInterval>{impl_->intervals};
+}
+
+std::span<const PreparedFillLayer>
+PreparedScene::fill_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedFillLayer>{}
+             : std::span<const PreparedFillLayer>{impl_->fill_layers};
+}
+
+std::span<const PreparedFillRegion>
+PreparedScene::fill_regions() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedFillRegion>{}
+             : std::span<const PreparedFillRegion>{impl_->fill_regions};
+}
+
+std::span<const PreparedFillVertex>
+PreparedScene::fill_vertices() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedFillVertex>{}
+             : std::span<const PreparedFillVertex>{impl_->fill_vertices};
+}
+
+std::span<const PreparedFillTriangle>
+PreparedScene::fill_triangles() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedFillTriangle>{}
+             : std::span<const PreparedFillTriangle>{impl_->fill_triangles};
 }
 
 std::span<const PreparedMarkerLayer>
@@ -544,6 +782,11 @@ PreparedScene::track_id_for_layer(EntityId layer_id) const noexcept {
     }
   }
   for (const auto &layer : impl_->interval_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->fill_layers) {
     if (layer.id == layer_id) {
       return layer.track_id;
     }
@@ -701,6 +944,73 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
           .display_depth = best_point->reference_depth,
           .value = best_point->value,
           .distance = DeviceIndependentPixels{best_distance},
+      };
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<FillPick>
+PreparedScene::pick_fill(const FillPickQuery &query) const noexcept {
+  if (impl_ == nullptr) {
+    return std::nullopt;
+  }
+  const auto position = query.scene_position;
+  // Iterate fill layers in reverse z order so the topmost layer wins.
+  for (auto layer_it = impl_->fill_layers.rbegin();
+       layer_it != impl_->fill_layers.rend(); ++layer_it) {
+    const auto track =
+        std::find_if(impl_->tracks.begin(), impl_->tracks.end(),
+                     [&](const PreparedTrack &candidate) {
+                       return candidate.id == layer_it->track_id;
+                     });
+    if (track == impl_->tracks.end() ||
+        position.left.value < track->clip.left.value ||
+        position.top.value < track->clip.top.value ||
+        position.left.value >
+            track->clip.left.value + track->clip.width.value ||
+        position.top.value >
+            track->clip.top.value + track->clip.height.value) {
+      continue;
+    }
+    for (auto region_index = layer_it->first_region + layer_it->region_count;
+         region_index > layer_it->first_region; --region_index) {
+      const auto &region =
+          impl_->fill_regions[static_cast<std::size_t>(region_index - 1)];
+      const auto vertex_begin =
+          impl_->fill_vertices.begin() +
+          static_cast<std::ptrdiff_t>(region.first_vertex);
+      const auto vertex_end = vertex_begin +
+                              static_cast<std::ptrdiff_t>(region.vertex_count);
+      std::vector<detail::PolygonPoint> ring;
+      ring.reserve(static_cast<std::size_t>(vertex_end - vertex_begin));
+      for (auto v = vertex_begin; v != vertex_end; ++v) {
+        ring.push_back(
+            detail::PolygonPoint{.x = v->position.left.value,
+                                 .y = v->position.top.value});
+      }
+      if (!detail::point_in_polygon(ring, position.left.value,
+                                    position.top.value)) {
+        continue;
+      }
+      // Resolve both dependent curve identities from their prepared layers.
+      const auto resolve_curve_id = [&](EntityId layer_id) -> EntityId {
+        for (const auto &cl : impl_->curve_layers) {
+          if (cl.id == layer_id) {
+            return cl.curve_id;
+          }
+        }
+        return EntityId{};
+      };
+      return FillPick{
+          .layer_id = layer_it->id,
+          .fill_region_index = EntityId{}, // region ordinal not required
+          .upper_curve_layer_id = region.upper_curve_layer_id,
+          .lower_curve_layer_id = region.lower_curve_layer_id,
+          .upper_curve_id = resolve_curve_id(region.upper_curve_layer_id),
+          .lower_curve_id = resolve_curve_id(region.lower_curve_layer_id),
+          .reference_depth =
+              0.5 * (region.top_reference_depth + region.bottom_reference_depth),
       };
     }
   }
@@ -1256,6 +1566,142 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           .interval_count =
               static_cast<std::uint64_t>(scene->intervals.size()) -
               first_interval,
+      });
+    }
+
+    // Crossover fill layers (ADR 0017; rendering.md section 6). Built after
+    // curve + interval layers so they can read the prepared curve geometry
+    // and the validated pattern ids. Each fill encloses the region between
+    // two crossing curve layers; the boundary is computed from mapped
+    // x-coordinates and triangulated once for both backends to consume.
+    std::vector<const CrossoverFillLayerSpec *> ordered_fill_layers;
+    ordered_fill_layers.reserve(presentation.crossover_fill_layers().size());
+    for (const auto &layer : presentation.crossover_fill_layers()) {
+      ordered_fill_layers.push_back(&layer);
+    }
+    order_layers_by_z(ordered_fill_layers);
+
+    const auto find_prepared_curve_layer =
+        [&](EntityId layer_id) -> const PreparedCurveLayer * {
+      for (const auto &cl : scene->curve_layers) {
+        if (cl.id == layer_id) {
+          return &cl;
+        }
+      }
+      return nullptr;
+    };
+
+    for (const auto *layer_pointer : ordered_fill_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      const auto bounds = track_bounds.find(layer.track_id);
+      const auto *upper_layer =
+          find_prepared_curve_layer(layer.upper_curve_layer_id);
+      const auto *lower_layer =
+          find_prepared_curve_layer(layer.lower_curve_layer_id);
+      const auto color_set = layer.fill_color.has_value();
+      const auto pattern_set =
+          layer.pattern_id.has_value() && !layer.pattern_id->is_nil();
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          bounds == track_bounds.end() || upper_layer == nullptr ||
+          lower_layer == nullptr ||
+          upper_layer->track_id != layer.track_id ||
+          lower_layer->track_id != layer.track_id ||
+          upper_layer->id == lower_layer->id ||
+          (color_set == pattern_set)) {
+        // Exactly one of fill_color / pattern_id must be set; both layers
+        // must exist, share this track, and differ.
+        return presentation_error(layer.id);
+      }
+      if (pattern_set && !pattern_ids.contains(*layer.pattern_id)) {
+        return presentation_error(*layer.pattern_id);
+      }
+      const auto fill_color =
+          color_set ? *layer.fill_color : RgbaColor{};
+      const auto pattern_id =
+          pattern_set ? *layer.pattern_id : EntityId{};
+
+      const auto first_region =
+          static_cast<std::uint64_t>(scene->fill_regions.size());
+
+      // Hidden fill, or a hidden dependent curve, contributes identity but
+      // no geometry (mirrors hidden curve-layer behaviour).
+      if (layer.visible && upper_layer->visible && lower_layer->visible) {
+        const auto upper_samples =
+            collect_layer_samples(scene->curve_segments, scene->curve_points,
+                                  *upper_layer);
+        const auto lower_samples =
+            collect_layer_samples(scene->curve_segments, scene->curve_points,
+                                  *lower_layer);
+        const auto regions = build_crossover_regions(upper_samples, lower_samples);
+        for (const auto &region : regions) {
+          if (stop_token.stop_requested()) {
+            return cancellation_error();
+          }
+          if (region.ring.size() < 3) {
+            continue;
+          }
+          const auto first_vertex =
+              static_cast<std::uint32_t>(scene->fill_vertices.size());
+          for (const auto &p : region.ring) {
+            scene->fill_vertices.push_back(PreparedFillVertex{.position = p});
+          }
+          std::vector<detail::PolygonPoint> polygon;
+          polygon.reserve(region.ring.size());
+          double min_left = std::numeric_limits<double>::infinity();
+          double min_top = std::numeric_limits<double>::infinity();
+          double max_left = -std::numeric_limits<double>::infinity();
+          double max_top = -std::numeric_limits<double>::infinity();
+          for (const auto &p : region.ring) {
+            polygon.push_back(detail::PolygonPoint{.x = p.left.value,
+                                                   .y = p.top.value});
+            min_left = std::min(min_left, p.left.value);
+            min_top = std::min(min_top, p.top.value);
+            max_left = std::max(max_left, p.left.value);
+            max_top = std::max(max_top, p.top.value);
+          }
+          const auto triangles = detail::triangulate_polygon(polygon);
+          const auto first_triangle =
+              static_cast<std::uint64_t>(scene->fill_triangles.size());
+          for (std::size_t t = 0; t + 2 < triangles.size(); t += 3) {
+            scene->fill_triangles.push_back(PreparedFillTriangle{
+                .a = triangles[t] + first_vertex,
+                .b = triangles[t + 1] + first_vertex,
+                .c = triangles[t + 2] + first_vertex,
+            });
+          }
+          scene->fill_regions.push_back(PreparedFillRegion{
+              .layer_id = layer.id,
+              .first_vertex = first_vertex,
+              .vertex_count = static_cast<std::uint64_t>(region.ring.size()),
+              .first_triangle = first_triangle,
+              .triangle_count = triangles.size() / 3,
+              .fill_color = fill_color,
+              .pattern_id = pattern_id,
+              .upper_curve_layer_id = layer.upper_curve_layer_id,
+              .lower_curve_layer_id = layer.lower_curve_layer_id,
+              .top_reference_depth = region.top_reference_depth,
+              .bottom_reference_depth = region.bottom_reference_depth,
+              .bounds =
+                  PhysicalRect{
+                      .left = Millimetres{min_left},
+                      .top = Millimetres{min_top},
+                      .width = Millimetres{max_left - min_left},
+                      .height = Millimetres{max_top - min_top},
+                  },
+          });
+        }
+      }
+      scene->fill_layers.push_back(PreparedFillLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .z_order = layer.z_order,
+          .first_region = first_region,
+          .region_count =
+              static_cast<std::uint64_t>(scene->fill_regions.size()) -
+              first_region,
       });
     }
 

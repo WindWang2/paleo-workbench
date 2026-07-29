@@ -130,6 +130,31 @@ struct IntervalLayerSpec {
   RgbaColor label_color{0, 0, 0, 255};
 };
 
+// Which enclosed side of a crossover to fill (rendering.md section 6).
+enum class CrossoverFillRule : std::uint8_t {
+  // Fill where the upper curve's mapped x is to the right of the lower's
+  // (upper-minus-lower). Extensible with further rules without reshaping
+  // the spec.
+  upper_minus_lower,
+};
+
+// Fills the enclosed region between two curve layers whose mapped track-x
+// polylines cross (ADR 0017; rendering.md section 6). The fill boundary is
+// computed from the mapped x-coordinates, never raw values; curves may use
+// different scales, units and directions. Exactly one of fill_color /
+// pattern_id must be set.
+struct CrossoverFillLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  EntityId upper_curve_layer_id;
+  EntityId lower_curve_layer_id;
+  CrossoverFillRule rule{CrossoverFillRule::upper_minus_lower};
+  std::optional<RgbaColor> fill_color;
+  std::optional<EntityId> pattern_id;
+  bool visible{true};
+};
+
 // Displays document Markers as zero-thickness horizontal lines across the
 // track with optional labels.
 struct MarkerLayerSpec {
@@ -180,6 +205,8 @@ public:
   [[nodiscard]] std::span<const PatternDefinition> patterns() const noexcept;
   [[nodiscard]] std::span<const IntervalLayerSpec>
   interval_layers() const noexcept;
+  [[nodiscard]] std::span<const CrossoverFillLayerSpec>
+  crossover_fill_layers() const noexcept;
   [[nodiscard]] std::span<const MarkerLayerSpec>
   marker_layers() const noexcept;
   [[nodiscard]] std::span<const SymbolLayerSpec>
@@ -213,6 +240,8 @@ public:
   ScenePresentationBuilder &add_pattern(const PatternDefinition &pattern) noexcept;
   ScenePresentationBuilder &
   add_interval_layer(const IntervalLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &
+  add_crossover_fill_layer(const CrossoverFillLayerSpec &layer) noexcept;
   ScenePresentationBuilder &
   add_marker_layer(const MarkerLayerSpec &layer) noexcept;
   ScenePresentationBuilder &
@@ -299,6 +328,46 @@ struct PreparedInterval {
   double top_reference_depth{};
   double bottom_reference_depth{};
   std::uint64_t label_run_index{no_text_run};
+};
+
+struct PreparedFillLayer {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  std::uint64_t first_region{};
+  std::uint64_t region_count{};
+};
+
+// A fill-region boundary vertex (scene millimetres).
+struct PreparedFillVertex {
+  PhysicalPoint position{};
+};
+
+// Triangle indices into PreparedScene::fill_vertices.
+struct PreparedFillTriangle {
+  std::uint32_t a{};
+  std::uint32_t b{};
+  std::uint32_t c{};
+};
+
+// One enclosed region between two crossing curve polylines (rendering.md
+// section 6). `first_vertex/vertex_count` index the closed boundary ring
+// (used by SVG path emission and point-in-polygon picking);
+// `first_triangle/triangle_count` index its triangulation (consumed by GL).
+// Both dependent curve layers are carried so a pick can return them.
+struct PreparedFillRegion {
+  EntityId layer_id;
+  std::uint64_t first_vertex{};
+  std::uint64_t vertex_count{};
+  std::uint64_t first_triangle{};
+  std::uint64_t triangle_count{};
+  RgbaColor fill_color{};
+  EntityId pattern_id;
+  EntityId upper_curve_layer_id;
+  EntityId lower_curve_layer_id;
+  double top_reference_depth{};
+  double bottom_reference_depth{};
+  PhysicalRect bounds{};
 };
 
 struct PreparedMarkerLayer {
@@ -441,6 +510,23 @@ struct CurvePickQuery {
   double vertical_device_independent_pixels_per_millimetre{};
 };
 
+// A hit on a crossover fill region (ADR 0030 semantic picking). Carries
+// BOTH dependent curve layers and the reference depth at the hit, so the
+// host can report which curves produced the filled band.
+struct FillPick {
+  EntityId layer_id;
+  EntityId fill_region_index{};
+  EntityId upper_curve_layer_id;
+  EntityId lower_curve_layer_id;
+  EntityId upper_curve_id;
+  EntityId lower_curve_id;
+  double reference_depth{};
+};
+
+struct FillPickQuery {
+  PhysicalPoint scene_position;
+};
+
 namespace detail {
 class ScenePreparer;
 }
@@ -471,6 +557,14 @@ public:
   [[nodiscard]] std::span<const PreparedIntervalLayer>
   interval_layers() const noexcept;
   [[nodiscard]] std::span<const PreparedInterval> intervals() const noexcept;
+  [[nodiscard]] std::span<const PreparedFillLayer>
+  fill_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedFillRegion>
+  fill_regions() const noexcept;
+  [[nodiscard]] std::span<const PreparedFillVertex>
+  fill_vertices() const noexcept;
+  [[nodiscard]] std::span<const PreparedFillTriangle>
+  fill_triangles() const noexcept;
   [[nodiscard]] std::span<const PreparedMarkerLayer>
   marker_layers() const noexcept;
   [[nodiscard]] std::span<const PreparedMarker> markers() const noexcept;
@@ -492,12 +586,14 @@ public:
   [[nodiscard]] std::span<const PreparedTrackHeaderEntry>
   track_header_entries() const noexcept;
   // Resolves the owning track of any prepared layer identity (curve,
-  // interval, marker, symbol or text), for backends mapping layer-scoped
-  // content back to its track clip.
+  // interval, marker, symbol, text or crossover fill), for backends mapping
+  // layer-scoped content back to its track clip.
   [[nodiscard]] std::optional<EntityId>
   track_id_for_layer(EntityId layer_id) const noexcept;
   [[nodiscard]] std::optional<CurvePick>
   pick_curve(const CurvePickQuery &query) const noexcept;
+  [[nodiscard]] std::optional<FillPick>
+  pick_fill(const FillPickQuery &query) const noexcept;
 
 private:
   struct Impl;
