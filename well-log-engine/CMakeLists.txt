@@ -334,6 +334,7 @@ endif()
 
 add_library(welllog_render_gl ${WELLLOG_LIBRARY_TYPE}
     src/render_gl/capability.cpp
+    src/render_gl/raster.cpp
     src/render_gl/renderer.cpp
     src/render_gl/upload.cpp
 )
@@ -425,6 +426,13 @@ if(WELLLOG_BUILD_QT_WIDGETS)
             Qt6::OpenGLWidgets
             Qt6::Widgets
     )
+    if(WELLLOG_BUILD_TEXT)
+        target_link_libraries(welllog_qtwidgets PUBLIC WellLog::Text)
+        target_compile_definitions(
+            welllog_qtwidgets
+            PRIVATE WELLLOG_WITH_TEXT
+        )
+    endif()
     target_include_directories(welllog_qtwidgets
         PUBLIC
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -774,6 +782,18 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::RenderGL
     )
     add_test(NAME welllog.render-gl COMMAND welllog_render_gl_tests)
+
+    add_executable(welllog_raster_tests
+        tests/render_gl/raster_test.cpp
+    )
+    target_compile_features(welllog_raster_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_raster_tests)
+    target_include_directories(
+        welllog_raster_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(welllog_raster_tests PRIVATE WellLog::RenderGL)
+    add_test(NAME welllog.render-raster COMMAND welllog_raster_tests)
 
     if(WELLLOG_BUILD_QT_WIDGETS)
         qt_add_executable(welllog_qt_widget_tests

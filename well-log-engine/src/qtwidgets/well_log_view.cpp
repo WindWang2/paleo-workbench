@@ -3,6 +3,10 @@
 #include "render_gl/capability_probe.hpp"
 #include "render_gl/renderer.hpp"
 
+#ifdef WELLLOG_WITH_TEXT
+#include <welllog/text/harfbuzz_text_engine.hpp>
+#endif
+
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMetaObject>
@@ -65,6 +69,12 @@ namespace {
     return QStringLiteral("missing_samples");
   case DiagnosticCode::asynchronous_preparation_failed:
     return QStringLiteral("asynchronous_preparation_failed");
+  case DiagnosticCode::missing_glyphs:
+    return QStringLiteral("missing_glyphs");
+  case DiagnosticCode::fallback_font_used:
+    return QStringLiteral("fallback_font_used");
+  case DiagnosticCode::text_engine_unavailable:
+    return QStringLiteral("text_engine_unavailable");
   }
   return QStringLiteral("unknown_diagnostic");
 }
@@ -119,6 +129,12 @@ WellLogView::WellLogView(std::shared_ptr<WellLogSession> session,
     : QOpenGLWidget(parent), impl_(std::make_unique<Impl>()) {
   impl_->session = session == nullptr ? std::make_shared<WellLogSession>()
                                       : std::move(session);
+#ifdef WELLLOG_WITH_TEXT
+  if (impl_->session != nullptr) {
+    impl_->session->set_text_engine(
+        std::make_shared<HarfBuzzTextEngine>());
+  }
+#endif
   setFormat(well_log_surface_format());
   setMouseTracking(true);
   setFocusPolicy(Qt::StrongFocus);
@@ -163,6 +179,12 @@ WellLogView::~WellLogView() {
 
 WellLogSession &WellLogView::session() noexcept { return *impl_->session; }
 
+void WellLogView::set_text_engine(
+    std::shared_ptr<TextEngine> text_engine) noexcept {
+  if (impl_->session != nullptr) {
+    impl_->session->set_text_engine(std::move(text_engine));
+  }
+}
 const WellLogSession &WellLogView::session() const noexcept {
   return *impl_->session;
 }

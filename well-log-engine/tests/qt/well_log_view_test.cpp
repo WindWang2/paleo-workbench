@@ -1,5 +1,7 @@
 #include <welllog/qtwidgets/well_log_view.hpp>
 
+#include <welllog/text/harfbuzz_text_engine.hpp>
+
 #include <QApplication>
 #include <QColor>
 #include <QGuiApplication>
@@ -30,6 +32,7 @@ class WellLogViewTest final : public QObject {
 private slots:
   void native_view_embeds_and_reports_capabilities();
   void prepared_curve_renders_into_the_widget_fbo();
+  void layered_scene_renders_intervals_patterns_symbols_and_text();
   void pointer_interaction_updates_session_and_semantic_picks();
   void pointer_pan_zoom_and_reset_use_session_commands();
   void widget_rebuild_restores_curve_from_session_cpu_state();
@@ -490,6 +493,233 @@ void WellLogViewTest::cross_thread_public_mutations_are_queued_to_gui() {
       DepthViewport{.top = 1000.0, .bottom = 1100.0}};
   QTRY_VERIFY_WITH_TIMEOUT(
       fixture.session->viewport(fixture.document_id) == default_viewport, 5000);
+}
+
+void WellLogViewTest::layered_scene_renders_intervals_patterns_symbols_and_text() {
+  const auto document_id = id("60000000-0000-4000-8000-000000000101");
+  const auto axis_id = id("60000000-0000-4000-8000-000000000102");
+  const auto curve_id = id("60000000-0000-4000-8000-000000000103");
+  const auto track_id = id("60000000-0000-4000-8000-000000000104");
+  const auto pattern_id = id("60000000-0000-4000-8000-000000000105");
+  const auto interval_layer_id = id("60000000-0000-4000-8000-000000000106");
+  const auto marker_layer_id = id("60000000-0000-4000-8000-000000000107");
+  const auto symbol_layer_id = id("60000000-0000-4000-8000-000000000108");
+  const auto text_layer_id = id("60000000-0000-4000-8000-000000000109");
+  const auto interval_id = id("60000000-0000-4000-8000-00000000010a");
+  const auto marker_id = id("60000000-0000-4000-8000-00000000010b");
+  const auto symbol_id = id("60000000-0000-4000-8000-00000000010c");
+  const auto annotation_id = id("60000000-0000-4000-8000-00000000010d");
+
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1050.0, 1100.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{0.0, 50.0, 100.0});
+  WellLogDocumentBuilder document_builder(document_id, DocumentRevision{1});
+  document_builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id,
+      .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth,
+      .unit = "m",
+      .direction = AxisDirection::increasing,
+  });
+  document_builder.add_curve(Curve{
+      .id = curve_id,
+      .mnemonic = "GR",
+      .display_name = "Gamma Ray",
+      .unit = "API",
+      .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values),
+      .nulls = {},
+  });
+  document_builder.add_interval(Interval{
+      .id = interval_id,
+      .top_reference_depth = 1000.0,
+      .bottom_reference_depth = 1050.0,
+      .semantic = IntervalSemantic::lithology,
+      .pattern_id = pattern_id,
+      .fill_color = RgbaColor{240, 230, 180, 255},
+      .label = {},
+  });
+  document_builder.add_marker(Marker{
+      .id = marker_id,
+      .reference_depth = 1050.0,
+      .semantic = MarkerSemantic::formation_top,
+      .label = {},
+  });
+  document_builder.add_symbol(SymbolOccurrence{
+      .id = symbol_id,
+      .reference_depth = 1025.0,
+      .track_fraction = 0.5,
+      .kind = SymbolKind::diamond,
+      .label = {},
+  });
+  document_builder.add_annotation(TextAnnotation{
+      .id = annotation_id,
+      .anchor = AnnotationAnchor::reference_depth,
+      .reference_depth = 1010.0,
+      .track_fraction = 0.5,
+      .track_id = {},
+      .depth_fraction = 0.0,
+      .horizontal_fraction = 0.0,
+      .scene_point = {},
+      .text = "Sand",
+      .language = "en",
+      .orientation = TextOrientation::horizontal,
+      .rotation_degrees = 0.0,
+      .font_size = Millimetres{4.0},
+  });
+
+  auto session = std::make_shared<WellLogSession>();
+  session->set_text_engine(std::make_shared<HarfBuzzTextEngine>());
+  Q_ASSERT(session->execute(SetDocumentCommand{document_builder.build()})
+               .has_value());
+  ScenePresentationBuilder presentation_builder(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = "m",
+          .top = 1000.0,
+          .bottom = 1100.0,
+      },
+      Millimetres{100.0}, "font-fixture-v1");
+  presentation_builder.add_track(
+      TrackSpec{.id = track_id, .width = Millimetres{30.0}, .z_order = 0});
+  presentation_builder.add_pattern(PatternDefinition{
+      .id = pattern_id,
+      .tile_width = Millimetres{4.0},
+      .tile_height = Millimetres{4.0},
+      .rotation_degrees = 0.0,
+      .foreground = RgbaColor{120, 100, 60, 255},
+      .background = RgbaColor{240, 230, 180, 255},
+      .stroke_width = Millimetres{0.4},
+      .scene_anchor = PhysicalPoint{Millimetres{0.0}, Millimetres{0.0}},
+      .primitives =
+          {
+              PatternLine{PhysicalPoint{Millimetres{0.0}, Millimetres{0.0}},
+                          PhysicalPoint{Millimetres{4.0}, Millimetres{4.0}}},
+          },
+  });
+  presentation_builder.add_interval_layer(IntervalLayerSpec{
+      .id = interval_layer_id,
+      .track_id = track_id,
+      .z_order = 0,
+      .draw_labels = false,
+      .label_font_size = Millimetres{3.0},
+      .label_color = RgbaColor{0, 0, 0, 255},
+  });
+  presentation_builder.add_marker_layer(MarkerLayerSpec{
+      .id = marker_layer_id,
+      .track_id = track_id,
+      .z_order = 1,
+      .line_color = RgbaColor{220, 20, 20, 255},
+      .line_width = Millimetres{0.8},
+      .draw_labels = false,
+      .label_font_size = Millimetres{3.0},
+      .label_color = RgbaColor{0, 0, 0, 255},
+  });
+  presentation_builder.add_symbol_layer(SymbolLayerSpec{
+      .id = symbol_layer_id,
+      .track_id = track_id,
+      .z_order = 2,
+      .color = RgbaColor{20, 20, 200, 255},
+      .symbol_size = Millimetres{6.0},
+  });
+  presentation_builder.add_text_layer(TextLayerSpec{
+      .id = text_layer_id,
+      .track_id = track_id,
+      .z_order = 3,
+      .color = RgbaColor{0, 0, 0, 255},
+  });
+  Q_ASSERT(
+      session->execute(SetPresentationCommand{presentation_builder.build()})
+          .has_value());
+  QVERIFY(session->prepared_scene(document_id) != nullptr);
+  QVERIFY(!session->prepared_scene(document_id)->intervals().empty());
+  QVERIFY(!session->prepared_scene(document_id)->text_runs().empty());
+
+  WellLogView view(session);
+  view.set_document_id(document_id);
+  view.resize(240, 240);
+  view.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&view));
+  QTRY_VERIFY_WITH_TIMEOUT(view.capability_report().initialization_complete,
+                           5000);
+  QVERIFY2(view.capability_report().graphics_available,
+           view.capability_report().unavailable_reason.c_str());
+
+  QImage image;
+  QTRY_VERIFY_WITH_TIMEOUT(
+      (image = view.grabFramebuffer(),
+       image.pixelColor(image.width() / 2, image.height() / 4) !=
+           QColor{Qt::white}),
+      5000);
+
+  // The patterned interval fills the top half with its tile background.
+  const auto interval_color =
+      image.pixelColor(image.width() / 8, image.height() / 8);
+  QVERIFY2(interval_color.red() > 180 && interval_color.blue() < 220,
+           qPrintable(interval_color.name(QColor::HexArgb)));
+
+  // The red marker line crosses the middle of the view.
+  auto marker_found = false;
+  for (int row = image.height() / 2 - 4; row <= image.height() / 2 + 4;
+       ++row) {
+    for (int left = 0; left < image.width(); ++left) {
+      const auto color = image.pixelColor(left, row);
+      if (color.red() > 150 && color.green() < 100 && color.blue() < 100) {
+        marker_found = true;
+        break;
+      }
+    }
+  }
+  QVERIFY2(marker_found, "the red marker line must be visible");
+
+  // The blue diamond symbol sits at the quarter-height mark.
+  auto symbol_found = false;
+  for (int row = image.height() / 5; row < image.height() * 3 / 10; ++row) {
+    for (int left = image.width() / 3; left < image.width() * 2 / 3;
+         ++left) {
+      const auto color = image.pixelColor(left, row);
+      if (color.blue() > 150 && color.red() < 100) {
+        symbol_found = true;
+        break;
+      }
+    }
+  }
+  QVERIFY2(symbol_found, "the blue symbol must be visible");
+
+  // The built-in fallback font renders the annotation as dark pixels.
+  auto text_found = false;
+  for (int row = image.height() / 20; row < image.height() / 6; ++row) {
+    for (int left = 0; left < image.width(); ++left) {
+      const auto color = image.pixelColor(left, row);
+      if (color.red() < 100 && color.green() < 100 && color.blue() < 100) {
+        text_found = true;
+        break;
+      }
+    }
+  }
+  QVERIFY2(text_found, "the annotation text must be visible");
+
+  // Phase continuity: samples one tile period apart vertically share the
+  // same pattern phase.
+  const auto tile_pixels = std::max(
+      4, static_cast<int>(std::lround(4.0 / 100.0 * image.height())));
+  auto phase_matches = 0;
+  auto phase_samples = 0;
+  for (int row = tile_pixels + 8; row < image.height() / 2 - tile_pixels;
+       row += 3) {
+    for (int left = 8; left < image.width() - 8; left += 3) {
+      ++phase_samples;
+      if (image.pixelColor(left, row) ==
+          image.pixelColor(left, row - tile_pixels)) {
+        ++phase_matches;
+      }
+    }
+  }
+  QVERIFY(phase_samples > 0);
+  QVERIFY2(phase_matches * 2 >= phase_samples,
+           "pattern phase must repeat with the tile period");
 }
 
 } // namespace

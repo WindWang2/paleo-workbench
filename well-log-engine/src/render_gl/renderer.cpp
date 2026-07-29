@@ -1,5 +1,7 @@
 #include "render_gl/renderer.hpp"
 
+#include "render_gl/raster.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -8,6 +10,7 @@
 #include <limits>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -50,6 +53,20 @@ constexpr GlEnum gl_src_alpha = 0x0302;
 constexpr GlEnum gl_one_minus_src_alpha = 0x0303;
 constexpr GlEnum gl_one = 1;
 constexpr GlEnum gl_no_error = 0;
+constexpr GlEnum gl_texture_2d = 0x0DE1;
+constexpr GlEnum gl_texture0 = 0x84C0;
+constexpr GlEnum gl_r8 = 0x8229;
+constexpr GlEnum gl_red = 0x1903;
+constexpr GlEnum gl_rgba8 = 0x8058;
+constexpr GlEnum gl_rgba = 0x1908;
+constexpr GlEnum gl_unsigned_byte = 0x1401;
+constexpr GlEnum gl_texture_min_filter = 0x2801;
+constexpr GlEnum gl_texture_mag_filter = 0x2800;
+constexpr GlEnum gl_texture_wrap_s = 0x2802;
+constexpr GlEnum gl_texture_wrap_t = 0x2803;
+constexpr GlEnum gl_linear = 0x2601;
+constexpr GlEnum gl_clamp_to_edge = 0x812F;
+constexpr GlEnum gl_unpack_alignment = 0x0CF5;
 
 using GlGenVertexArrays = void(WELLLOG_GL_CALL *)(GlSize, GlUInt *);
 using GlBindVertexArray = void(WELLLOG_GL_CALL *)(GlUInt);
@@ -99,6 +116,16 @@ using GlColorMask = void(WELLLOG_GL_CALL *)(GlBoolean, GlBoolean, GlBoolean,
 using GlStencilMask = void(WELLLOG_GL_CALL *)(GlUInt);
 using GlScissor = void(WELLLOG_GL_CALL *)(GlInt, GlInt, GlSize, GlSize);
 using GlDrawArrays = void(WELLLOG_GL_CALL *)(GlEnum, GlInt, GlSize);
+using GlGenTextures = void(WELLLOG_GL_CALL *)(GlSize, GlUInt *);
+using GlDeleteTextures = void(WELLLOG_GL_CALL *)(GlSize, const GlUInt *);
+using GlBindTexture = void(WELLLOG_GL_CALL *)(GlEnum, GlUInt);
+using GlTexImage2D = void(WELLLOG_GL_CALL *)(GlEnum, GlInt, GlInt, GlSize,
+                                             GlSize, GlInt, GlEnum, GlEnum,
+                                             const void *);
+using GlTexParameter = void(WELLLOG_GL_CALL *)(GlEnum, GlEnum, GlInt);
+using GlActiveTexture = void(WELLLOG_GL_CALL *)(GlEnum);
+using GlPixelStore = void(WELLLOG_GL_CALL *)(GlEnum, GlInt);
+using GlUniform1i = void(WELLLOG_GL_CALL *)(GlInt, GlInt);
 
 template <typename Function>
 [[nodiscard]] Function load(GlProcResolver resolver, void *resolver_context,
@@ -145,6 +172,14 @@ struct GlFunctions {
   GlStencilMask stencil_mask{};
   GlScissor scissor{};
   GlDrawArrays draw_arrays{};
+  GlGenTextures gen_textures{};
+  GlDeleteTextures delete_textures{};
+  GlBindTexture bind_texture{};
+  GlTexImage2D tex_image_2d{};
+  GlTexParameter tex_parameteri{};
+  GlActiveTexture active_texture{};
+  GlPixelStore pixel_storei{};
+  GlUniform1i uniform_1i{};
 
   [[nodiscard]] bool complete() const noexcept {
     return gen_vertex_arrays != nullptr && bind_vertex_array != nullptr &&
@@ -166,7 +201,11 @@ struct GlFunctions {
            clear != nullptr && enable != nullptr && disable != nullptr &&
            blend_func_separate != nullptr && color_mask != nullptr &&
            stencil_mask != nullptr && scissor != nullptr &&
-           draw_arrays != nullptr;
+           draw_arrays != nullptr && gen_textures != nullptr &&
+           delete_textures != nullptr && bind_texture != nullptr &&
+           tex_image_2d != nullptr && tex_parameteri != nullptr &&
+           active_texture != nullptr && pixel_storei != nullptr &&
+           uniform_1i != nullptr;
   }
 };
 
@@ -243,6 +282,22 @@ struct GlFunctions {
       .scissor = load<GlScissor>(resolver, resolver_context, "glScissor"),
       .draw_arrays =
           load<GlDrawArrays>(resolver, resolver_context, "glDrawArrays"),
+      .gen_textures =
+          load<GlGenTextures>(resolver, resolver_context, "glGenTextures"),
+      .delete_textures = load<GlDeleteTextures>(resolver, resolver_context,
+                                                "glDeleteTextures"),
+      .bind_texture =
+          load<GlBindTexture>(resolver, resolver_context, "glBindTexture"),
+      .tex_image_2d =
+          load<GlTexImage2D>(resolver, resolver_context, "glTexImage2D"),
+      .tex_parameteri =
+          load<GlTexParameter>(resolver, resolver_context, "glTexParameteri"),
+      .active_texture =
+          load<GlActiveTexture>(resolver, resolver_context, "glActiveTexture"),
+      .pixel_storei =
+          load<GlPixelStore>(resolver, resolver_context, "glPixelStorei"),
+      .uniform_1i =
+          load<GlUniform1i>(resolver, resolver_context, "glUniform1i"),
   };
 }
 
@@ -283,6 +338,66 @@ void main() {
 }
 )";
 
+// Scene-millimetre transform shared by interval, symbol and glyph passes.
+// mmScale/mmOffset map scene millimetres into NDC: x spans the physical
+// scene width; y maps through the depth range and current viewport.
+constexpr std::string_view scene_vertex_shader_source = R"(#version 330 core
+layout(location = 0) in vec2 sceneMm;
+layout(location = 1) in vec2 textureUv;
+uniform vec2 mmScale;
+uniform vec2 mmOffset;
+out vec2 vUv;
+out vec2 vMm;
+
+void main() {
+    gl_Position = vec4(sceneMm * mmScale + mmOffset, 0.0, 1.0);
+    vUv = textureUv;
+    vMm = sceneMm;
+}
+)";
+
+constexpr std::string_view solid_fragment_shader_source = R"(#version 330 core
+uniform vec4 fillColor;
+out vec4 fragmentColor;
+
+void main() {
+    fragmentColor = fillColor;
+}
+)";
+
+// Pattern tiles repeat around a scene anchor (rotated like the vector
+// export's patternTransform) so intervals and scrolling share phase.
+constexpr std::string_view pattern_fragment_shader_source = R"(#version 330 core
+uniform sampler2D tileAtlas;
+uniform vec2 anchorMm;
+uniform vec2 tileMm;
+uniform vec2 rotationCosSin;
+uniform vec4 atlasUv;
+in vec2 vMm;
+out vec4 fragmentColor;
+
+void main() {
+    vec2 relative = vMm - anchorMm;
+    vec2 rotated = vec2(
+        relative.x * rotationCosSin.x + relative.y * rotationCosSin.y,
+        -relative.x * rotationCosSin.y + relative.y * rotationCosSin.x);
+    vec2 tile = fract(rotated / tileMm);
+    fragmentColor = texture(tileAtlas, atlasUv.xy + tile * atlasUv.zw);
+}
+)";
+
+constexpr std::string_view glyph_fragment_shader_source = R"(#version 330 core
+uniform sampler2D glyphAtlas;
+uniform vec4 fillColor;
+in vec2 vUv;
+out vec4 fragmentColor;
+
+void main() {
+    float coverage = texture(glyphAtlas, vUv).r;
+    fragmentColor = vec4(fillColor.rgb, fillColor.a * coverage);
+}
+)";
+
 [[nodiscard]] GlUInt compile_shader(const GlFunctions &gl, GlEnum type,
                                     std::string_view source) noexcept {
   const auto shader = gl.create_shader(type);
@@ -300,6 +415,41 @@ void main() {
     return 0;
   }
   return shader;
+}
+
+[[nodiscard]] GlUInt build_program(const GlFunctions &gl,
+                                   std::string_view vertex_source,
+                                   std::string_view fragment_source) noexcept {
+  const auto vertex = compile_shader(gl, gl_vertex_shader, vertex_source);
+  const auto fragment =
+      compile_shader(gl, gl_fragment_shader, fragment_source);
+  if (vertex == 0 || fragment == 0) {
+    if (vertex != 0) {
+      gl.delete_shader(vertex);
+    }
+    if (fragment != 0) {
+      gl.delete_shader(fragment);
+    }
+    return 0;
+  }
+  const auto program = gl.create_program();
+  if (program == 0) {
+    gl.delete_shader(vertex);
+    gl.delete_shader(fragment);
+    return 0;
+  }
+  gl.attach_shader(program, vertex);
+  gl.attach_shader(program, fragment);
+  gl.link_program(program);
+  gl.delete_shader(vertex);
+  gl.delete_shader(fragment);
+  GlInt linked{};
+  gl.get_program_iv(program, gl_link_status, &linked);
+  if (linked == 0) {
+    gl.delete_program(program);
+    return 0;
+  }
+  return program;
 }
 
 struct CurveVertex {
@@ -325,6 +475,129 @@ struct CurveEdge {
   std::uint64_t first_point{};
   std::uint64_t second_point{};
 };
+
+struct PrimitiveVertex {
+  GlFloat scene_left{};
+  GlFloat scene_top{};
+  GlFloat uv_u{};
+  GlFloat uv_v{};
+};
+
+static_assert(sizeof(PrimitiveVertex) == 4 * sizeof(float));
+
+enum class PrimitiveKind : std::uint8_t {
+  solid,
+  pattern,
+  glyph,
+};
+
+struct PrimitiveBatch {
+  PrimitiveKind kind{PrimitiveKind::solid};
+  GlInt first_vertex{};
+  GlSize vertex_count{};
+  RgbaColor color;
+  PhysicalRect clip{};
+  double anchor_left{};
+  double anchor_top{};
+  double tile_width{1.0};
+  double tile_height{1.0};
+  double rotation_cos{1.0};
+  double rotation_sin{};
+  GlFloat atlas_u{};
+  GlFloat atlas_v{};
+  GlFloat atlas_du{};
+  GlFloat atlas_dv{};
+};
+
+void append_quad(std::vector<PrimitiveVertex> &vertices, double left,
+                 double top, double right, double bottom, float u0, float v0,
+                 float u1, float v1) {
+  const std::array<PrimitiveVertex, 6> corners{{
+      {static_cast<GlFloat>(left), static_cast<GlFloat>(top), u0, v0},
+      {static_cast<GlFloat>(left), static_cast<GlFloat>(bottom), u0, v1},
+      {static_cast<GlFloat>(right), static_cast<GlFloat>(bottom), u1, v1},
+      {static_cast<GlFloat>(left), static_cast<GlFloat>(top), u0, v0},
+      {static_cast<GlFloat>(right), static_cast<GlFloat>(bottom), u1, v1},
+      {static_cast<GlFloat>(right), static_cast<GlFloat>(top), u1, v0},
+  }};
+  vertices.insert(vertices.end(), corners.begin(), corners.end());
+}
+
+void append_triangle(std::vector<PrimitiveVertex> &vertices, double ax,
+                     double ay, double bx, double by, double cx, double cy) {
+  vertices.push_back(PrimitiveVertex{static_cast<GlFloat>(ax),
+                                     static_cast<GlFloat>(ay), 0.0F, 0.0F});
+  vertices.push_back(PrimitiveVertex{static_cast<GlFloat>(bx),
+                                     static_cast<GlFloat>(by), 0.0F, 0.0F});
+  vertices.push_back(PrimitiveVertex{static_cast<GlFloat>(cx),
+                                     static_cast<GlFloat>(cy), 0.0F, 0.0F});
+}
+
+void append_symbol_geometry(std::vector<PrimitiveVertex> &vertices,
+                            const PreparedSymbol &symbol, double half_size) {
+  const auto cx = symbol.center.left.value;
+  const auto cy = symbol.center.top.value;
+  switch (symbol.kind) {
+  case SymbolKind::circle: {
+    constexpr auto segments = 24;
+    for (auto index = 0; index < segments; ++index) {
+      const auto first_angle =
+          2.0 * 3.14159265358979323846 * static_cast<double>(index) /
+          segments;
+      const auto second_angle =
+          2.0 * 3.14159265358979323846 * static_cast<double>(index + 1) /
+          segments;
+      append_triangle(vertices, cx, cy,
+                      cx + half_size * std::cos(first_angle),
+                      cy + half_size * std::sin(first_angle),
+                      cx + half_size * std::cos(second_angle),
+                      cy + half_size * std::sin(second_angle));
+    }
+    return;
+  }
+  case SymbolKind::square:
+    append_quad(vertices, cx - half_size, cy - half_size, cx + half_size,
+                cy + half_size, 0.0F, 0.0F, 0.0F, 0.0F);
+    return;
+  case SymbolKind::triangle_up:
+    append_triangle(vertices, cx, cy - half_size, cx + half_size,
+                    cy + half_size, cx - half_size, cy + half_size);
+    return;
+  case SymbolKind::diamond:
+    append_triangle(vertices, cx, cy - half_size, cx + half_size, cy, cx,
+                    cy + half_size);
+    append_triangle(vertices, cx, cy - half_size, cx, cy + half_size,
+                    cx - half_size, cy);
+    return;
+  case SymbolKind::cross: {
+    const auto thickness = half_size / 3.0;
+    const auto diagonal = half_size;
+    // Two thin rotated quads.
+    const auto dx = diagonal;
+    const auto tx = thickness;
+    append_triangle(vertices, cx - dx + tx, cy - dx - tx, cx + dx + tx,
+                    cy + dx - tx, cx + dx - tx, cy + dx + tx);
+    append_triangle(vertices, cx - dx + tx, cy - dx - tx, cx - dx - tx,
+                    cy - dx + tx, cx + dx - tx, cy + dx + tx);
+    append_triangle(vertices, cx - dx - tx, cy + dx - tx, cx + dx - tx,
+                    cy - dx - tx, cx + dx + tx, cy - dx + tx);
+    append_triangle(vertices, cx - dx - tx, cy + dx - tx, cx + dx + tx,
+                    cy - dx + tx, cx - dx + tx, cy + dx + tx);
+    return;
+  }
+  }
+}
+
+// Rotates an em-space glyph-local point (y-up) into scene millimetres
+// around the glyph origin.
+[[nodiscard]] std::pair<double, double>
+glyph_corner(double em_x, double em_y, double font_size, double rotation_cos,
+             double rotation_sin, double origin_left, double origin_top) {
+  const auto local_x = em_x * font_size;
+  const auto local_y = -em_y * font_size; // em is y-up, scene is y-down
+  return {origin_left + local_x * rotation_cos - local_y * rotation_sin,
+          origin_top + local_x * rotation_sin + local_y * rotation_cos};
+}
 
 void clear_gl_errors(const GlFunctions &gl) noexcept {
   constexpr auto maximum_stale_errors = 16;
@@ -386,13 +659,44 @@ struct GlRenderer::Impl {
   GlInt viewport_half_span_uniform{-1};
   GlInt half_width_uniform{-1};
   GlInt color_uniform{-1};
+  GlUInt solid_program{};
+  GlUInt pattern_program{};
+  GlUInt glyph_program{};
+  GlInt solid_mm_scale_uniform{-1};
+  GlInt solid_mm_offset_uniform{-1};
+  GlInt solid_color_uniform{-1};
+  GlInt pattern_mm_scale_uniform{-1};
+  GlInt pattern_mm_offset_uniform{-1};
+  GlInt pattern_atlas_uniform{-1};
+  GlInt pattern_anchor_uniform{-1};
+  GlInt pattern_tile_uniform{-1};
+  GlInt pattern_rotation_uniform{-1};
+  GlInt pattern_atlas_uv_uniform{-1};
+  GlInt glyph_mm_scale_uniform{-1};
+  GlInt glyph_mm_offset_uniform{-1};
+  GlInt glyph_atlas_uniform{-1};
+  GlInt glyph_color_uniform{-1};
+  BufferSlot primitives;
+  GlUInt pattern_texture{};
+  GlUInt glyph_texture{};
   double physical_width{};
+  double scene_height{};
+  double depth_top{};
+  double depth_span{1.0};
   double scene_depth_center{};
   std::uint64_t active_bytes{};
   std::vector<CurveBatch> batches;
+  std::vector<PrimitiveBatch> primitive_batches;
   PreparedScene pending_scene;
   std::vector<CurveEdge> pending_edges;
   std::vector<CurveBatch> pending_batches;
+  std::vector<PrimitiveVertex> pending_primitive_vertices;
+  std::vector<PrimitiveBatch> pending_primitive_batches;
+  RasterImage pending_pattern_atlas;
+  RasterImage pending_glyph_atlas;
+  double pending_scene_height{};
+  double pending_depth_top{};
+  double pending_depth_span{1.0};
   std::vector<GpuUploadChunk> pending_chunks;
   std::size_t next_pending_chunk{};
   std::uint64_t pending_total_bytes{};
@@ -419,35 +723,18 @@ bool GlRenderer::initialize(GlProcResolver resolver,
     if (!impl_->gl.complete()) {
       return false;
     }
-    const auto vertex =
-        compile_shader(impl_->gl, gl_vertex_shader, vertex_shader_source);
-    const auto fragment =
-        compile_shader(impl_->gl, gl_fragment_shader, fragment_shader_source);
-    if (vertex == 0 || fragment == 0) {
-      if (vertex != 0) {
-        impl_->gl.delete_shader(vertex);
-      }
-      if (fragment != 0) {
-        impl_->gl.delete_shader(fragment);
-      }
-      return false;
-    }
-    impl_->program = impl_->gl.create_program();
-    if (impl_->program == 0) {
-      impl_->gl.delete_shader(vertex);
-      impl_->gl.delete_shader(fragment);
-      return false;
-    }
-    impl_->gl.attach_shader(impl_->program, vertex);
-    impl_->gl.attach_shader(impl_->program, fragment);
-    impl_->gl.link_program(impl_->program);
-    impl_->gl.delete_shader(vertex);
-    impl_->gl.delete_shader(fragment);
-    GlInt linked{};
-    impl_->gl.get_program_iv(impl_->program, gl_link_status, &linked);
-    if (linked == 0) {
-      impl_->gl.delete_program(impl_->program);
-      impl_->program = 0;
+    impl_->program =
+        build_program(impl_->gl, vertex_shader_source, fragment_shader_source);
+    impl_->solid_program = build_program(impl_->gl, scene_vertex_shader_source,
+                                         solid_fragment_shader_source);
+    impl_->pattern_program =
+        build_program(impl_->gl, scene_vertex_shader_source,
+                      pattern_fragment_shader_source);
+    impl_->glyph_program = build_program(impl_->gl, scene_vertex_shader_source,
+                                         glyph_fragment_shader_source);
+    if (impl_->program == 0 || impl_->solid_program == 0 ||
+        impl_->pattern_program == 0 || impl_->glyph_program == 0) {
+      release();
       return false;
     }
 
@@ -481,6 +768,64 @@ bool GlRenderer::initialize(GlProcResolver resolver,
         impl_->gl.get_uniform_location(impl_->program, "halfWidthPixels");
     impl_->color_uniform =
         impl_->gl.get_uniform_location(impl_->program, "curveColor");
+
+    const auto locate = [&](GlUInt program, const char *name) {
+      return impl_->gl.get_uniform_location(program, name);
+    };
+    impl_->solid_mm_scale_uniform = locate(impl_->solid_program, "mmScale");
+    impl_->solid_mm_offset_uniform = locate(impl_->solid_program, "mmOffset");
+    impl_->solid_color_uniform = locate(impl_->solid_program, "fillColor");
+    impl_->pattern_mm_scale_uniform =
+        locate(impl_->pattern_program, "mmScale");
+    impl_->pattern_mm_offset_uniform =
+        locate(impl_->pattern_program, "mmOffset");
+    impl_->pattern_atlas_uniform =
+        locate(impl_->pattern_program, "tileAtlas");
+    impl_->pattern_anchor_uniform =
+        locate(impl_->pattern_program, "anchorMm");
+    impl_->pattern_tile_uniform = locate(impl_->pattern_program, "tileMm");
+    impl_->pattern_rotation_uniform =
+        locate(impl_->pattern_program, "rotationCosSin");
+    impl_->pattern_atlas_uv_uniform =
+        locate(impl_->pattern_program, "atlasUv");
+    impl_->glyph_mm_scale_uniform = locate(impl_->glyph_program, "mmScale");
+    impl_->glyph_mm_offset_uniform = locate(impl_->glyph_program, "mmOffset");
+    impl_->glyph_atlas_uniform = locate(impl_->glyph_program, "glyphAtlas");
+    impl_->glyph_color_uniform = locate(impl_->glyph_program, "fillColor");
+
+    impl_->gl.gen_vertex_arrays(1, &impl_->primitives.vertex_array);
+    impl_->gl.gen_buffers(1, &impl_->primitives.vertex_buffer);
+    impl_->gl.gen_textures(1, &impl_->pattern_texture);
+    impl_->gl.gen_textures(1, &impl_->glyph_texture);
+    if (impl_->primitives.vertex_array == 0 ||
+        impl_->primitives.vertex_buffer == 0 || impl_->pattern_texture == 0 ||
+        impl_->glyph_texture == 0) {
+      release();
+      return false;
+    }
+    impl_->gl.bind_vertex_array(impl_->primitives.vertex_array);
+    impl_->gl.bind_buffer(gl_array_buffer, impl_->primitives.vertex_buffer);
+    impl_->gl.enable_vertex_attrib_array(0);
+    impl_->gl.vertex_attrib_pointer(
+        0, 2, gl_float, static_cast<GlBoolean>(gl_false),
+        static_cast<GlSize>(sizeof(PrimitiveVertex)), nullptr);
+    impl_->gl.enable_vertex_attrib_array(1);
+    impl_->gl.vertex_attrib_pointer(
+        1, 2, gl_float, static_cast<GlBoolean>(gl_false),
+        static_cast<GlSize>(sizeof(PrimitiveVertex)),
+        reinterpret_cast<const void *>(offsetof(PrimitiveVertex, uv_u)));
+    impl_->gl.pixel_storei(gl_unpack_alignment, 1);
+    for (const auto texture : {impl_->pattern_texture, impl_->glyph_texture}) {
+      impl_->gl.bind_texture(gl_texture_2d, texture);
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_min_filter,
+                               static_cast<GlInt>(gl_linear));
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_mag_filter,
+                               static_cast<GlInt>(gl_linear));
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_wrap_s,
+                               static_cast<GlInt>(gl_clamp_to_edge));
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_wrap_t,
+                               static_cast<GlInt>(gl_clamp_to_edge));
+    }
     return initialized();
   } catch (...) {
     abandon();
@@ -575,10 +920,329 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
     if (byte_count != schedule.value().total_bytes()) {
       return false;
     }
+
+    // Interval, marker, symbol and text passes consume the same prepared
+    // scene. Pattern tiles and glyph outlines rasterize into atlases once
+    // per upload; tiling repeats in the shader around the scene anchor.
+    constexpr std::uint32_t atlas_extent = 1024;
+    constexpr double pattern_pixels_per_millimetre = 16.0;
+    constexpr double glyph_pixels_per_em = 128.0;
+    std::vector<PrimitiveVertex> primitive_vertices;
+    std::vector<PrimitiveBatch> primitive_batches;
+    RasterImage pattern_atlas{
+        .width = atlas_extent,
+        .height = atlas_extent,
+        .channels = 4,
+        .pixels = std::vector<std::uint8_t>(
+            static_cast<std::size_t>(atlas_extent) * atlas_extent * 4, 0),
+    };
+    RasterImage glyph_atlas{
+        .width = atlas_extent,
+        .height = atlas_extent,
+        .channels = 1,
+        .pixels = std::vector<std::uint8_t>(
+            static_cast<std::size_t>(atlas_extent) * atlas_extent, 0),
+    };
+    ShelfAtlasPacker pattern_packer(atlas_extent, atlas_extent);
+    ShelfAtlasPacker glyph_packer(atlas_extent, atlas_extent);
+    std::unordered_map<EntityId, std::array<float, 4>, EntityIdHash>
+        pattern_uvs;
+    struct GlyphAtlasEntry {
+      float u0{};
+      float v0{};
+      float u1{};
+      float v1{};
+      double left_em{};
+      double top_em{};
+      double pixels_per_em{1.0};
+      std::uint32_t pixel_width{};
+      std::uint32_t pixel_height{};
+    };
+    std::unordered_map<std::uint64_t, GlyphAtlasEntry> glyph_atlas_entries;
+
+    const auto clip_for_track = [&](EntityId track_id) {
+      const auto track =
+          std::find_if(scene.tracks().begin(), scene.tracks().end(),
+                       [&](const PreparedTrack &candidate) {
+                         return candidate.id == track_id;
+                       });
+      return track == scene.tracks().end() ? PhysicalRect{} : track->clip;
+    };
+
+    for (const auto &pattern : scene.patterns()) {
+      auto tile =
+          rasterize_pattern_tile(pattern, pattern_pixels_per_millimetre);
+      const auto rect = pattern_packer.allocate(tile.width, tile.height);
+      if (!rect.has_value()) {
+        continue;
+      }
+      for (std::uint32_t row = 0; row < tile.height; ++row) {
+        std::memcpy(
+            pattern_atlas.pixels.data() +
+                (static_cast<std::size_t>(rect->top + row) * atlas_extent +
+                 rect->left) *
+                    4,
+            tile.pixels.data() +
+                static_cast<std::size_t>(row) * tile.width * 4,
+            static_cast<std::size_t>(tile.width) * 4);
+      }
+      pattern_uvs.emplace(
+          pattern.id,
+          std::array<float, 4>{
+              static_cast<float>(rect->left) / atlas_extent,
+              static_cast<float>(rect->top) / atlas_extent,
+              static_cast<float>(rect->width) / atlas_extent,
+              static_cast<float>(rect->height) / atlas_extent,
+          });
+    }
+    for (const auto &outline : scene.glyph_outlines()) {
+      auto raster = rasterize_glyph_outline(
+          scene.outline_commands().subspan(
+              static_cast<std::size_t>(outline.first_command),
+              static_cast<std::size_t>(outline.command_count)),
+          outline.left, outline.bottom, outline.right, outline.top,
+          glyph_pixels_per_em);
+      const auto rect =
+          glyph_packer.allocate(raster.width, raster.height);
+      if (!rect.has_value()) {
+        continue;
+      }
+      for (std::uint32_t row = 0; row < raster.height; ++row) {
+        std::memcpy(glyph_atlas.pixels.data() +
+                        static_cast<std::size_t>(rect->top + row) *
+                            atlas_extent +
+                        rect->left,
+                    raster.alpha.data() +
+                        static_cast<std::size_t>(row) * raster.width,
+                    raster.width);
+      }
+      const auto key = (static_cast<std::uint64_t>(outline.font_index)
+                        << 32U) |
+                       outline.glyph_id;
+      glyph_atlas_entries.emplace(
+          key, GlyphAtlasEntry{
+                   .u0 = static_cast<float>(rect->left) / atlas_extent,
+                   .v0 = static_cast<float>(rect->top) / atlas_extent,
+                   .u1 = static_cast<float>(rect->left + rect->width) /
+                         atlas_extent,
+                   .v1 = static_cast<float>(rect->top + rect->height) /
+                         atlas_extent,
+                   .left_em = raster.left_em,
+                   .top_em = raster.top_em,
+                   .pixels_per_em = raster.pixels_per_em,
+                   .pixel_width = raster.width,
+                   .pixel_height = raster.height,
+               });
+    }
+
+    const auto append_solid_quad = [&](const PhysicalRect &rect,
+                                       RgbaColor color,
+                                       const PhysicalRect &clip) {
+      const auto first_vertex = primitive_vertices.size();
+      append_quad(primitive_vertices, rect.left.value, rect.top.value,
+                  rect.left.value + rect.width.value,
+                  rect.top.value + rect.height.value, 0.0F, 0.0F, 0.0F,
+                  0.0F);
+      primitive_batches.push_back(PrimitiveBatch{
+          .kind = PrimitiveKind::solid,
+          .first_vertex = static_cast<GlInt>(first_vertex),
+          .vertex_count = static_cast<GlSize>(6),
+          .color = color,
+          .clip = clip,
+      });
+    };
+
+    for (const auto &layer : scene.interval_layers()) {
+      const auto clip = clip_for_track(layer.track_id);
+      for (std::uint64_t offset = 0; offset < layer.interval_count;
+           ++offset) {
+        const auto &interval = scene.intervals()[static_cast<std::size_t>(
+            layer.first_interval + offset)];
+        const auto pattern_uv =
+            interval.pattern_id.is_nil()
+                ? pattern_uvs.end()
+                : pattern_uvs.find(interval.pattern_id);
+        if (pattern_uv == pattern_uvs.end()) {
+          append_solid_quad(interval.rect, interval.fill_color, clip);
+          continue;
+        }
+        const auto pattern =
+            std::find_if(scene.patterns().begin(), scene.patterns().end(),
+                         [&](const PatternDefinition &candidate) {
+                           return candidate.id == interval.pattern_id;
+                         });
+        if (pattern == scene.patterns().end()) {
+          append_solid_quad(interval.rect, interval.fill_color, clip);
+          continue;
+        }
+        const auto first_vertex = primitive_vertices.size();
+        append_quad(primitive_vertices, interval.rect.left.value,
+                    interval.rect.top.value,
+                    interval.rect.left.value + interval.rect.width.value,
+                    interval.rect.top.value + interval.rect.height.value,
+                    0.0F, 0.0F, 0.0F, 0.0F);
+        const auto theta =
+            pattern->rotation_degrees * 3.14159265358979323846 / 180.0;
+        const auto &uv = pattern_uv->second;
+        primitive_batches.push_back(PrimitiveBatch{
+            .kind = PrimitiveKind::pattern,
+            .first_vertex = static_cast<GlInt>(first_vertex),
+            .vertex_count = static_cast<GlSize>(6),
+            .color = {},
+            .clip = clip,
+            .anchor_left = pattern->scene_anchor.left.value,
+            .anchor_top = pattern->scene_anchor.top.value,
+            .tile_width = pattern->tile_width.value,
+            .tile_height = pattern->tile_height.value,
+            .rotation_cos = std::cos(theta),
+            .rotation_sin = std::sin(theta),
+            .atlas_u = uv[0],
+            .atlas_v = uv[1],
+            .atlas_du = uv[2],
+            .atlas_dv = uv[3],
+        });
+      }
+    }
+    for (const auto &layer : scene.marker_layers()) {
+      const auto clip = clip_for_track(layer.track_id);
+      for (std::uint64_t offset = 0; offset < layer.marker_count;
+           ++offset) {
+        const auto &marker = scene.markers()[static_cast<std::size_t>(
+            layer.first_marker + offset)];
+        append_solid_quad(
+            PhysicalRect{
+                .left = clip.left,
+                .top = Millimetres{marker.display_top.value -
+                                   layer.line_width.value * 0.5},
+                .width = clip.width,
+                .height = layer.line_width,
+            },
+            layer.line_color, clip);
+      }
+    }
+    for (const auto &layer : scene.symbol_layers()) {
+      const auto clip = clip_for_track(layer.track_id);
+      const auto first_vertex = primitive_vertices.size();
+      for (std::uint64_t offset = 0; offset < layer.symbol_count;
+           ++offset) {
+        const auto &symbol = scene.symbols()[static_cast<std::size_t>(
+            layer.first_symbol + offset)];
+        append_symbol_geometry(primitive_vertices, symbol,
+                               layer.symbol_size.value * 0.5);
+      }
+      if (primitive_vertices.size() > first_vertex) {
+        primitive_batches.push_back(PrimitiveBatch{
+            .kind = PrimitiveKind::solid,
+            .first_vertex = static_cast<GlInt>(first_vertex),
+            .vertex_count = static_cast<GlSize>(primitive_vertices.size() -
+                                                first_vertex),
+            .color = layer.color,
+            .clip = clip,
+        });
+      }
+    }
+    const auto clip_for_run = [&](const PreparedTextRun &run) {
+      const auto in_text =
+          std::find_if(scene.text_layers().begin(), scene.text_layers().end(),
+                       [&](const PreparedTextLayer &layer) {
+                         return layer.id == run.layer_id;
+                       });
+      if (in_text != scene.text_layers().end()) {
+        return clip_for_track(in_text->track_id);
+      }
+      const auto in_interval = std::find_if(
+          scene.interval_layers().begin(), scene.interval_layers().end(),
+          [&](const PreparedIntervalLayer &layer) {
+            return layer.id == run.layer_id;
+          });
+      if (in_interval != scene.interval_layers().end()) {
+        return clip_for_track(in_interval->track_id);
+      }
+      const auto in_marker = std::find_if(
+          scene.marker_layers().begin(), scene.marker_layers().end(),
+          [&](const PreparedMarkerLayer &layer) {
+            return layer.id == run.layer_id;
+          });
+      if (in_marker != scene.marker_layers().end()) {
+        return clip_for_track(in_marker->track_id);
+      }
+      return PhysicalRect{};
+    };
+    for (const auto &run : scene.text_runs()) {
+      const auto clip = clip_for_run(run);
+      const auto first_vertex = primitive_vertices.size();
+      const auto font_size = run.font_size.value;
+      for (std::uint64_t offset = 0; offset < run.glyph_count; ++offset) {
+        const auto &glyph = scene.glyphs()[static_cast<std::size_t>(
+            run.first_glyph + offset)];
+        const auto key = (static_cast<std::uint64_t>(glyph.font_index)
+                          << 32U) |
+                         glyph.glyph_id;
+        const auto entry = glyph_atlas_entries.find(key);
+        if (entry == glyph_atlas_entries.end()) {
+          continue;
+        }
+        const auto &atlas = entry->second;
+        const auto theta =
+            glyph.rotation_degrees * 3.14159265358979323846 / 180.0;
+        const auto rotation_cos = std::cos(theta);
+        const auto rotation_sin = std::sin(theta);
+        const auto right_em =
+            atlas.left_em + atlas.pixel_width / atlas.pixels_per_em;
+        const auto bottom_em =
+            atlas.top_em - atlas.pixel_height / atlas.pixels_per_em;
+        const auto top_left = glyph_corner(
+            atlas.left_em, atlas.top_em, font_size, rotation_cos,
+            rotation_sin, glyph.origin.left.value, glyph.origin.top.value);
+        const auto top_right = glyph_corner(
+            right_em, atlas.top_em, font_size, rotation_cos, rotation_sin,
+            glyph.origin.left.value, glyph.origin.top.value);
+        const auto bottom_left = glyph_corner(
+            atlas.left_em, bottom_em, font_size, rotation_cos, rotation_sin,
+            glyph.origin.left.value, glyph.origin.top.value);
+        const auto bottom_right = glyph_corner(
+            right_em, bottom_em, font_size, rotation_cos, rotation_sin,
+            glyph.origin.left.value, glyph.origin.top.value);
+        const auto push = [&](const std::pair<double, double> &point,
+                              float u, float v) {
+          primitive_vertices.push_back(PrimitiveVertex{
+              static_cast<GlFloat>(point.first),
+              static_cast<GlFloat>(point.second), u, v});
+        };
+        push(top_left, atlas.u0, atlas.v0);
+        push(bottom_left, atlas.u0, atlas.v1);
+        push(bottom_right, atlas.u1, atlas.v1);
+        push(top_left, atlas.u0, atlas.v0);
+        push(bottom_right, atlas.u1, atlas.v1);
+        push(top_right, atlas.u1, atlas.v0);
+      }
+      if (primitive_vertices.size() > first_vertex) {
+        primitive_batches.push_back(PrimitiveBatch{
+            .kind = PrimitiveKind::glyph,
+            .first_vertex = static_cast<GlInt>(first_vertex),
+            .vertex_count = static_cast<GlSize>(primitive_vertices.size() -
+                                                first_vertex),
+            .color = run.color,
+            .clip = clip,
+        });
+      }
+    }
+    if (primitive_vertices.size() >
+        static_cast<std::size_t>(std::numeric_limits<GlInt>::max())) {
+      return false;
+    }
+
     impl_->staging_buffer = 1U - impl_->active_buffer;
     impl_->pending_scene = scene;
     impl_->pending_edges = std::move(edges);
     impl_->pending_batches = std::move(batches);
+    impl_->pending_primitive_vertices = std::move(primitive_vertices);
+    impl_->pending_primitive_batches = std::move(primitive_batches);
+    impl_->pending_pattern_atlas = std::move(pattern_atlas);
+    impl_->pending_glyph_atlas = std::move(glyph_atlas);
+    impl_->pending_scene_height = scene.physical_height().value;
+    impl_->pending_depth_top = depth_range.top;
+    impl_->pending_depth_span = depth_range.bottom - depth_range.top;
     const auto chunks = schedule.value().chunks();
     impl_->pending_chunks.assign(chunks.begin(), chunks.end());
     impl_->next_pending_chunk = 0;
@@ -697,6 +1361,56 @@ GlUploadProgress GlRenderer::upload_next() noexcept {
     impl_->scene_depth_center = impl_->pending_scene_depth_center;
     impl_->batches = std::move(impl_->pending_batches);
     impl_->active_bytes = total_bytes;
+
+    impl_->gl.bind_vertex_array(impl_->primitives.vertex_array);
+    impl_->gl.bind_buffer(gl_array_buffer, impl_->primitives.vertex_buffer);
+    const auto primitive_bytes = static_cast<GlSizePointer>(
+        impl_->pending_primitive_vertices.size() * sizeof(PrimitiveVertex));
+    clear_gl_errors(impl_->gl);
+    impl_->gl.buffer_data(gl_array_buffer, primitive_bytes,
+                          impl_->pending_primitive_vertices.empty()
+                              ? nullptr
+                              : impl_->pending_primitive_vertices.data(),
+                          gl_dynamic_draw);
+    if (impl_->gl.get_error() != gl_no_error) {
+      impl_->upload_pending = false;
+      return {};
+    }
+    impl_->gl.active_texture(gl_texture0);
+    if (!impl_->pending_pattern_atlas.pixels.empty()) {
+      clear_gl_errors(impl_->gl);
+      impl_->gl.bind_texture(gl_texture_2d, impl_->pattern_texture);
+      impl_->gl.tex_image_2d(
+          gl_texture_2d, 0, static_cast<GlInt>(gl_rgba8),
+          static_cast<GlSize>(impl_->pending_pattern_atlas.width),
+          static_cast<GlSize>(impl_->pending_pattern_atlas.height), 0,
+          gl_rgba, gl_unsigned_byte,
+          impl_->pending_pattern_atlas.pixels.data());
+      if (impl_->gl.get_error() != gl_no_error) {
+        impl_->upload_pending = false;
+        return {};
+      }
+    }
+    if (!impl_->pending_glyph_atlas.pixels.empty()) {
+      clear_gl_errors(impl_->gl);
+      impl_->gl.bind_texture(gl_texture_2d, impl_->glyph_texture);
+      impl_->gl.tex_image_2d(
+          gl_texture_2d, 0, static_cast<GlInt>(gl_r8),
+          static_cast<GlSize>(impl_->pending_glyph_atlas.width),
+          static_cast<GlSize>(impl_->pending_glyph_atlas.height), 0, gl_red,
+          gl_unsigned_byte, impl_->pending_glyph_atlas.pixels.data());
+      if (impl_->gl.get_error() != gl_no_error) {
+        impl_->upload_pending = false;
+        return {};
+      }
+    }
+    impl_->primitive_batches = std::move(impl_->pending_primitive_batches);
+    impl_->scene_height = impl_->pending_scene_height;
+    impl_->depth_top = impl_->pending_depth_top;
+    impl_->depth_span = impl_->pending_depth_span;
+    impl_->pending_primitive_vertices.clear();
+    impl_->pending_pattern_atlas = RasterImage{};
+    impl_->pending_glyph_atlas = RasterImage{};
     impl_->pending_scene = PreparedScene{};
     impl_->pending_edges.clear();
     impl_->pending_chunks.clear();
@@ -762,21 +1476,114 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
                        static_cast<GlFloat>(viewport_half_span));
   impl_->gl.enable(gl_scissor_test);
   if (frame.draw_scene) {
-    for (const auto &batch : impl_->batches) {
+    const auto scissor_for = [&](const PhysicalRect &clip) {
       const auto scissor_left = static_cast<int>(
-          std::floor(batch.clip.left.value / impl_->physical_width *
+          std::floor(clip.left.value / impl_->physical_width *
                      static_cast<double>(frame.pixel_width)));
       const auto scissor_width = static_cast<int>(
-          std::ceil(batch.clip.width.value / impl_->physical_width *
+          std::ceil(clip.width.value / impl_->physical_width *
                     static_cast<double>(frame.pixel_width)));
       impl_->gl.scissor(std::max(0, scissor_left), 0,
                         std::max(0, scissor_width), frame.pixel_height);
+    };
+    const auto mm_scale_x =
+        static_cast<GlFloat>(2.0 / impl_->physical_width);
+    const auto mm_scale_y =
+        static_cast<GlFloat>(-impl_->depth_span /
+                             (impl_->scene_height * viewport_half_span));
+    const auto mm_offset_y = static_cast<GlFloat>(
+        (viewport_center - impl_->depth_top) / viewport_half_span);
+    impl_->gl.active_texture(gl_texture0);
+
+    // Pass order follows rendering.md: intervals/patterns, markers and
+    // symbols below curves, text above them.
+    auto current_program = GlUInt{0};
+    const auto set_scene_uniforms = [&](GlUInt program, GlInt scale_uniform,
+                                        GlInt offset_uniform) {
+      if (program != current_program) {
+        impl_->gl.use_program(program);
+        current_program = program;
+        impl_->gl.uniform_2f(scale_uniform, mm_scale_x, mm_scale_y);
+        impl_->gl.uniform_2f(offset_uniform, -1.0F, mm_offset_y);
+      }
+    };
+    impl_->gl.bind_vertex_array(impl_->primitives.vertex_array);
+    for (const auto &batch : impl_->primitive_batches) {
+      if (batch.kind == PrimitiveKind::glyph) {
+        continue;
+      }
+      scissor_for(batch.clip);
+      if (batch.kind == PrimitiveKind::pattern) {
+        set_scene_uniforms(impl_->pattern_program,
+                           impl_->pattern_mm_scale_uniform,
+                           impl_->pattern_mm_offset_uniform);
+        impl_->gl.bind_texture(gl_texture_2d, impl_->pattern_texture);
+        impl_->gl.uniform_1i(impl_->pattern_atlas_uniform, 0);
+        impl_->gl.uniform_2f(impl_->pattern_anchor_uniform,
+                             static_cast<GlFloat>(batch.anchor_left),
+                             static_cast<GlFloat>(batch.anchor_top));
+        impl_->gl.uniform_2f(impl_->pattern_tile_uniform,
+                             static_cast<GlFloat>(batch.tile_width),
+                             static_cast<GlFloat>(batch.tile_height));
+        impl_->gl.uniform_2f(impl_->pattern_rotation_uniform,
+                             static_cast<GlFloat>(batch.rotation_cos),
+                             static_cast<GlFloat>(batch.rotation_sin));
+        impl_->gl.uniform_4f(impl_->pattern_atlas_uv_uniform, batch.atlas_u,
+                             batch.atlas_v, batch.atlas_du, batch.atlas_dv);
+      } else {
+        set_scene_uniforms(impl_->solid_program,
+                           impl_->solid_mm_scale_uniform,
+                           impl_->solid_mm_offset_uniform);
+        impl_->gl.uniform_4f(impl_->solid_color_uniform,
+                             static_cast<GlFloat>(batch.color.red) / 255.0F,
+                             static_cast<GlFloat>(batch.color.green) / 255.0F,
+                             static_cast<GlFloat>(batch.color.blue) / 255.0F,
+                             static_cast<GlFloat>(batch.color.alpha) / 255.0F);
+      }
+      impl_->gl.draw_arrays(gl_triangles, batch.first_vertex,
+                            batch.vertex_count);
+    }
+
+    impl_->gl.use_program(impl_->program);
+    current_program = impl_->program;
+    impl_->gl.bind_vertex_array(
+        impl_->buffers[impl_->active_buffer].vertex_array);
+    impl_->gl.uniform_2f(impl_->viewport_pixels_uniform,
+                         static_cast<GlFloat>(frame.pixel_width),
+                         static_cast<GlFloat>(frame.pixel_height));
+    impl_->gl.uniform_1f(
+        impl_->viewport_center_uniform,
+        static_cast<GlFloat>(viewport_center - impl_->scene_depth_center));
+    impl_->gl.uniform_1f(impl_->viewport_half_span_uniform,
+                         static_cast<GlFloat>(viewport_half_span));
+    for (const auto &batch : impl_->batches) {
+      scissor_for(batch.clip);
       impl_->gl.uniform_1f(
           impl_->half_width_uniform,
           static_cast<GlFloat>(
               std::max(0.5, batch.line_width.value *
                                 frame.physical_pixels_per_millimetre * 0.5)));
       impl_->gl.uniform_4f(impl_->color_uniform,
+                           static_cast<GlFloat>(batch.color.red) / 255.0F,
+                           static_cast<GlFloat>(batch.color.green) / 255.0F,
+                           static_cast<GlFloat>(batch.color.blue) / 255.0F,
+                           static_cast<GlFloat>(batch.color.alpha) / 255.0F);
+      impl_->gl.draw_arrays(gl_triangles, batch.first_vertex,
+                            batch.vertex_count);
+    }
+
+    impl_->gl.bind_vertex_array(impl_->primitives.vertex_array);
+    for (const auto &batch : impl_->primitive_batches) {
+      if (batch.kind != PrimitiveKind::glyph) {
+        continue;
+      }
+      scissor_for(batch.clip);
+      set_scene_uniforms(impl_->glyph_program,
+                         impl_->glyph_mm_scale_uniform,
+                         impl_->glyph_mm_offset_uniform);
+      impl_->gl.bind_texture(gl_texture_2d, impl_->glyph_texture);
+      impl_->gl.uniform_1i(impl_->glyph_atlas_uniform, 0);
+      impl_->gl.uniform_4f(impl_->glyph_color_uniform,
                            static_cast<GlFloat>(batch.color.red) / 255.0F,
                            static_cast<GlFloat>(batch.color.green) / 255.0F,
                            static_cast<GlFloat>(batch.color.blue) / 255.0F,
@@ -828,8 +1635,24 @@ void GlRenderer::release() noexcept {
       impl_->gl.delete_vertex_arrays(1, &buffer.vertex_array);
     }
   }
-  if (impl_->program != 0) {
-    impl_->gl.delete_program(impl_->program);
+  if (impl_->primitives.vertex_buffer != 0) {
+    impl_->gl.delete_buffers(1, &impl_->primitives.vertex_buffer);
+  }
+  if (impl_->primitives.vertex_array != 0) {
+    impl_->gl.delete_vertex_arrays(1, &impl_->primitives.vertex_array);
+  }
+  if (impl_->pattern_texture != 0) {
+    impl_->gl.delete_textures(1, &impl_->pattern_texture);
+  }
+  if (impl_->glyph_texture != 0) {
+    impl_->gl.delete_textures(1, &impl_->glyph_texture);
+  }
+  for (const auto program :
+       {impl_->program, impl_->solid_program, impl_->pattern_program,
+        impl_->glyph_program}) {
+    if (program != 0) {
+      impl_->gl.delete_program(program);
+    }
   }
   abandon();
 }
@@ -837,10 +1660,21 @@ void GlRenderer::release() noexcept {
 void GlRenderer::abandon() noexcept {
   impl_->buffers = {};
   impl_->program = 0;
+  impl_->solid_program = 0;
+  impl_->pattern_program = 0;
+  impl_->glyph_program = 0;
+  impl_->primitives = {};
+  impl_->pattern_texture = 0;
+  impl_->glyph_texture = 0;
   impl_->batches.clear();
+  impl_->primitive_batches.clear();
   impl_->pending_scene = PreparedScene{};
   impl_->pending_edges.clear();
   impl_->pending_batches.clear();
+  impl_->pending_primitive_vertices.clear();
+  impl_->pending_primitive_batches.clear();
+  impl_->pending_pattern_atlas = RasterImage{};
+  impl_->pending_glyph_atlas = RasterImage{};
   impl_->pending_chunks.clear();
   impl_->pending_total_bytes = 0;
   impl_->pending_buffer_allocated = false;
@@ -854,6 +1688,11 @@ void GlRenderer::abandon() noexcept {
 
 bool GlRenderer::initialized() const noexcept {
   return impl_ != nullptr && impl_->program != 0 &&
+         impl_->solid_program != 0 && impl_->pattern_program != 0 &&
+         impl_->glyph_program != 0 &&
+         impl_->primitives.vertex_array != 0 &&
+         impl_->primitives.vertex_buffer != 0 &&
+         impl_->pattern_texture != 0 && impl_->glyph_texture != 0 &&
          std::all_of(impl_->buffers.begin(), impl_->buffers.end(),
                      [](const Impl::BufferSlot &buffer) {
                        return buffer.vertex_array != 0 &&

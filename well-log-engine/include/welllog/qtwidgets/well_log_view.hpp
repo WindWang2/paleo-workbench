@@ -32,6 +32,10 @@ public:
   [[nodiscard]] WellLogSession &session() noexcept;
   [[nodiscard]] const WellLogSession &session() const noexcept;
   void set_document_id(EntityId document_id) noexcept;
+  // Overrides the text pipeline installed on the session. The view
+  // installs a HarfBuzz/FreeType/ICU engine by default when the text
+  // library is built.
+  void set_text_engine(std::shared_ptr<TextEngine> text_engine) noexcept;
   [[nodiscard]] std::optional<EntityId> document_id() const noexcept;
   [[nodiscard]] const CapabilityReport &capability_report() const noexcept;
   [[nodiscard]] std::optional<CurvePick> hover_pick() const noexcept;
