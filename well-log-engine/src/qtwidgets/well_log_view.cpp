@@ -271,7 +271,26 @@ void WellLogView::resizeGL(int width, int height) {
 }
 
 void WellLogView::paintGL() {
+  const auto pixel_ratio = devicePixelRatioF();
+  const auto pixel_width =
+      static_cast<int>(static_cast<double>(width()) * pixel_ratio);
+  const auto pixel_height =
+      static_cast<int>(static_cast<double>(height()) * pixel_ratio);
   if (impl_->document_id.has_value()) {
+    const auto current_viewport = impl_->session->viewport(*impl_->document_id);
+    const auto current_pixel_height =
+        impl_->session->viewport_pixel_height(*impl_->document_id);
+    const auto desired_pixel_height =
+        static_cast<std::uint32_t>(std::max(1, pixel_height));
+    if (current_viewport.has_value() &&
+        current_pixel_height !=
+            std::optional<std::uint32_t>{desired_pixel_height}) {
+      static_cast<void>(impl_->session->execute(SetViewportCommand{
+          .document_id = *impl_->document_id,
+          .viewport = *current_viewport,
+          .pixel_height = desired_pixel_height,
+      }));
+    }
     impl_->session->poll_async();
     const auto snapshot =
         impl_->session->performance_snapshot(*impl_->document_id);
@@ -357,11 +376,6 @@ void WellLogView::paintGL() {
                                .top = scene->reference_depth_range().top,
                                .bottom = scene->reference_depth_range().bottom,
                            };
-    const auto pixel_ratio = devicePixelRatioF();
-    const auto pixel_width =
-        static_cast<int>(static_cast<double>(width()) * pixel_ratio);
-    const auto pixel_height =
-        static_cast<int>(static_cast<double>(height()) * pixel_ratio);
     if (!impl_->renderer.render(detail::GlRenderFrame{
             .framebuffer = defaultFramebufferObject(),
             .pixel_width = pixel_width,

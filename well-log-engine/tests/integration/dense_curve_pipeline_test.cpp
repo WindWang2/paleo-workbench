@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -197,10 +198,12 @@ void dense_revisions_prepare_asynchronously_and_stale_work_cannot_win() {
   const auto stale_zoom = session.execute(SetViewportCommand{
       .document_id = document_id,
       .viewport = DepthViewport{.top = 1499.0, .bottom = 1501.0},
+      .pixel_height = 1,
   });
   const auto zoom = session.execute(SetViewportCommand{
       .document_id = document_id,
       .viewport = DepthViewport{.top = 3499.0, .bottom = 3501.0},
+      .pixel_height = 4000,
   });
   require(stale_zoom.has_value() &&
               stale_zoom.value().asynchronous_preparation_started &&
@@ -235,6 +238,43 @@ void dense_revisions_prepare_asynchronously_and_stale_work_cannot_win() {
                       after_viewport->discarded_tasks >
                   task_count_before_viewport,
           "a superseded viewport task must be cancelled or discarded");
+  require(session.viewport_pixel_height(document_id) ==
+              std::optional<std::uint32_t>{4000},
+          "the latest physical widget height must drive local LOD density");
+
+  WellLogSession constrained(PerformanceBudgets{
+      .maximum_cpu_derived_bytes = 1,
+      .maximum_gpu_cache_bytes = 8 * 1024 * 1024,
+      .maximum_upload_bytes_per_frame = 256 * 1024,
+      .prefetch_viewports = 2.0,
+      .asynchronous_sample_threshold = 1024,
+  });
+  const auto constrained_receipt = constrained.execute(SetDocumentCommand{
+      dense_document(DocumentRevision{3}, 0.0),
+  });
+  require(constrained_receipt.has_value(),
+          "valid dense input must be accepted before background preparation");
+  const auto failure_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (std::chrono::steady_clock::now() < failure_deadline) {
+    constrained.poll_async();
+    const auto snapshot = constrained.performance_snapshot(document_id);
+    if (snapshot.has_value() &&
+        snapshot->preparation_state == PreparationState::unavailable) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  }
+  require(
+      std::any_of(
+          constrained.diagnostics().begin(), constrained.diagnostics().end(),
+          [](const Diagnostic &diagnostic) {
+            return diagnostic.code ==
+                       DiagnosticCode::asynchronous_preparation_failed &&
+                   diagnostic.error_code ==
+                       std::optional<ErrorCode>{ErrorCode::resource_exhausted};
+          }),
+      "background preparation errors must publish stable diagnostics");
 }
 
 } // namespace

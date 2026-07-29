@@ -21,6 +21,69 @@ namespace {
   };
 }
 
+[[nodiscard]] std::optional<Error> validate_buffer(const BufferView &buffer) {
+  if (!buffer.has_owner()) {
+    return lod_error(ErrorCode::missing_owner,
+                     MessageKey::buffer_owner_required);
+  }
+  if (buffer.length() == 0 || buffer.data() == nullptr) {
+    return lod_error(ErrorCode::invalid_buffer,
+                     MessageKey::buffer_data_required);
+  }
+  const auto element_size = scalar_size_bytes(buffer.scalar_type());
+  if (buffer.stride_bytes() < element_size) {
+    return lod_error(ErrorCode::invalid_buffer,
+                     MessageKey::buffer_stride_too_small);
+  }
+  const auto steps = buffer.length() - 1;
+  if (steps > (std::numeric_limits<std::uint64_t>::max() - element_size) /
+                  buffer.stride_bytes()) {
+    return lod_error(ErrorCode::arithmetic_overflow,
+                     MessageKey::buffer_extent_overflow);
+  }
+  if (steps * buffer.stride_bytes() + element_size > buffer.byte_capacity()) {
+    return lod_error(ErrorCode::invalid_buffer,
+                     MessageKey::buffer_extent_exceeds_capacity);
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::optional<Error> validate_lod_inputs(const SamplingAxis &axis,
+                                                       const Curve &curve) {
+  if (const auto error = validate_buffer(axis.coordinates)) {
+    return error;
+  }
+  if (const auto error = validate_buffer(curve.values)) {
+    return error;
+  }
+  if (!curve.nulls.empty() &&
+      (!curve.nulls.has_owner() || curve.nulls.data() == nullptr ||
+       curve.nulls.bit_length() < curve.values.length() ||
+       curve.nulls.bit_length() >
+           std::numeric_limits<std::uint64_t>::max() - 7 ||
+       (curve.nulls.bit_length() + 7) / 8 > curve.nulls.byte_capacity())) {
+    return lod_error(ErrorCode::invalid_buffer,
+                     MessageKey::null_bitmap_extent_exceeds_capacity);
+  }
+  const auto length = axis.coordinates.length();
+  auto previous = axis.coordinates.value_as_double(0);
+  if (!previous.has_value() || !std::isfinite(*previous)) {
+    return lod_error(ErrorCode::invalid_sampling_axis,
+                     MessageKey::sampling_axis_direction_invalid);
+  }
+  for (std::uint64_t index = 1; index < length; ++index) {
+    const auto current = axis.coordinates.value_as_double(index);
+    if (!current.has_value() || !std::isfinite(*current) ||
+        (axis.direction == AxisDirection::increasing ? *current < *previous
+                                                     : *current > *previous)) {
+      return lod_error(ErrorCode::invalid_sampling_axis,
+                       MessageKey::sampling_axis_direction_invalid);
+    }
+    previous = current;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] bool valid_sample(const SamplingAxis &axis, const Curve &curve,
                                 std::uint64_t index) noexcept {
   const auto depth = axis.coordinates.value_as_double(index);
@@ -43,8 +106,8 @@ struct Level {
 };
 
 struct SourceRun {
-  std::uint64_t begin{};
-  std::uint64_t end{};
+  std::uint32_t begin{};
+  std::uint32_t end{};
   std::vector<Level> levels;
 };
 
@@ -205,7 +268,7 @@ struct SourceRange {
                           scalar_size_bytes(axis.coordinates.scalar_type());
   const auto curve_bytes =
       curve.values.length() * scalar_size_bytes(curve.values.scalar_type());
-  return (axis_bytes + curve_bytes) / 4;
+  return axis_bytes / 4 + curve_bytes / 4;
 }
 
 } // namespace
@@ -283,6 +346,9 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
       return lod_error(ErrorCode::invalid_document,
                        MessageKey::document_structure_invalid);
     }
+    if (const auto error = validate_lod_inputs(axis, curve)) {
+      return *error;
+    }
     if (options.maximum_derived_bytes == 0) {
       options.maximum_derived_bytes = default_budget(axis, curve);
     }
@@ -308,8 +374,28 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
     });
 
     const auto sample_count = curve.values.length();
+    std::uint64_t run_count{};
+    auto in_run = false;
+    for (std::uint64_t source_index = 0; source_index < sample_count;
+         ++source_index) {
+      if ((source_index & std::uint64_t{4095}) == 0 &&
+          stop_token.stop_requested()) {
+        return lod_error(ErrorCode::operation_cancelled,
+                         MessageKey::operation_cancelled);
+      }
+      const auto valid = valid_sample(axis, curve, source_index);
+      if (valid && !in_run) {
+        ++run_count;
+      }
+      in_run = valid;
+    }
+    if (run_count > options.maximum_derived_bytes / sizeof(SourceRun)) {
+      return lod_error(ErrorCode::resource_exhausted,
+                       MessageKey::resource_exhausted);
+    }
+    impl->runs.reserve(static_cast<std::size_t>(run_count));
     std::uint64_t index{};
-    std::uint64_t derived_bytes{};
+    std::uint64_t derived_bytes = run_count * sizeof(SourceRun);
     while (index < sample_count) {
       if (stop_token.stop_requested()) {
         return lod_error(ErrorCode::operation_cancelled,
@@ -334,8 +420,8 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
         ++index;
       }
       auto run = SourceRun{
-          .begin = run_begin,
-          .end = index,
+          .begin = static_cast<std::uint32_t>(run_begin),
+          .end = static_cast<std::uint32_t>(index),
           .levels = {},
       };
       auto bucket_samples = options.base_bucket_samples;
@@ -351,21 +437,22 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
         };
         const auto bucket_count =
             (run.end - run.begin + bucket_samples - 1) / bucket_samples;
-        const auto level_bytes = bucket_count * sizeof(Summary);
+        const auto level_bytes = sizeof(Level) + bucket_count * sizeof(Summary);
         if (level_bytes > options.maximum_derived_bytes - derived_bytes) {
           impl->statistics.budget_limited = true;
           break;
         }
         level.summaries.reserve(static_cast<std::size_t>(bucket_count));
         if (run.levels.empty()) {
-          for (auto bucket_begin = run.begin; bucket_begin < run.end;
-               bucket_begin += bucket_samples) {
+          for (auto bucket_begin = static_cast<std::uint64_t>(run.begin);
+               bucket_begin < run.end; bucket_begin += bucket_samples) {
             if (stop_token.stop_requested()) {
               return lod_error(ErrorCode::operation_cancelled,
                                MessageKey::operation_cancelled);
             }
             const auto bucket_end =
-                std::min(run.end, bucket_begin + bucket_samples);
+                std::min(static_cast<std::uint64_t>(run.end),
+                         bucket_begin + bucket_samples);
             level.summaries.push_back(
                 summarize(curve, bucket_begin, bucket_end));
           }
@@ -386,6 +473,7 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
         }
         derived_bytes += level_bytes;
         ++impl->statistics.level_count;
+        run.levels.reserve(run.levels.size() + 1);
         run.levels.push_back(std::move(level));
         if (bucket_samples > std::numeric_limits<std::uint64_t>::max() / 4) {
           break;
@@ -405,8 +493,13 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
 }
 
 Result<CurveLodSelection>
-CurveLodPyramid::query(const CurveLodQuery &query) const noexcept {
+CurveLodPyramid::query(const CurveLodQuery &query,
+                       std::stop_token stop_token) const noexcept {
   try {
+    if (stop_token.stop_requested()) {
+      return lod_error(ErrorCode::operation_cancelled,
+                       MessageKey::operation_cancelled);
+    }
     if (impl_ == nullptr || !std::isfinite(query.viewport_top) ||
         !std::isfinite(query.viewport_bottom) ||
         query.viewport_top >= query.viewport_bottom ||
@@ -440,17 +533,32 @@ CurveLodPyramid::query(const CurveLodQuery &query) const noexcept {
     selection->bucket_samples = 1;
 
     for (const auto &run : impl_->runs) {
-      const auto begin = std::max(run.begin, prefetched.begin);
-      const auto end = std::min(run.end, prefetched.end);
+      if (stop_token.stop_requested()) {
+        return lod_error(ErrorCode::operation_cancelled,
+                         MessageKey::operation_cancelled);
+      }
+      const auto begin =
+          std::max(static_cast<std::uint64_t>(run.begin), prefetched.begin);
+      const auto end =
+          std::min(static_cast<std::uint64_t>(run.end), prefetched.end);
       if (begin >= end) {
         continue;
       }
       const auto first_point =
           static_cast<std::uint64_t>(selection->points.size());
-      if (use_raw ||
-          (run.levels.empty() &&
-           impl_->options.algorithm == CurveLodAlgorithm::hierarchical)) {
+      auto target_bucket_samples = impl_->options.base_bucket_samples;
+      while (static_cast<double>(target_bucket_samples) < samples_per_pixel &&
+             target_bucket_samples <=
+                 std::numeric_limits<std::uint64_t>::max() / 4) {
+        target_bucket_samples *= 4;
+      }
+      if (use_raw) {
         for (auto index = begin; index < end; ++index) {
+          if ((index & std::uint64_t{4095}) == 0 &&
+              stop_token.stop_requested()) {
+            return lod_error(ErrorCode::operation_cancelled,
+                             MessageKey::operation_cancelled);
+          }
           selection->points.push_back(CurveLodPoint{
               .sample_index = index,
               .reference_depth =
@@ -459,21 +567,22 @@ CurveLodPyramid::query(const CurveLodQuery &query) const noexcept {
           });
         }
       } else if (impl_->options.algorithm ==
-                 CurveLodAlgorithm::scalar_reference) {
-        auto bucket_samples = impl_->options.base_bucket_samples;
-        while (static_cast<double>(bucket_samples) < samples_per_pixel &&
-               bucket_samples <=
-                   std::numeric_limits<std::uint64_t>::max() / 4) {
-          bucket_samples *= 4;
-        }
+                     CurveLodAlgorithm::scalar_reference ||
+                 run.levels.empty() ||
+                 run.levels.back().bucket_samples < target_bucket_samples) {
+        const auto bucket_samples = target_bucket_samples;
         selection->bucket_samples =
             std::max(selection->bucket_samples, bucket_samples);
         const auto first_bucket =
             run.begin + ((begin - run.begin) / bucket_samples) * bucket_samples;
         for (auto bucket_begin = first_bucket; bucket_begin < end;
              bucket_begin += bucket_samples) {
-          const auto bucket_end =
-              std::min(run.end, bucket_begin + bucket_samples);
+          if (stop_token.stop_requested()) {
+            return lod_error(ErrorCode::operation_cancelled,
+                             MessageKey::operation_cancelled);
+          }
+          const auto bucket_end = std::min(static_cast<std::uint64_t>(run.end),
+                                           bucket_begin + bucket_samples);
           const auto summary =
               summarize(impl_->curve, bucket_begin, bucket_end);
           for (std::uint8_t offset = 0; offset < summary.count; ++offset) {
@@ -500,6 +609,10 @@ CurveLodPyramid::query(const CurveLodQuery &query) const noexcept {
         selection->bucket_samples =
             std::max(selection->bucket_samples, level->bucket_samples);
         for (const auto &summary : level->summaries) {
+          if (stop_token.stop_requested()) {
+            return lod_error(ErrorCode::operation_cancelled,
+                             MessageKey::operation_cancelled);
+          }
           if (summary.source_end <= begin || summary.source_begin >= end) {
             continue;
           }

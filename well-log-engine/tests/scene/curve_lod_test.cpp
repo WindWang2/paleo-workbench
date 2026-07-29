@@ -171,8 +171,10 @@ void scalar_reference_and_hierarchy_have_identical_semantics() {
                     actual.value().points()[index].value,
             "reference and hierarchy must select identical source points");
   }
-  require(reference.value().statistics().derived_bytes == 0,
-          "scalar reference must not hide a derived hierarchy");
+  require(reference.value().statistics().level_count == 0 &&
+              reference.value().statistics().derived_bytes <
+                  hierarchy.value().statistics().derived_bytes,
+          "scalar reference may retain run breaks but not hierarchy levels");
 }
 
 void cache_budget_and_cancellation_are_observable() {
@@ -182,13 +184,25 @@ void cache_budget_and_cancellation_are_observable() {
                              CurveLodBuildOptions{
                                  .algorithm = CurveLodAlgorithm::hierarchical,
                                  .base_bucket_samples = 8,
-                                 .maximum_derived_bytes = 1,
+                                 .maximum_derived_bytes = 128,
                              });
   require(budget_limited.has_value(),
           "an exhausted derived-cache budget must fall back safely");
-  require(budget_limited.value().statistics().derived_bytes <= 1 &&
-              budget_limited.value().statistics().budget_limited,
-          "reported derived memory must respect the configured budget");
+  require(
+      budget_limited.value().statistics().derived_bytes <= 128 &&
+          budget_limited.value().statistics().derived_bytes > 0 &&
+          budget_limited.value().statistics().budget_limited,
+      "reported derived memory must include run metadata and respect budget");
+  const auto budget_limited_query = budget_limited.value().query(CurveLodQuery{
+      .viewport_top = 0.0,
+      .viewport_bottom = 16.0,
+      .pixel_height = 1,
+      .prefetch_viewports = 0.0,
+  });
+  require(budget_limited_query.has_value() &&
+              !budget_limited_query.value().uses_raw_samples() &&
+              budget_limited_query.value().points().size() < 17,
+          "an exhausted cache must compute bounded summaries on demand");
 
   std::stop_source cancelled;
   cancelled.request_stop();
@@ -198,6 +212,42 @@ void cache_budget_and_cancellation_are_observable() {
   require(!cancelled_build.has_value() &&
               cancelled_build.error().code == ErrorCode::operation_cancelled,
           "a cancelled build must stop with a stable cancellation code");
+
+  const auto ready = CurveLodPyramid::build(fixture.axis, fixture.curve,
+                                            CurveLodBuildOptions{});
+  const auto cancelled_query = ready.value().query(
+      CurveLodQuery{
+          .viewport_top = 0.0,
+          .viewport_bottom = 16.0,
+          .pixel_height = 1,
+          .prefetch_viewports = 0.0,
+      },
+      cancelled.get_token());
+  require(!cancelled_query.has_value() &&
+              cancelled_query.error().code == ErrorCode::operation_cancelled,
+          "a cancelled viewport query must stop with the stable code");
+
+  auto malformed = fixture;
+  malformed.curve.nulls = NullBitmapView::from_raw(
+      nullptr, 17, 3,
+      SharedOwner{std::make_shared<const std::vector<std::uint8_t>>(3)});
+  const auto malformed_result =
+      CurveLodPyramid::build(malformed.axis, malformed.curve);
+  require(!malformed_result.has_value() &&
+              malformed_result.error().code == ErrorCode::invalid_buffer,
+          "malformed public buffer views must fail instead of dereferencing");
+
+  auto unowned = fixture;
+  unowned.axis.coordinates = BufferView::from_raw(
+      fixture.axis.coordinates.data(), fixture.axis.coordinates.length(),
+      fixture.axis.coordinates.stride_bytes(),
+      fixture.axis.coordinates.scalar_type(),
+      fixture.axis.coordinates.byte_capacity(), SharedOwner{});
+  const auto unowned_result =
+      CurveLodPyramid::build(unowned.axis, unowned.curve);
+  require(!unowned_result.has_value() &&
+              unowned_result.error().code == ErrorCode::missing_owner,
+          "public LOD pyramids must not retain unowned source buffers");
 }
 
 void prefetch_does_not_coarsen_visible_pixel_density() {

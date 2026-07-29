@@ -22,6 +22,16 @@ namespace {
   };
 }
 
+[[nodiscard]] Error cancellation_error() {
+  return Error{
+      .code = ErrorCode::operation_cancelled,
+      .severity = Severity::error,
+      .entity_id = std::nullopt,
+      .message = MessageKey::operation_cancelled,
+      .arguments = {},
+  };
+}
+
 } // namespace
 
 struct ScenePresentation::Impl {
@@ -417,19 +427,24 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
 Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
                                const ScenePresentation &presentation) noexcept {
-  return prepare_impl(document, presentation, nullptr, nullptr);
+  return prepare_impl(document, presentation, nullptr, nullptr, {});
 }
 
 Result<PreparedScene> detail::ScenePreparer::prepare(
     const WellLogDocument &document, const ScenePresentation &presentation,
-    const CurveLodMap &curve_lods, const CurveLodQuery &query) noexcept {
-  return prepare_impl(document, presentation, &curve_lods, &query);
+    const CurveLodMap &curve_lods, const CurveLodQuery &query,
+    std::stop_token stop_token) noexcept {
+  return prepare_impl(document, presentation, &curve_lods, &query, stop_token);
 }
 
 Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     const WellLogDocument &document, const ScenePresentation &presentation,
-    const CurveLodMap *curve_lods, const CurveLodQuery *query) noexcept {
+    const CurveLodMap *curve_lods, const CurveLodQuery *query,
+    std::stop_token stop_token) noexcept {
   try {
+    if (stop_token.stop_requested()) {
+      return cancellation_error();
+    }
     const auto depth_range = presentation.reference_depth_range();
     if (presentation.document_id() != document.id() ||
         depth_range.domain == DepthDomain::source_index ||
@@ -468,6 +483,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
 
     double left{};
     for (const auto &track : presentation.tracks()) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
       if (track.id.is_nil() || !ids.insert(track.id).second ||
           !std::isfinite(track.width.value) || track.width.value <= 0.0) {
         return presentation_error(track.id);
@@ -495,6 +513,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
 
     std::unordered_map<EntityId, const TrackScaleSpec *, EntityIdHash> scales;
     for (const auto &scale : presentation.scales()) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
       if (scale.id.is_nil() || !ids.insert(scale.id).second ||
           !track_bounds.contains(scale.track_id) ||
           scale.mode != ScaleMode::linear || !std::isfinite(scale.minimum) ||
@@ -520,6 +541,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                      });
 
     for (const auto *layer_pointer : ordered_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
       const auto &layer = *layer_pointer;
       const auto scale = scales.find(layer.scale_id);
       const auto curve =
@@ -620,7 +644,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                                              : curve_lods->find(curve->id);
       if (curve_lods != nullptr && query != nullptr &&
           lod != curve_lods->end()) {
-        const auto selection = lod->second.query(*query);
+        const auto selection = lod->second.query(*query, stop_token);
         if (!selection.has_value()) {
           return selection.error();
         }
@@ -628,6 +652,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           close_segment();
           for (std::uint64_t offset = 0; offset < segment.point_count;
                ++offset) {
+            if ((offset & std::uint64_t{4095}) == 0 &&
+                stop_token.stop_requested()) {
+              return cancellation_error();
+            }
             const auto &point =
                 selection.value().points()[static_cast<std::size_t>(
                     segment.first_point + offset)];
@@ -641,6 +669,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         const auto sample_count = curve->values.length();
         for (std::uint64_t sample_index = 0; sample_index < sample_count;
              ++sample_index) {
+          if ((sample_index & std::uint64_t{4095}) == 0 &&
+              stop_token.stop_requested()) {
+            return cancellation_error();
+          }
           if (!append_sample(sample_index)) {
             return presentation_error(layer.id);
           }

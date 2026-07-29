@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -177,6 +178,11 @@ void WellLogViewTest::prepared_curve_renders_into_the_widget_fbo() {
                            5000);
   QVERIFY2(view.capability_report().graphics_available,
            view.capability_report().unavailable_reason.c_str());
+  QTRY_COMPARE_WITH_TIMEOUT(
+      fixture.session->viewport_pixel_height(fixture.document_id),
+      std::optional<std::uint32_t>{static_cast<std::uint32_t>(
+          static_cast<double>(view.height()) * view.devicePixelRatioF())},
+      5000);
 
   QImage image;
   QTRY_VERIFY_WITH_TIMEOUT(

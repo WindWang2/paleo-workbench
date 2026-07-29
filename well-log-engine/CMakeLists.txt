@@ -57,6 +57,10 @@ if(WELLLOG_BUILD_QT_WIDGETS)
     qt_standard_project_setup(REQUIRES 6.8)
 endif()
 
+if(WELLLOG_BUILD_BENCHMARKS AND NOT WELLLOG_BUILD_QT_WIDGETS)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Gui)
+endif()
+
 if(WELLLOG_BUILD_PYTHON)
     find_package(
         Python 3.12
@@ -445,7 +449,11 @@ if(WELLLOG_BUILD_BENCHMARKS)
     welllog_enable_warnings(welllog_dense_curve_benchmark)
     target_link_libraries(
         welllog_dense_curve_benchmark
-        PRIVATE WellLog::RenderGL WellLog::Session
+        PRIVATE WellLog::RenderGL WellLog::Session Qt6::Gui
+    )
+    target_include_directories(
+        welllog_dense_curve_benchmark
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
 endif()
 

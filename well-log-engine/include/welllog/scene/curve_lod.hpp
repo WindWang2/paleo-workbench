@@ -84,7 +84,8 @@ public:
         CurveLodBuildOptions options = {},
         std::stop_token stop_token = {}) noexcept;
   [[nodiscard]] Result<CurveLodSelection>
-  query(const CurveLodQuery &query) const noexcept;
+  query(const CurveLodQuery &query,
+        std::stop_token stop_token = {}) const noexcept;
   [[nodiscard]] CurveLodStatistics statistics() const noexcept;
 
 private:

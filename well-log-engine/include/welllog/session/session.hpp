@@ -37,6 +37,7 @@ struct CrosshairState {
 struct SetViewportCommand {
   EntityId document_id;
   DepthViewport viewport;
+  std::uint32_t pixel_height{};
 };
 
 struct PanDepthCommand {
@@ -88,6 +89,7 @@ using ViewEventObserver = std::function<void(const ViewEvent &)>;
 
 enum class DiagnosticCode : std::uint16_t {
   missing_samples,
+  asynchronous_preparation_failed,
 };
 
 struct PerformanceBudgets {
@@ -125,6 +127,8 @@ struct Diagnostic {
   EntityId entity_id;
   DocumentRevision document_revision;
   std::uint64_t occurrence_count{};
+  std::optional<ErrorCode> error_code;
+  std::optional<MessageKey> message;
 };
 
 class WELLLOG_SESSION_API WellLogSession {
@@ -158,6 +162,8 @@ public:
   prepared_scene(EntityId document_id) const noexcept;
   [[nodiscard]] std::optional<DepthViewport>
   viewport(EntityId document_id) const noexcept;
+  [[nodiscard]] std::optional<std::uint32_t>
+  viewport_pixel_height(EntityId document_id) const noexcept;
   [[nodiscard]] std::optional<CrosshairState>
   crosshair(EntityId document_id) const noexcept;
   [[nodiscard]] ViewEventObserverId

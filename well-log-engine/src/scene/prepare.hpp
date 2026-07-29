@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stop_token>
 #include <unordered_map>
 
 #include <welllog/scene/curve_lod.hpp>
@@ -18,12 +19,14 @@ public:
   [[nodiscard]] static Result<PreparedScene>
   prepare(const WellLogDocument &document,
           const ScenePresentation &presentation, const CurveLodMap &curve_lods,
-          const CurveLodQuery &query) noexcept;
+          const CurveLodQuery &query, std::stop_token stop_token = {}) noexcept;
 
 private:
-  [[nodiscard]] static Result<PreparedScene> prepare_impl(
-      const WellLogDocument &document, const ScenePresentation &presentation,
-      const CurveLodMap *curve_lods, const CurveLodQuery *query) noexcept;
+  [[nodiscard]] static Result<PreparedScene>
+  prepare_impl(const WellLogDocument &document,
+               const ScenePresentation &presentation,
+               const CurveLodMap *curve_lods, const CurveLodQuery *query,
+               std::stop_token stop_token) noexcept;
 };
 
 } // namespace welllog::detail

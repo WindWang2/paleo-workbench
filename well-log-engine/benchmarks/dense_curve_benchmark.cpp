@@ -1,6 +1,14 @@
 #include <welllog/render_gl/upload.hpp>
 #include <welllog/session/session.hpp>
 
+#include "render_gl/renderer.hpp"
+
+#include <QGuiApplication>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QSurfaceFormat>
+#include <QWindow>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -28,6 +36,14 @@ constexpr std::size_t measured_frames = 120;
 
 [[nodiscard]] EntityId id(std::string_view text) {
   return EntityId::parse(text).value();
+}
+
+[[nodiscard]] detail::GlProcAddress resolve_gl_proc(void *context,
+                                                    const char *name) noexcept {
+  if (context == nullptr || name == nullptr) {
+    return nullptr;
+  }
+  return static_cast<QOpenGLContext *>(context)->getProcAddress(name);
 }
 
 [[nodiscard]] WellLogDocument make_document() {
@@ -131,7 +147,8 @@ constexpr std::size_t measured_frames = 120;
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  QGuiApplication application(argc, argv);
   const auto document_id = id("80000000-0000-4000-8000-000000000001");
   WellLogSession session(PerformanceBudgets{
       .maximum_cpu_derived_bytes = cpu_budget,
@@ -156,20 +173,21 @@ int main() {
   }
   const auto prepare_ms = milliseconds(Clock::now() - prepare_start);
 
-  std::vector<double> frame_times;
-  frame_times.reserve(measured_frames);
+  std::vector<double> frame_plan_times;
+  frame_plan_times.reserve(measured_frames);
   for (std::size_t frame = 0; frame < measured_frames; ++frame) {
     const auto top = 1000.0 + static_cast<double>(frame) * 20.0;
     const auto start = Clock::now();
     const auto receipt = session.execute(SetViewportCommand{
         .document_id = document_id,
         .viewport = DepthViewport{.top = top, .bottom = top + 500.0},
+        .pixel_height = 2160,
     });
     if (!receipt.has_value() || !wait_until_ready(session, document_id)) {
       std::cerr << "dense benchmark frame preparation failed\n";
       return EXIT_FAILURE;
     }
-    frame_times.push_back(milliseconds(Clock::now() - start));
+    frame_plan_times.push_back(milliseconds(Clock::now() - start));
   }
 
   const auto scene = session.prepared_scene(document_id);
@@ -193,9 +211,94 @@ int main() {
                         return std::max(current, chunk.byte_count);
                       });
 
+  QSurfaceFormat format;
+  format.setRenderableType(QSurfaceFormat::OpenGL);
+  format.setVersion(3, 3);
+  format.setProfile(QSurfaceFormat::CoreProfile);
+  format.setDepthBufferSize(24);
+  format.setStencilBufferSize(8);
+  format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+  QWindow window;
+  window.setSurfaceType(QSurface::OpenGLSurface);
+  window.setFormat(format);
+  window.resize(3840, 2160);
+  window.create();
+  window.show();
+  application.processEvents();
+
+  QOpenGLContext context;
+  context.setFormat(format);
+  if (!context.create() || !context.makeCurrent(&window)) {
+    std::cerr << "dense benchmark OpenGL context creation failed\n";
+    return EXIT_FAILURE;
+  }
+  auto *functions = context.functions();
+  if (functions == nullptr) {
+    return EXIT_FAILURE;
+  }
+  functions->initializeOpenGLFunctions();
+  detail::GlRenderer renderer;
+  if (!renderer.initialize(resolve_gl_proc, &context)) {
+    std::cerr << "dense benchmark renderer initialization failed\n";
+    return EXIT_FAILURE;
+  }
+
+  const auto measured_viewport = session.viewport(document_id);
+  if (!measured_viewport.has_value()) {
+    return EXIT_FAILURE;
+  }
+  std::vector<double> frame_times;
+  frame_times.reserve(measured_frames);
+  std::vector<double> queue_times;
+  auto scene_available = false;
+  while (frame_times.size() < measured_frames) {
+    const auto queue_start = Clock::now();
+    if (!renderer.queue_upload(*scene,
+                               GpuUploadBudgets{
+                                   .maximum_cache_bytes = gpu_budget,
+                                   .maximum_bytes_per_frame = upload_budget,
+                               })) {
+      std::cerr << "dense benchmark renderer upload queue failed\n";
+      return EXIT_FAILURE;
+    }
+    queue_times.push_back(milliseconds(Clock::now() - queue_start));
+    auto completed = false;
+    while (!completed && frame_times.size() < measured_frames) {
+      const auto start = Clock::now();
+      const auto progress = renderer.upload_next();
+      if (!progress.pending && !progress.completed) {
+        return EXIT_FAILURE;
+      }
+      completed = progress.completed;
+      scene_available = scene_available || completed;
+      if (!renderer.render(detail::GlRenderFrame{
+              .framebuffer = 0,
+              .pixel_width = 3840,
+              .pixel_height = 2160,
+              .physical_pixels_per_millimetre = 96.0 / 25.4,
+              .viewport =
+                  detail::GlDepthViewport{
+                      .top = measured_viewport->top,
+                      .bottom = measured_viewport->bottom,
+                  },
+              .crosshair = std::nullopt,
+              .draw_scene = scene_available,
+          })) {
+        return EXIT_FAILURE;
+      }
+      context.swapBuffers(&window);
+      functions->glFinish();
+      frame_times.push_back(milliseconds(Clock::now() - start));
+      application.processEvents();
+    }
+  }
+  renderer.release();
+  context.doneCurrent();
+
   std::cout << std::fixed << std::setprecision(3) << "{\n"
             << "  \"schema\": \"welllog.dense-curve-benchmark.v1\",\n"
             << "  \"scenario\": \"single-curve-500k-4k\",\n"
+            << "  \"frame_scope\": \"budgeted-upload-draw-finish-swap\",\n"
             << "  \"sample_count\": " << sample_count << ",\n"
             << "  \"viewport_pixels\": {\"width\": 3840, \"height\": 2160},\n"
             << "  \"measured_frames\": " << measured_frames << ",\n"
@@ -204,6 +307,14 @@ int main() {
             << "  \"frame_ms\": {\"p50\": " << percentile(frame_times, 0.50)
             << ", \"p95\": " << percentile(frame_times, 0.95)
             << ", \"p99\": " << percentile(frame_times, 0.99) << "},\n"
+            << "  \"frame_plan_ms\": {\"p50\": "
+            << percentile(frame_plan_times, 0.50)
+            << ", \"p95\": " << percentile(frame_plan_times, 0.95)
+            << ", \"p99\": " << percentile(frame_plan_times, 0.99) << "},\n"
+            << "  \"upload_queue_ms\": {\"p50\": "
+            << percentile(queue_times, 0.50)
+            << ", \"p95\": " << percentile(queue_times, 0.95)
+            << ", \"p99\": " << percentile(queue_times, 0.99) << "},\n"
             << "  \"prepared_points\": " << scene->curve_points().size()
             << ",\n"
             << "  \"memory_bytes\": {\"cpu_source\": "
