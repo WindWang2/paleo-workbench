@@ -45,6 +45,11 @@ struct ScenePresentation::Impl {
   std::vector<TrackSpec> tracks;
   std::vector<TrackScaleSpec> scales;
   std::vector<CurveLayerSpec> curve_layers;
+  std::vector<PatternDefinition> patterns;
+  std::vector<IntervalLayerSpec> interval_layers;
+  std::vector<MarkerLayerSpec> marker_layers;
+  std::vector<SymbolLayerSpec> symbol_layers;
+  std::vector<TextLayerSpec> text_layers;
 };
 
 ScenePresentation::ScenePresentation() = default;
@@ -99,6 +104,41 @@ ScenePresentation::curve_layers() const noexcept {
              : std::span<const CurveLayerSpec>{impl_->curve_layers};
 }
 
+std::span<const PatternDefinition>
+ScenePresentation::patterns() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PatternDefinition>{}
+             : std::span<const PatternDefinition>{impl_->patterns};
+}
+
+std::span<const IntervalLayerSpec>
+ScenePresentation::interval_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const IntervalLayerSpec>{}
+             : std::span<const IntervalLayerSpec>{impl_->interval_layers};
+}
+
+std::span<const MarkerLayerSpec>
+ScenePresentation::marker_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const MarkerLayerSpec>{}
+             : std::span<const MarkerLayerSpec>{impl_->marker_layers};
+}
+
+std::span<const SymbolLayerSpec>
+ScenePresentation::symbol_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const SymbolLayerSpec>{}
+             : std::span<const SymbolLayerSpec>{impl_->symbol_layers};
+}
+
+std::span<const TextLayerSpec>
+ScenePresentation::text_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const TextLayerSpec>{}
+             : std::span<const TextLayerSpec>{impl_->text_layers};
+}
+
 struct ScenePresentationBuilder::Impl {
   ScenePresentation::Impl presentation;
   bool allocation_failed{};
@@ -122,6 +162,11 @@ ScenePresentationBuilder::ScenePresentationBuilder(
                 .tracks = {},
                 .scales = {},
                 .curve_layers = {},
+                .patterns = {},
+                .interval_layers = {},
+                .marker_layers = {},
+                .symbol_layers = {},
+                .text_layers = {},
             },
         .allocation_failed = false,
     });
@@ -175,6 +220,71 @@ ScenePresentationBuilder &ScenePresentationBuilder::add_curve_layer(
   return *this;
 }
 
+ScenePresentationBuilder &
+ScenePresentationBuilder::add_pattern(const PatternDefinition &pattern) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.patterns.push_back(pattern);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::add_interval_layer(
+    const IntervalLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.interval_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::add_marker_layer(
+    const MarkerLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.marker_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::add_symbol_layer(
+    const SymbolLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.symbol_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::add_text_layer(
+    const TextLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.text_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
 ScenePresentation ScenePresentationBuilder::build() const noexcept {
   if (impl_ == nullptr || impl_->allocation_failed) {
     return {};
@@ -214,6 +324,13 @@ struct PreparedScene::Impl {
   std::vector<PreparedCurveSegment> curve_segments;
   std::vector<PreparedCurvePoint> curve_points;
   std::vector<CurvePickIndex> curve_pick_indices;
+  std::vector<PatternDefinition> patterns;
+  std::vector<PreparedIntervalLayer> interval_layers;
+  std::vector<PreparedInterval> intervals;
+  std::vector<PreparedMarkerLayer> marker_layers;
+  std::vector<PreparedMarker> markers;
+  std::vector<PreparedSymbolLayer> symbol_layers;
+  std::vector<PreparedSymbol> symbols;
 };
 
 PreparedScene::PreparedScene() = default;
@@ -281,6 +398,52 @@ PreparedScene::curve_points() const noexcept {
   return impl_ == nullptr
              ? std::span<const PreparedCurvePoint>{}
              : std::span<const PreparedCurvePoint>{impl_->curve_points};
+}
+
+std::span<const PatternDefinition>
+PreparedScene::patterns() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PatternDefinition>{}
+             : std::span<const PatternDefinition>{impl_->patterns};
+}
+
+std::span<const PreparedIntervalLayer>
+PreparedScene::interval_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedIntervalLayer>{}
+             : std::span<const PreparedIntervalLayer>{impl_->interval_layers};
+}
+
+std::span<const PreparedInterval> PreparedScene::intervals() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedInterval>{}
+             : std::span<const PreparedInterval>{impl_->intervals};
+}
+
+std::span<const PreparedMarkerLayer>
+PreparedScene::marker_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedMarkerLayer>{}
+             : std::span<const PreparedMarkerLayer>{impl_->marker_layers};
+}
+
+std::span<const PreparedMarker> PreparedScene::markers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedMarker>{}
+             : std::span<const PreparedMarker>{impl_->markers};
+}
+
+std::span<const PreparedSymbolLayer>
+PreparedScene::symbol_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedSymbolLayer>{}
+             : std::span<const PreparedSymbolLayer>{impl_->symbol_layers};
+}
+
+std::span<const PreparedSymbol> PreparedScene::symbols() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedSymbol>{}
+             : std::span<const PreparedSymbol>{impl_->symbols};
 }
 
 std::optional<CurvePick>
@@ -446,6 +609,11 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       return cancellation_error();
     }
     const auto depth_range = presentation.reference_depth_range();
+    const auto layer_count =
+        presentation.curve_layers().size() +
+        presentation.interval_layers().size() +
+        presentation.marker_layers().size() +
+        presentation.symbol_layers().size() + presentation.text_layers().size();
     if (presentation.document_id() != document.id() ||
         depth_range.domain == DepthDomain::source_index ||
         depth_range.unit.empty() || !std::isfinite(depth_range.top) ||
@@ -454,8 +622,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         !std::isfinite(depth_range.bottom - depth_range.top) ||
         !std::isfinite(presentation.physical_height().value) ||
         presentation.physical_height().value <= 0.0 ||
-        presentation.tracks().empty() || presentation.scales().empty() ||
-        presentation.curve_layers().empty()) {
+        presentation.tracks().empty() || layer_count == 0) {
       return presentation_error(presentation.document_id());
     }
 
@@ -777,6 +944,293 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         }
       }
       scene->curve_pick_indices.push_back(std::move(pick_index));
+    }
+
+    // Pattern definitions are the single vector source of truth shared by
+    // the screen and vector backends (ADR 0020). They are validated against
+    // the untrusted-asset limits of ADR 0042 before entering the scene.
+    constexpr std::size_t maximum_pattern_primitives = 256;
+    constexpr std::size_t maximum_polyline_points = 1024;
+    constexpr double maximum_tile_extent_millimetres = 500.0;
+    std::unordered_set<EntityId, EntityIdHash> pattern_ids;
+    scene->patterns.reserve(presentation.patterns().size());
+    for (const auto &pattern : presentation.patterns()) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      if (pattern.id.is_nil() || !ids.insert(pattern.id).second ||
+          !std::isfinite(pattern.tile_width.value) ||
+          pattern.tile_width.value <= 0.0 ||
+          pattern.tile_width.value > maximum_tile_extent_millimetres ||
+          !std::isfinite(pattern.tile_height.value) ||
+          pattern.tile_height.value <= 0.0 ||
+          pattern.tile_height.value > maximum_tile_extent_millimetres ||
+          !std::isfinite(pattern.rotation_degrees) ||
+          !std::isfinite(pattern.stroke_width.value) ||
+          pattern.stroke_width.value <= 0.0 ||
+          pattern.stroke_width.value > maximum_tile_extent_millimetres ||
+          !std::isfinite(pattern.scene_anchor.left.value) ||
+          !std::isfinite(pattern.scene_anchor.top.value) ||
+          pattern.primitives.size() > maximum_pattern_primitives) {
+        return presentation_error(pattern.id);
+      }
+      bool primitives_valid = true;
+      const auto point_valid = [](const PhysicalPoint &point) {
+        return std::isfinite(point.left.value) &&
+               std::isfinite(point.top.value);
+      };
+      for (const auto &primitive : pattern.primitives) {
+        if (const auto *line = std::get_if<PatternLine>(&primitive)) {
+          primitives_valid = point_valid(line->from) && point_valid(line->to);
+        } else if (const auto *polyline =
+                       std::get_if<PatternPolyline>(&primitive)) {
+          primitives_valid =
+              polyline->points.size() >= 2 &&
+              polyline->points.size() <= maximum_polyline_points &&
+              std::all_of(polyline->points.begin(), polyline->points.end(),
+                          point_valid);
+        } else {
+          const auto &circle = std::get<PatternCircle>(primitive);
+          primitives_valid = point_valid(circle.center) &&
+                             std::isfinite(circle.radius.value) &&
+                             circle.radius.value > 0.0 &&
+                             circle.radius.value <=
+                                 maximum_tile_extent_millimetres;
+        }
+        if (!primitives_valid) {
+          break;
+        }
+      }
+      if (!primitives_valid) {
+        return presentation_error(pattern.id);
+      }
+      pattern_ids.insert(pattern.id);
+      scene->patterns.push_back(pattern);
+    }
+
+    const auto depth_to_top = [&](double reference_depth) {
+      return (reference_depth - depth_range.top) /
+             (depth_range.bottom - depth_range.top) *
+             presentation.physical_height().value;
+    };
+
+    std::vector<const IntervalLayerSpec *> ordered_interval_layers;
+    ordered_interval_layers.reserve(presentation.interval_layers().size());
+    for (const auto &layer : presentation.interval_layers()) {
+      ordered_interval_layers.push_back(&layer);
+    }
+    std::stable_sort(
+        ordered_interval_layers.begin(), ordered_interval_layers.end(),
+        [](const IntervalLayerSpec *left_layer,
+           const IntervalLayerSpec *right_layer) {
+          if (left_layer->z_order != right_layer->z_order) {
+            return left_layer->z_order < right_layer->z_order;
+          }
+          return left_layer->id < right_layer->id;
+        });
+
+    for (const auto *layer_pointer : ordered_interval_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      const auto bounds = track_bounds.find(layer.track_id);
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          bounds == track_bounds.end() ||
+          (layer.draw_labels &&
+           (!std::isfinite(layer.label_font_size.value) ||
+            layer.label_font_size.value <= 0.0))) {
+        return presentation_error(layer.id);
+      }
+      const auto first_interval =
+          static_cast<std::uint64_t>(scene->intervals.size());
+      for (const auto &interval : document.intervals()) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
+        if (!interval.pattern_id.is_nil() &&
+            !pattern_ids.contains(interval.pattern_id)) {
+          return presentation_error(interval.id);
+        }
+        if (interval.bottom_reference_depth <= depth_range.top ||
+            interval.top_reference_depth >= depth_range.bottom) {
+          continue;
+        }
+        const auto unclipped_top = depth_to_top(interval.top_reference_depth);
+        const auto unclipped_bottom =
+            depth_to_top(interval.bottom_reference_depth);
+        const auto top = std::clamp(unclipped_top, 0.0,
+                                    presentation.physical_height().value);
+        const auto bottom = std::clamp(unclipped_bottom, 0.0,
+                                       presentation.physical_height().value);
+        const auto height = bottom - top;
+        if (!std::isfinite(top) || !std::isfinite(bottom) ||
+            !std::isfinite(height) || height <= 0.0) {
+          continue;
+        }
+        scene->intervals.push_back(PreparedInterval{
+            .layer_id = layer.id,
+            .interval_id = interval.id,
+            .rect =
+                PhysicalRect{
+                    .left = bounds->second.left,
+                    .top = Millimetres{top},
+                    .width = bounds->second.width,
+                    .height = Millimetres{height},
+                },
+            .fill_color = interval.fill_color,
+            .pattern_id = interval.pattern_id,
+            .top_reference_depth = interval.top_reference_depth,
+            .bottom_reference_depth = interval.bottom_reference_depth,
+            .label_run_index = no_text_run,
+        });
+      }
+      scene->interval_layers.push_back(PreparedIntervalLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .z_order = layer.z_order,
+          .first_interval = first_interval,
+          .interval_count =
+              static_cast<std::uint64_t>(scene->intervals.size()) -
+              first_interval,
+      });
+    }
+
+    std::vector<const MarkerLayerSpec *> ordered_marker_layers;
+    ordered_marker_layers.reserve(presentation.marker_layers().size());
+    for (const auto &layer : presentation.marker_layers()) {
+      ordered_marker_layers.push_back(&layer);
+    }
+    std::stable_sort(
+        ordered_marker_layers.begin(), ordered_marker_layers.end(),
+        [](const MarkerLayerSpec *left_layer,
+           const MarkerLayerSpec *right_layer) {
+          if (left_layer->z_order != right_layer->z_order) {
+            return left_layer->z_order < right_layer->z_order;
+          }
+          return left_layer->id < right_layer->id;
+        });
+
+    for (const auto *layer_pointer : ordered_marker_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          !track_bounds.contains(layer.track_id) ||
+          !std::isfinite(layer.line_width.value) ||
+          layer.line_width.value <= 0.0 ||
+          (layer.draw_labels &&
+           (!std::isfinite(layer.label_font_size.value) ||
+            layer.label_font_size.value <= 0.0))) {
+        return presentation_error(layer.id);
+      }
+      const auto first_marker =
+          static_cast<std::uint64_t>(scene->markers.size());
+      for (const auto &marker : document.markers()) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
+        if (marker.reference_depth < depth_range.top ||
+            marker.reference_depth > depth_range.bottom) {
+          continue;
+        }
+        const auto top = depth_to_top(marker.reference_depth);
+        if (!std::isfinite(top)) {
+          continue;
+        }
+        scene->markers.push_back(PreparedMarker{
+            .layer_id = layer.id,
+            .marker_id = marker.id,
+            .display_top = Millimetres{top},
+            .reference_depth = marker.reference_depth,
+            .label_run_index = no_text_run,
+        });
+      }
+      scene->marker_layers.push_back(PreparedMarkerLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .z_order = layer.z_order,
+          .line_color = layer.line_color,
+          .line_width = layer.line_width,
+          .first_marker = first_marker,
+          .marker_count =
+              static_cast<std::uint64_t>(scene->markers.size()) - first_marker,
+      });
+    }
+
+    std::vector<const SymbolLayerSpec *> ordered_symbol_layers;
+    ordered_symbol_layers.reserve(presentation.symbol_layers().size());
+    for (const auto &layer : presentation.symbol_layers()) {
+      ordered_symbol_layers.push_back(&layer);
+    }
+    std::stable_sort(
+        ordered_symbol_layers.begin(), ordered_symbol_layers.end(),
+        [](const SymbolLayerSpec *left_layer,
+           const SymbolLayerSpec *right_layer) {
+          if (left_layer->z_order != right_layer->z_order) {
+            return left_layer->z_order < right_layer->z_order;
+          }
+          return left_layer->id < right_layer->id;
+        });
+
+    for (const auto *layer_pointer : ordered_symbol_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      const auto bounds = track_bounds.find(layer.track_id);
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          bounds == track_bounds.end() ||
+          !std::isfinite(layer.symbol_size.value) ||
+          layer.symbol_size.value <= 0.0) {
+        return presentation_error(layer.id);
+      }
+      const auto first_symbol =
+          static_cast<std::uint64_t>(scene->symbols.size());
+      for (const auto &symbol : document.symbols()) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
+        if (symbol.reference_depth < depth_range.top ||
+            symbol.reference_depth > depth_range.bottom) {
+          continue;
+        }
+        const auto top = depth_to_top(symbol.reference_depth);
+        const auto left = bounds->second.left.value +
+                          symbol.track_fraction * bounds->second.width.value;
+        if (!std::isfinite(top) || !std::isfinite(left)) {
+          continue;
+        }
+        scene->symbols.push_back(PreparedSymbol{
+            .layer_id = layer.id,
+            .symbol_id = symbol.id,
+            .center =
+                PhysicalPoint{
+                    .left = Millimetres{left},
+                    .top = Millimetres{top},
+                },
+            .kind = symbol.kind,
+            .reference_depth = symbol.reference_depth,
+        });
+      }
+      scene->symbol_layers.push_back(PreparedSymbolLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .z_order = layer.z_order,
+          .color = layer.color,
+          .symbol_size = layer.symbol_size,
+          .first_symbol = first_symbol,
+          .symbol_count =
+              static_cast<std::uint64_t>(scene->symbols.size()) - first_symbol,
+      });
+    }
+
+    for (const auto &layer : presentation.text_layers()) {
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          !track_bounds.contains(layer.track_id)) {
+        return presentation_error(layer.id);
+      }
     }
     return PreparedScene{std::move(scene)};
   } catch (const std::bad_alloc &) {

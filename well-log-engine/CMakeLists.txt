@@ -583,6 +583,23 @@ if(WELLLOG_BUILD_TESTS)
         COMMAND welllog_document_annotation_tests
     )
 
+    add_executable(welllog_layer_preparation_tests
+        tests/integration/layer_preparation_test.cpp
+    )
+    target_compile_features(
+        welllog_layer_preparation_tests
+        PRIVATE cxx_std_20
+    )
+    welllog_enable_warnings(welllog_layer_preparation_tests)
+    target_link_libraries(
+        welllog_layer_preparation_tests
+        PRIVATE WellLog::Session
+    )
+    add_test(
+        NAME welllog.layer-preparation
+        COMMAND welllog_layer_preparation_tests
+    )
+
     add_executable(welllog_manifest_tests
         tests/integration/manifest_roundtrip_test.cpp
     )

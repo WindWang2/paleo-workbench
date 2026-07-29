@@ -1,11 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
+#include <vector>
 
 #include <welllog/core/document.hpp>
 #include <welllog/core/result.hpp>
@@ -62,6 +65,86 @@ struct CurveLayerSpec {
   std::int32_t z_order{};
 };
 
+// A straight segment inside a pattern tile, in tile-local millimetres.
+struct PatternLine {
+  PhysicalPoint from;
+  PhysicalPoint to;
+};
+
+struct PatternPolyline {
+  std::vector<PhysicalPoint> points;
+  bool closed{};
+};
+
+struct PatternCircle {
+  PhysicalPoint center;
+  Millimetres radius;
+  bool filled{};
+};
+
+// The constrained vector vocabulary allowed inside a PatternDefinition.
+// Scripts, shaders and external resources are never accepted (ADR 0020,
+// ADR 0042).
+using PatternPrimitive =
+    std::variant<PatternLine, PatternPolyline, PatternCircle>;
+
+// The single vector source of truth for a geological pattern. The tile is
+// a repeating unit with physical size, anchored to `scene_anchor` in scene
+// millimetres so that scrolling and adjacent intervals share phase.
+// Screen backends rasterize the tile into an atlas; vector backends emit
+// the primitives directly.
+struct PatternDefinition {
+  EntityId id;
+  Millimetres tile_width;
+  Millimetres tile_height;
+  double rotation_degrees{};
+  RgbaColor foreground{};
+  RgbaColor background{};
+  Millimetres stroke_width{0.2};
+  PhysicalPoint scene_anchor{};
+  std::vector<PatternPrimitive> primitives;
+};
+
+// Displays document Intervals as clipped, filled (solid or patterned)
+// rectangles spanning the track.
+struct IntervalLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  bool draw_labels{true};
+  Millimetres label_font_size{3.0};
+};
+
+// Displays document Markers as zero-thickness horizontal lines across the
+// track with optional labels.
+struct MarkerLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  RgbaColor line_color{0, 0, 0, 255};
+  Millimetres line_width{0.3};
+  bool draw_labels{true};
+  Millimetres label_font_size{3.0};
+};
+
+// Displays document SymbolOccurrences at their depth and track fraction.
+struct SymbolLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  RgbaColor color{0, 0, 0, 255};
+  Millimetres symbol_size{3.0};
+};
+
+// Displays document TextAnnotations, including rotated and true vertical
+// typesetting.
+struct TextLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  RgbaColor color{0, 0, 0, 255};
+};
+
 class WELLLOG_SCENE_API ScenePresentation {
 public:
   ScenePresentation();
@@ -78,6 +161,14 @@ public:
   [[nodiscard]] std::span<const TrackSpec> tracks() const noexcept;
   [[nodiscard]] std::span<const TrackScaleSpec> scales() const noexcept;
   [[nodiscard]] std::span<const CurveLayerSpec> curve_layers() const noexcept;
+  [[nodiscard]] std::span<const PatternDefinition> patterns() const noexcept;
+  [[nodiscard]] std::span<const IntervalLayerSpec>
+  interval_layers() const noexcept;
+  [[nodiscard]] std::span<const MarkerLayerSpec>
+  marker_layers() const noexcept;
+  [[nodiscard]] std::span<const SymbolLayerSpec>
+  symbol_layers() const noexcept;
+  [[nodiscard]] std::span<const TextLayerSpec> text_layers() const noexcept;
 
 private:
   struct Impl;
@@ -103,6 +194,15 @@ public:
   ScenePresentationBuilder &add_scale(const TrackScaleSpec &scale) noexcept;
   ScenePresentationBuilder &
   add_curve_layer(const CurveLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &add_pattern(const PatternDefinition &pattern) noexcept;
+  ScenePresentationBuilder &
+  add_interval_layer(const IntervalLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &
+  add_marker_layer(const MarkerLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &
+  add_symbol_layer(const SymbolLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &
+  add_text_layer(const TextLayerSpec &layer) noexcept;
   [[nodiscard]] ScenePresentation build() const noexcept;
 
 private:
@@ -140,6 +240,71 @@ struct PreparedCurvePoint {
   std::uint64_t sample_index{};
   double reference_depth{};
   double value{};
+};
+
+// Sentinel for layer members that have no associated prepared text run.
+inline constexpr std::uint64_t no_text_run =
+    std::numeric_limits<std::uint64_t>::max();
+
+struct PreparedIntervalLayer {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  std::uint64_t first_interval{};
+  std::uint64_t interval_count{};
+};
+
+// An interval clipped to its track bounds. `rect` is in scene millimetres;
+// pattern tiling is anchored at the pattern's `scene_anchor`, so adjacent
+// intervals and scrolling share phase. `label_run_index` indexes
+// PreparedScene::text_runs or equals `no_text_run`.
+struct PreparedInterval {
+  EntityId layer_id;
+  EntityId interval_id;
+  PhysicalRect rect{};
+  RgbaColor fill_color{};
+  EntityId pattern_id;
+  double top_reference_depth{};
+  double bottom_reference_depth{};
+  std::uint64_t label_run_index{no_text_run};
+};
+
+struct PreparedMarkerLayer {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  RgbaColor line_color{};
+  Millimetres line_width{};
+  std::uint64_t first_marker{};
+  std::uint64_t marker_count{};
+};
+
+// A zero-thickness marker line spanning the full track width at
+// `display_top` (scene millimetres).
+struct PreparedMarker {
+  EntityId layer_id;
+  EntityId marker_id;
+  Millimetres display_top{};
+  double reference_depth{};
+  std::uint64_t label_run_index{no_text_run};
+};
+
+struct PreparedSymbolLayer {
+  EntityId id;
+  EntityId track_id;
+  std::int32_t z_order{};
+  RgbaColor color{};
+  Millimetres symbol_size{};
+  std::uint64_t first_symbol{};
+  std::uint64_t symbol_count{};
+};
+
+struct PreparedSymbol {
+  EntityId layer_id;
+  EntityId symbol_id;
+  PhysicalPoint center{};
+  SymbolKind kind{SymbolKind::circle};
+  double reference_depth{};
 };
 
 struct CurvePick {
@@ -185,6 +350,16 @@ public:
   curve_segments() const noexcept;
   [[nodiscard]] std::span<const PreparedCurvePoint>
   curve_points() const noexcept;
+  [[nodiscard]] std::span<const PatternDefinition> patterns() const noexcept;
+  [[nodiscard]] std::span<const PreparedIntervalLayer>
+  interval_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedInterval> intervals() const noexcept;
+  [[nodiscard]] std::span<const PreparedMarkerLayer>
+  marker_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedMarker> markers() const noexcept;
+  [[nodiscard]] std::span<const PreparedSymbolLayer>
+  symbol_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedSymbol> symbols() const noexcept;
   [[nodiscard]] std::optional<CurvePick>
   pick_curve(const CurvePickQuery &query) const noexcept;
 
