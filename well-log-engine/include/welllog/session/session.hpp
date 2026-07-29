@@ -8,12 +8,17 @@
 
 #include <welllog/core/document.hpp>
 #include <welllog/core/result.hpp>
+#include <welllog/scene/scene.hpp>
 #include <welllog/session/export.hpp>
 
 namespace welllog {
 
 struct SetDocumentCommand {
   WellLogDocument document;
+};
+
+struct SetPresentationCommand {
+  ScenePresentation presentation;
 };
 
 struct CommandReceipt {
@@ -27,6 +32,8 @@ struct CommandReceipt {
 enum class ViewEventKind : std::uint8_t {
   documents_changed,
   diagnostic_published,
+  presentation_changed,
+  frame_ready,
 };
 
 struct ViewEvent {
@@ -60,11 +67,15 @@ public:
   WellLogSession &operator=(const WellLogSession &) = delete;
 
   [[nodiscard]] Result<CommandReceipt> execute(SetDocumentCommand command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetPresentationCommand &command);
   [[nodiscard]] std::span<const ViewEvent> events() const noexcept;
   void clear_events() noexcept;
   [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept;
   [[nodiscard]] std::shared_ptr<const WellLogDocument>
   document(EntityId id) const noexcept;
+  [[nodiscard]] std::shared_ptr<const PreparedScene>
+  prepared_scene(EntityId document_id) const noexcept;
 
 private:
   struct Impl;

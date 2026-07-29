@@ -149,6 +149,8 @@ public:
   [[nodiscard]] bool has_owner() const noexcept;
   [[nodiscard]] const BufferSourceReference &source() const noexcept;
   [[nodiscard]] BufferAccessMode access_mode() const noexcept;
+  [[nodiscard]] std::optional<double>
+  value_as_double(std::uint64_t index) const noexcept;
 
 private:
   struct Impl;

@@ -75,6 +75,63 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+add_library(welllog_scene ${WELLLOG_LIBRARY_TYPE}
+    src/scene/scene.cpp
+)
+add_library(WellLog::Scene ALIAS welllog_scene)
+set_target_properties(welllog_scene PROPERTIES
+    EXPORT_NAME Scene
+    OUTPUT_NAME welllog-scene
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_scene PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_scene)
+target_link_libraries(welllog_scene PUBLIC WellLog::Core)
+target_include_directories(welllog_scene
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_scene
+        PRIVATE WELLLOG_SCENE_BUILD
+        PUBLIC WELLLOG_SCENE_SHARED
+    )
+endif()
+
+add_library(welllog_export_vector ${WELLLOG_LIBRARY_TYPE}
+    src/export_vector/svg.cpp
+)
+add_library(WellLog::ExportVector ALIAS welllog_export_vector)
+set_target_properties(welllog_export_vector PROPERTIES
+    EXPORT_NAME ExportVector
+    OUTPUT_NAME welllog-export-vector
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_export_vector PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_export_vector)
+target_link_libraries(welllog_export_vector PUBLIC WellLog::Scene)
+target_include_directories(welllog_export_vector
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_export_vector
+        PRIVATE WELLLOG_EXPORT_VECTOR_BUILD
+        PUBLIC WELLLOG_EXPORT_VECTOR_SHARED
+    )
+endif()
+
 add_library(welllog_session ${WELLLOG_LIBRARY_TYPE}
     src/session/session.cpp
 )
@@ -89,11 +146,12 @@ set_target_properties(welllog_session PROPERTIES
 )
 target_compile_features(welllog_session PUBLIC cxx_std_20)
 welllog_enable_warnings(welllog_session)
-target_link_libraries(welllog_session PUBLIC WellLog::Core)
+target_link_libraries(welllog_session PUBLIC WellLog::Core WellLog::Scene)
 target_include_directories(welllog_session
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 if(WELLLOG_BUILD_SHARED)
     target_compile_definitions(
@@ -132,7 +190,12 @@ if(WELLLOG_BUILD_SHARED)
 endif()
 
 install(
-    TARGETS welllog_core welllog_session welllog_io
+    TARGETS
+        welllog_core
+        welllog_scene
+        welllog_export_vector
+        welllog_session
+        welllog_io
     EXPORT WellLogTargets
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -192,6 +255,17 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.manifest COMMAND welllog_manifest_tests)
 
+    add_executable(welllog_headless_svg_tests
+        tests/integration/headless_svg_test.cpp
+    )
+    target_compile_features(welllog_headless_svg_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_headless_svg_tests)
+    target_link_libraries(
+        welllog_headless_svg_tests
+        PRIVATE WellLog::ExportVector WellLog::Session
+    )
+    add_test(NAME welllog.headless-svg COMMAND welllog_headless_svg_tests)
+
     add_test(
         NAME welllog.package.consumer
         COMMAND
@@ -200,6 +274,25 @@ if(WELLLOG_BUILD_TESTS)
             "-DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer"
             "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/package-consumer"
             "-DTEST_CONFIG=$<CONFIG>"
+            "-DENGINE_GENERATOR=${CMAKE_GENERATOR}"
+            "-DENGINE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+            "-DENGINE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+            "-DENGINE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DENGINE_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+            "-DENGINE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer/run_consumer_test.cmake"
+    )
+    add_test(
+        NAME welllog.svg.package.consumer
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DENGINE_BUILD_DIR=${CMAKE_BINARY_DIR}"
+            "-DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/svg_consumer"
+            "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/svg-package-consumer"
+            "-DTEST_CONFIG=$<CONFIG>"
+            "-DENGINE_GENERATOR=${CMAKE_GENERATOR}"
+            "-DENGINE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+            "-DENGINE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
             "-DENGINE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
             "-DENGINE_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
             "-DENGINE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"

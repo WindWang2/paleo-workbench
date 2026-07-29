@@ -1,5 +1,7 @@
 #include <welllog/session/session.hpp>
 
+#include "scene/prepare.hpp"
+
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -287,6 +289,9 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, std::shared_ptr<const WellLogDocument>,
                      EntityIdHash>
       documents;
+  std::unordered_map<EntityId, std::shared_ptr<const PreparedScene>,
+                     EntityIdHash>
+      prepared_scenes;
   std::vector<ViewEvent> events;
   std::vector<Diagnostic> diagnostics;
 };
@@ -370,6 +375,7 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
     impl_->diagnostics.reserve(impl_->diagnostics.size() +
                                pending_diagnostics.size());
     impl_->documents.insert_or_assign(document_id, std::move(document));
+    impl_->prepared_scenes.erase(document_id);
     impl_->state_version = next_state_version;
     impl_->next_diagnostic_id += pending_diagnostics.size();
     impl_->events.insert(impl_->events.end(), pending_events.begin(),
@@ -404,6 +410,84 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
   }
 }
 
+Result<CommandReceipt>
+WellLogSession::execute(const SetPresentationCommand &command) {
+  try {
+    const auto document_id = command.presentation.document_id();
+    const auto document = impl_->documents.find(document_id);
+    if (document == impl_->documents.end()) {
+      return Error{
+          .code = ErrorCode::document_not_found,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::presentation_document_missing,
+          .arguments = {},
+      };
+    }
+    if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
+      return Error{
+          .code = ErrorCode::internal_error,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::internal_error,
+          .arguments = {},
+      };
+    }
+    auto prepared =
+        detail::ScenePreparer::prepare(*document->second, command.presentation);
+    if (!prepared) {
+      return prepared.error();
+    }
+
+    auto scene =
+        std::make_shared<const PreparedScene>(std::move(prepared).value());
+    const auto next_state_version = impl_->state_version + 1;
+    const auto revision = document->second->revision();
+    std::vector<ViewEvent> pending_events{
+        ViewEvent{
+            .kind = ViewEventKind::presentation_changed,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        },
+        ViewEvent{
+            .kind = ViewEventKind::frame_ready,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        },
+    };
+    impl_->events.reserve(impl_->events.size() + pending_events.size());
+    impl_->prepared_scenes.insert_or_assign(document_id, std::move(scene));
+    impl_->state_version = next_state_version;
+    impl_->events.insert(impl_->events.end(), pending_events.begin(),
+                         pending_events.end());
+    return CommandReceipt{
+        .state_version = next_state_version,
+        .document_id = document_id,
+        .document_revision = revision,
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = std::nullopt,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = std::nullopt,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
 std::span<const ViewEvent> WellLogSession::events() const noexcept {
   return impl_->events;
 }
@@ -418,6 +502,12 @@ std::shared_ptr<const WellLogDocument>
 WellLogSession::document(EntityId id) const noexcept {
   const auto found = impl_->documents.find(id);
   return found == impl_->documents.end() ? nullptr : found->second;
+}
+
+std::shared_ptr<const PreparedScene>
+WellLogSession::prepared_scene(EntityId document_id) const noexcept {
+  const auto found = impl_->prepared_scenes.find(document_id);
+  return found == impl_->prepared_scenes.end() ? nullptr : found->second;
 }
 
 } // namespace welllog

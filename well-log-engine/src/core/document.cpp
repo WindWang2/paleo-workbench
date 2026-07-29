@@ -1,6 +1,18 @@
 #include <welllog/core/document.hpp>
 
+#include <cstring>
+
 namespace welllog {
+namespace {
+
+template <typename T>
+[[nodiscard]] double load_as_double(const std::byte *data) noexcept {
+  T value{};
+  std::memcpy(&value, data, sizeof(T));
+  return static_cast<double>(value);
+}
+
+} // namespace
 
 std::uint64_t scalar_size_bytes(ScalarType type) noexcept {
   switch (type) {
@@ -156,6 +168,41 @@ const BufferSourceReference &BufferView::source() const noexcept {
 
 BufferAccessMode BufferView::access_mode() const noexcept {
   return impl_ == nullptr ? BufferAccessMode::zero_copy : impl_->access_mode;
+}
+
+std::optional<double>
+BufferView::value_as_double(std::uint64_t index) const noexcept {
+  if (impl_ == nullptr || impl_->data == nullptr || index >= impl_->length) {
+    return std::nullopt;
+  }
+  const auto element_size = scalar_size_bytes(impl_->scalar_type);
+  if (impl_->stride_bytes < element_size ||
+      impl_->byte_capacity < element_size ||
+      index > (impl_->byte_capacity - element_size) / impl_->stride_bytes) {
+    return std::nullopt;
+  }
+  const auto *value = impl_->data + index * impl_->stride_bytes;
+  switch (impl_->scalar_type) {
+  case ScalarType::float32:
+    return load_as_double<float>(value);
+  case ScalarType::float64:
+    return load_as_double<double>(value);
+  case ScalarType::int16:
+    return load_as_double<std::int16_t>(value);
+  case ScalarType::int32:
+    return load_as_double<std::int32_t>(value);
+  case ScalarType::int64:
+    return load_as_double<std::int64_t>(value);
+  case ScalarType::uint8:
+    return load_as_double<std::uint8_t>(value);
+  case ScalarType::uint16:
+    return load_as_double<std::uint16_t>(value);
+  case ScalarType::uint32:
+    return load_as_double<std::uint32_t>(value);
+  case ScalarType::uint64:
+    return load_as_double<std::uint64_t>(value);
+  }
+  return std::nullopt;
 }
 
 struct NullBitmapView::Impl {
