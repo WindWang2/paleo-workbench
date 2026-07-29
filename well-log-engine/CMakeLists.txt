@@ -769,7 +769,7 @@ if(WELLLOG_BUILD_TESTS)
     welllog_enable_warnings(welllog_multi_scale_tests)
     target_link_libraries(
         welllog_multi_scale_tests
-        PRIVATE WellLog::ExportVector WellLog::Session
+        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Session
     )
     add_test(
         NAME welllog.multi-scale-track

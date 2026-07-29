@@ -25,6 +25,11 @@ namespace {
   };
 }
 
+constexpr double header_line_height_factor = 1.25;
+constexpr double header_baseline_factor = 0.85;
+constexpr double header_padding_millimetres = 0.5;
+constexpr double header_left_padding_millimetres = 1.0;
+
 template <typename Layer>
 void order_layers_by_z(std::vector<const Layer *> &layers) {
   std::stable_sort(layers.begin(), layers.end(),
@@ -1597,7 +1602,8 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       if (track.header.height.value <= 0.0) {
         continue;
       }
-      const auto line_height = track.header.font_size.value * 1.25;
+      const auto line_height =
+          track.header.font_size.value * header_line_height_factor;
       std::uint64_t line = 0;
       for (const auto *layer_pointer : ordered_layers) {
         if (stop_token.stop_requested()) {
@@ -1632,9 +1638,12 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           ++suppressed_runs;
         } else {
           const auto anchor = PhysicalPoint{
-              .left = Millimetres{track_bounds.at(track.id).left.value + 1.0},
+              .left = Millimetres{track_bounds.at(track.id).left.value +
+                                  header_left_padding_millimetres},
               .top = Millimetres{static_cast<double>(line) * line_height +
-                                 track.header.font_size.value * 0.85 + 0.5},
+                                 track.header.font_size.value *
+                                     header_baseline_factor +
+                                 header_padding_millimetres},
           };
           const auto run = append_text_run(
               layer.id, layer.id, text, "", TextOrientation::horizontal, 0.0,

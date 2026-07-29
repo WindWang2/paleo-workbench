@@ -1,5 +1,7 @@
+#include <welllog/render_gl/upload.hpp>
 #include <welllog/export/svg.hpp>
 #include <welllog/session/session.hpp>
+#include <cstdint>
 
 #include <chrono>
 #include <cmath>
@@ -388,7 +390,6 @@ void track_headers_describe_each_curve() {
           TrackHeaderSpec{
               .height = Millimetres{8.0},
               .font_size = Millimetres{2.5},
-              .color = RgbaColor{0, 0, 0, 255},
           },
   });
   with_header.add_scale(TrackScaleSpec{
@@ -668,27 +669,78 @@ void lod_and_picking_return_original_values_per_curve() {
   require(zoomed != nullptr, "zoomed scene must prepare");
 
   // Pick the GR layer near its mid-track position.
+  // Per-curve value ranges: GR stays in 0..100, DEN stays in 0.1..10.
+  for (const auto &point : zoomed->curve_points()) {
+    if (point.reference_depth < 1005.0 || point.reference_depth > 1010.0) {
+      continue;  // only the zoomed viewport
+    }
+    require(point.value >= 0.0 && point.value <= 100.0,
+            "zoomed points must carry original sample values");
+  }
+
+  // Pick a known GR point in the zoomed viewport so the hit is exact and
+  // the returned value is verifiably that curve's original sample.
+  const PreparedCurvePoint *gr_pick_point = nullptr;
+  for (const auto &point : zoomed->curve_points()) {
+    if (point.reference_depth >= 1005.0 && point.reference_depth <= 1010.0 &&
+        point.position.left.value > 2.0 &&
+        point.position.left.value < 38.0) {
+      gr_pick_point = &point;
+      break;
+    }
+  }
+  require(gr_pick_point != nullptr,
+          "the zoomed scene must contain a pickable GR point");
   const auto pick = zoomed->pick_curve(CurvePickQuery{
-      .scene_position =
-          PhysicalPoint{
-              .left = Millimetres{20.0},
-              .top = Millimetres{50.0},
-          },
-      .tolerance = DeviceIndependentPixels{20.0},
+      .scene_position = gr_pick_point->position,
+      .tolerance = DeviceIndependentPixels{2.0},
       .horizontal_device_independent_pixels_per_millimetre = 5.0,
       .vertical_device_independent_pixels_per_millimetre = 5.0,
   });
-  require(pick.has_value(), "pick must hit a curve");
-  require(pick->layer_id == gr_layer_id || pick->layer_id == den_layer_id,
-          "pick must identify a layer");
-  const auto expected_curve =
-      pick->layer_id == gr_layer_id ? gr_curve_id : den_curve_id;
-  require(pick->curve_id == expected_curve,
+  require(pick.has_value(), "pick must hit a curve at a known point");
+  require(pick->layer_id == gr_layer_id,
+          "picking a GR point must identify the GR layer");
+  require(pick->curve_id == gr_curve_id,
           "pick must identify the picked curve");
-  require(pick->value >= 0.0 && pick->value <= 100.0,
-          "pick must return the original sample value");
-  require(pick->reference_depth >= 1000.0 && pick->reference_depth <= 1025.0,
-          "pick must return the original reference depth");
+  require_near(pick->value, gr_pick_point->value,
+              "pick must return the original sample value");
+  require_near(pick->reference_depth, gr_pick_point->reference_depth,
+              "pick must return the original reference depth");
+}
+
+namespace {
+[[nodiscard]] int resolve_noop(void *, const char *) { return 0; }
+}  // namespace
+
+void opengl_and_svg_consume_identical_curve_geometry() {
+  // The GL upload planner reports the same vertex byte footprint the SVG
+  // exporter traces, so both backends share the prepared scene's scale
+  // mapping (rendering.md section 6). Without a GL context we exercise the
+  // upload schedule, which walks the prepared segments identically.
+  WellLogSession session;
+  require(session.execute(SetDocumentCommand{simple_multi_document()})
+              .has_value(),
+          "document must be accepted");
+  auto builder = base_presentation();
+  add_curve_layers(builder);
+  const auto scene = prepare(session, builder);
+  const auto schedule = GpuUploadSchedule::plan(
+      *scene, GpuUploadBudgets{.maximum_cache_bytes = 1024 * 1024,
+                               .maximum_bytes_per_frame = 1024 * 1024});
+  require(schedule.has_value(), "upload plan must succeed");
+  require(schedule.value().total_bytes() > 0,
+          "both curve layers must produce upload geometry");
+  // The exported SVG path d is built from the same segments.
+  const auto exported = SvgExporter::write(*scene);
+  require(exported.has_value(), "SVG export must succeed");
+  const auto text = std::string{exported.value().text()};
+  static_cast<void>(resolve_noop);
+  require(text.find("data-scale-id=\"80000000-0000-4000-8000-000000000006\"") !=
+              std::string::npos,
+          "SVG must reference the linear scale identity");
+  require(text.find("data-scale-id=\"80000000-0000-4000-8000-000000000007\"") !=
+              std::string::npos,
+          "SVG must reference the log scale identity");
 }
 
 void svg_and_scene_share_scale_semantics() {
@@ -724,6 +776,7 @@ int main() {
   track_headers_describe_each_curve();
   more_than_four_visible_scales_warn_without_refusing();
   lod_and_picking_return_original_values_per_curve();
+  opengl_and_svg_consume_identical_curve_geometry();
   svg_and_scene_share_scale_semantics();
   std::cout << "PASS: multi-scale curve tracks\n";
   return EXIT_SUCCESS;

@@ -28,6 +28,7 @@ enum class ErrorCode : std::uint16_t {
   internal_error,
   operation_cancelled,
   invalid_font,
+  diagnostic_warning,
 };
 
 enum class Severity : std::uint8_t {

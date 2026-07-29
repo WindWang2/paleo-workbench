@@ -47,7 +47,6 @@ enum class ScaleMode : std::uint8_t {
 struct TrackHeaderSpec {
   Millimetres height{0.0};
   Millimetres font_size{2.5};
-  RgbaColor color{0, 0, 0, 255};
 };
 
 struct TrackSpec {

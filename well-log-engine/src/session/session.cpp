@@ -683,7 +683,7 @@ struct WellLogSession::Impl {
         diagnostic_errors.emplace(
             diagnostic_id,
             Error{
-                .code = ErrorCode::invalid_presentation,
+                .code = ErrorCode::diagnostic_warning,
                 .severity = severity,
                 .entity_id = issue.entity_id,
                 .message = message,
