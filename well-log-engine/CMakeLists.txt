@@ -736,6 +736,28 @@ if(WELLLOG_BUILD_TESTS)
             NAME welllog.layer-svg
             COMMAND welllog_layer_svg_tests
         )
+
+        add_executable(welllog_scene_snapshot_tests
+            tests/integration/scene_snapshot_test.cpp
+        )
+        target_compile_features(
+            welllog_scene_snapshot_tests
+            PRIVATE cxx_std_20
+        )
+        welllog_enable_warnings(welllog_scene_snapshot_tests)
+        target_compile_definitions(
+            welllog_scene_snapshot_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_link_libraries(
+            welllog_scene_snapshot_tests
+            PRIVATE WellLog::Text WellLog::Session
+        )
+        add_test(
+            NAME welllog.scene-snapshot
+            COMMAND welllog_scene_snapshot_tests
+        )
     endif()
 
     add_executable(welllog_manifest_tests
