@@ -23,6 +23,17 @@ namespace {
   };
 }
 
+template <typename Layer>
+void order_layers_by_z(std::vector<const Layer *> &layers) {
+  std::stable_sort(layers.begin(), layers.end(),
+                   [](const Layer *left_layer, const Layer *right_layer) {
+                     if (left_layer->z_order != right_layer->z_order) {
+                       return left_layer->z_order < right_layer->z_order;
+                     }
+                     return left_layer->id < right_layer->id;
+                   });
+}
+
 [[nodiscard]] Error cancellation_error() {
   return Error{
       .code = ErrorCode::operation_cancelled,
@@ -498,6 +509,39 @@ std::span<const SceneTextIssue> PreparedScene::text_issues() const noexcept {
              : std::span<const SceneTextIssue>{impl_->text_issues};
 }
 
+std::optional<EntityId>
+PreparedScene::track_id_for_layer(EntityId layer_id) const noexcept {
+  if (impl_ == nullptr) {
+    return std::nullopt;
+  }
+  for (const auto &layer : impl_->curve_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->interval_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->marker_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->symbol_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->text_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<CurvePick>
 PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
   const auto &position = query.scene_position;
@@ -753,14 +797,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     for (const auto &layer : presentation.curve_layers()) {
       ordered_layers.push_back(&layer);
     }
-    std::stable_sort(ordered_layers.begin(), ordered_layers.end(),
-                     [](const CurveLayerSpec *left_layer,
-                        const CurveLayerSpec *right_layer) {
-                       if (left_layer->z_order != right_layer->z_order) {
-                         return left_layer->z_order < right_layer->z_order;
-                       }
-                       return left_layer->id < right_layer->id;
-                     });
+    order_layers_by_z(ordered_layers);
 
     for (const auto *layer_pointer : ordered_layers) {
       if (stop_token.stop_requested()) {
@@ -1074,15 +1111,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     for (const auto &layer : presentation.interval_layers()) {
       ordered_interval_layers.push_back(&layer);
     }
-    std::stable_sort(
-        ordered_interval_layers.begin(), ordered_interval_layers.end(),
-        [](const IntervalLayerSpec *left_layer,
-           const IntervalLayerSpec *right_layer) {
-          if (left_layer->z_order != right_layer->z_order) {
-            return left_layer->z_order < right_layer->z_order;
-          }
-          return left_layer->id < right_layer->id;
-        });
+    order_layers_by_z(ordered_interval_layers);
 
     for (const auto *layer_pointer : ordered_interval_layers) {
       if (stop_token.stop_requested()) {
@@ -1156,15 +1185,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     for (const auto &layer : presentation.marker_layers()) {
       ordered_marker_layers.push_back(&layer);
     }
-    std::stable_sort(
-        ordered_marker_layers.begin(), ordered_marker_layers.end(),
-        [](const MarkerLayerSpec *left_layer,
-           const MarkerLayerSpec *right_layer) {
-          if (left_layer->z_order != right_layer->z_order) {
-            return left_layer->z_order < right_layer->z_order;
-          }
-          return left_layer->id < right_layer->id;
-        });
+    order_layers_by_z(ordered_marker_layers);
 
     for (const auto *layer_pointer : ordered_marker_layers) {
       if (stop_token.stop_requested()) {
@@ -1219,15 +1240,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     for (const auto &layer : presentation.symbol_layers()) {
       ordered_symbol_layers.push_back(&layer);
     }
-    std::stable_sort(
-        ordered_symbol_layers.begin(), ordered_symbol_layers.end(),
-        [](const SymbolLayerSpec *left_layer,
-           const SymbolLayerSpec *right_layer) {
-          if (left_layer->z_order != right_layer->z_order) {
-            return left_layer->z_order < right_layer->z_order;
-          }
-          return left_layer->id < right_layer->id;
-        });
+    order_layers_by_z(ordered_symbol_layers);
 
     for (const auto *layer_pointer : ordered_symbol_layers) {
       if (stop_token.stop_requested()) {
@@ -1290,14 +1303,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       }
       ordered_text_layers.push_back(&layer);
     }
-    std::stable_sort(
-        ordered_text_layers.begin(), ordered_text_layers.end(),
-        [](const TextLayerSpec *left_layer, const TextLayerSpec *right_layer) {
-          if (left_layer->z_order != right_layer->z_order) {
-            return left_layer->z_order < right_layer->z_order;
-          }
-          return left_layer->id < right_layer->id;
-        });
+    order_layers_by_z(ordered_text_layers);
 
     // Text preparation. Shaping goes through the injected TextEngine so
     // the core stays free of text-rendering dependencies (ADR 0029); the
@@ -1609,7 +1615,11 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     }
 
     // Resolve outlines and font metadata for every glyph the runs use so
-    // the prepared scene is self-contained for both backends.
+    // the prepared scene is self-contained for both backends. The used
+    // sets are empty when no engine shaped anything.
+    if (text_engine == nullptr) {
+      return PreparedScene{std::move(scene)};
+    }
     for (const auto font_index : used_font_indices) {
       if (stop_token.stop_requested()) {
         return cancellation_error();

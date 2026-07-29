@@ -7,6 +7,7 @@
 #include <welllog/session/session.hpp>
 #include <welllog/text/harfbuzz_text_engine.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -366,12 +367,142 @@ std::shared_ptr<const PreparedScene> make_snapshot_scene(
   return scene;
 }
 
-constexpr std::string_view expected_fingerprint_prefix = "";
+void missing_glyphs_and_clipping_enter_the_snapshot_scene() {
+  auto engine = std::make_shared<HarfBuzzTextEngine>();
+  require(engine
+              ->add_project_font(std::string{WELLLOG_TEST_FONT_DIR} +
+                                 "/NotoSans-Regular.ttf")
+              .has_value(),
+          "bundled test font must load");
+  WellLogSession session;
+  session.set_text_engine(std::move(engine));
+
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1010.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1.0, 2.0});
+  WellLogDocumentBuilder document(document_id, DocumentRevision{12});
+  document.add_sampling_axis(SamplingAxis{
+      .id = axis_id,
+      .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth,
+      .unit = "m",
+      .direction = AxisDirection::increasing,
+  });
+  document.add_curve(Curve{
+      .id = curve_id,
+      .mnemonic = "GR",
+      .display_name = "Gamma Ray",
+      .unit = "API",
+      .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values),
+      .nulls = {},
+  });
+  // Crosses the visible range bottom: must clamp to the scene edge.
+  document.add_interval(Interval{
+      .id = interval_id,
+      .top_reference_depth = 1006.0,
+      .bottom_reference_depth = 1014.0,
+      .semantic = IntervalSemantic::lithology,
+      .pattern_id = {},
+      .fill_color = RgbaColor{90, 90, 90, 255},
+      .label = {},
+  });
+  document.add_annotation(TextAnnotation{
+      .id = note_id,
+      .anchor = AnnotationAnchor::reference_depth,
+      .reference_depth = 1002.0,
+      .track_fraction = 0.5,
+      .track_id = {},
+      .depth_fraction = 0.0,
+      .horizontal_fraction = 0.0,
+      .scene_point = {},
+      .text = "A\xF4\x8F\xBF\xBE", // A + U+10FFFE (uncovered)
+      .language = "en",
+      .orientation = TextOrientation::horizontal,
+      .rotation_degrees = 0.0,
+      .font_size = Millimetres{4.0},
+  });
+  require(session.execute(SetDocumentCommand{document.build()}).has_value(),
+          "document must be accepted");
+  ScenePresentationBuilder presentation(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = "m",
+          .top = 1000.0,
+          .bottom = 1010.0,
+      },
+      Millimetres{100.0}, "font-fixture-v1");
+  presentation.add_track(TrackSpec{
+      .id = track_id,
+      .width = Millimetres{40.0},
+      .z_order = 0,
+  });
+  presentation.add_interval_layer(IntervalLayerSpec{
+      .id = interval_layer_id,
+      .track_id = track_id,
+      .z_order = 0,
+      .draw_labels = false,
+      .label_font_size = Millimetres{3.0},
+      .label_color = RgbaColor{0, 0, 0, 255},
+  });
+  presentation.add_text_layer(TextLayerSpec{
+      .id = text_layer_id,
+      .track_id = track_id,
+      .z_order = 1,
+      .color = RgbaColor{0, 0, 0, 255},
+  });
+  require(session.execute(SetPresentationCommand{presentation.build()})
+              .has_value(),
+          "presentation must be accepted");
+  const auto scene = session.prepared_scene(document_id);
+  require(scene != nullptr, "scene must be prepared");
+
+  // Clipping: the interval crossing the range bottom clamps to 100mm.
+  require(scene->intervals().size() == 1, "one interval expected");
+  const auto &interval = scene->intervals().front();
+  require(interval.rect.top.value == 60.0 &&
+              interval.rect.height.value == 40.0,
+          "interval crossing the range must clamp to the scene edge");
+
+  // Missing glyphs: an explicit issue names the offending annotation and
+  // the replacement glyph is not a silent .notdef box.
+  auto found_issue = false;
+  for (const auto &issue : scene->text_issues()) {
+    if (issue.code == TextIssueCode::missing_glyphs &&
+        issue.entity_id == note_id) {
+      found_issue = true;
+      require(issue.occurrence_count == 1,
+              "exactly one missing code point must be counted");
+    }
+  }
+  require(found_issue, "the missing glyph must be issued by the scene");
+  const auto snapshot = snapshot_scene(*scene);
+  auto found_replacement = false;
+  for (const auto &glyph : scene->glyphs()) {
+    if (glyph.code_point == 0x10FFFE) {
+      found_replacement = true;
+      require(glyph.glyph_id != 0,
+              "replacement must not be a silent .notdef glyph");
+      const auto font = std::find_if(
+          scene->text_fonts().begin(), scene->text_fonts().end(),
+          [&](const PreparedTextFont &candidate) {
+            return candidate.index == glyph.font_index;
+          });
+      require(font != scene->text_fonts().end() &&
+                  font->fingerprint == "builtin:font5x7:v1",
+              "replacement must come from the built-in fallback font");
+    }
+  }
+  require(found_replacement, "the replacement glyph must be in the scene");
+  require(!scene->glyph_outlines().empty(),
+          "the replacement outline must be embedded");
+}
 
 } // namespace
 
 int main(int argc, char **argv) {
-  static_cast<void>(expected_fingerprint_prefix);
   auto engine = std::make_shared<HarfBuzzTextEngine>();
   require(engine
               ->add_project_font(std::string{WELLLOG_TEST_FONT_DIR} +
@@ -441,6 +572,7 @@ outline font=0 gid=86 advance=0.479 box=0.051,-0.01,0.434,0.546 commands=32
     std::cerr << "snapshot mismatch; actual:\n" << snapshot;
     fail("prepared scene snapshot must match the golden snapshot");
   }
+  missing_glyphs_and_clipping_enter_the_snapshot_scene();
   std::cout << "PASS: prepared scene semantic snapshot\n";
   return EXIT_SUCCESS;
 }

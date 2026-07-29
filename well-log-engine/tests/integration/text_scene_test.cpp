@@ -3,7 +3,6 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string_view>
@@ -60,7 +59,9 @@ std::shared_ptr<HarfBuzzTextEngine> make_engine() {
   const auto font = engine->add_project_font(
       std::string{WELLLOG_TEST_FONT_DIR} + "/NotoSans-Regular.ttf");
   require(font.has_value(), "bundled test font must load");
-  engine->add_system_font_directory("/usr/share/fonts/noto-cjk");
+  const auto cjk_font = engine->add_project_font(
+      std::string{WELLLOG_TEST_FONT_DIR} + "/SourceHanSansCN-subset.otf");
+  require(cjk_font.has_value(), "bundled CJK subset font must load");
   return engine;
 }
 
@@ -177,12 +178,6 @@ const PreparedTextRun &find_run(const PreparedScene &scene, EntityId source) {
 }
 
 void horizontal_rotated_and_vertical_runs_prepare_positions() {
-  const std::string cjk_path =
-      "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
-  if (!std::filesystem::exists(cjk_path)) {
-    std::cout << "SKIP: vertical scene test needs " << cjk_path << '\n';
-    return;
-  }
   WellLogSession session;
   session.set_text_engine(make_engine());
   require(session.execute(SetDocumentCommand{text_document()}).has_value(),

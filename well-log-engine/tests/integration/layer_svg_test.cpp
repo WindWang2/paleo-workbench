@@ -3,7 +3,6 @@
 #include <welllog/text/harfbuzz_text_engine.hpp>
 
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -307,15 +306,13 @@ void export_is_byte_for_byte_deterministic() {
 }
 
 void vertical_cjk_text_exports_upright_glyphs() {
-  const std::string cjk_path =
-      "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
-  if (!std::filesystem::exists(cjk_path)) {
-    std::cout << "SKIP: vertical SVG test needs " << cjk_path << '\n';
-    return;
-  }
   WellLogSession session;
   auto engine = make_engine();
-  engine->add_system_font_directory("/usr/share/fonts/noto-cjk");
+  require(engine
+              ->add_project_font(std::string{WELLLOG_TEST_FONT_DIR} +
+                                 "/SourceHanSansCN-subset.otf")
+              .has_value(),
+          "bundled CJK subset font must load");
   session.set_text_engine(std::move(engine));
 
   auto depths = std::make_shared<const std::vector<double>>(

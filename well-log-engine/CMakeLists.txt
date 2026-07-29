@@ -50,6 +50,7 @@ if(WELLLOG_BUILD_TEXT)
     pkg_check_modules(HarfBuzz REQUIRED IMPORTED_TARGET harfbuzz)
     pkg_check_modules(FreeType REQUIRED IMPORTED_TARGET freetype2)
     pkg_check_modules(ICU_UC REQUIRED IMPORTED_TARGET icu-uc)
+    pkg_check_modules(ICU_I18N REQUIRED IMPORTED_TARGET icu-i18n)
 endif()
 
 if(WELLLOG_BUILD_PYTHON)
@@ -386,6 +387,7 @@ if(WELLLOG_BUILD_TEXT)
             PkgConfig::HarfBuzz
             PkgConfig::FreeType
             PkgConfig::ICU_UC
+            PkgConfig::ICU_I18N
     )
     target_include_directories(welllog_text
         PUBLIC

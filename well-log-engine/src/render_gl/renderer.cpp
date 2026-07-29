@@ -509,6 +509,11 @@ struct PrimitiveBatch {
   GlFloat atlas_dv{};
 };
 
+[[nodiscard]] constexpr std::uint64_t
+glyph_atlas_key(std::uint32_t font_index, std::uint32_t glyph_id) {
+  return (static_cast<std::uint64_t>(font_index) << 32U) | glyph_id;
+}
+
 void append_quad(std::vector<PrimitiveVertex> &vertices, double left,
                  double top, double right, double bottom, float u0, float v0,
                  float u1, float v1) {
@@ -1016,11 +1021,9 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
                         static_cast<std::size_t>(row) * raster.width,
                     raster.width);
       }
-      const auto key = (static_cast<std::uint64_t>(outline.font_index)
-                        << 32U) |
-                       outline.glyph_id;
       glyph_atlas_entries.emplace(
-          key, GlyphAtlasEntry{
+          glyph_atlas_key(outline.font_index, outline.glyph_id),
+          GlyphAtlasEntry{
                    .u0 = static_cast<float>(rect->left) / atlas_extent,
                    .v0 = static_cast<float>(rect->top) / atlas_extent,
                    .u1 = static_cast<float>(rect->left + rect->width) /
@@ -1142,31 +1145,9 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
       }
     }
     const auto clip_for_run = [&](const PreparedTextRun &run) {
-      const auto in_text =
-          std::find_if(scene.text_layers().begin(), scene.text_layers().end(),
-                       [&](const PreparedTextLayer &layer) {
-                         return layer.id == run.layer_id;
-                       });
-      if (in_text != scene.text_layers().end()) {
-        return clip_for_track(in_text->track_id);
-      }
-      const auto in_interval = std::find_if(
-          scene.interval_layers().begin(), scene.interval_layers().end(),
-          [&](const PreparedIntervalLayer &layer) {
-            return layer.id == run.layer_id;
-          });
-      if (in_interval != scene.interval_layers().end()) {
-        return clip_for_track(in_interval->track_id);
-      }
-      const auto in_marker = std::find_if(
-          scene.marker_layers().begin(), scene.marker_layers().end(),
-          [&](const PreparedMarkerLayer &layer) {
-            return layer.id == run.layer_id;
-          });
-      if (in_marker != scene.marker_layers().end()) {
-        return clip_for_track(in_marker->track_id);
-      }
-      return PhysicalRect{};
+      const auto track_id = scene.track_id_for_layer(run.layer_id);
+      return track_id.has_value() ? clip_for_track(*track_id)
+                                  : PhysicalRect{};
     };
     for (const auto &run : scene.text_runs()) {
       const auto clip = clip_for_run(run);
@@ -1175,10 +1156,8 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
       for (std::uint64_t offset = 0; offset < run.glyph_count; ++offset) {
         const auto &glyph = scene.glyphs()[static_cast<std::size_t>(
             run.first_glyph + offset)];
-        const auto key = (static_cast<std::uint64_t>(glyph.font_index)
-                          << 32U) |
-                         glyph.glyph_id;
-        const auto entry = glyph_atlas_entries.find(key);
+        const auto entry = glyph_atlas_entries.find(
+            glyph_atlas_key(glyph.font_index, glyph.glyph_id));
         if (entry == glyph_atlas_entries.end()) {
           continue;
         }
@@ -1230,6 +1209,13 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
     if (primitive_vertices.size() >
         static_cast<std::size_t>(std::numeric_limits<GlInt>::max())) {
       return false;
+    }
+
+    // Center primitive vertices vertically before the float conversion so
+    // deep scenes keep sub-millimetre precision (rendering.md section 2).
+    const auto scene_y_center = scene.physical_height().value * 0.5;
+    for (auto &vertex : primitive_vertices) {
+      vertex.scene_top -= static_cast<GlFloat>(scene_y_center);
     }
 
     impl_->staging_buffer = 1U - impl_->active_buffer;
@@ -1491,8 +1477,11 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
     const auto mm_scale_y =
         static_cast<GlFloat>(-impl_->depth_span /
                              (impl_->scene_height * viewport_half_span));
+    const auto scene_y_center = impl_->scene_height * 0.5;
     const auto mm_offset_y = static_cast<GlFloat>(
-        (viewport_center - impl_->depth_top) / viewport_half_span);
+        (viewport_center - impl_->depth_top) / viewport_half_span -
+        impl_->depth_span / (impl_->scene_height * viewport_half_span) *
+            scene_y_center);
     impl_->gl.active_texture(gl_texture0);
 
     // Pass order follows rendering.md: intervals/patterns, markers and

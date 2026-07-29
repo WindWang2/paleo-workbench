@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <string_view>
 
@@ -27,6 +26,15 @@ void require(bool condition, std::string_view message) {
 
 const std::string test_font_path =
     std::string{WELLLOG_TEST_FONT_DIR} + "/NotoSans-Regular.ttf";
+const std::string test_cjk_font_path =
+    std::string{WELLLOG_TEST_FONT_DIR} + "/SourceHanSansCN-subset.otf";
+
+void register_test_fonts(HarfBuzzTextEngine &engine) {
+  require(engine.add_project_font(test_font_path).has_value(),
+          "the bundled Latin test font must load");
+  require(engine.add_project_font(test_cjk_font_path).has_value(),
+          "the bundled CJK subset font must load");
+}
 
 [[nodiscard]] bool code_point_missing(const ShapedRun &run, char32_t cp) {
   for (const auto missing : run.missing_code_points) {
@@ -160,15 +168,7 @@ void built_in_fallback_covers_ascii_without_font_files() {
 
 void vertical_typesetting_uses_uax50_orientation() {
   HarfBuzzTextEngine engine;
-  require(engine.add_project_font(test_font_path).has_value(),
-          "project font must load");
-  const std::string cjk_path =
-      "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
-  if (!std::filesystem::exists(cjk_path)) {
-    std::cout << "SKIP: vertical CJK test needs " << cjk_path << '\n';
-    return;
-  }
-  engine.add_system_font_directory("/usr/share/fonts/noto-cjk");
+  register_test_fonts(engine);
   const auto run = engine.shape(TextShapeRequest{
       .text = "\xE7\xA0\x82" "A", // 砂 A
       .language = "zh-Hans",
@@ -189,15 +189,7 @@ void vertical_typesetting_uses_uax50_orientation() {
 
 void rotated_cjk_shaping_uses_harfbuzz_clusters() {
   HarfBuzzTextEngine engine;
-  require(engine.add_project_font(test_font_path).has_value(),
-          "project font must load");
-  const std::string cjk_path =
-      "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
-  if (!std::filesystem::exists(cjk_path)) {
-    std::cout << "SKIP: horizontal CJK test needs " << cjk_path << '\n';
-    return;
-  }
-  engine.add_system_font_directory("/usr/share/fonts/noto-cjk");
+  register_test_fonts(engine);
   const auto run = engine.shape(TextShapeRequest{
       .text = "\xE7\xA0\x82\xE5\xB2\xA9 Sand", // 砂岩 Sand
       .language = "zh-Hans",

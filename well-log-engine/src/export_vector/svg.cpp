@@ -625,23 +625,8 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
       }
       const auto glyphs = scene.glyphs();
       for (const auto &run : scene.text_runs()) {
-        const auto in_text_layer =
-            std::any_of(scene.text_layers().begin(), scene.text_layers().end(),
-                        [&](const PreparedTextLayer &layer) {
-                          return layer.track_id == track.id &&
-                                 layer.id == run.layer_id;
-                        });
-        const auto in_interval_layer = std::any_of(
-            scene.interval_layers().begin(), scene.interval_layers().end(),
-            [&](const PreparedIntervalLayer &layer) {
-              return layer.track_id == track.id && layer.id == run.layer_id;
-            });
-        const auto in_marker_layer = std::any_of(
-            scene.marker_layers().begin(), scene.marker_layers().end(),
-            [&](const PreparedMarkerLayer &layer) {
-              return layer.track_id == track.id && layer.id == run.layer_id;
-            });
-        if (!in_text_layer && !in_interval_layer && !in_marker_layer) {
+        const auto run_track = scene.track_id_for_layer(run.layer_id);
+        if (!run_track.has_value() || *run_track != track.id) {
           continue;
         }
         output += "<g id=\"run-";

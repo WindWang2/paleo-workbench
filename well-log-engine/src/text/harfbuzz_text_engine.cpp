@@ -13,6 +13,8 @@
 #include <hb-ot.h>
 
 #include <unicode/uchar.h>
+#include <unicode/ubrk.h>
+#include <unicode/ustring.h>
 
 #include <algorithm>
 #include <cctype>
@@ -476,6 +478,65 @@ struct HarfBuzzTextEngine::Impl {
             assignment[index] = font;
             break;
           }
+        }
+      }
+    }
+
+    // Grapheme clusters (ICU BreakIterator, created per shaping call so
+    // every worker thread uses its own iterator) keep one font whenever
+    // the base character's font covers the whole cluster; shaping then
+    // sees the cluster as one HarfBuzz segment.
+    {
+      std::vector<std::int32_t> utf16_offsets;
+      utf16_offsets.reserve(code_points.size() + 1);
+      std::int32_t utf16_length = 0;
+      for (const auto &code_point : code_points) {
+        utf16_offsets.push_back(utf16_length);
+        utf16_length += code_point.code_point > 0xFFFF ? 2 : 1;
+      }
+      utf16_offsets.push_back(utf16_length);
+      std::vector<UChar> utf16(static_cast<std::size_t>(utf16_length));
+      UErrorCode conversion_status = U_ZERO_ERROR;
+      u_strFromUTF8(utf16.data(), utf16_length, nullptr,
+                    request.text.data(),
+                    static_cast<std::int32_t>(request.text.size()),
+                    &conversion_status);
+      UErrorCode status = U_ZERO_ERROR;
+      UBreakIterator *iterator =
+          ubrk_open(UBRK_CHARACTER, "root", utf16.data(), utf16_length,
+                    &status);
+      if (U_SUCCESS(status) && iterator != nullptr) {
+        std::vector<std::uint32_t> cluster_of(code_points.size());
+        std::uint32_t cluster = 0;
+        auto boundary = ubrk_first(iterator);
+        for (std::size_t index = 0; index < code_points.size(); ++index) {
+          while (boundary != UBRK_DONE &&
+                 boundary <= utf16_offsets[index]) {
+            if (boundary > 0) {
+              ++cluster;
+            }
+            boundary = ubrk_next(iterator);
+          }
+          cluster_of[index] = cluster;
+        }
+        ubrk_close(iterator);
+        std::size_t cluster_begin = 0;
+        while (cluster_begin < code_points.size()) {
+          std::size_t cluster_end = cluster_begin + 1;
+          while (cluster_end < code_points.size() &&
+                 cluster_of[cluster_end] == cluster_of[cluster_begin]) {
+            ++cluster_end;
+          }
+          const auto cluster_font = assignment[cluster_begin];
+          if (cluster_font.has_value()) {
+            for (std::size_t index = cluster_begin + 1; index < cluster_end;
+                 ++index) {
+              if (covers(*cluster_font, code_points[index].code_point)) {
+                assignment[index] = cluster_font;
+              }
+            }
+          }
+          cluster_begin = cluster_end;
         }
       }
     }

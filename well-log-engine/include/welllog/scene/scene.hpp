@@ -443,6 +443,11 @@ public:
   [[nodiscard]] std::span<const OutlineCommand>
   outline_commands() const noexcept;
   [[nodiscard]] std::span<const SceneTextIssue> text_issues() const noexcept;
+  // Resolves the owning track of any prepared layer identity (curve,
+  // interval, marker, symbol or text), for backends mapping layer-scoped
+  // content back to its track clip.
+  [[nodiscard]] std::optional<EntityId>
+  track_id_for_layer(EntityId layer_id) const noexcept;
   [[nodiscard]] std::optional<CurvePick>
   pick_curve(const CurvePickQuery &query) const noexcept;
 
