@@ -16,6 +16,10 @@ project(
     LANGUAGES CXX
 )
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -23,6 +27,23 @@ include(GNUInstallDirs)
 option(WELLLOG_BUILD_TESTS "Build WellLogEngine tests" ${BUILD_TESTING})
 option(WELLLOG_BUILD_SHARED "Build WellLogEngine shared libraries" OFF)
 option(WELLLOG_WARNINGS_AS_ERRORS "Treat WellLogEngine warnings as errors" OFF)
+option(
+    WELLLOG_BUILD_QT_WIDGETS
+    "Build the optional Qt Widgets/OpenGL adapter"
+    OFF
+)
+
+if(WELLLOG_BUILD_QT_WIDGETS)
+    find_package(
+        Qt6 6.8
+        REQUIRED
+        COMPONENTS Widgets OpenGLWidgets
+    )
+    if(WELLLOG_BUILD_TESTS)
+        find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+    endif()
+    qt_standard_project_setup(REQUIRES 6.8)
+endif()
 
 if(WELLLOG_BUILD_SHARED)
     set(WELLLOG_LIBRARY_TYPE SHARED)
@@ -189,6 +210,75 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+if(WELLLOG_BUILD_QT_WIDGETS)
+    add_library(welllog_render_gl ${WELLLOG_LIBRARY_TYPE}
+        src/render_gl/capability.cpp
+        src/render_gl/renderer.cpp
+    )
+    add_library(WellLog::RenderGL ALIAS welllog_render_gl)
+    set_target_properties(welllog_render_gl PROPERTIES
+        EXPORT_NAME RenderGL
+        OUTPUT_NAME welllog-render-gl
+        VERSION "${PROJECT_VERSION}"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
+    target_compile_features(welllog_render_gl PUBLIC cxx_std_20)
+    welllog_enable_warnings(welllog_render_gl)
+    target_link_libraries(welllog_render_gl PUBLIC WellLog::Scene)
+    target_include_directories(welllog_render_gl
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    if(WELLLOG_BUILD_SHARED)
+        target_compile_definitions(
+            welllog_render_gl
+            PRIVATE WELLLOG_RENDER_GL_BUILD
+            PUBLIC WELLLOG_RENDER_GL_SHARED
+        )
+    endif()
+
+    qt_add_library(welllog_qtwidgets ${WELLLOG_LIBRARY_TYPE}
+        src/qtwidgets/well_log_view.cpp
+        include/welllog/qtwidgets/well_log_view.hpp
+    )
+    add_library(WellLog::QtWidgets ALIAS welllog_qtwidgets)
+    set_target_properties(welllog_qtwidgets PROPERTIES
+        EXPORT_NAME QtWidgets
+        OUTPUT_NAME welllog-qtwidgets
+        VERSION "${PROJECT_VERSION}"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
+    target_compile_features(welllog_qtwidgets PUBLIC cxx_std_20)
+    welllog_enable_warnings(welllog_qtwidgets)
+    target_link_libraries(
+        welllog_qtwidgets
+        PUBLIC
+            WellLog::RenderGL
+            WellLog::Session
+            Qt6::OpenGLWidgets
+            Qt6::Widgets
+    )
+    target_include_directories(welllog_qtwidgets
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    if(WELLLOG_BUILD_SHARED)
+        target_compile_definitions(
+            welllog_qtwidgets
+            PRIVATE WELLLOG_QTWIDGETS_BUILD
+            PUBLIC WELLLOG_QTWIDGETS_SHARED
+        )
+    endif()
+endif()
+
 install(
     TARGETS
         welllog_core
@@ -202,6 +292,16 @@ install(
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+if(WELLLOG_BUILD_QT_WIDGETS)
+    install(
+        TARGETS welllog_render_gl welllog_qtwidgets
+        EXPORT WellLogTargets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+endif()
 install(
     DIRECTORY include/
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
@@ -266,6 +366,40 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.headless-svg COMMAND welllog_headless_svg_tests)
 
+    add_executable(welllog_viewport_tests
+        tests/integration/viewport_interaction_test.cpp
+    )
+    target_compile_features(welllog_viewport_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_viewport_tests)
+    target_link_libraries(welllog_viewport_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.viewport COMMAND welllog_viewport_tests)
+
+    if(WELLLOG_BUILD_QT_WIDGETS)
+        add_executable(welllog_render_gl_tests
+            tests/render_gl/capability_test.cpp
+            src/render_gl/capability.cpp
+        )
+        target_compile_features(welllog_render_gl_tests PRIVATE cxx_std_20)
+        welllog_enable_warnings(welllog_render_gl_tests)
+        target_include_directories(
+            welllog_render_gl_tests
+            PRIVATE
+                "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        )
+        add_test(NAME welllog.render-gl COMMAND welllog_render_gl_tests)
+
+        qt_add_executable(welllog_qt_widget_tests
+            tests/qt/well_log_view_test.cpp
+        )
+        welllog_enable_warnings(welllog_qt_widget_tests)
+        target_link_libraries(
+            welllog_qt_widget_tests
+            PRIVATE WellLog::QtWidgets Qt6::Test
+        )
+        add_test(NAME welllog.qt-widget COMMAND welllog_qt_widget_tests)
+    endif()
+
     add_test(
         NAME welllog.package.consumer
         COMMAND
@@ -298,6 +432,24 @@ if(WELLLOG_BUILD_TESTS)
             "-DENGINE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer/run_consumer_test.cmake"
     )
+    if(WELLLOG_BUILD_QT_WIDGETS)
+        add_test(
+            NAME welllog.qt.package.consumer
+            COMMAND
+                "${CMAKE_COMMAND}"
+                "-DENGINE_BUILD_DIR=${CMAKE_BINARY_DIR}"
+                "-DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/qt_consumer"
+                "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/qt-package-consumer"
+                "-DTEST_CONFIG=$<CONFIG>"
+                "-DENGINE_GENERATOR=${CMAKE_GENERATOR}"
+                "-DENGINE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+                "-DENGINE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+                "-DENGINE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                "-DENGINE_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+                "-DENGINE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer/run_consumer_test.cmake"
+        )
+    endif()
     add_test(
         NAME welllog.core.dependency-boundary
         COMMAND

@@ -279,39 +279,66 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
   if (impl_ == nullptr || !std::isfinite(position.left.value) ||
       !std::isfinite(position.top.value) ||
       !std::isfinite(query.tolerance.value) || query.tolerance.value < 0.0 ||
-      !std::isfinite(query.device_independent_pixels_per_millimetre) ||
-      query.device_independent_pixels_per_millimetre <= 0.0) {
+      !std::isfinite(
+          query.horizontal_device_independent_pixels_per_millimetre) ||
+      query.horizontal_device_independent_pixels_per_millimetre <= 0.0 ||
+      !std::isfinite(query.vertical_device_independent_pixels_per_millimetre) ||
+      query.vertical_device_independent_pixels_per_millimetre <= 0.0) {
     return std::nullopt;
   }
-  const auto tolerance_millimetres =
-      query.tolerance.value / query.device_independent_pixels_per_millimetre;
-  if (!std::isfinite(tolerance_millimetres)) {
+  const auto vertical_tolerance_millimetres =
+      query.tolerance.value /
+      query.vertical_device_independent_pixels_per_millimetre;
+  if (!std::isfinite(vertical_tolerance_millimetres)) {
     return std::nullopt;
   }
 
   const auto point_distance = [&](const PreparedCurvePoint &point) {
-    return std::hypot(point.position.left.value - position.left.value,
-                      point.position.top.value - position.top.value);
+    return std::hypot(
+        (point.position.left.value - position.left.value) *
+            query.horizontal_device_independent_pixels_per_millimetre,
+        (point.position.top.value - position.top.value) *
+            query.vertical_device_independent_pixels_per_millimetre);
   };
   const auto segment_distance =
       [&](const PreparedCurvePoint &first,
           const PreparedCurvePoint &second) -> std::pair<double, double> {
-    const auto delta_x = second.position.left.value - first.position.left.value;
-    const auto delta_y = second.position.top.value - first.position.top.value;
+    const auto delta_x =
+        (second.position.left.value - first.position.left.value) *
+        query.horizontal_device_independent_pixels_per_millimetre;
+    const auto delta_y =
+        (second.position.top.value - first.position.top.value) *
+        query.vertical_device_independent_pixels_per_millimetre;
     const auto length_squared = delta_x * delta_x + delta_y * delta_y;
     if (length_squared == 0.0) {
       return {point_distance(first), 0.0};
     }
     const auto projected =
-        ((position.left.value - first.position.left.value) * delta_x +
-         (position.top.value - first.position.top.value) * delta_y) /
+        ((position.left.value - first.position.left.value) *
+             query.horizontal_device_independent_pixels_per_millimetre *
+             delta_x +
+         (position.top.value - first.position.top.value) *
+             query.vertical_device_independent_pixels_per_millimetre *
+             delta_y) /
         length_squared;
     const auto parameter = std::clamp(projected, 0.0, 1.0);
-    const auto closest_x = first.position.left.value + parameter * delta_x;
-    const auto closest_y = first.position.top.value + parameter * delta_y;
-    return {std::hypot(closest_x - position.left.value,
-                       closest_y - position.top.value),
-            parameter};
+    const auto closest_x =
+        first.position.left.value *
+            query.horizontal_device_independent_pixels_per_millimetre +
+        parameter * delta_x;
+    const auto closest_y =
+        first.position.top.value *
+            query.vertical_device_independent_pixels_per_millimetre +
+        parameter * delta_y;
+    return {
+        std::hypot(
+            closest_x -
+                position.left.value *
+                    query.horizontal_device_independent_pixels_per_millimetre,
+            closest_y -
+                position.top.value *
+                    query.vertical_device_independent_pixels_per_millimetre),
+        parameter};
   };
 
   for (auto index_iterator = impl_->curve_pick_indices.rbegin();
@@ -344,8 +371,10 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
       return std::min(static_cast<std::size_t>(top / pick_index.bin_height),
                       pick_index.bins.size() - std::size_t{1});
     };
-    const auto first_bin = bin_for(position.top.value - tolerance_millimetres);
-    const auto last_bin = bin_for(position.top.value + tolerance_millimetres);
+    const auto first_bin =
+        bin_for(position.top.value - vertical_tolerance_millimetres);
+    const auto last_bin =
+        bin_for(position.top.value + vertical_tolerance_millimetres);
     for (auto bin = first_bin; bin <= last_bin; ++bin) {
       for (const auto primitive_index : pick_index.bins[bin]) {
         const auto &primitive =
@@ -370,7 +399,7 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
         }
       }
     }
-    if (best_point != nullptr && best_distance <= tolerance_millimetres) {
+    if (best_point != nullptr && best_distance <= query.tolerance.value) {
       return CurvePick{
           .layer_id = layer.id,
           .curve_id = layer.curve_id,
@@ -378,10 +407,7 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
           .reference_depth = best_point->reference_depth,
           .display_depth = best_point->reference_depth,
           .value = best_point->value,
-          .distance =
-              DeviceIndependentPixels{
-                  best_distance *
-                  query.device_independent_pixels_per_millimetre},
+          .distance = DeviceIndependentPixels{best_distance},
       };
     }
   }

@@ -1,0 +1,234 @@
+#include <welllog/session/session.hpp>
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <string_view>
+#include <vector>
+
+namespace {
+
+using namespace welllog;
+
+[[noreturn]] void fail(std::string_view message) {
+  std::cerr << "FAIL: " << message << '\n';
+  std::exit(EXIT_FAILURE);
+}
+
+void require(bool condition, std::string_view message) {
+  if (!condition) {
+    fail(message);
+  }
+}
+
+void require_near(double actual, double expected, std::string_view message) {
+  if (std::abs(actual - expected) > 1.0e-9) {
+    fail(message);
+  }
+}
+
+EntityId id(std::string_view text) {
+  const auto parsed = EntityId::parse(text);
+  require(parsed.has_value(), "test UUID must be valid");
+  return *parsed;
+}
+
+struct SessionFixture {
+  EntityId document_id;
+  WellLogSession session;
+};
+
+SessionFixture prepared_session() {
+  const auto document_id = id("50000000-0000-4000-8000-000000000001");
+  const auto axis_id = id("50000000-0000-4000-8000-000000000002");
+  const auto curve_id = id("50000000-0000-4000-8000-000000000003");
+  const auto track_id = id("50000000-0000-4000-8000-000000000004");
+  const auto scale_id = id("50000000-0000-4000-8000-000000000005");
+  const auto layer_id = id("50000000-0000-4000-8000-000000000006");
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1050.0, 1100.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{0.0, 50.0, 100.0});
+
+  WellLogDocumentBuilder document_builder(document_id, DocumentRevision{1});
+  document_builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id,
+      .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth,
+      .unit = "m",
+      .direction = AxisDirection::increasing,
+  });
+  document_builder.add_curve(Curve{
+      .id = curve_id,
+      .mnemonic = "GR",
+      .display_name = "Gamma Ray",
+      .unit = "API",
+      .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values),
+      .nulls = {},
+  });
+
+  WellLogSession session;
+  require(
+      session.execute(SetDocumentCommand{document_builder.build()}).has_value(),
+      "fixture document must be accepted");
+  ScenePresentationBuilder presentation_builder(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = "m",
+          .top = 1000.0,
+          .bottom = 1100.0,
+      },
+      Millimetres{100.0}, "font-fixture-v1");
+  presentation_builder.add_track(
+      TrackSpec{.id = track_id, .width = Millimetres{30.0}, .z_order = 0});
+  presentation_builder.add_scale(TrackScaleSpec{
+      .id = scale_id,
+      .track_id = track_id,
+      .mode = ScaleMode::linear,
+      .minimum = 0.0,
+      .maximum = 100.0,
+      .direction = ScaleDirection::left_to_right,
+      .unit = "API",
+  });
+  presentation_builder.add_curve_layer(CurveLayerSpec{
+      .id = layer_id,
+      .track_id = track_id,
+      .curve_id = curve_id,
+      .scale_id = scale_id,
+      .color = RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56},
+      .line_width = Millimetres{0.25},
+      .z_order = 0,
+  });
+  require(session.execute(SetPresentationCommand{presentation_builder.build()})
+              .has_value(),
+          "fixture presentation must be accepted");
+  session.clear_events();
+  return SessionFixture{
+      .document_id = document_id,
+      .session = std::move(session),
+  };
+}
+
+void session_owns_pan_zoom_and_reset_state() {
+  auto fixture = prepared_session();
+  const auto initial = fixture.session.viewport(fixture.document_id);
+  require(initial.has_value(), "presentation must establish a viewport");
+  require_near(initial->top, 1000.0,
+               "initial viewport top must use the presentation range");
+  require_near(initial->bottom, 1100.0,
+               "initial viewport bottom must use the presentation range");
+
+  require(fixture.session
+              .execute(SetViewportCommand{
+                  .document_id = fixture.document_id,
+                  .viewport = DepthViewport{.top = 1020.0, .bottom = 1060.0},
+              })
+              .has_value(),
+          "explicit viewport must be accepted");
+  require(fixture.session
+              .execute(PanDepthCommand{
+                  .document_id = fixture.document_id,
+                  .display_depth_delta = 10.0,
+              })
+              .has_value(),
+          "pan command must be accepted");
+  auto viewport = fixture.session.viewport(fixture.document_id);
+  require_near(viewport->top, 1030.0, "pan must move the viewport top");
+  require_near(viewport->bottom, 1070.0, "pan must move the viewport bottom");
+
+  require(fixture.session
+              .execute(ZoomDepthAtCommand{
+                  .document_id = fixture.document_id,
+                  .anchor_display_depth = 1050.0,
+                  .span_factor = 0.5,
+              })
+              .has_value(),
+          "zoom command must be accepted");
+  viewport = fixture.session.viewport(fixture.document_id);
+  require_near(viewport->top, 1040.0,
+               "zoom must retain the depth below the pointer");
+  require_near(viewport->bottom, 1060.0,
+               "zoom must retain the depth above the pointer");
+
+  require(fixture.session
+              .execute(ResetViewportCommand{
+                  .document_id = fixture.document_id,
+              })
+              .has_value(),
+          "reset command must be accepted");
+  viewport = fixture.session.viewport(fixture.document_id);
+  require_near(viewport->top, 1000.0,
+               "reset must restore the presentation top");
+  require_near(viewport->bottom, 1100.0,
+               "reset must restore the presentation bottom");
+  require(!fixture.session.events().empty() &&
+              fixture.session.events().back().kind ==
+                  ViewEventKind::viewport_changed,
+          "viewport commands must publish semantic viewport events");
+}
+
+void session_owns_crosshair_state() {
+  auto fixture = prepared_session();
+  require(fixture.session
+              .execute(SetCrosshairCommand{
+                  .document_id = fixture.document_id,
+                  .crosshair =
+                      CrosshairState{
+                          .track_fraction = 0.25,
+                          .display_depth = 1042.5,
+                      },
+              })
+              .has_value(),
+          "crosshair command must be accepted");
+  const auto crosshair = fixture.session.crosshair(fixture.document_id);
+  require(crosshair.has_value(), "crosshair must be owned by the session");
+  require_near(crosshair->track_fraction, 0.25,
+               "crosshair must retain its horizontal semantic position");
+  require_near(crosshair->display_depth, 1042.5,
+               "crosshair must retain Display Depth");
+  require(fixture.session.events().back().kind ==
+              ViewEventKind::crosshair_changed,
+          "crosshair changes must publish a semantic event");
+
+  require(fixture.session
+              .execute(SetCrosshairCommand{
+                  .document_id = fixture.document_id,
+                  .crosshair = std::nullopt,
+              })
+              .has_value(),
+          "crosshair clearing must be accepted");
+  require(!fixture.session.crosshair(fixture.document_id).has_value(),
+          "cleared crosshair must not remain in session state");
+}
+
+void invalid_view_commands_leave_session_state_unchanged() {
+  auto fixture = prepared_session();
+  const auto before = fixture.session.viewport(fixture.document_id);
+  const auto event_count = fixture.session.events().size();
+
+  const auto result = fixture.session.execute(ZoomDepthAtCommand{
+      .document_id = fixture.document_id,
+      .anchor_display_depth = 1050.0,
+      .span_factor = 0.0,
+  });
+  require(!result.has_value() &&
+              result.error().code == ErrorCode::invalid_viewport,
+          "non-positive zoom factors must return a stable viewport error");
+  require(fixture.session.viewport(fixture.document_id) == before,
+          "rejected view commands must preserve viewport state");
+  require(fixture.session.events().size() == event_count,
+          "rejected view commands must not publish events");
+}
+
+} // namespace
+
+int main() {
+  session_owns_pan_zoom_and_reset_state();
+  session_owns_crosshair_state();
+  invalid_view_commands_leave_session_state_unchanged();
+  std::cout << "PASS: session viewport interaction behavior\n";
+  return EXIT_SUCCESS;
+}

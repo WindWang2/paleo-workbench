@@ -281,6 +281,28 @@ validate_document(const WellLogDocument &document) {
   return count;
 }
 
+[[nodiscard]] Error viewport_error(EntityId document_id) {
+  return Error{
+      .code = ErrorCode::invalid_viewport,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::viewport_invalid,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] bool valid_viewport(DepthViewport viewport) noexcept {
+  return std::isfinite(viewport.top) && std::isfinite(viewport.bottom) &&
+         viewport.top < viewport.bottom &&
+         std::isfinite(viewport.bottom - viewport.top);
+}
+
+[[nodiscard]] bool valid_crosshair(CrosshairState crosshair) noexcept {
+  return std::isfinite(crosshair.track_fraction) &&
+         crosshair.track_fraction >= 0.0 && crosshair.track_fraction <= 1.0 &&
+         std::isfinite(crosshair.display_depth);
+}
+
 } // namespace
 
 struct WellLogSession::Impl {
@@ -292,6 +314,9 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, std::shared_ptr<const PreparedScene>,
                      EntityIdHash>
       prepared_scenes;
+  std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewports;
+  std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewport_defaults;
+  std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
   std::vector<ViewEvent> events;
   std::vector<Diagnostic> diagnostics;
 };
@@ -376,6 +401,9 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
                                pending_diagnostics.size());
     impl_->documents.insert_or_assign(document_id, std::move(document));
     impl_->prepared_scenes.erase(document_id);
+    impl_->viewports.erase(document_id);
+    impl_->viewport_defaults.erase(document_id);
+    impl_->crosshairs.erase(document_id);
     impl_->state_version = next_state_version;
     impl_->next_diagnostic_id += pending_diagnostics.size();
     impl_->events.insert(impl_->events.end(), pending_events.begin(),
@@ -443,9 +471,18 @@ WellLogSession::execute(const SetPresentationCommand &command) {
         std::make_shared<const PreparedScene>(std::move(prepared).value());
     const auto next_state_version = impl_->state_version + 1;
     const auto revision = document->second->revision();
+    const auto depth_range = command.presentation.reference_depth_range();
+    const auto initial_viewport =
+        DepthViewport{.top = depth_range.top, .bottom = depth_range.bottom};
     std::vector<ViewEvent> pending_events{
         ViewEvent{
             .kind = ViewEventKind::presentation_changed,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        },
+        ViewEvent{
+            .kind = ViewEventKind::viewport_changed,
             .state_version = next_state_version,
             .document_id = document_id,
             .document_revision = revision,
@@ -458,7 +495,13 @@ WellLogSession::execute(const SetPresentationCommand &command) {
         },
     };
     impl_->events.reserve(impl_->events.size() + pending_events.size());
+    impl_->prepared_scenes.reserve(impl_->prepared_scenes.size() + 1);
+    impl_->viewports.reserve(impl_->viewports.size() + 1);
+    impl_->viewport_defaults.reserve(impl_->viewport_defaults.size() + 1);
     impl_->prepared_scenes.insert_or_assign(document_id, std::move(scene));
+    impl_->viewports.insert_or_assign(document_id, initial_viewport);
+    impl_->viewport_defaults.insert_or_assign(document_id, initial_viewport);
+    impl_->crosshairs.erase(document_id);
     impl_->state_version = next_state_version;
     impl_->events.insert(impl_->events.end(), pending_events.begin(),
                          pending_events.end());
@@ -488,6 +531,168 @@ WellLogSession::execute(const SetPresentationCommand &command) {
   }
 }
 
+Result<CommandReceipt>
+WellLogSession::execute(const SetViewportCommand &command) {
+  try {
+    if (!valid_viewport(command.viewport)) {
+      return viewport_error(command.document_id);
+    }
+    const auto document = impl_->documents.find(command.document_id);
+    const auto viewport = impl_->viewports.find(command.document_id);
+    if (document == impl_->documents.end() ||
+        viewport == impl_->viewports.end()) {
+      return viewport_error(command.document_id);
+    }
+    if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
+      return viewport_error(command.document_id);
+    }
+    const auto next_state_version = impl_->state_version + 1;
+    impl_->events.reserve(impl_->events.size() + 1);
+    viewport->second = command.viewport;
+    impl_->state_version = next_state_version;
+    impl_->events.push_back(ViewEvent{
+        .kind = ViewEventKind::viewport_changed,
+        .state_version = next_state_version,
+        .document_id = command.document_id,
+        .document_revision = document->second->revision(),
+    });
+    return CommandReceipt{
+        .state_version = next_state_version,
+        .document_id = command.document_id,
+        .document_revision = document->second->revision(),
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
+Result<CommandReceipt> WellLogSession::execute(const PanDepthCommand &command) {
+  const auto current = viewport(command.document_id);
+  if (!current.has_value() || !std::isfinite(command.display_depth_delta)) {
+    return viewport_error(command.document_id);
+  }
+  const auto next = DepthViewport{
+      .top = current->top + command.display_depth_delta,
+      .bottom = current->bottom + command.display_depth_delta,
+  };
+  if (!valid_viewport(next)) {
+    return viewport_error(command.document_id);
+  }
+  return execute(SetViewportCommand{
+      .document_id = command.document_id,
+      .viewport = next,
+  });
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const ZoomDepthAtCommand &command) {
+  const auto current = viewport(command.document_id);
+  if (!current.has_value() || !std::isfinite(command.anchor_display_depth) ||
+      !std::isfinite(command.span_factor) || command.span_factor <= 0.0) {
+    return viewport_error(command.document_id);
+  }
+  const auto next = DepthViewport{
+      .top =
+          command.anchor_display_depth +
+          (current->top - command.anchor_display_depth) * command.span_factor,
+      .bottom = command.anchor_display_depth +
+                (current->bottom - command.anchor_display_depth) *
+                    command.span_factor,
+  };
+  if (!valid_viewport(next)) {
+    return viewport_error(command.document_id);
+  }
+  return execute(SetViewportCommand{
+      .document_id = command.document_id,
+      .viewport = next,
+  });
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const ResetViewportCommand &command) {
+  const auto default_viewport =
+      impl_->viewport_defaults.find(command.document_id);
+  if (default_viewport == impl_->viewport_defaults.end()) {
+    return viewport_error(command.document_id);
+  }
+  return execute(SetViewportCommand{
+      .document_id = command.document_id,
+      .viewport = default_viewport->second,
+  });
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetCrosshairCommand &command) {
+  try {
+    if (command.crosshair.has_value() && !valid_crosshair(*command.crosshair)) {
+      return viewport_error(command.document_id);
+    }
+    const auto document = impl_->documents.find(command.document_id);
+    if (document == impl_->documents.end() ||
+        !impl_->viewports.contains(command.document_id)) {
+      return viewport_error(command.document_id);
+    }
+    if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
+      return viewport_error(command.document_id);
+    }
+    const auto next_state_version = impl_->state_version + 1;
+    impl_->events.reserve(impl_->events.size() + 1);
+    if (command.crosshair.has_value()) {
+      impl_->crosshairs.reserve(impl_->crosshairs.size() + 1);
+      impl_->crosshairs.insert_or_assign(command.document_id,
+                                         *command.crosshair);
+    } else {
+      impl_->crosshairs.erase(command.document_id);
+    }
+    impl_->state_version = next_state_version;
+    impl_->events.push_back(ViewEvent{
+        .kind = ViewEventKind::crosshair_changed,
+        .state_version = next_state_version,
+        .document_id = command.document_id,
+        .document_revision = document->second->revision(),
+    });
+    return CommandReceipt{
+        .state_version = next_state_version,
+        .document_id = command.document_id,
+        .document_revision = document->second->revision(),
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
 std::span<const ViewEvent> WellLogSession::events() const noexcept {
   return impl_->events;
 }
@@ -508,6 +713,22 @@ std::shared_ptr<const PreparedScene>
 WellLogSession::prepared_scene(EntityId document_id) const noexcept {
   const auto found = impl_->prepared_scenes.find(document_id);
   return found == impl_->prepared_scenes.end() ? nullptr : found->second;
+}
+
+std::optional<DepthViewport>
+WellLogSession::viewport(EntityId document_id) const noexcept {
+  const auto found = impl_->viewports.find(document_id);
+  return found == impl_->viewports.end()
+             ? std::nullopt
+             : std::optional<DepthViewport>{found->second};
+}
+
+std::optional<CrosshairState>
+WellLogSession::crosshair(EntityId document_id) const noexcept {
+  const auto found = impl_->crosshairs.find(document_id);
+  return found == impl_->crosshairs.end()
+             ? std::nullopt
+             : std::optional<CrosshairState>{found->second};
 }
 
 } // namespace welllog

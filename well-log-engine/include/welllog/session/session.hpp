@@ -21,6 +21,43 @@ struct SetPresentationCommand {
   ScenePresentation presentation;
 };
 
+struct DepthViewport {
+  double top{};
+  double bottom{};
+  friend constexpr bool operator==(DepthViewport, DepthViewport) = default;
+};
+
+struct CrosshairState {
+  double track_fraction{};
+  double display_depth{};
+  friend constexpr bool operator==(CrosshairState, CrosshairState) = default;
+};
+
+struct SetViewportCommand {
+  EntityId document_id;
+  DepthViewport viewport;
+};
+
+struct PanDepthCommand {
+  EntityId document_id;
+  double display_depth_delta{};
+};
+
+struct ZoomDepthAtCommand {
+  EntityId document_id;
+  double anchor_display_depth{};
+  double span_factor{};
+};
+
+struct ResetViewportCommand {
+  EntityId document_id;
+};
+
+struct SetCrosshairCommand {
+  EntityId document_id;
+  std::optional<CrosshairState> crosshair;
+};
+
 struct CommandReceipt {
   std::uint64_t state_version{};
   EntityId document_id;
@@ -33,6 +70,8 @@ enum class ViewEventKind : std::uint8_t {
   documents_changed,
   diagnostic_published,
   presentation_changed,
+  viewport_changed,
+  crosshair_changed,
   frame_ready,
 };
 
@@ -69,6 +108,15 @@ public:
   [[nodiscard]] Result<CommandReceipt> execute(SetDocumentCommand command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetPresentationCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetViewportCommand &command);
+  [[nodiscard]] Result<CommandReceipt> execute(const PanDepthCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const ZoomDepthAtCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const ResetViewportCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetCrosshairCommand &command);
   [[nodiscard]] std::span<const ViewEvent> events() const noexcept;
   void clear_events() noexcept;
   [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept;
@@ -76,6 +124,10 @@ public:
   document(EntityId id) const noexcept;
   [[nodiscard]] std::shared_ptr<const PreparedScene>
   prepared_scene(EntityId document_id) const noexcept;
+  [[nodiscard]] std::optional<DepthViewport>
+  viewport(EntityId document_id) const noexcept;
+  [[nodiscard]] std::optional<CrosshairState>
+  crosshair(EntityId document_id) const noexcept;
 
 private:
   struct Impl;

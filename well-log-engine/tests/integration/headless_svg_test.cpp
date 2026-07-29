@@ -185,7 +185,8 @@ void session_prepares_a_physical_curve_track() {
               .top = Millimetres{40.1},
           },
       .tolerance = DeviceIndependentPixels{4.0},
-      .device_independent_pixels_per_millimetre = 4.0,
+      .horizontal_device_independent_pixels_per_millimetre = 4.0,
+      .vertical_device_independent_pixels_per_millimetre = 8.0,
   });
   require(hit.has_value(), "curve geometry must be pickable in physical space");
   require(hit->layer_id == layer_id && hit->curve_id == curve_id,
@@ -197,7 +198,7 @@ void session_prepares_a_physical_curve_track() {
   require_near(hit->value, 40.0,
                "pick result must return the original curve value");
 
-  require_near(hit->distance.value, std::hypot(0.1, 0.1) * 4.0,
+  require_near(hit->distance.value, std::hypot(0.1 * 4.0, 0.1 * 8.0),
                "pick distance must be reported in device-independent pixels");
 
   const auto miss = scene->pick_curve(CurvePickQuery{
@@ -207,7 +208,8 @@ void session_prepares_a_physical_curve_track() {
               .top = Millimetres{40.0},
           },
       .tolerance = DeviceIndependentPixels{4.0},
-      .device_independent_pixels_per_millimetre = 4.0,
+      .horizontal_device_independent_pixels_per_millimetre = 4.0,
+      .vertical_device_independent_pixels_per_millimetre = 8.0,
   });
   require(!miss.has_value(),
           "picking outside the track clip and tolerance must miss");

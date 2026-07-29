@@ -179,7 +179,8 @@ struct CurvePick {
 struct CurvePickQuery {
   PhysicalPoint scene_position;
   DeviceIndependentPixels tolerance;
-  double device_independent_pixels_per_millimetre{};
+  double horizontal_device_independent_pixels_per_millimetre{};
+  double vertical_device_independent_pixels_per_millimetre{};
 };
 
 namespace detail {
