@@ -197,6 +197,54 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
             [("40000000-0000-4000-8000-000000000001", 1)],
         )
 
+    def test_descending_depth_and_caller_ids_prepare_a_scene(self) -> None:
+        view = WellLogView()
+        depth = np.asarray([1002.0, 1001.0, 1000.0], dtype=np.float64)
+        values = np.asarray([1.0, 2.0, 3.0], dtype=np.float32)
+        depth.flags.writeable = False
+        values.flags.writeable = False
+
+        report = view.submit_curve(
+            depth,
+            values,
+            "50000000-0000-4000-8000-000000000001",
+            "50000000-0000-4000-8000-000000000010",
+            "50000000-0000-4000-8000-000000000003",
+            "DEN",
+            "m",
+            "g/cm3",
+        )
+
+        self.assertIs(report["render_prepared"], True)
+
+    def test_rejected_presentation_input_does_not_pin_buffers(self) -> None:
+        view = WellLogView()
+        depth = np.arange(3, dtype=np.float64)
+        values = np.arange(3, dtype=np.float32)
+        depth.flags.writeable = False
+        values.flags.writeable = False
+        depth_ref = weakref.ref(depth)
+        values_ref = weakref.ref(values)
+
+        with self.assertRaises(WellLogValidationError) as raised:
+            view.submit_curve(
+                depth,
+                values,
+                "60000000-0000-4000-8000-000000000001",
+                "60000000-0000-4000-8000-000000000002",
+                "60000000-0000-4000-8000-000000000003",
+                "GR",
+                "",
+                "API",
+            )
+
+        self.assertEqual(raised.exception.code, "invalid_presentation")
+        del depth
+        del values
+        gc.collect()
+        self.assertIsNone(depth_ref())
+        self.assertIsNone(values_ref())
+
 
 if __name__ == "__main__":
     unittest.main()

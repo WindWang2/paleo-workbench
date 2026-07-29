@@ -15,10 +15,10 @@ namespace python {
 submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
              const QString &document_id, const QString &axis_id,
              const QString &curve_id, const QString &mnemonic,
-             const QString &depth_unit, const QString &value_unit);
+             const QString &depth_unit, const QString &value_unit) noexcept;
 
 [[nodiscard]] PyObject *sample_value(WellLogView *view, const QString &curve_id,
-                                     unsigned long long sample_index);
+                                     unsigned long long sample_index) noexcept;
 
 } // namespace python
 } // namespace welllog

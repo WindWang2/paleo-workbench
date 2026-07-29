@@ -9,14 +9,19 @@
 #include <welllog/core/document.hpp>
 #include <welllog/qtwidgets/well_log_view.hpp>
 
+#include <QByteArray>
 #include <QThread>
+#include <QUuid>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -248,13 +253,34 @@ scalar_type_for_buffer(const Py_buffer &view) noexcept {
   return result;
 }
 
-[[nodiscard]] EntityId known_id(std::string_view text) {
-  return EntityId::parse(text).value();
+[[nodiscard]] EntityId
+derive_presentation_id(EntityId document_id, std::string_view role,
+                       std::initializer_list<EntityId> forbidden) {
+  const auto namespace_uuid =
+      QUuid{QString::fromStdString(document_id.to_string())};
+  const auto base_name =
+      QByteArray{role.data(), static_cast<qsizetype>(role.size())};
+  for (auto suffix = 0; suffix <= static_cast<int>(forbidden.size());
+       ++suffix) {
+    auto name = base_name;
+    if (suffix != 0) {
+      name.append('/');
+      name.append(QByteArray::number(suffix));
+    }
+    const auto derived = QUuid::createUuidV5(namespace_uuid, name);
+    const auto encoded = derived.toString(QUuid::WithoutBraces).toStdString();
+    const auto candidate = EntityId::parse(encoded).value();
+    if (std::find(forbidden.begin(), forbidden.end(), candidate) ==
+        forbidden.end()) {
+      return candidate;
+    }
+  }
+  throw std::runtime_error{"could not derive a unique presentation entity ID"};
 }
 
 [[nodiscard]] Result<CommandReceipt> prepare_default_curve_scene(
-    WellLogView &view, EntityId document_id, EntityId curve_id,
-    const BufferView &depth, const BufferView &values,
+    WellLogView &view, EntityId document_id, EntityId axis_id,
+    EntityId curve_id, const BufferView &depth, const BufferView &values,
     const std::string &depth_unit, const std::string &value_unit) {
   auto top = depth.value_as_double(0).value();
   auto bottom = depth.value_as_double(depth.length() - 1).value();
@@ -281,9 +307,17 @@ scalar_type_for_buffer(const Py_buffer &view) noexcept {
     maximum = minimum + 1.0;
   }
 
-  const auto track_id = known_id("50000000-0000-4000-8000-000000000001");
-  const auto scale_id = known_id("50000000-0000-4000-8000-000000000002");
-  const auto layer_id = known_id("50000000-0000-4000-8000-000000000003");
+  const auto track_id =
+      derive_presentation_id(document_id, "welllog-python/default-track",
+                             {document_id, axis_id, curve_id});
+  const auto scale_id =
+      derive_presentation_id(document_id, "welllog-python/default-scale",
+                             {document_id, axis_id, curve_id, track_id});
+  const auto layer_role =
+      std::string{"welllog-python/default-layer/"} + curve_id.to_string();
+  const auto layer_id = derive_presentation_id(
+      document_id, layer_role,
+      {document_id, axis_id, curve_id, track_id, scale_id});
   ScenePresentationBuilder presentation_builder(
       document_id,
       ReferenceDepthRange{
@@ -345,11 +379,14 @@ scalar_type_for_buffer(const Py_buffer &view) noexcept {
 
 } // namespace
 
-PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
-                       const QString &document_id_text,
-                       const QString &axis_id_text,
-                       const QString &curve_id_text, const QString &mnemonic,
-                       const QString &depth_unit, const QString &value_unit) {
+namespace {
+
+PyObject *submit_curve_impl(WellLogView *view, PyObject *depth,
+                            PyObject *values, const QString &document_id_text,
+                            const QString &axis_id_text,
+                            const QString &curve_id_text,
+                            const QString &mnemonic, const QString &depth_unit,
+                            const QString &value_unit) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -364,6 +401,11 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
   const auto axis_id = parse_id(axis_id_text, "axis_id");
   const auto curve_id = parse_id(curve_id_text, "curve_id");
   if (!document_id || !axis_id || !curve_id) {
+    return nullptr;
+  }
+  if (depth_unit.isEmpty() || value_unit.isEmpty()) {
+    set_welllog_error("WellLogValidationError", "invalid_presentation",
+                      "depth_unit and value_unit must be non-empty");
     return nullptr;
   }
   auto depth_buffer = adapt_buffer(depth, "depth");
@@ -384,12 +426,17 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
   const auto depth_unit_utf8 = depth_unit.toUtf8();
   const auto value_unit_utf8 = value_unit.toUtf8();
   const auto mnemonic_utf8 = mnemonic.toUtf8();
+  const auto first_depth = depth_buffer->buffer.value_as_double(0).value();
+  const auto last_depth =
+      depth_buffer->buffer.value_as_double(depth_buffer->buffer.length() - 1)
+          .value();
   builder.add_sampling_axis(SamplingAxis{
       .id = *axis_id,
       .coordinates = depth_buffer->buffer,
       .domain = DepthDomain::measured_depth,
       .unit = depth_unit_utf8.constData(),
-      .direction = AxisDirection::increasing,
+      .direction = last_depth < first_depth ? AxisDirection::decreasing
+                                            : AxisDirection::increasing,
   });
   builder.add_curve(Curve{
       .id = *curve_id,
@@ -407,7 +454,7 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
     return nullptr;
   }
   const auto presentation = prepare_default_curve_scene(
-      *view, *document_id, *curve_id, depth_buffer->buffer,
+      *view, *document_id, *axis_id, *curve_id, depth_buffer->buffer,
       value_buffer->buffer, depth_unit_utf8.constData(),
       value_unit_utf8.constData());
   if (!presentation.has_value()) {
@@ -433,8 +480,8 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
   return report;
 }
 
-PyObject *sample_value(WellLogView *view, const QString &curve_id_text,
-                       unsigned long long sample_index) {
+PyObject *sample_value_impl(WellLogView *view, const QString &curve_id_text,
+                            unsigned long long sample_index) {
   if (view == nullptr || !view->document_id().has_value()) {
     Py_RETURN_NONE;
   }
@@ -455,6 +502,40 @@ PyObject *sample_value(WellLogView *view, const QString &curve_id_text,
     }
   }
   Py_RETURN_NONE;
+}
+
+} // namespace
+
+PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
+                       const QString &document_id_text,
+                       const QString &axis_id_text,
+                       const QString &curve_id_text, const QString &mnemonic,
+                       const QString &depth_unit,
+                       const QString &value_unit) noexcept {
+  try {
+    return submit_curve_impl(view, depth, values, document_id_text,
+                             axis_id_text, curve_id_text, mnemonic, depth_unit,
+                             value_unit);
+  } catch (const std::bad_alloc &) {
+    return PyErr_NoMemory();
+  } catch (...) {
+    set_welllog_error("WellLogError", "internal_error",
+                      "unexpected native failure during curve submission");
+    return nullptr;
+  }
+}
+
+PyObject *sample_value(WellLogView *view, const QString &curve_id_text,
+                       unsigned long long sample_index) noexcept {
+  try {
+    return sample_value_impl(view, curve_id_text, sample_index);
+  } catch (const std::bad_alloc &) {
+    return PyErr_NoMemory();
+  } catch (...) {
+    set_welllog_error("WellLogError", "internal_error",
+                      "unexpected native failure while reading a curve sample");
+    return nullptr;
+  }
 }
 
 } // namespace welllog::python
