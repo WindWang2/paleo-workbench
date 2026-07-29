@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
   for (std::size_t frame = 0; frame < measured_frames; ++frame) {
     const auto top = 1000.0 + static_cast<double>(frame) * 20.0;
     const auto start = Clock::now();
-    const auto receipt = session.execute(SetViewportCommand{
+    const auto receipt = session.execute(SetViewportMetricsCommand{
         .document_id = document_id,
         .viewport = DepthViewport{.top = top, .bottom = top + 500.0},
         .pixel_height = 2160,

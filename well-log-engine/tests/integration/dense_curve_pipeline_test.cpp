@@ -195,12 +195,12 @@ void dense_revisions_prepare_asynchronously_and_stale_work_cannot_win() {
 
   const auto task_count_before_viewport =
       ready->cancelled_tasks + ready->discarded_tasks;
-  const auto stale_zoom = session.execute(SetViewportCommand{
+  const auto stale_zoom = session.execute(SetViewportMetricsCommand{
       .document_id = document_id,
       .viewport = DepthViewport{.top = 1499.0, .bottom = 1501.0},
       .pixel_height = 1,
   });
-  const auto zoom = session.execute(SetViewportCommand{
+  const auto zoom = session.execute(SetViewportMetricsCommand{
       .document_id = document_id,
       .viewport = DepthViewport{.top = 3499.0, .bottom = 3501.0},
       .pixel_height = 4000,
@@ -265,16 +265,20 @@ void dense_revisions_prepare_asynchronously_and_stale_work_cannot_win() {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds{1});
   }
-  require(
-      std::any_of(
-          constrained.diagnostics().begin(), constrained.diagnostics().end(),
-          [](const Diagnostic &diagnostic) {
-            return diagnostic.code ==
-                       DiagnosticCode::asynchronous_preparation_failed &&
-                   diagnostic.error_code ==
-                       std::optional<ErrorCode>{ErrorCode::resource_exhausted};
-          }),
-      "background preparation errors must publish stable diagnostics");
+  const auto failure = std::find_if(
+      constrained.diagnostics().begin(), constrained.diagnostics().end(),
+      [](const Diagnostic &diagnostic) {
+        return diagnostic.code ==
+               DiagnosticCode::asynchronous_preparation_failed;
+      });
+  require(failure != constrained.diagnostics().end(),
+          "background preparation errors must publish stable diagnostics");
+  const auto failure_error = constrained.diagnostic_error(failure->id);
+  require(failure_error.has_value() &&
+              failure_error->code == ErrorCode::resource_exhausted &&
+              failure_error->message == MessageKey::resource_exhausted,
+          "async diagnostic details must be available without changing the "
+          "stable Diagnostic layout");
 }
 
 } // namespace

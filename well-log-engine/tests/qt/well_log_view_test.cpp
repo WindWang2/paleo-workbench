@@ -36,6 +36,7 @@ private slots:
   void top_level_reparent_restores_curve_after_context_recreation();
   void unavailable_context_publishes_a_capability_report();
   void external_session_events_refresh_and_coalesce_qt_signals();
+  void asynchronous_failures_keep_their_diagnostic_identity();
   void cross_thread_public_mutations_are_queued_to_gui();
 };
 
@@ -51,7 +52,8 @@ EntityId id(std::string_view text) {
   return *parsed;
 }
 
-PreparedViewFixture prepared_view_fixture() {
+PreparedViewFixture
+prepared_view_fixture(PerformanceBudgets budgets = PerformanceBudgets{}) {
   const auto document_id = id("60000000-0000-4000-8000-000000000001");
   const auto axis_id = id("60000000-0000-4000-8000-000000000002");
   const auto curve_id = id("60000000-0000-4000-8000-000000000003");
@@ -81,7 +83,7 @@ PreparedViewFixture prepared_view_fixture() {
       .nulls = {},
   });
 
-  auto session = std::make_shared<WellLogSession>();
+  auto session = std::make_shared<WellLogSession>(budgets);
   Q_ASSERT(session->execute(SetDocumentCommand{document_builder.build()})
                .has_value());
   ScenePresentationBuilder presentation_builder(
@@ -439,6 +441,31 @@ void WellLogViewTest::
   const auto cursor_pixel =
       image.pixelColor(image.width() / 4, image.height() / 2);
   QVERIFY(cursor_pixel.red() > cursor_pixel.green() * 2);
+}
+
+void WellLogViewTest::asynchronous_failures_keep_their_diagnostic_identity() {
+  auto fixture = prepared_view_fixture(PerformanceBudgets{
+      .maximum_cpu_derived_bytes = 1,
+      .maximum_gpu_cache_bytes = 8 * 1024 * 1024,
+      .maximum_upload_bytes_per_frame = 256 * 1024,
+      .prefetch_viewports = 2.0,
+      .asynchronous_sample_threshold = 1,
+  });
+  WellLogView view(fixture.session);
+  view.set_document_id(fixture.document_id);
+  view.resize(200, 200);
+  QSignalSpy diagnostic_spy(&view, &WellLogView::diagnosticPublished);
+  QSignalSpy error_spy(&view, &WellLogView::viewError);
+  view.show();
+
+  QTRY_VERIFY_WITH_TIMEOUT(diagnostic_spy.count() >= 1, 5000);
+  QCOMPARE(diagnostic_spy.last().at(0).toString(),
+           QStringLiteral("asynchronous_preparation_failed"));
+  QTRY_VERIFY_WITH_TIMEOUT(error_spy.count() >= 1, 5000);
+  QCOMPARE(error_spy.last().at(0).toString(),
+           QStringLiteral("asynchronous_preparation_failed"));
+  QVERIFY(error_spy.last().at(1).toString().contains(
+      QStringLiteral("resource_exhausted")));
 }
 
 void WellLogViewTest::cross_thread_public_mutations_are_queued_to_gui() {

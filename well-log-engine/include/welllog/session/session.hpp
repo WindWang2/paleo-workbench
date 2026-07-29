@@ -37,6 +37,11 @@ struct CrosshairState {
 struct SetViewportCommand {
   EntityId document_id;
   DepthViewport viewport;
+};
+
+struct SetViewportMetricsCommand {
+  EntityId document_id;
+  DepthViewport viewport;
   std::uint32_t pixel_height{};
 };
 
@@ -127,8 +132,6 @@ struct Diagnostic {
   EntityId entity_id;
   DocumentRevision document_revision;
   std::uint64_t occurrence_count{};
-  std::optional<ErrorCode> error_code;
-  std::optional<MessageKey> message;
 };
 
 class WELLLOG_SESSION_API WellLogSession {
@@ -146,6 +149,8 @@ public:
   execute(const SetPresentationCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetViewportCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetViewportMetricsCommand &command);
   [[nodiscard]] Result<CommandReceipt> execute(const PanDepthCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const ZoomDepthAtCommand &command);
@@ -156,6 +161,8 @@ public:
   [[nodiscard]] std::span<const ViewEvent> events() const noexcept;
   void clear_events() noexcept;
   [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept;
+  [[nodiscard]] std::optional<Error>
+  diagnostic_error(std::uint64_t diagnostic_id) const noexcept;
   [[nodiscard]] std::shared_ptr<const WellLogDocument>
   document(EntityId id) const noexcept;
   [[nodiscard]] std::shared_ptr<const PreparedScene>

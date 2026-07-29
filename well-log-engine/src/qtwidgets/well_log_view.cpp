@@ -59,6 +59,29 @@ namespace {
   return static_cast<QOpenGLContext *>(context)->getProcAddress(name);
 }
 
+[[nodiscard]] QString diagnostic_code(DiagnosticCode code) {
+  switch (code) {
+  case DiagnosticCode::missing_samples:
+    return QStringLiteral("missing_samples");
+  case DiagnosticCode::asynchronous_preparation_failed:
+    return QStringLiteral("asynchronous_preparation_failed");
+  }
+  return QStringLiteral("unknown_diagnostic");
+}
+
+[[nodiscard]] QString asynchronous_error_reason(ErrorCode code) {
+  if (code == ErrorCode::resource_exhausted) {
+    return QStringLiteral("resource_exhausted");
+  }
+  if (code == ErrorCode::operation_cancelled) {
+    return QStringLiteral("operation_cancelled");
+  }
+  if (code == ErrorCode::internal_error) {
+    return QStringLiteral("internal_error");
+  }
+  return QStringLiteral("well_log_error_%1").arg(static_cast<quint16>(code));
+}
+
 } // namespace
 
 void configure_well_log_surface_format() {
@@ -82,6 +105,7 @@ struct WellLogView::Impl {
   QLabel *capability_overlay{};
   QTimer *signal_timer{};
   ViewEventObserverId session_observer_id{};
+  std::uint64_t last_diagnostic_id{};
   bool viewport_signal_pending{};
   bool crosshair_signal_pending{};
   bool hover_signal_pending{};
@@ -167,6 +191,10 @@ void WellLogView::set_document_id(EntityId document_id) noexcept {
   }
   impl_->document_id =
       document_id.is_nil() ? std::nullopt : std::optional{document_id};
+  for (const auto &diagnostic : impl_->session->diagnostics()) {
+    impl_->last_diagnostic_id =
+        std::max(impl_->last_diagnostic_id, diagnostic.id);
+  }
   impl_->uploaded_scene.reset();
   impl_->queued_scene.reset();
   const auto had_hover = impl_->hover_pick.has_value();
@@ -285,7 +313,7 @@ void WellLogView::paintGL() {
     if (current_viewport.has_value() &&
         current_pixel_height !=
             std::optional<std::uint32_t>{desired_pixel_height}) {
-      static_cast<void>(impl_->session->execute(SetViewportCommand{
+      static_cast<void>(impl_->session->execute(SetViewportMetricsCommand{
           .document_id = *impl_->document_id,
           .viewport = *current_viewport,
           .pixel_height = desired_pixel_height,
@@ -628,12 +656,32 @@ void WellLogView::handle_session_event(ViewEvent event) noexcept {
   case ViewEventKind::frame_ready:
     update();
     break;
-  case ViewEventKind::diagnostic_published:
-    emit diagnosticPublished(
-        QStringLiteral("missing_samples"),
-        QString::fromStdString(event.document_id.to_string()),
-        static_cast<quint64>(event.document_revision.value));
-    break;
+  case ViewEventKind::diagnostic_published: {
+    const Diagnostic *published{};
+    for (const auto &diagnostic : impl_->session->diagnostics()) {
+      if (diagnostic.id > impl_->last_diagnostic_id &&
+          diagnostic.document_id == event.document_id &&
+          diagnostic.document_revision == event.document_revision &&
+          (published == nullptr || diagnostic.id < published->id)) {
+        published = &diagnostic;
+      }
+    }
+    if (published != nullptr) {
+      impl_->last_diagnostic_id = published->id;
+      const auto code = diagnostic_code(published->code);
+      emit diagnosticPublished(
+          code, QString::fromStdString(event.document_id.to_string()),
+          static_cast<quint64>(event.document_revision.value));
+      if (published->code == DiagnosticCode::asynchronous_preparation_failed) {
+        const auto error = impl_->session->diagnostic_error(published->id);
+        const auto reason = error.has_value()
+                                ? asynchronous_error_reason(error->code)
+                                : QStringLiteral("details_unavailable");
+        emit viewError(
+            code, tr("Asynchronous scene preparation failed: %1").arg(reason));
+      }
+    }
+  } break;
   }
   schedule_coalesced_signals();
 }

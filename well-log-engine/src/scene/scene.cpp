@@ -717,6 +717,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       for (std::uint64_t segment_offset = 0;
            segment_offset < scene->curve_layers.back().segment_count;
            ++segment_offset) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
         const auto &segment = scene->curve_segments[static_cast<std::size_t>(
             first_segment + segment_offset)];
         if (segment.point_count == 0) {
@@ -727,6 +730,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                                      : segment.point_count - std::uint64_t{1};
         for (std::uint64_t primitive_offset = 0;
              primitive_offset < primitive_count; ++primitive_offset) {
+          if (stop_token.stop_requested()) {
+            return cancellation_error();
+          }
           const auto first_point =
               segment.first_point +
               (segment.point_count == 1 ? std::uint64_t{0} : primitive_offset);
@@ -763,6 +769,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           const auto first_bin = bin_for(minimum_top);
           const auto last_bin = bin_for(maximum_top);
           for (auto bin = first_bin; bin <= last_bin; ++bin) {
+            if (stop_token.stop_requested()) {
+              return cancellation_error();
+            }
             pick_index.bins[bin].push_back(primitive_index);
           }
         }
