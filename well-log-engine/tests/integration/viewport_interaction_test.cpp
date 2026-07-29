@@ -223,12 +223,50 @@ void invalid_view_commands_leave_session_state_unchanged() {
           "rejected view commands must not publish events");
 }
 
+void view_event_observers_receive_committed_state_changes() {
+  auto fixture = prepared_session();
+  auto observed_count = 0;
+  auto observed_viewport = DepthViewport{};
+  const auto observer_id =
+      fixture.session.subscribe_view_events([&](const ViewEvent &event) {
+        if (event.kind == ViewEventKind::viewport_changed) {
+          ++observed_count;
+          observed_viewport = *fixture.session.viewport(fixture.document_id);
+        }
+      });
+  require(observer_id != 0, "view event observer must subscribe");
+
+  require(fixture.session
+              .execute(PanDepthCommand{
+                  .document_id = fixture.document_id,
+                  .display_depth_delta = 5.0,
+              })
+              .has_value(),
+          "observed viewport command must succeed");
+  require(observed_count == 1,
+          "observer must receive one committed viewport event");
+  require_near(observed_viewport.top, 1005.0,
+               "observer must see committed session state");
+
+  fixture.session.unsubscribe_view_events(observer_id);
+  require(fixture.session
+              .execute(PanDepthCommand{
+                  .document_id = fixture.document_id,
+                  .display_depth_delta = 5.0,
+              })
+              .has_value(),
+          "viewport command after unsubscribe must succeed");
+  require(observed_count == 1,
+          "unsubscribed observer must receive no further events");
+}
+
 } // namespace
 
 int main() {
   session_owns_pan_zoom_and_reset_state();
   session_owns_crosshair_state();
   invalid_view_commands_leave_session_state_unchanged();
+  view_event_observers_receive_committed_state_changes();
   std::cout << "PASS: session viewport interaction behavior\n";
   return EXIT_SUCCESS;
 }

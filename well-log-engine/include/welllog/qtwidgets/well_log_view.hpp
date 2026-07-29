@@ -12,6 +12,8 @@
 class QEvent;
 class QKeyEvent;
 class QMouseEvent;
+class QResizeEvent;
+class QShowEvent;
 class QWheelEvent;
 
 namespace welllog {
@@ -50,6 +52,8 @@ protected:
   void initializeGL() override;
   void resizeGL(int width, int height) override;
   void paintGL() override;
+  void showEvent(QShowEvent *event) override;
+  void resizeEvent(QResizeEvent *event) override;
   void mousePressEvent(QMouseEvent *event) override;
   void mouseMoveEvent(QMouseEvent *event) override;
   void mouseReleaseEvent(QMouseEvent *event) override;
@@ -59,7 +63,10 @@ protected:
 
 private:
   void cleanup_context() noexcept;
+  void handle_session_event(ViewEvent event) noexcept;
+  void schedule_coalesced_signals() noexcept;
   void update_pointer(double left, double top) noexcept;
+  void update_capability_overlay() noexcept;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

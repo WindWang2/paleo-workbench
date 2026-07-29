@@ -47,10 +47,18 @@ evaluate_capabilities(OpenGlContextCapabilities capabilities) noexcept {
         .open_gl_minor = capabilities.open_gl_minor,
         .stencil_bits = capabilities.stencil_bits,
         .maximum_texture_size = capabilities.maximum_texture_size,
+        .maximum_combined_texture_units =
+            capabilities.maximum_combined_texture_units,
+        .maximum_vertex_attributes = capabilities.maximum_vertex_attributes,
+        .maximum_uniform_block_size = capabilities.maximum_uniform_block_size,
+        .buffer_storage_supported = capabilities.buffer_storage_supported,
+        .timer_query_supported = capabilities.timer_query_supported,
+        .persistent_mapping_enabled = false,
         .vendor = std::move(capabilities.vendor),
         .renderer = std::move(capabilities.renderer),
         .open_gl_version = std::move(capabilities.open_gl_version),
         .glsl_version = std::move(capabilities.glsl_version),
+        .active_upload_path = "OpenGL 3.3 static VBO",
         .unavailable_reason = {},
     };
     const auto version_available =

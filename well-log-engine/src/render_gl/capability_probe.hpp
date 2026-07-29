@@ -12,6 +12,11 @@ struct OpenGlContextCapabilities {
   int open_gl_minor{};
   int stencil_bits{};
   int maximum_texture_size{};
+  int maximum_combined_texture_units{};
+  int maximum_vertex_attributes{};
+  int maximum_uniform_block_size{};
+  bool buffer_storage_supported{};
+  bool timer_query_supported{};
   std::string vendor;
   std::string renderer;
   std::string open_gl_version;

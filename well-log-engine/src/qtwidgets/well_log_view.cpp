@@ -4,13 +4,17 @@
 #include "render_gl/renderer.hpp"
 
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
 #include <QOpenGLFunctions>
-#include <QPainter>
+#include <QResizeEvent>
+#include <QShowEvent>
 #include <QSurfaceFormat>
+#include <QThread>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -73,6 +77,12 @@ struct WellLogView::Impl {
   bool dragging{};
   bool drag_moved{};
   bool framebuffer_stencil_verified{};
+  QLabel *capability_overlay{};
+  QTimer *signal_timer{};
+  ViewEventObserverId session_observer_id{};
+  bool viewport_signal_pending{};
+  bool crosshair_signal_pending{};
+  bool hover_signal_pending{};
 };
 
 WellLogView::WellLogView(QWidget *parent)
@@ -87,9 +97,43 @@ WellLogView::WellLogView(std::shared_ptr<WellLogSession> session,
   setMouseTracking(true);
   setFocusPolicy(Qt::StrongFocus);
   setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
+  impl_->capability_overlay = new QLabel(tr("Initializing OpenGL view…"), this);
+  impl_->capability_overlay->setAlignment(Qt::AlignCenter);
+  impl_->capability_overlay->setWordWrap(true);
+  impl_->capability_overlay->setStyleSheet(
+      QStringLiteral("QLabel { color: #ebebeb; background: #232629; "
+                     "padding: 16px; }"));
+  impl_->capability_overlay->setGeometry(rect());
+  impl_->capability_overlay->raise();
+  impl_->signal_timer = new QTimer(this);
+  impl_->signal_timer->setInterval(16);
+  impl_->signal_timer->setSingleShot(true);
+  connect(impl_->signal_timer, &QTimer::timeout, this, [this]() {
+    if (impl_->viewport_signal_pending) {
+      impl_->viewport_signal_pending = false;
+      emit viewportChanged();
+    }
+    if (impl_->crosshair_signal_pending) {
+      impl_->crosshair_signal_pending = false;
+      emit crosshairChanged();
+    }
+    if (impl_->hover_signal_pending) {
+      impl_->hover_signal_pending = false;
+      emit hoverChanged();
+    }
+  });
+  impl_->session_observer_id =
+      impl_->session->subscribe_view_events([this](const ViewEvent &event) {
+        QMetaObject::invokeMethod(
+            this, [this, event]() { handle_session_event(event); },
+            Qt::QueuedConnection);
+      });
 }
 
-WellLogView::~WellLogView() { cleanup_context(); }
+WellLogView::~WellLogView() {
+  impl_->session->unsubscribe_view_events(impl_->session_observer_id);
+  cleanup_context();
+}
 
 WellLogSession &WellLogView::session() noexcept { return *impl_->session; }
 
@@ -98,13 +142,20 @@ const WellLogSession &WellLogView::session() const noexcept {
 }
 
 void WellLogView::set_document_id(EntityId document_id) noexcept {
+  if (QThread::currentThread() != thread()) {
+    QMetaObject::invokeMethod(
+        this, [this, document_id]() { set_document_id(document_id); },
+        Qt::QueuedConnection);
+    return;
+  }
   impl_->document_id =
       document_id.is_nil() ? std::nullopt : std::optional{document_id};
   const auto had_hover = impl_->hover_pick.has_value();
   impl_->hover_pick.reset();
   impl_->click_pick.reset();
   if (had_hover) {
-    emit hoverChanged();
+    impl_->hover_signal_pending = true;
+    schedule_coalesced_signals();
   }
   update();
 }
@@ -145,6 +196,14 @@ void WellLogView::initializeGL() {
 
     int maximum_texture_size{};
     functions->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximum_texture_size);
+    int maximum_combined_texture_units{};
+    functions->glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,
+                             &maximum_combined_texture_units);
+    int maximum_vertex_attributes{};
+    functions->glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maximum_vertex_attributes);
+    int maximum_uniform_block_size{};
+    functions->glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE,
+                             &maximum_uniform_block_size);
     const auto format = current->format();
     impl_->capability_report =
         detail::evaluate_capabilities(detail::OpenGlContextCapabilities{
@@ -153,6 +212,13 @@ void WellLogView::initializeGL() {
             .open_gl_minor = format.minorVersion(),
             .stencil_bits = format.stencilBufferSize(),
             .maximum_texture_size = maximum_texture_size,
+            .maximum_combined_texture_units = maximum_combined_texture_units,
+            .maximum_vertex_attributes = maximum_vertex_attributes,
+            .maximum_uniform_block_size = maximum_uniform_block_size,
+            .buffer_storage_supported = current->hasExtension(
+                QByteArrayLiteral("GL_ARB_buffer_storage")),
+            .timer_query_supported =
+                current->hasExtension(QByteArrayLiteral("GL_ARB_timer_query")),
             .vendor = gl_string(*functions, GL_VENDOR),
             .renderer = gl_string(*functions, GL_RENDERER),
             .open_gl_version = gl_string(*functions, GL_VERSION),
@@ -167,6 +233,7 @@ void WellLogView::initializeGL() {
     impl_->context_cleanup_connection = connect(
         current, &QOpenGLContext::aboutToBeDestroyed, this,
         [this]() { cleanup_context(); }, Qt::DirectConnection);
+    update_capability_overlay();
     emit capabilityChanged();
     if (!impl_->capability_report.graphics_available) {
       emit fatalViewError();
@@ -174,6 +241,7 @@ void WellLogView::initializeGL() {
   } catch (...) {
     impl_->capability_report =
         failed_capability_report("OpenGL capability detection failed");
+    update_capability_overlay();
     emit fatalViewError();
   }
 }
@@ -205,23 +273,13 @@ void WellLogView::paintGL() {
       }
     }
     impl_->framebuffer_stencil_verified = true;
+    update_capability_overlay();
     emit capabilityChanged();
     if (!impl_->capability_report.graphics_available) {
       emit fatalViewError();
     }
   }
   if (!impl_->capability_report.graphics_available) {
-    QPainter painter(this);
-    painter.fillRect(rect(), QColor{35, 38, 41});
-    painter.setPen(QColor{235, 235, 235});
-    const auto reason =
-        impl_->capability_report.unavailable_reason.empty()
-            ? tr("OpenGL view unavailable")
-            : tr("OpenGL view unavailable\n%1")
-                  .arg(QString::fromStdString(
-                      impl_->capability_report.unavailable_reason));
-    painter.drawText(rect().adjusted(16, 16, -16, -16),
-                     Qt::AlignCenter | Qt::TextWordWrap, reason);
     return;
   }
   try {
@@ -287,6 +345,25 @@ void WellLogView::paintGL() {
   }
 }
 
+void WellLogView::showEvent(QShowEvent *event) {
+  QOpenGLWidget::showEvent(event);
+  QTimer::singleShot(500, this, [this]() {
+    if (impl_->capability_report.initialization_complete || !isVisible()) {
+      return;
+    }
+    impl_->capability_report = failed_capability_report(
+        "an OpenGL 3.3 Core context could not be created");
+    update_capability_overlay();
+    emit capabilityChanged();
+    emit fatalViewError();
+  });
+}
+
+void WellLogView::resizeEvent(QResizeEvent *event) {
+  QOpenGLWidget::resizeEvent(event);
+  impl_->capability_overlay->setGeometry(rect());
+}
+
 void WellLogView::mousePressEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton) {
     impl_->dragging = true;
@@ -314,7 +391,6 @@ void WellLogView::mouseMoveEvent(QMouseEvent *event) {
               .has_value()) {
         impl_->drag_moved = true;
         impl_->drag_last_top = event->position().y();
-        emit viewportChanged();
         update();
       }
     }
@@ -362,7 +438,6 @@ void WellLogView::wheelEvent(QWheelEvent *event) {
               .span_factor = factor,
           })
           .has_value()) {
-    emit viewportChanged();
     update_pointer(event->position().x(), event->position().y());
     update();
   }
@@ -370,18 +445,16 @@ void WellLogView::wheelEvent(QWheelEvent *event) {
 }
 
 void WellLogView::leaveEvent(QEvent *event) {
-  if (impl_->document_id.has_value() &&
-      impl_->session
-          ->execute(SetCrosshairCommand{
-              .document_id = *impl_->document_id,
-              .crosshair = std::nullopt,
-          })
-          .has_value()) {
-    emit crosshairChanged();
+  if (impl_->document_id.has_value()) {
+    static_cast<void>(impl_->session->execute(SetCrosshairCommand{
+        .document_id = *impl_->document_id,
+        .crosshair = std::nullopt,
+    }));
   }
   if (impl_->hover_pick.has_value()) {
     impl_->hover_pick.reset();
-    emit hoverChanged();
+    impl_->hover_signal_pending = true;
+    schedule_coalesced_signals();
   }
   update();
   QOpenGLWidget::leaveEvent(event);
@@ -397,13 +470,17 @@ void WellLogView::keyPressEvent(QKeyEvent *event) {
 }
 
 void WellLogView::reset_viewport() {
+  if (QThread::currentThread() != thread()) {
+    QMetaObject::invokeMethod(
+        this, [this]() { reset_viewport(); }, Qt::QueuedConnection);
+    return;
+  }
   if (!impl_->document_id.has_value()) {
     return;
   }
   if (impl_->session
           ->execute(ResetViewportCommand{.document_id = *impl_->document_id})
           .has_value()) {
-    emit viewportChanged();
     update();
   }
 }
@@ -424,18 +501,14 @@ void WellLogView::update_pointer(double left, double top) noexcept {
         std::clamp(top / static_cast<double>(height()), 0.0, 1.0);
     const auto display_depth =
         viewport->top + vertical_fraction * (viewport->bottom - viewport->top);
-    if (impl_->session
-            ->execute(SetCrosshairCommand{
-                .document_id = *impl_->document_id,
-                .crosshair =
-                    CrosshairState{
-                        .track_fraction = horizontal_fraction,
-                        .display_depth = display_depth,
-                    },
-            })
-            .has_value()) {
-      emit crosshairChanged();
-    }
+    static_cast<void>(impl_->session->execute(SetCrosshairCommand{
+        .document_id = *impl_->document_id,
+        .crosshair =
+            CrosshairState{
+                .track_fraction = horizontal_fraction,
+                .display_depth = display_depth,
+            },
+    }));
 
     const auto reference_range = scene->reference_depth_range();
     const auto reference_span = reference_range.bottom - reference_range.top;
@@ -462,11 +535,64 @@ void WellLogView::update_pointer(double left, double top) noexcept {
             (physical_height * viewport_span / reference_span),
     });
     impl_->hover_pick = next_hover;
-    emit hoverChanged();
+    impl_->hover_signal_pending = true;
+    schedule_coalesced_signals();
     update();
   } catch (...) {
     emit fatalViewError();
   }
+}
+
+void WellLogView::handle_session_event(ViewEvent event) noexcept {
+  if (!impl_->document_id.has_value() ||
+      event.document_id != *impl_->document_id) {
+    return;
+  }
+  switch (event.kind) {
+  case ViewEventKind::viewport_changed:
+    impl_->viewport_signal_pending = true;
+    update();
+    break;
+  case ViewEventKind::crosshair_changed:
+    impl_->crosshair_signal_pending = true;
+    update();
+    break;
+  case ViewEventKind::documents_changed:
+  case ViewEventKind::presentation_changed:
+  case ViewEventKind::frame_ready:
+    update();
+    break;
+  case ViewEventKind::diagnostic_published:
+    break;
+  }
+  schedule_coalesced_signals();
+}
+
+void WellLogView::schedule_coalesced_signals() noexcept {
+  if (!impl_->signal_timer->isActive()) {
+    impl_->signal_timer->start();
+  }
+}
+
+void WellLogView::update_capability_overlay() noexcept {
+  if (impl_->capability_overlay == nullptr) {
+    return;
+  }
+  if (impl_->capability_report.graphics_available &&
+      impl_->framebuffer_stencil_verified) {
+    impl_->capability_overlay->hide();
+    return;
+  }
+  const auto reason =
+      impl_->capability_report.initialization_complete
+          ? QString::fromStdString(impl_->capability_report.unavailable_reason)
+          : tr("Initializing OpenGL view…");
+  impl_->capability_overlay->setText(
+      impl_->capability_report.initialization_complete
+          ? tr("OpenGL view unavailable\n%1").arg(reason)
+          : reason);
+  impl_->capability_overlay->show();
+  impl_->capability_overlay->raise();
 }
 
 void WellLogView::cleanup_context() noexcept {
@@ -486,6 +612,8 @@ void WellLogView::cleanup_context() noexcept {
   }
   impl_->uploaded_scene.reset();
   impl_->framebuffer_stencil_verified = false;
+  impl_->capability_report = {};
+  update_capability_overlay();
 }
 
 } // namespace welllog

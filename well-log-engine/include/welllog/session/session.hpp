@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -82,6 +83,9 @@ struct ViewEvent {
   DocumentRevision document_revision;
 };
 
+using ViewEventObserverId = std::uint64_t;
+using ViewEventObserver = std::function<void(const ViewEvent &)>;
+
 enum class DiagnosticCode : std::uint16_t {
   missing_samples,
 };
@@ -128,6 +132,9 @@ public:
   viewport(EntityId document_id) const noexcept;
   [[nodiscard]] std::optional<CrosshairState>
   crosshair(EntityId document_id) const noexcept;
+  [[nodiscard]] ViewEventObserverId
+  subscribe_view_events(ViewEventObserver observer) noexcept;
+  void unsubscribe_view_events(ViewEventObserverId observer_id) noexcept;
 
 private:
   struct Impl;

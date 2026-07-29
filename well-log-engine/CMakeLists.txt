@@ -210,37 +210,37 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
-if(WELLLOG_BUILD_QT_WIDGETS)
-    add_library(welllog_render_gl ${WELLLOG_LIBRARY_TYPE}
-        src/render_gl/capability.cpp
-        src/render_gl/renderer.cpp
+add_library(welllog_render_gl ${WELLLOG_LIBRARY_TYPE}
+    src/render_gl/capability.cpp
+    src/render_gl/renderer.cpp
+)
+add_library(WellLog::RenderGL ALIAS welllog_render_gl)
+set_target_properties(welllog_render_gl PROPERTIES
+    EXPORT_NAME RenderGL
+    OUTPUT_NAME welllog-render-gl
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_render_gl PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_render_gl)
+target_link_libraries(welllog_render_gl PUBLIC WellLog::Scene)
+target_include_directories(welllog_render_gl
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_render_gl
+        PRIVATE WELLLOG_RENDER_GL_BUILD
+        PUBLIC WELLLOG_RENDER_GL_SHARED
     )
-    add_library(WellLog::RenderGL ALIAS welllog_render_gl)
-    set_target_properties(welllog_render_gl PROPERTIES
-        EXPORT_NAME RenderGL
-        OUTPUT_NAME welllog-render-gl
-        VERSION "${PROJECT_VERSION}"
-        SOVERSION "${PROJECT_VERSION_MAJOR}"
-        CXX_VISIBILITY_PRESET hidden
-        VISIBILITY_INLINES_HIDDEN YES
-    )
-    target_compile_features(welllog_render_gl PUBLIC cxx_std_20)
-    welllog_enable_warnings(welllog_render_gl)
-    target_link_libraries(welllog_render_gl PUBLIC WellLog::Scene)
-    target_include_directories(welllog_render_gl
-        PUBLIC
-            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    if(WELLLOG_BUILD_SHARED)
-        target_compile_definitions(
-            welllog_render_gl
-            PRIVATE WELLLOG_RENDER_GL_BUILD
-            PUBLIC WELLLOG_RENDER_GL_SHARED
-        )
-    endif()
+endif()
 
+if(WELLLOG_BUILD_QT_WIDGETS)
     qt_add_library(welllog_qtwidgets ${WELLLOG_LIBRARY_TYPE}
         src/qtwidgets/well_log_view.cpp
         include/welllog/qtwidgets/well_log_view.hpp
@@ -286,6 +286,7 @@ install(
         welllog_export_vector
         welllog_session
         welllog_io
+        welllog_render_gl
     EXPORT WellLogTargets
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -294,7 +295,7 @@ install(
 )
 if(WELLLOG_BUILD_QT_WIDGETS)
     install(
-        TARGETS welllog_render_gl welllog_qtwidgets
+        TARGETS welllog_qtwidgets
         EXPORT WellLogTargets
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -374,21 +375,22 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_viewport_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.viewport COMMAND welllog_viewport_tests)
 
-    if(WELLLOG_BUILD_QT_WIDGETS)
-        add_executable(welllog_render_gl_tests
-            tests/render_gl/capability_test.cpp
-            src/render_gl/capability.cpp
-        )
-        target_compile_features(welllog_render_gl_tests PRIVATE cxx_std_20)
-        welllog_enable_warnings(welllog_render_gl_tests)
-        target_include_directories(
-            welllog_render_gl_tests
-            PRIVATE
-                "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                "${CMAKE_CURRENT_SOURCE_DIR}/src"
-        )
-        add_test(NAME welllog.render-gl COMMAND welllog_render_gl_tests)
+    add_executable(welllog_render_gl_tests
+        tests/render_gl/capability_test.cpp
+    )
+    target_compile_features(welllog_render_gl_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_render_gl_tests)
+    target_include_directories(
+        welllog_render_gl_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        welllog_render_gl_tests
+        PRIVATE WellLog::RenderGL
+    )
+    add_test(NAME welllog.render-gl COMMAND welllog_render_gl_tests)
 
+    if(WELLLOG_BUILD_QT_WIDGETS)
         qt_add_executable(welllog_qt_widget_tests
             tests/qt/well_log_view_test.cpp
         )
@@ -398,6 +400,22 @@ if(WELLLOG_BUILD_TESTS)
             PRIVATE WellLog::QtWidgets Qt6::Test
         )
         add_test(NAME welllog.qt-widget COMMAND welllog_qt_widget_tests)
+        add_test(
+            NAME welllog.qt-unavailable
+            COMMAND
+                welllog_qt_widget_tests
+                unavailable_context_publishes_a_capability_report
+        )
+        set_tests_properties(
+            welllog.qt-unavailable
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=minimal"
+        )
+        if(UNIX AND NOT APPLE)
+            set_tests_properties(
+                welllog.qt-widget
+                PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1"
+            )
+        endif()
     endif()
 
     add_test(

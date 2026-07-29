@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QGuiApplication>
 #include <QImage>
 #include <QMouseEvent>
 #include <QSignalSpy>
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -31,6 +33,9 @@ private slots:
   void pointer_pan_zoom_and_reset_use_session_commands();
   void widget_rebuild_restores_curve_from_session_cpu_state();
   void top_level_reparent_restores_curve_after_context_recreation();
+  void unavailable_context_publishes_a_capability_report();
+  void external_session_events_refresh_and_coalesce_qt_signals();
+  void cross_thread_public_mutations_are_queued_to_gui();
 };
 
 struct PreparedViewFixture {
@@ -103,7 +108,13 @@ PreparedViewFixture prepared_view_fixture() {
       .track_id = track_id,
       .curve_id = curve_id,
       .scale_id = scale_id,
-      .color = RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56},
+      .color =
+          RgbaColor{
+              .red = 0x12,
+              .green = 0x34,
+              .blue = 0x56,
+              .alpha = 0x80,
+          },
       .line_width = Millimetres{0.5},
       .z_order = 0,
   });
@@ -142,6 +153,12 @@ void WellLogViewTest::native_view_embeds_and_reports_capabilities() {
   QVERIFY(report.open_gl_major > 3 ||
           (report.open_gl_major == 3 && report.open_gl_minor >= 3));
   QVERIFY(report.stencil_bits >= 8);
+  QVERIFY(report.maximum_texture_size > 0);
+  QVERIFY(report.maximum_combined_texture_units > 0);
+  QVERIFY(report.maximum_vertex_attributes >= 2);
+  QVERIFY(report.maximum_uniform_block_size > 0);
+  QVERIFY(!report.persistent_mapping_enabled);
+  QVERIFY(!report.active_upload_path.empty());
   QVERIFY(!report.vendor.empty());
   QVERIFY(!report.renderer.empty());
   QVERIFY(!report.open_gl_version.empty());
@@ -167,19 +184,47 @@ void WellLogViewTest::prepared_curve_renders_into_the_widget_fbo() {
        image.pixelColor(image.width() / 2, image.height() / 2) !=
            QColor{Qt::white}),
       5000);
+  const auto center_color =
+      image.pixelColor(image.width() / 2, image.height() / 2);
+  const auto center_description = center_color.name(QColor::HexArgb);
+  QVERIFY2(center_color.red() >= 125 && center_color.red() <= 150,
+           qPrintable(center_description));
+  QVERIFY2(center_color.green() >= 145 && center_color.green() <= 170,
+           qPrintable(center_description));
+  QVERIFY2(center_color.blue() >= 160 && center_color.blue() <= 195,
+           qPrintable(center_description));
   QCOMPARE(image.pixelColor(image.width() - 20, 20), QColor{Qt::white});
 
   qsizetype curve_pixel_count{};
   for (int top = 0; top < image.height(); ++top) {
     for (int left = 0; left < image.width(); ++left) {
       const auto color = image.pixelColor(left, top);
-      if (color.red() < 128 && color.green() < 128 && color.blue() < 160) {
+      if (color.red() < 200 && color.green() < 200 && color.blue() < 210) {
         ++curve_pixel_count;
       }
     }
   }
   QVERIFY(curve_pixel_count >= 200);
   QVERIFY(curve_pixel_count <= 2000);
+
+  auto matched_rows = 0;
+  for (int top = 0; top < image.height(); ++top) {
+    const auto expected_left = static_cast<int>(std::lround(
+        static_cast<double>(top) / static_cast<double>(image.height() - 1) *
+        static_cast<double>(image.width() - 1)));
+    auto row_matches = false;
+    for (auto offset = -4; offset <= 4; ++offset) {
+      const auto left =
+          std::clamp(expected_left + offset, 0, image.width() - 1);
+      const auto color = image.pixelColor(left, top);
+      if (color.red() < 200 && color.green() < 200 && color.blue() < 210) {
+        row_matches = true;
+        break;
+      }
+    }
+    matched_rows += row_matches ? 1 : 0;
+  }
+  QVERIFY(matched_rows >= image.height() * 9 / 10);
 
   view.set_document_id(EntityId{});
   QTRY_COMPARE_WITH_TIMEOUT(
@@ -257,7 +302,7 @@ void WellLogViewTest::pointer_pan_zoom_and_reset_use_session_commands() {
   QApplication::sendEvent(&view, &wheel_event);
   viewport = fixture.session->viewport(fixture.document_id);
   QVERIFY(viewport->bottom - viewport->top < 100.0);
-  QVERIFY(viewport_spy.count() >= 2);
+  QTRY_VERIFY_WITH_TIMEOUT(viewport_spy.count() >= 1, 5000);
 
   view.reset_viewport();
   viewport = fixture.session->viewport(fixture.document_id);
@@ -325,6 +370,93 @@ void WellLogViewTest::
        image.pixelColor(image.width() / 2, image.height() / 2) !=
            QColor{Qt::white}),
       5000);
+}
+
+void WellLogViewTest::unavailable_context_publishes_a_capability_report() {
+  if (QGuiApplication::platformName() != QStringLiteral("minimal")) {
+    QSKIP("the unavailable-context contract runs with the minimal QPA plugin");
+  }
+  WellLogView view;
+  QSignalSpy capability_spy(&view, &WellLogView::capabilityChanged);
+  QSignalSpy fatal_spy(&view, &WellLogView::fatalViewError);
+  view.resize(200, 200);
+  view.show();
+
+  QTRY_VERIFY_WITH_TIMEOUT(view.capability_report().initialization_complete,
+                           3000);
+  QVERIFY(!view.capability_report().graphics_available);
+  QVERIFY(!view.capability_report().unavailable_reason.empty());
+  QVERIFY(capability_spy.count() >= 1);
+  QVERIFY(fatal_spy.count() >= 1);
+}
+
+void WellLogViewTest::
+    external_session_events_refresh_and_coalesce_qt_signals() {
+  auto fixture = prepared_view_fixture();
+  WellLogView view(fixture.session);
+  view.set_document_id(fixture.document_id);
+  view.resize(200, 200);
+  QSignalSpy viewport_spy(&view, &WellLogView::viewportChanged);
+  QSignalSpy crosshair_spy(&view, &WellLogView::crosshairChanged);
+  view.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&view));
+  QTRY_VERIFY_WITH_TIMEOUT(view.capability_report().graphics_available, 5000);
+
+  for (auto offset = 1; offset <= 3; ++offset) {
+    QVERIFY(fixture.session
+                ->execute(SetViewportCommand{
+                    .document_id = fixture.document_id,
+                    .viewport =
+                        DepthViewport{
+                            .top = 1000.0 + offset,
+                            .bottom = 1100.0 + offset,
+                        },
+                })
+                .has_value());
+  }
+  QTRY_COMPARE_WITH_TIMEOUT(viewport_spy.count(), 1, 5000);
+
+  for (auto offset = 1; offset <= 3; ++offset) {
+    QVERIFY(fixture.session
+                ->execute(SetCrosshairCommand{
+                    .document_id = fixture.document_id,
+                    .crosshair =
+                        CrosshairState{
+                            .track_fraction = 0.25,
+                            .display_depth = 1050.0 + offset,
+                        },
+                })
+                .has_value());
+  }
+  QTRY_COMPARE_WITH_TIMEOUT(crosshair_spy.count(), 1, 5000);
+  const auto image = view.grabFramebuffer();
+  const auto cursor_pixel =
+      image.pixelColor(image.width() / 4, image.height() / 2);
+  QVERIFY(cursor_pixel.red() > cursor_pixel.green() * 2);
+}
+
+void WellLogViewTest::cross_thread_public_mutations_are_queued_to_gui() {
+  auto fixture = prepared_view_fixture();
+  WellLogView view(fixture.session);
+
+  std::thread document_worker([&view, document_id = fixture.document_id]() {
+    view.set_document_id(document_id);
+  });
+  document_worker.join();
+  QTRY_VERIFY_WITH_TIMEOUT(view.document_id() == fixture.document_id, 5000);
+
+  QVERIFY(fixture.session
+              ->execute(SetViewportCommand{
+                  .document_id = fixture.document_id,
+                  .viewport = DepthViewport{.top = 1020.0, .bottom = 1080.0},
+              })
+              .has_value());
+  std::thread reset_worker([&view]() { view.reset_viewport(); });
+  reset_worker.join();
+  const auto default_viewport = std::optional<DepthViewport>{
+      DepthViewport{.top = 1000.0, .bottom = 1100.0}};
+  QTRY_VERIFY_WITH_TIMEOUT(
+      fixture.session->viewport(fixture.document_id) == default_viewport, 5000);
 }
 
 } // namespace

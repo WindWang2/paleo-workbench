@@ -319,6 +319,26 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
   std::vector<ViewEvent> events;
   std::vector<Diagnostic> diagnostics;
+  ViewEventObserverId next_observer_id{1};
+  std::unordered_map<ViewEventObserverId, ViewEventObserver> observers;
+
+  void notify_observers(const ViewEvent &event) const noexcept {
+    try {
+      std::vector<ViewEventObserver> observer_snapshot;
+      observer_snapshot.reserve(observers.size());
+      for (const auto &[observer_id, observer] : observers) {
+        static_cast<void>(observer_id);
+        observer_snapshot.push_back(observer);
+      }
+      for (const auto &observer : observer_snapshot) {
+        try {
+          observer(event);
+        } catch (...) {
+        }
+      }
+    } catch (...) {
+    }
+  }
 };
 
 WellLogSession::WellLogSession() : impl_(std::make_unique<Impl>()) {}
@@ -411,6 +431,9 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
     impl_->diagnostics.insert(impl_->diagnostics.end(),
                               pending_diagnostics.begin(),
                               pending_diagnostics.end());
+    for (const auto &event : pending_events) {
+      impl_->notify_observers(event);
+    }
 
     return CommandReceipt{
         .state_version = next_state_version,
@@ -505,6 +528,9 @@ WellLogSession::execute(const SetPresentationCommand &command) {
     impl_->state_version = next_state_version;
     impl_->events.insert(impl_->events.end(), pending_events.begin(),
                          pending_events.end());
+    for (const auto &event : pending_events) {
+      impl_->notify_observers(event);
+    }
     return CommandReceipt{
         .state_version = next_state_version,
         .document_id = document_id,
@@ -550,12 +576,14 @@ WellLogSession::execute(const SetViewportCommand &command) {
     impl_->events.reserve(impl_->events.size() + 1);
     viewport->second = command.viewport;
     impl_->state_version = next_state_version;
-    impl_->events.push_back(ViewEvent{
+    const auto event = ViewEvent{
         .kind = ViewEventKind::viewport_changed,
         .state_version = next_state_version,
         .document_id = command.document_id,
         .document_revision = document->second->revision(),
-    });
+    };
+    impl_->events.push_back(event);
+    impl_->notify_observers(event);
     return CommandReceipt{
         .state_version = next_state_version,
         .document_id = command.document_id,
@@ -661,12 +689,14 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
       impl_->crosshairs.erase(command.document_id);
     }
     impl_->state_version = next_state_version;
-    impl_->events.push_back(ViewEvent{
+    const auto event = ViewEvent{
         .kind = ViewEventKind::crosshair_changed,
         .state_version = next_state_version,
         .document_id = command.document_id,
         .document_revision = document->second->revision(),
-    });
+    };
+    impl_->events.push_back(event);
+    impl_->notify_observers(event);
     return CommandReceipt{
         .state_version = next_state_version,
         .document_id = command.document_id,
@@ -729,6 +759,30 @@ WellLogSession::crosshair(EntityId document_id) const noexcept {
   return found == impl_->crosshairs.end()
              ? std::nullopt
              : std::optional<CrosshairState>{found->second};
+}
+
+ViewEventObserverId
+WellLogSession::subscribe_view_events(ViewEventObserver observer) noexcept {
+  if (!observer) {
+    return 0;
+  }
+  try {
+    if (impl_->next_observer_id == 0 ||
+        impl_->next_observer_id ==
+            std::numeric_limits<ViewEventObserverId>::max()) {
+      return 0;
+    }
+    const auto observer_id = impl_->next_observer_id++;
+    impl_->observers.emplace(observer_id, std::move(observer));
+    return observer_id;
+  } catch (...) {
+    return 0;
+  }
+}
+
+void WellLogSession::unsubscribe_view_events(
+    ViewEventObserverId observer_id) noexcept {
+  impl_->observers.erase(observer_id);
 }
 
 } // namespace welllog

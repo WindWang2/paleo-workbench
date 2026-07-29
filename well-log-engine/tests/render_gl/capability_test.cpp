@@ -32,13 +32,22 @@ int main() {
       .open_gl_minor = 6,
       .stencil_bits = 8,
       .maximum_texture_size = 32768,
+      .maximum_combined_texture_units = 192,
+      .maximum_vertex_attributes = 16,
+      .maximum_uniform_block_size = 65536,
+      .buffer_storage_supported = true,
+      .timer_query_supported = true,
       .vendor = "fixture-vendor",
       .renderer = "fixture-renderer",
       .open_gl_version = "4.6 fixture",
       .glsl_version = "4.60 fixture",
   });
   if (!supported.initialization_complete || !supported.graphics_available ||
-      !supported.unavailable_reason.empty()) {
+      !supported.unavailable_reason.empty() ||
+      supported.maximum_vertex_attributes != 16 ||
+      !supported.buffer_storage_supported ||
+      supported.persistent_mapping_enabled ||
+      supported.active_upload_path != "OpenGL 3.3 static VBO") {
     fail("supported OpenGL capabilities were rejected");
   }
 
@@ -49,6 +58,11 @@ int main() {
           .open_gl_minor = 2,
           .stencil_bits = 8,
           .maximum_texture_size = 0,
+          .maximum_combined_texture_units = 0,
+          .maximum_vertex_attributes = 0,
+          .maximum_uniform_block_size = 0,
+          .buffer_storage_supported = false,
+          .timer_query_supported = false,
           .vendor = {},
           .renderer = {},
           .open_gl_version = {},
@@ -62,6 +76,11 @@ int main() {
           .open_gl_minor = 3,
           .stencil_bits = 8,
           .maximum_texture_size = 0,
+          .maximum_combined_texture_units = 0,
+          .maximum_vertex_attributes = 0,
+          .maximum_uniform_block_size = 0,
+          .buffer_storage_supported = false,
+          .timer_query_supported = false,
           .vendor = {},
           .renderer = {},
           .open_gl_version = {},
@@ -75,6 +94,11 @@ int main() {
           .open_gl_minor = 3,
           .stencil_bits = 0,
           .maximum_texture_size = 0,
+          .maximum_combined_texture_units = 0,
+          .maximum_vertex_attributes = 0,
+          .maximum_uniform_block_size = 0,
+          .buffer_storage_supported = false,
+          .timer_query_supported = false,
           .vendor = {},
           .renderer = {},
           .open_gl_version = {},
@@ -88,6 +112,11 @@ int main() {
           .open_gl_minor = 3,
           .stencil_bits = 8,
           .maximum_texture_size = 0,
+          .maximum_combined_texture_units = 0,
+          .maximum_vertex_attributes = 0,
+          .maximum_uniform_block_size = 0,
+          .buffer_storage_supported = false,
+          .timer_query_supported = false,
           .vendor = {},
           .renderer = {},
           .open_gl_version = {},

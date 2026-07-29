@@ -42,8 +42,13 @@ constexpr GlEnum gl_color_buffer_bit = 0x00004000;
 constexpr GlEnum gl_stencil_buffer_bit = 0x00000400;
 constexpr GlEnum gl_depth_test = 0x0B71;
 constexpr GlEnum gl_blend = 0x0BE2;
+constexpr GlEnum gl_cull_face = 0x0B44;
+constexpr GlEnum gl_stencil_test = 0x0B90;
 constexpr GlEnum gl_scissor_test = 0x0C11;
 constexpr GlEnum gl_triangles = 0x0004;
+constexpr GlEnum gl_src_alpha = 0x0302;
+constexpr GlEnum gl_one_minus_src_alpha = 0x0303;
+constexpr GlEnum gl_one = 1;
 
 using GlGenVertexArrays = void(WELLLOG_GL_CALL *)(GlSize, GlUInt *);
 using GlBindVertexArray = void(WELLLOG_GL_CALL *)(GlUInt);
@@ -83,6 +88,11 @@ using GlClearStencil = void(WELLLOG_GL_CALL *)(GlInt);
 using GlClear = void(WELLLOG_GL_CALL *)(GlEnum);
 using GlEnable = void(WELLLOG_GL_CALL *)(GlEnum);
 using GlDisable = void(WELLLOG_GL_CALL *)(GlEnum);
+using GlBlendFuncSeparate = void(WELLLOG_GL_CALL *)(GlEnum, GlEnum, GlEnum,
+                                                    GlEnum);
+using GlColorMask = void(WELLLOG_GL_CALL *)(GlBoolean, GlBoolean, GlBoolean,
+                                            GlBoolean);
+using GlStencilMask = void(WELLLOG_GL_CALL *)(GlUInt);
 using GlScissor = void(WELLLOG_GL_CALL *)(GlInt, GlInt, GlSize, GlSize);
 using GlDrawArrays = void(WELLLOG_GL_CALL *)(GlEnum, GlInt, GlSize);
 
@@ -124,6 +134,9 @@ struct GlFunctions {
   GlClear clear{};
   GlEnable enable{};
   GlDisable disable{};
+  GlBlendFuncSeparate blend_func_separate{};
+  GlColorMask color_mask{};
+  GlStencilMask stencil_mask{};
   GlScissor scissor{};
   GlDrawArrays draw_arrays{};
 
@@ -144,7 +157,9 @@ struct GlFunctions {
            bind_framebuffer != nullptr && viewport != nullptr &&
            clear_color != nullptr && clear_stencil != nullptr &&
            clear != nullptr && enable != nullptr && disable != nullptr &&
-           scissor != nullptr && draw_arrays != nullptr;
+           blend_func_separate != nullptr && color_mask != nullptr &&
+           stencil_mask != nullptr && scissor != nullptr &&
+           draw_arrays != nullptr;
   }
 };
 
@@ -209,6 +224,12 @@ struct GlFunctions {
       .clear = load<GlClear>(resolver, resolver_context, "glClear"),
       .enable = load<GlEnable>(resolver, resolver_context, "glEnable"),
       .disable = load<GlDisable>(resolver, resolver_context, "glDisable"),
+      .blend_func_separate = load<GlBlendFuncSeparate>(
+          resolver, resolver_context, "glBlendFuncSeparate"),
+      .color_mask =
+          load<GlColorMask>(resolver, resolver_context, "glColorMask"),
+      .stencil_mask =
+          load<GlStencilMask>(resolver, resolver_context, "glStencilMask"),
       .scissor = load<GlScissor>(resolver, resolver_context, "glScissor"),
       .draw_arrays =
           load<GlDrawArrays>(resolver, resolver_context, "glDrawArrays"),
@@ -367,6 +388,11 @@ bool GlRenderer::initialize(GlProcResolver resolver,
       return false;
     }
     impl_->program = impl_->gl.create_program();
+    if (impl_->program == 0) {
+      impl_->gl.delete_shader(vertex);
+      impl_->gl.delete_shader(fragment);
+      return false;
+    }
     impl_->gl.attach_shader(impl_->program, vertex);
     impl_->gl.attach_shader(impl_->program, fragment);
     impl_->gl.link_program(impl_->program);
@@ -380,6 +406,7 @@ bool GlRenderer::initialize(GlProcResolver resolver,
       return false;
     }
 
+    impl_->owner_thread = std::this_thread::get_id();
     impl_->gl.gen_vertex_arrays(1, &impl_->vertex_array);
     impl_->gl.gen_buffers(1, &impl_->vertex_buffer);
     if (impl_->vertex_array == 0 || impl_->vertex_buffer == 0) {
@@ -407,7 +434,6 @@ bool GlRenderer::initialize(GlProcResolver resolver,
         impl_->gl.get_uniform_location(impl_->program, "halfWidthPixels");
     impl_->color_uniform =
         impl_->gl.get_uniform_location(impl_->program, "curveColor");
-    impl_->owner_thread = std::this_thread::get_id();
     return initialized();
   } catch (...) {
     abandon();
@@ -510,10 +536,18 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
   impl_->gl.bind_framebuffer(gl_framebuffer, frame.framebuffer);
   impl_->gl.viewport(0, 0, frame.pixel_width, frame.pixel_height);
   impl_->gl.disable(gl_depth_test);
-  impl_->gl.disable(gl_blend);
+  impl_->gl.disable(gl_cull_face);
+  impl_->gl.disable(gl_stencil_test);
+  impl_->gl.disable(gl_scissor_test);
+  impl_->gl.color_mask(static_cast<GlBoolean>(1), static_cast<GlBoolean>(1),
+                       static_cast<GlBoolean>(1), static_cast<GlBoolean>(1));
+  impl_->gl.stencil_mask(std::numeric_limits<GlUInt>::max());
   impl_->gl.clear_color(1.0F, 1.0F, 1.0F, 1.0F);
   impl_->gl.clear_stencil(0);
   impl_->gl.clear(gl_color_buffer_bit | gl_stencil_buffer_bit);
+  impl_->gl.enable(gl_blend);
+  impl_->gl.blend_func_separate(gl_src_alpha, gl_one_minus_src_alpha, gl_one,
+                                gl_one_minus_src_alpha);
   impl_->gl.use_program(impl_->program);
   impl_->gl.bind_vertex_array(impl_->vertex_array);
   impl_->gl.uniform_2f(impl_->viewport_pixels_uniform,
@@ -557,27 +591,30 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
     const auto vertical_fraction =
         (frame.crosshair->display_depth - frame.viewport.top) /
         (frame.viewport.bottom - frame.viewport.top);
-    const auto crosshair_left = std::clamp(
-        static_cast<int>(std::lround(
-            horizontal_fraction * static_cast<double>(frame.pixel_width - 1))),
-        0, frame.pixel_width - 1);
-    const auto crosshair_bottom =
-        std::clamp(static_cast<int>(std::lround(
-                       (1.0 - vertical_fraction) *
-                       static_cast<double>(frame.pixel_height - 1))),
-                   0, frame.pixel_height - 1);
-    impl_->gl.clear_color(0.85F, 0.1F, 0.1F, 1.0F);
-    impl_->gl.scissor(crosshair_left, 0, 1, frame.pixel_height);
-    impl_->gl.clear(gl_color_buffer_bit);
-    impl_->gl.scissor(0, crosshair_bottom, frame.pixel_width, 1);
-    impl_->gl.clear(gl_color_buffer_bit);
+    if (vertical_fraction >= 0.0 && vertical_fraction <= 1.0) {
+      const auto crosshair_left =
+          std::clamp(static_cast<int>(std::lround(
+                         horizontal_fraction *
+                         static_cast<double>(frame.pixel_width - 1))),
+                     0, frame.pixel_width - 1);
+      const auto crosshair_bottom =
+          std::clamp(static_cast<int>(std::lround(
+                         (1.0 - vertical_fraction) *
+                         static_cast<double>(frame.pixel_height - 1))),
+                     0, frame.pixel_height - 1);
+      impl_->gl.clear_color(0.85F, 0.1F, 0.1F, 1.0F);
+      impl_->gl.scissor(crosshair_left, 0, 1, frame.pixel_height);
+      impl_->gl.clear(gl_color_buffer_bit);
+      impl_->gl.scissor(0, crosshair_bottom, frame.pixel_width, 1);
+      impl_->gl.clear(gl_color_buffer_bit);
+    }
   }
   impl_->gl.disable(gl_scissor_test);
   return true;
 }
 
 void GlRenderer::release() noexcept {
-  if (!initialized() || std::this_thread::get_id() != impl_->owner_thread) {
+  if (std::this_thread::get_id() != impl_->owner_thread) {
     abandon();
     return;
   }
