@@ -564,6 +564,49 @@ struct CurvePreparation {
   std::shared_ptr<const detail::ScenePreparer::CurveLodMap> pyramids;
 };
 
+// The prepared-scene issue enums (ValueIssueCode / TextIssueCode) map 1:1 onto
+// the session-domain DiagnosticCode and the error-domain MessageKey. These
+// resolvers keep that mapping in one place per family rather than restating it
+// inside each publish loop's switch (ADR 0038 domain separation is preserved:
+// the enums themselves stay distinct across scene/session/error layers).
+
+struct ValueIssueMapping {
+  DiagnosticCode code{DiagnosticCode::nonpositive_log_values};
+  MessageKey message{MessageKey::log_scale_values_not_drawn};
+};
+
+[[nodiscard]] ValueIssueMapping resolve(ValueIssueCode code) noexcept {
+  switch (code) {
+  case ValueIssueCode::nonpositive_log_values:
+    return {.code = DiagnosticCode::nonpositive_log_values,
+            .message = MessageKey::log_scale_values_not_drawn};
+  case ValueIssueCode::scale_readability_hint:
+    return {.code = DiagnosticCode::scale_readability_hint,
+            .message = MessageKey::scale_readability_hint};
+  }
+  return {};
+}
+
+struct TextIssueMapping {
+  DiagnosticCode code{DiagnosticCode::missing_glyphs};
+  MessageKey message{MessageKey::glyphs_missing_from_fonts};
+};
+
+[[nodiscard]] TextIssueMapping resolve(TextIssueCode code) noexcept {
+  switch (code) {
+  case TextIssueCode::missing_glyphs:
+    return {.code = DiagnosticCode::missing_glyphs,
+            .message = MessageKey::glyphs_missing_from_fonts};
+  case TextIssueCode::fallback_font_used:
+    return {.code = DiagnosticCode::fallback_font_used,
+            .message = MessageKey::font_fallback_used};
+  case TextIssueCode::text_engine_unavailable:
+    return {.code = DiagnosticCode::text_engine_unavailable,
+            .message = MessageKey::text_engine_unavailable};
+  }
+  return {};
+}
+
 } // namespace
 
 struct WellLogSession::Impl {
@@ -651,6 +694,55 @@ struct WellLogSession::Impl {
     notifications.push_back(event);
   }
 
+  // Publishes one diagnostic derived from a prepared-scene issue: reserves
+  // space across the four diagnostic sinks, emplaces the error + Diagnostic,
+  // bumps the version/next-id, and fans out the ViewEvent to both event
+  // sinks. Shared by publish_value_issues and publish_text_issues so the
+  // reserve/emplace/push/event sequence lives in one place. Returns the id
+  // assigned to the published diagnostic.
+  std::uint64_t publish_one_diagnostic(EntityId document_id,
+                                       DocumentRevision revision,
+                                       EntityId entity_id,
+                                       std::uint32_t occurrence_count,
+                                       DiagnosticCode code, MessageKey message,
+                                       ErrorCode error_code,
+                                       std::vector<ViewEvent> &notifications) noexcept {
+    const auto diagnostic_id = next_diagnostic_id;
+    diagnostics.reserve(diagnostics.size() + 1);
+    diagnostic_errors.reserve(diagnostic_errors.size() + 1);
+    events.reserve(events.size() + 1);
+    notifications.reserve(notifications.size() + 1);
+    diagnostic_errors.emplace(
+        diagnostic_id,
+        Error{
+            .code = error_code,
+            .severity = Severity::warning,
+            .entity_id = entity_id,
+            .message = message,
+            .arguments = {},
+        });
+    ++state_version;
+    diagnostics.push_back(Diagnostic{
+        .id = diagnostic_id,
+        .code = code,
+        .severity = Severity::warning,
+        .document_id = document_id,
+        .entity_id = entity_id,
+        .document_revision = revision,
+        .occurrence_count = occurrence_count,
+    });
+    ++next_diagnostic_id;
+    const auto event = ViewEvent{
+        .kind = ViewEventKind::diagnostic_published,
+        .state_version = state_version,
+        .document_id = document_id,
+        .document_revision = revision,
+    };
+    events.push_back(event);
+    notifications.push_back(event);
+    return diagnostic_id;
+  }
+
   // Publishes prepared-scene value issues (non-positive log-scale
   // samples, scale readability hints) into the diagnostic stream.
   void publish_value_issues(EntityId document_id, DocumentRevision revision,
@@ -662,52 +754,11 @@ struct WellLogSession::Impl {
             next_diagnostic_id == std::numeric_limits<std::uint64_t>::max()) {
           break;
         }
-        DiagnosticCode code = DiagnosticCode::nonpositive_log_values;
-        MessageKey message = MessageKey::log_scale_values_not_drawn;
-        Severity severity = Severity::warning;
-        switch (issue.code) {
-        case ValueIssueCode::nonpositive_log_values:
-          code = DiagnosticCode::nonpositive_log_values;
-          message = MessageKey::log_scale_values_not_drawn;
-          break;
-        case ValueIssueCode::scale_readability_hint:
-          code = DiagnosticCode::scale_readability_hint;
-          message = MessageKey::scale_readability_hint;
-          break;
-        }
-        const auto diagnostic_id = next_diagnostic_id;
-        diagnostics.reserve(diagnostics.size() + 1);
-        diagnostic_errors.reserve(diagnostic_errors.size() + 1);
-        events.reserve(events.size() + 1);
-        notifications.reserve(notifications.size() + 1);
-        diagnostic_errors.emplace(
-            diagnostic_id,
-            Error{
-                .code = ErrorCode::diagnostic_warning,
-                .severity = severity,
-                .entity_id = issue.entity_id,
-                .message = message,
-                .arguments = {},
-            });
-        ++state_version;
-        diagnostics.push_back(Diagnostic{
-            .id = diagnostic_id,
-            .code = code,
-            .severity = severity,
-            .document_id = document_id,
-            .entity_id = issue.entity_id,
-            .document_revision = revision,
-            .occurrence_count = issue.occurrence_count,
-        });
-        ++next_diagnostic_id;
-        const auto event = ViewEvent{
-            .kind = ViewEventKind::diagnostic_published,
-            .state_version = state_version,
-            .document_id = document_id,
-            .document_revision = revision,
-        };
-        events.push_back(event);
-        notifications.push_back(event);
+        const auto mapping = resolve(issue.code);
+        publish_one_diagnostic(document_id, revision, issue.entity_id,
+                               issue.occurrence_count, mapping.code,
+                               mapping.message, ErrorCode::diagnostic_warning,
+                               notifications);
       }
     } catch (...) {
     }
@@ -727,58 +778,14 @@ struct WellLogSession::Impl {
             next_diagnostic_id == std::numeric_limits<std::uint64_t>::max()) {
           break;
         }
-        DiagnosticCode code = DiagnosticCode::missing_glyphs;
-        MessageKey message = MessageKey::glyphs_missing_from_fonts;
-        switch (issue.code) {
-        case TextIssueCode::missing_glyphs:
-          code = DiagnosticCode::missing_glyphs;
-          message = MessageKey::glyphs_missing_from_fonts;
-          break;
-        case TextIssueCode::fallback_font_used:
-          code = DiagnosticCode::fallback_font_used;
-          message = MessageKey::font_fallback_used;
-          break;
-        case TextIssueCode::text_engine_unavailable:
-          code = DiagnosticCode::text_engine_unavailable;
-          message = MessageKey::text_engine_unavailable;
-          break;
-        }
-        const auto diagnostic_id = next_diagnostic_id;
-        diagnostics.reserve(diagnostics.size() + 1);
-        diagnostic_errors.reserve(diagnostic_errors.size() + 1);
-        events.reserve(events.size() + 1);
-        notifications.reserve(notifications.size() + 1);
-        diagnostic_errors.emplace(
-            diagnostic_id,
-            Error{
-                .code = ErrorCode::invalid_font,
-                .severity = Severity::warning,
-                .entity_id = issue.entity_id,
-                .message = message,
-                .arguments = {},
-            });
-        ++state_version;
-        diagnostics.push_back(Diagnostic{
-            .id = diagnostic_id,
-            .code = code,
-            .severity = Severity::warning,
-            .document_id = document_id,
-            .entity_id = issue.entity_id,
-            .document_revision = revision,
-            .occurrence_count = issue.occurrence_count,
-        });
-        ++next_diagnostic_id;
+        const auto mapping = resolve(issue.code);
+        const auto published = publish_one_diagnostic(
+            document_id, revision, issue.entity_id, issue.occurrence_count,
+            mapping.code, mapping.message, ErrorCode::invalid_font,
+            notifications);
         if (!first_diagnostic.has_value()) {
-          first_diagnostic = diagnostic_id;
+          first_diagnostic = published;
         }
-        const auto event = ViewEvent{
-            .kind = ViewEventKind::diagnostic_published,
-            .state_version = state_version,
-            .document_id = document_id,
-            .document_revision = revision,
-        };
-        events.push_back(event);
-        notifications.push_back(event);
       }
     } catch (...) {
     }

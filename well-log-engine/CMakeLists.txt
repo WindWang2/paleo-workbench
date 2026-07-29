@@ -767,9 +767,14 @@ if(WELLLOG_BUILD_TESTS)
     )
     target_compile_features(welllog_multi_scale_tests PRIVATE cxx_std_20)
     welllog_enable_warnings(welllog_multi_scale_tests)
+    target_compile_definitions(
+        welllog_multi_scale_tests
+        PRIVATE
+            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+    )
     target_link_libraries(
         welllog_multi_scale_tests
-        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Session
+        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Text WellLog::Session
     )
     add_test(
         NAME welllog.multi-scale-track

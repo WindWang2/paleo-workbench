@@ -1,6 +1,7 @@
 #include <welllog/render_gl/upload.hpp>
 #include <welllog/export/svg.hpp>
 #include <welllog/session/session.hpp>
+#include <welllog/text/harfbuzz_text_engine.hpp>
 #include <cstdint>
 
 #include <chrono>
@@ -170,6 +171,16 @@ const PreparedCurveLayer &find_layer(const PreparedScene &scene, EntityId layer)
     }
   }
   fail("expected the curve layer in the scene");
+}
+
+// A real text engine so header text runs are actually shaped (the default
+// null engine suppresses them, leaving label_run_index at no_text_run).
+std::shared_ptr<HarfBuzzTextEngine> make_text_engine() {
+  auto engine = std::make_shared<HarfBuzzTextEngine>();
+  const auto font = engine->add_project_font(
+      std::string{WELLLOG_TEST_FONT_DIR} + "/NotoSans-Regular.ttf");
+  require(font.has_value(), "bundled test font must load");
+  return engine;
 }
 
 void linear_log_and_reversed_scales_map_independently() {
@@ -459,6 +470,97 @@ void track_headers_describe_each_curve() {
           "suppressed header runs must be diagnosed");
 }
 
+void header_text_run_carries_curve_color() {
+  // Criterion 4 says the header must *show* each curve's color. With a real
+  // text engine the header entry resolves to a shaped text run; the curve's
+  // color must land on that run, not merely on the entry struct.
+  WellLogSession session;
+  session.set_text_engine(make_text_engine());
+  require(session.execute(SetDocumentCommand{simple_multi_document()})
+              .has_value(),
+          "document must be accepted");
+
+  auto with_header = ScenePresentationBuilder(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = "m",
+          .top = 1000.0,
+          .bottom = 1005.0,
+      },
+      Millimetres{100.0}, "font-fixture-v1");
+  with_header.add_track(TrackSpec{
+      .id = track_id,
+      .width = Millimetres{40.0},
+      .z_order = 0,
+      .header =
+          TrackHeaderSpec{
+              .height = Millimetres{8.0},
+              .font_size = Millimetres{2.5},
+          },
+  });
+  with_header.add_scale(TrackScaleSpec{
+      .id = linear_scale_id,
+      .track_id = track_id,
+      .mode = ScaleMode::linear,
+      .minimum = 0.0,
+      .maximum = 100.0,
+      .direction = ScaleDirection::left_to_right,
+      .unit = "API",
+  });
+  with_header.add_scale(TrackScaleSpec{
+      .id = log_scale_id,
+      .track_id = track_id,
+      .mode = ScaleMode::logarithmic,
+      .minimum = 0.1,
+      .maximum = 10.0,
+      .direction = ScaleDirection::right_to_left,
+      .unit = "g/cm3",
+  });
+  with_header.add_curve_layer(CurveLayerSpec{
+      .id = gr_layer_id,
+      .track_id = track_id,
+      .curve_id = gr_curve_id,
+      .scale_id = linear_scale_id,
+      .color = RgbaColor{20, 120, 20, 255},
+      .line_width = Millimetres{0.5},
+      .z_order = 0,
+      .visible = true,
+  });
+  with_header.add_curve_layer(CurveLayerSpec{
+      .id = den_layer_id,
+      .track_id = track_id,
+      .curve_id = den_curve_id,
+      .scale_id = log_scale_id,
+      .color = RgbaColor{200, 30, 30, 255},
+      .line_width = Millimetres{0.5},
+      .z_order = 1,
+      .visible = true,
+  });
+  const auto scene = prepare(session, with_header);
+
+  const auto &entries = scene->track_header_entries();
+  require(entries.size() == 2, "one header entry per visible curve layer");
+  require(scene->text_issues().empty(),
+          "a real engine must not produce header text issues");
+
+  // Each entry's color must reach its shaped text run (criterion 4 "shows
+  // color"), not just sit on the entry struct.
+  const auto &gr_run =
+      scene->text_runs()[static_cast<std::size_t>(entries[0].label_run_index)];
+  require(entries[0].label_run_index != no_text_run,
+          "the GR header must reference a shaped text run");
+  require(gr_run.color == RgbaColor(20, 120, 20, 255),
+          "the GR header run must carry the GR curve color");
+
+  const auto &den_run =
+      scene->text_runs()[static_cast<std::size_t>(entries[1].label_run_index)];
+  require(entries[1].label_run_index != no_text_run,
+          "the DEN header must reference a shaped text run");
+  require(den_run.color == RgbaColor(200, 30, 30, 255),
+          "the DEN header run must carry the DEN curve color");
+}
+
 void more_than_four_visible_scales_warn_without_refusing() {
   auto depths = std::make_shared<const std::vector<double>>(
       std::initializer_list<double>{1000.0, 1005.0});
@@ -708,15 +810,18 @@ void lod_and_picking_return_original_values_per_curve() {
               "pick must return the original reference depth");
 }
 
-namespace {
-[[nodiscard]] int resolve_noop(void *, const char *) { return 0; }
-}  // namespace
-
 void opengl_and_svg_consume_identical_curve_geometry() {
-  // The GL upload planner reports the same vertex byte footprint the SVG
-  // exporter traces, so both backends share the prepared scene's scale
-  // mapping (rendering.md section 6). Without a GL context we exercise the
-  // upload schedule, which walks the prepared segments identically.
+  // Criterion 7: OpenGL and SVG must produce consistent semantics for the
+  // same Track Scale config. Both backends consume the single prepared
+  // curve_segments()/curve_points() the kernel scales once, so the parity
+  // claim reduces to "both walk the same geometry." The GL upload schedule
+  // exposes only counts/bytes (no per-point coordinates), so edge-level
+  // parity is the strongest assertion possible without expanding the GL API.
+  //
+  // GL counts an "upload segment" per edge (point_count - 1) per prepared
+  // segment; SVG emits one M/L pair per point along the same edges. So the
+  // shared quantity is the total edge count, walked here the way SVG does
+  // (layer -> segment -> points), independently of GL's flat traversal.
   WellLogSession session;
   require(session.execute(SetDocumentCommand{simple_multi_document()})
               .has_value(),
@@ -724,17 +829,36 @@ void opengl_and_svg_consume_identical_curve_geometry() {
   auto builder = base_presentation();
   add_curve_layers(builder);
   const auto scene = prepare(session, builder);
+
+  const auto segments = scene->curve_segments();
+  std::uint64_t expected_edges = 0;
+  for (const auto &layer : scene->curve_layers()) {
+    for (std::uint64_t offset = 0; offset < layer.segment_count; ++offset) {
+      const auto &segment =
+          segments[static_cast<std::size_t>(layer.first_segment + offset)];
+      if (segment.point_count > 1) {
+        expected_edges += segment.point_count - 1;
+      }
+    }
+  }
+  require(expected_edges > 0,
+          "both curve layers must produce prepared geometry");
+
   const auto schedule = GpuUploadSchedule::plan(
       *scene, GpuUploadBudgets{.maximum_cache_bytes = 1024 * 1024,
                                .maximum_bytes_per_frame = 1024 * 1024});
   require(schedule.has_value(), "upload plan must succeed");
-  require(schedule.value().total_bytes() > 0,
-          "both curve layers must produce upload geometry");
-  // The exported SVG path d is built from the same segments.
+  // GL walks exactly the edges SVG traces: one edge = 6 vertices
+  // (upload.cpp vertices_per_curve_segment).
+  require(schedule.value().source_segment_count() == expected_edges,
+          "GL upload must consume the same curve edges as the scene");
+  require(schedule.value().vertex_count() == expected_edges * 6,
+          "GL vertex count must follow the shared edge count");
+
+  // SVG traces the same edges into its path d, tagged per scale.
   const auto exported = SvgExporter::write(*scene);
   require(exported.has_value(), "SVG export must succeed");
   const auto text = std::string{exported.value().text()};
-  static_cast<void>(resolve_noop);
   require(text.find("data-scale-id=\"80000000-0000-4000-8000-000000000006\"") !=
               std::string::npos,
           "SVG must reference the linear scale identity");
@@ -774,6 +898,7 @@ int main() {
   hidden_layers_keep_identity_without_geometry();
   log_scales_reject_nonpositive_ranges();
   track_headers_describe_each_curve();
+  header_text_run_carries_curve_color();
   more_than_four_visible_scales_warn_without_refusing();
   lod_and_picking_return_original_values_per_curve();
   opengl_and_svg_consume_identical_curve_geometry();
