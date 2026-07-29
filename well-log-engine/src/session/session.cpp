@@ -651,6 +651,68 @@ struct WellLogSession::Impl {
     notifications.push_back(event);
   }
 
+  // Publishes prepared-scene value issues (non-positive log-scale
+  // samples, scale readability hints) into the diagnostic stream.
+  void publish_value_issues(EntityId document_id, DocumentRevision revision,
+                            const PreparedScene &scene,
+                            std::vector<ViewEvent> &notifications) noexcept {
+    try {
+      for (const auto &issue : scene.value_issues()) {
+        if (state_version == std::numeric_limits<std::uint64_t>::max() ||
+            next_diagnostic_id == std::numeric_limits<std::uint64_t>::max()) {
+          break;
+        }
+        DiagnosticCode code = DiagnosticCode::nonpositive_log_values;
+        MessageKey message = MessageKey::log_scale_values_not_drawn;
+        Severity severity = Severity::warning;
+        switch (issue.code) {
+        case ValueIssueCode::nonpositive_log_values:
+          code = DiagnosticCode::nonpositive_log_values;
+          message = MessageKey::log_scale_values_not_drawn;
+          break;
+        case ValueIssueCode::scale_readability_hint:
+          code = DiagnosticCode::scale_readability_hint;
+          message = MessageKey::scale_readability_hint;
+          break;
+        }
+        const auto diagnostic_id = next_diagnostic_id;
+        diagnostics.reserve(diagnostics.size() + 1);
+        diagnostic_errors.reserve(diagnostic_errors.size() + 1);
+        events.reserve(events.size() + 1);
+        notifications.reserve(notifications.size() + 1);
+        diagnostic_errors.emplace(
+            diagnostic_id,
+            Error{
+                .code = ErrorCode::invalid_presentation,
+                .severity = severity,
+                .entity_id = issue.entity_id,
+                .message = message,
+                .arguments = {},
+            });
+        ++state_version;
+        diagnostics.push_back(Diagnostic{
+            .id = diagnostic_id,
+            .code = code,
+            .severity = severity,
+            .document_id = document_id,
+            .entity_id = issue.entity_id,
+            .document_revision = revision,
+            .occurrence_count = issue.occurrence_count,
+        });
+        ++next_diagnostic_id;
+        const auto event = ViewEvent{
+            .kind = ViewEventKind::diagnostic_published,
+            .state_version = state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        };
+        events.push_back(event);
+        notifications.push_back(event);
+      }
+    } catch (...) {
+    }
+  }
+
   // Publishes prepared-scene text issues (missing glyphs, fallback fonts,
   // unavailable engines) into the diagnostic stream. Returns the first
   // published diagnostic identity, if any.
@@ -1151,6 +1213,8 @@ WellLogSession::execute(const SetPresentationCommand &command) {
     auto scene =
         std::make_shared<const PreparedScene>(std::move(prepared).value());
     std::vector<ViewEvent> text_notifications;
+    impl_->publish_value_issues(document_id, revision, *scene,
+                                text_notifications);
     const auto text_diagnostic = impl_->publish_text_issues(
         document_id, revision, *scene, text_notifications);
     const auto next_state_version = impl_->state_version + 1;
@@ -1613,6 +1677,10 @@ void WellLogSession::poll_async() noexcept {
                                                   std::move(output.scene));
           impl_->frame_generations.erase(generation);
           ++impl_->completed_lod_tasks;
+          impl_->publish_value_issues(
+              completed_task->document_id, completed_task->revision,
+              *impl_->prepared_scenes.at(completed_task->document_id),
+              notifications);
           static_cast<void>(impl_->publish_text_issues(
               completed_task->document_id, completed_task->revision,
               *impl_->prepared_scenes.at(completed_task->document_id),

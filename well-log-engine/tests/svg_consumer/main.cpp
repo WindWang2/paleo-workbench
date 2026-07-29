@@ -72,6 +72,7 @@ int main() {
       .scale_id = *scale_id,
       .color = RgbaColor{.red = 0xff, .alpha = 0xff},
       .line_width = Millimetres{0.2},
+      .visible = true,
   });
   if (!session.execute(SetPresentationCommand{presentation_builder.build()})) {
     return 3;

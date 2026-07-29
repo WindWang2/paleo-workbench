@@ -75,6 +75,10 @@ namespace {
     return QStringLiteral("fallback_font_used");
   case DiagnosticCode::text_engine_unavailable:
     return QStringLiteral("text_engine_unavailable");
+  case DiagnosticCode::nonpositive_log_values:
+    return QStringLiteral("nonpositive_log_values");
+  case DiagnosticCode::scale_readability_hint:
+    return QStringLiteral("scale_readability_hint");
   }
   return QStringLiteral("unknown_diagnostic");
 }

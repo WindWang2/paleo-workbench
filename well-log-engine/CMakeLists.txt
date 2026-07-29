@@ -762,6 +762,20 @@ if(WELLLOG_BUILD_TESTS)
         )
     endif()
 
+    add_executable(welllog_multi_scale_tests
+        tests/integration/multi_scale_track_test.cpp
+    )
+    target_compile_features(welllog_multi_scale_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_multi_scale_tests)
+    target_link_libraries(
+        welllog_multi_scale_tests
+        PRIVATE WellLog::ExportVector WellLog::Session
+    )
+    add_test(
+        NAME welllog.multi-scale-track
+        COMMAND welllog_multi_scale_tests
+    )
+
     add_executable(welllog_manifest_tests
         tests/integration/manifest_roundtrip_test.cpp
     )

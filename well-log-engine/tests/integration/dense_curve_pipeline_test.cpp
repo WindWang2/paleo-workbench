@@ -98,6 +98,7 @@ ScenePresentation dense_presentation() {
       .color = {},
       .line_width = Millimetres{0.25},
       .z_order = 0,
+      .visible = true,
   });
   return builder.build();
 }

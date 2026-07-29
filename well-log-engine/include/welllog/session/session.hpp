@@ -99,6 +99,8 @@ enum class DiagnosticCode : std::uint16_t {
   missing_glyphs,
   fallback_font_used,
   text_engine_unavailable,
+  nonpositive_log_values,
+  scale_readability_hint,
 };
 
 struct PerformanceBudgets {

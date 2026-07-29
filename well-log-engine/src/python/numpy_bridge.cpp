@@ -349,6 +349,7 @@ derive_presentation_id(EntityId document_id, std::string_view role,
           RgbaColor{.red = 0x19, .green = 0x72, .blue = 0xb8, .alpha = 0xff},
       .line_width = Millimetres{0.35},
       .z_order = 0,
+      .visible = true,
   });
   return view.session().execute(
       SetPresentationCommand{presentation_builder.build()});

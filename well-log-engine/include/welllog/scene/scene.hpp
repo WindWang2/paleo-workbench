@@ -38,12 +38,23 @@ enum class ScaleDirection : std::uint8_t {
 
 enum class ScaleMode : std::uint8_t {
   linear,
+  logarithmic,
+};
+
+// Optional per-track header configuration. When `height` is zero the
+// track renders no header; otherwise each visible curve layer gets a
+// header line with its name, color, range, unit and scale type (ADR 0023).
+struct TrackHeaderSpec {
+  Millimetres height{0.0};
+  Millimetres font_size{2.5};
+  RgbaColor color{0, 0, 0, 255};
 };
 
 struct TrackSpec {
   EntityId id;
   Millimetres width;
   std::int32_t z_order{};
+  TrackHeaderSpec header{};
 };
 
 struct TrackScaleSpec {
@@ -64,6 +75,9 @@ struct CurveLayerSpec {
   RgbaColor color;
   Millimetres line_width;
   std::int32_t z_order{};
+  // Hidden layers keep their identity, style and visibility in the
+  // prepared scene but contribute no geometry.
+  bool visible{true};
 };
 
 // A straight segment inside a pattern tile, in tile-local millimetres.
@@ -230,6 +244,7 @@ struct PreparedCurveLayer {
   std::int32_t z_order{};
   std::uint64_t first_segment{};
   std::uint64_t segment_count{};
+  bool visible{true};
 };
 
 struct PreparedCurveSegment {
@@ -248,6 +263,21 @@ struct PreparedCurvePoint {
 // Sentinel for layer members that have no associated prepared text run.
 inline constexpr std::uint64_t no_text_run =
     std::numeric_limits<std::uint64_t>::max();
+
+// One track header line (ADR 0023): everything the header shows about a
+// curve, plus the prepared text run rendering it (or `no_text_run`).
+struct PreparedTrackHeaderEntry {
+  EntityId track_id;
+  EntityId curve_layer_id;
+  std::string curve_name;
+  RgbaColor color{};
+  double scale_minimum{};
+  double scale_maximum{};
+  std::string unit;
+  ScaleMode mode{ScaleMode::linear};
+  ScaleDirection direction{ScaleDirection::left_to_right};
+  std::uint64_t label_run_index{no_text_run};
+};
 
 struct PreparedIntervalLayer {
   EntityId id;
@@ -380,6 +410,21 @@ struct SceneTextIssue {
   std::uint32_t occurrence_count{};
 };
 
+enum class ValueIssueCode : std::uint8_t {
+  // Curve samples with value <= 0 on a logarithmic scale are not drawn
+  // and aggregate here (data-model-and-api.md section 9).
+  nonpositive_log_values,
+  // More than four visible scales in one track hurts readability; the
+  // kernel warns but never refuses (ADR 0023).
+  scale_readability_hint,
+};
+
+struct SceneValueIssue {
+  ValueIssueCode code{};
+  EntityId entity_id;
+  std::uint32_t occurrence_count{};
+};
+
 struct CurvePick {
   EntityId layer_id;
   EntityId curve_id;
@@ -443,6 +488,10 @@ public:
   [[nodiscard]] std::span<const OutlineCommand>
   outline_commands() const noexcept;
   [[nodiscard]] std::span<const SceneTextIssue> text_issues() const noexcept;
+  [[nodiscard]] std::span<const SceneValueIssue>
+  value_issues() const noexcept;
+  [[nodiscard]] std::span<const PreparedTrackHeaderEntry>
+  track_header_entries() const noexcept;
   // Resolves the owning track of any prepared layer identity (curve,
   // interval, marker, symbol or text), for backends mapping layer-scoped
   // content back to its track clip.

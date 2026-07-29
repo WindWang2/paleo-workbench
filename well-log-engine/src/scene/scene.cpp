@@ -1,6 +1,8 @@
 #include "scene/prepare.hpp"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -350,6 +352,8 @@ struct PreparedScene::Impl {
   std::vector<PreparedGlyphOutline> glyph_outlines;
   std::vector<OutlineCommand> outline_commands;
   std::vector<SceneTextIssue> text_issues;
+  std::vector<SceneValueIssue> value_issues;
+  std::vector<PreparedTrackHeaderEntry> track_header_entries;
 };
 
 PreparedScene::PreparedScene() = default;
@@ -507,6 +511,21 @@ std::span<const SceneTextIssue> PreparedScene::text_issues() const noexcept {
   return impl_ == nullptr
              ? std::span<const SceneTextIssue>{}
              : std::span<const SceneTextIssue>{impl_->text_issues};
+}
+
+std::span<const SceneValueIssue>
+PreparedScene::value_issues() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const SceneValueIssue>{}
+             : std::span<const SceneValueIssue>{impl_->value_issues};
+}
+
+std::span<const PreparedTrackHeaderEntry>
+PreparedScene::track_header_entries() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedTrackHeaderEntry>{}
+             : std::span<const PreparedTrackHeaderEntry>{
+                   impl_->track_header_entries};
 }
 
 std::optional<EntityId>
@@ -753,7 +772,12 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         return cancellation_error();
       }
       if (track.id.is_nil() || !ids.insert(track.id).second ||
-          !std::isfinite(track.width.value) || track.width.value <= 0.0) {
+          !std::isfinite(track.width.value) || track.width.value <= 0.0 ||
+          !std::isfinite(track.header.height.value) ||
+          track.header.height.value < 0.0 ||
+          (track.header.height.value > 0.0 &&
+           (!std::isfinite(track.header.font_size.value) ||
+            track.header.font_size.value <= 0.0))) {
         return presentation_error(track.id);
       }
       const auto right = left + track.width.value;
@@ -784,9 +808,11 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       }
       if (scale.id.is_nil() || !ids.insert(scale.id).second ||
           !track_bounds.contains(scale.track_id) ||
-          scale.mode != ScaleMode::linear || !std::isfinite(scale.minimum) ||
-          !std::isfinite(scale.maximum) || scale.minimum >= scale.maximum ||
-          !std::isfinite(scale.maximum - scale.minimum) || scale.unit.empty()) {
+          !std::isfinite(scale.minimum) || !std::isfinite(scale.maximum) ||
+          scale.minimum >= scale.maximum ||
+          !std::isfinite(scale.maximum - scale.minimum) ||
+          scale.unit.empty() ||
+          (scale.mode == ScaleMode::logarithmic && scale.minimum <= 0.0)) {
         return presentation_error(scale.id);
       }
       scales.emplace(scale.id, &scale);
@@ -838,6 +864,13 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       const auto first_segment =
           static_cast<std::uint64_t>(scene->curve_segments.size());
       std::optional<std::uint64_t> segment_start;
+      std::uint32_t nonpositive_log_values = 0;
+      const auto logarithmic =
+          scale->second->mode == ScaleMode::logarithmic;
+      const auto scale_minimum = scale->second->minimum;
+      const auto scale_maximum = scale->second->maximum;
+      const auto log_minimum = std::log(scale_minimum);
+      const auto log_maximum = std::log(scale_maximum);
       const auto close_segment = [&]() {
         if (!segment_start.has_value()) {
           return;
@@ -864,13 +897,22 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           return true;
         }
 
+        if (logarithmic && *value <= 0.0) {
+          // Non-positive values cannot be drawn on a logarithmic scale:
+          // they break the polyline and aggregate into a diagnostic.
+          close_segment();
+          ++nonpositive_log_values;
+          return true;
+        }
+
         if (!segment_start.has_value()) {
           segment_start =
               static_cast<std::uint64_t>(scene->curve_points.size());
         }
         auto normalized_value =
-            (*value - scale->second->minimum) /
-            (scale->second->maximum - scale->second->minimum);
+            logarithmic
+                ? (std::log(*value) - log_minimum) / (log_maximum - log_minimum)
+                : (*value - scale_minimum) / (scale_maximum - scale_minimum);
         if (scale->second->direction == ScaleDirection::right_to_left) {
           normalized_value = 1.0 - normalized_value;
         }
@@ -901,7 +943,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
 
       const auto lod = curve_lods == nullptr ? CurveLodMap::const_iterator{}
                                              : curve_lods->find(curve->id);
-      if (curve_lods != nullptr && query != nullptr &&
+      if (!layer.visible) {
+        // Hidden: identity and style are preserved without geometry.
+      } else if (curve_lods != nullptr && query != nullptr &&
           lod != curve_lods->end()) {
         const auto selection = lod->second.query(*query, stop_token);
         if (!selection.has_value()) {
@@ -938,6 +982,13 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         }
       }
       close_segment();
+      if (nonpositive_log_values > 0) {
+        scene->value_issues.push_back(SceneValueIssue{
+            .code = ValueIssueCode::nonpositive_log_values,
+            .entity_id = layer.id,
+            .occurrence_count = nonpositive_log_values,
+        });
+      }
 
       const auto layer_index =
           static_cast<std::uint64_t>(scene->curve_layers.size());
@@ -953,6 +1004,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           .segment_count =
               static_cast<std::uint64_t>(scene->curve_segments.size()) -
               first_segment,
+          .visible = layer.visible,
       });
 
       PreparedScene::Impl::CurvePickIndex pick_index{
@@ -1036,6 +1088,28 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         }
       }
       scene->curve_pick_indices.push_back(std::move(pick_index));
+    }
+
+    {
+      std::unordered_map<EntityId, std::unordered_set<EntityId, EntityIdHash>,
+                         EntityIdHash>
+          visible_scales_per_track;
+      for (const auto *layer_pointer : ordered_layers) {
+        if (layer_pointer->visible) {
+          visible_scales_per_track[layer_pointer->track_id].insert(
+              layer_pointer->scale_id);
+        }
+      }
+      for (const auto &[track_id, scale_ids] : visible_scales_per_track) {
+        if (scale_ids.size() > 4) {
+          scene->value_issues.push_back(SceneValueIssue{
+              .code = ValueIssueCode::scale_readability_hint,
+              .entity_id = track_id,
+              .occurrence_count =
+                  static_cast<std::uint32_t>(scale_ids.size()),
+          });
+        }
+      }
     }
 
     // Pattern definitions are the single vector source of truth shared by
@@ -1508,6 +1582,82 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           .run_count = static_cast<std::uint64_t>(scene->text_runs.size()) -
                        first_run,
       });
+    }
+
+    // Track headers: one entry per visible curve layer, rendered through
+    // the same text pipeline (ADR 0023).
+    const auto format_number = [](double value) {
+      std::array<char, 32> buffer{};
+      const auto result =
+          std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                        std::chars_format::general, 6);
+      return std::string{buffer.data(), result.ptr};
+    };
+    for (const auto &track : presentation.tracks()) {
+      if (track.header.height.value <= 0.0) {
+        continue;
+      }
+      const auto line_height = track.header.font_size.value * 1.25;
+      std::uint64_t line = 0;
+      for (const auto *layer_pointer : ordered_layers) {
+        if (stop_token.stop_requested()) {
+          return cancellation_error();
+        }
+        const auto &layer = *layer_pointer;
+        if (layer.track_id != track.id || !layer.visible) {
+          continue;
+        }
+        const auto &scale = *scales.at(layer.scale_id);
+        const auto curve = std::find_if(
+            document.curves().begin(), document.curves().end(),
+            [&](const Curve &candidate) {
+              return candidate.id == layer.curve_id;
+            });
+        auto name = curve->display_name.empty() ? curve->mnemonic
+                                                : curve->display_name;
+        auto text = name;
+        text.push_back(' ');
+        text += format_number(scale.minimum);
+        text += "..";
+        text += format_number(scale.maximum);
+        text.push_back(' ');
+        text += scale.unit;
+        text.push_back(' ');
+        text += scale.mode == ScaleMode::logarithmic ? "log" : "linear";
+        if (scale.direction == ScaleDirection::right_to_left) {
+          text += " rev";
+        }
+        auto label_run_index = no_text_run;
+        if (text_engine == nullptr) {
+          ++suppressed_runs;
+        } else {
+          const auto anchor = PhysicalPoint{
+              .left = Millimetres{track_bounds.at(track.id).left.value + 1.0},
+              .top = Millimetres{static_cast<double>(line) * line_height +
+                                 track.header.font_size.value * 0.85 + 0.5},
+          };
+          const auto run = append_text_run(
+              layer.id, layer.id, text, "", TextOrientation::horizontal, 0.0,
+              track.header.font_size, anchor, layer.color);
+          if (!run.has_value()) {
+            return run.error();
+          }
+          label_run_index = run.value();
+        }
+        scene->track_header_entries.push_back(PreparedTrackHeaderEntry{
+            .track_id = track.id,
+            .curve_layer_id = layer.id,
+            .curve_name = std::move(name),
+            .color = layer.color,
+            .scale_minimum = scale.minimum,
+            .scale_maximum = scale.maximum,
+            .unit = scale.unit,
+            .mode = scale.mode,
+            .direction = scale.direction,
+            .label_run_index = label_run_index,
+        });
+        ++line;
+      }
     }
 
     // Interval and marker labels share the same text pipeline so glyphs

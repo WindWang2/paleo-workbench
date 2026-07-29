@@ -110,6 +110,7 @@ void session_prepares_a_physical_curve_track() {
           RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56, .alpha = 0xff},
       .line_width = Millimetres{0.25},
       .z_order = 20,
+      .visible = true,
   });
 
   const auto receipt =
@@ -291,6 +292,7 @@ prepare_directional_scene(AxisDirection direction) {
           RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56, .alpha = 0xff},
       .line_width = Millimetres{0.25},
       .z_order = 20,
+      .visible = true,
   });
   require(session.execute(SetPresentationCommand{presentation_builder.build()})
               .has_value(),
@@ -409,6 +411,7 @@ void replacing_a_document_invalidates_its_prepared_scene() {
       .color = {},
       .line_width = Millimetres{0.25},
       .z_order = 0,
+      .visible = true,
   });
   require(session.execute(SetPresentationCommand{presentation_builder.build()})
               .has_value(),
@@ -485,6 +488,7 @@ void source_index_requires_an_explicit_reference_depth_transform() {
       .color = {},
       .line_width = Millimetres{0.25},
       .z_order = 0,
+      .visible = true,
   });
 
   const auto result =

@@ -113,6 +113,7 @@ constexpr std::size_t measured_frames = 120;
       .color = {},
       .line_width = Millimetres{0.25},
       .z_order = 0,
+      .visible = true,
   });
   return builder.build();
 }

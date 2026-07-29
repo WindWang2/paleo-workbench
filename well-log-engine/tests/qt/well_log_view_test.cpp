@@ -123,6 +123,7 @@ prepared_view_fixture(PerformanceBudgets budgets = PerformanceBudgets{}) {
           },
       .line_width = Millimetres{0.5},
       .z_order = 0,
+      .visible = true,
   });
   Q_ASSERT(
       session->execute(SetPresentationCommand{presentation_builder.build()})

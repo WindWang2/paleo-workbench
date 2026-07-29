@@ -312,6 +312,7 @@ std::shared_ptr<const PreparedScene> make_snapshot_scene(
       .color = RgbaColor{20, 52, 86, 255},
       .line_width = Millimetres{0.5},
       .z_order = 10,
+      .visible = true,
   });
   presentation.add_pattern(PatternDefinition{
       .id = pattern_id,

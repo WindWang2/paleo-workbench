@@ -101,6 +101,7 @@ SessionFixture prepared_session() {
       .color = RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56},
       .line_width = Millimetres{0.25},
       .z_order = 0,
+      .visible = true,
   });
   require(session.execute(SetPresentationCommand{presentation_builder.build()})
               .has_value(),
