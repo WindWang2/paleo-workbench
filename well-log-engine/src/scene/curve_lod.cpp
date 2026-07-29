@@ -48,8 +48,9 @@ namespace {
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<Error> validate_lod_inputs(const SamplingAxis &axis,
-                                                       const Curve &curve) {
+[[nodiscard]] std::optional<Error>
+validate_lod_inputs(const SamplingAxis &axis, const Curve &curve,
+                    std::stop_token stop_token) {
   if (const auto error = validate_buffer(axis.coordinates)) {
     return error;
   }
@@ -72,6 +73,10 @@ namespace {
                      MessageKey::sampling_axis_direction_invalid);
   }
   for (std::uint64_t index = 1; index < length; ++index) {
+    if ((index & std::uint64_t{4095}) == 0 && stop_token.stop_requested()) {
+      return lod_error(ErrorCode::operation_cancelled,
+                       MessageKey::operation_cancelled);
+    }
     const auto current = axis.coordinates.value_as_double(index);
     if (!current.has_value() || !std::isfinite(*current) ||
         (axis.direction == AxisDirection::increasing ? *current < *previous
@@ -346,7 +351,7 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
       return lod_error(ErrorCode::invalid_document,
                        MessageKey::document_structure_invalid);
     }
-    if (const auto error = validate_lod_inputs(axis, curve)) {
+    if (const auto error = validate_lod_inputs(axis, curve, stop_token)) {
       return *error;
     }
     if (options.maximum_derived_bytes == 0) {
