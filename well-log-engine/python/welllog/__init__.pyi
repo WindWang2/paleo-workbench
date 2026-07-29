@@ -1,5 +1,6 @@
 from typing import Any
 
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QWidget
 
 from .errors import (
@@ -12,7 +13,7 @@ from .errors import (
 )
 
 
-class WellLogView(QWidget):
+class WellLogView(QOpenGLWidget):
     def __init__(self, parent: QWidget | None = ...) -> None: ...
     def submit_curve(
         self,
@@ -24,6 +25,6 @@ class WellLogView(QWidget):
         mnemonic: str,
         depth_unit: str,
         value_unit: str,
-    ) -> dict[str, dict[str, int | str]]: ...
+    ) -> dict[str, object]: ...
     def sample_value(self, curve_id: str, sample_index: int) -> float | None: ...
     def reset_viewport(self) -> None: ...

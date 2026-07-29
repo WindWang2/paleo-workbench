@@ -25,6 +25,7 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         host = QWidget()
         layout = QVBoxLayout(host)
         view = WellLogView()
+        view_ref = weakref.ref(view)
         destroyed_count = 0
 
         def record_destruction() -> None:
@@ -46,6 +47,12 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         self.assertEqual(destroyed_count, 1)
         self.assertFalse(Shiboken.isValid(view))
 
+        del view
+        gc.collect()
+
+        self.assertIsNone(view_ref())
+        self.assertEqual(destroyed_count, 1)
+
     def test_numpy_curve_is_zero_copy_and_owned_by_the_document(self) -> None:
         view = WellLogView()
         depth = np.arange(1000.0, 1006.0, dtype=np.float64)
@@ -55,6 +62,8 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         values_ref = weakref.ref(values)
         expected_depth_address = depth.ctypes.data
         expected_value_address = values.ctypes.data
+        depth.flags.writeable = False
+        values.flags.writeable = False
 
         report = view.submit_curve(
             depth,
@@ -72,6 +81,7 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         self.assertEqual(report["depth"]["address"], expected_depth_address)
         self.assertEqual(report["curve"]["address"], expected_value_address)
         self.assertEqual(report["curve"]["stride_bytes"], 8)
+        self.assertIs(report["render_prepared"], True)
 
         del depth
         del values
@@ -114,6 +124,28 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, "invalid_buffer")
         self.assertTrue(issubclass(WellLogThreadError, RuntimeError))
 
+        writable_depth = np.arange(3, dtype=np.float64)
+        writable_values = np.ones(3, dtype=np.float32)
+        with self.assertRaises(WellLogValidationError) as writable_error:
+            view.submit_curve(writable_depth, writable_values, *arguments)
+
+        self.assertEqual(writable_error.exception.code, "writable_buffer")
+
+        invalid_depth = np.asarray(
+            [1000.0, 1002.0, 1001.0], dtype=np.float64
+        )
+        invalid_values = np.ones(3, dtype=np.float32)
+        invalid_depth.flags.writeable = False
+        invalid_values.flags.writeable = False
+        with self.assertRaises(WellLogValidationError) as result_error:
+            view.submit_curve(
+                invalid_depth,
+                invalid_values,
+                *arguments,
+            )
+
+        self.assertEqual(result_error.exception.code, "invalid_sampling_axis")
+
     def test_asynchronous_view_failure_is_a_typed_qt_signal(self) -> None:
         view = WellLogView()
         errors: list[tuple[str, str]] = []
@@ -143,9 +175,13 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
                 (document_id, revision)
             )
         )
+        depth = np.arange(4, dtype=np.float64)
+        values = np.arange(4, dtype=np.float32)
+        depth.flags.writeable = False
+        values.flags.writeable = False
         view.submit_curve(
-            np.arange(4, dtype=np.float64),
-            np.arange(4, dtype=np.float32),
+            depth,
+            values,
             "40000000-0000-4000-8000-000000000001",
             "40000000-0000-4000-8000-000000000002",
             "40000000-0000-4000-8000-000000000003",

@@ -9,9 +9,13 @@ host = QWidget()
 layout = QVBoxLayout(host)
 view = WellLogView()
 layout.addWidget(view)
+depth = np.arange(4, dtype=np.float64)
+values = np.arange(4, dtype=np.float32)
+depth.flags.writeable = False
+values.flags.writeable = False
 report = view.submit_curve(
-    np.arange(4, dtype=np.float64),
-    np.arange(4, dtype=np.float32),
+    depth,
+    values,
     "30000000-0000-4000-8000-000000000001",
     "30000000-0000-4000-8000-000000000002",
     "30000000-0000-4000-8000-000000000003",

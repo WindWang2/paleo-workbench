@@ -161,6 +161,11 @@ jobs:
           QT_QPA_PLATFORM: minimal
         run: python well-log-engine/tests/python/wheel_smoke.py
 
+      - name: Test Python embedding contracts
+        env:
+          QT_QPA_PLATFORM: minimal
+        run: python well-log-engine/tests/python/test_qt_embedding.py
+
   pinned-vcpkg:
     name: Ubuntu / pinned vcpkg manifest
     runs-on: ubuntu-latest

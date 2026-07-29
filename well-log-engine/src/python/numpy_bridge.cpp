@@ -11,6 +11,8 @@
 
 #include <QThread>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -71,6 +73,52 @@ void set_welllog_error(const char *type_name, const char *code,
     Py_DECREF(instance);
   }
   Py_DECREF(type);
+}
+
+[[nodiscard]] const char *error_code_name(ErrorCode code) noexcept {
+  switch (code) {
+  case ErrorCode::missing_owner:
+    return "missing_owner";
+  case ErrorCode::invalid_buffer:
+    return "invalid_buffer";
+  case ErrorCode::arithmetic_overflow:
+    return "arithmetic_overflow";
+  case ErrorCode::invalid_sampling_axis:
+    return "invalid_sampling_axis";
+  case ErrorCode::length_mismatch:
+    return "length_mismatch";
+  case ErrorCode::duplicate_entity_id:
+    return "duplicate_entity_id";
+  case ErrorCode::missing_sampling_axis:
+    return "missing_sampling_axis";
+  case ErrorCode::invalid_document:
+    return "invalid_document";
+  case ErrorCode::invalid_presentation:
+    return "invalid_presentation";
+  case ErrorCode::invalid_viewport:
+    return "invalid_viewport";
+  case ErrorCode::document_not_found:
+    return "document_not_found";
+  case ErrorCode::invalid_manifest:
+    return "invalid_manifest";
+  case ErrorCode::unresolved_buffer:
+    return "unresolved_buffer";
+  case ErrorCode::resource_exhausted:
+    return "resource_exhausted";
+  case ErrorCode::internal_error:
+    return "internal_error";
+  }
+  return "internal_error";
+}
+
+void set_result_error(const Error &error, const char *operation) {
+  const auto *type_name = error.code == ErrorCode::resource_exhausted ||
+                                  error.code == ErrorCode::internal_error
+                              ? "WellLogError"
+                              : "WellLogValidationError";
+  const auto *code = error_code_name(error.code);
+  const auto message = std::string{operation} + " failed with code " + code;
+  set_welllog_error(type_name, code, message.c_str());
 }
 
 [[nodiscard]] std::optional<ScalarType>
@@ -141,6 +189,13 @@ scalar_type_for_buffer(const Py_buffer &view) noexcept {
                       message.c_str());
     return std::nullopt;
   }
+  if (view.readonly == 0) {
+    const auto message =
+        std::string{role} + " must be marked read-only for zero-copy access";
+    set_welllog_error("WellLogValidationError", "writable_buffer",
+                      message.c_str());
+    return std::nullopt;
+  }
   const auto scalar_type = scalar_type_for_buffer(view);
   if (!scalar_type.has_value()) {
     const auto message =
@@ -193,6 +248,76 @@ scalar_type_for_buffer(const Py_buffer &view) noexcept {
   return result;
 }
 
+[[nodiscard]] EntityId known_id(std::string_view text) {
+  return EntityId::parse(text).value();
+}
+
+[[nodiscard]] Result<CommandReceipt> prepare_default_curve_scene(
+    WellLogView &view, EntityId document_id, EntityId curve_id,
+    const BufferView &depth, const BufferView &values,
+    const std::string &depth_unit, const std::string &value_unit) {
+  auto top = depth.value_as_double(0).value();
+  auto bottom = depth.value_as_double(depth.length() - 1).value();
+  if (top > bottom) {
+    std::swap(top, bottom);
+  }
+  if (top == bottom) {
+    bottom = top + 1.0;
+  }
+
+  auto minimum = std::numeric_limits<double>::infinity();
+  auto maximum = -std::numeric_limits<double>::infinity();
+  for (std::uint64_t index = 0; index < values.length(); ++index) {
+    const auto value = values.value_as_double(index);
+    if (value.has_value() && std::isfinite(*value)) {
+      minimum = std::min(minimum, *value);
+      maximum = std::max(maximum, *value);
+    }
+  }
+  if (!std::isfinite(minimum) || !std::isfinite(maximum)) {
+    minimum = 0.0;
+    maximum = 1.0;
+  } else if (minimum == maximum) {
+    maximum = minimum + 1.0;
+  }
+
+  const auto track_id = known_id("50000000-0000-4000-8000-000000000001");
+  const auto scale_id = known_id("50000000-0000-4000-8000-000000000002");
+  const auto layer_id = known_id("50000000-0000-4000-8000-000000000003");
+  ScenePresentationBuilder presentation_builder(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = depth_unit,
+          .top = top,
+          .bottom = bottom,
+      },
+      Millimetres{100.0}, "welllog-python-default");
+  presentation_builder.add_track(
+      TrackSpec{.id = track_id, .width = Millimetres{40.0}, .z_order = 0});
+  presentation_builder.add_scale(TrackScaleSpec{
+      .id = scale_id,
+      .track_id = track_id,
+      .mode = ScaleMode::linear,
+      .minimum = minimum,
+      .maximum = maximum,
+      .direction = ScaleDirection::left_to_right,
+      .unit = value_unit,
+  });
+  presentation_builder.add_curve_layer(CurveLayerSpec{
+      .id = layer_id,
+      .track_id = track_id,
+      .curve_id = curve_id,
+      .scale_id = scale_id,
+      .color =
+          RgbaColor{.red = 0x19, .green = 0x72, .blue = 0xb8, .alpha = 0xff},
+      .line_width = Millimetres{0.35},
+      .z_order = 0,
+  });
+  return view.session().execute(
+      SetPresentationCommand{presentation_builder.build()});
+}
+
 [[nodiscard]] PyObject *buffer_report(const AdaptedBuffer &buffer) {
   auto *report = PyDict_New();
   if (report == nullptr) {
@@ -242,8 +367,11 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
     return nullptr;
   }
   auto depth_buffer = adapt_buffer(depth, "depth");
+  if (!depth_buffer) {
+    return nullptr;
+  }
   auto value_buffer = adapt_buffer(values, "values");
-  if (!depth_buffer || !value_buffer) {
+  if (!value_buffer) {
     return nullptr;
   }
   if (depth_buffer->buffer.length() != value_buffer->buffer.length()) {
@@ -275,11 +403,15 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
   const auto result =
       view->session().execute(SetDocumentCommand{builder.build()});
   if (!result.has_value()) {
-    const auto message =
-        "document submission failed with code " +
-        std::to_string(static_cast<unsigned int>(result.error().code));
-    set_welllog_error("WellLogValidationError", "invalid_document",
-                      message.c_str());
+    set_result_error(result.error(), "document submission");
+    return nullptr;
+  }
+  const auto presentation = prepare_default_curve_scene(
+      *view, *document_id, *curve_id, depth_buffer->buffer,
+      value_buffer->buffer, depth_unit_utf8.constData(),
+      value_unit_utf8.constData());
+  if (!presentation.has_value()) {
+    set_result_error(presentation.error(), "presentation preparation");
     return nullptr;
   }
   view->set_document_id(*document_id);
@@ -289,7 +421,8 @@ PyObject *submit_curve(WellLogView *view, PyObject *depth, PyObject *values,
   auto *curve_report = buffer_report(*value_buffer);
   if (report == nullptr || depth_report == nullptr || curve_report == nullptr ||
       PyDict_SetItemString(report, "depth", depth_report) != 0 ||
-      PyDict_SetItemString(report, "curve", curve_report) != 0) {
+      PyDict_SetItemString(report, "curve", curve_report) != 0 ||
+      PyDict_SetItemString(report, "render_prepared", Py_True) != 0) {
     Py_XDECREF(report);
     Py_XDECREF(depth_report);
     Py_XDECREF(curve_report);

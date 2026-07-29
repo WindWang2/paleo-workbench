@@ -82,8 +82,14 @@ if(WELLLOG_BUILD_PYTHON)
     string(REPLACE "\n" ";" WELLLOG_PYTHON_CMAKE_PATHS "${WELLLOG_PYTHON_CMAKE_PATHS}")
     list(PREPEND CMAKE_PREFIX_PATH ${WELLLOG_PYTHON_CMAKE_PATHS})
     find_package(Shiboken6 REQUIRED CONFIG)
-    find_package(Shiboken6Tools REQUIRED CONFIG)
     find_package(PySide6 REQUIRED CONFIG)
+    find_package(
+        Shiboken6Tools
+        ${PySide6_VERSION}
+        EXACT
+        REQUIRED
+        CONFIG
+    )
     get_target_property(
         WELLLOG_SHIBOKEN_GENERATOR_RELEASE
         Shiboken6::shiboken6
@@ -104,6 +110,12 @@ if(WELLLOG_BUILD_PYTHON)
         message(
             FATAL_ERROR
             "PySide6 ${PySide6_VERSION} and Shiboken6 ${Shiboken6_VERSION} must match"
+        )
+    endif()
+    if(NOT PySide6_VERSION VERSION_EQUAL Shiboken6Tools_VERSION)
+        message(
+            FATAL_ERROR
+            "PySide6 ${PySide6_VERSION} and Shiboken6Tools ${Shiboken6Tools_VERSION} must match"
         )
     endif()
     if(NOT Qt6_VERSION VERSION_EQUAL PySide6_VERSION)
