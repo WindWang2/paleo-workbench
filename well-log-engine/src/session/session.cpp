@@ -2,6 +2,7 @@
 
 #include "scene/prepare.hpp"
 
+#include <welllog/core/utf8.hpp>
 #include <welllog/scene/curve_lod.hpp>
 
 #include <algorithm>
@@ -275,6 +276,128 @@ validate_document(const WellLogDocument &document) {
     if (auto error = validate_null_bitmap(curve.nulls, curve.values.length())) {
       error->entity_id = curve.id;
       return error;
+    }
+  }
+
+  const auto encoding_error = [](EntityId entity_id) {
+    return Error{
+        .code = ErrorCode::invalid_document,
+        .entity_id = entity_id,
+        .message = MessageKey::text_encoding_invalid,
+        .arguments = {},
+    };
+  };
+
+  for (const auto &interval : document.intervals()) {
+    if (interval.id.is_nil() || !ids.insert(interval.id).second) {
+      return Error{
+          .code = ErrorCode::duplicate_entity_id,
+          .entity_id = interval.id,
+          .message = MessageKey::entity_identity_duplicated,
+          .arguments = {},
+      };
+    }
+    if (!std::isfinite(interval.top_reference_depth) ||
+        !std::isfinite(interval.bottom_reference_depth) ||
+        interval.top_reference_depth >= interval.bottom_reference_depth) {
+      return Error{
+          .code = ErrorCode::invalid_document,
+          .entity_id = interval.id,
+          .message = MessageKey::interval_depth_order_invalid,
+          .arguments = {},
+      };
+    }
+    if (!is_valid_utf8(interval.label)) {
+      return encoding_error(interval.id);
+    }
+  }
+
+  for (const auto &marker : document.markers()) {
+    if (marker.id.is_nil() || !ids.insert(marker.id).second) {
+      return Error{
+          .code = ErrorCode::duplicate_entity_id,
+          .entity_id = marker.id,
+          .message = MessageKey::entity_identity_duplicated,
+          .arguments = {},
+      };
+    }
+    if (!std::isfinite(marker.reference_depth)) {
+      return Error{
+          .code = ErrorCode::invalid_document,
+          .entity_id = marker.id,
+          .message = MessageKey::document_structure_invalid,
+          .arguments = {},
+      };
+    }
+    if (!is_valid_utf8(marker.label)) {
+      return encoding_error(marker.id);
+    }
+  }
+
+  for (const auto &symbol : document.symbols()) {
+    if (symbol.id.is_nil() || !ids.insert(symbol.id).second) {
+      return Error{
+          .code = ErrorCode::duplicate_entity_id,
+          .entity_id = symbol.id,
+          .message = MessageKey::entity_identity_duplicated,
+          .arguments = {},
+      };
+    }
+    if (!std::isfinite(symbol.reference_depth) ||
+        !std::isfinite(symbol.track_fraction) ||
+        symbol.track_fraction < 0.0 || symbol.track_fraction > 1.0) {
+      return Error{
+          .code = ErrorCode::invalid_document,
+          .entity_id = symbol.id,
+          .message = MessageKey::document_structure_invalid,
+          .arguments = {},
+      };
+    }
+    if (!is_valid_utf8(symbol.label)) {
+      return encoding_error(symbol.id);
+    }
+  }
+
+  for (const auto &annotation : document.annotations()) {
+    if (annotation.id.is_nil() || !ids.insert(annotation.id).second) {
+      return Error{
+          .code = ErrorCode::duplicate_entity_id,
+          .entity_id = annotation.id,
+          .message = MessageKey::entity_identity_duplicated,
+          .arguments = {},
+      };
+    }
+    const auto valid_fraction = [](double fraction) {
+      return std::isfinite(fraction) && fraction >= 0.0 && fraction <= 1.0;
+    };
+    bool anchor_valid = false;
+    switch (annotation.anchor) {
+    case AnnotationAnchor::reference_depth:
+      anchor_valid = std::isfinite(annotation.reference_depth) &&
+                     valid_fraction(annotation.track_fraction);
+      break;
+    case AnnotationAnchor::track:
+      anchor_valid = !annotation.track_id.is_nil() &&
+                     valid_fraction(annotation.depth_fraction) &&
+                     valid_fraction(annotation.horizontal_fraction);
+      break;
+    case AnnotationAnchor::scene_point:
+      anchor_valid = std::isfinite(annotation.scene_point.left.value) &&
+                     std::isfinite(annotation.scene_point.top.value);
+      break;
+    }
+    if (!anchor_valid || !std::isfinite(annotation.rotation_degrees) ||
+        !std::isfinite(annotation.font_size.value) ||
+        annotation.font_size.value <= 0.0 || annotation.text.empty()) {
+      return Error{
+          .code = ErrorCode::invalid_document,
+          .entity_id = annotation.id,
+          .message = MessageKey::annotation_anchor_invalid,
+          .arguments = {},
+      };
+    }
+    if (!is_valid_utf8(annotation.text)) {
+      return encoding_error(annotation.id);
     }
   }
   return std::nullopt;

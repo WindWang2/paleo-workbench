@@ -276,6 +276,10 @@ struct WellLogDocument::Impl {
   DocumentRevision revision;
   std::vector<SamplingAxis> axes;
   std::vector<Curve> curves;
+  std::vector<Interval> intervals;
+  std::vector<Marker> markers;
+  std::vector<SymbolOccurrence> symbols;
+  std::vector<TextAnnotation> annotations;
 };
 
 WellLogDocument::WellLogDocument() = default;
@@ -301,19 +305,51 @@ std::span<const Curve> WellLogDocument::curves() const noexcept {
                           : std::span<const Curve>{impl_->curves};
 }
 
+std::span<const Interval> WellLogDocument::intervals() const noexcept {
+  return impl_ == nullptr ? std::span<const Interval>{}
+                          : std::span<const Interval>{impl_->intervals};
+}
+
+std::span<const Marker> WellLogDocument::markers() const noexcept {
+  return impl_ == nullptr ? std::span<const Marker>{}
+                          : std::span<const Marker>{impl_->markers};
+}
+
+std::span<const SymbolOccurrence> WellLogDocument::symbols() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const SymbolOccurrence>{}
+             : std::span<const SymbolOccurrence>{impl_->symbols};
+}
+
+std::span<const TextAnnotation> WellLogDocument::annotations() const noexcept {
+  return impl_ == nullptr ? std::span<const TextAnnotation>{}
+                          : std::span<const TextAnnotation>{impl_->annotations};
+}
+
 struct WellLogDocumentBuilder::Impl {
   EntityId id;
   DocumentRevision revision;
   std::vector<SamplingAxis> axes;
   std::vector<Curve> curves;
+  std::vector<Interval> intervals;
+  std::vector<Marker> markers;
+  std::vector<SymbolOccurrence> symbols;
+  std::vector<TextAnnotation> annotations;
   bool allocation_failed{};
 };
 
 WellLogDocumentBuilder::WellLogDocumentBuilder(
     EntityId id, DocumentRevision revision) noexcept {
   try {
-    impl_ = std::make_unique<Impl>(
-        Impl{.id = id, .revision = revision, .axes = {}, .curves = {}});
+    impl_ = std::make_unique<Impl>(Impl{.id = id,
+                                        .revision = revision,
+                                        .axes = {},
+                                        .curves = {},
+                                        .intervals = {},
+                                        .markers = {},
+                                        .symbols = {},
+                                        .annotations = {},
+                                        .allocation_failed = false});
   } catch (...) {
     impl_.reset();
   }
@@ -351,6 +387,56 @@ WellLogDocumentBuilder::add_curve(const Curve &curve) noexcept {
   return *this;
 }
 
+namespace {
+
+template <typename Collection>
+void append_entity(Collection &collection, const typename Collection::value_type &entity,
+                   bool &allocation_failed) {
+  try {
+    collection.push_back(entity);
+  } catch (...) {
+    allocation_failed = true;
+  }
+}
+
+} // namespace
+
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_interval(const Interval &interval) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->intervals, interval, impl_->allocation_failed);
+  return *this;
+}
+
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_marker(const Marker &marker) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->markers, marker, impl_->allocation_failed);
+  return *this;
+}
+
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_symbol(const SymbolOccurrence &symbol) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->symbols, symbol, impl_->allocation_failed);
+  return *this;
+}
+
+WellLogDocumentBuilder &WellLogDocumentBuilder::add_annotation(
+    const TextAnnotation &annotation) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->annotations, annotation, impl_->allocation_failed);
+  return *this;
+}
+
 WellLogDocument WellLogDocumentBuilder::build() const noexcept {
   if (impl_ == nullptr || impl_->allocation_failed) {
     return {};
@@ -361,6 +447,10 @@ WellLogDocument WellLogDocumentBuilder::build() const noexcept {
     document->revision = impl_->revision;
     document->axes = impl_->axes;
     document->curves = impl_->curves;
+    document->intervals = impl_->intervals;
+    document->markers = impl_->markers;
+    document->symbols = impl_->symbols;
+    document->annotations = impl_->annotations;
     return WellLogDocument{std::move(document)};
   } catch (...) {
     return {};

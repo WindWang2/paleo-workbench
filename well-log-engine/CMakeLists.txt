@@ -175,6 +175,7 @@ endfunction()
 add_library(welllog_core ${WELLLOG_LIBRARY_TYPE}
     src/core/document.cpp
     src/core/entity_id.cpp
+    src/core/utf8.cpp
 )
 add_library(WellLog::Core ALIAS welllog_core)
 set_target_properties(welllog_core PROPERTIES
@@ -564,6 +565,23 @@ if(WELLLOG_BUILD_TESTS)
     welllog_enable_warnings(welllog_session_tests)
     target_link_libraries(welllog_session_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.session COMMAND welllog_session_tests)
+
+    add_executable(welllog_document_annotation_tests
+        tests/integration/document_annotation_test.cpp
+    )
+    target_compile_features(
+        welllog_document_annotation_tests
+        PRIVATE cxx_std_20
+    )
+    welllog_enable_warnings(welllog_document_annotation_tests)
+    target_link_libraries(
+        welllog_document_annotation_tests
+        PRIVATE WellLog::Session
+    )
+    add_test(
+        NAME welllog.document-annotations
+        COMMAND welllog_document_annotation_tests
+    )
 
     add_executable(welllog_manifest_tests
         tests/integration/manifest_roundtrip_test.cpp

@@ -60,6 +60,9 @@ enum class MessageKey : std::uint16_t {
   resource_exhausted,
   internal_error,
   operation_cancelled,
+  interval_depth_order_invalid,
+  text_encoding_invalid,
+  annotation_anchor_invalid,
 };
 
 struct ErrorArgument {

@@ -12,6 +12,7 @@
 
 #include <welllog/core/entity_id.hpp>
 #include <welllog/core/export.hpp>
+#include <welllog/core/units.hpp>
 
 namespace welllog {
 
@@ -204,6 +205,101 @@ struct Curve {
   NullBitmapView nulls;
 };
 
+enum class IntervalSemantic : std::uint8_t {
+  lithology,
+  stratigraphy,
+  sequence,
+  systems_tract,
+  facies,
+  custom,
+};
+
+// A closed depth interval. `top_reference_depth` must be less than
+// `bottom_reference_depth`; a zero-thickness feature is a Marker, not an
+// Interval. `pattern_id` references a PatternDefinition registered on the
+// ScenePresentation; when nil the interval is solid-filled with
+// `fill_color`. `label` is UTF-8.
+struct Interval {
+  EntityId id;
+  double top_reference_depth{};
+  double bottom_reference_depth{};
+  IntervalSemantic semantic{IntervalSemantic::custom};
+  EntityId pattern_id;
+  RgbaColor fill_color{};
+  std::string label;
+};
+
+enum class MarkerSemantic : std::uint8_t {
+  formation_top,
+  fault,
+  fluid_contact,
+  casing_shoe,
+  custom,
+};
+
+// A zero-thickness depth feature drawn as a horizontal line with an
+// optional UTF-8 `label`.
+struct Marker {
+  EntityId id;
+  double reference_depth{};
+  MarkerSemantic semantic{MarkerSemantic::custom};
+  std::string label;
+};
+
+enum class SymbolKind : std::uint8_t {
+  circle,
+  square,
+  triangle_up,
+  diamond,
+  cross,
+};
+
+// A discrete symbol anchored at a depth; `track_fraction` is the horizontal
+// anchor within the owning track in [0, 1].
+struct SymbolOccurrence {
+  EntityId id;
+  double reference_depth{};
+  double track_fraction{0.5};
+  SymbolKind kind{SymbolKind::circle};
+  std::string label;
+};
+
+enum class TextOrientation : std::uint8_t {
+  horizontal,
+  rotated,
+  vertical,
+};
+
+enum class AnnotationAnchor : std::uint8_t {
+  reference_depth,
+  track,
+  scene_point,
+};
+
+// A UTF-8 text annotation. The anchor type is explicit:
+//  - reference_depth: `reference_depth` + `track_fraction` inside the layer's
+//    track;
+//  - track: `track_id` + `depth_fraction`/`horizontal_fraction` in [0, 1];
+//  - scene_point: absolute `scene_point` in scene millimetres.
+// `rotation_degrees` applies when `orientation` is `rotated`; `vertical`
+// requests true vertical typesetting. `language` is a BCP 47 tag used for
+// shaping and font fallback.
+struct TextAnnotation {
+  EntityId id;
+  AnnotationAnchor anchor{AnnotationAnchor::reference_depth};
+  double reference_depth{};
+  double track_fraction{0.5};
+  EntityId track_id;
+  double depth_fraction{};
+  double horizontal_fraction{};
+  PhysicalPoint scene_point{};
+  std::string text;
+  std::string language;
+  TextOrientation orientation{TextOrientation::horizontal};
+  double rotation_degrees{};
+  Millimetres font_size{3.0};
+};
+
 class WELLLOG_CORE_API WellLogDocument {
 public:
   WellLogDocument();
@@ -212,6 +308,10 @@ public:
   [[nodiscard]] DocumentRevision revision() const noexcept;
   [[nodiscard]] std::span<const SamplingAxis> sampling_axes() const noexcept;
   [[nodiscard]] std::span<const Curve> curves() const noexcept;
+  [[nodiscard]] std::span<const Interval> intervals() const noexcept;
+  [[nodiscard]] std::span<const Marker> markers() const noexcept;
+  [[nodiscard]] std::span<const SymbolOccurrence> symbols() const noexcept;
+  [[nodiscard]] std::span<const TextAnnotation> annotations() const noexcept;
 
 private:
   struct Impl;
@@ -231,6 +331,11 @@ public:
 
   WellLogDocumentBuilder &add_sampling_axis(const SamplingAxis &axis) noexcept;
   WellLogDocumentBuilder &add_curve(const Curve &curve) noexcept;
+  WellLogDocumentBuilder &add_interval(const Interval &interval) noexcept;
+  WellLogDocumentBuilder &add_marker(const Marker &marker) noexcept;
+  WellLogDocumentBuilder &add_symbol(const SymbolOccurrence &symbol) noexcept;
+  WellLogDocumentBuilder &
+  add_annotation(const TextAnnotation &annotation) noexcept;
   [[nodiscard]] WellLogDocument build() const noexcept;
 
 private:
