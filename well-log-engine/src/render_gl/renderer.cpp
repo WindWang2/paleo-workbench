@@ -1112,6 +1112,22 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
     // shader derives tile coords from the vertex scene position + anchor, so
     // the triangle UVs are unused (left at 0,0 by append_triangle).
     const auto fill_vertices = scene.fill_vertices();
+    const auto triangles = scene.fill_triangles();
+    // Emits one region's prepared triangulation into the primitive stream.
+    // Shared by the solid and pattern batches — only the batch metadata differs.
+    const auto emit_region_triangles = [&](const PreparedFillRegion &region) {
+      for (std::uint64_t t = 0; t < region.triangle_count; ++t) {
+        const auto &tri =
+            triangles[static_cast<std::size_t>(region.first_triangle + t)];
+        const auto &a = fill_vertices[tri.a];
+        const auto &b = fill_vertices[tri.b];
+        const auto &c = fill_vertices[tri.c];
+        append_triangle(primitive_vertices, a.position.left.value,
+                        a.position.top.value, b.position.left.value,
+                        b.position.top.value, c.position.left.value,
+                        c.position.top.value);
+      }
+    };
     for (const auto &fill_layer : scene.fill_layers()) {
       const auto clip = clip_for_track(fill_layer.track_id);
       for (std::uint64_t offset = 0; offset < fill_layer.region_count;
@@ -1121,20 +1137,9 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         if (region.triangle_count == 0) {
           continue;
         }
-        const auto triangles = scene.fill_triangles();
         if (region.pattern_id.is_nil()) {
           const auto first_vertex = primitive_vertices.size();
-          for (std::uint64_t t = 0; t < region.triangle_count; ++t) {
-            const auto &tri = triangles[static_cast<std::size_t>(
-                region.first_triangle + t)];
-            const auto &a = fill_vertices[tri.a];
-            const auto &b = fill_vertices[tri.b];
-            const auto &c = fill_vertices[tri.c];
-            append_triangle(primitive_vertices, a.position.left.value,
-                            a.position.top.value, b.position.left.value,
-                            b.position.top.value, c.position.left.value,
-                            c.position.top.value);
-          }
+          emit_region_triangles(region);
           primitive_batches.push_back(PrimitiveBatch{
               .kind = PrimitiveKind::solid,
               .first_vertex = static_cast<GlInt>(first_vertex),
@@ -1159,17 +1164,7 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
           continue;
         }
         const auto first_vertex = primitive_vertices.size();
-        for (std::uint64_t t = 0; t < region.triangle_count; ++t) {
-          const auto &tri = triangles[static_cast<std::size_t>(
-              region.first_triangle + t)];
-          const auto &a = fill_vertices[tri.a];
-          const auto &b = fill_vertices[tri.b];
-          const auto &c = fill_vertices[tri.c];
-          append_triangle(primitive_vertices, a.position.left.value,
-                          a.position.top.value, b.position.left.value,
-                          b.position.top.value, c.position.left.value,
-                          c.position.top.value);
-        }
+        emit_region_triangles(region);
         const auto theta =
             pattern->rotation_degrees * 3.14159265358979323846 / 180.0;
         const auto &uv = pattern_uv->second;

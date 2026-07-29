@@ -2,6 +2,7 @@
 #include <welllog/export/svg.hpp>
 #include <welllog/session/session.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -595,6 +596,95 @@ void opengl_and_svg_consume_identical_fill_geometry() {
           "SVG must emit the solid fill color");
 }
 
+// Repeated (duplicate) depths must not divide by zero or corrupt the fill.
+void repeated_depth_handles_degenerate_segments() {
+  // Two consecutive samples at depth 1004 (repeated) on both curves.
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1002.0, 1004.0, 1004.0, 1006.0});
+  auto upper = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{20.0, 40.0, 60.0, 60.0, 80.0});
+  auto lower = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{70.0, 60.0, 50.0, 50.0, 40.0});
+  WellLogSession session;
+  auto builder = fill_presentation(upper_curve_id, upper_layer_id);
+  require(session
+              .execute(SetDocumentCommand{
+                  two_curve_document(depths, upper, lower)})
+              .has_value(),
+          "document with repeated depths must be accepted");
+  require(session.execute(SetPresentationCommand{builder.build()}).has_value(),
+          "crossover presentation with repeated depths must be accepted");
+  const auto scene = session.prepared_scene(document_id);
+  require(scene != nullptr, "repeated-depth scene must prepare");
+  const auto &layers = scene->fill_layers();
+  require(layers.size() == 1, "one fill layer expected");
+  // Upper-minus-lower turns positive around depth 1004-1006; a region must
+  // form without crashing or producing NaN geometry.
+  require(layers.front().region_count >= 1,
+          "repeated depths must still produce a fill region");
+  for (const auto &region : scene->fill_regions()) {
+    for (std::uint64_t v = 0; v < region.vertex_count; ++v) {
+      const auto &vertex = scene->fill_vertices()[static_cast<std::size_t>(
+          region.first_vertex + v)];
+      require(std::isfinite(vertex.position.left.value) &&
+                  std::isfinite(vertex.position.top.value),
+              "fill vertices must be finite despite repeated depths");
+    }
+  }
+}
+
+// An interior null gap on the lower curve must break the fill rather than
+// interpolating across the missing region (criterion 3).
+void interior_null_breaks_the_fill_region() {
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1001.0, 1002.0, 1003.0, 1004.0});
+  auto upper = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{20.0, 40.0, 60.0, 80.0, 90.0});
+  auto lower = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{60.0, 55.0, 50.0, 45.0, 40.0});
+  // Null out the lower sample at index 2 (depth 1002), splitting the lower
+  // polyline into two runs [0,1] and [3,4] with a gap at 1002.
+  auto nulls_owner = std::make_shared<std::vector<unsigned char>>(
+      std::vector<unsigned char>{0x04}); // bit 2 set
+  WellLogDocumentBuilder builder(document_id, DocumentRevision{1});
+  builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id, .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth, .unit = "m",
+      .direction = AxisDirection::increasing});
+  builder.add_curve(Curve{
+      .id = upper_curve_id, .mnemonic = "UP", .display_name = "Upper",
+      .unit = "API", .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(upper), .nulls = {}});
+  builder.add_curve(Curve{
+      .id = lower_curve_id, .mnemonic = "LO", .display_name = "Lower",
+      .unit = "API", .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(lower),
+      .nulls = NullBitmapView::from_raw(nulls_owner->data(), 5,
+                                        nulls_owner->size(),
+                                        SharedOwner{nulls_owner})});
+  const auto document = builder.build();
+
+  WellLogSession session;
+  auto presentation = fill_presentation(upper_curve_id, upper_layer_id);
+  require(
+      session.execute(SetDocumentCommand{document}).has_value(),
+      "document with an interior null must be accepted");
+  require(
+      session.execute(SetPresentationCommand{presentation.build()}).has_value(),
+      "crossover presentation with an interior null must be accepted");
+  const auto scene = session.prepared_scene(document_id);
+  require(scene != nullptr, "interior-null scene must prepare");
+  // No region may span across the gap at depth 1002: every region's depth
+  // span must lie entirely above or entirely below 1002, never crossing it.
+  for (const auto &region : scene->fill_regions()) {
+    const auto crosses_gap =
+        region.top_reference_depth < 1002.0 &&
+        region.bottom_reference_depth > 1002.0;
+    require(!crosses_gap,
+            "a fill region must not span across a lower-curve null gap");
+  }
+}
+
 // A pattern fill resolves to url(#pat-...) in SVG and is accounted for in GL.
 void pattern_fill_resolves_in_both_backends() {
   auto depths = std::make_shared<const std::vector<double>>(
@@ -678,6 +768,8 @@ int main() {
   fill_requires_exactly_one_of_color_or_pattern();
   fill_is_pickable_and_returns_both_curves();
   opengl_and_svg_consume_identical_fill_geometry();
+  repeated_depth_handles_degenerate_segments();
+  interior_null_breaks_the_fill_region();
   pattern_fill_resolves_in_both_backends();
   std::cout << "PASS: cross-scale curve crossover fill\n";
   return EXIT_SUCCESS;

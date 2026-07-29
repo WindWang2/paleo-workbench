@@ -405,11 +405,15 @@ struct AlignedSample {
   double left{};
   double top{};
   double reference_depth{};
+  // Which contiguous valid run (prepared segment) this sample belongs to.
+  // Two samples with different runs straddle a missing-value gap and must
+  // NOT be interpolated across (criterion 3: no crossing Null/QC Invalid).
+  std::uint32_t run{};
 };
 
 // Collects the valid mapped points of one prepared curve layer, in depth
-// order, as AlignedSamples. A curve may have several (broken) segments; we
-// concatenate them and sort defensively by depth.
+// order, as AlignedSamples tagged with their source run. Each prepared
+// segment is one run; concatenating runs preserves the gaps between them.
 [[nodiscard]] std::vector<AlignedSample>
 collect_layer_samples(std::span<const PreparedCurveSegment> segments,
                       std::span<const PreparedCurvePoint> points,
@@ -425,6 +429,7 @@ collect_layer_samples(std::span<const PreparedCurveSegment> segments,
           .left = point.position.left.value,
           .top = point.position.top.value,
           .reference_depth = point.reference_depth,
+          .run = static_cast<std::uint32_t>(s),
       });
     }
   }
@@ -437,7 +442,8 @@ collect_layer_samples(std::span<const PreparedCurveSegment> segments,
 
 // Linear interpolation of the lower curve's mapped left at a given depth,
 // within one contiguous valid run of lower samples. Returns nullopt when
-// the depth lies outside the run (so the caller can break the region).
+// the depth lies outside the run OR between two runs (i.e. across a missing
+// gap), so the caller breaks the region instead of bridging the gap.
 [[nodiscard]] std::optional<double>
 interpolate_left_at_depth(const std::vector<AlignedSample> &lower,
                           std::size_t run_begin, std::size_t run_end,
@@ -453,6 +459,11 @@ interpolate_left_at_depth(const std::vector<AlignedSample> &lower,
     const auto &a = lower[i];
     const auto &b = lower[i + 1];
     if (depth >= a.reference_depth && depth <= b.reference_depth) {
+      // Do not interpolate across a missing-value gap: the bracketing pair
+      // must belong to the same run.
+      if (a.run != b.run) {
+        return std::nullopt;
+      }
       const auto span = b.reference_depth - a.reference_depth;
       if (span <= 0.0) {
         return a.left; // repeated depth: take the lower sample
@@ -1004,7 +1015,6 @@ PreparedScene::pick_fill(const FillPickQuery &query) const noexcept {
       };
       return FillPick{
           .layer_id = layer_it->id,
-          .fill_region_index = EntityId{}, // region ordinal not required
           .upper_curve_layer_id = region.upper_curve_layer_id,
           .lower_curve_layer_id = region.lower_curve_layer_id,
           .upper_curve_id = resolve_curve_id(region.upper_curve_layer_id),

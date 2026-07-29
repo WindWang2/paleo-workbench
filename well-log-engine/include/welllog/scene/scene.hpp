@@ -515,7 +515,6 @@ struct CurvePickQuery {
 // host can report which curves produced the filled band.
 struct FillPick {
   EntityId layer_id;
-  EntityId fill_region_index{};
   EntityId upper_curve_layer_id;
   EntityId lower_curve_layer_id;
   EntityId upper_curve_id;
