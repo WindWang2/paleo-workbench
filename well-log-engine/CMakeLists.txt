@@ -39,6 +39,18 @@ option(
     "Build the optional PySide6/Shiboken6 bindings"
     OFF
 )
+option(
+    WELLLOG_BUILD_TEXT
+    "Build the Unicode text pipeline (HarfBuzz/FreeType/ICU)"
+    ON
+)
+
+if(WELLLOG_BUILD_TEXT)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(HarfBuzz REQUIRED IMPORTED_TARGET harfbuzz)
+    pkg_check_modules(FreeType REQUIRED IMPORTED_TARGET freetype2)
+    pkg_check_modules(ICU_UC REQUIRED IMPORTED_TARGET icu-uc)
+endif()
 
 if(WELLLOG_BUILD_PYTHON)
     set(WELLLOG_BUILD_QT_WIDGETS ON)
@@ -351,6 +363,44 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+if(WELLLOG_BUILD_TEXT)
+    add_library(welllog_text ${WELLLOG_LIBRARY_TYPE}
+        src/text/harfbuzz_text_engine.cpp
+    )
+    add_library(WellLog::Text ALIAS welllog_text)
+    set_target_properties(welllog_text PROPERTIES
+        EXPORT_NAME Text
+        OUTPUT_NAME welllog-text
+        VERSION "${PROJECT_VERSION}"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
+    target_compile_features(welllog_text PUBLIC cxx_std_20)
+    welllog_enable_warnings(welllog_text)
+    target_link_libraries(
+        welllog_text
+        PUBLIC WellLog::Scene
+        PRIVATE
+            PkgConfig::HarfBuzz
+            PkgConfig::FreeType
+            PkgConfig::ICU_UC
+    )
+    target_include_directories(welllog_text
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    if(WELLLOG_BUILD_SHARED)
+        target_compile_definitions(
+            welllog_text
+            PRIVATE WELLLOG_TEXT_BUILD
+            PUBLIC WELLLOG_TEXT_SHARED
+        )
+    endif()
+endif()
+
 if(WELLLOG_BUILD_QT_WIDGETS)
     qt_add_library(welllog_qtwidgets ${WELLLOG_LIBRARY_TYPE}
         src/qtwidgets/well_log_view.cpp
@@ -472,6 +522,16 @@ install(
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+if(WELLLOG_BUILD_TEXT)
+    install(
+        TARGETS welllog_text
+        EXPORT WellLogTargets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+endif()
 if(WELLLOG_BUILD_QT_WIDGETS)
     install(
         TARGETS welllog_qtwidgets
@@ -599,6 +659,30 @@ if(WELLLOG_BUILD_TESTS)
         NAME welllog.layer-preparation
         COMMAND welllog_layer_preparation_tests
     )
+
+    if(WELLLOG_BUILD_TEXT)
+        add_executable(welllog_text_engine_tests
+            tests/text/text_engine_test.cpp
+        )
+        target_compile_features(
+            welllog_text_engine_tests
+            PRIVATE cxx_std_20
+        )
+        welllog_enable_warnings(welllog_text_engine_tests)
+        target_compile_definitions(
+            welllog_text_engine_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_link_libraries(
+            welllog_text_engine_tests
+            PRIVATE WellLog::Text
+        )
+        add_test(
+            NAME welllog.text-engine
+            COMMAND welllog_text_engine_tests
+        )
+    endif()
 
     add_executable(welllog_manifest_tests
         tests/integration/manifest_roundtrip_test.cpp

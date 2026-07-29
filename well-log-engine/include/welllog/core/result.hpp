@@ -27,6 +27,7 @@ enum class ErrorCode : std::uint16_t {
   resource_exhausted,
   internal_error,
   operation_cancelled,
+  invalid_font,
 };
 
 enum class Severity : std::uint8_t {
@@ -63,6 +64,8 @@ enum class MessageKey : std::uint16_t {
   interval_depth_order_invalid,
   text_encoding_invalid,
   annotation_anchor_invalid,
+  font_load_failed,
+  font_glyph_unavailable,
 };
 
 struct ErrorArgument {
