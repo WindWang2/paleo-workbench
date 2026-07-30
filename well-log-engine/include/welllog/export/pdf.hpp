@@ -1,14 +1,15 @@
 #pragma once
 
-// Minimal hand-rolled PDF writer (ADR: PDF via hand-rolled writer, #185 spike).
+// Minimal hand-rolled PDF writer (ADR: PDF via hand-rolled writer, #185 spike,
+// extended by #187 scene emission).
 //
-// This is a SPIKE / foundation: it proves a byte-deterministic, Flate-compressed
-// multi-page PDF can be produced with no third-party PDF library — only zlib for
-// stream compression. The richer per-layer emission (curves, text-as-outlines,
-// raster XObjects, tiling patterns) is built on top in later tickets (#187/#188);
-// this header only exposes the primitives those need: a path operator stream
-// built from the engine's backend-neutral OutlineCommand vocabulary, and page
-// assembly. Output is deterministic by construction (no CreationDate/ModDate/ID).
+// This writer produces a byte-deterministic, Flate-compressed multi-page PDF
+// with no third-party PDF library — only zlib for stream compression. It exposes
+// the primitives the per-layer scene emission (#187's PdfSceneExporter) needs: a
+// path operator stream built from the engine's backend-neutral OutlineCommand
+// vocabulary, plus the graphics-state operators (clip, transform, alpha) those
+// layers require, and page assembly. Output is deterministic by construction
+// (no CreationDate/ModDate/ID).
 
 #include <cstdint>
 #include <memory>
@@ -60,9 +61,40 @@ public:
                                   std::uint8_t b) noexcept;
   // Set the line width in points.
   PdfPathStream &set_line_width(double width) noexcept;
+  // Save/restore the graphics state (PDF `q`/`Q`). Used to scope per-track
+  // clips and per-glyph transforms so they never leak across layers.
+  PdfPathStream &save_state() noexcept;
+  PdfPathStream &restore_state() noexcept;
+  // Concatenate the current transformation matrix with the given 6-element
+  // matrix (PDF `cm`). This is how the page maps scene millimetres into PDF
+  // user-space points, and how per-glyph placement/rotation is applied.
+  PdfPathStream &concat_matrix(double a, double b, double c, double d,
+                               double e, double f) noexcept;
+  // Append a rectangle subpath (PDF `re`). Equivalent to m/l/l/l/h but the
+  // dedicated operator is the idiomatic, compact form for axis-aligned rects
+  // (intervals, track clips, printable areas).
+  PdfPathStream &rect(double x, double y, double width,
+                      double height) noexcept;
+  // Clip the current path (non-zero winding, PDF `W`) then discard it without
+  // painting (PDF `n`). The `clip` + `end_path_no_paint` pair establishes the
+  // clip region the following operators draw against; mirror SVG's clipPath.
+  PdfPathStream &clip_nonzero() noexcept;
+  PdfPathStream &end_path_no_paint() noexcept;
+  // Set the non-stroking (fill) alpha to `alpha` in [0,1]. PDF has no inline
+  // opacity, so this resolves to a named /ExtGState object (`/GSn`) emitted by
+  // the writer; the alpha values a stream uses are recorded deterministically
+  // (first-encountered order, deduplicated) and the writer names the objects
+  // in that same order, so identical content always yields identical /GS names
+  // and object layout. A `gs` operator is emitted referencing the assigned name.
+  PdfPathStream &set_fill_alpha(double alpha) noexcept;
 
   // The raw (uncompressed) content-stream operators.
   [[nodiscard]] std::string_view operators() const noexcept;
+  // The distinct fill-alpha values this stream emitted `gs /GSn` for, in
+  // first-encountered order. The writer emits one /ExtGState object per value
+  // and names them /GS0, /GS1, … by this same order. Empty when no alpha was
+  // set (opaque only).
+  [[nodiscard]] std::span<const double> fill_alphas() const noexcept;
 
 private:
   struct Impl;

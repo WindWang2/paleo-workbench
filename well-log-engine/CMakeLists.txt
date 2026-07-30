@@ -278,10 +278,11 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
-# PDF export backend (ADR: hand-rolled writer, #185). No third-party PDF
-# library; only zlib for FlateDecode stream compression.
+# PDF export backend (ADR: hand-rolled writer, #185; scene emission #187). No
+# third-party PDF library; only zlib for FlateDecode stream compression.
 add_library(welllog_export_pdf ${WELLLOG_LIBRARY_TYPE}
     src/export_vector/pdf.cpp
+    src/export_vector/pdf_scene.cpp
 )
 add_library(WellLog::ExportPdf ALIAS welllog_export_pdf)
 set_target_properties(welllog_export_pdf PROPERTIES
@@ -913,6 +914,22 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportPdf ZLIB::ZLIB
     )
     add_test(NAME welllog.pdf-spike COMMAND welllog_pdf_spike_tests)
+
+    add_executable(welllog_pdf_scene_tests
+        tests/integration/pdf_scene_test.cpp
+    )
+    target_compile_features(welllog_pdf_scene_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_pdf_scene_tests)
+    target_compile_definitions(
+        welllog_pdf_scene_tests
+        PRIVATE
+            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+    )
+    target_link_libraries(
+        welllog_pdf_scene_tests
+        PRIVATE WellLog::ExportPdf WellLog::Text WellLog::Session ZLIB::ZLIB
+    )
+    add_test(NAME welllog.pdf-scene COMMAND welllog_pdf_scene_tests)
 
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp

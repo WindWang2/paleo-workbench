@@ -116,6 +116,10 @@ struct PdfPathStream::Impl {
   // Last move-to point, carried so a following quadratic_to can lift to cubic.
   double current_x{};
   double current_y{};
+  // Distinct fill-alpha values this stream emitted `gs /GSn` for, kept in
+  // first-encountered order (deduplicated) so the writer's /ExtGState objects
+  // are named in the exact order the stream assigns /GSn names.
+  std::vector<double> fill_alphas;
 };
 
 PdfPathStream::PdfPathStream() : impl_(std::make_unique<Impl>()) {}
@@ -256,8 +260,93 @@ PdfPathStream &PdfPathStream::set_line_width(double width) noexcept {
   return *this;
 }
 
+PdfPathStream &PdfPathStream::save_state() noexcept {
+  impl_->operators += "q\n";
+  return *this;
+}
+
+PdfPathStream &PdfPathStream::restore_state() noexcept {
+  impl_->operators += "Q\n";
+  return *this;
+}
+
+PdfPathStream &PdfPathStream::concat_matrix(double a, double b, double c,
+                                            double d, double e,
+                                            double f) noexcept {
+  append_number(impl_->operators, a);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, b);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, c);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, d);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, e);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, f);
+  impl_->operators += " cm\n";
+  return *this;
+}
+
+PdfPathStream &PdfPathStream::rect(double x, double y, double width,
+                                   double height) noexcept {
+  append_number(impl_->operators, x);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, y);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, width);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, height);
+  impl_->operators += " re\n";
+  return *this;
+}
+
+PdfPathStream &PdfPathStream::clip_nonzero() noexcept {
+  impl_->operators += "W\n";
+  return *this;
+}
+
+PdfPathStream &PdfPathStream::end_path_no_paint() noexcept {
+  impl_->operators += "n\n";
+  return *this;
+}
+
+// Clamps an alpha into PDF's [0,1] range, then records it (dedup, in
+// first-encountered order) and emits `gs /GSn` where n is the value's index in
+// that insertion-ordered list. Insertion order (not sorted) is essential: the
+// name is assigned at the moment `set_fill_alpha` is called, so it must match
+// the writer's Resources/ExtGState dictionary, which names the objects in the
+// SAME order they appear here. Sorted order would re-index alphas retroactively
+// and desync the per-stream `gs` operators from the page's /GSi→object map.
+PdfPathStream &PdfPathStream::set_fill_alpha(double alpha) noexcept {
+  if (!std::isfinite(alpha) || alpha < 0.0) {
+    alpha = 0.0;
+  } else if (alpha > 1.0) {
+    alpha = 1.0;
+  }
+  auto &alphas = impl_->fill_alphas;
+  std::size_t index = alphas.size();
+  for (std::size_t i = 0; i < alphas.size(); ++i) {
+    if (alphas[i] == alpha) {
+      index = i;
+      break;
+    }
+  }
+  if (index == alphas.size()) {
+    alphas.push_back(alpha);
+  }
+  impl_->operators += "/GS";
+  append_integer(impl_->operators, static_cast<std::int64_t>(index));
+  impl_->operators += " gs\n";
+  return *this;
+}
+
 std::string_view PdfPathStream::operators() const noexcept {
   return impl_->operators;
+}
+
+std::span<const double> PdfPathStream::fill_alphas() const noexcept {
+  return impl_->fill_alphas;
 }
 
 struct PdfDocument::Impl {
@@ -277,11 +366,20 @@ std::string_view PdfDocument::bytes() const noexcept {
   return impl_ == nullptr ? std::string_view{} : std::string_view{impl_->bytes};
 }
 
-// Builds the PDF byte stream. Object layout (1-based object numbers):
-//   1: Catalog         2: Pages
+// Builds the PDF byte stream. Object layout (1-based object numbers), allocated
+// up front so the count is known before any object body references another:
+//   1: Catalog
+//   2: Pages
 //   per page p (0-based):  content stream = 3 + 2*p ;  Page = 3 + 2*p + 1
+//   per-page /ExtGState objects (one per distinct fill-alpha THAT PAGE uses)
+//   follow all page objects, numbered 3 + 2*N + (per-page running offset).
 // The xref table follows, then trailer. All offsets are deterministic given the
-// (deterministic) content streams.
+// (deterministic) content streams. Each page's /ExtGState dictionary maps its
+// own local /GSn names (n = index in that page's first-encountered-order,
+// deduplicated alpha list) to its own ExtGState objects, so the per-stream
+// `gs /GSn` operators resolve correctly regardless of what alphas other pages
+// use. The first-encountered order (not sorted) is what the stream assigns names
+// in, so the writer must name objects in that exact same order.
 Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
                                      std::span<const PdfPageSpec> page_specs) noexcept {
   try {
@@ -294,6 +392,36 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
       specs[i] = i < page_specs.size() ? page_specs[i] : PdfPageSpec{};
     }
 
+    // Each page's distinct fill-alphas (already sorted-unique per stream). The
+    // /GSn names a stream emits are indices into ITS OWN list, so ExtGState
+    // objects and the Resources/ExtGState dictionary are page-local — no cross-
+    // page name collision, no global re-indexing needed.
+    std::vector<std::span<const double>> page_alphas(pages.size());
+    for (std::size_t p = 0; p < pages.size(); ++p) {
+      page_alphas[p] = pages[p].stream.fill_alphas();
+    }
+    // Per-page ExtGState object-number offsets (after all the page objects).
+    // Page p's alpha g maps to object (ext_gstate_base + running_sum_to_p + g).
+    const std::size_t ext_gstate_base = 3 + 2 * pages.size();
+    std::vector<std::size_t> page_alpha_base(pages.size() + 1);
+    page_alpha_base[0] = ext_gstate_base;
+    for (std::size_t p = 0; p < pages.size(); ++p) {
+      page_alpha_base[p + 1] = page_alpha_base[p] + page_alphas[p].size();
+    }
+    const std::size_t total_alpha_objects =
+        page_alpha_base[pages.size()] - ext_gstate_base;
+
+    // Compress every page's content stream once (deterministic) so its length
+    // is known when the content-stream object is written.
+    std::vector<std::string> compressed(pages.size());
+    for (std::size_t p = 0; p < pages.size(); ++p) {
+      if (!flate_compress(std::string(pages[p].stream.operators()),
+                          compressed[p])) {
+        return pdf_error(ErrorCode::internal_error,
+                         MessageKey::internal_error);
+      }
+    }
+
     std::string out;
     out.reserve(4096);
     out += "%PDF-1.7\n";
@@ -303,11 +431,15 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
 
     // Record the byte offset of each indirect object for the xref table.
     std::vector<std::size_t> offsets;
-
-    auto emit_object_header = [&](int object_number) -> int {
-      offsets.resize(static_cast<std::size_t>(object_number) + 1);
-      offsets[static_cast<std::size_t>(object_number)] = out.size();
-      append_integer(out, object_number);
+    const auto reserve_object = [&](std::size_t object_number) {
+      if (offsets.size() <= object_number) {
+        offsets.resize(object_number + 1);
+      }
+    };
+    auto emit_object_header = [&](std::size_t object_number) -> std::size_t {
+      reserve_object(object_number);
+      offsets[object_number] = out.size();
+      append_integer(out, static_cast<std::int64_t>(object_number));
       out += " 0 obj\n";
       return object_number;
     };
@@ -333,24 +465,16 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
 
     // Per-page: content stream object + page object.
     for (std::size_t p = 0; p < pages.size(); ++p) {
-      // Compress the page's content stream.
-      std::string compressed;
-      const auto &ops = pages[p].stream.operators();
-      if (!flate_compress(std::string(ops), compressed)) {
-        return pdf_error(ErrorCode::internal_error,
-                         MessageKey::internal_error);
-      }
-
       // Content stream object = 3 + 2*p
-      emit_object_header(3 + static_cast<int>(2 * p));
+      emit_object_header(3 + 2 * p);
       out += "<< /Length ";
-      append_integer(out, static_cast<std::int64_t>(compressed.size()));
+      append_integer(out, static_cast<std::int64_t>(compressed[p].size()));
       out += " /Filter /FlateDecode >>\nstream\n";
-      out.append(compressed.data(), compressed.size());
+      out.append(compressed[p].data(), compressed[p].size());
       out += "\nendstream\nendobj\n";
 
       // Page object = 3 + 2*p + 1
-      emit_object_header(3 + static_cast<int>(2 * p) + 1);
+      emit_object_header(3 + 2 * p + 1);
       out += "<< /Type /Page /Parent 2 0 R ";
       out += "/MediaBox [0 0 ";
       append_number(out, specs[p].width_points);
@@ -358,14 +482,41 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
       append_number(out, specs[p].height_points);
       out += "] ";
       out += "/Contents ";
-      append_integer(out, 3 + static_cast<int>(2 * p));
+      append_integer(out, static_cast<std::int64_t>(3 + 2 * p));
       out += " 0 R ";
-      out += "/Resources << >> >>\nendobj\n";
+      // Resources: when this page uses any fill-alpha, name its ExtGState
+      // objects so the stream's `gs /GSn` operators resolve. With no alphas
+      // (opaque-only, e.g. the #185 spike) this stays `/Resources << >>`,
+      // byte-identical to the pre-alpha writer.
+      if (page_alphas[p].empty()) {
+        out += "/Resources << >> >>\nendobj\n";
+      } else {
+        out += "/Resources << /ExtGState << ";
+        for (std::size_t g = 0; g < page_alphas[p].size(); ++g) {
+          out += "/GS";
+          append_integer(out, static_cast<std::int64_t>(g));
+          out.push_back(' ');
+          append_integer(out, static_cast<std::int64_t>(page_alpha_base[p] + g));
+          out += " 0 R ";
+        }
+        out += ">> >> >>\nendobj\n";
+      }
+    }
+
+    // Per-page /ExtGState objects (one per distinct fill-alpha that page uses).
+    for (std::size_t p = 0; p < pages.size(); ++p) {
+      for (std::size_t g = 0; g < page_alphas[p].size(); ++g) {
+        emit_object_header(page_alpha_base[p] + g);
+        out += "<< /Type /ExtGState /ca ";
+        append_number(out, page_alphas[p][g]);
+        out += " >>\nendobj\n";
+      }
     }
 
     // xref table.
     const auto xref_offset = out.size();
-    const auto object_count = static_cast<std::size_t>(2 + 2 * pages.size() + 1);
+    const auto object_count =
+        static_cast<std::size_t>(2 + 2 * pages.size() + total_alpha_objects + 1);
     out += "xref\n0 ";
     append_integer(out, static_cast<std::int64_t>(object_count));
     out += "\n0000000000 65535 f \n";
