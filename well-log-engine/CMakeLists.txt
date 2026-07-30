@@ -249,6 +249,7 @@ endif()
 
 add_library(welllog_export_vector ${WELLLOG_LIBRARY_TYPE}
     src/export_vector/svg.cpp
+    src/export_vector/pagination.cpp
 )
 add_library(WellLog::ExportVector ALIAS welllog_export_vector)
 set_target_properties(welllog_export_vector PROPERTIES
@@ -266,6 +267,8 @@ target_include_directories(welllog_export_vector
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 if(WELLLOG_BUILD_SHARED)
     target_compile_definitions(
@@ -888,6 +891,17 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportVector WellLog::Session
     )
     add_test(NAME welllog.headless-svg COMMAND welllog_headless_svg_tests)
+
+    add_executable(welllog_paginated_svg_tests
+        tests/integration/paginated_svg_test.cpp
+    )
+    target_compile_features(welllog_paginated_svg_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_paginated_svg_tests)
+    target_link_libraries(
+        welllog_paginated_svg_tests
+        PRIVATE WellLog::ExportVector WellLog::Session
+    )
+    add_test(NAME welllog.paginated-svg COMMAND welllog_paginated_svg_tests)
 
     add_executable(welllog_pdf_spike_tests
         tests/integration/pdf_spike_test.cpp

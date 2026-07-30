@@ -25,6 +25,31 @@ struct ReferenceDepthRange {
   double bottom{};
 };
 
+// Monotonically increasing version of a presentation/profile, captured so an
+// export is self-describing and reproducible (table-and-export.md section 8.1).
+struct PresentationVersion {
+  std::uint64_t value{};
+  friend constexpr bool operator==(PresentationVersion,
+                                   PresentationVersion) = default;
+};
+
+// A lightweight descriptor of the depth mapping that produced a scene's
+// reference depth axis: the domain/unit of the source axis, the top/bottom
+// reference-depth window, and a version tag. This is NOT the full reversible
+// depth-transform chain of ADR 0013 (which composes measured/true
+// vertical/sub-sea transforms) — only enough for an export snapshot to record
+// which depth mapping it was produced against (#186). The full chain remains a
+// later topic.
+struct DepthTransformDescriptor {
+  DepthDomain domain{DepthDomain::measured_depth};
+  std::string_view unit;
+  double reference_top{};
+  double reference_bottom{};
+  std::uint64_t version{};
+  friend constexpr bool operator==(const DepthTransformDescriptor &,
+                                   const DepthTransformDescriptor &) = default;
+};
+
 struct DeviceIndependentPixels {
   double value{};
   friend constexpr bool operator==(DeviceIndependentPixels,
@@ -117,6 +142,9 @@ struct PatternDefinition {
   Millimetres stroke_width{0.2};
   PhysicalPoint scene_anchor{};
   std::vector<PatternPrimitive> primitives;
+  // Version of the pattern's vector source, captured by the export snapshot so
+  // an export is reproducible (table-and-export.md section 8.1).
+  std::uint64_t version{};
 };
 
 // Displays document Intervals as clipped, filled (solid or patterned)
@@ -224,6 +252,8 @@ public:
   [[nodiscard]] ReferenceDepthRange reference_depth_range() const noexcept;
   [[nodiscard]] Millimetres physical_height() const noexcept;
   [[nodiscard]] std::string_view font_asset_fingerprint() const noexcept;
+  [[nodiscard]] PresentationVersion presentation_version() const noexcept;
+  [[nodiscard]] DepthTransformDescriptor depth_transform() const noexcept;
   [[nodiscard]] std::span<const TrackSpec> tracks() const noexcept;
   [[nodiscard]] std::span<const TrackScaleSpec> scales() const noexcept;
   [[nodiscard]] std::span<const CurveLayerSpec> curve_layers() const noexcept;
@@ -263,6 +293,13 @@ public:
   operator=(const ScenePresentationBuilder &) = delete;
 
   ScenePresentationBuilder &add_track(const TrackSpec &track) noexcept;
+  // Export-metadata setters (ADR 0048): optional version tags recorded by the
+  // export snapshot so an export is self-describing and reproducible. Defaults
+  // to version 0 when unset, which keeps existing presentations byte-identical.
+  ScenePresentationBuilder &
+  set_presentation_version(PresentationVersion version) noexcept;
+  ScenePresentationBuilder &
+  set_depth_transform_version(std::uint64_t version) noexcept;
   ScenePresentationBuilder &add_scale(const TrackScaleSpec &scale) noexcept;
   ScenePresentationBuilder &
   add_curve_layer(const CurveLayerSpec &layer) noexcept;
@@ -691,6 +728,8 @@ public:
   [[nodiscard]] Millimetres physical_height() const noexcept;
   [[nodiscard]] ReferenceDepthRange reference_depth_range() const noexcept;
   [[nodiscard]] std::string_view font_asset_fingerprint() const noexcept;
+  [[nodiscard]] PresentationVersion presentation_version() const noexcept;
+  [[nodiscard]] DepthTransformDescriptor depth_transform() const noexcept;
   [[nodiscard]] std::span<const PreparedTrack> tracks() const noexcept;
   [[nodiscard]] std::span<const PreparedCurveLayer>
   curve_layers() const noexcept;

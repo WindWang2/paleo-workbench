@@ -1,5 +1,7 @@
 #include <welllog/export/svg.hpp>
 
+#include "export_vector/svg_internal.hpp"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -456,7 +458,438 @@ void append_fill_ring_path(std::string &output, const PreparedScene &scene,
   };
 }
 
+// Emits the <defs> block shared by the single-scene exporter and every
+// paginated page: one clipPath per track (the track clip), every pattern tile,
+// and one vector <path> per glyph outline. The clipPath ids are referenced by
+// the per-track <g> in append_layer_body.
+void append_defs(std::string &output, const PreparedScene &scene) {
+  output += "<defs>";
+  for (const auto &track : scene.tracks()) {
+    output += "<clipPath id=\"clip-";
+    output += track.id.to_string();
+    output += "\">";
+    append_rect(output, track.clip);
+    output += "</clipPath>";
+  }
+  for (const auto &pattern : scene.patterns()) {
+    append_pattern_definition(output, pattern);
+  }
+  const auto outline_commands = scene.outline_commands();
+  for (const auto &outline : scene.glyph_outlines()) {
+    output += "<path id=\"g";
+    append_integer(output, outline.font_index);
+    output.push_back('-');
+    append_integer(output, outline.glyph_id);
+    output += "\" d=\"";
+    append_outline_path_data(
+        output,
+        outline_commands.subspan(
+            static_cast<std::size_t>(outline.first_command),
+            static_cast<std::size_t>(outline.command_count)));
+    output += "\"/>";
+  }
+  output += "</defs>";
+}
+
+// Emits the per-track, per-layer <g> body: intervals, markers, symbols, curves,
+// crossover fills, image tiles, custom primitives and text runs. Each track's
+// <g> is clipped to its own track clip. This is the single geometric emitter
+// shared by SvgExporter::write and the paginated exporter (ADR 0048); the
+// paginated exporter wraps it in an additional per-page depth-window clip.
+void append_layer_body(std::string &output, const PreparedScene &scene) {
+  for (const auto &track : scene.tracks()) {
+    output += "<g id=\"track-";
+    output += track.id.to_string();
+    output += "\" clip-path=\"url(#clip-";
+    output += track.id.to_string();
+    output += ")\" data-z-order=\"";
+    append_integer(output, track.z_order);
+    output += "\">";
+    for (const auto &layer : scene.interval_layers()) {
+      if (layer.track_id != track.id) {
+        continue;
+      }
+      for (std::uint64_t offset = 0; offset < layer.interval_count; ++offset) {
+        const auto &interval = scene.intervals()[static_cast<std::size_t>(
+            layer.first_interval + offset)];
+        output += "<rect id=\"interval-";
+        output += interval.interval_id.to_string();
+        output += "\" data-layer-id=\"";
+        output += layer.id.to_string();
+        output += "\" data-top-depth=\"";
+        append_number(output, interval.top_reference_depth);
+        output += "\" data-bottom-depth=\"";
+        append_number(output, interval.bottom_reference_depth);
+        output += "\" x=\"";
+        append_number(output, interval.rect.left.value);
+        output += "\" y=\"";
+        append_number(output, interval.rect.top.value);
+        output += "\" width=\"";
+        append_number(output, interval.rect.width.value);
+        output += "\" height=\"";
+        append_number(output, interval.rect.height.value);
+        if (interval.pattern_id.is_nil()) {
+          output += "\" fill=\"";
+          append_color(output, interval.fill_color);
+          output += "\" fill-opacity=\"";
+          append_number(
+              output,
+              static_cast<double>(interval.fill_color.alpha) / 255.0);
+        } else {
+          output += "\" fill=\"url(#pat-";
+          output += interval.pattern_id.to_string();
+          output += ")";
+        }
+        output += "\"/>";
+      }
+    }
+    for (const auto &layer : scene.marker_layers()) {
+      if (layer.track_id != track.id) {
+        continue;
+      }
+      const auto right = track.clip.left.value + track.clip.width.value;
+      for (std::uint64_t offset = 0; offset < layer.marker_count; ++offset) {
+        const auto &marker = scene.markers()[static_cast<std::size_t>(
+            layer.first_marker + offset)];
+        output += "<line id=\"marker-";
+        output += marker.marker_id.to_string();
+        output += "\" data-layer-id=\"";
+        output += layer.id.to_string();
+        output += "\" data-reference-depth=\"";
+        append_number(output, marker.reference_depth);
+        output += "\" x1=\"";
+        append_number(output, track.clip.left.value);
+        output += "\" y1=\"";
+        append_number(output, marker.display_top.value);
+        output += "\" x2=\"";
+        append_number(output, right);
+        output += "\" y2=\"";
+        append_number(output, marker.display_top.value);
+        output += "\" stroke=\"";
+        append_color(output, layer.line_color);
+        output += "\" stroke-opacity=\"";
+        append_number(output,
+                      static_cast<double>(layer.line_color.alpha) / 255.0);
+        output += "\" stroke-width=\"";
+        append_number(output, layer.line_width.value);
+        output += "\"/>";
+      }
+    }
+    for (const auto &layer : scene.symbol_layers()) {
+      if (layer.track_id != track.id) {
+        continue;
+      }
+      for (std::uint64_t offset = 0; offset < layer.symbol_count; ++offset) {
+        const auto &symbol = scene.symbols()[static_cast<std::size_t>(
+            layer.first_symbol + offset)];
+        append_symbol(output, symbol, layer);
+      }
+    }
+    for (const auto &layer : scene.curve_layers()) {
+      if (layer.track_id != track.id) {
+        continue;
+      }
+      output += "<path id=\"layer-";
+      output += layer.id.to_string();
+      output += "\" data-curve-id=\"";
+      output += layer.curve_id.to_string();
+      output += "\" data-scale-id=\"";
+      output += layer.scale_id.to_string();
+      output += "\" data-z-order=\"";
+      append_integer(output, layer.z_order);
+      output += "\" fill=\"none\" stroke=\"";
+      append_color(output, layer.color);
+      output += "\" stroke-opacity=\"";
+      append_number(output, static_cast<double>(layer.color.alpha) / 255.0);
+      output += "\" stroke-width=\"";
+      append_number(output, layer.line_width.value);
+      output += "\" d=\"";
+      append_path_data(output, scene, layer);
+      output += "\"/>";
+    }
+    // Crossover fill regions (rendering.md section 6): each region's
+    // closed boundary ring is emitted as one <path>, filled with a solid
+    // color or a pattern reference, tagged with both dependent curves.
+    for (const auto &fill_layer : scene.fill_layers()) {
+      if (fill_layer.track_id != track.id) {
+        continue;
+      }
+      for (std::uint64_t offset = 0; offset < fill_layer.region_count;
+           ++offset) {
+        const auto &region = scene.fill_regions()[static_cast<std::size_t>(
+            fill_layer.first_region + offset)];
+        output += "<path id=\"fill-";
+        output += fill_layer.id.to_string();
+        output += "\" data-upper-curve-layer-id=\"";
+        output += region.upper_curve_layer_id.to_string();
+        output += "\" data-lower-curve-layer-id=\"";
+        output += region.lower_curve_layer_id.to_string();
+        output += "\" data-z-order=\"";
+        append_integer(output, fill_layer.z_order);
+        if (region.pattern_id.is_nil()) {
+          output += "\" fill=\"";
+          append_color(output, region.fill_color);
+          output += "\" fill-opacity=\"";
+          append_number(
+              output, static_cast<double>(region.fill_color.alpha) / 255.0);
+        } else {
+          output += "\" fill=\"url(#pat-";
+          output += region.pattern_id.to_string();
+          output += ")";
+        }
+        output += "\" d=\"";
+        append_fill_ring_path(output, scene, region);
+        output += "\"/>";
+      }
+    }
+    // Image layer tiles (rendering.md section 10): each visible tile is a
+    // raster object with explicit physical dimensions, DPI and source
+    // identity. No pixels are inlined — the host resolves the href on
+    // render (ADR 0032).
+    for (const auto &image_layer : scene.image_layers()) {
+      if (image_layer.track_id != track.id) {
+        continue;
+      }
+      for (std::uint64_t offset = 0; offset < image_layer.tile_count; ++offset) {
+        const auto &tile = scene.image_tiles()[static_cast<std::size_t>(
+            image_layer.first_tile + offset)];
+        output += "<image id=\"image-";
+        output += image_layer.id.to_string();
+        output += "\" data-image-source-id=\"";
+        output += tile.image_source_id.to_string();
+        output += "\" data-level=\"";
+        append_integer(output, tile.level);
+        output += "\" data-row=\"";
+        append_integer(output, tile.row);
+        output += "\" data-col=\"";
+        append_integer(output, tile.col);
+        output += "\" data-dpi=\"";
+        append_integer(output, tile.dpi);
+        output += "\" data-pixel-format=\"";
+        append_integer(output, static_cast<std::uint8_t>(tile.pixel_format));
+        output += "\" x=\"";
+        append_number(output, tile.rect.left.value);
+        output += "\" y=\"";
+        append_number(output, tile.rect.top.value);
+        output += "\" width=\"";
+        append_number(output, tile.rect.width.value);
+        output += "\" height=\"";
+        append_number(output, tile.rect.height.value);
+        output += "\" preserveAspectRatio=\"none\" href=\"";
+        append_xml_attribute(output, tile.source.uri);
+        output += "\"/>";
+      }
+    }
+    // Custom layer primitives (ADR 0018/0046). Each primitive is emitted as
+    // the appropriate SVG element — <path> for polylines, <polygon> for
+    // triangles/quads, <circle> for symbols — all tagged with the layer,
+    // source and primitive-index identity so picks and exports agree. The
+    // geometry is the same scene-millimetre data the GL stream walks.
+    const auto custom_vertices = scene.custom_vertices();
+    for (const auto &custom_layer : scene.custom_layers()) {
+      if (custom_layer.track_id != track.id) {
+        continue;
+      }
+      for (std::uint64_t offset = 0; offset < custom_layer.primitive_count;
+           ++offset) {
+        const auto &primitive =
+            scene.custom_primitives()[static_cast<std::size_t>(
+                custom_layer.first_primitive + offset)];
+        output += "<path data-custom-layer-id=\"";
+        output += custom_layer.id.to_string();
+        output += "\" data-custom-source-id=\"";
+        output += primitive.source_id.to_string();
+        output += "\" data-primitive-index=\"";
+        append_integer(output, primitive.source_primitive_index);
+        output += "\" data-primitive-kind=\"";
+        append_integer(output, static_cast<std::uint8_t>(primitive.kind));
+        output += "\" data-z-order=\"";
+        append_integer(output, custom_layer.z_order);
+        if (primitive.kind == CustomPrimitiveKind::polyline) {
+          output += "\" fill=\"none\" stroke=\"";
+          append_color(output, primitive.color);
+          output += "\" stroke-opacity=\"";
+          append_number(output,
+                        static_cast<double>(primitive.color.alpha) / 255.0);
+          output += "\" stroke-width=\"";
+          append_number(output, primitive.stroke_width.value);
+          output += "\" d=\"";
+          bool first = true;
+          for (std::uint64_t point_offset = 0;
+               point_offset < primitive.vertex_count; ++point_offset) {
+            const auto &point = custom_vertices[static_cast<std::size_t>(
+                primitive.first_vertex + point_offset)];
+            if (!first) {
+              output.push_back(' ');
+            }
+            output += point_offset == 0 ? "M " : " L ";
+            append_number(output, point.left.value);
+            output.push_back(' ');
+            append_number(output, point.top.value);
+            first = false;
+          }
+          if (primitive.closed) {
+            output += " Z";
+          }
+          output += "\"/>";
+        } else if (primitive.kind == CustomPrimitiveKind::triangle ||
+                   primitive.kind == CustomPrimitiveKind::quad) {
+          // Triangles and quads are stored as clipped, triangulated geometry
+          // (vertex_count vertices in groups of 3). Emit each triangle as a
+          // closed sub-path so one <path> covers the whole primitive.
+          output += "\" fill=\"";
+          append_color(output, primitive.color);
+          output += "\" fill-opacity=\"";
+          append_number(output,
+                        static_cast<double>(primitive.color.alpha) / 255.0);
+          output += "\" d=\"";
+          const auto triangle_count = primitive.vertex_count / 3;
+          for (std::uint64_t tri = 0; tri < triangle_count; ++tri) {
+            if (tri > 0) {
+              output.push_back(' ');
+            }
+            for (std::uint64_t point_offset = 0; point_offset < 3;
+                 ++point_offset) {
+              const auto &point = custom_vertices[static_cast<std::size_t>(
+                  primitive.first_vertex + tri * 3 + point_offset)];
+              output += point_offset == 0 ? "M " : " L ";
+              append_number(output, point.left.value);
+              output.push_back(' ');
+              append_number(output, point.top.value);
+            }
+            output += " Z";
+          }
+          output += "\"/>";
+        } else {
+          // Symbol: emitted as an SVG circle at the center vertex. This
+          // matches the default circle kind; non-circle symbol kinds
+          // (square/diamond/...) currently export as a circle in SVG while
+          // the GL backend renders their true geometry via
+          // append_symbol_geometry. Full SVG parity for every symbol kind is
+          // deferred (the custom-layer parity test uses circles).
+          const auto &center = custom_vertices[static_cast<std::size_t>(
+              primitive.first_vertex)];
+          output += "\" fill=\"";
+          append_color(output, primitive.color);
+          output += "\" fill-opacity=\"";
+          append_number(output,
+                        static_cast<double>(primitive.color.alpha) / 255.0);
+          output += "\" d=\"M ";
+          const auto radius = primitive.bounds.width.value * 0.5;
+          append_number(output, center.left.value + radius);
+          output.push_back(' ');
+          append_number(output, center.top.value);
+          output += " A ";
+          append_number(output, radius);
+          output.push_back(' ');
+          append_number(output, radius);
+          output += " 0 1 0 ";
+          append_number(output, center.left.value - radius);
+          output.push_back(' ');
+          append_number(output, center.top.value);
+          output += " A ";
+          append_number(output, radius);
+          output.push_back(' ');
+          append_number(output, radius);
+          output += " 0 1 0 ";
+          append_number(output, center.left.value + radius);
+          output.push_back(' ');
+          append_number(output, center.top.value);
+          output += " Z\"/>";
+        }
+      }
+    }
+    const auto glyphs = scene.glyphs();
+    for (const auto &run : scene.text_runs()) {
+      const auto run_track = scene.track_id_for_layer(run.layer_id);
+      if (!run_track.has_value() || *run_track != track.id) {
+        continue;
+      }
+      output += "<g id=\"run-";
+      output += run.source_entity_id.to_string();
+      output += "\" data-layer-id=\"";
+      output += run.layer_id.to_string();
+      output += "\" data-orientation=\"";
+      append_integer(output, static_cast<std::uint8_t>(run.orientation));
+      output += "\" fill=\"";
+      append_color(output, run.color);
+      output += "\" fill-opacity=\"";
+      append_number(output, static_cast<double>(run.color.alpha) / 255.0);
+      output += "\">";
+      for (std::uint64_t offset = 0; offset < run.glyph_count; ++offset) {
+        const auto &glyph = glyphs[static_cast<std::size_t>(run.first_glyph +
+                                                            offset)];
+        output += "<use href=\"#g";
+        append_integer(output, glyph.font_index);
+        output.push_back('-');
+        append_integer(output, glyph.glyph_id);
+        output += "\" transform=\"translate(";
+        append_number(output, glyph.origin.left.value);
+        output.push_back(' ');
+        append_number(output, glyph.origin.top.value);
+        output += ") rotate(";
+        append_number(output, glyph.rotation_degrees);
+        output += ") scale(";
+        append_number(output, run.font_size.value);
+        output += " -";
+        append_number(output, run.font_size.value);
+        output += ")\"/>";
+      }
+      output += "</g>";
+    }
+    output += "</g>";
+  }
+}
+
+// Appends one <text> element. Used by the paginated exporter for the synthesized
+// page header/footer/legend strings (well name, page number, depth range, curve
+// legend), which are plain ASCII SVG text — not the scene's glyph-outline runs.
+void append_text_element(std::string &output, std::string_view role,
+                         double x_mm, double y_mm, std::string_view body,
+                         double font_size_mm) {
+  output += "<text data-export-role=\"";
+  output += role;
+  output += "\" x=\"";
+  append_number(output, x_mm);
+  output += "\" y=\"";
+  append_number(output, y_mm);
+  output += "\" font-size=\"";
+  append_number(output, font_size_mm);
+  output += "\">";
+  append_xml_attribute(output, body);
+  output += "</text>";
+}
+
 } // namespace
+
+// Expose the shared emitters to the paginated exporter (svg_internal.hpp). The
+// definitions live in the anonymous namespace above; these wrappers delegate so
+// pagination.cpp reuses the exact same per-layer emission (ADR 0048).
+namespace svg_internal {
+void append_number(std::string &output, double value) {
+  welllog::append_number(output, value);
+}
+void append_integer(std::string &output, std::uint64_t value) {
+  welllog::append_integer(output, value);
+}
+void append_xml_attribute(std::string &output, std::string_view value) {
+  welllog::append_xml_attribute(output, value);
+}
+void append_color(std::string &output, RgbaColor color) {
+  welllog::append_color(output, color);
+}
+void append_defs(std::string &output, const PreparedScene &scene) {
+  welllog::append_defs(output, scene);
+}
+void append_layer_body(std::string &output, const PreparedScene &scene) {
+  welllog::append_layer_body(output, scene);
+}
+void append_text_element(std::string &output, std::string_view role,
+                         double x_mm, double y_mm, std::string_view body,
+                         double font_size_mm) {
+  welllog::append_text_element(output, role, x_mm, y_mm, body, font_size_mm);
+}
+} // namespace svg_internal
 
 struct SvgDocument::Impl {
   std::string text;
@@ -503,382 +936,10 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
     append_integer(output, scene.document_revision().value);
     output += "\" data-font-asset=\"";
     append_xml_attribute(output, scene.font_asset_fingerprint());
-    output += "\"><defs>";
+    output += "\">";
 
-    for (const auto &track : scene.tracks()) {
-      output += "<clipPath id=\"clip-";
-      output += track.id.to_string();
-      output += "\">";
-      append_rect(output, track.clip);
-      output += "</clipPath>";
-    }
-    for (const auto &pattern : scene.patterns()) {
-      append_pattern_definition(output, pattern);
-    }
-    const auto outline_commands = scene.outline_commands();
-    for (const auto &outline : scene.glyph_outlines()) {
-      output += "<path id=\"g";
-      append_integer(output, outline.font_index);
-      output.push_back('-');
-      append_integer(output, outline.glyph_id);
-      output += "\" d=\"";
-      append_outline_path_data(
-          output,
-          outline_commands.subspan(
-              static_cast<std::size_t>(outline.first_command),
-              static_cast<std::size_t>(outline.command_count)));
-      output += "\"/>";
-    }
-    output += "</defs>";
-
-    for (const auto &track : scene.tracks()) {
-      output += "<g id=\"track-";
-      output += track.id.to_string();
-      output += "\" clip-path=\"url(#clip-";
-      output += track.id.to_string();
-      output += ")\" data-z-order=\"";
-      append_integer(output, track.z_order);
-      output += "\">";
-      for (const auto &layer : scene.interval_layers()) {
-        if (layer.track_id != track.id) {
-          continue;
-        }
-        for (std::uint64_t offset = 0; offset < layer.interval_count;
-             ++offset) {
-          const auto &interval = scene.intervals()[static_cast<std::size_t>(
-              layer.first_interval + offset)];
-          output += "<rect id=\"interval-";
-          output += interval.interval_id.to_string();
-          output += "\" data-layer-id=\"";
-          output += layer.id.to_string();
-          output += "\" data-top-depth=\"";
-          append_number(output, interval.top_reference_depth);
-          output += "\" data-bottom-depth=\"";
-          append_number(output, interval.bottom_reference_depth);
-          output += "\" x=\"";
-          append_number(output, interval.rect.left.value);
-          output += "\" y=\"";
-          append_number(output, interval.rect.top.value);
-          output += "\" width=\"";
-          append_number(output, interval.rect.width.value);
-          output += "\" height=\"";
-          append_number(output, interval.rect.height.value);
-          if (interval.pattern_id.is_nil()) {
-            output += "\" fill=\"";
-            append_color(output, interval.fill_color);
-            output += "\" fill-opacity=\"";
-            append_number(
-                output,
-                static_cast<double>(interval.fill_color.alpha) / 255.0);
-          } else {
-            output += "\" fill=\"url(#pat-";
-            output += interval.pattern_id.to_string();
-            output += ")";
-          }
-          output += "\"/>";
-        }
-      }
-      for (const auto &layer : scene.marker_layers()) {
-        if (layer.track_id != track.id) {
-          continue;
-        }
-        const auto right = track.clip.left.value + track.clip.width.value;
-        for (std::uint64_t offset = 0; offset < layer.marker_count;
-             ++offset) {
-          const auto &marker = scene.markers()[static_cast<std::size_t>(
-              layer.first_marker + offset)];
-          output += "<line id=\"marker-";
-          output += marker.marker_id.to_string();
-          output += "\" data-layer-id=\"";
-          output += layer.id.to_string();
-          output += "\" data-reference-depth=\"";
-          append_number(output, marker.reference_depth);
-          output += "\" x1=\"";
-          append_number(output, track.clip.left.value);
-          output += "\" y1=\"";
-          append_number(output, marker.display_top.value);
-          output += "\" x2=\"";
-          append_number(output, right);
-          output += "\" y2=\"";
-          append_number(output, marker.display_top.value);
-          output += "\" stroke=\"";
-          append_color(output, layer.line_color);
-          output += "\" stroke-opacity=\"";
-          append_number(output,
-                        static_cast<double>(layer.line_color.alpha) / 255.0);
-          output += "\" stroke-width=\"";
-          append_number(output, layer.line_width.value);
-          output += "\"/>";
-        }
-      }
-      for (const auto &layer : scene.symbol_layers()) {
-        if (layer.track_id != track.id) {
-          continue;
-        }
-        for (std::uint64_t offset = 0; offset < layer.symbol_count;
-             ++offset) {
-          const auto &symbol = scene.symbols()[static_cast<std::size_t>(
-              layer.first_symbol + offset)];
-          append_symbol(output, symbol, layer);
-        }
-      }
-      for (const auto &layer : scene.curve_layers()) {
-        if (layer.track_id != track.id) {
-          continue;
-        }
-        output += "<path id=\"layer-";
-        output += layer.id.to_string();
-        output += "\" data-curve-id=\"";
-        output += layer.curve_id.to_string();
-        output += "\" data-scale-id=\"";
-        output += layer.scale_id.to_string();
-        output += "\" data-z-order=\"";
-        append_integer(output, layer.z_order);
-        output += "\" fill=\"none\" stroke=\"";
-        append_color(output, layer.color);
-        output += "\" stroke-opacity=\"";
-        append_number(output, static_cast<double>(layer.color.alpha) / 255.0);
-        output += "\" stroke-width=\"";
-        append_number(output, layer.line_width.value);
-        output += "\" d=\"";
-        append_path_data(output, scene, layer);
-        output += "\"/>";
-      }
-      // Crossover fill regions (rendering.md section 6): each region's
-      // closed boundary ring is emitted as one <path>, filled with a solid
-      // color or a pattern reference, tagged with both dependent curves.
-      for (const auto &fill_layer : scene.fill_layers()) {
-        if (fill_layer.track_id != track.id) {
-          continue;
-        }
-        for (std::uint64_t offset = 0; offset < fill_layer.region_count;
-             ++offset) {
-          const auto &region = scene.fill_regions()[static_cast<std::size_t>(
-              fill_layer.first_region + offset)];
-          output += "<path id=\"fill-";
-          output += fill_layer.id.to_string();
-          output += "\" data-upper-curve-layer-id=\"";
-          output += region.upper_curve_layer_id.to_string();
-          output += "\" data-lower-curve-layer-id=\"";
-          output += region.lower_curve_layer_id.to_string();
-          output += "\" data-z-order=\"";
-          append_integer(output, fill_layer.z_order);
-          if (region.pattern_id.is_nil()) {
-            output += "\" fill=\"";
-            append_color(output, region.fill_color);
-            output += "\" fill-opacity=\"";
-            append_number(
-                output, static_cast<double>(region.fill_color.alpha) / 255.0);
-          } else {
-            output += "\" fill=\"url(#pat-";
-            output += region.pattern_id.to_string();
-            output += ")";
-          }
-          output += "\" d=\"";
-          append_fill_ring_path(output, scene, region);
-          output += "\"/>";
-        }
-      }
-      // Image layer tiles (rendering.md section 10): each visible tile is a
-      // raster object with explicit physical dimensions, DPI and source
-      // identity. No pixels are inlined — the host resolves the href on
-      // render (ADR 0032).
-      for (const auto &image_layer : scene.image_layers()) {
-        if (image_layer.track_id != track.id) {
-          continue;
-        }
-        for (std::uint64_t offset = 0; offset < image_layer.tile_count;
-             ++offset) {
-          const auto &tile = scene.image_tiles()[static_cast<std::size_t>(
-              image_layer.first_tile + offset)];
-          output += "<image id=\"image-";
-          output += image_layer.id.to_string();
-          output += "\" data-image-source-id=\"";
-          output += tile.image_source_id.to_string();
-          output += "\" data-level=\"";
-          append_integer(output, tile.level);
-          output += "\" data-row=\"";
-          append_integer(output, tile.row);
-          output += "\" data-col=\"";
-          append_integer(output, tile.col);
-          output += "\" data-dpi=\"";
-          append_integer(output, tile.dpi);
-          output += "\" data-pixel-format=\"";
-          append_integer(output, static_cast<std::uint8_t>(tile.pixel_format));
-          output += "\" x=\"";
-          append_number(output, tile.rect.left.value);
-          output += "\" y=\"";
-          append_number(output, tile.rect.top.value);
-          output += "\" width=\"";
-          append_number(output, tile.rect.width.value);
-          output += "\" height=\"";
-          append_number(output, tile.rect.height.value);
-          output += "\" preserveAspectRatio=\"none\" href=\"";
-          append_xml_attribute(output, tile.source.uri);
-          output += "\"/>";
-        }
-      }
-      // Custom layer primitives (ADR 0018/0046). Each primitive is emitted as
-      // the appropriate SVG element — <path> for polylines, <polygon> for
-      // triangles/quads, <circle> for symbols — all tagged with the layer,
-      // source and primitive-index identity so picks and exports agree. The
-      // geometry is the same scene-millimetre data the GL stream walks.
-      const auto custom_vertices = scene.custom_vertices();
-      for (const auto &custom_layer : scene.custom_layers()) {
-        if (custom_layer.track_id != track.id) {
-          continue;
-        }
-        for (std::uint64_t offset = 0; offset < custom_layer.primitive_count;
-             ++offset) {
-          const auto &primitive =
-              scene.custom_primitives()[static_cast<std::size_t>(
-                  custom_layer.first_primitive + offset)];
-          output += "<path data-custom-layer-id=\"";
-          output += custom_layer.id.to_string();
-          output += "\" data-custom-source-id=\"";
-          output += primitive.source_id.to_string();
-          output += "\" data-primitive-index=\"";
-          append_integer(output, primitive.source_primitive_index);
-          output += "\" data-primitive-kind=\"";
-          append_integer(output, static_cast<std::uint8_t>(primitive.kind));
-          output += "\" data-z-order=\"";
-          append_integer(output, custom_layer.z_order);
-          if (primitive.kind == CustomPrimitiveKind::polyline) {
-            output += "\" fill=\"none\" stroke=\"";
-            append_color(output, primitive.color);
-            output += "\" stroke-opacity=\"";
-            append_number(output,
-                          static_cast<double>(primitive.color.alpha) / 255.0);
-            output += "\" stroke-width=\"";
-            append_number(output, primitive.stroke_width.value);
-            output += "\" d=\"";
-            bool first = true;
-            for (std::uint64_t point_offset = 0;
-                 point_offset < primitive.vertex_count; ++point_offset) {
-              const auto &point = custom_vertices[static_cast<std::size_t>(
-                  primitive.first_vertex + point_offset)];
-              if (!first) {
-                output.push_back(' ');
-              }
-              output += point_offset == 0 ? "M " : " L ";
-              append_number(output, point.left.value);
-              output.push_back(' ');
-              append_number(output, point.top.value);
-              first = false;
-            }
-            if (primitive.closed) {
-              output += " Z";
-            }
-            output += "\"/>";
-          } else if (primitive.kind == CustomPrimitiveKind::triangle ||
-                     primitive.kind == CustomPrimitiveKind::quad) {
-            // Triangles and quads are stored as clipped, triangulated geometry
-            // (vertex_count vertices in groups of 3). Emit each triangle as a
-            // closed sub-path so one <path> covers the whole primitive.
-            output += "\" fill=\"";
-            append_color(output, primitive.color);
-            output += "\" fill-opacity=\"";
-            append_number(output,
-                          static_cast<double>(primitive.color.alpha) / 255.0);
-            output += "\" d=\"";
-            const auto triangle_count = primitive.vertex_count / 3;
-            for (std::uint64_t tri = 0; tri < triangle_count; ++tri) {
-              if (tri > 0) {
-                output.push_back(' ');
-              }
-              for (std::uint64_t point_offset = 0; point_offset < 3;
-                   ++point_offset) {
-                const auto &point = custom_vertices[static_cast<std::size_t>(
-                    primitive.first_vertex + tri * 3 + point_offset)];
-                output += point_offset == 0 ? "M " : " L ";
-                append_number(output, point.left.value);
-                output.push_back(' ');
-                append_number(output, point.top.value);
-              }
-              output += " Z";
-            }
-            output += "\"/>";
-          } else {
-            // Symbol: emitted as an SVG circle at the center vertex. This
-            // matches the default circle kind; non-circle symbol kinds
-            // (square/diamond/...) currently export as a circle in SVG while
-            // the GL backend renders their true geometry via
-            // append_symbol_geometry. Full SVG parity for every symbol kind is
-            // deferred (the custom-layer parity test uses circles).
-            const auto &center = custom_vertices[static_cast<std::size_t>(
-                primitive.first_vertex)];
-            output += "\" fill=\"";
-            append_color(output, primitive.color);
-            output += "\" fill-opacity=\"";
-            append_number(output,
-                          static_cast<double>(primitive.color.alpha) / 255.0);
-            output += "\" d=\"M ";
-            const auto radius = primitive.bounds.width.value * 0.5;
-            append_number(output, center.left.value + radius);
-            output.push_back(' ');
-            append_number(output, center.top.value);
-            output += " A ";
-            append_number(output, radius);
-            output.push_back(' ');
-            append_number(output, radius);
-            output += " 0 1 0 ";
-            append_number(output, center.left.value - radius);
-            output.push_back(' ');
-            append_number(output, center.top.value);
-            output += " A ";
-            append_number(output, radius);
-            output.push_back(' ');
-            append_number(output, radius);
-            output += " 0 1 0 ";
-            append_number(output, center.left.value + radius);
-            output.push_back(' ');
-            append_number(output, center.top.value);
-            output += " Z\"/>";
-          }
-        }
-      }
-      const auto glyphs = scene.glyphs();
-      for (const auto &run : scene.text_runs()) {
-        const auto run_track = scene.track_id_for_layer(run.layer_id);
-        if (!run_track.has_value() || *run_track != track.id) {
-          continue;
-        }
-        output += "<g id=\"run-";
-        output += run.source_entity_id.to_string();
-        output += "\" data-layer-id=\"";
-        output += run.layer_id.to_string();
-        output += "\" data-orientation=\"";
-        append_integer(output,
-                       static_cast<std::uint8_t>(run.orientation));
-        output += "\" fill=\"";
-        append_color(output, run.color);
-        output += "\" fill-opacity=\"";
-        append_number(output,
-                      static_cast<double>(run.color.alpha) / 255.0);
-        output += "\">";
-        for (std::uint64_t offset = 0; offset < run.glyph_count; ++offset) {
-          const auto &glyph = glyphs[static_cast<std::size_t>(
-              run.first_glyph + offset)];
-          output += "<use href=\"#g";
-          append_integer(output, glyph.font_index);
-          output.push_back('-');
-          append_integer(output, glyph.glyph_id);
-          output += "\" transform=\"translate(";
-          append_number(output, glyph.origin.left.value);
-          output.push_back(' ');
-          append_number(output, glyph.origin.top.value);
-          output += ") rotate(";
-          append_number(output, glyph.rotation_degrees);
-          output += ") scale(";
-          append_number(output, run.font_size.value);
-          output += " -";
-          append_number(output, run.font_size.value);
-          output += ")\"/>";
-        }
-        output += "</g>";
-      }
-      output += "</g>";
-    }
+    append_defs(output, scene);
+    append_layer_body(output, scene);
     output += "</svg>";
     return SvgDocument{std::move(output)};
   } catch (const std::bad_alloc &) {

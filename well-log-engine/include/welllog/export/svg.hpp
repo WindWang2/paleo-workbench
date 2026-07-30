@@ -26,6 +26,7 @@ private:
   explicit SvgDocument(std::string text);
   std::shared_ptr<const Impl> impl_;
   friend class SvgExporter;
+  friend class PaginatedSvgExporter;
 };
 
 class WELLLOG_EXPORT_VECTOR_API SvgExporter {

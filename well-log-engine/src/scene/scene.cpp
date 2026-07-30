@@ -62,6 +62,8 @@ struct ScenePresentation::Impl {
   double reference_depth_bottom{};
   Millimetres physical_height;
   std::string font_asset_fingerprint;
+  PresentationVersion presentation_version;
+  std::uint64_t depth_transform_version{};
   std::vector<TrackSpec> tracks;
   std::vector<TrackScaleSpec> scales;
   std::vector<CurveLayerSpec> curve_layers;
@@ -108,6 +110,25 @@ Millimetres ScenePresentation::physical_height() const noexcept {
 std::string_view ScenePresentation::font_asset_fingerprint() const noexcept {
   return impl_ == nullptr ? std::string_view{}
                           : std::string_view{impl_->font_asset_fingerprint};
+}
+
+PresentationVersion
+ScenePresentation::presentation_version() const noexcept {
+  return impl_ == nullptr ? PresentationVersion{}
+                          : impl_->presentation_version;
+}
+
+DepthTransformDescriptor
+ScenePresentation::depth_transform() const noexcept {
+  return impl_ == nullptr
+             ? DepthTransformDescriptor{}
+             : DepthTransformDescriptor{
+                   .domain = impl_->reference_depth_domain,
+                   .unit = impl_->reference_depth_unit,
+                   .reference_top = impl_->reference_depth_top,
+                   .reference_bottom = impl_->reference_depth_bottom,
+                   .version = impl_->depth_transform_version,
+               };
 }
 
 std::span<const TrackSpec> ScenePresentation::tracks() const noexcept {
@@ -203,6 +224,8 @@ ScenePresentationBuilder::ScenePresentationBuilder(
                 .reference_depth_bottom = reference_depth_range.bottom,
                 .physical_height = physical_height,
                 .font_asset_fingerprint = std::string{font_asset_fingerprint},
+                .presentation_version = PresentationVersion{},
+                .depth_transform_version = 0,
                 .tracks = {},
                 .scales = {},
                 .curve_layers = {},
@@ -250,6 +273,22 @@ ScenePresentationBuilder::add_scale(const TrackScaleSpec &scale) noexcept {
     impl_->presentation.scales.push_back(scale);
   } catch (...) {
     impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::set_presentation_version(
+    PresentationVersion version) noexcept {
+  if (impl_ != nullptr && !impl_->allocation_failed) {
+    impl_->presentation.presentation_version = version;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::set_depth_transform_version(
+    std::uint64_t version) noexcept {
+  if (impl_ != nullptr && !impl_->allocation_failed) {
+    impl_->presentation.depth_transform_version = version;
   }
   return *this;
 }
@@ -406,6 +445,8 @@ struct PreparedScene::Impl {
   double reference_depth_top{};
   double reference_depth_bottom{};
   std::string font_asset_fingerprint;
+  PresentationVersion presentation_version;
+  std::uint64_t depth_transform_version{};
   std::vector<PreparedTrack> tracks;
   std::vector<PreparedCurveLayer> curve_layers;
   std::vector<PreparedCurveSegment> curve_segments;
@@ -670,6 +711,24 @@ ReferenceDepthRange PreparedScene::reference_depth_range() const noexcept {
 std::string_view PreparedScene::font_asset_fingerprint() const noexcept {
   return impl_ == nullptr ? std::string_view{}
                           : std::string_view{impl_->font_asset_fingerprint};
+}
+
+PresentationVersion PreparedScene::presentation_version() const noexcept {
+  return impl_ == nullptr ? PresentationVersion{}
+                          : impl_->presentation_version;
+}
+
+DepthTransformDescriptor
+PreparedScene::depth_transform() const noexcept {
+  return impl_ == nullptr
+             ? DepthTransformDescriptor{}
+             : DepthTransformDescriptor{
+                   .domain = impl_->reference_depth_domain,
+                   .unit = impl_->reference_depth_unit,
+                   .reference_top = impl_->reference_depth_top,
+                   .reference_bottom = impl_->reference_depth_bottom,
+                   .version = impl_->depth_transform_version,
+               };
 }
 
 std::span<const PreparedTrack> PreparedScene::tracks() const noexcept {
@@ -1319,6 +1378,8 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     scene->reference_depth_bottom = depth_range.bottom;
     scene->font_asset_fingerprint =
         std::string{presentation.font_asset_fingerprint()};
+    scene->presentation_version = presentation.presentation_version();
+    scene->depth_transform_version = presentation.depth_transform().version;
     scene->tracks.reserve(presentation.tracks().size());
     scene->curve_layers.reserve(presentation.curve_layers().size());
 
