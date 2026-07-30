@@ -198,6 +198,19 @@ struct TextLayerSpec {
   RgbaColor color{0, 0, 0, 255};
 };
 
+// Displays a host-authored declarative CustomLayerSource (ADR 0018/0046). The
+// layer is a thin reference to a document custom source (which owns the
+// primitives); it participates in track layout, z-order, visibility and the
+// upload budget like every other layer. The primitives are decomposed by the
+// scene kernel into the shared primitive streams — no host GL/shader code.
+struct CustomLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  EntityId custom_source_id;
+  std::int32_t z_order{};
+  bool visible{true};
+};
+
 class WELLLOG_SCENE_API ScenePresentation {
 public:
   ScenePresentation();
@@ -226,6 +239,8 @@ public:
   [[nodiscard]] std::span<const SymbolLayerSpec>
   symbol_layers() const noexcept;
   [[nodiscard]] std::span<const TextLayerSpec> text_layers() const noexcept;
+  [[nodiscard]] std::span<const CustomLayerSpec>
+  custom_layers() const noexcept;
 
 private:
   struct Impl;
@@ -263,6 +278,8 @@ public:
   add_symbol_layer(const SymbolLayerSpec &layer) noexcept;
   ScenePresentationBuilder &
   add_text_layer(const TextLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &
+  add_custom_layer(const CustomLayerSpec &layer) noexcept;
   [[nodiscard]] ScenePresentation build() const noexcept;
 
 private:
@@ -305,6 +322,10 @@ struct PreparedCurvePoint {
 
 // Sentinel for layer members that have no associated prepared text run.
 inline constexpr std::uint64_t no_text_run =
+    std::numeric_limits<std::uint64_t>::max();
+
+// Sentinel for a custom layer that declares no clip path.
+inline constexpr std::uint64_t no_clip =
     std::numeric_limits<std::uint64_t>::max();
 
 // One track header line (ADR 0023): everything the header shows about a
@@ -494,6 +515,52 @@ struct PreparedTextLayer {
   std::uint64_t run_count{};
 };
 
+// A flattened triangle/quad/symbol primitive from a CustomLayerSource, in scene
+// millimetres. `first_vertex/vertex_count` index PreparedScene::custom_vertices
+// (triangles contribute 3, quads 6, symbols a variable fan — same layout the
+// GL renderer already builds for the built-in symbol layer). Polylines are NOT
+// stored here: they are decomposed into PreparedCurveSegment/PreparedCurvePoint
+// (so GL draws them as edges and SVG emits them as paths with no new code) and
+// their identity is recovered via the layer_id on the segment.
+struct PreparedCustomPrimitive {
+  EntityId layer_id;
+  EntityId source_id;
+  std::uint64_t source_primitive_index{};
+  CustomPrimitiveKind kind{CustomPrimitiveKind::triangle};
+  RgbaColor color{};
+  // For polylines: the stroke width. Unused by filled kinds.
+  Millimetres stroke_width{0.3};
+  std::uint64_t first_vertex{};
+  std::uint64_t vertex_count{};
+  // For polylines: whether the ring is closed (a final segment joins the last
+  // point back to the first). Unused by filled kinds.
+  bool closed{};
+  // For symbols: the symbol kind (circle/square/...). Unused by other kinds.
+  SymbolKind symbol_kind{SymbolKind::circle};
+  // Triangle/quad extent in scene millimetres (used by point-in-shape picking).
+  PhysicalRect bounds{};
+};
+
+struct PreparedCustomLayer {
+  EntityId id;
+  EntityId track_id;
+  EntityId custom_source_id;
+  std::int32_t z_order{};
+  std::uint64_t first_primitive{};
+  std::uint64_t primitive_count{};
+  // Index into PreparedScene::custom_clip_paths, or no_clip when the source
+  // declares no clip path.
+  std::uint64_t clip_path_index{no_clip};
+  bool visible{true};
+};
+
+// A flattened clip path (scene millimetres) masking one custom layer's own
+// primitives. `points` is the closed ring used by SVG clip-path emission and
+// by pick containment testing.
+struct PreparedCustomClipPath {
+  std::vector<PhysicalPoint> points;
+};
+
 // Vector outline of one glyph in em fractions (y-up, glyph-local), shared
 // by the vector exporters and by the screen backend's atlas rasterizer.
 struct PreparedGlyphOutline {
@@ -585,6 +652,26 @@ struct ImagePickQuery {
   PhysicalPoint scene_position;
 };
 
+// A hit on a custom-layer primitive (ADR 0030 semantic picking). Carries the
+// layer, the owning custom source, the primitive's index within that source,
+// its kind, and the reference depth at the hit point (inverted from the scene
+// millimetre position). Host-supplied pick metadata is recovered from the
+// source's primitive list by index.
+struct CustomPick {
+  EntityId layer_id;
+  EntityId source_id;
+  std::uint64_t source_primitive_index{};
+  CustomPrimitiveKind kind{CustomPrimitiveKind::triangle};
+  double reference_depth{};
+};
+
+struct CustomPickQuery {
+  PhysicalPoint scene_position;
+  DeviceIndependentPixels tolerance;
+  double horizontal_device_independent_pixels_per_millimetre{};
+  double vertical_device_independent_pixels_per_millimetre{};
+};
+
 namespace detail {
 class ScenePreparer;
 }
@@ -646,9 +733,16 @@ public:
   value_issues() const noexcept;
   [[nodiscard]] std::span<const PreparedTrackHeaderEntry>
   track_header_entries() const noexcept;
+  [[nodiscard]] std::span<const PreparedCustomLayer>
+  custom_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedCustomPrimitive>
+  custom_primitives() const noexcept;
+  [[nodiscard]] std::span<const PhysicalPoint> custom_vertices() const noexcept;
+  [[nodiscard]] std::span<const PreparedCustomClipPath>
+  custom_clip_paths() const noexcept;
   // Resolves the owning track of any prepared layer identity (curve,
-  // interval, marker, symbol, text or crossover fill), for backends mapping
-  // layer-scoped content back to its track clip.
+  // interval, marker, symbol, text, crossover fill or custom), for backends
+  // mapping layer-scoped content back to its track clip.
   [[nodiscard]] std::optional<EntityId>
   track_id_for_layer(EntityId layer_id) const noexcept;
   [[nodiscard]] std::optional<CurvePick>
@@ -657,6 +751,8 @@ public:
   pick_fill(const FillPickQuery &query) const noexcept;
   [[nodiscard]] std::optional<ImagePick>
   pick_image(const ImagePickQuery &query) const noexcept;
+  [[nodiscard]] std::optional<CustomPick>
+  pick_custom(const CustomPickQuery &query) const noexcept;
 
 private:
   struct Impl;

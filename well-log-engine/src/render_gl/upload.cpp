@@ -33,6 +33,7 @@ struct GpuUploadSchedule::Impl {
   std::uint64_t vertex_count{};
   std::uint64_t total_bytes{};
   std::uint64_t fill_triangle_count{};
+  std::uint64_t custom_triangle_count{};
   std::vector<GpuUploadChunk> chunks;
 };
 
@@ -101,6 +102,48 @@ GpuUploadSchedule::plan(const PreparedScene &scene,
       }
     }
     impl->fill_triangle_count = fill_triangles;
+    // Account for custom-layer primitives so the schedule reports the same
+    // triangle geometry the GL primitive stream walks (ADR 0036 parity).
+    // Symbols are approximated as a circle fan (24 triangles); non-circle
+    // symbol kinds (square/diamond/...) emit a different count, so the parity
+    // count is exact only for circles. The custom-layer parity test uses
+    // circles.
+    constexpr std::uint64_t custom_symbol_triangles = 24; // circle fan
+    std::uint64_t custom_triangles{};
+    for (const auto &layer : scene.custom_layers()) {
+      for (std::uint64_t offset = 0; offset < layer.primitive_count; ++offset) {
+        const auto &primitive = scene.custom_primitives()[static_cast<std::size_t>(
+            layer.first_primitive + offset)];
+        std::uint64_t contribution{};
+        switch (primitive.kind) {
+        case CustomPrimitiveKind::polyline: {
+          if (primitive.vertex_count >= 2) {
+            contribution = 2 * (primitive.vertex_count - 1);
+            if (primitive.closed && primitive.vertex_count >= 3) {
+              contribution += 2;
+            }
+          }
+          break;
+        }
+        case CustomPrimitiveKind::triangle:
+        case CustomPrimitiveKind::quad:
+          // Both store clipped, triangulated geometry: vertex_count / 3
+          // triangles (exact, including post-clip triangle counts).
+          contribution = primitive.vertex_count / 3;
+          break;
+        case CustomPrimitiveKind::symbol:
+          contribution = custom_symbol_triangles;
+          break;
+        }
+        if (contribution >
+            std::numeric_limits<std::uint64_t>::max() - custom_triangles) {
+          return upload_error(ErrorCode::arithmetic_overflow,
+                              MessageKey::buffer_extent_overflow);
+        }
+        custom_triangles += contribution;
+      }
+    }
+    impl->custom_triangle_count = custom_triangles;
     const auto chunk_capacity =
         budgets.maximum_bytes_per_frame -
         budgets.maximum_bytes_per_frame % bytes_per_curve_segment;
@@ -138,6 +181,10 @@ std::uint64_t GpuUploadSchedule::total_bytes() const noexcept {
 
 std::uint64_t GpuUploadSchedule::fill_triangle_count() const noexcept {
   return impl_ == nullptr ? 0 : impl_->fill_triangle_count;
+}
+
+std::uint64_t GpuUploadSchedule::custom_triangle_count() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->custom_triangle_count;
 }
 
 std::uint64_t GpuUploadSchedule::chunk_count() const noexcept {

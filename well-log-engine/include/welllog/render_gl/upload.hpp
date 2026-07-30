@@ -40,6 +40,10 @@ public:
   // Total prepared fill-region triangles the GL primitive stream will walk.
   // Used by parity tests asserting GL and SVG consume the same fill geometry.
   [[nodiscard]] std::uint64_t fill_triangle_count() const noexcept;
+  // Total triangles the GL primitive stream will walk for custom-layer
+  // primitives (polylines contribute 2 per segment, triangles 1, quads 2,
+  // symbols a variable fan). Used by the custom-layer GL/SVG parity test.
+  [[nodiscard]] std::uint64_t custom_triangle_count() const noexcept;
 
 private:
   struct Impl;

@@ -150,4 +150,64 @@ bool point_in_polygon(const std::vector<PolygonPoint> &polygon, double x,
   return inside;
 }
 
+std::vector<PolygonPoint>
+clip_polygon_to_polygon(const std::vector<PolygonPoint> &subject,
+                        const std::vector<PolygonPoint> &clip) noexcept {
+  if (subject.size() < 3 || clip.size() < 3) {
+    return {};
+  }
+  // Sutherland–Hodgman treats `clip` as convex; for the layer-local custom
+  // clip the host path is expected to be convex (a mask region). Compute the
+  // clip winding once so the per-edge inside test honours either winding.
+  const auto clip_winding = signed_area(clip);
+  auto output = subject;
+  const auto clip_count = clip.size();
+  for (std::size_t edge = 0; edge < clip_count; ++edge) {
+    const auto &edge_start = clip[edge];
+    const auto &edge_end = clip[(edge + 1) % clip_count];
+    // Inside test: on the same side as the clip's winding (left for CCW,
+    // right for CW). The cross product sign is the signed turn at the edge.
+    const auto inside = [&](const PolygonPoint &p) {
+      const auto cross_val = (edge_end.x - edge_start.x) * (p.y - edge_start.y) -
+                             (edge_end.y - edge_start.y) * (p.x - edge_start.x);
+      return clip_winding >= 0.0 ? cross_val >= 0.0 : cross_val <= 0.0;
+    };
+    const auto intersect = [&](const PolygonPoint &a, const PolygonPoint &b) {
+      const auto dx = b.x - a.x;
+      const auto dy = b.y - a.y;
+      const auto denom = (edge_end.x - edge_start.x) * dy -
+                         (edge_end.y - edge_start.y) * dx;
+      if (denom == 0.0) {
+        return a; // parallel — keep an endpoint, harmless for our regions
+      }
+      const auto t = ((edge_start.x - a.x) * dy -
+                      (edge_start.y - a.y) * dx) /
+                     denom;
+      return PolygonPoint{.x = a.x + t * dx, .y = a.y + t * dy};
+    };
+    std::vector<PolygonPoint> input = std::move(output);
+    output.clear();
+    output.reserve(input.size());
+    const auto input_count = input.size();
+    for (std::size_t i = 0; i < input_count; ++i) {
+      const auto &current = input[i];
+      const auto &previous = input[(i + input_count - 1) % input_count];
+      const auto current_in = inside(current);
+      const auto previous_in = inside(previous);
+      if (current_in) {
+        if (!previous_in) {
+          output.push_back(intersect(previous, current));
+        }
+        output.push_back(current);
+      } else if (previous_in) {
+        output.push_back(intersect(previous, current));
+      }
+    }
+    if (output.size() < 3) {
+      return {};
+    }
+  }
+  return output;
+}
+
 } // namespace welllog::detail

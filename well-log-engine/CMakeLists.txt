@@ -815,6 +815,24 @@ if(WELLLOG_BUILD_TESTS)
         COMMAND welllog_image_layer_tests
     )
 
+    add_executable(welllog_custom_layer_tests
+        tests/integration/custom_layer_test.cpp
+    )
+    target_compile_features(welllog_custom_layer_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_custom_layer_tests)
+    target_include_directories(
+        welllog_custom_layer_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        welllog_custom_layer_tests
+        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Session
+    )
+    add_test(
+        NAME welllog.custom-layer
+        COMMAND welllog_custom_layer_tests
+    )
+
     add_executable(welllog_manifest_tests
         tests/integration/manifest_roundtrip_test.cpp
     )

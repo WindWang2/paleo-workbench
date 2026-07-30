@@ -32,4 +32,14 @@ triangulate_polygon(const std::vector<PolygonPoint> &polygon) noexcept;
 [[nodiscard]] bool point_in_polygon(const std::vector<PolygonPoint> &polygon,
                                     double x, double y) noexcept;
 
+// Clips a convex or weakly-simple `subject` polygon against the convex clip
+// polygon `clip` via Sutherland–Hodgman. Used by the custom-layer kernel to
+// restrict a primitive's geometry to its layer-local clip path before it
+// enters the prepared-scene primitive stream, so every backend (GL/SVG/pick)
+// sees only the clipped geometry. Returns an empty vector when the result is
+// empty (the subject lies entirely outside the clip).
+[[nodiscard]] std::vector<PolygonPoint>
+clip_polygon_to_polygon(const std::vector<PolygonPoint> &subject,
+                        const std::vector<PolygonPoint> &clip) noexcept;
+
 } // namespace welllog::detail

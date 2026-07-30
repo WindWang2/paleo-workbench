@@ -1410,6 +1410,104 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         });
       }
     }
+    // Custom layers (ADR 0018/0046). Each triangle/quad/symbol primitive is
+    // emitted as a solid batch reusing the existing append_* helpers — no new
+    // shader, program or batch kind. Polylines are stroked as a quad ribbon
+    // (one thin quad per segment, offset along the segment normal by half the
+    // stroke width), which the solid program draws as filled triangles.
+    const auto custom_vertices = scene.custom_vertices();
+    for (const auto &custom_layer : scene.custom_layers()) {
+      const auto clip = clip_for_track(custom_layer.track_id);
+      for (std::uint64_t offset = 0; offset < custom_layer.primitive_count;
+           ++offset) {
+        const auto &primitive =
+            scene.custom_primitives()[static_cast<std::size_t>(
+                custom_layer.first_primitive + offset)];
+        const auto first_vertex = primitive_vertices.size();
+        if (primitive.kind == CustomPrimitiveKind::polyline) {
+          // Stroke as a quad ribbon: one thin quad (two triangles) per
+          // segment, offset along the segment normal by half the stroke width.
+          const auto width = primitive.stroke_width.value;
+          const auto emit_segment = [&](const PhysicalPoint &p0,
+                                        const PhysicalPoint &p1) {
+            const auto dx = p1.left.value - p0.left.value;
+            const auto dy = p1.top.value - p0.top.value;
+            const auto length = std::hypot(dx, dy);
+            if (length <= 0.0) {
+              return;
+            }
+            const auto half = width * 0.5;
+            const auto nx = -dy / length * half;
+            const auto ny = dx / length * half;
+            append_triangle(primitive_vertices, p0.left.value + nx,
+                            p0.top.value + ny, p0.left.value - nx,
+                            p0.top.value - ny, p1.left.value - nx,
+                            p1.top.value - ny);
+            append_triangle(primitive_vertices, p0.left.value + nx,
+                            p0.top.value + ny, p1.left.value - nx,
+                            p1.top.value - ny, p1.left.value + nx,
+                            p1.top.value + ny);
+          };
+          for (std::uint64_t point_offset = 1;
+               point_offset < primitive.vertex_count; ++point_offset) {
+            emit_segment(
+                custom_vertices[static_cast<std::size_t>(
+                    primitive.first_vertex + point_offset - 1)],
+                custom_vertices[static_cast<std::size_t>(
+                    primitive.first_vertex + point_offset)]);
+          }
+          if (primitive.closed && primitive.vertex_count >= 3) {
+            emit_segment(
+                custom_vertices[static_cast<std::size_t>(
+                    primitive.first_vertex + primitive.vertex_count - 1)],
+                custom_vertices[static_cast<std::size_t>(
+                    primitive.first_vertex)]);
+          }
+        } else if (primitive.kind == CustomPrimitiveKind::triangle ||
+                   primitive.kind == CustomPrimitiveKind::quad) {
+          // Triangles and quads are stored as clipped, triangulated geometry:
+          // vertex_count vertices in groups of 3 (one solid triangle each).
+          // Quads may produce fewer/more than their original two triangles
+          // after clipping to the layer-local clip path.
+          const auto triangle_count = primitive.vertex_count / 3;
+          for (std::uint64_t tri = 0; tri < triangle_count; ++tri) {
+            const auto base = static_cast<std::size_t>(
+                primitive.first_vertex + tri * 3);
+            const auto &a = custom_vertices[base];
+            const auto &b = custom_vertices[base + 1];
+            const auto &c = custom_vertices[base + 2];
+            append_triangle(primitive_vertices, a.left.value, a.top.value,
+                            b.left.value, b.top.value, c.left.value,
+                            c.top.value);
+          }
+        } else {
+          // Symbol: rebuild geometry from the single center vertex + the
+          // primitive's kind/size (mirrors the built-in symbol layer, which
+          // handles every SymbolKind via append_symbol_geometry).
+          const auto &center = custom_vertices[static_cast<std::size_t>(
+              primitive.first_vertex)];
+          const PreparedSymbol symbol{
+              .layer_id = primitive.layer_id,
+              .symbol_id = primitive.source_id,
+              .center = center,
+              .kind = primitive.symbol_kind,
+              .reference_depth = 0.0,
+          };
+          const auto half = primitive.bounds.width.value * 0.5;
+          append_symbol_geometry(primitive_vertices, symbol, half);
+        }
+        if (primitive_vertices.size() > first_vertex) {
+          primitive_batches.push_back(PrimitiveBatch{
+              .kind = PrimitiveKind::solid,
+              .first_vertex = static_cast<GlInt>(first_vertex),
+              .vertex_count = static_cast<GlSize>(primitive_vertices.size() -
+                                                  first_vertex),
+              .color = primitive.color,
+              .clip = clip,
+          });
+        }
+      }
+    }
     const auto clip_for_run = [&](const PreparedTextRun &run) {
       const auto track_id = scene.track_id_for_layer(run.layer_id);
       return track_id.has_value() ? clip_for_track(*track_id)

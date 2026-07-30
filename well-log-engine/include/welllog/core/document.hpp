@@ -8,6 +8,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <welllog/core/entity_id.hpp>
@@ -325,6 +326,86 @@ struct TextAnnotation {
   Millimetres font_size{3.0};
 };
 
+// --- Custom Layer (ADR 0018, rendering.md section 11) -----------------------
+//
+// The declarative extension vocabulary a host uses to build a professional
+// Layer without touching the screen backend, shaders or the engine's private
+// renderer.
+// Primitives are plain data: points and colours. There is deliberately no
+// field for shaders, scripts, commands or network resources (ADR 0042 — the
+// struct itself cannot express them, so the constraint is enforced by the
+// type system, not by parsing rules).
+
+enum class CustomPrimitiveKind : std::uint8_t {
+  // An open or closed polyline in scene millimetres.
+  polyline,
+  // A filled triangle in scene millimetres.
+  triangle,
+  // A filled axis-aligned quad (rect) in scene millimetres.
+  quad,
+  // A discrete symbol reusing the built-in symbol geometry (SymbolKind).
+  symbol,
+};
+
+// A polyline stroke. `closed` closes the ring with a final segment (and, for
+// SVG/GL, treats it as a closed path). `width` is the stroke width.
+struct CustomPolyline {
+  std::vector<PhysicalPoint> points;
+  bool closed{};
+  RgbaColor color{0, 0, 0, 255};
+  Millimetres width{0.3};
+};
+
+// A filled triangle defined by three scene-mm points.
+struct CustomTriangle {
+  PhysicalPoint a;
+  PhysicalPoint b;
+  PhysicalPoint c;
+  RgbaColor fill_color{0, 0, 0, 255};
+};
+
+// A filled axis-aligned rectangle in scene millimetres.
+struct CustomQuad {
+  PhysicalRect rect;
+  RgbaColor fill_color{0, 0, 0, 255};
+};
+
+// A discrete symbol, mirroring SymbolOccurrence but positioned directly in
+// scene millimetres (it is not a document entity, so it carries its own kind,
+// colour and size rather than referencing a SymbolOccurrence).
+struct CustomSymbolOccurrence {
+  PhysicalPoint center;
+  SymbolKind kind{SymbolKind::circle};
+  RgbaColor color{0, 0, 0, 255};
+  Millimetres size{3.0};
+};
+
+// The constrained declarative primitive vocabulary (ADR 0018). A variant is
+// used (as with PatternPrimitive) so the kind is structural and exhaustive.
+using CustomPrimitive =
+    std::variant<CustomPolyline, CustomTriangle, CustomQuad,
+                 CustomSymbolOccurrence>;
+
+// A closed clip path in scene millimetres. When present on a CustomLayerSource
+// it masks only that custom layer's own primitives (layer-local clip).
+struct CustomClipPath {
+  std::vector<PhysicalPoint> points;
+};
+
+// A host-authored declarative layer registered on the document (ADR 0046). It
+// is a document entity with an Entity ID and a content revision, so a host can
+// version its primitives and the manifest can round-trip them. The primitives
+// live here (with the data), not on the presentation layer; a CustomLayerSpec
+// references the source by id, mirroring ImageSource/ImageLayerSpec (#152).
+struct CustomLayerSource {
+  EntityId id;
+  // Content revision of this source's primitives, independent of the owning
+  // document revision. Hosts bump it when the primitive set changes.
+  DocumentRevision content_revision;
+  std::vector<CustomPrimitive> primitives;
+  std::optional<CustomClipPath> clip;
+};
+
 class WELLLOG_CORE_API WellLogDocument {
 public:
   WellLogDocument();
@@ -338,6 +419,8 @@ public:
   [[nodiscard]] std::span<const SymbolOccurrence> symbols() const noexcept;
   [[nodiscard]] std::span<const ImageSource> image_sources() const noexcept;
   [[nodiscard]] std::span<const TextAnnotation> annotations() const noexcept;
+  [[nodiscard]] std::span<const CustomLayerSource>
+  custom_sources() const noexcept;
 
 private:
   struct Impl;
@@ -363,6 +446,8 @@ public:
   WellLogDocumentBuilder &add_image_source(const ImageSource &source) noexcept;
   WellLogDocumentBuilder &
   add_annotation(const TextAnnotation &annotation) noexcept;
+  WellLogDocumentBuilder &
+  add_custom_source(const CustomLayerSource &source) noexcept;
   [[nodiscard]] WellLogDocument build() const noexcept;
 
 private:

@@ -29,6 +29,7 @@ enum class ErrorCode : std::uint16_t {
   operation_cancelled,
   invalid_font,
   invalid_image,
+  invalid_custom_source,
   diagnostic_warning,
 };
 
@@ -78,6 +79,9 @@ enum class MessageKey : std::uint16_t {
   image_pixels_exceed_limit,
   image_compression_ratio_excessive,
   image_tile_unresolved,
+  custom_source_empty,
+  custom_source_primitives_exceed_limit,
+  custom_source_points_exceed_limit,
 };
 
 struct ErrorArgument {

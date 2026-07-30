@@ -281,6 +281,7 @@ struct WellLogDocument::Impl {
   std::vector<SymbolOccurrence> symbols;
   std::vector<ImageSource> image_sources;
   std::vector<TextAnnotation> annotations;
+  std::vector<CustomLayerSource> custom_sources;
 };
 
 WellLogDocument::WellLogDocument() = default;
@@ -334,6 +335,13 @@ std::span<const TextAnnotation> WellLogDocument::annotations() const noexcept {
                           : std::span<const TextAnnotation>{impl_->annotations};
 }
 
+std::span<const CustomLayerSource>
+WellLogDocument::custom_sources() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const CustomLayerSource>{}
+             : std::span<const CustomLayerSource>{impl_->custom_sources};
+}
+
 struct WellLogDocumentBuilder::Impl {
   EntityId id;
   DocumentRevision revision;
@@ -344,6 +352,7 @@ struct WellLogDocumentBuilder::Impl {
   std::vector<SymbolOccurrence> symbols;
   std::vector<ImageSource> image_sources;
   std::vector<TextAnnotation> annotations;
+  std::vector<CustomLayerSource> custom_sources;
   bool allocation_failed{};
 };
 
@@ -359,6 +368,7 @@ WellLogDocumentBuilder::WellLogDocumentBuilder(
                                         .symbols = {},
                                         .image_sources = {},
                                         .annotations = {},
+                                        .custom_sources = {},
                                         .allocation_failed = false});
   } catch (...) {
     impl_.reset();
@@ -456,6 +466,16 @@ WellLogDocumentBuilder &WellLogDocumentBuilder::add_annotation(
   return *this;
 }
 
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_custom_source(
+    const CustomLayerSource &source) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->custom_sources, source, impl_->allocation_failed);
+  return *this;
+}
+
 WellLogDocument WellLogDocumentBuilder::build() const noexcept {
   if (impl_ == nullptr || impl_->allocation_failed) {
     return {};
@@ -471,6 +491,7 @@ WellLogDocument WellLogDocumentBuilder::build() const noexcept {
     document->symbols = impl_->symbols;
     document->image_sources = impl_->image_sources;
     document->annotations = impl_->annotations;
+    document->custom_sources = impl_->custom_sources;
     return WellLogDocument{std::move(document)};
   } catch (...) {
     return {};

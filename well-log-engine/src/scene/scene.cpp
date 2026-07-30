@@ -72,6 +72,7 @@ struct ScenePresentation::Impl {
   std::vector<MarkerLayerSpec> marker_layers;
   std::vector<SymbolLayerSpec> symbol_layers;
   std::vector<TextLayerSpec> text_layers;
+  std::vector<CustomLayerSpec> custom_layers;
 };
 
 ScenePresentation::ScenePresentation() = default;
@@ -175,6 +176,13 @@ ScenePresentation::text_layers() const noexcept {
              : std::span<const TextLayerSpec>{impl_->text_layers};
 }
 
+std::span<const CustomLayerSpec>
+ScenePresentation::custom_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const CustomLayerSpec>{}
+             : std::span<const CustomLayerSpec>{impl_->custom_layers};
+}
+
 struct ScenePresentationBuilder::Impl {
   ScenePresentation::Impl presentation;
   bool allocation_failed{};
@@ -205,6 +213,7 @@ ScenePresentationBuilder::ScenePresentationBuilder(
                 .marker_layers = {},
                 .symbol_layers = {},
                 .text_layers = {},
+                .custom_layers = {},
             },
         .allocation_failed = false,
     });
@@ -350,6 +359,19 @@ ScenePresentationBuilder &ScenePresentationBuilder::add_text_layer(
   return *this;
 }
 
+ScenePresentationBuilder &ScenePresentationBuilder::add_custom_layer(
+    const CustomLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.custom_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
 ScenePresentation ScenePresentationBuilder::build() const noexcept {
   if (impl_ == nullptr || impl_->allocation_failed) {
     return {};
@@ -411,6 +433,10 @@ struct PreparedScene::Impl {
   std::vector<SceneTextIssue> text_issues;
   std::vector<SceneValueIssue> value_issues;
   std::vector<PreparedTrackHeaderEntry> track_header_entries;
+  std::vector<PreparedCustomLayer> custom_layers;
+  std::vector<PreparedCustomPrimitive> custom_primitives;
+  std::vector<PhysicalPoint> custom_vertices;
+  std::vector<PreparedCustomClipPath> custom_clip_paths;
 };
 
 // ---- Crossover fill geometry (rendering.md section 6) ---------------------
@@ -819,6 +845,36 @@ PreparedScene::track_header_entries() const noexcept {
                    impl_->track_header_entries};
 }
 
+std::span<const PreparedCustomLayer>
+PreparedScene::custom_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedCustomLayer>{}
+             : std::span<const PreparedCustomLayer>{impl_->custom_layers};
+}
+
+std::span<const PreparedCustomPrimitive>
+PreparedScene::custom_primitives() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedCustomPrimitive>{}
+             : std::span<const PreparedCustomPrimitive>{
+                   impl_->custom_primitives};
+}
+
+std::span<const PhysicalPoint>
+PreparedScene::custom_vertices() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PhysicalPoint>{}
+             : std::span<const PhysicalPoint>{impl_->custom_vertices};
+}
+
+std::span<const PreparedCustomClipPath>
+PreparedScene::custom_clip_paths() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedCustomClipPath>{}
+             : std::span<const PreparedCustomClipPath>{
+                   impl_->custom_clip_paths};
+}
+
 std::optional<EntityId>
 PreparedScene::track_id_for_layer(EntityId layer_id) const noexcept {
   if (impl_ == nullptr) {
@@ -855,6 +911,11 @@ PreparedScene::track_id_for_layer(EntityId layer_id) const noexcept {
     }
   }
   for (const auto &layer : impl_->text_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->custom_layers) {
     if (layer.id == layer_id) {
       return layer.track_id;
     }
@@ -1113,6 +1174,77 @@ PreparedScene::pick_image(const ImagePickQuery &query) const noexcept {
   return std::nullopt;
 }
 
+std::optional<CustomPick>
+PreparedScene::pick_custom(const CustomPickQuery &query) const noexcept {
+  if (impl_ == nullptr) {
+    return std::nullopt;
+  }
+  const auto position = query.scene_position;
+  const auto depth_top = impl_->reference_depth_top;
+  const auto depth_span = impl_->reference_depth_bottom - depth_top;
+  // Tolerance in scene millimetres (mirrors pick_curve's per-axis conversion).
+  const auto h_ppmm =
+      query.horizontal_device_independent_pixels_per_millimetre > 0.0
+          ? query.horizontal_device_independent_pixels_per_millimetre
+          : 1.0;
+  const auto v_ppmm =
+      query.vertical_device_independent_pixels_per_millimetre > 0.0
+          ? query.vertical_device_independent_pixels_per_millimetre
+          : 1.0;
+  const auto tol_h = query.tolerance.value / h_ppmm;
+  const auto tol_v = query.tolerance.value / v_ppmm;
+  // Iterate custom layers in reverse z order so the topmost layer wins.
+  for (auto layer_it = impl_->custom_layers.rbegin();
+       layer_it != impl_->custom_layers.rend(); ++layer_it) {
+    // Respect an optional layer-local clip path.
+    if (layer_it->clip_path_index != no_clip) {
+      const auto &clip =
+          impl_->custom_clip_paths[static_cast<std::size_t>(
+              layer_it->clip_path_index)];
+      std::vector<detail::PolygonPoint> ring;
+      ring.reserve(clip.points.size());
+      for (const auto &point : clip.points) {
+        ring.push_back(
+            detail::PolygonPoint{.x = point.left.value, .y = point.top.value});
+      }
+      if (!detail::point_in_polygon(ring, position.left.value,
+                                    position.top.value)) {
+        continue;
+      }
+    }
+    for (auto primitive_index = layer_it->first_primitive +
+                                layer_it->primitive_count;
+         primitive_index > layer_it->first_primitive; --primitive_index) {
+      const auto &primitive = impl_->custom_primitives[static_cast<std::size_t>(
+          primitive_index - 1)];
+      const auto left = primitive.bounds.left.value;
+      const auto right = left + primitive.bounds.width.value;
+      const auto top = primitive.bounds.top.value;
+      const auto bottom = top + primitive.bounds.height.value;
+      if (position.left.value < left - tol_h ||
+          position.left.value > right + tol_h ||
+          position.top.value < top - tol_v ||
+          position.top.value > bottom + tol_v) {
+        continue;
+      }
+      auto reference_depth = depth_top;
+      if (impl_->physical_height.value > 0.0 && depth_span > 0.0) {
+        reference_depth =
+            depth_top + (position.top.value / impl_->physical_height.value) *
+                            depth_span;
+      }
+      return CustomPick{
+          .layer_id = layer_it->id,
+          .source_id = primitive.source_id,
+          .source_primitive_index = primitive.source_primitive_index,
+          .kind = primitive.kind,
+          .reference_depth = reference_depth,
+      };
+    }
+  }
+  return std::nullopt;
+}
+
 Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
                                const ScenePresentation &presentation,
@@ -1154,7 +1286,8 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         presentation.interval_layers().size() +
         presentation.image_layers().size() +
         presentation.marker_layers().size() +
-        presentation.symbol_layers().size() + presentation.text_layers().size();
+        presentation.symbol_layers().size() + presentation.text_layers().size() +
+        presentation.custom_layers().size();
     if (presentation.document_id() != document.id() ||
         depth_range.domain == DepthDomain::source_index ||
         depth_range.unit.empty() || !std::isfinite(depth_range.top) ||
@@ -1929,6 +2062,325 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           .first_tile = first_tile,
           .tile_count = static_cast<std::uint64_t>(scene->image_tiles.size()) -
                         first_tile,
+      });
+    }
+
+    // Custom layers (ADR 0018/0046, rendering.md section 11). A host-authored
+    // declarative source of polylines, triangles, quads and symbols, validated
+    // against the untrusted-asset limits of ADR 0042. The primitives are plain
+    // data — no shader/script/command field exists, so the security constraint
+    // is enforced by the type system. Polylines decompose into the shared
+    // curve segment/point stream (so GL draws them as edges and SVG emits them
+    // as paths with no new backend code); triangles/quads/symbols flatten into
+    // custom_primitives/custom_vertices for the solid-batch upload loop. Each
+    // layer may declare a layer-local clip path that masks only its own
+    // primitives.
+    constexpr std::size_t maximum_custom_primitives = 4096;
+    constexpr std::size_t maximum_custom_polyline_points = 8192;
+    constexpr std::size_t maximum_custom_vertices = 1 << 20;
+    const auto custom_point_valid = [](const PhysicalPoint &point) {
+      return std::isfinite(point.left.value) && std::isfinite(point.top.value);
+    };
+    const auto find_custom_source =
+        [&](EntityId source_id) -> const CustomLayerSource * {
+      for (const auto &candidate : document.custom_sources()) {
+        if (candidate.id == source_id) {
+          return &candidate;
+        }
+      }
+      return nullptr;
+    };
+    std::vector<const CustomLayerSpec *> ordered_custom_layers;
+    ordered_custom_layers.reserve(presentation.custom_layers().size());
+    for (const auto &layer : presentation.custom_layers()) {
+      ordered_custom_layers.push_back(&layer);
+    }
+    order_layers_by_z(ordered_custom_layers);
+
+    for (const auto *layer_pointer : ordered_custom_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      const auto bounds = track_bounds.find(layer.track_id);
+      const auto *source = find_custom_source(layer.custom_source_id);
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          bounds == track_bounds.end() || source == nullptr) {
+        return presentation_error(layer.id);
+      }
+      if (source->primitives.empty()) {
+        return Error{
+            .code = ErrorCode::invalid_custom_source,
+            .severity = Severity::error,
+            .entity_id = source->id,
+            .message = MessageKey::custom_source_empty,
+            .arguments = {},
+        };
+      }
+      if (source->primitives.size() > maximum_custom_primitives) {
+        return Error{
+            .code = ErrorCode::invalid_custom_source,
+            .severity = Severity::error,
+            .entity_id = source->id,
+            .message = MessageKey::custom_source_primitives_exceed_limit,
+            .arguments = {},
+        };
+      }
+      // Validate every primitive's geometry up front (ADR 0042): a single bad
+      // point rejects the whole source rather than producing a partial scene.
+      std::size_t total_vertices = 0;
+      for (const auto &primitive : source->primitives) {
+        if (const auto *polyline = std::get_if<CustomPolyline>(&primitive)) {
+          if (polyline->points.size() < 2 ||
+              polyline->points.size() > maximum_custom_polyline_points ||
+              !std::isfinite(polyline->width.value) ||
+              polyline->width.value < 0.0 ||
+              !std::all_of(polyline->points.begin(), polyline->points.end(),
+                           custom_point_valid)) {
+            return presentation_error(layer.id);
+          }
+          continue;
+        }
+        if (const auto *triangle = std::get_if<CustomTriangle>(&primitive)) {
+          if (!custom_point_valid(triangle->a) ||
+              !custom_point_valid(triangle->b) ||
+              !custom_point_valid(triangle->c)) {
+            return presentation_error(layer.id);
+          }
+          total_vertices += 3;
+        } else if (const auto *quad = std::get_if<CustomQuad>(&primitive)) {
+          if (!std::isfinite(quad->rect.left.value) ||
+              !std::isfinite(quad->rect.top.value) ||
+              !std::isfinite(quad->rect.width.value) ||
+              !std::isfinite(quad->rect.height.value)) {
+            return presentation_error(layer.id);
+          }
+          total_vertices += 6;
+        } else {
+          const auto &symbol = std::get<CustomSymbolOccurrence>(primitive);
+          if (!custom_point_valid(symbol.center) ||
+              !std::isfinite(symbol.size.value) ||
+              symbol.size.value <= 0.0) {
+            return presentation_error(layer.id);
+          }
+          total_vertices += 24;
+        }
+      }
+      if (total_vertices > maximum_custom_vertices) {
+        return Error{
+            .code = ErrorCode::invalid_custom_source,
+            .severity = Severity::error,
+            .entity_id = source->id,
+            .message = MessageKey::custom_source_points_exceed_limit,
+            .arguments = {},
+        };
+      }
+      // Resolve an optional layer-local clip path.
+      std::uint64_t clip_path_index = no_clip;
+      if (source->clip.has_value()) {
+        if (source->clip->points.size() < 3 ||
+            source->clip->points.size() > maximum_custom_polyline_points ||
+            !std::all_of(source->clip->points.begin(),
+                         source->clip->points.end(), custom_point_valid)) {
+          return presentation_error(layer.id);
+        }
+        clip_path_index =
+            static_cast<std::uint64_t>(scene->custom_clip_paths.size());
+        scene->custom_clip_paths.push_back(
+            PreparedCustomClipPath{.points = source->clip->points});
+      }
+      const auto first_primitive =
+          static_cast<std::uint64_t>(scene->custom_primitives.size());
+      if (layer.visible) {
+        // When the source declares a layer-local clip path, build it once as a
+        // PolygonPoint ring so filled primitives can be clipped to it in scene
+        // millimetres before entering the primitive stream. This keeps GL, SVG
+        // and pick all seeing the same clipped geometry (no per-backend clip).
+        std::vector<detail::PolygonPoint> clip_ring;
+        if (clip_path_index != no_clip) {
+          const auto &clip_points = scene->custom_clip_paths[clip_path_index].points;
+          clip_ring.reserve(clip_points.size());
+          for (const auto &point : clip_points) {
+            clip_ring.push_back(
+                detail::PolygonPoint{.x = point.left.value, .y = point.top.value});
+          }
+        }
+        const auto bounds_of =
+            [](const std::vector<PhysicalPoint> &points) -> PhysicalRect {
+          if (points.empty()) {
+            return {};
+          }
+          auto min_left = points.front().left.value;
+          auto max_left = min_left;
+          auto min_top = points.front().top.value;
+          auto max_top = min_top;
+          for (const auto &point : points) {
+            min_left = std::min(min_left, point.left.value);
+            max_left = std::max(max_left, point.left.value);
+            min_top = std::min(min_top, point.top.value);
+            max_top = std::max(max_top, point.top.value);
+          }
+          return PhysicalRect{.left = Millimetres{min_left},
+                              .top = Millimetres{min_top},
+                              .width = Millimetres{max_left - min_left},
+                              .height = Millimetres{max_top - min_top}};
+        };
+        // Emits a filled primitive (triangle/quad) from its polygon ring,
+        // clipped to the layer-local clip path if present, then triangulated.
+        // The prepared primitive stores every triangle's vertices (3 each) so
+        // GL/SVG/pick all consume exact clipped geometry.
+        const auto emit_filled =
+            [&](const std::vector<PhysicalPoint> &ring, EntityId source_id,
+                std::size_t primitive_index, CustomPrimitiveKind kind,
+                RgbaColor color) {
+              std::vector<detail::PolygonPoint> polygon;
+              polygon.reserve(ring.size());
+              for (const auto &point : ring) {
+                polygon.push_back(detail::PolygonPoint{.x = point.left.value,
+                                                       .y = point.top.value});
+              }
+              std::vector<detail::PolygonPoint> clipped = polygon;
+              if (!clip_ring.empty()) {
+                clipped = detail::clip_polygon_to_polygon(polygon, clip_ring);
+                if (clipped.size() < 3) {
+                  return; // primitive lies entirely outside the clip path
+                }
+              }
+              const auto indices = detail::triangulate_polygon(clipped);
+              if (indices.size() < 3) {
+                return;
+              }
+              const auto first_vertex =
+                  static_cast<std::uint64_t>(scene->custom_vertices.size());
+              std::vector<PhysicalPoint> emitted;
+              emitted.reserve(indices.size());
+              for (const auto index_32 : indices) {
+                const auto &p = clipped[static_cast<std::size_t>(index_32)];
+                const auto point =
+                    PhysicalPoint{.left = Millimetres{p.x}, .top = Millimetres{p.y}};
+                scene->custom_vertices.push_back(point);
+                emitted.push_back(point);
+              }
+              scene->custom_primitives.push_back(PreparedCustomPrimitive{
+                  .layer_id = layer.id,
+                  .source_id = source_id,
+                  .source_primitive_index = primitive_index,
+                  .kind = kind,
+                  .color = color,
+                  .first_vertex = first_vertex,
+                  .vertex_count = emitted.size(),
+                  .bounds = bounds_of(emitted),
+              });
+            };
+        for (std::size_t index = 0; index < source->primitives.size();
+             ++index) {
+          const auto &primitive = source->primitives[index];
+          if (const auto *polyline = std::get_if<CustomPolyline>(&primitive)) {
+            // Polylines store their points in custom_vertices and a single
+            // PreparedCustomPrimitive record (vertex_count = point count). The
+            // GL and SVG backends both treat vertex_count >= 2 with kind
+            // polyline as a line strip (closed when the source was closed).
+            // Under a layer-local clip, segments with both endpoints outside
+            // the clip are dropped; partial-line clipping is deferred.
+            const auto first_vertex =
+                static_cast<std::uint64_t>(scene->custom_vertices.size());
+            std::vector<PhysicalPoint> kept;
+            kept.reserve(polyline->points.size());
+            for (const auto &point : polyline->points) {
+              if (!clip_ring.empty() &&
+                  !detail::point_in_polygon(clip_ring, point.left.value,
+                                            point.top.value)) {
+                // Keep the boundary point only if a neighbour is inside, so a
+                // polyline entering the clip still connects across the edge.
+                if (!kept.empty()) {
+                  kept.push_back(point);
+                }
+                continue;
+              }
+              kept.push_back(point);
+            }
+            if (kept.size() < 2) {
+              continue;
+            }
+            for (const auto &point : kept) {
+              scene->custom_vertices.push_back(point);
+            }
+            scene->custom_primitives.push_back(PreparedCustomPrimitive{
+                .layer_id = layer.id,
+                .source_id = source->id,
+                .source_primitive_index = index,
+                .kind = CustomPrimitiveKind::polyline,
+                .color = polyline->color,
+                .stroke_width = polyline->width,
+                .first_vertex = first_vertex,
+                .vertex_count = kept.size(),
+                .closed = polyline->closed,
+                .bounds = bounds_of(kept),
+            });
+            continue;
+          }
+          if (const auto *triangle = std::get_if<CustomTriangle>(&primitive)) {
+            emit_filled(std::vector<PhysicalPoint>{triangle->a, triangle->b,
+                                                   triangle->c},
+                        source->id, index, CustomPrimitiveKind::triangle,
+                        triangle->fill_color);
+          } else if (const auto *quad = std::get_if<CustomQuad>(&primitive)) {
+            const auto left = quad->rect.left.value;
+            const auto top = quad->rect.top.value;
+            const auto right = left + quad->rect.width.value;
+            const auto bottom = top + quad->rect.height.value;
+            emit_filled(
+                std::vector<PhysicalPoint>{
+                    PhysicalPoint{.left = Millimetres{left}, .top = Millimetres{top}},
+                    PhysicalPoint{.left = Millimetres{right}, .top = Millimetres{top}},
+                    PhysicalPoint{.left = Millimetres{right}, .top = Millimetres{bottom}},
+                    PhysicalPoint{.left = Millimetres{left}, .top = Millimetres{bottom}}},
+                source->id, index, CustomPrimitiveKind::quad, quad->fill_color);
+          } else {
+            const auto &symbol =
+                std::get<CustomSymbolOccurrence>(primitive);
+            // A symbol whose center lies outside the layer-local clip is
+            // dropped; the GL renderer rebuilds its geometry from center/kind/
+            // size at upload time, so only the center vertex is stored.
+            if (!clip_ring.empty() &&
+                !detail::point_in_polygon(clip_ring, symbol.center.left.value,
+                                          symbol.center.top.value)) {
+              continue;
+            }
+            const auto first_vertex =
+                static_cast<std::uint64_t>(scene->custom_vertices.size());
+            scene->custom_vertices.push_back(symbol.center);
+            const auto half = symbol.size.value * 0.5;
+            scene->custom_primitives.push_back(PreparedCustomPrimitive{
+                .layer_id = layer.id,
+                .source_id = source->id,
+                .source_primitive_index = index,
+                .kind = CustomPrimitiveKind::symbol,
+                .color = symbol.color,
+                .first_vertex = first_vertex,
+                .vertex_count = 1,
+                .symbol_kind = symbol.kind,
+                .bounds = PhysicalRect{
+                    .left = Millimetres{symbol.center.left.value - half},
+                    .top = Millimetres{symbol.center.top.value - half},
+                    .width = symbol.size,
+                    .height = symbol.size,
+                },
+            });
+          }
+        }
+      }
+      scene->custom_layers.push_back(PreparedCustomLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .custom_source_id = layer.custom_source_id,
+          .z_order = layer.z_order,
+          .first_primitive = first_primitive,
+          .primitive_count =
+              static_cast<std::uint64_t>(scene->custom_primitives.size()) -
+              first_primitive,
+          .clip_path_index = clip_path_index,
+          .visible = layer.visible,
       });
     }
 
