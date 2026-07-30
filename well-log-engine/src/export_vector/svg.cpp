@@ -13,7 +13,13 @@
 #include <utility>
 
 namespace welllog {
-namespace {
+namespace svg_internal {
+
+// Shared emitters (svg_internal.hpp). These live here, NOT in an anonymous
+// namespace, so both svg.cpp and pagination.cpp link against one definition and
+// there is no Middle Man wrapper layer — the paginated pages reuse the exact
+// same emission as SvgExporter::write (ADR 0048). They have no dependencies on
+// the SvgExporter-internal composites below, so the composites stay private.
 
 void append_number(std::string &output, double value) {
   if (value == 0.0) {
@@ -78,6 +84,14 @@ void append_color(std::string &output, RgbaColor color) {
   append_byte(color.green);
   append_byte(color.blue);
 }
+
+} // namespace svg_internal
+
+namespace {
+using svg_internal::append_color;
+using svg_internal::append_integer;
+using svg_internal::append_number;
+using svg_internal::append_xml_attribute;
 
 void append_rect(std::string &output, const PhysicalRect &rect) {
   output += "<rect x=\"";
@@ -843,22 +857,16 @@ void append_layer_body(std::string &output, const PreparedScene &scene) {
 
 } // namespace
 
-// Expose the shared emitters to the paginated exporter (svg_internal.hpp). The
-// definitions live in the anonymous namespace above; these wrappers delegate so
-// pagination.cpp reuses the exact same per-layer emission (ADR 0048).
+// Bridges from the paginated exporter to the anonymous-namespace emitters above
+// (svg_internal.hpp). append_defs / append_layer_body CANNOT be defined directly
+// in svg_internal the way the atoms can: their bodies call SvgExporter-private
+// composites (append_rect, append_pattern_definition, append_outline_path_data,
+// append_symbol, append_path_data, append_fill_ring_path) that must keep
+// internal linkage as the correct idiom for translation-unit-private code. So
+// these two are a deliberate linkage adapter (internal -> external), not a
+// middle-man re-export — they let pagination.cpp reach TU-private emitters it
+// otherwise could not name (ADR 0048).
 namespace svg_internal {
-void append_number(std::string &output, double value) {
-  welllog::append_number(output, value);
-}
-void append_integer(std::string &output, std::uint64_t value) {
-  welllog::append_integer(output, value);
-}
-void append_xml_attribute(std::string &output, std::string_view value) {
-  welllog::append_xml_attribute(output, value);
-}
-void append_color(std::string &output, RgbaColor color) {
-  welllog::append_color(output, color);
-}
 void append_defs(std::string &output, const PreparedScene &scene) {
   welllog::append_defs(output, scene);
 }

@@ -70,25 +70,54 @@ pagination_error(ErrorCode code, MessageKey message) noexcept {
   return true;
 }
 
+// The page's printable width/height in millimetres (page size minus margins) —
+// the printable-area concept table-and-export.md section 9 names. Centralized
+// so the margin arithmetic is expressed once, not recomputed at each call site.
+[[nodiscard]] double printable_width(const ExportPageSpec &page) noexcept {
+  return page.page_width.value - page.margins.left.value -
+         page.margins.right.value;
+}
+[[nodiscard]] double printable_height(const ExportPageSpec &page) noexcept {
+  return page.page_height.value - page.margins.top.value -
+         page.margins.bottom.value;
+}
+
 [[nodiscard]] double
 printable_depth_height_mm(const PreparedScene &scene,
                           const ExportPageSpec &page) noexcept {
   // The scene maps onto the page width: scale the scene so its physical width
   // matches the printable width, then the printable depth height is the page's
   // printable height. (Continuous mode derives its own height separately.)
-  const auto printable_width =
-      page.page_width.value - page.margins.left.value - page.margins.right.value;
-  const auto scale = printable_width / scene.physical_width().value;
-  const auto printable_page_height = page.page_height.value -
-                                     page.margins.top.value -
-                                     page.margins.bottom.value;
-  return printable_page_height / scale;
+  const auto scale = printable_width(page) / scene.physical_width().value;
+  return printable_height(page) / scale;
 }
 
 // Formats a depth value with the engine's deterministic shortest-round-trip
 // representation (matches the rest of the SVG emitters).
 void append_depth(std::string &output, double depth) noexcept {
   append_number(output, depth);
+}
+
+// Appends the per-page depth-range footer: a <text> carrying the depth window
+// both as machine-readable data-page-depth-top/-bottom (for cross-page
+// continuity assertions, criterion 3/8) and as a human "depth A .. B" label.
+// Emitted identically by fixed pages and the continuous page (criterion 8).
+void append_depth_range_footer(std::string &output, double x_mm,
+                               double footer_y_mm, double depth_top,
+                               double depth_bottom) noexcept {
+  output += "<text data-export-role=\"footer\" x=\"";
+  append_number(output, x_mm);
+  output += "\" y=\"";
+  append_number(output, footer_y_mm);
+  output += "\" data-page-depth-top=\"";
+  append_depth(output, depth_top);
+  output += "\" data-page-depth-bottom=\"";
+  append_depth(output, depth_bottom);
+  output += "\" font-size=\"3\">depth ";
+  append_depth(output, depth_top);
+  output += " .. ";
+  append_depth(output, depth_bottom);
+  output += "</text>";
 }
 
 // Computes the reference depth at a scene-y position, using the scene's linear
@@ -168,9 +197,7 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
   // from the per-track curve headers emitted in the body below).
   const auto content_left = page.margins.left.value;
   const auto content_top = page.margins.top.value;
-  const auto printable_page_height = page.page_height.value -
-                                     page.margins.top.value -
-                                     page.margins.bottom.value;
+  const auto printable_page_height = printable_height(page);
   if (page.repeat_headers) {
     if (!page.well_name.empty()) {
       append_text_element(output, "header", content_left,
@@ -195,19 +222,8 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
     const auto depth_bottom = scene_y_to_depth(scene, window_bottom_mm);
     const auto footer_y =
         page.page_height.value - page.margins.bottom.value + 3.0;
-    output += "<text data-export-role=\"footer\" x=\"";
-    append_number(output, content_left);
-    output += "\" y=\"";
-    append_number(output, footer_y);
-    output += "\" data-page-depth-top=\"";
-    append_depth(output, depth_top);
-    output += "\" data-page-depth-bottom=\"";
-    append_depth(output, depth_bottom);
-    output += "\" font-size=\"3\">depth ";
-    append_depth(output, depth_top);
-    output += " .. ";
-    append_depth(output, depth_bottom);
-    output += "</text>";
+    append_depth_range_footer(output, content_left, footer_y, depth_top,
+                              depth_bottom);
   }
 
   // Legend band: one line per visible curve layer (mnemonic + colour swatch +
@@ -244,9 +260,8 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
   // shows on this page. The clipPath is in PAGE millimetres (the printable
   // rect) so it clips the scaled body to the content area; the scene's own track
   // clips are preserved inside append_layer_body.
-  const auto printable_width =
-      page.page_width.value - page.margins.left.value - page.margins.right.value;
-  const auto scale = printable_width / scene.physical_width().value;
+  const auto printable_width_mm = printable_width(page);
+  const auto scale = printable_width_mm / scene.physical_width().value;
   output += "<clipPath id=\"page-window-";
   append_integer(output, page_index);
   output += "\"><rect x=\"";
@@ -254,7 +269,7 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
   output += "\" y=\"";
   append_number(output, content_top);
   output += "\" width=\"";
-  append_number(output, printable_width);
+  append_number(output, printable_width_mm);
   output += "\" height=\"";
   append_number(output, printable_page_height);
   output += "\"/></clipPath>";
@@ -328,10 +343,8 @@ PaginatedSvgExporter::write(const PreparedScene &scene,
       // One continuous page: the printable width maps the scene width, and the
       // page height preserves true depth->physical-length (scene physical height
       // scaled by the same width factor), so depth proportions stay correct.
-      const auto printable_width = page.page_width.value -
-                                   page.margins.left.value -
-                                   page.margins.right.value;
-      const auto scale = printable_width / scene.physical_width().value;
+      const auto printable_width_mm = printable_width(page);
+      const auto scale = printable_width_mm / scene.physical_width().value;
       const auto page_height_mm =
           scene.physical_height().value * scale +
           page.margins.top.value + page.margins.bottom.value;
@@ -358,19 +371,8 @@ PaginatedSvgExporter::write(const PreparedScene &scene,
         const auto depth_bottom = scene_y_to_depth(
             scene, scene.physical_height().value);
         const auto footer_y = page_height_mm - page.margins.bottom.value + 3.0;
-        output += "<text data-export-role=\"footer\" x=\"";
-        append_number(output, page.margins.left.value);
-        output += "\" y=\"";
-        append_number(output, footer_y);
-        output += "\" data-page-depth-top=\"";
-        append_depth(output, depth_top);
-        output += "\" data-page-depth-bottom=\"";
-        append_depth(output, depth_bottom);
-        output += "\" font-size=\"3\">depth ";
-        append_depth(output, depth_top);
-        output += " .. ";
-        append_depth(output, depth_bottom);
-        output += "</text>";
+        append_depth_range_footer(output, page.margins.left.value, footer_y,
+                                  depth_top, depth_bottom);
       }
 
       // Body translated to (margin-left, margin-top) and scaled to fit the

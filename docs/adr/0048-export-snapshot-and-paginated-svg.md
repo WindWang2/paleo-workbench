@@ -53,6 +53,8 @@ rendering.md / #156 要求从 Export Snapshot 输出物理比例准确的 SVG：
 ## 延后项（诚实记录，同 #152/#153）
 
 - PDF 发射（#187/#188）。
+- **Document Scale `1:N`**。spec §9 与 requirements EXP-02 把分页建模为比例驱动（`page_depth_span = printable_height × N`），但本切片**不引入显式 `1:N` 参数**：定页深度跨度改为从场景既有的 `physical_height / physical_width` 比例推导（`printable_depth_height_mm`），由宿主在 prepare 时设定。也就是说，本切片的"比例"是宿主烘焙进场景物理维度的，**而非 spec §9 的 `printable_height × N`**。由此连续模式的发射物理长度 = 宿主设定的 `physical_height`（内部几何自洽、深度比例保真），但未实现 §9 的显式 `1:N` 语义。显式 Document Scale 模型作为后续 export ticket 延后。
+- **Selection/Overlay 策略 与颜色空间策略**。spec §8.1（Selection/Overlay 作为 snapshot 捕获项）与 §8.2（"颜色空间策略显式"）要求的字段，`ExportSnapshot` 本切片**均未捕获**。二者更自然地属于后续导出流水线阶段（栅格/PDF/选择渲染），故延后而非实现；本次 snapshot 仅捕获准则 1 列出的其余自描述字段。
 - ADR 0013 完整可逆深度变换链（本次仅落 version-tagged 描述符）。
 - 针对非均匀采样的按页本地密度曲线重查询（聚合密度 prepare 对主导情形正确；改进为后续）。
 - 新增 presentation/version/depth-transform/pattern-version 字段的 manifest 序列化（ADR 0032/0037——与 #152/#153 同类缺口）。

@@ -5,7 +5,16 @@
 // export_vector translation units only. The shared geometric emitter
 // (append_defs + append_layer_body) guarantees the paginated pages use exactly
 // the same per-layer emission as SvgExporter::write (ADR 0048).
+//
+// append_number / append_integer / append_xml_attribute / append_color are
+// defined directly in this namespace (svg.cpp) — they have no dependencies on
+// SvgExporter-internal composites, so they are linked straight across TUs. The
+// two entry points append_defs / append_layer_body are emitted via thin bridges
+// because their bodies use SvgExporter-private composites that cannot live in
+// this namespace.
 
+#include <concepts>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -18,8 +27,11 @@ namespace welllog::svg_internal {
 // (the same format every other SVG emitter uses, so paginated output matches).
 void append_number(std::string &output, double value);
 
-// Appends an integer deterministically.
-void append_integer(std::string &output, std::uint64_t value);
+// Appends an integer deterministically (templated over integral width so signed
+// and unsigned callers get exact-width output).
+template <typename Integer>
+  requires std::is_integral_v<Integer>
+void append_integer(std::string &output, Integer value);
 
 // Appends an XML-attribute-escaped copy of `value`.
 void append_xml_attribute(std::string &output, std::string_view value);
@@ -28,10 +40,12 @@ void append_xml_attribute(std::string &output, std::string_view value);
 void append_color(std::string &output, RgbaColor color);
 
 // Emits the <defs> block (track clipPaths, pattern tiles, glyph outline paths).
+// Bridge to a SvgExporter-private definition (uses internal composites).
 void append_defs(std::string &output, const PreparedScene &scene);
 
 // Emits the per-track, per-layer <g> body (the single geometric emitter shared
-// by both exporters). Each track <g> is clipped to its own track clip.
+// by both exporters). Each track <g> is clipped to its own track clip. Bridge to
+// a SvgExporter-private definition.
 void append_layer_body(std::string &output, const PreparedScene &scene);
 
 } // namespace welllog::svg_internal
