@@ -841,25 +841,6 @@ void append_layer_body(std::string &output, const PreparedScene &scene) {
   }
 }
 
-// Appends one <text> element. Used by the paginated exporter for the synthesized
-// page header/footer/legend strings (well name, page number, depth range, curve
-// legend), which are plain ASCII SVG text — not the scene's glyph-outline runs.
-void append_text_element(std::string &output, std::string_view role,
-                         double x_mm, double y_mm, std::string_view body,
-                         double font_size_mm) {
-  output += "<text data-export-role=\"";
-  output += role;
-  output += "\" x=\"";
-  append_number(output, x_mm);
-  output += "\" y=\"";
-  append_number(output, y_mm);
-  output += "\" font-size=\"";
-  append_number(output, font_size_mm);
-  output += "\">";
-  append_xml_attribute(output, body);
-  output += "</text>";
-}
-
 } // namespace
 
 // Expose the shared emitters to the paginated exporter (svg_internal.hpp). The
@@ -883,11 +864,6 @@ void append_defs(std::string &output, const PreparedScene &scene) {
 }
 void append_layer_body(std::string &output, const PreparedScene &scene) {
   welllog::append_layer_body(output, scene);
-}
-void append_text_element(std::string &output, std::string_view role,
-                         double x_mm, double y_mm, std::string_view body,
-                         double font_size_mm) {
-  welllog::append_text_element(output, role, x_mm, y_mm, body, font_size_mm);
 }
 } // namespace svg_internal
 

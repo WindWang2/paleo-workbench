@@ -34,10 +34,4 @@ void append_defs(std::string &output, const PreparedScene &scene);
 // by both exporters). Each track <g> is clipped to its own track clip.
 void append_layer_body(std::string &output, const PreparedScene &scene);
 
-// Appends one plain <text> element tagged with a data-export-role, used by the
-// paginated exporter for synthesized page header/footer/legend strings.
-void append_text_element(std::string &output, std::string_view role,
-                         double x_mm, double y_mm, std::string_view body,
-                         double font_size_mm = 3.0);
-
 } // namespace welllog::svg_internal

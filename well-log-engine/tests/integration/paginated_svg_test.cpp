@@ -292,6 +292,39 @@ void fixed_mode_paginates_with_repeating_bands_and_continuous_depths() {
   // per page.
   require(count_occurrences(text, "data-curve-id=") >= svg_count,
           "every page body must reference the curve layer");
+
+  // Criterion 5: a legend band must be present (repeat_legend is on). The
+  // tall scene has one visible curve layer -> one legend entry per page, and
+  // each entry emits two legend-role elements (a colour swatch <rect> + a
+  // <text>), so the count is 2 per page.
+  const auto legend_count = count_occurrences(text, "data-export-role=\"legend\"");
+  require(legend_count == 2 * svg_count,
+          "every page must carry a legend band when repeat_legend is set");
+
+  // The fixed-mode body must be mapped onto the printable area: its <g> carries
+  // a scale (scene->printable-width) AND a left-margin translate. The earlier
+  // translate-only form under-filled the page and ignored the left margin; this
+  // guards the regression. Scale = printable_width / scene_width = 100/80 = 1.25.
+  require(count_occurrences(text, "data-export-role=\"body\"") == svg_count,
+          "every page must carry a body group");
+  require(text.find("scale(1.25 1.25)") != std::string::npos,
+          "fixed-mode body must scale the scene onto the printable width");
+  require(text.find("translate(10 ") != std::string::npos,
+          "fixed-mode body must translate by the left page margin");
+
+  // Criterion 1 (self-describing): each page root carries the snapshot metadata
+  // (document id/revision, presentation version, depth-transform version, font).
+  require(count_occurrences(text, "data-document-revision=\"7\"") == svg_count,
+          "every page must carry the document revision");
+  require(count_occurrences(text, "data-presentation-version=\"42\"") ==
+              svg_count,
+          "every page must carry the presentation version");
+  require(count_occurrences(text, "data-depth-transform-version=\"3\"") ==
+              svg_count,
+          "every page must carry the depth-transform version");
+  require(count_occurrences(text, "data-font-asset=\"font-fixture-v1\"") ==
+              svg_count,
+          "every page must carry the font asset fingerprint");
 }
 
 void aggregate_pixel_height_is_positive_and_scale_aware() {

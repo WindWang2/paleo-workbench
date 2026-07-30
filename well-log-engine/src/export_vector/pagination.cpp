@@ -17,7 +17,6 @@ using svg_internal::append_defs;
 using svg_internal::append_integer;
 using svg_internal::append_layer_body;
 using svg_internal::append_number;
-using svg_internal::append_text_element;
 using svg_internal::append_xml_attribute;
 
 // 1 inch = 25.4 mm (ADR 0039 unit conversion; never uses screen DPI).
@@ -101,6 +100,45 @@ void append_depth(std::string &output, double depth) noexcept {
   return range.top + (y_mm / scene.physical_height().value) * span;
 }
 
+// Appends one plain <text> element tagged with a data-export-role, used for the
+// synthesized page header/footer/legend strings (well name, page number, depth
+// range, curve legend) — plain ASCII SVG text, not the scene's glyph runs.
+void append_text_element(std::string &output, std::string_view role,
+                         double x_mm, double y_mm, std::string_view body,
+                         double font_size_mm = 3.0) {
+  output += "<text data-export-role=\"";
+  output += role;
+  output += "\" x=\"";
+  append_number(output, x_mm);
+  output += "\" y=\"";
+  append_number(output, y_mm);
+  output += "\" font-size=\"";
+  append_number(output, font_size_mm);
+  output += "\">";
+  append_xml_attribute(output, body);
+  output += "</text>";
+}
+
+// Appends the self-describing snapshot metadata as data-* attributes on the
+// page root <svg>, so every page records the document revision, presentation
+// version, font fingerprint and depth-transform version the export was produced
+// against (criterion 1 "self-describing"; table-and-export.md section 9
+// "Revision 元数据"). Mirrors the single-scene exporter's document/font tags.
+void append_snapshot_metadata(std::string &output,
+                              const ExportSnapshot &snapshot) noexcept {
+  output += "\" data-document-id=\"";
+  append_xml_attribute(output, snapshot.document_id.to_string());
+  output += "\" data-document-revision=\"";
+  append_integer(output, snapshot.document_revision.value);
+  output += "\" data-presentation-version=\"";
+  append_integer(output, snapshot.presentation_version.value);
+  output += "\" data-depth-transform-version=\"";
+  append_integer(output, snapshot.depth_transform.version);
+  output += "\" data-font-asset=\"";
+  append_xml_attribute(output, snapshot.font_asset_fingerprint);
+  output += "\">";
+}
+
 // Emits one fixed page: page-sized <svg>, header/footer/legend bands, and the
 // scene body clipped to this page's depth window and translated into place.
 void append_fixed_page(std::string &output, const PreparedScene &scene,
@@ -120,7 +158,7 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
   append_integer(output, page_index + 1);
   output += "\" data-export-page-count=\"";
   append_integer(output, page_count);
-  output += "\">";
+  append_snapshot_metadata(output, snapshot);
 
   // Patterns/glyph defs are emitted once per page (each page is a standalone
   // SVG document). Track clipPaths/patterns/glyphs live in the shared helper.
@@ -140,9 +178,9 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
     }
     if (page.show_page_numbers) {
       std::string page_label = "page ";
-      page_label += std::to_string(page_index + 1);
+      append_integer(page_label, page_index + 1);
       page_label += " of ";
-      page_label += std::to_string(page_count);
+      append_integer(page_label, page_count);
       const auto page_label_x =
           page.page_width.value - page.margins.right.value;
       append_text_element(output, "header", page_label_x, content_top + 3.0,
@@ -187,9 +225,9 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
       output += "\"/>";
       std::string legend = entry.curve_name;
       legend += " ";
-      legend += std::to_string(entry.scale_minimum);
+      append_number(legend, entry.scale_minimum);
       legend += "..";
-      legend += std::to_string(entry.scale_maximum);
+      append_number(legend, entry.scale_maximum);
       legend += " ";
       legend += entry.unit;
       append_text_element(output, "legend", content_left + 4.0, legend_y,
@@ -198,23 +236,40 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
     }
   }
 
-  // The scene body, clipped to this page's depth window. The scene's own track
-  // clips are preserved (append_layer_body applies them); this outer clipPath
-  // additionally restricts to the page's vertical depth slice. A translate
-  // shifts scene-y=0 to the page's content top so the window lines up.
+  // The scene body, mapped onto the printable area and clipped to this page's
+  // depth window. The scene is scaled the same way as continuous mode
+  // (scale = printable_width / scene_width) so it fills the printable width and
+  // depth proportions stay true; a translate positions scene-y=window_top at the
+  // page content top, so only [window_top, window_bottom] of the scaled scene
+  // shows on this page. The clipPath is in PAGE millimetres (the printable
+  // rect) so it clips the scaled body to the content area; the scene's own track
+  // clips are preserved inside append_layer_body.
+  const auto printable_width =
+      page.page_width.value - page.margins.left.value - page.margins.right.value;
+  const auto scale = printable_width / scene.physical_width().value;
   output += "<clipPath id=\"page-window-";
   append_integer(output, page_index);
-  output += "\"><rect x=\"0\" y=\"";
-  append_number(output, window_top_mm);
+  output += "\"><rect x=\"";
+  append_number(output, content_left);
+  output += "\" y=\"";
+  append_number(output, content_top);
   output += "\" width=\"";
-  append_number(output, scene.physical_width().value);
+  append_number(output, printable_width);
   output += "\" height=\"";
-  append_number(output, window_bottom_mm - window_top_mm);
+  append_number(output, printable_page_height);
   output += "\"/></clipPath>";
   output += "<g clip-path=\"url(#page-window-";
   append_integer(output, page_index);
-  output += ")\" transform=\"translate(0 ";
-  append_number(output, content_top - window_top_mm);
+  output += ")\" transform=\"translate(";
+  append_number(output, content_left);
+  output.push_back(' ');
+  // Scene point (x, window_top) must land at content_top: after scale, y is
+  // window_top*scale, so translate by content_top - window_top*scale.
+  append_number(output, content_top - window_top_mm * scale);
+  output += ") scale(";
+  append_number(output, scale);
+  output.push_back(' ');
+  append_number(output, scale);
   output += ")\" data-export-role=\"body\">";
   append_layer_body(output, scene);
   output += "</g>";
@@ -289,7 +344,8 @@ PaginatedSvgExporter::write(const PreparedScene &scene,
       append_number(output, page.page_width.value);
       output.push_back(' ');
       append_number(output, page_height_mm);
-      output += "\" data-export-page=\"1\" data-export-page-count=\"1\">";
+      output += "\" data-export-page=\"1\" data-export-page-count=\"1\"";
+      append_snapshot_metadata(output, snapshot);
       append_defs(output, scene);
 
       if (page.repeat_headers && !page.well_name.empty()) {
