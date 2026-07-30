@@ -104,13 +104,14 @@ ScenePresentationBuilder image_presentation() {
 PreparedScene
 prepare_with_image(const WellLogDocument &document,
                    ScenePresentationBuilder &builder,
-                   const ImagePyramidQuery &query) {
+                   const ImagePyramidQuery &query,
+                   std::uint64_t derived_budget = 16 * 1024) {
   const auto presentation = builder.build();
   detail::ScenePreparer::CurveLodMap curve_lods;
   detail::ScenePreparer::ImagePyramidMap image_pyramids;
   const auto pyramid = ImagePyramid::build(
       document.image_sources().front(),
-      ImagePyramidOptions{.tile_size = 256, .maximum_derived_bytes = 16 * 1024});
+      ImagePyramidOptions{.tile_size = 256, .maximum_derived_bytes = derived_budget});
   require(pyramid.has_value(), "image pyramid must build");
   image_pyramids.emplace(image_source_id, pyramid.value());
   const auto scene = detail::ScenePreparer::prepare(
@@ -298,6 +299,79 @@ void hidden_image_layer_emits_no_tiles() {
           "hidden layer must emit no tiles");
 }
 
+// Criterion 4: an image tile is pickable by scene position and returns the
+// image source identity plus the reference depth at the hit.
+void image_tile_is_pickable_and_returns_depth() {
+  const auto document = image_document();
+  auto builder = image_presentation();
+  const auto scene = prepare_with_image(
+      document, builder,
+      ImagePyramidQuery{.viewport_top = 1000.0,
+                        .viewport_bottom = 1100.0,
+                        .pixel_height = 500.0,
+                        .prefetch_viewports = 0.0});
+  const auto &layer = scene.image_layers().front();
+  require(layer.tile_count > 0, "at least one tile must be prepared");
+  const auto &tile = scene.image_tiles()[0];
+  // Pick the center of the first tile.
+  const auto pick = scene.pick_image(ImagePickQuery{
+      .scene_position = PhysicalPoint{
+          .left = Millimetres{tile.rect.left.value +
+                              tile.rect.width.value * 0.5},
+          .top = Millimetres{tile.rect.top.value +
+                             tile.rect.height.value * 0.5}},
+  });
+  require(pick.has_value(), "a point inside the tile must be picked");
+  require(pick->layer_id == image_layer_id,
+          "pick must identify the image layer");
+  require(pick->image_source_id == image_source_id,
+          "pick must return the image source identity");
+  require(pick->reference_depth >= 1000.0 && pick->reference_depth <= 1100.0,
+          "pick must return a reference depth within the image range");
+  // A point far outside any tile must not be picked.
+  const auto miss = scene.pick_image(ImagePickQuery{
+      .scene_position = PhysicalPoint{.left = Millimetres{9999.0},
+                                       .top = Millimetres{9999.0}},
+  });
+  require(!miss.has_value(), "a point outside every tile must not be picked");
+}
+
+// Criterion 8: a large virtual image selects a bounded number of visible
+// tiles (proportional to the viewport, not the source size), so peak tile
+// loading stays controlled regardless of image height.
+void large_image_selects_bounded_visible_tiles() {
+  // A large image (within the per-side cap) over the depth range. 8000x40000
+  // = 320M pixels, each side under 65536.
+  const auto document = image_document(8000, 40000);
+
+  // Full-depth viewport: selects the whole image's tile grid.
+  auto full_builder = image_presentation();
+  const auto full_scene = prepare_with_image(
+      document, full_builder,
+      ImagePyramidQuery{.viewport_top = 1000.0,
+                        .viewport_bottom = 1100.0,
+                        .pixel_height = 1000.0,
+                        .prefetch_viewports = 0.0},
+      /*derived_budget=*/64 * 1024 * 1024);
+  const auto full_count = full_scene.image_layers().front().tile_count;
+  require(full_count > 0, "full viewport must select tiles");
+
+  // Narrow viewport over the top 10%: must select strictly fewer tiles.
+  auto narrow_builder = image_presentation();
+  const auto narrow_scene = prepare_with_image(
+      document, narrow_builder,
+      ImagePyramidQuery{.viewport_top = 1000.0,
+                        .viewport_bottom = 1010.0,
+                        .pixel_height = 200.0,
+                        .prefetch_viewports = 0.0},
+      /*derived_budget=*/64 * 1024 * 1024);
+  const auto narrow_count = narrow_scene.image_layers().front().tile_count;
+  require(narrow_count > 0, "narrow viewport must still select tiles");
+  require(narrow_count < full_count,
+          "visible-tile count must be bounded by the viewport, not the "
+          "source image size");
+}
+
 } // namespace
 
 int main() {
@@ -307,6 +381,8 @@ int main() {
   svg_keeps_raster_object_with_physical_dimensions();
   pyramid_build_reports_levels_and_budget();
   hidden_image_layer_emits_no_tiles();
+  image_tile_is_pickable_and_returns_depth();
+  large_image_selects_bounded_visible_tiles();
   std::cout << "PASS: raster image layer\n";
   return EXIT_SUCCESS;
 }

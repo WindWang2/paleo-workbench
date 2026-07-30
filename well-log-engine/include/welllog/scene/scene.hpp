@@ -568,6 +568,23 @@ struct FillPickQuery {
   PhysicalPoint scene_position;
 };
 
+// A hit on a raster image tile (ADR 0030 semantic picking). Carries the
+// image source identity, the pyramid tile, and the reference depth at the
+// hit point (computed from the tile's depth span), so the host can report
+// which image and depth the user picked.
+struct ImagePick {
+  EntityId layer_id;
+  EntityId image_source_id;
+  std::uint32_t level{};
+  std::uint32_t row{};
+  std::uint32_t col{};
+  double reference_depth{};
+};
+
+struct ImagePickQuery {
+  PhysicalPoint scene_position;
+};
+
 namespace detail {
 class ScenePreparer;
 }
@@ -638,6 +655,8 @@ public:
   pick_curve(const CurvePickQuery &query) const noexcept;
   [[nodiscard]] std::optional<FillPick>
   pick_fill(const FillPickQuery &query) const noexcept;
+  [[nodiscard]] std::optional<ImagePick>
+  pick_image(const ImagePickQuery &query) const noexcept;
 
 private:
   struct Impl;

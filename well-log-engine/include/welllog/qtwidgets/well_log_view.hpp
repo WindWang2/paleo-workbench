@@ -1,10 +1,12 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
 
 #include <QOpenGLWidget>
 
+#include <welllog/io/manifest.hpp>
 #include <welllog/qtwidgets/export.hpp>
 #include <welllog/render_gl/capability.hpp>
 #include <welllog/session/session.hpp>
@@ -36,6 +38,13 @@ public:
   // installs a HarfBuzz/FreeType/ICU engine by default when the text
   // library is built.
   void set_text_engine(std::shared_ptr<TextEngine> text_engine) noexcept;
+  // Installs the host-side image-tile decoder used by the GL renderer to
+  // upload raster layers (ADR 0045: the engine never decodes images; the
+  // host supplies decoded tile bytes on demand). Must be called from the GUI
+  // thread; takes effect on the next frame.
+  void set_image_tile_resolver(
+      std::function<Result<RasterTile>(const ImageTileRequest &)> resolver)
+      noexcept;
   [[nodiscard]] std::optional<EntityId> document_id() const noexcept;
   [[nodiscard]] const CapabilityReport &capability_report() const noexcept;
   [[nodiscard]] std::optional<CurvePick> hover_pick() const noexcept;

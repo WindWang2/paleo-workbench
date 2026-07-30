@@ -122,6 +122,10 @@ struct WellLogView::Impl {
   std::uint64_t last_diagnostic_id{};
   bool viewport_signal_pending{};
   bool crosshair_signal_pending{};
+  // Host image-tile resolver (ADR 0045); applied to the renderer on the GL
+  // thread once initialized, and re-applied after context recovery.
+  std::function<Result<RasterTile>(const ImageTileRequest &)> image_resolver;
+  bool image_resolver_dirty{};
   bool hover_signal_pending{};
 };
 
@@ -188,6 +192,13 @@ void WellLogView::set_text_engine(
   if (impl_->session != nullptr) {
     impl_->session->set_text_engine(std::move(text_engine));
   }
+}
+
+void WellLogView::set_image_tile_resolver(
+    std::function<Result<RasterTile>(const ImageTileRequest &)> resolver)
+    noexcept {
+  impl_->image_resolver = std::move(resolver);
+  impl_->image_resolver_dirty = true;
 }
 const WellLogSession &WellLogView::session() const noexcept {
   return *impl_->session;
@@ -302,6 +313,11 @@ void WellLogView::initializeGL() {
       impl_->capability_report.graphics_available = false;
       impl_->capability_report.unavailable_reason =
           "OpenGL shader or buffer initialization failed";
+    } else if (impl_->capability_report.graphics_available) {
+      // (Re)install the host image-tile decoder + budget on the GL thread
+      // (ADR 0045). On context recovery the renderer is freshly initialized,
+      // so this re-applies the resolver for texture regeneration.
+      impl_->image_resolver_dirty = true;
     }
     impl_->context_cleanup_connection = connect(
         current, &QOpenGLContext::aboutToBeDestroyed, this,
@@ -401,6 +417,14 @@ void WellLogView::paintGL() {
     if (scene != nullptr && scene != impl_->uploaded_scene &&
         scene != impl_->queued_scene) {
       const auto budgets = impl_->session->performance_budgets();
+      // Push the host image resolver + texture budget onto the renderer when
+      // it changes (or after context recovery) so image tiles can be decoded
+      // and uploaded (ADR 0045).
+      if (impl_->image_resolver_dirty) {
+        impl_->renderer.set_image_tile_resolver(impl_->image_resolver,
+                                                budgets.maximum_image_texture_bytes);
+        impl_->image_resolver_dirty = false;
+      }
       if (!impl_->renderer.queue_upload(
               *scene,
               GpuUploadBudgets{

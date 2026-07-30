@@ -1069,6 +1069,50 @@ PreparedScene::pick_fill(const FillPickQuery &query) const noexcept {
   return std::nullopt;
 }
 
+std::optional<ImagePick>
+PreparedScene::pick_image(const ImagePickQuery &query) const noexcept {
+  if (impl_ == nullptr) {
+    return std::nullopt;
+  }
+  const auto position = query.scene_position;
+  const auto depth_top = impl_->reference_depth_top;
+  const auto depth_span = impl_->reference_depth_bottom - depth_top;
+  // Iterate image layers in reverse z order so the topmost layer wins.
+  for (auto layer_it = impl_->image_layers.rbegin();
+       layer_it != impl_->image_layers.rend(); ++layer_it) {
+    for (auto tile_index = layer_it->first_tile + layer_it->tile_count;
+         tile_index > layer_it->first_tile; --tile_index) {
+      const auto &tile =
+          impl_->image_tiles[static_cast<std::size_t>(tile_index - 1)];
+      const auto left = tile.rect.left.value;
+      const auto right = left + tile.rect.width.value;
+      const auto top = tile.rect.top.value;
+      const auto bottom = top + tile.rect.height.value;
+      if (position.left.value < left || position.left.value > right ||
+          position.top.value < top || position.top.value > bottom) {
+        continue;
+      }
+      // Invert the depth mapping (depth = top + (top_mm / height) * span) to
+      // report the reference depth at the hit point.
+      auto reference_depth = depth_top;
+      if (impl_->physical_height.value > 0.0 && depth_span > 0.0) {
+        reference_depth =
+            depth_top + (position.top.value / impl_->physical_height.value) *
+                            depth_span;
+      }
+      return ImagePick{
+          .layer_id = layer_it->id,
+          .image_source_id = tile.image_source_id,
+          .level = tile.level,
+          .row = tile.row,
+          .col = tile.col,
+          .reference_depth = reference_depth,
+      };
+    }
+  }
+  return std::nullopt;
+}
+
 Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
                                const ScenePresentation &presentation,

@@ -39,9 +39,9 @@ struct ImageTileRequest {
   std::uint32_t col{};
 };
 
-// The decoded pixels for one tile. `bytes` holds width*height*channels pixels
-// in row-major order; `owner` keeps the storage alive (non-owning view model,
-// ADR 0032). `data` is a raw pointer into `owner`'s storage.
+// The decoded pixels for one tile. `data` points to width*height*channels
+// pixels in row-major order; `owner` keeps the storage alive (non-owning view
+// model, ADR 0032).
 struct RasterTile {
   std::uint32_t width_px{};
   std::uint32_t height_px{};

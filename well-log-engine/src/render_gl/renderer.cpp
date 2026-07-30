@@ -1296,6 +1296,11 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         return {0, false};
       }
       const auto byte_size = raster.byte_size();
+      // A single tile larger than the whole budget can never be uploaded;
+      // reject it before evicting live textures it would displace for nothing.
+      if (byte_size > impl_->maximum_image_texture_bytes) {
+        return {0, false};
+      }
       // Evict least-recently-used tiles until the new one fits the budget.
       while (!impl_->image_textures.empty() &&
              impl_->image_texture_bytes + byte_size >
@@ -1310,9 +1315,6 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         }
         impl_->image_texture_bytes -= victim->second.byte_size;
         impl_->image_textures.erase(victim);
-      }
-      if (byte_size > impl_->maximum_image_texture_bytes) {
-        return {0, false}; // single tile exceeds the whole budget
       }
       GlUInt texture{};
       impl_->gl.gen_textures(1, &texture);
@@ -1975,7 +1977,10 @@ bool GlRenderer::initialized() const noexcept {
 void GlRenderer::set_image_tile_resolver(
     std::function<Result<RasterTile>(const ImageTileRequest &)> resolver,
     std::uint64_t maximum_texture_bytes) noexcept {
-  if (impl_ == nullptr) {
+  // The resolver is invoked on the GL thread during upload, so it must be
+  // installed from the same (GUI) thread that owns the context (ADR 0016).
+  if (impl_ == nullptr ||
+      std::this_thread::get_id() != impl_->owner_thread) {
     return;
   }
   impl_->image_resolver = std::move(resolver);
