@@ -29,10 +29,41 @@ struct NullBitmapDescriptor {
   std::uint64_t byte_capacity{};
 };
 
+// A request for one decoded raster tile from an ImageSource, identified by its
+// pyramid level and tile grid coordinates. The host resolves this into the
+// pre-decoded pixel bytes (the engine never decodes images — ADR 0042).
+struct ImageTileRequest {
+  EntityId image_source_id;
+  std::uint32_t level{};
+  std::uint32_t row{};
+  std::uint32_t col{};
+};
+
+// The decoded pixels for one tile. `bytes` holds width*height*channels pixels
+// in row-major order; `owner` keeps the storage alive (non-owning view model,
+// ADR 0032). `data` is a raw pointer into `owner`'s storage.
+struct RasterTile {
+  std::uint32_t width_px{};
+  std::uint32_t height_px{};
+  PixelFormat pixel_format{PixelFormat::rgba8};
+  SharedOwner owner;
+  const std::uint8_t *data{nullptr};
+
+  [[nodiscard]] std::uint64_t byte_size() const noexcept {
+    const auto channels = pixel_format == PixelFormat::rgba8 ? 4
+                        : pixel_format == PixelFormat::rgb8 ? 3 : 1;
+    return static_cast<std::uint64_t>(width_px) *
+           static_cast<std::uint64_t>(height_px) *
+           static_cast<std::uint64_t>(channels);
+  }
+};
+
 struct ManifestResolvers {
   std::function<Result<BufferView>(const BufferDescriptor &)> buffer;
   std::function<Result<NullBitmapView>(const NullBitmapDescriptor &)>
       null_bitmap;
+  // Resolves a decoded image tile on demand (host-side decode, ADR 0042).
+  std::function<Result<RasterTile>(const ImageTileRequest &)> image_tile;
 };
 
 class WELLLOG_IO_API ManifestText {

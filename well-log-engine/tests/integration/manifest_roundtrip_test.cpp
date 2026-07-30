@@ -122,6 +122,7 @@ void manifest_round_trip_rebinds_external_buffers() {
             .arguments = {},
         };
       },
+      .image_tile = {},
   };
   const auto restored = ManifestCodec::read(encoded.value().text(), resolvers);
   require(restored.has_value(), "manifest must restore through host resolvers");

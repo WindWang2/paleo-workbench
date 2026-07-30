@@ -68,6 +68,7 @@ struct ScenePresentation::Impl {
   std::vector<PatternDefinition> patterns;
   std::vector<IntervalLayerSpec> interval_layers;
   std::vector<CrossoverFillLayerSpec> crossover_fill_layers;
+  std::vector<ImageLayerSpec> image_layers;
   std::vector<MarkerLayerSpec> marker_layers;
   std::vector<SymbolLayerSpec> symbol_layers;
   std::vector<TextLayerSpec> text_layers;
@@ -147,6 +148,12 @@ ScenePresentation::crossover_fill_layers() const noexcept {
                    impl_->crossover_fill_layers};
 }
 
+std::span<const ImageLayerSpec>
+ScenePresentation::image_layers() const noexcept {
+  return impl_ == nullptr ? std::span<const ImageLayerSpec>{}
+                          : std::span<const ImageLayerSpec>{impl_->image_layers};
+}
+
 std::span<const MarkerLayerSpec>
 ScenePresentation::marker_layers() const noexcept {
   return impl_ == nullptr
@@ -194,6 +201,7 @@ ScenePresentationBuilder::ScenePresentationBuilder(
                 .patterns = {},
                 .interval_layers = {},
                 .crossover_fill_layers = {},
+                .image_layers = {},
                 .marker_layers = {},
                 .symbol_layers = {},
                 .text_layers = {},
@@ -290,6 +298,19 @@ ScenePresentationBuilder::add_crossover_fill_layer(
   return *this;
 }
 
+ScenePresentationBuilder &
+ScenePresentationBuilder::add_image_layer(const ImageLayerSpec &layer) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  try {
+    impl_->presentation.image_layers.push_back(layer);
+  } catch (...) {
+    impl_->allocation_failed = true;
+  }
+  return *this;
+}
+
 ScenePresentationBuilder &ScenePresentationBuilder::add_marker_layer(
     const MarkerLayerSpec &layer) noexcept {
   if (impl_ == nullptr || impl_->allocation_failed) {
@@ -375,6 +396,8 @@ struct PreparedScene::Impl {
   std::vector<PreparedFillRegion> fill_regions;
   std::vector<PreparedFillVertex> fill_vertices;
   std::vector<PreparedFillTriangle> fill_triangles;
+  std::vector<PreparedImageLayer> image_layers;
+  std::vector<PreparedImageTile> image_tiles;
   std::vector<PreparedMarkerLayer> marker_layers;
   std::vector<PreparedMarker> markers;
   std::vector<PreparedSymbolLayer> symbol_layers;
@@ -697,6 +720,20 @@ PreparedScene::fill_triangles() const noexcept {
              : std::span<const PreparedFillTriangle>{impl_->fill_triangles};
 }
 
+std::span<const PreparedImageLayer>
+PreparedScene::image_layers() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedImageLayer>{}
+             : std::span<const PreparedImageLayer>{impl_->image_layers};
+}
+
+std::span<const PreparedImageTile>
+PreparedScene::image_tiles() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const PreparedImageTile>{}
+             : std::span<const PreparedImageTile>{impl_->image_tiles};
+}
+
 std::span<const PreparedMarkerLayer>
 PreparedScene::marker_layers() const noexcept {
   return impl_ == nullptr
@@ -798,6 +835,11 @@ PreparedScene::track_id_for_layer(EntityId layer_id) const noexcept {
     }
   }
   for (const auto &layer : impl_->fill_layers) {
+    if (layer.id == layer_id) {
+      return layer.track_id;
+    }
+  }
+  for (const auto &layer : impl_->image_layers) {
     if (layer.id == layer_id) {
       return layer.track_id;
     }
@@ -1031,21 +1073,32 @@ Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
                                const ScenePresentation &presentation,
                                TextEngine *text_engine) noexcept {
-  return prepare_impl(document, presentation, nullptr, nullptr, {},
-                      text_engine);
+  return prepare_impl(document, presentation, nullptr, nullptr, nullptr,
+                      nullptr, {}, text_engine);
 }
 
 Result<PreparedScene> detail::ScenePreparer::prepare(
     const WellLogDocument &document, const ScenePresentation &presentation,
     const CurveLodMap &curve_lods, const CurveLodQuery &query,
     std::stop_token stop_token, TextEngine *text_engine) noexcept {
-  return prepare_impl(document, presentation, &curve_lods, &query, stop_token,
-                      text_engine);
+  return prepare_impl(document, presentation, &curve_lods, &query, nullptr,
+                      nullptr, stop_token, text_engine);
+}
+
+Result<PreparedScene> detail::ScenePreparer::prepare(
+    const WellLogDocument &document, const ScenePresentation &presentation,
+    const CurveLodMap &curve_lods, const CurveLodQuery &query,
+    const ImagePyramidMap &image_pyramids,
+    const ImagePyramidQuery &image_query, std::stop_token stop_token,
+    TextEngine *text_engine) noexcept {
+  return prepare_impl(document, presentation, &curve_lods, &query,
+                      &image_pyramids, &image_query, stop_token, text_engine);
 }
 
 Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     const WellLogDocument &document, const ScenePresentation &presentation,
     const CurveLodMap *curve_lods, const CurveLodQuery *query,
+    const ImagePyramidMap *image_pyramids, const ImagePyramidQuery *image_query,
     std::stop_token stop_token, TextEngine *text_engine) noexcept {
   try {
     if (stop_token.stop_requested()) {
@@ -1055,6 +1108,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     const auto layer_count =
         presentation.curve_layers().size() +
         presentation.interval_layers().size() +
+        presentation.image_layers().size() +
         presentation.marker_layers().size() +
         presentation.symbol_layers().size() + presentation.text_layers().size();
     if (presentation.document_id() != document.id() ||
@@ -1712,6 +1766,125 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
           .region_count =
               static_cast<std::uint64_t>(scene->fill_regions.size()) -
               first_region,
+      });
+    }
+
+    // Image layers (rendering.md section 10). Validated against the untrusted
+    // asset limits (ADR 0042), then a multi-resolution pyramid selects the
+    // visible (+ prefetched) tiles at the viewport's resolution; each tile is
+    // placed as a full-track-width rect over its depth slice. The engine does
+    // NOT decode pixels — the host resolves tile bytes via the image_tile
+    // resolver (ADR 0032).
+    constexpr std::uint64_t maximum_image_dimension_px = 65536ULL;
+    constexpr std::uint64_t maximum_image_pixels = 512ULL * 1024ULL * 1024ULL;
+    constexpr std::uint32_t minimum_image_dpi = 1;
+    std::vector<const ImageLayerSpec *> ordered_image_layers;
+    ordered_image_layers.reserve(presentation.image_layers().size());
+    for (const auto &layer : presentation.image_layers()) {
+      ordered_image_layers.push_back(&layer);
+    }
+    order_layers_by_z(ordered_image_layers);
+
+    const auto find_image_source =
+        [&](EntityId source_id) -> const ImageSource * {
+      for (const auto &candidate : document.image_sources()) {
+        if (candidate.id == source_id) {
+          return &candidate;
+        }
+      }
+      return nullptr;
+    };
+
+    for (const auto *layer_pointer : ordered_image_layers) {
+      if (stop_token.stop_requested()) {
+        return cancellation_error();
+      }
+      const auto &layer = *layer_pointer;
+      const auto bounds = track_bounds.find(layer.track_id);
+      const auto *source = find_image_source(layer.image_source_id);
+      if (layer.id.is_nil() || !ids.insert(layer.id).second ||
+          bounds == track_bounds.end() || source == nullptr ||
+          source->width_px == 0 || source->height_px == 0 ||
+          source->width_px > maximum_image_dimension_px ||
+          source->height_px > maximum_image_dimension_px ||
+          source->dpi < minimum_image_dpi ||
+          source->reference_depth_bottom <= source->reference_depth_top ||
+          !std::isfinite(source->reference_depth_top) ||
+          !std::isfinite(source->reference_depth_bottom)) {
+        return presentation_error(layer.id);
+      }
+      const auto pixel_count = source->width_px * source->height_px;
+      if (pixel_count > maximum_image_pixels) {
+        return Error{
+            .code = ErrorCode::invalid_image,
+            .severity = Severity::error,
+            .entity_id = source->id,
+            .message = MessageKey::image_pixels_exceed_limit,
+            .arguments = {},
+        };
+      }
+      const auto first_tile =
+          static_cast<std::uint64_t>(scene->image_tiles.size());
+      if (layer.visible && image_pyramids != nullptr &&
+          image_query != nullptr) {
+        const auto pyramid = image_pyramids->find(layer.image_source_id);
+        if (pyramid != image_pyramids->end()) {
+          const auto selection = pyramid->second.query(*image_query, stop_token);
+          if (!selection.has_value()) {
+            return selection.error();
+          }
+          for (const auto &tile : selection.value().tiles) {
+            if (stop_token.stop_requested()) {
+              return cancellation_error();
+            }
+            // Clip the tile's depth span to the presentation range.
+            const auto top_depth = std::clamp(tile.top_reference_depth,
+                                              depth_range.top,
+                                              depth_range.bottom);
+            const auto bottom_depth = std::clamp(tile.bottom_reference_depth,
+                                                 depth_range.top,
+                                                 depth_range.bottom);
+            if (bottom_depth <= top_depth) {
+              continue;
+            }
+            const auto tile_top = std::clamp(depth_to_top(top_depth), 0.0,
+                                             presentation.physical_height().value);
+            const auto tile_bottom =
+                std::clamp(depth_to_top(bottom_depth), 0.0,
+                           presentation.physical_height().value);
+            const auto height = tile_bottom - tile_top;
+            if (height <= 0.0) {
+              continue;
+            }
+            scene->image_tiles.push_back(PreparedImageTile{
+                .layer_id = layer.id,
+                .image_source_id = layer.image_source_id,
+                .rect = PhysicalRect{
+                    .left = bounds->second.left,
+                    .top = Millimetres{tile_top},
+                    .width = bounds->second.width,
+                    .height = Millimetres{height},
+                },
+                .level = tile.level,
+                .row = tile.row,
+                .col = tile.col,
+                .width_px = tile.width_px,
+                .height_px = tile.height_px,
+                .pixel_format = source->pixel_format,
+                .dpi = source->dpi,
+                .source = source->source,
+            });
+          }
+        }
+      }
+      scene->image_layers.push_back(PreparedImageLayer{
+          .id = layer.id,
+          .track_id = layer.track_id,
+          .image_source_id = layer.image_source_id,
+          .z_order = layer.z_order,
+          .first_tile = first_tile,
+          .tile_count = static_cast<std::uint64_t>(scene->image_tiles.size()) -
+                        first_tile,
       });
     }
 

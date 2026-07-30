@@ -279,6 +279,7 @@ struct WellLogDocument::Impl {
   std::vector<Interval> intervals;
   std::vector<Marker> markers;
   std::vector<SymbolOccurrence> symbols;
+  std::vector<ImageSource> image_sources;
   std::vector<TextAnnotation> annotations;
 };
 
@@ -321,6 +322,13 @@ std::span<const SymbolOccurrence> WellLogDocument::symbols() const noexcept {
              : std::span<const SymbolOccurrence>{impl_->symbols};
 }
 
+std::span<const ImageSource>
+WellLogDocument::image_sources() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const ImageSource>{}
+             : std::span<const ImageSource>{impl_->image_sources};
+}
+
 std::span<const TextAnnotation> WellLogDocument::annotations() const noexcept {
   return impl_ == nullptr ? std::span<const TextAnnotation>{}
                           : std::span<const TextAnnotation>{impl_->annotations};
@@ -334,6 +342,7 @@ struct WellLogDocumentBuilder::Impl {
   std::vector<Interval> intervals;
   std::vector<Marker> markers;
   std::vector<SymbolOccurrence> symbols;
+  std::vector<ImageSource> image_sources;
   std::vector<TextAnnotation> annotations;
   bool allocation_failed{};
 };
@@ -348,6 +357,7 @@ WellLogDocumentBuilder::WellLogDocumentBuilder(
                                         .intervals = {},
                                         .markers = {},
                                         .symbols = {},
+                                        .image_sources = {},
                                         .annotations = {},
                                         .allocation_failed = false});
   } catch (...) {
@@ -428,6 +438,15 @@ WellLogDocumentBuilder::add_symbol(const SymbolOccurrence &symbol) noexcept {
   return *this;
 }
 
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_image_source(const ImageSource &source) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->image_sources, source, impl_->allocation_failed);
+  return *this;
+}
+
 WellLogDocumentBuilder &WellLogDocumentBuilder::add_annotation(
     const TextAnnotation &annotation) noexcept {
   if (impl_ == nullptr || impl_->allocation_failed) {
@@ -450,6 +469,7 @@ WellLogDocument WellLogDocumentBuilder::build() const noexcept {
     document->intervals = impl_->intervals;
     document->markers = impl_->markers;
     document->symbols = impl_->symbols;
+    document->image_sources = impl_->image_sources;
     document->annotations = impl_->annotations;
     return WellLogDocument{std::move(document)};
   } catch (...) {

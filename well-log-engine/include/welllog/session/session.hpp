@@ -107,6 +107,9 @@ struct PerformanceBudgets {
   std::uint64_t maximum_cpu_derived_bytes{};
   std::uint64_t maximum_gpu_cache_bytes{256ULL * 1024ULL * 1024ULL};
   std::uint64_t maximum_upload_bytes_per_frame{4ULL * 1024ULL * 1024ULL};
+  // Carve-out of the GPU cache reserved for decoded image-tile textures,
+  // LRU-evicted (ADR 0034). Defaults to a quarter of the GPU cache.
+  std::uint64_t maximum_image_texture_bytes{64ULL * 1024ULL * 1024ULL};
   double prefetch_viewports{2.0};
   std::uint64_t asynchronous_sample_threshold{16'384};
 };

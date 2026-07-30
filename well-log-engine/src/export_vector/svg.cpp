@@ -679,6 +679,45 @@ Result<SvgDocument> SvgExporter::write(const PreparedScene &scene) noexcept {
           output += "\"/>";
         }
       }
+      // Image layer tiles (rendering.md section 10): each visible tile is a
+      // raster object with explicit physical dimensions, DPI and source
+      // identity. No pixels are inlined — the host resolves the href on
+      // render (ADR 0032).
+      for (const auto &image_layer : scene.image_layers()) {
+        if (image_layer.track_id != track.id) {
+          continue;
+        }
+        for (std::uint64_t offset = 0; offset < image_layer.tile_count;
+             ++offset) {
+          const auto &tile = scene.image_tiles()[static_cast<std::size_t>(
+              image_layer.first_tile + offset)];
+          output += "<image id=\"image-";
+          output += image_layer.id.to_string();
+          output += "\" data-image-source-id=\"";
+          output += tile.image_source_id.to_string();
+          output += "\" data-level=\"";
+          append_integer(output, tile.level);
+          output += "\" data-row=\"";
+          append_integer(output, tile.row);
+          output += "\" data-col=\"";
+          append_integer(output, tile.col);
+          output += "\" data-dpi=\"";
+          append_integer(output, tile.dpi);
+          output += "\" data-pixel-format=\"";
+          append_integer(output, static_cast<std::uint8_t>(tile.pixel_format));
+          output += "\" x=\"";
+          append_number(output, tile.rect.left.value);
+          output += "\" y=\"";
+          append_number(output, tile.rect.top.value);
+          output += "\" width=\"";
+          append_number(output, tile.rect.width.value);
+          output += "\" height=\"";
+          append_number(output, tile.rect.height.value);
+          output += "\" preserveAspectRatio=\"none\" href=\"";
+          append_xml_attribute(output, tile.source.uri);
+          output += "\"/>";
+        }
+      }
       const auto glyphs = scene.glyphs();
       for (const auto &run : scene.text_runs()) {
         const auto run_track = scene.track_id_for_layer(run.layer_id);

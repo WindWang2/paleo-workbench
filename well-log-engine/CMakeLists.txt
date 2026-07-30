@@ -216,6 +216,7 @@ endif()
 
 add_library(welllog_scene ${WELLLOG_LIBRARY_TYPE}
     src/scene/curve_lod.cpp
+    src/scene/image_pyramid.cpp
     src/scene/scene.cpp
     src/scene/triangulate.cpp
 )
@@ -794,6 +795,24 @@ if(WELLLOG_BUILD_TESTS)
     add_test(
         NAME welllog.crossover-fill
         COMMAND welllog_crossover_fill_tests
+    )
+
+    add_executable(welllog_image_layer_tests
+        tests/integration/image_layer_test.cpp
+    )
+    target_compile_features(welllog_image_layer_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_image_layer_tests)
+    target_include_directories(
+        welllog_image_layer_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        welllog_image_layer_tests
+        PRIVATE WellLog::ExportVector WellLog::Session
+    )
+    add_test(
+        NAME welllog.image-layer
+        COMMAND welllog_image_layer_tests
     )
 
     add_executable(welllog_manifest_tests

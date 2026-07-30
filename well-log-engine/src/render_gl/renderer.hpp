@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 
 #include <welllog/render_gl/export.hpp>
 #include <welllog/render_gl/upload.hpp>
+#include <welllog/io/manifest.hpp>
 #include <welllog/scene/scene.hpp>
 
 namespace welllog::detail {
@@ -57,6 +59,12 @@ public:
                                   GpuUploadBudgets budgets) noexcept;
   [[nodiscard]] GlUploadProgress upload_next() noexcept;
   [[nodiscard]] bool render(const GlRenderFrame &frame) noexcept;
+  // Supplies the host-side image-tile decoder (ADR 0042: the engine never
+  // decodes images; it uploads pixels the host provides per visible tile).
+  // Set to nullptr to disable image rendering.
+  void set_image_tile_resolver(
+      std::function<Result<RasterTile>(const ImageTileRequest &)> resolver,
+      std::uint64_t maximum_texture_bytes) noexcept;
   void release() noexcept;
   void abandon() noexcept;
   [[nodiscard]] bool initialized() const noexcept;

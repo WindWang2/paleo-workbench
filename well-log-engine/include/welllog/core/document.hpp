@@ -205,6 +205,31 @@ struct Curve {
   NullBitmapView nulls;
 };
 
+// Pixel layout of a raster image source. The engine never decodes image
+// bytes itself (ADR 0042 governs decoding limits; the host performs it); this
+// only describes the pre-decoded bytes the host supplies per tile.
+enum class PixelFormat : std::uint8_t {
+  rgba8,
+  rgb8,
+  r8,
+};
+
+// A large raster source (core photo, borehole image) registered by depth
+// (rendering.md section 10). The bytes are NOT owned here — `source` is the
+// data-source identity (uri/checksum/offset, ADR 0032) the host resolves into
+// decoded tile bytes on demand. `dpi` is the explicit source resolution
+// (ADR 0039: never derived from window/system DPI).
+struct ImageSource {
+  EntityId id;
+  std::uint64_t width_px{};
+  std::uint64_t height_px{};
+  PixelFormat pixel_format{PixelFormat::rgba8};
+  double reference_depth_top{};
+  double reference_depth_bottom{};
+  std::uint32_t dpi{};
+  BufferSourceReference source;
+};
+
 enum class IntervalSemantic : std::uint8_t {
   lithology,
   stratigraphy,
@@ -311,6 +336,7 @@ public:
   [[nodiscard]] std::span<const Interval> intervals() const noexcept;
   [[nodiscard]] std::span<const Marker> markers() const noexcept;
   [[nodiscard]] std::span<const SymbolOccurrence> symbols() const noexcept;
+  [[nodiscard]] std::span<const ImageSource> image_sources() const noexcept;
   [[nodiscard]] std::span<const TextAnnotation> annotations() const noexcept;
 
 private:
@@ -334,6 +360,7 @@ public:
   WellLogDocumentBuilder &add_interval(const Interval &interval) noexcept;
   WellLogDocumentBuilder &add_marker(const Marker &marker) noexcept;
   WellLogDocumentBuilder &add_symbol(const SymbolOccurrence &symbol) noexcept;
+  WellLogDocumentBuilder &add_image_source(const ImageSource &source) noexcept;
   WellLogDocumentBuilder &
   add_annotation(const TextAnnotation &annotation) noexcept;
   [[nodiscard]] WellLogDocument build() const noexcept;

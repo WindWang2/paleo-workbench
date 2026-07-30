@@ -155,6 +155,18 @@ struct CrossoverFillLayerSpec {
   bool visible{true};
 };
 
+// Displays a raster ImageSource registered by depth, decoding/uploading only
+// the visible tiles (+ limited prefetch) of a multi-resolution pyramid
+// (rendering.md section 10). The image spans the full track width over its
+// depth range; pixels are supplied by the host via the image_tile resolver.
+struct ImageLayerSpec {
+  EntityId id;
+  EntityId track_id;
+  EntityId image_source_id;
+  std::int32_t z_order{};
+  bool visible{true};
+};
+
 // Displays document Markers as zero-thickness horizontal lines across the
 // track with optional labels.
 struct MarkerLayerSpec {
@@ -207,6 +219,8 @@ public:
   interval_layers() const noexcept;
   [[nodiscard]] std::span<const CrossoverFillLayerSpec>
   crossover_fill_layers() const noexcept;
+  [[nodiscard]] std::span<const ImageLayerSpec>
+  image_layers() const noexcept;
   [[nodiscard]] std::span<const MarkerLayerSpec>
   marker_layers() const noexcept;
   [[nodiscard]] std::span<const SymbolLayerSpec>
@@ -242,6 +256,7 @@ public:
   add_interval_layer(const IntervalLayerSpec &layer) noexcept;
   ScenePresentationBuilder &
   add_crossover_fill_layer(const CrossoverFillLayerSpec &layer) noexcept;
+  ScenePresentationBuilder &add_image_layer(const ImageLayerSpec &layer) noexcept;
   ScenePresentationBuilder &
   add_marker_layer(const MarkerLayerSpec &layer) noexcept;
   ScenePresentationBuilder &
@@ -368,6 +383,33 @@ struct PreparedFillRegion {
   double top_reference_depth{};
   double bottom_reference_depth{};
   PhysicalRect bounds{};
+};
+
+struct PreparedImageLayer {
+  EntityId id;
+  EntityId track_id;
+  EntityId image_source_id;
+  std::int32_t z_order{};
+  std::uint64_t first_tile{};
+  std::uint64_t tile_count{};
+};
+
+// One visible tile of a raster image, placed in scene millimetres. The tile
+// spans the full track width over its depth slice; `level/row/col` identify
+// the pyramid tile the host resolves into decoded pixels. `pixel_format`
+// records the bytes the resolver will supply (the engine never decodes).
+struct PreparedImageTile {
+  EntityId layer_id;
+  EntityId image_source_id;
+  PhysicalRect rect{};
+  std::uint32_t level{};
+  std::uint32_t row{};
+  std::uint32_t col{};
+  std::uint32_t width_px{};
+  std::uint32_t height_px{};
+  PixelFormat pixel_format{PixelFormat::rgba8};
+  std::uint32_t dpi{};
+  BufferSourceReference source;
 };
 
 struct PreparedMarkerLayer {
@@ -564,6 +606,9 @@ public:
   fill_vertices() const noexcept;
   [[nodiscard]] std::span<const PreparedFillTriangle>
   fill_triangles() const noexcept;
+  [[nodiscard]] std::span<const PreparedImageLayer>
+  image_layers() const noexcept;
+  [[nodiscard]] std::span<const PreparedImageTile> image_tiles() const noexcept;
   [[nodiscard]] std::span<const PreparedMarkerLayer>
   marker_layers() const noexcept;
   [[nodiscard]] std::span<const PreparedMarker> markers() const noexcept;

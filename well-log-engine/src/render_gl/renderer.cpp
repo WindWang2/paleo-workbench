@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <string>
 #include <thread>
@@ -59,6 +60,8 @@ constexpr GlEnum gl_r8 = 0x8229;
 constexpr GlEnum gl_red = 0x1903;
 constexpr GlEnum gl_rgba8 = 0x8058;
 constexpr GlEnum gl_rgba = 0x1908;
+constexpr GlEnum gl_rgb8_internal = 0x8401;
+constexpr GlEnum gl_rgb = 0x1907;
 constexpr GlEnum gl_unsigned_byte = 0x1401;
 constexpr GlEnum gl_texture_min_filter = 0x2801;
 constexpr GlEnum gl_texture_mag_filter = 0x2800;
@@ -386,6 +389,21 @@ void main() {
 }
 )";
 
+// Samples one decoded image tile directly via per-vertex UVs (0..1 over the
+// tile quad). The tile texture is uploaded per visible tile by the host
+// resolver; the engine never decodes (ADR 0042).
+constexpr std::string_view image_fragment_shader_source = R"(#version 330 core
+uniform sampler2D imageTexture;
+uniform bool swapRedAlpha;
+in vec2 vUv;
+out vec4 fragmentColor;
+
+void main() {
+    vec4 sampled = texture(imageTexture, vUv);
+    fragmentColor = swapRedAlpha ? vec4(sampled.aaa, sampled.r) : sampled;
+}
+)";
+
 constexpr std::string_view glyph_fragment_shader_source = R"(#version 330 core
 uniform sampler2D glyphAtlas;
 uniform vec4 fillColor;
@@ -489,6 +507,7 @@ enum class PrimitiveKind : std::uint8_t {
   solid,
   pattern,
   glyph,
+  image,
 };
 
 struct PrimitiveBatch {
@@ -507,6 +526,37 @@ struct PrimitiveBatch {
   GlFloat atlas_v{};
   GlFloat atlas_du{};
   GlFloat atlas_dv{};
+  // For image batches: the GL texture name of the decoded tile (0 = none).
+  GlUInt image_texture{};
+  // For image batches: 1 when the source pixel format is single-channel
+  // (coverage in red); the shader packs it into alpha for compositing.
+  GlInt image_single_channel{};
+};
+
+// Cache key for one decoded image tile (ADR 0032 identity + pyramid coords).
+struct ImageTextureKey {
+  EntityId image_source_id;
+  std::uint32_t level{};
+  std::uint32_t row{};
+  std::uint32_t col{};
+  bool operator==(const ImageTextureKey &) const = default;
+};
+
+struct ImageTextureKeyHash {
+  std::size_t operator()(const ImageTextureKey &key) const noexcept {
+    const auto h = EntityIdHash{}(key.image_source_id);
+    return h ^ (std::hash<std::uint32_t>{}(key.level) << 1U) ^
+           (std::hash<std::uint32_t>{}(key.row) << 2U) ^
+           (std::hash<std::uint32_t>{}(key.col) << 3U);
+  }
+};
+
+// One cached GPU texture for an image tile, with its byte cost + a recency
+// stamp for LRU eviction (ADR 0034).
+struct ImageTextureEntry {
+  GlUInt texture{};
+  std::uint64_t byte_size{};
+  std::uint64_t last_used{};
 };
 
 [[nodiscard]] constexpr std::uint64_t
@@ -681,9 +731,23 @@ struct GlRenderer::Impl {
   GlInt glyph_mm_offset_uniform{-1};
   GlInt glyph_atlas_uniform{-1};
   GlInt glyph_color_uniform{-1};
+  GlUInt image_program{};
+  GlInt image_mm_scale_uniform{-1};
+  GlInt image_mm_offset_uniform{-1};
+  GlInt image_texture_uniform{-1};
+  GlInt image_swap_red_alpha_uniform{-1};
   BufferSlot primitives;
   GlUInt pattern_texture{};
   GlUInt glyph_texture{};
+  // Bounded cache of per-tile image textures, keyed by source/level/row/col.
+  // Survives context loss by being cleared on release(); tiles are re-uploaded
+  // from prepared metadata + host resolver bytes on the next frame.
+  std::unordered_map<ImageTextureKey, ImageTextureEntry, ImageTextureKeyHash>
+      image_textures;
+  std::uint64_t image_texture_bytes{};
+  std::uint64_t maximum_image_texture_bytes{256ULL * 1024ULL * 1024ULL};
+  std::function<Result<RasterTile>(const ImageTileRequest &)> image_resolver;
+  std::uint64_t frame_stamp{};
   double physical_width{};
   double scene_height{};
   double depth_top{};
@@ -737,11 +801,22 @@ bool GlRenderer::initialize(GlProcResolver resolver,
                       pattern_fragment_shader_source);
     impl_->glyph_program = build_program(impl_->gl, scene_vertex_shader_source,
                                          glyph_fragment_shader_source);
+    impl_->image_program = build_program(impl_->gl, scene_vertex_shader_source,
+                                         image_fragment_shader_source);
     if (impl_->program == 0 || impl_->solid_program == 0 ||
-        impl_->pattern_program == 0 || impl_->glyph_program == 0) {
+        impl_->pattern_program == 0 || impl_->glyph_program == 0 ||
+        impl_->image_program == 0) {
       release();
       return false;
     }
+    impl_->image_mm_scale_uniform = impl_->gl.get_uniform_location(
+        impl_->image_program, "mmScale");
+    impl_->image_mm_offset_uniform = impl_->gl.get_uniform_location(
+        impl_->image_program, "mmOffset");
+    impl_->image_texture_uniform = impl_->gl.get_uniform_location(
+        impl_->image_program, "imageTexture");
+    impl_->image_swap_red_alpha_uniform = impl_->gl.get_uniform_location(
+        impl_->image_program, "swapRedAlpha");
 
     impl_->owner_thread = std::this_thread::get_id();
     for (auto &buffer : impl_->buffers) {
@@ -1188,6 +1263,113 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         });
       }
     }
+    // Image tiles (rendering.md section 10). Resolve each visible tile's
+    // decoded pixels via the host resolver (ADR 0042 — the engine never
+    // decodes), upload to a cached texture (LRU-evicted under the budget,
+    // ADR 0034), and emit a textured quad. Off-screen/evicted tiles are
+    // re-resolved on the next frame from prepared metadata.
+    const auto upload_image_tile = [&](const PreparedImageTile &tile)
+        -> std::pair<GlUInt, bool> {
+      if (impl_->image_resolver == nullptr) {
+        return {0, false};
+      }
+      const ImageTextureKey key{tile.image_source_id, tile.level, tile.row,
+                                tile.col};
+      const auto existing = impl_->image_textures.find(key);
+      if (existing != impl_->image_textures.end()) {
+        existing->second.last_used = impl_->frame_stamp;
+        return {existing->second.texture,
+                tile.pixel_format == PixelFormat::r8};
+      }
+      const auto resolved = impl_->image_resolver(ImageTileRequest{
+          .image_source_id = tile.image_source_id,
+          .level = tile.level,
+          .row = tile.row,
+          .col = tile.col,
+      });
+      if (!resolved.has_value()) {
+        return {0, false};
+      }
+      const auto &raster = resolved.value();
+      if (raster.data == nullptr || raster.width_px == 0 ||
+          raster.height_px == 0) {
+        return {0, false};
+      }
+      const auto byte_size = raster.byte_size();
+      // Evict least-recently-used tiles until the new one fits the budget.
+      while (!impl_->image_textures.empty() &&
+             impl_->image_texture_bytes + byte_size >
+                 impl_->maximum_image_texture_bytes) {
+        auto victim = std::min_element(
+            impl_->image_textures.begin(), impl_->image_textures.end(),
+            [](const auto &a, const auto &b) {
+              return a.second.last_used < b.second.last_used;
+            });
+        if (victim->second.texture != 0) {
+          impl_->gl.delete_textures(1, &victim->second.texture);
+        }
+        impl_->image_texture_bytes -= victim->second.byte_size;
+        impl_->image_textures.erase(victim);
+      }
+      if (byte_size > impl_->maximum_image_texture_bytes) {
+        return {0, false}; // single tile exceeds the whole budget
+      }
+      GlUInt texture{};
+      impl_->gl.gen_textures(1, &texture);
+      impl_->gl.bind_texture(gl_texture_2d, texture);
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_min_filter, gl_linear);
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_mag_filter, gl_linear);
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_wrap_s, gl_clamp_to_edge);
+      impl_->gl.tex_parameteri(gl_texture_2d, gl_texture_wrap_t, gl_clamp_to_edge);
+      const auto internal_format =
+          tile.pixel_format == PixelFormat::rgba8 ? gl_rgba8
+          : tile.pixel_format == PixelFormat::rgb8 ? gl_rgb8_internal
+                                                   : gl_r8;
+      const auto upload_format =
+          tile.pixel_format == PixelFormat::rgba8 ? gl_rgba
+          : tile.pixel_format == PixelFormat::rgb8 ? gl_rgb
+                                                   : gl_red;
+      impl_->gl.pixel_storei(gl_unpack_alignment, 1);
+      impl_->gl.tex_image_2d(
+          gl_texture_2d, 0, static_cast<GlInt>(internal_format),
+          static_cast<GlSize>(raster.width_px),
+          static_cast<GlSize>(raster.height_px), 0, upload_format,
+          gl_unsigned_byte, raster.data);
+      impl_->image_textures.emplace(
+          key, ImageTextureEntry{.texture = texture,
+                                 .byte_size = byte_size,
+                                 .last_used = impl_->frame_stamp});
+      impl_->image_texture_bytes += byte_size;
+      return {texture, tile.pixel_format == PixelFormat::r8};
+    };
+
+    for (const auto &image_layer : scene.image_layers()) {
+      const auto clip = clip_for_track(image_layer.track_id);
+      for (std::uint64_t offset = 0; offset < image_layer.tile_count;
+           ++offset) {
+        const auto &tile = scene.image_tiles()[static_cast<std::size_t>(
+            image_layer.first_tile + offset)];
+        const auto [texture, single_channel] = upload_image_tile(tile);
+        if (texture == 0) {
+          continue; // unresolved or over-budget: skip, re-attempt next frame
+        }
+        const auto first_vertex = primitive_vertices.size();
+        append_quad(primitive_vertices, tile.rect.left.value,
+                    tile.rect.top.value,
+                    tile.rect.left.value + tile.rect.width.value,
+                    tile.rect.top.value + tile.rect.height.value, 0.0F, 0.0F,
+                    1.0F, 1.0F);
+        primitive_batches.push_back(PrimitiveBatch{
+            .kind = PrimitiveKind::image,
+            .first_vertex = static_cast<GlInt>(first_vertex),
+            .vertex_count = static_cast<GlSize>(6),
+            .color = {},
+            .clip = clip,
+            .image_texture = texture,
+            .image_single_channel = single_channel ? 1 : 0,
+        });
+      }
+    }
     for (const auto &layer : scene.marker_layers()) {
       const auto clip = clip_for_track(layer.track_id);
       for (std::uint64_t offset = 0; offset < layer.marker_count;
@@ -1507,6 +1689,7 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
       frame.viewport.top >= frame.viewport.bottom) {
     return false;
   }
+  ++impl_->frame_stamp; // advance LRU recency for image-texture eviction
   const auto viewport_center =
       frame.viewport.top + (frame.viewport.bottom - frame.viewport.top) * 0.5;
   const auto viewport_half_span =
@@ -1584,7 +1767,15 @@ bool GlRenderer::render(const GlRenderFrame &frame) noexcept {
         continue;
       }
       scissor_for(batch.clip);
-      if (batch.kind == PrimitiveKind::pattern) {
+      if (batch.kind == PrimitiveKind::image) {
+        set_scene_uniforms(impl_->image_program,
+                           impl_->image_mm_scale_uniform,
+                           impl_->image_mm_offset_uniform);
+        impl_->gl.bind_texture(gl_texture_2d, batch.image_texture);
+        impl_->gl.uniform_1i(impl_->image_texture_uniform, 0);
+        impl_->gl.uniform_1i(impl_->image_swap_red_alpha_uniform,
+                             batch.image_single_channel);
+      } else if (batch.kind == PrimitiveKind::pattern) {
         set_scene_uniforms(impl_->pattern_program,
                            impl_->pattern_mm_scale_uniform,
                            impl_->pattern_mm_offset_uniform);
@@ -1718,9 +1909,16 @@ void GlRenderer::release() noexcept {
   if (impl_->glyph_texture != 0) {
     impl_->gl.delete_textures(1, &impl_->glyph_texture);
   }
+  for (const auto &[key, entry] : impl_->image_textures) {
+    if (entry.texture != 0) {
+      impl_->gl.delete_textures(1, &entry.texture);
+    }
+  }
+  impl_->image_textures.clear();
+  impl_->image_texture_bytes = 0;
   for (const auto program :
        {impl_->program, impl_->solid_program, impl_->pattern_program,
-        impl_->glyph_program}) {
+        impl_->glyph_program, impl_->image_program}) {
     if (program != 0) {
       impl_->gl.delete_program(program);
     }
@@ -1734,9 +1932,12 @@ void GlRenderer::abandon() noexcept {
   impl_->solid_program = 0;
   impl_->pattern_program = 0;
   impl_->glyph_program = 0;
+  impl_->image_program = 0;
   impl_->primitives = {};
   impl_->pattern_texture = 0;
   impl_->glyph_texture = 0;
+  impl_->image_textures.clear();
+  impl_->image_texture_bytes = 0;
   impl_->batches.clear();
   impl_->primitive_batches.clear();
   impl_->pending_scene = PreparedScene{};
@@ -1760,7 +1961,7 @@ void GlRenderer::abandon() noexcept {
 bool GlRenderer::initialized() const noexcept {
   return impl_ != nullptr && impl_->program != 0 &&
          impl_->solid_program != 0 && impl_->pattern_program != 0 &&
-         impl_->glyph_program != 0 &&
+         impl_->glyph_program != 0 && impl_->image_program != 0 &&
          impl_->primitives.vertex_array != 0 &&
          impl_->primitives.vertex_buffer != 0 &&
          impl_->pattern_texture != 0 && impl_->glyph_texture != 0 &&
@@ -1769,6 +1970,16 @@ bool GlRenderer::initialized() const noexcept {
                        return buffer.vertex_array != 0 &&
                               buffer.vertex_buffer != 0;
                      });
+}
+
+void GlRenderer::set_image_tile_resolver(
+    std::function<Result<RasterTile>(const ImageTileRequest &)> resolver,
+    std::uint64_t maximum_texture_bytes) noexcept {
+  if (impl_ == nullptr) {
+    return;
+  }
+  impl_->image_resolver = std::move(resolver);
+  impl_->maximum_image_texture_bytes = maximum_texture_bytes;
 }
 
 } // namespace welllog::detail
