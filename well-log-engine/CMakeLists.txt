@@ -24,6 +24,7 @@ include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 
 option(WELLLOG_BUILD_TESTS "Build WellLogEngine tests" ${BUILD_TESTING})
 option(WELLLOG_BUILD_SHARED "Build WellLogEngine shared libraries" OFF)
@@ -271,6 +272,39 @@ if(WELLLOG_BUILD_SHARED)
         welllog_export_vector
         PRIVATE WELLLOG_EXPORT_VECTOR_BUILD
         PUBLIC WELLLOG_EXPORT_VECTOR_SHARED
+    )
+endif()
+
+# PDF export backend (ADR: hand-rolled writer, #185). No third-party PDF
+# library; only zlib for FlateDecode stream compression.
+add_library(welllog_export_pdf ${WELLLOG_LIBRARY_TYPE}
+    src/export_vector/pdf.cpp
+)
+add_library(WellLog::ExportPdf ALIAS welllog_export_pdf)
+set_target_properties(welllog_export_pdf PROPERTIES
+    EXPORT_NAME ExportPdf
+    OUTPUT_NAME welllog-export-pdf
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_export_pdf PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_export_pdf)
+target_link_libraries(welllog_export_pdf
+    PUBLIC WellLog::Scene
+    PRIVATE ZLIB::ZLIB
+)
+target_include_directories(welllog_export_pdf
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_export_pdf
+        PRIVATE WELLLOG_EXPORT_PDF_BUILD
+        PUBLIC WELLLOG_EXPORT_PDF_SHARED
     )
 endif()
 
@@ -854,6 +888,17 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportVector WellLog::Session
     )
     add_test(NAME welllog.headless-svg COMMAND welllog_headless_svg_tests)
+
+    add_executable(welllog_pdf_spike_tests
+        tests/integration/pdf_spike_test.cpp
+    )
+    target_compile_features(welllog_pdf_spike_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_pdf_spike_tests)
+    target_link_libraries(
+        welllog_pdf_spike_tests
+        PRIVATE WellLog::ExportPdf ZLIB::ZLIB
+    )
+    add_test(NAME welllog.pdf-spike COMMAND welllog_pdf_spike_tests)
 
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp
