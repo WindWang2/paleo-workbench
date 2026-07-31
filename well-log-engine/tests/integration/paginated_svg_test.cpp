@@ -313,12 +313,27 @@ void fixed_mode_paginates_with_repeating_bands_and_continuous_depths() {
           "fixed-mode body must translate by the left page margin");
 
   // Criterion 1 (self-describing): each page root carries the snapshot metadata
-  // (document id/revision, presentation version, depth-transform version, font).
+  // (document id/revision, presentation version, the full depth-transform
+  // descriptor, font). The depth-transform params (domain + reference window +
+  // unit) — not just the version — let a consumer reconstruct the depth mapping.
   require(count_occurrences(text, "data-document-revision=\"7\"") == svg_count,
           "every page must carry the document revision");
   require(count_occurrences(text, "data-presentation-version=\"42\"") ==
               svg_count,
           "every page must carry the presentation version");
+  require(count_occurrences(text, "data-depth-transform-domain=\"0\"") ==
+              svg_count,
+          "every page must carry the depth-transform domain");
+  require(count_occurrences(text, "data-depth-transform-unit=\"m\"") ==
+              svg_count,
+          "every page must carry the depth-transform unit");
+  require(count_occurrences(text, "data-depth-transform-reference-top=\"1000\"")
+              == svg_count,
+          "every page must carry the depth-transform reference top");
+  require(count_occurrences(text,
+                            "data-depth-transform-reference-bottom=\"1800\"") ==
+              svg_count,
+          "every page must carry the depth-transform reference bottom");
   require(count_occurrences(text, "data-depth-transform-version=\"3\"") ==
               svg_count,
           "every page must carry the depth-transform version");

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -150,7 +149,8 @@ void append_text_element(std::string &output, std::string_view role,
 
 // Appends the self-describing snapshot metadata as data-* attributes on the
 // page root <svg>, so every page records the document revision, presentation
-// version, font fingerprint and depth-transform version the export was produced
+// version, font fingerprint, the depth-transform descriptor (domain + reference
+// window + unit + version) and the pattern versions the export was produced
 // against (criterion 1 "self-describing"; table-and-export.md section 9
 // "Revision 元数据"). Mirrors the single-scene exporter's document/font tags.
 void append_snapshot_metadata(std::string &output,
@@ -161,10 +161,30 @@ void append_snapshot_metadata(std::string &output,
   append_integer(output, snapshot.document_revision.value);
   output += "\" data-presentation-version=\"";
   append_integer(output, snapshot.presentation_version.value);
+  // The full depth-transform descriptor (domain + reference window + unit), not
+  // just the version tag, so a consumer can reconstruct the depth mapping
+  // (criterion 1). `unit` is owning so it survives on the snapshot.
+  output += "\" data-depth-transform-domain=\"";
+  append_integer(output, static_cast<std::uint64_t>(snapshot.depth_transform.domain));
+  output += "\" data-depth-transform-unit=\"";
+  append_xml_attribute(output, snapshot.depth_transform.unit);
+  output += "\" data-depth-transform-reference-top=\"";
+  append_number(output, snapshot.depth_transform.reference_top);
+  output += "\" data-depth-transform-reference-bottom=\"";
+  append_number(output, snapshot.depth_transform.reference_bottom);
   output += "\" data-depth-transform-version=\"";
   append_integer(output, snapshot.depth_transform.version);
   output += "\" data-font-asset=\"";
   append_xml_attribute(output, snapshot.font_asset_fingerprint);
+  // Pattern versions, parallel to the scene's patterns() order, as a
+  // space-separated list. Omitted (empty attribute) when the scene has none.
+  output += "\" data-pattern-versions=\"";
+  for (std::size_t i = 0; i < snapshot.pattern_versions.size(); ++i) {
+    if (i != 0) {
+      output.push_back(' ');
+    }
+    append_integer(output, snapshot.pattern_versions[i]);
+  }
   output += "\">";
 }
 
@@ -228,6 +248,16 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
 
   // Legend band: one line per visible curve layer (mnemonic + colour swatch +
   // scale range), from the prepared track-header entries. Repeated per page.
+  // The band is RESERVED at the bottom of the printable area (4 mm per entry),
+  // and the scene body's clip rect is shrunk by that height below so the legend
+  // never overpaints curve geometry.
+  const auto legend_entries =
+      page.repeat_legend ? scene.track_header_entries().size() : std::size_t{0};
+  constexpr double legend_row_height_mm = 4.0;
+  const double legend_band_height_mm =
+      static_cast<double>(legend_entries) * legend_row_height_mm;
+  const double body_clip_height_mm =
+      printable_page_height - legend_band_height_mm;
   if (page.repeat_legend) {
     const auto headers = scene.track_header_entries();
     double legend_y = content_top + printable_page_height - 3.0;
@@ -248,7 +278,7 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
       legend += entry.unit;
       append_text_element(output, "legend", content_left + 4.0, legend_y,
                           legend);
-      legend_y -= 4.0;
+      legend_y -= legend_row_height_mm;
     }
   }
 
@@ -257,9 +287,10 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
   // (scale = printable_width / scene_width) so it fills the printable width and
   // depth proportions stay true; a translate positions scene-y=window_top at the
   // page content top, so only [window_top, window_bottom] of the scaled scene
-  // shows on this page. The clipPath is in PAGE millimetres (the printable
-  // rect) so it clips the scaled body to the content area; the scene's own track
-  // clips are preserved inside append_layer_body.
+  // shows on this page. The clipPath is in PAGE millimetres over the body
+  // region — the printable area MINUS the reserved legend band at the bottom —
+  // so the legend never overlaps the body; the scene's own track clips are
+  // preserved inside append_layer_body.
   const auto printable_width_mm = printable_width(page);
   const auto scale = printable_width_mm / scene.physical_width().value;
   output += "<clipPath id=\"page-window-";
@@ -271,7 +302,7 @@ void append_fixed_page(std::string &output, const PreparedScene &scene,
   output += "\" width=\"";
   append_number(output, printable_width_mm);
   output += "\" height=\"";
-  append_number(output, printable_page_height);
+  append_number(output, body_clip_height_mm);
   output += "\"/></clipPath>";
   output += "<g clip-path=\"url(#page-window-";
   append_integer(output, page_index);

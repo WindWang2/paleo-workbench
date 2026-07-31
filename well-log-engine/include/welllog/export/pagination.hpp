@@ -17,9 +17,9 @@
 // re-query (for non-uniform sampling) is a documented refinement/deferral.
 
 #include <cstdint>
-#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <welllog/core/result.hpp>
 #include <welllog/core/units.hpp>
@@ -77,9 +77,11 @@ struct ExportSnapshot {
   PresentationVersion presentation_version{};
   DepthTransformDescriptor depth_transform{};
   std::string font_asset_fingerprint;
-  // Pattern versions, parallel to the prepared scene's patterns() order. Empty
-  // when the scene has no patterns.
-  std::span<const std::uint64_t> pattern_versions{};
+  // Pattern versions, parallel to the prepared scene's patterns() order. Owning
+  // (not a span) so ExportSnapshot is a true value type: it can be copied/moved
+  // and outlive the caller's backing storage without dangling. Empty when the
+  // scene has no patterns.
+  std::vector<std::uint64_t> pattern_versions{};
   ExportPageSpec page{};
 };
 

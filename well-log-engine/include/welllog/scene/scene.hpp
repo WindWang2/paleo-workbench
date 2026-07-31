@@ -42,7 +42,10 @@ struct PresentationVersion {
 // later topic.
 struct DepthTransformDescriptor {
   DepthDomain domain{DepthDomain::measured_depth};
-  std::string_view unit;
+  // Owning (not string_view): the descriptor is copied into ExportSnapshot,
+  // which is a portable value type that may outlive the PreparedScene whose
+  // storage a non-owning view would point into.
+  std::string unit;
   double reference_top{};
   double reference_bottom{};
   std::uint64_t version{};
