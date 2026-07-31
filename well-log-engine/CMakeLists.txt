@@ -215,6 +215,38 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+# Table Projection (ADR 0022, #154): a Qt-agnostic, virtualized projection of a
+# WellLogDocument into per-Sampling-Axis curve tables. Depends only on Core
+# (reads raw Curve buffers straight from the document). Qt-facing virtualization
+# lives in the qtwidgets adapter.
+add_library(welllog_table ${WELLLOG_LIBRARY_TYPE}
+    src/table/table_projection.cpp
+)
+add_library(WellLog::Table ALIAS welllog_table)
+set_target_properties(welllog_table PROPERTIES
+    EXPORT_NAME Table
+    OUTPUT_NAME welllog-table
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_table PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_table)
+target_link_libraries(welllog_table PUBLIC WellLog::Core)
+target_include_directories(welllog_table
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_table
+        PRIVATE WELLLOG_TABLE_BUILD
+        PUBLIC WELLLOG_TABLE_SHARED
+    )
+endif()
+
 add_library(welllog_scene ${WELLLOG_LIBRARY_TYPE}
     src/scene/curve_lod.cpp
     src/scene/image_pyramid.cpp
@@ -970,6 +1002,14 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportVector WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
     )
     add_test(NAME welllog.export-parity COMMAND welllog_export_parity_tests)
+
+    add_executable(welllog_table_projection_tests
+        tests/integration/table_projection_test.cpp
+    )
+    target_compile_features(welllog_table_projection_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_table_projection_tests)
+    target_link_libraries(welllog_table_projection_tests PRIVATE WellLog::Table)
+    add_test(NAME welllog.table-projection COMMAND welllog_table_projection_tests)
 
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp
