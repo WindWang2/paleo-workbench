@@ -50,6 +50,15 @@ TableModel::~TableModel() = default;
 void TableModel::set_projection(TableProjection projection) noexcept {
   beginResetModel();
   impl_->projection = std::move(projection);
+  // A new projection may be a different document/axis with different row
+  // indices — drop the reflected selection so stale indices are never emitted.
+  // The host re-attaches a selection source and calls refresh_session_selection
+  // after setting the projection.
+  impl_->reflected = {{}, {}};
+  impl_->has_reflected = false;
+  impl_->session = nullptr;
+  impl_->document_id = EntityId{};
+  impl_->sampling_axis_id = EntityId{};
   endResetModel();
 }
 

@@ -98,6 +98,7 @@ private slots:
   void model_on_one_axis_ignores_other_axis_selection();
   void refresh_emits_data_changed_over_spans();
   void clipboard_internal_mime_carries_axis_and_curve_identity();
+  void set_projection_clears_stale_selection_source();
 };
 
 // A session depth-range selection on axis A is reflected by a model built on
@@ -240,6 +241,42 @@ void TableSelectionSyncTest::clipboard_internal_mime_carries_axis_and_curve_iden
   QVERIFY(text.contains(QString::fromStdString(curve_rt_id.to_string())));
   QVERIFY(text.contains(QStringLiteral("API")));
   QVERIFY(text.contains(QStringLiteral("ohm.m")));
+}
+
+// set_projection() drops the selection source and any reflected span so stale
+// row indices from a previous projection are never emitted. (A new projection
+// may be a different document/axis with different row indices.)
+void TableSelectionSyncTest::set_projection_clears_stale_selection_source() {
+  WellLogSession session;
+  QVERIFY(session.execute(SetDocumentCommand{make_document()}).has_value());
+
+  const auto tables = TableProjectionBuilder::from_document(*session.document(document_id));
+  const auto *axis_a_table = find_table(tables, axis_a_id);
+  QVERIFY(axis_a_table != nullptr);
+
+  TableModel model;
+  model.set_projection(*axis_a_table);
+  model.set_session_selection_source(&session, document_id, axis_a_id);
+  QVERIFY(session
+              .execute(SetSelectionCommand{
+                  .document_id = document_id,
+                  .sampling_axis_id = axis_a_id,
+                  .reference_depth_range = {.top = 1000.0, .bottom = 1002.0},
+              })
+              .has_value());
+  model.refresh_session_selection();
+  QVERIFY(model.current_row_selection().last_row > 0);
+
+  // Replace the projection — the reflected span and source must clear.
+  TableProjection empty;
+  model.set_projection(empty);
+  QCOMPARE(model.current_row_selection().first_row, std::uint64_t{0});
+  QCOMPARE(model.current_row_selection().last_row, std::uint64_t{0});
+  // After clearing, refresh is a no-op (no source): no reflection returns.
+  model.refresh_session_selection();
+  QCOMPARE(model.current_row_selection().last_row, std::uint64_t{0});
+  // set_row_selection returns false with no source attached.
+  QVERIFY(!model.set_row_selection(0, 1));
 }
 
 } // namespace
