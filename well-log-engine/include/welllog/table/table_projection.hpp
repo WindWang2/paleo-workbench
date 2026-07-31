@@ -2,11 +2,13 @@
 
 // Virtualized Table Projection (ADR 0022, #154). A Qt-agnostic, immutable view
 // over a WellLogDocument that partitions its curves by Sampling Axis into one
-// CurveTable per axis (a `Depth | Curve...` wide table), with separate tables
-// for intervals, markers and annotations. Curves on DIFFERENT axes never align
-// implicitly — there is no join by array index, float-depth approximate match,
-// auto-interpolation, or Display Depth substitution (ADR 0022 §2.2). Only an
-// explicit user choice produces a labelled Resampled Table (a later ticket).
+// CurveTable per axis (a `Depth | Curve...` wide table). Curves on DIFFERENT
+// axes never align implicitly — there is no join by array index, float-depth
+// approximate match, auto-interpolation, or Display Depth substitution
+// (ADR 0022 §2.2). Only an explicit user choice produces a labelled Resampled
+// Table (a later ticket). Phase A builds curve tables only; interval/marker/
+// annotation tables are a tracked follow-up (the TableKind enum reserves their
+// values).
 //
 // Table Projection is the data projection of a Document Revision: graphics use
 // PreparedScene (LOD-reduced envelope points); the table reads the RAW curve
@@ -33,14 +35,15 @@
 
 namespace welllog {
 
-// The kind of a projected table (ADR 0022 §2.2). Curves sharing an axis form
-// one curve table per axis; intervals, markers and annotations each get their
-// own kind.
+// The kind of a projected table (ADR 0022 §2.2). Phase A builds curve tables
+// only (curves sharing a Sampling Axis form one Depth|Curve table per axis).
+// Interval/marker/annotation tables are tracked follow-ups — the enum reserves
+// their values so consumers can branch on kind without an ABI break later.
 enum class TableKind : std::uint8_t {
   curves,
-  intervals,
-  markers,
-  annotations,
+  intervals,   // reserved — not built in Phase A
+  markers,     // reserved — not built in Phase A
+  annotations, // reserved — not built in Phase A
 };
 
 // One column of a projected table. For a curve table the first column is the
@@ -108,11 +111,10 @@ private:
   explicit TableProjection(std::shared_ptr<const Impl> impl);
 };
 
-// Builds the set of Table Projections for a document: one curve table per
-// Sampling Axis that has curves, plus one table each for intervals, markers and
-// annotations (when non-empty). Curves are grouped by sampling_axis_id; axes
-// with no curves produce no curve table. Order: curve tables in axis order,
-// then intervals, markers, annotations.
+// Builds the set of Table Projections for a document. Phase A emits one curve
+// table per Sampling Axis that has curves (grouped by sampling_axis_id; axes
+// with no curves produce no table). Interval/marker/annotation tables are a
+// tracked follow-up. Order: curve tables in first-seen axis order.
 class WELLLOG_TABLE_API TableProjectionBuilder {
 public:
   // Partitions the document into its projected tables. Each table shares the

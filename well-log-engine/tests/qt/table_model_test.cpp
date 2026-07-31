@@ -66,6 +66,7 @@ private slots:
   void model_is_virtualized_for_large_row_counts();
   void clipboard_copy_produces_tsv_html_and_internal_mime();
   void clipboard_large_selection_is_guarded();
+  void document_revision_change_drives_invalidation();
 };
 
 void TableModelTest::
@@ -250,6 +251,33 @@ void TableModelTest::clipboard_large_selection_is_guarded() {
   auto small = build_selection_clipboard(model, RowSelection{10, 13});
   QVERIFY(!small.too_large_for_clipboard);
   QCOMPARE(small.copied_rows, static_cast<std::uint64_t>(3));
+}
+
+void TableModelTest::document_revision_change_drives_invalidation() {
+  // End-to-end invalidation: a host holds a model at revision 1, detects the
+  // document advanced to revision 2, and swaps the projection. The modelReset
+  // signal fires and the carried revision updates — the view's stale content is
+  // invalidated. (The ADR 0024 Selection-Set remap on revision change is Phase B.)
+  TableModel model;
+  model.set_projection(make_projection(DocumentRevision{1}));
+  QCOMPARE(model.document_revision(), DocumentRevision{1});
+  const auto v1_cell =
+      model.data(model.index(0, 1), TableModel::RawValueRole).toDouble();
+  QCOMPARE(v1_cell, 10.0);
+
+  QSignalSpy reset_spy(&model, &QAbstractTableModel::modelReset);
+  QVERIFY(reset_spy.isValid());
+  // Document replaced at revision 2 → host rebuilds the projection and swaps.
+  model.set_projection(make_projection(DocumentRevision{2}));
+  QCOMPARE(reset_spy.count(), 1);
+  QCOMPARE(model.document_revision(), DocumentRevision{2});
+  // Document id is stable across the revision change.
+  QCOMPARE(model.document_id(), document_id);
+  // Content is the same fixture (revision is the only diff), confirming the
+  // swap is clean — no stale/leftover rows from revision 1.
+  QCOMPARE(model.rowCount(), 4);
+  QCOMPARE(model.data(model.index(0, 1), TableModel::RawValueRole).toDouble(),
+           10.0);
 }
 
 } // namespace

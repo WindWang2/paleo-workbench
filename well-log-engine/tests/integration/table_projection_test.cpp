@@ -314,6 +314,39 @@ void empty_document_yields_no_tables() {
   require(tables.empty(), "a document with no curves/axes yields no tables");
 }
 
+// Repeat / non-monotonic depths: the projection is a pure index projection —
+// it does NOT assume monotonic or unique depths. An axis with repeated or
+// decreasing coordinates yields one row per coordinate (no de-dup, no sort).
+void repeat_and_non_monotonic_depths_keep_one_row_per_sample() {
+  // Depths: [1000, 1000, 1001, 999] — a repeat (1000) and a decrease (999).
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1000.0, 1001.0, 999.0});
+  auto gr = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{10.0, 20.0, 30.0, 40.0});
+  WellLogDocumentBuilder builder(document_id, DocumentRevision{1});
+  builder.add_sampling_axis(SamplingAxis{
+      .id = axis_a_id, .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth, .unit = "m",
+      .direction = AxisDirection::increasing});
+  builder.add_curve(Curve{
+      .id = curve_gr_id, .mnemonic = "GR", .display_name = "GR", .unit = "API",
+      .sampling_axis_id = axis_a_id, .values = BufferView::from_vector(gr),
+      .nulls = {}});
+  const auto tables = TableProjectionBuilder::from_document(builder.build());
+  require(tables.size() == 1, "one axis → one table");
+  const auto &t = tables.front();
+  // No de-dup: 4 samples → 4 rows.
+  require(t.row_count() == 4,
+          "repeat/non-monotonic depths must keep one row per sample (no de-dup)");
+  // Each row reads its own coordinate verbatim (index projection, no depth math).
+  require_near(t.cell(0, 0).value.value_or(-1.0), 1000.0, "row 0 depth");
+  require_near(t.cell(1, 0).value.value_or(-1.0), 1000.0,
+               "row 1 depth (repeat kept)");
+  require_near(t.cell(2, 0).value.value_or(-1.0), 1001.0, "row 2 depth");
+  require_near(t.cell(3, 0).value.value_or(-1.0), 999.0,
+               "row 3 depth (non-monotonic kept)");
+}
+
 } // namespace
 
 int main() {
@@ -325,6 +358,7 @@ int main() {
   large_row_count_is_virtualized();
   unaligned_curve_is_dropped();
   empty_document_yields_no_tables();
+  repeat_and_non_monotonic_depths_keep_one_row_per_sample();
   std::cout << "welllog.table-projection: all cases passed\n";
   return EXIT_SUCCESS;
 }

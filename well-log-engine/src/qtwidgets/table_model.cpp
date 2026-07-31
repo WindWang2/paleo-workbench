@@ -66,7 +66,11 @@ int TableModel::columnCount(const QModelIndex &parent) const noexcept {
   if (parent.isValid()) {
     return 0;
   }
-  return static_cast<int>(impl_->projection.column_count());
+  // Column counts are tiny by construction (depth + N curves per axis); cap at
+  // INT_MAX for parity with rowCount() and -Wconversion cleanliness.
+  const auto cols = impl_->projection.column_count();
+  return cols > max_qt_rows ? static_cast<int>(max_qt_rows)
+                            : static_cast<int>(cols);
 }
 
 QVariant TableModel::data(const QModelIndex &index, int role) const noexcept {
@@ -134,6 +138,17 @@ QString format_cell(const TableModel &model, std::uint64_t row,
   return QString::number(c.value, 'g', 17);
 }
 
+// Strips tab/newline/carriage-return from a TSV field so a mnemonic/unit/header
+// containing those characters cannot corrupt the column structure. TSV has no
+// quoting convention here, so sanitizing is the robust choice (RFC 4180 quoting
+// is reserved for the CSV exporter in a later ticket).
+QString sanitize_tsv_field(QString s) {
+  s.remove('\t');
+  s.remove('\n');
+  s.remove('\r');
+  return s;
+}
+
 // The app-internal MIME type carrying document id/revision/units so an in-app
 // paste preserves identity (table-and-export.md §4.2 "可选内部 MIME").
 constexpr const char *kWellLogTableMime = "application/x-welllog-table-selection";
@@ -162,14 +177,16 @@ SelectionClipboard build_selection_clipboard(const TableModel &model,
   }
 
   // TSV (text/plain): header row + one tab-separated row per selected row.
-  // Null cells are empty (no sentinel).
+  // Null cells are empty (no sentinel). Header fields are sanitized so a
+  // mnemonic/unit containing tab/newline cannot corrupt the column structure.
   QString tsv;
   for (std::uint64_t c = 0; c < col_count; ++c) {
     if (c != 0) {
       tsv += '\t';
     }
-    tsv += model.headerData(static_cast<int>(c), Qt::Horizontal, Qt::DisplayRole)
-               .toString();
+    tsv += sanitize_tsv_field(
+        model.headerData(static_cast<int>(c), Qt::Horizontal, Qt::DisplayRole)
+            .toString());
   }
   tsv += '\n';
   // HTML (text/html): a <table> with <th> headers and <td> cells.

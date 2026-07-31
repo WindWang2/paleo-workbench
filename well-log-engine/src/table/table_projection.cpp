@@ -116,22 +116,17 @@ TableCell TableProjection::cell(std::uint64_t row,
     return TableCell{std::nullopt};
   }
   const auto &column = impl_->columns[col];
+  // make_curve_table sets `axis` on every column, so a built curves table never
+  // has a null axis; the depth column is distinguished by `curve == nullptr`.
+  // The kind guard below keeps this scoped to curves tables (the only kind
+  // built in Phase A).
   if (impl_->kind == TableKind::curves) {
-    // Raw buffer read: the axis column reads the axis coordinates; a curve
-    // column reads that curve's values. Both share the same row index.
-    const auto *axis = column.axis;
-    if (axis == nullptr) {
-      return TableCell{std::nullopt};
-    }
     if (column.curve == nullptr) {
-      // Depth/axis column.
-      return read_buffer_cell(axis->coordinates, NullBitmapView{}, row);
+      // Depth/axis column — reads the axis coordinates.
+      return read_buffer_cell(column.axis->coordinates, NullBitmapView{}, row);
     }
     return read_buffer_cell(column.curve->values, column.curve->nulls, row);
   }
-  // Non-curve tables: not implemented as raw-buffer projections in this phase
-  // (interval/marker/annotation fields are struct values, not Buffers). They
-  // surface no numeric cells here; the Qt model formats them separately.
   return TableCell{std::nullopt};
 }
 
