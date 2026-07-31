@@ -1,5 +1,7 @@
 #include <welllog/export/svg.hpp>
 
+#include <welllog/export/export_layout.hpp>
+
 #include "export_vector/svg_internal.hpp"
 
 #include <algorithm>
@@ -105,49 +107,9 @@ void append_rect(std::string &output, const PhysicalRect &rect) {
   output += "\"/>";
 }
 
-// Clips a tile-local segment to the pattern tile rect (Liang-Barsky).
-[[nodiscard]] std::optional<std::pair<PhysicalPoint, PhysicalPoint>>
-clip_line_to_tile(PhysicalPoint from, PhysicalPoint to, double width,
-                  double height) {
-  const auto delta_x = to.left.value - from.left.value;
-  const auto delta_y = to.top.value - from.top.value;
-  double enter = 0.0;
-  double leave = 1.0;
-  const auto clip_side = [&](double p, double q) {
-    if (p == 0.0) {
-      return q >= 0.0;
-    }
-    const auto ratio = q / p;
-    if (p < 0.0) {
-      if (ratio > leave) {
-        return false;
-      }
-      enter = std::max(enter, ratio);
-    } else {
-      if (ratio < enter) {
-        return false;
-      }
-      leave = std::min(leave, ratio);
-    }
-    return true;
-  };
-  if (!clip_side(-delta_x, from.left.value) ||
-      !clip_side(delta_x, width - from.left.value) ||
-      !clip_side(-delta_y, from.top.value) ||
-      !clip_side(delta_y, height - from.top.value)) {
-    return std::nullopt;
-  }
-  return std::pair{
-      PhysicalPoint{
-          .left = Millimetres{from.left.value + enter * delta_x},
-          .top = Millimetres{from.top.value + enter * delta_y},
-      },
-      PhysicalPoint{
-          .left = Millimetres{from.left.value + leave * delta_x},
-          .top = Millimetres{from.top.value + leave * delta_y},
-      },
-  };
-}
+// Tile-local line clip comes from the shared export_layout header (identical
+// to the PDF backend's — ADR 0047: one geometric truth).
+using export_layout::clip_line_to_tile;
 
 void append_tile_line(std::string &output, PhysicalPoint from, PhysicalPoint to,
                       const PatternDefinition &pattern) {

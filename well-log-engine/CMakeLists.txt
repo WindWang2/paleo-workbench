@@ -936,13 +936,18 @@ if(WELLLOG_BUILD_TESTS)
     )
     target_compile_features(welllog_pdf_scene_full_tests PRIVATE cxx_std_20)
     welllog_enable_warnings(welllog_pdf_scene_full_tests)
+    target_compile_definitions(
+        welllog_pdf_scene_full_tests
+        PRIVATE
+            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+    )
     target_include_directories(
         welllog_pdf_scene_full_tests
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
     target_link_libraries(
         welllog_pdf_scene_full_tests
-        PRIVATE WellLog::ExportPdf WellLog::Scene WellLog::Session ZLIB::ZLIB
+        PRIVATE WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
     )
     add_test(NAME welllog.pdf-scene-full COMMAND welllog_pdf_scene_full_tests)
 

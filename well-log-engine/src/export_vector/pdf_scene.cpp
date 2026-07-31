@@ -24,10 +24,12 @@
 
 #include <welllog/core/document.hpp>
 #include <welllog/core/entity_id.hpp>
+#include <welllog/export/export_layout.hpp>
 #include <welllog/io/manifest.hpp>
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -98,21 +100,50 @@ pdf_scene_error(ErrorCode code, MessageKey message) noexcept {
   return true;
 }
 
-[[nodiscard]] double printable_width(const ExportPageSpec &page) noexcept {
-  return page.page_width.value - page.margins.left.value -
-         page.margins.right.value;
+// Backend-neutral page-layout + tile-clip geometry comes from the shared
+// export_layout header (ADR 0047: both backends share one geometric truth).
+using export_layout::clip_line_to_tile;
+using export_layout::compute_page_windows;
+using export_layout::printable_depth_height_mm;
+using export_layout::printable_height;
+using export_layout::printable_width;
+using export_layout::scene_y_to_depth;
+
+// Formats a double with the engine's deterministic shortest-round-trip
+// representation (mirrors pdf.cpp's append_number / svg_internal's
+// append_number), into a string. Used for the synthesized band labels.
+void append_number(std::string &out, double value) {
+  if (value == 0.0) {
+    out.push_back('0');
+    return;
+  }
+  std::array<char, 48> buffer{};
+  const auto res =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                    std::chars_format::general, 17);
+  if (res.ec == std::errc{}) {
+    out.append(buffer.data(), res.ptr);
+  } else {
+    out.push_back('0');
+  }
 }
-[[nodiscard]] double printable_height(const ExportPageSpec &page) noexcept {
-  return page.page_height.value - page.margins.top.value -
-         page.margins.bottom.value;
+void append_integer(std::string &out, std::int64_t value) {
+  std::array<char, 24> buffer{};
+  const auto res =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+  if (res.ec == std::errc{}) {
+    out.append(buffer.data(), res.ptr);
+  }
 }
 
-// The printable depth height in scene millimetres, mirroring pagination.cpp.
-[[nodiscard]] double
-printable_depth_height_mm(const PreparedScene &scene,
-                          const ExportPageSpec &page) noexcept {
-  const auto scale = printable_width(page) / scene.physical_width().value;
-  return printable_height(page) / scale;
+// Sets the non-stroking (fill) colour + alpha for a solid RgbaColor fill: RGB
+// always, plus a `gs /GSn` when the colour is semi-transparent (PDF has no
+// inline opacity). Shared by interval/fill-region/custom-fill emission.
+void set_solid_fill(PdfPathStream &stream, RgbaColor color) noexcept {
+  stream.set_fill_color(color.red, color.green, color.blue);
+  if (color.alpha < 255) {
+    stream.set_fill_alpha(static_cast<double>(color.alpha) / 255.0);
+  }
 }
 
 // Emits a circle as four cubic Bezier segments approximating a full circle of
@@ -142,48 +173,6 @@ void emit_circle_path(PdfPathStream &stream, double cx, double cy,
   }};
   stream.move_to(cx + radius, cy);
   stream.append_outline(commands);
-}
-
-// Clips a tile-local segment to the pattern tile rect (Liang-Barsky). Carried
-// over verbatim from svg.cpp::clip_line_to_tile — tile-local clipping is pure
-// geometry, backend-neutral, so SVG and PDF share the exact same result.
-[[nodiscard]] std::optional<std::pair<PhysicalPoint, PhysicalPoint>>
-clip_line_to_tile(PhysicalPoint from, PhysicalPoint to, double width,
-                  double height) noexcept {
-  const auto delta_x = to.left.value - from.left.value;
-  const auto delta_y = to.top.value - from.top.value;
-  double enter = 0.0;
-  double leave = 1.0;
-  const auto clip_side = [&](double p, double q) {
-    if (p == 0.0) {
-      return q >= 0.0;
-    }
-    const auto ratio = q / p;
-    if (p < 0.0) {
-      if (ratio > leave) {
-        return false;
-      }
-      enter = std::max(enter, ratio);
-    } else {
-      if (ratio < enter) {
-        return false;
-      }
-      leave = std::min(leave, ratio);
-    }
-    return true;
-  };
-  if (!clip_side(-delta_x, from.left.value) ||
-      !clip_side(delta_x, width - from.left.value) ||
-      !clip_side(-delta_y, from.top.value) ||
-      !clip_side(delta_y, height - from.top.value)) {
-    return std::nullopt;
-  }
-  return std::pair{
-      PhysicalPoint{.left = Millimetres{from.left.value + enter * delta_x},
-                    .top = Millimetres{from.top.value + enter * delta_y}},
-      PhysicalPoint{.left = Millimetres{from.left.value + leave * delta_x},
-                    .top = Millimetres{from.top.value + leave * delta_y}},
-  };
 }
 
 // A per-page registry of the indirect objects (image XObjects + tiling
@@ -348,14 +337,14 @@ void emit_pattern_tile_body(PdfPathStream &stream,
 }
 
 // Builds the full object body for a tiling pattern: dictionary + compressed
-// content stream. The /Matrix composes translate(scene_anchor) · rotate(θ):
-// scene_anchor pins the tile phase to scene coordinates (matching SVG's x/y),
-// rotation_degrees matches SVG's patternTransform rotate. Returns the body the
-// writer wraps in "N 0 obj\n…\nendobj".
-// Returns nullopt on a Flate failure so the caller can surface an error
-// rather than emit a malformed (dict-less) object body. NOT noexcept: it
-// allocates (string building, Flate), so a bad_alloc must propagate to
-// write()'s catch (→ resource_exhausted) rather than terminate.
+// content stream. The /Matrix = R(θ)·T(scene_anchor) pins the tile phase to
+// scene coordinates AND rotates the tiling, matching the SVG backend's
+// patternUnits="userSpaceOnUse" x/y + patternTransform="rotate(θ)" for ANY
+// anchor/rotation (not just θ=0). Returns the body the writer wraps in
+// "N 0 obj\n…\nendobj". Returns nullopt on a Flate failure so the caller
+// surfaces an error rather than emit a malformed (dict-less) object body. NOT
+// noexcept: it allocates (string building, Flate), so a bad_alloc must
+// propagate to write()'s catch (→ resource_exhausted) rather than terminate.
 std::optional<std::string>
 build_pattern_body(const PatternDefinition &pattern) {
   PdfPathStream tile;
@@ -368,33 +357,41 @@ build_pattern_body(const PatternDefinition &pattern) {
   std::string body;
   body += "<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 ";
   body += "/BBox [0 0 ";
-  body += std::to_string(pattern.tile_width.value);
+  append_number(body, pattern.tile_width.value);
   body += " ";
-  body += std::to_string(pattern.tile_height.value);
+  append_number(body, pattern.tile_height.value);
   body += "] /XStep ";
-  body += std::to_string(pattern.tile_width.value);
+  append_number(body, pattern.tile_width.value);
   body += " /YStep ";
-  body += std::to_string(pattern.tile_height.value);
-  // Pattern matrix: translate(scene_anchor) · rotate(θ), in millimetres (the
-  // pattern cell is in mm; the page cm maps mm→points). SVG applies the same
-  // translate (x/y) + rotate (patternTransform).
+  append_number(body, pattern.tile_height.value);
+  // Pattern matrix = R(θ) · T(scene_anchor), so tile phase matches the SVG
+  // backend exactly. SVG sets the pattern cell origin to (ax, ay) via x/y, then
+  // applies patternTransform="rotate(θ)" to the whole tiling around (0,0): a
+  // tile at grid (i,j) lands at R·(ax + i·tw, ay + j·th). PDF pattern space
+  // paints the cell at (i·XStep, j·YStep); the /Matrix maps that into page
+  // space. To reproduce SVG we need Matrix(p) = R·(ax,ay) + p, i.e. the affine
+  // [cos sin −sin cos | (cos·ax − sin·ay, sin·ax + cos·ay)]. (The naive
+  // T·R = [.. | (ax,ay)] only matches when θ = 0.) All in millimetres; the page
+  // cm maps mm→points.
   const auto theta = pattern.rotation_degrees * (M_PI / 180.0);
   const auto cos_t = std::cos(theta);
   const auto sin_t = std::sin(theta);
+  const auto ax = pattern.scene_anchor.left.value;
+  const auto ay = pattern.scene_anchor.top.value;
   body += " /Matrix [";
-  body += std::to_string(cos_t);
+  append_number(body, cos_t);
   body += " ";
-  body += std::to_string(sin_t);
+  append_number(body, sin_t);
   body += " ";
-  body += std::to_string(-sin_t);
+  append_number(body, -sin_t);
   body += " ";
-  body += std::to_string(cos_t);
+  append_number(body, cos_t);
   body += " ";
-  body += std::to_string(pattern.scene_anchor.left.value);
+  append_number(body, cos_t * ax - sin_t * ay);
   body += " ";
-  body += std::to_string(pattern.scene_anchor.top.value);
+  append_number(body, sin_t * ax + cos_t * ay);
   body += "] /Resources << >> /Length ";
-  body += std::to_string(compressed.size());
+  append_integer(body, static_cast<std::int64_t>(compressed.size()));
   body += " /Filter /FlateDecode >>\nstream\n";
   body.append(compressed.data(), compressed.size());
   body += "\nendstream";
@@ -402,24 +399,28 @@ build_pattern_body(const PatternDefinition &pattern) {
 }
 
 // Builds the full object body for an image XObject: dictionary + the pixel
-// stream (Flate-compressed). Colourspace maps PixelFormat → DeviceRGB/DeviceGray
-// (#188 drops the RGBA alpha channel — a separate /SMask soft-mask is a later
-// refinement). DPI is encoded by the placement `cm` (physical rect vs pixel
-// count), not in the object — consistent with SVG's width/height. Returns
-// nullopt on a Flate failure so the caller surfaces an error. NOT noexcept: it
-// allocates (string + Flate), so bad_alloc propagates to write()'s catch.
+// stream (Flate-compressed). Colourspace maps PixelFormat → DeviceRGB/DeviceGray.
+// RGBA's alpha channel is currently DROPPED (the RGB channels are embedded):
+// preserving alpha needs a separate /SMask indirect image XObject, which the
+// writer's object model doesn't yet let a caller own (object numbers are
+// assigned at write time, not body-build time) — that is a documented follow-up
+// (tracked separately). DPI is encoded by the placement `cm` (physical rect vs
+// pixel count), consistent with SVG's width/height and recoverable for the
+// test. Returns nullopt on a Flate failure so the caller surfaces an error. NOT
+// noexcept: it allocates (string + Flate), so bad_alloc propagates to write()'s
+// catch (→ resource_exhausted) rather than terminating.
 std::optional<std::string>
 build_image_body(const PageResources::ImageRecord &rec) {
-  const std::uint32_t channels = rec.pixel_format == PixelFormat::rgba8 ? 3
-                              : rec.pixel_format == PixelFormat::rgb8 ? 3 : 1;
-  // Re-pack RGBA → RGB if needed (drop alpha).
-  std::string pixels;
+  const bool is_rgba = rec.pixel_format == PixelFormat::rgba8;
+  const std::uint32_t channels = is_rgba || rec.pixel_format == PixelFormat::rgb8
+                                     ? 3 : 1;
   const auto pixels_in =
       static_cast<std::uint64_t>(rec.width_px) *
       static_cast<std::uint64_t>(rec.height_px);
-  const std::uint32_t in_channels =
-      rec.pixel_format == PixelFormat::rgba8 ? 4
+  const std::uint32_t in_channels = is_rgba ? 4
       : rec.pixel_format == PixelFormat::rgb8 ? 3 : 1;
+  // Extract the colour channels (drop alpha for RGBA — see header note).
+  std::string pixels;
   pixels.reserve(pixels_in * channels);
   for (std::uint64_t i = 0; i < pixels_in; ++i) {
     const auto base = i * in_channels;
@@ -433,13 +434,13 @@ build_image_body(const PageResources::ImageRecord &rec) {
   }
   std::string body;
   body += "<< /Type /XObject /Subtype /Image /Width ";
-  body += std::to_string(rec.width_px);
+  append_integer(body, static_cast<std::int64_t>(rec.width_px));
   body += " /Height ";
-  body += std::to_string(rec.height_px);
+  append_integer(body, static_cast<std::int64_t>(rec.height_px));
   body += " /ColorSpace /";
   body += channels == 1 ? "DeviceGray" : "DeviceRGB";
   body += " /BitsPerComponent 8 /Length ";
-  body += std::to_string(compressed.size());
+  append_integer(body, static_cast<std::int64_t>(compressed.size()));
   body += " /Filter /FlateDecode >>\nstream\n";
   body.append(compressed.data(), compressed.size());
   body += "\nendstream";
@@ -554,12 +555,7 @@ void emit_fill_region(PdfPathStream &stream, const PreparedScene &scene,
                       PageResources &resources) noexcept {
   append_fill_ring(stream, scene, region);
   if (region.pattern_id.is_nil()) {
-    stream.set_fill_color(region.fill_color.red, region.fill_color.green,
-                          region.fill_color.blue);
-    if (region.fill_color.alpha < 255) {
-      stream.set_fill_alpha(
-          static_cast<double>(region.fill_color.alpha) / 255.0);
-    }
+    set_solid_fill(stream, region.fill_color);
     stream.close().fill();
   } else {
     // Pattern fill: switch the non-stroking colour space to /Pattern and paint
@@ -623,6 +619,137 @@ void emit_text_run(PdfPathStream &stream, const PreparedScene &scene,
   stream.restore_state();
 }
 
+// Shapes `text` and returns its width in millimetres at font size `fs` (sum of
+// glyph em-advances × fs). Used to right-align band labels before emitting.
+// Returns 0 when the engine is null or shaping fails.
+double measure_text_mm(TextEngine *text_engine, std::string_view text,
+                       double fs) noexcept {
+  if (text_engine == nullptr || text.empty()) {
+    return 0.0;
+  }
+  const auto run = text_engine->shape(TextShapeRequest{
+      .text = text, .language = "en", .direction = TextDirection::left_to_right});
+  if (!run.has_value()) {
+    return 0.0;
+  }
+  double width_em = 0.0;
+  for (const auto &glyph : run.value().glyphs) {
+    width_em += glyph.advance_x;
+  }
+  return width_em * fs;
+}
+
+// Emits a synthesized text STRING as glyph outlines at a page-millimetre pen
+// origin (px, py), horizontal (run rotation 0), font size `fs` mm, in `color`.
+// Used for the pagination metadata bands (well name, page number, depth range,
+// legend mnemonics) — the same no-font policy as scene text (ADR 0047). Must be
+// called inside a page-mm (y-flipped) `cm` so the per-glyph placement
+// [fs 0 0 -fs px py] lands upright. No-op when text_engine is null.
+void emit_text_string(PdfPathStream &stream, TextEngine *text_engine,
+                      std::string_view text, double px, double py, double fs,
+                      RgbaColor color) noexcept {
+  if (text_engine == nullptr || text.empty()) {
+    return;
+  }
+  const auto run = text_engine->shape(TextShapeRequest{
+      .text = text, .language = "en", .direction = TextDirection::left_to_right});
+  if (!run.has_value() || run.value().glyphs.empty()) {
+    return;
+  }
+  stream.save_state();
+  stream.set_fill_color(color.red, color.green, color.blue);
+  if (color.alpha < 255) {
+    stream.set_fill_alpha(static_cast<double>(color.alpha) / 255.0);
+  }
+  double pen_x = px;
+  for (const auto &glyph : run.value().glyphs) {
+    const auto outline =
+        text_engine->glyph_outline(glyph.font_index, glyph.glyph_id);
+    if (outline.has_value() && !outline.value().commands.empty()) {
+      // Em-space (y-up) → page-mm (y-down): [fs 0 0 -fs pen_x py]. No rotation
+      // (horizontal band text); no per-glyph rotation in band strings.
+      stream.save_state();
+      stream.concat_matrix(fs, 0.0, 0.0, -fs, pen_x, py);
+      stream.append_outline(outline.value().commands);
+      stream.fill();
+      stream.restore_state();
+    }
+    pen_x += glyph.advance_x * fs;
+  }
+  stream.restore_state();
+}
+
+// Emits the pagination metadata bands for one page, mirroring
+// pagination.cpp::append_fixed_page's bands (header well-name + page number,
+// depth-range footer, legend swatches + mnemonics). `page_index`/`page_count`
+// are 1-based/total; `window_top_mm`/`window_bottom_mm` are the scene depth
+// window this page shows (for the depth-range footer). Emitted in PAGE-mm space
+// (y-down) — must be called inside the page-mm (y-flipped) `cm` established by
+// write(). Geometric bands (legend swatches) always emit; text bands emit only
+// when a text engine is supplied.
+void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
+                     const ExportSnapshot &snapshot, std::uint32_t page_index,
+                     std::uint32_t page_count, double window_top_mm,
+                     double window_bottom_mm,
+                     TextEngine *text_engine) noexcept {
+  const auto &page = snapshot.page;
+  const auto content_left = page.margins.left.value;
+  const auto content_top = page.margins.top.value;
+  const auto printable_h = printable_height(page);
+  const auto label_color = RgbaColor{0, 0, 0, 255};
+  const auto band_font_size = 3.0;
+  if (page.repeat_headers) {
+    if (!page.well_name.empty()) {
+      emit_text_string(stream, text_engine, page.well_name, content_left,
+                       content_top + band_font_size, band_font_size, label_color);
+    }
+    if (page.show_page_numbers) {
+      std::string label = "page ";
+      append_integer(label, static_cast<std::int64_t>(page_index + 1));
+      label += " of ";
+      append_integer(label, static_cast<std::int64_t>(page_count));
+      // Right-align at the right margin: measure, then emit at the offset.
+      const auto width =
+          measure_text_mm(text_engine, label, band_font_size);
+      const auto right_x = page.page_width.value - page.margins.right.value;
+      emit_text_string(stream, text_engine, label, right_x - width,
+                       content_top + band_font_size, band_font_size,
+                       label_color);
+    }
+  }
+  if (page.show_depth_range) {
+    const auto depth_top = scene_y_to_depth(scene, window_top_mm);
+    const auto depth_bottom = scene_y_to_depth(scene, window_bottom_mm);
+    const auto footer_y =
+        page.page_height.value - page.margins.bottom.value + band_font_size;
+    std::string footer = "depth ";
+    append_number(footer, depth_top);
+    footer += " .. ";
+    append_number(footer, depth_bottom);
+    emit_text_string(stream, text_engine, footer, content_left, footer_y,
+                     band_font_size, label_color);
+  }
+  if (page.repeat_legend) {
+    const auto headers = scene.track_header_entries();
+    double legend_y = content_top + printable_h - band_font_size;
+    for (const auto &entry : headers) {
+      // Legend colour swatch (pure geometry — always emitted).
+      stream.set_fill_color(entry.color.red, entry.color.green, entry.color.blue);
+      stream.rect(content_left, legend_y - 2.0, 3.0, 2.0).fill();
+      std::string mnemonic = entry.curve_name;
+      mnemonic += " ";
+      append_number(mnemonic, entry.scale_minimum);
+      mnemonic += "..";
+      append_number(mnemonic, entry.scale_maximum);
+      mnemonic += " ";
+      mnemonic += entry.unit;
+      emit_text_string(stream, text_engine, mnemonic, content_left + 4.0,
+                       legend_y, band_font_size, label_color);
+      legend_y -= 4.0;
+    }
+  }
+}
+
 // Emits the custom-layer primitives of one track, mirroring svg.cpp's custom
 // loop. Polylines → stroked path; triangles/quads → filled closed sub-paths
 // (triangulated, vertex_count/3 triangles); symbols → filled shape. No
@@ -657,12 +784,7 @@ void emit_custom_layer(PdfPathStream &stream, const PreparedScene &scene,
       stream.stroke();
     } else if (primitive.kind == CustomPrimitiveKind::triangle ||
                primitive.kind == CustomPrimitiveKind::quad) {
-      stream.set_fill_color(primitive.color.red, primitive.color.green,
-                            primitive.color.blue);
-      if (primitive.color.alpha < 255) {
-        stream.set_fill_alpha(
-            static_cast<double>(primitive.color.alpha) / 255.0);
-      }
+      set_solid_fill(stream, primitive.color);
       const auto triangle_count = primitive.vertex_count / 3;
       for (std::uint64_t tri = 0; tri < triangle_count; ++tri) {
         for (std::uint64_t point_offset = 0; point_offset < 3; ++point_offset) {
@@ -678,9 +800,13 @@ void emit_custom_layer(PdfPathStream &stream, const PreparedScene &scene,
       }
       stream.fill();
     } else {
-      // Symbol: emit the symbol's true geometry. SVG defers non-circle kinds to
-      // a circle; PDF emits each SymbolKind correctly via emit_symbol (size from
-      // the primitive bounds, color from the primitive).
+      // Symbol. SVG currently defers non-circle kinds to a circle (svg.cpp
+      // "Full SVG parity for every symbol kind is deferred") — a known SVG
+      // limitation. PDF can emit each SymbolKind's true geometry correctly via
+      // emit_symbol, so it does rather than inherit SVG's limitation; this is an
+      // intentional, documented divergence where PDF is more capable. When SVG
+      // gains full symbol parity both backends will agree; until then the
+      // custom-layer parity tests use circles, which both render identically.
       PreparedSymbol sym;
       PreparedSymbolLayer slyr;
       const auto &center = custom_vertices[static_cast<std::size_t>(
@@ -713,13 +839,7 @@ void emit_track_body(PdfPathStream &stream, const PreparedScene &scene,
       stream.rect(interval.rect.left.value, interval.rect.top.value,
                   interval.rect.width.value, interval.rect.height.value);
       if (interval.pattern_id.is_nil()) {
-        stream.set_fill_color(interval.fill_color.red,
-                              interval.fill_color.green,
-                              interval.fill_color.blue);
-        if (interval.fill_color.alpha < 255) {
-          stream.set_fill_alpha(
-              static_cast<double>(interval.fill_color.alpha) / 255.0);
-        }
+        set_solid_fill(stream, interval.fill_color);
         stream.fill();
       } else {
         stream.set_pattern_fill(resources.name_for_pattern(interval.pattern_id));
@@ -891,7 +1011,8 @@ Result<PdfDocument>
 PdfSceneExporter::write(const PreparedScene &scene,
                         const ExportSnapshot &snapshot,
                         std::function<Result<RasterTile>(const ImageTileRequest &)>
-                            image_tile) noexcept {
+                            image_tile,
+                        TextEngine *text_engine) noexcept {
   try {
     if (!snapshot_is_valid(scene, snapshot)) {
       return pdf_scene_error(ErrorCode::invalid_presentation,
@@ -903,40 +1024,9 @@ PdfSceneExporter::write(const PreparedScene &scene,
     const auto margin_left_pt =
         page.margins.left.value * points_per_millimetre;
 
-    // Determine the pages: continuous (one page, true depth length) or fixed
-    // (depth-window slicing), mirroring pagination.cpp.
-    struct PageWindow {
-      double window_top_mm;
-      double window_bottom_mm;
-      bool clip;          // false for continuous (whole scene), true for fixed
-      double height_mm;   // page height in mm (MediaBox derived)
-    };
-    std::vector<PageWindow> windows;
-    if (page.mode == PaginationMode::continuous) {
-      const auto page_height_mm = scene.physical_height().value * scale +
-                                  page.margins.top.value +
-                                  page.margins.bottom.value;
-      windows.push_back({0.0, scene.physical_height().value, false,
-                         page_height_mm});
-    } else {
-      const auto printable_depth_mm = printable_depth_height_mm(scene, page);
-      const auto effective_step =
-          printable_depth_mm * (1.0 - page.page_overlap);
-      const auto scene_height = scene.physical_height().value;
-      auto page_count =
-          static_cast<std::uint32_t>(std::ceil(scene_height / effective_step));
-      if (page_count == 0) {
-        page_count = 1;
-      }
-      for (std::uint32_t index = 0; index < page_count; ++index) {
-        const auto window_top = static_cast<double>(index) * effective_step;
-        auto window_bottom = window_top + printable_depth_mm;
-        if (window_bottom > scene_height || index + 1 == page_count) {
-          window_bottom = scene_height;
-        }
-        windows.push_back({window_top, window_bottom, true, page.page_height.value});
-      }
-    }
+    // Page windows from the shared page model (identical slicing to the SVG
+    // paginated exporter — export_layout::compute_page_windows).
+    const auto windows = compute_page_windows(scene, snapshot);
 
     std::vector<PdfPageContent> contents;
     std::vector<PdfPageSpec> specs;
@@ -945,7 +1035,9 @@ PdfSceneExporter::write(const PreparedScene &scene,
     specs.reserve(windows.size());
     object_storage.reserve(windows.size());
 
-    for (const auto &window : windows) {
+    const auto page_count = static_cast<std::uint32_t>(windows.size());
+    for (std::uint32_t page_index = 0; page_index < page_count; ++page_index) {
+      const auto &window = windows[page_index];
       PdfPathStream stream;
       // Page cm: map scene-millimetres (sx, sy), y-DOWN with depth increasing
       // downward, into PDF user-space points (x, y), y-UP — so the scene renders
@@ -983,6 +1075,21 @@ PdfSceneExporter::write(const PreparedScene &scene,
       if (window.clip) {
         stream.restore_state();
       }
+
+      // Pagination metadata bands (header/legend/page-number/depth-range) in
+      // PAGE-mm space (y-down), separate from the scene body's flipped cm. A
+      // dedicated cm maps page-mm (y-down) → PDF points (y-up): a=pmm, d=−pmm,
+      // f=page_height_pt, so band coordinates authored top-down land upright.
+      // Emitted on every page (continuous shows the single-page bands too),
+      // mirroring pagination.cpp's per-page bands.
+      const auto page_height_pt = window.height_mm * points_per_millimetre;
+      stream.save_state();
+      stream.concat_matrix(points_per_millimetre, 0.0, 0.0,
+                           -points_per_millimetre, 0.0, page_height_pt);
+      emit_page_bands(stream, scene, snapshot, page_index, page_count,
+                      window.window_top_mm, window.window_bottom_mm,
+                      text_engine);
+      stream.restore_state();
 
       auto objects_opt = materialize_objects(scene, resources);
       if (!objects_opt.has_value()) {

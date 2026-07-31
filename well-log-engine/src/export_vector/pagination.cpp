@@ -1,5 +1,7 @@
 #include <welllog/export/pagination.hpp>
 
+#include <welllog/export/export_layout.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -69,27 +71,12 @@ pagination_error(ErrorCode code, MessageKey message) noexcept {
   return true;
 }
 
-// The page's printable width/height in millimetres (page size minus margins) —
-// the printable-area concept table-and-export.md section 9 names. Centralized
-// so the margin arithmetic is expressed once, not recomputed at each call site.
-[[nodiscard]] double printable_width(const ExportPageSpec &page) noexcept {
-  return page.page_width.value - page.margins.left.value -
-         page.margins.right.value;
-}
-[[nodiscard]] double printable_height(const ExportPageSpec &page) noexcept {
-  return page.page_height.value - page.margins.top.value -
-         page.margins.bottom.value;
-}
-
-[[nodiscard]] double
-printable_depth_height_mm(const PreparedScene &scene,
-                          const ExportPageSpec &page) noexcept {
-  // The scene maps onto the page width: scale the scene so its physical width
-  // matches the printable width, then the printable depth height is the page's
-  // printable height. (Continuous mode derives its own height separately.)
-  const auto scale = printable_width(page) / scene.physical_width().value;
-  return printable_height(page) / scale;
-}
+// Printable-area + depth math come from the shared export_layout header
+// (identical to the PDF backend — ADR 0047/0048: one page model).
+using export_layout::compute_page_windows;
+using export_layout::printable_depth_height_mm;
+using export_layout::printable_height;
+using export_layout::printable_width;
 
 // Formats a depth value with the engine's deterministic shortest-round-trip
 // representation (matches the rest of the SVG emitters).
@@ -119,14 +106,9 @@ void append_depth_range_footer(std::string &output, double x_mm,
   output += "</text>";
 }
 
-// Computes the reference depth at a scene-y position, using the scene's linear
-// depth transform (depth_top + (y / physical_height) * (bottom - top)).
-[[nodiscard]] double scene_y_to_depth(const PreparedScene &scene,
-                                      double y_mm) noexcept {
-  const auto range = scene.reference_depth_range();
-  const auto span = range.bottom - range.top;
-  return range.top + (y_mm / scene.physical_height().value) * span;
-}
+// scene-y → reference-depth is shared via export_layout (above using-declaration
+// block would grow; keep scene_y_to_depth there too).
+using export_layout::scene_y_to_depth;
 
 // Appends one plain <text> element tagged with a data-export-role, used for the
 // synthesized page header/footer/legend strings (well name, page number, depth
@@ -422,25 +404,14 @@ PaginatedSvgExporter::write(const PreparedScene &scene,
       return SvgDocument{std::move(output)};
     }
 
-    // Fixed mode: slice the scene depth range into pages.
-    const auto printable_depth_mm = printable_depth_height_mm(scene, page);
-    const auto effective_step = printable_depth_mm * (1.0 - page.page_overlap);
-    const auto scene_height = scene.physical_height().value;
-    auto page_count =
-        static_cast<std::uint32_t>(std::ceil(scene_height / effective_step));
-    if (page_count == 0) {
-      page_count = 1;
-    }
+    // Fixed mode: slice the scene depth range into pages using the shared page
+    // model (identical slicing to the PDF backend — export_layout).
+    const auto windows = compute_page_windows(scene, snapshot);
+    const auto page_count = static_cast<std::uint32_t>(windows.size());
     for (std::uint32_t index = 0; index < page_count; ++index) {
-      const auto window_top =
-          static_cast<double>(index) * effective_step;
-      auto window_bottom = window_top + printable_depth_mm;
-      // The final page bottoms out at the scene height (no overshoot).
-      if (window_bottom > scene_height || index + 1 == page_count) {
-        window_bottom = scene_height;
-      }
-      append_fixed_page(output, scene, snapshot, index, page_count, window_top,
-                        window_bottom);
+      append_fixed_page(output, scene, snapshot, index, page_count,
+                        windows[index].window_top_mm,
+                        windows[index].window_bottom_mm);
     }
     return SvgDocument{std::move(output)};
   } catch (const std::bad_alloc &) {

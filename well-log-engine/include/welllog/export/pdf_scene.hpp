@@ -30,6 +30,7 @@
 #include <welllog/export/pagination.hpp>
 #include <welllog/io/manifest.hpp>
 #include <welllog/scene/scene.hpp>
+#include <welllog/scene/text_engine.hpp>
 
 #include <functional>
 
@@ -41,15 +42,22 @@ namespace welllog {
 // ErrorCode::invalid_presentation, consistent with SvgExporter /
 // PaginatedSvgExporter. Both pagination modes are supported: continuous (one
 // long page preserving true depth length) and fixed (depth-window slicing with
-// repeating header bands — #188). Raster image tiles embed as image XObjects
-// whose pixels are fetched via the optional `image_tile` resolver (the engine
-// never decodes); a missing resolver or failed resolution skips the tile.
+// repeating header/legend/page-number/depth-range bands — #188).
+//
+// Raster image tiles embed as image XObjects whose pixels are fetched via the
+// optional `image_tile` resolver (the engine never decodes); a missing resolver
+// or failed resolution skips the tile. The pagination metadata bands (well
+// name, page number, depth range, legend mnemonics) are rendered as glyph
+// outlines via the optional `text_engine` (no font program embedded — ADR
+// 0047); geometric band parts (legend colour swatches) are always emitted. With
+// no text engine the text portions are omitted but the layout bands remain.
 class WELLLOG_EXPORT_PDF_API PdfSceneExporter {
 public:
   [[nodiscard]] static Result<PdfDocument>
   write(const PreparedScene &scene, const ExportSnapshot &snapshot,
         std::function<Result<RasterTile>(const ImageTileRequest &)>
-            image_tile = {}) noexcept;
+            image_tile = {},
+        TextEngine *text_engine = nullptr) noexcept;
 };
 
 } // namespace welllog
