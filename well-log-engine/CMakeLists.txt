@@ -596,6 +596,7 @@ endif()
 install(
     TARGETS
         welllog_core
+        welllog_table
         welllog_scene
         welllog_export_vector
         welllog_session
@@ -1021,6 +1022,17 @@ if(WELLLOG_BUILD_TESTS)
     welllog_enable_warnings(welllog_viewport_tests)
     target_link_libraries(welllog_viewport_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.viewport COMMAND welllog_viewport_tests)
+
+    # Shared semantic Selection Set in WellLogSession (ADR 0024, #154 Phase B).
+    # Headless: selection maps Reference Depth Range ↔ row span and remaps/
+    # invalidates on document replacement; no GL or Qt needed.
+    add_executable(welllog_session_selection_tests
+        tests/integration/session_selection_test.cpp
+    )
+    target_compile_features(welllog_session_selection_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_session_selection_tests)
+    target_link_libraries(welllog_session_selection_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.session-selection COMMAND welllog_session_selection_tests)
 
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp

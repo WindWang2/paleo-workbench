@@ -436,6 +436,137 @@ validate_document(const WellLogDocument &document) {
          std::isfinite(crosshair.display_depth);
 }
 
+[[nodiscard]] bool valid_selection_range(SelectionDepthRange range) noexcept {
+  return std::isfinite(range.top) && std::isfinite(range.bottom) &&
+         range.top <= range.bottom;
+}
+
+// Lower/upper bound of a Reference Depth Range in axis index space. A selection
+// range maps to a half-open `[first_row, last_row)` span of axis rows. For an
+// increasing axis, `top` (smaller depth) is the lower index; for a decreasing
+// axis it is the higher index. The mapping is index-projection: it reads the
+// raw axis coordinates (no LOD, no interpolation) and clamps to the axis length.
+
+// Finds the first index whose coordinate is >= `depth` (increasing axis) or <=
+// `depth` (decreasing axis). Returns `length` when `depth` is beyond the last
+// coordinate. Used for the selection's `first_row`.
+[[nodiscard]] std::uint64_t
+first_row_at_depth(const BufferView &coordinates, AxisDirection direction,
+                   double depth) noexcept {
+  const auto length = coordinates.length();
+  if (length == 0) {
+    return 0;
+  }
+  if (direction == AxisDirection::increasing) {
+    for (std::uint64_t i = 0; i < length; ++i) {
+      if (load_as_double(coordinates, i) >= depth) {
+        return i;
+      }
+    }
+    return length;
+  }
+  for (std::uint64_t i = 0; i < length; ++i) {
+    if (load_as_double(coordinates, i) <= depth) {
+      return i;
+    }
+  }
+  return length;
+}
+
+// Finds the first index whose coordinate is > `depth` (increasing axis) or <
+// `depth` (decreasing axis). Returns `length` when `depth` is at/ beyond the
+// last coordinate. Used for the selection's exclusive `last_row`.
+[[nodiscard]] std::uint64_t
+last_row_after_depth(const BufferView &coordinates, AxisDirection direction,
+                     double depth) noexcept {
+  const auto length = coordinates.length();
+  if (length == 0) {
+    return 0;
+  }
+  if (direction == AxisDirection::increasing) {
+    for (std::uint64_t i = 0; i < length; ++i) {
+      if (load_as_double(coordinates, i) > depth) {
+        return i;
+      }
+    }
+    return length;
+  }
+  for (std::uint64_t i = 0; i < length; ++i) {
+    if (load_as_double(coordinates, i) < depth) {
+      return i;
+    }
+  }
+  return length;
+}
+
+// Resolves a SelectionDepthRange on an axis to a half-open `[first, last)` row
+// span. The span is clamped to `[0, length]`; an empty/wholely-out-of-range
+// selection yields `first == last` (zero rows). `increasing` axis: top is the
+// lower index, bottom the upper; `decreasing`: inverted.
+struct RowSpan {
+  std::uint64_t first{};
+  std::uint64_t last{};
+};
+[[nodiscard]] RowSpan rows_for_range(const BufferView &coordinates,
+                                     AxisDirection direction,
+                                     SelectionDepthRange range) noexcept {
+  const auto length = coordinates.length();
+  if (length == 0) {
+    return {0, 0};
+  }
+  if (direction == AxisDirection::increasing) {
+    const auto first = first_row_at_depth(coordinates, direction, range.top);
+    const auto last = last_row_after_depth(coordinates, direction, range.bottom);
+    return {first, std::max(first, last)};
+  }
+  const auto first = first_row_at_depth(coordinates, direction, range.bottom);
+  const auto last = last_row_after_depth(coordinates, direction, range.top);
+  return {first, std::max(first, last)};
+}
+
+// Resolves a half-open row span to the Reference Depth Range it covers by
+// reading the raw axis coordinate at the boundary rows (no LOD). Direction is
+// immaterial here — the range is min/max of the two boundary coordinates, so a
+// decreasing axis produces the same `[top, bottom]` as an increasing one. A
+// zero-length span (`first == last`) yields the coordinate at `first` for both
+// ends.
+[[nodiscard]] SelectionDepthRange
+range_for_rows(const BufferView &coordinates, std::uint64_t first_row,
+               std::uint64_t last_row) noexcept {
+  const auto length = coordinates.length();
+  const auto clamped_first =
+      first_row >= length ? (length == 0 ? 0 : length - 1) : first_row;
+  const auto clamped_last_idx =
+      last_row == 0 ? 0 : (last_row - 1 >= length ? length - 1 : last_row - 1);
+  if (length == 0) {
+    return {};
+  }
+  const auto a = load_as_double(coordinates, clamped_first);
+  const auto b = load_as_double(coordinates, clamped_last_idx);
+  return {.top = std::min(a, b), .bottom = std::max(a, b)};
+}
+
+// Locates a Sampling Axis on a document by id; returns nullptr when absent.
+[[nodiscard]] const SamplingAxis *
+find_axis(const WellLogDocument &document, EntityId axis_id) noexcept {
+  for (const auto &axis : document.sampling_axes()) {
+    if (axis.id == axis_id) {
+      return &axis;
+    }
+  }
+  return nullptr;
+}
+
+[[nodiscard]] Error selection_error(EntityId document_id) {
+  return Error{
+      .code = ErrorCode::invalid_viewport,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::viewport_invalid,
+      .arguments = {},
+  };
+}
+
 struct LodBuildOutput {
   bool cancelled{};
   std::optional<Error> error;
@@ -630,6 +761,7 @@ struct WellLogSession::Impl {
       viewport_pixel_heights;
   std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewport_defaults;
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
+  std::unordered_map<EntityId, SelectionState, EntityIdHash> selections;
   std::unordered_map<EntityId, CurvePreparation, EntityIdHash> preparations;
   std::unordered_map<EntityId, std::uint64_t, EntityIdHash> frame_generations;
   std::vector<std::unique_ptr<LodTask>> lod_tasks;
@@ -1020,6 +1152,49 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
     impl_->viewport_defaults.erase(document_id);
     impl_->crosshairs.erase(document_id);
     impl_->frame_generations.erase(document_id);
+    // ADR 0024: a document replacement attempts to safely remap an existing
+    // selection onto the new revision's axis coordinates. If the selected axis
+    // survived and the depth range still falls within the new axis extent, the
+    // row span is recomputed against the new revision and the selection stays
+    // valid. Otherwise the selection is explicitly invalidated and a
+    // selection_invalidated event is published (the host must stop using it).
+    // The outcome event folds into the pending events at next_state_version.
+    if (const auto sel = impl_->selections.find(document_id);
+        sel != impl_->selections.end()) {
+      const auto axis = find_axis(*document, sel->second.sampling_axis_id);
+      if (axis != nullptr) {
+        const auto span = rows_for_range(axis->coordinates, axis->direction,
+                                         sel->second.reference_depth_range);
+        const auto axis_extent = range_for_rows(
+            axis->coordinates, 0, axis->coordinates.length());
+        // Keep the selection if it resolves to a non-empty span within the new
+        // axis extent; otherwise invalidate.
+        const auto within = span.last > span.first &&
+                            sel->second.reference_depth_range.top >=
+                                axis_extent.top - 1.0e-9 &&
+                            sel->second.reference_depth_range.bottom <=
+                                axis_extent.bottom + 1.0e-9;
+        if (within) {
+          sel->second.first_row = span.first;
+          sel->second.last_row = span.last;
+          sel->second.document_revision = revision;
+          sel->second.valid = true;
+        } else {
+          sel->second.valid = false;
+          sel->second.document_revision = revision;
+        }
+      } else {
+        sel->second.valid = false;
+        sel->second.document_revision = revision;
+      }
+      pending_events.push_back(ViewEvent{
+          .kind = sel->second.valid ? ViewEventKind::selection_changed
+                                    : ViewEventKind::selection_invalidated,
+          .state_version = next_state_version,
+          .document_id = document_id,
+          .document_revision = revision,
+      });
+    }
     if (asynchronous) {
       impl_->preparations.insert_or_assign(
           document_id, CurvePreparation{
@@ -1521,6 +1696,156 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
   }
 }
 
+// Shared apply path for the selection commands. Resolves a SelectionState for
+// `document_id` over `axis_id` from either a depth range or a row span, stores
+// it, bumps the version, and publishes a selection_changed event. Rejects when
+// the document or axis is unknown, or the range/span is invalid.
+[[nodiscard]] Result<CommandReceipt>
+WellLogSession::apply_selection(EntityId document_id, EntityId axis_id,
+                                SelectionDepthRange range,
+                                std::uint64_t first_row,
+                                std::uint64_t last_row, bool from_rows) {
+  try {
+    const auto document = impl_->documents.find(document_id);
+    if (document == impl_->documents.end()) {
+      return selection_error(document_id);
+    }
+    const auto axis = find_axis(*document->second, axis_id);
+    if (axis == nullptr) {
+      return selection_error(document_id);
+    }
+    const auto revision = document->second->revision();
+    if (from_rows) {
+      // Resolve rows → range, then recompute the row span from that range so
+      // the stored span is canonical (clamped, monotone).
+      range =
+          range_for_rows(axis->coordinates, first_row, last_row);
+    }
+    if (!valid_selection_range(range)) {
+      return selection_error(document_id);
+    }
+    const auto span =
+        rows_for_range(axis->coordinates, axis->direction, range);
+    if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
+      return selection_error(document_id);
+    }
+    const auto next_state_version = impl_->state_version + 1;
+    impl_->events.reserve(impl_->events.size() + 1);
+    impl_->selections.reserve(impl_->selections.size() + 1);
+    impl_->selections.insert_or_assign(
+        document_id,
+        SelectionState{
+            .document_id = document_id,
+            .sampling_axis_id = axis_id,
+            .reference_depth_range = range,
+            .first_row = span.first,
+            .last_row = span.last,
+            .document_revision = revision,
+            .valid = true,
+        });
+    impl_->state_version = next_state_version;
+    const auto event = ViewEvent{
+        .kind = ViewEventKind::selection_changed,
+        .state_version = next_state_version,
+        .document_id = document_id,
+        .document_revision = revision,
+    };
+    impl_->events.push_back(event);
+    impl_->notify_observers(event);
+    return CommandReceipt{
+        .state_version = next_state_version,
+        .document_id = document_id,
+        .document_revision = revision,
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetSelectionCommand &command) {
+  return apply_selection(command.document_id, command.sampling_axis_id,
+                         command.reference_depth_range, 0, 0,
+                         /*from_rows=*/false);
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetRowSelectionCommand &command) {
+  if (command.last_row < command.first_row) {
+    return selection_error(command.document_id);
+  }
+  return apply_selection(command.document_id, command.sampling_axis_id,
+                         SelectionDepthRange{}, command.first_row,
+                         command.last_row, /*from_rows=*/true);
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const ClearSelectionCommand &command) {
+  try {
+    const auto document = impl_->documents.find(command.document_id);
+    if (document == impl_->documents.end()) {
+      return selection_error(command.document_id);
+    }
+    if (!impl_->selections.contains(command.document_id)) {
+      // Nothing to clear: still succeed, no event.
+      return CommandReceipt{
+          .state_version = impl_->state_version,
+          .document_id = command.document_id,
+          .document_revision = document->second->revision(),
+          .asynchronous_preparation_started = false,
+          .diagnostic_id = std::nullopt,
+      };
+    }
+    if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
+      return selection_error(command.document_id);
+    }
+    const auto next_state_version = impl_->state_version + 1;
+    const auto revision = document->second->revision();
+    impl_->events.reserve(impl_->events.size() + 1);
+    impl_->selections.erase(command.document_id);
+    impl_->state_version = next_state_version;
+    const auto event = ViewEvent{
+        .kind = ViewEventKind::selection_changed,
+        .state_version = next_state_version,
+        .document_id = command.document_id,
+        .document_revision = revision,
+    };
+    impl_->events.push_back(event);
+    impl_->notify_observers(event);
+    return CommandReceipt{
+        .state_version = next_state_version,
+        .document_id = command.document_id,
+        .document_revision = revision,
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
 void WellLogSession::poll_async() noexcept {
   try {
     std::vector<ViewEvent> notifications;
@@ -1821,6 +2146,14 @@ WellLogSession::crosshair(EntityId document_id) const noexcept {
   return found == impl_->crosshairs.end()
              ? std::nullopt
              : std::optional<CrosshairState>{found->second};
+}
+
+std::optional<SelectionState>
+WellLogSession::selection(EntityId document_id) const noexcept {
+  const auto found = impl_->selections.find(document_id);
+  return found == impl_->selections.end()
+             ? std::nullopt
+             : std::optional<SelectionState>{found->second};
 }
 
 ViewEventObserverId

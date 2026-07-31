@@ -66,6 +66,58 @@ struct SetCrosshairCommand {
   std::optional<CrosshairState> crosshair;
 };
 
+// A closed Reference Depth Range on one Sampling Axis (ADR 0024). Selection is
+// expressed in Reference Depth (the axis coordinate), never in Display Depth,
+// screen pixels or LOD envelope points. `top <= bottom` and both finite.
+struct SelectionDepthRange {
+  double top{};
+  double bottom{};
+  friend constexpr bool operator==(SelectionDepthRange,
+                                   SelectionDepthRange) = default;
+};
+
+// The shared semantic Selection Set state held by the session (ADR 0024). One
+// selection per document, expressed over a single Sampling Axis: a Reference
+// Depth Range plus the half-open `[first_row, last_row)` row span it maps to on
+// that axis. `document_revision` is the revision the selection was made against
+// (the invalidation key); `valid` becomes false when a document replacement
+// could not safely remap the selection (the axis vanished or the range no
+// longer fits), and a `selection_invalidated` event is published.
+struct SelectionState {
+  EntityId document_id;
+  EntityId sampling_axis_id;
+  SelectionDepthRange reference_depth_range;
+  std::uint64_t first_row{};
+  std::uint64_t last_row{}; // exclusive
+  DocumentRevision document_revision;
+  bool valid{true};
+  friend constexpr bool operator==(const SelectionState &,
+                                   const SelectionState &) = default;
+};
+
+// Selects a Reference Depth Range on a Sampling Axis of a document. The session
+// maps the range to the half-open row span on that axis's coordinates.
+struct SetSelectionCommand {
+  EntityId document_id;
+  EntityId sampling_axis_id;
+  SelectionDepthRange reference_depth_range;
+};
+
+// Selects a half-open `[first_row, last_row)` row span on a Sampling Axis. The
+// session maps the span back to a Reference Depth Range by reading the axis
+// coordinate at the boundary rows. Drives graphic selection from a table.
+struct SetRowSelectionCommand {
+  EntityId document_id;
+  EntityId sampling_axis_id;
+  std::uint64_t first_row{};
+  std::uint64_t last_row{}; // exclusive
+};
+
+// Clears any selection on a document.
+struct ClearSelectionCommand {
+  EntityId document_id;
+};
+
 struct CommandReceipt {
   std::uint64_t state_version{};
   EntityId document_id;
@@ -81,6 +133,8 @@ enum class ViewEventKind : std::uint8_t {
   viewport_changed,
   crosshair_changed,
   frame_ready,
+  selection_changed,
+  selection_invalidated,
 };
 
 struct ViewEvent {
@@ -167,6 +221,12 @@ public:
   execute(const ResetViewportCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetCrosshairCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetSelectionCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetRowSelectionCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const ClearSelectionCommand &command);
   // Installs the text pipeline used to shape annotations and labels during
   // scene preparation (ADR 0029). Without an engine, text layers prepare
   // empty and a text_engine_unavailable diagnostic is published.
@@ -186,6 +246,10 @@ public:
   viewport_pixel_height(EntityId document_id) const noexcept;
   [[nodiscard]] std::optional<CrosshairState>
   crosshair(EntityId document_id) const noexcept;
+  // The shared semantic Selection Set entry for a document (ADR 0024). Empty
+  // when the document has no selection.
+  [[nodiscard]] std::optional<SelectionState>
+  selection(EntityId document_id) const noexcept;
   [[nodiscard]] ViewEventObserverId
   subscribe_view_events(ViewEventObserver observer) noexcept;
   void unsubscribe_view_events(ViewEventObserverId observer_id) noexcept;
@@ -195,6 +259,14 @@ public:
   performance_snapshot(EntityId document_id) const noexcept;
 
 private:
+  // Shared apply path for the selection commands (depth-range or row-span
+  // source). Resolves, stores, versions, and publishes. Returns the receipt or
+  // an error. Defined in the .cpp; `from_rows` selects the row→range path.
+  [[nodiscard]] Result<CommandReceipt>
+  apply_selection(EntityId document_id, EntityId axis_id,
+                  SelectionDepthRange range, std::uint64_t first_row,
+                  std::uint64_t last_row, bool from_rows);
+
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
