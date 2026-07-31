@@ -75,8 +75,8 @@ struct CubicFromQuadratic {
 }
 
 // Compresses a byte range with zlib (FlateDecode). Returns false on zlib error.
-[[nodiscard]] bool flate_compress(const std::string &input,
-                                  std::string &output) noexcept {
+[[nodiscard]] bool flate_compress_view(std::string_view input,
+                                       std::string &output) noexcept {
   z_stream stream{};
   // deflateInit2 with windowBits=15 (zlib format — PDF FlateDecode expects the
   // zlib 2-byte header, not raw deflate).
@@ -97,6 +97,12 @@ struct CubicFromQuadratic {
   }
   output.resize(stream.total_out);
   return true;
+}
+
+// Compresses a std::string (legacy call sites).
+[[nodiscard]] bool flate_compress(const std::string &input,
+                                  std::string &output) noexcept {
+  return flate_compress_view(std::string_view{input}, output);
 }
 
 [[nodiscard]] Error pdf_error(ErrorCode code, MessageKey message) {
@@ -341,6 +347,23 @@ PdfPathStream &PdfPathStream::set_fill_alpha(double alpha) noexcept {
   return *this;
 }
 
+PdfPathStream &PdfPathStream::set_pattern_fill(
+    std::string_view pattern_name) noexcept {
+  // Switch the non-stroking colour space to /Pattern, select the named tiling
+  // pattern, then paint the current path with it (`f`).
+  impl_->operators += "/Pattern cs\n/";
+  impl_->operators.append(pattern_name.data(), pattern_name.size());
+  impl_->operators += " scn\nf\n";
+  return *this;
+}
+
+PdfPathStream &PdfPathStream::invoke_xobject(std::string_view name) noexcept {
+  impl_->operators.push_back('/');
+  impl_->operators.append(name.data(), name.size());
+  impl_->operators += " Do\n";
+  return *this;
+}
+
 std::string_view PdfPathStream::operators() const noexcept {
   return impl_->operators;
 }
@@ -410,6 +433,21 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
     }
     const std::size_t total_alpha_objects =
         page_alpha_base[pages.size()] - ext_gstate_base;
+
+    // Per-page caller-supplied indirect objects (#188: image XObjects + tiling
+    // patterns). They are numbered AFTER the ExtGState objects, page by page in
+    // `objects` order. page_object_base[p] is the first object number page p's
+    // objects occupy; objects are emitted in the order given (the exporter is
+    // responsible for deterministic ordering).
+    const std::size_t object_base = ext_gstate_base + total_alpha_objects;
+    std::vector<std::size_t> page_object_base(pages.size() + 1);
+    page_object_base[0] = object_base;
+    for (std::size_t p = 0; p < pages.size(); ++p) {
+      page_object_base[p + 1] =
+          page_object_base[p] + pages[p].objects.size();
+    }
+    const std::size_t total_caller_objects =
+        page_object_base[pages.size()] - object_base;
 
     // Compress every page's content stream once (deterministic) so its length
     // is known when the content-stream object is written.
@@ -484,22 +522,78 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
       out += "/Contents ";
       append_integer(out, static_cast<std::int64_t>(3 + 2 * p));
       out += " 0 R ";
-      // Resources: when this page uses any fill-alpha, name its ExtGState
-      // objects so the stream's `gs /GSn` operators resolve. With no alphas
-      // (opaque-only, e.g. the #185 spike) this stays `/Resources << >>`,
-      // byte-identical to the pre-alpha writer.
-      if (page_alphas[p].empty()) {
+      // Resources. With no alphas AND no caller objects (opaque-only + no
+      // images/patterns, e.g. the #185 spike) this stays `/Resources << >>`,
+      // byte-identical to the pre-#188 writer. Otherwise build a dict naming
+      // /ExtGState (alphas), /XObject (images) and /Pattern (tiling patterns).
+      const bool has_alphas = !page_alphas[p].empty();
+      const bool has_objects = !pages[p].objects.empty();
+      if (!has_alphas && !has_objects) {
         out += "/Resources << >> >>\nendobj\n";
       } else {
-        out += "/Resources << /ExtGState << ";
-        for (std::size_t g = 0; g < page_alphas[p].size(); ++g) {
-          out += "/GS";
-          append_integer(out, static_cast<std::int64_t>(g));
-          out.push_back(' ');
-          append_integer(out, static_cast<std::int64_t>(page_alpha_base[p] + g));
-          out += " 0 R ";
+        out += "/Resources <<";
+        if (has_alphas) {
+          out += " /ExtGState << ";
+          for (std::size_t g = 0; g < page_alphas[p].size(); ++g) {
+            out += "/GS";
+            append_integer(out, static_cast<std::int64_t>(g));
+            out.push_back(' ');
+            append_integer(out,
+                           static_cast<std::int64_t>(page_alpha_base[p] + g));
+            out += " 0 R ";
+          }
+          out += ">>";
         }
-        out += ">> >> >>\nendobj\n";
+        if (has_objects) {
+          // Partition the page's objects by kind so each resource dict only
+          // names the objects of its kind. Object numbers are page-local and
+          // assigned in `objects` order.
+          bool any_image = false;
+          bool any_pattern = false;
+          for (const auto &obj : pages[p].objects) {
+            if (obj.kind == PdfObjectKind::image) {
+              any_image = true;
+            } else {
+              any_pattern = true;
+            }
+            if (any_image && any_pattern) {
+              break;
+            }
+          }
+          if (any_image) {
+            out += " /XObject << ";
+            std::size_t oi = 0;
+            for (const auto &obj : pages[p].objects) {
+              if (obj.kind == PdfObjectKind::image) {
+                out += '/';
+                out += obj.local_name;
+                out.push_back(' ');
+                append_integer(out, static_cast<std::int64_t>(
+                                        page_object_base[p] + oi));
+                out += " 0 R ";
+              }
+              ++oi;
+            }
+            out += ">>";
+          }
+          if (any_pattern) {
+            out += " /Pattern << ";
+            std::size_t oi = 0;
+            for (const auto &obj : pages[p].objects) {
+              if (obj.kind == PdfObjectKind::pattern) {
+                out += '/';
+                out += obj.local_name;
+                out.push_back(' ');
+                append_integer(out, static_cast<std::int64_t>(
+                                        page_object_base[p] + oi));
+                out += " 0 R ";
+              }
+              ++oi;
+            }
+            out += ">>";
+          }
+        }
+        out += " >> >>\nendobj\n";
       }
     }
 
@@ -513,10 +607,21 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
       }
     }
 
+    // Per-page caller-supplied objects (image XObjects + tiling patterns). Each
+    // body is already a complete dict (+ optional stream); the writer only adds
+    // the "N 0 obj\n" header and "endobj\n" trailer.
+    for (std::size_t p = 0; p < pages.size(); ++p) {
+      for (std::size_t oi = 0; oi < pages[p].objects.size(); ++oi) {
+        emit_object_header(page_object_base[p] + oi);
+        out += pages[p].objects[oi].body;
+        out += "\nendobj\n";
+      }
+    }
+
     // xref table.
     const auto xref_offset = out.size();
-    const auto object_count =
-        static_cast<std::size_t>(2 + 2 * pages.size() + total_alpha_objects + 1);
+    const auto object_count = static_cast<std::size_t>(
+        2 + 2 * pages.size() + total_alpha_objects + total_caller_objects + 1);
     out += "xref\n0 ";
     append_integer(out, static_cast<std::int64_t>(object_count));
     out += "\n0000000000 65535 f \n";
@@ -548,6 +653,14 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
   } catch (...) {
     return pdf_error(ErrorCode::internal_error, MessageKey::internal_error);
   }
+}
+
+// Public alias of the writer's Flate codec, for image/pattern stream bodies
+// (#188). Lives at welllog scope (not anonymous) so it satisfies the exported
+// declaration in pdf.hpp.
+bool flate_compress_buffer(std::string_view input,
+                           std::string &output) noexcept {
+  return flate_compress_view(input, output);
 }
 
 } // namespace welllog

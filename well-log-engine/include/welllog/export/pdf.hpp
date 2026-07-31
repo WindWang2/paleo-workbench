@@ -87,6 +87,15 @@ public:
   // in that same order, so identical content always yields identical /GS names
   // and object layout. A `gs` operator is emitted referencing the assigned name.
   PdfPathStream &set_fill_alpha(double alpha) noexcept;
+  // Paint the current path with a tiling pattern instead of a solid colour
+  // (#188). Switches the non-stroking colour space to /Pattern and paints the
+  // current path with the named pattern: `/Pattern cs` + `/<name> scn` + `f`.
+  // The pattern object is registered separately by the scene exporter and named
+  // in the page Resources. Call after building the path (the `f` paints it).
+  PdfPathStream &set_pattern_fill(std::string_view pattern_name) noexcept;
+  // Invoke a named XObject (PDF `Do`), e.g. an image placed under a prior `cm`.
+  // The XObject is registered separately and named in the page Resources.
+  PdfPathStream &invoke_xobject(std::string_view name) noexcept;
 
   // The raw (uncompressed) content-stream operators.
   [[nodiscard]] std::string_view operators() const noexcept;
@@ -109,10 +118,34 @@ struct PdfPageSpec {
   double height_points{841.889764}; // A4 height (297 mm)
 };
 
-// One page's worth of content-stream operators. The spike emits simple geometry
-// per page; later tickets replace this with the per-layer prepared-scene emit.
+// A caller-supplied indirect object the writer appends to the PDF (#188): used
+// for image XObjects and tiling patterns, which the content stream references by
+// name. `body` is the full object body after the "N 0 obj\n" header — i.e. a
+// dictionary plus an optional "stream\n…\nendstream". `kind` tells the writer
+// which page resource dictionary to name it under (/XObject for images,
+// /Pattern for tiling patterns). `local_name` is the per-page name the stream's
+// `Do` / `scn` operator uses (e.g. "Im0", "P0"); it must be unique among objects
+// of the same kind on one page. Determinism: the writer assigns object numbers
+// in `objects` order, so identical content yields identical layout.
+enum class PdfObjectKind : std::uint8_t {
+  image,
+  pattern,
+};
+
+struct PdfIndirectObject {
+  std::string body;
+  PdfObjectKind kind{PdfObjectKind::image};
+  std::string local_name;
+};
+
+// One page's worth of content-stream operators plus the extra indirect objects
+// (image XObjects, tiling patterns) the stream references by name. `objects`
+// defaults empty, in which case the writer emits no /XObject or /Pattern
+// resource dicts — byte-identical to the pre-#188 writer (the #185 spike and
+// #187 scene tests).
 struct PdfPageContent {
   PdfPathStream stream;
+  std::span<const PdfIndirectObject> objects{};
 };
 
 class WELLLOG_EXPORT_PDF_API PdfDocument {
@@ -145,5 +178,12 @@ public:
   write(std::span<const PdfPageContent> pages,
         std::span<const PdfPageSpec> page_specs = {}) noexcept;
 };
+
+// Compresses a byte range with zlib (FlateDecode), the same codec the writer
+// uses for content streams (#188 image XObject pixel streams). Returns false on
+// a zlib error. Exposed so the scene exporter can pre-compress image pixels and
+// embed them in a PdfIndirectObject body without reaching into writer internals.
+[[nodiscard]] WELLLOG_EXPORT_PDF_API bool
+flate_compress_buffer(std::string_view input, std::string &output) noexcept;
 
 } // namespace welllog

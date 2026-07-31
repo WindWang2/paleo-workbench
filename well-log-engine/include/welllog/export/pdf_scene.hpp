@@ -28,18 +28,28 @@
 #include <welllog/export/pdf.hpp>
 #include <welllog/export/pdf_export.hpp>
 #include <welllog/export/pagination.hpp>
+#include <welllog/io/manifest.hpp>
 #include <welllog/scene/scene.hpp>
+
+#include <functional>
 
 namespace welllog {
 
-// Serializes one PreparedScene + ExportSnapshot to a single-page PDF. Returns a
-// Result so invalid scenes/snapshots surface as ErrorCode::invalid_presentation,
-// consistent with SvgExporter / PaginatedSvgExporter. Continuous mode is the
-// only mode this ticket supports (fixed-mode pagination is #188).
+// Serializes a PreparedScene + ExportSnapshot to a PDF (#187 vector primitives
+// + text-as-outlines; #188 raster images, tiling patterns, pagination, custom
+// layer). Returns a Result so invalid scenes/snapshots surface as
+// ErrorCode::invalid_presentation, consistent with SvgExporter /
+// PaginatedSvgExporter. Both pagination modes are supported: continuous (one
+// long page preserving true depth length) and fixed (depth-window slicing with
+// repeating header bands — #188). Raster image tiles embed as image XObjects
+// whose pixels are fetched via the optional `image_tile` resolver (the engine
+// never decodes); a missing resolver or failed resolution skips the tile.
 class WELLLOG_EXPORT_PDF_API PdfSceneExporter {
 public:
   [[nodiscard]] static Result<PdfDocument>
-  write(const PreparedScene &scene, const ExportSnapshot &snapshot) noexcept;
+  write(const PreparedScene &scene, const ExportSnapshot &snapshot,
+        std::function<Result<RasterTile>(const ImageTileRequest &)>
+            image_tile = {}) noexcept;
 };
 
 } // namespace welllog

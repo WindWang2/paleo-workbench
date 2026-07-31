@@ -931,6 +931,21 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.pdf-scene COMMAND welllog_pdf_scene_tests)
 
+    add_executable(welllog_pdf_scene_full_tests
+        tests/integration/pdf_scene_full_test.cpp
+    )
+    target_compile_features(welllog_pdf_scene_full_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_pdf_scene_full_tests)
+    target_include_directories(
+        welllog_pdf_scene_full_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        welllog_pdf_scene_full_tests
+        PRIVATE WellLog::ExportPdf WellLog::Scene WellLog::Session ZLIB::ZLIB
+    )
+    add_test(NAME welllog.pdf-scene-full COMMAND welllog_pdf_scene_full_tests)
+
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp
     )
