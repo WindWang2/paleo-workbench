@@ -479,7 +479,9 @@ endif()
 if(WELLLOG_BUILD_QT_WIDGETS)
     qt_add_library(welllog_qtwidgets ${WELLLOG_LIBRARY_TYPE}
         src/qtwidgets/well_log_view.cpp
+        src/qtwidgets/table_model.cpp
         include/welllog/qtwidgets/well_log_view.hpp
+        include/welllog/qtwidgets/table_model.hpp
     )
     add_library(WellLog::QtWidgets ALIAS welllog_qtwidgets)
     set_target_properties(welllog_qtwidgets PROPERTIES
@@ -497,6 +499,7 @@ if(WELLLOG_BUILD_QT_WIDGETS)
         PUBLIC
             WellLog::RenderGL
             WellLog::Session
+            WellLog::Table
             Qt6::OpenGLWidgets
             Qt6::Widgets
     )
@@ -1072,6 +1075,22 @@ if(WELLLOG_BUILD_TESTS)
                 PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1"
             )
         endif()
+
+        # Virtualized table-model adapter test (ADR 0022, #154). No GL needed
+        # (a table model has no OpenGL) — runs under the minimal platform.
+        qt_add_executable(welllog_qt_table_model_tests
+            tests/qt/table_model_test.cpp
+        )
+        welllog_enable_warnings(welllog_qt_table_model_tests)
+        target_link_libraries(
+            welllog_qt_table_model_tests
+            PRIVATE WellLog::QtWidgets Qt6::Test
+        )
+        add_test(NAME welllog.qt-table-model COMMAND welllog_qt_table_model_tests)
+        set_tests_properties(
+            welllog.qt-table-model
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=minimal"
+        )
     endif()
     if(WELLLOG_BUILD_PYTHON)
         add_test(

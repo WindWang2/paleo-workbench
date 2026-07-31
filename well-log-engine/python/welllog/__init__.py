@@ -14,6 +14,7 @@ from PySide6 import QtWidgets as _PySideWidgets
 from . import _QtWidgets
 
 WellLogView = _QtWidgets.welllog.WellLogView
+TableModel = _QtWidgets.welllog.TableModel
 
 __all__ = [
     "WellLogCapabilityError",
@@ -23,4 +24,5 @@ __all__ = [
     "WellLogValidationError",
     "WellLogVersionConflict",
     "WellLogView",
+    "TableModel",
 ]

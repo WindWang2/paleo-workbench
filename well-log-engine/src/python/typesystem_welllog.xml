@@ -2,6 +2,7 @@
 <typesystem package="welllog._QtWidgets">
     <load-typesystem name="typesystem_widgets.xml" generate="no"/>
     <load-typesystem name="typesystem_openglwidgets.xml" generate="no"/>
+    <load-typesystem name="typesystem_core.xml" generate="no"/>
 
     <namespace-type name="welllog">
         <object-type name="WellLogView" parent-management="yes">
@@ -27,5 +28,13 @@
                 </inject-code>
             </add-function>
         </object-type>
+
+        <!-- Virtualized Table Projection model (ADR 0022, #154). The core
+             TableProjection is bound as a value type so a Python host can pass
+             one to TableModel.set_projection(); the host builds it from a
+             session via a convenience bridge (the from_document factory needs
+             a full WellLogDocument binding, a separate follow-up). -->
+        <value-type name="TableProjection"/>
+        <object-type name="TableModel" parent-management="yes"/>
     </namespace-type>
 </typesystem>
