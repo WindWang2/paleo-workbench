@@ -24,6 +24,7 @@
 #include <welllog/core/result.hpp>
 #include <welllog/core/units.hpp>
 #include <welllog/export/export.hpp>
+#include <welllog/export/export_report.hpp>
 #include <welllog/export/svg.hpp>
 #include <welllog/scene/scene.hpp>
 
@@ -64,6 +65,18 @@ struct ExportPageSpec {
   bool repeat_legend{true};
   bool show_page_numbers{true};
   bool show_depth_range{true};
+  // Criterion 7 (table-and-export.md section 8.4): the export mode. pure_vector
+  // (default) keeps every non-source-raster layer vector and never silently
+  // rasterizes; mixed allows complex layers to be rasterized, recording each in
+  // the ExportReport. Stored on the snapshot so the export is reproducible.
+  ExportMode export_mode{ExportMode::pure_vector};
+  // The vector-complexity budget above which a layer is considered for
+  // rasterization in mixed mode (currently measured against a curve layer's
+  // total prepared point count). 0 = no budget / heuristic off, so the default
+  // behaviour is unchanged and the ExportReport stays empty. This is the
+  // criterion-7 trigger surface; the actual rasterization path is a documented
+  // follow-up (the report records the decision the future path would make).
+  std::uint64_t vector_complexity_budget{0};
 };
 
 // The immutable, self-describing metadata an export captures so it is
@@ -93,8 +106,14 @@ public:
   // Continuous mode emits exactly one <svg>; fixed mode emits one <svg> per
   // page, concatenated. Returns a Result so invalid scenes/snapshots surface as
   // ErrorCode::invalid_presentation like SvgExporter::write.
+  //
+  // `report` (criterion 7) is an optional out-channel: in mixed mode it records
+  // each layer the export chose to rasterize; in pure_vector mode (default) it
+  // stays empty and a budget-triggered layer fails the export instead. May be
+  // null (the pre-#189 behaviour). Filled in layer-emit order for determinism.
   [[nodiscard]] static Result<SvgDocument>
-  write(const PreparedScene &scene, const ExportSnapshot &snapshot) noexcept;
+  write(const PreparedScene &scene, const ExportSnapshot &snapshot,
+        ExportReport *report = nullptr) noexcept;
 
   // The aggregate curve-envelope pixel height the host should prepare the scene
   // at so every fixed page resolves to the correct per-page density. Equals the

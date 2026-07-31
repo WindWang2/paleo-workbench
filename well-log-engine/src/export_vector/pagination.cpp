@@ -1,6 +1,7 @@
 #include <welllog/export/pagination.hpp>
 
 #include <welllog/export/export_layout.hpp>
+#include <welllog/export/export_report.hpp>
 
 #include <algorithm>
 #include <array>
@@ -341,11 +342,30 @@ std::uint32_t PaginatedSvgExporter::required_aggregate_pixel_height(
 
 Result<SvgDocument>
 PaginatedSvgExporter::write(const PreparedScene &scene,
-                            const ExportSnapshot &snapshot) noexcept {
+                            const ExportSnapshot &snapshot,
+                            ExportReport *report) noexcept {
   try {
     if (!snapshot_is_valid(scene, snapshot)) {
       return pagination_error(ErrorCode::invalid_presentation,
                               MessageKey::presentation_invalid);
+    }
+    // Criterion 7: evaluate the shared complexity heuristic once. In pure-vector
+    // mode (default) an over-budget layer must FAIL rather than silently
+    // rasterize; in mixed mode the over-budget layers are recorded in the report
+    // (the actual raster path is a documented follow-up). Identical to the PDF
+    // backend (pdf_scene.cpp) so both make the same decision for the same input.
+    const auto decision = evaluate_complexity(
+        scene, snapshot.page.vector_complexity_budget, snapshot.page.dpi);
+    if (decision.would_degrade()) {
+      if (snapshot.page.export_mode == ExportMode::pure_vector) {
+        return pagination_error(ErrorCode::invalid_presentation,
+                                MessageKey::presentation_invalid);
+      }
+      if (report != nullptr) {
+        report->degraded_layers.insert(report->degraded_layers.end(),
+                                       decision.over_budget.begin(),
+                                       decision.over_budget.end());
+      }
     }
     const auto &page = snapshot.page;
 

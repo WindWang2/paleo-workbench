@@ -25,6 +25,7 @@
 #include <welllog/core/document.hpp>
 #include <welllog/core/entity_id.hpp>
 #include <welllog/export/export_layout.hpp>
+#include <welllog/export/export_report.hpp>
 #include <welllog/io/manifest.hpp>
 
 #include <algorithm>
@@ -1012,11 +1013,30 @@ PdfSceneExporter::write(const PreparedScene &scene,
                         const ExportSnapshot &snapshot,
                         std::function<Result<RasterTile>(const ImageTileRequest &)>
                             image_tile,
-                        TextEngine *text_engine) noexcept {
+                        TextEngine *text_engine,
+                        ExportReport *report) noexcept {
   try {
     if (!snapshot_is_valid(scene, snapshot)) {
       return pdf_scene_error(ErrorCode::invalid_presentation,
                              MessageKey::presentation_invalid);
+    }
+    // Criterion 7: evaluate the shared complexity heuristic once. In pure-vector
+    // mode (default) an over-budget layer must FAIL rather than silently
+    // rasterize; in mixed mode the over-budget layers are recorded in the report
+    // (the actual raster path is a documented follow-up). Identical to the SVG
+    // backend (pagination.cpp) so both make the same decision for the same input.
+    const auto decision = evaluate_complexity(
+        scene, snapshot.page.vector_complexity_budget, snapshot.page.dpi);
+    if (decision.would_degrade()) {
+      if (snapshot.page.export_mode == ExportMode::pure_vector) {
+        return pdf_scene_error(ErrorCode::invalid_presentation,
+                               MessageKey::presentation_invalid);
+      }
+      if (report != nullptr) {
+        report->degraded_layers.insert(report->degraded_layers.end(),
+                                       decision.over_budget.begin(),
+                                       decision.over_budget.end());
+      }
     }
     const auto &page = snapshot.page;
     const auto scale = printable_width(page) / scene.physical_width().value;

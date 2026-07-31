@@ -27,6 +27,7 @@
 #include <welllog/core/result.hpp>
 #include <welllog/export/pdf.hpp>
 #include <welllog/export/pdf_export.hpp>
+#include <welllog/export/export_report.hpp>
 #include <welllog/export/pagination.hpp>
 #include <welllog/io/manifest.hpp>
 #include <welllog/scene/scene.hpp>
@@ -57,7 +58,8 @@ public:
   write(const PreparedScene &scene, const ExportSnapshot &snapshot,
         std::function<Result<RasterTile>(const ImageTileRequest &)>
             image_tile = {},
-        TextEngine *text_engine = nullptr) noexcept;
+        TextEngine *text_engine = nullptr,
+        ExportReport *report = nullptr) noexcept;
 };
 
 } // namespace welllog

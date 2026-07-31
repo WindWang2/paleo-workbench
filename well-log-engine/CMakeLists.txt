@@ -951,6 +951,26 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.pdf-scene-full COMMAND welllog_pdf_scene_full_tests)
 
+    add_executable(welllog_export_parity_tests
+        tests/integration/export_parity_test.cpp
+    )
+    target_compile_features(welllog_export_parity_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_export_parity_tests)
+    target_compile_definitions(
+        welllog_export_parity_tests
+        PRIVATE
+            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+    )
+    target_include_directories(
+        welllog_export_parity_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(
+        welllog_export_parity_tests
+        PRIVATE WellLog::ExportVector WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
+    )
+    add_test(NAME welllog.export-parity COMMAND welllog_export_parity_tests)
+
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp
     )
