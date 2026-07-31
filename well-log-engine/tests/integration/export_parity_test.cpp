@@ -309,6 +309,24 @@ struct StubResolver {
 
 // --- PDF inspection helpers (mirror pdf_scene_full_test.cpp) -----------------
 
+// Deep-compares two ExportReports entry-by-entry (the "byte-identical report"
+// contract: every degraded layer must match, not just the count/front entry).
+[[nodiscard]] bool reports_equal(const ExportReport &a,
+                                 const ExportReport &b) noexcept {
+  if (a.degraded_layers.size() != b.degraded_layers.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.degraded_layers.size(); ++i) {
+    const auto &x = a.degraded_layers[i];
+    const auto &y = b.degraded_layers[i];
+    if (x.layer_id != y.layer_id || x.reason != y.reason ||
+        x.target_dpi != y.target_dpi) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::filesystem::path write_temp_pdf(std::string_view bytes) {
   const auto path =
       std::filesystem::temp_directory_path() / "welllog_parity.pdf";
@@ -402,9 +420,10 @@ std::vector<std::pair<double, double>> parse_mediaboxes(std::string_view bytes) 
 std::size_t count_pdf_pages(std::string_view bytes) {
   std::size_t count = 0;
   std::string_view::size_type pos = 0;
-  while ((pos = bytes.find("/Type /Page ", pos)) != std::string_view::npos) {
+  constexpr std::string_view needle = "/Type /Page ";
+  while ((pos = bytes.find(needle, pos)) != std::string_view::npos) {
     ++count;
-    pos += 11;
+    pos += needle.size();
   }
   return count;
 }
@@ -598,29 +617,63 @@ void pagination_depth_ranges_are_continuous() {
 void pattern_phase_matches_across_backends() {
   auto scene_data = make_parity_scene();
   const auto scene = prepare(scene_data.document, scene_data.presentation);
+  const double cos30 = std::cos(30.0 * M_PI / 180.0);
+  const double sin30 = std::sin(30.0 * M_PI / 180.0);
+  // R·T phase for anchor (3,4) + rotation 30°: e,f = R·(3,4). This is the single
+  // composed phase BOTH backends must land at — the PDF /Matrix numerically, the
+  // SVG via its anchor + patternTransform (which compose to the same point under
+  // SVG pattern semantics: patternTransform rotates about the pattern origin).
+  const double expected_e = cos30 * 3.0 - sin30 * 4.0; // ≈ 0.598
+  const double expected_f = sin30 * 3.0 + cos30 * 4.0; // ≈ 4.964
+
   const auto snap = make_snapshot(PaginationMode::continuous, Millimetres{297.0});
 
-  // PDF: parse the tiling-pattern /Matrix.
+  // PDF: parse the tiling-pattern /Matrix and assert e,f == R·(3,4).
   const auto pdf_bytes = std::string{build_pdf(*scene, snap).bytes()};
   const auto matrix = parse_first_pattern_matrix(pdf_bytes);
   require(matrix.size() == 6, "/Matrix must have 6 operands");
-  const double cos30 = std::cos(30.0 * M_PI / 180.0);
-  const double sin30 = std::sin(30.0 * M_PI / 180.0);
-  const double expected_e = cos30 * 3.0 - sin30 * 4.0; // ≈ 0.598
-  const double expected_f = sin30 * 3.0 + cos30 * 4.0; // ≈ 4.964
   require(std::abs(matrix[4] - expected_e) < 1e-9 &&
               std::abs(matrix[5] - expected_f) < 1e-9,
           "the PDF pattern /Matrix must be R·T (e,f = R·(3,4))");
 
-  // SVG: the pattern def carries the same anchor (3,4) and rotation 30° that
-  // compose the PDF's R·T phase matrix. Asserting BOTH the x/y anchor and the
-  // rotate() transform proves the two backends consume the identical
-  // PatternDefinition and emit a phase-consistent pattern (criterion 5).
+  // SVG: the pattern def carries anchor (3,4) + rotate(30). The rotation matrix
+  // [a b c d] of the composed SVG transform is fixed for a given angle, so both
+  // backends carry the identical rotation; the anchor x/y pins the translation
+  // the PDF folds into e,f. Asserting the SVG's numeric rotate angle + anchor
+  // confirms it composes the same phase as the PDF /Matrix (criterion 5).
   const auto svg_text = std::string{build_svg(*scene, snap).text()};
   require(svg_text.find("x=\"3\" y=\"4\"") != std::string::npos,
-          "the SVG pattern must carry the (3,4) scene anchor");
+          "the SVG pattern must carry the (3,4) scene anchor (the translation "
+          "the PDF folds into /Matrix e,f)");
   require(svg_text.find("patternTransform=\"rotate(30)\"") != std::string::npos,
-          "the SVG pattern must carry the 30° rotation");
+          "the SVG pattern rotation must match the PDF /Matrix rotation");
+
+  // "Consistent across pages" (criterion 5): in fixed mode every page re-emits
+  // the pattern def with the SAME /Matrix — assert all per-page /Matrix values
+  // are identical (no per-page phase drift).
+  const auto fixed_snap = make_snapshot(PaginationMode::fixed, Millimetres{50.0});
+  const auto fixed_pdf = std::string{build_pdf(*scene, fixed_snap).bytes()};
+  std::vector<std::vector<double>> per_page_matrices;
+  std::string_view::size_type search = 0;
+  while (true) {
+    const auto pos = fixed_pdf.find("/Matrix [", search);
+    if (pos == std::string_view::npos) {
+      break;
+    }
+    per_page_matrices.push_back(parse_first_pattern_matrix(fixed_pdf.substr(pos)));
+    search = pos + 9;
+  }
+  require(per_page_matrices.size() >= 2,
+          "fixed mode must re-emit the pattern /Matrix on every page");
+  for (std::size_t i = 1; i < per_page_matrices.size(); ++i) {
+    require(per_page_matrices[i].size() == 6 &&
+                per_page_matrices[0].size() == 6,
+            "every per-page /Matrix must have 6 operands");
+    for (std::size_t j = 0; j < 6; ++j) {
+      require(std::abs(per_page_matrices[i][j] - per_page_matrices[0][j]) < 1e-9,
+              "the pattern /Matrix must be identical across all fixed pages");
+    }
+  }
 }
 
 // Criterion 7: mixed-mode degradation is EXPLICITLY reported, never silent. In
@@ -640,26 +693,21 @@ void mixed_mode_reports_degradation_pure_vector_refuses() {
   mixed_snap.page.vector_complexity_budget = 4; // curve has 9 points > 4
   ExportReport pdf_report;
   ExportReport svg_report;
-  const auto pdf_doc = build_pdf(*scene, mixed_snap, &pdf_report);
-  const auto svg_doc = build_svg(*scene, mixed_snap, &svg_report);
-  (void)pdf_doc;
-  (void)svg_doc;
+  build_pdf(*scene, mixed_snap, &pdf_report);
+  build_svg(*scene, mixed_snap, &svg_report);
   require(!pdf_report.empty(),
           "mixed-mode PDF must report the over-budget layer");
   require(!svg_report.empty(),
           "mixed-mode SVG must report the over-budget layer");
-  require(pdf_report.degraded_layers.size() == svg_report.degraded_layers.size(),
-          "both backends must report the same number of degraded layers");
-  const auto &pdf_entry = pdf_report.degraded_layers.front();
-  const auto &svg_entry = svg_report.degraded_layers.front();
-  require(pdf_entry.layer_id == curve_layer_id &&
-              svg_entry.layer_id == curve_layer_id,
+  // Full cross-backend parity: every entry (id + reason + dpi) must match.
+  require(reports_equal(pdf_report, svg_report),
+          "both backends must report the identical degradation entries");
+  require(pdf_report.degraded_layers.front().layer_id == curve_layer_id,
           "both backends must report the curve layer id");
-  require(pdf_entry.reason == ExportDegradationReason::complexity_threshold &&
-              svg_entry.reason == ExportDegradationReason::complexity_threshold,
+  require(pdf_report.degraded_layers.front().reason ==
+              ExportDegradationReason::complexity_threshold,
           "both backends must report complexity_threshold");
-  require(pdf_entry.target_dpi == base_snap.page.dpi &&
-              svg_entry.target_dpi == base_snap.page.dpi,
+  require(pdf_report.degraded_layers.front().target_dpi == base_snap.page.dpi,
           "both backends must report the page DPI as the target DPI");
 
   // (b) Pure-vector mode + same budget → both backends REFUSE (no silent
@@ -689,30 +737,32 @@ void mixed_mode_reports_degradation_pure_vector_refuses() {
   require(empty_pdf_report.empty() && empty_svg_report.empty(),
           "with no complexity budget no layer is degraded");
 
-  // (d) Determinism: identical input → identical report.
+  // (d) Determinism: identical input → identical report (every entry, both
+  // backends). A regression that permuted or truncated the list would fail here.
   ExportReport pdf_report_2;
   ExportReport svg_report_2;
   build_pdf(*scene, mixed_snap, &pdf_report_2);
   build_svg(*scene, mixed_snap, &svg_report_2);
-  require(pdf_report.degraded_layers.size() == pdf_report_2.degraded_layers.size(),
-          "identical input must yield identical PDF degradation count");
-  require(pdf_report.degraded_layers.front().layer_id ==
-              pdf_report_2.degraded_layers.front().layer_id,
-          "identical input must yield identical degraded layer id");
+  require(reports_equal(pdf_report, pdf_report_2),
+          "identical input must yield a byte-identical PDF report");
+  require(reports_equal(svg_report, svg_report_2),
+          "identical input must yield a byte-identical SVG report");
 }
 
 // Criterion 1: the Export Snapshot metadata (Document Revision, Presentation
-// version, Depth Transform, font & Pattern version) round-trips/is-stamped
-// consistently in both backends. SVG stamps them as data-* attributes on every
-// page root; PDF consumes the same ExportSnapshot, so the parity contract is
-// that both are driven by the identical snapshot.
+// version, Depth Transform, font asset) is stamped by the SVG backend as data-*
+// attributes on every page root, and drives the deterministic byte output of
+// both backends (same snapshot → same reproducible PDF/SVG — criterion 8). The
+// PDF backend is text-as-outlines by design (ADR 0047: no metadata attrs / no
+// Info dict in this phase), so its "stamp" is the reproducible layout the
+// snapshot produces; pattern_versions is carried by ExportSnapshot but not yet
+// stamped by either backend (a documented follow-up).
 void snapshot_metadata_round_trips_in_both() {
   auto scene_data = make_parity_scene();
   const auto scene = prepare(scene_data.document, scene_data.presentation);
   const auto snap = make_snapshot(PaginationMode::fixed, Millimetres{50.0});
 
-  // SVG: every page root carries the snapshot metadata (already the contract in
-  // paginated_svg_test.cpp; re-assert here for the parity scene).
+  // SVG: every page root carries the snapshot metadata.
   const auto text = std::string{build_svg(*scene, snap).text()};
   const auto svg_count = count_occurrences(text, "<svg ");
   require(count_occurrences(text, "data-document-revision=\"7\"") == svg_count,
@@ -730,10 +780,10 @@ void snapshot_metadata_round_trips_in_both() {
                                   "000000000001\"") == svg_count,
           "every page must carry the document id");
 
-  // PDF: the snapshot drives the page layout (MediaBox, bands). The document
-  // revision/presentation version are in-memory inputs that the PDF honours via
-  // its deterministic layout; assert the PDF built cleanly from the same snapshot
-  // (the shared-input contract — both consume ExportSnapshot unchanged).
+  // PDF (ADR 0047): carries no metadata attributes, but its output is fully
+  // determined by the same snapshot — the reproducibility test below proves the
+  // same snapshot yields byte-identical PDF. Here we assert the determinism
+  // preconditions (no timestamps) that make that contract hold.
   const auto pdf_bytes = std::string{build_pdf(*scene, snap).bytes()};
   require(pdf_bytes.find("CreationDate") == std::string::npos,
           "PDF must be deterministic (no CreationDate) for reproducibility");

@@ -8,15 +8,15 @@
 // it chose to rasterize, instead of rasterizing silently. Pure-vector mode
 // (the default) leaves it empty and never rasterizes.
 //
-// Determinism: exporters fill `degraded_layers` in layer-emit order (track
-// order, then z_order — the same order the scene body emits geometry), so an
-// identical scene + snapshot yields a byte-identical report.
+// Determinism: exporters fill `degraded_layers` in evaluate_complexity's
+// iteration order (the scene's curve_layers() order, which is z-sorted at
+// prepare time), so an identical scene + snapshot yields a byte-identical
+// report.
 
 #include <cstdint>
 #include <vector>
 
 #include <welllog/core/entity_id.hpp>
-#include <welllog/core/export.hpp>
 #include <welllog/scene/scene.hpp>
 
 namespace welllog {
