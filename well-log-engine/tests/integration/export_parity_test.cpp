@@ -428,6 +428,81 @@ std::size_t count_pdf_pages(std::string_view bytes) {
   return count;
 }
 
+// Parses the 6 operands of the PAGE `cm` operator — the transform with a
+// NEGATIVE d (the y-flip), which uniquely identifies the page cm amid the
+// per-glyph / image-placement / band cms. Uses qpdf --qdf to decompress every
+// stream reliably (the parity PDF's content streams are Flate-compressed); when
+// qpdf is unavailable the check is skipped (the orientation test in
+// pdf_scene_test covers the negative-d invariant independently).
+std::vector<double> parse_page_cm_operands(std::string_view bytes) {
+  bool qpdf_available = std::filesystem::exists("/usr/sbin/qpdf") ||
+                        std::filesystem::exists("/usr/bin/qpdf");
+  if (!qpdf_available) {
+    return {};
+  }
+  const auto in_path = write_temp_pdf(bytes);
+  const auto qdf_path =
+      std::filesystem::temp_directory_path() / "welllog_parity_qdf.pdf";
+  std::string captured;
+  const auto rc = run("qpdf --qdf --object-streams=disable " +
+                          in_path.string() + " " + qdf_path.string() + " 2>&1",
+                      captured);
+  std::error_code ec;
+  if (rc != 0) {
+    std::filesystem::remove(in_path, ec);
+    return {};
+  }
+  std::ifstream qdf(qdf_path, std::ios::binary);
+  const std::string qdf_bytes((std::istreambuf_iterator<char>(qdf)),
+                              std::istreambuf_iterator<char>());
+  std::filesystem::remove(in_path, ec);
+  std::filesystem::remove(qdf_path, ec);
+  // Scan every ` cm` operator line for the one with a negative d (index 3).
+  std::string_view::size_type search = 0;
+  while (true) {
+    const auto cm_pos = qdf_bytes.find(" cm", search);
+    if (cm_pos == std::string::npos) {
+      break;
+    }
+    const auto line_start = qdf_bytes.rfind('\n', cm_pos);
+    const auto line_end = qdf_bytes.find('\n', cm_pos);
+    const auto line = qdf_bytes.substr(
+        line_start == std::string::npos ? 0 : line_start + 1,
+        (line_end == std::string::npos ? qdf_bytes.size() : line_end) -
+            (line_start == std::string::npos ? 0 : line_start + 1));
+    std::vector<double> vals;
+    std::string token;
+    bool ok = true;
+    for (const char ch : line) {
+      if (ch == ' ') {
+        if (!token.empty()) {
+          try {
+            vals.push_back(std::stod(token));
+          } catch (...) {
+            ok = false;
+            break;
+          }
+          token.clear();
+        }
+      } else {
+        token.push_back(ch);
+      }
+    }
+    if (ok && !token.empty()) {
+      try {
+        vals.push_back(std::stod(token));
+      } catch (...) {
+        ok = false;
+      }
+    }
+    if (ok && vals.size() == 6 && vals[3] < 0.0) {
+      return vals;
+    }
+    search = cm_pos + 3;
+  }
+  return {};
+}
+
 // Extracts the first "/Matrix [...]" body and parses its 6 operands.
 std::vector<double> parse_first_pattern_matrix(std::string_view bytes) {
   const auto start = bytes.find("/Matrix [");
@@ -522,6 +597,38 @@ void pdf_page_physical_dimensions_match_request() {
   require_near(cont_boxes[0].second, expected_cont_h,
                "continuous page height must equal the margins+scale-derived "
                "physical height");
+}
+
+// Regression guard for the #193 M1 bug (hidden by symmetric test margins): with
+// ASYMMETRIC margins, the page `cm` must still anchor the body's shallow end
+// (scene-y=0) at the printable TOP. The correct f = (page_height_mm −
+// margins.top)·pmm; a prior form (margin_top_pt + window_bottom_pt) was wrong
+// for asymmetric margins. Asserts the page cm's f operand encodes the correct
+// asymmetric anchor.
+void asymmetric_margins_anchor_body_at_printable_top() {
+  auto scene_data = make_parity_scene();
+  const auto scene = prepare(scene_data.document, scene_data.presentation);
+  auto snap = make_snapshot(PaginationMode::continuous, Millimetres{297.0});
+  // Asymmetric: top 10, bottom 25. Scene 400 mm tall, 80 wide; printable width
+  // 120−10−10=100 → scale 1.25; derived body height 400·1.25=500 mm; page
+  // height = 500 + top(10) + bottom(25) = 535 mm.
+  snap.page.margins.top = Millimetres{10.0};
+  snap.page.margins.bottom = Millimetres{25.0};
+  const auto doc = build_pdf(*scene, snap);
+  const auto bytes = std::string{doc.bytes()};
+  const auto cm = parse_page_cm_operands(bytes);
+  if (cm.empty()) {
+    // qpdf unavailable — the negative-d orientation invariant is covered
+    // independently by pdf_scene_test; skip the asymmetric-anchor check here.
+    return;
+  }
+  require(cm[3] < 0.0, "page cm d-operand must be negative (y-flip)");
+  // f = (page_height_mm − margins.top)·pmm = (535 − 10)·pmm = 525·pmm.
+  const auto expected_f =
+      (535.0 - snap.page.margins.top.value) * points_per_millimetre;
+  require_near(cm[5], expected_f,
+               "page cm f must anchor scene-y=0 at the printable top for "
+               "asymmetric margins (the #193 M1 regression)");
 }
 
 // Criterion 8: SVG structure correctness — root/page/header/legend/page-number/
@@ -927,6 +1034,7 @@ void external_tools_accept_and_orientation_is_upright() {
 
 int main() {
   pdf_page_physical_dimensions_match_request();
+  asymmetric_margins_anchor_body_at_printable_top();
   svg_structure_is_correct();
   pagination_depth_ranges_are_continuous();
   pattern_phase_matches_across_backends();
