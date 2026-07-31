@@ -5,6 +5,7 @@
 // in the output. qpdf --check / pdfinfo verify external validity when available;
 // the Flate round-trip inflates the ACTUAL embedded content stream.
 
+#include <welllog/export/export_layout.hpp>
 #include <welllog/export/pdf_scene.hpp>
 #include <welllog/scene/image_pyramid.hpp>
 #include <welllog/scene/scene.hpp>
@@ -14,6 +15,7 @@
 #include "scene/prepare.hpp"
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -22,9 +24,11 @@
 #include <fstream>
 #include <iterator>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 #include <zlib.h>
 
@@ -41,6 +45,42 @@ void require(bool condition, std::string_view message) {
   if (!condition) {
     fail(message);
   }
+}
+
+void require_near(double actual, double expected, std::string_view message) {
+  if (std::abs(actual - expected) > 1.0e-6) {
+    fail(message);
+  }
+}
+
+// Builds the exact normalized-colour operator string the writer emits for an
+// sRGB triple + operator (rg = fill, RG = stroke), reproducing its append_number
+// (to_chars general, max_digits10) so the assertion is robust to digit count.
+// Used to assert the custom-layer primitives by their unique colours (which no
+// other layer emits) rather than generic S/f operators.
+[[nodiscard]] std::string color_operator(std::uint8_t r, std::uint8_t g,
+                                          std::uint8_t b,
+                                          std::string_view op) {
+  auto component = [](double v) {
+    if (v == 0.0) {
+      return std::string{"0"};
+    }
+    std::array<char, 48> buffer{};
+    const auto res = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+                                   v, std::chars_format::general,
+                                   std::numeric_limits<double>::max_digits10);
+    return res.ec == std::errc{} ? std::string(buffer.data(), res.ptr)
+                                 : std::string{"0"};
+  };
+  std::string out = component(r / 255.0);
+  out.push_back(' ');
+  out += component(g / 255.0);
+  out.push_back(' ');
+  out += component(b / 255.0);
+  out.push_back(' ');
+  out += op;
+  out.push_back('\n');
+  return out;
 }
 
 EntityId id(std::string_view text) {
@@ -691,6 +731,34 @@ void depth_range_bands_are_emitted_and_continuous() {
           "continuity); got " +
               std::to_string(band_cms) + " bands for " +
               std::to_string(fixed_pages) + " pages");
+
+  // Real depth-range continuity (criterion 3): re-derive each page's depth
+  // window from the SHARED page model (export_layout::compute_page_windows —
+  // the same model both backends consume) and assert the windows chain with no
+  // gaps/overlaps: page K's bottom-depth == page K+1's top-depth, the first
+  // page tops at the scene top, the last bottoms at the scene bottom. This is
+  // the page-model-level continuity the band-cm count above only proxies.
+  const auto fixed_snap = make_snapshot(PaginationMode::fixed, Millimetres{40.0});
+  const auto windows = export_layout::compute_page_windows(*scene, fixed_snap);
+  require(windows.size() == fixed_pages,
+          "the page model must compute the same page count as the PDF emits");
+  require(!windows.empty(), "fixed mode must produce >=1 page window");
+  const auto scene_top_depth =
+      export_layout::scene_y_to_depth(*scene, windows.front().window_top_mm);
+  const auto scene_bottom_depth =
+      export_layout::scene_y_to_depth(*scene, windows.back().window_bottom_mm);
+  require_near(scene_top_depth, 1000.0,
+               "first page must start at the scene top depth");
+  require_near(scene_bottom_depth, 1100.0,
+               "last page must end at the scene bottom depth");
+  for (std::size_t i = 1; i < windows.size(); ++i) {
+    const auto prev_bottom =
+        export_layout::scene_y_to_depth(*scene, windows[i - 1].window_bottom_mm);
+    const auto cur_top =
+        export_layout::scene_y_to_depth(*scene, windows[i].window_top_mm);
+    require_near(prev_bottom, cur_top,
+                 "page depth windows must be continuous (no gaps/overlaps)");
+  }
 }
 
 // Image DPI is encoded by the placement `cm` (physical rect vs pixel count):
@@ -799,13 +867,15 @@ void pattern_phase_matrix_matches_svg_for_nonzero_anchor_rotation() {
 
 // Custom-layer primitives: the content stream contains the polyline (stroked
 // m/l) and the triangle (filled m/l/h), emitted from the prepared custom layer.
+// Distinguished from curve/interval layers by their UNIQUE colours (polyline
+// stroke 10,20,200 RG; triangle fill 200,100,0 rg), which no other layer emits.
 void custom_layer_primitives_are_emitted() {
   const auto doc = build_full_document(PaginationMode::continuous);
   const auto inflated = inflate_first_stream(doc.bytes());
-  // Both custom primitives use m/l. Their presence (alongside the curve) is
-  // covered by the general primitive test; here we confirm the custom path
-  // contributed geometry by checking the polyline's stroke and a fill exist.
-  // (Exact coordinate matching is brittle across the cm; assert operators.)
+  require(inflated.find(color_operator(10, 20, 200, "RG")) != std::string::npos,
+          "the custom polyline must stroke in its unique colour");
+  require(inflated.find(color_operator(200, 100, 0, "rg")) != std::string::npos,
+          "the custom triangle must fill in its unique colour");
   require(inflated.find("S\n") != std::string::npos,
           "the custom polyline must stroke");
   require(inflated.find("f\n") != std::string::npos,
