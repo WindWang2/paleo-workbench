@@ -203,13 +203,23 @@ void TableModelTest::clipboard_copy_produces_tsv_html_and_internal_mime() {
   QVERIFY(html.contains(QStringLiteral("<td>10</td>")));
   QVERIFY(html.contains(QStringLiteral("<tr><td>1001</td><td></td></tr>")));
 
-  // Internal MIME: "<uuid>/<revision>".
+  // Internal MIME (ADR 0024 identity): "doc|rev|axis" on line 0, then one
+  // "curveId|unit" line per column (column 0 is the axis/depth column → nil
+  // curve id with the axis unit "m").
   const auto internal =
       QString::fromUtf8(payload.mime->data(
           QStringLiteral("application/x-welllog-table-selection")));
-  QVERIFY(internal.endsWith(QStringLiteral("/5")));
   QVERIFY(internal.startsWith(
       QStringLiteral("22222222-0000-4000-8000-000000000001")));
+  // The revision (5) and the axis id are on the first line.
+  QVERIFY(internal.contains(QStringLiteral("|5|")));
+  QVERIFY(internal.contains(
+      QStringLiteral("22222222-0000-4000-8000-000000000002")));
+  // The curve id (GR) and its unit (API) are present.
+  QVERIFY(internal.contains(
+      QStringLiteral("22222222-0000-4000-8000-000000000003")));
+  QVERIFY(internal.contains(QStringLiteral("|API")));
+  QVERIFY(internal.contains(QStringLiteral("|m")));
 }
 
 void TableModelTest::clipboard_large_selection_is_guarded() {

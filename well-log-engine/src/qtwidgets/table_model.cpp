@@ -33,6 +33,13 @@ constexpr std::uint64_t max_qt_rows =
 
 struct TableModel::Impl {
   TableProjection projection;
+  // ADR 0024 selection sync (Phase B). When non-null, the model reflects the
+  // session's Selection Set for this (document, axis) as a [first,last) span.
+  WellLogSession *session{nullptr};
+  EntityId document_id{};
+  EntityId sampling_axis_id{};
+  RowSelection reflected{{}, {}};
+  bool has_reflected{false};
 };
 
 TableModel::TableModel(QObject *parent)
@@ -51,6 +58,15 @@ EntityId TableModel::document_id() const noexcept {
 }
 DocumentRevision TableModel::document_revision() const noexcept {
   return impl_->projection.document_revision();
+}
+EntityId TableModel::sampling_axis_id() const noexcept {
+  return impl_->projection.sampling_axis_id();
+}
+TableColumn TableModel::column(std::uint64_t index) const noexcept {
+  return impl_->projection.column(index);
+}
+std::uint64_t TableModel::projection_column_count() const noexcept {
+  return impl_->projection.column_count();
 }
 
 int TableModel::rowCount(const QModelIndex &parent) const noexcept {
@@ -121,6 +137,81 @@ TableRowCell TableModel::raw_cell(std::uint64_t row,
                                   std::uint64_t column) const noexcept {
   const auto cell = impl_->projection.cell(row, column);
   return TableRowCell{cell.value.value_or(0.0), cell.null()};
+}
+
+void TableModel::set_session_selection_source(WellLogSession *session,
+                                              EntityId document_id,
+                                              EntityId sampling_axis_id) noexcept {
+  impl_->session = session;
+  impl_->document_id = document_id;
+  impl_->sampling_axis_id = sampling_axis_id;
+  // Drop any stale reflection; the host calls refresh_session_selection() once
+  // the source is wired (and on every subsequent selection event).
+  impl_->has_reflected = false;
+  impl_->reflected = {{}, {}};
+}
+
+void TableModel::refresh_session_selection() noexcept {
+  if (impl_->session == nullptr) {
+    return;
+  }
+  const auto sel = impl_->session->selection(impl_->document_id);
+  const auto prev = impl_->reflected;
+  const auto had = impl_->has_reflected;
+  // Reflect only selections on THIS model's axis (ADR 0024 / table-and-export.md
+  // §4.1: each axis maps its own rows). A selection on another axis, an
+  // invalidated selection, or no selection → clear the reflection.
+  RowSelection next{{}, {}};
+  bool reflect = false;
+  if (sel.has_value() && sel->valid &&
+      sel->sampling_axis_id == impl_->sampling_axis_id) {
+    next = RowSelection{.first_row = sel->first_row, .last_row = sel->last_row};
+    reflect = true;
+  }
+  impl_->reflected = next;
+  impl_->has_reflected = reflect;
+  const auto cols = columnCount();
+  // Emit dataChanged over the union of the previous and new spans so a
+  // connected view/QItemSelectionModel refreshes both the newly-selected and
+  // newly-deselected rows. QModelIndex() parent (flat table).
+  const auto emit_span = [&](std::uint64_t first, std::uint64_t last) {
+    if (first >= last || cols <= 0) {
+      return;
+    }
+    const auto row_count = static_cast<std::uint64_t>(rowCount());
+    const auto clamped_last = std::min(last, row_count);
+    if (first >= clamped_last) {
+      return;
+    }
+    emit dataChanged(index(static_cast<int>(first), 0),
+                     index(static_cast<int>(clamped_last - 1), cols - 1),
+                     {Qt::DisplayRole, NullRole});
+  };
+  if (had) {
+    emit_span(prev.first_row, prev.last_row);
+  }
+  if (reflect) {
+    emit_span(next.first_row, next.last_row);
+  }
+}
+
+RowSelection TableModel::current_row_selection() const noexcept {
+  return impl_->reflected;
+}
+
+bool TableModel::set_row_selection(std::uint64_t first_row,
+                                   std::uint64_t last_row) noexcept {
+  if (impl_->session == nullptr) {
+    return false;
+  }
+  return impl_->session
+      ->execute(SetRowSelectionCommand{
+          .document_id = impl_->document_id,
+          .sampling_axis_id = impl_->sampling_axis_id,
+          .first_row = first_row,
+          .last_row = last_row,
+      })
+      .has_value();
 }
 
 namespace {
@@ -219,10 +310,26 @@ SelectionClipboard build_selection_clipboard(const TableModel &model,
   }
   html += "</table>";
 
-  // Internal MIME: document id/revision for an in-app paste.
-  const QString internal =
-      QString::fromStdString(model.document_id().to_string()) + '/' +
-      QString::number(model.document_revision().value);
+  // Internal MIME: the full semantic identity for an in-app paste (ADR 0024 /
+  // table-and-export.md §4.2). Carries document id, revision, the Sampling
+  // Axis id, and each column's curve id + unit so an in-app paste can resolve
+  // back to the same raw samples without re-deriving from headers. The line
+  // format is: "doc|rev|axis\ncurveId|unit\ncurveId|unit..." (column 0 is the
+  // axis/depth column: a nil curve id with the axis unit). Nil curve ids are
+  // emitted as the empty string. Sanitized of newlines within fields.
+  QString internal =
+      QString::fromStdString(model.document_id().to_string()) + '|' +
+      QString::number(model.document_revision().value) + '|' +
+      QString::fromStdString(model.sampling_axis_id().to_string()) + '\n';
+  for (std::uint64_t c = 0; c < col_count; ++c) {
+    if (c != 0) {
+      internal += '\n';
+    }
+    const auto col = model.column(c);
+    internal += sanitize_tsv_field(
+        QString::fromStdString(col.curve_id.to_string()) + '|' +
+        sanitize_tsv_field(QString::fromStdString(col.unit)));
+  }
 
   result.copied_rows = rows;
   result.mime = std::make_unique<QMimeData>();

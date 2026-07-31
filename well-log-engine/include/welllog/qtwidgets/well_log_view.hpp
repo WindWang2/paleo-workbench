@@ -49,9 +49,19 @@ public:
   [[nodiscard]] const CapabilityReport &capability_report() const noexcept;
   [[nodiscard]] std::optional<CurvePick> hover_pick() const noexcept;
   [[nodiscard]] std::optional<CurvePick> click_pick() const noexcept;
+  // The current shared Selection Set entry for this view's document (ADR 0024),
+  // or nullopt when there is none. Read straight from the session — the view is
+  // an adapter, selection state lives in the session.
+  [[nodiscard]] std::optional<SelectionState> selection() const noexcept;
 
 public slots:
   void reset_viewport();
+  // Selects a Reference Depth Range on `axis_id` for this view's document
+  // (issues a SetSelectionCommand on the session). Mirrors the host API; the
+  // built-in Ctrl+drag gesture uses the same path.
+  void set_selection(EntityId axis_id, SelectionDepthRange range);
+  // Clears the selection on this view's document.
+  void clear_selection();
 
 signals:
   void capabilityChanged();
@@ -64,6 +74,9 @@ signals:
   void crosshairChanged();
   void hoverChanged();
   void curveClicked();
+  // Emitted (coalesced) when the session's selection for this document changes
+  // or is invalidated (ADR 0024).
+  void selectionChanged();
 
 protected:
   void initializeGL() override;
@@ -85,6 +98,13 @@ private:
   void schedule_coalesced_signals() noexcept;
   void update_pointer(double left, double top) noexcept;
   void update_capability_overlay() noexcept;
+  // Ctrl+drag selection gesture (ADR 0024). begin_selection_drag captures the
+  // Reference Depth at `pixel_top` and resolves the axis the press falls in
+  // (the hovered curve's axis, else the document's first axis).
+  // update_selection_drag issues a live SetSelectionCommand between the anchor
+  // depth and the depth at `pixel_top`.
+  void begin_selection_drag(double pixel_top) noexcept;
+  void update_selection_drag(double pixel_top) noexcept;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

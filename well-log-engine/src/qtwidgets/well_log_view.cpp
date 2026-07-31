@@ -122,11 +122,20 @@ struct WellLogView::Impl {
   std::uint64_t last_diagnostic_id{};
   bool viewport_signal_pending{};
   bool crosshair_signal_pending{};
+  bool selection_signal_pending{};
   // Host image-tile resolver (ADR 0045); applied to the renderer on the GL
   // thread once initialized, and re-applied after context recovery.
   std::function<Result<RasterTile>(const ImageTileRequest &)> image_resolver;
   bool image_resolver_dirty{};
   bool hover_signal_pending{};
+  // Ctrl+drag selection gesture (ADR 0024). `selecting` is true during an
+  // active depth-band drag; `selection_anchor_depth` is the Reference Depth at
+  // the press point; `selection_axis_id` is the axis the press fell in. The
+  // gesture issues a SetSelectionCommand on release (and live-updates during
+  // the drag).
+  bool selecting{};
+  double selection_anchor_depth{};
+  EntityId selection_axis_id{};
 };
 
 WellLogView::WellLogView(QWidget *parent)
@@ -170,6 +179,10 @@ WellLogView::WellLogView(std::shared_ptr<WellLogSession> session,
     if (impl_->hover_signal_pending) {
       impl_->hover_signal_pending = false;
       emit hoverChanged();
+    }
+    if (impl_->selection_signal_pending) {
+      impl_->selection_signal_pending = false;
+      emit selectionChanged();
     }
   });
   impl_->session_observer_id =
@@ -505,6 +518,14 @@ void WellLogView::resizeEvent(QResizeEvent *event) {
 }
 
 void WellLogView::mousePressEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton &&
+      event->modifiers().testFlag(Qt::ControlModifier)) {
+    // Ctrl+drag: start a depth-band selection gesture (ADR 0024). Capture the
+    // Reference Depth at the press point and the axis the press falls in.
+    begin_selection_drag(event->position().y());
+    event->accept();
+    return;
+  }
   if (event->button() == Qt::LeftButton) {
     impl_->dragging = true;
     impl_->drag_moved = false;
@@ -517,6 +538,12 @@ void WellLogView::mousePressEvent(QMouseEvent *event) {
 }
 
 void WellLogView::mouseMoveEvent(QMouseEvent *event) {
+  if (impl_->selecting) {
+    // Live-update the selection band as the drag moves.
+    update_selection_drag(event->position().y());
+    event->accept();
+    return;
+  }
   if (impl_->dragging && impl_->document_id.has_value() && height() > 0) {
     const auto delta = event->position().y() - impl_->drag_last_top;
     const auto viewport = impl_->session->viewport(*impl_->document_id);
@@ -540,6 +567,12 @@ void WellLogView::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void WellLogView::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton && impl_->selecting) {
+    update_selection_drag(event->position().y());
+    impl_->selecting = false;
+    event->accept();
+    return;
+  }
   if (event->button() == Qt::LeftButton && impl_->dragging) {
     update_pointer(event->position().x(), event->position().y());
     if (!impl_->drag_moved) {
@@ -625,6 +658,117 @@ void WellLogView::reset_viewport() {
   }
 }
 
+std::optional<SelectionState> WellLogView::selection() const noexcept {
+  if (!impl_->document_id.has_value()) {
+    return std::nullopt;
+  }
+  return impl_->session->selection(*impl_->document_id);
+}
+
+void WellLogView::set_selection(EntityId axis_id, SelectionDepthRange range) {
+  if (QThread::currentThread() != thread()) {
+    const auto axis = axis_id;
+    const auto r = range;
+    QMetaObject::invokeMethod(
+        this, [this, axis, r]() { set_selection(axis, r); },
+        Qt::QueuedConnection);
+    return;
+  }
+  if (!impl_->document_id.has_value()) {
+    return;
+  }
+  static_cast<void>(impl_->session->execute(SetSelectionCommand{
+      .document_id = *impl_->document_id,
+      .sampling_axis_id = axis_id,
+      .reference_depth_range = range,
+  }));
+}
+
+void WellLogView::clear_selection() {
+  if (QThread::currentThread() != thread()) {
+    QMetaObject::invokeMethod(
+        this, [this]() { clear_selection(); }, Qt::QueuedConnection);
+    return;
+  }
+  if (!impl_->document_id.has_value()) {
+    return;
+  }
+  static_cast<void>(impl_->session->execute(
+      ClearSelectionCommand{.document_id = *impl_->document_id}));
+}
+
+void WellLogView::begin_selection_drag(double pixel_top) noexcept {
+  try {
+    if (!impl_->document_id.has_value() || height() <= 0) {
+      return;
+    }
+    const auto document =
+        impl_->session->document(*impl_->document_id);
+    const auto viewport = impl_->session->viewport(*impl_->document_id);
+    if (document == nullptr || !viewport.has_value()) {
+      return;
+    }
+    const auto vertical_fraction =
+        std::clamp(pixel_top / static_cast<double>(height()), 0.0, 1.0);
+    const auto depth =
+        viewport->top + vertical_fraction * (viewport->bottom - viewport->top);
+    // Resolve the axis: prefer the hovered curve's axis; else the document's
+    // first Sampling Axis (the primary axis). A nil axis aborts the gesture.
+    EntityId axis_id;
+    if (impl_->hover_pick.has_value()) {
+      for (const auto &curve : document->curves()) {
+        if (curve.id == impl_->hover_pick->curve_id) {
+          axis_id = curve.sampling_axis_id;
+          break;
+        }
+      }
+    }
+    if (axis_id.is_nil() && !document->sampling_axes().empty()) {
+      axis_id = document->sampling_axes().front().id;
+    }
+    if (axis_id.is_nil()) {
+      return;
+    }
+    impl_->selecting = true;
+    impl_->selection_anchor_depth = depth;
+    impl_->selection_axis_id = axis_id;
+    // Issue an initial zero-band selection so the host sees the gesture start.
+    static_cast<void>(impl_->session->execute(SetSelectionCommand{
+        .document_id = *impl_->document_id,
+        .sampling_axis_id = axis_id,
+        .reference_depth_range = {.top = depth, .bottom = depth},
+    }));
+  } catch (...) {
+    publish_fatal_error();
+  }
+}
+
+void WellLogView::update_selection_drag(double pixel_top) noexcept {
+  try {
+    if (!impl_->selecting || !impl_->document_id.has_value() ||
+        impl_->selection_axis_id.is_nil() || height() <= 0) {
+      return;
+    }
+    const auto viewport = impl_->session->viewport(*impl_->document_id);
+    if (!viewport.has_value()) {
+      return;
+    }
+    const auto vertical_fraction =
+        std::clamp(pixel_top / static_cast<double>(height()), 0.0, 1.0);
+    const auto depth =
+        viewport->top + vertical_fraction * (viewport->bottom - viewport->top);
+    const auto top = std::min(depth, impl_->selection_anchor_depth);
+    const auto bottom = std::max(depth, impl_->selection_anchor_depth);
+    static_cast<void>(impl_->session->execute(SetSelectionCommand{
+        .document_id = *impl_->document_id,
+        .sampling_axis_id = impl_->selection_axis_id,
+        .reference_depth_range = {.top = top, .bottom = bottom},
+    }));
+  } catch (...) {
+    publish_fatal_error();
+  }
+}
+
 void WellLogView::update_pointer(double left, double top) noexcept {
   try {
     if (!impl_->document_id.has_value() || width() <= 0 || height() <= 0) {
@@ -695,6 +839,11 @@ void WellLogView::handle_session_event(ViewEvent event) noexcept {
     break;
   case ViewEventKind::crosshair_changed:
     impl_->crosshair_signal_pending = true;
+    update();
+    break;
+  case ViewEventKind::selection_changed:
+  case ViewEventKind::selection_invalidated:
+    impl_->selection_signal_pending = true;
     update();
     break;
   case ViewEventKind::documents_changed:

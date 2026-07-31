@@ -20,6 +20,7 @@
 #include <QVariant>
 
 #include <welllog/qtwidgets/export.hpp>
+#include <welllog/session/session.hpp>
 #include <welllog/table/table_projection.hpp>
 
 namespace welllog {
@@ -30,6 +31,13 @@ namespace welllog {
 struct TableRowCell {
   double value{};
   bool null{true};
+};
+
+// A half-open [first_row, last_row) selection range on a table (also the
+// reflected span from the session's Selection Set, ADR 0024).
+struct RowSelection {
+  std::uint64_t first_row{};
+  std::uint64_t last_row{}; // exclusive
 };
 
 class WELLLOG_QTWIDGETS_API TableModel : public QAbstractTableModel {
@@ -60,6 +68,13 @@ public:
   // when empty) — a host uses these to invalidate on document replacement.
   [[nodiscard]] EntityId document_id() const noexcept;
   [[nodiscard]] DocumentRevision document_revision() const noexcept;
+  // The Sampling Axis this model's projection is aligned to (nil when empty).
+  [[nodiscard]] EntityId sampling_axis_id() const noexcept;
+  // Column metadata for the projection (column 0 is the axis/depth column).
+  [[nodiscard]] TableColumn column(std::uint64_t index) const noexcept;
+  // The projection's column count (64-bit; rowCount/columnCount report the
+  // Qt int-capped value).
+  [[nodiscard]] std::uint64_t projection_column_count() const noexcept;
 
   // --- QAbstractTableModel overrides (on-demand, no matrix copy) -----------
   [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const noexcept
@@ -77,6 +92,37 @@ public:
   // path through the projection). Used by clipboard copy and exposed for tests.
   [[nodiscard]] TableRowCell raw_cell(std::uint64_t row,
                                       std::uint64_t column) const noexcept;
+
+  // --- ADR 0024 selection sync (Phase B) -----------------------------------
+  //
+  // The model is a bidirectional adapter over the session's shared Selection
+  // Set. A model built on one Sampling Axis reflects ONLY selections on that
+  // axis (a selection on another axis is ignored — multi-axis tables map their
+  // own rows, table-and-export.md §4.1).
+  //
+  // Attaches the model to a session's Selection Set for one axis. After this,
+  // call refresh_session_selection() whenever a selection_changed /
+  // selection_invalidated ViewEvent is delivered (the host marshals the event
+  // onto the GUI thread, ADR 0147). Passing a null session detaches. The
+  // document/axis ids must match this model's projection.
+  void set_session_selection_source(WellLogSession *session,
+                                    EntityId document_id,
+                                    EntityId sampling_axis_id) noexcept;
+  // Reflects the session's current selection (if any, on this model's axis) as
+  // a [first_row, last_row) span. Emits dataChanged over the previous and new
+  // spans so a connected QItemSelectionModel/view updates. No-op when no source
+  // is set. Safe to call on every selection event.
+  void refresh_session_selection() noexcept;
+  // The row span this model currently reflects from the session (or the
+  // explicitly-set span when the host drives selection from the table).
+  // `{0,0}` when there is no selection. Half-open [first_row, last_row).
+  [[nodiscard]] RowSelection current_row_selection() const noexcept;
+  // Drives selection FROM the table: issues a SetRowSelectionCommand on the
+  // attached session for this model's axis. Returns false when no source is
+  // attached or the command is rejected. The session then publishes
+  // selection_changed, which refresh_session_selection() reflects back.
+  [[nodiscard]] bool set_row_selection(std::uint64_t first_row,
+                                       std::uint64_t last_row) noexcept;
 
 private:
   struct Impl;
@@ -98,12 +144,6 @@ struct SelectionClipboard {
   // Owning the built payload. Null when too large. The caller takes ownership
   // (parent it to the QApplication clipboard or delete it).
   std::unique_ptr<QMimeData> mime;
-};
-
-// A half-open [first_row, last_row) selection range on a table.
-struct RowSelection {
-  std::uint64_t first_row{};
-  std::uint64_t last_row{}; // exclusive
 };
 
 // Default ceiling above which a selection is "too large" to build on the GUI

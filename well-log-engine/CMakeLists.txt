@@ -1103,6 +1103,25 @@ if(WELLLOG_BUILD_TESTS)
             welllog.qt-table-model
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=minimal"
         )
+
+        # Bidirectional graphics↔table selection sync (ADR 0024, #154 Phase B).
+        # No GL needed — a TableModel + headless session only.
+        qt_add_executable(welllog_qt_table_selection_sync_tests
+            tests/qt/table_selection_sync_test.cpp
+        )
+        welllog_enable_warnings(welllog_qt_table_selection_sync_tests)
+        target_link_libraries(
+            welllog_qt_table_selection_sync_tests
+            PRIVATE WellLog::QtWidgets WellLog::Session WellLog::Table Qt6::Test
+        )
+        add_test(
+            NAME welllog.qt-table-selection-sync
+            COMMAND welllog_qt_table_selection_sync_tests
+        )
+        set_tests_properties(
+            welllog.qt-table-selection-sync
+            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=minimal"
+        )
     endif()
     if(WELLLOG_BUILD_PYTHON)
         add_test(
