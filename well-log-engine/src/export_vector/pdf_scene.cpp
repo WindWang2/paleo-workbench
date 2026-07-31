@@ -381,16 +381,21 @@ PdfSceneExporter::write(const PreparedScene &scene,
                                 page.margins.bottom.value;
 
     // Build the single page's content stream. One `cm` maps a scene-millimetre
-    // point (sx, sy) to PDF user-space points:
-    //   (marginL_mm·pmm + sx·scale·pmm, marginT_mm·pmm + sy·scale·pmm)
-    // As an affine [a b c d e f] that is a=d=scale·pmm, e=marginL_mm·pmm,
-    // f=marginT_mm·pmm (b=c=0). pmm = points per millimetre.
+    // point (sx, sy) into PDF user-space points, y-FLIPPING because scene-mm is
+    // y-down (depth increases downward) while PDF user-space is y-up — so the
+    // scene renders top-down (shallow depth at the page top, deep at the
+    // bottom), matching the SVG backend and well-log convention. As an affine
+    // [a b c d e f]: a=scale·pmm, d=−scale·pmm (the flip), e=marginL_mm·pmm,
+    // f=(page_height_mm − marginT_mm)·pmm (pinned so scene-y=0 lands at the
+    // printable top, scene-y=physical_height at the printable bottom). pmm =
+    // points per millimetre. A positive d here would invert the whole scene.
     PdfPageContent content;
     const auto s_pt = scale * points_per_millimetre;
     const auto margin_left_pt = page.margins.left.value * points_per_millimetre;
-    const auto margin_top_pt = page.margins.top.value * points_per_millimetre;
-    content.stream.concat_matrix(s_pt, 0.0, 0.0, s_pt, margin_left_pt,
-                                 margin_top_pt);
+    const auto page_top_pt =
+        (page_height_mm - page.margins.top.value) * points_per_millimetre;
+    content.stream.concat_matrix(s_pt, 0.0, 0.0, -s_pt, margin_left_pt,
+                                 page_top_pt);
 
     // Per track: save state, establish the track clip (re ... W n), emit the
     // body, restore state — mirroring SVG's per-track clipPath'd `<g>`.

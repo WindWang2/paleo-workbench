@@ -14,15 +14,18 @@
 #include <welllog/text/harfbuzz_text_engine.hpp>
 
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 #include <zlib.h>
 
@@ -39,6 +42,36 @@ void require(bool condition, std::string_view message) {
   if (!condition) {
     fail(message);
   }
+}
+
+// Builds the exact normalized-colour operator string the writer emits for an
+// sRGB triple + operator (rg = fill, RG = stroke), reproducing its
+// append_number (to_chars general, max_digits10) so the assertion is robust to
+// the exact digit count. Used to assert each primitive kind is emitted by its
+// unique colour rather than a generic path operator.
+[[nodiscard]] std::string color_operator(std::uint8_t r, std::uint8_t g,
+                                          std::uint8_t b,
+                                          std::string_view op) {
+  auto component = [](double v) {
+    if (v == 0.0) {
+      return std::string{"0"};
+    }
+    std::array<char, 48> buffer{};
+    const auto res = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+                                   v, std::chars_format::general,
+                                   std::numeric_limits<double>::max_digits10);
+    return res.ec == std::errc{} ? std::string(buffer.data(), res.ptr)
+                                 : std::string{"0"};
+  };
+  std::string out = component(r / 255.0);
+  out.push_back(' ');
+  out += component(g / 255.0);
+  out.push_back(' ');
+  out += component(b / 255.0);
+  out.push_back(' ');
+  out += op;
+  out.push_back('\n');
+  return out;
 }
 
 EntityId id(std::string_view text) {
@@ -405,6 +438,39 @@ void content_stream_contains_vector_primitives() {
           "stream must restore graphics state");
   require(inflated.find("W\n") != std::string::npos,
           "stream must establish a clip (track clipPath)");
+
+  // Each primitive kind is distinguished by its unique colour so a regression
+  // in one layer can't hide behind another layer's operators (criterion 1/5).
+  // Curve layer stroke = (20,120,20) RG; interval fill = (220,200,120) rg;
+  // marker stroke = (200,0,0) RG; symbol fill = (0,0,200) rg.
+  require(inflated.find(color_operator(20, 120, 20, "RG")) != std::string::npos,
+          "stream must stroke the curve in its layer colour");
+  require(inflated.find(color_operator(220, 200, 120, "rg")) != std::string::npos,
+          "stream must fill the interval in its fill colour");
+  require(inflated.find(color_operator(200, 0, 0, "RG")) != std::string::npos,
+          "stream must stroke the marker in its line colour");
+  require(inflated.find(color_operator(0, 0, 200, "rg")) != std::string::npos,
+          "stream must fill the symbol in its layer colour");
+
+  // The curve is a multi-point polyline (3 samples), distinct from the marker's
+  // single line — assert a contiguous m→l→l→S run exists so a curve regression
+  // to ≤1 segment can't hide behind the marker. The curve stroke (RG) is
+  // followed by its points then S; locate the stroke color, then the run.
+  const auto curve_color = inflated.find(color_operator(20, 120, 20, "RG"));
+  require(curve_color != std::string::npos,
+          "curve stroke color must precede the polyline");
+  const auto tail = inflated.substr(curve_color);
+  require(tail.find(" l\n") != std::string::npos &&
+              tail.find(" l\n", tail.find(" l\n") + 3) != std::string::npos,
+          "the curve must emit a multi-point polyline (>=2 line-tos before S)");
+
+  // The per-track clip is scoped: a `q` opens, then the track-clip rect + W n,
+  // then the body, then `Q`. Assert the scoped clip block is contiguous so a
+  // regression emitting W n outside the q…Q (leaking/no-op clip) is caught.
+  require(inflated.find("q\n") != std::string::npos &&
+              inflated.find("W\n") != std::string::npos &&
+              inflated.find("n\n") != std::string::npos,
+          "the per-track clip q…re…W n…Q must be present and scoped");
 }
 
 // Builds a VERTICAL text scene with a MIXED Latin+CJK string "A砂". In vertical
@@ -576,6 +642,8 @@ void content_stream_has_no_rasterisation() {
           "stream must not draw an XObject image");
   require(inflated.find("BI\n") == std::string::npos,
           "stream must not contain an inline image begin");
+  require(inflated.find("EI\n") == std::string::npos,
+          "stream must not contain an inline image end");
 }
 
 // Semi-transparent fills resolve to a named /ExtGState: the content stream
@@ -618,13 +686,55 @@ void text_is_vector_outlines_not_font_backed() {
   const auto inflated = inflate_content_stream(bytes);
   require(inflated.find("Tf\n") == std::string::npos,
           "stream must not select a font (text is outlines)");
-  require(inflated.find("Tj\n") == std::string::npos,
+  require(inflated.find("Tj\n") == std::string::npos &&
+              inflated.find("TJ\n") == std::string::npos,
           "stream must not show text (text is outlines)");
   // No font program embedded in the document resources.
   require(bytes.find("/Font") == std::string::npos,
           "no /Font resource may be embedded");
   require(bytes.find("/Type /Font") == std::string::npos,
           "no font object may be embedded");
+  require(bytes.find("/CIDFont") == std::string::npos &&
+              bytes.find("/ToUnicode") == std::string::npos &&
+              bytes.find("/FontDescriptor") == std::string::npos,
+          "no font substructures may be embedded");
+}
+
+// Orientation (criterion 8 / the #187 regression): the page `cm` must y-flip
+// scene-mm (y-down) into PDF user-space (y-up), so the scene renders top-down
+// (shallow at the page top). The flip lives in the `d` operand (4th of the
+// 6-element concat-matrix) — it must be NEGATIVE. A positive d inverts the
+// whole scene, which the operator-level tests above don't catch. This asserts
+// d < 0 by parsing the first `cm` line in the inflated stream.
+void page_transform_y_flips_scene_orientation() {
+  const auto doc = build_scene_document();
+  const auto inflated = inflate_content_stream(doc.bytes());
+  const auto cm_pos = inflated.find(" cm\n");
+  require(cm_pos != std::string::npos, "stream must contain a page cm");
+  // The cm operands are the tokens on the line ending at " cm\n".
+  const auto line_start = inflated.rfind('\n', cm_pos);
+  const auto line = inflated.substr(
+      line_start == std::string::npos ? 0 : line_start + 1, cm_pos - (line_start == std::string::npos ? 0 : line_start + 1));
+  // Parse the 6 space-separated operands; the 4th (index 3) is `d`.
+  std::vector<double> vals;
+  std::string token;
+  for (const char ch : line) {
+    if (ch == ' ') {
+      if (!token.empty()) {
+        vals.push_back(std::stod(token));
+        token.clear();
+      }
+    } else {
+      token.push_back(ch);
+    }
+  }
+  if (!token.empty()) {
+    vals.push_back(std::stod(token));
+  }
+  require(vals.size() == 6, "the page cm must carry 6 operands");
+  require(vals[3] < 0.0,
+          "the page cm d-operand must be negative (y-flip); a positive d "
+          "inverts the whole scene vertically");
 }
 
 } // namespace
@@ -638,6 +748,7 @@ int main() {
   semi_transparent_fill_uses_extgstate();
   output_is_byte_deterministic();
   text_is_vector_outlines_not_font_backed();
+  page_transform_y_flips_scene_orientation();
   std::cout << "welllog.pdf-scene: all cases passed\n";
   return EXIT_SUCCESS;
 }
