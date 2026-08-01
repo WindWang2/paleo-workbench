@@ -191,3 +191,11 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 **drive-by 潜伏 build 修复**（本沙箱 GCC 更严，阻塞依赖库编译）：manifest `(void)field()` 丢弃 nodiscard、xlsx `sheet_index` set-but-unused、`well_log_view.cpp` switch 漏 `image_pyramid_unavailable`、两测试 `BufferSourceReference::checksum` 缺初始化。
 
 **#162 链状态**：#196 ✅ → #197 ✅ → **#198 ✅** → #199（增量 LOD 尾扩展，frontier）/ #200（fixed-viewport vs follow-latest）→ #201（高频合并 + 压力）。
+
+## Session: 2026-08-01（续 9）— #199 增量 LOD 尾扩展（append 不全量重建）
+
+`/implement` #199（#162 链，ADR 0031「LOD 只增量更新受影响尾块」）。**核心**：`CurveLodPyramid::extend_tail`（scene）——把短曲线的旧 pyramid 无拷贝尾扩展到长曲线：重用除最后一个 run 外的全部 SourceRun（其样点范围未被 append 触及，level summary 不变），仅从最后一个 run 的 begin 到扩展末端重新派生（含 null 间隔引入的新 tail run）。结果与全量 `build` 在 envelope 点 + derived_bytes + level_count + source_bytes + budget_limited 上**逐字节相等**。提取共享 `build_run_levels`（per-run 层级派生）供 build 与 extend_tail 复用，结构性保证两者派生的任一 run 字节一致。前置：id 匹配、扩展更长、前缀数值相等（append 非编辑）、algorithm/base_bucket/budget 全匹配（否则拒，调方须全量 build）。**Session 接线**：AppendBatchCommand 在前次 preparation ready 时暂存每曲线旧 pyramid 到 `pending_append_reuse` 提示；SetDocumentCommand LOD worker 读它——每曲线先试 extend_tail，结构拒绝/无旧 pyramid 则回退全量 build（始终正确）；未变曲线直接复用旧 pyramid（零工作）。
+
+**两轴 review**（固定点 `dacf025`）：**两轴收敛到同一根因**——parity 保证在 binding/auto-growing budget 下破裂（无测试覆盖该区）。**3 hard 全修**：(1) derived-byte 预充——extend_tail 原在每 run 派生后才充 `sizeof(SourceRun)`，首 run 见的预算比 build 大 → 两遍扫描（先发现 run 边界预充全部 SourceRun 开销，再派生），匹配 build 的 `run_count*sizeof` 预充；(2) 默认预算复用——caller 留 0 时复用旧（更短）曲线 auto-budget 而非扩展曲线的 → 改为预算不一致即拒（parity 仅在匹配预算下成立）；(3) `pending_append_reuse` 仅在 async 分支消费 → 同步路径泄漏 → 提到 async/sync 分支前消费。**judgement 应用**：J4 注释对齐代码。保留（行内文档）：J2 重复 run-scan（两遍修复已消除其引发的分歧）、J1 整数曲线前缀走 double（曲线值多 float）、J3 所有 extend_tail 拒因归一码（每拒都回退全量 build，无调用方分支）。新增 2 测试（binding-budget parity、mismatched-budget 拒），既有改用显式常量预算。commit `cebc56a`（feature）+ `196a72d`（review fix）。38/38 green。
+
+**#162 链状态**：#196 ✅ → #197 ✅ → #198 ✅ → **#199 ✅** → #200（fixed-viewport vs follow-latest，frontier）/ #201（高频合并 + 压力）。

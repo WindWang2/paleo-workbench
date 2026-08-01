@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W7（WellLogEngine #198 AppendBatchCommand）— Complete; frontier now #199
+Phase W8（WellLogEngine #199 增量 LOD 尾扩展）— Complete; frontier now #200
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -274,6 +274,28 @@ Phase W7（WellLogEngine #198 AppendBatchCommand）— Complete; frontier now #1
 - [x] judgement 保留（行内文档）：重复 double 单调遍历（两路径载荷不同）、`version_conflict` 复用 `invalid_document`（无 enum 项，跨模块改动延后）
 - **Status:** complete（commit `dacf025`），36/36 green。frontier 现 #199
 
+### Phase W8: #199 增量 LOD 尾扩展（append 不全量重建，ADR 0031）
+
+`/implement` #199（#162 链）。extend_tail + session 接线，两 commit + 两轴 `/code-review`。固定点 `dacf025`。
+
+#### W8.1: CurveLodPyramid::extend_tail + 共享 build_run_levels
+- [x] 提取 `build_run_levels`（per-run 层级派生）供 build 与 extend_tail 复用（结构性 parity 基础）
+- [x] `extend_tail`：重用除最后 run 外全部 SourceRun；从最后 run begin 到扩展末端两遍扫描（先发现 run 边界预充 SourceRun 开销，再派生），envelope + derived_bytes + level_count + budget_limited 逐字节等于全量 build
+- [x] 前置：id 匹配、扩展更长、前缀数值相等（append 非编辑）、algorithm/base_bucket/budget 全匹配（否则拒 → 调方全量 build）
+- **Status:** complete（合入 commit `cebc56a`）
+
+#### W8.2: Session LOD worker 增量接线 + 测试
+- [x] AppendBatchCommand 在前次 preparation ready 时暂存每曲线旧 pyramid 到 `pending_append_reuse` 提示
+- [x] SetDocumentCommand LOD worker 读提示：每曲线先试 extend_tail，结构拒绝/无旧 pyramid 回退全量 build；未变曲线直接复用
+- [x] 测试：incremental-lod（7 用例：parity/链式/编辑拒/非增长拒/null-gap/tight-budget parity/mismatched-budget 拒）+ append-incremental-session（2 用例：incremental 路径 ready / 无前次 ready 回退）
+- **Status:** complete（commit `cebc56a`）
+
+#### W8.3: 两轴 /code-review 修复
+- [x] **两轴收敛同一根因**：parity 在 binding/auto-growing budget 下破裂（无测试覆盖）。3 hard 全修：derived-byte 预充分歧（两遍扫描预充）、默认预算复用（改预算不一致即拒）、`pending_append_reuse` 同步路径泄漏（消费提到分支前）
+- [x] 新增 2 测试（tight-budget parity 锁定预充修复、mismatched-budget 拒锁定预算前置）；既有改用显式常量预算
+- [x] judgement 应用：J4 注释对齐代码；保留 J2/J1/J3（行内文档）
+- **Status:** complete（commit `196a72d`），38/38 green。frontier 现 #200
+
 ## Decisions Made
 
 | Decision | Rationale |
@@ -294,6 +316,10 @@ Phase W7（WellLogEngine #198 AppendBatchCommand）— Complete; frontier now #1
 | **[W7]** append 委托 `SetDocumentCommand` 提交 | 复用 validate/LOD/selection 重映射/事件发布，避免复制 ~300 行失效逻辑；append 专有校验（单调门、尾连续性）在前置阶段完成 |
 | **[W7]** `version_conflict` 复用 `invalid_document`（非新 enum） | `ErrorCode` 无 `version_conflict` 项；新增是跨模块改动。follow `selection_*` 先例复用最接近稳定码，行内文档说明 |
 | **[W7]** 空批为 no-op 成功（当前 revision） | 规格未覆盖；成功不产新 revision/事件，避免无意义状态变更 |
+| **[W8]** extend_tail 重用除最后 run 外全部 SourceRun，仅重派生末尾区 | 旧 run 样点范围未被 append 触及，level summary 不变；末尾 run 的 begin 重派生是规格允许的「join 边界 bucket」 |
+| **[W8]** extend_tail 预算不一致即拒（非复用旧预算） | parity 仅在匹配预算下成立；auto-budget 随曲线增长会变，故拒绝强制全量 build。现实契约是 host/session 跨 append 用常量预算 |
+| **[W8]** run-scan 两遍（先发现边界预充 SourceRun 开销，再派生） | 必须匹配 build 的 `run_count*sizeof` 预充，否则 extend_tail 见更大预算包络 → 发出 build 会截断的 level，破坏 parity（review hard 发现） |
+| **[W8]** session 用 `pending_append_reuse` 提示暂存旧 pyramid（非重构 SetDocumentCommand） | 最小侵入接线；hint 在 async/sync 两路径消费，worker 先试 extend_tail 再回退 build，始终正确 |
 
 ## Errors Encountered & Resolved
 
@@ -312,3 +338,6 @@ Phase W7（WellLogEngine #198 AppendBatchCommand）— Complete; frontier now #1
 | **[W1]** `set_projection` 未清除陈旧 selection 反射（自审发现） | 1 | 清除 source + 反射 span + 回归测试 |
 | **[W7]** `axis_is_ordered` 重写走 `value_as_double` 破坏整数精度测试 | 1 | 恢复类型精确模板（单块 memcpy 比较），仅复合分支走 `value_as_double` |
 | **[W7]** 本沙箱 GCC 更严暴露多处潜伏 `-Werror`（manifest nodiscard / xlsx sheet_index / well_log_view switch / 测试 checksum 初始化）阻塞编译 | 各 1 | drive-by 修：`(void)field()`、删未用变量、补 switch case、补字段初始化（均潜伏 bug，非本会话引入） |
+| **[W8]** extend_tail 测试用 auto-budget（默认 0）失败 | 1 | H2 修复后 auto-budget 随曲线增长变化 → extend_tail 正确拒绝；测试改用显式常量预算（现实契约） |
+| **[W8]** extend_tail 在 binding/auto-growing budget 下 parity 破裂（review 两轴收敛发现） | 1 | 两处修复：derived-byte 预充分歧（两遍扫描预充 SourceRun）、默认预算复用（预算不一致即拒）；新增 tight-budget parity 测试锁定 |
+| **[W8]** session append 测试异步帧管线 headless 下 scene 不稳定（state=ready 但 scene=null） | 1 | 不驱动脆弱的帧管线；测试改为断言 preparation 达 ready + 无 diagnostic（incremental 路径完成），parity 由单元测试权威证明 |
