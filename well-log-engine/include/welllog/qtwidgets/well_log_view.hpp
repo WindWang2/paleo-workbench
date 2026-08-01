@@ -45,6 +45,11 @@ public:
   void set_image_tile_resolver(
       std::function<Result<RasterTile>(const ImageTileRequest &)> resolver)
       noexcept;
+  // Overrides the image-pyramid build options (tile size, derived-byte budget)
+  // the session uses to build ImagePyramidMap from ImageSource entities (#184).
+  // Mirrors how curve-LOD budgets flow through PerformanceBudgets; takes effect
+  // on the next document LOD build.
+  void set_image_pyramid_options(ImagePyramidOptions options) noexcept;
   [[nodiscard]] std::optional<EntityId> document_id() const noexcept;
   [[nodiscard]] const CapabilityReport &capability_report() const noexcept;
   [[nodiscard]] std::optional<CurvePick> hover_pick() const noexcept;

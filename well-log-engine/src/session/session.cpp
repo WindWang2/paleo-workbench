@@ -600,6 +600,11 @@ struct LodBuildOutput {
   std::optional<Error> error;
   std::uint64_t derived_bytes{};
   std::unordered_map<EntityId, CurveLodPyramid, EntityIdHash> pyramids;
+  // Image pyramids built from ImageSource entities (#184). metadata-only
+  // (no pixel decode — ADR 0045); a missing/empty map means image layers
+  // produce no tiles (non-fatal degradation).
+  detail::ScenePreparer::ImagePyramidMap image_pyramids;
+  std::uint64_t image_derived_bytes{};
 };
 
 struct LodTaskState {
@@ -641,7 +646,9 @@ struct FrameTask {
     std::shared_ptr<const WellLogDocument> document,
     ScenePresentation presentation,
     std::shared_ptr<const detail::ScenePreparer::CurveLodMap> pyramids,
-    CurveLodQuery query, std::shared_ptr<TextEngine> text_engine,
+    CurveLodQuery query,
+    std::shared_ptr<const detail::ScenePreparer::ImagePyramidMap> image_pyramids,
+    ImagePyramidQuery image_query, std::shared_ptr<TextEngine> text_engine,
     std::mutex *text_engine_mutex) {
   auto state = std::make_shared<FrameTaskState>();
   auto task = std::make_unique<FrameTask>();
@@ -652,6 +659,7 @@ struct FrameTask {
   task->worker = std::jthread(
       [document = std::move(document), presentation = std::move(presentation),
        pyramids = std::move(pyramids), query,
+       image_pyramids = std::move(image_pyramids), image_query,
        text_engine = std::move(text_engine), text_engine_mutex,
        state = std::move(state)](std::stop_token stop_token) {
         auto output = FrameBuildOutput{};
@@ -674,8 +682,10 @@ struct FrameTask {
                       ? std::unique_lock<std::mutex>{}
                       : std::unique_lock<std::mutex>{*text_engine_mutex};
               prepared = detail::ScenePreparer::prepare(
-                  *document, presentation, *pyramids, query, stop_token,
-                  text_engine.get());
+                  *document, presentation, *pyramids, query,
+                  image_pyramids ? *image_pyramids
+                                  : detail::ScenePreparer::ImagePyramidMap{},
+                  image_query, stop_token, text_engine.get());
             }
             if (stop_token.stop_requested()) {
               output.cancelled = true;
@@ -721,6 +731,9 @@ struct CurvePreparation {
   std::uint64_t derived_bytes{};
   std::uint64_t maximum_derived_bytes{};
   std::shared_ptr<const detail::ScenePreparer::CurveLodMap> pyramids;
+  // Image pyramids built alongside the curve LOD (#184); empty when the
+  // document has no ImageSource entities.
+  std::shared_ptr<const detail::ScenePreparer::ImagePyramidMap> image_pyramids;
 };
 
 // The prepared-scene issue enums (ValueIssueCode / TextIssueCode) map 1:1 onto
@@ -1038,7 +1051,9 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
           static_cast<std::uint64_t>(document->curves().size());
       const auto per_curve_budget =
           std::max(std::uint64_t{1}, maximum_derived_bytes / curve_count);
-      task->worker = std::jthread([document, state, per_curve_budget](
+      const auto image_pyramid_options = impl_->budgets.image_pyramid_options;
+      task->worker = std::jthread([document, state, per_curve_budget,
+                                   image_pyramid_options](
                                       std::stop_token stop_token) {
         auto output = LodBuildOutput{};
         try {
@@ -1081,6 +1096,32 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
             }
             output.derived_bytes += pyramid.value().statistics().derived_bytes;
             output.pyramids.emplace(curve.id, std::move(pyramid).value());
+          }
+          // Image pyramids (#184): build the level/tile grid for each
+          // ImageSource. metadata-only (no pixel decode — ADR 0045); a build
+          // failure degrades (no tiles for that image) rather than failing the
+          // whole LOD task, mirroring how the scene tolerates a missing map.
+          for (const auto &image : document->image_sources()) {
+            if (stop_token.stop_requested()) {
+              output.cancelled = true;
+              break;
+            }
+            auto image_pyramid = ImagePyramid::build(image, image_pyramid_options,
+                                                    stop_token);
+            if (!image_pyramid.has_value()) {
+              output.cancelled = image_pyramid.error().code ==
+                                 ErrorCode::operation_cancelled;
+              if (!output.cancelled) {
+                // Non-fatal: skip this image (no tiles). The scene emits no
+                // image layer for a source without a pyramid entry.
+                continue;
+              }
+              break;
+            }
+            output.image_derived_bytes +=
+                image_pyramid.value().statistics().derived_bytes;
+            output.image_pyramids.emplace(image.id,
+                                          std::move(image_pyramid).value());
           }
         } catch (const std::bad_alloc &) {
           output.error = Error{
@@ -1337,6 +1378,13 @@ WellLogSession::execute(const SetPresentationCommand &command) {
                 .pixel_height = default_frame_pixel_height,
                 .prefetch_viewports = impl_->budgets.prefetch_viewports,
             },
+            preparation->second.image_pyramids,
+            ImagePyramidQuery{
+                .viewport_top = initial_viewport.top,
+                .viewport_bottom = initial_viewport.bottom,
+                .pixel_height = static_cast<double>(default_frame_pixel_height),
+                .prefetch_viewports = impl_->budgets.prefetch_viewports,
+            },
             impl_->text_engine, &impl_->text_engine_mutex);
       }
       const auto next_state_version = impl_->state_version + 1;
@@ -1553,6 +1601,13 @@ WellLogSession::execute(const SetViewportMetricsCommand &command) {
               .viewport_top = command.viewport.top,
               .viewport_bottom = command.viewport.bottom,
               .pixel_height = command.pixel_height,
+              .prefetch_viewports = impl_->budgets.prefetch_viewports,
+          },
+          preparation->second.image_pyramids,
+          ImagePyramidQuery{
+              .viewport_top = command.viewport.top,
+              .viewport_bottom = command.viewport.bottom,
+              .pixel_height = static_cast<double>(command.pixel_height),
               .prefetch_viewports = impl_->budgets.prefetch_viewports,
           },
           impl_->text_engine, &impl_->text_engine_mutex);
@@ -1914,6 +1969,9 @@ void WellLogSession::poll_async() noexcept {
           preparation->second.pyramids =
               std::make_shared<const detail::ScenePreparer::CurveLodMap>(
                   std::move(output.pyramids));
+          preparation->second.image_pyramids =
+              std::make_shared<const detail::ScenePreparer::ImagePyramidMap>(
+                  std::move(output.image_pyramids));
           const auto document =
               impl_->documents.find(completed_task->document_id);
           const auto presentation =
@@ -1949,6 +2007,14 @@ void WellLogSession::poll_async() noexcept {
                       .viewport_top = viewport->second.top,
                       .viewport_bottom = viewport->second.bottom,
                       .pixel_height = viewport_pixel_height->second,
+                      .prefetch_viewports = impl_->budgets.prefetch_viewports,
+                  },
+                  preparation->second.image_pyramids,
+                  ImagePyramidQuery{
+                      .viewport_top = viewport->second.top,
+                      .viewport_bottom = viewport->second.bottom,
+                      .pixel_height =
+                          static_cast<double>(viewport_pixel_height->second),
                       .prefetch_viewports = impl_->budgets.prefetch_viewports,
                   },
                   impl_->text_engine, &impl_->text_engine_mutex);
@@ -2116,6 +2182,11 @@ WellLogSession::performance_snapshot(EntityId document_id) const noexcept {
 
 PerformanceBudgets WellLogSession::performance_budgets() const noexcept {
   return impl_->budgets;
+}
+
+void WellLogSession::set_performance_budgets(
+    PerformanceBudgets budgets) noexcept {
+  impl_->budgets = std::move(budgets);
 }
 
 std::span<const ViewEvent> WellLogSession::events() const noexcept {

@@ -213,6 +213,11 @@ void WellLogView::set_image_tile_resolver(
   impl_->image_resolver = std::move(resolver);
   impl_->image_resolver_dirty = true;
 }
+void WellLogView::set_image_pyramid_options(ImagePyramidOptions options) noexcept {
+  auto budgets = impl_->session->performance_budgets();
+  budgets.image_pyramid_options = std::move(options);
+  impl_->session->set_performance_budgets(budgets);
+}
 const WellLogSession &WellLogView::session() const noexcept {
   return *impl_->session;
 }

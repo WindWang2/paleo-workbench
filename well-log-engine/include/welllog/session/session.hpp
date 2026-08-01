@@ -9,6 +9,7 @@
 
 #include <welllog/core/document.hpp>
 #include <welllog/core/result.hpp>
+#include <welllog/scene/image_pyramid.hpp>
 #include <welllog/scene/scene.hpp>
 #include <welllog/scene/text_engine.hpp>
 #include <welllog/session/export.hpp>
@@ -166,6 +167,11 @@ struct PerformanceBudgets {
   std::uint64_t maximum_image_texture_bytes{64ULL * 1024ULL * 1024ULL};
   double prefetch_viewports{2.0};
   std::uint64_t asynchronous_sample_threshold{16'384};
+  // Image-pyramid build options (#184): tile size + derived-metadata byte
+  // budget for the ImagePyramidMap the session builds from ImageSource
+  // entities. metadata-only (no pixel decode — ADR 0045); the host configures
+  // LOD here, mirroring how curve-LOD budgets flow through this struct.
+  ImagePyramidOptions image_pyramid_options{};
 };
 
 enum class PreparationState : std::uint8_t {
@@ -255,6 +261,9 @@ public:
   void unsubscribe_view_events(ViewEventObserverId observer_id) noexcept;
   void poll_async() noexcept;
   [[nodiscard]] PerformanceBudgets performance_budgets() const noexcept;
+  // Replaces the performance budgets (#184: the host updates image-pyramid
+  // build options via the view). Takes effect on the next document LOD build.
+  void set_performance_budgets(PerformanceBudgets budgets) noexcept;
   [[nodiscard]] std::optional<PerformanceSnapshot>
   performance_snapshot(EntityId document_id) const noexcept;
 

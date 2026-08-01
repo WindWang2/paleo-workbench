@@ -11,6 +11,7 @@
 #include <welllog/scene/scene.hpp>
 #include <welllog/session/session.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -374,6 +376,114 @@ void large_image_selects_bounded_visible_tiles() {
 
 } // namespace
 
+// #184: an image layer rendered through the production session path
+// (execute(SetDocument) → execute(SetPresentation) → prepared_scene) produces
+// the SAME visible tiles as the direct ScenePreparer::prepare path. The session
+// REQUIRES an axis+curve (validate_document rejects image-only docs), so the
+// fixture carries a minimal curve alongside the image.
+void session_image_layer_matches_direct_prepare() {
+  const auto axis_id = id("a0000000-0000-4000-8000-00000000000a");
+  const auto curve_id = id("a0000000-0000-4000-8000-00000000000b");
+  // Build a document with one axis, one curve, one image source, one image
+  // layer. The curve exceeds the default asynchronous_sample_threshold (16384)
+  // so the session takes the ASYNC LOD+frame path (the path #184 wires image
+  // pyramids through); an image-only or tiny-curve doc would take the sync
+  // fallback, which has no LOD at all.
+  constexpr std::uint64_t curve_samples = 20'000;
+  auto depths_fill = std::make_shared<std::vector<double>>(curve_samples);
+  auto values_fill = std::make_shared<std::vector<double>>(curve_samples);
+  for (std::uint64_t i = 0; i < curve_samples; ++i) {
+    (*depths_fill)[i] = 1000.0 + static_cast<double>(i) * 0.005; // 1000..1100
+    (*values_fill)[i] = static_cast<double>(i);
+  }
+  auto depths = std::shared_ptr<const std::vector<double>>(std::move(depths_fill));
+  auto values = std::shared_ptr<const std::vector<double>>(std::move(values_fill));
+  WellLogDocumentBuilder builder(document_id, DocumentRevision{1});
+  builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id,
+      .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth,
+      .unit = "m",
+      .direction = AxisDirection::increasing,
+  });
+  builder.add_curve(Curve{
+      .id = curve_id,
+      .mnemonic = "GR",
+      .display_name = "GR",
+      .unit = "API",
+      .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values),
+      .nulls = {},
+  });
+  builder.add_image_source(ImageSource{
+      .id = image_source_id,
+      .width_px = 2048,
+      .height_px = 2048,
+      .pixel_format = PixelFormat::rgba8,
+      .reference_depth_top = 1000.0,
+      .reference_depth_bottom = 1100.0,
+      .dpi = 300,
+      .source = BufferSourceReference{.uri = "image://core-photo/1"},
+  });
+  const auto document = builder.build();
+  auto presentation_builder = image_presentation();
+  const auto presentation = presentation_builder.build();
+
+  // Configure the session's image-pyramid options to match the direct path.
+  PerformanceBudgets budgets;
+  budgets.image_pyramid_options =
+      ImagePyramidOptions{.tile_size = 256, .maximum_derived_bytes = 16 * 1024};
+
+  WellLogSession session(budgets);
+  require(session.execute(SetDocumentCommand{document}).has_value(),
+          "session must accept the image+curve document");
+  require(session.execute(SetPresentationCommand{presentation}).has_value(),
+          "session must accept the image presentation");
+  // Pump the async LOD + frame tasks to completion. The LOD worker runs on a
+  // jthread; poll_async reaps finished tasks and re-issues the frame task. A
+  // short yield between polls lets the worker thread make progress (a tight
+  // poll loop starves it).
+  for (int i = 0; i < 200; ++i) {
+    session.poll_async();
+    const auto scene_now = session.prepared_scene(document_id);
+    if (scene_now != nullptr) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  const auto scene = session.prepared_scene(document_id);
+  require(scene != nullptr, "session must prepare an image scene");
+  require(scene->image_layers().size() == 1, "one image layer expected");
+  const auto session_tile_count = scene->image_layers().front().tile_count;
+  require(session_tile_count > 0,
+          "the session path must produce visible image tiles");
+
+  // Direct path: build the same pyramid map and prepare directly.
+  detail::ScenePreparer::CurveLodMap curve_lods;
+  detail::ScenePreparer::ImagePyramidMap image_pyramids;
+  const auto pyramid = ImagePyramid::build(
+      document.image_sources().front(),
+      ImagePyramidOptions{.tile_size = 256, .maximum_derived_bytes = 16 * 1024});
+  require(pyramid.has_value(), "direct image pyramid must build");
+  image_pyramids.emplace(image_source_id, pyramid.value());
+  const auto direct = detail::ScenePreparer::prepare(
+      document, presentation, curve_lods, {}, image_pyramids,
+      ImagePyramidQuery{.viewport_top = 1000.0,
+                        .viewport_bottom = 1100.0,
+                        .pixel_height = 2160.0,
+                        .prefetch_viewports = 2.0});
+  require(direct.has_value(), "direct image scene must prepare");
+  require(direct.value().image_layers().size() == 1,
+          "direct path must have one image layer");
+  const auto direct_tile_count = direct.value().image_layers().front().tile_count;
+
+  // Parity: the session path yields the same tile count (both drive the same
+  // pyramid + an equivalent viewport; the session's default pixel height is
+  // 2160 and prefetch 2.0, matching the direct query above).
+  require(session_tile_count == direct_tile_count,
+          "session and direct paths must produce the same visible tile count");
+}
+
 int main() {
   image_layer_declares_metadata_and_prepares();
   pyramid_selects_only_visible_tiles();
@@ -383,6 +493,7 @@ int main() {
   hidden_image_layer_emits_no_tiles();
   image_tile_is_pickable_and_returns_depth();
   large_image_selects_bounded_visible_tiles();
+  session_image_layer_matches_direct_prepare();
   std::cout << "PASS: raster image layer\n";
   return EXIT_SUCCESS;
 }
