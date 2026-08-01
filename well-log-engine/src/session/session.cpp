@@ -888,15 +888,22 @@ struct WellLogSession::Impl {
   };
   std::unordered_map<EntityId, AppendCoalescer, EntityIdHash> append_coalescers;
   std::unordered_map<EntityId, CurvePreparation, EntityIdHash> preparations;
-  // Append-incremental LOD reuse hint (#199): when an AppendBatchCommand
-  // delegates to SetDocumentCommand, it stages the document's previously-built
-  // per-curve pyramids here so the LOD worker can extend_tail them instead of
-  // full-rebuilding. Cleared after the worker is created. Empty for a plain
-  // SetDocumentCommand (full rebuild, as before).
-  std::unordered_map<EntityId,
-                     std::shared_ptr<const detail::ScenePreparer::CurveLodMap>,
-                     EntityIdHash>
-      pending_append_reuse;
+  enum class LodReuseKind : std::uint8_t {
+    append_tail,
+    unchanged_document,
+  };
+  // Commands that delegate to SetDocumentCommand may retain derived data when
+  // their source buffers are known compatible. Appends extend curve pyramids;
+  // patches retain all raw curves/images and reuse a ready preparation as-is.
+  struct PendingLodReuse {
+    LodReuseKind kind{LodReuseKind::append_tail};
+    std::shared_ptr<const detail::ScenePreparer::CurveLodMap> pyramids;
+    std::shared_ptr<const detail::ScenePreparer::ImagePyramidMap> image_pyramids;
+    std::uint64_t derived_bytes{};
+    std::uint64_t maximum_derived_bytes{};
+  };
+  std::unordered_map<EntityId, PendingLodReuse, EntityIdHash>
+      pending_lod_reuse;
   std::unordered_map<EntityId, std::uint64_t, EntityIdHash> frame_generations;
   std::vector<std::unique_ptr<LodTask>> lod_tasks;
   std::vector<std::unique_ptr<FrameTask>> frame_tasks;
@@ -1144,20 +1151,31 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
           .arguments = {},
       };
     }
-    const auto generation =
-        asynchronous ? impl_->next_lod_generation : std::uint64_t{};
-    // Append-incremental LOD reuse (#199): consume the staged previous-curves
-    // hint here — on BOTH the async and the synchronous path — so it never
-    // leaks past this command (a sub-threshold append stages the hint but takes
-    // the synchronous path, which must still clear it). Only the async worker
-    // actually uses reuse_map; the synchronous path discards it.
-    const auto reuse = impl_->pending_append_reuse.find(document_id);
-    const auto reuse_map =
-        reuse != impl_->pending_append_reuse.end() ? reuse->second : nullptr;
-    impl_->pending_append_reuse.erase(document_id);
+    // Consume a trusted derived-cache hint on either path so it cannot leak
+    // into a later replacement. A patch never changes raw buffers (ADR 0025),
+    // whereas an append only has an extend-tail starting point.
+    std::optional<Impl::PendingLodReuse> reuse;
+    if (const auto pending = impl_->pending_lod_reuse.find(document_id);
+        pending != impl_->pending_lod_reuse.end()) {
+      reuse = pending->second;
+      impl_->pending_lod_reuse.erase(pending);
+    }
+    const auto reuse_preparation =
+        asynchronous && reuse.has_value() &&
+        reuse->kind == Impl::LodReuseKind::unchanged_document &&
+        reuse->pyramids != nullptr;
+    const auto generation = asynchronous && !reuse_preparation
+                                ? impl_->next_lod_generation
+                                : std::uint64_t{};
+    const auto reuse_map = reuse.has_value() &&
+                                   reuse->kind == Impl::LodReuseKind::append_tail
+                               ? reuse->pyramids
+                               : nullptr;
     auto task = std::unique_ptr<LodTask>{};
-    auto maximum_derived_bytes = impl_->budgets.maximum_cpu_derived_bytes;
-    if (asynchronous) {
+    auto maximum_derived_bytes = reuse_preparation
+                                     ? reuse->maximum_derived_bytes
+                                     : impl_->budgets.maximum_cpu_derived_bytes;
+    if (asynchronous && !reuse_preparation) {
       if (maximum_derived_bytes == 0) {
         const auto add_budget = [&](std::uint64_t increment) {
           maximum_derived_bytes =
@@ -1186,11 +1204,9 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
       const auto per_curve_budget =
           std::max(std::uint64_t{1}, maximum_derived_bytes / curve_count);
       const auto image_pyramid_options = impl_->budgets.image_pyramid_options;
-      // Append-incremental LOD reuse (#199): reuse_map (consumed above) holds,
-      // when set by an AppendBatchCommand, the previously-built per-curve
-      // pyramids. The worker tries extend_tail onto each before falling back to
-      // a full build. Unchanged curves reuse the previous pyramid directly
-      // (zero work); appended curves extend it.
+      // Append-incremental LOD reuse (#199): reuse_map only holds the prior
+      // curve pyramids for an AppendBatchCommand. This worker extends a tail or
+      // falls back to a full build; unchanged-document reuse bypasses it.
       const auto build_options = CurveLodBuildOptions{
           .algorithm = CurveLodAlgorithm::hierarchical,
           .base_bucket_samples = 16,
@@ -1367,6 +1383,8 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
                                pending_diagnostics.size());
     if (asynchronous) {
       impl_->preparations.reserve(impl_->preparations.size() + 1);
+    }
+    if (asynchronous && !reuse_preparation) {
       impl_->lod_tasks.reserve(impl_->lod_tasks.size() + 1);
     }
     for (auto &existing_task : impl_->lod_tasks) {
@@ -1472,18 +1490,31 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
       }
     }
     if (asynchronous) {
-      impl_->preparations.insert_or_assign(
-          document_id, CurvePreparation{
-                           .revision = revision,
-                           .generation = generation,
-                           .state = PreparationState::pending,
-                           .derived_bytes = 0,
-                           .maximum_derived_bytes = maximum_derived_bytes,
-                           .pyramids = {},
-                           .image_pyramids = {},
-                       });
-      impl_->lod_tasks.push_back(std::move(task));
-      ++impl_->next_lod_generation;
+      if (reuse_preparation) {
+        impl_->preparations.insert_or_assign(
+            document_id, CurvePreparation{
+                             .revision = revision,
+                             .generation = 0,
+                             .state = PreparationState::ready,
+                             .derived_bytes = reuse->derived_bytes,
+                             .maximum_derived_bytes = maximum_derived_bytes,
+                             .pyramids = reuse->pyramids,
+                             .image_pyramids = reuse->image_pyramids,
+                         });
+      } else {
+        impl_->preparations.insert_or_assign(
+            document_id, CurvePreparation{
+                             .revision = revision,
+                             .generation = generation,
+                             .state = PreparationState::pending,
+                             .derived_bytes = 0,
+                             .maximum_derived_bytes = maximum_derived_bytes,
+                             .pyramids = {},
+                             .image_pyramids = {},
+                         });
+        impl_->lod_tasks.push_back(std::move(task));
+        ++impl_->next_lod_generation;
+      }
     } else {
       impl_->preparations.erase(document_id);
     }
@@ -2467,6 +2498,75 @@ inverse_edits_for_patch(const DocumentPatch &patch,
       entity);
 }
 
+[[nodiscard]] Error patch_presentation_invalid(EntityId entity_id) {
+  return Error{
+      .code = ErrorCode::invalid_presentation,
+      .severity = Severity::error,
+      .entity_id = entity_id,
+      .message = MessageKey::presentation_invalid,
+      .arguments = {},
+  };
+}
+
+// SetPresentationCommand can defer scene validation while LOD work is pending.
+// Validate the patchable layout subset here, before ApplyPatchCommand commits a
+// new revision, so a malformed Track/Scale/CurveLayer patch remains atomic.
+[[nodiscard]] std::optional<Error>
+validate_patchable_presentation(const WellLogDocument &document,
+                                const ScenePresentation &presentation) {
+  std::unordered_set<EntityId, EntityIdHash> entity_ids;
+  entity_ids.insert(document.id());
+  for (const auto &axis : document.sampling_axes()) {
+    entity_ids.insert(axis.id);
+  }
+  for (const auto &curve : document.curves()) {
+    entity_ids.insert(curve.id);
+  }
+
+  std::unordered_set<EntityId, EntityIdHash> track_ids;
+  for (const auto &track : presentation.tracks()) {
+    if (track.id.is_nil() || !entity_ids.insert(track.id).second ||
+        !std::isfinite(track.width.value) || track.width.value <= 0.0 ||
+        !std::isfinite(track.header.height.value) ||
+        track.header.height.value < 0.0 ||
+        (track.header.height.value > 0.0 &&
+         (!std::isfinite(track.header.font_size.value) ||
+          track.header.font_size.value <= 0.0))) {
+      return patch_presentation_invalid(track.id);
+    }
+    track_ids.insert(track.id);
+  }
+
+  std::unordered_map<EntityId, const TrackScaleSpec *, EntityIdHash> scales;
+  for (const auto &scale : presentation.scales()) {
+    if (scale.id.is_nil() || !entity_ids.insert(scale.id).second ||
+        !track_ids.contains(scale.track_id) || !std::isfinite(scale.minimum) ||
+        !std::isfinite(scale.maximum) || scale.minimum >= scale.maximum ||
+        !std::isfinite(scale.maximum - scale.minimum) || scale.unit.empty() ||
+        (scale.mode == ScaleMode::logarithmic && scale.minimum <= 0.0)) {
+      return patch_presentation_invalid(scale.id);
+    }
+    scales.emplace(scale.id, &scale);
+  }
+
+  for (const auto &layer : presentation.curve_layers()) {
+    const auto scale = scales.find(layer.scale_id);
+    const auto curve =
+        std::find_if(document.curves().begin(), document.curves().end(),
+                     [&layer](const Curve &candidate) {
+                       return candidate.id == layer.curve_id;
+                     });
+    if (layer.id.is_nil() || !entity_ids.insert(layer.id).second ||
+        !track_ids.contains(layer.track_id) || scale == scales.end() ||
+        scale->second->track_id != layer.track_id ||
+        curve == document.curves().end() || curve->unit != scale->second->unit ||
+        !std::isfinite(layer.line_width.value) || layer.line_width.value <= 0.0) {
+      return patch_presentation_invalid(layer.id);
+    }
+  }
+  return std::nullopt;
+}
+
 Result<CommandReceipt>
 WellLogSession::execute(const AppendBatchCommand &command) {
   try {
@@ -2839,6 +2939,11 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         }
       }
       patched_presentation = pres_builder.build();
+      if (const auto validation =
+              validate_patchable_presentation(current_doc, *patched_presentation);
+          validation.has_value()) {
+        return *validation;
+      }
     } else if (presentation_upserts_present) {
       // A patch upserts a presentation entity but the document has no
       // presentation to edit — a presentation entity needs a presentation.
@@ -2884,20 +2989,24 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
           .arguments = {},
       };
     }
-    // Stage the document's previously-built per-curve pyramids for incremental
-    // LOD reuse, mirroring AppendBatchCommand: a patch edits
-    // interpretation/layout entities and leaves the raw curves byte-identical,
-    // so the LOD worker should reuse the prior pyramids (architecture.md §7
-    // minimal-closure rule) rather than full-rebuild every curve. The worker
-    // falls back to full-build if a reused pyramid's prefix was edited (it
-    // never is on the patch path - curves are immutable in place, ADR 0025), so
-    // this is always safe.
+    // A patch edits interpretation/layout entities and leaves raw curves and
+    // images byte-identical (ADR 0025). Retag a ready cache at the new revision
+    // instead of rebuilding its LOD; SetPresentationCommand only needs a new
+    // frame from that cache (architecture.md §7 minimal-closure rule).
     if (const auto prep = impl_->preparations.find(command.document_id);
         prep != impl_->preparations.end() &&
         prep->second.state == PreparationState::ready &&
         prep->second.revision == current_revision &&
         prep->second.pyramids != nullptr) {
-      impl_->pending_append_reuse[command.document_id] = prep->second.pyramids;
+      impl_->pending_lod_reuse.insert_or_assign(
+          command.document_id,
+          Impl::PendingLodReuse{
+              .kind = Impl::LodReuseKind::unchanged_document,
+              .pyramids = prep->second.pyramids,
+              .image_pyramids = prep->second.image_pyramids,
+              .derived_bytes = prep->second.derived_bytes,
+              .maximum_derived_bytes = prep->second.maximum_derived_bytes,
+          });
     }
     const auto commit = execute(SetDocumentCommand{std::move(patched_doc)});
     if (!commit.has_value()) {
@@ -2912,19 +3021,14 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     // The viewport is restored below because a patch does not move the depth
     // window — unlike an append, the edited depths are interpretation entities,
     // not new samples.
-    Result<CommandReceipt> presentation_commit = Error{
-        .code = ErrorCode::internal_error,
-        .severity = Severity::error,
-        .entity_id = command.document_id,
-        .message = MessageKey::internal_error,
-        .arguments = {},
-    };
+    std::optional<CommandReceipt> presentation_commit;
     if (patched_presentation.has_value()) {
-      presentation_commit =
+      const auto presentation_result =
           execute(SetPresentationCommand{*patched_presentation});
-      if (!presentation_commit.has_value()) {
-        return presentation_commit;
+      if (!presentation_result.has_value()) {
+        return presentation_result;
       }
+      presentation_commit = presentation_result.value();
     }
     if (captured_default.has_value()) {
       impl_->viewport_defaults.insert_or_assign(command.document_id,
@@ -2951,7 +3055,7 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     history_entry.after = impl_->semantic_state(command.document_id);
     impl_->record_new_history(command.document_id, std::move(history_entry),
                               commit.value().document_revision);
-    auto receipt = presentation_commit.has_value() ? presentation_commit.value()
+    auto receipt = presentation_commit.has_value() ? *presentation_commit
                                                    : commit.value();
     receipt.state_version = impl_->state_version;
     return receipt;
@@ -3273,7 +3377,15 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
         prep->second.state == PreparationState::ready &&
         prep->second.revision == current_revision &&
         prep->second.pyramids != nullptr) {
-      impl_->pending_append_reuse[command.document_id] = prep->second.pyramids;
+      impl_->pending_lod_reuse.insert_or_assign(
+          command.document_id,
+          Impl::PendingLodReuse{
+              .kind = Impl::LodReuseKind::append_tail,
+              .pyramids = prep->second.pyramids,
+              .image_pyramids = {},
+              .derived_bytes = 0,
+              .maximum_derived_bytes = 0,
+          });
     }
 
     // Capture the viewport interaction state to restore after the append commit

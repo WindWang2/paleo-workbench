@@ -1202,6 +1202,18 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_apply_patch_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.apply-patch COMMAND welllog_apply_patch_tests)
 
+    # Interpretation-entity patch coverage (#205, AC #2 of #158): create/move/
+    # modify/delete of Interval/Marker/Annotation via ApplyPatchCommand, with
+    # invalid-edit rejections (Interval top>=bottom, invalid UTF-8) and
+    # prepared-scene reflection. Headless; Session + Scene.
+    add_executable(welllog_interpretation_patch_tests
+        tests/integration/interpretation_patch_test.cpp
+    )
+    target_compile_features(welllog_interpretation_patch_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_interpretation_patch_tests)
+    target_link_libraries(welllog_interpretation_patch_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.interpretation-patch COMMAND welllog_interpretation_patch_tests)
+
     # Kernel-owned per-document undo/redo history (#203, ADR 0025): patch and
     # append semantic round trips, redo clearing, Selection Set restoration,
     # and can_undo/can_redo + history_changed observability. Headless.
