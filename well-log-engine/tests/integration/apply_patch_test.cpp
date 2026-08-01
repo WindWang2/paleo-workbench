@@ -1,21 +1,25 @@
 // Headless test for ApplyPatchCommand (#202, the #158 foundation, ADR 0025).
-// Asserts: upsert + remove of document interpretation entities (Interval/Marker/
-// Annotation) and presentation layout entities (Track/Scale/CurveLayer) produce
-// a new Document Revision readable end-to-end; the patch is atomic (one bad
-// edit rejects the whole batch, document unchanged); a base-revision mismatch
-// is rejected with patch_conflict (no guessing); the Selection Set remaps or
-// invalidates per ADR 0024. No GL/Qt — WellLogSession + core.
+// Asserts: upsert + remove of document interpretation entities
+// (Interval/Marker/ Annotation) and presentation layout entities
+// (Track/Scale/CurveLayer) produce a new Document Revision readable end-to-end;
+// the patch is atomic (one bad edit rejects the whole batch, document
+// unchanged); a base-revision mismatch is rejected with patch_conflict (no
+// guessing); the Selection Set remaps or invalidates per ADR 0024. No GL/Qt —
+// WellLogSession + core.
 
 #include <welllog/core/document.hpp>
 #include <welllog/scene/scene.hpp>
 #include <welllog/session/session.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -42,9 +46,13 @@ EntityId id(std::string_view text) {
 const auto document_id = id("cc000000-0000-4000-8000-000000000001");
 const auto axis_id = id("cc000000-0000-4000-8000-000000000002");
 const auto curve_id = id("cc000000-0000-4000-8000-000000000003");
+const auto second_curve_id = id("cc000000-0000-4000-8000-000000000013");
 const auto track_id = id("cc000000-0000-4000-8000-000000000004");
 const auto scale_id = id("cc000000-0000-4000-8000-000000000005");
 const auto layer_id = id("cc000000-0000-4000-8000-000000000006");
+const auto second_track_id = id("cc000000-0000-4000-8000-000000000010");
+const auto second_scale_id = id("cc000000-0000-4000-8000-000000000011");
+const auto second_layer_id = id("cc000000-0000-4000-8000-000000000012");
 const auto interval_id = id("cc000000-0000-4000-8000-000000000007");
 const auto marker_id = id("cc000000-0000-4000-8000-000000000008");
 const auto annotation_id = id("cc000000-0000-4000-8000-000000000009");
@@ -61,22 +69,41 @@ struct Fixture {
         std::initializer_list<double>{1000.0, 1001.0, 1002.0});
     auto values = std::make_shared<const std::vector<double>>(
         std::initializer_list<double>{10.0, 20.0, 30.0});
+    auto second_values = std::make_shared<const std::vector<double>>(
+        std::initializer_list<double>{10.0, 100.0, 1000.0});
     WellLogDocumentBuilder db(document_id, DocumentRevision{1});
-    db.add_sampling_axis(SamplingAxis{
-        .id = axis_id, .coordinates = BufferView::from_vector(depths),
-        .domain = DepthDomain::measured_depth, .unit = "m",
-        .direction = AxisDirection::increasing});
+    db.add_sampling_axis(
+        SamplingAxis{.id = axis_id,
+                     .coordinates = BufferView::from_vector(depths),
+                     .domain = DepthDomain::measured_depth,
+                     .unit = "m",
+                     .direction = AxisDirection::increasing});
+    db.add_curve(Curve{.id = curve_id,
+                       .mnemonic = "GR",
+                       .display_name = "Gamma Ray",
+                       .unit = "API",
+                       .sampling_axis_id = axis_id,
+                       .values = BufferView::from_vector(values),
+                       .nulls = {}});
     db.add_curve(Curve{
-        .id = curve_id, .mnemonic = "GR", .display_name = "Gamma Ray",
-        .unit = "API", .sampling_axis_id = axis_id,
-        .values = BufferView::from_vector(values), .nulls = {}});
-    db.add_interval(Interval{
-        .id = interval_id, .top_reference_depth = 1000.0,
-        .bottom_reference_depth = 1001.0, .semantic = IntervalSemantic::lithology,
-        .pattern_id = {}, .label = "Sand"});
-    db.add_marker(Marker{
-        .id = marker_id, .reference_depth = 1000.5,
-        .semantic = MarkerSemantic::formation_top, .label = "Top A"});
+        .id = second_curve_id,
+        .mnemonic = "CPS",
+        .display_name = "Counts",
+        .unit = "CPS",
+        .sampling_axis_id = axis_id,
+        .values = BufferView::from_vector(second_values),
+        .nulls = {},
+    });
+    db.add_interval(Interval{.id = interval_id,
+                             .top_reference_depth = 1000.0,
+                             .bottom_reference_depth = 1001.0,
+                             .semantic = IntervalSemantic::lithology,
+                             .pattern_id = {},
+                             .label = "Sand"});
+    db.add_marker(Marker{.id = marker_id,
+                         .reference_depth = 1000.5,
+                         .semantic = MarkerSemantic::formation_top,
+                         .label = "Top A"});
     TextAnnotation annotation;
     annotation.id = annotation_id;
     annotation.reference_depth = 1001.0;
@@ -88,17 +115,44 @@ struct Fixture {
     ScenePresentationBuilder pb(document_id,
                                 ReferenceDepthRange{
                                     .domain = DepthDomain::measured_depth,
-                                    .unit = "m", .top = 1000.0, .bottom = 1002.0,
+                                    .unit = "m",
+                                    .top = 1000.0,
+                                    .bottom = 1002.0,
                                 },
                                 Millimetres{500.0}, "fixture-font");
-    pb.add_track(TrackSpec{.id = track_id, .width = Millimetres{40.0}});
-    pb.add_scale(TrackScaleSpec{
-        .id = scale_id, .track_id = track_id, .mode = ScaleMode::linear,
-        .minimum = 0.0, .maximum = 100.0, .unit = "API"});
-    pb.add_curve_layer(CurveLayerSpec{
-        .id = layer_id, .track_id = track_id, .curve_id = curve_id,
-        .scale_id = scale_id, .color = {}, .line_width = Millimetres{0.25},
-        .visible = true});
+    pb.add_track(TrackSpec{
+        .id = track_id,
+        .width = Millimetres{40.0},
+        .header = TrackHeaderSpec{.height = Millimetres{8.0}},
+    });
+    pb.add_track(TrackSpec{
+        .id = second_track_id, .width = Millimetres{30.0}, .z_order = 1});
+    pb.add_scale(TrackScaleSpec{.id = scale_id,
+                                .track_id = track_id,
+                                .mode = ScaleMode::linear,
+                                .minimum = 0.0,
+                                .maximum = 100.0,
+                                .unit = "API"});
+    pb.add_scale(TrackScaleSpec{.id = second_scale_id,
+                                .track_id = second_track_id,
+                                .mode = ScaleMode::linear,
+                                .minimum = 0.0,
+                                .maximum = 100.0,
+                                .unit = "API"});
+    pb.add_curve_layer(CurveLayerSpec{.id = layer_id,
+                                      .track_id = track_id,
+                                      .curve_id = curve_id,
+                                      .scale_id = scale_id,
+                                      .color = {},
+                                      .line_width = Millimetres{0.25},
+                                      .visible = true});
+    pb.add_curve_layer(CurveLayerSpec{.id = second_layer_id,
+                                      .track_id = second_track_id,
+                                      .curve_id = curve_id,
+                                      .scale_id = second_scale_id,
+                                      .color = {},
+                                      .line_width = Millimetres{0.25},
+                                      .visible = true});
     require(session.execute(SetPresentationCommand{pb.build()}).has_value(),
             "fixture presentation must be accepted");
     // Establish a viewport (presentation set the initial one; adjust it).
@@ -114,6 +168,21 @@ struct Fixture {
   }
 };
 
+std::shared_ptr<const PreparedScene>
+await_prepared_scene(WellLogSession &session) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (std::chrono::steady_clock::now() < deadline) {
+    session.poll_async();
+    if (const auto scene = session.prepared_scene(document_id);
+        scene != nullptr) {
+      return scene;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  }
+  return session.prepared_scene(document_id);
+}
+
 // Upserting an existing document entity (modify) replaces it by id and produces
 // a new revision.
 void upsert_replaces_document_entity() {
@@ -125,11 +194,13 @@ void upsert_replaces_document_entity() {
               .base_revision = f.revision,
               .edits =
                   {
-                      EntityEdit{UpsertEntity{Interval{
-                          .id = interval_id, .top_reference_depth = 1000.0,
-                          .bottom_reference_depth = 1001.5,
-                          .semantic = IntervalSemantic::lithology,
-                          .pattern_id = {}, .label = "Shale"}}},
+                      EntityEdit{UpsertEntity{
+                          Interval{.id = interval_id,
+                                   .top_reference_depth = 1000.0,
+                                   .bottom_reference_depth = 1001.5,
+                                   .semantic = IntervalSemantic::lithology,
+                                   .pattern_id = {},
+                                   .label = "Shale"}}},
                   },
           },
   });
@@ -156,9 +227,11 @@ void upsert_creates_document_entity() {
               .base_revision = f.revision,
               .edits =
                   {
-                      EntityEdit{UpsertEntity{Marker{
-                          .id = new_marker, .reference_depth = 1001.5,
-                          .semantic = MarkerSemantic::fault, .label = "Fault"}}},
+                      EntityEdit{
+                          UpsertEntity{Marker{.id = new_marker,
+                                              .reference_depth = 1001.5,
+                                              .semantic = MarkerSemantic::fault,
+                                              .label = "Fault"}}},
                   },
           },
   });
@@ -185,13 +258,11 @@ void remove_deletes_document_entity() {
   });
   require(result.has_value(), "remove-annotation patch must succeed");
   const auto doc = f.session.document(document_id);
-  require(doc->annotations().empty(),
-          "the removed annotation must be gone");
+  require(doc->annotations().empty(), "the removed annotation must be gone");
 }
 
-// A patch editing a presentation entity (Track width) replaces it and the
-// change is readable on the session's presentation (which the LOD-completion
-// path uses to rebuild the scene).
+// A Track width patch changes the prepared geometry, rather than only the
+// session's retained presentation value.
 void upsert_edits_presentation_entity() {
   Fixture f;
   const auto result = f.session.execute(ApplyPatchCommand{
@@ -214,6 +285,192 @@ void upsert_edits_presentation_entity() {
           "the viewport must be preserved across a patch");
   require(f.session.viewport(document_id)->bottom == 1001.5,
           "the viewport window must be unchanged by a patch");
+  const auto scene = await_prepared_scene(f.session);
+  require(scene != nullptr, "track width patch must re-prepare a scene");
+  const auto track =
+      std::find_if(scene->tracks().begin(), scene->tracks().end(),
+                   [](const PreparedTrack &t) { return t.id == track_id; });
+  require(track != scene->tracks().end(),
+          "prepared scene must retain the patched track");
+  require(track->bounds.width.value == 80.0,
+          "prepared track geometry must use the patched width");
+  require(scene->physical_width().value == 110.0,
+          "the physical scene width must include the patched track width");
+}
+
+// A Track z_order patch is a layout edit: re-preparing must place the patched
+// track first, including its geometry, rather than merely retaining z_order as
+// unread metadata on an insertion-ordered scene.
+void track_z_order_patch_reorders_prepared_tracks() {
+  Fixture f;
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch =
+          DocumentPatch{
+              .base_revision = f.revision,
+              .edits = {EntityEdit{UpsertEntity{TrackSpec{
+                  .id = second_track_id,
+                  .width = Millimetres{30.0},
+                  .z_order = -1,
+              }}}},
+          },
+  });
+  require(result.has_value(), "track z-order patch must succeed");
+  const auto scene = await_prepared_scene(f.session);
+  require(scene != nullptr, "track z-order patch must re-prepare a scene");
+  require(scene->tracks().size() == 2,
+          "prepared scene must retain both tracks after a patch");
+  require(scene->tracks().front().id == second_track_id,
+          "prepared tracks must follow the patched z-order");
+  require(scene->tracks().front().bounds.left.value == 0.0,
+          "the reordered track must own the leftmost geometry");
+}
+
+// Scale mode/range/direction/unit edits must reach prepared metadata and the
+// curve geometry. Changing the unit also retargets the layer to a compatible
+// immutable source curve; raw curves themselves remain unedited (ADR 0025).
+void scale_patch_changes_prepared_metadata_and_geometry() {
+  Fixture f;
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch =
+          DocumentPatch{
+              .base_revision = f.revision,
+              .edits =
+                  {
+                      EntityEdit{UpsertEntity{TrackScaleSpec{
+                          .id = scale_id,
+                          .track_id = track_id,
+                          .mode = ScaleMode::logarithmic,
+                          .minimum = 1.0,
+                          .maximum = 1000.0,
+                          .direction = ScaleDirection::right_to_left,
+                          .unit = "CPS",
+                      }}},
+                      EntityEdit{UpsertEntity{CurveLayerSpec{
+                          .id = layer_id,
+                          .track_id = track_id,
+                          .curve_id = second_curve_id,
+                          .scale_id = scale_id,
+                          .color = {},
+                          .line_width = Millimetres{0.25},
+                          .visible = true,
+                      }}},
+                  },
+          },
+  });
+  require(result.has_value(), "scale patch must succeed");
+  const auto scene = await_prepared_scene(f.session);
+  require(scene != nullptr, "scale patch must re-prepare a scene");
+  const auto header = std::find_if(scene->track_header_entries().begin(),
+                                   scene->track_header_entries().end(),
+                                   [](const PreparedTrackHeaderEntry &entry) {
+                                     return entry.curve_layer_id == layer_id;
+                                   });
+  require(header != scene->track_header_entries().end(),
+          "prepared header must retain the patched scale");
+  require(header->scale_minimum == 1.0 && header->scale_maximum == 1000.0,
+          "prepared header must carry the patched scale range");
+  require(header->unit == "CPS", "prepared header must carry the patched unit");
+  require(header->mode == ScaleMode::logarithmic,
+          "prepared header must carry the patched scale mode");
+  require(header->direction == ScaleDirection::right_to_left,
+          "prepared header must carry the patched scale direction");
+  const auto layer =
+      std::find_if(scene->curve_layers().begin(), scene->curve_layers().end(),
+                   [](const PreparedCurveLayer &candidate) {
+                     return candidate.id == layer_id;
+                   });
+  require(layer != scene->curve_layers().end() && layer->segment_count == 1,
+          "patched scale layer must retain one visible geometry segment");
+  require(layer->first_segment < scene->curve_segments().size(),
+          "prepared layer must reference an in-range segment");
+  const auto &segment =
+      scene->curve_segments()[static_cast<std::size_t>(layer->first_segment)];
+  require(segment.first_point < scene->curve_points().size(),
+          "prepared segment must reference an in-range point");
+  const auto &first_point =
+      scene->curve_points()[static_cast<std::size_t>(segment.first_point)];
+  require(std::abs(first_point.position.left.value - (40.0 * 2.0 / 3.0)) <
+              1.0e-9,
+          "logarithmic right-to-left scale must remap prepared x geometry");
+}
+
+// Curve-layer style is renderer input, so color and stroke width must appear
+// on the re-prepared layer rather than only in a patchable presentation entry.
+void curve_layer_style_patch_changes_prepared_layer() {
+  Fixture f;
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch =
+          DocumentPatch{
+              .base_revision = f.revision,
+              .edits = {EntityEdit{UpsertEntity{CurveLayerSpec{
+                  .id = layer_id,
+                  .track_id = track_id,
+                  .curve_id = curve_id,
+                  .scale_id = scale_id,
+                  .color = RgbaColor{0x12, 0x34, 0x56, 0x78},
+                  .line_width = Millimetres{1.5},
+                  .visible = true,
+              }}}},
+          },
+  });
+  require(result.has_value(), "curve-layer style patch must succeed");
+  const auto scene = await_prepared_scene(f.session);
+  require(scene != nullptr, "style patch must re-prepare a scene");
+  const auto layer =
+      std::find_if(scene->curve_layers().begin(), scene->curve_layers().end(),
+                   [](const PreparedCurveLayer &candidate) {
+                     return candidate.id == layer_id;
+                   });
+  require(layer != scene->curve_layers().end(),
+          "prepared scene must retain the patched curve layer");
+  require(layer->color.red == 0x12 && layer->color.green == 0x34 &&
+              layer->color.blue == 0x56 && layer->color.alpha == 0x78,
+          "prepared layer must carry the patched RGBA style");
+  require(layer->line_width.value == 1.5,
+          "prepared layer must carry the patched line width");
+}
+
+// Hidden curve layers remain addressable for a later patch, but must emit no
+// curve geometry into the prepared scene.
+void curve_layer_visibility_patch_removes_prepared_geometry() {
+  Fixture f;
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch =
+          DocumentPatch{
+              .base_revision = f.revision,
+              .edits = {EntityEdit{UpsertEntity{CurveLayerSpec{
+                  .id = layer_id,
+                  .track_id = track_id,
+                  .curve_id = curve_id,
+                  .scale_id = scale_id,
+                  .color = {},
+                  .line_width = Millimetres{0.25},
+                  .visible = false,
+              }}}},
+          },
+  });
+  require(result.has_value(), "curve-layer visibility patch must succeed");
+  const auto scene = await_prepared_scene(f.session);
+  require(scene != nullptr, "visibility patch must re-prepare a scene");
+  const auto layer =
+      std::find_if(scene->curve_layers().begin(), scene->curve_layers().end(),
+                   [](const PreparedCurveLayer &candidate) {
+                     return candidate.id == layer_id;
+                   });
+  require(layer != scene->curve_layers().end() && !layer->visible,
+          "prepared layer must retain its patched hidden state");
+  require(layer->segment_count == 0,
+          "hidden curve layers must contribute no prepared segments");
+  require(std::none_of(scene->curve_segments().begin(),
+                       scene->curve_segments().end(),
+                       [](const PreparedCurveSegment &segment) {
+                         return segment.layer_id == layer_id;
+                       }),
+          "hidden curve layers must contribute no prepared geometry");
 }
 
 // A remove of a presentation entity (CurveLayer) takes effect.
@@ -244,10 +501,12 @@ void whole_batch_rejects_on_one_bad_edit() {
               .base_revision = f.revision,
               .edits =
                   {
-                      EntityEdit{UpsertEntity{Interval{
-                          .id = interval_id, .top_reference_depth = 1000.0,
-                          .bottom_reference_depth = 1001.5, .pattern_id = {},
-                          .label = "Shale"}}},
+                      EntityEdit{UpsertEntity{
+                          Interval{.id = interval_id,
+                                   .top_reference_depth = 1000.0,
+                                   .bottom_reference_depth = 1001.5,
+                                   .pattern_id = {},
+                                   .label = "Shale"}}},
                       EntityEdit{RemoveEntity{missing}}, // bad: not present
                   },
           },
@@ -322,10 +581,12 @@ void selection_survives_patch() {
               .base_revision = f.revision,
               .edits =
                   {
-                      EntityEdit{UpsertEntity{Interval{
-                          .id = interval_id, .top_reference_depth = 1000.0,
-                          .bottom_reference_depth = 1001.5, .pattern_id = {},
-                          .label = "Shale"}}},
+                      EntityEdit{UpsertEntity{
+                          Interval{.id = interval_id,
+                                   .top_reference_depth = 1000.0,
+                                   .bottom_reference_depth = 1001.5,
+                                   .pattern_id = {},
+                                   .label = "Shale"}}},
                   },
           },
   });
@@ -333,7 +594,8 @@ void selection_survives_patch() {
   const auto sel = f.session.selection(document_id);
   require(sel.has_value() && sel->valid,
           "the selection must survive a non-axis patch");
-  require(sel->document_revision.value == result.value().document_revision.value,
+  require(sel->document_revision.value ==
+              result.value().document_revision.value,
           "the remapped selection must carry the patched revision");
 }
 
@@ -361,11 +623,13 @@ void patch_preserves_untouched_collections() {
               .base_revision = f.revision,
               .edits =
                   {
-                      EntityEdit{UpsertEntity{Interval{
-                          .id = interval_id, .top_reference_depth = 1000.0,
-                          .bottom_reference_depth = 1001.8,
-                          .semantic = IntervalSemantic::lithology,
-                          .pattern_id = {}, .label = "Shale"}}},
+                      EntityEdit{UpsertEntity{
+                          Interval{.id = interval_id,
+                                   .top_reference_depth = 1000.0,
+                                   .bottom_reference_depth = 1001.8,
+                                   .semantic = IntervalSemantic::lithology,
+                                   .pattern_id = {},
+                                   .label = "Shale"}}},
                   },
           },
   });
@@ -382,7 +646,7 @@ void patch_preserves_untouched_collections() {
           "annotations must survive a patch untouched");
   require(doc->annotations().front().text == "Note",
           "the surviving annotation must be byte-identical");
-  require(doc->curves().size() == 1,
+  require(doc->curves().size() == 2,
           "curves must survive a patch untouched (immutable, ADR 0025)");
 }
 
@@ -396,14 +660,19 @@ void presentation_upsert_without_presentation_rejected() {
   auto values = std::make_shared<const std::vector<double>>(
       std::initializer_list<double>{10.0, 20.0, 30.0});
   WellLogDocumentBuilder db(document_id, DocumentRevision{1});
-  db.add_sampling_axis(SamplingAxis{
-      .id = axis_id, .coordinates = BufferView::from_vector(depths),
-      .domain = DepthDomain::measured_depth, .unit = "m",
-      .direction = AxisDirection::increasing});
-  db.add_curve(Curve{
-      .id = curve_id, .mnemonic = "GR", .display_name = "GR", .unit = "API",
-      .sampling_axis_id = axis_id, .values = BufferView::from_vector(values),
-      .nulls = {}});
+  db.add_sampling_axis(
+      SamplingAxis{.id = axis_id,
+                   .coordinates = BufferView::from_vector(depths),
+                   .domain = DepthDomain::measured_depth,
+                   .unit = "m",
+                   .direction = AxisDirection::increasing});
+  db.add_curve(Curve{.id = curve_id,
+                     .mnemonic = "GR",
+                     .display_name = "GR",
+                     .unit = "API",
+                     .sampling_axis_id = axis_id,
+                     .values = BufferView::from_vector(values),
+                     .nulls = {}});
   require(session.execute(SetDocumentCommand{db.build()}).has_value(),
           "no-presentation document must be accepted");
   const auto result = session.execute(ApplyPatchCommand{
@@ -420,8 +689,9 @@ void presentation_upsert_without_presentation_rejected() {
   });
   require(!result.has_value(),
           "a presentation-entity upsert with no presentation must be rejected");
-  require(result.error().code == ErrorCode::invalid_presentation,
-          "no-presentation presentation upsert must return invalid_presentation");
+  require(
+      result.error().code == ErrorCode::invalid_presentation,
+      "no-presentation presentation upsert must return invalid_presentation");
 }
 
 } // namespace
@@ -431,6 +701,10 @@ int main() {
   upsert_creates_document_entity();
   remove_deletes_document_entity();
   upsert_edits_presentation_entity();
+  track_z_order_patch_reorders_prepared_tracks();
+  scale_patch_changes_prepared_metadata_and_geometry();
+  curve_layer_style_patch_changes_prepared_layer();
+  curve_layer_visibility_patch_removes_prepared_geometry();
   remove_deletes_presentation_entity();
   whole_batch_rejects_on_one_bad_edit();
   duplicate_id_in_batch_rejected();

@@ -2904,19 +2904,27 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
       return commit;
     }
 
-    // Restore the patched presentation + viewport defaults so the
-    // LOD-completion frame task rebuilds the scene against the edited layout.
-    // The document commit cleared them. The viewport is preserved (a patch does
-    // not move the depth window — unlike an append, the edited depths are
-    // interpretation entities, not new samples).
+    // Restore the patched presentation through its normal command path. The
+    // document commit cleared the presentation and any prepared frame; merely
+    // repopulating Impl::presentations would leave a pending LOD task with no
+    // way to schedule its replacement PreparedScene. SetPresentationCommand
+    // reconnects the edited layout to the current revision's preparation.
+    // The viewport is restored below because a patch does not move the depth
+    // window — unlike an append, the edited depths are interpretation entities,
+    // not new samples.
+    Result<CommandReceipt> presentation_commit = Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
     if (patched_presentation.has_value()) {
-      impl_->presentations.insert_or_assign(command.document_id,
-                                            *patched_presentation);
-    } else if (has_presentation) {
-      // No presentation edits but a presentation existed — restore the original
-      // (the commit cleared it).
-      impl_->presentations.insert_or_assign(command.document_id,
-                                            pres_entry->second);
+      presentation_commit =
+          execute(SetPresentationCommand{*patched_presentation});
+      if (!presentation_commit.has_value()) {
+        return presentation_commit;
+      }
     }
     if (captured_default.has_value()) {
       impl_->viewport_defaults.insert_or_assign(command.document_id,
@@ -2943,7 +2951,8 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     history_entry.after = impl_->semantic_state(command.document_id);
     impl_->record_new_history(command.document_id, std::move(history_entry),
                               commit.value().document_revision);
-    auto receipt = commit.value();
+    auto receipt = presentation_commit.has_value() ? presentation_commit.value()
+                                                   : commit.value();
     receipt.state_version = impl_->state_version;
     return receipt;
   } catch (const std::bad_alloc &) {

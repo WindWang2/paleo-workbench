@@ -1383,8 +1383,19 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
     scene->tracks.reserve(presentation.tracks().size());
     scene->curve_layers.reserve(presentation.curve_layers().size());
 
-    double left{};
+    // Track z-order owns horizontal layout order as well as render order. This
+    // makes a TrackSpec patch observable in PreparedScene geometry rather than
+    // preserving the builder's historical insertion order.
+    std::vector<const TrackSpec *> ordered_tracks;
+    ordered_tracks.reserve(presentation.tracks().size());
     for (const auto &track : presentation.tracks()) {
+      ordered_tracks.push_back(&track);
+    }
+    order_layers_by_z(ordered_tracks);
+
+    double left{};
+    for (const auto *track_pointer : ordered_tracks) {
+      const auto &track = *track_pointer;
       if (stop_token.stop_requested()) {
         return cancellation_error();
       }
