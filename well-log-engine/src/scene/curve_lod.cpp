@@ -293,6 +293,88 @@ struct SourceRange {
   return axis_bytes / 4 + curve_bytes / 4;
 }
 
+// Derives the hierarchical levels for one SourceRun `[run_begin, run_end)` over
+// `curve`, appending levels until either the run is exhausted or the budget is
+// reached. Returns the bytes consumed (sizeof(Level) + summaries for each level
+// added); sets `budget_limited` when the budget cut the run short before its
+// natural top level. This is the shared per-run build step used by both the
+// full `CurveLodPyramid::build` and the incremental `extend_tail` (#199), so
+// the two produce byte-identical levels for any run they both derive — the
+// foundation of the append parity guarantee (a tail-extended pyramid equals a
+// full rebuild over the extended curve).
+struct RunBuildResult {
+  std::vector<Level> levels;
+  std::uint64_t derived_bytes{};
+  std::uint32_t level_count{};
+  bool budget_limited{};
+};
+[[nodiscard]] RunBuildResult
+build_run_levels(const Curve &curve, std::uint32_t run_begin,
+                 std::uint32_t run_end, std::uint64_t base_bucket_samples,
+                 std::uint64_t maximum_derived_bytes,
+                 std::uint64_t derived_bytes_so_far,
+                 std::stop_token stop_token) {
+  RunBuildResult result;
+  auto bucket_samples = base_bucket_samples;
+  while (bucket_samples <= static_cast<std::uint64_t>(run_end) - run_begin) {
+    if (stop_token.stop_requested()) {
+      result.budget_limited = true;
+      return result;
+    }
+    Level level{
+        .bucket_samples = bucket_samples,
+        .summaries = {},
+    };
+    const auto bucket_count =
+        (static_cast<std::uint64_t>(run_end) - run_begin + bucket_samples - 1) /
+        bucket_samples;
+    const auto level_bytes = sizeof(Level) + bucket_count * sizeof(Summary);
+    if (level_bytes >
+        maximum_derived_bytes - result.derived_bytes - derived_bytes_so_far) {
+      result.budget_limited = true;
+      break;
+    }
+    level.summaries.reserve(static_cast<std::size_t>(bucket_count));
+    if (result.levels.empty()) {
+      for (auto bucket_begin = static_cast<std::uint64_t>(run_begin);
+           bucket_begin < static_cast<std::uint64_t>(run_end);
+           bucket_begin += bucket_samples) {
+        if (stop_token.stop_requested()) {
+          result.budget_limited = true;
+          return result;
+        }
+        const auto bucket_end =
+            std::min(static_cast<std::uint64_t>(run_end),
+                     bucket_begin + bucket_samples);
+        level.summaries.push_back(summarize(curve, bucket_begin, bucket_end));
+      }
+    } else {
+      const auto &children = result.levels.back().summaries;
+      for (std::size_t child_begin = 0; child_begin < children.size();
+           child_begin += 4) {
+        if (stop_token.stop_requested()) {
+          result.budget_limited = true;
+          return result;
+        }
+        const auto child_end =
+            std::min(children.size(), child_begin + std::size_t{4});
+        level.summaries.push_back(summarize_children(
+            curve, std::span<const Summary>{children}.subspan(
+                       child_begin, child_end - child_begin)));
+      }
+    }
+    result.derived_bytes += level_bytes;
+    ++result.level_count;
+    result.levels.reserve(result.levels.size() + 1);
+    result.levels.push_back(std::move(level));
+    if (bucket_samples > std::numeric_limits<std::uint64_t>::max() / 4) {
+      break;
+    }
+    bucket_samples *= 4;
+  }
+  return result;
+}
+
 } // namespace
 
 struct CurveLodSelection::Impl {
@@ -446,62 +528,200 @@ CurveLodPyramid::build(const SamplingAxis &axis, const Curve &curve,
           .end = static_cast<std::uint32_t>(index),
           .levels = {},
       };
-      auto bucket_samples = options.base_bucket_samples;
-      while (options.algorithm == CurveLodAlgorithm::hierarchical &&
-             bucket_samples <= run.end - run.begin) {
+      if (options.algorithm == CurveLodAlgorithm::hierarchical) {
+        const auto built = build_run_levels(
+            curve, run.begin, run.end, options.base_bucket_samples,
+            options.maximum_derived_bytes, derived_bytes, stop_token);
         if (stop_token.stop_requested()) {
           return lod_error(ErrorCode::operation_cancelled,
                            MessageKey::operation_cancelled);
         }
-        Level level{
-            .bucket_samples = bucket_samples,
-            .summaries = {},
-        };
-        const auto bucket_count =
-            (run.end - run.begin + bucket_samples - 1) / bucket_samples;
-        const auto level_bytes = sizeof(Level) + bucket_count * sizeof(Summary);
-        if (level_bytes > options.maximum_derived_bytes - derived_bytes) {
+        derived_bytes += built.derived_bytes;
+        impl->statistics.level_count += built.level_count;
+        if (built.budget_limited) {
           impl->statistics.budget_limited = true;
-          break;
         }
-        level.summaries.reserve(static_cast<std::size_t>(bucket_count));
-        if (run.levels.empty()) {
-          for (auto bucket_begin = static_cast<std::uint64_t>(run.begin);
-               bucket_begin < run.end; bucket_begin += bucket_samples) {
-            if (stop_token.stop_requested()) {
-              return lod_error(ErrorCode::operation_cancelled,
-                               MessageKey::operation_cancelled);
-            }
-            const auto bucket_end =
-                std::min(static_cast<std::uint64_t>(run.end),
-                         bucket_begin + bucket_samples);
-            level.summaries.push_back(
-                summarize(curve, bucket_begin, bucket_end));
-          }
-        } else {
-          const auto &children = run.levels.back().summaries;
-          for (std::size_t child_begin = 0; child_begin < children.size();
-               child_begin += 4) {
-            if (stop_token.stop_requested()) {
-              return lod_error(ErrorCode::operation_cancelled,
-                               MessageKey::operation_cancelled);
-            }
-            const auto child_end =
-                std::min(children.size(), child_begin + std::size_t{4});
-            level.summaries.push_back(summarize_children(
-                curve, std::span<const Summary>{children}.subspan(
-                           child_begin, child_end - child_begin)));
-          }
-        }
-        derived_bytes += level_bytes;
-        ++impl->statistics.level_count;
-        run.levels.reserve(run.levels.size() + 1);
-        run.levels.push_back(std::move(level));
-        if (bucket_samples > std::numeric_limits<std::uint64_t>::max() / 4) {
-          break;
-        }
-        bucket_samples *= 4;
+        run.levels = std::move(built.levels);
       }
+      impl->runs.push_back(std::move(run));
+    }
+    impl->statistics.derived_bytes = derived_bytes;
+    return CurveLodPyramid{std::move(impl)};
+  } catch (const std::bad_alloc &) {
+    return lod_error(ErrorCode::resource_exhausted,
+                     MessageKey::resource_exhausted);
+  } catch (...) {
+    return lod_error(ErrorCode::internal_error, MessageKey::internal_error);
+  }
+}
+
+Result<CurveLodPyramid>
+CurveLodPyramid::extend_tail(const CurveLodPyramid &previous,
+                             const SamplingAxis &extended_axis,
+                             const Curve &extended_curve,
+                             CurveLodBuildOptions options,
+                             std::stop_token stop_token) noexcept {
+  try {
+    if (stop_token.stop_requested()) {
+      return lod_error(ErrorCode::operation_cancelled,
+                       MessageKey::operation_cancelled);
+    }
+    // The previous pyramid must exist and carry the curve it was built over.
+    if (previous.impl_ == nullptr || previous.impl_->runs.empty()) {
+      return lod_error(ErrorCode::invalid_document,
+                       MessageKey::document_structure_invalid);
+    }
+    const auto &prev = *previous.impl_;
+    const auto prev_length = prev.statistics.source_samples;
+    const auto extended_length = extended_curve.values.length();
+    // Structural preconditions: matching ids, the extended curve is longer, and
+    // the build options match (a different algorithm/base bucket would produce
+    // a different level grid, so reuse is invalid — caller must full-build).
+    if (extended_curve.sampling_axis_id != extended_axis.id ||
+        extended_axis.id != prev.axis.id ||
+        extended_curve.id != prev.curve.id ||
+        extended_length <= prev_length ||
+        extended_axis.coordinates.length() != extended_length ||
+        options.algorithm != prev.options.algorithm ||
+        options.base_bucket_samples != prev.options.base_bucket_samples ||
+        extended_length > std::numeric_limits<std::uint32_t>::max() ||
+        options.base_bucket_samples < 2) {
+      return lod_error(ErrorCode::invalid_document,
+                       MessageKey::document_structure_invalid);
+    }
+    if (const auto error =
+            validate_lod_inputs(extended_axis, extended_curve, stop_token)) {
+      return *error;
+    }
+    // Append (not edit) precondition: the first `prev_length` samples of the
+    // extended curve/axis must equal the previous curve/axis numerically. A
+    // mismatch means the earlier region was edited — the reused summaries would
+    // be wrong, so refuse (the caller must issue a full build instead).
+    for (std::uint64_t index = 0; index < prev_length; ++index) {
+      if ((index & std::uint64_t{4095}) == 0 && stop_token.stop_requested()) {
+        return lod_error(ErrorCode::operation_cancelled,
+                         MessageKey::operation_cancelled);
+      }
+      const auto prev_value = prev.curve.values.value_as_double(index);
+      const auto ext_value = extended_curve.values.value_as_double(index);
+      if (!prev_value.has_value() || !ext_value.has_value() ||
+          *prev_value != *ext_value) {
+        return lod_error(ErrorCode::invalid_document,
+                         MessageKey::document_structure_invalid);
+      }
+    }
+
+    if (options.maximum_derived_bytes == 0) {
+      options.maximum_derived_bytes =
+          default_budget(extended_axis, extended_curve);
+    }
+
+    // Reuse the options/budget of the previous build when the caller left them
+    // default, so the level grid and budget envelope match the reused runs.
+    const auto effective_budget = (prev.options.maximum_derived_bytes != 0)
+                                      ? prev.options.maximum_derived_bytes
+                                      : options.maximum_derived_bytes;
+
+    auto impl = std::make_shared<Impl>(Impl{
+        .axis = extended_axis,
+        .curve = extended_curve,
+        .options =
+            CurveLodBuildOptions{
+                .algorithm = prev.options.algorithm,
+                .base_bucket_samples = prev.options.base_bucket_samples,
+                .maximum_derived_bytes = effective_budget,
+            },
+        .runs = {},
+        .statistics =
+            CurveLodStatistics{
+                .source_samples = extended_length,
+                .source_bytes =
+                    extended_axis.coordinates.length() *
+                        scalar_size_bytes(extended_axis.coordinates.scalar_type()) +
+                    extended_length *
+                        scalar_size_bytes(extended_curve.values.scalar_type()) +
+                    extended_curve.nulls.byte_capacity(),
+                .derived_bytes = 0,
+                .maximum_derived_bytes = effective_budget,
+                .level_count = 0,
+                .budget_limited = false,
+            },
+    });
+
+    // All runs except the last are reused byte-for-byte: their `[begin, end)`
+    // sample ranges fall entirely within the unchanged earlier region, so their
+    // level summaries are identical to a full rebuild. Their bytes and level
+    // counts carry over unchanged.
+    std::uint64_t derived_bytes{};
+    if (prev.runs.size() > 1) {
+      impl->runs.reserve(prev.runs.size());
+      for (std::size_t run_index = 0; run_index + 1 < prev.runs.size();
+           ++run_index) {
+        const auto &reused = prev.runs[run_index];
+        derived_bytes += sizeof(SourceRun);
+        for (const auto &level : reused.levels) {
+          derived_bytes += sizeof(Level) + level.summaries.size() * sizeof(Summary);
+          impl->statistics.level_count += 1;
+        }
+        impl->runs.push_back(reused);
+      }
+    }
+
+    // Re-derive from the last run's begin to the extended end. This re-derives
+    // the (now longer) last run and any new tail runs the appended region
+    // introduces (null gaps splitting runs). Re-scanning run boundaries here —
+    // rather than naively extending the last run's end — guarantees the run
+    // structure matches a full rebuild exactly.
+    const auto resume_begin =
+        static_cast<std::uint64_t>(prev.runs.back().begin);
+    std::uint64_t index = resume_begin;
+    const auto extended_count = extended_length;
+    while (index < extended_count) {
+      if (stop_token.stop_requested()) {
+        return lod_error(ErrorCode::operation_cancelled,
+                         MessageKey::operation_cancelled);
+      }
+      while (index < extended_count &&
+             !valid_sample(extended_axis, extended_curve, index)) {
+        if ((index & std::uint64_t{4095}) == 0 && stop_token.stop_requested()) {
+          return lod_error(ErrorCode::operation_cancelled,
+                           MessageKey::operation_cancelled);
+        }
+        ++index;
+      }
+      if (index == extended_count) {
+        break;
+      }
+      const auto run_begin = index;
+      while (index < extended_count &&
+             valid_sample(extended_axis, extended_curve, index)) {
+        if ((index & std::uint64_t{4095}) == 0 && stop_token.stop_requested()) {
+          return lod_error(ErrorCode::operation_cancelled,
+                           MessageKey::operation_cancelled);
+        }
+        ++index;
+      }
+      auto run = SourceRun{
+          .begin = static_cast<std::uint32_t>(run_begin),
+          .end = static_cast<std::uint32_t>(index),
+          .levels = {},
+      };
+      if (prev.options.algorithm == CurveLodAlgorithm::hierarchical) {
+        const auto built = build_run_levels(
+            extended_curve, run.begin, run.end, prev.options.base_bucket_samples,
+            effective_budget, derived_bytes, stop_token);
+        if (stop_token.stop_requested()) {
+          return lod_error(ErrorCode::operation_cancelled,
+                           MessageKey::operation_cancelled);
+        }
+        derived_bytes += built.derived_bytes;
+        impl->statistics.level_count += built.level_count;
+        if (built.budget_limited) {
+          impl->statistics.budget_limited = true;
+        }
+        run.levels = std::move(built.levels);
+      }
+      derived_bytes += sizeof(SourceRun);
       impl->runs.push_back(std::move(run));
     }
     impl->statistics.derived_bytes = derived_bytes;

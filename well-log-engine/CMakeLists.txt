@@ -1146,6 +1146,29 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_append_batch_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.append-batch COMMAND welllog_append_batch_tests)
 
+    # Incremental LOD tail-extension (#199, ADR 0031): extend_tail reuses the
+    # unchanged earlier region's summaries and re-derives only the tail, with
+    # parity to a full rebuild. Headless; Scene only.
+    add_executable(welllog_incremental_lod_tests
+        tests/integration/incremental_lod_test.cpp
+    )
+    target_compile_features(welllog_incremental_lod_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_incremental_lod_tests)
+    target_link_libraries(welllog_incremental_lod_tests PRIVATE WellLog::Scene)
+    add_test(NAME welllog.incremental-lod COMMAND welllog_incremental_lod_tests)
+
+    # Session append-incremental LOD (#199): a session that appends a tail
+    # (incremental extend_tail worker) produces a Prepared Scene LOD-identical
+    # to a session that directly submits the full curve (full build). Headless;
+    # Session only (dense curve drives the async worker).
+    add_executable(welllog_append_incremental_session_tests
+        tests/integration/append_incremental_session_test.cpp
+    )
+    target_compile_features(welllog_append_incremental_session_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_append_incremental_session_tests)
+    target_link_libraries(welllog_append_incremental_session_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.append-incremental-session COMMAND welllog_append_incremental_session_tests)
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

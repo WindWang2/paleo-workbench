@@ -840,6 +840,14 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
   std::unordered_map<EntityId, SelectionState, EntityIdHash> selections;
   std::unordered_map<EntityId, CurvePreparation, EntityIdHash> preparations;
+  // Append-incremental LOD reuse hint (#199): when an AppendBatchCommand
+  // delegates to SetDocumentCommand, it stages the document's previously-built
+  // per-curve pyramids here so the LOD worker can extend_tail them instead of
+  // full-rebuilding. Cleared after the worker is created. Empty for a plain
+  // SetDocumentCommand (full rebuild, as before).
+  std::unordered_map<EntityId, std::shared_ptr<const detail::ScenePreparer::CurveLodMap>,
+                     EntityIdHash>
+      pending_append_reuse;
   std::unordered_map<EntityId, std::uint64_t, EntityIdHash> frame_generations;
   std::vector<std::unique_ptr<LodTask>> lod_tasks;
   std::vector<std::unique_ptr<FrameTask>> frame_tasks;
@@ -1088,9 +1096,24 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
       const auto per_curve_budget =
           std::max(std::uint64_t{1}, maximum_derived_bytes / curve_count);
       const auto image_pyramid_options = impl_->budgets.image_pyramid_options;
+      // Append-incremental LOD reuse (#199): when set (an AppendBatchCommand),
+      // try extend_tail onto the previously-built pyramid before falling back
+      // to a full build. Unchanged curves reuse the previous pyramid directly
+      // (zero work); appended curves extend it.
+      const auto reuse =
+          impl_->pending_append_reuse.find(document_id);
+      const auto reuse_map =
+          reuse != impl_->pending_append_reuse.end() ? reuse->second
+                                                     : nullptr;
+      impl_->pending_append_reuse.erase(document_id);
+      const auto build_options = CurveLodBuildOptions{
+          .algorithm = CurveLodAlgorithm::hierarchical,
+          .base_bucket_samples = 16,
+          .maximum_derived_bytes = per_curve_budget,
+      };
       task->worker = std::jthread([document, state, per_curve_budget,
-                                   image_pyramid_options](
-                                      std::stop_token stop_token) {
+                                   image_pyramid_options, reuse_map,
+                                   build_options](std::stop_token stop_token) {
         auto output = LodBuildOutput{};
         try {
           for (const auto &curve : document->curves()) {
@@ -1114,14 +1137,29 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
               };
               break;
             }
-            auto pyramid = CurveLodPyramid::build(
-                *axis, curve,
-                CurveLodBuildOptions{
-                    .algorithm = CurveLodAlgorithm::hierarchical,
-                    .base_bucket_samples = 16,
-                    .maximum_derived_bytes = per_curve_budget,
-                },
-                stop_token);
+            // Incremental path: if a previous pyramid for this curve is staged
+            // for reuse (#199), extend its tail onto the appended curve. A
+            // structural rejection (edited prefix, option change, shrink) falls
+            // back to a full build so the result is always correct.
+            auto pyramid = Result<CurveLodPyramid>{Error{
+                .code = ErrorCode::invalid_document,
+                .severity = Severity::error,
+                .entity_id = curve.id,
+                .message = MessageKey::document_structure_invalid,
+                .arguments = {},
+            }};
+            if (reuse_map != nullptr) {
+              const auto previous = reuse_map->find(curve.id);
+              if (previous != reuse_map->end()) {
+                pyramid = CurveLodPyramid::extend_tail(
+                    previous->second, *axis, curve, build_options, stop_token);
+              }
+            }
+            if (!pyramid.has_value() &&
+                pyramid.error().code != ErrorCode::operation_cancelled) {
+              pyramid = CurveLodPyramid::build(*axis, curve, build_options,
+                                               stop_token);
+            }
             if (!pyramid.has_value()) {
               output.cancelled =
                   pyramid.error().code == ErrorCode::operation_cancelled;
@@ -2306,6 +2344,20 @@ WellLogSession::execute(const AppendBatchCommand &command) {
           .message = MessageKey::resource_exhausted,
           .arguments = {},
       };
+    }
+    // Stage the document's previously-built per-curve pyramids for incremental
+    // LOD reuse (#199): when the previous preparation is ready at the current
+    // revision, the SetDocumentCommand LOD worker will extend_tail each curve's
+    // pyramid instead of full-rebuilding. Unchanged curves reuse the previous
+    // pyramid directly (zero work); appended curves extend it. A missing/stale
+    // preparation (none built, or a revision mismatch) leaves the reuse map
+    // empty and the worker full-builds — always correct.
+    if (const auto prep = impl_->preparations.find(command.document_id);
+        prep != impl_->preparations.end() &&
+        prep->second.state == PreparationState::ready &&
+        prep->second.revision == current_revision &&
+        prep->second.pyramids != nullptr) {
+      impl_->pending_append_reuse[command.document_id] = prep->second.pyramids;
     }
     return execute(SetDocumentCommand{std::move(appended)});
   } catch (const std::bad_alloc &) {

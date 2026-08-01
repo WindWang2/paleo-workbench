@@ -83,6 +83,26 @@ public:
   build(const SamplingAxis &axis, const Curve &curve,
         CurveLodBuildOptions options = {},
         std::stop_token stop_token = {}) noexcept;
+  // Incrementally tail-extends a pyramid built over the shorter `previous_axis`
+  // / `previous_curve` onto the longer `extended_axis` / `extended_curve` (#199,
+  // ADR 0031 "LOD 只增量更新受影响尾块"). The earlier SourceRuns — every run
+  // except possibly the last — are reused byte-for-byte (their sample ranges
+  // are untouched by a tail-append, so their level summaries are unchanged);
+  // only the last run (whose end extended) and any new tail runs are
+  // re-derived. The result is identical (envelope values + derived-byte
+  // accounting) to a full `build` over the extended curve, but skips
+  // re-derivation of the unchanged earlier region.
+  //
+  // Preconditions: the axis/curve ids match `previous`; the extended curve is
+  // the previous curve with samples appended (the first `previous` samples are
+  // numerically equal — an append, not an edit); the options match those used
+  // to build `previous` (algorithm + base_bucket_samples). A violation returns
+  // invalid_document; the caller should fall back to a full `build`.
+  [[nodiscard]] static Result<CurveLodPyramid>
+  extend_tail(const CurveLodPyramid &previous, const SamplingAxis &extended_axis,
+              const Curve &extended_curve,
+              CurveLodBuildOptions options = {},
+              std::stop_token stop_token = {}) noexcept;
   [[nodiscard]] Result<CurveLodSelection>
   query(const CurveLodQuery &query,
         std::stop_token stop_token = {}) const noexcept;
