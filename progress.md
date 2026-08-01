@@ -167,6 +167,13 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 
 **下一步（可选）**：`/implement` #197（迁移 CurveLodPyramid/GL renderer/exporters 到复合视图——contract 步）；或换 #158/#163；或 merge spike-185 → main（领先约 60 commit）。
 
+## Session: 2026-08-01（续 7）— #197 迁移消费者到复合 buffer（contract 步）
+
+`/implement` #197（#162 链 frontier）。3 个并行 Explore agent 调研发现：所有 buffer 消费路径已是 index-based（value_as_double + length），无 raw data() memcpy → 迁移是一个 adapter 类型而非逐消费者重写。新增 `CurveBuffer`（core，包装 BufferView | CompositeBufferView，暴露 value_as_double/length/scalar_type + is_composite/as_single/segments；隐式 BufferView 构造使 84+ 现有 `Curve{.values=...}` 站点不变）。Curve::values 改 CurveBuffer；消费者最小改动：curve_lod validate_curve_buffer、table_projection read_buffer_cell、session load_as_double/required_bytes 重载、manifest 门控拒绝复合曲线。GL renderer 零改动（scene-prepare 已通过 value_as_double 扁平化）。两轴 review 补 3 测试（scene-prepare/GL、XML+XLSX、no-copy 断言）。commit `4b77bee` + `2a28c22`。36/36 green。
+
+**#162 链状态**：#196 ✅ → #197 ✅ → **#198（frontier）**（AppendBatchCommand）→ #199/#200 → #201。
+
+
 
 
 

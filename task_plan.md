@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W6（WellLogEngine #196 CompositeBufferView expand）— Complete; frontier now #197
+Phase W6（WellLogEngine #196–#197 composite buffer expand+contract）— Complete; frontier now #198
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
