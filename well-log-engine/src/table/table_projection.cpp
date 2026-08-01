@@ -61,12 +61,15 @@ struct TableProjection::Impl {
 
 namespace {
 
-// Reads a curve/axis cell straight from the raw BufferView (zero copy). Null
-// when the index is out of range, the null bitmap is set, or the value is
-// non-finite — matching the scene kernel's missing-sample rule
-// (src/scene/scene.cpp ~1505). This is the "reads the raw Buffer, not LOD"
-// path. Defined here (before cell()) so the accessor can call it.
-TableCell read_buffer_cell(const BufferView &values, const NullBitmapView &nulls,
+// Reads a curve/axis cell straight from the raw buffer (zero copy). The curve
+// values arrive as a CurveBuffer (single-block OR composite, #197); both
+// expose value_as_double(index). Null when the index is out of range, the null
+// bitmap is set, or the value is non-finite — matching the scene kernel's
+// missing-sample rule (src/scene/scene.cpp ~1505). This is the "reads the raw
+// Buffer, not LOD" path. Defined here (before cell()) so the accessor can call
+// it.
+TableCell read_buffer_cell(const CurveBuffer &values,
+                           const NullBitmapView &nulls,
                            std::uint64_t row) noexcept {
   if (!nulls.empty() && nulls.is_null(row)) {
     return TableCell{std::nullopt};
@@ -130,9 +133,10 @@ TableCell TableProjection::cell(std::uint64_t row,
   // built in Phase A).
   if (impl_->kind == TableKind::curves) {
     if (column.curve == nullptr) {
-      // Depth/axis column — reads the axis coordinates.
-      return read_buffer_cell(column.axis->coordinates, NullBitmapView{},
-                              source_row);
+      // Depth/axis column — reads the axis coordinates (always a single-block
+      // BufferView; append extends curve values, not axis coordinates).
+      return read_buffer_cell(CurveBuffer{column.axis->coordinates},
+                              NullBitmapView{}, source_row);
     }
     return read_buffer_cell(column.curve->values, column.curve->nulls,
                             source_row);

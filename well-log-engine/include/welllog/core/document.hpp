@@ -247,6 +247,54 @@ private:
   explicit CompositeBufferView(std::shared_ptr<const Impl> impl);
 };
 
+// A curve's value buffer — either a single contiguous `BufferView` (the common
+// case) or a `CompositeBufferView` spanning N immutable segments (the append
+// case, #162/#197). Consumers (LOD build, scene-prepare, table projection)
+// read a curve through the three index-based accessors below; this adapter
+// forwards to whichever underlying view the curve carries, so they need no
+// branching. The implicit `BufferView` constructor keeps every existing
+// `Curve{.values = someBufferView}` site compiling unchanged (#197 contract
+// step: migrate consumers onto the composite-capable interface without
+// touching call sites).
+class WELLLOG_CORE_API CurveBuffer {
+public:
+  // Implicit so `Curve{.values = BufferView{...}}` keeps working (84+ sites).
+  CurveBuffer(BufferView view) noexcept;
+  // Explicit for the multi-segment append case.
+  explicit CurveBuffer(CompositeBufferView composite) noexcept;
+
+  CurveBuffer() = default;
+  ~CurveBuffer() = default;
+  CurveBuffer(const CurveBuffer &) = default;
+  CurveBuffer &operator=(const CurveBuffer &) = default;
+  CurveBuffer(CurveBuffer &&) noexcept = default;
+  CurveBuffer &operator=(CurveBuffer &&) noexcept = default;
+
+  // True when the curve carries no buffer (neither view set).
+  [[nodiscard]] bool empty() const noexcept;
+  // The total element count across the underlying view.
+  [[nodiscard]] std::uint64_t length() const noexcept;
+  // The scalar type (float64 when empty).
+  [[nodiscard]] ScalarType scalar_type() const noexcept;
+  // Reads element `index`; nullopt on out-of-range, consistent with
+  // BufferView::value_as_double.
+  [[nodiscard]] std::optional<double>
+  value_as_double(std::uint64_t index) const noexcept;
+  // True when the curve carries a composite (multi-segment) buffer.
+  [[nodiscard]] bool is_composite() const noexcept;
+  // The single-block view, when the curve carries one (empty otherwise). Lets
+  // validators that need raw data()/stride/byte_capacity reach the single
+  // contiguous block.
+  [[nodiscard]] const BufferView &as_single() const noexcept;
+  // The segments of a composite, when the curve carries one (empty otherwise).
+  [[nodiscard]] std::span<const BufferView> segments() const noexcept;
+
+private:
+  BufferView single_;
+  CompositeBufferView composite_;
+  bool is_composite_{false};
+};
+
 struct SamplingAxis {
   EntityId id;
   BufferView coordinates;
@@ -261,7 +309,7 @@ struct Curve {
   std::string display_name;
   std::string unit;
   EntityId sampling_axis_id;
-  BufferView values;
+  CurveBuffer values;
   NullBitmapView nulls;
 };
 

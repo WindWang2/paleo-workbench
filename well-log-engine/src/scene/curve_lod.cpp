@@ -48,13 +48,30 @@ namespace {
   return std::nullopt;
 }
 
+// Validates a curve's value buffer whether it is a single block or a composite
+// of N segments (#197). The single-block path reuses validate_buffer above; the
+// composite path validates each segment (the same per-block invariants apply —
+// each segment must carry an owner, non-empty data, valid stride/capacity).
+[[nodiscard]] std::optional<Error>
+validate_curve_buffer(const CurveBuffer &buffer) {
+  if (buffer.is_composite()) {
+    for (const auto &segment : buffer.segments()) {
+      if (const auto error = validate_buffer(segment)) {
+        return error;
+      }
+    }
+    return std::nullopt;
+  }
+  return validate_buffer(buffer.as_single());
+}
+
 [[nodiscard]] std::optional<Error>
 validate_lod_inputs(const SamplingAxis &axis, const Curve &curve,
                     std::stop_token stop_token) {
   if (const auto error = validate_buffer(axis.coordinates)) {
     return error;
   }
-  if (const auto error = validate_buffer(curve.values)) {
+  if (const auto error = validate_curve_buffer(curve.values)) {
     return error;
   }
   if (!curve.nulls.empty() &&

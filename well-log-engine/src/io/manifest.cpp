@@ -789,6 +789,18 @@ can_write_manifest_buffer(const BufferView &buffer) noexcept {
          buffer.stride_bytes() > 0 && buffer.byte_capacity() > 0;
 }
 
+// A curve's value buffer (#197): the manifest serializes a single
+// BufferSourceReference per curve today (#183 round-trip). A composite
+// (multi-block, append) curve has one source per segment — serializing that
+// is the job of a later ticket (per-segment source identity). Until then, the
+// manifest rejects composite-carrying curves (can_write_manifest_document
+// returns false), a clean gate. Single-block curves serialize as before.
+[[nodiscard]] bool
+can_write_manifest_buffer(const CurveBuffer &buffer) noexcept {
+  return !buffer.is_composite() &&
+         can_write_manifest_buffer(buffer.as_single());
+}
+
 [[nodiscard]] bool
 can_write_manifest_nulls(const NullBitmapView &nulls) noexcept {
   return nulls.empty() || (!nulls.source().uri.empty() &&
@@ -907,7 +919,8 @@ Result<ManifestText> ManifestCodec::write(const WellLogDocument &document) {
     output += "],\"curves\":[";
     first = true;
     for (const auto &curve : document.curves()) {
-      if (curve.values.source().uri.empty() ||
+      if (curve.values.is_composite() ||
+          curve.values.as_single().source().uri.empty() ||
           (!curve.nulls.empty() && curve.nulls.source().uri.empty())) {
         return manifest_error();
       }
@@ -925,7 +938,9 @@ Result<ManifestText> ManifestCodec::write(const WellLogDocument &document) {
       output += ",\"samplingAxisId\":";
       append_escaped(output, curve.sampling_axis_id.to_string());
       output += ",\"values\":";
-      write_buffer(output, curve.values);
+      // can_write_manifest_document gates out composite-carrying curves, so a
+      // curve reaching here is single-block.
+      write_buffer(output, curve.values.as_single());
       output += ",\"nulls\":";
       if (curve.nulls.empty()) {
         output += "null";

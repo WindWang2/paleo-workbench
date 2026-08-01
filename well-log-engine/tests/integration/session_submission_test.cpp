@@ -173,7 +173,7 @@ void session_keeps_decreasing_curve_buffers_alive_without_copying() {
             "session must pin the submitted buffer owner");
     const auto stored = session.document(document_id);
     require(stored != nullptr, "submitted document must be queryable");
-    require(stored->curves().front().values.data() ==
+    require(stored->curves().front().values.as_single().data() ==
                 reinterpret_cast<const std::byte *>(original_values_address),
             "session must retain the original zero-copy buffer address");
     require(std::vector<double>(original_values_address,

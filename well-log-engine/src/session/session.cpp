@@ -71,6 +71,24 @@ constexpr std::uint32_t default_frame_pixel_height = 2160;
   return required;
 }
 
+// CurveBuffer overload (#197): sums the required bytes across the single
+// block or each composite segment. Each segment is validated independently.
+[[nodiscard]] Result<std::uint64_t>
+required_bytes(const CurveBuffer &buffer) {
+  if (buffer.is_composite()) {
+    std::uint64_t total = 0;
+    for (const auto &segment : buffer.segments()) {
+      const auto r = required_bytes(segment);
+      if (!r) {
+        return r.error();
+      }
+      total += r.value();
+    }
+    return total;
+  }
+  return required_bytes(buffer.as_single());
+}
+
 [[nodiscard]] std::optional<Error>
 validate_null_bitmap(const NullBitmapView &nulls,
                      std::uint64_t expected_length) {
@@ -144,6 +162,15 @@ template <typename T>
     return load_as_double<std::uint64_t>(buffer, index);
   }
   return std::numeric_limits<double>::quiet_NaN();
+}
+
+// CurveBuffer overload (#197): reads element `index` across a single-block or
+// composite curve buffer. Returns NaN for an out-of-range/null cell, matching
+// the single-block path's non-finite → missing-sample semantics.
+[[nodiscard]] double load_as_double(const CurveBuffer &buffer,
+                                    std::uint64_t index) noexcept {
+  const auto v = buffer.value_as_double(index);
+  return v.value_or(std::numeric_limits<double>::quiet_NaN());
 }
 
 template <typename T>

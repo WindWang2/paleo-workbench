@@ -324,6 +324,46 @@ std::span<const BufferView> CompositeBufferView::segments() const noexcept {
   return std::span<const BufferView>{impl_->segments};
 }
 
+// --- CurveBuffer (#197) -----------------------------------------------------
+// Forwards the three index-based accessors to whichever underlying view the
+// curve carries. The single-block path is the common case; the composite path
+// is the append case. No consumer branches on the variant — they call these.
+CurveBuffer::CurveBuffer(BufferView view) noexcept
+    : single_(std::move(view)), is_composite_(false) {}
+
+CurveBuffer::CurveBuffer(CompositeBufferView composite) noexcept
+    : composite_(std::move(composite)), is_composite_(true) {}
+
+bool CurveBuffer::empty() const noexcept {
+  return is_composite_ ? composite_.empty() : single_.length() == 0;
+}
+
+std::uint64_t CurveBuffer::length() const noexcept {
+  return is_composite_ ? composite_.length() : single_.length();
+}
+
+ScalarType CurveBuffer::scalar_type() const noexcept {
+  return is_composite_ ? composite_.scalar_type() : single_.scalar_type();
+}
+
+std::optional<double>
+CurveBuffer::value_as_double(std::uint64_t index) const noexcept {
+  return is_composite_ ? composite_.value_as_double(index)
+                       : single_.value_as_double(index);
+}
+
+bool CurveBuffer::is_composite() const noexcept { return is_composite_; }
+
+const BufferView &CurveBuffer::as_single() const noexcept {
+  // Returns the single-block view (default-constructed/empty when this curve
+  // carries a composite). Callers must check is_composite() first.
+  return single_;
+}
+
+std::span<const BufferView> CurveBuffer::segments() const noexcept {
+  return is_composite_ ? composite_.segments() : std::span<const BufferView>{};
+}
+
 struct NullBitmapView::Impl {
   const std::uint8_t *data{};
   std::uint64_t bit_length{};

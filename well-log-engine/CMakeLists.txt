@@ -1077,6 +1077,19 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_composite_buffer_view_tests PRIVATE WellLog::Core)
     add_test(NAME welllog.composite-buffer-view COMMAND welllog_composite_buffer_view_tests)
 
+    # Composite-buffer consumer migration (#197): a multi-segment curve flows
+    # through LOD + table projection/exporters identically to single-block.
+    add_executable(welllog_composite_curve_migration_tests
+        tests/integration/composite_curve_migration_test.cpp
+    )
+    target_compile_features(welllog_composite_curve_migration_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_composite_curve_migration_tests)
+    target_link_libraries(
+        welllog_composite_curve_migration_tests
+        PRIVATE WellLog::Scene WellLog::Table WellLog::ExportTable
+    )
+    add_test(NAME welllog.composite-curve-migration COMMAND welllog_composite_curve_migration_tests)
+
     # Versioned XML table-export writer (§6, #155). Headless; ExportTable only.
     add_executable(welllog_xml_table_export_tests
         tests/integration/xml_table_export_test.cpp
