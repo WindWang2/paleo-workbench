@@ -1088,6 +1088,10 @@ if(WELLLOG_BUILD_TESTS)
         welllog_composite_curve_migration_tests
         PRIVATE WellLog::Scene WellLog::Table WellLog::ExportTable
     )
+    target_include_directories(
+        welllog_composite_curve_migration_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
     add_test(NAME welllog.composite-curve-migration COMMAND welllog_composite_curve_migration_tests)
 
     # Versioned XML table-export writer (§6, #155). Headless; ExportTable only.
