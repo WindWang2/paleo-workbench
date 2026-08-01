@@ -1202,6 +1202,17 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_apply_patch_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.apply-patch COMMAND welllog_apply_patch_tests)
 
+    # Kernel-owned per-document undo/redo history (#203, ADR 0025): patch and
+    # append semantic round trips, redo clearing, Selection Set restoration,
+    # and can_undo/can_redo + history_changed observability. Headless.
+    add_executable(welllog_undo_redo_tests
+        tests/integration/undo_redo_test.cpp
+    )
+    target_compile_features(welllog_undo_redo_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_undo_redo_tests)
+    target_link_libraries(welllog_undo_redo_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.undo-redo COMMAND welllog_undo_redo_tests)
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

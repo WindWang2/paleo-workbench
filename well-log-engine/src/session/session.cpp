@@ -819,6 +819,30 @@ struct TextIssueMapping {
 } // namespace
 
 struct WellLogSession::Impl {
+  // The state a history transition restores. Raw document buffers are immutable
+  // shared owners, so retaining a document snapshot does not duplicate sample
+  // data. Presentation layout and Selection Set are semantic state; viewports,
+  // crosshairs, and prepared pixels remain transient widget/session state.
+  struct SemanticState {
+    std::shared_ptr<const WellLogDocument> document;
+    std::optional<ScenePresentation> presentation;
+    std::optional<SelectionState> selection;
+  };
+
+  // A patch carries its explicit inverse edit list for auditability and future
+  // patch-level persistence. Snapshots make append undo exact as well: curve
+  // buffers are intentionally immutable and cannot be expressed as patch edits.
+  struct HistoryEntry {
+    SemanticState before;
+    SemanticState after;
+    std::vector<EntityEdit> inverse_edits;
+  };
+
+  struct DocumentHistory {
+    std::vector<HistoryEntry> undo;
+    std::vector<HistoryEntry> redo;
+  };
+
   PerformanceBudgets budgets;
   std::uint64_t state_version{};
   std::uint64_t next_diagnostic_id{1};
@@ -840,6 +864,7 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewport_defaults;
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
   std::unordered_map<EntityId, SelectionState, EntityIdHash> selections;
+  std::unordered_map<EntityId, DocumentHistory, EntityIdHash> histories;
   // Per-document append viewport mode (#200): whether an AppendBatchCommand
   // preserves the current viewport (fixed, the absence/default) or advances its
   // bottom to the new tail depth (follow_latest).
@@ -874,6 +899,57 @@ struct WellLogSession::Impl {
   std::mutex text_engine_mutex;
   ViewEventObserverId next_observer_id{1};
   std::unordered_map<ViewEventObserverId, ViewEventObserver> observers;
+
+  [[nodiscard]] SemanticState semantic_state(EntityId document_id) const {
+    SemanticState state;
+    if (const auto document = documents.find(document_id);
+        document != documents.end()) {
+      state.document = document->second;
+    }
+    if (const auto presentation = presentations.find(document_id);
+        presentation != presentations.end()) {
+      state.presentation = presentation->second;
+    }
+    if (const auto selection = selections.find(document_id);
+        selection != selections.end()) {
+      state.selection = selection->second;
+    }
+    return state;
+  }
+
+  void restore_semantic_state(EntityId document_id,
+                              const SemanticState &state) {
+    if (state.presentation.has_value()) {
+      presentations.insert_or_assign(document_id, *state.presentation);
+    } else {
+      presentations.erase(document_id);
+    }
+    if (state.selection.has_value()) {
+      selections.insert_or_assign(document_id, *state.selection);
+    } else {
+      selections.erase(document_id);
+    }
+  }
+
+  void publish_history_changed(EntityId document_id,
+                               DocumentRevision revision) {
+    const auto event = ViewEvent{
+        .kind = ViewEventKind::history_changed,
+        .state_version = state_version,
+        .document_id = document_id,
+        .document_revision = revision,
+    };
+    events.push_back(event);
+    notify_observers(event);
+  }
+
+  void record_new_history(EntityId document_id, HistoryEntry entry,
+                          DocumentRevision revision) {
+    auto &history = histories.at(document_id);
+    history.redo.clear();
+    history.undo.push_back(std::move(entry));
+    publish_history_changed(document_id, revision);
+  }
 
   void notify_observers(const ViewEvent &event) const noexcept {
     try {
@@ -2222,6 +2298,83 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
          has(pres.curve_layers());
 }
 
+// Returns the current value for one patchable entity, whether it lives in the
+// document's interpretation collections or the presentation's layout
+// collections. The history path copies that value into an inverse edit before
+// an ApplyPatchCommand replaces or removes it.
+[[nodiscard]] std::optional<PatchableEntity>
+patchable_entity_at(const WellLogDocument &document,
+                    const ScenePresentation *presentation, EntityId id) {
+  const auto in_document = [id](const auto &entities)
+      -> std::optional<PatchableEntity> {
+    const auto found = std::find_if(entities.begin(), entities.end(),
+                                    [id](const auto &entity) {
+                                      return entity.id == id;
+                                    });
+    return found == entities.end() ? std::nullopt
+                                   : std::optional<PatchableEntity>{*found};
+  };
+  if (const auto found = in_document(document.intervals()); found.has_value()) {
+    return found;
+  }
+  if (const auto found = in_document(document.markers()); found.has_value()) {
+    return found;
+  }
+  if (const auto found = in_document(document.symbols()); found.has_value()) {
+    return found;
+  }
+  if (const auto found = in_document(document.annotations());
+      found.has_value()) {
+    return found;
+  }
+  if (presentation == nullptr) {
+    return std::nullopt;
+  }
+  if (const auto found = in_document(presentation->tracks());
+      found.has_value()) {
+    return found;
+  }
+  if (const auto found = in_document(presentation->scales());
+      found.has_value()) {
+    return found;
+  }
+  return in_document(presentation->curve_layers());
+}
+
+// Produces the inverse of a validated patch. An upsert that created an entity
+// reverses to Remove; one that modified an entity restores its previous value;
+// a Remove reverses to an upsert of the previous entity. Edits are reversed to
+// preserve the normal command-inversion ordering even though #202 forbids
+// duplicate ids in a patch.
+[[nodiscard]] std::optional<std::vector<EntityEdit>>
+inverse_edits_for_patch(const DocumentPatch &patch,
+                        const WellLogDocument &document,
+                        const ScenePresentation *presentation) {
+  std::vector<EntityEdit> inverse;
+  inverse.reserve(patch.edits.size());
+  for (const auto &edit : patch.edits) {
+    if (std::holds_alternative<UpsertEntity>(edit)) {
+      const auto &upsert = std::get<UpsertEntity>(edit);
+      const auto previous =
+          patchable_entity_at(document, presentation, patch_entity_id(upsert.entity));
+      if (previous.has_value()) {
+        inverse.emplace_back(UpsertEntity{.entity = *previous});
+      } else {
+        inverse.emplace_back(RemoveEntity{.id = patch_entity_id(upsert.entity)});
+      }
+      continue;
+    }
+    const auto id = std::get<RemoveEntity>(edit).id;
+    const auto previous = patchable_entity_at(document, presentation, id);
+    if (!previous.has_value()) {
+      return std::nullopt;
+    }
+    inverse.emplace_back(UpsertEntity{.entity = *previous});
+  }
+  std::reverse(inverse.begin(), inverse.end());
+  return inverse;
+}
+
 // A patch-conflict error: the patch's base revision does not match the current
 // revision (#202, ADR 0025). Stable code so a host detects a stale-base patch
 // specifically (never applied by name/position guessing).
@@ -2231,6 +2384,16 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
       .severity = Severity::error,
       .entity_id = document_id,
       .message = MessageKey::patch_base_revision_conflict,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] Error history_empty(EntityId document_id) {
+  return Error{
+      .code = ErrorCode::history_empty,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::history_empty,
       .arguments = {},
   };
 }
@@ -2514,6 +2677,31 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
       }
     }
 
+    // Capture the exact semantic state and the declarative inverse before the
+    // commit changes the document. The snapshots make revision restoration
+    // exact; inverse_edits records how each validated patch edit reverses.
+    const auto inverse_edits = inverse_edits_for_patch(
+        command.patch, current_doc,
+        has_presentation ? &pres_entry->second : nullptr);
+    if (!inverse_edits.has_value()) {
+      return Error{
+          .code = ErrorCode::internal_error,
+          .severity = Severity::error,
+          .entity_id = command.document_id,
+          .message = MessageKey::internal_error,
+          .arguments = {},
+      };
+    }
+    auto history_entry = Impl::HistoryEntry{
+        .before = impl_->semantic_state(command.document_id),
+        .after = {},
+        .inverse_edits = std::move(*inverse_edits),
+    };
+    auto [history, inserted] = impl_->histories.try_emplace(command.document_id);
+    static_cast<void>(inserted);
+    history->second.undo.reserve(history->second.undo.size() + 1);
+    impl_->events.reserve(impl_->events.size() + 1);
+
     // --- Build the patched document (interpretation entities edited). ---
     // Copy every untouched collection verbatim; for the patchable document
     // collections (intervals/markers/symbols/annotations), copy each entity
@@ -2731,7 +2919,12 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         impl_->notify_observers(event);
       }
     }
-    return commit;
+    history_entry.after = impl_->semantic_state(command.document_id);
+    impl_->record_new_history(command.document_id, std::move(history_entry),
+                              commit.value().document_revision);
+    auto receipt = commit.value();
+    receipt.state_version = impl_->state_version;
+    return receipt;
   } catch (const std::bad_alloc &) {
     return Error{
         .code = ErrorCode::resource_exhausted,
@@ -2745,6 +2938,87 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         .code = ErrorCode::internal_error,
         .severity = Severity::error,
         .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
+Result<CommandReceipt> WellLogSession::execute(const UndoCommand &command) {
+  return execute_history(command.document_id, HistoryDirection::undo);
+}
+
+Result<CommandReceipt> WellLogSession::execute(const RedoCommand &command) {
+  return execute_history(command.document_id, HistoryDirection::redo);
+}
+
+Result<CommandReceipt>
+WellLogSession::execute_history(EntityId document_id, HistoryDirection direction) {
+  try {
+    if (!impl_->documents.contains(document_id)) {
+      return append_document_missing(document_id);
+    }
+    const auto history_it = impl_->histories.find(document_id);
+    if (history_it == impl_->histories.end()) {
+      return history_empty(document_id);
+    }
+    auto &history = history_it->second;
+    auto &source = direction == HistoryDirection::undo ? history.undo
+                                                        : history.redo;
+    auto &destination = direction == HistoryDirection::undo ? history.redo
+                                                             : history.undo;
+    if (source.empty()) {
+      return history_empty(document_id);
+    }
+    // Reserve the only allocations needed after the document commit before
+    // making that commit. A failed reserve therefore leaves document and
+    // history unchanged instead of producing an unobservable transition.
+    destination.reserve(destination.size() + 1);
+    impl_->events.reserve(impl_->events.size() + 1);
+    const auto &target = direction == HistoryDirection::undo
+                             ? source.back().before
+                             : source.back().after;
+    if (target.document == nullptr) {
+      return Error{
+          .code = ErrorCode::internal_error,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::internal_error,
+          .arguments = {},
+      };
+    }
+
+    // Re-enter through SetDocumentCommand so revision-scoped prepared work is
+    // cancelled/rebuilt and the Selection Set is remapped with the same rules
+    // as a normal commit. Restore the captured selection immediately after to
+    // preserve its exact semantic validity and revision at this history point.
+    const auto restored = execute(SetDocumentCommand{*target.document});
+    if (!restored.has_value()) {
+      return restored;
+    }
+    impl_->restore_semantic_state(document_id, target);
+
+    auto entry = std::move(source.back());
+    source.pop_back();
+    destination.push_back(std::move(entry));
+    impl_->publish_history_changed(document_id,
+                                   restored.value().document_revision);
+    auto receipt = restored.value();
+    receipt.state_version = impl_->state_version;
+    return receipt;
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = document_id,
         .message = MessageKey::internal_error,
         .arguments = {},
     };
@@ -2940,6 +3214,19 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
           .arguments = {},
       };
     }
+    // Appends have no patch representation for their immutable curve-buffer
+    // segments, so their before/after semantic snapshots are the undo record.
+    // Reserve every throwing history/event allocation before the document
+    // commit so a successful visible append is never left unrecorded.
+    auto history_entry = Impl::HistoryEntry{
+        .before = impl_->semantic_state(command.document_id),
+        .after = {},
+        .inverse_edits = {},
+    };
+    auto [history, inserted] = impl_->histories.try_emplace(command.document_id);
+    static_cast<void>(inserted);
+    history->second.undo.reserve(history->second.undo.size() + 1);
+    impl_->events.reserve(impl_->events.size() + 1);
     // Stage the document's previously-built per-curve pyramids for incremental
     // LOD reuse (#199): when the previous preparation is ready at the current
     // revision, the SetDocumentCommand LOD worker will extend_tail each curve's
@@ -3073,7 +3360,12 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
         impl_->notify_observers(event);
       }
     }
-    return commit;
+    history_entry.after = impl_->semantic_state(command.document_id);
+    impl_->record_new_history(command.document_id, std::move(history_entry),
+                              commit.value().document_revision);
+    auto receipt = commit.value();
+    receipt.state_version = impl_->state_version;
+    return receipt;
   } catch (const std::bad_alloc &) {
     return Error{
         .code = ErrorCode::resource_exhausted,
@@ -3446,6 +3738,24 @@ WellLogSession::selection(EntityId document_id) const noexcept {
   return found == impl_->selections.end()
              ? std::nullopt
              : std::optional<SelectionState>{found->second};
+}
+
+bool WellLogSession::can_undo(EntityId document_id) const noexcept {
+  try {
+    const auto history = impl_->histories.find(document_id);
+    return history != impl_->histories.end() && !history->second.undo.empty();
+  } catch (...) {
+    return false;
+  }
+}
+
+bool WellLogSession::can_redo(EntityId document_id) const noexcept {
+  try {
+    const auto history = impl_->histories.find(document_id);
+    return history != impl_->histories.end() && !history->second.redo.empty();
+  } catch (...) {
+    return false;
+  }
 }
 
 AppendViewportMode

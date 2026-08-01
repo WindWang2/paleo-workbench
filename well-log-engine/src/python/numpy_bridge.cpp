@@ -114,6 +114,10 @@ void set_welllog_error(const char *type_name, const char *code,
     return "resource_exhausted";
   case ErrorCode::internal_error:
     return "internal_error";
+  case ErrorCode::patch_conflict:
+    return "patch_conflict";
+  case ErrorCode::history_empty:
+    return "history_empty";
   }
   return "internal_error";
 }

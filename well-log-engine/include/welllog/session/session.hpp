@@ -208,6 +208,19 @@ struct ApplyPatchCommand {
   DocumentPatch patch;
 };
 
+// Restores the semantic state before the latest committed patch or visible
+// append for this document (#203, ADR 0025). Widget pixels are transient and
+// deliberately not part of the restored state.
+struct UndoCommand {
+  EntityId document_id;
+};
+
+// Re-applies the semantic state of the latest undone patch or visible append
+// for this document (#203, ADR 0025).
+struct RedoCommand {
+  EntityId document_id;
+};
+
 struct CommandReceipt {
   std::uint64_t state_version{};
   EntityId document_id;
@@ -225,6 +238,8 @@ enum class ViewEventKind : std::uint8_t {
   frame_ready,
   selection_changed,
   selection_invalidated,
+  // Read can_undo()/can_redo() after this event to observe the new stacks.
+  history_changed,
 };
 
 struct ViewEvent {
@@ -338,6 +353,8 @@ public:
   execute(const AppendBatchCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const ApplyPatchCommand &command);
+  [[nodiscard]] Result<CommandReceipt> execute(const UndoCommand &command);
+  [[nodiscard]] Result<CommandReceipt> execute(const RedoCommand &command);
   // Installs the text pipeline used to shape annotations and labels during
   // scene preparation (ADR 0029). Without an engine, text layers prepare
   // empty and a text_engine_unavailable diagnostic is published.
@@ -361,6 +378,10 @@ public:
   // when the document has no selection.
   [[nodiscard]] std::optional<SelectionState>
   selection(EntityId document_id) const noexcept;
+  // Per-document history observability (#203, ADR 0025). A successful new
+  // patch or visible append clears redo entries before recording its undo.
+  [[nodiscard]] bool can_undo(EntityId document_id) const noexcept;
+  [[nodiscard]] bool can_redo(EntityId document_id) const noexcept;
   // The append viewport mode for a document (#200): whether an
   // AppendBatchCommand preserves the current viewport (`fixed`, the default) or
   // advances its bottom to the new tail depth (`follow_latest`). Returns `fixed`
@@ -395,6 +416,13 @@ public:
   performance_snapshot(EntityId document_id) const noexcept;
 
 private:
+  enum class HistoryDirection : std::uint8_t {
+    undo,
+    redo,
+  };
+
+  [[nodiscard]] Result<CommandReceipt>
+  execute_history(EntityId document_id, HistoryDirection direction);
   // Shared apply path for the selection commands (depth-range or row-span
   // source). Resolves, stores, versions, and publishes. Returns the receipt or
   // an error. Defined in the .cpp; `from_rows` selects the row→range path.

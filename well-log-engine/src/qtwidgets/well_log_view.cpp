@@ -871,6 +871,7 @@ void WellLogView::handle_session_event(ViewEvent event) noexcept {
     break;
   case ViewEventKind::presentation_changed:
   case ViewEventKind::frame_ready:
+  case ViewEventKind::history_changed:
     update();
     break;
   case ViewEventKind::diagnostic_published: {

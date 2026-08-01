@@ -35,6 +35,9 @@ enum class ErrorCode : std::uint16_t {
   // guessing by name/position, so it is rejected. Distinct from
   // invalid_document so a host can detect a stale-base patch specifically.
   patch_conflict,
+  // An UndoCommand or RedoCommand found no entry in the requested history
+  // direction (#203, ADR 0025).
+  history_empty,
   diagnostic_warning,
 };
 
@@ -91,6 +94,8 @@ enum class MessageKey : std::uint16_t {
   // revision (#202/#158, ADR 0025). Stable message key paired with
   // ErrorCode::patch_conflict.
   patch_base_revision_conflict,
+  // An UndoCommand or RedoCommand has no entry to apply (#203, ADR 0025).
+  history_empty,
 };
 
 struct ErrorArgument {
