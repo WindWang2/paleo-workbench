@@ -316,6 +316,7 @@ endif()
 # self-contained OOXML zip writer.
 add_library(welllog_export_table ${WELLLOG_LIBRARY_TYPE}
     src/export_table/csv.cpp
+    src/export_table/xml.cpp
 )
 add_library(WellLog::ExportTable ALIAS welllog_export_table)
 set_target_properties(welllog_export_table PROPERTIES
@@ -1060,6 +1061,15 @@ if(WELLLOG_BUILD_TESTS)
     welllog_enable_warnings(welllog_csv_table_export_tests)
     target_link_libraries(welllog_csv_table_export_tests PRIVATE WellLog::ExportTable)
     add_test(NAME welllog.csv-table-export COMMAND welllog_csv_table_export_tests)
+
+    # Versioned XML table-export writer (§6, #155). Headless; ExportTable only.
+    add_executable(welllog_xml_table_export_tests
+        tests/integration/xml_table_export_test.cpp
+    )
+    target_compile_features(welllog_xml_table_export_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_xml_table_export_tests)
+    target_link_libraries(welllog_xml_table_export_tests PRIVATE WellLog::ExportTable)
+    add_test(NAME welllog.xml-table-export COMMAND welllog_xml_table_export_tests)
 
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp

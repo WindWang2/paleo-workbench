@@ -74,4 +74,27 @@ public:
                      CsvExportOptions options = {});
 };
 
+// Versioned XML table exchange format (§6). NOT SpreadsheetML — a streaming,
+// hardened writer that emits one <wellLogTables schemaVersion="1.0"> document
+// grouping all of a well's projections. Disables DTD, external entities, and
+// network resources by construction (the writer never emits them; attribute
+// text is XML-escaped and control characters rejected). Round-trippable: a
+// small/repeat-depth/multi-axis/null document can be written and read back to
+// the same depths/nulls/units/identity.
+struct XmlTableExportOptions {
+  std::string schema_version = "1.0";
+};
+
+class WELLLOG_EXPORT_TABLE_API XmlTableExporter {
+public:
+  // Streams the document + its projections to `path` as one XML document. Each
+  // table's columns carry id/name/unit/type (type from TableColumn.scalar_type);
+  // rows stream <v> (finite) / <null/> (null sample) from raw cell() reads.
+  [[nodiscard]] static Result<TableExportReport>
+  write_to_file(const WellLogDocument &document,
+                const std::vector<TableProjection> &projections,
+                const std::filesystem::path &path,
+                XmlTableExportOptions options = {});
+};
+
 } // namespace welllog
