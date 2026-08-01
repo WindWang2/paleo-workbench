@@ -403,29 +403,15 @@ void append_escaped(std::string &output, std::string_view text) {
 }
 
 [[nodiscard]] std::string_view domain_name(DepthDomain domain) {
-  switch (domain) {
-  case DepthDomain::measured_depth:
-    return "md";
-  case DepthDomain::true_vertical_depth:
-    return "tvd";
-  case DepthDomain::true_vertical_depth_subsea:
-    return "tvdss";
-  case DepthDomain::source_index:
-    return "sourceIndex";
-  }
-  return "";
+  return depth_domain_name(domain);
 }
 
 [[nodiscard]] DepthDomain parse_domain(std::string_view name) {
-  if (name == "md")
-    return DepthDomain::measured_depth;
-  if (name == "tvd")
-    return DepthDomain::true_vertical_depth;
-  if (name == "tvdss")
-    return DepthDomain::true_vertical_depth_subsea;
-  if (name == "sourceIndex")
-    return DepthDomain::source_index;
-  throw ParseFailure{"unknown depth domain"};
+  const auto parsed = parse_depth_domain(name);
+  if (!parsed.has_value()) {
+    throw ParseFailure{"unknown depth domain"};
+  }
+  return *parsed;
 }
 
 [[nodiscard]] std::string_view direction_name(AxisDirection direction) {

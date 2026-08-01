@@ -310,6 +310,40 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+# Table export backends (ADR 0022 / table-and-export.md §5-§7, §10, #155): CSV,
+# versioned XML, and XLSX writers over a TableProjection. Depends only on Table
+# (which pulls Core) — Qt stays in the adapter. XLSX adds PRIVATE ZLIB for the
+# self-contained OOXML zip writer.
+add_library(welllog_export_table ${WELLLOG_LIBRARY_TYPE}
+    src/export_table/csv.cpp
+)
+add_library(WellLog::ExportTable ALIAS welllog_export_table)
+set_target_properties(welllog_export_table PROPERTIES
+    EXPORT_NAME ExportTable
+    OUTPUT_NAME welllog-export-table
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_export_table PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_export_table)
+target_link_libraries(welllog_export_table PUBLIC WellLog::Table)
+target_include_directories(welllog_export_table
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_export_table
+        PRIVATE WELLLOG_EXPORT_TABLE_BUILD
+        PUBLIC WELLLOG_EXPORT_TABLE_SHARED
+    )
+endif()
+
 # PDF export backend (ADR: hand-rolled writer, #185; scene emission #187). No
 # third-party PDF library; only zlib for FlateDecode stream compression.
 add_library(welllog_export_pdf ${WELLLOG_LIBRARY_TYPE}
@@ -599,6 +633,8 @@ install(
         welllog_table
         welllog_scene
         welllog_export_vector
+        welllog_export_pdf
+        welllog_export_table
         welllog_session
         welllog_io
         welllog_render_gl
@@ -1014,6 +1050,16 @@ if(WELLLOG_BUILD_TESTS)
     welllog_enable_warnings(welllog_table_projection_tests)
     target_link_libraries(welllog_table_projection_tests PRIVATE WellLog::Table)
     add_test(NAME welllog.table-projection COMMAND welllog_table_projection_tests)
+
+    # CSV table-export writer (ADR 0022 / table-and-export.md §7, #155).
+    # Headless: links only ExportTable (Core+Table); no GL or Qt.
+    add_executable(welllog_csv_table_export_tests
+        tests/integration/csv_table_export_test.cpp
+    )
+    target_compile_features(welllog_csv_table_export_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_csv_table_export_tests)
+    target_link_libraries(welllog_csv_table_export_tests PRIVATE WellLog::ExportTable)
+    add_test(NAME welllog.csv-table-export COMMAND welllog_csv_table_export_tests)
 
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp

@@ -49,11 +49,14 @@ enum class TableKind : std::uint8_t {
 // One column of a projected table. For a curve table the first column is the
 // axis (depth) and each subsequent column is a curve; `curve_id` is nil for the
 // axis column. `unit` is the column's value unit (axis unit for the depth
-// column, curve unit otherwise).
+// column, curve unit otherwise). `scalar_type` is the raw buffer's element type
+// (axis coordinate type for the depth column, curve value type otherwise) —
+// exported writers use it to label columns (e.g. XML `type="float64"`).
 struct TableColumn {
   EntityId curve_id{};      // nil for the axis/depth column of a curve table
   std::string name;         // mnemonic/display name (or axis label)
   std::string unit;         // value unit
+  ScalarType scalar_type{ScalarType::float64};
 };
 
 // One cell, read on demand from the raw buffer. `value` is nullopt for a null

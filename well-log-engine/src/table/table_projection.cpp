@@ -31,6 +31,7 @@ struct CurveColumn {
   EntityId curve_id{};
   std::string name;
   std::string unit;
+  ScalarType scalar_type{ScalarType::float64};
   // For a curve column: pointers into the document's spans (the curve + its
   // axis). For the axis (depth) column, curve is nullptr and the axis is set.
   const SamplingAxis *axis{};
@@ -104,7 +105,7 @@ TableColumn TableProjection::column(std::uint64_t index) const noexcept {
     return {};
   }
   const auto &c = impl_->columns[index];
-  return TableColumn{c.curve_id, c.name, c.unit};
+  return TableColumn{c.curve_id, c.name, c.unit, c.scalar_type};
 }
 std::uint64_t TableProjection::row_count() const noexcept {
   return impl_ ? impl_->row_count : 0;
@@ -153,6 +154,7 @@ TableProjection TableProjectionBuilder::make_curve_table(
   depth_col.curve_id = EntityId{};
   depth_col.name = "DEPTH";
   depth_col.unit = axis.unit;
+  depth_col.scalar_type = axis.coordinates.scalar_type();
   depth_col.axis = &axis;
   depth_col.curve = nullptr;
   impl->columns.push_back(std::move(depth_col));
@@ -162,6 +164,7 @@ TableProjection TableProjectionBuilder::make_curve_table(
     cc.curve_id = curve->id;
     cc.name = curve->mnemonic.empty() ? curve->display_name : curve->mnemonic;
     cc.unit = curve->unit;
+    cc.scalar_type = curve->values.scalar_type();
     cc.axis = &axis;
     cc.curve = curve;
     impl->columns.push_back(std::move(cc));

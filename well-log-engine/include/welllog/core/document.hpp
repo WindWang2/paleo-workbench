@@ -49,6 +49,14 @@ enum class DepthDomain : std::uint8_t {
   source_index,
 };
 
+// Canonical lowercase Reference-Depth domain tokens shared by the manifest and
+// the XML/table exporters (single source of truth). `parse_depth_domain` is the
+// inverse; returns nullopt on an unknown token (no throw).
+[[nodiscard]] WELLLOG_CORE_API std::string_view
+depth_domain_name(DepthDomain domain) noexcept;
+[[nodiscard]] WELLLOG_CORE_API std::optional<DepthDomain>
+parse_depth_domain(std::string_view name) noexcept;
+
 enum class AxisDirection : std::uint8_t {
   increasing,
   decreasing,

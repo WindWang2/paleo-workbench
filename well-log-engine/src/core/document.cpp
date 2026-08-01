@@ -71,6 +71,37 @@ std::optional<ScalarType> parse_scalar_type(std::string_view name) noexcept {
   return std::nullopt;
 }
 
+std::string_view depth_domain_name(DepthDomain domain) noexcept {
+  switch (domain) {
+  case DepthDomain::measured_depth:
+    return "md";
+  case DepthDomain::true_vertical_depth:
+    return "tvd";
+  case DepthDomain::true_vertical_depth_subsea:
+    return "tvdss";
+  case DepthDomain::source_index:
+    return "sourceIndex";
+  }
+  return "";
+}
+
+std::optional<DepthDomain>
+parse_depth_domain(std::string_view name) noexcept {
+  if (name == "md") {
+    return DepthDomain::measured_depth;
+  }
+  if (name == "tvd") {
+    return DepthDomain::true_vertical_depth;
+  }
+  if (name == "tvdss") {
+    return DepthDomain::true_vertical_depth_subsea;
+  }
+  if (name == "sourceIndex") {
+    return DepthDomain::source_index;
+  }
+  return std::nullopt;
+}
+
 struct SharedOwner::Impl {
   std::shared_ptr<const void> owner;
 };
