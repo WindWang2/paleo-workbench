@@ -1190,6 +1190,18 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_append_coalescing_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.append-coalescing-stress COMMAND welllog_append_coalescing_tests)
 
+    # DocumentPatch + ApplyPatchCommand (#202, the #158 undoable-patch
+    # foundation): upsert/remove on document + presentation entities, atomic
+    # whole-batch reject, patch_conflict on stale base, selection remap.
+    # Headless; Session + Scene.
+    add_executable(welllog_apply_patch_tests
+        tests/integration/apply_patch_test.cpp
+    )
+    target_compile_features(welllog_apply_patch_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_apply_patch_tests)
+    target_link_libraries(welllog_apply_patch_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.apply-patch COMMAND welllog_apply_patch_tests)
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

@@ -30,6 +30,11 @@ enum class ErrorCode : std::uint16_t {
   invalid_font,
   invalid_image,
   invalid_custom_source,
+  // A patch's declared base revision does not match the document's current
+  // revision (#202/#158, ADR 0025): the patch cannot be applied without
+  // guessing by name/position, so it is rejected. Distinct from
+  // invalid_document so a host can detect a stale-base patch specifically.
+  patch_conflict,
   diagnostic_warning,
 };
 
@@ -82,6 +87,10 @@ enum class MessageKey : std::uint16_t {
   custom_source_empty,
   custom_source_primitives_exceed_limit,
   custom_source_points_exceed_limit,
+  // A patch's declared base revision does not match the document's current
+  // revision (#202/#158, ADR 0025). Stable message key paired with
+  // ErrorCode::patch_conflict.
+  patch_base_revision_conflict,
 };
 
 struct ErrorArgument {

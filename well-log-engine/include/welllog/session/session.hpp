@@ -160,6 +160,54 @@ enum class AppendViewportMode : std::uint8_t {
   follow_latest,
 };
 
+// --- Undoable Document Patch (#202/#158, ADR 0025) ---------------------------
+//
+// A declarative edit a host applies to a document + presentation. Raw curve
+// arrays are never edited in place (ADR 0025); a patch edits interpretation
+// entities (Interval/Marker/Symbol/Annotation) and layout entities
+// (Track/Scale/CurveLayer) by EntityId. Each edit is Upsert (add-or-replace by
+// id) or Remove (delete by id). A DocumentPatch declares the base revision it
+// was built against; the session rejects a patch whose base != the current
+// revision (PatchConflict — no guessing by name/position, ADR 0025).
+
+// Every entity a patch may target. A variant makes the edit structural and
+// exhaustive (the apply path switches on the alternative to route the entity to
+// the right document/presentation collection).
+using PatchableEntity =
+    std::variant<Interval, Marker, SymbolOccurrence, TextAnnotation, TrackSpec,
+                 TrackScaleSpec, CurveLayerSpec>;
+
+// Add-or-replace the entity carried in `entity` (matched by its EntityId on the
+// target collection). The id must be non-nil.
+struct UpsertEntity {
+  PatchableEntity entity;
+};
+
+// Remove the entity with `id` from whichever collection holds it. The entity
+// must currently exist.
+struct RemoveEntity {
+  EntityId id;
+};
+
+using EntityEdit = std::variant<UpsertEntity, RemoveEntity>;
+
+// A batch of edits applied atomically (all-or-nothing) over a document +
+// presentation at `base_revision`. Produces a single new Document Revision.
+struct DocumentPatch {
+  DocumentRevision base_revision;
+  std::vector<EntityEdit> edits;
+};
+
+// Applies a DocumentPatch to a document, producing a new Document Revision
+// (#202/#158). The patch is validated wholesale and either all-edits apply or
+// none do (no half-applied state). A base-revision mismatch is rejected with
+// patch_conflict. The Selection Set remaps or invalidates per ADR 0024 (the
+// commit delegates through the existing document/presentation replace path).
+struct ApplyPatchCommand {
+  EntityId document_id;
+  DocumentPatch patch;
+};
+
 struct CommandReceipt {
   std::uint64_t state_version{};
   EntityId document_id;
@@ -288,6 +336,8 @@ public:
   execute(const ClearSelectionCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const AppendBatchCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const ApplyPatchCommand &command);
   // Installs the text pipeline used to shape annotations and labels during
   // scene preparation (ADR 0029). Without an engine, text layers prepare
   // empty and a text_engine_unavailable diagnostic is published.

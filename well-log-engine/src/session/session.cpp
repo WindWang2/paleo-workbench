@@ -2190,6 +2190,98 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
       std::int64_t{1'000'000'000} / std::int64_t{rate_hz}};
 }
 
+// --- Document Patch helpers (#202/#158, ADR 0025) ---------------------------
+
+// Extracts the EntityId from any patchable entity (every PatchableEntity
+// alternative has an `id` member named identically).
+[[nodiscard]] EntityId patch_entity_id(const PatchableEntity &entity) noexcept {
+  return std::visit(
+      [](const auto &e) -> EntityId { return e.id; }, entity);
+}
+
+// True when `id` matches an entity in the document's interpretation collections
+// (Interval/Marker/SymbolOccurrence/TextAnnotation).
+[[nodiscard]] bool document_has_entity(const WellLogDocument &doc,
+                                       EntityId id) noexcept {
+  const auto has = [id](const auto &span) {
+    return std::any_of(span.begin(), span.end(),
+                       [id](const auto &e) { return e.id == id; });
+  };
+  return has(doc.intervals()) || has(doc.markers()) ||
+         has(doc.symbols()) || has(doc.annotations());
+}
+
+// True when `id` matches a presentation layout entity (Track/Scale/CurveLayer).
+[[nodiscard]] bool presentation_has_entity(const ScenePresentation &pres,
+                                           EntityId id) noexcept {
+  const auto has = [id](const auto &span) {
+    return std::any_of(span.begin(), span.end(),
+                       [id](const auto &e) { return e.id == id; });
+  };
+  return has(pres.tracks()) || has(pres.scales()) ||
+         has(pres.curve_layers());
+}
+
+// A patch-conflict error: the patch's base revision does not match the current
+// revision (#202, ADR 0025). Stable code so a host detects a stale-base patch
+// specifically (never applied by name/position guessing).
+[[nodiscard]] Error patch_base_conflict(EntityId document_id) {
+  return Error{
+      .code = ErrorCode::patch_conflict,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::patch_base_revision_conflict,
+      .arguments = {},
+  };
+}
+
+// Generic upsert into a builder collection: visit the entity variant and call
+// the matching add_* on the document builder. Returns true if the entity type
+// is a document entity (was routed), false if it is a presentation entity (the
+// caller routes it to the presentation builder instead).
+[[nodiscard]] bool upsert_document_entity(WellLogDocumentBuilder &builder,
+                                          const PatchableEntity &entity) {
+  return std::visit(
+      [&builder](const auto &e) -> bool {
+        using T = std::decay_t<decltype(e)>;
+        if constexpr (std::is_same_v<T, Interval>) {
+          builder.add_interval(e);
+          return true;
+        } else if constexpr (std::is_same_v<T, Marker>) {
+          builder.add_marker(e);
+          return true;
+        } else if constexpr (std::is_same_v<T, SymbolOccurrence>) {
+          builder.add_symbol(e);
+          return true;
+        } else if constexpr (std::is_same_v<T, TextAnnotation>) {
+          builder.add_annotation(e);
+          return true;
+        }
+        return false;
+      },
+      entity);
+}
+
+[[nodiscard]] bool upsert_presentation_entity(ScenePresentationBuilder &builder,
+                                              const PatchableEntity &entity) {
+  return std::visit(
+      [&builder](const auto &e) -> bool {
+        using T = std::decay_t<decltype(e)>;
+        if constexpr (std::is_same_v<T, TrackSpec>) {
+          builder.add_track(e);
+          return true;
+        } else if constexpr (std::is_same_v<T, TrackScaleSpec>) {
+          builder.add_scale(e);
+          return true;
+        } else if constexpr (std::is_same_v<T, CurveLayerSpec>) {
+          builder.add_curve_layer(e);
+          return true;
+        }
+        return false;
+      },
+      entity);
+}
+
 Result<CommandReceipt>
 WellLogSession::execute(const AppendBatchCommand &command) {
   try {
@@ -2312,6 +2404,329 @@ WellLogSession::flush_append_coalesce(EntityId document_id) noexcept {
         .code = ErrorCode::internal_error,
         .severity = Severity::error,
         .entity_id = document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const ApplyPatchCommand &command) {
+  try {
+    if (command.patch.edits.empty()) {
+      // An empty patch is a no-op at the current revision.
+      const auto document = impl_->documents.find(command.document_id);
+      if (document == impl_->documents.end()) {
+        return append_document_missing(command.document_id);
+      }
+      return CommandReceipt{
+          .state_version = impl_->state_version,
+          .document_id = command.document_id,
+          .document_revision = document->second->revision(),
+          .asynchronous_preparation_started = false,
+          .diagnostic_id = std::nullopt,
+      };
+    }
+
+    const auto document_entry = impl_->documents.find(command.document_id);
+    if (document_entry == impl_->documents.end()) {
+      return append_document_missing(command.document_id);
+    }
+    const auto &current_doc = *document_entry->second;
+    const auto current_revision = current_doc.revision();
+    // Patch-conflict gate (AC #6): the patch's base revision must equal the
+    // current revision exactly. A mismatch is rejected with the stable
+    // patch_conflict code — never applied by name/position guessing (ADR 0025).
+    if (command.patch.base_revision.value != current_revision.value) {
+      return patch_base_conflict(command.document_id);
+    }
+
+    // Resolve the presentation (optional — a patch may target only document
+    // entities on a document that has no presentation yet).
+    const auto pres_entry = impl_->presentations.find(command.document_id);
+    const bool has_presentation = pres_entry != impl_->presentations.end();
+
+    // --- Validate the whole patch before touching any state (atomicity). ---
+    // Track the set of ids this patch references so remove-targets-exist and
+    // no-duplicate-id checks see the patch's cumulative effect, and so the
+    // rebuild can skip/replace entities by id.
+    std::unordered_set<EntityId, EntityIdHash> patched_ids;
+    for (const auto &edit : command.patch.edits) {
+      if (std::holds_alternative<UpsertEntity>(edit)) {
+        const auto &upsert = std::get<UpsertEntity>(edit);
+        const auto id = patch_entity_id(upsert.entity);
+        if (id.is_nil()) {
+          return Error{
+              .code = ErrorCode::invalid_document,
+              .severity = Severity::error,
+              .entity_id = id,
+              .message = MessageKey::document_structure_invalid,
+              .arguments = {},
+          };
+        }
+        if (!patched_ids.insert(id).second) {
+          return Error{
+              .code = ErrorCode::duplicate_entity_id,
+              .severity = Severity::error,
+              .entity_id = id,
+              .message = MessageKey::entity_identity_duplicated,
+              .arguments = {},
+          };
+        }
+      } else {
+        const auto id = std::get<RemoveEntity>(edit).id;
+        if (id.is_nil()) {
+          return Error{
+              .code = ErrorCode::invalid_document,
+              .severity = Severity::error,
+              .entity_id = id,
+              .message = MessageKey::document_structure_invalid,
+              .arguments = {},
+          };
+        }
+        if (!patched_ids.insert(id).second) {
+          return Error{
+              .code = ErrorCode::duplicate_entity_id,
+              .severity = Severity::error,
+              .entity_id = id,
+              .message = MessageKey::entity_identity_duplicated,
+              .arguments = {},
+          };
+        }
+        // The remove must target an existing entity (document or presentation).
+        const auto in_doc = document_has_entity(current_doc, id);
+        const auto in_pres =
+            has_presentation &&
+            presentation_has_entity(pres_entry->second, id);
+        if (!in_doc && !in_pres) {
+          return Error{
+              .code = ErrorCode::document_not_found,
+              .severity = Severity::error,
+              .entity_id = id,
+              .message = MessageKey::presentation_document_missing,
+              .arguments = {},
+          };
+        }
+      }
+    }
+
+    // --- Build the patched document (interpretation entities edited). ---
+    // Copy every untouched collection verbatim; for the patchable document
+    // collections (intervals/markers/symbols/annotations), copy each entity
+    // unless it is removed, and append upserts.
+    WellLogDocumentBuilder doc_builder(current_doc.id(),
+                                       DocumentRevision{current_revision.value + 1});
+    for (const auto &axis : current_doc.sampling_axes()) {
+      doc_builder.add_sampling_axis(axis);
+    }
+    for (const auto &curve : current_doc.curves()) {
+      doc_builder.add_curve(curve);
+    }
+    for (const auto &image : current_doc.image_sources()) {
+      doc_builder.add_image_source(image);
+    }
+    for (const auto &custom : current_doc.custom_sources()) {
+      doc_builder.add_custom_source(custom);
+    }
+    // Helper: copy an entity collection, skipping any id this patch touches —
+    // both removed ids (gone) and upserted ids (replaced by the upsert's new
+    // value, applied below). Copying the original then appending the upsert
+    // would duplicate the id.
+    const auto is_patched = [&patched_ids](EntityId id) {
+      return patched_ids.contains(id);
+    };
+    for (const auto &interval : current_doc.intervals()) {
+      if (!is_patched(interval.id)) {
+        doc_builder.add_interval(interval);
+      }
+    }
+    for (const auto &marker : current_doc.markers()) {
+      if (!is_patched(marker.id)) {
+        doc_builder.add_marker(marker);
+      }
+    }
+    for (const auto &symbol : current_doc.symbols()) {
+      if (!is_patched(symbol.id)) {
+        doc_builder.add_symbol(symbol);
+      }
+    }
+    for (const auto &annotation : current_doc.annotations()) {
+      if (!is_patched(annotation.id)) {
+        doc_builder.add_annotation(annotation);
+      }
+    }
+    // Apply upserts — document entities go to the document builder, presentation
+    // entities to the presentation builder (built next).
+    bool presentation_upserts_present = false;
+    for (const auto &edit : command.patch.edits) {
+      if (std::holds_alternative<UpsertEntity>(edit)) {
+        const auto &upsert = std::get<UpsertEntity>(edit);
+        if (!upsert_document_entity(doc_builder, upsert.entity)) {
+          presentation_upserts_present = true;
+        }
+      }
+    }
+
+    // --- Build the patched presentation (layout entities edited), if any. ---
+    std::optional<ScenePresentation> patched_presentation;
+    if (has_presentation) {
+      const auto &pres = pres_entry->second;
+      ScenePresentationBuilder pres_builder(
+          pres.document_id(), pres.reference_depth_range(),
+          pres.physical_height(), pres.font_asset_fingerprint());
+      pres_builder.set_presentation_version(pres.presentation_version());
+      // Depth-transform version round-trips via the descriptor's version.
+      pres_builder.set_depth_transform_version(pres.depth_transform().version);
+      for (const auto &pattern : pres.patterns()) {
+        pres_builder.add_pattern(pattern);
+      }
+      for (const auto &layer : pres.interval_layers()) {
+        pres_builder.add_interval_layer(layer);
+      }
+      for (const auto &layer : pres.crossover_fill_layers()) {
+        pres_builder.add_crossover_fill_layer(layer);
+      }
+      for (const auto &layer : pres.image_layers()) {
+        pres_builder.add_image_layer(layer);
+      }
+      for (const auto &layer : pres.marker_layers()) {
+        pres_builder.add_marker_layer(layer);
+      }
+      for (const auto &layer : pres.symbol_layers()) {
+        pres_builder.add_symbol_layer(layer);
+      }
+      for (const auto &layer : pres.text_layers()) {
+        pres_builder.add_text_layer(layer);
+      }
+      for (const auto &layer : pres.custom_layers()) {
+        pres_builder.add_custom_layer(layer);
+      }
+      // Copy the patchable layout collections, skipping removed ids.
+      for (const auto &track : pres.tracks()) {
+        if (!is_patched(track.id)) {
+          pres_builder.add_track(track);
+        }
+      }
+      for (const auto &scale : pres.scales()) {
+        if (!is_patched(scale.id)) {
+          pres_builder.add_scale(scale);
+        }
+      }
+      for (const auto &layer : pres.curve_layers()) {
+        if (!is_patched(layer.id)) {
+          pres_builder.add_curve_layer(layer);
+        }
+      }
+      // Apply presentation upserts.
+      for (const auto &edit : command.patch.edits) {
+        if (std::holds_alternative<UpsertEntity>(edit)) {
+          (void)upsert_presentation_entity(
+              pres_builder, std::get<UpsertEntity>(edit).entity);
+        }
+      }
+      patched_presentation = pres_builder.build();
+    } else if (presentation_upserts_present) {
+      // A patch upserts a presentation entity but the document has no
+      // presentation to edit — a presentation entity needs a presentation.
+      return Error{
+          .code = ErrorCode::invalid_presentation,
+          .severity = Severity::error,
+          .entity_id = command.document_id,
+          .message = MessageKey::presentation_document_missing,
+          .arguments = {},
+      };
+    }
+
+    // --- Capture viewport state to restore after the commit (like append). ---
+    struct CapturedViewport {
+      DepthViewport viewport;
+      std::uint32_t pixel_height;
+    };
+    std::optional<CapturedViewport> captured_viewport;
+    if (const auto vp = impl_->viewports.find(command.document_id);
+        vp != impl_->viewports.end()) {
+      const auto ph =
+          impl_->viewport_pixel_heights.find(command.document_id);
+      if (ph != impl_->viewport_pixel_heights.end() && ph->second != 0) {
+        captured_viewport =
+            CapturedViewport{.viewport = vp->second, .pixel_height = ph->second};
+      }
+    }
+    const auto captured_default =
+        impl_->viewport_defaults.find(command.document_id) !=
+                impl_->viewport_defaults.end()
+            ? std::optional<DepthViewport>{
+                  impl_->viewport_defaults.at(command.document_id)}
+            : std::nullopt;
+
+    // --- Commit the patched document (reuses validation/LOD/selection remap). ---
+    auto patched_doc = doc_builder.build();
+    if (patched_doc.id().is_nil()) {
+      return Error{
+          .code = ErrorCode::resource_exhausted,
+          .severity = Severity::error,
+          .entity_id = command.document_id,
+          .message = MessageKey::resource_exhausted,
+          .arguments = {},
+      };
+    }
+    const auto commit =
+        execute(SetDocumentCommand{std::move(patched_doc)});
+    if (!commit.has_value()) {
+      return commit;
+    }
+
+    // Restore the patched presentation + viewport defaults so the LOD-completion
+    // frame task rebuilds the scene against the edited layout. The document
+    // commit cleared them. The viewport is preserved (a patch does not move the
+    // depth window — unlike an append, the edited depths are interpretation
+    // entities, not new samples).
+    if (patched_presentation.has_value()) {
+      impl_->presentations.insert_or_assign(command.document_id,
+                                            *patched_presentation);
+    } else if (has_presentation) {
+      // No presentation edits but a presentation existed — restore the original
+      // (the commit cleared it).
+      impl_->presentations.insert_or_assign(command.document_id,
+                                            pres_entry->second);
+    }
+    if (captured_default.has_value()) {
+      impl_->viewport_defaults.insert_or_assign(command.document_id,
+                                                *captured_default);
+    }
+    if (captured_viewport.has_value()) {
+      impl_->viewports.insert_or_assign(command.document_id,
+                                        captured_viewport->viewport);
+      impl_->viewport_pixel_heights.insert_or_assign(
+          command.document_id, captured_viewport->pixel_height);
+      if (impl_->state_version !=
+          std::numeric_limits<std::uint64_t>::max()) {
+        ++impl_->state_version;
+        impl_->events.reserve(impl_->events.size() + 1);
+        const auto event = ViewEvent{
+            .kind = ViewEventKind::viewport_changed,
+            .state_version = impl_->state_version,
+            .document_id = command.document_id,
+            .document_revision = commit.value().document_revision,
+        };
+        impl_->events.push_back(event);
+        impl_->notify_observers(event);
+      }
+    }
+    return commit;
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
         .message = MessageKey::internal_error,
         .arguments = {},
     };
