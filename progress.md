@@ -239,3 +239,13 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 ## Session: 2026-08-01（续 14）— #204 Presentation patch prepared-scene coverage（进行中）
 
 用户选择 `/implement` #204。按 TDD 执行，固定点 `78aa746`。工单已明确预先约定 public seam：从 `WellLogSession::execute(ApplyPatchCommand)` 施加 Track/Scale/CurveLayer patch，随后以 `prepare_scene` 的 prepared-scene 输出断言布局和几何；不依赖 session 私有 presentation storage。下一步是阅读 scene 输出模型和现有 scene 测试，先添加一个会因当前缺口失败的端到端测试。
+
+## Session: 2026-08-01（续 15）- #205 Interval/Marker/Annotation patch 覆盖（ADR 0025）
+
+`/implement` #205（#158 AC #2）。#203/#204 由前上下文窗口已完成并提交（commits `59fa229`/`78aa746`/`5eea446`），本会话关闭 #204 并实现 #205。9 用例测试（welllog.interpretation-patch）：Interval/Marker/Annotation 各 create/move/modify/delete + 无效编辑拒绝（Interval top>=bottom、无效 UTF-8 label，断言文档不变）+ prepared-scene 反射（PreparedInterval 深度、PreparedMarker 深度、text-run/文档回退、删除消失）。
+
+**latent 修复**：#203/#204 提交将 `pending_append_reuse` 重命名为 `pending_lod_reuse`（结构体 PendingLodReuse + kind），但 execute(ApplyPatchCommand) 和 commit_append_batch 中残留 2 处旧名引用 + patch 路径误用 `LodReuseKind::append_tail`（应为 `unchanged_document`--patch 不改原始曲线，ADR 0025，pyramid 原样复用）。修复两处。
+
+两轴 /code-review：子代理撞 5h 限额；inline 自审 Spec 4/4（prepared-scene annotation text-run 无 text engine 时诚实回退文档断言），Standards 干净。commit `a4d2570`。43/43 green。
+
+**#158 链状态**：#202 ✅ -> #203 ✅ -> #204 ✅ -> **#205 ✅** -> #206（seam validation，frontier，ready-for-agent，closes #158）。
