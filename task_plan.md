@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W10（WellLogEngine #201 高频 append 合并 + 压力）— Complete; #162 epic 全部 6 子工单交付
+Phase W11（WellLogEngine #158 /to-tickets 拆解 + #202 DocumentPatch 基础）- Complete; frontier now #203
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -333,6 +333,31 @@ Phase W10（WellLogEngine #201 高频 append 合并 + 压力）— Complete; #16
 原子分块追加实时曲线并可跟随最新深度，按 /to-tickets 拆为 6 子工单全部交付：
 - #196 CompositeBufferView（append 基础，expand）→ #197 消费者迁移（contract）→ #198 AppendBatchCommand（原子尾追加 + 单调 revision 门）→ #199 增量 LOD 尾扩展（parity）→ #200 Append 视口策略（Fixed/Follow-Latest，方向感知）→ #201 高频合并 + 压力健壮性
 - 旧数组不复制（CompositeBufferView 跨段无拷贝）、LOD 只增量更新受影响尾块（extend_tail parity）、同批整体可见/失败、乱序/回补转显式 Patch、视口可固定/跟随、高频 C++ 内合并（≤N 可见刷新/秒）—— ADR 0031 全部条款满足。
+
+### Phase W11: #158 /to-tickets 拆解 + #202 DocumentPatch 基础（ADR 0025）
+
+`/implement` #158（可撤销 Document Patch epic）。调研发现 ADR 0025 指定的 undoable patch + 内核 undo 栈 + 逐实体编辑全无。**走 /to-tickets 拆 5 子工单**（#202-#206），本会话实现 foundation #202。固定点 `4e3944e`。
+
+#### W11.0: /to-tickets 拆解 + 发布
+- [x] 拆 5 子工单（#202 foundation -> #203 undo/redo -> {#204 layout coverage, #205 interpretation coverage} -> #206 seam validation）；GitHub 发布，blocking 链 + #158 body 注释
+- **Status:** complete
+
+#### W11.1: #202 DocumentPatch + ApplyPatchCommand + PatchConflict
+- [x] `PatchableEntity` variant（文档 Interval/Marker/Symbol/Annotation + 布局 Track/Scale/CurveLayer）；`UpsertEntity`/`RemoveEntity`/`EntityEdit`；`DocumentPatch{base_revision, edits}`；`ApplyPatchCommand`
+- [x] execute：patch_conflict 门（base != current -> 新稳定码 `ErrorCode::patch_conflict`）；整批校验（nil id/重复 id/remove 须存在）；原子 apply（builder 重建，patched id 跳过拷贝->upsert 替换/remove 删）；委托 SetDocumentCommand 提交 + 恢复 patched presentation + 保留 viewport；selection 重映射
+- [x] 测试 12 用例（upsert 替换/创建、remove 文档/布局、整批拒、重复 id、patch_conflict、selection 存活、空 noop、保 untouched 集合、无 presentation 时布局 upsert 拒）
+- **Status:** complete（commit `ba458ce`）
+
+#### W11.2: 两轴 /code-review 修复
+- [x] **hard**：patch 不暂存 `pending_append_reuse` -> 仅编辑解释实体的 patch 仍全量重建每曲线 LOD（违 architecture §7 最小闭包）-> patch 委托前暂存旧 pyramid（曲线 immutable，原样复用）
+- [x] judgement 应用：#6 remove-of-missing 消息键 `presentation_document_missing`（误导）-> `document_structure_invalid`
+- [x] 新增 2 测试（保 untouched 集合、无 presentation 时布局 upsert 拒）
+- [x] 保留（文档化）：capture/restore 与 append 重复（共享 commit helper 待重构）、repeated-switch variant 分发（static_assert 可加固）
+- **Status:** complete（commit `b1d1090`），41/41 green。frontier 现 #203
+
+#### #158 Epic 子工单状态
+#202 ✅（foundation）-> #203（undo/redo 栈，frontier，blocked）-> {#204 layout coverage, #205 interpretation coverage}（blocked）-> #206 seam validation（blocked，closes #158）。ADR 0025 的 QC Mask/Derived Curve/cross-well/depth-transform 编辑非 #158 AC，延后。
+
 
 ## Decisions Made
 
