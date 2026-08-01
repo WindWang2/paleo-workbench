@@ -2431,9 +2431,15 @@ WellLogSession::execute(const AppendBatchCommand &command) {
     if (captured_viewport.has_value()) {
       auto result_viewport = captured_viewport->viewport;
       if (mode == AppendViewportMode::follow_latest) {
-        // The new tail's last reference depth: the last coordinate of the first
-        // sampling axis on the extended document (the typical single-axis case;
-        // a multi-axis document uses the primary axis's extent).
+        // The appended tail's newest reference depth: the last coordinate of
+        // the first sampling axis on the extended document (the typical
+        // single-axis case; a multi-axis document uses the primary axis's
+        // extent). A DepthViewport is always normalized top<bottom
+        // (valid_viewport / range_for_rows), independent of axis direction, so
+        // the bound the tail lands on depends on direction: an increasing
+        // axis's tail is the deepest sample (→ bottom), a decreasing axis's
+        // tail is the shallowest (→ top). The opposite bound shifts to
+        // preserve the span.
         const auto extended_doc = impl_->documents.find(command.document_id);
         if (extended_doc != impl_->documents.end() &&
             !extended_doc->second->sampling_axes().empty()) {
@@ -2443,12 +2449,20 @@ WellLogSession::execute(const AppendBatchCommand &command) {
             if (const auto last = axis.coordinates.value_as_double(length - 1);
                 last.has_value() && std::isfinite(*last)) {
               const auto span = result_viewport.bottom - result_viewport.top;
-              result_viewport.bottom = *last;
-              // Preserve the span, guarding against an infinite/NaN span and
-              // keeping top finite + strictly below bottom.
-              if (std::isfinite(span) && span > 0.0 &&
-                  std::isfinite(*last - span)) {
-                result_viewport.top = *last - span;
+              if (std::isfinite(span) && span > 0.0) {
+                if (axis.direction == AxisDirection::increasing) {
+                  // Tail is the deepest sample → new bottom; top = bottom-span.
+                  if (std::isfinite(*last - span)) {
+                    result_viewport.bottom = *last;
+                    result_viewport.top = *last - span;
+                  }
+                } else {
+                  // Tail is the shallowest sample → new top; bottom = top+span.
+                  if (std::isfinite(*last + span)) {
+                    result_viewport.top = *last;
+                    result_viewport.bottom = *last + span;
+                  }
+                }
               }
             }
           }
@@ -2468,6 +2482,7 @@ WellLogSession::execute(const AppendBatchCommand &command) {
             .document_id = command.document_id,
             .document_revision = commit.value().document_revision,
         };
+        impl_->events.reserve(impl_->events.size() + 1);
         impl_->events.push_back(event);
         impl_->notify_observers(event);
       }

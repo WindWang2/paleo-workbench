@@ -257,6 +257,92 @@ void append_with_no_prior_viewport_stays_cleared() {
           "append with no prior viewport must leave the viewport cleared");
 }
 
+// Follow-Latest on a DECREASING axis: the appended tail's newest sample is the
+// SHALLOWEST depth (the axis descends), so it must become the viewport's `top`
+// and the span extends downward (bottom = top + span). A DepthViewport is always
+// normalized top<bottom regardless of axis direction. Regression-guards the
+// direction-aware Follow-Latest math (initially direction-blind → wrong window
+// below the data extent on a decreasing axis).
+void follow_latest_advances_on_decreasing_axis() {
+  WellLogSession session;
+  // Decreasing axis [1002, 1001, 1000]; tail [999, 998] continues descending.
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1002.0, 1001.0, 1000.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{30.0, 20.0, 10.0});
+  WellLogDocumentBuilder builder(document_id, DocumentRevision{1});
+  builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id, .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth, .unit = "m",
+      .direction = AxisDirection::decreasing});
+  builder.add_curve(Curve{
+      .id = curve_id, .mnemonic = "GR", .display_name = "Gamma Ray",
+      .unit = "API", .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values), .nulls = {}});
+  require(session.execute(SetDocumentCommand{builder.build()}).has_value(),
+          "decreasing-axis document must be accepted");
+  require(session.execute(SetPresentationCommand{make_presentation()})
+              .has_value(),
+          "decreasing-axis presentation must be accepted");
+  // Viewport [1000, 1001] (span 1.0), normalized top<bottom.
+  require(session
+              .execute(SetViewportCommand{
+                  .document_id = document_id,
+                  .viewport = {.top = 1000.0, .bottom = 1001.0},
+              })
+              .has_value(),
+          "decreasing-axis viewport must be accepted");
+  require(session
+              .execute(SetViewportMetricsCommand{
+                  .document_id = document_id,
+                  .viewport = {.top = 1000.0, .bottom = 1001.0},
+                  .pixel_height = 1080,
+              })
+              .has_value(),
+          "decreasing-axis viewport metrics must be accepted");
+  session.set_append_viewport_mode(document_id,
+                                   AppendViewportMode::follow_latest);
+  session.clear_events();
+
+  // Append the descending tail [999, 998]; the newest sample is 998 (shallowest).
+  auto tail_depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{999.0, 998.0});
+  auto tail_values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{5.0, 2.0});
+  static thread_local std::vector<std::shared_ptr<const std::vector<double>>>
+      keepalive;
+  keepalive.push_back(tail_depths);
+  keepalive.push_back(tail_values);
+  require(session
+              .execute(AppendBatchCommand{
+                  .document_id = document_id,
+                  .target_revision = DocumentRevision{2},
+                  .blocks =
+                      {
+                          CurveTailBlock{
+                              .curve_id = curve_id,
+                              .sampling_axis_id = axis_id,
+                              .tail_coordinates =
+                                  BufferView::from_vector(tail_depths),
+                              .tail_values = BufferView::from_vector(tail_values),
+                          },
+                      },
+              })
+              .has_value(),
+          "decreasing-axis append must succeed");
+
+  const auto vp = session.viewport(document_id);
+  require(vp.has_value(), "viewport must be present after decreasing append");
+  // Tail newest = 998 → top; span 1.0 → bottom = 999. Normalized top<bottom.
+  require(vp->top == 998.0,
+          "Follow-Latest on a decreasing axis must set top to the tail's "
+          "newest (shallowest) depth");
+  require(vp->bottom == 999.0,
+          "Follow-Latest on a decreasing axis must extend bottom by the span");
+  require(vp->top < vp->bottom,
+          "Follow-Latest viewport must stay normalized top < bottom");
+}
+
 } // namespace
 
 int main() {
@@ -265,6 +351,7 @@ int main() {
   mode_is_observable_and_defaults_fixed();
   follow_latest_publishes_viewport_changed_event();
   append_with_no_prior_viewport_stays_cleared();
+  follow_latest_advances_on_decreasing_axis();
   std::cout << "welllog.append-viewport-mode: all cases passed\n";
   return EXIT_SUCCESS;
 }
