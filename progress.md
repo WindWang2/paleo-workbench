@@ -235,3 +235,7 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 **测试与审查**：新增 `welllog.undo-redo`（3 patch round trip、patch/append redo-clear、Selection revision restore、observer coherence、history event、append round trip、ErrorCode numeric stability）。完整 build 通过；headless CTest 42/42 green（排除既有 4 项 Qt/Python 环境依赖测试）。两轴 `/code-review`（固定点 `b1d1090`）：Spec 0；Standards 2 hard——稳定 ErrorCode 数值与 observer 原子性——均已修复。保留「inverse edits 同时不直接执行」的 judgement：#203 明确要求 history record 携带反向 edit，snapshot 则是 append 与 exact revision restore 的权威机制。
 
 **提交**：`59fa229 feat(welllog): add kernel undo redo history (#203)`；`78aa746 fix(welllog): address #203 history review findings`。#203 已解除 blocked 标签并关闭；下一 frontier 为 #204 / #205。
+
+## Session: 2026-08-01（续 14）— #204 Presentation patch prepared-scene coverage（进行中）
+
+用户选择 `/implement` #204。按 TDD 执行，固定点 `78aa746`。工单已明确预先约定 public seam：从 `WellLogSession::execute(ApplyPatchCommand)` 施加 Track/Scale/CurveLayer patch，随后以 `prepare_scene` 的 prepared-scene 输出断言布局和几何；不依赖 session 私有 presentation storage。下一步是阅读 scene 输出模型和现有 scene 测试，先添加一个会因当前缺口失败的端到端测试。

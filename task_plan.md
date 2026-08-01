@@ -380,6 +380,20 @@ Phase W12（WellLogEngine #203 内核 Undo/Redo stack）- Complete; frontier now
 - [x] commit `59fa229`（feature）+ `78aa746`（review fix）；GitHub #203 已关闭
 - **Status:** complete
 
+### Phase W13: #204 Presentation patch 的 prepared-scene 覆盖（ADR 0025）
+
+`/implement` #204。固定点 `78aa746`。采用 TDD；已由工单预先约定公开测试 seam：`WellLogSession::execute(ApplyPatchCommand)` 与 `prepare_scene` 的 prepared-scene 输出，绝不检视 session 内部 presentation map。
+
+#### W13.1: Red — 端到端 layout / scale / style / visibility 覆盖
+- [ ] 先建立带多 Track/Scale/CurveLayer 的可渲染 fixture，并编写失败的 prepared-scene assertions：z_order、width、scale mode/range/direction/unit、style、visible/remove。
+- [ ] 若 z_order 的 patch 不能使 prepared scene 排序，最小化实现一等排序支持；否则只补 coverage。
+- **Status:** in progress
+
+#### W13.2: Green — 单测、完整 headless suite 与两轴 /code-review
+- [ ] 逐项运行目标测试与 C++ 构建；最终运行 headless CTest。
+- [ ] 以 `78aa746` 为固定点执行 Standards + Spec 审查，修复 hard findings，提交并关闭 #204。
+- **Status:** pending
+
 ## Decisions Made
 
 | Decision | Rationale |
