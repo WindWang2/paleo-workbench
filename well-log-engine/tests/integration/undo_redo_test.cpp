@@ -332,10 +332,12 @@ void append_commit_is_undoable_without_copying_old_semantics() {
 }
 
 void existing_error_code_values_remain_stable() {
-  require(static_cast<std::uint16_t>(ErrorCode::patch_conflict) == 19,
-          "patch_conflict numeric value must remain stable");
-  require(static_cast<std::uint16_t>(ErrorCode::diagnostic_warning) == 20,
+  require(static_cast<std::uint16_t>(ErrorCode::diagnostic_warning) == 19,
           "diagnostic_warning numeric value must remain stable");
+  require(static_cast<std::uint16_t>(ErrorCode::history_empty) == 20,
+          "history_empty numeric value must remain stable");
+  require(static_cast<std::uint16_t>(ErrorCode::patch_conflict) == 21,
+          "patch_conflict must append after existing stable error codes");
 }
 
 } // namespace

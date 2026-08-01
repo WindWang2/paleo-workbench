@@ -542,6 +542,82 @@ void remove_deletes_presentation_entity() {
           "re-added visible layers must restore prepared geometry");
 }
 
+// TrackSpec has no separate visible flag, so the model's structural visibility
+// operation is removing the track together with its dependent scale/layer and
+// later re-adding that complete layout subtree. Both states must be reflected
+// by the prepared scene, not merely retained in the presentation builder.
+void remove_and_readd_track_changes_prepared_scene_visibility() {
+  Fixture f;
+  const auto remove = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = f.revision,
+          .edits = {
+              EntityEdit{RemoveEntity{second_layer_id}},
+              EntityEdit{RemoveEntity{second_scale_id}},
+              EntityEdit{RemoveEntity{second_track_id}},
+          },
+      },
+  });
+  require(remove.has_value(), "removing a complete secondary track must succeed");
+  const auto hidden_scene = await_prepared_scene(f.session);
+  require(hidden_scene != nullptr,
+          "removing a track must re-prepare the scene");
+  require(hidden_scene->tracks().size() == 1,
+          "a removed track must be absent from the prepared scene");
+  require(std::none_of(hidden_scene->tracks().begin(), hidden_scene->tracks().end(),
+                       [](const PreparedTrack &track) {
+                         return track.id == second_track_id;
+                       }),
+          "the removed track must have no prepared geometry");
+  require_near(hidden_scene->physical_width().value, 40.0,
+               "removing a track must shrink prepared scene width");
+
+  const auto readd = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = f.session.document(document_id)->revision(),
+          .edits = {
+              EntityEdit{UpsertEntity{TrackSpec{
+                  .id = second_track_id,
+                  .width = Millimetres{30.0},
+                  .z_order = 1,
+              }}},
+              EntityEdit{UpsertEntity{TrackScaleSpec{
+                  .id = second_scale_id,
+                  .track_id = second_track_id,
+                  .mode = ScaleMode::linear,
+                  .minimum = 0.0,
+                  .maximum = 100.0,
+                  .unit = "API",
+              }}},
+              EntityEdit{UpsertEntity{CurveLayerSpec{
+                  .id = second_layer_id,
+                  .track_id = second_track_id,
+                  .curve_id = curve_id,
+                  .scale_id = second_scale_id,
+                  .color = {},
+                  .line_width = Millimetres{0.25},
+                  .visible = true,
+              }}},
+          },
+      },
+  });
+  require(readd.has_value(), "re-adding a complete secondary track must succeed");
+  const auto visible_scene = await_prepared_scene(f.session);
+  require(visible_scene != nullptr,
+          "re-adding a track must re-prepare the scene");
+  const auto readded = std::find_if(
+      visible_scene->tracks().begin(), visible_scene->tracks().end(),
+      [](const PreparedTrack &track) { return track.id == second_track_id; });
+  require(readded != visible_scene->tracks().end(),
+          "the re-added track must restore prepared geometry");
+  require_near(readded->bounds.width.value, 30.0,
+               "the re-added track must retain its width");
+  require_near(visible_scene->physical_width().value, 70.0,
+               "re-adding a track must restore prepared scene width");
+}
+
 // A layout patch that would make the full presentation invalid must be
 // rejected before any document revision or event is committed.
 void invalid_presentation_patch_is_atomic() {
@@ -699,6 +775,25 @@ void base_revision_mismatch_rejected_as_conflict() {
           "a conflict-rejected patch must leave the revision unchanged");
 }
 
+// The conflict gate applies even when there are no edits. A stale no-op is
+// still a command built against obsolete state and must not look successful to
+// a host that uses the receipt as an acknowledgement of its base revision.
+void stale_empty_patch_is_rejected_as_conflict() {
+  Fixture f;
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = DocumentRevision{f.revision.value + 1},
+          .edits = {},
+      },
+  });
+  require(!result.has_value(), "a stale empty patch must be rejected");
+  require(result.error().code == ErrorCode::patch_conflict,
+          "a stale empty patch must return patch_conflict");
+  require(f.session.document(document_id)->revision() == f.revision,
+          "a stale empty patch must leave the revision unchanged");
+}
+
 // An existing Selection Set survives a patch that does not move its axis range
 // (remaps onto the new revision, stays valid).
 void selection_survives_patch() {
@@ -844,12 +939,14 @@ int main() {
   curve_layer_style_patch_changes_prepared_layer();
   curve_layer_visibility_patch_removes_prepared_geometry();
   remove_deletes_presentation_entity();
+  remove_and_readd_track_changes_prepared_scene_visibility();
   invalid_presentation_patch_is_atomic();
   invalid_document_presentation_dependency_is_atomic();
   presentation_patch_reuses_ready_lod_cache();
   whole_batch_rejects_on_one_bad_edit();
   duplicate_id_in_batch_rejected();
   base_revision_mismatch_rejected_as_conflict();
+  stale_empty_patch_is_rejected_as_conflict();
   selection_survives_patch();
   empty_patch_is_noop();
   patch_preserves_untouched_collections();

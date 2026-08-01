@@ -10,10 +10,12 @@
 #include <welllog/session/session.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -31,6 +33,60 @@ void require(bool condition, std::string_view message) {
     fail(message);
   }
 }
+
+void require_near(double actual, double expected, std::string_view message) {
+  require(std::abs(actual - expected) < 1.0e-9, message);
+}
+
+// The patch tests need prepared text runs to prove annotation and label changes
+// reach the scene. Keep that proof independent of optional HarfBuzz/FreeType
+// build dependencies with a deterministic, minimal shaping implementation.
+class TestTextEngine final : public TextEngine {
+public:
+  [[nodiscard]] Result<ShapedRun>
+  shape(const TextShapeRequest &request) noexcept override {
+    ShapedRun run;
+    run.ascender = 0.8;
+    run.descender = -0.2;
+    run.glyphs.reserve(request.text.size());
+    std::uint32_t cluster{};
+    for (const auto byte : request.text) {
+      const auto code_point = static_cast<unsigned char>(byte);
+      run.glyphs.push_back(ShapedGlyph{
+          .glyph_id = static_cast<std::uint32_t>(code_point) + 1,
+          .font_index = 0,
+          .cluster = cluster++,
+          .code_point = code_point,
+          .advance_x = 0.6,
+          .advance_y = 0.0,
+          .offset_x = 0.0,
+          .offset_y = 0.0,
+          .upright = true,
+      });
+    }
+    return run;
+  }
+
+  [[nodiscard]] Result<GlyphOutline>
+  glyph_outline(std::uint32_t, std::uint32_t) noexcept override {
+    return GlyphOutline{
+        .commands = {},
+        .advance_x = 0.6,
+        .left = 0.0,
+        .bottom = 0.0,
+        .right = 0.6,
+        .top = 0.8,
+    };
+  }
+
+  [[nodiscard]] std::string font_fingerprint(std::uint32_t) const override {
+    return "patch-test-font-v1";
+  }
+
+  [[nodiscard]] std::string font_family_name(std::uint32_t) const override {
+    return "Patch Test";
+  }
+};
 
 EntityId id(std::string_view text) {
   auto parsed = EntityId::parse(text);
@@ -51,6 +107,35 @@ const auto interval_id = id("dd000000-0000-4000-8000-000000000007");
 const auto marker_id = id("dd000000-0000-4000-8000-000000000008");
 const auto annotation_id = id("dd000000-0000-4000-8000-000000000009");
 
+const PreparedInterval *find_interval(const PreparedScene &scene,
+                                      EntityId entity_id) {
+  const auto found = std::find_if(
+      scene.intervals().begin(), scene.intervals().end(),
+      [entity_id](const PreparedInterval &interval) {
+        return interval.interval_id == entity_id;
+      });
+  return found == scene.intervals().end() ? nullptr : &*found;
+}
+
+const PreparedMarker *find_marker(const PreparedScene &scene, EntityId entity_id) {
+  const auto found = std::find_if(
+      scene.markers().begin(), scene.markers().end(),
+      [entity_id](const PreparedMarker &marker) {
+        return marker.marker_id == entity_id;
+      });
+  return found == scene.markers().end() ? nullptr : &*found;
+}
+
+const PreparedTextRun *find_text_run(const PreparedScene &scene,
+                                     EntityId entity_id) {
+  const auto found = std::find_if(
+      scene.text_runs().begin(), scene.text_runs().end(),
+      [entity_id](const PreparedTextRun &run) {
+        return run.source_entity_id == entity_id;
+      });
+  return found == scene.text_runs().end() ? nullptr : &*found;
+}
+
 // Fixture: document with axis/curve + one Interval/Marker/Annotation, and a
 // presentation with Track/Scale/CurveLayer + IntervalLayer/MarkerLayer/TextLayer
 // so the prepared scene renders all three interpretation entity types.
@@ -59,6 +144,7 @@ struct Fixture {
   DocumentRevision revision;
 
   Fixture() {
+    session.set_text_engine(std::make_shared<TestTextEngine>());
     auto depths = std::make_shared<const std::vector<double>>(
         std::initializer_list<double>{1000.0, 1001.0, 1002.0, 1003.0});
     auto values = std::make_shared<const std::vector<double>>(
@@ -138,6 +224,21 @@ void interval_create_move_modify_delete() {
           "create interval must succeed");
   const auto doc1 = f.session.document(document_id);
   require(doc1->intervals().size() == 2, "new interval must be added");
+  const auto created_document_interval = std::find_if(
+      doc1->intervals().begin(), doc1->intervals().end(),
+      [new_iv](const Interval &interval) { return interval.id == new_iv; });
+  require(created_document_interval != doc1->intervals().end() &&
+              created_document_interval->semantic == IntervalSemantic::facies &&
+              created_document_interval->label == "Shale" &&
+              created_document_interval->fill_color == RgbaColor{0, 255, 0, 255},
+          "the created interval fields must be readable on the document");
+  const auto created_scene = f.session.prepared_scene(document_id);
+  require(created_scene != nullptr,
+          "creating an interval must refresh the prepared scene");
+  const auto created_interval = find_interval(*created_scene, new_iv);
+  require(created_interval != nullptr &&
+              created_interval->fill_color == RgbaColor{0, 255, 0, 255},
+          "the prepared scene must contain the created interval and its color");
 
   // Move the original interval (change depths).
   f.revision = doc1->revision();
@@ -152,17 +253,27 @@ void interval_create_move_modify_delete() {
   const auto moved = std::find_if(
       doc2->intervals().begin(), doc2->intervals().end(),
       [](const Interval &i) { return i.id == interval_id; });
-  require(moved != doc2->intervals().end() &&
-              moved->top_reference_depth == 1000.5 &&
-              moved->bottom_reference_depth == 1001.5,
-          "moved interval must carry the new depths");
+  require(moved != doc2->intervals().end(),
+          "moved interval must remain readable on the document");
+  require_near(moved->top_reference_depth, 1000.5,
+               "moved interval must carry the new top depth");
+  require_near(moved->bottom_reference_depth, 1001.5,
+               "moved interval must carry the new bottom depth");
+  const auto moved_scene = f.session.prepared_scene(document_id);
+  require(moved_scene != nullptr, "moving an interval must refresh the scene");
+  const auto moved_interval = find_interval(*moved_scene, interval_id);
+  require(moved_interval != nullptr, "the moved interval must be prepared");
+  require_near(moved_interval->top_reference_depth, 1000.5,
+               "the prepared interval must carry the moved top depth");
+  require_near(moved_interval->bottom_reference_depth, 1001.5,
+               "the prepared interval must carry the moved bottom depth");
 
   // Modify the interval (change label + fill_color).
   f.revision = doc2->revision();
   require(f.patch({EntityEdit{UpsertEntity{Interval{
               .id = interval_id, .top_reference_depth = 1000.5,
               .bottom_reference_depth = 1001.5,
-              .semantic = IntervalSemantic::lithology, .pattern_id = {},
+              .semantic = IntervalSemantic::stratigraphy, .pattern_id = {},
               .fill_color = {0, 0, 255, 255}, .label = "Modified"}}}})
               .has_value(),
           "modify interval must succeed");
@@ -171,8 +282,19 @@ void interval_create_move_modify_delete() {
       doc3->intervals().begin(), doc3->intervals().end(),
       [](const Interval &i) { return i.id == interval_id; });
   require(mod != doc3->intervals().end() && mod->label == "Modified" &&
+              mod->semantic == IntervalSemantic::stratigraphy &&
               mod->fill_color == RgbaColor{0, 0, 255, 255},
-          "modified interval must carry the new label and color");
+          "modified interval must carry the new label, semantic, and color");
+  const auto modified_scene = f.session.prepared_scene(document_id);
+  require(modified_scene != nullptr,
+          "modifying an interval must refresh the prepared scene");
+  const auto modified_interval = find_interval(*modified_scene, interval_id);
+  require(modified_interval != nullptr &&
+              modified_interval->fill_color == RgbaColor{0, 0, 255, 255},
+          "the prepared interval must carry the modified fill color");
+  const auto modified_label = find_text_run(*modified_scene, interval_id);
+  require(modified_label != nullptr && modified_label->text == "Modified",
+          "the prepared interval label must carry the modified text");
 
   // Delete the new interval.
   f.revision = doc3->revision();
@@ -182,6 +304,11 @@ void interval_create_move_modify_delete() {
   require(doc4->intervals().size() == 1, "deleted interval must be gone");
   require(doc4->intervals().front().id == interval_id,
           "the remaining interval must be the original");
+  const auto deleted_scene = f.session.prepared_scene(document_id);
+  require(deleted_scene != nullptr,
+          "deleting an interval must refresh the prepared scene");
+  require(find_interval(*deleted_scene, new_iv) == nullptr,
+          "the deleted interval must be absent from the prepared scene");
 }
 
 // --- Marker: create, move, modify, delete ---
@@ -195,8 +322,19 @@ void marker_create_move_modify_delete() {
               .semantic = MarkerSemantic::fault, .label = "Fault"}}}})
               .has_value(),
           "create marker must succeed");
-  require(f.session.document(document_id)->markers().size() == 2,
+  const auto created_document_markers = f.session.document(document_id)->markers();
+  require(created_document_markers.size() == 2,
           "new marker must be added");
+  const auto created_document_marker = std::find_if(
+      created_document_markers.begin(), created_document_markers.end(),
+      [new_m](const Marker &marker) { return marker.id == new_m; });
+  require(created_document_marker != created_document_markers.end() &&
+              created_document_marker->semantic == MarkerSemantic::fault &&
+              created_document_marker->label == "Fault",
+          "the created marker fields must be readable on the document");
+  const auto created_scene = f.session.prepared_scene(document_id);
+  require(created_scene != nullptr && find_marker(*created_scene, new_m) != nullptr,
+          "the prepared scene must contain the created marker");
 
   // Move.
   f.revision = f.session.document(document_id)->revision();
@@ -209,9 +347,16 @@ void marker_create_move_modify_delete() {
   const auto moved_m = std::find_if(
       markers_moved.begin(), markers_moved.end(),
       [](const Marker &m) { return m.id == marker_id; });
-  require(moved_m != markers_moved.end() &&
-              moved_m->reference_depth == 1001.5,
-          "moved marker must carry the new depth");
+  require(moved_m != markers_moved.end(),
+          "moved marker must remain readable on the document");
+  require_near(moved_m->reference_depth, 1001.5,
+               "moved marker must carry the new depth");
+  const auto moved_scene = f.session.prepared_scene(document_id);
+  require(moved_scene != nullptr, "moving a marker must refresh the scene");
+  const auto moved_marker = find_marker(*moved_scene, marker_id);
+  require(moved_marker != nullptr, "the moved marker must be prepared");
+  require_near(moved_marker->reference_depth, 1001.5,
+               "the prepared marker must carry the moved depth");
 
   // Modify (label + semantic).
   f.revision = f.session.document(document_id)->revision();
@@ -227,6 +372,12 @@ void marker_create_move_modify_delete() {
   require(mod_m != markers_mod.end() && mod_m->label == "Shoe" &&
               mod_m->semantic == MarkerSemantic::casing_shoe,
           "modified marker must carry the new label and semantic");
+  const auto modified_scene = f.session.prepared_scene(document_id);
+  require(modified_scene != nullptr,
+          "modifying a marker must refresh the prepared scene");
+  const auto modified_label = find_text_run(*modified_scene, marker_id);
+  require(modified_label != nullptr && modified_label->text == "Shoe",
+          "the prepared marker label must carry the modified text");
 
   // Delete.
   f.revision = f.session.document(document_id)->revision();
@@ -234,6 +385,9 @@ void marker_create_move_modify_delete() {
           "delete marker must succeed");
   require(f.session.document(document_id)->markers().size() == 1,
           "deleted marker must be gone");
+  const auto deleted_scene = f.session.prepared_scene(document_id);
+  require(deleted_scene != nullptr && find_marker(*deleted_scene, new_m) == nullptr,
+          "the deleted marker must be absent from the prepared scene");
 }
 
 // --- Annotation: create, move, modify, delete ---
@@ -248,8 +402,21 @@ void annotation_create_move_modify_delete() {
   new_ann.text = "New note";
   require(f.patch({EntityEdit{UpsertEntity{new_ann}}}).has_value(),
           "create annotation must succeed");
-  require(f.session.document(document_id)->annotations().size() == 2,
+  const auto created_document_annotations =
+      f.session.document(document_id)->annotations();
+  require(created_document_annotations.size() == 2,
           "new annotation must be added");
+  const auto created_document_annotation = std::find_if(
+      created_document_annotations.begin(), created_document_annotations.end(),
+      [new_a](const TextAnnotation &annotation) { return annotation.id == new_a; });
+  require(created_document_annotation != created_document_annotations.end() &&
+              created_document_annotation->text == "New note",
+          "the created annotation fields must be readable on the document");
+  const auto created_scene = f.session.prepared_scene(document_id);
+  require(created_scene != nullptr, "creating an annotation must refresh the scene");
+  const auto created_run = find_text_run(*created_scene, new_a);
+  require(created_run != nullptr && created_run->text == "New note",
+          "the prepared scene must contain the created annotation text");
 
   // Move (change depth).
   f.revision = f.session.document(document_id)->revision();
@@ -263,8 +430,16 @@ void annotation_create_move_modify_delete() {
   const auto moved_a = std::find_if(
       anns_moved.begin(), anns_moved.end(),
       [](const TextAnnotation &a) { return a.id == annotation_id; });
-  require(moved_a != anns_moved.end() && moved_a->reference_depth == 1000.5,
-          "moved annotation must carry the new depth");
+  require(moved_a != anns_moved.end(),
+          "moved annotation must remain readable on the document");
+  require_near(moved_a->reference_depth, 1000.5,
+               "moved annotation must carry the new depth");
+  const auto moved_scene = f.session.prepared_scene(document_id);
+  require(moved_scene != nullptr, "moving an annotation must refresh the scene");
+  const auto moved_run = find_text_run(*moved_scene, annotation_id);
+  require(moved_run != nullptr, "the moved annotation must be prepared");
+  require_near(moved_run->anchor.top.value, 500.0 / 6.0,
+               "the prepared annotation anchor must reflect the moved depth");
 
   // Modify (change text).
   f.revision = f.session.document(document_id)->revision();
@@ -280,6 +455,12 @@ void annotation_create_move_modify_delete() {
       [](const TextAnnotation &a) { return a.id == annotation_id; });
   require(mod_a != anns_mod.end() && mod_a->text == "Changed",
           "modified annotation must carry the new text");
+  const auto modified_scene = f.session.prepared_scene(document_id);
+  require(modified_scene != nullptr,
+          "modifying an annotation must refresh the prepared scene");
+  const auto modified_run = find_text_run(*modified_scene, annotation_id);
+  require(modified_run != nullptr && modified_run->text == "Changed",
+          "the prepared annotation text must carry the modification");
 
   // Delete.
   f.revision = f.session.document(document_id)->revision();
@@ -287,6 +468,9 @@ void annotation_create_move_modify_delete() {
           "delete annotation must succeed");
   require(f.session.document(document_id)->annotations().size() == 1,
           "deleted annotation must be gone");
+  const auto deleted_scene = f.session.prepared_scene(document_id);
+  require(deleted_scene != nullptr && find_text_run(*deleted_scene, new_a) == nullptr,
+          "the deleted annotation must be absent from the prepared scene");
 }
 
 // --- Invalid-edit rejections (ADR 0028 strict validation) ---
@@ -345,8 +529,8 @@ void interval_move_reflected_in_prepared_scene() {
       [](const PreparedInterval &p) { return p.interval_id == interval_id; });
   require(pi != intervals.end(),
           "the moved interval must appear in the prepared scene");
-  require(pi->bottom_reference_depth == 1002.0,
-          "the prepared interval must reflect the moved bottom depth");
+  require_near(pi->bottom_reference_depth, 1002.0,
+               "the prepared interval must reflect the moved bottom depth");
 }
 
 // A patched Marker move is reflected in the prepared scene's marker depth.
@@ -365,8 +549,8 @@ void marker_move_reflected_in_prepared_scene() {
       [](const PreparedMarker &p) { return p.marker_id == marker_id; });
   require(pm != markers.end(),
           "the moved marker must appear in the prepared scene");
-  require(pm->reference_depth == 1002.0,
-          "the prepared marker must reflect the moved depth");
+  require_near(pm->reference_depth, 1002.0,
+               "the prepared marker must reflect the moved depth");
 }
 
 // A patched Annotation text change is reflected in the prepared scene's text.
@@ -380,17 +564,9 @@ void annotation_modify_reflected_in_prepared_scene() {
           "modify annotation must succeed");
   const auto scene = f.session.prepared_scene(document_id);
   require(scene != nullptr, "a prepared scene must exist");
-  const auto runs = scene->text_runs();
-  // Text runs require a text engine; without one the text layer may prepare
-  // empty. If runs exist, assert the changed text appears; otherwise fall back
-  // to asserting the annotation is readable on the document.
-  if (!runs.empty()) {
-    require(std::any_of(runs.begin(), runs.end(),
-                        [](const PreparedTextRun &r) {
-                          return r.text == "Changed";
-                        }),
-            "the prepared text runs must reflect the modified annotation text");
-  }
+  const auto run = find_text_run(*scene, annotation_id);
+  require(run != nullptr && run->text == "Changed",
+          "the prepared text run must reflect the modified annotation text");
   const auto anns = f.session.document(document_id)->annotations();
   require(std::any_of(anns.begin(), anns.end(),
                       [](const TextAnnotation &a) { return a.text == "Changed"; }),

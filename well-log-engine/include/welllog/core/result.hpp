@@ -30,15 +30,15 @@ enum class ErrorCode : std::uint16_t {
   invalid_font,
   invalid_image,
   invalid_custom_source,
-  // A patch's declared base revision does not match the document's current
-  // revision (#202/#158, ADR 0025): the patch cannot be applied without
-  // guessing by name/position, so it is rejected. Distinct from
-  // invalid_document so a host can detect a stale-base patch specifically.
-  patch_conflict,
   diagnostic_warning,
   // An UndoCommand or RedoCommand found no entry in the requested history
   // direction (#203, ADR 0025).
   history_empty,
+  // A patch's declared base revision does not match the document's current
+  // revision (#202/#158, ADR 0025): the patch cannot be applied without
+  // guessing by name/position, so it is rejected. Appended so existing stable
+  // error-code values remain unchanged.
+  patch_conflict,
 };
 
 enum class Severity : std::uint8_t {

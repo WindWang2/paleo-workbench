@@ -2429,28 +2429,6 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
   return std::visit([](const auto &e) -> EntityId { return e.id; }, entity);
 }
 
-// True when `id` matches an entity in the document's interpretation collections
-// (Interval/Marker/SymbolOccurrence/TextAnnotation).
-[[nodiscard]] bool document_has_entity(const WellLogDocument &doc,
-                                       EntityId id) noexcept {
-  const auto has = [id](const auto &span) {
-    return std::any_of(span.begin(), span.end(),
-                       [id](const auto &e) { return e.id == id; });
-  };
-  return has(doc.intervals()) || has(doc.markers()) || has(doc.symbols()) ||
-         has(doc.annotations());
-}
-
-// True when `id` matches a presentation layout entity (Track/Scale/CurveLayer).
-[[nodiscard]] bool presentation_has_entity(const ScenePresentation &pres,
-                                           EntityId id) noexcept {
-  const auto has = [id](const auto &span) {
-    return std::any_of(span.begin(), span.end(),
-                       [id](const auto &e) { return e.id == id; });
-  };
-  return has(pres.tracks()) || has(pres.scales()) || has(pres.curve_layers());
-}
-
 // Returns the current value for one patchable entity, whether it lives in the
 // document's interpretation collections or the presentation's layout
 // collections. The history path copies that value into an inverse edit before
@@ -2729,32 +2707,26 @@ WellLogSession::flush_append_coalesce(EntityId document_id) noexcept {
 Result<CommandReceipt>
 WellLogSession::execute(const ApplyPatchCommand &command) {
   try {
-    if (command.patch.edits.empty()) {
-      // An empty patch is a no-op at the current revision.
-      const auto document = impl_->documents.find(command.document_id);
-      if (document == impl_->documents.end()) {
-        return append_document_missing(command.document_id);
-      }
-      return CommandReceipt{
-          .state_version = impl_->state_version,
-          .document_id = command.document_id,
-          .document_revision = document->second->revision(),
-          .asynchronous_preparation_started = false,
-          .diagnostic_id = std::nullopt,
-      };
-    }
-
     const auto document_entry = impl_->documents.find(command.document_id);
     if (document_entry == impl_->documents.end()) {
       return append_document_missing(command.document_id);
     }
     const auto &current_doc = *document_entry->second;
     const auto current_revision = current_doc.revision();
-    // Patch-conflict gate (AC #6): the patch's base revision must equal the
-    // current revision exactly. A mismatch is rejected with the stable
-    // patch_conflict code — never applied by name/position guessing (ADR 0025).
+    // Patch-conflict gate (AC #6): every patch, including an empty no-op, must
+    // acknowledge the exact document revision it was built against.
     if (command.patch.base_revision.value != current_revision.value) {
       return patch_base_conflict(command.document_id);
+    }
+    if (command.patch.edits.empty()) {
+      // An empty patch is a no-op at the current revision.
+      return CommandReceipt{
+          .state_version = impl_->state_version,
+          .document_id = command.document_id,
+          .document_revision = current_revision,
+          .asynchronous_preparation_started = false,
+          .diagnostic_id = std::nullopt,
+      };
     }
 
     // Resolve the presentation (optional — a patch may target only document
@@ -2809,11 +2781,11 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
               .arguments = {},
           };
         }
-        // The remove must target an existing entity (document or presentation).
-        const auto in_doc = document_has_entity(current_doc, id);
-        const auto in_pres =
-            has_presentation && presentation_has_entity(pres_entry->second, id);
-        if (!in_doc && !in_pres) {
+        // Use the same central lookup as inverse generation so removal and
+        // history agree on which document/presentation entities are patchable.
+        const auto existing = patchable_entity_at(
+            current_doc, has_presentation ? &pres_entry->second : nullptr, id);
+        if (!existing.has_value()) {
           // The remove targets no existing entity. document_not_found is the
           // closest stable code; document_structure_invalid message (not the
           // presentation->document message) - the entity referenced by the
