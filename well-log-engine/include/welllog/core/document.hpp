@@ -196,6 +196,57 @@ private:
   std::shared_ptr<const Impl> impl_;
 };
 
+// A logical buffer spanning N immutable physical segments, each a `BufferView`
+// carrying its own `SharedOwner` (#196, foundation for #162 "不复制旧数组": an
+// appended tail block is a second segment; the old segment is retained
+// untouched, with no contiguous copy). Added BESIDE the single-contiguous
+// `BufferView`; no callers are migrated in this ticket. Element i maps across
+// the concatenation of segments in order.
+//
+// All segments MUST share the same `scalar_type` (a heterogeneous composite is
+// rejected at build); `stride_bytes` may differ per segment (segments are
+// physical blocks that may pack differently), but element addressing is by
+// logical index across the concatenation.
+class WELLLOG_CORE_API CompositeBufferView {
+public:
+  CompositeBufferView();
+  ~CompositeBufferView();
+  CompositeBufferView(const CompositeBufferView &);
+  CompositeBufferView &operator=(const CompositeBufferView &);
+  CompositeBufferView(CompositeBufferView &&) noexcept;
+  CompositeBufferView &operator=(CompositeBufferView &&) noexcept;
+
+  // Builds a composite from an ordered list of segments. All segments must
+  // share a scalar_type and have a non-null data pointer + length; returns an
+  // empty composite on a mismatch or empty input.
+  [[nodiscard]] static CompositeBufferView
+  from_segments(std::vector<BufferView> segments) noexcept;
+
+  // True when the composite holds no segments.
+  [[nodiscard]] bool empty() const noexcept;
+
+  // The scalar type shared by all segments (float64 on an empty composite).
+  [[nodiscard]] ScalarType scalar_type() const noexcept;
+
+  // The total element count across all segments (sum of each segment's length).
+  [[nodiscard]] std::uint64_t length() const noexcept;
+
+  // Reads element `index` across the concatenation, mapping it to the correct
+  // segment + intra-segment offset. Out-of-range yields nullopt, consistent
+  // with BufferView::value_as_double. No contiguous copy is made.
+  [[nodiscard]] std::optional<double>
+  value_as_double(std::uint64_t index) const noexcept;
+
+  // The ordered segments, for consumers that walk block boundaries without
+  // flattening (a span of const BufferView).
+  [[nodiscard]] std::span<const BufferView> segments() const noexcept;
+
+private:
+  struct Impl;
+  std::shared_ptr<const Impl> impl_;
+  explicit CompositeBufferView(std::shared_ptr<const Impl> impl);
+};
+
 struct SamplingAxis {
   EntityId id;
   BufferView coordinates;

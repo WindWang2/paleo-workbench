@@ -1067,6 +1067,16 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_csv_table_export_tests PRIVATE WellLog::ExportTable)
     add_test(NAME welllog.csv-table-export COMMAND welllog_csv_table_export_tests)
 
+    # Composite/Chained BufferView (#196, foundation for #162 append). Headless;
+    # core-only — the type lives in core beside BufferView.
+    add_executable(welllog_composite_buffer_view_tests
+        tests/integration/composite_buffer_view_test.cpp
+    )
+    target_compile_features(welllog_composite_buffer_view_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_composite_buffer_view_tests)
+    target_link_libraries(welllog_composite_buffer_view_tests PRIVATE WellLog::Core)
+    add_test(NAME welllog.composite-buffer-view COMMAND welllog_composite_buffer_view_tests)
+
     # Versioned XML table-export writer (§6, #155). Headless; ExportTable only.
     add_executable(welllog_xml_table_export_tests
         tests/integration/xml_table_export_test.cpp

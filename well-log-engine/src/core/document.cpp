@@ -236,6 +236,94 @@ BufferView::value_as_double(std::uint64_t index) const noexcept {
   return std::nullopt;
 }
 
+// --- CompositeBufferView (#196) --------------------------------------------
+// A logical buffer spanning N immutable BufferView segments. Random access
+// walks the segments to locate the one holding element `index`, then delegates
+// to that segment's value_as_double (reusing its proven bounds/capacity
+// checks). No contiguous copy is ever made; each segment's SharedOwner keeps
+// its physical block alive independently.
+struct CompositeBufferView::Impl {
+  std::vector<BufferView> segments;
+  std::uint64_t total_length{};
+  ScalarType scalar_type{ScalarType::float64};
+};
+
+CompositeBufferView::CompositeBufferView() = default;
+CompositeBufferView::~CompositeBufferView() = default;
+CompositeBufferView::CompositeBufferView(const CompositeBufferView &) = default;
+CompositeBufferView &CompositeBufferView::
+operator=(const CompositeBufferView &) = default;
+CompositeBufferView::CompositeBufferView(CompositeBufferView &&) noexcept =
+    default;
+CompositeBufferView &CompositeBufferView::
+operator=(CompositeBufferView &&) noexcept = default;
+
+CompositeBufferView::CompositeBufferView(std::shared_ptr<const Impl> impl)
+    : impl_(std::move(impl)) {}
+
+CompositeBufferView CompositeBufferView::from_segments(
+    std::vector<BufferView> segments) noexcept {
+  try {
+    if (segments.empty()) {
+      return {};
+    }
+    // All segments must share a scalar_type and be non-empty with data.
+    const auto type = segments.front().scalar_type();
+    std::uint64_t total = 0;
+    for (const auto &s : segments) {
+      if (s.data() == nullptr || s.length() == 0 ||
+          s.scalar_type() != type) {
+        return {};
+      }
+      total += s.length();
+    }
+    auto impl = std::make_shared<Impl>();
+    impl->segments = std::move(segments);
+    impl->total_length = total;
+    impl->scalar_type = type;
+    return CompositeBufferView{std::move(impl)};
+  } catch (...) {
+    return {};
+  }
+}
+
+bool CompositeBufferView::empty() const noexcept {
+  return impl_ == nullptr || impl_->segments.empty();
+}
+
+ScalarType CompositeBufferView::scalar_type() const noexcept {
+  return impl_ == nullptr ? ScalarType::float64 : impl_->scalar_type;
+}
+
+std::uint64_t CompositeBufferView::length() const noexcept {
+  return impl_ == nullptr ? 0 : impl_->total_length;
+}
+
+std::optional<double>
+CompositeBufferView::value_as_double(std::uint64_t index) const noexcept {
+  if (impl_ == nullptr || index >= impl_->total_length) {
+    return std::nullopt;
+  }
+  // Walk segments to find the one holding this element, decrementing the
+  // index by each skipped segment's length.
+  std::uint64_t remaining = index;
+  for (const auto &segment : impl_->segments) {
+    const auto seg_len = segment.length();
+    if (remaining < seg_len) {
+      return segment.value_as_double(remaining);
+    }
+    remaining -= seg_len;
+  }
+  return std::nullopt;
+}
+
+std::span<const BufferView> CompositeBufferView::segments() const noexcept {
+  if (impl_ == nullptr) {
+    return {};
+  }
+  return std::span<const BufferView>{impl_->segments};
+}
+
 struct NullBitmapView::Impl {
   const std::uint8_t *data{};
   std::uint64_t bit_length{};
