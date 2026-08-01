@@ -181,3 +181,13 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 
 
 
+
+## Session: 2026-08-01（续 8）— #198 AppendBatchCommand（原子曲线尾追加）
+
+`/implement` #198（#162 链 frontier，ADR 0031）。**Expand 步**：`SamplingAxis.coordinates` 从 `BufferView` 扩为 `CurveBuffer`（镜像 #196/#197），使 append 能给轴坐标追加尾段而不复制旧块——隐式 `CurveBuffer(BufferView)` 构造使 84+ 现有 `SamplingAxis{...}` 字面量不变；少数 BufferView-specific 站点（manifest write 拒复合 + `as_single()`、curve_lod `validate_curve_buffer`、session `axis_is_ordered` 复合分支走 `value_as_double` 而单块走类型精确模板保留整数精度、4 个 selection row/range mapper 改 `CurveBuffer`、curve_lod_test `as_single()`）。**实现**：`AppendBatchCommand`（session.hpp：`CurveTailBlock` + `AppendBatchCommand{document_id, target_revision, vector<CurveTailBlock>}`）+ `execute`（session.cpp）：先校验整批（曲线/轴存在、方向、长度、owner、尾连续性、scalar 类型匹配），任一失败返错且不动状态（原子）；通过 `existing_segments` + `CompositeBufferView::from_segments` 无拷贝组合（旧段 SharedOwner 原地保活）；单调 revision 门（`target_revision > current`，否则拒——`SetDocumentCommand` 盲替换无此门）；乱序/历史回补拒为 Append；最后委托 `SetDocumentCommand` 提交（复用 validate/LOD/selection 重映射/事件）。10 用例测试（成功端到端跨段读、no-copy 旧块地址保活、整批失败不变、乱序拒、回补拒、非单调 revision 拒、链式重复追加、缺文档/缺曲线/缺轴 distinct 码）。
+
+**两轴 review**（固定点 `43a0790`）：Spec **6/6 PASS** 0 发现；Standards **1 hard**（`append_curve_missing` 是 Mysterious Name——返 `missing_sampling_axis` 码却用于缺曲线→拆为 `append_curve_missing`(`invalid_document`) + `append_axis_missing`(`missing_sampling_axis`) 两个 distinct builder + 2 测试锁定），1 judgement 应用（staging map `count()+at()` 双查改 `find()` 单查无拷贝）。commit `1873a3b`（feature）+ `dacf025`（review fix）。36/36 green。
+
+**drive-by 潜伏 build 修复**（本沙箱 GCC 更严，阻塞依赖库编译）：manifest `(void)field()` 丢弃 nodiscard、xlsx `sheet_index` set-but-unused、`well_log_view.cpp` switch 漏 `image_pyramid_unavailable`、两测试 `BufferSourceReference::checksum` 缺初始化。
+
+**#162 链状态**：#196 ✅ → #197 ✅ → **#198 ✅** → #199（增量 LOD 尾扩展，frontier）/ #200（fixed-viewport vs follow-latest）→ #201（高频合并 + 压力）。

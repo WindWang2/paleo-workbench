@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W6（WellLogEngine #196–#197 composite buffer expand+contract）— Complete; frontier now #198
+Phase W7（WellLogEngine #198 AppendBatchCommand）— Complete; frontier now #199
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -249,6 +249,31 @@ Phase W6（WellLogEngine #196–#197 composite buffer expand+contract）— Comp
 - [x] 两轴 /code-review：Standards 0 hard（2 judgement call follow 先例）、Spec 0 发现——无需修复 commit
 - **Status:** complete（commit `c5c9e81`），35/35 green。frontier 现 #197
 
+### Phase W7: #198 AppendBatchCommand（原子曲线尾追加，ADR 0031）
+
+`/implement` #198（#162 链 frontier）。expand（坐标 BufferView→CurveBuffer）+ AppendBatchCommand 实现，两 commit + 两轴 `/code-review`。固定点 `43a0790`。
+
+#### W7.1: Expand — SamplingAxis.coordinates BufferView → CurveBuffer
+- [x] header 类型扩；隐式 `CurveBuffer(BufferView)` 构造使 84+ `SamplingAxis{...}` 字面量不变
+- [x] BufferView-specific 站点迁移：manifest write 拒复合 + `as_single()`、curve_lod `validate_curve_buffer`、session `axis_is_ordered`（复合分支 `value_as_double`，单块类型精确模板保留整数精度）、4 个 selection row/range mapper 改 `CurveBuffer`、curve_lod_test `as_single()`
+- [x] 整数精度回归修复（`session_compares_integer_sampling_axes_without_precision_loss` 重新通过——单块路径保留类型精确 memcpy 比较）
+- **Status:** complete（合入 commit `1873a3b`）
+
+#### W7.2: AppendBatchCommand 实现 + 测试
+- [x] `CurveTailBlock`/`AppendBatchCommand` 类型（session.hpp）；`execute(AppendBatchCommand)`（session.cpp）
+- [x] 整批校验先行（曲线/轴存在、方向、长度、owner、尾连续性、scalar 匹配）→ 任一失败返错且不动状态（原子，无半批）
+- [x] 无拷贝组合：`existing_segments` + `CompositeBufferView::from_segments`（旧段 SharedOwner 原地保活）
+- [x] 单调 revision 门（`target_revision > current`，否则拒）；乱序/历史回补拒为 Append
+- [x] 委托 `SetDocumentCommand` 提交（复用 validate/LOD/selection 重映射/事件）
+- [x] 测试 10 用例（成功端到端跨段读、no-copy 旧块地址保活、整批失败不变、乱序拒、回补拒、非单调 revision 拒、链式重复追加、缺文档/缺曲线/缺轴 distinct 码）
+- **Status:** complete（commit `1873a3b`）
+
+#### W7.3: 两轴 /code-review 修复
+- [x] Spec 6/6 PASS 0 发现；Standards 1 hard：`append_curve_missing` 返 `missing_sampling_axis` 码却用于缺曲线（Mysterious Name + Result/Error 契约不符）→ 拆 `append_curve_missing`(`invalid_document`) + `append_axis_missing`(`missing_sampling_axis`) + 2 测试锁定 distinct 码
+- [x] Standards judgement 应用：staging map `count()+at()` 双查改 `find()` 单查无拷贝
+- [x] judgement 保留（行内文档）：重复 double 单调遍历（两路径载荷不同）、`version_conflict` 复用 `invalid_document`（无 enum 项，跨模块改动延后）
+- **Status:** complete（commit `dacf025`），36/36 green。frontier 现 #199
+
 ## Decisions Made
 
 | Decision | Rationale |
@@ -264,6 +289,11 @@ Phase W6（WellLogEngine #196–#197 composite buffer expand+contract）— Comp
 | **[W1]** 图形输入 = Both（API + Ctrl+drag） | 用户明确选择；既暴露 API 供宿主，又内置手势 |
 | **[W1]** mapping 用线性扫描（非二分） | 选择时（非每帧）触发；轴长度典型规模下可接受；简化正确性 |
 | **[W1]** `apply_selection` 为私有成员函数 | 需访问 `WellLogSession::Impl`（私有嵌套结构），自由函数无法命名 |
+| **[W7]** `SamplingAxis.coordinates` 扩为 `CurveBuffer`（而非仅曲线值） | ADR 0031「旧数组不复制」是普遍的；append 必须无拷贝扩展轴坐标，否则坐标被迫重建（拷贝）。镜像 #196/#197 expand-contract。 |
+| **[W7]** 整数精度轴序检查走类型精确模板（单块），复合走 `value_as_double` | `session_compares_integer_sampling_axes_without_precision_loss` 要求 uint64 值 `2^53+1` vs `2^53` 区分；double 转换会掩盖。append 坐标是深度（浮点），复合边界走 double 可接受。 |
+| **[W7]** append 委托 `SetDocumentCommand` 提交 | 复用 validate/LOD/selection 重映射/事件发布，避免复制 ~300 行失效逻辑；append 专有校验（单调门、尾连续性）在前置阶段完成 |
+| **[W7]** `version_conflict` 复用 `invalid_document`（非新 enum） | `ErrorCode` 无 `version_conflict` 项；新增是跨模块改动。follow `selection_*` 先例复用最接近稳定码，行内文档说明 |
+| **[W7]** 空批为 no-op 成功（当前 revision） | 规格未覆盖；成功不产新 revision/事件，避免无意义状态变更 |
 
 ## Errors Encountered & Resolved
 
@@ -280,3 +310,5 @@ Phase W6（WellLogEngine #196–#197 composite buffer expand+contract）— Comp
 | **[W1]** cmake reconfigure 报 "welllog_table not in export set" | 1 | Phase A 遗留打包 bug；加入 install EXPORT（非本会话引入） |
 | **[W1]** `qt-table-model` 旧测试断言旧 MIME 格式失败 | 1 | 更新断言匹配新 identity 格式 |
 | **[W1]** `set_projection` 未清除陈旧 selection 反射（自审发现） | 1 | 清除 source + 反射 span + 回归测试 |
+| **[W7]** `axis_is_ordered` 重写走 `value_as_double` 破坏整数精度测试 | 1 | 恢复类型精确模板（单块 memcpy 比较），仅复合分支走 `value_as_double` |
+| **[W7]** 本沙箱 GCC 更严暴露多处潜伏 `-Werror`（manifest nodiscard / xlsx sheet_index / well_log_view switch / 测试 checksum 初始化）阻塞编译 | 各 1 | drive-by 修：`(void)field()`、删未用变量、补 switch case、补字段初始化（均潜伏 bug，非本会话引入） |
