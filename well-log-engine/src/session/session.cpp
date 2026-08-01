@@ -435,6 +435,97 @@ validate_document(const WellLogDocument &document) {
   return std::nullopt;
 }
 
+[[nodiscard]] bool same_source_reference(const BufferSourceReference &left,
+                                         const BufferSourceReference &right) {
+  return left.uri == right.uri && left.checksum == right.checksum &&
+         left.byte_offset == right.byte_offset;
+}
+
+[[nodiscard]] bool same_buffer_view(const BufferView &left,
+                                    const BufferView &right) {
+  return left.data() == right.data() && left.length() == right.length() &&
+         left.stride_bytes() == right.stride_bytes() &&
+         left.scalar_type() == right.scalar_type() &&
+         left.byte_capacity() == right.byte_capacity() &&
+         left.access_mode() == right.access_mode() &&
+         same_source_reference(left.source(), right.source());
+}
+
+[[nodiscard]] bool same_curve_buffer(const CurveBuffer &left,
+                                      const CurveBuffer &right) {
+  if (left.is_composite() != right.is_composite()) {
+    return false;
+  }
+  if (!left.is_composite()) {
+    return same_buffer_view(left.as_single(), right.as_single());
+  }
+  const auto left_segments = left.segments();
+  const auto right_segments = right.segments();
+  if (left_segments.size() != right_segments.size()) {
+    return false;
+  }
+  return std::equal(left_segments.begin(), left_segments.end(),
+                    right_segments.begin(),
+                    [](const BufferView &left_segment,
+                       const BufferView &right_segment) {
+                      return same_buffer_view(left_segment, right_segment);
+                    });
+}
+
+[[nodiscard]] bool same_null_bitmap(const NullBitmapView &left,
+                                    const NullBitmapView &right) {
+  return left.data() == right.data() && left.bit_length() == right.bit_length() &&
+         left.byte_capacity() == right.byte_capacity() &&
+         same_source_reference(left.source(), right.source());
+}
+
+// A ready LOD cache may be retagged only if every buffer/metadata input it
+// reads is identical. ApplyPatchCommand satisfies this by construction (ADR
+// 0025); this defensive check keeps a stale internal hint from corrupting a
+// future SetDocumentCommand should that invariant ever change.
+[[nodiscard]] bool same_lod_inputs(const WellLogDocument &previous,
+                                   const WellLogDocument &replacement) {
+  if (previous.sampling_axes().size() != replacement.sampling_axes().size() ||
+      previous.curves().size() != replacement.curves().size() ||
+      previous.image_sources().size() != replacement.image_sources().size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < previous.sampling_axes().size(); ++index) {
+    const auto &left = previous.sampling_axes()[index];
+    const auto &right = replacement.sampling_axes()[index];
+    if (left.id != right.id || left.domain != right.domain ||
+        left.unit != right.unit || left.direction != right.direction ||
+        !same_curve_buffer(left.coordinates, right.coordinates)) {
+      return false;
+    }
+  }
+  for (std::size_t index = 0; index < previous.curves().size(); ++index) {
+    const auto &left = previous.curves()[index];
+    const auto &right = replacement.curves()[index];
+    if (left.id != right.id ||
+        left.sampling_axis_id != right.sampling_axis_id ||
+        !same_curve_buffer(left.values, right.values) ||
+        !same_null_bitmap(left.nulls, right.nulls)) {
+      return false;
+    }
+  }
+  for (std::size_t index = 0; index < previous.image_sources().size();
+       ++index) {
+    const auto &left = previous.image_sources()[index];
+    const auto &right = replacement.image_sources()[index];
+    if (left.id != right.id || left.width_px != right.width_px ||
+        left.height_px != right.height_px ||
+        left.pixel_format != right.pixel_format ||
+        left.reference_depth_top != right.reference_depth_top ||
+        left.reference_depth_bottom != right.reference_depth_bottom ||
+        left.dpi != right.dpi ||
+        !same_source_reference(left.source, right.source)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] std::uint64_t missing_sample_count(const Curve &curve) noexcept {
   std::uint64_t count{};
   for (std::uint64_t index = 0; index < curve.values.length(); ++index) {
@@ -901,6 +992,8 @@ struct WellLogSession::Impl {
     std::shared_ptr<const detail::ScenePreparer::ImagePyramidMap> image_pyramids;
     std::uint64_t derived_bytes{};
     std::uint64_t maximum_derived_bytes{};
+    std::shared_ptr<const WellLogDocument> source_document;
+    DocumentRevision source_revision{};
   };
   std::unordered_map<EntityId, PendingLodReuse, EntityIdHash>
       pending_lod_reuse;
@@ -1160,14 +1253,21 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
       reuse = pending->second;
       impl_->pending_lod_reuse.erase(pending);
     }
+    const auto current_document = impl_->documents.find(document_id);
+    const auto reuse_matches_current_document =
+        reuse.has_value() && reuse->source_document != nullptr &&
+        current_document != impl_->documents.end() &&
+        reuse->source_document == current_document->second &&
+        reuse->source_revision == current_document->second->revision();
     const auto reuse_preparation =
-        asynchronous && reuse.has_value() &&
+        asynchronous && reuse_matches_current_document &&
         reuse->kind == Impl::LodReuseKind::unchanged_document &&
-        reuse->pyramids != nullptr;
+        reuse->pyramids != nullptr &&
+        same_lod_inputs(*current_document->second, *document);
     const auto generation = asynchronous && !reuse_preparation
                                 ? impl_->next_lod_generation
                                 : std::uint64_t{};
-    const auto reuse_map = reuse.has_value() &&
+    const auto reuse_map = reuse_matches_current_document &&
                                    reuse->kind == Impl::LodReuseKind::append_tail
                                ? reuse->pyramids
                                : nullptr;
@@ -2498,75 +2598,6 @@ inverse_edits_for_patch(const DocumentPatch &patch,
       entity);
 }
 
-[[nodiscard]] Error patch_presentation_invalid(EntityId entity_id) {
-  return Error{
-      .code = ErrorCode::invalid_presentation,
-      .severity = Severity::error,
-      .entity_id = entity_id,
-      .message = MessageKey::presentation_invalid,
-      .arguments = {},
-  };
-}
-
-// SetPresentationCommand can defer scene validation while LOD work is pending.
-// Validate the patchable layout subset here, before ApplyPatchCommand commits a
-// new revision, so a malformed Track/Scale/CurveLayer patch remains atomic.
-[[nodiscard]] std::optional<Error>
-validate_patchable_presentation(const WellLogDocument &document,
-                                const ScenePresentation &presentation) {
-  std::unordered_set<EntityId, EntityIdHash> entity_ids;
-  entity_ids.insert(document.id());
-  for (const auto &axis : document.sampling_axes()) {
-    entity_ids.insert(axis.id);
-  }
-  for (const auto &curve : document.curves()) {
-    entity_ids.insert(curve.id);
-  }
-
-  std::unordered_set<EntityId, EntityIdHash> track_ids;
-  for (const auto &track : presentation.tracks()) {
-    if (track.id.is_nil() || !entity_ids.insert(track.id).second ||
-        !std::isfinite(track.width.value) || track.width.value <= 0.0 ||
-        !std::isfinite(track.header.height.value) ||
-        track.header.height.value < 0.0 ||
-        (track.header.height.value > 0.0 &&
-         (!std::isfinite(track.header.font_size.value) ||
-          track.header.font_size.value <= 0.0))) {
-      return patch_presentation_invalid(track.id);
-    }
-    track_ids.insert(track.id);
-  }
-
-  std::unordered_map<EntityId, const TrackScaleSpec *, EntityIdHash> scales;
-  for (const auto &scale : presentation.scales()) {
-    if (scale.id.is_nil() || !entity_ids.insert(scale.id).second ||
-        !track_ids.contains(scale.track_id) || !std::isfinite(scale.minimum) ||
-        !std::isfinite(scale.maximum) || scale.minimum >= scale.maximum ||
-        !std::isfinite(scale.maximum - scale.minimum) || scale.unit.empty() ||
-        (scale.mode == ScaleMode::logarithmic && scale.minimum <= 0.0)) {
-      return patch_presentation_invalid(scale.id);
-    }
-    scales.emplace(scale.id, &scale);
-  }
-
-  for (const auto &layer : presentation.curve_layers()) {
-    const auto scale = scales.find(layer.scale_id);
-    const auto curve =
-        std::find_if(document.curves().begin(), document.curves().end(),
-                     [&layer](const Curve &candidate) {
-                       return candidate.id == layer.curve_id;
-                     });
-    if (layer.id.is_nil() || !entity_ids.insert(layer.id).second ||
-        !track_ids.contains(layer.track_id) || scale == scales.end() ||
-        scale->second->track_id != layer.track_id ||
-        curve == document.curves().end() || curve->unit != scale->second->unit ||
-        !std::isfinite(layer.line_width.value) || layer.line_width.value <= 0.0) {
-      return patch_presentation_invalid(layer.id);
-    }
-  }
-  return std::nullopt;
-}
-
 Result<CommandReceipt>
 WellLogSession::execute(const AppendBatchCommand &command) {
   try {
@@ -2798,32 +2829,6 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
       }
     }
 
-    // Capture the exact semantic state and the declarative inverse before the
-    // commit changes the document. The snapshots make revision restoration
-    // exact; inverse_edits records how each validated patch edit reverses.
-    const auto inverse_edits = inverse_edits_for_patch(
-        command.patch, current_doc,
-        has_presentation ? &pres_entry->second : nullptr);
-    if (!inverse_edits.has_value()) {
-      return Error{
-          .code = ErrorCode::internal_error,
-          .severity = Severity::error,
-          .entity_id = command.document_id,
-          .message = MessageKey::internal_error,
-          .arguments = {},
-      };
-    }
-    auto history_entry = Impl::HistoryEntry{
-        .before = impl_->semantic_state(command.document_id),
-        .after = {},
-        .inverse_edits = std::move(*inverse_edits),
-    };
-    auto [history, inserted] =
-        impl_->histories.try_emplace(command.document_id);
-    static_cast<void>(inserted);
-    history->second.undo.reserve(history->second.undo.size() + 1);
-    impl_->events.reserve(impl_->events.size() + 1);
-
     // --- Build the patched document (interpretation entities edited). ---
     // Copy every untouched collection verbatim; for the patchable document
     // collections (intervals/markers/symbols/annotations), copy each entity
@@ -2879,6 +2884,16 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
           presentation_upserts_present = true;
         }
       }
+    }
+    auto patched_doc = doc_builder.build();
+    if (patched_doc.id().is_nil()) {
+      return Error{
+          .code = ErrorCode::resource_exhausted,
+          .severity = Severity::error,
+          .entity_id = command.document_id,
+          .message = MessageKey::resource_exhausted,
+          .arguments = {},
+      };
     }
 
     // --- Build the patched presentation (layout entities edited), if any. ---
@@ -2939,8 +2954,13 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         }
       }
       patched_presentation = pres_builder.build();
-      if (const auto validation =
-              validate_patchable_presentation(current_doc, *patched_presentation);
+      // SetPresentationCommand defers validation while a LOD task is pending.
+      // A patch must instead preflight the complete patched graph before
+      // SetDocumentCommand changes a revision or emits any event. The scene
+      // preflight performs no text shaping or curve-geometry preparation, so a
+      // presentation-only patch retains the minimal asynchronous work closure.
+      if (const auto validation = detail::ScenePreparer::preflight(
+              patched_doc, *patched_presentation);
           validation.has_value()) {
         return *validation;
       }
@@ -2955,6 +2975,33 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
           .arguments = {},
       };
     }
+
+    // Capture the exact semantic state and the declarative inverse only after
+    // every patch validation has succeeded. The snapshots make revision
+    // restoration exact; inverse_edits records how each validated patch edit
+    // reverses.
+    const auto inverse_edits = inverse_edits_for_patch(
+        command.patch, current_doc,
+        has_presentation ? &pres_entry->second : nullptr);
+    if (!inverse_edits.has_value()) {
+      return Error{
+          .code = ErrorCode::internal_error,
+          .severity = Severity::error,
+          .entity_id = command.document_id,
+          .message = MessageKey::internal_error,
+          .arguments = {},
+      };
+    }
+    auto history_entry = Impl::HistoryEntry{
+        .before = impl_->semantic_state(command.document_id),
+        .after = {},
+        .inverse_edits = std::move(*inverse_edits),
+    };
+    auto [history, inserted] =
+        impl_->histories.try_emplace(command.document_id);
+    static_cast<void>(inserted);
+    history->second.undo.reserve(history->second.undo.size() + 1);
+    impl_->events.reserve(impl_->events.size() + 1);
 
     // --- Capture viewport state to restore after the commit (like append). ---
     struct CapturedViewport {
@@ -2979,16 +3026,6 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
 
     // --- Commit the patched document (reuses validation/LOD/selection remap).
     // ---
-    auto patched_doc = doc_builder.build();
-    if (patched_doc.id().is_nil()) {
-      return Error{
-          .code = ErrorCode::resource_exhausted,
-          .severity = Severity::error,
-          .entity_id = command.document_id,
-          .message = MessageKey::resource_exhausted,
-          .arguments = {},
-      };
-    }
     // A patch edits interpretation/layout entities and leaves raw curves and
     // images byte-identical (ADR 0025). Retag a ready cache at the new revision
     // instead of rebuilding its LOD; SetPresentationCommand only needs a new
@@ -3006,10 +3043,16 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
               .image_pyramids = prep->second.image_pyramids,
               .derived_bytes = prep->second.derived_bytes,
               .maximum_derived_bytes = prep->second.maximum_derived_bytes,
+              .source_document = document_entry->second,
+              .source_revision = current_revision,
           });
     }
     const auto commit = execute(SetDocumentCommand{std::move(patched_doc)});
     if (!commit.has_value()) {
+      // SetDocumentCommand can reject before consuming the cache hint (for
+      // example, an invalid patched document). Do not let that ready cache be
+      // reused by a later, unrelated replacement of this document id.
+      impl_->pending_lod_reuse.erase(command.document_id);
       return commit;
     }
 
@@ -3385,6 +3428,8 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
               .image_pyramids = {},
               .derived_bytes = 0,
               .maximum_derived_bytes = 0,
+              .source_document = document_entry->second,
+              .source_revision = current_revision,
           });
     }
 
@@ -3426,6 +3471,9 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
 
     const auto commit = execute(SetDocumentCommand{std::move(appended)});
     if (!commit.has_value()) {
+      // A rejected delegated replacement must not leave an append-tail cache
+      // hint for a later document with different source buffers.
+      impl_->pending_lod_reuse.erase(command.document_id);
       return commit;
     }
 

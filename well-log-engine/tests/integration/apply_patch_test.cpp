@@ -37,6 +37,10 @@ void require(bool condition, std::string_view message) {
   }
 }
 
+void require_near(double actual, double expected, std::string_view message) {
+  require(std::abs(actual - expected) < 1.0e-9, message);
+}
+
 EntityId id(std::string_view text) {
   auto parsed = EntityId::parse(text);
   require(parsed.has_value(), "test UUID must be valid");
@@ -53,6 +57,7 @@ const auto layer_id = id("cc000000-0000-4000-8000-000000000006");
 const auto second_track_id = id("cc000000-0000-4000-8000-000000000010");
 const auto second_scale_id = id("cc000000-0000-4000-8000-000000000011");
 const auto second_layer_id = id("cc000000-0000-4000-8000-000000000012");
+const auto interval_layer_id = id("cc000000-0000-4000-8000-000000000014");
 const auto interval_id = id("cc000000-0000-4000-8000-000000000007");
 const auto marker_id = id("cc000000-0000-4000-8000-000000000008");
 const auto annotation_id = id("cc000000-0000-4000-8000-000000000009");
@@ -64,7 +69,7 @@ struct Fixture {
   WellLogSession session;
   DocumentRevision revision;
 
-  Fixture() {
+  explicit Fixture(PerformanceBudgets budgets = {}) : session(std::move(budgets)) {
     auto depths = std::make_shared<const std::vector<double>>(
         std::initializer_list<double>{1000.0, 1001.0, 1002.0});
     auto values = std::make_shared<const std::vector<double>>(
@@ -153,6 +158,11 @@ struct Fixture {
                                       .color = {},
                                       .line_width = Millimetres{0.25},
                                       .visible = true});
+    pb.add_interval_layer(IntervalLayerSpec{
+        .id = interval_layer_id,
+        .track_id = track_id,
+        .draw_labels = false,
+    });
     require(session.execute(SetPresentationCommand{pb.build()}).has_value(),
             "fixture presentation must be accepted");
     // Establish a viewport (presentation set the initial one; adjust it).
@@ -212,8 +222,8 @@ void upsert_replaces_document_entity() {
   require(intervals.size() == 1, "interval count must stay 1 (replaced)");
   require(intervals.front().label == "Shale",
           "the upserted interval must replace the old one");
-  require(intervals.front().bottom_reference_depth == 1001.5,
-          "the upserted interval must carry the new bottom depth");
+  require_near(intervals.front().bottom_reference_depth, 1001.5,
+               "the upserted interval must carry the new bottom depth");
 }
 
 // Upserting a NEW document entity id (create) adds it.
@@ -283,8 +293,8 @@ void upsert_edits_presentation_entity() {
   // preserved (the patch path restores it) and the revision advanced.
   require(f.session.viewport(document_id).has_value(),
           "the viewport must be preserved across a patch");
-  require(f.session.viewport(document_id)->bottom == 1001.5,
-          "the viewport window must be unchanged by a patch");
+  require_near(f.session.viewport(document_id)->bottom, 1001.5,
+               "the viewport window must be unchanged by a patch");
   const auto scene = await_prepared_scene(f.session);
   require(scene != nullptr, "track width patch must re-prepare a scene");
   const auto track =
@@ -292,10 +302,10 @@ void upsert_edits_presentation_entity() {
                    [](const PreparedTrack &t) { return t.id == track_id; });
   require(track != scene->tracks().end(),
           "prepared scene must retain the patched track");
-  require(track->bounds.width.value == 80.0,
-          "prepared track geometry must use the patched width");
-  require(scene->physical_width().value == 110.0,
-          "the physical scene width must include the patched track width");
+  require_near(track->bounds.width.value, 80.0,
+               "prepared track geometry must use the patched width");
+  require_near(scene->physical_width().value, 110.0,
+               "the physical scene width must include the patched track width");
 }
 
 // A Track z_order patch is a layout edit: re-preparing must place the patched
@@ -322,8 +332,8 @@ void track_z_order_patch_reorders_prepared_tracks() {
           "prepared scene must retain both tracks after a patch");
   require(scene->tracks().front().id == second_track_id,
           "prepared tracks must follow the patched z-order");
-  require(scene->tracks().front().bounds.left.value == 0.0,
-          "the reordered track must own the leftmost geometry");
+  require_near(scene->tracks().front().bounds.left.value, 0.0,
+               "the reordered track must own the leftmost geometry");
 }
 
 // Scale mode/range/direction/unit edits must reach prepared metadata and the
@@ -369,8 +379,10 @@ void scale_patch_changes_prepared_metadata_and_geometry() {
                                    });
   require(header != scene->track_header_entries().end(),
           "prepared header must retain the patched scale");
-  require(header->scale_minimum == 1.0 && header->scale_maximum == 1000.0,
-          "prepared header must carry the patched scale range");
+  require_near(header->scale_minimum, 1.0,
+               "prepared header must carry the patched scale minimum");
+  require_near(header->scale_maximum, 1000.0,
+               "prepared header must carry the patched scale maximum");
   require(header->unit == "CPS", "prepared header must carry the patched unit");
   require(header->mode == ScaleMode::logarithmic,
           "prepared header must carry the patched scale mode");
@@ -429,8 +441,8 @@ void curve_layer_style_patch_changes_prepared_layer() {
   require(layer->color.red == 0x12 && layer->color.green == 0x34 &&
               layer->color.blue == 0x56 && layer->color.alpha == 0x78,
           "prepared layer must carry the patched RGBA style");
-  require(layer->line_width.value == 1.5,
-          "prepared layer must carry the patched line width");
+  require_near(layer->line_width.value, 1.5,
+               "prepared layer must carry the patched line width");
 }
 
 // Hidden curve layers remain addressable for a later patch, but must emit no
@@ -473,7 +485,8 @@ void curve_layer_visibility_patch_removes_prepared_geometry() {
           "hidden curve layers must contribute no prepared geometry");
 }
 
-// A remove of a presentation entity (CurveLayer) takes effect.
+// Removing a layer uses the structural-visibility path: it must be absent from
+// the re-prepared scene as well as from the retained presentation.
 void remove_deletes_presentation_entity() {
   Fixture f;
   const auto result = f.session.execute(ApplyPatchCommand{
@@ -487,6 +500,131 @@ void remove_deletes_presentation_entity() {
   require(result.has_value(), "remove-layer patch must succeed");
   require(f.session.viewport(document_id).has_value(),
           "the viewport must be preserved across a presentation patch");
+  const auto scene = await_prepared_scene(f.session);
+  require(scene != nullptr, "remove-layer patch must re-prepare a scene");
+  require(std::none_of(scene->curve_layers().begin(),
+                       scene->curve_layers().end(),
+                       [](const PreparedCurveLayer &layer) {
+                         return layer.id == layer_id;
+                       }),
+          "removed curve layers must be absent from the prepared scene");
+  require(std::none_of(scene->curve_segments().begin(),
+                       scene->curve_segments().end(),
+                       [](const PreparedCurveSegment &segment) {
+                         return segment.layer_id == layer_id;
+                       }),
+          "removed curve layers must contribute no prepared geometry");
+
+  const auto readd = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = f.session.document(document_id)->revision(),
+          .edits = {EntityEdit{UpsertEntity{CurveLayerSpec{
+              .id = layer_id,
+              .track_id = track_id,
+              .curve_id = curve_id,
+              .scale_id = scale_id,
+              .color = {},
+              .line_width = Millimetres{0.25},
+              .visible = true,
+          }}}},
+      },
+  });
+  require(readd.has_value(), "re-adding a removed layer must succeed");
+  const auto readded_scene = await_prepared_scene(f.session);
+  require(readded_scene != nullptr,
+          "re-adding a layer must re-prepare a scene");
+  const auto readded_layer = std::find_if(
+      readded_scene->curve_layers().begin(), readded_scene->curve_layers().end(),
+      [](const PreparedCurveLayer &layer) { return layer.id == layer_id; });
+  require(readded_layer != readded_scene->curve_layers().end() &&
+              readded_layer->segment_count > 0,
+          "re-added visible layers must restore prepared geometry");
+}
+
+// A layout patch that would make the full presentation invalid must be
+// rejected before any document revision or event is committed.
+void invalid_presentation_patch_is_atomic() {
+  Fixture f;
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = f.revision,
+          .edits = {EntityEdit{RemoveEntity{track_id}}},
+      },
+  });
+  require(!result.has_value(), "invalid layout patch must be rejected");
+  require(result.error().code == ErrorCode::invalid_presentation,
+          "invalid layout patch must use invalid_presentation");
+  require(f.session.document(document_id)->revision() == f.revision,
+          "rejected layout patch must preserve the document revision");
+  require(f.session.events().empty(),
+          "rejected layout patch must publish no state-change events");
+}
+
+// The preflight covers the patched document as well as the presentation. An
+// interval that refers to an absent pattern must be rejected before it changes
+// the revision, even though Interval is not itself a presentation entity.
+void invalid_document_presentation_dependency_is_atomic() {
+  Fixture f;
+  const auto unknown_pattern = id("cc000000-0000-4000-8000-000000000015");
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = f.revision,
+          .edits = {EntityEdit{UpsertEntity{Interval{
+              .id = interval_id,
+              .top_reference_depth = 1000.0,
+              .bottom_reference_depth = 1001.0,
+              .semantic = IntervalSemantic::lithology,
+              .pattern_id = unknown_pattern,
+              .label = "Sand",
+          }}}},
+      },
+  });
+  require(!result.has_value(), "invalid interval pattern must be rejected");
+  require(result.error().code == ErrorCode::invalid_presentation,
+          "unknown interval patterns must report invalid_presentation");
+  require(f.session.document(document_id)->revision() == f.revision,
+          "invalid document/presentation dependencies must preserve revision");
+  require(f.session.events().empty(),
+          "invalid document/presentation dependencies must publish no events");
+}
+
+// Presentation-only edits retain immutable source buffers and their ready LOD
+// cache. Re-preparing the changed layout should complete one frame task, not a
+// second LOD build plus frame task.
+void presentation_patch_reuses_ready_lod_cache() {
+  auto budgets = PerformanceBudgets{};
+  budgets.asynchronous_sample_threshold = 1;
+  budgets.maximum_cpu_derived_bytes = 1ULL * 1024ULL * 1024ULL;
+  Fixture f(budgets);
+  require(await_prepared_scene(f.session) != nullptr,
+          "async fixture must finish its initial prepared scene");
+  const auto before = f.session.performance_snapshot(document_id);
+  require(before.has_value() && before->preparation_state == PreparationState::ready,
+          "initial LOD preparation must be ready before the patch");
+
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch = DocumentPatch{
+          .base_revision = f.revision,
+          .edits = {EntityEdit{UpsertEntity{TrackSpec{
+              .id = track_id,
+              .width = Millimetres{80.0},
+              .header = TrackHeaderSpec{.height = Millimetres{8.0}},
+          }}}},
+      },
+  });
+  require(result.has_value() && result.value().asynchronous_preparation_started,
+          "presentation patch must start only its replacement frame task");
+  require(await_prepared_scene(f.session) != nullptr,
+          "presentation patch must publish its replacement scene");
+  const auto after = f.session.performance_snapshot(document_id);
+  require(after.has_value() && after->preparation_state == PreparationState::ready,
+          "presentation patch must retain a ready LOD preparation");
+  require(after->completed_tasks == before->completed_tasks + 1,
+          "presentation patch must reuse LOD and complete only one frame task");
 }
 
 // The whole batch is atomic: one bad edit (a remove of a non-existent entity)
@@ -706,6 +844,9 @@ int main() {
   curve_layer_style_patch_changes_prepared_layer();
   curve_layer_visibility_patch_removes_prepared_geometry();
   remove_deletes_presentation_entity();
+  invalid_presentation_patch_is_atomic();
+  invalid_document_presentation_dependency_is_atomic();
+  presentation_patch_reuses_ready_lod_cache();
   whole_batch_rejects_on_one_bad_edit();
   duplicate_id_in_batch_rejected();
   base_revision_mismatch_rejected_as_conflict();

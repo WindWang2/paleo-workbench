@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <stop_token>
 #include <unordered_map>
 
@@ -16,6 +17,13 @@ public:
   using ImagePyramidMap =
       std::unordered_map<EntityId, ImagePyramid, EntityIdHash>;
 
+  // Validates every static document/presentation relationship ScenePreparer
+  // depends on, without shaping text, walking curve samples, or producing a
+  // PreparedScene. Command paths use this to reject invalid declarative edits
+  // atomically before scheduling the asynchronous geometry work.
+  [[nodiscard]] static std::optional<Error>
+  preflight(const WellLogDocument &document,
+            const ScenePresentation &presentation) noexcept;
   [[nodiscard]] static Result<PreparedScene>
   prepare(const WellLogDocument &document,
           const ScenePresentation &presentation,

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1304,6 +1305,360 @@ PreparedScene::pick_custom(const CustomPickQuery &query) const noexcept {
   return std::nullopt;
 }
 
+std::optional<Error> detail::ScenePreparer::preflight(
+    const WellLogDocument &document,
+    const ScenePresentation &presentation) noexcept {
+  try {
+    const auto depth_range = presentation.reference_depth_range();
+    const auto layer_count =
+        presentation.curve_layers().size() +
+        presentation.interval_layers().size() +
+        presentation.image_layers().size() +
+        presentation.marker_layers().size() +
+        presentation.symbol_layers().size() + presentation.text_layers().size() +
+        presentation.custom_layers().size();
+    if (presentation.document_id() != document.id() ||
+        depth_range.domain == DepthDomain::source_index ||
+        depth_range.unit.empty() || !std::isfinite(depth_range.top) ||
+        !std::isfinite(depth_range.bottom) ||
+        depth_range.top >= depth_range.bottom ||
+        !std::isfinite(depth_range.bottom - depth_range.top) ||
+        !std::isfinite(presentation.physical_height().value) ||
+        presentation.physical_height().value <= 0.0 ||
+        presentation.tracks().empty() || layer_count == 0) {
+      return presentation_error(presentation.document_id());
+    }
+
+    std::unordered_set<EntityId, EntityIdHash> ids;
+    const auto add_id = [&ids](EntityId id) { return !id.is_nil() && ids.insert(id).second; };
+    if (!add_id(document.id())) {
+      return presentation_error(document.id());
+    }
+    for (const auto &axis : document.sampling_axes()) {
+      if (!add_id(axis.id)) {
+        return presentation_error(axis.id);
+      }
+    }
+    for (const auto &curve : document.curves()) {
+      if (!add_id(curve.id)) {
+        return presentation_error(curve.id);
+      }
+    }
+    for (const auto &image : document.image_sources()) {
+      if (!add_id(image.id)) {
+        return presentation_error(image.id);
+      }
+    }
+    for (const auto &source : document.custom_sources()) {
+      if (!add_id(source.id)) {
+        return presentation_error(source.id);
+      }
+    }
+    for (const auto &interval : document.intervals()) {
+      if (!add_id(interval.id)) {
+        return presentation_error(interval.id);
+      }
+    }
+    for (const auto &marker : document.markers()) {
+      if (!add_id(marker.id)) {
+        return presentation_error(marker.id);
+      }
+    }
+    for (const auto &symbol : document.symbols()) {
+      if (!add_id(symbol.id)) {
+        return presentation_error(symbol.id);
+      }
+    }
+    for (const auto &annotation : document.annotations()) {
+      if (!add_id(annotation.id)) {
+        return presentation_error(annotation.id);
+      }
+    }
+
+    std::unordered_map<EntityId, const TrackSpec *, EntityIdHash> tracks;
+    double total_width{};
+    for (const auto &track : presentation.tracks()) {
+      if (!add_id(track.id) || !std::isfinite(track.width.value) ||
+          track.width.value <= 0.0 || !std::isfinite(track.header.height.value) ||
+          track.header.height.value < 0.0 ||
+          (track.header.height.value > 0.0 &&
+           (!std::isfinite(track.header.font_size.value) ||
+            track.header.font_size.value <= 0.0))) {
+        return presentation_error(track.id);
+      }
+      total_width += track.width.value;
+      if (!std::isfinite(total_width)) {
+        return presentation_error(track.id);
+      }
+      tracks.emplace(track.id, &track);
+    }
+
+    std::unordered_map<EntityId, const TrackScaleSpec *, EntityIdHash> scales;
+    for (const auto &scale : presentation.scales()) {
+      if (!add_id(scale.id) || !tracks.contains(scale.track_id) ||
+          !std::isfinite(scale.minimum) || !std::isfinite(scale.maximum) ||
+          scale.minimum >= scale.maximum ||
+          !std::isfinite(scale.maximum - scale.minimum) || scale.unit.empty() ||
+          (scale.mode == ScaleMode::logarithmic && scale.minimum <= 0.0)) {
+        return presentation_error(scale.id);
+      }
+      scales.emplace(scale.id, &scale);
+    }
+
+    std::unordered_map<EntityId, const CurveLayerSpec *, EntityIdHash>
+        curve_layers;
+    for (const auto &layer : presentation.curve_layers()) {
+      const auto scale = scales.find(layer.scale_id);
+      const auto curve = std::find_if(
+          document.curves().begin(), document.curves().end(),
+          [&layer](const Curve &candidate) { return candidate.id == layer.curve_id; });
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          scale == scales.end() || scale->second->track_id != layer.track_id ||
+          curve == document.curves().end() ||
+          !std::isfinite(layer.line_width.value) || layer.line_width.value <= 0.0) {
+        return presentation_error(layer.id);
+      }
+      const auto axis = std::find_if(
+          document.sampling_axes().begin(), document.sampling_axes().end(),
+          [&curve](const SamplingAxis &candidate) {
+            return candidate.id == curve->sampling_axis_id;
+          });
+      if (axis == document.sampling_axes().end() ||
+          axis->domain != depth_range.domain ||
+          axis->domain == DepthDomain::source_index ||
+          axis->unit != depth_range.unit || curve->unit != scale->second->unit) {
+        return presentation_error(layer.id);
+      }
+      curve_layers.emplace(layer.id, &layer);
+    }
+
+    constexpr std::size_t maximum_pattern_primitives = 256;
+    constexpr std::size_t maximum_polyline_points = 1024;
+    constexpr double maximum_tile_extent_millimetres = 500.0;
+    std::unordered_set<EntityId, EntityIdHash> pattern_ids;
+    const auto point_valid = [](const PhysicalPoint &point) {
+      return std::isfinite(point.left.value) && std::isfinite(point.top.value);
+    };
+    for (const auto &pattern : presentation.patterns()) {
+      if (!add_id(pattern.id) || !std::isfinite(pattern.tile_width.value) ||
+          pattern.tile_width.value <= 0.0 ||
+          pattern.tile_width.value > maximum_tile_extent_millimetres ||
+          !std::isfinite(pattern.tile_height.value) ||
+          pattern.tile_height.value <= 0.0 ||
+          pattern.tile_height.value > maximum_tile_extent_millimetres ||
+          !std::isfinite(pattern.rotation_degrees) ||
+          !std::isfinite(pattern.stroke_width.value) ||
+          pattern.stroke_width.value <= 0.0 ||
+          pattern.stroke_width.value > maximum_tile_extent_millimetres ||
+          !point_valid(pattern.scene_anchor) ||
+          pattern.primitives.size() > maximum_pattern_primitives) {
+        return presentation_error(pattern.id);
+      }
+      for (const auto &primitive : pattern.primitives) {
+        const auto valid = std::visit(
+            [&point_valid](const auto &value) {
+              using T = std::decay_t<decltype(value)>;
+              if constexpr (std::is_same_v<T, PatternLine>) {
+                return point_valid(value.from) && point_valid(value.to);
+              } else if constexpr (std::is_same_v<T, PatternPolyline>) {
+                return value.points.size() >= 2 &&
+                       value.points.size() <= maximum_polyline_points &&
+                       std::all_of(value.points.begin(), value.points.end(),
+                                   point_valid);
+              } else {
+                return point_valid(value.center) &&
+                       std::isfinite(value.radius.value) &&
+                       value.radius.value > 0.0 &&
+                       value.radius.value <= maximum_tile_extent_millimetres;
+              }
+            },
+            primitive);
+        if (!valid) {
+          return presentation_error(pattern.id);
+        }
+      }
+      pattern_ids.insert(pattern.id);
+    }
+
+    for (const auto &layer : presentation.interval_layers()) {
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          (layer.draw_labels &&
+           (!std::isfinite(layer.label_font_size.value) ||
+            layer.label_font_size.value <= 0.0))) {
+        return presentation_error(layer.id);
+      }
+    }
+    if (!presentation.interval_layers().empty()) {
+      for (const auto &interval : document.intervals()) {
+        if (!interval.pattern_id.is_nil() &&
+            !pattern_ids.contains(interval.pattern_id)) {
+          return presentation_error(interval.id);
+        }
+      }
+    }
+
+    for (const auto &layer : presentation.crossover_fill_layers()) {
+      const auto upper = curve_layers.find(layer.upper_curve_layer_id);
+      const auto lower = curve_layers.find(layer.lower_curve_layer_id);
+      const auto color_set = layer.fill_color.has_value();
+      const auto pattern_set = layer.pattern_id.has_value() && !layer.pattern_id->is_nil();
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          upper == curve_layers.end() || lower == curve_layers.end() ||
+          upper->second->track_id != layer.track_id ||
+          lower->second->track_id != layer.track_id ||
+          upper->second->id == lower->second->id || color_set == pattern_set ||
+          (pattern_set && !pattern_ids.contains(*layer.pattern_id))) {
+        return presentation_error(layer.id);
+      }
+    }
+
+    constexpr std::uint64_t maximum_image_dimension_px = 65536ULL;
+    constexpr std::uint64_t maximum_image_pixels = 512ULL * 1024ULL * 1024ULL;
+    for (const auto &layer : presentation.image_layers()) {
+      const auto source = std::find_if(
+          document.image_sources().begin(), document.image_sources().end(),
+          [&layer](const ImageSource &candidate) {
+            return candidate.id == layer.image_source_id;
+          });
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          source == document.image_sources().end() || source->width_px == 0 ||
+          source->height_px == 0 ||
+          source->width_px > maximum_image_dimension_px ||
+          source->height_px > maximum_image_dimension_px || source->dpi == 0 ||
+          source->reference_depth_bottom <= source->reference_depth_top ||
+          !std::isfinite(source->reference_depth_top) ||
+          !std::isfinite(source->reference_depth_bottom)) {
+        return presentation_error(layer.id);
+      }
+      if (source->width_px * source->height_px > maximum_image_pixels) {
+        return Error{.code = ErrorCode::invalid_image,
+                     .severity = Severity::error,
+                     .entity_id = source->id,
+                     .message = MessageKey::image_pixels_exceed_limit,
+                     .arguments = {}};
+      }
+    }
+
+    constexpr std::size_t maximum_custom_primitives = 4096;
+    constexpr std::size_t maximum_custom_polyline_points = 8192;
+    constexpr std::size_t maximum_custom_vertices = 1 << 20;
+    for (const auto &layer : presentation.custom_layers()) {
+      const auto source = std::find_if(
+          document.custom_sources().begin(), document.custom_sources().end(),
+          [&layer](const CustomLayerSource &candidate) {
+            return candidate.id == layer.custom_source_id;
+          });
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          source == document.custom_sources().end()) {
+        return presentation_error(layer.id);
+      }
+      if (source->primitives.empty()) {
+        return Error{.code = ErrorCode::invalid_custom_source,
+                     .severity = Severity::error,
+                     .entity_id = source->id,
+                     .message = MessageKey::custom_source_empty,
+                     .arguments = {}};
+      }
+      if (source->primitives.size() > maximum_custom_primitives) {
+        return Error{.code = ErrorCode::invalid_custom_source,
+                     .severity = Severity::error,
+                     .entity_id = source->id,
+                     .message = MessageKey::custom_source_primitives_exceed_limit,
+                     .arguments = {}};
+      }
+      std::size_t total_vertices{};
+      for (const auto &primitive : source->primitives) {
+        const auto valid = std::visit(
+            [&point_valid, &total_vertices](const auto &value) {
+              using T = std::decay_t<decltype(value)>;
+              if constexpr (std::is_same_v<T, CustomPolyline>) {
+                return value.points.size() >= 2 &&
+                       value.points.size() <= maximum_custom_polyline_points &&
+                       std::isfinite(value.width.value) &&
+                       value.width.value >= 0.0 &&
+                       std::all_of(value.points.begin(), value.points.end(),
+                                   point_valid);
+              } else if constexpr (std::is_same_v<T, CustomTriangle>) {
+                total_vertices += 3;
+                return point_valid(value.a) && point_valid(value.b) &&
+                       point_valid(value.c);
+              } else if constexpr (std::is_same_v<T, CustomQuad>) {
+                total_vertices += 6;
+                return std::isfinite(value.rect.left.value) &&
+                       std::isfinite(value.rect.top.value) &&
+                       std::isfinite(value.rect.width.value) &&
+                       std::isfinite(value.rect.height.value);
+              } else {
+                total_vertices += 24;
+                return point_valid(value.center) &&
+                       std::isfinite(value.size.value) && value.size.value > 0.0;
+              }
+            },
+            primitive);
+        if (!valid) {
+          return presentation_error(layer.id);
+        }
+      }
+      if (total_vertices > maximum_custom_vertices) {
+        return Error{.code = ErrorCode::invalid_custom_source,
+                     .severity = Severity::error,
+                     .entity_id = source->id,
+                     .message = MessageKey::custom_source_points_exceed_limit,
+                     .arguments = {}};
+      }
+      if (source->clip.has_value() &&
+          (source->clip->points.size() < 3 ||
+           source->clip->points.size() > maximum_custom_polyline_points ||
+           !std::all_of(source->clip->points.begin(), source->clip->points.end(),
+                        point_valid))) {
+        return presentation_error(layer.id);
+      }
+    }
+
+    for (const auto &layer : presentation.marker_layers()) {
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          !std::isfinite(layer.line_width.value) || layer.line_width.value <= 0.0 ||
+          (layer.draw_labels &&
+           (!std::isfinite(layer.label_font_size.value) ||
+            layer.label_font_size.value <= 0.0))) {
+        return presentation_error(layer.id);
+      }
+    }
+    for (const auto &layer : presentation.symbol_layers()) {
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id) ||
+          !std::isfinite(layer.symbol_size.value) || layer.symbol_size.value <= 0.0) {
+        return presentation_error(layer.id);
+      }
+    }
+    for (const auto &layer : presentation.text_layers()) {
+      if (!add_id(layer.id) || !tracks.contains(layer.track_id)) {
+        return presentation_error(layer.id);
+      }
+    }
+    if (!presentation.text_layers().empty()) {
+      for (const auto &annotation : document.annotations()) {
+        if (annotation.anchor == AnnotationAnchor::track &&
+            !tracks.contains(annotation.track_id)) {
+          return presentation_error(annotation.id);
+        }
+      }
+    }
+    return std::nullopt;
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
+}
+
 Result<PreparedScene>
 detail::ScenePreparer::prepare(const WellLogDocument &document,
                                const ScenePresentation &presentation,
@@ -1338,6 +1693,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
   try {
     if (stop_token.stop_requested()) {
       return cancellation_error();
+    }
+    if (const auto validation = preflight(document, presentation);
+        validation.has_value()) {
+      return *validation;
     }
     const auto depth_range = presentation.reference_depth_range();
     const auto layer_count =
