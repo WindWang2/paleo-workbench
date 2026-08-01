@@ -1179,6 +1179,17 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_append_viewport_mode_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.append-viewport-mode COMMAND welllog_append_viewport_mode_tests)
 
+    # High-frequency append coalescing + stress/robustness (#201, final #162
+    # criterion): coalescing cap, external-owner retention, append-LOD cancel,
+    # selection survival, rapid-append pressure. Headless; Session + core.
+    add_executable(welllog_append_coalescing_tests
+        tests/integration/append_coalescing_test.cpp
+    )
+    target_compile_features(welllog_append_coalescing_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_append_coalescing_tests)
+    target_link_libraries(welllog_append_coalescing_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.append-coalescing-stress COMMAND welllog_append_coalescing_tests)
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

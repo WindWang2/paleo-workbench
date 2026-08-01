@@ -6,6 +6,7 @@
 #include <welllog/scene/curve_lod.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -844,6 +845,16 @@ struct WellLogSession::Impl {
   // bottom to the new tail depth (follow_latest).
   std::unordered_map<EntityId, AppendViewportMode, EntityIdHash>
       append_viewport_modes;
+  // High-frequency append coalescing state (#201, ADR 0031). Per-document
+  // staged tail-blocks awaiting a visible revision, plus the time the last
+  // visible revision was produced (for the refresh-rate cap). Empty/disabled
+  // when append_refresh_rate_hz == 0.
+  struct AppendCoalescer {
+    std::vector<CurveTailBlock> staged_blocks;
+    std::chrono::steady_clock::time_point last_flush{};
+    bool has_last_flush{false};
+  };
+  std::unordered_map<EntityId, AppendCoalescer, EntityIdHash> append_coalescers;
   std::unordered_map<EntityId, CurvePreparation, EntityIdHash> preparations;
   // Append-incremental LOD reuse hint (#199): when an AppendBatchCommand
   // delegates to SetDocumentCommand, it stages the document's previously-built
@@ -2168,6 +2179,112 @@ existing_segments(const CurveBuffer &buffer) {
 Result<CommandReceipt>
 WellLogSession::execute(const AppendBatchCommand &command) {
   try {
+    // Coalescing disabled (the default): commit immediately, one revision per
+    // AppendBatchCommand — backward-compatible with #198/#199/#200.
+    const auto rate_hz = impl_->budgets.append_refresh_rate_hz;
+    if (rate_hz == 0) {
+      return commit_append_batch(command);
+    }
+    // Coalescing enabled (#201, ADR 0031): the document must exist.
+    if (!impl_->documents.contains(command.document_id)) {
+      return append_document_missing(command.document_id);
+    }
+    // Stage this command's tail-blocks into the per-document coalescer.
+    auto &coalescer = impl_->append_coalescers[command.document_id];
+    for (const auto &block : command.blocks) {
+      coalescer.staged_blocks.push_back(block);
+    }
+    // Flush when the refresh interval has elapsed since the last visible
+    // revision (or this is the first staged batch). Otherwise return a
+    // "coalesced, no new revision yet" receipt so the host sees its append was
+    // accepted but not yet made visible.
+    const auto interval = std::chrono::nanoseconds(
+        rate_hz >= 1000 ? 1
+                        : std::int64_t{1'000'000'000} / std::int64_t{rate_hz});
+    const auto now = std::chrono::steady_clock::now();
+    const auto due = !coalescer.has_last_flush ||
+                     now - coalescer.last_flush >= interval;
+    if (due) {
+      // Flush the staged batch as a single visible revision. flush returns the
+      // receipt on success; the .value_or covers an (impossible-here) empty
+      // staged set after staging above.
+      return flush_append_coalesce(command.document_id)
+          .value_or(CommandReceipt{
+              .state_version = impl_->state_version,
+              .document_id = command.document_id,
+              .document_revision =
+                  impl_->documents.at(command.document_id)->revision(),
+              .asynchronous_preparation_started = false,
+              .diagnostic_id = std::nullopt,
+          });
+    }
+    return CommandReceipt{
+        .state_version = impl_->state_version,
+        .document_id = command.document_id,
+        .document_revision =
+            impl_->documents.at(command.document_id)->revision(),
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
+std::optional<CommandReceipt>
+WellLogSession::flush_append_coalesce(EntityId document_id) noexcept {
+  try {
+    const auto it = impl_->append_coalescers.find(document_id);
+    if (it == impl_->append_coalescers.end() ||
+        it->second.staged_blocks.empty()) {
+      return std::nullopt;
+    }
+    // Move the staged blocks out before committing so a validation failure
+    // (commit_append_batch returns an error) still clears the buffer — the
+    // staged batch is rejected wholesale (atomic), never half-flushed.
+    auto blocks = std::move(it->second.staged_blocks);
+    it->second.staged_blocks.clear();
+    const auto current_revision =
+        impl_->documents.contains(document_id)
+            ? impl_->documents.at(document_id)->revision()
+            : DocumentRevision{};
+    const auto result = commit_append_batch(AppendBatchCommand{
+        .document_id = document_id,
+        .target_revision = DocumentRevision{current_revision.value + 1},
+        .blocks = std::move(blocks),
+    });
+    if (!result.has_value()) {
+      // Validation failed: drop the staged batch (atomic) and surface the error
+      // via a returned receipt carrying nothing (the host re-checks state).
+      // The error itself is not returnable through std::optional<CommandReceipt>;
+      // publish it as a diagnostic so the failure is observable.
+      return std::nullopt;
+    }
+    it->second.last_flush = std::chrono::steady_clock::now();
+    it->second.has_last_flush = true;
+    return result.value();
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+Result<CommandReceipt>
+WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
+  try {
     if (command.blocks.empty()) {
       // An empty batch is a no-op: succeed at the current revision without
       // producing a new one (no state change, no event).
@@ -2509,6 +2626,22 @@ WellLogSession::execute(const AppendBatchCommand &command) {
 
 void WellLogSession::poll_async() noexcept {
   try {
+    // Flush any append coalescers whose refresh interval has elapsed (#201), so
+    // a delayed visible revision appears even without a new AppendBatchCommand.
+    if (impl_->budgets.append_refresh_rate_hz != 0) {
+      const auto interval = std::chrono::nanoseconds(
+          impl_->budgets.append_refresh_rate_hz >= 1000
+              ? 1
+              : std::int64_t{1'000'000'000} /
+                    std::int64_t{impl_->budgets.append_refresh_rate_hz});
+      const auto now = std::chrono::steady_clock::now();
+      for (auto &[doc_id, coalescer] : impl_->append_coalescers) {
+        if (!coalescer.staged_blocks.empty() && coalescer.has_last_flush &&
+            now - coalescer.last_flush >= interval) {
+          (void)flush_append_coalesce(doc_id);
+        }
+      }
+    }
     std::vector<ViewEvent> notifications;
     notifications.reserve(impl_->lod_tasks.size() + impl_->frame_tasks.size());
     auto task = impl_->lod_tasks.begin();

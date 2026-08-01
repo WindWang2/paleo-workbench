@@ -216,6 +216,15 @@ struct PerformanceBudgets {
   // entities. metadata-only (no pixel decode — ADR 0045); the host configures
   // LOD here, mirroring how curve-LOD budgets flow through this struct.
   ImagePyramidOptions image_pyramid_options{};
+  // High-frequency append coalescing cap (#201, ADR 0031 "高频提交在 C++ 内合
+  // 并并默认最多每秒触发十次可见刷新"): the maximum number of VISIBLE
+  // revisions an AppendBatchCommand stream may produce per second. 0 (default)
+  // disables coalescing — every AppendBatchCommand produces a revision
+  // immediately (backward-compatible). A host streaming rapid appends (WITSML/
+  // MQTT) sets this (e.g. 10) so back-to-back appends merge inside the engine
+  // and emit at most N visible revisions per second; staged blocks flush on the
+  // next due interval, on flush_append_coalesce(), or on poll_async().
+  std::uint32_t append_refresh_rate_hz{0};
 };
 
 enum class PreparationState : std::uint8_t {
@@ -318,6 +327,13 @@ public:
   subscribe_view_events(ViewEventObserver observer) noexcept;
   void unsubscribe_view_events(ViewEventObserverId observer_id) noexcept;
   void poll_async() noexcept;
+  // Forces any coalesced (staged) AppendBatchCommand blocks for a document to
+  // flush as a single visible revision now (#201). Returns the resulting
+  // receipt when blocks were flushed and a new revision produced, nullopt when
+  // nothing was staged. A no-op when coalescing is disabled. Use on unload or
+  // when the host needs the staged tail visible immediately.
+  [[nodiscard]] std::optional<CommandReceipt>
+  flush_append_coalesce(EntityId document_id) noexcept;
   [[nodiscard]] PerformanceBudgets performance_budgets() const noexcept;
   // Replaces the performance budgets (#184: the host updates image-pyramid
   // build options via the view). Takes effect on the next document LOD build.
@@ -333,6 +349,12 @@ private:
   apply_selection(EntityId document_id, EntityId axis_id,
                   SelectionDepthRange range, std::uint64_t first_row,
                   std::uint64_t last_row, bool from_rows);
+  // Immediate commit of an AppendBatchCommand: validates + composites + commits
+  // a single visible revision (#198). The coalescing gate in execute() may
+  // merge several AppendBatchCommands' blocks and call this with the merged
+  // batch (#201).
+  [[nodiscard]] Result<CommandReceipt>
+  commit_append_batch(const AppendBatchCommand &command);
 
   struct Impl;
   std::unique_ptr<Impl> impl_;
