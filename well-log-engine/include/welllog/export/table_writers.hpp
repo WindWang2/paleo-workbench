@@ -97,4 +97,22 @@ public:
                 XmlTableExportOptions options = {});
 };
 
+// XLSX (OOXML SpreadsheetML) table export (§5). Self-contained — a minimal
+// hand-written zip (PRIVATE ZLIB deflate) produces the OOXML parts; no
+// third-party spreadsheet library (ADR 0041 reproducible deps). One workbook
+// per document; one worksheet per Sampling Axis for curves, plus a Metadata
+// worksheet carrying units/axis/revision/null rule. Numeric cells are numeric
+// (not pre-formatted strings); null cells are empty (§5.2). A projection
+// exceeding 1,048,576 rows splits into _01/_02... continuation sheets, each
+// repeating column definitions and recording the global start row in the
+// metadata sheet (§5.1). Phase-A scope: curve sheets only (interval/marker/
+// annotation sheets land when those tables do).
+class WELLLOG_EXPORT_TABLE_API XlsxTableExporter {
+public:
+  [[nodiscard]] static Result<TableExportReport>
+  write_to_file(const WellLogDocument &document,
+                const std::vector<TableProjection> &projections,
+                const std::filesystem::path &path);
+};
+
 } // namespace welllog

@@ -317,6 +317,8 @@ endif()
 add_library(welllog_export_table ${WELLLOG_LIBRARY_TYPE}
     src/export_table/csv.cpp
     src/export_table/xml.cpp
+    src/export_table/xlsx.cpp
+    src/export_table/zip_writer.cpp
 )
 add_library(WellLog::ExportTable ALIAS welllog_export_table)
 set_target_properties(welllog_export_table PROPERTIES
@@ -329,7 +331,10 @@ set_target_properties(welllog_export_table PROPERTIES
 )
 target_compile_features(welllog_export_table PUBLIC cxx_std_20)
 welllog_enable_warnings(welllog_export_table)
-target_link_libraries(welllog_export_table PUBLIC WellLog::Table)
+target_link_libraries(welllog_export_table
+    PUBLIC WellLog::Table
+    PRIVATE ZLIB::ZLIB
+)
 target_include_directories(welllog_export_table
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -1070,6 +1075,19 @@ if(WELLLOG_BUILD_TESTS)
     welllog_enable_warnings(welllog_xml_table_export_tests)
     target_link_libraries(welllog_xml_table_export_tests PRIVATE WellLog::ExportTable)
     add_test(NAME welllog.xml-table-export COMMAND welllog_xml_table_export_tests)
+
+    # Self-contained XLSX (OOXML+zlib) table export (§5, #155). Headless; reads
+    # the archive back via ZLIB inflate (no Excel dependency).
+    add_executable(welllog_xlsx_table_export_tests
+        tests/integration/xlsx_table_export_test.cpp
+    )
+    target_compile_features(welllog_xlsx_table_export_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_xlsx_table_export_tests)
+    target_link_libraries(
+        welllog_xlsx_table_export_tests
+        PRIVATE WellLog::ExportTable ZLIB::ZLIB
+    )
+    add_test(NAME welllog.xlsx-table-export COMMAND welllog_xlsx_table_export_tests)
 
     add_executable(welllog_viewport_tests
         tests/integration/viewport_interaction_test.cpp
