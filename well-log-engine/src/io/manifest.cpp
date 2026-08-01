@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <initializer_list>
 #include <map>
 #include <stdexcept>
@@ -347,6 +348,25 @@ void require_exact_fields(const JsonObject &value,
   return result;
 }
 
+[[nodiscard]] double number(const JsonValue &value) {
+  const auto *num = std::get_if<JsonNumber>(&value.value);
+  if (num == nullptr) {
+    throw ParseFailure{"expected JSON number"};
+  }
+  try {
+    return std::stod(num->text);
+  } catch (...) {
+    throw ParseFailure{"number is out of range"};
+  }
+}
+
+[[nodiscard]] bool boolean(const JsonValue &value) {
+  if (const auto *result = std::get_if<bool>(&value.value)) {
+    return *result;
+  }
+  throw ParseFailure{"expected JSON boolean"};
+}
+
 [[nodiscard]] EntityId entity_id(const JsonValue &value) {
   const auto parsed = EntityId::parse(string(value));
   if (!parsed || parsed->is_nil()) {
@@ -426,6 +446,45 @@ void append_escaped(std::string &output, std::string_view text) {
   throw ParseFailure{"unknown sampling-axis direction"};
 }
 
+// ImageSource pixel-format and CustomSymbolOccurrence symbol-kind name helpers
+// (manifest-local; parallel to direction_name/domain_name). A later cleanup can
+// lift these to core alongside depth_domain_name.
+[[nodiscard]] std::string_view pixel_format_name(PixelFormat format) {
+  switch (format) {
+  case PixelFormat::rgba8: return "rgba8";
+  case PixelFormat::rgb8:  return "rgb8";
+  case PixelFormat::r8:    return "r8";
+  }
+  return "";
+}
+
+[[nodiscard]] PixelFormat parse_pixel_format(std::string_view name) {
+  if (name == "rgba8") return PixelFormat::rgba8;
+  if (name == "rgb8")  return PixelFormat::rgb8;
+  if (name == "r8")    return PixelFormat::r8;
+  throw ParseFailure{"unknown pixel format"};
+}
+
+[[nodiscard]] std::string_view symbol_kind_name(SymbolKind kind) {
+  switch (kind) {
+  case SymbolKind::circle:      return "circle";
+  case SymbolKind::square:      return "square";
+  case SymbolKind::triangle_up: return "triangleUp";
+  case SymbolKind::diamond:     return "diamond";
+  case SymbolKind::cross:       return "cross";
+  }
+  return "";
+}
+
+[[nodiscard]] SymbolKind parse_symbol_kind(std::string_view name) {
+  if (name == "circle")      return SymbolKind::circle;
+  if (name == "square")      return SymbolKind::square;
+  if (name == "triangleUp")  return SymbolKind::triangle_up;
+  if (name == "diamond")     return SymbolKind::diamond;
+  if (name == "cross")       return SymbolKind::cross;
+  throw ParseFailure{"unknown symbol kind"};
+}
+
 void write_source(std::string &output, const BufferSourceReference &source) {
   output += "{\"uri\":";
   append_escaped(output, source.uri);
@@ -449,6 +508,166 @@ void write_nulls(std::string &output, const NullBitmapView &nulls) {
   write_source(output, nulls.source());
   output += ",\"bitLength\":" + std::to_string(nulls.bit_length());
   output += ",\"byteCapacity\":" + std::to_string(nulls.byte_capacity()) + '}';
+}
+
+// --- ImageSource / CustomLayerSource serialization helpers (#183) -----------
+// ADR 0042 untrusted-input limits, mirrored from src/scene/scene.cpp so the
+// manifest layer rejects over-limit input before it reaches the scene. A later
+// cleanup can share these between the two layers.
+constexpr std::uint32_t manifest_maximum_image_dimension_px = 65536;
+constexpr std::uint64_t manifest_maximum_image_pixels =
+    512ULL * 1024ULL * 1024ULL;
+constexpr std::uint32_t manifest_minimum_image_dpi = 1;
+constexpr std::size_t manifest_maximum_custom_primitives = 4096;
+constexpr std::size_t manifest_maximum_custom_vertices = 1ULL << 20;
+
+void write_color(std::string &output, const RgbaColor &color) {
+  output += "{\"r\":" + std::to_string(color.red);
+  output += ",\"g\":" + std::to_string(color.green);
+  output += ",\"b\":" + std::to_string(color.blue);
+  output += ",\"a\":" + std::to_string(color.alpha) + '}';
+}
+
+[[nodiscard]] RgbaColor parse_color(const JsonValue &value) {
+  const auto &color = object(value);
+  return RgbaColor{
+      .red = static_cast<std::uint8_t>(unsigned_integer(field(color, "r"))),
+      .green = static_cast<std::uint8_t>(unsigned_integer(field(color, "g"))),
+      .blue = static_cast<std::uint8_t>(unsigned_integer(field(color, "b"))),
+      .alpha = static_cast<std::uint8_t>(unsigned_integer(field(color, "a"))),
+  };
+}
+
+void write_point(std::string &output, const PhysicalPoint &point) {
+  output += "{\"left\":" + std::to_string(point.left.value);
+  output += ",\"top\":" + std::to_string(point.top.value) + '}';
+}
+
+[[nodiscard]] PhysicalPoint parse_point(const JsonValue &value) {
+  const auto &point = object(value);
+  return PhysicalPoint{
+      .left = Millimetres{number(field(point, "left"))},
+      .top = Millimetres{number(field(point, "top"))},
+  };
+}
+
+[[nodiscard]] CustomPrimitive parse_primitive(const JsonValue &value) {
+  const auto &obj = object(value);
+  const auto kind = string(field(obj, "kind"));
+  if (kind == "polyline") {
+    CustomPolyline p;
+    p.closed = boolean(field(obj, "closed"));
+    p.color = parse_color(field(obj, "color"));
+    p.width = Millimetres{number(field(obj, "width"))};
+    for (const auto &pt : array(field(obj, "points"))) {
+      p.points.push_back(parse_point(pt));
+    }
+    return p;
+  }
+  if (kind == "triangle") {
+    return CustomTriangle{
+        .a = parse_point(field(obj, "a")),
+        .b = parse_point(field(obj, "b")),
+        .c = parse_point(field(obj, "c")),
+        .fill_color = parse_color(field(obj, "fillColor")),
+    };
+  }
+  if (kind == "quad") {
+    const auto &rect = object(field(obj, "rect"));
+    return CustomQuad{
+        .rect = PhysicalRect{
+            .left = Millimetres{number(field(rect, "left"))},
+            .top = Millimetres{number(field(rect, "top"))},
+            .width = Millimetres{number(field(rect, "width"))},
+            .height = Millimetres{number(field(rect, "height"))},
+        },
+        .fill_color = parse_color(field(obj, "fillColor")),
+    };
+  }
+  if (kind == "symbol") {
+    return CustomSymbolOccurrence{
+        .center = parse_point(field(obj, "center")),
+        .kind = parse_symbol_kind(string(field(obj, "symbol"))),
+        .color = parse_color(field(obj, "color")),
+        .size = Millimetres{number(field(obj, "size"))},
+    };
+  }
+  throw ParseFailure{"unknown custom primitive kind"};
+}
+
+void write_primitive(std::string &output, const CustomPrimitive &primitive) {
+  std::visit(
+      [&](const auto &p) {
+        using T = std::decay_t<decltype(p)>;
+        if constexpr (std::is_same_v<T, CustomPolyline>) {
+          output += "{\"kind\":\"polyline\",\"closed\":";
+          output += (p.closed ? "true" : "false");
+          output += ",\"color\":";
+          write_color(output, p.color);
+          output += ",\"width\":" + std::to_string(p.width.value);
+          output += ",\"points\":[";
+          bool first = true;
+          for (const auto &pt : p.points) {
+            if (!first) output.push_back(',');
+            first = false;
+            write_point(output, pt);
+          }
+          output += "]}";
+        } else if constexpr (std::is_same_v<T, CustomTriangle>) {
+          output += "{\"kind\":\"triangle\",\"a\":";
+          write_point(output, p.a);
+          output += ",\"b\":";
+          write_point(output, p.b);
+          output += ",\"c\":";
+          write_point(output, p.c);
+          output += ",\"fillColor\":";
+          write_color(output, p.fill_color);
+          output += "}";
+        } else if constexpr (std::is_same_v<T, CustomQuad>) {
+          output += "{\"kind\":\"quad\",\"rect\":{\"left\":";
+          output += std::to_string(p.rect.left.value);
+          output += ",\"top\":" + std::to_string(p.rect.top.value);
+          output += ",\"width\":" + std::to_string(p.rect.width.value);
+          output += ",\"height\":" + std::to_string(p.rect.height.value);
+          output += "},\"fillColor\":";
+          write_color(output, p.fill_color);
+          output += "}";
+        } else if constexpr (std::is_same_v<T, CustomSymbolOccurrence>) {
+          output += "{\"kind\":\"symbol\",\"center\":";
+          write_point(output, p.center);
+          output += ",\"symbol\":";
+          append_escaped(output, symbol_kind_name(p.kind));
+          output += ",\"color\":";
+          write_color(output, p.color);
+          output += ",\"size\":" + std::to_string(p.size.value);
+          output += "}";
+        }
+      },
+      primitive);
+}
+
+// Counts the vertices in a custom primitive (polyline points + triangle 3 +
+// quad 4 + symbol 1) for the ADR 0042 total-vertex limit.
+[[nodiscard]] std::size_t primitive_vertex_count(const CustomPrimitive &p) {
+  if (const auto *poly = std::get_if<CustomPolyline>(&p)) {
+    return poly->points.size();
+  }
+  if (std::holds_alternative<CustomTriangle>(p)) {
+    return 3;
+  }
+  if (std::holds_alternative<CustomQuad>(p)) {
+    return 4;
+  }
+  return 1; // CustomSymbolOccurrence
+}
+
+// Optional-field accessor: returns nullptr when the key is absent (unlike
+// field(), which throws). Lets a v2 reader tolerate v1 manifests missing the
+// new imageSources/customSources keys.
+[[nodiscard]] const JsonValue *optional_field(const JsonObject &value,
+                                              std::string_view name) {
+  const auto found = value.find(name);
+  return found == value.end() ? nullptr : &found->second;
 }
 
 [[nodiscard]] BufferSourceReference parse_source(const JsonValue &value) {
@@ -508,7 +727,22 @@ void validate_manifest_schema(const JsonObject &root) {
   require_exact_fields(root,
                        {"schemaVersion", "requiredSdkVersion", "document"});
   const auto &document = object(field(root, "document"));
-  require_exact_fields(document, {"id", "revision", "samplingAxes", "curves"});
+  // The document object must carry the 4 mandatory keys, and MAY carry the
+  // optional imageSources/customSources keys (#183 schema v2). A v1 manifest
+  // omits them; a v2 reader tolerates both. Unknown keys are still rejected.
+  for (const auto &mandatory :
+       {"id", "revision", "samplingAxes", "curves"}) {
+    field(document, mandatory); // throws on miss
+  }
+  for (const auto &[key, value] : document) {
+    if (key != "id" && key != "revision" && key != "samplingAxes" &&
+        key != "curves" && key != "imageSources" && key != "customSources") {
+      throw ParseFailure{"unknown document field: " + key};
+    }
+    static_cast<void>(value);
+  }
+  // The per-image / per-custom-source field schemas are validated in the read
+  // path (parse_image_source / parse_custom_source), not here.
 
   const auto &axes = array(field(document, "samplingAxes"));
   const auto &curves = array(field(document, "curves"));
@@ -578,6 +812,18 @@ can_write_manifest_document(const WellLogDocument &document) noexcept {
 manifest_error(MessageKey message = MessageKey::manifest_invalid) {
   return Error{
       .code = ErrorCode::invalid_manifest,
+      .severity = Severity::error,
+      .entity_id = std::nullopt,
+      .message = message,
+      .arguments = {},
+  };
+}
+
+// Overload carrying a distinct ErrorCode (ADR 0042 image/custom-source limits
+// use invalid_image / invalid_custom_source, not invalid_manifest).
+[[nodiscard]] Error manifest_error(MessageKey message, ErrorCode code) {
+  return Error{
+      .code = code,
       .severity = Severity::error,
       .entity_id = std::nullopt,
       .message = message,
@@ -681,7 +927,69 @@ Result<ManifestText> ManifestCodec::write(const WellLogDocument &document) {
       }
       output.push_back('}');
     }
-    output += "]}}";
+    output += "]";
+    // Optional imageSources (#183). Emitted only when present so the common
+    // no-image document is unchanged.
+    if (!document.image_sources().empty()) {
+      output += ",\"imageSources\":[";
+      bool img_first = true;
+      for (const auto &image : document.image_sources()) {
+        if (image.source.uri.empty()) {
+          return manifest_error();
+        }
+        if (!img_first) output.push_back(',');
+        img_first = false;
+        output += "{\"id\":";
+        append_escaped(output, image.id.to_string());
+        output += ",\"widthPx\":" + std::to_string(image.width_px);
+        output += ",\"heightPx\":" + std::to_string(image.height_px);
+        output += ",\"pixelFormat\":";
+        append_escaped(output, pixel_format_name(image.pixel_format));
+        output += ",\"referenceDepthTop\":" +
+                  std::to_string(image.reference_depth_top);
+        output += ",\"referenceDepthBottom\":" +
+                  std::to_string(image.reference_depth_bottom);
+        output += ",\"dpi\":" + std::to_string(image.dpi);
+        output += ",\"source\":";
+        write_source(output, image.source);
+        output += "}";
+      }
+      output += "]";
+    }
+    // Optional customSources (#183).
+    if (!document.custom_sources().empty()) {
+      output += ",\"customSources\":[";
+      bool custom_first = true;
+      for (const auto &custom : document.custom_sources()) {
+        if (!custom_first) output.push_back(',');
+        custom_first = false;
+        output += "{\"id\":";
+        append_escaped(output, custom.id.to_string());
+        output += ",\"contentRevision\":" +
+                  std::to_string(custom.content_revision.value);
+        output += ",\"primitives\":[";
+        bool prim_first = true;
+        for (const auto &primitive : custom.primitives) {
+          if (!prim_first) output.push_back(',');
+          prim_first = false;
+          write_primitive(output, primitive);
+        }
+        output += "]";
+        if (custom.clip.has_value()) {
+          output += ",\"clip\":{\"points\":[";
+          bool clip_first = true;
+          for (const auto &pt : custom.clip->points) {
+            if (!clip_first) output.push_back(',');
+            clip_first = false;
+            write_point(output, pt);
+          }
+          output += "]}";
+        }
+        output += "}";
+      }
+      output += "]";
+    }
+    output += "}}";
     return ManifestText{std::move(output)};
   } catch (const std::bad_alloc &) {
     return boundary_error(ErrorCode::resource_exhausted,
@@ -787,6 +1095,102 @@ ManifestCodec::read(std::string_view manifest,
           .values = view,
           .nulls = std::move(nulls),
       });
+    }
+    // Optional imageSources (#183, schema v2). Absent on v1 manifests.
+    if (const auto *images_value = optional_field(document, "imageSources")) {
+      for (const auto &image_value : array(*images_value)) {
+        const auto &image = object(image_value);
+        require_exact_fields(image, {"id", "widthPx", "heightPx", "pixelFormat",
+                                     "referenceDepthTop",
+                                     "referenceDepthBottom", "dpi", "source"});
+        const auto width_px =
+            static_cast<std::uint32_t>(unsigned_integer(field(image, "widthPx")));
+        const auto height_px = static_cast<std::uint32_t>(
+            unsigned_integer(field(image, "heightPx")));
+        const auto dpi =
+            static_cast<std::uint32_t>(unsigned_integer(field(image, "dpi")));
+        const auto depth_top = number(field(image, "referenceDepthTop"));
+        const auto depth_bottom = number(field(image, "referenceDepthBottom"));
+        // ADR 0042 untrusted-input limits.
+        if (width_px == 0 || height_px == 0 ||
+            width_px > manifest_maximum_image_dimension_px ||
+            height_px > manifest_maximum_image_dimension_px) {
+          return manifest_error(MessageKey::image_dimension_exceeds_limit,
+                                ErrorCode::invalid_image);
+        }
+        const auto pixels = static_cast<std::uint64_t>(width_px) *
+                            static_cast<std::uint64_t>(height_px);
+        if (pixels > manifest_maximum_image_pixels) {
+          return manifest_error(MessageKey::image_pixels_exceed_limit,
+                                ErrorCode::invalid_image);
+        }
+        if (dpi < manifest_minimum_image_dpi || !std::isfinite(depth_top) ||
+            !std::isfinite(depth_bottom)) {
+          return manifest_error(MessageKey::image_metadata_invalid,
+                                ErrorCode::invalid_image);
+        }
+        builder.add_image_source(ImageSource{
+            .id = entity_id(field(image, "id")),
+            .width_px = width_px,
+            .height_px = height_px,
+            .pixel_format =
+                parse_pixel_format(string(field(image, "pixelFormat"))),
+            .reference_depth_top = depth_top,
+            .reference_depth_bottom = depth_bottom,
+            .dpi = dpi,
+            .source = parse_source(field(image, "source")),
+        });
+      }
+    }
+    // Optional customSources (#183, schema v2).
+    if (const auto *customs_value = optional_field(document, "customSources")) {
+      for (const auto &custom_value : array(*customs_value)) {
+        const auto &custom = object(custom_value);
+        // clip is optional; the rest are mandatory.
+        for (const auto &mandatory :
+             {"id", "contentRevision", "primitives"}) {
+          field(custom, mandatory);
+        }
+        const auto primitives_array = array(field(custom, "primitives"));
+        // ADR 0042: non-empty + bounded primitive/vertex counts.
+        if (primitives_array.empty()) {
+          return manifest_error(MessageKey::custom_source_empty,
+                                ErrorCode::invalid_custom_source);
+        }
+        if (primitives_array.size() > manifest_maximum_custom_primitives) {
+          return manifest_error(MessageKey::custom_source_primitives_exceed_limit,
+                                ErrorCode::invalid_custom_source);
+        }
+        std::vector<CustomPrimitive> primitives;
+        primitives.reserve(primitives_array.size());
+        std::size_t total_vertices = 0;
+        for (const auto &primitive_value : primitives_array) {
+          auto primitive = parse_primitive(primitive_value);
+          total_vertices += primitive_vertex_count(primitive);
+          primitives.push_back(std::move(primitive));
+        }
+        if (total_vertices > manifest_maximum_custom_vertices) {
+          return manifest_error(MessageKey::custom_source_points_exceed_limit,
+                                ErrorCode::invalid_custom_source);
+        }
+        std::optional<CustomClipPath> clip;
+        if (const auto *clip_value = optional_field(custom, "clip")) {
+          const auto &clip_obj = object(*clip_value);
+          require_exact_fields(clip_obj, {"points"});
+          CustomClipPath clip_path;
+          for (const auto &pt : array(field(clip_obj, "points"))) {
+            clip_path.points.push_back(parse_point(pt));
+          }
+          clip = std::move(clip_path);
+        }
+        builder.add_custom_source(CustomLayerSource{
+            .id = entity_id(field(custom, "id")),
+            .content_revision = DocumentRevision{
+                unsigned_integer(field(custom, "contentRevision"))},
+            .primitives = std::move(primitives),
+            .clip = std::move(clip),
+        });
+      }
     }
     auto result = builder.build();
     if (result.id().is_nil()) {

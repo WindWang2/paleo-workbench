@@ -11,7 +11,7 @@
 
 namespace welllog {
 
-inline constexpr std::uint32_t manifest_schema_version = 1;
+inline constexpr std::uint32_t manifest_schema_version = 2;
 inline constexpr std::string_view welllog_sdk_version = "0.1.0";
 inline constexpr std::string_view manifest_sdk_requirement = ">=0.1.0 <1.0.0";
 
