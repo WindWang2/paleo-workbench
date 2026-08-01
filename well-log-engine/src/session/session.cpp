@@ -557,7 +557,35 @@ find_axis(const WellLogDocument &document, EntityId axis_id) noexcept {
   return nullptr;
 }
 
-[[nodiscard]] Error selection_error(EntityId document_id) {
+// Selection-failure error builders. Each maps to the SAME code/message the
+// document/viewport paths already use for that failure mode, so a caller can
+// distinguish an unknown document from an unknown axis from a bad range — the
+// single invalid_viewport used before was a Mysterious Name that hid the cause
+// (architecture.md §2 Result/Error model; quality-security-performance.md §7
+// "稳定码").
+[[nodiscard]] Error selection_document_missing(EntityId document_id) {
+  return Error{
+      .code = ErrorCode::document_not_found,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::presentation_document_missing,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] Error selection_axis_missing(EntityId axis_id) {
+  return Error{
+      .code = ErrorCode::missing_sampling_axis,
+      .severity = Severity::error,
+      .entity_id = axis_id,
+      .message = MessageKey::sampling_axis_missing,
+      .arguments = {},
+  };
+}
+
+// A bad range/span value or a version overflow — the existing viewport pair is
+// the closest "invalid value" code; the session has no selection-specific code.
+[[nodiscard]] Error selection_invalid(EntityId document_id) {
   return Error{
       .code = ErrorCode::invalid_viewport,
       .severity = Severity::error,
@@ -1708,11 +1736,11 @@ WellLogSession::apply_selection(EntityId document_id, EntityId axis_id,
   try {
     const auto document = impl_->documents.find(document_id);
     if (document == impl_->documents.end()) {
-      return selection_error(document_id);
+      return selection_document_missing(document_id);
     }
     const auto axis = find_axis(*document->second, axis_id);
     if (axis == nullptr) {
-      return selection_error(document_id);
+      return selection_axis_missing(axis_id);
     }
     const auto revision = document->second->revision();
     if (from_rows) {
@@ -1722,12 +1750,12 @@ WellLogSession::apply_selection(EntityId document_id, EntityId axis_id,
           range_for_rows(axis->coordinates, first_row, last_row);
     }
     if (!valid_selection_range(range)) {
-      return selection_error(document_id);
+      return selection_invalid(document_id);
     }
     const auto span =
         rows_for_range(axis->coordinates, axis->direction, range);
     if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
-      return selection_error(document_id);
+      return selection_invalid(document_id);
     }
     const auto next_state_version = impl_->state_version + 1;
     impl_->events.reserve(impl_->events.size() + 1);
@@ -1788,7 +1816,7 @@ WellLogSession::execute(const SetSelectionCommand &command) {
 Result<CommandReceipt>
 WellLogSession::execute(const SetRowSelectionCommand &command) {
   if (command.last_row < command.first_row) {
-    return selection_error(command.document_id);
+    return selection_invalid(command.document_id);
   }
   return apply_selection(command.document_id, command.sampling_axis_id,
                          SelectionDepthRange{}, command.first_row,
@@ -1800,7 +1828,7 @@ WellLogSession::execute(const ClearSelectionCommand &command) {
   try {
     const auto document = impl_->documents.find(command.document_id);
     if (document == impl_->documents.end()) {
-      return selection_error(command.document_id);
+      return selection_document_missing(command.document_id);
     }
     if (!impl_->selections.contains(command.document_id)) {
       // Nothing to clear: still succeed, no event.
@@ -1813,7 +1841,7 @@ WellLogSession::execute(const ClearSelectionCommand &command) {
       };
     }
     if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
-      return selection_error(command.document_id);
+      return selection_invalid(command.document_id);
     }
     const auto next_state_version = impl_->state_version + 1;
     const auto revision = document->second->revision();
