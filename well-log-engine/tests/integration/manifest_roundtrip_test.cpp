@@ -400,20 +400,32 @@ void image_and_custom_sources_round_trip() {
   require(tri != nullptr, "second primitive must be a triangle");
   require(tri->fill_color == RgbaColor{0xFF, 0x00, 0x00, 0xFF},
           "triangle fill color must round-trip");
-  require(tri->a.left.value == 1.0 && tri->b.top.value == 1.0,
-          "triangle points must round-trip");
+  // All three triangle points, all coords.
+  require(tri->a.left.value == 1.0 && tri->a.top.value == 1.0,
+          "triangle a must round-trip");
+  require(tri->b.left.value == 2.0 && tri->b.top.value == 1.0,
+          "triangle b must round-trip");
+  require(tri->c.left.value == 1.5 && tri->c.top.value == 2.0,
+          "triangle c must round-trip");
   // Quad.
   const auto *quad = std::get_if<CustomQuad>(&customs[0].primitives[2]);
   require(quad != nullptr, "third primitive must be a quad");
   require(quad->rect.width.value == 10.0 && quad->rect.height.value == 5.0,
           "quad rect must round-trip");
+  require(quad->rect.left.value == 0.0 && quad->rect.top.value == 0.0,
+          "quad rect origin must round-trip");
+  require(quad->fill_color == RgbaColor{0x00, 0xFF, 0x00, 0xFF},
+          "quad fill color must round-trip");
   // Symbol.
   const auto *sym =
       std::get_if<CustomSymbolOccurrence>(&customs[0].primitives[3]);
   require(sym != nullptr, "fourth primitive must be a symbol");
   require(sym->kind == SymbolKind::diamond, "symbol kind must round-trip");
   require(sym->size == Millimetres{2.5}, "symbol size must round-trip");
-  require(sym->center.left.value == 4.0, "symbol center must round-trip");
+  require(sym->center.left.value == 4.0 && sym->center.top.value == 4.0,
+          "symbol center must round-trip");
+  require(sym->color == RgbaColor{0x00, 0x00, 0xFF, 0xFF},
+          "symbol color must round-trip");
   // Clip path.
   require(customs[0].clip.has_value() && customs[0].clip->points.size() == 3,
           "clip path must round-trip");
@@ -484,6 +496,31 @@ void over_limit_image_and_empty_custom_sources_rejected() {
   require(oversize_result.error().code == ErrorCode::invalid_image,
           "over-dimension image must return invalid_image");
 
+  // Image: patch both dims large but each under 65536, product over the pixel
+  // limit (e.g. 50000 × 50000 = 2.5e9 > 512·1024·1024 ≈ 5.4e8).
+  auto over_pixels = std::string{encoded.value().text()};
+  over_pixels.replace(over_pixels.find("\"widthPx\":2048"),
+                      std::string_view{"\"widthPx\":2048"}.size(),
+                      "\"widthPx\":50000");
+  over_pixels.replace(over_pixels.find("\"heightPx\":1024"),
+                      std::string_view{"\"heightPx\":1024"}.size(),
+                      "\"heightPx\":50000");
+  const auto pixels_result = ManifestCodec::read(over_pixels, resolvers);
+  require(!pixels_result.has_value(),
+          "an over-pixel-count image must be rejected");
+  require(pixels_result.error().code == ErrorCode::invalid_image,
+          "over-pixel image must return invalid_image");
+
+  // Image: dpi below the minimum (0).
+  auto low_dpi = std::string{encoded.value().text()};
+  low_dpi.replace(low_dpi.find("\"dpi\":300"),
+                  std::string_view{"\"dpi\":300"}.size(), "\"dpi\":0");
+  const auto dpi_result = ManifestCodec::read(low_dpi, resolvers);
+  require(!dpi_result.has_value(),
+          "a zero-dpi image must be rejected");
+  require(dpi_result.error().code == ErrorCode::invalid_image,
+          "invalid-dpi image must return invalid_image");
+
   // Empty custom source: a document with a CustomLayerSource carrying an empty
   // primitives vector serializes, but the reader rejects it (ADR 0042 non-empty
   // rule, custom_source_empty).
@@ -548,8 +585,12 @@ void over_limit_image_and_empty_custom_sources_rejected() {
           "empty custom source must return invalid_custom_source");
 }
 
-// A v1 reader (schema forced to 1) rejects a v2 manifest carrying imageSources.
-void v1_reader_rejects_v2_manifest() {
+// The v2 reader accepts BOTH v1 and v2 manifests (forward-compat: v2 only
+// added two optional keys). Forcing a v2 manifest's version DOWN to 1 must
+// still round-trip (the imageSources/customSources are simply re-read). A
+// version the reader does not know (:3) is rejected with
+// manifest_schema_unsupported (the "old reader rejects new shape" intent).
+void version_gate_accepts_v1_and_rejects_unknown() {
   const auto document_id = id("44444444-0000-4000-8000-000000000001");
   const auto axis_id = id("44444444-0000-4000-8000-000000000002");
   const auto curve_id = id("44444444-0000-4000-8000-000000000003");
@@ -559,17 +600,36 @@ void v1_reader_rejects_v2_manifest() {
                                               image_id, custom_id);
   const auto encoded = ManifestCodec::write(doc);
   require(encoded.has_value(), "fixture must encode");
-  // Force the version back to 1 — an old reader rejects the v2 shape.
-  auto v1 = std::string{encoded.value().text()};
-  v1.replace(v1.find("\"schemaVersion\":2"),
-             std::string_view{"\"schemaVersion\":2"}.size(),
-             "\"schemaVersion\":1");
   const auto resolvers = make_uri_resolvers();
-  const auto result = ManifestCodec::read(v1, resolvers);
-  require(!result.has_value(),
-          "a v1 reader must reject a v2 manifest (schema bump)");
-  require(result.error().message == MessageKey::manifest_schema_unsupported,
-          "version mismatch must surface manifest_schema_unsupported");
+
+  // v2 manifest (current) round-trips.
+  const auto v2_result = ManifestCodec::read(encoded.value().text(), resolvers);
+  require(v2_result.has_value(), "the current schema version must round-trip");
+
+  // Force version DOWN to 1: a v2 reader still reads it (the imageSources/
+  // customSources round-trip because the keys are present in the JSON body
+  // regardless of the version number; the v1 label is tolerated).
+  auto as_v1 = std::string{encoded.value().text()};
+  as_v1.replace(as_v1.find("\"schemaVersion\":2"),
+                std::string_view{"\"schemaVersion\":2"}.size(),
+                "\"schemaVersion\":1");
+  const auto v1_result = ManifestCodec::read(as_v1, resolvers);
+  require(v1_result.has_value(),
+          "a v2 reader must accept a manifest labelled v1 (forward-compat)");
+  require(v1_result.value().image_sources().size() == 1 &&
+              v1_result.value().custom_sources().size() == 1,
+          "the v1-labelled manifest's image/custom sources must still round-trip");
+
+  // An unknown future version (:3) is rejected with manifest_schema_unsupported.
+  auto as_v3 = std::string{encoded.value().text()};
+  as_v3.replace(as_v3.find("\"schemaVersion\":2"),
+                std::string_view{"\"schemaVersion\":2"}.size(),
+                "\"schemaVersion\":3");
+  const auto v3_result = ManifestCodec::read(as_v3, resolvers);
+  require(!v3_result.has_value(),
+          "an unknown schema version must be rejected");
+  require(v3_result.error().message == MessageKey::manifest_schema_unsupported,
+          "unknown version must surface manifest_schema_unsupported");
 }
 
 } // namespace
@@ -579,7 +639,7 @@ int main() {
   manifest_writer_rejects_documents_outside_schema();
   image_and_custom_sources_round_trip();
   over_limit_image_and_empty_custom_sources_rejected();
-  v1_reader_rejects_v2_manifest();
+  version_gate_accepts_v1_and_rejects_unknown();
   std::cout << "PASS: manifest round trip\n";
   return EXIT_SUCCESS;
 }

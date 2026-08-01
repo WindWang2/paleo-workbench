@@ -520,6 +520,9 @@ constexpr std::uint64_t manifest_maximum_image_pixels =
 constexpr std::uint32_t manifest_minimum_image_dpi = 1;
 constexpr std::size_t manifest_maximum_custom_primitives = 4096;
 constexpr std::size_t manifest_maximum_custom_vertices = 1ULL << 20;
+// Per-polyline / per-clip-path point ceiling (mirrors scene.cpp's
+// maximum_custom_polyline_points); polylines also need ≥2 points, clips ≥3.
+constexpr std::size_t manifest_maximum_custom_polyline_points = 8192;
 
 void write_color(std::string &output, const RgbaColor &color) {
   output += "{\"r\":" + std::to_string(color.red);
@@ -646,8 +649,12 @@ void write_primitive(std::string &output, const CustomPrimitive &primitive) {
       primitive);
 }
 
-// Counts the vertices in a custom primitive (polyline points + triangle 3 +
-// quad 4 + symbol 1) for the ADR 0042 total-vertex limit.
+// Counts the tessellated vertices a custom primitive contributes to the scene
+// (ADR 0042 total-vertex limit), MIRRORING src/scene/scene.cpp's counting so the
+// manifest gate rejects exactly what the scene would: polyline = points.size(),
+// triangle = 3, quad = 6 (two triangles), symbol = 24 (built-in symbol tessellation).
+// (The manifest's geometric count previously diverged from the scene's, letting
+// over-limit input through the manifest gate.)
 [[nodiscard]] std::size_t primitive_vertex_count(const CustomPrimitive &p) {
   if (const auto *poly = std::get_if<CustomPolyline>(&p)) {
     return poly->points.size();
@@ -656,9 +663,9 @@ void write_primitive(std::string &output, const CustomPrimitive &primitive) {
     return 3;
   }
   if (std::holds_alternative<CustomQuad>(p)) {
-    return 4;
+    return 6;
   }
-  return 1; // CustomSymbolOccurrence
+  return 24; // CustomSymbolOccurrence
 }
 
 // Optional-field accessor: returns nullptr when the key is absent (unlike
@@ -1007,8 +1014,15 @@ ManifestCodec::read(std::string_view manifest,
     const auto root = JsonParser{manifest}.parse();
     const auto &root_object = object(root);
     validate_manifest_schema(root_object);
-    if (unsigned_integer(field(root_object, "schemaVersion")) !=
-        manifest_schema_version) {
+    // Schema version: a v2 reader accepts BOTH v1 and v2. v2 only ADDED two
+    // optional keys (imageSources/customSources); v1 manifests omit them and
+    // the optional-field handling reconstructs an empty set, so reading a v1
+    // manifest is safe and loss-free (the document had no images/custom sources
+    // to lose). A future incompatible change would narrow this set. This makes
+    // the optional-key tolerance genuine forward-compat (not dead code).
+    const auto schema_version =
+        unsigned_integer(field(root_object, "schemaVersion"));
+    if (schema_version != 1 && schema_version != manifest_schema_version) {
       return manifest_error(MessageKey::manifest_schema_unsupported);
     }
     if (string(field(root_object, "requiredSdkVersion")) !=
@@ -1166,6 +1180,17 @@ ManifestCodec::read(std::string_view manifest,
         std::size_t total_vertices = 0;
         for (const auto &primitive_value : primitives_array) {
           auto primitive = parse_primitive(primitive_value);
+          // ADR 0042 per-polyline point cap + minimum (mirrors scene.cpp): a
+          // polyline needs ≥2 points and ≤8192.
+          if (const auto *poly = std::get_if<CustomPolyline>(&primitive)) {
+            if (poly->points.size() < 2 ||
+                poly->points.size() >
+                    manifest_maximum_custom_polyline_points) {
+              return manifest_error(
+                  MessageKey::custom_source_points_exceed_limit,
+                  ErrorCode::invalid_custom_source);
+            }
+          }
           total_vertices += primitive_vertex_count(primitive);
           primitives.push_back(std::move(primitive));
         }
@@ -1180,6 +1205,14 @@ ManifestCodec::read(std::string_view manifest,
           CustomClipPath clip_path;
           for (const auto &pt : array(field(clip_obj, "points"))) {
             clip_path.points.push_back(parse_point(pt));
+          }
+          // ADR 0042 clip-path point cap + minimum (mirrors scene.cpp): a clip
+          // needs ≥3 points and ≤8192.
+          if (clip_path.points.size() < 3 ||
+              clip_path.points.size() >
+                  manifest_maximum_custom_polyline_points) {
+            return manifest_error(MessageKey::custom_source_points_exceed_limit,
+                                  ErrorCode::invalid_custom_source);
           }
           clip = std::move(clip_path);
         }
