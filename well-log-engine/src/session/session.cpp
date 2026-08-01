@@ -1065,6 +1065,15 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
     }
     const auto generation =
         asynchronous ? impl_->next_lod_generation : std::uint64_t{};
+    // Append-incremental LOD reuse (#199): consume the staged previous-curves
+    // hint here — on BOTH the async and the synchronous path — so it never
+    // leaks past this command (a sub-threshold append stages the hint but takes
+    // the synchronous path, which must still clear it). Only the async worker
+    // actually uses reuse_map; the synchronous path discards it.
+    const auto reuse = impl_->pending_append_reuse.find(document_id);
+    const auto reuse_map =
+        reuse != impl_->pending_append_reuse.end() ? reuse->second : nullptr;
+    impl_->pending_append_reuse.erase(document_id);
     auto task = std::unique_ptr<LodTask>{};
     auto maximum_derived_bytes = impl_->budgets.maximum_cpu_derived_bytes;
     if (asynchronous) {
@@ -1096,16 +1105,11 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
       const auto per_curve_budget =
           std::max(std::uint64_t{1}, maximum_derived_bytes / curve_count);
       const auto image_pyramid_options = impl_->budgets.image_pyramid_options;
-      // Append-incremental LOD reuse (#199): when set (an AppendBatchCommand),
-      // try extend_tail onto the previously-built pyramid before falling back
-      // to a full build. Unchanged curves reuse the previous pyramid directly
+      // Append-incremental LOD reuse (#199): reuse_map (consumed above) holds,
+      // when set by an AppendBatchCommand, the previously-built per-curve
+      // pyramids. The worker tries extend_tail onto each before falling back to
+      // a full build. Unchanged curves reuse the previous pyramid directly
       // (zero work); appended curves extend it.
-      const auto reuse =
-          impl_->pending_append_reuse.find(document_id);
-      const auto reuse_map =
-          reuse != impl_->pending_append_reuse.end() ? reuse->second
-                                                     : nullptr;
-      impl_->pending_append_reuse.erase(document_id);
       const auto build_options = CurveLodBuildOptions{
           .algorithm = CurveLodAlgorithm::hierarchical,
           .base_bucket_samples = 16,

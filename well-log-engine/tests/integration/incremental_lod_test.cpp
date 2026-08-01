@@ -76,10 +76,17 @@ Built make_built(const std::vector<double> &depths,
   };
 }
 
+// An explicit, generous budget (not the default auto-budget). extend_tail only
+// guarantees parity when the budget matches between the previous and the
+// extended build — the auto-budget grows with curve length, so an append would
+// change it and extend_tail would (correctly) refuse. A fixed explicit budget
+// is the realistic contract a host uses across appends (the session passes a
+// constant per-curve budget).
 CurveLodBuildOptions opts() {
   return CurveLodBuildOptions{
       .algorithm = CurveLodAlgorithm::hierarchical,
       .base_bucket_samples = 4,
+      .maximum_derived_bytes = 1 * 1024 * 1024,
   };
 }
 
@@ -329,6 +336,104 @@ void null_gap_in_tail_matches_full_rebuild() {
           "extend_tail null-gap derived_bytes must equal full rebuild");
 }
 
+// Parity under a BINDING (tight) budget — the regime the earlier review flagged
+// as untested. A budget small enough to truncate levels (budget_limited) must
+// still yield a pyramid identical to a full rebuild: same derived_bytes, same
+// level_count, same budget_limited flag, same envelope. This is the guard
+// against the SourceRun-overhead pre-charge divergence (the per-run overhead
+// must be charged exactly as build does, or extend_tail gets more budget than
+// build and emits a level build truncates).
+void extend_tail_matches_full_rebuild_under_tight_budget() {
+  std::vector<double> depths_short, values_short, depths_ext, values_ext;
+  for (int i = 0; i < 40; ++i) {
+    depths_short.push_back(6000.0 + i);
+    values_short.push_back(std::sin(static_cast<double>(i)) * 50.0 + 50.0);
+  }
+  depths_ext = depths_short;
+  values_ext = values_short;
+  for (int i = 40; i < 80; ++i) {
+    depths_ext.push_back(6000.0 + i);
+    values_ext.push_back(std::cos(static_cast<double>(i)) * 50.0 + 50.0);
+  }
+  const auto short_built = make_built(depths_short, values_short);
+  const auto ext_built = make_built(depths_ext, values_ext);
+
+  // A deliberately tight budget: enough for the first one or two levels but
+  // not the full hierarchy, so budget_limited is exercised.
+  const CurveLodBuildOptions tight{
+      .algorithm = CurveLodAlgorithm::hierarchical,
+      .base_bucket_samples = 4,
+      .maximum_derived_bytes = 256,
+  };
+  const auto previous =
+      CurveLodPyramid::build(short_built.axis, short_built.curve, tight);
+  require(previous.has_value(), "tight-budget previous build must succeed");
+  require(previous.value().statistics().budget_limited,
+          "tight budget must truncate the previous build's levels");
+
+  const auto full = CurveLodPyramid::build(ext_built.axis, ext_built.curve, tight);
+  require(full.has_value(), "tight-budget full build must succeed");
+  const auto incremental = CurveLodPyramid::extend_tail(
+      previous.value(), ext_built.axis, ext_built.curve, tight);
+  require(incremental.has_value(),
+          "tight-budget extend_tail must succeed");
+
+  require_queries_equal(full.value(), incremental.value(),
+                        "tight-budget extend_tail envelope must equal full");
+  require(full.value().statistics().derived_bytes ==
+              incremental.value().statistics().derived_bytes,
+          "tight-budget derived_bytes must match full rebuild");
+  require(full.value().statistics().level_count ==
+              incremental.value().statistics().level_count,
+          "tight-budget level_count must match full rebuild");
+  require(full.value().statistics().budget_limited ==
+              incremental.value().statistics().budget_limited,
+          "tight-budget budget_limited flag must match full rebuild");
+}
+
+// When the budget differs between the previous build and the extended build
+// (e.g. the auto-budget grew because the curve grew), extend_tail must REFUSE
+// rather than produce a non-parity result — the caller issues a full build.
+// Documents the budget-parity precondition contract.
+void mismatched_budget_rejected() {
+  std::vector<double> depths_short, values_short, depths_ext, values_ext;
+  for (int i = 0; i < 20; ++i) {
+    depths_short.push_back(7000.0 + i);
+    values_short.push_back(static_cast<double>(i));
+  }
+  depths_ext = depths_short;
+  values_ext = values_short;
+  for (int i = 20; i < 60; ++i) {
+    depths_ext.push_back(7000.0 + i);
+    values_ext.push_back(static_cast<double>(i));
+  }
+  const auto short_built = make_built(depths_short, values_short);
+  const auto ext_built = make_built(depths_ext, values_ext);
+
+  // Previous built with an explicit budget; extend requested with a DIFFERENT
+  // (larger) explicit budget → extend_tail must refuse (no parity guarantee).
+  const CurveLodBuildOptions small{
+      .algorithm = CurveLodAlgorithm::hierarchical,
+      .base_bucket_samples = 4,
+      .maximum_derived_bytes = 512,
+  };
+  const CurveLodBuildOptions large{
+      .algorithm = CurveLodAlgorithm::hierarchical,
+      .base_bucket_samples = 4,
+      .maximum_derived_bytes = 65536,
+  };
+  const auto previous =
+      CurveLodPyramid::build(short_built.axis, short_built.curve, small);
+  require(previous.has_value(), "previous build must succeed");
+  const auto result = CurveLodPyramid::extend_tail(previous.value(),
+                                                   ext_built.axis, ext_built.curve,
+                                                   large);
+  require(!result.has_value(),
+          "extend_tail must refuse when the budget differs from the previous");
+  require(result.error().code == ErrorCode::invalid_document,
+          "mismatched budget must return the document-structure code");
+}
+
 } // namespace
 
 int main() {
@@ -337,6 +442,8 @@ int main() {
   edited_prefix_rejected();
   non_growing_curve_rejected();
   null_gap_in_tail_matches_full_rebuild();
+  extend_tail_matches_full_rebuild_under_tight_budget();
+  mismatched_budget_rejected();
   std::cout << "welllog.incremental-lod: all cases passed\n";
   return EXIT_SUCCESS;
 }
