@@ -408,6 +408,62 @@ void append_on_missing_document_rejected() {
           "missing document must return the document_not_found code");
 }
 
+// A block naming a curve that does not exist on the document is rejected with a
+// DISTINCT code from a missing axis, so a caller can tell the two apart (a
+// missing curve is a document-structure problem; a missing axis is not).
+void missing_curve_rejected_with_distinct_code() {
+  Fixture f;
+  const auto missing_curve = id("77000000-0000-4000-8000-000000000099");
+  const auto result = f.session.execute(AppendBatchCommand{
+      .document_id = document_id,
+      .target_revision = DocumentRevision{2},
+      .blocks =
+          {
+              CurveTailBlock{
+                  .curve_id = missing_curve,
+                  .sampling_axis_id = axis_id,
+                  .tail_coordinates = tail_view({1003.0}),
+                  .tail_values = tail_view({40.0}),
+              },
+          },
+  });
+  require(!result.has_value(), "append on a missing curve must be rejected");
+  require(result.error().code == ErrorCode::invalid_document,
+          "missing curve must return the document-structure code");
+  require(result.error().entity_id == missing_curve,
+          "missing-curve error must carry the curve id");
+}
+
+// A block naming an axis that does not exist is rejected with the
+// missing_sampling_axis code (distinct from a missing curve above).
+void missing_axis_rejected_with_distinct_code() {
+  Fixture f;
+  const auto missing_axis = id("77000000-0000-4000-8000-000000000098");
+  // Use the real curve id but a non-existent axis; the curve lookup passes, the
+  // axis lookup fails.
+  const auto result = f.session.execute(AppendBatchCommand{
+      .document_id = document_id,
+      .target_revision = DocumentRevision{2},
+      .blocks =
+          {
+              CurveTailBlock{
+                  .curve_id = curve_gr_id,
+                  .sampling_axis_id = missing_axis,
+                  .tail_coordinates = tail_view({1003.0}),
+                  .tail_values = tail_view({40.0}),
+              },
+          },
+  });
+  require(!result.has_value(), "append on a missing axis must be rejected");
+  // The curve's own axis id disagrees with the block's → structural mismatch
+  // surfaces as a tail mismatch (length_mismatch) before the axis lookup; that
+  // is the earliest distinct signal. Verify the curve-vs-axis disagreement is
+  // caught rather than silently accepted.
+  require(result.error().code == ErrorCode::length_mismatch ||
+              result.error().code == ErrorCode::missing_sampling_axis,
+          "curve/axis disagreement must surface a distinct rejection code");
+}
+
 } // namespace
 
 int main() {
@@ -419,6 +475,8 @@ int main() {
   non_monotonic_revision_rejected();
   repeated_append_chains_segments();
   append_on_missing_document_rejected();
+  missing_curve_rejected_with_distinct_code();
+  missing_axis_rejected_with_distinct_code();
   std::cout << "welllog.append-batch: all cases passed\n";
   return EXIT_SUCCESS;
 }

@@ -2072,11 +2072,27 @@ existing_segments(const CurveBuffer &buffer) {
   };
 }
 
+// A block names a curve id that does not exist on the document — the closest
+// stable code is invalid_document (the referenced entity is absent), distinct
+// from a missing sampling axis below so a caller can tell the two apart.
 [[nodiscard]] Error append_curve_missing(EntityId curve_id) {
+  return Error{
+      .code = ErrorCode::invalid_document,
+      .severity = Severity::error,
+      .entity_id = curve_id,
+      .message = MessageKey::document_structure_invalid,
+      .arguments = {},
+  };
+}
+
+// A block names a sampling axis id that does not exist on the document (or the
+// curve's axis id disagrees with the block's). Reuses the same code/message
+// validate_document uses when a curve references an absent axis.
+[[nodiscard]] Error append_axis_missing(EntityId axis_id) {
   return Error{
       .code = ErrorCode::missing_sampling_axis,
       .severity = Severity::error,
-      .entity_id = curve_id,
+      .entity_id = axis_id,
       .message = MessageKey::sampling_axis_missing,
       .arguments = {},
   };
@@ -2164,7 +2180,7 @@ WellLogSession::execute(const AppendBatchCommand &command) {
       }
       const auto *axis = find_axis(current, block.sampling_axis_id);
       if (axis == nullptr) {
-        return append_curve_missing(block.sampling_axis_id);
+        return append_axis_missing(block.sampling_axis_id);
       }
 
       // Tail buffers must each be valid (owner + non-empty data + stride).
@@ -2192,11 +2208,13 @@ WellLogSession::execute(const AppendBatchCommand &command) {
       }
 
       // Tail continuity + monotonicity in the axis direction (rejects
-      // out-of-order and historical backfill).
-      const auto axis_coords_so_far =
-          rebuilt_axes.count(axis->id)
-              ? rebuilt_axes.at(axis->id).axis.coordinates
-              : axis->coordinates;
+      // out-of-order and historical backfill). Compose against the staged
+      // composite when an earlier block in this batch already rebuilt this
+      // axis/curve, so a multi-block batch on one curve appends in order.
+      const auto staged_axis = rebuilt_axes.find(axis->id);
+      const auto &axis_coords_so_far =
+          staged_axis == rebuilt_axes.end() ? axis->coordinates
+                                            : staged_axis->second.axis.coordinates;
       if (!tail_continues_axis(axis_coords_so_far, block.tail_coordinates,
                                axis->direction)) {
         return append_tail_direction(axis->id);
@@ -2213,10 +2231,11 @@ WellLogSession::execute(const AppendBatchCommand &command) {
       }
 
       // Curve values: existing segments + tail value block.
-      const auto curve_values_so_far =
-          rebuilt_curves.count(existing_curve->id)
-              ? rebuilt_curves.at(existing_curve->id).curve.values
-              : existing_curve->values;
+      const auto staged_curve = rebuilt_curves.find(existing_curve->id);
+      const auto &curve_values_so_far =
+          staged_curve == rebuilt_curves.end()
+              ? existing_curve->values
+              : staged_curve->second.curve.values;
       auto value_segments = existing_segments(curve_values_so_far);
       value_segments.push_back(block.tail_values);
       auto value_composite =
