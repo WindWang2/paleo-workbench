@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W8（WellLogEngine #199 增量 LOD 尾扩展）— Complete; frontier now #200
+Phase W9（WellLogEngine #200 Append 视口策略）— Complete; frontier now #201
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -296,6 +296,22 @@ Phase W8（WellLogEngine #199 增量 LOD 尾扩展）— Complete; frontier now 
 - [x] judgement 应用：J4 注释对齐代码；保留 J2/J1/J3（行内文档）
 - **Status:** complete（commit `196a72d`），38/38 green。frontier 现 #200
 
+### Phase W9: #200 Append 视口策略（Fixed vs Follow-Latest，ADR 0031）
+
+`/implement` #200（#162 链）。AppendViewportMode + 每文档 session 状态 + AppendBatchCommand 捕获/恢复，两 commit + 两轴 `/code-review`。固定点 `196a72d`。
+
+#### W9.1: AppendViewportMode + session/view 访问器 + append 捕获恢复
+- [x] `AppendViewportMode`（fixed | follow_latest）；Impl 每文档 map；`append_viewport_mode`/`set_append_viewport_mode` session 访问器；`WellLogView::set_append_viewport_mode`/`append_viewport_mode` view 转发
+- [x] AppendBatchCommand 在委托 `SetDocumentCommand`（清 viewport/presentation/defaults）前捕获 viewport/pixel_height/presentation/viewport_default + mode，委托后按 mode 恢复：Fixed→原窗口；Follow-Latest→底/顶推进到尾最新深度保 span；恢复 presentation+default 使 LOD-完成帧任务按所选 viewport 重建 scene；发布 viewport_changed
+- [x] 测试 6 用例（Fixed 保持、Follow-Latest 递增推进、mode 可观测默认 fixed、Follow-Latest 发事件、无前次 viewport 保持清除、Follow-Latest 递减轴推进）
+- **Status:** complete（commit `e90ff34`）
+
+#### W9.2: 两轴 /code-review 修复
+- [x] **两轴收敛同一 hard**：Follow-Latest 方向无关，递减轴错误（DepthViewport 恒 top<bottom，但尾最新样点递增轴最深/递减轴最浅）。按 `axis.direction` 分支修复 + 新增递减轴测试（qsp §2.1 强制）
+- [x] judgement 应用：J1 补 `events.reserve(size+1)`（同文件其余单事件发布先例）
+- [x] 保留（文档化）：直接 map 重插（follow #199 先例）、front() 多轴主轴、view setter 无 doc no-op
+- **Status:** complete（commit `3348646`），39/39 green。frontier 现 #201
+
 ## Decisions Made
 
 | Decision | Rationale |
@@ -320,6 +336,9 @@ Phase W8（WellLogEngine #199 增量 LOD 尾扩展）— Complete; frontier now 
 | **[W8]** extend_tail 预算不一致即拒（非复用旧预算） | parity 仅在匹配预算下成立；auto-budget 随曲线增长会变，故拒绝强制全量 build。现实契约是 host/session 跨 append 用常量预算 |
 | **[W8]** run-scan 两遍（先发现边界预充 SourceRun 开销，再派生） | 必须匹配 build 的 `run_count*sizeof` 预充，否则 extend_tail 见更大预算包络 → 发出 build 会截断的 level，破坏 parity（review hard 发现） |
 | **[W8]** session 用 `pending_append_reuse` 提示暂存旧 pyramid（非重构 SetDocumentCommand） | 最小侵入接线；hint 在 async/sync 两路径消费，worker 先试 extend_tail 再回退 build，始终正确 |
+| **[W9]** append 视口策略用捕获/恢复（委托前捕获 viewport/presentation/defaults，委托后按 mode 重插），非重构 SetDocumentCommand | 委托 SetDocumentCommand 复用 validate/LOD/selection 重映射；捕获恢复最小侵入且正确——委托的 LOD-完成路径按恢复 viewport 重建 scene。follow #199 pending_append_reuse 直接 map 操作先例 |
+| **[W9]** Follow-Latest 按 `axis.direction` 分支（递增→bottom、递减→top） | DepthViewport 恒归一 top<bottom；尾最新样点递增轴最深/递减轴最浅。方向无关会递减轴产出低于数据范围的错误窗口（review hard） |
+| **[W9]** 多轴文档用 `sampling_axes().front()` 作主轴 | 单轴单井是常见情况；front() 是 builder 插入序的首轴。注释 hedge 多轴限制 |
 
 ## Errors Encountered & Resolved
 
@@ -341,3 +360,5 @@ Phase W8（WellLogEngine #199 增量 LOD 尾扩展）— Complete; frontier now 
 | **[W8]** extend_tail 测试用 auto-budget（默认 0）失败 | 1 | H2 修复后 auto-budget 随曲线增长变化 → extend_tail 正确拒绝；测试改用显式常量预算（现实契约） |
 | **[W8]** extend_tail 在 binding/auto-growing budget 下 parity 破裂（review 两轴收敛发现） | 1 | 两处修复：derived-byte 预充分歧（两遍扫描预充 SourceRun）、默认预算复用（预算不一致即拒）；新增 tight-budget parity 测试锁定 |
 | **[W8]** session append 测试异步帧管线 headless 下 scene 不稳定（state=ready 但 scene=null） | 1 | 不驱动脆弱的帧管线；测试改为断言 preparation 达 ready + 无 diagnostic（incremental 路径完成），parity 由单元测试权威证明 |
+| **[W9]** 测试 SetViewportCommand 在无 presentation 时失败（首次 viewport 须由 SetPresentationCommand 建立） | 1 | fixture 先建 presentation（建立初始 viewport+pixel_height），再 SetViewportCommand 调整 |
+| **[W9]** Follow-Latest 递减轴产出错误窗口（review 两轴收敛发现） | 1 | 方向无关数学改按 `axis.direction` 分支；新增递减轴测试锁定 |
