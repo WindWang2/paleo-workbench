@@ -1225,6 +1225,26 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_undo_redo_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.undo-redo COMMAND welllog_undo_redo_tests)
 
+    # End-to-end seam validation for #206 / #158 AC #8: after a document
+    # patch, undo and redo, graphics, table, SVG and ViewEvent outputs must
+    # agree on one semantic revision. Headless; no GL or Qt adapter needed.
+    add_executable(welllog_session_seam_validation_tests
+        tests/integration/session_seam_validation_test.cpp
+    )
+    target_compile_features(
+        welllog_session_seam_validation_tests
+        PRIVATE cxx_std_20
+    )
+    welllog_enable_warnings(welllog_session_seam_validation_tests)
+    target_link_libraries(
+        welllog_session_seam_validation_tests
+        PRIVATE WellLog::ExportVector WellLog::Table WellLog::Session
+    )
+    add_test(
+        NAME welllog.session-seam-validation
+        COMMAND welllog_session_seam_validation_tests
+    )
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

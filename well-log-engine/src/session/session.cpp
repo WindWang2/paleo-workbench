@@ -3177,12 +3177,27 @@ WellLogSession::execute_history(EntityId document_id,
       return restored;
     }
 
+    // SetDocumentCommand restores the retained presentation so document and
+    // selection observers see one coherent semantic snapshot. It deliberately
+    // clears the revision-scoped PreparedScene, however, so history restores
+    // must also re-enter through SetPresentationCommand. That normal path
+    // rebuilds (or schedules) the graphics scene that SVG and screen adapters
+    // consume; merely retaining the presentation would leave every graphics
+    // seam empty after undo/redo.
+    auto receipt = restored.value();
+    if (target.presentation.has_value()) {
+      const auto presentation =
+          execute(SetPresentationCommand{*target.presentation});
+      if (!presentation.has_value()) {
+        return presentation;
+      }
+      receipt = presentation.value();
+    }
+
     auto entry = std::move(source.back());
     source.pop_back();
     destination.push_back(std::move(entry));
-    impl_->publish_history_changed(document_id,
-                                   restored.value().document_revision);
-    auto receipt = restored.value();
+    impl_->publish_history_changed(document_id, receipt.document_revision);
     receipt.state_version = impl_->state_version;
     return receipt;
   } catch (const std::bad_alloc &) {
