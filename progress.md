@@ -45,3 +45,58 @@
 
 **下一步**：样板页（首页+数据页）已确认 Slate 效果；剩余 9 页因 token 驱动已自动跟随，可按需单独打磨（mapping GIS 壳、地震页等）。
 
+## Session: 2026-08-01 — WellLogEngine #154 Phase B（图形↔表格选择联动）
+
+独立 C++ 子系统轨道（`well-log-engine/`），分支 `agent/welllog-pdf-spike-185`，直接在此开发。从交接文档 `/tmp/zcode_handoff_table_154.md` 接续（Phase A 已完成 review，遗留最后一条验收标准）。
+
+**目标**：交付 #154 的最后一条验收标准——图形 Reference Depth Range 选择与表格源行双向联动，基于 ADR 0024 在 `WellLogSession` 中建立共享语义 Selection Set。
+
+| Phase | 内容 | 结果 |
+|-------|------|------|
+| W1.1 | `WellLogSession` 新增 Selection Set：`SelectionDepthRange`/`SelectionState`/3 个 command + `selection_changed`/`selection_invalidated` 事件；depth-range↔row-span mapping（increasing & decreasing 轴，线性扫描读原始 axis BufferView）；SetDocumentCommand 安全 remap/invalidation；headless `welllog.session-selection`（12 用例）。顺带修 Phase A 打包 bug：`welllog_table` 未加入 install EXPORT | commit `bb12774` |
+| W1.2 | 双向联动：`TableModel`（`set_session_selection_source`/`refresh_session_selection`/`current_row_selection`/`set_row_selection`，轴隔离）；`WellLogView`（`selection()`/`set_selection`/`clear_selection` slots + `selectionChanged` signal + Ctrl+drag 拖选手势）；clipboard 内部 MIME identity 扩展（doc\|rev\|axis + curveId\|unit）；Qt sync `welllog.qt-table-selection-sync` | commit `119c091` |
+| W1.3 | 两轴自审：qt-cpp-review lint 聚焦新代码；修复 `set_projection()` 未清除陈旧 selection 反射（真实潜在 bug）；回归测试（8 用例总计） | commit `746bb7f` |
+
+**关键设计决策**：选择状态唯一存于 `WellLogSession`（单一真相源，view/table 都是 adapter，与 viewport/crosshair 一致）；基于身份而非屏幕坐标；跳过 GL band 高亮渲染（标准是关于 sync，可 headless 测试，绘制是后续 ticket）；图形输入 = Both（API + Ctrl+drag，用户明确选择）。
+
+**验证**：`ctest -j4 -E 'qt-widget\|python.qt-embedding\|qt.package.consumer'` → **31/31 green**（原 29；+`welllog.session-selection`，+`welllog.qt-table-selection-sync`）。3 个 env-blocked 测试需真实 GL / 非 conda libstdc++，与 #154 无关。工作树干净；`welllog.core.dependency-boundary` 通过。
+
+**#154 验收标准**：8/8 全部满足（Phase A 7 条 + Phase B 选择 sync + 内部 MIME identity 完成）。
+
+**下一步（可选）**：(1) `gh issue view 154` 后关闭 issue；(2) merge spike-185 → main（main 仍无 `well-log-engine/`，spike-185 领先约 50 commit）；(3) 开 #155（XLSX/CSV 导出，Phase B 的 SelectionSet 现已支持基于选择的导出）。
+
+### 2026-08-01（续）— #154 Phase B /code-review（两轴审查）
+
+对 `1dea684..HEAD`（Phase B 3 commit）运行正式 `/code-review`（两轴 Standards + Spec，并行子代理）。固定点 `1dea684`。
+
+| 轴 | 发现 | 处置 |
+|----|------|------|
+| Standards（hard） | selection 失败一律复用 `invalid_viewport`（未知文档/未知轴/坏范围混为一谈），违反 `architecture.md §2` + `quality-security-performance.md §7` 稳定码规则 | **已修**：拆为 `selection_document_missing`→`document_not_found` / `selection_axis_missing`→`missing_sampling_axis`（entity_id=轴）/ `selection_invalid`→`invalid_viewport`（坏值）。测试断言各码。commit `641a635` |
+| Standards（judgement） | `selection_error` 与 `viewport_error` 近克隆（Duplicated Code）；`bool from_rows` 是隐式 tagged union（Primitive Obsession） | 跳过：克隆已随 hard 修复消除；variant 在 2 调用点价值低（用户决定 keep bool） |
+| Spec（a） | table→graphic *视觉* 高亮缺失（数据通路完整，paintGL 不读 selection） | **延后**：用户在 Phase B 计划中明确选 "Skip rendering"；状态正确同步，绘制是后续 ticket |
+| Spec（c） | selection 按 document_id 单键（轴 B 静默驱逐轴 A）；remap 用绝对 ±1e-9 容差 | **确认意图**：单键符合 ADR 0024 "one selection per document over a single axis"（用户确认 keep）；新增 `one_selection_per_document_evicts_other_axis` 测试锁定意图。绝对容差对米深度无碍，延后 |
+
+**验证**：session-selection 用例 12→13（+distinct-codes 断言、+axis-eviction）；31/31 headless green。
+
+**Phase B 最终状态**：4 commit（`bb12774`/`119c091`/`746bb7f`/`641a635`），#154 全部 8 条验收标准满足，两轴 review 完成。
+
+## Session: 2026-08-01（续 2）— #155 XLSX/XML/CSV 表格导出
+
+`/implement` #155（被 #154 阻塞，现已解锁）。CSV → XML → XLSX 三后端，每个独立 commit + TDD，最后两轴 `/code-review`。固定点 `641a635`。
+
+| Phase | 内容 | 结果 |
+|-------|------|------|
+| W2.1 | table-export 组件 `welllog_export_table`（链接 WellLog::Table + PRIVATE ZLIB）+ 共享 groundwork：TableColumn 加 ScalarType（G1）、`depth_domain_name/parse_depth_domain` 提升为 public core（G3）、`format.hpp` 数字格式化（G2）、`atomic_write.hpp` 原子写（G5, §10）、修 install EXPORT（含遗留 welllog_export_pdf）。CSV writer（§7）+ CsvPackageExporter（目录+manifest）。 | commit `b871af0` |
+| W2.2 | 版本化 XML writer（§6）：`<wellLogTables schemaVersion>` + 流式 `<row>`（从原始 buffer，非 LOD），禁 DTD/外部实体/网络，XML 转义，§6 往返测试（5 用例）。 | commit `75dcbf7` |
+| W2.3 | 自包含 XLSX（§5）：手写 ZipWriter（ZLIB deflate + CRC32）+ OOXML parts；数值单元格为数值、null 为空；>1,048,576 行自动 `_01/_02` 分表 + metadata 记录 global start row。测试用 ZLIB inflate 读回验证（4 用例）。 | commit `147516c` |
+| W2.4 | 两轴 `/code-review` 修复：I/O 错误码改 `internal_error`（不再误用 `invalid_manifest`，匹配 svg/pdf 同类）；删 dead `stage` 参；XML referenceDepth 改共识派生（不再 over-fit axes().front()）；新增 `TableProjection::slice()` 选择导出路径（满足 "支持 Selection Set"）；记录 XLSX 内存上限为已知限制（§5.2 流式 follow-up）。 | commit `e663fdc` |
+
+**验证**：34/34 headless green（原 31；+`welllog.csv-table-export` 5、+`welllog.xml-table-export` 5、+`welllog.xlsx-table-export` 4）。core dependency-boundary 通过。
+
+**#155 验收**：全部 8 条满足（XLSX 按井/轴工作表 + 连续分表、XML 版本化+禁 DTD+往返、CSV 一文件一表+manifest、数值/Null/单位保持、流式+Selection Set、结构/XSD-往返/metadata 测试）。明确延后：CSV ZIP 打包、Interval/Marker/Annotation 工作表（表尚不存在）、正式 .xsd、Resampled 表导出、XLSX constant-memory 流式。
+
+**下一步（可选）**：关闭 #155；merge spike-185 → main（main 仍无 `well-log-engine/`，spike-185 领先约 54 commit）。
+
+
+
+

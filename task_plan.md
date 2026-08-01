@@ -6,7 +6,9 @@
 
 ## Current Phase
 
-Phase 5 — Complete & Verified
+Phase W2（WellLogEngine #155 XLSX/XML/CSV）— Complete & Verified
+
+> 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
 ## Phases
 
@@ -128,6 +130,73 @@ Phase 5 — Complete & Verified
 - [x] 相干性 C3 接入属性下拉（`attribute_pipeline`）
 - **Status:** complete
 
+### Phase W1: WellLogEngine #154 Phase B — 图形↔表格选择联动（ADR 0024）
+
+独立 C++ 子系统轨道（`well-log-engine/`），与上述 Python 重构无依赖关系。分支 `agent/welllog-pdf-spike-185`，直接在此开发（非 submodule）。
+
+#### W1.1: Commit 1 — WellLogSession 中的 Selection Set（ADR 0024）
+- [x] `session.hpp` 新增类型：`SelectionDepthRange`、`SelectionState`、3 个 command struct
+- [x] 新增 `ViewEventKind::selection_changed` / `selection_invalidated`
+- [x] mapping helpers（depth-range↔row-span，increasing & decreasing 轴）
+- [x] `execute(SetSelection/SetRowSelection/ClearSelectionCommand)` + `selection()` accessor
+- [x] SetDocumentCommand 中安全 remap/invalidation
+- [x] headless 测试 `welllog.session-selection`（12 用例）
+- [x] 修复 Phase A 遗留打包 bug（`welllog_table` 未加入 install EXPORT）
+- **Status:** complete（commit `bb12774`）
+
+#### W1.2: Commit 2 — 图形↔表格双向联动
+- [x] `TableModel`：selection 反射 + 行选择命令 + 轴隔离
+- [x] `WellLogView`：slots + signal + Ctrl+drag 拖选手势
+- [x] clipboard 内部 MIME identity（doc|rev|axis + curveId|unit）
+- [x] Qt sync 测试 `welllog.qt-table-selection-sync`
+- **Status:** complete（commit `119c091`）
+
+#### W1.3: Commit 3 — 两轴自审（Standards + Spec）
+- [x] qt-cpp-review lint（新代码聚焦）
+- [x] 修复真实问题：`set_projection()` 未清除陈旧 selection source/反射
+- [x] 回归测试 `set_projection_clears_stale_selection_source`（8 用例总计）
+- **Status:** complete（commit `746bb7f`）
+
+#### W1.4: Commit 4 — 正式 /code-review（两轴并行子代理）
+- [x] 固定点 `1dea684`，diff `1dea684..HEAD`（Phase B 3 commit）
+- [x] Standards 轴 + Spec 轴并行子代理审查
+- [x] **Standards hard 修复**：selection 失败拆为 3 个 distinct 错误码（`document_not_found`/`missing_sampling_axis`/`invalid_viewport`），替代单一 `invalid_viewport`（Mysterious Name）
+- [x] 测试断言各 distinct 错误码 + `one_selection_per_document_evicts_other_axis`（锁定 ADR 0024 单键意图）
+- [x] 延后（用户决定）：GL band 高亮渲染、绝对容差、variant 重构
+- **Status:** complete（commit `641a635`），session-selection 13 用例，31/31 green
+
+#### W1.4: 交付与验证
+- [x] 31/31 headless green（原 29；+2 新测试）
+- [x] 工作树干净；core 边界检查通过
+- [x] #154 全部 8 条验收标准满足
+- **Status:** complete
+
+### Phase W2: #155 XLSX/XML/CSV 表格导出
+
+独立 C++ 轨道（`well-log-engine/`），`/implement` #155（被 #154 阻塞，现已解锁）。CSV → XML → XLSX，每后端独立 commit + TDD，最后两轴 `/code-review`。固定点 `641a635`。
+
+#### W2.1: Commit 1 — table-export 组件 + CSV
+- [x] G1 TableColumn 加 ScalarType；G3 `depth_domain_name/parse_depth_domain` 提升为 public core；G2 `format.hpp`；G5 `atomic_write.hpp`（§10）；G4 新组件 + 修 install EXPORT（含遗留 welllog_export_pdf）
+- [x] CSV writer（§7）+ CsvPackageExporter（目录+manifest.json）；4 用例
+- **Status:** complete（commit `b871af0`）
+
+#### W2.2: Commit 2 — 版本化 XML（§6）
+- [x] `<wellLogTables schemaVersion>` + 流式 `<row>`（原始 buffer，非 LOD）
+- [x] 禁 DTD/外部实体/网络；XML 转义；§6 往返测试；5 用例
+- **Status:** complete（commit `75dcbf7`）
+
+#### W2.3: Commit 3 — 自包含 XLSX（§5）
+- [x] 手写 ZipWriter（ZLIB deflate + CRC32）+ OOXML parts
+- [x] 数值为数值、null 为空；>1,048,576 行 `_01/_02` 分表 + metadata global start row
+- [x] 测试用 ZLIB inflate 读回验证；4 用例
+- **Status:** complete（commit `147516c`）
+
+#### W2.4: Commit 4 — 两轴 /code-review 修复
+- [x] Standards：I/O 错误码改 `internal_error`（不再误用 `invalid_manifest`）；删 dead `stage` 参
+- [x] Spec：XML referenceDepth 共识派生（不再 over-fit axes().front()）；新增 `TableProjection::slice()` 选择导出路径（满足 "支持 Selection Set"）
+- [x] 记录 XLSX 内存上限为已知限制（§5.2 流式 follow-up）
+- **Status:** complete（commit `e663fdc`），34/34 green
+
 ## Decisions Made
 
 | Decision | Rationale |
@@ -137,6 +206,12 @@ Phase 5 — Complete & Verified
 | 拆分 `map_edit_scene.py` 为 4 个高内聚辅助模块 | 将几何工厂、草图状态机、吸附管理器、拓扑算法与主 Scene 事件路由解耦，提高可维护性。 |
 | 采用 pybind11 构建 `seismic_3d_core` 原生模块 | 在纯 Python / NumPy 算法保底的前提下，通过 C++ 单线程计算（释放 GIL）与内存连续性提供高效震相计算与切片提取。 |
 | 采用 pybind11 构建 `well_log_core` 测井原生扩展 | 将视口 Min-Max LOD 抽稀、ASCII 解析与交叠填色下沉到 `viz/` 算法层与原生扩展，保障 60 FPS 渲染。 |
+| **[W1]** Selection 状态唯一存于 WellLogSession | ADR 0024 单一真相源；view/table 都是 adapter（与 viewport/crosshair 一致） |
+| **[W1]** 选择基于身份（EntityId + Reference Depth + sample index + DocumentRevision） | 不存屏幕坐标/Display Depth/LOD 点（ADR 0024） |
+| **[W1]** 跳过 GL band 高亮渲染 | 标准是关于选择 sync，可 headless 测试；绘制是后续 ticket |
+| **[W1]** 图形输入 = Both（API + Ctrl+drag） | 用户明确选择；既暴露 API 供宿主，又内置手势 |
+| **[W1]** mapping 用线性扫描（非二分） | 选择时（非每帧）触发；轴长度典型规模下可接受；简化正确性 |
+| **[W1]** `apply_selection` 为私有成员函数 | 需访问 `WellLogSession::Impl`（私有嵌套结构），自由函数无法命名 |
 
 ## Errors Encountered & Resolved
 
@@ -147,3 +222,9 @@ Phase 5 — Complete & Verified
 | `NumPy 2.5 DeprecationWarning` in `document_parsers.py` | 1 | 将 `dataset.read(1, out_shape=(1, h, w))` 的 3D shape 改为标准的 2D shape `(h, w)`。 |
 | `compute_coherence_3d` numerical parity discrepancy | 1 | 修正 C++ 相干性算法公式，使其与 Python 逐道均方根归一化一致。 |
 | `fast_las_parse_data` return type discrepancy | 1 | 统一 C++ 原生扩展 headers 返回类型为 Python tuple 保持类型完全一致。 |
+| **[W1]** `range_for_rows` 返回匿名 struct 类型非法 | 1 | 改为命名 `RowSpan` struct |
+| **[W1]** `apply_selection` 自由函数无法访问 `Impl` | 1 | 改为私有成员函数（header 声明） |
+| **[W1]** `RowSelection` 在类后定义导致 MOC 报错 | 1 | 移到类前定义，删除重复 |
+| **[W1]** cmake reconfigure 报 "welllog_table not in export set" | 1 | Phase A 遗留打包 bug；加入 install EXPORT（非本会话引入） |
+| **[W1]** `qt-table-model` 旧测试断言旧 MIME 格式失败 | 1 | 更新断言匹配新 identity 格式 |
+| **[W1]** `set_projection` 未清除陈旧 selection 反射（自审发现） | 1 | 清除 source + 反射 span + 回归测试 |
