@@ -114,6 +114,24 @@
 
 **下一步（可选）**：关闭 #155/#183；merge spike-185 → main（领先约 56 commit）；下一个 ready 工单（#158 Document Patch+Undo、#162/#163 Arrow/append、#184 image pyramid）。
 
+## Session: 2026-08-01（续 4）— #184 Thread ImagePyramidMap through the session frame path
+
+`/implement` #184（session 异步帧路径只穿 CurveLodMap，不穿 ImagePyramidMap → 图像层经 session 不可达）。单 commit + 两轴 `/code-review` 修复。固定点 `f75e4c7`。
+
+| Phase | 内容 | 结果 |
+|-------|------|------|
+| W4.1 | session 异步路径接入 ImagePyramidMap：PerformanceBudgets 加 `image_pyramid_options`；LOD worker 在曲线 pyramid 后用 `ImagePyramid::build`（仅元数据，ADR 0045）为每个 ImageSource 建 pyramid；CurvePreparation 携带 image_pyramids；make_frame_task 加 image 参并调 image-aware prepare 重载（3 个调用点全更新，pixel_height double 转换）；WellLogView `set_image_pyramid_options` setter（+ session `set_performance_budgets`）。parity 测试（曲线+图像文档经 session 产出 tile）。 | commit `f0a1191` |
+| W4.2 | 两轴 `/code-review` 修复：(1) ADR 0034 — image derived bytes 折入聚合 derived_bytes（原只累计到独立字段被丢弃，预算只报曲线）；(2) qsp §7 — 图像 pyramid 构建失败改为发 `DiagnosticCode::image_pyramid_unavailable` Diagnostic（稳定码+实体 id）后降级（原静默 continue）；(3) Spec — parity 测试从 tile COUNT 强化到 tile SET 相等（level/row/col 集合）并先断言 session viewport=[1000,1100]×2160。 | commit `cf6d774` |
+
+**调试发现**：异步 LOD worker 需要真实墙钟时间完成；紧密 poll 循环会饿死 worker 线程 → 测试 poll 间加 `sleep_for(2ms)` yield。
+
+**验证**：34/34 headless green（image_layer_test 增 1 parity 用例）。
+
+**#184 验收**：5 条满足（session 建 ImagePyramidMap 并穿入异步 prepare、view 暴露 pyramid 选项、session 路径产出与直连 prepare 相同 tile 集合、image_tile resolver 仍走 view 无引擎解码、异步可取消）。明确延后：同步（非异步）prepare 回退无 LOD（既有行为）；"镜像 curve LOD 暴露"措辞——curve LOD 算法/bucket 在 worker 硬编码、view 未暴露，无先例（image-pyramid setter 是净新增，未来 ticket 补 curve-LOD 对应项）。
+
+**下一步（可选）**：关闭 #155/#183/#184；merge spike-185 → main（领先约 58 commit）；下一个 ready 工单（#158 Document Patch+Undo、#162/#163 Arrow/append）。
+
+
 
 
 

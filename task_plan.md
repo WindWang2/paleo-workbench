@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W3（WellLogEngine #183 Manifest round-trip）— Complete & Verified
+Phase W4（WellLogEngine #184 ImagePyramidMap in session）— Complete & Verified
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -212,6 +212,21 @@ Phase W3（WellLogEngine #183 Manifest round-trip）— Complete & Verified
 - [x] Standards：`primitive_vertex_count` 改镜像 scene 的 tessellated 计数（tri=3/quad=6/sym=24）；补 per-polyline(≥2,≤8192) + per-clip(≥3,≤8192) 点上限
 - [x] Spec：version gate 改接受 {1,2}（真前向兼容）；测试加固（triangle 全坐标 + symbol color + over-pixel/zero-dpi 负例 + version_gate 双向）
 - **Status:** complete（commit `3ed8ca6`），34/34 green
+
+### Phase W4: #184 Thread ImagePyramidMap through the session frame path
+
+`/implement` #184（session 异步帧路径只穿 CurveLodMap → 图像层经 session 不可达）。单 commit + 两轴 `/code-review` 修复。固定点 `f75e4c7`。
+
+#### W4.1: Commit 1 — session 接入 ImagePyramidMap
+- [x] PerformanceBudgets 加 `image_pyramid_options`；LOD worker 为 ImageSource 建 pyramid（ImagePyramid::build，仅元数据 ADR 0045）
+- [x] CurvePreparation 携带 image_pyramids；make_frame_task 加 image 参调 image-aware prepare（3 调用点 + pixel_height double 转换）
+- [x] WellLogView `set_image_pyramid_options` + session `set_performance_budgets`；parity 测试
+- **Status:** complete（commit `f0a1191`）
+
+#### W4.2: Commit 2 — 两轴 /code-review 修复
+- [x] Standards：image derived bytes 折入聚合 derived_bytes（ADR 0034）；图像失败发 `image_pyramid_unavailable` Diagnostic 后降级（qsp §7）
+- [x] Spec：parity 测试从 tile COUNT 强化到 tile SET 相等 + session viewport 断言
+- **Status:** complete（commit `cf6d774`），34/34 green
 
 ## Decisions Made
 
