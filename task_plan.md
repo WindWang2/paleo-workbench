@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W5（WellLogEngine #162 /to-tickets 拆解）— Complete; 6 子工单 #196-#201 已发布，frontier = #196
+Phase W6（WellLogEngine #196 CompositeBufferView expand）— Complete; frontier now #197
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -237,6 +237,17 @@ Phase W5（WellLogEngine #162 /to-tickets 拆解）— Complete; 6 子工单 #19
 - [x] /to-tickets 拆 6 子工单（composite-buffer expand/contract + append + incr-LOD + viewport + coalescing）
 - [x] 发布 GitHub #196-#201（parent #162，ready-for-agent，原生 blocking），#162 body 加 sub-tickets 注释
 - **Status:** complete。子工单链：#196（frontier）→ #197 → #198 → {#199, #200} → #201
+
+### Phase W6: #196 CompositeBufferView（#162 append 基础，expand）
+
+`/implement` #196（#162 拆解后 frontier）。单 commit + 两轴 `/code-review`（0 发现）。固定点 `baee494`。
+
+#### W6.1: core 新增 CompositeBufferView + 测试
+- [x] core 新增 `CompositeBufferView`（from_segments/length/value_as_double 跨段拼接/segments 迭代）；PIMPL 不可变，每段 SharedOwner 独立保活，无连续拷贝
+- [x] value_as_double 委派段 BufferView（复用 bounds/capacity/scalar 检查，无重复 switch）
+- [x] 测试 5 用例（单段等价/两段跨边界/owner 保活/OOB/异构拒绝）
+- [x] 两轴 /code-review：Standards 0 hard（2 judgement call follow 先例）、Spec 0 发现——无需修复 commit
+- **Status:** complete（commit `c5c9e81`），35/35 green。frontier 现 #197
 
 ## Decisions Made
 

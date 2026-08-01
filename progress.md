@@ -152,6 +152,22 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 
 **下一步（可选）**：`/implement` #196（frontier，无阻塞）；或换 #158/#163；或 merge spike-185 → main。
 
+## Session: 2026-08-01（续 6）— #196 CompositeBufferView（#162 append 基础，expand）
+
+`/implement` #196（#162 拆解后的 frontier 子工单）。新增逻辑跨 N 个不可变物理段的 buffer-view 类型，为 #162 "不复制旧数组" 打基础。expand 步：旁置新增，不迁移任何消费者（#197 才迁移）。单 commit + 两轴 `/code-review`（**0 发现**，两侧 clean）。固定点 `baee494`。
+
+| 内容 | 结果 |
+|------|------|
+| core 新增 `CompositeBufferView`（document.hpp/cpp）：`from_segments(vector<BufferView>)`（段须同 scalar_type、非空非 null-data 否则空复合）、`length()`（段长之和）、`value_as_double(i)`（跨段拼接映射，委派给段的 `value_as_double` 复用其 bounds/capacity 检查，无重复 switch）、`segments()`（span 供边界遍历）。每段 `SharedOwner` 独立保活，无连续拷贝。PIMPL 不可变值类型，镜像 BufferView/WellLogDocument。 | commit `c5c9e81` |
+| 测试 welllog.composite-buffer-view（5 用例）：单段等价、两段跨边界、owner 独立保活（caller 释放 shared_ptr 后仍可读）、OOB nullopt + 空复合、异构类型/null/空输入拒绝。 | 35/35 green |
+
+**两轴 review**：Standards 0 hard（2 judgement call 均 follow `BufferView::from_raw` 先例——验证失败返空值而非 Result/稳定码、未检 `has_owner()`，均非回归）；Spec 0 发现（完全 faithful，纯 expand 无调用方迁移）。无需修复 commit。
+
+**#196 验收**：5/5 满足（core 新类型持有序段列表、随机访问跨拼接 OOB 一致、各段 owner 独立保活无连续拷贝、段迭代暴露、4+ 项测试覆盖）。
+
+**下一步（可选）**：`/implement` #197（迁移 CurveLodPyramid/GL renderer/exporters 到复合视图——contract 步）；或换 #158/#163；或 merge spike-185 → main（领先约 60 commit）。
+
+
 
 
 
