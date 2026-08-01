@@ -2499,11 +2499,15 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
             has_presentation &&
             presentation_has_entity(pres_entry->second, id);
         if (!in_doc && !in_pres) {
+          // The remove targets no existing entity. document_not_found is the
+          // closest stable code; document_structure_invalid message (not the
+          // presentation->document message) - the entity referenced by the
+          // patch is absent from the document/presentation structure.
           return Error{
               .code = ErrorCode::document_not_found,
               .severity = Severity::error,
               .entity_id = id,
-              .message = MessageKey::presentation_document_missing,
+              .message = MessageKey::document_structure_invalid,
               .arguments = {},
           };
         }
@@ -2669,6 +2673,20 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
           .message = MessageKey::resource_exhausted,
           .arguments = {},
       };
+    }
+    // Stage the document's previously-built per-curve pyramids for incremental
+    // LOD reuse, mirroring AppendBatchCommand: a patch edits interpretation/layout
+    // entities and leaves the raw curves byte-identical, so the LOD worker should
+    // reuse the prior pyramids (architecture.md §7 minimal-closure rule) rather
+    // than full-rebuild every curve. The worker falls back to full-build if a
+    // reused pyramid's prefix was edited (it never is on the patch path - curves
+    // are immutable in place, ADR 0025), so this is always safe.
+    if (const auto prep = impl_->preparations.find(command.document_id);
+        prep != impl_->preparations.end() &&
+        prep->second.state == PreparationState::ready &&
+        prep->second.revision == current_revision &&
+        prep->second.pyramids != nullptr) {
+      impl_->pending_append_reuse[command.document_id] = prep->second.pyramids;
     }
     const auto commit =
         execute(SetDocumentCommand{std::move(patched_doc)});

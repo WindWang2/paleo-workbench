@@ -349,6 +349,81 @@ void empty_patch_is_noop() {
           "an empty patch must not advance the revision");
 }
 
+// A patch editing one collection leaves the OTHER collections byte-identical -
+// the hand-rolled copy loops must not drop or duplicate untouched entities.
+void patch_preserves_untouched_collections() {
+  Fixture f;
+  // Patch only the interval; markers, annotations, curves must survive.
+  const auto result = f.session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch =
+          DocumentPatch{
+              .base_revision = f.revision,
+              .edits =
+                  {
+                      EntityEdit{UpsertEntity{Interval{
+                          .id = interval_id, .top_reference_depth = 1000.0,
+                          .bottom_reference_depth = 1001.8,
+                          .semantic = IntervalSemantic::lithology,
+                          .pattern_id = {}, .label = "Shale"}}},
+                  },
+          },
+  });
+  require(result.has_value(), "patch must succeed");
+  const auto doc = f.session.document(document_id);
+  // The interval changed; markers/annotations/curves survive verbatim.
+  require(doc->intervals().size() == 1 &&
+              doc->intervals().front().label == "Shale",
+          "the patched interval must reflect the upsert");
+  require(doc->markers().size() == 1, "markers must survive a patch untouched");
+  require(doc->markers().front().label == "Top A",
+          "the surviving marker must be byte-identical");
+  require(doc->annotations().size() == 1,
+          "annotations must survive a patch untouched");
+  require(doc->annotations().front().text == "Note",
+          "the surviving annotation must be byte-identical");
+  require(doc->curves().size() == 1,
+          "curves must survive a patch untouched (immutable, ADR 0025)");
+}
+
+// A presentation-entity upsert on a document with NO presentation is rejected
+// (a layout entity needs a presentation to live on).
+void presentation_upsert_without_presentation_rejected() {
+  // A document with no presentation registered.
+  WellLogSession session;
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1001.0, 1002.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{10.0, 20.0, 30.0});
+  WellLogDocumentBuilder db(document_id, DocumentRevision{1});
+  db.add_sampling_axis(SamplingAxis{
+      .id = axis_id, .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth, .unit = "m",
+      .direction = AxisDirection::increasing});
+  db.add_curve(Curve{
+      .id = curve_id, .mnemonic = "GR", .display_name = "GR", .unit = "API",
+      .sampling_axis_id = axis_id, .values = BufferView::from_vector(values),
+      .nulls = {}});
+  require(session.execute(SetDocumentCommand{db.build()}).has_value(),
+          "no-presentation document must be accepted");
+  const auto result = session.execute(ApplyPatchCommand{
+      .document_id = document_id,
+      .patch =
+          DocumentPatch{
+              .base_revision = DocumentRevision{1},
+              .edits =
+                  {
+                      EntityEdit{UpsertEntity{TrackSpec{
+                          .id = track_id, .width = Millimetres{40.0}}}},
+                  },
+          },
+  });
+  require(!result.has_value(),
+          "a presentation-entity upsert with no presentation must be rejected");
+  require(result.error().code == ErrorCode::invalid_presentation,
+          "no-presentation presentation upsert must return invalid_presentation");
+}
+
 } // namespace
 
 int main() {
@@ -362,6 +437,8 @@ int main() {
   base_revision_mismatch_rejected_as_conflict();
   selection_survives_patch();
   empty_patch_is_noop();
+  patch_preserves_untouched_collections();
+  presentation_upsert_without_presentation_rejected();
   std::cout << "welllog.apply-patch: all cases passed\n";
   return EXIT_SUCCESS;
 }
