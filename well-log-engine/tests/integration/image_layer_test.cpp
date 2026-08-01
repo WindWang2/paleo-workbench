@@ -17,9 +17,11 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -454,11 +456,32 @@ void session_image_layer_matches_direct_prepare() {
   const auto scene = session.prepared_scene(document_id);
   require(scene != nullptr, "session must prepare an image scene");
   require(scene->image_layers().size() == 1, "one image layer expected");
-  const auto session_tile_count = scene->image_layers().front().tile_count;
-  require(session_tile_count > 0,
+  require(scene->image_layers().front().tile_count > 0,
           "the session path must produce visible image tiles");
 
-  // Direct path: build the same pyramid map and prepare directly.
+  // Assert the session's viewport matches what the direct query will use, so
+  // the parity comparison is between equivalent viewports (not coincidence).
+  const auto session_viewport = session.viewport(document_id);
+  require(session_viewport.has_value(),
+          "the session must have a viewport for the document");
+  require(session_viewport->top == 1000.0 && session_viewport->bottom == 1100.0,
+          "the session viewport must be the presentation depth range [1000,1100]");
+  const auto session_pixel_height = session.viewport_pixel_height(document_id);
+  require(session_pixel_height.has_value() && *session_pixel_height == 2160,
+          "the session pixel height must be the default 2160");
+
+  // Collect the session path's visible tiles as a (level,row,col) set.
+  auto tile_key = [](const PreparedImageTile &t) {
+    return std::tuple{t.level, t.row, t.col};
+  };
+  std::set<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>> session_tiles;
+  for (const auto &t : scene->image_tiles()) {
+    session_tiles.insert(tile_key(t));
+  }
+  require(!session_tiles.empty(), "session path must select >=1 tile");
+
+  // Direct path: build the same pyramid map and prepare with an equivalent
+  // viewport (1000..1100 × 2160, prefetch 2.0 — the session defaults).
   detail::ScenePreparer::CurveLodMap curve_lods;
   detail::ScenePreparer::ImagePyramidMap image_pyramids;
   const auto pyramid = ImagePyramid::build(
@@ -475,13 +498,15 @@ void session_image_layer_matches_direct_prepare() {
   require(direct.has_value(), "direct image scene must prepare");
   require(direct.value().image_layers().size() == 1,
           "direct path must have one image layer");
-  const auto direct_tile_count = direct.value().image_layers().front().tile_count;
+  std::set<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>> direct_tiles;
+  for (const auto &t : direct.value().image_tiles()) {
+    direct_tiles.insert(tile_key(t));
+  }
 
-  // Parity: the session path yields the same tile count (both drive the same
-  // pyramid + an equivalent viewport; the session's default pixel height is
-  // 2160 and prefetch 2.0, matching the direct query above).
-  require(session_tile_count == direct_tile_count,
-          "session and direct paths must produce the same visible tile count");
+  // Parity: the session path selects the SAME visible tiles (level/row/col set)
+  // as the direct prepare path — not just the same count.
+  require(session_tiles == direct_tiles,
+          "session and direct paths must select the same visible tile set");
 }
 
 int main() {

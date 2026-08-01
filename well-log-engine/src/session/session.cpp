@@ -605,6 +605,10 @@ struct LodBuildOutput {
   // produce no tiles (non-fatal degradation).
   detail::ScenePreparer::ImagePyramidMap image_pyramids;
   std::uint64_t image_derived_bytes{};
+  // ImageSource ids whose pyramid build failed (non-cancelled) and were
+  // skipped. poll_async publishes a Diagnostic per id (qsp §7: degradation
+  // must be observable), then degrades — the scene emits no layer for them.
+  std::vector<EntityId> skipped_images;
 };
 
 struct LodTaskState {
@@ -1112,13 +1116,20 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
               output.cancelled = image_pyramid.error().code ==
                                  ErrorCode::operation_cancelled;
               if (!output.cancelled) {
-                // Non-fatal: skip this image (no tiles). The scene emits no
-                // image layer for a source without a pyramid entry.
+                // Non-fatal: record the skipped image so poll_async publishes a
+                // Diagnostic (qsp §7: degradation must be observable), then
+                // degrade — the scene emits no layer for this source.
+                output.skipped_images.push_back(image.id);
                 continue;
               }
               break;
             }
             output.image_derived_bytes +=
+                image_pyramid.value().statistics().derived_bytes;
+            // Fold into the aggregate so the budget envelope (ADR 0034) and
+            // performance_snapshot report the total derived bytes (curve +
+            // image), not curve-only.
+            output.derived_bytes +=
                 image_pyramid.value().statistics().derived_bytes;
             output.image_pyramids.emplace(image.id,
                                           std::move(image_pyramid).value());
@@ -1972,6 +1983,16 @@ void WellLogSession::poll_async() noexcept {
           preparation->second.image_pyramids =
               std::make_shared<const detail::ScenePreparer::ImagePyramidMap>(
                   std::move(output.image_pyramids));
+          // Publish a Diagnostic for each ImageSource whose pyramid build
+          // failed (non-cancelled), so the degradation is observable (qsp §7)
+          // before the scene emits no layer for it.
+          for (const auto &skipped : output.skipped_images) {
+            impl_->publish_one_diagnostic(
+                completed_task->document_id, completed_task->revision, skipped,
+                1, DiagnosticCode::image_pyramid_unavailable,
+                MessageKey::image_metadata_invalid, ErrorCode::invalid_image,
+                notifications);
+          }
           const auto document =
               impl_->documents.find(completed_task->document_id);
           const auto presentation =

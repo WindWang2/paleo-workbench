@@ -156,6 +156,9 @@ enum class DiagnosticCode : std::uint16_t {
   text_engine_unavailable,
   nonpositive_log_values,
   scale_readability_hint,
+  // An ImageSource's pyramid build failed (non-cancelled); the image layer is
+  // degraded (no tiles). Stable code for the observable degradation (#184).
+  image_pyramid_unavailable,
 };
 
 struct PerformanceBudgets {
