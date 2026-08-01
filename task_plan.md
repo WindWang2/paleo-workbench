@@ -382,17 +382,17 @@ Phase W12（WellLogEngine #203 内核 Undo/Redo stack）- Complete; frontier now
 
 ### Phase W13: #204 Presentation patch 的 prepared-scene 覆盖（ADR 0025）
 
-`/implement` #204。固定点 `78aa746`。采用 TDD；已由工单预先约定公开测试 seam：`WellLogSession::execute(ApplyPatchCommand)` 与 `prepare_scene` 的 prepared-scene 输出，绝不检视 session 内部 presentation map。
+`/implement` #204。固定点 `78aa746`。采用 TDD；公开测试 seam 为 `WellLogSession::execute(ApplyPatchCommand)` 与 prepared-scene 输出，绝不检视 session 内部 presentation map。已完成：Track z-order/width、Scale mode/range/direction/unit、CurveLayer style/visibility/remove-readd 的 headless 断言；新增无几何预检以保证失败补丁原子拒绝并保留 ready LOD cache。
 
 #### W13.1: Red — 端到端 layout / scale / style / visibility 覆盖
-- [ ] 先建立带多 Track/Scale/CurveLayer 的可渲染 fixture，并编写失败的 prepared-scene assertions：z_order、width、scale mode/range/direction/unit、style、visible/remove。
-- [ ] 若 z_order 的 patch 不能使 prepared scene 排序，最小化实现一等排序支持；否则只补 coverage。
-- **Status:** in progress
+- [x] 建立多 Track/Scale/CurveLayer fixture，并以 prepared-scene assertions 覆盖 z_order、width、scale mode/range/direction/unit、style、visible/remove-readd。
+- [x] 实现 Track 的 z-order prepared-scene 排序，使 patch 后水平布局与渲染顺序一致。
+- **Status:** complete
 
 #### W13.2: Green — 单测、完整 headless suite 与两轴 /code-review
-- [ ] 逐项运行目标测试与 C++ 构建；最终运行 headless CTest。
-- [ ] 以 `78aa746` 为固定点执行 Standards + Spec 审查，修复 hard findings，提交并关闭 #204。
-- **Status:** pending
+- [x] 目标测试、完整 C++ build、headless CTest 均通过（43/43，排除 4 项 Qt/Python 环境依赖测试）。
+- [x] 以 `7fb4399` 为固定点执行 Standards + Spec 审查；修复原子预检、LOD 最小闭包与缓存来源校验。提交 `5eea446` + `ae72b05` 并关闭 #204。
+- **Status:** complete
 
 ## Decisions Made
 
