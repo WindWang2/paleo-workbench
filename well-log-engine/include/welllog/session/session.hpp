@@ -329,10 +329,13 @@ public:
   void poll_async() noexcept;
   // Forces any coalesced (staged) AppendBatchCommand blocks for a document to
   // flush as a single visible revision now (#201). Returns the resulting
-  // receipt when blocks were flushed and a new revision produced, nullopt when
-  // nothing was staged. A no-op when coalescing is disabled. Use on unload or
-  // when the host needs the staged tail visible immediately.
-  [[nodiscard]] std::optional<CommandReceipt>
+  // CommandReceipt on success, or an Error (e.g. invalid_document) when the
+  // merged batch fails validation — a host flushing on unload can detect a
+  // rejected batch rather than losing it silently. Returns a CommandReceipt at
+  // the current revision (no new revision, no state change) when nothing was
+  // staged. A no-op when coalescing is disabled. Use on unload or when the host
+  // needs the staged tail visible immediately.
+  [[nodiscard]] Result<CommandReceipt>
   flush_append_coalesce(EntityId document_id) noexcept;
   [[nodiscard]] PerformanceBudgets performance_budgets() const noexcept;
   // Replaces the performance budgets (#184: the host updates image-pyramid

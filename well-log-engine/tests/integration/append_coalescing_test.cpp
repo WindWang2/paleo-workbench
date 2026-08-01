@@ -140,8 +140,45 @@ void coalescing_disabled_is_immediate() {
   const auto r1 = session.document(document_id)->revision().value;
   require(r1 == r0 + 2,
           "with coalescing disabled each append must produce a revision");
-  require(!session.flush_append_coalesce(document_id).has_value(),
-          "flush must be a no-op when coalescing is disabled");
+  // Flush succeeds but is a no-op (no staged blocks under coalescing-disabled):
+  // it returns a receipt at the current revision without advancing it.
+  const auto flushed = session.flush_append_coalesce(document_id);
+  require(flushed.has_value(),
+          "flush must succeed (return a receipt) even with nothing staged");
+  require(flushed.value().document_revision.value == r1,
+          "flush with nothing staged must not advance the revision");
+}
+
+// The delayed visible-revision path (#201): under a low refresh cap, a staged
+// batch does NOT advance the revision mid-burst; after the interval elapses, a
+// poll_async() flush (no new AppendBatchCommand) produces the visible revision.
+// This is the headline coalescing path and exercises the poll_async coalescer-
+// flush branch.
+void poll_async_flushes_overdue_coalescer() {
+  auto session = make_session_with_document(/*refresh_hz=*/5); // 200 ms interval
+  const auto r0 = session.document(document_id)->revision().value;
+  // First append is due (no prior flush) → flushes immediately → revision+1.
+  append_one(session, 1003.0, 40.0, DocumentRevision{2});
+  const auto r_after_first = session.document(document_id)->revision().value;
+  require(r_after_first == r0 + 1,
+          "the first append under a refresh cap must flush immediately");
+  // Subsequent appends within the 200 ms interval stage but do NOT advance the
+  // revision.
+  append_one(session, 1004.0, 50.0, DocumentRevision{3});
+  append_one(session, 1005.0, 60.0, DocumentRevision{4});
+  require(session.document(document_id)->revision().value == r_after_first,
+          "appends within the refresh interval must coalesce (no new revision)");
+  // Sleep past the interval, then poll — the overdue coalescer flushes and the
+  // revision advances to include the staged tail.
+  std::this_thread::sleep_for(std::chrono::milliseconds{220});
+  session.poll_async();
+  const auto r_after_poll = session.document(document_id)->revision().value;
+  require(r_after_poll == r_after_first + 1,
+          "poll_async must flush the overdue coalescer into a visible revision");
+  // The flushed tail must be readable end-to-end (old 3 + 3 appended samples).
+  const auto doc = session.document(document_id);
+  require(doc->curves().front().values.length() == 6,
+          "the coalesced+flushed tail must extend the curve by all staged samples");
 }
 
 // --- Criterion 2: Python-owned (external shared_ptr) buffers survive append. ---
@@ -280,7 +317,12 @@ void append_lod_cancellation_reports_cancelled() {
   }
   require(session.document(document_id)->revision().value == 3,
           "final revision must be the replacement (append LOD cancelled)");
-  // No asynchronous-preparation-failed diagnostic from the cancellation.
+  // The append's LOD task was cancelled by the superseding revision; it must be
+  // classified as operation_cancelled (surfaced as a cancelled_tasks count,
+  // consistently with the curve-LOD async path), NOT a hard failure.
+  const auto snap = session.performance_snapshot(document_id);
+  require(snap.has_value() && snap->cancelled_tasks >= 1,
+          "the cancelled append LOD task must be counted as cancelled");
   for (const auto &d : session.diagnostics()) {
     require(d.code != DiagnosticCode::asynchronous_preparation_failed,
             "append LOD cancellation must not publish a hard failure");
@@ -403,6 +445,7 @@ void rapid_append_pressure_with_poll_is_safe() {
 int main() {
   coalescing_caps_visible_revisions_and_flushes();
   coalescing_disabled_is_immediate();
+  poll_async_flushes_overdue_coalescer();
   external_owner_buffers_survive_append();
   append_lod_cancellation_reports_cancelled();
   selection_survives_append();
