@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W11（WellLogEngine #158 /to-tickets 拆解 + #202 DocumentPatch 基础）- Complete; frontier now #203
+Phase W12（WellLogEngine #203 内核 Undo/Redo stack）- Complete; frontier now #204 / #205
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -356,8 +356,29 @@ Phase W11（WellLogEngine #158 /to-tickets 拆解 + #202 DocumentPatch 基础）
 - **Status:** complete（commit `b1d1090`），41/41 green。frontier 现 #203
 
 #### #158 Epic 子工单状态
-#202 ✅（foundation）-> #203（undo/redo 栈，frontier，blocked）-> {#204 layout coverage, #205 interpretation coverage}（blocked）-> #206 seam validation（blocked，closes #158）。ADR 0025 的 QC Mask/Derived Curve/cross-well/depth-transform 编辑非 #158 AC，延后。
+#202 ✅（foundation）-> #203 ✅（undo/redo 栈）-> {#204 layout coverage, #205 interpretation coverage}（next）-> #206 seam validation（blocked，closes #158）。ADR 0025 的 QC Mask/Derived Curve/cross-well/depth-transform 编辑非 #158 AC，延后。
 
+
+### Phase W12: #203 内核 Undo/Redo stack（ADR 0025）
+
+`/implement` #203。以 #202 的 `ApplyPatchCommand` 为基础，新增每 document 的历史记录、Undo/Redo commands、可观察 history 状态，并保持既有 `SetDocumentCommand` 的 revision / selection / LOD 失效路径。
+
+#### W12.1: 调研与设计
+- [x] 已读取 #203、#158、ADR 0025 与 #202 交接记录；固定点 `b1d1090`
+- [x] 确认 patch / append 经 `SetDocumentCommand` 提交、revision 可由 snapshot 恢复、Selection 由替换路径 remap；history entry 以 document/presentation/selection 前后快照为权威，patch 另存逆向 edit 列表，append 用不可变 buffer snapshot 反转
+- **Status:** complete
+
+#### W12.2: 实现与测试
+- [x] 每 document undo/redo 栈；UndoCommand / RedoCommand；can_undo / can_redo；history_changed event；empty direction 返回稳定 `history_empty` Error
+- [x] patch 与可见 append 成功后进入 history；新成功 commit 清 redo；undo/redo 走 `SetDocumentCommand` 的失效路径并恢复 document / presentation / selection 的语义 snapshot
+- [x] 新增 `welllog.undo-redo` headless integration coverage（3 patch round trip、patch/append redo clear、selection/revision semantic restore、observer coherence、history observability、append round trip）
+- **Status:** complete（局部 build + `welllog.apply-patch` / `welllog.undo-redo` 2/2 green）
+
+#### W12.3: 验证、两轴 review、提交与交接
+- [x] 完整 build；headless CTest 42/42 green（排除既有 4 项 Qt/Python 环境依赖测试）
+- [x] 以 `b1d1090` 为固定点执行 Standards + Spec 两轴 review：Spec 0；Standards 2 hard 修复（稳定 ErrorCode 枚举值、history restore 先于 observer notification）
+- [x] commit `59fa229`（feature）+ `78aa746`（review fix）；GitHub #203 已关闭
+- **Status:** complete
 
 ## Decisions Made
 
@@ -389,6 +410,8 @@ Phase W11（WellLogEngine #158 /to-tickets 拆解 + #202 DocumentPatch 基础）
 | **[W10]** 合并 `append_refresh_rate_hz` 引擎默认 0（非 ADR 字面「默认十次」） | 向后兼容 #198/#199/#200（测试留 0）；库不知调用方是否流式，0（立即）更安全。ADR「默认十次」是 host 流式应用默认，经 budget 旋钮设。文档化此解释 |
 | **[W10]** 合并批次校验失败丢弃（atomic）但 Error 经 `Result` 返回（非静默） | 批次拒绝不重试原样（atomic）；但 host 须能检测被拒批次（非数据丢失）。`flush_append_coalesce` 返 `Result` 传播 Error（review hard 修复） |
 | **[W10]** 压力测试单线程（非真并发线程） | session 单线程契约：execute+poll 须同（事件循环）线程。真并发线程测的是库不提供的契约。单线程快速 append+poll 交错是现实 host 模式 + 正确的压力测试 |
+| **[W12]** HistoryEntry 同时保存语义快照与 patch inverse edits | snapshot 精确恢复 DocumentRevision、presentation、Selection，以及不可变 curve buffer 的 append；inverse edits 满足 #203 对 patch 反转记录的显式要求。 |
+| **[W12]** Undo/redo 在 SetDocumentCommand 通知前暂存 semantic restore | 复用既有 revision / task cancellation 路径，同时确保 observers 不会看到已清除 presentation 或临时 remap 的 Selection；历史转换对 host 是原子的。 |
 
 ## Errors Encountered & Resolved
 
@@ -414,3 +437,6 @@ Phase W11（WellLogEngine #158 /to-tickets 拆解 + #202 DocumentPatch 基础）
 | **[W9]** Follow-Latest 递减轴产出错误窗口（review 两轴收敛发现） | 1 | 方向无关数学改按 `axis.direction` 分支；新增递减轴测试锁定 |
 | **[W10]** `flush_append_coalesce` 校验失败静默丢弃 + execute `.value_or` 伪造成功 receipt（review hard，数据丢失不可见） | 1 | `flush_append_coalesce` 改返 `Result<CommandReceipt>` 传播 Error；execute 去掉伪造直传 Result |
 | **[W10]** poll_async 合并器 flush 分支零覆盖（review hard，headline 路径未测） | 1 | 新增 `poll_async_flushes_overdue_coalescer`（hz=5，间隔内合并，sleep 过间隔后 poll 推进 revision） |
+| **[W12]** 全量 build 因新 `history_changed` 在 WellLogView 穷尽 switch 失败 | 1 | 将 history event 纳入 adapter refresh 分支；随后完整 build 通过。 |
+| **[W12]** Standards review：插入 ErrorCode 改变既有 `diagnostic_warning` 数值 | 1 | 新 `history_empty` 改为追加；测试锁定 `patch_conflict` / `diagnostic_warning` 数值。 |
+| **[W12]** Standards review：undo 暂态在 observer 通知后才恢复 | 1 | `execute_history` 暂存 semantic restore，SetDocumentCommand 在 event 前恢复并发布对应 presentation/selection 事件。 |

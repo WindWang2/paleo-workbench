@@ -225,3 +225,13 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 **两轴 review**（固定点 `4e3944e`，Standards 返回，Spec 撞 session 限额）：**hard** - patch 不暂存 `pending_append_reuse` -> 仅编辑解释实体的 patch 仍全量重建每条曲线 LOD（违 architecture §7 最小闭包 + 退于 append 路径）。**修复**：patch 委托前暂存旧 pyramid（曲线 immutable，pyramid 原样复用；extend_tail 回退路径安全）。**judgement 应用**：#6 remove-of-missing 的 `presentation_document_missing` 消息键误导->改 `document_structure_invalid`。新增 2 测试（patch 保 untouched 集合字节不变、无 presentation 时 presentation-entity upsert 拒）。保留（文档化）：capture/restore 与 append 重复（共享 commit helper 待重构）、repeated-switch variant 分发（新类型须改 4 处 visitor，static_assert 可加固）。commit `ba458ce`（feature）+ `b1d1090`（review fix）。41/41 green。
 
 **#158 链状态**：#202 ✅（foundation）-> #203（undo/redo 栈，frontier，blocked）-> {#204, #205}（coverage）-> #206（seam validation，closes #158）。ADR 0025 的 QC Mask/Derived Curve/cross-well/depth-transform 编辑非 #158 AC，延后。
+
+## Session: 2026-08-01（续 13）- #203 内核 Undo/Redo stack（进行中）
+
+已从 `/tmp/zcode_handoff_202_158.md` 恢复 #202 交接上下文，读取 #203、#158、ADR 0025、现有 planning 文件与 `/implement` / `/code-review` 工作流。#203 的固定点为 `b1d1090`；目标是为每个 document 添加 patch/append 历史、Undo/Redo 命令、可观察 history 状态，并通过已有提交路径恢复 document revision 与 selection 的语义状态。下一步：定位 `well-log-engine/` 中 session 的提交 / revision / event 实现，完成最小的 history entry 设计后测试先行。
+
+**完成**：每 document `DocumentHistory` 保存 undo/redo entry；entry 以 document/presentation/Selection 前后 snapshot 精确反转（append 的 immutable composite buffer 同样可恢复），patch 额外保存 `Upsert↔Remove` / 旧值 inverse edits。新增 `UndoCommand` / `RedoCommand`、`can_undo` / `can_redo`、`ViewEventKind::history_changed` 与稳定 `history_empty` Error；新成功 patch 或可见 append 会清 redo。Undo/redo 仍进入 `SetDocumentCommand` 的 revision、任务取消与 invalidation 路径；semantic restore 在其 event 发布**前**暂存完成，observer 不会读到临时清空的 presentation 或 Selection。Qt adapter 处理新 event，Python error-name 映射同步。
+
+**测试与审查**：新增 `welllog.undo-redo`（3 patch round trip、patch/append redo-clear、Selection revision restore、observer coherence、history event、append round trip、ErrorCode numeric stability）。完整 build 通过；headless CTest 42/42 green（排除既有 4 项 Qt/Python 环境依赖测试）。两轴 `/code-review`（固定点 `b1d1090`）：Spec 0；Standards 2 hard——稳定 ErrorCode 数值与 observer 原子性——均已修复。保留「inverse edits 同时不直接执行」的 judgement：#203 明确要求 history record 携带反向 edit，snapshot 则是 append 与 exact revision restore 的权威机制。
+
+**提交**：`59fa229 feat(welllog): add kernel undo redo history (#203)`；`78aa746 fix(welllog): address #203 history review findings`。#203 已解除 blocked 标签并关闭；下一 frontier 为 #204 / #205。
