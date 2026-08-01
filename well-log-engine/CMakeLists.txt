@@ -1169,6 +1169,16 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_append_incremental_session_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.append-incremental-session COMMAND welllog_append_incremental_session_tests)
 
+    # Session append viewport mode (#200): Fixed preserves the viewport across
+    # an append, Follow-Latest advances the bottom to the new tail depth. Head.
+    add_executable(welllog_append_viewport_mode_tests
+        tests/integration/append_viewport_mode_test.cpp
+    )
+    target_compile_features(welllog_append_viewport_mode_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_append_viewport_mode_tests)
+    target_link_libraries(welllog_append_viewport_mode_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.append-viewport-mode COMMAND welllog_append_viewport_mode_tests)
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

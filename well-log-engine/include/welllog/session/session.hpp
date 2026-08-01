@@ -148,6 +148,18 @@ struct AppendBatchCommand {
   std::vector<CurveTailBlock> blocks;
 };
 
+// How the session treats an existing viewport when an AppendBatchCommand
+// produces a new revision (#200, ADR 0031 "Session 可固定视口或跟随最新深度").
+// `fixed` (default) preserves the current depth window across the append;
+// `follow_latest` advances the viewport's `bottom` to the appended tail's last
+// reference depth, preserving the span (top = new_bottom - span). Applies only
+// to AppendBatchCommand — a plain SetDocumentCommand always resets the viewport
+// (it is a full document replacement).
+enum class AppendViewportMode : std::uint8_t {
+  fixed,
+  follow_latest,
+};
+
 struct CommandReceipt {
   std::uint64_t state_version{};
   EntityId document_id;
@@ -290,6 +302,18 @@ public:
   // when the document has no selection.
   [[nodiscard]] std::optional<SelectionState>
   selection(EntityId document_id) const noexcept;
+  // The append viewport mode for a document (#200): whether an
+  // AppendBatchCommand preserves the current viewport (`fixed`, the default) or
+  // advances its bottom to the new tail depth (`follow_latest`). Returns `fixed`
+  // when no mode has been set.
+  [[nodiscard]] AppendViewportMode
+  append_viewport_mode(EntityId document_id) const noexcept;
+  // Sets the append viewport mode for a document (#200). The host/view uses
+  // this to choose Fixed vs Follow-Latest behaviour; takes effect on the next
+  // AppendBatchCommand for that document. Mirrors how other interaction state
+  // (selection, crosshair) is exposed on the session.
+  void set_append_viewport_mode(EntityId document_id,
+                                AppendViewportMode mode) noexcept;
   [[nodiscard]] ViewEventObserverId
   subscribe_view_events(ViewEventObserver observer) noexcept;
   void unsubscribe_view_events(ViewEventObserverId observer_id) noexcept;

@@ -839,6 +839,11 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, DepthViewport, EntityIdHash> viewport_defaults;
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
   std::unordered_map<EntityId, SelectionState, EntityIdHash> selections;
+  // Per-document append viewport mode (#200): whether an AppendBatchCommand
+  // preserves the current viewport (fixed, the absence/default) or advances its
+  // bottom to the new tail depth (follow_latest).
+  std::unordered_map<EntityId, AppendViewportMode, EntityIdHash>
+      append_viewport_modes;
   std::unordered_map<EntityId, CurvePreparation, EntityIdHash> preparations;
   // Append-incremental LOD reuse hint (#199): when an AppendBatchCommand
   // delegates to SetDocumentCommand, it stages the document's previously-built
@@ -2363,7 +2368,111 @@ WellLogSession::execute(const AppendBatchCommand &command) {
         prep->second.pyramids != nullptr) {
       impl_->pending_append_reuse[command.document_id] = prep->second.pyramids;
     }
-    return execute(SetDocumentCommand{std::move(appended)});
+
+    // Capture the viewport interaction state to restore after the append commit
+    // (#200). SetDocumentCommand clears the viewport/presentation/defaults (it
+    // is a full document replacement); an append must instead preserve (Fixed)
+    // or advance (Follow-Latest) the viewport. Captured BEFORE the delegate so
+    // the post-commit restore can re-insert it. The presentation + pixel height
+    // are restored verbatim so the LOD-completion path can rebuild the scene
+    // against the chosen viewport.
+    struct CapturedViewport {
+      DepthViewport viewport;
+      std::uint32_t pixel_height;
+    };
+    std::optional<CapturedViewport> captured_viewport;
+    if (const auto vp = impl_->viewports.find(command.document_id);
+        vp != impl_->viewports.end()) {
+      const auto ph =
+          impl_->viewport_pixel_heights.find(command.document_id);
+      if (ph != impl_->viewport_pixel_heights.end() && ph->second != 0) {
+        captured_viewport =
+            CapturedViewport{.viewport = vp->second,
+                             .pixel_height = ph->second};
+      }
+    }
+    const auto captured_presentation =
+        impl_->presentations.find(command.document_id) != impl_->presentations.end()
+            ? std::optional<ScenePresentation>{
+                  impl_->presentations.at(command.document_id)}
+            : std::nullopt;
+    const auto captured_default =
+        impl_->viewport_defaults.find(command.document_id) !=
+                impl_->viewport_defaults.end()
+            ? std::optional<DepthViewport>{
+                  impl_->viewport_defaults.at(command.document_id)}
+            : std::nullopt;
+    const auto mode = impl_->append_viewport_modes.count(command.document_id)
+                          ? impl_->append_viewport_modes.at(command.document_id)
+                          : AppendViewportMode::fixed;
+
+    const auto commit =
+        execute(SetDocumentCommand{std::move(appended)});
+    if (!commit.has_value()) {
+      return commit;
+    }
+
+    // Restore the presentation + viewport defaults so the LOD-completion frame
+    // task can build a scene (it needs both present). These were cleared by the
+    // SetDocumentCommand commit.
+    if (captured_presentation.has_value()) {
+      impl_->presentations.insert_or_assign(command.document_id,
+                                            *captured_presentation);
+    }
+    if (captured_default.has_value()) {
+      impl_->viewport_defaults.insert_or_assign(command.document_id,
+                                                *captured_default);
+    }
+    // Apply the configured viewport mode. Fixed: restore the prior window
+    // unchanged. Follow-Latest: advance the bottom to the new tail's last
+    // reference depth, preserving the span (top = new_bottom - span). Only
+    // applied when a prior viewport was captured; otherwise the viewport stays
+    // cleared (matching a plain document replacement with no prior viewport).
+    if (captured_viewport.has_value()) {
+      auto result_viewport = captured_viewport->viewport;
+      if (mode == AppendViewportMode::follow_latest) {
+        // The new tail's last reference depth: the last coordinate of the first
+        // sampling axis on the extended document (the typical single-axis case;
+        // a multi-axis document uses the primary axis's extent).
+        const auto extended_doc = impl_->documents.find(command.document_id);
+        if (extended_doc != impl_->documents.end() &&
+            !extended_doc->second->sampling_axes().empty()) {
+          const auto &axis = extended_doc->second->sampling_axes().front();
+          const auto length = axis.coordinates.length();
+          if (length > 0) {
+            if (const auto last = axis.coordinates.value_as_double(length - 1);
+                last.has_value() && std::isfinite(*last)) {
+              const auto span = result_viewport.bottom - result_viewport.top;
+              result_viewport.bottom = *last;
+              // Preserve the span, guarding against an infinite/NaN span and
+              // keeping top finite + strictly below bottom.
+              if (std::isfinite(span) && span > 0.0 &&
+                  std::isfinite(*last - span)) {
+                result_viewport.top = *last - span;
+              }
+            }
+          }
+        }
+      }
+      impl_->viewports.insert_or_assign(command.document_id, result_viewport);
+      impl_->viewport_pixel_heights.insert_or_assign(
+          command.document_id, captured_viewport->pixel_height);
+      // Publish a viewport_changed event so the host/view observes the
+      // post-append viewport (Fixed: unchanged; Follow-Latest: advanced).
+      if (impl_->state_version !=
+          std::numeric_limits<std::uint64_t>::max()) {
+        ++impl_->state_version;
+        const auto event = ViewEvent{
+            .kind = ViewEventKind::viewport_changed,
+            .state_version = impl_->state_version,
+            .document_id = command.document_id,
+            .document_revision = commit.value().document_revision,
+        };
+        impl_->events.push_back(event);
+        impl_->notify_observers(event);
+      }
+    }
+    return commit;
   } catch (const std::bad_alloc &) {
     return Error{
         .code = ErrorCode::resource_exhausted,
@@ -2717,6 +2826,19 @@ WellLogSession::selection(EntityId document_id) const noexcept {
   return found == impl_->selections.end()
              ? std::nullopt
              : std::optional<SelectionState>{found->second};
+}
+
+AppendViewportMode
+WellLogSession::append_viewport_mode(EntityId document_id) const noexcept {
+  const auto found = impl_->append_viewport_modes.find(document_id);
+  return found == impl_->append_viewport_modes.end()
+             ? AppendViewportMode::fixed
+             : found->second;
+}
+
+void WellLogSession::set_append_viewport_mode(
+    EntityId document_id, AppendViewportMode mode) noexcept {
+  impl_->append_viewport_modes.insert_or_assign(document_id, mode);
 }
 
 ViewEventObserverId

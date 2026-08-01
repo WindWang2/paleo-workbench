@@ -50,6 +50,12 @@ public:
   // Mirrors how curve-LOD budgets flow through PerformanceBudgets; takes effect
   // on the next document LOD build.
   void set_image_pyramid_options(ImagePyramidOptions options) noexcept;
+  // Sets the append viewport mode for this view's document (#200): whether an
+  // AppendBatchCommand preserves the current viewport (Fixed, the default) or
+  // advances its bottom to the new tail depth (Follow-Latest). Mirrors how the
+  // host configures other session interaction state through the view.
+  void set_append_viewport_mode(AppendViewportMode mode) noexcept;
+  [[nodiscard]] AppendViewportMode append_viewport_mode() const noexcept;
   [[nodiscard]] std::optional<EntityId> document_id() const noexcept;
   [[nodiscard]] const CapabilityReport &capability_report() const noexcept;
   [[nodiscard]] std::optional<CurvePick> hover_pick() const noexcept;

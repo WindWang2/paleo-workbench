@@ -220,6 +220,17 @@ void WellLogView::set_image_pyramid_options(ImagePyramidOptions options) noexcep
   budgets.image_pyramid_options = std::move(options);
   impl_->session->set_performance_budgets(budgets);
 }
+void WellLogView::set_append_viewport_mode(AppendViewportMode mode) noexcept {
+  const auto doc = impl_->document_id;
+  if (doc.has_value()) {
+    impl_->session->set_append_viewport_mode(*doc, mode);
+  }
+}
+AppendViewportMode WellLogView::append_viewport_mode() const noexcept {
+  const auto doc = impl_->document_id;
+  return doc.has_value() ? impl_->session->append_viewport_mode(*doc)
+                         : AppendViewportMode::fixed;
+}
 const WellLogSession &WellLogView::session() const noexcept {
   return *impl_->session;
 }
