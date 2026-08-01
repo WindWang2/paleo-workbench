@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W4（WellLogEngine #184 ImagePyramidMap in session）— Complete & Verified
+Phase W5（WellLogEngine #162 /to-tickets 拆解）— Complete; 6 子工单 #196-#201 已发布，frontier = #196
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -227,6 +227,16 @@ Phase W4（WellLogEngine #184 ImagePyramidMap in session）— Complete & Verifi
 - [x] Standards：image derived bytes 折入聚合 derived_bytes（ADR 0034）；图像失败发 `image_pyramid_unavailable` Diagnostic 后降级（qsp §7）
 - [x] Spec：parity 测试从 tile COUNT 强化到 tile SET 相等 + session viewport 断言
 - **Status:** complete（commit `cf6d774`），34/34 green
+
+### Phase W5: #162 /to-tickets 拆解（append-batch 多工单化）
+
+`/implement` #162 调研后发现需全新基础设施（CompositeBufferView + 增量 LOD），超单切片 → 走 `/to-tickets` 拆为 6 个 tracer-bullet 子工单。
+
+#### W5.1: 调研 + 拆解 + 发布
+- [x] 调研：BufferView 单连续（无复合类型）、LOD 全量重建、SetDocumentCommand 盲替换+清 viewport
+- [x] /to-tickets 拆 6 子工单（composite-buffer expand/contract + append + incr-LOD + viewport + coalescing）
+- [x] 发布 GitHub #196-#201（parent #162，ready-for-agent，原生 blocking），#162 body 加 sub-tickets 注释
+- **Status:** complete。子工单链：#196（frontier）→ #197 → #198 → {#199, #200} → #201
 
 ## Decisions Made
 

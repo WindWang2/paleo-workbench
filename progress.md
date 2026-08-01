@@ -131,6 +131,28 @@
 
 **下一步（可选）**：关闭 #155/#183/#184；merge spike-185 → main（领先约 58 commit）；下一个 ready 工单（#158 Document Patch+Undo、#162/#163 Arrow/append）。
 
+## Session: 2026-08-01（续 5）— #162 /to-tickets 拆解（append-batch 多 ticket 化）
+
+用户选 #162（原子追加曲线尾块 + Follow Latest）。调研后发现其 2 条验收标准需全新基础设施，远超单 `/implement` 切片：① "不复制旧数组" 需新建 CompositeBufferView（当前 `BufferView` 单连续，所有 renderer/exporter/LOD 读 `data()`+`length()`，追加尾块要么拷贝旧数组违反标准、要么新建复合类型触及每个 buffer 消费者）；② "LOD 只增量更新" 需 `CurveLodPyramid::extend_tail`（当前每次全量重建）。外加：revision 单调门（SetDocumentCommand 当前盲替换）、SetDocumentCommand 当前清空 viewport（与 Fixed/Follow 冲突）。
+
+按主流程对超大工单走 `/to-tickets`，拆为 6 个 tracer-bullet 子工单（GitHub #196-#201，parent #162，`ready-for-agent`，原生 blocking）：
+
+| 子工单 | 标题 | Blocked by |
+|--------|------|------------|
+| #196 | Composite/Chained BufferView（append 基础 — expand） | 无（frontier） |
+| #197 | 迁移 buffer 消费者到复合视图（contract） | #196 |
+| #198 | AppendBatchCommand — 原子追加 + 单调 revision 门 | #196 #197 |
+| #199 | 增量 LOD 尾扩展 | #198 |
+| #200 | Session Fixed-Viewport vs Follow-Latest | #198 |
+| #201 | 高频合并 + 并发/取消/选择压力测试 | #199 #200 |
+
+Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → #197 migrate 逐批保绿）。#162 保持 OPEN 作为 parent（#162 body 加 sub-tickets 注释）。
+
+**关键设计决策（调研结论）**：复合 buffer 类型是必需的新基础设施——旧块不可变/共享所有权 per-block 已可保证，但"跨两块"的 span 需新类型；增量 LOD 是独立新增。
+
+**下一步（可选）**：`/implement` #196（frontier，无阻塞）；或换 #158/#163；或 merge spike-185 → main。
+
+
 
 
 
