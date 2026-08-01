@@ -68,7 +68,7 @@ validate_curve_buffer(const CurveBuffer &buffer) {
 [[nodiscard]] std::optional<Error>
 validate_lod_inputs(const SamplingAxis &axis, const Curve &curve,
                     std::stop_token stop_token) {
-  if (const auto error = validate_buffer(axis.coordinates)) {
+  if (const auto error = validate_curve_buffer(axis.coordinates)) {
     return error;
   }
   if (const auto error = validate_curve_buffer(curve.values)) {

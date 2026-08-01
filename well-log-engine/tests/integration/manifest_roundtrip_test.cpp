@@ -444,7 +444,8 @@ void image_and_custom_sources_round_trip() {
     b.add_sampling_axis(SamplingAxis{
         .id = id("22222222-0000-4000-8000-000000000002"),
         .coordinates = BufferView::from_vector(
-            depths, BufferSourceReference{.uri = "mmap://no-img#depth"}),
+            depths, BufferSourceReference{.uri = "mmap://no-img#depth",
+                                          .checksum = {}, .byte_offset = 0}),
         .domain = DepthDomain::measured_depth,
         .unit = "m",
         .direction = AxisDirection::increasing,
@@ -456,7 +457,8 @@ void image_and_custom_sources_round_trip() {
         .unit = "API",
         .sampling_axis_id = id("22222222-0000-4000-8000-000000000002"),
         .values = BufferView::from_vector(
-            values, BufferSourceReference{.uri = "mmap://no-img#gr"}),
+            values, BufferSourceReference{.uri = "mmap://no-img#gr",
+                                          .checksum = {}, .byte_offset = 0}),
         .nulls = {},
     });
     return b.build();
@@ -532,7 +534,8 @@ void over_limit_image_and_empty_custom_sources_rejected() {
   empty_builder.add_sampling_axis(SamplingAxis{
       .id = axis_id,
       .coordinates = BufferView::from_vector(
-          depths, BufferSourceReference{.uri = "mmap://empty#depth"}),
+          depths, BufferSourceReference{.uri = "mmap://empty#depth",
+                                        .checksum = {}, .byte_offset = 0}),
       .domain = DepthDomain::measured_depth,
       .unit = "m",
       .direction = AxisDirection::increasing,
@@ -544,7 +547,8 @@ void over_limit_image_and_empty_custom_sources_rejected() {
       .unit = "API",
       .sampling_axis_id = axis_id,
       .values = BufferView::from_vector(
-          values, BufferSourceReference{.uri = "mmap://empty#gr"}),
+          values, BufferSourceReference{.uri = "mmap://empty#gr",
+                                        .checksum = {}, .byte_offset = 0}),
       .nulls = {},
   });
   empty_builder.add_custom_source(CustomLayerSource{

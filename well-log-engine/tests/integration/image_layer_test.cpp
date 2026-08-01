@@ -425,7 +425,8 @@ void session_image_layer_matches_direct_prepare() {
       .reference_depth_top = 1000.0,
       .reference_depth_bottom = 1100.0,
       .dpi = 300,
-      .source = BufferSourceReference{.uri = "image://core-photo/1"},
+      .source = BufferSourceReference{.uri = "image://core-photo/1",
+                                      .checksum = {}, .byte_offset = 0},
   });
   const auto document = builder.build();
   auto presentation_builder = image_presentation();

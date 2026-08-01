@@ -739,7 +739,7 @@ void validate_manifest_schema(const JsonObject &root) {
   // omits them; a v2 reader tolerates both. Unknown keys are still rejected.
   for (const auto &mandatory :
        {"id", "revision", "samplingAxes", "curves"}) {
-    field(document, mandatory); // throws on miss
+    (void)field(document, mandatory); // throws on miss
   }
   for (const auto &[key, value] : document) {
     if (key != "id" && key != "revision" && key != "samplingAxes" &&
@@ -898,7 +898,8 @@ Result<ManifestText> ManifestCodec::write(const WellLogDocument &document) {
     output += ",\"samplingAxes\":[";
     bool first = true;
     for (const auto &axis : document.sampling_axes()) {
-      if (axis.coordinates.source().uri.empty()) {
+      if (axis.coordinates.is_composite() ||
+          axis.coordinates.as_single().source().uri.empty()) {
         return manifest_error();
       }
       if (!first)
@@ -913,7 +914,7 @@ Result<ManifestText> ManifestCodec::write(const WellLogDocument &document) {
       output += ",\"direction\":";
       append_escaped(output, direction_name(axis.direction));
       output += ",\"coordinates\":";
-      write_buffer(output, axis.coordinates);
+      write_buffer(output, axis.coordinates.as_single());
       output.push_back('}');
     }
     output += "],\"curves\":[";
@@ -1178,7 +1179,7 @@ ManifestCodec::read(std::string_view manifest,
         // clip is optional; the rest are mandatory.
         for (const auto &mandatory :
              {"id", "contentRevision", "primitives"}) {
-          field(custom, mandatory);
+          (void)field(custom, mandatory);
         }
         const auto primitives_array = array(field(custom, "primitives"));
         // ADR 0042: non-empty + bounded primitive/vertex counts.

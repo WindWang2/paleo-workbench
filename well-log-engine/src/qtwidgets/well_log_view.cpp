@@ -79,6 +79,8 @@ namespace {
     return QStringLiteral("nonpositive_log_values");
   case DiagnosticCode::scale_readability_hint:
     return QStringLiteral("scale_readability_hint");
+  case DiagnosticCode::image_pyramid_unavailable:
+    return QStringLiteral("image_pyramid_unavailable");
   }
   return QStringLiteral("unknown_diagnostic");
 }

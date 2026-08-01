@@ -238,11 +238,11 @@ void cache_budget_and_cancellation_are_observable() {
           "malformed public buffer views must fail instead of dereferencing");
 
   auto unowned = fixture;
+  const auto &fixture_coords = fixture.axis.coordinates.as_single();
   unowned.axis.coordinates = BufferView::from_raw(
-      fixture.axis.coordinates.data(), fixture.axis.coordinates.length(),
-      fixture.axis.coordinates.stride_bytes(),
-      fixture.axis.coordinates.scalar_type(),
-      fixture.axis.coordinates.byte_capacity(), SharedOwner{});
+      fixture_coords.data(), fixture_coords.length(),
+      fixture_coords.stride_bytes(), fixture_coords.scalar_type(),
+      fixture_coords.byte_capacity(), SharedOwner{});
   const auto unowned_result =
       CurveLodPyramid::build(unowned.axis, unowned.curve);
   require(!unowned_result.has_value() &&

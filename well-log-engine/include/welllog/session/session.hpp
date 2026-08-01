@@ -119,6 +119,35 @@ struct ClearSelectionCommand {
   EntityId document_id;
 };
 
+// One curve tail-block in an AppendBatch (#162/#198, ADR 0031). The session
+// appends `tail_values` to the existing curve identified by `curve_id` and
+// `tail_coordinates` to that curve's sampling axis (`sampling_axis_id`), both as
+// new immutable segments on the curve's/axis's composite buffer — the existing
+// blocks are retained untouched with no contiguous copy. The two tail buffers
+// must have equal length and a matching scalar type to the existing axis
+// coordinates; the tail must continue the axis in its declared direction (no
+// out-of-order or historical backfill — those require an explicit
+// Replace/Patch).
+struct CurveTailBlock {
+  EntityId curve_id;
+  EntityId sampling_axis_id;
+  BufferView tail_coordinates;
+  BufferView tail_values;
+};
+
+// Atomically appends a batch of curve tail-blocks to an existing document,
+// producing one new Document Revision from the whole batch, or failing the
+// whole batch (never a half-batch visible state). `target_revision` must be
+// strictly greater than the document's current revision (monotonic revision
+// gate — does not exist for SetDocumentCommand, which blindly replaces). Old
+// data blocks are immutable and not re-copied. Out-of-order and historical
+// backfill are rejected as Append.
+struct AppendBatchCommand {
+  EntityId document_id;
+  DocumentRevision target_revision;
+  std::vector<CurveTailBlock> blocks;
+};
+
 struct CommandReceipt {
   std::uint64_t state_version{};
   EntityId document_id;
@@ -236,6 +265,8 @@ public:
   execute(const SetRowSelectionCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const ClearSelectionCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const AppendBatchCommand &command);
   // Installs the text pipeline used to shape annotations and labels during
   // scene preparation (ADR 0029). Without an engine, text layers prepare
   // empty and a text_engine_unavailable diagnostic is published.

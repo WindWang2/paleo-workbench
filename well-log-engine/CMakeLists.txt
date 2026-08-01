@@ -1135,6 +1135,17 @@ if(WELLLOG_BUILD_TESTS)
     target_link_libraries(welllog_session_selection_tests PRIVATE WellLog::Session)
     add_test(NAME welllog.session-selection COMMAND welllog_session_selection_tests)
 
+    # AppendBatchCommand (#198, ADR 0031): atomic curve tail-append producing a
+    # new Document Revision, with no copy of the old data blocks; rejects
+    # out-of-order/backfill tails and non-monotonic revisions. Headless.
+    add_executable(welllog_append_batch_tests
+        tests/integration/append_batch_test.cpp
+    )
+    target_compile_features(welllog_append_batch_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_append_batch_tests)
+    target_link_libraries(welllog_append_batch_tests PRIVATE WellLog::Session)
+    add_test(NAME welllog.append-batch COMMAND welllog_append_batch_tests)
+
     add_executable(welllog_render_gl_tests
         tests/render_gl/capability_test.cpp
     )

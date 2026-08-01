@@ -297,7 +297,12 @@ private:
 
 struct SamplingAxis {
   EntityId id;
-  BufferView coordinates;
+  // The depth coordinates, one per sample. Carried as a `CurveBuffer` so an
+  // append (#162/#198) extends the axis by adding a tail segment, with no copy
+  // of the existing coordinate block (ADR 0031). The common single-block case
+  // is set implicitly from a `BufferView`; `is_composite()` is false there and
+  // `as_single()` reaches the contiguous block.
+  CurveBuffer coordinates;
   DepthDomain domain{DepthDomain::measured_depth};
   std::string unit;
   AxisDirection direction{AxisDirection::increasing};

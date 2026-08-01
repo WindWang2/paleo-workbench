@@ -277,7 +277,6 @@ XlsxTableExporter::write_to_file(const WellLogDocument &document,
   // excel_max_rows_per_sheet - 2.
   constexpr std::uint64_t header_rows = 2;
   const std::uint64_t data_ceiling = excel_max_rows_per_sheet - header_rows;
-  std::uint64_t sheet_index = 0;
   for (const auto &p : projections) {
     if (p.kind() != TableKind::curves) {
       continue;
@@ -301,7 +300,6 @@ XlsxTableExporter::write_to_file(const WellLogDocument &document,
       std::string body;
       total_rows += build_worksheet_body(body, p, start, end, start);
       sheet_bodies.push_back(std::move(body));
-      ++sheet_index;
       ++part;
       if (start == end) {
         break; // 0-row projection: one empty sheet, then stop

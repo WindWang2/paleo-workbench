@@ -131,48 +131,20 @@ validate_null_bitmap(const NullBitmapView &nulls,
   return std::nullopt;
 }
 
-template <typename T>
-[[nodiscard]] double load_as_double(const BufferView &buffer,
-                                    std::uint64_t index) noexcept {
-  T value{};
-  std::memcpy(&value, buffer.data() + index * buffer.stride_bytes(), sizeof(T));
-  return static_cast<double>(value);
-}
-
-[[nodiscard]] double load_as_double(const BufferView &buffer,
-                                    std::uint64_t index) noexcept {
-  switch (buffer.scalar_type()) {
-  case ScalarType::float32:
-    return load_as_double<float>(buffer, index);
-  case ScalarType::float64:
-    return load_as_double<double>(buffer, index);
-  case ScalarType::int16:
-    return load_as_double<std::int16_t>(buffer, index);
-  case ScalarType::int32:
-    return load_as_double<std::int32_t>(buffer, index);
-  case ScalarType::int64:
-    return load_as_double<std::int64_t>(buffer, index);
-  case ScalarType::uint8:
-    return load_as_double<std::uint8_t>(buffer, index);
-  case ScalarType::uint16:
-    return load_as_double<std::uint16_t>(buffer, index);
-  case ScalarType::uint32:
-    return load_as_double<std::uint32_t>(buffer, index);
-  case ScalarType::uint64:
-    return load_as_double<std::uint64_t>(buffer, index);
-  }
-  return std::numeric_limits<double>::quiet_NaN();
-}
-
-// CurveBuffer overload (#197): reads element `index` across a single-block or
-// composite curve buffer. Returns NaN for an out-of-range/null cell, matching
-// the single-block path's non-finite → missing-sample semantics.
+// Reads element `index` from a single-block or composite curve buffer. Returns
+// NaN for an out-of-range/null cell, matching the non-finite → missing-sample
+// semantics used by the missing-sample scan and the selection row mappers.
 [[nodiscard]] double load_as_double(const CurveBuffer &buffer,
                                     std::uint64_t index) noexcept {
   const auto v = buffer.value_as_double(index);
   return v.value_or(std::numeric_limits<double>::quiet_NaN());
 }
 
+// Type-exact monotone check on a single contiguous coordinate block. Compares
+// the raw scalar values (not doubles) so an integer axis whose values differ
+// only outside double precision is still checked exactly — e.g. uint64 values
+// 2^53+1 and 2^53 are distinct integers but equal as doubles; the double path
+// would hide that disorder (regression-tested in session_submission_test).
 template <typename T>
 [[nodiscard]] bool axis_is_ordered(const BufferView &coordinates,
                                    AxisDirection direction) noexcept {
@@ -205,26 +177,59 @@ template <typename T>
   return true;
 }
 
+// Checks the axis coordinates are monotone in the declared direction. A
+// single-block axis (the common case) is checked type-exactly via the template
+// above so integer precision is preserved. A composite (multi-segment) axis —
+// the append case (#198) — is checked by walking the concatenation through
+// `value_as_double`: coordinates are overwhelmingly floating-point, and the
+// append's own validation guarantees tail continuity against the existing
+// direction, so double precision across the segment boundary is acceptable.
 [[nodiscard]] bool axis_is_ordered(const SamplingAxis &axis) noexcept {
-  switch (axis.coordinates.scalar_type()) {
+  const auto &coordinates = axis.coordinates;
+  if (coordinates.is_composite()) {
+    const auto length = coordinates.length();
+    if (length == 0) {
+      return false;
+    }
+    auto previous = coordinates.value_as_double(0);
+    if (!previous.has_value() || !std::isfinite(*previous)) {
+      return false;
+    }
+    for (std::uint64_t index = 1; index < length; ++index) {
+      const auto current = coordinates.value_as_double(index);
+      if (!current.has_value() || !std::isfinite(*current)) {
+        return false;
+      }
+      const auto ordered = axis.direction == AxisDirection::increasing
+                               ? *current >= *previous
+                               : *current <= *previous;
+      if (!ordered) {
+        return false;
+      }
+      previous = current;
+    }
+    return true;
+  }
+  const auto &block = coordinates.as_single();
+  switch (block.scalar_type()) {
   case ScalarType::float32:
-    return axis_is_ordered<float>(axis.coordinates, axis.direction);
+    return axis_is_ordered<float>(block, axis.direction);
   case ScalarType::float64:
-    return axis_is_ordered<double>(axis.coordinates, axis.direction);
+    return axis_is_ordered<double>(block, axis.direction);
   case ScalarType::int16:
-    return axis_is_ordered<std::int16_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::int16_t>(block, axis.direction);
   case ScalarType::int32:
-    return axis_is_ordered<std::int32_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::int32_t>(block, axis.direction);
   case ScalarType::int64:
-    return axis_is_ordered<std::int64_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::int64_t>(block, axis.direction);
   case ScalarType::uint8:
-    return axis_is_ordered<std::uint8_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::uint8_t>(block, axis.direction);
   case ScalarType::uint16:
-    return axis_is_ordered<std::uint16_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::uint16_t>(block, axis.direction);
   case ScalarType::uint32:
-    return axis_is_ordered<std::uint32_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::uint32_t>(block, axis.direction);
   case ScalarType::uint64:
-    return axis_is_ordered<std::uint64_t>(axis.coordinates, axis.direction);
+    return axis_is_ordered<std::uint64_t>(block, axis.direction);
   }
   return false;
 }
@@ -478,7 +483,7 @@ validate_document(const WellLogDocument &document) {
 // `depth` (decreasing axis). Returns `length` when `depth` is beyond the last
 // coordinate. Used for the selection's `first_row`.
 [[nodiscard]] std::uint64_t
-first_row_at_depth(const BufferView &coordinates, AxisDirection direction,
+first_row_at_depth(const CurveBuffer &coordinates, AxisDirection direction,
                    double depth) noexcept {
   const auto length = coordinates.length();
   if (length == 0) {
@@ -504,7 +509,7 @@ first_row_at_depth(const BufferView &coordinates, AxisDirection direction,
 // `depth` (decreasing axis). Returns `length` when `depth` is at/ beyond the
 // last coordinate. Used for the selection's exclusive `last_row`.
 [[nodiscard]] std::uint64_t
-last_row_after_depth(const BufferView &coordinates, AxisDirection direction,
+last_row_after_depth(const CurveBuffer &coordinates, AxisDirection direction,
                      double depth) noexcept {
   const auto length = coordinates.length();
   if (length == 0) {
@@ -534,7 +539,7 @@ struct RowSpan {
   std::uint64_t first{};
   std::uint64_t last{};
 };
-[[nodiscard]] RowSpan rows_for_range(const BufferView &coordinates,
+[[nodiscard]] RowSpan rows_for_range(const CurveBuffer &coordinates,
                                      AxisDirection direction,
                                      SelectionDepthRange range) noexcept {
   const auto length = coordinates.length();
@@ -558,7 +563,7 @@ struct RowSpan {
 // zero-length span (`first == last`) yields the coordinate at `first` for both
 // ends.
 [[nodiscard]] SelectionDepthRange
-range_for_rows(const BufferView &coordinates, std::uint64_t first_row,
+range_for_rows(const CurveBuffer &coordinates, std::uint64_t first_row,
                std::uint64_t last_row) noexcept {
   const auto length = coordinates.length();
   const auto clamped_first =
@@ -1311,6 +1316,7 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
                            .derived_bytes = 0,
                            .maximum_derived_bytes = maximum_derived_bytes,
                            .pyramids = {},
+                           .image_pyramids = {},
                        });
       impl_->lod_tasks.push_back(std::move(task));
       ++impl_->next_lod_generation;
@@ -1955,6 +1961,341 @@ WellLogSession::execute(const ClearSelectionCommand &command) {
         .document_revision = revision,
         .asynchronous_preparation_started = false,
         .diagnostic_id = std::nullopt,
+    };
+  } catch (...) {
+    return Error{
+        .code = ErrorCode::internal_error,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::internal_error,
+        .arguments = {},
+    };
+  }
+}
+
+// --- AppendBatchCommand (#198, ADR 0031) ------------------------------------
+//
+// Atomically appends a batch of curve tail-blocks to an existing document,
+// producing one new Document Revision from the whole batch (or failing the
+// whole batch). Old data blocks stay immutable and are NOT re-copied: each
+// appended tail becomes a new segment on the curve's/axis's composite buffer,
+// the existing segments retained via their SharedOwners. The session rejects
+// an append whose declared revision is not strictly greater than the current
+// (monotonic revision gate). Out-of-order and historical backfill are rejected
+// — those require an explicit Replace/Patch.
+
+// Gathers the existing physical segments of a CurveBuffer in order: the single
+// block, or each composite segment. Used to rebuild a composite spanning the
+// existing data plus a new tail, with no contiguous copy of the old data.
+[[nodiscard]] std::vector<BufferView>
+existing_segments(const CurveBuffer &buffer) {
+  if (buffer.is_composite()) {
+    const auto segs = buffer.segments();
+    return {segs.begin(), segs.end()};
+  }
+  return {buffer.as_single()};
+}
+
+// Tail-continuity + monotonicity check for an append. The tail coordinates must
+// (a) be monotone in the axis direction with no non-finite values, and (b)
+// continue the existing axis: the tail's first coordinate must stand in the
+// declared direction relative to the existing last coordinate (increasing →
+// tail.first >= existing.last; decreasing → tail.first <= existing.last). An
+// out-of-order tail (the next sample would step backward) or a historical
+// backfill (tail starts before the existing end) fails here. Coordinates are
+// compared as doubles — append coordinates are depths (floating-point); integer
+// precision across the segment boundary is not a concern for an append.
+[[nodiscard]] bool tail_continues_axis(const CurveBuffer &existing_coords,
+                                       const BufferView &tail_coordinates,
+                                       AxisDirection direction) noexcept {
+  const auto existing_length = existing_coords.length();
+  const auto tail_length = tail_coordinates.length();
+  if (tail_length == 0) {
+    return false;
+  }
+  // Tail must itself be monotone + finite in the declared direction.
+  auto previous = tail_coordinates.value_as_double(0);
+  if (!previous.has_value() || !std::isfinite(*previous)) {
+    return false;
+  }
+  for (std::uint64_t index = 1; index < tail_length; ++index) {
+    const auto current = tail_coordinates.value_as_double(index);
+    if (!current.has_value() || !std::isfinite(*current)) {
+      return false;
+    }
+    const auto ordered = direction == AxisDirection::increasing
+                             ? *current >= *previous
+                             : *current <= *previous;
+    if (!ordered) {
+      return false;
+    }
+    previous = current;
+  }
+  // Continuity against the existing axis end (only when the axis is non-empty;
+  // an empty axis — impossible for a valid document — would accept any tail).
+  if (existing_length == 0) {
+    return true;
+  }
+  const auto existing_last = existing_coords.value_as_double(existing_length - 1);
+  const auto tail_first = tail_coordinates.value_as_double(0);
+  if (!existing_last.has_value() || !tail_first.has_value()) {
+    return false;
+  }
+  return direction == AxisDirection::increasing
+             ? *tail_first >= *existing_last
+             : *tail_first <= *existing_last;
+}
+
+// Append-failure error builders. Each reuses the closest existing stable
+// code/message so a caller distinguishes a missing document, a monotonic
+// revision clash, a structural tail mismatch, and a direction/continuity
+// violation — never a single opaque code (architecture.md §2 Result/Error).
+[[nodiscard]] Error append_document_missing(EntityId document_id) {
+  return Error{
+      .code = ErrorCode::document_not_found,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::presentation_document_missing,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] Error append_revision_not_monotonic(EntityId document_id) {
+  // A revision clash is a document-structure violation (the host raced or
+  // mis-stated the base revision); invalid_document is the closest stable code.
+  return Error{
+      .code = ErrorCode::invalid_document,
+      .severity = Severity::error,
+      .entity_id = document_id,
+      .message = MessageKey::document_structure_invalid,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] Error append_curve_missing(EntityId curve_id) {
+  return Error{
+      .code = ErrorCode::missing_sampling_axis,
+      .severity = Severity::error,
+      .entity_id = curve_id,
+      .message = MessageKey::sampling_axis_missing,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] Error append_tail_mismatch(EntityId entity_id) {
+  return Error{
+      .code = ErrorCode::length_mismatch,
+      .severity = Severity::error,
+      .entity_id = entity_id,
+      .message = MessageKey::curve_length_mismatch,
+      .arguments = {},
+  };
+}
+
+[[nodiscard]] Error append_tail_direction(EntityId axis_id) {
+  return Error{
+      .code = ErrorCode::invalid_sampling_axis,
+      .severity = Severity::error,
+      .entity_id = axis_id,
+      .message = MessageKey::sampling_axis_direction_invalid,
+      .arguments = {},
+  };
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const AppendBatchCommand &command) {
+  try {
+    if (command.blocks.empty()) {
+      // An empty batch is a no-op: succeed at the current revision without
+      // producing a new one (no state change, no event).
+      const auto document = impl_->documents.find(command.document_id);
+      if (document == impl_->documents.end()) {
+        return append_document_missing(command.document_id);
+      }
+      return CommandReceipt{
+          .state_version = impl_->state_version,
+          .document_id = command.document_id,
+          .document_revision = document->second->revision(),
+          .asynchronous_preparation_started = false,
+          .diagnostic_id = std::nullopt,
+      };
+    }
+
+    const auto document_entry = impl_->documents.find(command.document_id);
+    if (document_entry == impl_->documents.end()) {
+      return append_document_missing(command.document_id);
+    }
+    const auto &current = *document_entry->second;
+    const auto current_revision = current.revision();
+    // Monotonic revision gate: the declared target must be strictly greater
+    // than the document's current revision. SetDocumentCommand blindly
+    // replaces; append refuses a stale/equal revision so a racing host cannot
+    // silently clobber a newer append.
+    if (command.target_revision.value <= current_revision.value) {
+      return append_revision_not_monotonic(command.document_id);
+    }
+
+    // --- Validate the whole batch before touching any state (atomicity). ---
+    // Stage the rebuilt curves/axes keyed by id so the commit rebuild is a
+    // lookup. A failure here returns an error and leaves the session unchanged.
+    struct RebuiltCurve {
+      Curve curve;
+    };
+    struct RebuiltAxis {
+      SamplingAxis axis;
+    };
+    std::unordered_map<EntityId, RebuiltAxis, EntityIdHash> rebuilt_axes;
+    std::unordered_map<EntityId, RebuiltCurve, EntityIdHash> rebuilt_curves;
+
+    for (const auto &block : command.blocks) {
+      // Resolve the existing curve + its sampling axis on the current document.
+      const Curve *existing_curve = nullptr;
+      for (const auto &curve : current.curves()) {
+        if (curve.id == block.curve_id) {
+          existing_curve = &curve;
+          break;
+        }
+      }
+      if (existing_curve == nullptr) {
+        return append_curve_missing(block.curve_id);
+      }
+      if (existing_curve->sampling_axis_id != block.sampling_axis_id) {
+        return append_tail_mismatch(block.curve_id);
+      }
+      const auto *axis = find_axis(current, block.sampling_axis_id);
+      if (axis == nullptr) {
+        return append_curve_missing(block.sampling_axis_id);
+      }
+
+      // Tail buffers must each be valid (owner + non-empty data + stride).
+      if (const auto r = required_bytes(block.tail_coordinates); !r) {
+        return r.error();
+      }
+      if (const auto r = required_bytes(block.tail_values); !r) {
+        return r.error();
+      }
+      // Tail coordinate/value lengths must match each other.
+      if (block.tail_coordinates.length() != block.tail_values.length()) {
+        return append_tail_mismatch(block.curve_id);
+      }
+      // Tail coordinate scalar type must match the existing axis (a mixed-type
+      // composite is rejected at CompositeBufferView build; catch it here with a
+      // structural error before composing).
+      if (block.tail_coordinates.scalar_type() !=
+          axis->coordinates.scalar_type()) {
+        return append_tail_mismatch(block.sampling_axis_id);
+      }
+      // Tail value scalar type must match the existing curve values.
+      if (block.tail_values.scalar_type() !=
+          existing_curve->values.scalar_type()) {
+        return append_tail_mismatch(block.curve_id);
+      }
+
+      // Tail continuity + monotonicity in the axis direction (rejects
+      // out-of-order and historical backfill).
+      const auto axis_coords_so_far =
+          rebuilt_axes.count(axis->id)
+              ? rebuilt_axes.at(axis->id).axis.coordinates
+              : axis->coordinates;
+      if (!tail_continues_axis(axis_coords_so_far, block.tail_coordinates,
+                               axis->direction)) {
+        return append_tail_direction(axis->id);
+      }
+
+      // --- Compose the no-copy composite buffers. ---
+      // Axis coordinates: existing segments + tail coordinate block.
+      auto coord_segments = existing_segments(axis_coords_so_far);
+      coord_segments.push_back(block.tail_coordinates);
+      auto coord_composite =
+          CompositeBufferView::from_segments(std::move(coord_segments));
+      if (coord_composite.empty()) {
+        return append_tail_mismatch(block.sampling_axis_id);
+      }
+
+      // Curve values: existing segments + tail value block.
+      const auto curve_values_so_far =
+          rebuilt_curves.count(existing_curve->id)
+              ? rebuilt_curves.at(existing_curve->id).curve.values
+              : existing_curve->values;
+      auto value_segments = existing_segments(curve_values_so_far);
+      value_segments.push_back(block.tail_values);
+      auto value_composite =
+          CompositeBufferView::from_segments(std::move(value_segments));
+      if (value_composite.empty()) {
+        return append_tail_mismatch(block.curve_id);
+      }
+
+      // Stage the rebuilt axis + curve (preserving all metadata; only the
+      // buffers change). A second block on the same axis/curve composes against
+      // the staged composite, so a multi-block batch on one curve appends in
+      // order.
+      SamplingAxis rebuilt_axis = *axis;
+      rebuilt_axis.coordinates = CurveBuffer(coord_composite);
+      rebuilt_axes[axis->id] = RebuiltAxis{.axis = std::move(rebuilt_axis)};
+
+      Curve rebuilt_curve = *existing_curve;
+      rebuilt_curve.values = CurveBuffer(value_composite);
+      rebuilt_curves[existing_curve->id] =
+          RebuiltCurve{.curve = std::move(rebuilt_curve)};
+    }
+
+    // --- Atomic commit: rebuild the document at the target revision. ---
+    // Copy every entity from the current document into a fresh builder at the
+    // new revision, substituting the rebuilt (composite-buffer) axes/curves.
+    // No old data block is re-copied — the composite buffers reference them
+    // in place via their SharedOwners.
+    WellLogDocumentBuilder builder(current.id(), command.target_revision);
+    for (const auto &axis : current.sampling_axes()) {
+      const auto it = rebuilt_axes.find(axis.id);
+      builder.add_sampling_axis(it == rebuilt_axes.end() ? axis : it->second.axis);
+    }
+    for (const auto &curve : current.curves()) {
+      const auto it = rebuilt_curves.find(curve.id);
+      builder.add_curve(it == rebuilt_curves.end() ? curve : it->second.curve);
+    }
+    for (const auto &interval : current.intervals()) {
+      builder.add_interval(interval);
+    }
+    for (const auto &marker : current.markers()) {
+      builder.add_marker(marker);
+    }
+    for (const auto &symbol : current.symbols()) {
+      builder.add_symbol(symbol);
+    }
+    for (const auto &image : current.image_sources()) {
+      builder.add_image_source(image);
+    }
+    for (const auto &annotation : current.annotations()) {
+      builder.add_annotation(annotation);
+    }
+    for (const auto &custom : current.custom_sources()) {
+      builder.add_custom_source(custom);
+    }
+
+    // Delegate to the existing SetDocumentCommand commit path: it re-validates
+    // the rebuilt document (catching any inconsistency), rebuilds the LOD,
+    // remaps/invalidates the selection, clears stale viewports/scenes, and
+    // publishes the documents_changed event at the new revision.
+    auto appended = builder.build();
+    if (appended.id().is_nil()) {
+      // Builder allocation failure (allocation_failed flag is internal to the
+      // builder; build() returns a default document on failure).
+      return Error{
+          .code = ErrorCode::resource_exhausted,
+          .severity = Severity::error,
+          .entity_id = command.document_id,
+          .message = MessageKey::resource_exhausted,
+          .arguments = {},
+      };
+    }
+    return execute(SetDocumentCommand{std::move(appended)});
+  } catch (const std::bad_alloc &) {
+    return Error{
+        .code = ErrorCode::resource_exhausted,
+        .severity = Severity::error,
+        .entity_id = command.document_id,
+        .message = MessageKey::resource_exhausted,
+        .arguments = {},
     };
   } catch (...) {
     return Error{
