@@ -74,8 +74,7 @@ constexpr std::uint32_t default_frame_pixel_height = 2160;
 
 // CurveBuffer overload (#197): sums the required bytes across the single
 // block or each composite segment. Each segment is validated independently.
-[[nodiscard]] Result<std::uint64_t>
-required_bytes(const CurveBuffer &buffer) {
+[[nodiscard]] Result<std::uint64_t> required_bytes(const CurveBuffer &buffer) {
   if (buffer.is_composite()) {
     std::uint64_t total = 0;
     for (const auto &segment : buffer.segments()) {
@@ -377,8 +376,8 @@ validate_document(const WellLogDocument &document) {
       };
     }
     if (!std::isfinite(symbol.reference_depth) ||
-        !std::isfinite(symbol.track_fraction) ||
-        symbol.track_fraction < 0.0 || symbol.track_fraction > 1.0) {
+        !std::isfinite(symbol.track_fraction) || symbol.track_fraction < 0.0 ||
+        symbol.track_fraction > 1.0) {
       return Error{
           .code = ErrorCode::invalid_document,
           .entity_id = symbol.id,
@@ -478,14 +477,15 @@ validate_document(const WellLogDocument &document) {
 // range maps to a half-open `[first_row, last_row)` span of axis rows. For an
 // increasing axis, `top` (smaller depth) is the lower index; for a decreasing
 // axis it is the higher index. The mapping is index-projection: it reads the
-// raw axis coordinates (no LOD, no interpolation) and clamps to the axis length.
+// raw axis coordinates (no LOD, no interpolation) and clamps to the axis
+// length.
 
 // Finds the first index whose coordinate is >= `depth` (increasing axis) or <=
 // `depth` (decreasing axis). Returns `length` when `depth` is beyond the last
 // coordinate. Used for the selection's `first_row`.
-[[nodiscard]] std::uint64_t
-first_row_at_depth(const CurveBuffer &coordinates, AxisDirection direction,
-                   double depth) noexcept {
+[[nodiscard]] std::uint64_t first_row_at_depth(const CurveBuffer &coordinates,
+                                               AxisDirection direction,
+                                               double depth) noexcept {
   const auto length = coordinates.length();
   if (length == 0) {
     return 0;
@@ -509,9 +509,9 @@ first_row_at_depth(const CurveBuffer &coordinates, AxisDirection direction,
 // Finds the first index whose coordinate is > `depth` (increasing axis) or <
 // `depth` (decreasing axis). Returns `length` when `depth` is at/ beyond the
 // last coordinate. Used for the selection's exclusive `last_row`.
-[[nodiscard]] std::uint64_t
-last_row_after_depth(const CurveBuffer &coordinates, AxisDirection direction,
-                     double depth) noexcept {
+[[nodiscard]] std::uint64_t last_row_after_depth(const CurveBuffer &coordinates,
+                                                 AxisDirection direction,
+                                                 double depth) noexcept {
   const auto length = coordinates.length();
   if (length == 0) {
     return 0;
@@ -549,7 +549,8 @@ struct RowSpan {
   }
   if (direction == AxisDirection::increasing) {
     const auto first = first_row_at_depth(coordinates, direction, range.top);
-    const auto last = last_row_after_depth(coordinates, direction, range.bottom);
+    const auto last =
+        last_row_after_depth(coordinates, direction, range.bottom);
     return {first, std::max(first, last)};
   }
   const auto first = first_row_at_depth(coordinates, direction, range.bottom);
@@ -580,8 +581,8 @@ range_for_rows(const CurveBuffer &coordinates, std::uint64_t first_row,
 }
 
 // Locates a Sampling Axis on a document by id; returns nullptr when absent.
-[[nodiscard]] const SamplingAxis *
-find_axis(const WellLogDocument &document, EntityId axis_id) noexcept {
+[[nodiscard]] const SamplingAxis *find_axis(const WellLogDocument &document,
+                                            EntityId axis_id) noexcept {
   for (const auto &axis : document.sampling_axes()) {
     if (axis.id == axis_id) {
       return &axis;
@@ -684,7 +685,8 @@ struct FrameTask {
     ScenePresentation presentation,
     std::shared_ptr<const detail::ScenePreparer::CurveLodMap> pyramids,
     CurveLodQuery query,
-    std::shared_ptr<const detail::ScenePreparer::ImagePyramidMap> image_pyramids,
+    std::shared_ptr<const detail::ScenePreparer::ImagePyramidMap>
+        image_pyramids,
     ImagePyramidQuery image_query, std::shared_ptr<TextEngine> text_engine,
     std::mutex *text_engine_mutex) {
   auto state = std::make_shared<FrameTaskState>();
@@ -721,7 +723,7 @@ struct FrameTask {
               prepared = detail::ScenePreparer::prepare(
                   *document, presentation, *pyramids, query,
                   image_pyramids ? *image_pyramids
-                                  : detail::ScenePreparer::ImagePyramidMap{},
+                                 : detail::ScenePreparer::ImagePyramidMap{},
                   image_query, stop_token, text_engine.get());
             }
             if (stop_token.stop_requested()) {
@@ -829,9 +831,9 @@ struct WellLogSession::Impl {
     std::optional<SelectionState> selection;
   };
 
-  // A patch carries its explicit inverse edit list for auditability and future
-  // patch-level persistence. Snapshots make append undo exact as well: curve
-  // buffers are intentionally immutable and cannot be expressed as patch edits.
+  // A patch carries its explicit inverse edit list, as required by #203;
+  // snapshots make append undo exact because immutable curve buffers cannot be
+  // expressed as patch edits.
   struct HistoryEntry {
     SemanticState before;
     SemanticState after;
@@ -865,6 +867,11 @@ struct WellLogSession::Impl {
   std::unordered_map<EntityId, CrosshairState, EntityIdHash> crosshairs;
   std::unordered_map<EntityId, SelectionState, EntityIdHash> selections;
   std::unordered_map<EntityId, DocumentHistory, EntityIdHash> histories;
+  // execute_history stages the semantic state that SetDocumentCommand must
+  // restore before its notifications become observable. This keeps a history
+  // transition atomic for event observers.
+  std::unordered_map<EntityId, SemanticState, EntityIdHash>
+      pending_history_restores;
   // Per-document append viewport mode (#200): whether an AppendBatchCommand
   // preserves the current viewport (fixed, the absence/default) or advances its
   // bottom to the new tail depth (follow_latest).
@@ -886,7 +893,8 @@ struct WellLogSession::Impl {
   // per-curve pyramids here so the LOD worker can extend_tail them instead of
   // full-rebuilding. Cleared after the worker is created. Empty for a plain
   // SetDocumentCommand (full rebuild, as before).
-  std::unordered_map<EntityId, std::shared_ptr<const detail::ScenePreparer::CurveLodMap>,
+  std::unordered_map<EntityId,
+                     std::shared_ptr<const detail::ScenePreparer::CurveLodMap>,
                      EntityIdHash>
       pending_append_reuse;
   std::unordered_map<EntityId, std::uint64_t, EntityIdHash> frame_generations;
@@ -915,20 +923,6 @@ struct WellLogSession::Impl {
       state.selection = selection->second;
     }
     return state;
-  }
-
-  void restore_semantic_state(EntityId document_id,
-                              const SemanticState &state) {
-    if (state.presentation.has_value()) {
-      presentations.insert_or_assign(document_id, *state.presentation);
-    } else {
-      presentations.erase(document_id);
-    }
-    if (state.selection.has_value()) {
-      selections.insert_or_assign(document_id, *state.selection);
-    } else {
-      selections.erase(document_id);
-    }
   }
 
   void publish_history_changed(EntityId document_id,
@@ -1009,27 +1003,22 @@ struct WellLogSession::Impl {
   // sinks. Shared by publish_value_issues and publish_text_issues so the
   // reserve/emplace/push/event sequence lives in one place. Returns the id
   // assigned to the published diagnostic.
-  std::uint64_t publish_one_diagnostic(EntityId document_id,
-                                       DocumentRevision revision,
-                                       EntityId entity_id,
-                                       std::uint32_t occurrence_count,
-                                       DiagnosticCode code, MessageKey message,
-                                       ErrorCode error_code,
-                                       std::vector<ViewEvent> &notifications) noexcept {
+  std::uint64_t publish_one_diagnostic(
+      EntityId document_id, DocumentRevision revision, EntityId entity_id,
+      std::uint32_t occurrence_count, DiagnosticCode code, MessageKey message,
+      ErrorCode error_code, std::vector<ViewEvent> &notifications) noexcept {
     const auto diagnostic_id = next_diagnostic_id;
     diagnostics.reserve(diagnostics.size() + 1);
     diagnostic_errors.reserve(diagnostic_errors.size() + 1);
     events.reserve(events.size() + 1);
     notifications.reserve(notifications.size() + 1);
-    diagnostic_errors.emplace(
-        diagnostic_id,
-        Error{
-            .code = error_code,
-            .severity = Severity::warning,
-            .entity_id = entity_id,
-            .message = message,
-            .arguments = {},
-        });
+    diagnostic_errors.emplace(diagnostic_id, Error{
+                                                 .code = error_code,
+                                                 .severity = Severity::warning,
+                                                 .entity_id = entity_id,
+                                                 .message = message,
+                                                 .arguments = {},
+                                             });
     ++state_version;
     diagnostics.push_back(Diagnostic{
         .id = diagnostic_id,
@@ -1276,11 +1265,11 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
               output.cancelled = true;
               break;
             }
-            auto image_pyramid = ImagePyramid::build(image, image_pyramid_options,
-                                                    stop_token);
+            auto image_pyramid =
+                ImagePyramid::build(image, image_pyramid_options, stop_token);
             if (!image_pyramid.has_value()) {
-              output.cancelled = image_pyramid.error().code ==
-                                 ErrorCode::operation_cancelled;
+              output.cancelled =
+                  image_pyramid.error().code == ErrorCode::operation_cancelled;
               if (!output.cancelled) {
                 // Non-fatal: record the skipped image so poll_async publishes a
                 // Diagnostic (qsp §7: degradation must be observable), then
@@ -1398,48 +1387,89 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
     impl_->viewport_defaults.erase(document_id);
     impl_->crosshairs.erase(document_id);
     impl_->frame_generations.erase(document_id);
-    // ADR 0024: a document replacement attempts to safely remap an existing
-    // selection onto the new revision's axis coordinates. If the selected axis
-    // survived and the depth range still falls within the new axis extent, the
-    // row span is recomputed against the new revision and the selection stays
-    // valid. Otherwise the selection is explicitly invalidated and a
-    // selection_invalidated event is published (the host must stop using it).
-    // The outcome event folds into the pending events at next_state_version.
-    if (const auto sel = impl_->selections.find(document_id);
-        sel != impl_->selections.end()) {
-      const auto axis = find_axis(*document, sel->second.sampling_axis_id);
-      if (axis != nullptr) {
-        const auto span = rows_for_range(axis->coordinates, axis->direction,
-                                         sel->second.reference_depth_range);
-        const auto axis_extent = range_for_rows(
-            axis->coordinates, 0, axis->coordinates.length());
-        // Keep the selection if it resolves to a non-empty span within the new
-        // axis extent; otherwise invalidate.
-        const auto within = span.last > span.first &&
-                            sel->second.reference_depth_range.top >=
-                                axis_extent.top - 1.0e-9 &&
-                            sel->second.reference_depth_range.bottom <=
-                                axis_extent.bottom + 1.0e-9;
-        if (within) {
-          sel->second.first_row = span.first;
-          sel->second.last_row = span.last;
-          sel->second.document_revision = revision;
-          sel->second.valid = true;
+    const auto history_restore =
+        impl_->pending_history_restores.find(document_id);
+    if (history_restore != impl_->pending_history_restores.end()) {
+      // History transitions restore layout and selection before any observer is
+      // told about the replacement. SetDocumentCommand remains the single
+      // revision/invalidation path, while these saved semantic values prevent
+      // a transient cleared presentation or remapped selection from escaping.
+      if (history_restore->second.presentation.has_value()) {
+        impl_->presentations.insert_or_assign(
+            document_id, *history_restore->second.presentation);
+        pending_events.push_back(ViewEvent{
+            .kind = ViewEventKind::presentation_changed,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        });
+      }
+      if (history_restore->second.selection.has_value()) {
+        impl_->selections.insert_or_assign(document_id,
+                                           *history_restore->second.selection);
+        pending_events.push_back(ViewEvent{
+            .kind = history_restore->second.selection->valid
+                        ? ViewEventKind::selection_changed
+                        : ViewEventKind::selection_invalidated,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        });
+      } else if (impl_->selections.erase(document_id) != 0) {
+        // ClearSelectionCommand uses selection_changed for an empty Selection
+        // Set too; match that observable convention for a restored empty state.
+        pending_events.push_back(ViewEvent{
+            .kind = ViewEventKind::selection_changed,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        });
+      }
+    } else {
+      // ADR 0024: a document replacement attempts to safely remap an existing
+      // selection onto the new revision's axis coordinates. If the selected
+      // axis survived and the depth range still falls within the new axis
+      // extent, the row span is recomputed against the new revision and the
+      // selection stays valid. Otherwise the selection is explicitly
+      // invalidated and a selection_invalidated event is published (the host
+      // must stop using it). The outcome event folds into the pending events at
+      // next_state_version.
+      if (const auto sel = impl_->selections.find(document_id);
+          sel != impl_->selections.end()) {
+        const auto axis = find_axis(*document, sel->second.sampling_axis_id);
+        if (axis != nullptr) {
+          const auto span = rows_for_range(axis->coordinates, axis->direction,
+                                           sel->second.reference_depth_range);
+          const auto axis_extent =
+              range_for_rows(axis->coordinates, 0, axis->coordinates.length());
+          // Keep the selection if it resolves to a non-empty span within the
+          // new axis extent; otherwise invalidate.
+          const auto within = span.last > span.first &&
+                              sel->second.reference_depth_range.top >=
+                                  axis_extent.top - 1.0e-9 &&
+                              sel->second.reference_depth_range.bottom <=
+                                  axis_extent.bottom + 1.0e-9;
+          if (within) {
+            sel->second.first_row = span.first;
+            sel->second.last_row = span.last;
+            sel->second.document_revision = revision;
+            sel->second.valid = true;
+          } else {
+            sel->second.valid = false;
+            sel->second.document_revision = revision;
+          }
         } else {
           sel->second.valid = false;
           sel->second.document_revision = revision;
         }
-      } else {
-        sel->second.valid = false;
-        sel->second.document_revision = revision;
+        pending_events.push_back(ViewEvent{
+            .kind = sel->second.valid ? ViewEventKind::selection_changed
+                                      : ViewEventKind::selection_invalidated,
+            .state_version = next_state_version,
+            .document_id = document_id,
+            .document_revision = revision,
+        });
       }
-      pending_events.push_back(ViewEvent{
-          .kind = sel->second.valid ? ViewEventKind::selection_changed
-                                    : ViewEventKind::selection_invalidated,
-          .state_version = next_state_version,
-          .document_id = document_id,
-          .document_revision = revision,
-      });
     }
     if (asynchronous) {
       impl_->preparations.insert_or_assign(
@@ -1638,9 +1668,8 @@ WellLogSession::execute(const SetPresentationCommand &command) {
           impl_->text_engine == nullptr
               ? std::unique_lock<std::mutex>{}
               : std::unique_lock<std::mutex>{impl_->text_engine_mutex};
-      prepared = detail::ScenePreparer::prepare(*document->second,
-                                                command.presentation,
-                                                impl_->text_engine.get());
+      prepared = detail::ScenePreparer::prepare(
+          *document->second, command.presentation, impl_->text_engine.get());
     }
     if (!prepared) {
       return prepared.error();
@@ -1961,11 +1990,9 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
 // `document_id` over `axis_id` from either a depth range or a row span, stores
 // it, bumps the version, and publishes a selection_changed event. Rejects when
 // the document or axis is unknown, or the range/span is invalid.
-[[nodiscard]] Result<CommandReceipt>
-WellLogSession::apply_selection(EntityId document_id, EntityId axis_id,
-                                SelectionDepthRange range,
-                                std::uint64_t first_row,
-                                std::uint64_t last_row, bool from_rows) {
+[[nodiscard]] Result<CommandReceipt> WellLogSession::apply_selection(
+    EntityId document_id, EntityId axis_id, SelectionDepthRange range,
+    std::uint64_t first_row, std::uint64_t last_row, bool from_rows) {
   try {
     const auto document = impl_->documents.find(document_id);
     if (document == impl_->documents.end()) {
@@ -1979,31 +2006,28 @@ WellLogSession::apply_selection(EntityId document_id, EntityId axis_id,
     if (from_rows) {
       // Resolve rows → range, then recompute the row span from that range so
       // the stored span is canonical (clamped, monotone).
-      range =
-          range_for_rows(axis->coordinates, first_row, last_row);
+      range = range_for_rows(axis->coordinates, first_row, last_row);
     }
     if (!valid_selection_range(range)) {
       return selection_invalid(document_id);
     }
-    const auto span =
-        rows_for_range(axis->coordinates, axis->direction, range);
+    const auto span = rows_for_range(axis->coordinates, axis->direction, range);
     if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
       return selection_invalid(document_id);
     }
     const auto next_state_version = impl_->state_version + 1;
     impl_->events.reserve(impl_->events.size() + 1);
     impl_->selections.reserve(impl_->selections.size() + 1);
-    impl_->selections.insert_or_assign(
-        document_id,
-        SelectionState{
-            .document_id = document_id,
-            .sampling_axis_id = axis_id,
-            .reference_depth_range = range,
-            .first_row = span.first,
-            .last_row = span.last,
-            .document_revision = revision,
-            .valid = true,
-        });
+    impl_->selections.insert_or_assign(document_id,
+                                       SelectionState{
+                                           .document_id = document_id,
+                                           .sampling_axis_id = axis_id,
+                                           .reference_depth_range = range,
+                                           .first_row = span.first,
+                                           .last_row = span.last,
+                                           .document_revision = revision,
+                                           .valid = true,
+                                       });
     impl_->state_version = next_state_version;
     const auto event = ViewEvent{
         .kind = ViewEventKind::selection_changed,
@@ -2170,14 +2194,14 @@ existing_segments(const CurveBuffer &buffer) {
   if (existing_length == 0) {
     return true;
   }
-  const auto existing_last = existing_coords.value_as_double(existing_length - 1);
+  const auto existing_last =
+      existing_coords.value_as_double(existing_length - 1);
   const auto tail_first = tail_coordinates.value_as_double(0);
   if (!existing_last.has_value() || !tail_first.has_value()) {
     return false;
   }
-  return direction == AxisDirection::increasing
-             ? *tail_first >= *existing_last
-             : *tail_first <= *existing_last;
+  return direction == AxisDirection::increasing ? *tail_first >= *existing_last
+                                                : *tail_first <= *existing_last;
 }
 
 // Append-failure error builders. Each reuses the closest existing stable
@@ -2262,8 +2286,8 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
   if (rate_hz >= 1000) {
     return std::chrono::nanoseconds{1};
   }
-  return std::chrono::nanoseconds{
-      std::int64_t{1'000'000'000} / std::int64_t{rate_hz}};
+  return std::chrono::nanoseconds{std::int64_t{1'000'000'000} /
+                                  std::int64_t{rate_hz}};
 }
 
 // --- Document Patch helpers (#202/#158, ADR 0025) ---------------------------
@@ -2271,8 +2295,7 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
 // Extracts the EntityId from any patchable entity (every PatchableEntity
 // alternative has an `id` member named identically).
 [[nodiscard]] EntityId patch_entity_id(const PatchableEntity &entity) noexcept {
-  return std::visit(
-      [](const auto &e) -> EntityId { return e.id; }, entity);
+  return std::visit([](const auto &e) -> EntityId { return e.id; }, entity);
 }
 
 // True when `id` matches an entity in the document's interpretation collections
@@ -2283,8 +2306,8 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
     return std::any_of(span.begin(), span.end(),
                        [id](const auto &e) { return e.id == id; });
   };
-  return has(doc.intervals()) || has(doc.markers()) ||
-         has(doc.symbols()) || has(doc.annotations());
+  return has(doc.intervals()) || has(doc.markers()) || has(doc.symbols()) ||
+         has(doc.annotations());
 }
 
 // True when `id` matches a presentation layout entity (Track/Scale/CurveLayer).
@@ -2294,8 +2317,7 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
     return std::any_of(span.begin(), span.end(),
                        [id](const auto &e) { return e.id == id; });
   };
-  return has(pres.tracks()) || has(pres.scales()) ||
-         has(pres.curve_layers());
+  return has(pres.tracks()) || has(pres.scales()) || has(pres.curve_layers());
 }
 
 // Returns the current value for one patchable entity, whether it lives in the
@@ -2305,12 +2327,11 @@ coalesce_interval(std::uint32_t rate_hz) noexcept {
 [[nodiscard]] std::optional<PatchableEntity>
 patchable_entity_at(const WellLogDocument &document,
                     const ScenePresentation *presentation, EntityId id) {
-  const auto in_document = [id](const auto &entities)
-      -> std::optional<PatchableEntity> {
-    const auto found = std::find_if(entities.begin(), entities.end(),
-                                    [id](const auto &entity) {
-                                      return entity.id == id;
-                                    });
+  const auto in_document =
+      [id](const auto &entities) -> std::optional<PatchableEntity> {
+    const auto found =
+        std::find_if(entities.begin(), entities.end(),
+                     [id](const auto &entity) { return entity.id == id; });
     return found == entities.end() ? std::nullopt
                                    : std::optional<PatchableEntity>{*found};
   };
@@ -2355,12 +2376,13 @@ inverse_edits_for_patch(const DocumentPatch &patch,
   for (const auto &edit : patch.edits) {
     if (std::holds_alternative<UpsertEntity>(edit)) {
       const auto &upsert = std::get<UpsertEntity>(edit);
-      const auto previous =
-          patchable_entity_at(document, presentation, patch_entity_id(upsert.entity));
+      const auto previous = patchable_entity_at(document, presentation,
+                                                patch_entity_id(upsert.entity));
       if (previous.has_value()) {
         inverse.emplace_back(UpsertEntity{.entity = *previous});
       } else {
-        inverse.emplace_back(RemoveEntity{.id = patch_entity_id(upsert.entity)});
+        inverse.emplace_back(
+            RemoveEntity{.id = patch_entity_id(upsert.entity)});
       }
       continue;
     }
@@ -2469,8 +2491,8 @@ WellLogSession::execute(const AppendBatchCommand &command) {
     // accepted but not yet made visible.
     const auto interval = coalesce_interval(rate_hz);
     const auto now = std::chrono::steady_clock::now();
-    const auto due = !coalescer.has_last_flush ||
-                     now - coalescer.last_flush >= interval;
+    const auto due =
+        !coalescer.has_last_flush || now - coalescer.last_flush >= interval;
     if (due) {
       // Flush the staged batch as a single visible revision. Propagate the
       // Result directly — a validation failure (Error) is surfaced to the host,
@@ -2659,8 +2681,7 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         // The remove must target an existing entity (document or presentation).
         const auto in_doc = document_has_entity(current_doc, id);
         const auto in_pres =
-            has_presentation &&
-            presentation_has_entity(pres_entry->second, id);
+            has_presentation && presentation_has_entity(pres_entry->second, id);
         if (!in_doc && !in_pres) {
           // The remove targets no existing entity. document_not_found is the
           // closest stable code; document_structure_invalid message (not the
@@ -2697,7 +2718,8 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         .after = {},
         .inverse_edits = std::move(*inverse_edits),
     };
-    auto [history, inserted] = impl_->histories.try_emplace(command.document_id);
+    auto [history, inserted] =
+        impl_->histories.try_emplace(command.document_id);
     static_cast<void>(inserted);
     history->second.undo.reserve(history->second.undo.size() + 1);
     impl_->events.reserve(impl_->events.size() + 1);
@@ -2706,8 +2728,8 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     // Copy every untouched collection verbatim; for the patchable document
     // collections (intervals/markers/symbols/annotations), copy each entity
     // unless it is removed, and append upserts.
-    WellLogDocumentBuilder doc_builder(current_doc.id(),
-                                       DocumentRevision{current_revision.value + 1});
+    WellLogDocumentBuilder doc_builder(
+        current_doc.id(), DocumentRevision{current_revision.value + 1});
     for (const auto &axis : current_doc.sampling_axes()) {
       doc_builder.add_sampling_axis(axis);
     }
@@ -2747,8 +2769,8 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         doc_builder.add_annotation(annotation);
       }
     }
-    // Apply upserts — document entities go to the document builder, presentation
-    // entities to the presentation builder (built next).
+    // Apply upserts — document entities go to the document builder,
+    // presentation entities to the presentation builder (built next).
     bool presentation_upserts_present = false;
     for (const auto &edit : command.patch.edits) {
       if (std::holds_alternative<UpsertEntity>(edit)) {
@@ -2812,8 +2834,8 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
       // Apply presentation upserts.
       for (const auto &edit : command.patch.edits) {
         if (std::holds_alternative<UpsertEntity>(edit)) {
-          (void)upsert_presentation_entity(
-              pres_builder, std::get<UpsertEntity>(edit).entity);
+          (void)upsert_presentation_entity(pres_builder,
+                                           std::get<UpsertEntity>(edit).entity);
         }
       }
       patched_presentation = pres_builder.build();
@@ -2837,21 +2859,21 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     std::optional<CapturedViewport> captured_viewport;
     if (const auto vp = impl_->viewports.find(command.document_id);
         vp != impl_->viewports.end()) {
-      const auto ph =
-          impl_->viewport_pixel_heights.find(command.document_id);
+      const auto ph = impl_->viewport_pixel_heights.find(command.document_id);
       if (ph != impl_->viewport_pixel_heights.end() && ph->second != 0) {
-        captured_viewport =
-            CapturedViewport{.viewport = vp->second, .pixel_height = ph->second};
+        captured_viewport = CapturedViewport{.viewport = vp->second,
+                                             .pixel_height = ph->second};
       }
     }
     const auto captured_default =
         impl_->viewport_defaults.find(command.document_id) !=
                 impl_->viewport_defaults.end()
-            ? std::optional<DepthViewport>{
-                  impl_->viewport_defaults.at(command.document_id)}
+            ? std::optional<DepthViewport>{impl_->viewport_defaults.at(
+                  command.document_id)}
             : std::nullopt;
 
-    // --- Commit the patched document (reuses validation/LOD/selection remap). ---
+    // --- Commit the patched document (reuses validation/LOD/selection remap).
+    // ---
     auto patched_doc = doc_builder.build();
     if (patched_doc.id().is_nil()) {
       return Error{
@@ -2863,12 +2885,13 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
       };
     }
     // Stage the document's previously-built per-curve pyramids for incremental
-    // LOD reuse, mirroring AppendBatchCommand: a patch edits interpretation/layout
-    // entities and leaves the raw curves byte-identical, so the LOD worker should
-    // reuse the prior pyramids (architecture.md §7 minimal-closure rule) rather
-    // than full-rebuild every curve. The worker falls back to full-build if a
-    // reused pyramid's prefix was edited (it never is on the patch path - curves
-    // are immutable in place, ADR 0025), so this is always safe.
+    // LOD reuse, mirroring AppendBatchCommand: a patch edits
+    // interpretation/layout entities and leaves the raw curves byte-identical,
+    // so the LOD worker should reuse the prior pyramids (architecture.md §7
+    // minimal-closure rule) rather than full-rebuild every curve. The worker
+    // falls back to full-build if a reused pyramid's prefix was edited (it
+    // never is on the patch path - curves are immutable in place, ADR 0025), so
+    // this is always safe.
     if (const auto prep = impl_->preparations.find(command.document_id);
         prep != impl_->preparations.end() &&
         prep->second.state == PreparationState::ready &&
@@ -2876,17 +2899,16 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
         prep->second.pyramids != nullptr) {
       impl_->pending_append_reuse[command.document_id] = prep->second.pyramids;
     }
-    const auto commit =
-        execute(SetDocumentCommand{std::move(patched_doc)});
+    const auto commit = execute(SetDocumentCommand{std::move(patched_doc)});
     if (!commit.has_value()) {
       return commit;
     }
 
-    // Restore the patched presentation + viewport defaults so the LOD-completion
-    // frame task rebuilds the scene against the edited layout. The document
-    // commit cleared them. The viewport is preserved (a patch does not move the
-    // depth window — unlike an append, the edited depths are interpretation
-    // entities, not new samples).
+    // Restore the patched presentation + viewport defaults so the
+    // LOD-completion frame task rebuilds the scene against the edited layout.
+    // The document commit cleared them. The viewport is preserved (a patch does
+    // not move the depth window — unlike an append, the edited depths are
+    // interpretation entities, not new samples).
     if (patched_presentation.has_value()) {
       impl_->presentations.insert_or_assign(command.document_id,
                                             *patched_presentation);
@@ -2905,8 +2927,7 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
                                         captured_viewport->viewport);
       impl_->viewport_pixel_heights.insert_or_assign(
           command.document_id, captured_viewport->pixel_height);
-      if (impl_->state_version !=
-          std::numeric_limits<std::uint64_t>::max()) {
+      if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
         ++impl_->state_version;
         impl_->events.reserve(impl_->events.size() + 1);
         const auto event = ViewEvent{
@@ -2953,7 +2974,8 @@ Result<CommandReceipt> WellLogSession::execute(const RedoCommand &command) {
 }
 
 Result<CommandReceipt>
-WellLogSession::execute_history(EntityId document_id, HistoryDirection direction) {
+WellLogSession::execute_history(EntityId document_id,
+                                HistoryDirection direction) {
   try {
     if (!impl_->documents.contains(document_id)) {
       return append_document_missing(document_id);
@@ -2963,10 +2985,10 @@ WellLogSession::execute_history(EntityId document_id, HistoryDirection direction
       return history_empty(document_id);
     }
     auto &history = history_it->second;
-    auto &source = direction == HistoryDirection::undo ? history.undo
-                                                        : history.redo;
-    auto &destination = direction == HistoryDirection::undo ? history.redo
-                                                             : history.undo;
+    auto &source =
+        direction == HistoryDirection::undo ? history.undo : history.redo;
+    auto &destination =
+        direction == HistoryDirection::undo ? history.redo : history.undo;
     if (source.empty()) {
       return history_empty(document_id);
     }
@@ -2989,14 +3011,15 @@ WellLogSession::execute_history(EntityId document_id, HistoryDirection direction
     }
 
     // Re-enter through SetDocumentCommand so revision-scoped prepared work is
-    // cancelled/rebuilt and the Selection Set is remapped with the same rules
-    // as a normal commit. Restore the captured selection immediately after to
-    // preserve its exact semantic validity and revision at this history point.
+    // cancelled/rebuilt through the normal path. Stage the captured semantic
+    // state first; SetDocumentCommand restores it before publishing its events,
+    // so observers see one coherent history transition.
+    impl_->pending_history_restores.insert_or_assign(document_id, target);
     const auto restored = execute(SetDocumentCommand{*target.document});
+    impl_->pending_history_restores.erase(document_id);
     if (!restored.has_value()) {
       return restored;
     }
-    impl_->restore_semantic_state(document_id, target);
 
     auto entry = std::move(source.back());
     source.pop_back();
@@ -3102,8 +3125,8 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
         return append_tail_mismatch(block.curve_id);
       }
       // Tail coordinate scalar type must match the existing axis (a mixed-type
-      // composite is rejected at CompositeBufferView build; catch it here with a
-      // structural error before composing).
+      // composite is rejected at CompositeBufferView build; catch it here with
+      // a structural error before composing).
       if (block.tail_coordinates.scalar_type() !=
           axis->coordinates.scalar_type()) {
         return append_tail_mismatch(block.sampling_axis_id);
@@ -3120,8 +3143,9 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
       // axis/curve, so a multi-block batch on one curve appends in order.
       const auto staged_axis = rebuilt_axes.find(axis->id);
       const auto &axis_coords_so_far =
-          staged_axis == rebuilt_axes.end() ? axis->coordinates
-                                            : staged_axis->second.axis.coordinates;
+          staged_axis == rebuilt_axes.end()
+              ? axis->coordinates
+              : staged_axis->second.axis.coordinates;
       if (!tail_continues_axis(axis_coords_so_far, block.tail_coordinates,
                                axis->direction)) {
         return append_tail_direction(axis->id);
@@ -3139,10 +3163,9 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
 
       // Curve values: existing segments + tail value block.
       const auto staged_curve = rebuilt_curves.find(existing_curve->id);
-      const auto &curve_values_so_far =
-          staged_curve == rebuilt_curves.end()
-              ? existing_curve->values
-              : staged_curve->second.curve.values;
+      const auto &curve_values_so_far = staged_curve == rebuilt_curves.end()
+                                            ? existing_curve->values
+                                            : staged_curve->second.curve.values;
       auto value_segments = existing_segments(curve_values_so_far);
       value_segments.push_back(block.tail_values);
       auto value_composite =
@@ -3173,7 +3196,8 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
     WellLogDocumentBuilder builder(current.id(), command.target_revision);
     for (const auto &axis : current.sampling_axes()) {
       const auto it = rebuilt_axes.find(axis.id);
-      builder.add_sampling_axis(it == rebuilt_axes.end() ? axis : it->second.axis);
+      builder.add_sampling_axis(it == rebuilt_axes.end() ? axis
+                                                         : it->second.axis);
     }
     for (const auto &curve : current.curves()) {
       const auto it = rebuilt_curves.find(curve.id);
@@ -3223,7 +3247,8 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
         .after = {},
         .inverse_edits = {},
     };
-    auto [history, inserted] = impl_->histories.try_emplace(command.document_id);
+    auto [history, inserted] =
+        impl_->histories.try_emplace(command.document_id);
     static_cast<void>(inserted);
     history->second.undo.reserve(history->second.undo.size() + 1);
     impl_->events.reserve(impl_->events.size() + 1);
@@ -3256,31 +3281,29 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
     std::optional<CapturedViewport> captured_viewport;
     if (const auto vp = impl_->viewports.find(command.document_id);
         vp != impl_->viewports.end()) {
-      const auto ph =
-          impl_->viewport_pixel_heights.find(command.document_id);
+      const auto ph = impl_->viewport_pixel_heights.find(command.document_id);
       if (ph != impl_->viewport_pixel_heights.end() && ph->second != 0) {
-        captured_viewport =
-            CapturedViewport{.viewport = vp->second,
-                             .pixel_height = ph->second};
+        captured_viewport = CapturedViewport{.viewport = vp->second,
+                                             .pixel_height = ph->second};
       }
     }
     const auto captured_presentation =
-        impl_->presentations.find(command.document_id) != impl_->presentations.end()
-            ? std::optional<ScenePresentation>{
-                  impl_->presentations.at(command.document_id)}
+        impl_->presentations.find(command.document_id) !=
+                impl_->presentations.end()
+            ? std::optional<ScenePresentation>{impl_->presentations.at(
+                  command.document_id)}
             : std::nullopt;
     const auto captured_default =
         impl_->viewport_defaults.find(command.document_id) !=
                 impl_->viewport_defaults.end()
-            ? std::optional<DepthViewport>{
-                  impl_->viewport_defaults.at(command.document_id)}
+            ? std::optional<DepthViewport>{impl_->viewport_defaults.at(
+                  command.document_id)}
             : std::nullopt;
     const auto mode = impl_->append_viewport_modes.count(command.document_id)
                           ? impl_->append_viewport_modes.at(command.document_id)
                           : AppendViewportMode::fixed;
 
-    const auto commit =
-        execute(SetDocumentCommand{std::move(appended)});
+    const auto commit = execute(SetDocumentCommand{std::move(appended)});
     if (!commit.has_value()) {
       return commit;
     }
@@ -3346,8 +3369,7 @@ WellLogSession::commit_append_batch(const AppendBatchCommand &command) {
           command.document_id, captured_viewport->pixel_height);
       // Publish a viewport_changed event so the host/view observes the
       // post-append viewport (Fixed: unchanged; Follow-Latest: advanced).
-      if (impl_->state_version !=
-          std::numeric_limits<std::uint64_t>::max()) {
+      if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
         ++impl_->state_version;
         const auto event = ViewEvent{
             .kind = ViewEventKind::viewport_changed,
@@ -3761,9 +3783,8 @@ bool WellLogSession::can_redo(EntityId document_id) const noexcept {
 AppendViewportMode
 WellLogSession::append_viewport_mode(EntityId document_id) const noexcept {
   const auto found = impl_->append_viewport_modes.find(document_id);
-  return found == impl_->append_viewport_modes.end()
-             ? AppendViewportMode::fixed
-             : found->second;
+  return found == impl_->append_viewport_modes.end() ? AppendViewportMode::fixed
+                                                     : found->second;
 }
 
 void WellLogSession::set_append_viewport_mode(

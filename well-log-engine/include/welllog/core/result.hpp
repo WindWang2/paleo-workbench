@@ -35,10 +35,10 @@ enum class ErrorCode : std::uint16_t {
   // guessing by name/position, so it is rejected. Distinct from
   // invalid_document so a host can detect a stale-base patch specifically.
   patch_conflict,
+  diagnostic_warning,
   // An UndoCommand or RedoCommand found no entry in the requested history
   // direction (#203, ADR 0025).
   history_empty,
-  diagnostic_warning,
 };
 
 enum class Severity : std::uint8_t {
