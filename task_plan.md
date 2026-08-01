@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase W2（WellLogEngine #155 XLSX/XML/CSV）— Complete & Verified
+Phase W3（WellLogEngine #183 Manifest round-trip）— Complete & Verified
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -196,6 +196,22 @@ Phase W2（WellLogEngine #155 XLSX/XML/CSV）— Complete & Verified
 - [x] Spec：XML referenceDepth 共识派生（不再 over-fit axes().front()）；新增 `TableProjection::slice()` 选择导出路径（满足 "支持 Selection Set"）
 - [x] 记录 XLSX 内存上限为已知限制（§5.2 流式 follow-up）
 - **Status:** complete（commit `e663fdc`），34/34 green
+
+### Phase W3: #183 Manifest round-trip for ImageSource + CustomLayerSource
+
+`/implement` #183（ManifestCodec 对 ImageSource/CustomLayerSource 零代码 → 无法往返）。单 commit + 两轴 `/code-review` 修复。固定点 `8ebd35e`。
+
+#### W3.1: Commit 1 — manifest round-trip 补全
+- [x] write 补 imageSources（id/dims/pixelFormat/depths/dpi/source）+ customSources（id/contentRevision/4 primitive + clip），仅非空时输出
+- [x] read 补 optional_field + schema gate 放宽 + 重建两类实体
+- [x] `manifest_schema_version` 1→2；ADR 0042 限制在 manifest 层强制
+- [x] manifest-local helper（pixel_format_name/symbol_kind_name/number/boolean）+ `manifest_error(msg,code)` overload
+- **Status:** complete（commit `f52c257`）
+
+#### W3.2: Commit 2 — 两轴 /code-review 修复
+- [x] Standards：`primitive_vertex_count` 改镜像 scene 的 tessellated 计数（tri=3/quad=6/sym=24）；补 per-polyline(≥2,≤8192) + per-clip(≥3,≤8192) 点上限
+- [x] Spec：version gate 改接受 {1,2}（真前向兼容）；测试加固（triangle 全坐标 + symbol color + over-pixel/zero-dpi 负例 + version_gate 双向）
+- **Status:** complete（commit `3ed8ca6`），34/34 green
 
 ## Decisions Made
 

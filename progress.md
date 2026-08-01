@@ -97,6 +97,24 @@
 
 **下一步（可选）**：关闭 #155；merge spike-185 → main（main 仍无 `well-log-engine/`，spike-185 领先约 54 commit）。
 
+## Session: 2026-08-01（续 3）— #183 Manifest round-trip for ImageSource + CustomLayerSource
+
+`/implement` #183（自包含正确性缺口：ManifestCodec 对 ImageSource/CustomLayerSource 此前为零代码，文档携带这两类实体无法经 manifest 往返）。单 commit + 两轴 `/code-review` 修复。固定点 `8ebd35e`。
+
+| Phase | 内容 | 结果 |
+|-------|------|------|
+| W3.1 | ManifestCodec write/read 补全 ImageSource（id/dims/pixelFormat/depths/dpi/source identity）+ CustomLayerSource（id/contentRevision/4 种 primitive + clip path）；`manifest_schema_version` 1→2；ADR 0042 限制在 manifest 层强制（dims/pixels/dpi + primitives/vertices/non-empty）；新增 manifest-local `pixel_format_name`/`symbol_kind_name` 等 helper + `number`/`boolean`/`optional_field`/`manifest_error(msg,code)` overload；schema gate 放宽允许可选 imageSources/customSources 键。 | commit `f52c257` |
+| W3.2 | 两轴 `/code-review` 修复：(1) `primitive_vertex_count` 改为镜像 scene 的 tessellated 计数（tri=3/quad=6/sym=24/polyline=points），原几何计数（quad=4/sym=1）用同一 1<<20 上限但基数不同，会让超限输入漏过；(2) 补 per-polyline(≥2,≤8192) 与 per-clip(≥3,≤8192) 点上限；(3) version gate 改为接受 {1,2}（真前向兼容，v2 读 v1）；(4) 测试加固——triangle 全 3 点 6 坐标 + symbol color + quad origin/fill + over-pixel/zero-dpi 负例 + 重命名 version_gate 测试证双向。 | commit `3ed8ca6` |
+
+**验证**：34/34 headless green（manifest round-trip 测试 2→5 用例）。
+
+**#183 验收**：全部 6 条满足（write 全字段、read 等值重建、schema bump+旧版拒绝、ADR 0042 限制+invalid_image/invalid_custom_source、含 ≥1 image + ≥1 custom 全 primitive+clip 的往返测试）。明确延后：intervals/markers/symbols/annotations 序列化（同样被丢弃，独立 ticket）；PixelFormat/SymbolKind name helper 提升到 core；image_tile resolver（运行时路径，非 manifest）。
+
+**注意**：#156（PDF/SVG 导出）已由 #185-189 完成并落在 spike-185，本会话验证后跳过（避免重复实现）。
+
+**下一步（可选）**：关闭 #155/#183；merge spike-185 → main（领先约 56 commit）；下一个 ready 工单（#158 Document Patch+Undo、#162/#163 Arrow/append、#184 image pyramid）。
+
+
 
 
 
