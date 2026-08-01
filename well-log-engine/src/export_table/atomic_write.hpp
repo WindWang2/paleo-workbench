@@ -5,14 +5,14 @@
 // (atomic on POSIX). On any failure the temp file is removed. The producer
 // streams into an ostream so a million-row table never builds one giant string
 // in memory (constant-memory path, §5.2 / §10). Returns the path written or an
-// Error carrying path + stage (never raw data).
+// Error (architecture.md §2 / quality-security-performance.md §7: I/O failures
+// are internal_error; resource_exhausted is reserved for bad_alloc only —
+// matching the svg/pdf export siblings, NOT the manifest error code).
 
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <string>
-#include <system_error>
 
 #include <welllog/core/result.hpp>
 
@@ -29,25 +29,25 @@ namespace export_table {
 // to abort (the helper then removes the temp file and returns an error).
 using StreamProducer = std::function<bool(std::ostream &out)>;
 
-// Writes `producer`'s output to `target` atomically. `stage` labels the
-// failure stage on the returned Error (e.g. "csv-write", "xml-rename").
+// Writes `producer`'s output to `target` atomically. I/O failures (open,
+// flush, rename, mkdir) map to internal_error; bad_alloc thrown by the producer
+// maps to resource_exhausted. The temp file is cleaned on any failure.
 [[nodiscard]] inline Result<std::filesystem::path>
 write_file_atomic(const std::filesystem::path &target,
-                  const StreamProducer &producer, std::string_view stage) {
-  (void)stage; // labels the failure stage for caller-side logging (no Error
-               // field carries it today; reserved).
+                  const StreamProducer &producer) {
   namespace fs = std::filesystem;
   std::error_code ec;
   const auto parent = target.parent_path();
   const auto dir = parent.empty() ? fs::current_path(ec) : parent;
+  const auto io_error = Error{
+      .code = ErrorCode::internal_error,
+      .severity = Severity::error,
+      .entity_id = std::nullopt,
+      .message = MessageKey::internal_error,
+      .arguments = {},
+  };
   if (ec) {
-    return Error{
-        .code = ErrorCode::invalid_manifest,
-        .severity = Severity::error,
-        .entity_id = std::nullopt,
-        .message = MessageKey::manifest_invalid,
-        .arguments = {},
-    };
+    return io_error;
   }
   // Temp file: target + ".<pid>.tmp" in the same directory (same filesystem →
   // rename is atomic).
@@ -65,27 +65,15 @@ write_file_atomic(const std::filesystem::path &target,
     std::ofstream out(temp, std::ios::binary | std::ios::trunc);
     if (!out) {
       fs::remove(temp, ec);
-      return Error{
-          .code = ErrorCode::invalid_manifest,
-          .severity = Severity::error,
-          .entity_id = std::nullopt,
-          .message = MessageKey::manifest_invalid,
-          .arguments = {},
-      };
+      return io_error;
     }
     try {
       if (!producer(out)) {
         out.close();
         fs::remove(temp, ec);
-        return Error{
-            .code = ErrorCode::invalid_manifest,
-            .severity = Severity::error,
-            .entity_id = std::nullopt,
-            .message = MessageKey::manifest_invalid,
-            .arguments = {},
-        };
+        return io_error;
       }
-    } catch (...) {
+    } catch (const std::bad_alloc &) {
       out.close();
       fs::remove(temp, ec);
       return Error{
@@ -95,29 +83,21 @@ write_file_atomic(const std::filesystem::path &target,
           .message = MessageKey::resource_exhausted,
           .arguments = {},
       };
+    } catch (...) {
+      out.close();
+      fs::remove(temp, ec);
+      return io_error;
     }
     out.flush();
     if (!out) {
       fs::remove(temp, ec);
-      return Error{
-          .code = ErrorCode::invalid_manifest,
-          .severity = Severity::error,
-          .entity_id = std::nullopt,
-          .message = MessageKey::manifest_invalid,
-          .arguments = {},
-      };
+      return io_error;
     }
   }
   fs::rename(temp, target, ec);
   if (ec) {
     fs::remove(temp, ec);
-    return Error{
-        .code = ErrorCode::invalid_manifest,
-        .severity = Severity::error,
-        .entity_id = std::nullopt,
-        .message = MessageKey::manifest_invalid,
-        .arguments = {},
-    };
+    return io_error;
   }
   return target;
 }

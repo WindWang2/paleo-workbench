@@ -348,8 +348,7 @@ XlsxTableExporter::write_to_file(const WellLogDocument &document,
       [&](std::ostream &out) -> bool {
         out.write(archive.data(), static_cast<std::streamsize>(archive.size()));
         return static_cast<bool>(out);
-      },
-      "xlsx-write");
+      });
   if (!result.has_value()) {
     return result.error();
   }

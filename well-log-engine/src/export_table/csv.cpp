@@ -185,7 +185,7 @@ CsvTableExporter::write_to_file(const TableProjection &projection,
     rows = stream_csv(out, projection, options);
     return true;
   };
-  const auto result = write_file_atomic(path, producer, "csv-write");
+  const auto result = write_file_atomic(path, producer);
   if (!result.has_value()) {
     return result.error();
   }
@@ -206,10 +206,10 @@ CsvPackageExporter::write_to_directory(
   fs::create_directories(directory, ec);
   if (ec) {
     return Error{
-        .code = ErrorCode::invalid_manifest,
+        .code = ErrorCode::internal_error,
         .severity = Severity::error,
         .entity_id = std::nullopt,
-        .message = MessageKey::manifest_invalid,
+        .message = MessageKey::internal_error,
         .arguments = {},
     };
   }
@@ -236,8 +236,7 @@ CsvPackageExporter::write_to_directory(
         out.write(manifest_body.data(),
                   static_cast<std::streamsize>(manifest_body.size()));
         return static_cast<bool>(out);
-      },
-      "csv-manifest");
+      });
   if (!manifest_result.has_value()) {
     return manifest_result.error();
   }

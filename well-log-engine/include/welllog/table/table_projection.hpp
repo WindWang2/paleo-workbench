@@ -107,6 +107,17 @@ public:
   [[nodiscard]] TableCell cell(std::uint64_t row,
                                std::uint64_t column) const noexcept;
 
+  // Returns a projection over the half-open [first_row, last_row) row span of
+  // THIS projection, sharing its column metadata + identity (document id/
+  // revision/axis) and reading the SAME raw buffer (zero copy). A row r in the
+  // slice maps to row (first_row + r) in the source. The slice's row_count is
+  // (last_row - first_row), clamped to the source's bounds; an empty or
+  // out-of-range span yields a valid 0-row slice. Used by the table exporters
+  // to export a Phase-B Selection Set range ("支持完整表或 Selection Set") —
+  // slice the projection to the selection's [first_row,last_row) then export.
+  [[nodiscard]] TableProjection slice(std::uint64_t first_row,
+                                      std::uint64_t last_row) const noexcept;
+
 private:
   struct Impl;
   std::shared_ptr<const Impl> impl_;

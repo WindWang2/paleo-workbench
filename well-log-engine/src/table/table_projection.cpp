@@ -47,6 +47,11 @@ struct TableProjection::Impl {
   EntityId sampling_axis_id{};
   EntityId document_id{};
   DocumentRevision document_revision{};
+  // The visible row window over the source buffers: row r of THIS projection
+  // maps to source row (row_offset + r). A source projection has row_offset 0
+  // and row_count = axis length; a slice has row_offset = first_row and
+  // row_count = (last_row - first_row).
+  std::uint64_t row_offset{};
   std::uint64_t row_count{};
   std::vector<CurveColumn> columns;
   // Retains the source document for the projection's lifetime; the column
@@ -116,6 +121,8 @@ TableCell TableProjection::cell(std::uint64_t row,
   if (!impl_ || row >= impl_->row_count || col >= impl_->columns.size()) {
     return TableCell{std::nullopt};
   }
+  // Map the projection row through the slice offset to the source row.
+  const auto source_row = impl_->row_offset + row;
   const auto &column = impl_->columns[col];
   // make_curve_table sets `axis` on every column, so a built curves table never
   // has a null axis; the depth column is distinguished by `curve == nullptr`.
@@ -124,11 +131,28 @@ TableCell TableProjection::cell(std::uint64_t row,
   if (impl_->kind == TableKind::curves) {
     if (column.curve == nullptr) {
       // Depth/axis column — reads the axis coordinates.
-      return read_buffer_cell(column.axis->coordinates, NullBitmapView{}, row);
+      return read_buffer_cell(column.axis->coordinates, NullBitmapView{},
+                              source_row);
     }
-    return read_buffer_cell(column.curve->values, column.curve->nulls, row);
+    return read_buffer_cell(column.curve->values, column.curve->nulls,
+                            source_row);
   }
   return TableCell{std::nullopt};
+}
+
+TableProjection TableProjection::slice(std::uint64_t first_row,
+                                       std::uint64_t last_row) const noexcept {
+  // An empty/null source yields an empty slice.
+  if (!impl_ || impl_->row_count == 0) {
+    return TableProjection{};
+  }
+  // Clamp to [0, row_count]; normalize an inverted/empty span to a 0-row slice.
+  const auto clamped_first = first_row >= impl_->row_count ? impl_->row_count : first_row;
+  const auto clamped_last = last_row > impl_->row_count ? impl_->row_count : last_row;
+  auto sliced = std::make_shared<Impl>(*impl_);
+  sliced->row_offset = impl_->row_offset + clamped_first;
+  sliced->row_count = clamped_last > clamped_first ? (clamped_last - clamped_first) : 0;
+  return TableProjection{std::move(sliced)};
 }
 
 // Builds one curve table for an axis + the curves sharing it. A member of the

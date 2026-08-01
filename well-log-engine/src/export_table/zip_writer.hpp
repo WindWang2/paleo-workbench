@@ -6,11 +6,15 @@
 // directory record. Uses ZLIB for deflate compression and CRC-32. Only the
 // subset OOXML readers (Excel/LibreOffice/the test's inflate readback) need.
 //
-// Entries are buffered in memory (an XLSX workbook is small relative to the
-// row data, which is emitted compressed; for very large workbooks a streaming
-// zip-to-file would be a follow-up). The row streams themselves are written
-// per-entry, so the uncompressed worksheet text is never all held at once —
-// each entry's producer streams into a deflate buffer.
+// KNOWN LIMIT (table-and-export.md §5.2/§10 "流式/constant-memory"): the whole
+// archive is materialized in memory before the atomic write. The XLSX path
+// (xlsx.cpp) builds every worksheet body into memory, then serializes the full
+// zip into one std::string. This is O(total workbook size) in RAM — acceptable
+// for Phase-A table sizes, but NOT constant-memory for very large workbooks.
+// A streaming zip-to-file (deflate each worksheet incrementally, write local
+// headers + central dir as it goes) is the tracked follow-up. The
+// add_entry_streamed hook is retained for that future path but the current XLSX
+// writer does not use it.
 
 #include <cstdint>
 #include <functional>

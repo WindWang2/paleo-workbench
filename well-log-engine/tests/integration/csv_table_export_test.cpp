@@ -247,6 +247,52 @@ void empty_projection_writes_header_only() {
           "header is still written for 0 rows");
 }
 
+// Selection-Set export path (§7 / criterion "支持完整表或 Selection Set"):
+// slice a projection to a [first_row,last_row) span — as a Phase-B SelectionState
+// would — then export only that range. The slice shares the source's columns/
+// identity and reads the same raw buffer; row r of the slice maps to
+// first_row + r of the source.
+void selection_slice_exports_only_the_selected_rows() {
+  const auto tables = TableProjectionBuilder::from_document(make_document());
+  const TableProjection *axis_a = nullptr;
+  for (const auto &t : tables) {
+    if (t.sampling_axis_id() == axis_a_id) {
+      axis_a = &t;
+    }
+  }
+  require(axis_a != nullptr, "axis A must have a table");
+  require(axis_a->row_count() == 4, "axis-A source has 4 rows");
+  // Slice rows [1, 3) — a 2-row selection.
+  const auto sliced = axis_a->slice(1, 3);
+  require(sliced.row_count() == 2, "slice [1,3) must have 2 rows");
+  // Identity is preserved (exporter invalidation key).
+  require(sliced.document_id() == axis_a->document_id(),
+          "slice must carry the source document id");
+  require(sliced.document_revision() == axis_a->document_revision(),
+          "slice must carry the source revision");
+  // Slice row 0 → source row 1: DEPTH=1001, GR=null, RT=2.
+  const auto c0 = sliced.cell(0, 0);
+  require(!c0.null() && std::abs(c0.value.value_or(-1.0) - 1001.0) < 1.0e-9,
+          "slice row 0 depth must map to source row 1 (1001)");
+  const auto gr0 = sliced.cell(0, 1);
+  require(gr0.null(), "slice row 0 GR (source row 1) must be null");
+  // Export the slice — only 2 rows.
+  TempDir dir;
+  const auto target = dir.path / "sel.csv";
+  const auto r = CsvTableExporter::write_to_file(sliced, target);
+  require(r.has_value(), "slice CSV export must succeed");
+  require(r.value().exported_rows == 2, "slice export must write 2 rows");
+  const auto body = read_file(target);
+  // Source row 1's depth (1001) is present; source row 0's depth (1000) is not.
+  require(body.find("1001") != std::string::npos,
+          "slice must include the selected row's depth");
+  require(body.find("\n1000,") == std::string::npos,
+          "slice must NOT include rows outside the selection");
+  // Out-of-range / inverted slices are clamped safely.
+  require(axis_a->slice(10, 20).row_count() == 0, "OOB slice → 0 rows");
+  require(axis_a->slice(3, 1).row_count() == 0, "inverted slice → 0 rows");
+}
+
 } // namespace
 
 int main() {
@@ -254,6 +300,7 @@ int main() {
   null_token_distinct_from_literal_value();
   package_writes_directory_and_manifest();
   empty_projection_writes_header_only();
+  selection_slice_exports_only_the_selected_rows();
   std::cout << "welllog.csv-table-export: all cases passed\n";
   return EXIT_SUCCESS;
 }

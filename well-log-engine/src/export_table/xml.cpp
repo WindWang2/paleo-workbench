@@ -81,25 +81,39 @@ stream_xml(std::ostream &out, const WellLogDocument &document,
   append_xml_escaped(buf, document.id().to_string());
   buf.append("\" revision=\"");
   append_integer(buf, document.revision().value);
-  buf.append("\" referenceDepth=\"");
-  // The document's Reference-Depth domain (upper-cased per the §6 example,
-  // e.g. "MD"); derived from the first sampling axis (all axes share the
-  // document's depth frame in Phase A).
-  const auto domain = document.sampling_axes().empty()
-                          ? DepthDomain::measured_depth
-                          : document.sampling_axes().front().domain;
-  const auto domain_token = depth_domain_name(domain);
-  // Canonical tokens are lowercase (md/tvd/...); the §6 example shows upper-case
-  // display, so upper-case the emitted attribute value.
-  for (const auto c : domain_token) {
-    buf.push_back(static_cast<char>(
-        std::toupper(static_cast<unsigned char>(c))));
+  // §6's referenceDepth/unit describe the document's depth frame. Phase A has
+  // no explicit document-level depth frame, so derive a CONSENSUS: if every
+  // Sampling Axis shares the same domain (and unit), emit it; otherwise OMIT
+  // the attributes rather than guessing from axes().front() (an ordering
+  // assumption the spec does not grant). When axes disagree or there are none,
+  // the attributes are absent — a reader treats the table-level samplingAxisId
+  // as authoritative.
+  const auto axes = document.sampling_axes();
+  std::optional<DepthDomain> consensus_domain;
+  std::optional<std::string> consensus_unit;
+  if (!axes.empty()) {
+    consensus_domain = axes.front().domain;
+    consensus_unit = axes.front().unit;
+    for (const auto &axis : axes) {
+      if (axis.domain != *consensus_domain || axis.unit != *consensus_unit) {
+        consensus_domain.reset();
+        consensus_unit.reset();
+        break;
+      }
+    }
   }
-  buf.append("\" unit=\"");
-  const auto unit = document.sampling_axes().empty()
-                        ? std::string{}
-                        : document.sampling_axes().front().unit;
-  append_xml_escaped(buf, unit);
+  if (consensus_domain.has_value()) {
+    buf.append("\" referenceDepth=\"");
+    const auto domain_token = depth_domain_name(*consensus_domain);
+    // Canonical tokens are lowercase (md/tvd/...); the §6 example shows
+    // upper-case display, so upper-case the emitted attribute value.
+    for (const auto c : domain_token) {
+      buf.push_back(static_cast<char>(
+          std::toupper(static_cast<unsigned char>(c))));
+    }
+    buf.append("\" unit=\"");
+    append_xml_escaped(buf, *consensus_unit);
+  }
   buf.append("\">");
   out.write(buf.data(), static_cast<std::streamsize>(buf.size()));
   buf.clear();
@@ -169,7 +183,7 @@ XmlTableExporter::write_to_file(const WellLogDocument &document,
     rows = stream_xml(out, document, projections, options);
     return true;
   };
-  const auto result = write_file_atomic(path, producer, "xml-write");
+  const auto result = write_file_atomic(path, producer);
   if (!result.has_value()) {
     return result.error();
   }
