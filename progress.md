@@ -421,3 +421,15 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 测试 | gate PASS；adapter/canvas pytest 4 passed |
 
 **#174 验收**：产品默认 Engine + Legacy 可回退；结构/内存门禁自动化；绝对帧 P95 与完整 Win/GPU 矩阵/SBOM 生成仍按文档在固定工作站/发布流程执行（QSP §4.3 禁止 CI 绝对帧断言）。**下一 frontier**：#143 PRD 收口。
+
+## Session: 2026-08-03 — #143 PRD 收口
+
+`/implement` #143（父 PRD，非功能实现票）。全部 WellLogEngine 子票已 CLOSED（#144–#174 及 #158/#162 拆解链）；撰写完成简报并关闭 PRD。
+
+| 项 | 内容 |
+|----|------|
+| 简报 | `well-log-engine/docs/prd-143-completion.md`：解决方案映射、票号表、US 主题、门禁、Out-of-Scope 延后项 |
+| 验证 | 无新代码路径；依赖既有 release-gate + Workbench 默认 Flag |
+| Tracker | Close #143 |
+
+**#143 验收**：Phase-one PRD 交付完成。后续：固定工作站帧 SLO 证据、多 GPU 矩阵、SBOM 生成属发布流程；删除 Legacy 须另开评审。

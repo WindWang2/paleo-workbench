@@ -505,6 +505,13 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] 文档：`docs/release-gate.md`、`docs/sbom-and-licenses.md`
 - **Status:** complete
 
+### Phase W25: #143 PRD 收口
+
+- [x] 子票 #144–#174（及 #158/#162 拆解）全部 CLOSED
+- [x] 完成简报 `well-log-engine/docs/prd-143-completion.md`（交付映射 + 明确延后）
+- [x] Close parent PRD #143
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |

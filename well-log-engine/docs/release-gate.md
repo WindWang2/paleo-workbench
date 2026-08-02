@@ -42,13 +42,15 @@ harness enforces **structure + memory ratio + pick budget + SVG** only.
 ## How to run
 
 ```bash
-# Structural publish subset
+# Structural publish subset (exact label; does not include full 1e8)
 well-log-engine/scripts/run_release_gate.sh
 # or:
-ctest --test-dir well-log-engine/build/dev-shared -L release-gate --output-on-failure
+ctest --test-dir well-log-engine/build/dev-shared -L '^release-gate$' --output-on-failure
 
-# Full 1e8 scale (long; needs RAM)
-WELLLOG_GATE_SCALE=full ctest --test-dir … -R welllog.release-gate-scenario-full -V
+# Full 1e8 scale (long; needs RAM) — structural + memory/LOD; reports first-interactive ms
+ctest --test-dir … -L '^release-gate-full$' -V
+# Absolute ≤2s first-interactive only on ADR 0014 reference HW:
+WELLLOG_GATE_ENFORCE_SLO=1 ctest --test-dir … -L '^release-gate-full$' -V
 
 # Workbench default flag
 pytest tests/test_welllog_engine_adapter.py tests/test_well_log_canvas_panel.py -q
