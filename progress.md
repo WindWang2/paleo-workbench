@@ -406,3 +406,18 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 验证 | headless stress PASS；Qt stress 6/6 PASS（`LIBGL_ALWAYS_SOFTWARE=1`）；Python 3/3 PASS（minimal QPA） |
 
 **#173 验收**：AC 覆盖（矩阵/sanitizer 以文档+本地命令为准，非本票新建 CI 矩阵）。**下一 frontier**：#174 一亿点门禁 + 默认启用引擎（仍保留 Legacy）。
+
+## Session: 2026-08-02 — #174 一亿点门禁 + 默认启用 WellLogEngine
+
+`/implement` #174（ADR 0014）。**不删除 Legacy**。
+
+| 项 | 内容 |
+|----|------|
+| 默认 Flag | `welllog_engine_env_enabled()`：unset → **True**；`0/false/no/off/legacy` → False |
+| UI | 单井/地层 combo 仍可切 Legacy；占位文案改为默认引擎 |
+| 场景门禁 | `welllog.release-gate-scenario`：CI 2 井×4 曲线×80k + LOD 压缩/内存/GPU 计划/pick/SVG；`WELLLOG_GATE_SCALE=full` = 20×10×500k + 100k markers |
+| 聚合 | CTest `LABELS release-gate`；`scripts/run_release_gate.sh` |
+| 文档 | `docs/release-gate.md`（矩阵/SLO/跑法）、`docs/sbom-and-licenses.md` |
+| 测试 | gate PASS；adapter/canvas pytest 4 passed |
+
+**#174 验收**：产品默认 Engine + Legacy 可回退；结构/内存门禁自动化；绝对帧 P95 与完整 Win/GPU 矩阵/SBOM 生成仍按文档在固定工作站/发布流程执行（QSP §4.3 禁止 CI 绝对帧断言）。**下一 frontier**：#143 PRD 收口。

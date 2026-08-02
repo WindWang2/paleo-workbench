@@ -127,22 +127,23 @@ def test_well_log_canvas_bound_failure_shows_message(qtbot, monkeypatch):
     assert panel.empty_label.text() == "井数据文件不存在或不可读"
 
 
-def test_canvas_panel_default_backend_is_legacy(qtbot, monkeypatch):
+def test_canvas_panel_default_backend_is_engine(qtbot, monkeypatch):
+    # #174: default ON when env unset.
     monkeypatch.delenv("PALEO_USE_WELLLOG_ENGINE", raising=False)
-    panel = WellLogCanvasPanel()
-    qtbot.addWidget(panel)
-    assert panel.backend() == "legacy"
-
-
-def test_canvas_panel_env_defaults_to_engine(qtbot, monkeypatch):
-    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "1")
     panel = WellLogCanvasPanel()
     qtbot.addWidget(panel)
     assert panel.backend() == "engine"
 
 
+def test_canvas_panel_env_opts_out_to_legacy(qtbot, monkeypatch):
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    assert panel.backend() == "legacy"
+
+
 def test_canvas_panel_explicit_backend_switch_keeps_legacy(qtbot, monkeypatch):
-    monkeypatch.delenv("PALEO_USE_WELLLOG_ENGINE", raising=False)
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     task = PredictionTask(
         name="switch",
         status="complete",

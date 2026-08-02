@@ -36,8 +36,9 @@ def _primary_resource(project: Any, task: Any, key: str):
 class WellLogCanvasPanel(QFrame):
     """Center panel: Legacy geoviz canvas and optional WellLogEngine view.
 
-    Explicit backend switch (combo) + env default ``PALEO_USE_WELLLOG_ENGINE``.
-    Legacy is never deleted (#169).
+    Explicit backend switch (combo) + env default ``PALEO_USE_WELLLOG_ENGINE``
+    (default ON for WellLogEngine; set ``=0``/``legacy`` for Legacy).
+    Legacy is never deleted (#169/#174).
     """
 
     canvas_ready = Signal(bool)
@@ -105,8 +106,8 @@ class WellLogCanvasPanel(QFrame):
         engine_layout = QVBoxLayout(self.engine_host)
         engine_layout.setContentsMargins(0, 0, 0, 0)
         self.engine_placeholder = QLabel(
-            "WellLogEngine 未启用或不可用。\n"
-            "设置 PALEO_USE_WELLLOG_ENGINE=1 并安装 welllog 绑定。"
+            "WellLogEngine 默认启用但当前不可用。\n"
+            "请安装 welllog 绑定；或设 PALEO_USE_WELLLOG_ENGINE=0 使用 Legacy。"
         )
         self.engine_placeholder.setObjectName("EmptyStateLabel")
         self.engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -238,7 +238,8 @@ class StratigraphyCorrelationPage(QWidget):
         engine_layout.setContentsMargins(0, 0, 0, 0)
         self.engine_placeholder = QLabel(
             "WellLogEngine 多井路径未启用或不可用。\n"
-            "设置 PALEO_USE_WELLLOG_ENGINE=1 并安装带 multi-well 的 welllog 绑定。"
+            "WellLogEngine 默认启用；安装带 multi-well 的 welllog 绑定，"
+            "或设 PALEO_USE_WELLLOG_ENGINE=0 使用 Legacy。"
         )
         self.engine_placeholder.setObjectName("EmptyStateLabel")
         self.engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)

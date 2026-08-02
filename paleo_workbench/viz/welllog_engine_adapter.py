@@ -1,7 +1,12 @@
 """Thin adapter: Workbench WellLogData → WellLogEngine submission (no Session/LOD).
 
-Feature flag: ``PALEO_USE_WELLLOG_ENGINE`` (1/true/yes/on). When disabled, the
-single-well page stays on the Legacy geoviz QPainter path (#169).
+Feature flag: ``PALEO_USE_WELLLOG_ENGINE`` (#174).
+
+- **Default ON** when the env var is unset (WellLogEngine is the product default).
+- Explicit disable: ``0`` / ``false`` / ``no`` / ``off`` / ``legacy`` → Legacy.
+- Explicit enable: ``1`` / ``true`` / ``yes`` / ``on`` → Engine.
+
+Pages keep an explicit Legacy ↔ Engine combo; Legacy is never deleted (#169/#174).
 
 This module does **not** reimplement LOD, layout, or session logic — it only
 maps Pydantic/NumPy well-log data into the public ``WellLogView.submit_curve``
@@ -21,11 +26,24 @@ import numpy as np
 # Stable namespace so the same well+curve identity reloads with the same UUIDs.
 _ID_NS = uuid.UUID("a1690000-0000-4000-8000-000000000001")
 
+_FALSEY = frozenset({"0", "false", "no", "off", "legacy"})
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
 
 def welllog_engine_env_enabled() -> bool:
-    """Return True when the process env requests the WellLogEngine path."""
+    """Return True when WellLogEngine should be the default backend.
+
+    Unset → True (default enable, #174). Explicit falsey tokens → False.
+    """
     raw = (os.environ.get("PALEO_USE_WELLLOG_ENGINE") or "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    if raw == "":
+        return True
+    if raw in _FALSEY:
+        return False
+    if raw in _TRUTHY:
+        return True
+    # Unknown values: prefer engine (product default) but stay predictable.
+    return True
 
 
 def try_import_welllog() -> tuple[Any, type | None, type | None]:

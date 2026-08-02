@@ -38,13 +38,17 @@ def _sample_well() -> WellLogData:
     )
 
 
-def test_env_flag_defaults_off(monkeypatch):
+def test_env_flag_defaults_on_and_can_opt_out(monkeypatch):
+    # #174: product default is WellLogEngine; Legacy is explicit opt-out.
     monkeypatch.delenv("PALEO_USE_WELLLOG_ENGINE", raising=False)
-    assert adapter.welllog_engine_env_enabled() is False
+    assert adapter.welllog_engine_env_enabled() is True
     monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "1")
     assert adapter.welllog_engine_env_enabled() is True
     monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "yes")
     assert adapter.welllog_engine_env_enabled() is True
+    for off in ("0", "false", "no", "off", "legacy"):
+        monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", off)
+        assert adapter.welllog_engine_env_enabled() is False, off
 
 
 def test_adapt_well_log_data_maps_curves_nulls_and_intervals():

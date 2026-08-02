@@ -867,6 +867,36 @@ if(WELLLOG_BUILD_TESTS)
         COMMAND welllog_async_lrw_stress_tests
     )
 
+    # #174 — ADR 0014 reference scenario (CI scale by default; full 1e8 via env).
+    add_executable(welllog_release_gate_scenario_tests
+        tests/integration/release_gate_scenario_test.cpp
+    )
+    target_compile_features(
+        welllog_release_gate_scenario_tests
+        PRIVATE cxx_std_20
+    )
+    welllog_enable_warnings(welllog_release_gate_scenario_tests)
+    target_link_libraries(
+        welllog_release_gate_scenario_tests
+        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Session
+    )
+    add_test(
+        NAME welllog.release-gate-scenario
+        COMMAND welllog_release_gate_scenario_tests
+    )
+    # Full 1e8 is opt-in (fixed workstation); CI only runs the reduced scale.
+    add_test(
+        NAME welllog.release-gate-scenario-full
+        COMMAND welllog_release_gate_scenario_tests
+    )
+    set_tests_properties(
+        welllog.release-gate-scenario-full
+        PROPERTIES
+            ENVIRONMENT "WELLLOG_GATE_SCALE=full"
+            LABELS "release-gate-full"
+            TIMEOUT 1800
+    )
+
     add_executable(welllog_session_tests
         tests/integration/session_submission_test.cpp
     )
@@ -1728,4 +1758,29 @@ if(WELLLOG_BUILD_TESTS)
             "-DCORE_INCLUDE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/include/welllog/core"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/check_core_boundary.cmake"
     )
+
+    # #174 — aggregate label for publish-gate subset (ctest -L release-gate).
+    # Absolute frame P95 is NOT in this set (ref HW only; QSP §4.3).
+    set(_welllog_release_gate_tests
+        welllog.release-gate-scenario
+        welllog.dense-curve-pipeline
+        welllog.async-lrw-stress
+        welllog.manifest
+        welllog.container-security
+        welllog.package.consumer
+        welllog.svg.package.consumer
+        welllog.fuzz-binary-sources
+        welllog.fuzz-assets
+    )
+    foreach(_t IN LISTS _welllog_release_gate_tests)
+        if(TEST ${_t})
+            set_property(TEST ${_t} APPEND PROPERTY LABELS release-gate)
+        endif()
+    endforeach()
+    if(TEST welllog.qt-context-lifecycle-stress)
+        set_property(
+            TEST welllog.qt-context-lifecycle-stress
+            APPEND PROPERTY LABELS release-gate
+        )
+    endif()
 endif()

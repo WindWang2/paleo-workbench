@@ -497,6 +497,14 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] 文档：`tests/qt/README.md`（sanitizer / 3.12–3.13 复跑说明）
 - **Status:** complete
 
+### Phase W24: #174 一亿点发布门禁 + 默认启用 WellLogEngine
+
+- [x] Workbench：`PALEO_USE_WELLLOG_ENGINE` 默认 ON；`0`/`legacy` 回退；Legacy 保留
+- [x] `welllog.release-gate-scenario`：CI 多井 LOD/内存/GPU 计划；`WELLLOG_GATE_SCALE=full` → 20×10×500k=1e8
+- [x] CTest label `release-gate` + `scripts/run_release_gate.sh`
+- [x] 文档：`docs/release-gate.md`、`docs/sbom-and-licenses.md`
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |
