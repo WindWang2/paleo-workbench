@@ -676,6 +676,19 @@ void test_import_identity_is_stable_for_content_and_profile() {
   const auto second = LisSourceAdapter::import(source_bytes, source);
   require(first.has_value() && second.has_value(),
           "repeat imports must remain valid");
+  require(first.value().document.id() ==
+              id("0dfa0e2f-01b0-4bee-bd7f-9398b6a2cb47"),
+          "the default v1 profile must preserve its established document "
+          "identity");
+  require(first.value().document.sampling_axes().front().id ==
+              id("638fffe8-49fd-4133-93b4-371e1452bfdb"),
+          "the default v1 profile must preserve its established axis identity");
+  require(first.value().document.curves()[0U].id ==
+              id("02dcfe9f-71af-49a3-b291-473851e1a00d") &&
+              first.value().document.curves()[1U].id ==
+                  id("6d0b4718-d53c-40f8-9dc0-8fb0b46e6762"),
+          "the default v1 profile must preserve its established curve "
+          "identities");
   require(
       first.value().document.id() == second.value().document.id(),
       "same content and normalization profile must preserve document identity");

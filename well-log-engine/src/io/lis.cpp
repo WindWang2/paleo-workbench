@@ -606,22 +606,17 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
   append_component(result, profile.name);
   append_component(result, profile.version);
   append_component(result, profile.text_encoding);
-  // These iterate the actual default rules, so changing one cannot silently
-  // reuse entities imported under the preceding normalization behavior.
-  for (const auto &alias : builtin_alias_rules) {
-    append_component(result, alias.source);
-    append_component(result, alias.canonical);
-  }
-  for (const auto &rule : builtin_unit_rules) {
-    append_component(result, rule.canonical_mnemonic);
-    append_component(result, rule.source_unit);
-    append_component(result, rule.canonical_unit);
-    append_component(result, std::to_string(rule.multiplier));
-  }
-  for (const auto &rule : builtin_depth_unit_rules) {
-    append_component(result, rule.source_unit);
-    append_component(result, std::to_string(rule.metres_per_unit));
-  }
+  // This is the established v1 wire encoding of the built-in vocabulary.
+  // Entity IDs include this fingerprint, so refactoring the rule tables must
+  // not alter it. A behavior change to the default vocabulary requires a new
+  // normalization-profile version (ADR 0049), which changes the component
+  // serialized immediately above.
+  append_component(result,
+                   "GR=GR,GAM,GAMMA;SP=SP;AC=AC,DT,DTC;DEN=DEN,RHOB;"
+                   "CNL=CNL,NPHI,TNPH;CAL=CAL,CALI;RDEEP=RILD,LLD,RT;"
+                   "RMED=RILM,LLM;RSHAL=RLLS,LLS;"
+                   "GR/API;SP/mV;DEN/g/cc,g/cm3,kg/m3;AC/us/m,us/ft;"
+                   "CNL/%,v/v;CAL/mm,cm,in;R/ohm.m,ohm.ft;DEPTH/m,ft,in");
   for (const auto value : profile.inferred_null_values) {
     append_component(result, std::to_string(value));
   }
