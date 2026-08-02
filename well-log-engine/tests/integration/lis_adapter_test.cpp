@@ -206,11 +206,12 @@ private:
   std::vector<std::uint8_t> bytes_;
 };
 
-[[nodiscard]] std::vector<std::byte> representative_lis() {
+[[nodiscard]] std::vector<std::byte>
+representative_lis(double first_gamma_ray = 45.0) {
   LisFixture fixture;
   fixture.add_file_header();
   fixture.add_format_specification();
-  fixture.add_normal_data();
+  fixture.add_normal_data(1000.0, first_gamma_ray);
   return std::move(fixture).finish();
 }
 
@@ -260,6 +261,30 @@ private:
   fixture.add_file_header();
   fixture.add_format_specification("M");
   fixture.add_normal_data(1000.0, 40.0);
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(2000.0, 90.0);
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> collision_prone_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  std::vector<std::array<double, 3>> frames;
+  frames.reserve(329U);
+  for (std::size_t index{}; index < 329U; ++index) {
+    const auto coordinate = index < 165U
+                                ? 1000.0 + static_cast<double>(index)
+                                : 1328.0 - static_cast<double>(index);
+    frames.push_back(
+        {coordinate, 40.0 + static_cast<double>(index), 2.30});
+  }
+  fixture.add_normal_data(frames);
+  // These six padding bytes place the next DFS at offset 4102. Legacy curve
+  // IDs then collide: 6 + 4096 + 1 == 4102 + 1.
+  for (std::size_t index{}; index < 6U; ++index) {
+    fixture.add_null_padding();
+  }
   fixture.add_format_specification("M");
   fixture.add_normal_data(2000.0, 90.0);
   return std::move(fixture).finish();
@@ -388,6 +413,36 @@ void append_le32(std::vector<std::byte> &out, std::uint32_t value) {
   append_le32(result, 1U);
   append_le32(result, static_cast<std::uint32_t>(source.size() + 24U));
   append_le32(result, static_cast<std::uint32_t>(source.size() + 36U));
+  return result;
+}
+
+[[nodiscard]] std::vector<std::byte>
+rp66_v1_rejection_fixture(bool also_valid_direct_lis79) {
+  // With the polyglot sequence number, the first two spaces encode a LIS79
+  // physical-record length of 0x2020 and "10" is a legal no-link attribute
+  // word. The RP66 record at offset 80 remains independently valid.
+  const auto size = also_valid_direct_lis79 ? 0x2020U : 100U;
+  std::vector<std::byte> result(size, static_cast<std::byte>(' '));
+  const auto write_ascii = [&result](std::size_t offset,
+                                     std::string_view value) {
+    for (std::size_t index{}; index < value.size(); ++index) {
+      result[offset + index] = static_cast<std::byte>(value[index]);
+    }
+  };
+  write_ascii(0U, also_valid_direct_lis79 ? "  10" : "   1");
+  write_ascii(4U, "V1.00");
+  write_ascii(9U, "RECORD");
+  write_ascii(15U, " 8192");
+  write_ascii(20U, "Paleo Workbench RP66 rejection fixture");
+
+  result[80U] = static_cast<std::byte>(0x00U);
+  result[81U] = static_cast<std::byte>(0x14U);
+  result[82U] = static_cast<std::byte>(0xffU);
+  result[83U] = static_cast<std::byte>(0x01U);
+  result[84U] = static_cast<std::byte>(0x00U);
+  result[85U] = static_cast<std::byte>(0x10U);
+  result[86U] = static_cast<std::byte>(0x80U);
+  result[87U] = static_cast<std::byte>(0x00U);
   return result;
 }
 
@@ -668,27 +723,63 @@ void test_tif_wrapped_lis79_is_detected_structurally() {
           "TIF unwrapping must preserve the enclosed LIS curves");
 }
 
-void test_import_identity_is_stable_for_content_and_profile() {
+void test_rp66_v1_family_is_rejected_instead_of_guessed_as_lis79() {
+  const auto unsupported = rp66_v1_rejection_fixture(false);
+  const auto unsupported_inspection = LisSourceAdapter::inspect(unsupported);
+  require(!unsupported_inspection.has_value() &&
+              unsupported_inspection.error().code ==
+                  ErrorCode::invalid_document,
+          "an RP66 V1 envelope without a LIS79 parse must be rejected");
+  const auto unsupported_import = LisSourceAdapter::import(
+      unsupported,
+      BufferSourceReference{.uri = "asset://well/rp66-v1.dlis",
+                            .checksum = "rp66-v1"});
+  require(!unsupported_import.has_value() &&
+              unsupported_import.error().code == ErrorCode::invalid_document,
+          "the LIS importer must not guess-read an unsupported RP66 V1 file");
+
+  const auto ambiguous = rp66_v1_rejection_fixture(true);
+  const auto ambiguous_inspection = LisSourceAdapter::inspect(ambiguous);
+  require(!ambiguous_inspection.has_value() &&
+              ambiguous_inspection.error().code ==
+                  ErrorCode::invalid_document,
+          "bytes valid as both RP66 V1 and direct LIS79 must inspect as "
+          "ambiguous");
+  const auto ambiguous_import = LisSourceAdapter::import(
+      ambiguous,
+      BufferSourceReference{.uri = "asset://well/rp66-lis79-polyglot.lis",
+                            .checksum = "rp66-lis79-polyglot"});
+  require(!ambiguous_import.has_value() &&
+              ambiguous_import.error().code == ErrorCode::invalid_document,
+          "bytes valid as both RP66 V1 and direct LIS79 must not import");
+}
+
+void test_import_identity_versions_content_and_prevents_curve_collisions() {
   const auto source_bytes = representative_lis();
   const BufferSourceReference source{.uri = "asset://well/stable.lis",
                                      .checksum = "stable-v1"};
+  const auto v1 = LisSourceAdapter::import(
+      source_bytes, source,
+      LisSelection{.identity_scheme = LisIdentityScheme::resform_compatible_v1});
+  require(v1.has_value(), "the explicit legacy identity scheme must import");
+  require(v1.value().document.id() ==
+              id("0dfa0e2f-01b0-4bee-bd7f-9398b6a2cb47"),
+          "the explicit v1 scheme must preserve its established document "
+          "identity");
+  require(v1.value().document.sampling_axes().front().id ==
+              id("638fffe8-49fd-4133-93b4-371e1452bfdb"),
+          "the explicit v1 scheme must preserve its established axis identity");
+  require(v1.value().document.curves()[0U].id ==
+              id("02dcfe9f-71af-49a3-b291-473851e1a00d") &&
+              v1.value().document.curves()[1U].id ==
+                  id("6d0b4718-d53c-40f8-9dc0-8fb0b46e6762"),
+          "the explicit v1 scheme must preserve its established curve "
+          "identities");
+
   const auto first = LisSourceAdapter::import(source_bytes, source);
   const auto second = LisSourceAdapter::import(source_bytes, source);
   require(first.has_value() && second.has_value(),
           "repeat imports must remain valid");
-  require(first.value().document.id() ==
-              id("0dfa0e2f-01b0-4bee-bd7f-9398b6a2cb47"),
-          "the default v1 profile must preserve its established document "
-          "identity");
-  require(first.value().document.sampling_axes().front().id ==
-              id("638fffe8-49fd-4133-93b4-371e1452bfdb"),
-          "the default v1 profile must preserve its established axis identity");
-  require(first.value().document.curves()[0U].id ==
-              id("02dcfe9f-71af-49a3-b291-473851e1a00d") &&
-              first.value().document.curves()[1U].id ==
-                  id("6d0b4718-d53c-40f8-9dc0-8fb0b46e6762"),
-          "the default v1 profile must preserve its established curve "
-          "identities");
   require(
       first.value().document.id() == second.value().document.id(),
       "same content and normalization profile must preserve document identity");
@@ -702,6 +793,40 @@ void test_import_identity_is_stable_for_content_and_profile() {
               second.value().document.revision() == DocumentRevision{1},
           "repeat import does not manufacture a new revision");
 
+  require(first.value().document.id() != v1.value().document.id(),
+          "content-bound v2 must be distinct from the legacy v1 identity");
+  const auto changed_content = LisSourceAdapter::import(
+      representative_lis(46.0), source);
+  require(changed_content.has_value() &&
+              changed_content.value().document.id() != first.value().document.id(),
+          "content-bound v2 must not trust a reused source checksum over "
+          "different bytes");
+
+  const auto collision_prone = LisSourceAdapter::import(
+      collision_prone_lis(),
+      BufferSourceReference{.uri = "asset://well/collision.lis",
+                            .checksum = "collision-v1"});
+  require(collision_prone.has_value(),
+          "content-bound v2 must import a stream with legacy ordinal overlap");
+  const auto &collision_document = collision_prone.value().document;
+  for (std::size_t left{}; left < collision_document.sampling_axes().size();
+       ++left) {
+    for (std::size_t right = left + 1U;
+         right < collision_document.sampling_axes().size(); ++right) {
+      require(collision_document.sampling_axes()[left].id !=
+                  collision_document.sampling_axes()[right].id,
+              "each LIS data-set segment must have a distinct axis identity");
+    }
+  }
+  for (std::size_t left{}; left < collision_document.curves().size(); ++left) {
+    for (std::size_t right = left + 1U;
+         right < collision_document.curves().size(); ++right) {
+      require(collision_document.curves()[left].id !=
+                  collision_document.curves()[right].id,
+              "each LIS data-set curve must have a distinct curve identity");
+    }
+  }
+
   auto changed_profile = default_lis_normalization_profile();
   changed_profile.version = "2";
   const auto changed =
@@ -710,6 +835,57 @@ void test_import_identity_is_stable_for_content_and_profile() {
   require(changed.value().document.id() != first.value().document.id(),
           "a changed normalization profile must intentionally create a new "
           "identity");
+}
+
+void test_profile_identity_is_injective_and_text_encoding_is_closed() {
+  const auto source_bytes = representative_lis();
+  const BufferSourceReference source{.uri = "asset://well/profile-id.lis",
+                                     .checksum = "profile-id-v1"};
+
+  auto first_null_profile = default_lis_normalization_profile();
+  first_null_profile.inferred_null_values = {-999.0000001};
+  auto second_null_profile = first_null_profile;
+  second_null_profile.inferred_null_values = {-999.0000002};
+  const auto first_null = LisSourceAdapter::import(source_bytes, source, {},
+                                                    first_null_profile);
+  const auto second_null = LisSourceAdapter::import(source_bytes, source, {},
+                                                     second_null_profile);
+  require(first_null.has_value() && second_null.has_value() &&
+              first_null.value().document.id() != second_null.value().document.id(),
+          "distinct null sentinels must produce distinct profile identities");
+
+  auto first_unit_profile = default_lis_normalization_profile();
+  first_unit_profile.unit_rules.push_back(
+      LisUnitRule{.canonical_mnemonic = "GR",
+                  .source_unit = "API",
+                  .canonical_unit = "cps",
+                  .multiplier = 1.0000001});
+  auto second_unit_profile = first_unit_profile;
+  second_unit_profile.unit_rules.back().multiplier = 1.0000002;
+  const auto first_unit = LisSourceAdapter::import(source_bytes, source, {},
+                                                    first_unit_profile);
+  const auto second_unit = LisSourceAdapter::import(source_bytes, source, {},
+                                                     second_unit_profile);
+  require(first_unit.has_value() && second_unit.has_value() &&
+              first_unit.value().document.id() != second_unit.value().document.id(),
+          "distinct unit multipliers must produce distinct profile identities");
+
+  auto latin_1_profile = default_lis_normalization_profile();
+  latin_1_profile.text_encoding = LisTextEncoding::iso_8859_1;
+  const auto ascii = LisSourceAdapter::import(source_bytes, source);
+  const auto latin_1 =
+      LisSourceAdapter::import(source_bytes, source, {}, latin_1_profile);
+  require(ascii.has_value() && latin_1.has_value() &&
+              ascii.value().document.id() != latin_1.value().document.id(),
+          "text encoding must participate in profile identity");
+
+  auto invalid_encoding = default_lis_normalization_profile();
+  invalid_encoding.text_encoding = static_cast<LisTextEncoding>(255U);
+  const auto rejected = LisSourceAdapter::import(source_bytes, source, {},
+                                                  invalid_encoding);
+  require(!rejected.has_value() &&
+              rejected.error().code == ErrorCode::invalid_document,
+          "an out-of-domain text encoding must reject before importing");
 }
 
 void test_invalid_normalization_profile_is_rejected_before_importing() {
@@ -870,7 +1046,7 @@ void test_default_ascii_reports_non_ascii_text_and_explicit_codepage_decodes_it(
   require(default_reported, "default ASCII must audit non-ASCII source text");
 
   auto latin_1 = default_lis_normalization_profile();
-  latin_1.text_encoding = "ISO-8859-1";
+  latin_1.text_encoding = LisTextEncoding::iso_8859_1;
   const auto decoded = LisSourceAdapter::import(
       source_bytes,
       BufferSourceReference{.uri = "asset://well/text.lis",
@@ -999,7 +1175,9 @@ int main() {
   test_each_lis_data_set_retains_its_own_axis_and_curves();
   test_valid_non_scalar_lis_data_set_becomes_an_empty_document();
   test_tif_wrapped_lis79_is_detected_structurally();
-  test_import_identity_is_stable_for_content_and_profile();
+  test_rp66_v1_family_is_rejected_instead_of_guessed_as_lis79();
+  test_import_identity_versions_content_and_prevents_curve_collisions();
+  test_profile_identity_is_injective_and_text_encoding_is_closed();
   test_invalid_normalization_profile_is_rejected_before_importing();
   test_normalization_profile_can_supply_auditable_custom_alias_and_unit_rules();
   test_direct_physical_stream_preserves_short_record_headers_after_padding();

@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -257,6 +259,165 @@ parse_direct_records(std::span<const std::byte> bytes,
                                   limits);
 }
 
+[[nodiscard]] bool
+rp66_decimal_field(std::span<const std::byte> field) noexcept {
+  bool has_digit{};
+  for (const auto byte : field) {
+    const auto character = std::to_integer<std::uint8_t>(byte);
+    if (!has_digit && character == static_cast<std::uint8_t>(' ')) {
+      continue;
+    }
+    if (character < static_cast<std::uint8_t>('0') ||
+        character > static_cast<std::uint8_t>('9')) {
+      return false;
+    }
+    has_digit = true;
+  }
+  return has_digit;
+}
+
+// This is deliberately a narrow RP66 V1 family signature, not a detector for
+// every historical LIS84 envelope. In addition to the Storage Unit Label, the
+// first visible record must be exactly partitioned into structurally valid
+// logical-record segments so label-shaped LIS79 payloads remain LIS79.
+[[nodiscard]] bool
+has_rp66_v1_envelope(std::span<const std::byte> bytes) noexcept {
+  constexpr std::size_t storage_unit_label_size = 80U;
+  constexpr std::size_t visible_header_size = 4U;
+  constexpr std::size_t segment_header_size = 4U;
+  constexpr std::uint8_t segment_explicit = 0x80U;
+  constexpr std::uint8_t segment_predecessor = 0x40U;
+  constexpr std::uint8_t segment_successor = 0x20U;
+  constexpr std::uint8_t segment_encrypted = 0x10U;
+  constexpr std::uint8_t segment_encryption_packet = 0x08U;
+  constexpr std::uint8_t segment_checksum = 0x04U;
+  constexpr std::uint8_t segment_trailing_length = 0x02U;
+  constexpr std::uint8_t segment_padding = 0x01U;
+
+  if (bytes.size() < storage_unit_label_size + visible_header_size +
+                         segment_header_size ||
+      !rp66_decimal_field(bytes.subspan(0U, 4U)) ||
+      std::to_integer<std::uint8_t>(bytes[4U]) !=
+          static_cast<std::uint8_t>('V') ||
+      std::to_integer<std::uint8_t>(bytes[5U]) !=
+          static_cast<std::uint8_t>('1') ||
+      std::to_integer<std::uint8_t>(bytes[6U]) !=
+          static_cast<std::uint8_t>('.') ||
+      !rp66_decimal_field(bytes.subspan(7U, 2U)) ||
+      std::to_integer<std::uint8_t>(bytes[9U]) !=
+          static_cast<std::uint8_t>('R') ||
+      std::to_integer<std::uint8_t>(bytes[10U]) !=
+          static_cast<std::uint8_t>('E') ||
+      std::to_integer<std::uint8_t>(bytes[11U]) !=
+          static_cast<std::uint8_t>('C') ||
+      std::to_integer<std::uint8_t>(bytes[12U]) !=
+          static_cast<std::uint8_t>('O') ||
+      std::to_integer<std::uint8_t>(bytes[13U]) !=
+          static_cast<std::uint8_t>('R') ||
+      std::to_integer<std::uint8_t>(bytes[14U]) !=
+          static_cast<std::uint8_t>('D') ||
+      !rp66_decimal_field(bytes.subspan(15U, 5U))) {
+    return false;
+  }
+  for (const auto byte : bytes.subspan(20U, 60U)) {
+    const auto character = std::to_integer<std::uint8_t>(byte);
+    if (character < 0x20U || character > 0x7eU) {
+      return false;
+    }
+  }
+
+  const auto visible_length = static_cast<std::size_t>(
+      (static_cast<std::uint16_t>(
+           std::to_integer<std::uint8_t>(bytes[80U]))
+       << 8U) |
+      static_cast<std::uint16_t>(
+          std::to_integer<std::uint8_t>(bytes[81U])));
+  if (visible_length < visible_header_size + 16U ||
+      visible_length > bytes.size() - storage_unit_label_size ||
+      std::to_integer<std::uint8_t>(bytes[82U]) != 0xffU ||
+      std::to_integer<std::uint8_t>(bytes[83U]) != 0x01U) {
+    return false;
+  }
+
+  const auto visible_end = storage_unit_label_size + visible_length;
+  auto position = storage_unit_label_size + visible_header_size;
+  bool pending_successor{};
+  std::uint8_t pending_type{};
+  bool pending_explicit{};
+  while (position < visible_end) {
+    if (visible_end - position < segment_header_size) {
+      return false;
+    }
+    const auto segment_length = static_cast<std::size_t>(
+        (static_cast<std::uint16_t>(
+             std::to_integer<std::uint8_t>(bytes[position]))
+         << 8U) |
+        static_cast<std::uint16_t>(
+            std::to_integer<std::uint8_t>(bytes[position + 1U])));
+    if (segment_length < 16U || segment_length % 2U != 0U ||
+        segment_length > visible_end - position) {
+      return false;
+    }
+    const auto attributes =
+        std::to_integer<std::uint8_t>(bytes[position + 2U]);
+    const auto type = std::to_integer<std::uint8_t>(bytes[position + 3U]);
+    if (position == storage_unit_label_size + visible_header_size &&
+        type != 0U) {
+      return false;
+    }
+    const auto has_predecessor =
+        (attributes & segment_predecessor) != 0U;
+    if (has_predecessor != pending_successor) {
+      return false;
+    }
+    const auto explicit_formatting = (attributes & segment_explicit) != 0U;
+    if (has_predecessor &&
+        (type != pending_type || explicit_formatting != pending_explicit)) {
+      return false;
+    }
+
+    auto payload_begin = position + segment_header_size;
+    auto payload_size = segment_length - segment_header_size;
+    if ((attributes & segment_encryption_packet) != 0U) {
+      if (payload_size == 0U) {
+        return false;
+      }
+      const auto packet_length =
+          std::to_integer<std::uint8_t>(bytes[payload_begin]);
+      if (packet_length > payload_size) {
+        return false;
+      }
+      payload_begin += packet_length;
+      payload_size -= packet_length;
+    }
+    if ((attributes & segment_encrypted) == 0U) {
+      std::size_t trailer_size{};
+      if ((attributes & segment_checksum) != 0U) {
+        trailer_size += 2U;
+      }
+      if ((attributes & segment_trailing_length) != 0U) {
+        trailer_size += 2U;
+      }
+      if ((attributes & segment_padding) != 0U) {
+        if (trailer_size >= payload_size) {
+          return false;
+        }
+        trailer_size += std::to_integer<std::uint8_t>(
+            bytes[payload_begin + payload_size - trailer_size - 1U]);
+      }
+      if (trailer_size > payload_size) {
+        return false;
+      }
+    }
+
+    pending_successor = (attributes & segment_successor) != 0U;
+    pending_type = type;
+    pending_explicit = explicit_formatting;
+    position += segment_length;
+  }
+  return position == visible_end && !pending_successor;
+}
+
 [[nodiscard]] std::uint32_t
 read_little_endian_u32(std::span<const std::byte> bytes, std::size_t offset) {
   if (bytes.size() - offset < 4U) {
@@ -298,6 +459,7 @@ unwrap_tif(std::span<const std::byte> bytes) {
 
 [[nodiscard]] std::vector<LogicalRecord>
 parse_lis_records(std::span<const std::byte> bytes, const LisLimits &limits) {
+  const auto rp66_v1 = has_rp66_v1_envelope(bytes);
   std::optional<std::vector<LogicalRecord>> direct;
   std::optional<std::vector<LogicalRecord>> tif;
   try {
@@ -315,7 +477,9 @@ parse_lis_records(std::span<const std::byte> bytes, const LisLimits &limits) {
       throw;
     }
   }
-  if (direct.has_value() == tif.has_value()) {
+  // The LIS public error vocabulary is intentionally format-agnostic. A sole
+  // RP66 match is unsupported here; RP66 plus either LIS79 match is ambiguous.
+  if (rp66_v1 || direct.has_value() == tif.has_value()) {
     malformed();
   }
   return direct.has_value() ? std::move(*direct) : std::move(*tif);
@@ -349,6 +513,26 @@ parse_lis_records(std::span<const std::byte> bytes, const LisLimits &limits) {
     }
   }
   return result;
+}
+
+[[nodiscard]] std::string_view
+text_encoding_name(LisTextEncoding encoding) noexcept {
+  switch (encoding) {
+  case LisTextEncoding::ascii:
+    return "ASCII";
+  case LisTextEncoding::iso_8859_1:
+    return "ISO-8859-1";
+  }
+  return {};
+}
+
+[[nodiscard]] bool valid_identity_scheme(LisIdentityScheme scheme) noexcept {
+  switch (scheme) {
+  case LisIdentityScheme::resform_compatible_v1:
+  case LisIdentityScheme::content_bound_v2:
+    return true;
+  }
+  return false;
 }
 
 struct BuiltinAliasRule {
@@ -411,6 +595,17 @@ constexpr std::array builtin_depth_unit_rules{
     BuiltinDepthUnitRule{"FT", 0.3048},
     BuiltinDepthUnitRule{"IN", 0.0254},
 };
+
+// Immutable protocol data for the original v1 entity-identity preimage. It
+// deliberately stays separate from the executable rule tables: it describes
+// an already-persisted wire format, not a regenerated summary of current
+// behavior. ADR 0049 requires a new profile version for behavior changes.
+constexpr std::string_view resform_compatible_v1_identity_component =
+    "GR=GR,GAM,GAMMA;SP=SP;AC=AC,DT,DTC;DEN=DEN,RHOB;"
+    "CNL=CNL,NPHI,TNPH;CAL=CAL,CALI;RDEEP=RILD,LLD,RT;"
+    "RMED=RILM,LLM;RSHAL=RLLS,LLS;"
+    "GR/API;SP/mV;DEN/g/cc,g/cm3,kg/m3;AC/us/m,us/ft;"
+    "CNL/%,v/v;CAL/mm,cm,in;R/ohm.m,ohm.ft;DEPTH/m,ft,in";
 
 [[nodiscard]] std::optional<double> read_lis_f32(Cursor &cursor) {
   const auto encoded = cursor.read_u32();
@@ -490,7 +685,7 @@ struct DataFormatSpecification {
 
 [[nodiscard]] DataFormatSpecification
 parse_format_specification(const LogicalRecord &record, const LisLimits &limits,
-                           std::string_view text_encoding) {
+                           LisTextEncoding text_encoding) {
   Cursor cursor{record.body, record.byte_offset + 6U};
   DataFormatSpecification result{
       .byte_offset = record.byte_offset,
@@ -545,7 +740,7 @@ parse_format_specification(const LogicalRecord &record, const LisLimits &limits,
           continue;
         }
         result.contains_non_ascii_text = true;
-        if (text_encoding == "ISO-8859-1") {
+        if (text_encoding == LisTextEncoding::iso_8859_1) {
           value.push_back(static_cast<char>(0xc0U | (byte >> 6U)));
           value.push_back(static_cast<char>(0x80U | (byte & 0x3fU)));
         } else {
@@ -605,20 +800,33 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
   std::string result;
   append_component(result, profile.name);
   append_component(result, profile.version);
-  append_component(result, profile.text_encoding);
-  // This is the established v1 wire encoding of the built-in vocabulary.
-  // Entity IDs include this fingerprint, so refactoring the rule tables must
-  // not alter it. A behavior change to the default vocabulary requires a new
-  // normalization-profile version (ADR 0049), which changes the component
-  // serialized immediately above.
-  append_component(result,
-                   "GR=GR,GAM,GAMMA;SP=SP;AC=AC,DT,DTC;DEN=DEN,RHOB;"
-                   "CNL=CNL,NPHI,TNPH;CAL=CAL,CALI;RDEEP=RILD,LLD,RT;"
-                   "RMED=RILM,LLM;RSHAL=RLLS,LLS;"
-                   "GR/API;SP/mV;DEN/g/cc,g/cm3,kg/m3;AC/us/m,us/ft;"
-                   "CNL/%,v/v;CAL/mm,cm,in;R/ohm.m,ohm.ft;DEPTH/m,ft,in");
+  append_component(result, text_encoding_name(profile.text_encoding));
+  append_component(result, resform_compatible_v1_identity_component);
+  const auto append_double = [&append_component](std::string &target,
+                                                   double value) {
+    auto legacy = std::to_string(value);
+    double parsed{};
+    const auto [end, error] =
+        std::from_chars(legacy.data(), legacy.data() + legacy.size(), parsed);
+    if (error == std::errc{} && end == legacy.data() + legacy.size() &&
+        std::bit_cast<std::uint64_t>(parsed) ==
+            std::bit_cast<std::uint64_t>(value)) {
+      append_component(target, legacy);
+      return;
+    }
+    constexpr std::array<char, 16> digits{'0', '1', '2', '3', '4', '5', '6',
+                                          '7', '8', '9', 'a', 'b', 'c', 'd',
+                                          'e', 'f'};
+    const auto bits = std::bit_cast<std::uint64_t>(value);
+    legacy.push_back('@');
+    for (std::size_t index{}; index < 16U; ++index) {
+      const auto shift = static_cast<unsigned>((15U - index) * 4U);
+      legacy.push_back(digits[(bits >> shift) & 0x0fU]);
+    }
+    append_component(target, legacy);
+  };
   for (const auto value : profile.inferred_null_values) {
-    append_component(result, std::to_string(value));
+    append_double(result, value);
   }
   for (const auto &alias : profile.aliases) {
     append_component(result, alias.source_mnemonic);
@@ -628,15 +836,14 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
     append_component(result, rule.canonical_mnemonic);
     append_component(result, rule.source_unit);
     append_component(result, rule.canonical_unit);
-    append_component(result, std::to_string(rule.multiplier));
+    append_double(result, rule.multiplier);
   }
   return result;
 }
 
 [[nodiscard]] bool valid_profile(const LisNormalizationProfile &profile) {
   if (profile.name.empty() || profile.version.empty() ||
-      (profile.text_encoding != "ASCII" &&
-       profile.text_encoding != "ISO-8859-1") ||
+      text_encoding_name(profile.text_encoding).empty() ||
       !std::all_of(profile.inferred_null_values.begin(),
                    profile.inferred_null_values.end(),
                    [](double value) { return std::isfinite(value); })) {
@@ -916,11 +1123,57 @@ logical_file_ranges(const std::vector<LogicalRecord> &records) {
 
 [[nodiscard]] std::string import_identity(
     std::span<const std::byte> bytes, const BufferSourceReference &source,
-    const LisNormalizationProfile &profile, std::uint32_t logical_file_index) {
-  const auto content =
-      source.checksum.empty() ? content_fingerprint(bytes) : source.checksum;
-  return "lis/" + content + "/" + profile_fingerprint(profile) +
-         "/logical-file/" + std::to_string(logical_file_index);
+    const LisNormalizationProfile &profile, LisIdentityScheme scheme,
+    std::uint32_t logical_file_index) {
+  if (scheme == LisIdentityScheme::resform_compatible_v1) {
+    const auto content =
+        source.checksum.empty() ? content_fingerprint(bytes) : source.checksum;
+    return "lis/" + content + "/" + profile_fingerprint(profile) +
+           "/logical-file/" + std::to_string(logical_file_index);
+  }
+  const auto append_component = [](std::string &target,
+                                   std::string_view value) {
+    target += "/" + std::to_string(value.size()) + ":" + std::string{value};
+  };
+  std::string result{"lis/content-bound-v2"};
+  append_component(result, source.uri);
+  append_component(result, source.checksum);
+  append_component(result, std::to_string(source.byte_offset));
+  append_component(result, content_fingerprint(bytes));
+  append_component(result, profile_fingerprint(profile));
+  append_component(result, std::to_string(logical_file_index));
+  return result;
+}
+
+[[nodiscard]] EntityId
+axis_id_for_import(std::string_view identity, LisIdentityScheme scheme,
+                   std::uint32_t data_set_ordinal,
+                   std::uint64_t specification_offset,
+                   std::size_t segment_begin, std::size_t segment_index) {
+  if (scheme == LisIdentityScheme::resform_compatible_v1) {
+    return stable_id(identity, "axis",
+                     specification_offset +
+                         static_cast<std::uint64_t>(segment_begin));
+  }
+  return stable_id(identity,
+                   "axis/data-set/" + std::to_string(data_set_ordinal),
+                   static_cast<std::uint64_t>(segment_index));
+}
+
+[[nodiscard]] EntityId
+curve_id(std::string_view identity, LisIdentityScheme scheme,
+         std::uint32_t data_set_ordinal, std::uint64_t specification_offset,
+         std::size_t segment_index, std::size_t specification_index) {
+  if (scheme == LisIdentityScheme::resform_compatible_v1) {
+    return stable_id(identity, "curve",
+                     specification_offset +
+                         static_cast<std::uint64_t>(segment_index) * 4096U +
+                         static_cast<std::uint64_t>(specification_index));
+  }
+  return stable_id(identity,
+                   "curve/data-set/" + std::to_string(data_set_ordinal) +
+                       "/segment/" + std::to_string(segment_index),
+                   static_cast<std::uint64_t>(specification_index));
 }
 
 } // namespace
@@ -956,7 +1209,8 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
                          const LisNormalizationProfile &profile,
                          LisLimits limits) {
   try {
-    if (!valid_profile(profile)) {
+    if (!valid_profile(profile) ||
+        !valid_identity_scheme(selection.identity_scheme)) {
       return invalid_lis();
     }
     if (bytes.size() > limits.max_input_bytes) {
@@ -978,7 +1232,8 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
         records.begin() + static_cast<std::ptrdiff_t>(range.begin);
     const auto selected_end =
         records.begin() + static_cast<std::ptrdiff_t>(range.end);
-    const auto identity = import_identity(bytes, source, profile, selected);
+    const auto identity = import_identity(bytes, source, profile,
+                                          selection.identity_scheme, selected);
     const auto document_id = stable_id(identity, "document");
     WellLogDocumentBuilder builder(document_id, DocumentRevision{1});
     std::vector<LisDiagnostic> diagnostics;
@@ -1023,7 +1278,7 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
         continue;
       }
       if (specification.contains_non_ascii_text &&
-          profile.text_encoding == "ASCII") {
+          profile.text_encoding == LisTextEncoding::ascii) {
         diagnostics.push_back(LisDiagnostic{
             .code = LisDiagnosticCode::non_ascii_text,
             .severity = Severity::warning,
@@ -1250,9 +1505,9 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
             coordinates.begin() + static_cast<std::ptrdiff_t>(segment.begin),
             coordinates.begin() + static_cast<std::ptrdiff_t>(segment.end));
         const auto axis_id =
-            stable_id(identity, "axis",
-                      specification.byte_offset +
-                          static_cast<std::uint64_t>(segment.begin));
+            axis_id_for_import(identity, selection.identity_scheme, ordinal,
+                               specification.byte_offset, segment.begin,
+                               segment_index);
         const auto depth_owner = std::make_shared<const std::vector<double>>(
             std::move(segment_coordinates));
         builder.add_sampling_axis(SamplingAxis{
@@ -1304,11 +1559,9 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
           const auto owner =
               std::shared_ptr<const std::vector<double>>{std::move(values)};
           builder.add_curve(Curve{
-              .id = stable_id(
-                  identity, "curve",
-                  specification.byte_offset +
-                      static_cast<std::uint64_t>(segment_index) * 4096U +
-                      static_cast<std::uint64_t>(curve.specification_index)),
+              .id = curve_id(identity, selection.identity_scheme, ordinal,
+                             specification.byte_offset, segment_index,
+                             curve.specification_index),
               .mnemonic = curve.mnemonic,
               .display_name = spec.mnemonic,
               .unit = curve.unit,

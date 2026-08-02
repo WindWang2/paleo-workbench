@@ -55,10 +55,19 @@ struct LisInspection {
   std::vector<LisDiagnostic> diagnostics;
 };
 
+// v1 preserves the original LIS adapter identity preimage for persisted
+// references. v2 binds imported entities to the supplied source bytes as well
+// as source metadata and is the default for new imports.
+enum class LisIdentityScheme : std::uint8_t {
+  resform_compatible_v1,
+  content_bound_v2,
+};
+
 struct LisSelection {
   // When exactly one logical file exists, this sentinel selects it. Multiple
   // files always require the host to choose an explicit catalog index.
   std::uint32_t logical_file_index{UINT32_MAX};
+  LisIdentityScheme identity_scheme{LisIdentityScheme::content_bound_v2};
 };
 
 struct LisAliasRule {
@@ -73,6 +82,11 @@ struct LisUnitRule {
   double multiplier{1.0};
 };
 
+enum class LisTextEncoding : std::uint8_t {
+  ascii,
+  iso_8859_1,
+};
+
 // A value object whose rules influence both normalization and stable imported
 // identity. Custom rules precede the built-in ResForm-compatible v1 rules and
 // are validated as a complete value before the source stream is read.
@@ -82,9 +96,9 @@ struct LisNormalizationProfile {
   std::vector<double> inferred_null_values{-999.25, -999.0, -9999.0, -99999.0};
   std::vector<LisAliasRule> aliases;
   std::vector<LisUnitRule> unit_rules;
-  // "ASCII" keeps non-ASCII bytes untouched and reports them. ISO-8859-1 is
-  // the currently supported explicit single-byte decoding choice.
-  std::string text_encoding{"ASCII"};
+  // ASCII keeps non-ASCII bytes untouched and reports them. ISO-8859-1 is the
+  // currently supported explicit single-byte decoding choice.
+  LisTextEncoding text_encoding{LisTextEncoding::ascii};
 };
 
 [[nodiscard]] WELLLOG_IO_API const LisNormalizationProfile &
