@@ -27,6 +27,14 @@ python -m well_log_workstation
   templates/
 ```
 
+### Import LAS (#218)
+
+With a workspace open: **文件 → 导入 LAS…**
+
+- Copies file under `wells/<id>/`
+- Updates `workspace.json` catalog
+- Loads curves into the host session store (readable via `session.sample_value`)
+
 Headless / CI:
 
 ```bash

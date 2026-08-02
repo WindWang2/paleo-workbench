@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from well_log_workstation.las_import import LasImportError, import_las_into_workspace
 from well_log_workstation.qt_platform import effective_qt_platform_hint
+from well_log_workstation.session_store import HostSessionStore
 from well_log_workstation.workspace import (
     Workspace,
     WorkspaceError,
@@ -40,6 +42,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self.resize(1280, 800)
 
         self._workspace: Workspace | None = None
+        self.session = HostSessionStore()
 
         self._build_menus()
         self._build_body()
@@ -60,6 +63,11 @@ class WellLogWorkstationWindow(QMainWindow):
         act_open = file_menu.addAction("打开工区…")
         act_open.setObjectName("Action_OpenWorkspace")
         act_open.triggered.connect(self._on_open_workspace)
+        file_menu.addSeparator()
+        self._act_import_las = file_menu.addAction("导入 LAS…")
+        self._act_import_las.setObjectName("Action_ImportLas")
+        self._act_import_las.triggered.connect(self._on_import_las)
+        self._act_import_las.setEnabled(False)
         file_menu.addSeparator()
         act_quit = file_menu.addAction("退出")
         act_quit.triggered.connect(self.close)
@@ -177,12 +185,28 @@ class WellLogWorkstationWindow(QMainWindow):
     def set_workspace(self, ws: Workspace | None) -> None:
         """Programmatic API for tests and future host wiring."""
         self._workspace = ws
+        if ws is None:
+            self.session.clear()
+        self._act_import_las.setEnabled(ws is not None)
         self._refresh_tree()
         self._update_status()
         if ws is not None:
             self.setWindowTitle(f"{ws.name} — Well Log Workstation")
         else:
             self.setWindowTitle("Well Log Workstation")
+
+    def import_las_path(self, las_path: Path | str) -> str:
+        """Import LAS into the open workspace; returns catalog well id.
+
+        Raises LasImportError / WorkspaceError for the caller to surface.
+        """
+        if self._workspace is None:
+            raise WorkspaceError("请先打开或新建工区")
+        result = import_las_into_workspace(self._workspace, las_path)
+        self.session.put(result.document)
+        self._refresh_tree()
+        self._update_status()
+        return result.catalog_well_id
 
     def _refresh_tree(self) -> None:
         tree = self.workspace_tree
@@ -272,3 +296,35 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "打开工区失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "打开工区失败", str(exc))
+
+    def _on_import_las(self) -> None:
+        if self._workspace is None:
+            QMessageBox.information(self, "导入 LAS", "请先打开或新建工区。")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 LAS 文件",
+            "",
+            "LAS (*.las *.LAS);;All (*.*)",
+        )
+        if not path:
+            return
+        try:
+            well_id = self.import_las_path(path)
+            doc = self.session.get(well_id)
+            n_curves = len(doc.curves) if doc else 0
+            extra = ""
+            if doc and doc.diagnostics:
+                extra = "\n\n提示:\n- " + "\n- ".join(doc.diagnostics[:8])
+            QMessageBox.information(
+                self,
+                "导入成功",
+                f"已导入井「{doc.well_name if doc else well_id}」\n"
+                f"曲线数: {n_curves}\n"
+                f"路径: {doc.source_path if doc else ''}"
+                f"{extra}",
+            )
+        except (LasImportError, WorkspaceError) as exc:
+            QMessageBox.warning(self, "导入 LAS 失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "导入 LAS 失败", str(exc))
