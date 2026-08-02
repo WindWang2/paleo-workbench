@@ -1,6 +1,7 @@
 #include <welllog/io/manifest.hpp>
 
 #include <welllog/core/checked_math.hpp>
+#include <welllog/io/asset_security.hpp>
 #include <welllog/io/container_security.hpp>
 
 #include <cctype>
@@ -707,6 +708,9 @@ void write_primitive(std::string &output, const CustomPrimitive &primitive) {
   };
   if (result.uri.empty()) {
     throw ParseFailure{"buffer source URI must not be empty"};
+  }
+  if (!is_safe_untrusted_asset_uri(result.uri)) {
+    throw ParseFailure{"buffer source URI scheme or content is not allowed"};
   }
   return result;
 }

@@ -377,3 +377,18 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 测试 | `welllog.container-security`；xlsx/xml/csv/manifest 回归 |
 
 **#171 验收**：AC 覆盖。持续 fuzz harness 作为 follow-up（#172）；本票提供种子策略与 determininistic 回归。
+
+## Session: 2026-08-02 — #172 模糊测试资产与二进制测井源
+
+`/implement` #172（ADR 0042）。Pattern/Custom/Image/URI 策略 + DLIS/LIS/716 确定性 corpus/mutation fuzz；不依赖 libFuzzer 即可进 CTest；ASan/UBSan 可在宿主工具链上复跑同一语料。
+
+| 项 | 内容 |
+|----|------|
+| `asset_security` | `is_safe_untrusted_asset_uri`；Image/CustomLayer/Pattern 结构与资源上限；Error 无 payload args |
+| Manifest | `parse_source` 拒绝 javascript/data/http(s)/file 与脚本/Shader token |
+| Harness | `tests/fuzz/`：`fuzz_common`（xorshift 变异）、binary + assets 可执行；`WELLLOG_FUZZ_ITERS` / corpus env |
+| 语料 | `corpus/binary/`（空、截断、huge-count、随机）；`corpus/assets/`（JSON/XML/URI） |
+| 字体 | 既有 HarfBuzz 入口 64 MiB / 64 faces 上限（#152 路径）纳入同一安全叙述 |
+| 测试 | `welllog.fuzz-binary-sources`、`welllog.fuzz-assets`；container-security + manifest 回归绿 |
+
+**#172 验收**：AC 覆盖。明确延后：CI 内置 libFuzzer 持续 AFL 模式；Windows ASan 等价 runner（文档要求本地/CI 工具链复跑）；崩溃种子自动入库流水线（手拷贝进 corpus）。

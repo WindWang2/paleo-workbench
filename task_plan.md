@@ -480,6 +480,15 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] Tests: `welllog.container-security` + export regressions
 - **Status:** complete
 
+### Phase W22: #172 模糊测试图纹、字体、图像及二进制测井源（ADR 0042）
+
+- [x] `asset_security`：URI 方案/脚本/Shader 拒绝；ImageSource / CustomLayer / Pattern 上限
+- [x] Manifest `parse_source` 拒绝不安全 URI
+- [x] 确定性 corpus + mutation harness（无 libFuzzer CI 依赖）
+- [x] CTest：`welllog.fuzz-binary-sources`（DLIS/LIS/716）、`welllog.fuzz-assets`
+- [x] 持久种子：`tests/fuzz/corpus/{binary,assets}/`；Error.arguments 空断言
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |

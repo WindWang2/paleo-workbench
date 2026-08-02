@@ -503,6 +503,7 @@ if(WELLLOG_BUILD_ARROW)
 endif()
 
 add_library(welllog_io ${WELLLOG_LIBRARY_TYPE}
+    src/io/asset_security.cpp
     src/io/container_security.cpp
     src/io/dlis.cpp
     src/io/format716.cpp
@@ -1243,6 +1244,50 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.container-security
              COMMAND welllog_container_security_tests)
+
+    # Deterministic corpus + mutation fuzz (#172). Always runs under CTest;
+    # raise iterations with WELLLOG_FUZZ_ITERS. Optional ASan/UBSan via host
+    # toolchain (WELLLOG_SANITIZERS / CXXFLAGS).
+    set(WELLLOG_FUZZ_CORPUS_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus")
+    add_executable(welllog_fuzz_binary_sources_tests
+        tests/fuzz/fuzz_binary_sources_test.cpp
+    )
+    target_compile_features(welllog_fuzz_binary_sources_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_fuzz_binary_sources_tests)
+    target_compile_definitions(
+        welllog_fuzz_binary_sources_tests
+        PRIVATE "WELLLOG_FUZZ_CORPUS_DIR=\"${WELLLOG_FUZZ_CORPUS_DIR}\""
+    )
+    target_include_directories(
+        welllog_fuzz_binary_sources_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz"
+    )
+    target_link_libraries(
+        welllog_fuzz_binary_sources_tests
+        PRIVATE WellLog::IO
+    )
+    add_test(NAME welllog.fuzz-binary-sources
+             COMMAND welllog_fuzz_binary_sources_tests)
+
+    add_executable(welllog_fuzz_assets_tests
+        tests/fuzz/fuzz_assets_test.cpp
+    )
+    target_compile_features(welllog_fuzz_assets_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_fuzz_assets_tests)
+    target_compile_definitions(
+        welllog_fuzz_assets_tests
+        PRIVATE "WELLLOG_FUZZ_CORPUS_DIR=\"${WELLLOG_FUZZ_CORPUS_DIR}\""
+    )
+    target_include_directories(
+        welllog_fuzz_assets_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz"
+    )
+    target_link_libraries(
+        welllog_fuzz_assets_tests
+        PRIVATE WellLog::IO WellLog::Scene
+    )
+    add_test(NAME welllog.fuzz-assets COMMAND welllog_fuzz_assets_tests)
 
     if(WELLLOG_BUILD_ARROW AND WELLLOG_ARROW_HAS_IPC)
         add_executable(welllog_arrow_adapter_tests
