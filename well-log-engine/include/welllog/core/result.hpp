@@ -44,6 +44,9 @@ enum class ErrorCode : std::uint16_t {
 enum class Severity : std::uint8_t {
   warning,
   error,
+  // Appended so warning/error keep their established numeric values. Source
+  // adapters use info for auditable automatic normalizations.
+  info,
 };
 
 enum class MessageKey : std::uint16_t {

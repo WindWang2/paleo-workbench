@@ -1,0 +1,820 @@
+#include <welllog/io/lis.hpp>
+#include <welllog/table/table_projection.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <optional>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using namespace welllog;
+
+[[noreturn]] void fail(std::string_view message) {
+  std::cerr << "FAIL: " << message << '\n';
+  std::exit(EXIT_FAILURE);
+}
+
+void require(bool condition, std::string_view message) {
+  if (!condition) {
+    fail(message);
+  }
+}
+
+void require_near(double actual, double expected, std::string_view message) {
+  if (std::fabs(actual - expected) > 1.0e-6) {
+    fail(message);
+  }
+}
+
+class LisFixture {
+public:
+  void add_file_header() { add_record(128U, {}); }
+
+  void add_unknown_record() { add_record(1U, {0U, 1U, 2U}); }
+
+  void add_null_padding() { bytes_.push_back(0U); }
+
+  void
+  add_format_specification(std::string_view depth_unit = "FT",
+                           std::string_view index_mnemonic = "DEPT",
+                           std::string_view gamma_mnemonic = "GR",
+                           std::string_view gamma_unit = "API",
+                           std::optional<double> absent_value = std::nullopt) {
+    std::vector<std::uint8_t> body;
+    append_entry_i32(body, 3U, 12); // frame size: DEPT, GR, RHOB
+    if (absent_value.has_value()) {
+      body.insert(body.end(), {12U, 4U, 68U});
+      append_lis_f32(body, *absent_value);
+    }
+    body.insert(body.end(), {0U, 0U, 0U}); // entry-block terminator
+    append_spec_block(body, index_mnemonic, depth_unit, 4U, 1U, 68U);
+    append_spec_block(body, gamma_mnemonic, gamma_unit, 4U, 1U, 68U);
+    append_spec_block(body, "RHOB", "G/CC", 4U, 1U, 68U);
+    add_record(64U, std::move(body));
+  }
+
+  void add_non_scalar_format_specification() {
+    std::vector<std::uint8_t> body;
+    append_entry_i32(body, 3U, 12); // DEPT plus a two-sample image channel.
+    body.insert(body.end(), {0U, 0U, 0U});
+    append_spec_block(body, "DEPT", "M", 4U, 1U, 68U);
+    append_spec_block(body, "IMG", "", 8U, 2U, 68U);
+    add_record(64U, std::move(body));
+  }
+
+  void add_normal_data(double first_depth = 1000.0,
+                       double first_gamma_ray = 45.0) {
+    add_normal_data({{{first_depth, first_gamma_ray, 2.30},
+                      {first_depth + 1.0, first_gamma_ray + 1.0, 2.31},
+                      {first_depth + 2.0, first_gamma_ray + 2.0, 2.32}}});
+  }
+
+  void add_normal_data(const std::vector<std::array<double, 3>> &frames) {
+    std::vector<std::uint8_t> body;
+    for (const auto &frame : frames) {
+      append_frame(body, frame[0U], frame[1U], frame[2U]);
+    }
+    add_record(0U, std::move(body));
+  }
+
+  void add_non_scalar_data() {
+    std::vector<std::uint8_t> body;
+    append_lis_f32(body, 1000.0);
+    append_lis_f32(body, 1.0);
+    append_lis_f32(body, 2.0);
+    add_record(0U, std::move(body));
+  }
+
+  void add_malformed_normal_data() {
+    add_record(0U, std::vector<std::uint8_t>(11U, 0U));
+  }
+
+  [[nodiscard]] std::vector<std::byte> finish() && {
+    std::vector<std::byte> result;
+    result.reserve(bytes_.size());
+    for (const auto byte : bytes_) {
+      result.push_back(static_cast<std::byte>(byte));
+    }
+    return result;
+  }
+
+private:
+  static void append_u16(std::vector<std::uint8_t> &out, std::uint16_t value) {
+    out.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>(value & 0xffU));
+  }
+
+  static void append_i32(std::vector<std::uint8_t> &out, std::int32_t value) {
+    const auto encoded = static_cast<std::uint32_t>(value);
+    out.push_back(static_cast<std::uint8_t>((encoded >> 24U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>((encoded >> 16U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>((encoded >> 8U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>(encoded & 0xffU));
+  }
+
+  static void append_lis_f32(std::vector<std::uint8_t> &out, double value) {
+    if (value == 0.0) {
+      out.insert(out.end(), 4U, 0U);
+      return;
+    }
+    int exponent{};
+    const auto fraction = std::frexp(std::fabs(value), &exponent);
+    const auto significand = static_cast<std::uint32_t>(
+        std::llround(fraction * static_cast<double>(1U << 23U)));
+    const auto negative = value < 0.0;
+    const auto exponent_bits =
+        negative ? static_cast<std::uint8_t>(
+                       ~static_cast<std::uint8_t>(exponent + 128))
+                 : static_cast<std::uint8_t>(exponent + 128);
+    const auto fraction_bits =
+        negative ? static_cast<std::uint32_t>((~significand + 1U) & 0x007fffffU)
+                 : significand & 0x007fffffU;
+    const auto encoded = (negative ? 0x80000000U : 0U) |
+                         (static_cast<std::uint32_t>(exponent_bits) << 23U) |
+                         fraction_bits;
+    out.push_back(static_cast<std::uint8_t>((encoded >> 24U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>((encoded >> 16U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>((encoded >> 8U) & 0xffU));
+    out.push_back(static_cast<std::uint8_t>(encoded & 0xffU));
+  }
+
+  static void append_entry_i32(std::vector<std::uint8_t> &out,
+                               std::uint8_t type, std::int32_t value) {
+    out.push_back(type);
+    out.push_back(4U);
+    out.push_back(73U);
+    append_i32(out, value);
+  }
+
+  static void
+  append_spec_block(std::vector<std::uint8_t> &out, std::string_view mnemonic,
+                    std::string_view unit, std::uint16_t reserved_size,
+                    std::uint8_t samples, std::uint8_t representation) {
+    if (mnemonic.size() > 4U || unit.size() > 4U) {
+      fail("test mnemonic and unit must fit LIS79 spec-block fields");
+    }
+    std::vector<std::uint8_t> block(40U, static_cast<std::uint8_t>(' '));
+    for (std::size_t index{}; index < mnemonic.size(); ++index) {
+      block[index] = static_cast<std::uint8_t>(mnemonic[index]);
+    }
+    for (std::size_t index{}; index < unit.size(); ++index) {
+      block[18U + index] = static_cast<std::uint8_t>(unit[index]);
+    }
+    block[28U] = static_cast<std::uint8_t>((reserved_size >> 8U) & 0xffU);
+    block[29U] = static_cast<std::uint8_t>(reserved_size & 0xffU);
+    block[33U] = samples;
+    block[34U] = representation;
+    out.insert(out.end(), block.begin(), block.end());
+  }
+
+  static void append_frame(std::vector<std::uint8_t> &out, double depth,
+                           double gamma_ray, double density) {
+    append_lis_f32(out, depth);
+    append_lis_f32(out, gamma_ray);
+    append_lis_f32(out, density);
+  }
+
+  void add_record(std::uint8_t type, std::vector<std::uint8_t> body) {
+    const auto length = body.size() + 6U;
+    if (length > 0xffffU) {
+      fail("LIS test record must fit a physical record");
+    }
+    append_u16(bytes_, static_cast<std::uint16_t>(length));
+    append_u16(bytes_, 0U);
+    bytes_.push_back(type);
+    bytes_.push_back(0U);
+    bytes_.insert(bytes_.end(), body.begin(), body.end());
+  }
+
+  std::vector<std::uint8_t> bytes_;
+};
+
+[[nodiscard]] std::vector<std::byte> representative_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification();
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> two_logical_files_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification();
+  fixture.add_normal_data();
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(2000.0, 90.0);
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> backtracking_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data({{{1000.0, 10.0, 2.10},
+                            {1001.0, 11.0, 2.11},
+                            {1001.0, 12.0, 2.12},
+                            {1000.5, 13.0, 2.13},
+                            {1000.0, 14.0, 2.14}}});
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> inferred_null_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(
+      {{{1000.0, 45.0, 2.30}, {1001.0, -999.25, 2.31}, {1002.0, 47.0, 2.32}}});
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> source_index_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("MS", "TIME");
+  fixture.add_normal_data(
+      {{{100.0, 45.0, 2.30}, {200.0, 46.0, 2.31}, {300.0, 47.0, 2.32}}});
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> multiple_data_sets_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(1000.0, 40.0);
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(2000.0, 90.0);
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> non_scalar_only_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_non_scalar_format_specification();
+  fixture.add_non_scalar_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> redundant_format_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_format_specification("M");
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> unknown_record_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_unknown_record();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> locally_malformed_data_set_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_malformed_normal_data();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(2000.0, 90.0);
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> custom_alias_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M", "DEPT", "XGR", "API");
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> padded_direct_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_null_padding();
+  fixture.add_format_specification("M");
+  fixture.add_null_padding();
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> explicit_null_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M", "DEPT", "GR", "API", -999.0);
+  fixture.add_normal_data({{{1000.0, -999.25, 2.30},
+                            {1001.0, -999.0, 2.31},
+                            {1002.0, 50.0, 2.32}}});
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> constant_axis_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M");
+  fixture.add_normal_data(
+      {{{1000.0, 45.0, 2.30}, {1000.0, 46.0, 2.31}, {1000.0, 47.0, 2.32}}});
+  return std::move(fixture).finish();
+}
+
+void append_le32(std::vector<std::byte> &out, std::uint32_t value) {
+  for (std::uint32_t index{}; index < 4U; ++index) {
+    out.push_back(static_cast<std::byte>((value >> (index * 8U)) & 0xffU));
+  }
+}
+
+[[nodiscard]] std::vector<std::byte> tif_wrapped_lis() {
+  const auto source = representative_lis();
+  std::vector<std::byte> result;
+  result.reserve(source.size() + 36U);
+  append_le32(result, 0U); // beginning-of-file tape mark
+  append_le32(result, 0U);
+  append_le32(result, static_cast<std::uint32_t>(source.size() + 12U));
+  result.insert(result.end(), source.begin(), source.end());
+  append_le32(result, 1U); // end-of-file tape marks
+  append_le32(result, 0U);
+  append_le32(result, static_cast<std::uint32_t>(source.size() + 24U));
+  append_le32(result, 1U);
+  append_le32(result, static_cast<std::uint32_t>(source.size() + 24U));
+  append_le32(result, static_cast<std::uint32_t>(source.size() + 36U));
+  return result;
+}
+
+void test_default_profile_normalizes_a_selected_lis79_logical_file() {
+  const auto source_bytes = representative_lis();
+  const auto inspection = LisSourceAdapter::inspect(source_bytes);
+  require(inspection.has_value(),
+          "a structurally valid LIS79 stream must inspect");
+  require(inspection.value().catalog.logical_files.size() == 1U,
+          "one file header must expose one logical-file choice");
+
+  const auto imported = LisSourceAdapter::import(
+      source_bytes,
+      BufferSourceReference{.uri = "asset://well/A1.lis", .checksum = "a1-v1"},
+      LisSelection{.logical_file_index = 0U});
+  require(imported.has_value(), "the selected LIS79 logical file must import");
+
+  const auto &document = imported.value().document;
+  require(document.revision() == DocumentRevision{1},
+          "a first LIS79 import must begin at revision one");
+  require(document.sampling_axes().size() == 1U,
+          "one normal LIS data run must create one sampling axis");
+  require(document.curves().size() == 2U,
+          "the index must not be duplicated as a curve");
+
+  const auto &axis = document.sampling_axes().front();
+  require(axis.domain == DepthDomain::measured_depth,
+          "DEPT with a length unit must normalize to measured depth");
+  require(axis.unit == "m", "feet must normalize to metres");
+  require_near(*axis.coordinates.value_as_double(0U), 304.8,
+               "the depth values must convert from feet to metres");
+  require_near(*axis.coordinates.value_as_double(2U), 305.4096,
+               "each depth sample must convert independently");
+
+  const auto &gamma_ray = document.curves()[0U];
+  require(gamma_ray.mnemonic == "GR", "GR must retain canonical mnemonic");
+  require(gamma_ray.display_name == "GR",
+          "the raw source mnemonic is displayed");
+  require(gamma_ray.unit == "API", "GR must retain API units");
+  require_near(*gamma_ray.values.value_as_double(1U), 46.0,
+               "GR values must remain numerically stable");
+
+  const auto &density = document.curves()[1U];
+  require(density.mnemonic == "DEN", "RHOB must normalize to density");
+  require(density.display_name == "RHOB",
+          "density must retain its source name");
+  require(density.unit == "g/cm3", "source density spelling must normalize");
+  require_near(*density.values.value_as_double(2U), 2.32,
+               "density values in canonical units must remain stable");
+
+  const auto tables = TableProjectionBuilder::from_document(document);
+  require(tables.size() == 1U && tables.front().row_count() == 3U &&
+              tables.front().column_count() == 3U,
+          "an imported LIS document must enter the standard table projection");
+}
+
+void test_multiple_logical_files_require_an_explicit_selection() {
+  const auto source_bytes = two_logical_files_lis();
+  const auto inspection = LisSourceAdapter::inspect(source_bytes);
+  require(inspection.has_value(), "a multi-file LIS79 stream must inspect");
+  require(inspection.value().catalog.logical_files.size() == 2U,
+          "two file headers must expose two logical-file choices");
+
+  const auto implicit_import = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/two-files.lis",
+                                          .checksum = "two-v1"});
+  require(!implicit_import.has_value(),
+          "an import must not silently choose among multiple logical files");
+
+  const auto selected_import = LisSourceAdapter::import(
+      source_bytes,
+      BufferSourceReference{.uri = "asset://well/two-files.lis",
+                            .checksum = "two-v1"},
+      LisSelection{.logical_file_index = 1U});
+  require(selected_import.has_value(),
+          "the selected second logical file must import");
+  const auto &document = selected_import.value().document;
+  require_near(
+      *document.sampling_axes().front().coordinates.value_as_double(0U), 2000.0,
+      "the selected logical file must not import the first file's depth");
+  require_near(
+      *document.curves().front().values.value_as_double(0U), 90.0,
+      "the selected logical file must not import the first file's curves");
+}
+
+void test_backtracking_index_creates_separate_axes_without_sorting() {
+  const auto source_bytes = backtracking_lis();
+  const auto imported = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/backtrack.lis",
+                                          .checksum = "back-v1"});
+  require(imported.has_value(),
+          "a backtracking LIS data run must remain importable");
+
+  const auto &document = imported.value().document;
+  require(document.sampling_axes().size() == 2U,
+          "a first index reversal must start a separate sampling axis");
+  const auto &increasing = document.sampling_axes()[0U];
+  require(increasing.direction == AxisDirection::increasing,
+          "the first non-repeated difference determines the first direction");
+  require(increasing.coordinates.length() == 3U,
+          "repeated depth samples must stay in the first source segment");
+  require_near(*increasing.coordinates.value_as_double(2U), 1001.0,
+               "repeated depth values must retain source order");
+
+  const auto &decreasing = document.sampling_axes()[1U];
+  require(decreasing.direction == AxisDirection::decreasing,
+          "the post-reversal axis must retain its physical direction");
+  require(
+      decreasing.coordinates.length() == 2U,
+      "the reversal sample must begin rather than duplicate the new segment");
+  require_near(*decreasing.coordinates.value_as_double(0U), 1000.5,
+               "the reversal sample must remain at the start of the new axis");
+  require(document.curves().size() == 4U,
+          "each scalar curve must be represented for each source-axis segment");
+  require(document.curves()[2U].sampling_axis_id == decreasing.id,
+          "the second GR curve must bind to the second source-axis segment");
+}
+
+void test_profile_infers_nulls_in_the_source_numeric_domain() {
+  const auto source_bytes = inferred_null_lis();
+  const auto imported = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/null.lis",
+                                          .checksum = "null-v1"});
+  require(imported.has_value(),
+          "an inferred-null curve must remain importable");
+
+  const auto &gamma_ray = imported.value().document.curves()[0U];
+  require(
+      gamma_ray.nulls.is_null(1U),
+      "the raw -999.25 sentinel must become a Curve null before conversion");
+  require(!gamma_ray.nulls.is_null(0U), "ordinary values must remain plotted");
+  require(std::isnan(*gamma_ray.values.value_as_double(1U)),
+          "a normalized null must not retain a plottable numeric value");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::inferred_null &&
+               diagnostic.severity == Severity::info &&
+               diagnostic.channel_name == "GR";
+      });
+  require(reported,
+          "inferred null conversion must be visible in the import audit");
+}
+
+void test_unrecognized_numeric_index_is_not_misrepresented_as_depth() {
+  const auto source_bytes = source_index_lis();
+  const auto imported = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/time.lis",
+                                          .checksum = "time-v1"});
+  require(imported.has_value(),
+          "a numeric source index must remain importable");
+  const auto &axis = imported.value().document.sampling_axes().front();
+  require(axis.domain == DepthDomain::source_index,
+          "TIME must not be guessed to be a measured-depth axis");
+  require(axis.unit == "MS", "a source-index axis must retain its source unit");
+  require_near(*axis.coordinates.value_as_double(2U), 300.0,
+               "a source-index axis must retain unconverted values");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::unknown_index_semantics &&
+               diagnostic.severity == Severity::warning;
+      });
+  require(reported,
+          "the unrecognized index semantic must be visible in the audit");
+}
+
+void test_each_lis_data_set_retains_its_own_axis_and_curves() {
+  const auto source_bytes = multiple_data_sets_lis();
+  const auto imported = LisSourceAdapter::import(
+      source_bytes,
+      BufferSourceReference{.uri = "asset://well/two-data-sets.lis",
+                            .checksum = "sets-v1"});
+  require(imported.has_value(),
+          "two normal LIS data sets must import together");
+  const auto &document = imported.value().document;
+  require(document.sampling_axes().size() == 2U,
+          "each LIS data set must own a distinct sampling axis");
+  require(document.curves().size() == 4U,
+          "each data set must retain both source scalar curves");
+  require_near(*document.sampling_axes()[1U].coordinates.value_as_double(0U),
+               2000.0,
+               "the second data set must retain its own source coordinates");
+  require(document.curves()[2U].sampling_axis_id ==
+              document.sampling_axes()[1U].id,
+          "the second data set curves must bind to its own axis");
+  require_near(
+      *document.curves()[2U].values.value_as_double(0U), 90.0,
+      "the second data set GR values must not be merged with the first");
+}
+
+void test_valid_non_scalar_lis_data_set_becomes_an_empty_document() {
+  const auto source_bytes = non_scalar_only_lis();
+  const auto imported = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/image.lis",
+                                          .checksum = "image-v1"});
+  require(
+      imported.has_value(),
+      "a structurally valid data set with no scalar curve must still import");
+  require(imported.value().document.sampling_axes().empty(),
+          "a data set without scalar curves must not leave an orphan axis");
+  require(imported.value().document.curves().empty(),
+          "non-scalar LIS channels must not be coerced into Core curves");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::no_importable_curve &&
+               diagnostic.severity == Severity::warning;
+      });
+  require(reported,
+          "a zero-curve import must explain why no scalar data was retained");
+}
+
+void test_tif_wrapped_lis79_is_detected_structurally() {
+  const auto source_bytes = tif_wrapped_lis();
+  const auto inspection = LisSourceAdapter::inspect(source_bytes);
+  require(inspection.has_value(),
+          "a valid TIF envelope must be detected before LIS parsing");
+  const auto imported = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/tif.lis",
+                                          .checksum = "tif-v1"});
+  require(imported.has_value(),
+          "the unique TIF-wrapped LIS79 parse must import");
+  require(imported.value().document.curves().size() == 2U,
+          "TIF unwrapping must preserve the enclosed LIS curves");
+}
+
+void test_import_identity_is_stable_for_content_and_profile() {
+  const auto source_bytes = representative_lis();
+  const BufferSourceReference source{.uri = "asset://well/stable.lis",
+                                     .checksum = "stable-v1"};
+  const auto first = LisSourceAdapter::import(source_bytes, source);
+  const auto second = LisSourceAdapter::import(source_bytes, source);
+  require(first.has_value() && second.has_value(),
+          "repeat imports must remain valid");
+  require(
+      first.value().document.id() == second.value().document.id(),
+      "same content and normalization profile must preserve document identity");
+  require(first.value().document.sampling_axes().front().id ==
+              second.value().document.sampling_axes().front().id,
+          "repeat imports must preserve sampling-axis identities");
+  require(first.value().document.curves().front().id ==
+              second.value().document.curves().front().id,
+          "repeat imports must preserve curve identities");
+  require(first.value().document.revision() == DocumentRevision{1} &&
+              second.value().document.revision() == DocumentRevision{1},
+          "repeat import does not manufacture a new revision");
+
+  auto changed_profile = default_lis_normalization_profile();
+  changed_profile.version = "2";
+  const auto changed =
+      LisSourceAdapter::import(source_bytes, source, {}, changed_profile);
+  require(changed.has_value(), "a versioned normalization profile must import");
+  require(changed.value().document.id() != first.value().document.id(),
+          "a changed normalization profile must intentionally create a new "
+          "identity");
+}
+
+void test_invalid_normalization_profile_is_rejected_before_importing() {
+  auto invalid_profile = default_lis_normalization_profile();
+  invalid_profile.version.clear();
+  const auto rejected = LisSourceAdapter::import(
+      representative_lis(),
+      BufferSourceReference{.uri = "asset://well/invalid-profile.lis",
+                            .checksum = "none"},
+      {}, invalid_profile);
+  require(!rejected.has_value(), "an invalid normalization profile must be "
+                                 "rejected without accepting source bytes");
+
+  auto conflicting_profile = default_lis_normalization_profile();
+  conflicting_profile.aliases = {
+      LisAliasRule{.source_mnemonic = "XGR", .canonical_mnemonic = "GR"},
+      LisAliasRule{.source_mnemonic = "x-gr", .canonical_mnemonic = "DEN"},
+  };
+  const auto conflicting = LisSourceAdapter::import(
+      representative_lis(),
+      BufferSourceReference{.uri = "asset://well/conflict-profile.lis",
+                            .checksum = "none"},
+      {}, conflicting_profile);
+  require(!conflicting.has_value(),
+          "conflicting normalized alias rules must be rejected before import");
+}
+
+void test_normalization_profile_can_supply_auditable_custom_alias_and_unit_rules() {
+  auto profile = default_lis_normalization_profile();
+  profile.aliases.push_back(
+      LisAliasRule{.source_mnemonic = "XGR", .canonical_mnemonic = "GR"});
+  profile.unit_rules.push_back(LisUnitRule{.canonical_mnemonic = "GR",
+                                           .source_unit = "API",
+                                           .canonical_unit = "cps",
+                                           .multiplier = 2.0});
+  const auto imported = LisSourceAdapter::import(
+      custom_alias_lis(),
+      BufferSourceReference{.uri = "asset://well/profile.lis",
+                            .checksum = "profile-v1"},
+      {}, profile);
+  require(imported.has_value(),
+          "a valid explicit normalization profile must import");
+  const auto &gamma_ray = imported.value().document.curves().front();
+  require(
+      gamma_ray.mnemonic == "GR" && gamma_ray.unit == "cps",
+      "custom alias and unit rules must take precedence over built-in rules");
+  require_near(*gamma_ray.values.value_as_double(0U), 90.0,
+               "a custom unit rule must transform source values");
+  const auto alias_reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::alias_normalized &&
+               diagnostic.channel_name == "XGR";
+      });
+  require(alias_reported,
+          "custom normalization must remain visible in the audit");
+}
+
+void test_direct_physical_stream_preserves_short_record_headers_after_padding() {
+  const auto imported = LisSourceAdapter::import(
+      padded_direct_lis(),
+      BufferSourceReference{.uri = "asset://well/padding.lis",
+                            .checksum = "padding-v1"});
+  require(
+      imported.has_value(),
+      "null padding must not consume a following short physical-record header");
+  require(imported.value().document.curves().size() == 2U,
+          "padding recovery must preserve the subsequent LIS data set");
+}
+
+void test_explicit_lis_absent_value_has_priority_over_inferred_nulls() {
+  const auto imported = LisSourceAdapter::import(
+      explicit_null_lis(),
+      BufferSourceReference{.uri = "asset://well/explicit-null.lis",
+                            .checksum = "explicit-v1"});
+  require(imported.has_value(), "an explicit LIS absent value must import");
+  const auto &gamma_ray = imported.value().document.curves().front();
+  require(!gamma_ray.nulls.is_null(0U) && gamma_ray.nulls.is_null(1U),
+          "an explicit source null must replace rather than combine with "
+          "inferred sentinels");
+  require_near(*gamma_ray.values.value_as_double(0U), -999.25,
+               "an inferred sentinel remains numeric when the source declares "
+               "another null");
+}
+
+void test_constant_lis_axis_defaults_to_increasing_with_an_audit_entry() {
+  const auto imported = LisSourceAdapter::import(
+      constant_axis_lis(),
+      BufferSourceReference{.uri = "asset://well/constant.lis",
+                            .checksum = "constant-v1"});
+  require(imported.has_value(), "a constant LIS index must remain importable");
+  require(imported.value().document.sampling_axes().front().direction ==
+              AxisDirection::increasing,
+          "an all-equal axis must use the documented increasing fallback");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::constant_axis &&
+               diagnostic.severity == Severity::info;
+      });
+  require(reported,
+          "the all-equal direction fallback must be visible in the audit");
+}
+
+void test_redundant_format_and_unknown_records_are_audited_without_losing_data() {
+  const auto redundant = LisSourceAdapter::import(
+      redundant_format_lis(),
+      BufferSourceReference{.uri = "asset://well/redundant.lis",
+                            .checksum = "redundant-v1"});
+  require(redundant.has_value(),
+          "a redundant DFS must not suppress following data");
+  require(
+      redundant.value().document.sampling_axes().size() == 1U,
+      "an adjacent identical DFS without data must collapse to one data set");
+  const auto redundant_reported = std::any_of(
+      redundant.value().diagnostics.begin(),
+      redundant.value().diagnostics.end(), [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code ==
+                   LisDiagnosticCode::redundant_format_specification &&
+               diagnostic.severity == Severity::info;
+      });
+  require(redundant_reported,
+          "the redundant DFS collapse must remain auditable");
+
+  const auto unknown = LisSourceAdapter::import(
+      unknown_record_lis(),
+      BufferSourceReference{.uri = "asset://well/unknown.lis",
+                            .checksum = "unknown-v1"});
+  require(unknown.has_value(),
+          "a bounded unknown record must not reject a valid data set");
+  const auto unknown_reported = std::any_of(
+      unknown.value().diagnostics.begin(), unknown.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::unknown_record &&
+               diagnostic.severity == Severity::warning;
+      });
+  require(unknown_reported,
+          "a skipped unknown record must be visible in the audit");
+}
+
+void test_configured_lis_resource_limits_reject_without_truncating() {
+  const auto source_bytes = representative_lis();
+  auto input_limit = LisLimits{};
+  input_limit.max_input_bytes = source_bytes.size() - 1U;
+  const auto rejected_input = LisSourceAdapter::import(
+      source_bytes,
+      BufferSourceReference{.uri = "asset://well/limit.lis",
+                            .checksum = "limit-v1"},
+      {}, default_lis_normalization_profile(), input_limit);
+  require(!rejected_input.has_value() &&
+              rejected_input.error().code == ErrorCode::resource_exhausted,
+          "an input-size breach must reject rather than partially import a LIS "
+          "file");
+
+  auto sample_limit = LisLimits{};
+  sample_limit.max_samples_per_data_set = 2U;
+  const auto rejected_samples = LisSourceAdapter::import(
+      source_bytes,
+      BufferSourceReference{.uri = "asset://well/limit.lis",
+                            .checksum = "limit-v1"},
+      {}, default_lis_normalization_profile(), sample_limit);
+  require(!rejected_samples.has_value() &&
+              rejected_samples.error().code == ErrorCode::resource_exhausted,
+          "a sample-limit breach must reject rather than truncate a data set");
+}
+
+void test_malformed_bounded_data_set_isolated_from_following_data_set() {
+  const auto imported = LisSourceAdapter::import(
+      locally_malformed_data_set_lis(),
+      BufferSourceReference{.uri = "asset://well/local-error.lis",
+                            .checksum = "local-v1"});
+  require(imported.has_value(), "a malformed bounded data run must not "
+                                "suppress a following valid data set");
+  const auto &document = imported.value().document;
+  require(document.sampling_axes().size() == 1U &&
+              document.curves().size() == 2U,
+          "only the following valid data set must enter the document");
+  require_near(
+      *document.sampling_axes().front().coordinates.value_as_double(0U), 2000.0,
+      "the retained data set must preserve its own coordinates");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::malformed_dataset &&
+               diagnostic.severity == Severity::warning &&
+               diagnostic.data_set_ordinal == 0U;
+      });
+  require(reported,
+          "the isolated malformed data set must remain visible in the audit");
+}
+
+} // namespace
+
+int main() {
+  test_default_profile_normalizes_a_selected_lis79_logical_file();
+  test_multiple_logical_files_require_an_explicit_selection();
+  test_backtracking_index_creates_separate_axes_without_sorting();
+  test_profile_infers_nulls_in_the_source_numeric_domain();
+  test_unrecognized_numeric_index_is_not_misrepresented_as_depth();
+  test_each_lis_data_set_retains_its_own_axis_and_curves();
+  test_valid_non_scalar_lis_data_set_becomes_an_empty_document();
+  test_tif_wrapped_lis79_is_detected_structurally();
+  test_import_identity_is_stable_for_content_and_profile();
+  test_invalid_normalization_profile_is_rejected_before_importing();
+  test_normalization_profile_can_supply_auditable_custom_alias_and_unit_rules();
+  test_direct_physical_stream_preserves_short_record_headers_after_padding();
+  test_explicit_lis_absent_value_has_priority_over_inferred_nulls();
+  test_constant_lis_axis_defaults_to_increasing_with_an_audit_entry();
+  test_redundant_format_and_unknown_records_are_audited_without_losing_data();
+  test_configured_lis_resource_limits_reject_without_truncating();
+  test_malformed_bounded_data_set_isolated_from_following_data_set();
+  return EXIT_SUCCESS;
+}
