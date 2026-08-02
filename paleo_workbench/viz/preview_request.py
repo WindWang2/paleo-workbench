@@ -14,6 +14,7 @@ def request_from_resource(
     path: str | None = None,
     semantic_type: str | None = None,
     label: str | None = None,
+    comparison_crs: str | None = None,
 ) -> PreviewRequest:
     """Build the canonical, versioned engine request for a project resource."""
     source_path = path if path is not None else resource.path
@@ -38,7 +39,11 @@ def request_from_resource(
             or metadata.get("units")
             or ""
         ),
-        comparison_crs=str(metadata.get("comparison_crs") or ""),
+        comparison_crs=(
+            str(comparison_crs)
+            if comparison_crs is not None
+            else str(metadata.get("comparison_crs") or "")
+        ),
     )
 
 

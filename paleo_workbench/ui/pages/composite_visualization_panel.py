@@ -26,7 +26,7 @@ class VisualizationWorkspace(QFrame):
     exports behind a small 2-method interface (``load``, ``export_snapshot``).
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, well_state_store=None):
         super().__init__(parent)
         self.setObjectName("CompositeVisualizationPanel")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -60,7 +60,7 @@ class VisualizationWorkspace(QFrame):
         self.cross_well_host = CrossWellHost()
         self.map_host = PaleoMapHost()
         self.well_tie_host = WellTieHost()
-        self.engine_host = EnginePreviewHost()
+        self.engine_host = EnginePreviewHost(well_state_store=well_state_store)
 
         # Backward-compatible attributes used by tests and trace code.
         self.well_canvas = self.well_host.canvas
@@ -219,5 +219,4 @@ class VisualizationWorkspace(QFrame):
 
 # Backward-compatible alias
 CompositeVisualizationPanel = VisualizationWorkspace
-
 

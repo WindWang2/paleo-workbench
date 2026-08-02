@@ -23,6 +23,9 @@ from paleo_workbench.ui.pages.stratigraphy_correlation_page import StratigraphyC
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
 from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
+from paleo_workbench.viz.hosts.well_location_preview import (
+    WellLocationPreviewStateStore,
+)
 from paleo_workbench.ui.sidebar import ContextSidebar, TextSidebar
 from paleo_workbench.ui.status_bar import StatusBar
 from paleo_workbench.ui.workflow_stepper import WorkflowStepper
@@ -51,6 +54,7 @@ class AppShell(QWidget):
         self.setObjectName("AppShell")
         self.setStyleSheet(tokens.build_qss())
         self.project = project or ProjectDocument.new("Untitled Project")
+        self._well_location_state_store = WellLocationPreviewStateStore()
         self._fade_anim: QPropertyAnimation | None = None
 
         # Stage memory: track the last visited page for each stage
@@ -80,7 +84,10 @@ class AppShell(QWidget):
         self.sidebar.setVisible(True)
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(HomePage())        # index 0 = 首页
-        self.data_page = DataPage(project=self.project)
+        self.data_page = DataPage(
+            project=self.project,
+            well_state_store=self._well_location_state_store,
+        )
         self.data_page.data_context_changed.connect(self.update_data_context)
         self.page_stack.addWidget(self.data_page)        # index 1 = 数据
         self._data_context = self._build_data_context()
@@ -88,7 +95,11 @@ class AppShell(QWidget):
         self.page_stack.addWidget(SeismicPredictionPage()) # index 3 = 地震预测
         self.page_stack.addWidget(SequenceFrameworkPage()) # index 4 = 层序格架
         self.page_stack.addWidget(StratigraphyCorrelationPage())  # index 5 = 地层对比
-        self.page_stack.addWidget(VisualizationPage()) # index 6 = 可视化
+        self.page_stack.addWidget(
+            VisualizationPage(
+                well_state_store=self._well_location_state_store,
+            )
+        ) # index 6 = 可视化
         self.page_stack.addWidget(PreparationPage()) # index 7 = 制备
         self.mapping_page = MappingPage()
         self.mapping_page.mapping_context_changed.connect(self.update_mapping_context)

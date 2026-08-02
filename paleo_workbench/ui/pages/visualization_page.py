@@ -35,7 +35,13 @@ from paleo_workbench.viz.models import VizRef
 class VisualizationPage(QWidget):
     """Display-first 可视化 page combining geo-viz widgets."""
 
-    def __init__(self, parent=None, *, preview_provider=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        well_state_store=None,
+        preview_provider=None,
+    ):
         super().__init__(parent)
         self.setObjectName("VisualizationPage")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -101,7 +107,9 @@ class VisualizationPage(QWidget):
         self.summary_panel = VisualizationSummaryPanel()
         self.summary_panel.setHidden(True)
 
-        self.composite_panel = CompositeVisualizationPanel()
+        self.composite_panel = CompositeVisualizationPanel(
+            well_state_store=well_state_store,
+        )
         content.addWidget(self.composite_panel, 1)
 
         self.trace_panel = VisualizationTracePanel()

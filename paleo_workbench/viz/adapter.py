@@ -332,6 +332,14 @@ class VizAdapter:
                 path=path,
                 semantic_type=rtype or "unknown",
                 label=label,
+                comparison_crs=str(
+                    getattr(
+                        getattr(project, "coordinate", None),
+                        "project_crs",
+                        "",
+                    )
+                    or ""
+                ),
             )
         else:
             from geoviz import PreviewRequest

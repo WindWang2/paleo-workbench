@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QListView, QListWidget
+from PySide6.QtWidgets import QListView, QListWidget, QToolButton
 
 from geoviz import (
     GeoVizEngine,
@@ -16,6 +16,7 @@ from geoviz.previews.dat import XYPreviewPayload
 from paleo_workbench.viz.hosts.well_location_preview import (
     WellLocationId,
     WellLocationPreview,
+    WellLocationPreviewState,
     WellLocationPreviewStateStore,
 )
 from paleo_workbench.viz.models import VizPayload
@@ -167,7 +168,48 @@ def test_well_list_model_keeps_all_50_000_supported_wells(qtbot):
     assert len(preview.plot.series_list[0].x) == count
 
 
-def test_source_coordinate_and_row_diagnostics_are_visible(qtbot):
+def test_50_000_well_list_search_and_plot_keep_every_identity_reachable(qtbot):
+    count = 50_000
+    prepared = _named_well_preview(
+        tuple(f"W{index}" for index in range(count)),
+        record_ids=tuple(range(count)),
+    )
+    preview = _show_well_preview(qtbot, prepared)
+
+    for point_index in (0, count // 2, count - 1):
+        preview.well_search.setText(f"W{point_index}")
+        assert preview.well_list.model().rowCount() == 1
+        row = preview.well_list.model().index(0, 0)
+        qtbot.mouseClick(
+            preview.well_list.viewport(),
+            Qt.LeftButton,
+            pos=preview.well_list.visualRect(row).center(),
+        )
+        assert preview.active_well is not None
+        assert preview.active_well.identity.record_id == point_index
+
+    preview.well_search.clear()
+    point_index = count - 1
+    preview.plot.focus_point(
+        float(prepared.payload.x[point_index]),
+        float(prepared.payload.y[point_index]),
+        zoom_factor=1_000.0,
+    )
+    px, py = preview.plot.data_to_pixel(
+        float(prepared.payload.x[point_index]),
+        float(prepared.payload.y[point_index]),
+    )
+    qtbot.mouseClick(
+        preview.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+
+    assert preview.active_well is not None
+    assert preview.active_well.identity.record_id == point_index
+
+
+def test_source_coordinate_and_row_diagnostics_are_expandable(qtbot):
     prepared = PreparedPreview(
         kind=PreviewKind.XY_SCATTER,
         title="Well locations",
@@ -192,8 +234,45 @@ def test_source_coordinate_and_row_diagnostics_are_visible(qtbot):
 
     assert "EPSG:32648" in preview.source_status.text()
     assert "m" in preview.source_status.text()
-    assert "源行 4" in preview.source_status.text()
-    assert "X 坐标不是有限数值" in preview.source_status.text()
+    assert "有效 1/2" in preview.source_status.text()
+    toggle = preview.findChild(QToolButton, "WellLocationDiagnosticToggle")
+    assert toggle is not None
+    assert toggle.isVisible()
+    assert "查看 1 条" in toggle.text()
+    assert "源行 4" not in preview.source_status.text()
+    assert not preview.diagnostic_details.isVisible()
+
+    qtbot.mouseClick(toggle, Qt.LeftButton)
+
+    assert preview.diagnostic_details.isVisible()
+    assert "源行 4" in preview.diagnostic_details.text()
+    assert "X 坐标不是有限数值" in preview.diagnostic_details.text()
+
+
+def test_data_quality_marks_extremely_low_validity_and_duplicate_groups(qtbot):
+    prepared = PreparedPreview(
+        kind=PreviewKind.XY_SCATTER,
+        title="Well locations",
+        payload=XYPreviewPayload(
+            names=("A1", "A1", "B1"),
+            x=np.asarray([10.0, 20.0, 30.0]),
+            y=np.asarray([20.0, 40.0, 60.0]),
+            resource_id="well-head-1",
+            record_ids=(0, 1, 2),
+            source_rows=(3, 4, 5),
+            source_version="v1",
+            diagnostics=XYPreviewDiagnostics(
+                total_records=100,
+                valid_records=3,
+            ),
+        ),
+    )
+    preview = _show_well_preview(qtbot, prepared)
+
+    assert "严重数据质量问题" in preview.source_status.text()
+    assert "3/100" in preview.source_status.text()
+    assert "1 个重名井名组" in preview.source_status.text()
+    assert "X/Y" in preview.source_status.text()
 
 
 def test_versioned_state_survives_widget_reconstruction_and_invalidates(
@@ -247,6 +326,18 @@ def test_versioned_state_survives_widget_reconstruction_and_invalidates(
 
     assert changed.active_well is None
     assert changed.well_search.text() == ""
+
+
+def test_stale_version_cannot_evict_newer_version_state():
+    store = WellLocationPreviewStateStore()
+    current = WellLocationPreviewState(search_text="current")
+    stale = WellLocationPreviewState(search_text="stale")
+
+    store.save("well-head-1", "version-2", current)
+    store.save("well-head-1", "version-1", stale)
+
+    assert store.load("well-head-1", "version-2") == current
+    assert store.load("well-head-1", "version-3") is None
 
 
 def test_well_search_filters_names_only_and_preserves_plot_points(qtbot):
@@ -650,3 +741,57 @@ def test_both_data_page_entries_delegate_to_shared_well_preview(qtbot):
         visualization_entry.widget.stack.currentWidget(),
         WellLocationPreview,
     )
+
+
+def test_data_and_visualization_entries_share_one_session_state(qtbot):
+    from paleo_workbench.ui.pages.lazy_visualization_tabs import (
+        LazyVisualizationTabs,
+    )
+    from paleo_workbench.viz.hosts.engine_preview_host import EnginePreviewHost
+
+    engine = GeoVizEngine.default()
+    store = WellLocationPreviewStateStore()
+    reader_entry = LazyVisualizationTabs(
+        engine,
+        well_state_store=store,
+    )
+    visualization_entry = EnginePreviewHost(
+        engine,
+        well_state_store=store,
+    )
+    qtbot.addWidget(reader_entry)
+    qtbot.addWidget(visualization_entry.widget)
+    reader_entry.resize(900, 600)
+    reader_entry.show()
+    reader_entry.show_preview(_well_preview())
+    qtbot.wait(10)
+    reader_preview = reader_entry.host.stack.currentWidget()
+    assert isinstance(reader_preview, WellLocationPreview)
+    px, py = reader_preview.plot.data_to_pixel(10.0, 20.0)
+    qtbot.mouseClick(
+        reader_preview.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+    reader_preview.well_search.setText("A1")
+    reader_preview.plot.pan(20.0, 10.0)
+    expected_view = reader_preview.plot.view_bounds()
+
+    assert visualization_entry.apply(
+        VizPayload(
+            kind="engine_preview",
+            label="Well locations",
+            prepared=_well_preview(),
+        )
+    )
+    visualization_preview = visualization_entry.widget.stack.currentWidget()
+
+    assert isinstance(visualization_preview, WellLocationPreview)
+    assert visualization_preview.active_well is not None
+    assert visualization_preview.active_well.identity == WellLocationId(
+        "well-head-1",
+        "version-1",
+        8,
+    )
+    assert visualization_preview.well_search.text() == "A1"
+    assert visualization_preview.plot.view_bounds() == pytest.approx(expected_view)

@@ -10,7 +10,13 @@ from paleo_workbench.ui.pages.navigation_tree import NavigationTree
 
 
 class DataWorkspace(QWidget):
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        well_state_store=None,
+        comparison_crs: str = "",
+    ):
         super().__init__(parent)
         self.setObjectName("DataWorkspace")
 
@@ -28,7 +34,10 @@ class DataWorkspace(QWidget):
         # Right column: vertical splitter of reader + inspector
         self.right_splitter = QSplitter(Qt.Orientation.Vertical)
         self.right_splitter.setChildrenCollapsible(False)
-        self.reader_panel = DataReaderPanel()
+        self.reader_panel = DataReaderPanel(
+            well_state_store=well_state_store,
+            comparison_crs=comparison_crs,
+        )
         self.inspector_panel = InspectorPanel()
         self.right_splitter.addWidget(self.reader_panel)
         self.right_splitter.addWidget(self.inspector_panel)

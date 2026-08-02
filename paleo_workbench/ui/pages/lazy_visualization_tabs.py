@@ -17,9 +17,16 @@ class LazyVisualizationTabs(QTabWidget):
 
     visualization_requested = Signal()
 
-    def __init__(self, engine=None, parent=None) -> None:
+    def __init__(
+        self,
+        engine=None,
+        parent=None,
+        *,
+        well_state_store=None,
+    ) -> None:
         super().__init__(parent)
         self._engine = engine
+        self._well_state_store = well_state_store
         self._host = None
         self._requested = False
 
@@ -52,7 +59,10 @@ class LazyVisualizationTabs(QTabWidget):
             # Deferred: pulls in geoviz engine stack; keep startup cost lazy.
             from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
 
-            self._host = GeoVizPreviewHost(self._engine)
+            self._host = GeoVizPreviewHost(
+                self._engine,
+                well_state_store=self._well_state_store,
+            )
             self.visual_stack.addWidget(self._host)
         return self._host
 
