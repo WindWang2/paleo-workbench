@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -792,7 +791,8 @@ content_fingerprint(std::span<const std::byte> bytes) {
 }
 
 [[nodiscard]] std::string
-profile_fingerprint(const LisNormalizationProfile &profile) {
+profile_fingerprint(const LisNormalizationProfile &profile,
+                    LisIdentityScheme scheme) {
   const auto append_component = [](std::string &target,
                                    std::string_view value) {
     target += "/" + std::to_string(value.size()) + ":" + std::string{value};
@@ -802,28 +802,24 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
   append_component(result, profile.version);
   append_component(result, text_encoding_name(profile.text_encoding));
   append_component(result, resform_compatible_v1_identity_component);
-  const auto append_double = [&append_component](std::string &target,
-                                                   double value) {
-    auto legacy = std::to_string(value);
-    double parsed{};
-    const auto [end, error] =
-        std::from_chars(legacy.data(), legacy.data() + legacy.size(), parsed);
-    if (error == std::errc{} && end == legacy.data() + legacy.size() &&
-        std::bit_cast<std::uint64_t>(parsed) ==
-            std::bit_cast<std::uint64_t>(value)) {
-      append_component(target, legacy);
+  const auto append_double = [&append_component, scheme](std::string &target,
+                                                           double value) {
+    if (scheme == LisIdentityScheme::resform_compatible_v1) {
+      // Preserve the historical v1 preimage byte-for-byte, including its
+      // locale-dependent std::to_string representation.
+      append_component(target, std::to_string(value));
       return;
     }
     constexpr std::array<char, 16> digits{'0', '1', '2', '3', '4', '5', '6',
                                           '7', '8', '9', 'a', 'b', 'c', 'd',
                                           'e', 'f'};
     const auto bits = std::bit_cast<std::uint64_t>(value);
-    legacy.push_back('@');
+    std::string exact{"f64:"};
     for (std::size_t index{}; index < 16U; ++index) {
       const auto shift = static_cast<unsigned>((15U - index) * 4U);
-      legacy.push_back(digits[(bits >> shift) & 0x0fU]);
+      exact.push_back(digits[(bits >> shift) & 0x0fU]);
     }
-    append_component(target, legacy);
+    append_component(target, exact);
   };
   for (const auto value : profile.inferred_null_values) {
     append_double(result, value);
@@ -1128,7 +1124,8 @@ logical_file_ranges(const std::vector<LogicalRecord> &records) {
   if (scheme == LisIdentityScheme::resform_compatible_v1) {
     const auto content =
         source.checksum.empty() ? content_fingerprint(bytes) : source.checksum;
-    return "lis/" + content + "/" + profile_fingerprint(profile) +
+    return "lis/" + content + "/" +
+           profile_fingerprint(profile, LisIdentityScheme::resform_compatible_v1) +
            "/logical-file/" + std::to_string(logical_file_index);
   }
   const auto append_component = [](std::string &target,
@@ -1140,7 +1137,9 @@ logical_file_ranges(const std::vector<LogicalRecord> &records) {
   append_component(result, source.checksum);
   append_component(result, std::to_string(source.byte_offset));
   append_component(result, content_fingerprint(bytes));
-  append_component(result, profile_fingerprint(profile));
+  append_component(result,
+                   profile_fingerprint(profile,
+                                       LisIdentityScheme::content_bound_v2));
   append_component(result, std::to_string(logical_file_index));
   return result;
 }

@@ -854,6 +854,18 @@ void test_profile_identity_is_injective_and_text_encoding_is_closed() {
               first_null.value().document.id() != second_null.value().document.id(),
           "distinct null sentinels must produce distinct profile identities");
 
+  const LisSelection legacy_selection{
+      .identity_scheme = LisIdentityScheme::resform_compatible_v1};
+  const auto first_legacy_null = LisSourceAdapter::import(
+      source_bytes, source, legacy_selection, first_null_profile);
+  const auto second_legacy_null = LisSourceAdapter::import(
+      source_bytes, source, legacy_selection, second_null_profile);
+  require(first_legacy_null.has_value() && second_legacy_null.has_value() &&
+              first_legacy_null.value().document.id() ==
+                  second_legacy_null.value().document.id(),
+          "the legacy v1 scheme must retain its historical double "
+          "serialization exactly");
+
   auto first_unit_profile = default_lis_normalization_profile();
   first_unit_profile.unit_rules.push_back(
       LisUnitRule{.canonical_mnemonic = "GR",
