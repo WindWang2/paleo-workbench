@@ -140,19 +140,31 @@ class ShellPrototype(QMainWindow):
         c_l = QVBoxLayout(center)
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(True)
+        # 单井分析图 = ONE well, MANY tracks (图道) in one plot — not a single curve.
         self.single_host = QWidget()
         sh = QVBoxLayout(self.single_host)
-        self.canvas_label = QLabel("中栏 · 单井分析图 · Well-A")
+        self.canvas_label = QLabel(
+            "中栏 · 单井分析图 · Well-A · 多图道（深度 | GR | RT | DEN …）"
+        )
         sh.addWidget(self.canvas_label)
-        self.engine_or_mock = self._make_canvas()
+        # Prefer mock multi-track so the chrome always shows 多图道 layout;
+        # real WellLogView multi-track needs host template→Presentation (H).
+        self.engine_or_mock = MockMultiTrackCanvas()
+        self.engine_or_mock.set_caption(
+            "单井 · 多图道 mock · template「标准三轨 GR-RT-DEN」→ Presentation"
+        )
         sh.addWidget(self.engine_or_mock, 1)
-        self.tabs.addTab(self.single_host, "单井分析图 · Well-A")
+        self.tabs.addTab(self.single_host, "单井分析图 · Well-A（多图道）")
 
         corr = QWidget()
         cr = QVBoxLayout(corr)
-        cr.addWidget(QLabel("中栏 · 地层对比图-lite · Well-A / B / C（占位）"))
+        cr.addWidget(
+            QLabel(
+                "中栏 · 地层对比图-lite · 多井并排（每井仍可有多图道）· Well-A / B / C"
+            )
+        )
         mock2 = MockMultiTrackCanvas()
-        mock2.set_caption("Correlation-lite mock · shared depth")
+        mock2.set_caption("Correlation-lite · multi-well · each column multi-track")
         cr.addWidget(mock2, 1)
         self.tabs.addTab(corr, "地层对比图 · A–C")
         self.tabs.currentChanged.connect(self._on_tab)
@@ -238,10 +250,11 @@ class ShellPrototype(QMainWindow):
         self.state.setPlainText(
             f"event: {event}\n"
             f"shell: L (left/center/right)\n"
-            f"canvas: {engine}\n"
+            f"canvas: multi-track mock (单井=多图道; engine WellLogView optional)\n"
             f"workspace: demo-field (in-memory only)\n"
-            f"docs: S1 单井 + 对比-lite tabs\n"
-            f"templates: library-only (H)\n"
+            f"docs: S1 单井分析图(多图道) + 对比-lite tabs\n"
+            f"templates: library-only (H) maps mnemonics → tracks\n"
+            f"NOTE: 单井 ≠ 单轨; 一井一图可含 GR/RT/DEN/岩性等并行图道\n"
         )
 
 
