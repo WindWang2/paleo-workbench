@@ -848,6 +848,25 @@ if(WELLLOG_BUILD_TESTS)
         COMMAND welllog_dense_curve_pipeline_tests
     )
 
+    # #173 — headless LRW / cancel / session-destroy / table+SVG without GL.
+    add_executable(welllog_async_lrw_stress_tests
+        tests/integration/async_lrw_stress_test.cpp
+    )
+    target_compile_features(welllog_async_lrw_stress_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_async_lrw_stress_tests)
+    target_link_libraries(
+        welllog_async_lrw_stress_tests
+        PRIVATE
+            WellLog::ExportRaster
+            WellLog::ExportVector
+            WellLog::Session
+            WellLog::Table
+    )
+    add_test(
+        NAME welllog.async-lrw-stress
+        COMMAND welllog_async_lrw_stress_tests
+    )
+
     add_executable(welllog_session_tests
         tests/integration/session_submission_test.cpp
     )
@@ -1576,6 +1595,26 @@ if(WELLLOG_BUILD_TESTS)
             )
         endif()
 
+        # #173 — create/reparent/destroy churn, multi-view isolation, Trace toggle.
+        qt_add_executable(welllog_qt_context_lifecycle_stress_tests
+            tests/qt/context_lifecycle_stress_test.cpp
+        )
+        welllog_enable_warnings(welllog_qt_context_lifecycle_stress_tests)
+        target_link_libraries(
+            welllog_qt_context_lifecycle_stress_tests
+            PRIVATE WellLog::QtWidgets Qt6::Test
+        )
+        add_test(
+            NAME welllog.qt-context-lifecycle-stress
+            COMMAND welllog_qt_context_lifecycle_stress_tests
+        )
+        if(UNIX AND NOT APPLE)
+            set_tests_properties(
+                welllog.qt-context-lifecycle-stress
+                PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1"
+            )
+        endif()
+
         # Virtualized table-model adapter test (ADR 0022, #154). No GL needed
         # (a table model has no OpenGL) — runs under the minimal platform.
         qt_add_executable(welllog_qt_table_model_tests
@@ -1620,6 +1659,15 @@ if(WELLLOG_BUILD_TESTS)
                 "QT_QPA_PLATFORM=minimal"
                 "${Python_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_qt_embedding.py"
+        )
+        add_test(
+            NAME welllog.python.qt-lifecycle-stress
+            COMMAND
+                "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python"
+                "QT_QPA_PLATFORM=minimal"
+                "${Python_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_qt_lifecycle_stress.py"
         )
     endif()
 

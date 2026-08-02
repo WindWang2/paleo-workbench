@@ -489,6 +489,14 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] 持久种子：`tests/fuzz/corpus/{binary,assets}/`；Error.arguments 空断言
 - **Status:** complete
 
+### Phase W23: #173 压力验证 Qt Context、Python GC 与异步取消恢复
+
+- [x] Headless：`welllog.async-lrw-stress`（LRW、session 销毁、export cancel、table/SVG 无 GL）
+- [x] Qt：`welllog.qt-context-lifecycle-stress`（create/hide/reparent/destroy、multi-view 隔离、Trace 开关）
+- [x] Python：`welllog.python.qt-lifecycle-stress`（churn、worker-thread GC、GUI-thread 契约）
+- [x] 文档：`tests/qt/README.md`（sanitizer / 3.12–3.13 复跑说明）
+- **Status:** complete
+
 ## Decisions Made
 
 | Decision | Rationale |

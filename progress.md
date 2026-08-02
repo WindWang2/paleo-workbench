@@ -392,3 +392,17 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 测试 | `welllog.fuzz-binary-sources`、`welllog.fuzz-assets`；container-security + manifest 回归绿 |
 
 **#172 验收**：AC 覆盖。明确延后：CI 内置 libFuzzer 持续 AFL 模式；Windows ASan 等价 runner（文档要求本地/CI 工具链复跑）；崩溃种子自动入库流水线（手拷贝进 corpus）。
+
+## Session: 2026-08-02 — #173 Qt Context / Python GC / 异步取消压力
+
+`/implement` #173。生产路径（context cleanup、generation LRW、cancel/discard、buffer pin）已具备；本票补齐 **专用压力回归套件**，未改默认 Feature Flag。
+
+| 项 | 内容 |
+|----|------|
+| `async_lrw_stress_test` | 快速 SetDocument LRW；destroy session 时 worker 在途；append+replace；raster cancel 后 scene 仍可用；**无 GL** 时 TableProjection + SvgExporter |
+| `context_lifecycle_stress_test` | 40× create/show/hide/destroy；reparent+hide/show 恢复 GPU；多 View 销毁隔离；Chrome Trace / profiler 开关 |
+| `test_qt_lifecycle_stress.py` | wrapper churn；**后台线程 gc.collect** 时 buffer pin 存活；GUI 线程契约 |
+| 文档 | `tests/qt/README.md`：ASan/UBSan 与 Win/Linux、Python 3.12/3.13 复跑 |
+| 验证 | headless stress PASS；Qt stress 6/6 PASS（`LIBGL_ALWAYS_SOFTWARE=1`）；Python 3/3 PASS（minimal QPA） |
+
+**#173 验收**：AC 覆盖（矩阵/sanitizer 以文档+本地命令为准，非本票新建 CI 矩阵）。**下一 frontier**：#174 一亿点门禁 + 默认启用引擎（仍保留 Legacy）。
