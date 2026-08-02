@@ -334,3 +334,17 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 边界 | `welllog.core.dependency-boundary` 通过；core 无 arrow 符号 |
 
 **#163 验收**：AC 覆盖。明确延后：PyArrow Shiboken 直接绑定（C Data 已是 Python 路径）、完整 RecordBatch 多列文档构建 helper、非 primitive 嵌套类型。
+
+## Session: 2026-08-02 — #170 迁移 Workbench 多井地层对比
+
+`/implement` #170（依赖 #161/#169）。同一 Feature Flag 双路径：Legacy CrossWell 保留；WellLogEngine multi-well surface（共享 Display Depth + Overlay）。
+
+| 项 | 内容 |
+|----|------|
+| Adapter | `welllog_multi_well_adapter.py`：稳定 EntityId（resource_id 键）、MD/TVDSS/horizon 位移→DepthTransform、horizon/band Overlay、parity snapshot |
+| 绑定 | `submit_multi_well_section` / `clear_multi_well_section`（多文档 + layout + shared viewport + overlays） |
+| View | `paintGL`/`update_pointer` 在 layout 非空时用 `prepared_surface_scene` |
+| UI | `StratigraphyCorrelationPage` backend combo + stack；Legacy 交互保留；Engine PNG 导出 |
+| 测试 | `test_welllog_multi_well_adapter` + dual-path page；22 workbench 相关 passed |
+
+**#170 验收**：AC 覆盖。明确延后：Engine 路径上 DTW/拾取手势完整移植（仍走 Legacy）；Engine 矢量导出（PNG 抓屏）；TVD 轨迹换算表。

@@ -6,8 +6,8 @@
 
 ## Current Phase
 
-Phase W18 (#163 Arrow C Data / mmap adapter) complete.  
-**Open frontier (examples):** #170 (multi-well workbench path), #174 (100M gate), #168/#171–#173.
+Phase W19 (#170 Workbench multi-well correlation dual-path) complete.  
+**Open frontier (examples):** #174 (100M gate), #168/#171–#173; close #183/#184 if confirmed delivered.
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -453,6 +453,15 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] Optional IPC via Arrow C++ (`import_arrow_ipc_file_column`)
 - [x] Tests: `welllog.arrow-adapter` (null polarity, offset, LOD, session, budget)
 - [x] Core boundary: no Arrow in public core headers
+- **Status:** complete
+
+### Phase W19: #170 迁移多井地层对比（Feature Flag dual-path）
+
+- [x] `welllog_multi_well_adapter`：稳定 ID、datum shift、overlays、parity
+- [x] Python `submit_multi_well_section` / `clear_multi_well_section`
+- [x] WellLogView paints multi-well surface when layout active
+- [x] StratigraphyCorrelationPage backend combo；Legacy 不删除
+- [x] Tests: multi-well adapter + dual-path page
 - **Status:** complete
 
 ## Decisions Made

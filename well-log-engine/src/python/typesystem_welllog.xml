@@ -27,6 +27,23 @@
                         %CPPSELF, %1, %2);
                 </inject-code>
             </add-function>
+            <add-function
+                signature="submit_multi_well_section(PyObject*@payload@)"
+                return-type="PyObject*"
+            >
+                <inject-code class="target" position="beginning">
+                    %PYARG_0 = welllog::python::submit_multi_well_section(
+                        %CPPSELF, %PYARG_1);
+                </inject-code>
+            </add-function>
+            <add-function
+                signature="clear_multi_well_section()"
+                return-type="PyObject*"
+            >
+                <inject-code class="target" position="beginning">
+                    %PYARG_0 = welllog::python::clear_multi_well_section(%CPPSELF);
+                </inject-code>
+            </add-function>
         </object-type>
 
         <!-- Virtualized Table Projection model (ADR 0022, #154). The core

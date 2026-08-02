@@ -440,7 +440,19 @@ void WellLogView::paintGL() {
     std::shared_ptr<const PreparedScene> scene;
     std::optional<DepthViewport> viewport;
     std::optional<CrosshairState> crosshair;
-    if (impl_->document_id.has_value()) {
+    // Multi-well surface (#160/#170): when a layout is active, paint the
+    // composed surface so all wells share one view / shared Display Depth.
+    if (!impl_->session->well_layout().empty()) {
+      scene = impl_->session->prepared_surface_scene();
+      viewport = impl_->session->shared_depth_viewport();
+      if (!viewport.has_value() && impl_->document_id.has_value()) {
+        viewport = impl_->session->viewport(*impl_->document_id);
+      }
+      const auto layout = impl_->session->well_layout();
+      if (!layout.empty()) {
+        crosshair = impl_->session->crosshair(layout.front().document_id);
+      }
+    } else if (impl_->document_id.has_value()) {
       scene = impl_->session->prepared_scene(*impl_->document_id);
       viewport = impl_->session->viewport(*impl_->document_id);
       crosshair = impl_->session->crosshair(*impl_->document_id);
@@ -792,8 +804,15 @@ void WellLogView::update_pointer(double left, double top) noexcept {
     if (!impl_->document_id.has_value() || width() <= 0 || height() <= 0) {
       return;
     }
-    const auto scene = impl_->session->prepared_scene(*impl_->document_id);
-    const auto viewport = impl_->session->viewport(*impl_->document_id);
+    const auto multi = !impl_->session->well_layout().empty();
+    const auto scene =
+        multi ? impl_->session->prepared_surface_scene()
+              : impl_->session->prepared_scene(*impl_->document_id);
+    const auto viewport =
+        multi ? (impl_->session->shared_depth_viewport().has_value()
+                     ? impl_->session->shared_depth_viewport()
+                     : impl_->session->viewport(*impl_->document_id))
+              : impl_->session->viewport(*impl_->document_id);
     if (scene == nullptr || !viewport.has_value()) {
       return;
     }

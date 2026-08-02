@@ -121,3 +121,62 @@ def test_stratigraphy_correlation_page_has_scroll_area(qtbot):
         page.scroll_area.horizontalScrollBarPolicy()
         == Qt.ScrollBarPolicy.ScrollBarAsNeeded
     )
+
+
+def test_dual_path_backend_switch_keeps_legacy_and_builds_engine_plan(
+    qtbot, monkeypatch
+):
+    """#170: Legacy remains; engine plan built with stable multi-well ids."""
+    project = ProjectDocument.new("Dual")
+    project.stratigraphy.target_horizon = "H1"
+    project.resources.append(
+        ResourceItem(name="W1.las", path="/w1.las", type="well_log", format="las")
+    )
+    project.resources.append(
+        ResourceItem(name="W2.las", path="/w2.las", type="well_log", format="las")
+    )
+    known = WellLogData(
+        well_name="well",
+        top_depth=1000.0,
+        bottom_depth=1002.0,
+        curves=[
+            CurveData(
+                name="GR",
+                unit="GAPI",
+                depth=[1000.0, 1001.0, 1002.0],
+                values=[5, 10, 8],
+            )
+        ],
+    )
+    from paleo_workbench.viz.adapter import VizAdapter
+    from paleo_workbench.viz.models import VizPayload
+
+    monkeypatch.setattr(
+        VizAdapter,
+        "resolve",
+        lambda self, ref, project_arg: VizPayload(
+            kind="well_log", label="well", well_log=known.model_copy()
+        ),
+    )
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+    page.set_backend("legacy")
+    page.set_project(project)
+    page.update_state(project)
+    page.load_btn.click()
+    assert page.backend() == "legacy"
+    assert page.cross_host.inner.canvas_count >= 2
+    # Engine plan always built for parity even on Legacy path.
+    plan = page.engine_plan()
+    assert plan is not None
+    assert len(plan.wells) == 2
+    assert plan.wells[0].document_id != plan.wells[1].document_id
+    # Switch to engine without deleting Legacy host.
+    page.set_backend("engine")
+    assert page.backend() == "engine"
+    assert page.view_stack.currentWidget() is page.engine_host
+    # Legacy widgets still exist (not deleted).
+    assert page.cross_host.widget is not None
+    page.clear_section()
+    assert page.engine_plan() is None
+    assert page.loaded_value.text().startswith("已加载: 0")
