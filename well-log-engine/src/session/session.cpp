@@ -2457,6 +2457,18 @@ patchable_entity_at(const WellLogDocument &document,
       found.has_value()) {
     return found;
   }
+  if (const auto found = in_document(document.qc_masks()); found.has_value()) {
+    return found;
+  }
+  if (const auto found = in_document(document.curves()); found.has_value()) {
+    // Only derived curves participate in the patch vocabulary; raw source
+    // curves remain immutable via patch (ADR 0025 / #159).
+    if (std::holds_alternative<Curve>(*found) &&
+        !std::get<Curve>(*found).derived.has_value()) {
+      return std::nullopt;
+    }
+    return found;
+  }
   if (presentation == nullptr) {
     return std::nullopt;
   }
@@ -2550,6 +2562,16 @@ inverse_edits_for_patch(const DocumentPatch &patch,
         } else if constexpr (std::is_same_v<T, TextAnnotation>) {
           builder.add_annotation(e);
           return true;
+        } else if constexpr (std::is_same_v<T, QcMask>) {
+          builder.add_qc_mask(e);
+          return true;
+        } else if constexpr (std::is_same_v<T, Curve>) {
+          // Derived curves only — raw source curves are never patch-upserted.
+          if (e.derived.has_value()) {
+            builder.add_curve(e);
+            return true;
+          }
+          return false;
         }
         return false;
       },
@@ -2810,9 +2832,6 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     for (const auto &axis : current_doc.sampling_axes()) {
       doc_builder.add_sampling_axis(axis);
     }
-    for (const auto &curve : current_doc.curves()) {
-      doc_builder.add_curve(curve);
-    }
     for (const auto &image : current_doc.image_sources()) {
       doc_builder.add_image_source(image);
     }
@@ -2826,6 +2845,17 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
     const auto is_patched = [&patched_ids](EntityId id) {
       return patched_ids.contains(id);
     };
+    // Curves (raw + derived) and QC masks are patchable collections (#159).
+    for (const auto &curve : current_doc.curves()) {
+      if (!is_patched(curve.id)) {
+        doc_builder.add_curve(curve);
+      }
+    }
+    for (const auto &mask : current_doc.qc_masks()) {
+      if (!is_patched(mask.id)) {
+        doc_builder.add_qc_mask(mask);
+      }
+    }
     for (const auto &interval : current_doc.intervals()) {
       if (!is_patched(interval.id)) {
         doc_builder.add_interval(interval);
@@ -2866,6 +2896,69 @@ WellLogSession::execute(const ApplyPatchCommand &command) {
           .message = MessageKey::resource_exhausted,
           .arguments = {},
       };
+    }
+
+    // --- Validate QC Mask / Derived Curve invariants (#159). ---
+    for (const auto &edit : command.patch.edits) {
+      if (!std::holds_alternative<UpsertEntity>(edit)) {
+        continue;
+      }
+      const auto &entity = std::get<UpsertEntity>(edit).entity;
+      if (std::holds_alternative<Curve>(entity)) {
+        const auto &curve = std::get<Curve>(entity);
+        if (!curve.derived.has_value()) {
+          return Error{
+              .code = ErrorCode::invalid_document,
+              .severity = Severity::error,
+              .entity_id = curve.id,
+              .message = MessageKey::document_structure_invalid,
+              .arguments = {},
+          };
+        }
+        const auto &prov = *curve.derived;
+        bool input_found = false;
+        for (const auto &candidate : patched_doc.curves()) {
+          if (candidate.id == prov.input_curve_id) {
+            input_found = true;
+            break;
+          }
+        }
+        if (!input_found) {
+          return Error{
+              .code = ErrorCode::invalid_document,
+              .severity = Severity::error,
+              .entity_id = curve.id,
+              .message = MessageKey::document_structure_invalid,
+              .arguments = {},
+          };
+        }
+      }
+      if (std::holds_alternative<QcMask>(entity)) {
+        const auto &mask = std::get<QcMask>(entity);
+        if (mask.states.scalar_type() != ScalarType::uint8) {
+          return Error{
+              .code = ErrorCode::invalid_document,
+              .severity = Severity::error,
+              .entity_id = mask.id,
+              .message = MessageKey::document_structure_invalid,
+              .arguments = {},
+          };
+        }
+        const auto curves = patched_doc.curves();
+        const auto curve = std::find_if(
+            curves.begin(), curves.end(),
+            [&](const Curve &c) { return c.id == mask.curve_id; });
+        if (curve == curves.end() ||
+            curve->values.length() != mask.states.length()) {
+          return Error{
+              .code = ErrorCode::invalid_document,
+              .severity = Severity::error,
+              .entity_id = mask.id,
+              .message = MessageKey::document_structure_invalid,
+              .arguments = {},
+          };
+        }
+      }
     }
 
     // --- Build the patched presentation (layout entities edited), if any. ---

@@ -1123,6 +1123,17 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.raster-export COMMAND welllog_raster_export_tests)
 
+    add_executable(welllog_qc_derived_curve_tests
+        tests/integration/qc_derived_curve_test.cpp
+    )
+    target_compile_features(welllog_qc_derived_curve_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_qc_derived_curve_tests)
+    target_link_libraries(
+        welllog_qc_derived_curve_tests
+        PRIVATE WellLog::ExportVector WellLog::Session WellLog::Table
+    )
+    add_test(NAME welllog.qc-derived-curve COMMAND welllog_qc_derived_curve_tests)
+
     add_executable(welllog_export_parity_tests
         tests/integration/export_parity_test.cpp
     )

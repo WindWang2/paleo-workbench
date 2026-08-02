@@ -1,5 +1,6 @@
 #include <welllog/core/document.hpp>
 
+#include <algorithm>
 #include <cstring>
 
 namespace welllog {
@@ -435,6 +436,7 @@ struct WellLogDocument::Impl {
   DocumentRevision revision;
   std::vector<SamplingAxis> axes;
   std::vector<Curve> curves;
+  std::vector<QcMask> qc_masks;
   std::vector<Interval> intervals;
   std::vector<Marker> markers;
   std::vector<SymbolOccurrence> symbols;
@@ -464,6 +466,11 @@ std::span<const SamplingAxis> WellLogDocument::sampling_axes() const noexcept {
 std::span<const Curve> WellLogDocument::curves() const noexcept {
   return impl_ == nullptr ? std::span<const Curve>{}
                           : std::span<const Curve>{impl_->curves};
+}
+
+std::span<const QcMask> WellLogDocument::qc_masks() const noexcept {
+  return impl_ == nullptr ? std::span<const QcMask>{}
+                          : std::span<const QcMask>{impl_->qc_masks};
 }
 
 std::span<const Interval> WellLogDocument::intervals() const noexcept {
@@ -506,6 +513,7 @@ struct WellLogDocumentBuilder::Impl {
   DocumentRevision revision;
   std::vector<SamplingAxis> axes;
   std::vector<Curve> curves;
+  std::vector<QcMask> qc_masks;
   std::vector<Interval> intervals;
   std::vector<Marker> markers;
   std::vector<SymbolOccurrence> symbols;
@@ -522,6 +530,7 @@ WellLogDocumentBuilder::WellLogDocumentBuilder(
                                         .revision = revision,
                                         .axes = {},
                                         .curves = {},
+                                        .qc_masks = {},
                                         .intervals = {},
                                         .markers = {},
                                         .symbols = {},
@@ -579,6 +588,15 @@ void append_entity(Collection &collection, const typename Collection::value_type
 }
 
 } // namespace
+
+WellLogDocumentBuilder &
+WellLogDocumentBuilder::add_qc_mask(const QcMask &mask) noexcept {
+  if (impl_ == nullptr || impl_->allocation_failed) {
+    return *this;
+  }
+  append_entity(impl_->qc_masks, mask, impl_->allocation_failed);
+  return *this;
+}
 
 WellLogDocumentBuilder &
 WellLogDocumentBuilder::add_interval(const Interval &interval) noexcept {
@@ -645,16 +663,109 @@ WellLogDocument WellLogDocumentBuilder::build() const noexcept {
     document->revision = impl_->revision;
     document->axes = impl_->axes;
     document->curves = impl_->curves;
+    document->qc_masks = impl_->qc_masks;
     document->intervals = impl_->intervals;
     document->markers = impl_->markers;
     document->symbols = impl_->symbols;
     document->image_sources = impl_->image_sources;
     document->annotations = impl_->annotations;
     document->custom_sources = impl_->custom_sources;
+    // Stamp derived freshness against the just-built curve set (#159).
+    for (auto &curve : document->curves) {
+      if (!curve.derived.has_value()) {
+        continue;
+      }
+      const auto &prov = *curve.derived;
+      const auto input = std::find_if(
+          document->curves.begin(), document->curves.end(),
+          [&](const Curve &candidate) {
+            return candidate.id == prov.input_curve_id;
+          });
+      if (input == document->curves.end()) {
+        curve.derived->freshness = DerivedFreshness::stale;
+        continue;
+      }
+      const auto length = input->values.length();
+      const void *data = nullptr;
+      if (input->values.is_composite()) {
+        const auto segs = input->values.segments();
+        if (!segs.empty()) {
+          data = segs.front().data();
+        }
+      } else {
+        data = input->values.as_single().data();
+      }
+      curve.derived->freshness =
+          (data == prov.input_values_data &&
+           length == prov.input_values_length)
+              ? DerivedFreshness::current
+              : DerivedFreshness::stale;
+    }
     return WellLogDocument{std::move(document)};
   } catch (...) {
     return {};
   }
+}
+
+QcState qc_state_at(const WellLogDocument &document, const Curve &curve,
+                    std::uint64_t sample_index) noexcept {
+  const auto masks = document.qc_masks();
+  const auto found = std::find_if(
+      masks.begin(), masks.end(), [&](const QcMask &mask) {
+        // Prefer explicit curve.qc_mask_id; otherwise bind by mask.curve_id so
+        // a patch can attach a mask without rewriting the raw Curve (#159).
+        if (!curve.qc_mask_id.is_nil()) {
+          return mask.id == curve.qc_mask_id;
+        }
+        return mask.curve_id == curve.id;
+      });
+  if (found == masks.end()) {
+    return QcState::valid;
+  }
+  if (found->states.scalar_type() != ScalarType::uint8 ||
+      sample_index >= found->states.length()) {
+    return QcState::valid;
+  }
+  const auto value = found->states.value_as_double(sample_index);
+  if (!value.has_value()) {
+    return QcState::valid;
+  }
+  const auto code = static_cast<std::uint8_t>(*value);
+  if (code > static_cast<std::uint8_t>(QcState::user_excluded)) {
+    return QcState::valid;
+  }
+  return static_cast<QcState>(code);
+}
+
+DerivedFreshness compute_derived_freshness(const WellLogDocument &document,
+                                           const Curve &curve) noexcept {
+  if (!curve.derived.has_value()) {
+    return DerivedFreshness::current;
+  }
+  const auto &prov = *curve.derived;
+  const auto curves = document.curves();
+  const auto input =
+      std::find_if(curves.begin(), curves.end(), [&](const Curve &candidate) {
+        return candidate.id == prov.input_curve_id;
+      });
+  if (input == curves.end()) {
+    return DerivedFreshness::stale;
+  }
+  // Input buffer identity: length + data pointer of the logical buffer.
+  const auto length = input->values.length();
+  const void *data = nullptr;
+  if (input->values.is_composite()) {
+    const auto segs = input->values.segments();
+    if (!segs.empty()) {
+      data = segs.front().data();
+    }
+  } else {
+    data = input->values.as_single().data();
+  }
+  if (data != prov.input_values_data || length != prov.input_values_length) {
+    return DerivedFreshness::stale;
+  }
+  return DerivedFreshness::current;
 }
 
 } // namespace welllog

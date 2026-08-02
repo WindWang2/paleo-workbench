@@ -94,6 +94,14 @@ struct TrackScaleSpec {
   std::string unit;
 };
 
+// How a curve layer treats QC Mask states when preparing geometry (#159).
+// Masks never rewrite values; this policy only affects drawability.
+struct QcDisplayPolicy {
+  bool hide_suspect{false};
+  bool hide_invalid{true};
+  bool hide_user_excluded{true};
+};
+
 struct CurveLayerSpec {
   EntityId id;
   EntityId track_id;
@@ -105,6 +113,7 @@ struct CurveLayerSpec {
   // Hidden layers keep their identity, style and visibility in the
   // prepared scene but contribute no geometry.
   bool visible{true};
+  QcDisplayPolicy qc_display{};
 };
 
 // A straight segment inside a pattern tile, in tile-local millimetres.

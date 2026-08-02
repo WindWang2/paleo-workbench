@@ -163,19 +163,21 @@ enum class AppendViewportMode : std::uint8_t {
 // --- Undoable Document Patch (#202/#158, ADR 0025) ---------------------------
 //
 // A declarative edit a host applies to a document + presentation. Raw curve
-// arrays are never edited in place (ADR 0025); a patch edits interpretation
-// entities (Interval/Marker/Symbol/Annotation) and layout entities
-// (Track/Scale/CurveLayer) by EntityId. Each edit is Upsert (add-or-replace by
-// id) or Remove (delete by id). A DocumentPatch declares the base revision it
-// was built against; the session rejects a patch whose base != the current
-// revision (PatchConflict — no guessing by name/position, ADR 0025).
+// value buffers are never edited in place (ADR 0025); a patch edits
+// interpretation entities (Interval/Marker/Symbol/Annotation/QcMask), derived
+// curves (Curve with provenance — never a raw source overwrite without
+// derived), and layout entities (Track/Scale/CurveLayer) by EntityId. Each edit
+// is Upsert (add-or-replace by id) or Remove (delete by id). A DocumentPatch
+// declares the base revision it was built against; the session rejects a patch
+// whose base != the current revision (PatchConflict — no guessing by
+// name/position, ADR 0025).
 
 // Every entity a patch may target. A variant makes the edit structural and
 // exhaustive (the apply path switches on the alternative to route the entity to
 // the right document/presentation collection).
 using PatchableEntity =
-    std::variant<Interval, Marker, SymbolOccurrence, TextAnnotation, TrackSpec,
-                 TrackScaleSpec, CurveLayerSpec>;
+    std::variant<Interval, Marker, SymbolOccurrence, TextAnnotation, QcMask,
+                 Curve, TrackSpec, TrackScaleSpec, CurveLayerSpec>;
 
 // Add-or-replace the entity carried in `entity` (matched by its EntityId on the
 // target collection). The id must be non-nil.

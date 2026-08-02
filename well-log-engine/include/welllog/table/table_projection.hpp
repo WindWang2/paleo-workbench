@@ -57,13 +57,27 @@ struct TableColumn {
   std::string name;         // mnemonic/display name (or axis label)
   std::string unit;         // value unit
   ScalarType scalar_type{ScalarType::float64};
+  // Derived-curve provenance when this column is a Derived Curve (#159). Empty
+  // for axis columns and raw source curves. Resampled/export paths reuse these
+  // fields so table semantics match the document.
+  std::optional<DerivedCurveProvenance> derived{};
+  DerivedFreshness derived_freshness{DerivedFreshness::current};
+};
+
+// How table cells treat QC Mask states (#159). Defaults match graphics:
+// invalid and user-excluded become null cells; suspect remains visible.
+struct TableQcPolicy {
+  bool nullify_suspect{false};
+  bool nullify_invalid{true};
+  bool nullify_user_excluded{true};
 };
 
 // One cell, read on demand from the raw buffer. `value` is nullopt for a null
-// sample (null bitmap set, out-of-range index, or non-finite value) — the cell
-// is empty, not a sentinel.
+// sample (null bitmap set, out-of-range index, non-finite value, or suppressed
+// QC state) — the cell is empty, not a sentinel.
 struct TableCell {
   std::optional<double> value;
+  QcState qc_state{QcState::valid};
   [[nodiscard]] bool null() const noexcept { return !value.has_value(); }
 };
 
@@ -132,9 +146,11 @@ private:
 class WELLLOG_TABLE_API TableProjectionBuilder {
 public:
   // Partitions the document into its projected tables. Each table shares the
-  // document's id/revision for invalidation.
+  // document's id/revision for invalidation. `qc_policy` controls how QC Mask
+  // states surface as null cells (#159).
   [[nodiscard]] static std::vector<TableProjection>
-  from_document(const WellLogDocument &document) noexcept;
+  from_document(const WellLogDocument &document,
+                TableQcPolicy qc_policy = {}) noexcept;
 
 private:
   // Builds one curve table for an axis + the curves sharing it. Column 0 is the
@@ -145,7 +161,8 @@ private:
   make_curve_table(const std::shared_ptr<const WellLogDocument> &document,
                    EntityId document_id, DocumentRevision revision,
                    const SamplingAxis &axis,
-                   const std::vector<const Curve *> &curves);
+                   const std::vector<const Curve *> &curves,
+                   TableQcPolicy qc_policy);
 };
 
 } // namespace welllog

@@ -1875,7 +1875,12 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       const auto append_sample = [&](std::uint64_t sample_index) {
         const auto depth = axis->coordinates.value_as_double(sample_index);
         const auto value = curve->values.value_as_double(sample_index);
+        const auto qc = qc_state_at(document, *curve, sample_index);
+        const auto qc_hidden = qc_state_is_suppressed(
+            qc, layer.qc_display.hide_suspect, layer.qc_display.hide_invalid,
+            layer.qc_display.hide_user_excluded);
         const auto missing =
+            qc_hidden ||
             (!curve->nulls.empty() && curve->nulls.is_null(sample_index)) ||
             !depth.has_value() || !value.has_value() ||
             !std::isfinite(*depth) || !std::isfinite(*value);

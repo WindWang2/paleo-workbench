@@ -36,6 +36,8 @@ struct CurveColumn {
   // axis). For the axis (depth) column, curve is nullptr and the axis is set.
   const SamplingAxis *axis{};
   const Curve *curve{};
+  std::optional<DerivedCurveProvenance> derived{};
+  DerivedFreshness derived_freshness{DerivedFreshness::current};
 };
 
 } // namespace
@@ -57,6 +59,7 @@ struct TableProjection::Impl {
   // Retains the source document for the projection's lifetime; the column
   // pointers reference spans inside it.
   std::shared_ptr<const WellLogDocument> document_holder;
+  TableQcPolicy qc_policy{};
 };
 
 namespace {
@@ -70,15 +73,16 @@ namespace {
 // it.
 TableCell read_buffer_cell(const CurveBuffer &values,
                            const NullBitmapView &nulls,
-                           std::uint64_t row) noexcept {
+                           std::uint64_t row,
+                           QcState qc = QcState::valid) noexcept {
   if (!nulls.empty() && nulls.is_null(row)) {
-    return TableCell{std::nullopt};
+    return TableCell{.value = std::nullopt, .qc_state = qc};
   }
   const auto v = values.value_as_double(row);
   if (!v.has_value() || !std::isfinite(*v)) {
-    return TableCell{std::nullopt};
+    return TableCell{.value = std::nullopt, .qc_state = qc};
   }
-  return TableCell{*v};
+  return TableCell{.value = *v, .qc_state = qc};
 }
 
 } // namespace
@@ -113,7 +117,12 @@ TableColumn TableProjection::column(std::uint64_t index) const noexcept {
     return {};
   }
   const auto &c = impl_->columns[index];
-  return TableColumn{c.curve_id, c.name, c.unit, c.scalar_type};
+  return TableColumn{.curve_id = c.curve_id,
+                     .name = c.name,
+                     .unit = c.unit,
+                     .scalar_type = c.scalar_type,
+                     .derived = c.derived,
+                     .derived_freshness = c.derived_freshness};
 }
 std::uint64_t TableProjection::row_count() const noexcept {
   return impl_ ? impl_->row_count : 0;
@@ -138,10 +147,19 @@ TableCell TableProjection::cell(std::uint64_t row,
       return read_buffer_cell(CurveBuffer{column.axis->coordinates},
                               NullBitmapView{}, source_row);
     }
+    const auto qc =
+        impl_->document_holder
+            ? qc_state_at(*impl_->document_holder, *column.curve, source_row)
+            : QcState::valid;
+    if (qc_state_is_suppressed(qc, impl_->qc_policy.nullify_suspect,
+                               impl_->qc_policy.nullify_invalid,
+                               impl_->qc_policy.nullify_user_excluded)) {
+      return TableCell{.value = std::nullopt, .qc_state = qc};
+    }
     return read_buffer_cell(column.curve->values, column.curve->nulls,
-                            source_row);
+                            source_row, qc);
   }
-  return TableCell{std::nullopt};
+  return TableCell{.value = std::nullopt};
 }
 
 TableProjection TableProjection::slice(std::uint64_t first_row,
@@ -166,13 +184,14 @@ TableProjection TableProjection::slice(std::uint64_t first_row,
 TableProjection TableProjectionBuilder::make_curve_table(
     const std::shared_ptr<const WellLogDocument> &document,
     EntityId document_id, DocumentRevision revision, const SamplingAxis &axis,
-    const std::vector<const Curve *> &curves) {
+    const std::vector<const Curve *> &curves, TableQcPolicy qc_policy) {
   auto impl = std::make_shared<TableProjection::Impl>();
   impl->kind = TableKind::curves;
   impl->sampling_axis_id = axis.id;
   impl->document_id = document_id;
   impl->document_revision = revision;
   impl->document_holder = document;
+  impl->qc_policy = qc_policy;
   // Row count = axis coordinate count (the alignment unit). Curves whose value
   // buffers differ in length still address by row index; out-of-range reads
   // yield null cells (read_buffer_cell).
@@ -195,13 +214,18 @@ TableProjection TableProjectionBuilder::make_curve_table(
     cc.scalar_type = curve->values.scalar_type();
     cc.axis = &axis;
     cc.curve = curve;
+    if (curve->derived.has_value()) {
+      cc.derived = curve->derived;
+      cc.derived_freshness = curve->derived->freshness;
+    }
     impl->columns.push_back(std::move(cc));
   }
   return TableProjection{std::move(impl)};
 }
 
 std::vector<TableProjection>
-TableProjectionBuilder::from_document(const WellLogDocument &document) noexcept {
+TableProjectionBuilder::from_document(const WellLogDocument &document,
+                                      TableQcPolicy qc_policy) noexcept {
   // Hold the document alive for the projections' lifetime via a shared copy.
   // WellLogDocument is an immutable PIMPL value type (shared_ptr<const Impl>),
   // so copying is cheap and shares state.
@@ -238,7 +262,7 @@ TableProjectionBuilder::from_document(const WellLogDocument &document) noexcept 
   for (const auto &axis_id : axis_order) {
     const auto *axis = axis_by_id.at(axis_id);
     tables.push_back(make_curve_table(holder, doc_id, revision, *axis,
-                                      curves_by_axis[axis_id]));
+                                      curves_by_axis[axis_id], qc_policy));
   }
   return tables;
 }

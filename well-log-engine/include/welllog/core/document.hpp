@@ -308,6 +308,47 @@ struct SamplingAxis {
   AxisDirection direction{AxisDirection::increasing};
 };
 
+// Per-sample quality state for a QC Mask (#159, ADR 0025). Masks never rewrite
+// the curve value buffer; graphics/table policy decides hide/colour/annotate.
+enum class QcState : std::uint8_t {
+  valid = 0,
+  suspect = 1,
+  invalid = 2,
+  user_excluded = 3,
+};
+
+// Whether a derived curve still matches its input buffers (#159).
+enum class DerivedFreshness : std::uint8_t {
+  current = 0,
+  stale = 1,
+};
+
+// Provenance for a Derived Curve. The curve's own `values` hold the derived
+// samples; the original input Curve Buffer stays byte-identical (ADR 0025).
+struct DerivedCurveProvenance {
+  EntityId input_curve_id{};
+  DocumentRevision input_revision{};
+  std::string algorithm_id;
+  std::string algorithm_version;
+  // Opaque, host-defined parameter record (e.g. JSON) for audit/reproducibility.
+  std::string parameters;
+  EntityId output_sampling_axis_id{};
+  // Identity of the input values buffer at derivation time. Used so unrelated
+  // document edits (intervals, layout) do not mark the result stale, while
+  // append/replace of the input does.
+  const void *input_values_data{};
+  std::uint64_t input_values_length{};
+  DerivedFreshness freshness{DerivedFreshness::current};
+};
+
+// A QC Mask is sample-aligned with its target curve: `states` is a uint8 buffer
+// whose length equals the curve sample count; each element is a QcState.
+struct QcMask {
+  EntityId id{};
+  EntityId curve_id{};
+  BufferView states;
+};
+
 struct Curve {
   EntityId id;
   std::string mnemonic;
@@ -316,7 +357,29 @@ struct Curve {
   EntityId sampling_axis_id;
   CurveBuffer values;
   NullBitmapView nulls;
+  // Nil when the curve has no QC Mask. The mask lives in the document's
+  // qc_masks collection and never mutates `values`.
+  EntityId qc_mask_id{};
+  // Present only for Derived Curves. Source (raw) curves leave this empty.
+  std::optional<DerivedCurveProvenance> derived{};
 };
+
+// True when QC policy treats the sample as non-drawable / table-null.
+[[nodiscard]] constexpr bool qc_state_is_suppressed(
+    QcState state, bool hide_suspect, bool hide_invalid,
+    bool hide_user_excluded) noexcept {
+  switch (state) {
+  case QcState::valid:
+    return false;
+  case QcState::suspect:
+    return hide_suspect;
+  case QcState::invalid:
+    return hide_invalid;
+  case QcState::user_excluded:
+    return hide_user_excluded;
+  }
+  return false;
+}
 
 // Pixel layout of a raster image source. The engine never decodes image
 // bytes itself (ADR 0042 governs decoding limits; the host performs it); this
@@ -526,6 +589,7 @@ public:
   [[nodiscard]] DocumentRevision revision() const noexcept;
   [[nodiscard]] std::span<const SamplingAxis> sampling_axes() const noexcept;
   [[nodiscard]] std::span<const Curve> curves() const noexcept;
+  [[nodiscard]] std::span<const QcMask> qc_masks() const noexcept;
   [[nodiscard]] std::span<const Interval> intervals() const noexcept;
   [[nodiscard]] std::span<const Marker> markers() const noexcept;
   [[nodiscard]] std::span<const SymbolOccurrence> symbols() const noexcept;
@@ -541,6 +605,16 @@ private:
   friend class WellLogDocumentBuilder;
 };
 
+// Reads one sample's QC state; missing mask or out-of-range → valid.
+[[nodiscard]] WELLLOG_CORE_API QcState
+qc_state_at(const WellLogDocument &document, const Curve &curve,
+            std::uint64_t sample_index) noexcept;
+
+// Recomputes derived freshness against the document's current curves.
+[[nodiscard]] WELLLOG_CORE_API DerivedFreshness
+compute_derived_freshness(const WellLogDocument &document,
+                          const Curve &curve) noexcept;
+
 class WELLLOG_CORE_API WellLogDocumentBuilder {
 public:
   WellLogDocumentBuilder(EntityId id, DocumentRevision revision) noexcept;
@@ -552,6 +626,7 @@ public:
 
   WellLogDocumentBuilder &add_sampling_axis(const SamplingAxis &axis) noexcept;
   WellLogDocumentBuilder &add_curve(const Curve &curve) noexcept;
+  WellLogDocumentBuilder &add_qc_mask(const QcMask &mask) noexcept;
   WellLogDocumentBuilder &add_interval(const Interval &interval) noexcept;
   WellLogDocumentBuilder &add_marker(const Marker &marker) noexcept;
   WellLogDocumentBuilder &add_symbol(const SymbolOccurrence &symbol) noexcept;
