@@ -18,9 +18,12 @@ enum class LisDiagnosticCode : std::uint8_t {
   non_finite_curve_value,
   unknown_index_semantics,
   constant_axis,
+  non_ascii_text,
   inferred_null,
   alias_normalized,
   unit_normalized,
+  unknown_curve_semantics,
+  normalization_conflict,
   redundant_format_specification,
   replaced_format_specification,
   malformed_dataset,
@@ -33,6 +36,7 @@ struct LisDiagnostic {
   std::uint64_t byte_offset{};
   std::uint32_t logical_file_index{};
   std::uint32_t data_set_ordinal{};
+  std::uint8_t representation{};
   std::string channel_name;
 };
 
@@ -78,6 +82,9 @@ struct LisNormalizationProfile {
   std::vector<double> inferred_null_values{-999.25, -999.0, -9999.0, -99999.0};
   std::vector<LisAliasRule> aliases;
   std::vector<LisUnitRule> unit_rules;
+  // "ASCII" keeps non-ASCII bytes untouched and reports them. ISO-8859-1 is
+  // the currently supported explicit single-byte decoding choice.
+  std::string text_encoding{"ASCII"};
 };
 
 [[nodiscard]] WELLLOG_IO_API const LisNormalizationProfile &

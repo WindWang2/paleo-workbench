@@ -329,6 +329,30 @@ private:
   return std::move(fixture).finish();
 }
 
+[[nodiscard]] std::vector<std::byte> spaced_mnemonic_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M", "DEPT", "D TC", "US/M");
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> incompatible_unit_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M", "DEPT", "RHOB", "API");
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
+[[nodiscard]] std::vector<std::byte> non_ascii_text_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  fixture.add_format_specification("M", "DEPT", "GR", "\xe9");
+  fixture.add_normal_data();
+  return std::move(fixture).finish();
+}
+
 void append_le32(std::vector<std::byte> &out, std::uint32_t value) {
   for (std::uint32_t index{}; index < 4U; ++index) {
     out.push_back(static_cast<std::byte>((value >> (index * 8U)) & 0xffU));
@@ -709,6 +733,73 @@ void test_constant_lis_axis_defaults_to_increasing_with_an_audit_entry() {
           "the all-equal direction fallback must be visible in the audit");
 }
 
+void test_normalization_does_not_remove_internal_mnemonic_spaces() {
+  const auto imported = LisSourceAdapter::import(
+      spaced_mnemonic_lis(),
+      BufferSourceReference{.uri = "asset://well/spaced.lis",
+                            .checksum = "spaced-v1"});
+  require(imported.has_value(),
+          "a spaced scalar mnemonic must remain importable");
+  const auto &curve = imported.value().document.curves().front();
+  require(curve.mnemonic == "D TC" && curve.unit == "US/M",
+          "only spaces at the mnemonic boundaries may be ignored for aliases");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::unknown_curve_semantics;
+      });
+  require(reported,
+          "an unrecognized spaced mnemonic must be audited distinctly");
+}
+
+void test_known_curve_with_incompatible_unit_is_a_normalization_conflict() {
+  const auto imported = LisSourceAdapter::import(
+      incompatible_unit_lis(),
+      BufferSourceReference{.uri = "asset://well/conflict.lis",
+                            .checksum = "conflict-v1"});
+  require(imported.has_value(),
+          "an incompatible scalar unit must retain raw data");
+  const auto &curve = imported.value().document.curves().front();
+  require(curve.mnemonic == "RHOB" && curve.unit == "API",
+          "a name/unit conflict must preserve the raw source curve");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::normalization_conflict &&
+               diagnostic.representation == 68U;
+      });
+  require(reported,
+          "a name/unit conflict must retain its representation in the audit");
+}
+
+void test_default_ascii_reports_non_ascii_text_and_explicit_codepage_decodes_it() {
+  const auto source_bytes = non_ascii_text_lis();
+  const auto default_import = LisSourceAdapter::import(
+      source_bytes, BufferSourceReference{.uri = "asset://well/text.lis",
+                                          .checksum = "text-v1"});
+  require(default_import.has_value(),
+          "default ASCII handling must preserve importability");
+  const auto default_reported = std::any_of(
+      default_import.value().diagnostics.begin(),
+      default_import.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::non_ascii_text &&
+               diagnostic.severity == Severity::warning;
+      });
+  require(default_reported, "default ASCII must audit non-ASCII source text");
+
+  auto latin_1 = default_lis_normalization_profile();
+  latin_1.text_encoding = "ISO-8859-1";
+  const auto decoded = LisSourceAdapter::import(
+      source_bytes,
+      BufferSourceReference{.uri = "asset://well/text.lis",
+                            .checksum = "text-v1"},
+      {}, latin_1);
+  require(decoded.has_value(), "an explicit supported code page must import");
+  require(decoded.value().document.curves().front().unit == "\xc3\xa9",
+          "the explicit ISO-8859-1 profile must decode source text as UTF-8");
+}
+
 void test_redundant_format_and_unknown_records_are_audited_without_losing_data() {
   const auto redundant = LisSourceAdapter::import(
       redundant_format_lis(),
@@ -813,6 +904,9 @@ int main() {
   test_direct_physical_stream_preserves_short_record_headers_after_padding();
   test_explicit_lis_absent_value_has_priority_over_inferred_nulls();
   test_constant_lis_axis_defaults_to_increasing_with_an_audit_entry();
+  test_normalization_does_not_remove_internal_mnemonic_spaces();
+  test_known_curve_with_incompatible_unit_is_a_normalization_conflict();
+  test_default_ascii_reports_non_ascii_text_and_explicit_codepage_decodes_it();
   test_redundant_format_and_unknown_records_are_audited_without_losing_data();
   test_configured_lis_resource_limits_reject_without_truncating();
   test_malformed_bounded_data_set_isolated_from_following_data_set();

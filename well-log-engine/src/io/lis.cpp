@@ -344,7 +344,7 @@ parse_lis_records(std::span<const std::byte> bytes, const LisLimits &limits) {
 [[nodiscard]] std::string compact_ascii(std::string_view value) {
   std::string result;
   for (const auto character : upper_ascii(trim_ascii(value))) {
-    if (character != ' ' && character != '_' && character != '-') {
+    if (character != '_' && character != '-') {
       result.push_back(character);
     }
   }
@@ -423,17 +423,19 @@ struct DataFormatSpecification {
   std::uint64_t byte_offset{};
   std::uint32_t frame_size{};
   std::optional<double> explicit_null_value;
+  bool contains_non_ascii_text{};
   std::vector<SpecBlock> specifications;
 };
 
 [[nodiscard]] DataFormatSpecification
-parse_format_specification(const LogicalRecord &record,
-                           const LisLimits &limits) {
+parse_format_specification(const LogicalRecord &record, const LisLimits &limits,
+                           std::string_view text_encoding) {
   Cursor cursor{record.body, record.byte_offset + 6U};
   DataFormatSpecification result{
       .byte_offset = record.byte_offset,
       .frame_size = 0U,
       .explicit_null_value = std::nullopt,
+      .contains_non_ascii_text = false,
       .specifications = {},
   };
   while (true) {
@@ -471,12 +473,23 @@ parse_format_specification(const LogicalRecord &record,
   }
   while (!cursor.empty()) {
     const auto block = cursor.read_span(40U);
-    const auto read_text = [&block](std::size_t offset, std::size_t size) {
+    const auto read_text = [&block, &result, text_encoding](std::size_t offset,
+                                                            std::size_t size) {
       std::string value;
       value.reserve(size);
       for (std::size_t index{}; index < size; ++index) {
-        value.push_back(static_cast<char>(
-            std::to_integer<std::uint8_t>(block[offset + index])));
+        const auto byte = std::to_integer<std::uint8_t>(block[offset + index]);
+        if (byte <= 0x7fU) {
+          value.push_back(static_cast<char>(byte));
+          continue;
+        }
+        result.contains_non_ascii_text = true;
+        if (text_encoding == "ISO-8859-1") {
+          value.push_back(static_cast<char>(0xc0U | (byte >> 6U)));
+          value.push_back(static_cast<char>(0x80U | (byte & 0x3fU)));
+        } else {
+          value.push_back(static_cast<char>(byte));
+        }
       }
       return trim_ascii(value);
     };
@@ -531,6 +544,15 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
   std::string result;
   append_component(result, profile.name);
   append_component(result, profile.version);
+  append_component(result, profile.text_encoding);
+  // Keep the built-in v1 vocabulary in the identity as well: changing a
+  // default mapping cannot silently reuse entities from the old behavior.
+  append_component(result,
+                   "GR=GR,GAM,GAMMA;SP=SP;AC=AC,DT,DTC;DEN=DEN,RHOB;"
+                   "CNL=CNL,NPHI,TNPH;CAL=CAL,CALI;RDEEP=RILD,LLD,RT;"
+                   "RMED=RILM,LLM;RSHAL=RLLS,LLS;"
+                   "GR/API;SP/mV;DEN/g/cc,g/cm3,kg/m3;AC/us/m,us/ft;"
+                   "CNL/%,v/v;CAL/mm,cm,in;R/ohm.m,ohm.ft;DEPTH/m,ft,in");
   for (const auto value : profile.inferred_null_values) {
     append_component(result, std::to_string(value));
   }
@@ -549,6 +571,8 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
 
 [[nodiscard]] bool valid_profile(const LisNormalizationProfile &profile) {
   if (profile.name.empty() || profile.version.empty() ||
+      (profile.text_encoding != "ASCII" &&
+       profile.text_encoding != "ISO-8859-1") ||
       !std::all_of(profile.inferred_null_values.begin(),
                    profile.inferred_null_values.end(),
                    [](double value) { return std::isfinite(value); })) {
@@ -982,7 +1006,8 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
       const auto ordinal = data_set_ordinal++;
       DataFormatSpecification specification;
       try {
-        specification = parse_format_specification(*format, limits);
+        specification =
+            parse_format_specification(*format, limits, profile.text_encoding);
       } catch (ParseFailure failure) {
         if (failure == ParseFailure::exhausted) {
           throw;
@@ -996,6 +1021,18 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
             .channel_name = {},
         });
         continue;
+      }
+      if (specification.contains_non_ascii_text &&
+          profile.text_encoding == "ASCII") {
+        diagnostics.push_back(LisDiagnostic{
+            .code = LisDiagnosticCode::non_ascii_text,
+            .severity = Severity::warning,
+            .byte_offset = specification.byte_offset,
+            .logical_file_index = selected,
+            .data_set_ordinal = ordinal,
+            .representation = 0U,
+            .channel_name = {},
+        });
       }
 
       std::vector<LogicalRecord> data_records;
@@ -1141,6 +1178,7 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
               .byte_offset = specification.byte_offset,
               .logical_file_index = selected,
               .data_set_ordinal = ordinal,
+              .representation = spec.representation,
               .channel_name = spec.mnemonic,
           });
           continue;
@@ -1152,11 +1190,14 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
                 : std::nullopt;
         if (!semantic.has_value() || !conversion.has_value()) {
           diagnostics.push_back(LisDiagnostic{
-              .code = LisDiagnosticCode::unsupported_channel,
+              .code = !semantic.has_value()
+                          ? LisDiagnosticCode::unknown_curve_semantics
+                          : LisDiagnosticCode::normalization_conflict,
               .severity = Severity::warning,
               .byte_offset = specification.byte_offset,
               .logical_file_index = selected,
               .data_set_ordinal = ordinal,
+              .representation = spec.representation,
               .channel_name = spec.mnemonic,
           });
           curves.push_back(CurvePlan{.specification_index = spec_index,
