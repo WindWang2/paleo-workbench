@@ -45,6 +45,22 @@ option(
     "Build the Unicode text pipeline (HarfBuzz/FreeType/ICU)"
     ON
 )
+option(
+    WELLLOG_BUILD_ARROW
+    "Build the optional Arrow C Data / mmap / IPC adapter (ADR 0027)"
+    ON
+)
+
+set(WELLLOG_ARROW_HAS_IPC OFF)
+if(WELLLOG_BUILD_ARROW)
+    find_package(Arrow CONFIG QUIET)
+    if(Arrow_FOUND AND TARGET Arrow::arrow_shared)
+        set(WELLLOG_ARROW_HAS_IPC ON)
+        message(STATUS "WellLog Arrow IPC: enabled (Arrow ${ARROW_VERSION})")
+    else()
+        message(STATUS "WellLog Arrow IPC: disabled (Arrow C++ not found; C Data + mmap only)")
+    endif()
+endif()
 
 if(WELLLOG_BUILD_TEXT)
     find_package(PkgConfig REQUIRED)
@@ -450,6 +466,40 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+if(WELLLOG_BUILD_ARROW)
+    add_library(welllog_arrow ${WELLLOG_LIBRARY_TYPE}
+        src/arrow/adapter.cpp
+    )
+    add_library(WellLog::Arrow ALIAS welllog_arrow)
+    set_target_properties(welllog_arrow PROPERTIES
+        EXPORT_NAME Arrow
+        OUTPUT_NAME welllog-arrow
+        VERSION "${PROJECT_VERSION}"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+    )
+    target_compile_features(welllog_arrow PUBLIC cxx_std_20)
+    welllog_enable_warnings(welllog_arrow)
+    target_link_libraries(welllog_arrow PUBLIC WellLog::Core)
+    target_include_directories(welllog_arrow
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    )
+    if(WELLLOG_ARROW_HAS_IPC)
+        target_compile_definitions(welllog_arrow PUBLIC WELLLOG_ARROW_HAS_IPC=1)
+        target_link_libraries(welllog_arrow PRIVATE Arrow::arrow_shared)
+    endif()
+    if(WELLLOG_BUILD_SHARED)
+        target_compile_definitions(
+            welllog_arrow
+            PRIVATE WELLLOG_ARROW_BUILD
+            PUBLIC WELLLOG_ARROW_SHARED
+        )
+    endif()
+endif()
+
 add_library(welllog_io ${WELLLOG_LIBRARY_TYPE}
     src/io/dlis.cpp
     src/io/format716.cpp
@@ -688,6 +738,16 @@ install(
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+if(WELLLOG_BUILD_ARROW)
+    install(
+        TARGETS welllog_arrow
+        EXPORT WellLogTargets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+endif()
 if(WELLLOG_BUILD_TEXT)
     install(
         TARGETS welllog_text
@@ -1156,6 +1216,24 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.depth-transform-overlay
              COMMAND welllog_depth_transform_overlay_tests)
+
+    # Arrow adapter tests need Arrow C++ for IPC fixtures + ExportArray round-trip.
+    if(WELLLOG_BUILD_ARROW AND WELLLOG_ARROW_HAS_IPC)
+        add_executable(welllog_arrow_adapter_tests
+            tests/integration/arrow_adapter_test.cpp
+        )
+        target_compile_features(welllog_arrow_adapter_tests PRIVATE cxx_std_20)
+        welllog_enable_warnings(welllog_arrow_adapter_tests)
+        target_link_libraries(
+            welllog_arrow_adapter_tests
+            PRIVATE
+                WellLog::Arrow
+                WellLog::Session
+                WellLog::Scene
+                Arrow::arrow_shared
+        )
+        add_test(NAME welllog.arrow-adapter COMMAND welllog_arrow_adapter_tests)
+    endif()
 
     add_executable(welllog_export_parity_tests
         tests/integration/export_parity_test.cpp

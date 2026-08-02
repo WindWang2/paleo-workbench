@@ -6,8 +6,8 @@
 
 ## Current Phase
 
-Phase W17 (#161 Marker align + Cross-Well Overlay) complete.  
-**Open frontier (examples):** #170 (multi-well workbench path), #174 (100M gate), #163/#168/#171–#173.
+Phase W18 (#163 Arrow C Data / mmap adapter) complete.  
+**Open frontier (examples):** #170 (multi-well workbench path), #174 (100M gate), #168/#171–#173.
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -443,6 +443,16 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] Session: `SetDepthTransformCommand`, `AlignWellsToMarkersCommand`, `SetCrossWellOverlaysCommand`
 - [x] `append_surface_overlay_geometry` + surface SVG entity-id overlays
 - [x] Tests: `welllog.depth-transform-overlay` (+ multi-well regression)
+- **Status:** complete
+
+### Phase W18: #163 Arrow C Data / mmap / IPC 零拷贝（ADR 0027）
+
+- [x] Optional `WellLog::Arrow` library (`WELLLOG_BUILD_ARROW`)
+- [x] Vendored C Data ABI + `import_arrow_array` (zero-copy primitives, explicit convert policy)
+- [x] `import_mmap_scalar_column` + SharedOwner unmap
+- [x] Optional IPC via Arrow C++ (`import_arrow_ipc_file_column`)
+- [x] Tests: `welllog.arrow-adapter` (null polarity, offset, LOD, session, budget)
+- [x] Core boundary: no Arrow in public core headers
 - **Status:** complete
 
 ## Decisions Made

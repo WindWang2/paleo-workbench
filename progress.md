@@ -318,3 +318,19 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 回归 | multi-well-surface + session/layer/document-annotation green |
 
 **#161 验收**：AC 覆盖（参考域选择经 presentation domain + 变换时轴域校验；Patch/Undo 与 #158 文档补丁同轨——变换/overlay 为 session 状态命令 + state_version）。明确延后：host 完整 MD↔TVD 换算表、交互式拖拽控制点 UI、transform 入 history stack。
+
+## Session: 2026-08-02 — #163 Arrow C Data / mmap 零拷贝（ADR 0027）
+
+`/implement` #163。可选 `WellLog::Arrow` 适配器：C Data Interface + mmap + Arrow IPC，不进入 Core 公共 API。
+
+| 项 | 内容 |
+|----|------|
+| 模块 | `include/welllog/arrow/{export,c_abi,adapter}.hpp` + `src/arrow/adapter.cpp` |
+| C Data | 固定宽 primitive 零拷贝；offset/type/length/stride；validity→Core null 位（极性反转 = Converted Copy for nulls） |
+| 策略 | `allow_converted_copy` 才允许 half-float→f64；否则 diagnostic |
+| 生命周期 | Arrow release / mmap unmap 经 `SharedOwner` 覆盖 prepare/LOD/session 读周期 |
+| IPC | 可选 `WELLLOG_ARROW_HAS_IPC`（find Arrow C++）：`import_arrow_ipc_file_column` |
+| 测试 | `welllog.arrow-adapter`：zero-copy、offset、half convert、mmap+LOD、session/scene、IPC nulls、1e6 mmap 预算 |
+| 边界 | `welllog.core.dependency-boundary` 通过；core 无 arrow 符号 |
+
+**#163 验收**：AC 覆盖。明确延后：PyArrow Shiboken 直接绑定（C Data 已是 Python 路径）、完整 RecordBatch 多列文档构建 helper、非 primitive 嵌套类型。
