@@ -384,6 +384,39 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+# Raster PNG/TIFF export (#157, ADR 0021). CPU tiled rendering + zlib PNG /
+# hand-rolled TIFF; never QOpenGLWidget framebuffer readback.
+add_library(welllog_export_raster ${WELLLOG_LIBRARY_TYPE}
+    src/export_raster/raster_export.cpp
+)
+add_library(WellLog::ExportRaster ALIAS welllog_export_raster)
+set_target_properties(welllog_export_raster PROPERTIES
+    EXPORT_NAME ExportRaster
+    OUTPUT_NAME welllog-export-raster
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_export_raster PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_export_raster)
+target_link_libraries(welllog_export_raster
+    PUBLIC WellLog::ExportVector WellLog::Scene
+    PRIVATE ZLIB::ZLIB Threads::Threads
+)
+target_include_directories(welllog_export_raster
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_export_raster
+        PRIVATE WELLLOG_EXPORT_RASTER_BUILD
+        PUBLIC WELLLOG_EXPORT_RASTER_SHARED
+    )
+endif()
+
 add_library(welllog_session ${WELLLOG_LIBRARY_TYPE}
     src/session/session.cpp
 )
@@ -644,6 +677,7 @@ install(
         welllog_scene
         welllog_export_vector
         welllog_export_pdf
+        welllog_export_raster
         welllog_export_table
         welllog_session
         welllog_io
@@ -1077,6 +1111,17 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
     )
     add_test(NAME welllog.pdf-scene-full COMMAND welllog_pdf_scene_full_tests)
+
+    add_executable(welllog_raster_export_tests
+        tests/integration/raster_export_test.cpp
+    )
+    target_compile_features(welllog_raster_export_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_raster_export_tests)
+    target_link_libraries(
+        welllog_raster_export_tests
+        PRIVATE WellLog::ExportRaster WellLog::Session
+    )
+    add_test(NAME welllog.raster-export COMMAND welllog_raster_export_tests)
 
     add_executable(welllog_export_parity_tests
         tests/integration/export_parity_test.cpp
