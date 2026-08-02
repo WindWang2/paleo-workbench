@@ -435,6 +435,7 @@ endif()
 
 add_library(welllog_session ${WELLLOG_LIBRARY_TYPE}
     src/session/session.cpp
+    src/session/observability.cpp
 )
 add_library(WellLog::Session ALIAS welllog_session)
 set_target_properties(welllog_session PROPERTIES
@@ -1218,6 +1219,17 @@ if(WELLLOG_BUILD_TESTS)
              COMMAND welllog_depth_transform_overlay_tests)
 
     # Arrow adapter tests need Arrow C++ for IPC fixtures + ExportArray round-trip.
+    add_executable(welllog_observability_tests
+        tests/integration/observability_test.cpp
+    )
+    target_compile_features(welllog_observability_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_observability_tests)
+    target_link_libraries(
+        welllog_observability_tests
+        PRIVATE WellLog::Session
+    )
+    add_test(NAME welllog.observability COMMAND welllog_observability_tests)
+
     if(WELLLOG_BUILD_ARROW AND WELLLOG_ARROW_HAS_IPC)
         add_executable(welllog_arrow_adapter_tests
             tests/integration/arrow_adapter_test.cpp

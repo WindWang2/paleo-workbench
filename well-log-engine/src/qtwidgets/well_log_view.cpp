@@ -23,7 +23,9 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <utility>
 
 namespace welllog {
@@ -119,6 +121,7 @@ struct WellLogView::Impl {
   bool drag_moved{};
   bool framebuffer_stencil_verified{};
   QLabel *capability_overlay{};
+  QLabel *profiler_overlay{};
   QTimer *signal_timer{};
   ViewEventObserverId session_observer_id{};
   std::uint64_t last_diagnostic_id{};
@@ -138,6 +141,14 @@ struct WellLogView::Impl {
   bool selecting{};
   double selection_anchor_depth{};
   EntityId selection_axis_id{};
+  // Profiler Overlay + Chrome Trace (#168). Overlay off by default; detailed
+  // trace off by default.
+  bool profiler_overlay_visible{false};
+  FrameStatsAggregator frame_stats{120};
+  ChromeTraceRecorder chrome_trace{};
+  std::uint64_t last_upload_bytes{};
+  std::uint64_t last_upload_cache_hits{};
+  std::uint64_t last_upload_cache_misses{};
 };
 
 WellLogView::WellLogView(QWidget *parent)
@@ -166,6 +177,15 @@ WellLogView::WellLogView(std::shared_ptr<WellLogSession> session,
                      "padding: 16px; }"));
   impl_->capability_overlay->setGeometry(rect());
   impl_->capability_overlay->raise();
+  impl_->profiler_overlay = new QLabel(this);
+  impl_->profiler_overlay->setObjectName(QStringLiteral("WellLogProfilerOverlay"));
+  impl_->profiler_overlay->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+  impl_->profiler_overlay->setWordWrap(false);
+  impl_->profiler_overlay->setStyleSheet(
+      QStringLiteral("QLabel { color: #d0ffe0; background: rgba(20,28,24,200); "
+                     "padding: 8px; font-family: monospace; font-size: 11px; }"));
+  impl_->profiler_overlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+  impl_->profiler_overlay->hide();
   impl_->signal_timer = new QTimer(this);
   impl_->signal_timer->setInterval(16);
   impl_->signal_timer->setSingleShot(true);
@@ -372,11 +392,20 @@ void WellLogView::resizeGL(int width, int height) {
 }
 
 void WellLogView::paintGL() {
+  using clock = std::chrono::steady_clock;
+  const auto frame_t0 = clock::now();
+  const auto trace_t0 = chrome_trace_now_us();
+  FrameSample frame{};
+  auto phase_ms = [](clock::time_point a, clock::time_point b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+  };
+
   const auto pixel_ratio = devicePixelRatioF();
   const auto pixel_width =
       static_cast<int>(static_cast<double>(width()) * pixel_ratio);
   const auto pixel_height =
       static_cast<int>(static_cast<double>(height()) * pixel_ratio);
+  const auto prepare_t0 = clock::now();
   if (impl_->document_id.has_value()) {
     const auto current_viewport = impl_->session->viewport(*impl_->document_id);
     const auto current_pixel_height =
@@ -395,12 +424,19 @@ void WellLogView::paintGL() {
     impl_->session->poll_async();
     const auto snapshot =
         impl_->session->performance_snapshot(*impl_->document_id);
-    if (snapshot.has_value() &&
-        (snapshot->preparation_state == PreparationState::pending ||
-         snapshot->frame_preparation_pending)) {
-      QTimer::singleShot(1, this, [this]() { update(); });
+    if (snapshot.has_value()) {
+      frame.worker_completed = snapshot->completed_tasks;
+      frame.worker_cancelled = snapshot->cancelled_tasks;
+      frame.worker_discarded = snapshot->discarded_tasks;
+      if (snapshot->preparation_state == PreparationState::pending ||
+          snapshot->frame_preparation_pending) {
+        QTimer::singleShot(1, this, [this]() { update(); });
+      }
     }
+    frame.diagnostics_count =
+        static_cast<std::uint64_t>(impl_->session->diagnostics().size());
   }
+  frame.prepare_ms = phase_ms(prepare_t0, clock::now());
   if (impl_->capability_report.graphics_available &&
       !impl_->framebuffer_stencil_verified) {
     auto *current = QOpenGLContext::currentContext();
@@ -429,6 +465,9 @@ void WellLogView::paintGL() {
     }
   }
   if (!impl_->capability_report.graphics_available) {
+    frame.total_ms = phase_ms(frame_t0, clock::now());
+    impl_->frame_stats.push(frame);
+    update_profiler_overlay();
     return;
   }
   try {
@@ -457,6 +496,16 @@ void WellLogView::paintGL() {
       viewport = impl_->session->viewport(*impl_->document_id);
       crosshair = impl_->session->crosshair(*impl_->document_id);
     }
+    if (scene != nullptr) {
+      frame.lod_points =
+          static_cast<std::uint64_t>(scene->curve_points().size());
+      frame.batches =
+          static_cast<std::uint64_t>(scene->curve_layers().size() +
+                                     scene->interval_layers().size() +
+                                     scene->marker_layers().size() + 1);
+      frame.vertices = frame.lod_points;
+    }
+    const auto upload_t0 = clock::now();
     if (scene != nullptr && scene != impl_->uploaded_scene &&
         scene != impl_->queued_scene) {
       const auto budgets = impl_->session->performance_budgets();
@@ -479,9 +528,17 @@ void WellLogView::paintGL() {
         return;
       }
       impl_->queued_scene = scene;
+      // New scene scheduled: treat as cache miss for this frame.
+      ++impl_->last_upload_cache_misses;
+      frame.cache_misses = 1;
+    } else if (scene != nullptr && scene == impl_->uploaded_scene) {
+      ++impl_->last_upload_cache_hits;
+      frame.cache_hits = 1;
     }
     if (impl_->queued_scene != nullptr) {
       const auto progress = impl_->renderer.upload_next();
+      frame.upload_bytes = progress.bytes_uploaded;
+      impl_->last_upload_bytes = progress.bytes_uploaded;
       if (progress.completed) {
         impl_->uploaded_scene = std::move(impl_->queued_scene);
       } else if (progress.pending) {
@@ -491,6 +548,8 @@ void WellLogView::paintGL() {
         return;
       }
     }
+    frame.upload_ms = phase_ms(upload_t0, clock::now());
+    const auto draw_t0 = clock::now();
     const auto fallback_viewport =
         scene == nullptr ? DepthViewport{.top = 0.0, .bottom = 1.0}
                          : DepthViewport{
@@ -523,9 +582,42 @@ void WellLogView::paintGL() {
         })) {
       publish_fatal_error();
     }
+    frame.draw_ms = phase_ms(draw_t0, clock::now());
   } catch (...) {
     publish_fatal_error();
   }
+  const auto frame_t1 = clock::now();
+  frame.present_ms = 0.0; // swap is outside paintGL; residual accounted in total
+  frame.total_ms = phase_ms(frame_t0, frame_t1);
+  frame.cache_hits = frame.cache_hits ? frame.cache_hits : 0;
+  impl_->frame_stats.push(frame);
+  if (impl_->chrome_trace.enabled()) {
+    const auto dur_us = frame.total_ms * 1000.0;
+    char args[256];
+    std::snprintf(
+        args, sizeof(args),
+        "{\"upload_bytes\":%llu,\"vertices\":%llu,\"batches\":%llu}",
+        static_cast<unsigned long long>(frame.upload_bytes),
+        static_cast<unsigned long long>(frame.vertices),
+        static_cast<unsigned long long>(frame.batches));
+    impl_->chrome_trace.complete("paintGL", "render", trace_t0, dur_us, args);
+    if (frame.prepare_ms > 0.0) {
+      impl_->chrome_trace.complete("prepare", "cpu", trace_t0,
+                                   frame.prepare_ms * 1000.0, "{}");
+    }
+    if (frame.upload_ms > 0.0) {
+      impl_->chrome_trace.complete(
+          "upload", "gpu", trace_t0 + frame.prepare_ms * 1000.0,
+          frame.upload_ms * 1000.0, args);
+    }
+    if (frame.draw_ms > 0.0) {
+      impl_->chrome_trace.complete(
+          "draw", "gpu",
+          trace_t0 + (frame.prepare_ms + frame.upload_ms) * 1000.0,
+          frame.draw_ms * 1000.0, "{}");
+    }
+  }
+  update_profiler_overlay();
 }
 
 void WellLogView::showEvent(QShowEvent *event) {
@@ -545,6 +637,10 @@ void WellLogView::showEvent(QShowEvent *event) {
 void WellLogView::resizeEvent(QResizeEvent *event) {
   QOpenGLWidget::resizeEvent(event);
   impl_->capability_overlay->setGeometry(rect());
+  if (impl_->profiler_overlay != nullptr) {
+    impl_->profiler_overlay->setGeometry(8, 8, std::min(420, width() - 16),
+                                         std::min(140, height() - 16));
+  }
 }
 
 void WellLogView::mousePressEvent(QMouseEvent *event) {
@@ -948,6 +1044,57 @@ void WellLogView::update_capability_overlay() noexcept {
           : reason);
   impl_->capability_overlay->show();
   impl_->capability_overlay->raise();
+}
+
+void WellLogView::update_profiler_overlay() noexcept {
+  if (impl_->profiler_overlay == nullptr) {
+    return;
+  }
+  if (!impl_->profiler_overlay_visible) {
+    impl_->profiler_overlay->hide();
+    return;
+  }
+  const auto stats = impl_->frame_stats.aggregate();
+  const auto text = format_profiler_overlay(stats);
+  impl_->profiler_overlay->setText(QString::fromStdString(text));
+  impl_->profiler_overlay->setGeometry(8, 8, std::min(420, width() - 16),
+                                       std::min(140, height() - 16));
+  impl_->profiler_overlay->show();
+  impl_->profiler_overlay->raise();
+}
+
+void WellLogView::set_profiler_overlay_visible(bool visible) noexcept {
+  impl_->profiler_overlay_visible = visible;
+  update_profiler_overlay();
+  if (visible) {
+    update();
+  }
+}
+
+bool WellLogView::profiler_overlay_visible() const noexcept {
+  return impl_->profiler_overlay_visible;
+}
+
+void WellLogView::set_chrome_trace_enabled(bool enabled) noexcept {
+  impl_->chrome_trace.set_enabled(enabled);
+  if (enabled) {
+    impl_->chrome_trace.instant("trace_enabled", "session",
+                                chrome_trace_now_us(), "{}");
+  }
+}
+
+bool WellLogView::chrome_trace_enabled() const noexcept {
+  return impl_->chrome_trace.enabled();
+}
+
+void WellLogView::clear_chrome_trace() noexcept { impl_->chrome_trace.clear(); }
+
+std::string WellLogView::export_chrome_trace_json() const {
+  return impl_->chrome_trace.export_json();
+}
+
+AggregatedFrameStats WellLogView::frame_stats() const noexcept {
+  return impl_->frame_stats.aggregate();
 }
 
 void WellLogView::cleanup_context() noexcept {

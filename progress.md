@@ -348,3 +348,17 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | 测试 | `test_welllog_multi_well_adapter` + dual-path page；22 workbench 相关 passed |
 
 **#170 验收**：AC 覆盖。明确延后：Engine 路径上 DTW/拾取手势完整移植（仍走 Legacy）；Engine 矢量导出（PNG 抓屏）；TVD 轨迹换算表。
+
+## Session: 2026-08-02 — #168 Profiler Overlay + Chrome Trace
+
+`/implement` #168（ADR 0043）。帧聚合 + 可关闭 Overlay + 默认关闭的 Chrome Trace。
+
+| 项 | 内容 |
+|----|------|
+| Module | `session/observability.hpp`：`FrameSample`/`FrameStatsAggregator`/`ChromeTraceRecorder`/`format_profiler_overlay` |
+| View | paintGL 分阶段计时；`set_profiler_overlay_visible` / `frame_stats` / `export_chrome_trace_json` |
+| 隐私 | Overlay/Trace 仅 Entity 计数与数值，无井名/标签/曲线值 |
+| 测试 | `welllog.observability`：percentile、ring 聚合、trace JSON、overlay 文案 |
+| Hygiene | 关闭已交付 #183/#184 |
+
+**#168 验收**：AC 覆盖（GPU timer query 异步路径：字段预留 `gpu_pass_ms`，当前以 CPU draw 为主）。详细 Trace 默认关。

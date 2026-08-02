@@ -9,6 +9,7 @@
 #include <welllog/io/manifest.hpp>
 #include <welllog/qtwidgets/export.hpp>
 #include <welllog/render_gl/capability.hpp>
+#include <welllog/session/observability.hpp>
 #include <welllog/session/session.hpp>
 
 class QEvent;
@@ -65,6 +66,20 @@ public:
   // an adapter, selection state lives in the session.
   [[nodiscard]] std::optional<SelectionState> selection() const noexcept;
 
+  // --- Profiler Overlay + Chrome Trace (#168, ADR 0043) ---------------------
+  // Low-overhead rolling aggregates (default off for overlay). Detailed Chrome
+  // Trace recording is off by default and must be enabled explicitly.
+  void set_profiler_overlay_visible(bool visible) noexcept;
+  [[nodiscard]] bool profiler_overlay_visible() const noexcept;
+  void set_chrome_trace_enabled(bool enabled) noexcept;
+  [[nodiscard]] bool chrome_trace_enabled() const noexcept;
+  void clear_chrome_trace() noexcept;
+  // Chrome Trace Event JSON (safe for chrome://tracing). Empty when disabled
+  // and no events captured.
+  [[nodiscard]] std::string export_chrome_trace_json() const;
+  // Rolling aggregate of recent paint frames for Python poll / host UI.
+  [[nodiscard]] AggregatedFrameStats frame_stats() const noexcept;
+
 public slots:
   void reset_viewport();
   // Selects a Reference Depth Range on `axis_id` for this view's document
@@ -116,6 +131,7 @@ private:
   // depth and the depth at `pixel_top`.
   void begin_selection_drag(double pixel_top) noexcept;
   void update_selection_drag(double pixel_top) noexcept;
+  void update_profiler_overlay() noexcept;
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

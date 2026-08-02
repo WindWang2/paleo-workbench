@@ -403,6 +403,8 @@ struct PerformanceSnapshot {
   std::uint64_t cancelled_tasks{};
   std::uint64_t discarded_tasks{};
   bool frame_preparation_pending{};
+  // Low-overhead worker / budget aggregates (#168). Per-frame prepare/upload/
+  // draw timings live on WellLogView::frame_stats() (GUI paint path).
 };
 
 struct Diagnostic {

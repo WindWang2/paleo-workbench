@@ -6,8 +6,8 @@
 
 ## Current Phase
 
-Phase W19 (#170 Workbench multi-well correlation dual-path) complete.  
-**Open frontier (examples):** #174 (100M gate), #168/#171–#173; close #183/#184 if confirmed delivered.
+Phase W20 (#168 Profiler Overlay + Chrome Trace) complete.  
+**Open frontier (examples):** #174 (100M gate), #171–#173.
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -462,6 +462,14 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] WellLogView paints multi-well surface when layout active
 - [x] StratigraphyCorrelationPage backend combo；Legacy 不删除
 - [x] Tests: multi-well adapter + dual-path page
+- **Status:** complete
+
+### Phase W20: #168 Profiler Overlay + Chrome Trace（ADR 0043）
+
+- [x] `FrameStatsAggregator` + `ChromeTraceRecorder` + overlay formatter
+- [x] WellLogView paintGL phase timing; toggleable overlay; trace export
+- [x] Tests: `welllog.observability`
+- [x] Tracker: close #183/#184 (already shipped)
 - **Status:** complete
 
 ## Decisions Made
