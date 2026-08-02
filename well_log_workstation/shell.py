@@ -1,18 +1,17 @@
-"""Main window chrome for Well Log Workstation — L layout (#211 / #216).
-
-Empty panes are intentional in ticket 01; data arrives in #217+.
-"""
+"""Main window chrome for Well Log Workstation — L layout (#211 / #216 / #217)."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
-    QHBoxLayout,
     QLabel,
     QListWidget,
     QMainWindow,
-    QMenuBar,
+    QMessageBox,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -23,6 +22,12 @@ from PySide6.QtWidgets import (
 )
 
 from well_log_workstation.qt_platform import effective_qt_platform_hint
+from well_log_workstation.workspace import (
+    Workspace,
+    WorkspaceError,
+    create_workspace,
+    open_workspace,
+)
 
 
 class WellLogWorkstationWindow(QMainWindow):
@@ -34,19 +39,36 @@ class WellLogWorkstationWindow(QMainWindow):
         self.setWindowTitle("Well Log Workstation")
         self.resize(1280, 800)
 
+        self._workspace: Workspace | None = None
+
         self._build_menus()
         self._build_body()
         self._build_status()
+        self._refresh_tree()
+
+    @property
+    def workspace(self) -> Workspace | None:
+        return self._workspace
 
     def _build_menus(self) -> None:
-        bar = QMenuBar(self)
-        for name in ("文件", "图件", "图版", "导出", "帮助"):
+        bar = self.menuBar()
+        file_menu = bar.addMenu("文件")
+        file_menu.setObjectName("Menu_文件")
+        act_new = file_menu.addAction("新建工区…")
+        act_new.setObjectName("Action_NewWorkspace")
+        act_new.triggered.connect(self._on_new_workspace)
+        act_open = file_menu.addAction("打开工区…")
+        act_open.setObjectName("Action_OpenWorkspace")
+        act_open.triggered.connect(self._on_open_workspace)
+        file_menu.addSeparator()
+        act_quit = file_menu.addAction("退出")
+        act_quit.triggered.connect(self.close)
+
+        for name in ("图件", "图版", "导出", "帮助"):
             menu = bar.addMenu(name)
             menu.setObjectName(f"Menu_{name}")
-            # Placeholders — wired in later tickets
             act = menu.addAction("…")
             act.setEnabled(False)
-        self.setMenuBar(bar)
 
     def _build_body(self) -> None:
         root = QWidget()
@@ -73,21 +95,13 @@ class WellLogWorkstationWindow(QMainWindow):
         pane = QWidget()
         pane.setObjectName("LeftPane")
         layout = QVBoxLayout(pane)
-        title = QLabel("工区")
-        title.setObjectName("LeftPaneTitle")
-        layout.addWidget(title)
+        self.left_title = QLabel("工区")
+        self.left_title.setObjectName("LeftPaneTitle")
+        layout.addWidget(self.left_title)
 
         self.workspace_tree = QTreeWidget()
         self.workspace_tree.setObjectName("WorkspaceTree")
         self.workspace_tree.setHeaderLabels(["名称"])
-        # Empty skeleton until #217 fills from workspace.json
-        root = QTreeWidgetItem(["（未打开工区）"])
-        wells = QTreeWidgetItem(["井"])
-        plots = QTreeWidgetItem(["图件"])
-        root.addChild(wells)
-        root.addChild(plots)
-        self.workspace_tree.addTopLevelItem(root)
-        self.workspace_tree.expandAll()
         layout.addWidget(self.workspace_tree, 1)
         return pane
 
@@ -107,9 +121,9 @@ class WellLogWorkstationWindow(QMainWindow):
         ph = QVBoxLayout(placeholder)
         lab = QLabel(
             "画布区\n\n"
-            "单井分析图 = 一口井 · 多图道（图版模板，#219）\n"
-            "地层对比图-lite = 多井共享深度（#222）\n\n"
-            "（#216：空壳可导航）"
+            "单井分析图 = 一口井 · 多图道（#219）\n"
+            "地层对比图-lite（#222）\n\n"
+            "先用「文件 → 打开/新建工区」加载目录工区。"
         )
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lab.setWordWrap(True)
@@ -143,6 +157,118 @@ class WellLogWorkstationWindow(QMainWindow):
     def _build_status(self) -> None:
         status = QStatusBar(self)
         status.setObjectName("MainStatusBar")
-        hint = effective_qt_platform_hint()
-        status.showMessage(f"Well Log Workstation · Qt platform: {hint}")
         self.setStatusBar(status)
+        self._update_status()
+
+    def _update_status(self) -> None:
+        hint = effective_qt_platform_hint()
+        if self._workspace is None:
+            msg = f"Well Log Workstation · 未打开工区 · Qt: {hint}"
+        else:
+            msg = (
+                f"工区: {self._workspace.name} · "
+                f"{self._workspace.root} · "
+                f"井 {len(self._workspace.wells)} · "
+                f"图件 {len(self._workspace.plots)} · "
+                f"Qt: {hint}"
+            )
+        self.statusBar().showMessage(msg)
+
+    def set_workspace(self, ws: Workspace | None) -> None:
+        """Programmatic API for tests and future host wiring."""
+        self._workspace = ws
+        self._refresh_tree()
+        self._update_status()
+        if ws is not None:
+            self.setWindowTitle(f"{ws.name} — Well Log Workstation")
+        else:
+            self.setWindowTitle("Well Log Workstation")
+
+    def _refresh_tree(self) -> None:
+        tree = self.workspace_tree
+        tree.clear()
+        if self._workspace is None:
+            self.left_title.setText("工区")
+            root = QTreeWidgetItem(["（未打开工区）"])
+            root.addChild(QTreeWidgetItem(["井"]))
+            root.addChild(QTreeWidgetItem(["图件"]))
+            tree.addTopLevelItem(root)
+            tree.expandAll()
+            return
+
+        ws = self._workspace
+        self.left_title.setText(f"工区 · {ws.name}")
+        root = QTreeWidgetItem([ws.name])
+        root.setData(0, Qt.ItemDataRole.UserRole, {"kind": "workspace"})
+
+        wells_node = QTreeWidgetItem(["井"])
+        wells_node.setData(0, Qt.ItemDataRole.UserRole, {"kind": "wells_folder"})
+        for well in ws.wells:
+            item = QTreeWidgetItem([well.name])
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"kind": "well", "id": well.id, "path": well.path},
+            )
+            item.setToolTip(0, well.path or well.id)
+            wells_node.addChild(item)
+        if not ws.wells:
+            empty = QTreeWidgetItem(["（无井）"])
+            empty.setDisabled(True)
+            wells_node.addChild(empty)
+
+        plots_node = QTreeWidgetItem(["图件"])
+        plots_node.setData(0, Qt.ItemDataRole.UserRole, {"kind": "plots_folder"})
+        for plot in ws.plots:
+            label = plot.name
+            if plot.type == "correlation":
+                label = f"{plot.name} [对比]"
+            elif plot.type == "single_well":
+                label = f"{plot.name} [单井·多图道]"
+            item = QTreeWidgetItem([label])
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"kind": "plot", "id": plot.id, "type": plot.type},
+            )
+            plots_node.addChild(item)
+        if not ws.plots:
+            empty = QTreeWidgetItem(["（无图件）"])
+            empty.setDisabled(True)
+            plots_node.addChild(empty)
+
+        root.addChild(wells_node)
+        root.addChild(plots_node)
+        tree.addTopLevelItem(root)
+        tree.expandAll()
+
+    def _on_new_workspace(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "选择空目录作为新工区")
+        if not path:
+            return
+        try:
+            # Prefer create in empty dir; if path is empty create works.
+            # If user picks non-empty, create_workspace errors.
+            target = Path(path)
+            if not any(target.iterdir()) if target.is_dir() else True:
+                ws = create_workspace(target)
+            else:
+                # Offer create under a child if non-empty? Keep strict.
+                ws = create_workspace(target)
+            self.set_workspace(ws)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "新建工区失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "新建工区失败", str(exc))
+
+    def _on_open_workspace(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "打开工区目录")
+        if not path:
+            return
+        try:
+            ws = open_workspace(path)
+            self.set_workspace(ws)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "打开工区失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "打开工区失败", str(exc))

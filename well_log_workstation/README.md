@@ -3,7 +3,7 @@
 Standalone **log-first** desktop product (wayfinder #207).  
 Not Paleo Workbench. Rendering uses **WellLogEngine** in later tickets.
 
-## Run (#216)
+## Run
 
 ```bash
 # From monorepo root, with PySide6 installed (e.g. repo .venv)
@@ -13,6 +13,18 @@ unset PALEO_FORCE_XCB
 unset WLWS_FORCE_XCB
 
 python -m well_log_workstation
+```
+
+### Workspace (#217)
+
+**文件 → 新建工区…** / **打开工区…** 选择目录。
+
+```
+<workspace>/
+  workspace.json   # catalog (not engine Manifest)
+  wells/
+  plots/
+  templates/
 ```
 
 Headless / CI:

@@ -61,7 +61,7 @@ def test_shell_has_l_chrome(qtbot) -> None:
 
     assert win.document_tabs.count() >= 1
     msg = win.statusBar().currentMessage() or ""
-    assert "Qt platform" in msg
+    assert "Qt:" in msg
 
 
 def test_effective_hint_nonempty() -> None:
