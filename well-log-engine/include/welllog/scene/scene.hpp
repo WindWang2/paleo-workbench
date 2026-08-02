@@ -652,7 +652,11 @@ struct SceneValueIssue {
 };
 
 struct CurvePick {
+  // Owning well document when the hit comes from a multi-well surface (#160).
+  // Nil for single-document prepared scenes (legacy single-well path).
+  EntityId document_id{};
   EntityId layer_id;
+  EntityId track_id{};
   EntityId curve_id;
   std::uint64_t sample_index{};
   double reference_depth{};
@@ -724,6 +728,8 @@ struct CustomPickQuery {
 namespace detail {
 class ScenePreparer;
 }
+
+struct WellScenePlacement;
 
 class WELLLOG_SCENE_API PreparedScene {
 public:
@@ -810,6 +816,33 @@ private:
   explicit PreparedScene(std::shared_ptr<const Impl> impl);
   std::shared_ptr<const Impl> impl_;
   friend class detail::ScenePreparer;
+  friend Result<PreparedScene>
+  compose_multi_well_scene(std::span<const WellScenePlacement> wells,
+                           Millimetres physical_height) noexcept;
 };
+
+// One well's prepared scene and its horizontal placement on a multi-well
+// surface (#160, ADR 0012). `left` is the scene-mm offset of this well's local
+// origin within the shared surface.
+struct WellScenePlacement {
+  EntityId document_id{};
+  Millimetres left{};
+  std::shared_ptr<const PreparedScene> scene;
+};
+
+// Composes horizontally arranged single-well prepared scenes into one surface
+// scene (same physical height, cumulative width). Used for multi-well SVG
+// export and unified picking. Off-screen wells should be omitted by the caller
+// (horizontal culling / virtualization — #160).
+[[nodiscard]] WELLLOG_SCENE_API Result<PreparedScene>
+compose_multi_well_scene(std::span<const WellScenePlacement> wells,
+                         Millimetres physical_height) noexcept;
+
+// Picks a curve on a multi-well surface by testing each well in reverse order
+// (rightmost/topmost wins) with a left-shifted query. Returns the hit with
+// `document_id` and `track_id` filled.
+[[nodiscard]] WELLLOG_SCENE_API std::optional<CurvePick>
+pick_curve_multi_well(std::span<const WellScenePlacement> wells,
+                      const CurvePickQuery &query) noexcept;
 
 } // namespace welllog

@@ -968,6 +968,14 @@ struct WellLogSession::Impl {
   // bottom to the new tail depth (follow_latest).
   std::unordered_map<EntityId, AppendViewportMode, EntityIdHash>
       append_viewport_modes;
+  // Multi-well surface layout (#160, ADR 0012). Empty = independent single-well
+  // mode (prepared_scene(doc) only). Non-empty wells share Display Depth via
+  // shared_depth_viewport when set.
+  std::vector<WellPlacement> well_layout;
+  Millimetres well_layout_gap{4.0};
+  std::optional<DepthViewport> shared_depth_viewport;
+  std::optional<std::uint32_t> shared_pixel_height;
+  std::optional<std::pair<double, double>> surface_horizontal_view;
   // High-frequency append coalescing state (#201, ADR 0031). Per-document
   // staged tail-blocks awaiting a visible revision, plus the time the last
   // visible revision was produced (for the refresh-rate cap). Empty/disabled
@@ -1889,8 +1897,197 @@ WellLogSession::execute(const SetPresentationCommand &command) {
   }
 }
 
+namespace {
+
+[[nodiscard]] Millimetres
+presentation_column_width(const ScenePresentation &presentation) noexcept {
+  double width = 0.0;
+  for (const auto &track : presentation.tracks()) {
+    if (std::isfinite(track.width.value) && track.width.value > 0.0) {
+      width += track.width.value;
+    }
+  }
+  return Millimetres{width > 0.0 ? width : 40.0};
+}
+
+[[nodiscard]] bool layout_contains(const std::vector<WellPlacement> &layout,
+                                   EntityId document_id) noexcept {
+  return std::any_of(layout.begin(), layout.end(),
+                     [document_id](const WellPlacement &well) {
+                       return well.document_id == document_id;
+                     });
+}
+
+} // namespace
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetWellLayoutCommand &command) {
+  try {
+    if (command.wells.empty()) {
+      return execute(ClearWellLayoutCommand{});
+    }
+    std::vector<WellPlacement> packed;
+    packed.reserve(command.wells.size());
+    double cursor = 0.0;
+    for (const auto &well : command.wells) {
+      if (well.document_id.is_nil() ||
+          !impl_->documents.contains(well.document_id)) {
+        return Error{
+            .code = ErrorCode::document_not_found,
+            .severity = Severity::error,
+            .entity_id = well.document_id,
+            .message = MessageKey::document_structure_invalid,
+            .arguments = {},
+        };
+      }
+      WellPlacement next = well;
+      if (command.pack_left_to_right) {
+        Millimetres width = well.width;
+        if (width.value <= 0.0) {
+          if (const auto scene = prepared_scene(well.document_id);
+              scene != nullptr && scene->physical_width().value > 0.0) {
+            width = scene->physical_width();
+          } else if (const auto pres =
+                         impl_->presentations.find(well.document_id);
+                     pres != impl_->presentations.end()) {
+            width = presentation_column_width(pres->second);
+          } else {
+            width = Millimetres{40.0};
+          }
+        }
+        next.left = Millimetres{cursor};
+        next.width = width;
+        cursor += width.value + command.gap.value;
+      }
+      packed.push_back(next);
+    }
+    impl_->well_layout = std::move(packed);
+    impl_->well_layout_gap = command.gap;
+    if (impl_->state_version == std::numeric_limits<std::uint64_t>::max()) {
+      return Error{.code = ErrorCode::internal_error,
+                   .severity = Severity::error,
+                   .entity_id = std::nullopt,
+                   .message = MessageKey::internal_error,
+                   .arguments = {}};
+    }
+    ++impl_->state_version;
+    return CommandReceipt{
+        .state_version = impl_->state_version,
+        .document_id = impl_->well_layout.front().document_id,
+        .document_revision =
+            impl_->documents.at(impl_->well_layout.front().document_id)
+                ->revision(),
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const ClearWellLayoutCommand &) {
+  impl_->well_layout.clear();
+  impl_->shared_depth_viewport.reset();
+  impl_->shared_pixel_height.reset();
+  impl_->surface_horizontal_view.reset();
+  if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
+    ++impl_->state_version;
+  }
+  return CommandReceipt{
+      .state_version = impl_->state_version,
+      .document_id = EntityId{},
+      .document_revision = DocumentRevision{},
+      .asynchronous_preparation_started = false,
+      .diagnostic_id = std::nullopt,
+  };
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetSharedDepthViewportCommand &command) {
+  if (!valid_viewport(command.viewport)) {
+    return viewport_error(EntityId{});
+  }
+  if (impl_->well_layout.empty()) {
+    return Error{.code = ErrorCode::invalid_presentation,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::presentation_invalid,
+                 .arguments = {}};
+  }
+  impl_->shared_depth_viewport = command.viewport;
+  if (command.pixel_height != 0) {
+    impl_->shared_pixel_height = command.pixel_height;
+  }
+  // Broadcast to every well so per-doc prepared scenes stay in sync.
+  Result<CommandReceipt> last = viewport_error(EntityId{});
+  for (const auto &well : impl_->well_layout) {
+    if (!well.visible) {
+      continue;
+    }
+    const auto pixel =
+        command.pixel_height != 0
+            ? command.pixel_height
+            : viewport_pixel_height(well.document_id).value_or(std::uint32_t{1});
+    last = execute(SetViewportMetricsCommand{
+        .document_id = well.document_id,
+        .viewport = command.viewport,
+        .pixel_height = pixel == 0 ? 1U : pixel,
+    });
+    if (!last.has_value()) {
+      return last;
+    }
+  }
+  return last;
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetSurfaceHorizontalViewCommand &command) {
+  if (!std::isfinite(command.left_mm) || !std::isfinite(command.right_mm) ||
+      command.right_mm <= command.left_mm) {
+    return Error{.code = ErrorCode::invalid_presentation,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::presentation_invalid,
+                 .arguments = {}};
+  }
+  impl_->surface_horizontal_view =
+      std::pair<double, double>{command.left_mm, command.right_mm};
+  if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
+    ++impl_->state_version;
+  }
+  return CommandReceipt{
+      .state_version = impl_->state_version,
+      .document_id = impl_->well_layout.empty()
+                         ? EntityId{}
+                         : impl_->well_layout.front().document_id,
+      .document_revision = DocumentRevision{},
+      .asynchronous_preparation_started = false,
+      .diagnostic_id = std::nullopt,
+  };
+}
+
 Result<CommandReceipt>
 WellLogSession::execute(const SetViewportCommand &command) {
+  // Multi-well surface: viewport changes on any layout well are shared.
+  if (!impl_->well_layout.empty() &&
+      layout_contains(impl_->well_layout, command.document_id)) {
+    return execute(SetSharedDepthViewportCommand{
+        .viewport = command.viewport,
+        .pixel_height =
+            viewport_pixel_height(command.document_id).value_or(std::uint32_t{}),
+    });
+  }
   return execute(SetViewportMetricsCommand{
       .document_id = command.document_id,
       .viewport = command.viewport,
@@ -2074,13 +2271,24 @@ WellLogSession::execute(const SetCrosshairCommand &command) {
     }
     const auto next_state_version = impl_->state_version + 1;
     const auto revision = document->second->revision();
-    impl_->events.reserve(impl_->events.size() + 1);
-    if (command.crosshair.has_value()) {
-      impl_->crosshairs.reserve(impl_->crosshairs.size() + 1);
-      impl_->crosshairs.insert_or_assign(command.document_id,
-                                         *command.crosshair);
-    } else {
-      impl_->crosshairs.erase(command.document_id);
+    // Multi-well surface: shared Display Depth cursor across layout wells.
+    std::vector<EntityId> targets{command.document_id};
+    if (!impl_->well_layout.empty() &&
+        layout_contains(impl_->well_layout, command.document_id)) {
+      targets.clear();
+      for (const auto &well : impl_->well_layout) {
+        if (well.visible && impl_->documents.contains(well.document_id)) {
+          targets.push_back(well.document_id);
+        }
+      }
+    }
+    impl_->events.reserve(impl_->events.size() + targets.size());
+    for (const auto target : targets) {
+      if (command.crosshair.has_value()) {
+        impl_->crosshairs.insert_or_assign(target, *command.crosshair);
+      } else {
+        impl_->crosshairs.erase(target);
+      }
     }
     impl_->state_version = next_state_version;
     const auto event = ViewEvent{
@@ -3977,6 +4185,106 @@ std::shared_ptr<const PreparedScene>
 WellLogSession::prepared_scene(EntityId document_id) const noexcept {
   const auto found = impl_->prepared_scenes.find(document_id);
   return found == impl_->prepared_scenes.end() ? nullptr : found->second;
+}
+
+std::span<const WellPlacement>
+WellLogSession::well_layout() const noexcept {
+  return impl_ == nullptr ? std::span<const WellPlacement>{}
+                          : std::span<const WellPlacement>{impl_->well_layout};
+}
+
+std::optional<DepthViewport>
+WellLogSession::shared_depth_viewport() const noexcept {
+  return impl_ == nullptr ? std::nullopt : impl_->shared_depth_viewport;
+}
+
+std::shared_ptr<const PreparedScene>
+WellLogSession::prepared_surface_scene() const noexcept {
+  try {
+    if (impl_ == nullptr || impl_->well_layout.empty()) {
+      return nullptr;
+    }
+    std::vector<WellScenePlacement> placements;
+    const auto view = impl_->surface_horizontal_view;
+    for (const auto &well : impl_->well_layout) {
+      if (!well.visible) {
+        continue;
+      }
+      const auto scene_it = impl_->prepared_scenes.find(well.document_id);
+      if (scene_it == impl_->prepared_scenes.end() ||
+          scene_it->second == nullptr) {
+        continue;
+      }
+      const auto width =
+          well.width.value > 0.0 ? well.width.value
+                                 : scene_it->second->physical_width().value;
+      const auto right = well.left.value + width;
+      if (view.has_value()) {
+        if (right <= view->first || well.left.value >= view->second) {
+          continue;
+        }
+      }
+      placements.push_back(WellScenePlacement{
+          .document_id = well.document_id,
+          .left = well.left,
+          .scene = scene_it->second,
+      });
+    }
+    if (placements.empty()) {
+      return nullptr;
+    }
+    Millimetres height = placements.front().scene->physical_height();
+    for (const auto &placement : placements) {
+      if (placement.scene->physical_height().value > height.value) {
+        height = placement.scene->physical_height();
+      }
+    }
+    auto composed = compose_multi_well_scene(placements, height);
+    if (!composed.has_value()) {
+      return nullptr;
+    }
+    return std::make_shared<const PreparedScene>(std::move(composed.value()));
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+std::optional<CurvePick>
+WellLogSession::pick_surface_curve(const CurvePickQuery &query) const noexcept {
+  try {
+    if (impl_ == nullptr || impl_->well_layout.empty()) {
+      return std::nullopt;
+    }
+    std::vector<WellScenePlacement> placements;
+    const auto view = impl_->surface_horizontal_view;
+    for (const auto &well : impl_->well_layout) {
+      if (!well.visible) {
+        continue;
+      }
+      const auto scene_it = impl_->prepared_scenes.find(well.document_id);
+      if (scene_it == impl_->prepared_scenes.end() ||
+          scene_it->second == nullptr) {
+        continue;
+      }
+      const auto width =
+          well.width.value > 0.0 ? well.width.value
+                                 : scene_it->second->physical_width().value;
+      if (view.has_value()) {
+        const auto right = well.left.value + width;
+        if (right <= view->first || well.left.value >= view->second) {
+          continue;
+        }
+      }
+      placements.push_back(WellScenePlacement{
+          .document_id = well.document_id,
+          .left = well.left,
+          .scene = scene_it->second,
+      });
+    }
+    return pick_curve_multi_well(placements, query);
+  } catch (...) {
+    return std::nullopt;
+  }
 }
 
 std::optional<DepthViewport>

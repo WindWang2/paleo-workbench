@@ -30,6 +30,46 @@ struct DepthViewport {
   friend constexpr bool operator==(DepthViewport, DepthViewport) = default;
 };
 
+// --- Multi-well surface layout (#160, ADR 0012) -----------------------------
+//
+// One WellLogDocument remains one well. The session may hold many documents;
+// SetWellLayoutCommand arranges a subset left-to-right on a single surface
+// with a shared Display Depth viewport. Single-well is the layout of one
+// placement (or an empty layout + prepared_scene(doc) as today).
+
+struct WellPlacement {
+  EntityId document_id{};
+  // Absolute left edge in surface millimetres. When packing is requested
+  // (all left == 0 and width == 0), the session assigns lefts sequentially.
+  Millimetres left{};
+  // Well column width in millimetres. 0 → use the well's prepared scene /
+  // presentation track sum when packing.
+  Millimetres width{};
+  bool visible{true};
+};
+
+struct SetWellLayoutCommand {
+  std::vector<WellPlacement> wells;
+  Millimetres gap{4.0};
+  // When true, ignore caller left/width and pack left-to-right using each
+  // well's prepared-scene width (or presentation track widths) + gap.
+  bool pack_left_to_right{true};
+};
+
+struct ClearWellLayoutCommand {};
+
+// Shared Display Depth window applied to every well in the active layout.
+struct SetSharedDepthViewportCommand {
+  DepthViewport viewport;
+  std::uint32_t pixel_height{}; // 0 keeps each well's current pixel height
+};
+
+// Horizontal culling window in surface millimetres (nullopt = no cull).
+struct SetSurfaceHorizontalViewCommand {
+  double left_mm{};
+  double right_mm{};
+};
+
 struct CrosshairState {
   double track_fraction{};
   double display_depth{};
@@ -335,6 +375,14 @@ public:
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetPresentationCommand &command);
   [[nodiscard]] Result<CommandReceipt>
+  execute(const SetWellLayoutCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const ClearWellLayoutCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetSharedDepthViewportCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetSurfaceHorizontalViewCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
   execute(const SetViewportCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetViewportMetricsCommand &command);
@@ -370,6 +418,18 @@ public:
   document(EntityId id) const noexcept;
   [[nodiscard]] std::shared_ptr<const PreparedScene>
   prepared_scene(EntityId document_id) const noexcept;
+  // Active multi-well layout placements (empty when single-well mode).
+  [[nodiscard]] std::span<const WellPlacement> well_layout() const noexcept;
+  // Composes the multi-well surface from per-well prepared scenes with
+  // horizontal culling. Returns nullptr when layout is empty or no well is
+  // prepared/visible. Single-document layout of size 1 still composes.
+  [[nodiscard]] std::shared_ptr<const PreparedScene>
+  prepared_surface_scene() const noexcept;
+  // Unified multi-well curve pick (document_id + track_id filled).
+  [[nodiscard]] std::optional<CurvePick>
+  pick_surface_curve(const CurvePickQuery &query) const noexcept;
+  [[nodiscard]] std::optional<DepthViewport>
+  shared_depth_viewport() const noexcept;
   [[nodiscard]] std::optional<DepthViewport>
   viewport(EntityId document_id) const noexcept;
   [[nodiscard]] std::optional<std::uint32_t>

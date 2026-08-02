@@ -1111,7 +1111,9 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
     }
     if (best_point != nullptr && best_distance <= query.tolerance.value) {
       return CurvePick{
+          .document_id = impl_->document_id,
           .layer_id = layer.id,
+          .track_id = layer.track_id,
           .curve_id = layer.curve_id,
           .sample_index = best_point->sample_index,
           .reference_depth = best_point->reference_depth,
@@ -3395,6 +3397,195 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         .arguments = {},
     };
   }
+}
+
+Result<PreparedScene>
+compose_multi_well_scene(std::span<const WellScenePlacement> wells,
+                         Millimetres physical_height) noexcept {
+  try {
+    if (wells.empty() || !std::isfinite(physical_height.value) ||
+        physical_height.value <= 0.0) {
+      return Error{.code = ErrorCode::invalid_presentation,
+                   .severity = Severity::error,
+                   .entity_id = std::nullopt,
+                   .message = MessageKey::presentation_invalid,
+                   .arguments = {}};
+    }
+    auto shift_left_pt = [](PhysicalPoint &point, double dx) {
+      point.left.value += dx;
+    };
+    auto shift_left_rect = [](PhysicalRect &rect, double dx) {
+      rect.left.value += dx;
+    };
+    auto shift_scene_impl = [&](PreparedScene::Impl &impl, double dx,
+                                EntityId document_id_override) {
+      if (!document_id_override.is_nil()) {
+        impl.document_id = document_id_override;
+      }
+      if (dx == 0.0) {
+        return;
+      }
+      for (auto &track : impl.tracks) {
+        shift_left_rect(track.bounds, dx);
+        shift_left_rect(track.clip, dx);
+      }
+      for (auto &point : impl.curve_points) {
+        shift_left_pt(point.position, dx);
+      }
+      for (auto &interval : impl.intervals) {
+        shift_left_rect(interval.rect, dx);
+      }
+      for (auto &vertex : impl.fill_vertices) {
+        shift_left_pt(vertex.position, dx);
+      }
+      for (auto &region : impl.fill_regions) {
+        shift_left_rect(region.bounds, dx);
+      }
+      for (auto &tile : impl.image_tiles) {
+        shift_left_rect(tile.rect, dx);
+      }
+      for (auto &symbol : impl.symbols) {
+        shift_left_pt(symbol.center, dx);
+      }
+      for (auto &run : impl.text_runs) {
+        shift_left_pt(run.anchor, dx);
+        shift_left_rect(run.bounds, dx);
+      }
+      for (auto &vertex : impl.custom_vertices) {
+        shift_left_pt(vertex, dx);
+      }
+    };
+
+    auto out = std::make_shared<PreparedScene::Impl>();
+    out->physical_height = physical_height;
+    out->physical_width = Millimetres{0.0};
+    // Use the first well as the surface document id (host reads picks'
+    // document_id for true well identity).
+    out->document_id = wells.front().document_id;
+    out->document_revision = DocumentRevision{1};
+    out->reference_depth_domain = DepthDomain::measured_depth;
+    out->reference_depth_unit = "m";
+    out->font_asset_fingerprint = "multi-well-surface";
+
+    double max_right = 0.0;
+    bool depth_range_set = false;
+
+    for (const auto &placement : wells) {
+      if (placement.scene == nullptr || placement.scene->impl_ == nullptr) {
+        continue;
+      }
+      const auto &src = *placement.scene->impl_;
+      const auto dx = placement.left.value;
+      // Copy source then shift (avoids mutating the live per-well scene).
+      PreparedScene::Impl local = src;
+      shift_scene_impl(local, dx, placement.document_id);
+      // Depth range: union of wells (shared display depth should match).
+      if (!depth_range_set) {
+        out->document_revision = local.document_revision.value == 0
+                                     ? DocumentRevision{1}
+                                     : local.document_revision;
+        out->reference_depth_domain = local.reference_depth_domain;
+        out->reference_depth_unit = local.reference_depth_unit;
+        out->reference_depth_top = local.reference_depth_top;
+        out->reference_depth_bottom = local.reference_depth_bottom;
+        out->presentation_version = local.presentation_version;
+        out->font_asset_fingerprint = local.font_asset_fingerprint;
+        depth_range_set = true;
+      }
+      // Append collections with index remapping for segments/points.
+      const auto point_base = out->curve_points.size();
+      const auto segment_base = out->curve_segments.size();
+      const auto layer_base = out->curve_layers.size();
+      for (const auto &point : local.curve_points) {
+        out->curve_points.push_back(point);
+      }
+      for (auto segment : local.curve_segments) {
+        segment.first_point += static_cast<std::uint64_t>(point_base);
+        out->curve_segments.push_back(segment);
+      }
+      for (auto layer : local.curve_layers) {
+        layer.first_segment += static_cast<std::uint64_t>(segment_base);
+        out->curve_layers.push_back(layer);
+      }
+      for (const auto &track : local.tracks) {
+        out->tracks.push_back(track);
+      }
+      const auto interval_base = out->intervals.size();
+      for (const auto &interval : local.intervals) {
+        out->intervals.push_back(interval);
+      }
+      for (auto layer : local.interval_layers) {
+        layer.first_interval += static_cast<std::uint64_t>(interval_base);
+        out->interval_layers.push_back(layer);
+      }
+      const auto marker_base = out->markers.size();
+      for (const auto &marker : local.markers) {
+        out->markers.push_back(marker);
+      }
+      for (auto layer : local.marker_layers) {
+        layer.first_marker += static_cast<std::uint64_t>(marker_base);
+        out->marker_layers.push_back(layer);
+      }
+      // Remap pick indices for this well's layers.
+      for (auto pick : local.curve_pick_indices) {
+        pick.layer_index += static_cast<std::uint64_t>(layer_base);
+        for (auto &primitive : pick.primitives) {
+          primitive.first_point += static_cast<std::uint64_t>(point_base);
+          primitive.second_point += static_cast<std::uint64_t>(point_base);
+        }
+        out->curve_pick_indices.push_back(std::move(pick));
+      }
+      const auto right =
+          placement.left.value + local.physical_width.value;
+      max_right = std::max(max_right, right);
+    }
+    if (out->tracks.empty() && out->curve_layers.empty()) {
+      return Error{.code = ErrorCode::invalid_presentation,
+                   .severity = Severity::error,
+                   .entity_id = std::nullopt,
+                   .message = MessageKey::presentation_invalid,
+                   .arguments = {}};
+    }
+    out->physical_width = Millimetres{max_right};
+    return PreparedScene{std::move(out)};
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
+}
+
+std::optional<CurvePick>
+pick_curve_multi_well(std::span<const WellScenePlacement> wells,
+                      const CurvePickQuery &query) noexcept {
+  // Right-to-left so a well drawn later (higher z / right) wins ties.
+  std::optional<CurvePick> best;
+  for (auto it = wells.rbegin(); it != wells.rend(); ++it) {
+    if (it->scene == nullptr) {
+      continue;
+    }
+    CurvePickQuery local = query;
+    local.scene_position.left.value =
+        query.scene_position.left.value - it->left.value;
+    auto hit = it->scene->pick_curve(local);
+    if (hit.has_value()) {
+      hit->document_id = it->document_id;
+      if (best.has_value() &&
+          hit->distance.value >= best->distance.value) {
+        continue;
+      }
+      best = hit;
+    }
+  }
+  return best;
 }
 
 } // namespace welllog

@@ -1134,6 +1134,17 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.qc-derived-curve COMMAND welllog_qc_derived_curve_tests)
 
+    add_executable(welllog_multi_well_surface_tests
+        tests/integration/multi_well_surface_test.cpp
+    )
+    target_compile_features(welllog_multi_well_surface_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_multi_well_surface_tests)
+    target_link_libraries(
+        welllog_multi_well_surface_tests
+        PRIVATE WellLog::ExportVector WellLog::Session
+    )
+    add_test(NAME welllog.multi-well-surface COMMAND welllog_multi_well_surface_tests)
+
     add_executable(welllog_export_parity_tests
         tests/integration/export_parity_test.cpp
     )
