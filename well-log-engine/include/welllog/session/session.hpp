@@ -70,6 +70,60 @@ struct SetSurfaceHorizontalViewCommand {
   double right_mm{};
 };
 
+// --- Depth Transform + Cross-Well Overlay (#161, ADR 0013) ------------------
+
+// Applies a reversible piecewise Depth Transform to one well's presentation.
+// Empty control_points clears to identity. Reference depth range on the
+// presentation must be expressed in Display Depth space when a non-identity
+// transform is active (shared multi-well viewport).
+struct SetDepthTransformCommand {
+  EntityId document_id{};
+  DepthTransform transform{};
+};
+
+// Builds per-well transforms so each well's marker references map onto the
+// target well's marker display depths (identity on the target). All marker
+// id lists must have the same non-zero length and refer to markers that exist
+// on the respective documents.
+struct AlignWellsToMarkersCommand {
+  EntityId target_document_id{};
+  std::vector<EntityId> target_marker_ids;
+  struct WellMarkers {
+    EntityId document_id{};
+    std::vector<EntityId> marker_ids;
+  };
+  std::vector<WellMarkers> wells;
+  // Display-depth window after alignment (shared across the layout).
+  DepthViewport shared_viewport{};
+  std::uint32_t pixel_height{200};
+};
+
+// A cross-well horizon line or correlation band on the multi-well surface.
+// References stable well + Marker entity ids (never raw screen coords).
+struct CrossWellOverlay {
+  EntityId id{};
+  enum class Kind : std::uint8_t {
+    horizon_line,
+    correlation_band,
+  };
+  Kind kind{Kind::horizon_line};
+  EntityId left_document_id{};
+  EntityId right_document_id{};
+  // Top markers (also used as the single marker pair for horizon_line).
+  EntityId left_marker_id{};
+  EntityId right_marker_id{};
+  // Bottom markers for correlation_band only (nil for horizon_line).
+  EntityId left_bottom_marker_id{};
+  EntityId right_bottom_marker_id{};
+  RgbaColor color{255, 165, 0, 90};
+  Millimetres line_width{0.35};
+  std::int32_t z_order{50};
+};
+
+struct SetCrossWellOverlaysCommand {
+  std::vector<CrossWellOverlay> overlays;
+};
+
 struct CrosshairState {
   double track_fraction{};
   double display_depth{};
@@ -383,6 +437,12 @@ public:
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetSurfaceHorizontalViewCommand &command);
   [[nodiscard]] Result<CommandReceipt>
+  execute(const SetDepthTransformCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const AlignWellsToMarkersCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
+  execute(const SetCrossWellOverlaysCommand &command);
+  [[nodiscard]] Result<CommandReceipt>
   execute(const SetViewportCommand &command);
   [[nodiscard]] Result<CommandReceipt>
   execute(const SetViewportMetricsCommand &command);
@@ -420,6 +480,11 @@ public:
   prepared_scene(EntityId document_id) const noexcept;
   // Active multi-well layout placements (empty when single-well mode).
   [[nodiscard]] std::span<const WellPlacement> well_layout() const noexcept;
+  [[nodiscard]] std::span<const CrossWellOverlay>
+  cross_well_overlays() const noexcept;
+  // Per-document Depth Transform (identity when unset).
+  [[nodiscard]] DepthTransform
+  depth_transform(EntityId document_id) const noexcept;
   // Composes the multi-well surface from per-well prepared scenes with
   // horizontal culling. Returns nullptr when layout is empty or no well is
   // prepared/visible. Single-document layout of size 1 still composes.

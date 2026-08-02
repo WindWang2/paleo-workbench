@@ -6,7 +6,8 @@
 
 ## Current Phase
 
-Phase W12（WellLogEngine #203 内核 Undo/Redo stack）- Complete; frontier now #204 / #205
+Phase W17 (#161 Marker align + Cross-Well Overlay) complete.  
+**Open frontier (examples):** #170 (multi-well workbench path), #174 (100M gate), #163/#168/#171–#173.
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -392,6 +393,56 @@ Phase W12（WellLogEngine #203 内核 Undo/Redo stack）- Complete; frontier now
 #### W13.2: Green — 单测、完整 headless suite 与两轴 /code-review
 - [x] 目标测试、完整 C++ build、headless CTest 均通过（43/43，排除 4 项 Qt/Python 环境依赖测试）。
 - [x] 以 `7fb4399` 为固定点执行 Standards + Spec 审查；修复原子预检、LOD 最小闭包与缓存来源校验。提交 `5eea446` + `ae72b05` 并关闭 #204。
+- **Status:** complete
+
+### Phase W14: #205 + #206 收口 #158（解释对象 patch + session seam）
+
+- [x] #205 Interval/Marker/Annotation create/move/modify/delete via patch — `a4d2570`
+- [x] #206 graphic/table/SVG/event seam validation — `541ac7b`（`session_seam_validation_test.cpp`）
+- [x] GitHub: #202–#206 + epic #158 已关闭（2026-08-02 tracker hygiene）
+- **Status:** complete — **#158 epic 完成**
+
+### Phase W15: 源适配 LAS / DLIS / LIS79（#164–#166）
+
+- [x] #164 LAS source adapter — `2435277`
+- [x] #165 DLIS source adapter — `097287b`
+- [x] #166 LIS79 source adapter + identity/normalization hardening — `b5ffb9f`…`aab9217`
+- [x] GitHub: #164–#166 已关闭（2026-08-02 tracker hygiene）
+- **Status:** complete。下一源适配 frontier：#167（716）
+
+### Phase WL: 数据页井位平面预览 PRD #136（#133–#142）
+
+Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 RenderableWellLocation、ActiveWell 点选/列表双向、固定倍率聚焦、SourceXY/SourceCRS 可信呈现、按资产会话状态恢复、50k 规模验收。
+
+- [x] 领域词写入 `CONTEXT.md`（ActiveWell、WellLocationPreviewState、SourceXY/SourceCRS 等）
+- [x] 深模块 `viz/hosts/well_location_preview.py` + 测试 `tests/test_well_location_preview.py`
+- [x] `1060c3e` feat: complete well location preview workflow
+- [x] `3c311b3` fix: keep well preview state and trust context current（缓存 CRS、旧版本状态回写、阻断错误重载、滚动恢复、EPSG 别名）
+- [x] 引擎子模块 `geo-viz-engine@43178a04`
+- [x] 验证：工作台相关 144 passed；引擎 DAT/编解码 59 passed；Wayland Qt 冒烟 passed
+- [x] GitHub: #133–#142（含 PRD #136）已关闭（2026-08-02 tracker hygiene；#137 先前已关）
+- **Status:** complete
+
+### 同步关闭（tracker hygiene，代码此前已交付）
+
+- [x] #154 虚拟化表格 + 图形↔表格选择联动
+- [x] #155 XLSX / 版本化 XML / CSV 表格导出
+
+### Phase W16: #167 Format716 Source Adapter（welllog-716-disk-v1）
+
+- [x] `include/welllog/io/format716.hpp` + `src/io/format716.cpp`
+- [x] Integration tests: table / SVG / CSV path on representative fixture
+- [x] CMake: `welllog_io` + `welllog.format716-adapter`
+- [x] Review: overflow-checked size math; curve/sample limits → `resource_exhausted`
+- **Status:** complete
+
+### Phase W17: #161 Marker 对齐多井 + Cross-Well Overlay（ADR 0013）
+
+- [x] `DepthTransform` + validate / map / align helpers（scene API）
+- [x] Prepare path: Reference→Display；cull markers/intervals/symbols/annotations in display space
+- [x] Session: `SetDepthTransformCommand`, `AlignWellsToMarkersCommand`, `SetCrossWellOverlaysCommand`
+- [x] `append_surface_overlay_geometry` + surface SVG entity-id overlays
+- [x] Tests: `welllog.depth-transform-overlay` (+ multi-well regression)
 - **Status:** complete
 
 ## Decisions Made

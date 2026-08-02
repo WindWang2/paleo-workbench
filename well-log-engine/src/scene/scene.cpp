@@ -14,6 +14,161 @@
 #include <vector>
 
 namespace welllog {
+
+namespace {
+
+[[nodiscard]] double interpolate_segment(double x, double x0, double x1,
+                                         double y0, double y1) noexcept {
+  if (x1 == x0) {
+    return y0;
+  }
+  const auto t = (x - x0) / (x1 - x0);
+  return y0 + t * (y1 - y0);
+}
+
+} // namespace
+
+std::optional<Error>
+validate_depth_transform(const DepthTransform &transform) noexcept {
+  const auto &pts = transform.control_points;
+  if (pts.empty()) {
+    return std::nullopt;
+  }
+  if (pts.size() == 1) {
+    return Error{.code = ErrorCode::invalid_presentation,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::presentation_invalid,
+                 .arguments = {}};
+  }
+  for (std::size_t i = 0; i < pts.size(); ++i) {
+    if (!std::isfinite(pts[i].reference_depth) ||
+        !std::isfinite(pts[i].display_depth)) {
+      return Error{.code = ErrorCode::invalid_presentation,
+                   .severity = Severity::error,
+                   .entity_id = std::nullopt,
+                   .message = MessageKey::presentation_invalid,
+                   .arguments = {}};
+    }
+    if (i > 0) {
+      if (!(pts[i].reference_depth > pts[i - 1].reference_depth) ||
+          !(pts[i].display_depth > pts[i - 1].display_depth)) {
+        return Error{.code = ErrorCode::invalid_presentation,
+                     .severity = Severity::error,
+                     .entity_id = std::nullopt,
+                     .message = MessageKey::presentation_invalid,
+                     .arguments = {}};
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+double map_reference_to_display(const DepthTransform &transform,
+                                double reference_depth) noexcept {
+  const auto &pts = transform.control_points;
+  if (pts.empty() || !std::isfinite(reference_depth)) {
+    return reference_depth;
+  }
+  if (reference_depth <= pts.front().reference_depth) {
+    if (transform.extrapolate == DepthExtrapolatePolicy::clamp ||
+        pts.size() < 2) {
+      return pts.front().display_depth;
+    }
+    return interpolate_segment(reference_depth, pts[0].reference_depth,
+                               pts[1].reference_depth, pts[0].display_depth,
+                               pts[1].display_depth);
+  }
+  if (reference_depth >= pts.back().reference_depth) {
+    if (transform.extrapolate == DepthExtrapolatePolicy::clamp ||
+        pts.size() < 2) {
+      return pts.back().display_depth;
+    }
+    const auto n = pts.size();
+    return interpolate_segment(reference_depth, pts[n - 2].reference_depth,
+                               pts[n - 1].reference_depth,
+                               pts[n - 2].display_depth,
+                               pts[n - 1].display_depth);
+  }
+  for (std::size_t i = 1; i < pts.size(); ++i) {
+    if (reference_depth <= pts[i].reference_depth) {
+      return interpolate_segment(reference_depth, pts[i - 1].reference_depth,
+                                 pts[i].reference_depth,
+                                 pts[i - 1].display_depth,
+                                 pts[i].display_depth);
+    }
+  }
+  return pts.back().display_depth;
+}
+
+double map_display_to_reference(const DepthTransform &transform,
+                                double display_depth) noexcept {
+  const auto &pts = transform.control_points;
+  if (pts.empty() || !std::isfinite(display_depth)) {
+    return display_depth;
+  }
+  if (display_depth <= pts.front().display_depth) {
+    if (transform.extrapolate == DepthExtrapolatePolicy::clamp ||
+        pts.size() < 2) {
+      return pts.front().reference_depth;
+    }
+    return interpolate_segment(display_depth, pts[0].display_depth,
+                               pts[1].display_depth, pts[0].reference_depth,
+                               pts[1].reference_depth);
+  }
+  if (display_depth >= pts.back().display_depth) {
+    if (transform.extrapolate == DepthExtrapolatePolicy::clamp ||
+        pts.size() < 2) {
+      return pts.back().reference_depth;
+    }
+    const auto n = pts.size();
+    return interpolate_segment(display_depth, pts[n - 2].display_depth,
+                               pts[n - 1].display_depth,
+                               pts[n - 2].reference_depth,
+                               pts[n - 1].reference_depth);
+  }
+  for (std::size_t i = 1; i < pts.size(); ++i) {
+    if (display_depth <= pts[i].display_depth) {
+      return interpolate_segment(display_depth, pts[i - 1].display_depth,
+                                 pts[i].display_depth,
+                                 pts[i - 1].reference_depth,
+                                 pts[i].reference_depth);
+    }
+  }
+  return pts.back().reference_depth;
+}
+
+Result<DepthTransform> depth_transform_aligning_markers(
+    std::span<const double> source_reference_depths,
+    std::span<const double> target_display_depths) noexcept {
+  if (source_reference_depths.size() != target_display_depths.size() ||
+      source_reference_depths.size() < 2) {
+    return Error{.code = ErrorCode::invalid_presentation,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::presentation_invalid,
+                 .arguments = {}};
+  }
+  DepthTransform transform;
+  transform.control_points.reserve(source_reference_depths.size());
+  for (std::size_t i = 0; i < source_reference_depths.size(); ++i) {
+    transform.control_points.push_back(DepthControlPoint{
+        .reference_depth = source_reference_depths[i],
+        .display_depth = target_display_depths[i],
+    });
+  }
+  // Sort by source reference depth.
+  std::sort(transform.control_points.begin(), transform.control_points.end(),
+            [](const DepthControlPoint &a, const DepthControlPoint &b) {
+              return a.reference_depth < b.reference_depth;
+            });
+  if (const auto err = validate_depth_transform(transform); err.has_value()) {
+    return *err;
+  }
+  transform.version = 1;
+  return transform;
+}
+
 namespace {
 
 [[nodiscard]] Error presentation_error(EntityId entity_id = {}) {
@@ -65,6 +220,7 @@ struct ScenePresentation::Impl {
   std::string font_asset_fingerprint;
   PresentationVersion presentation_version;
   std::uint64_t depth_transform_version{};
+  DepthTransform depth_transform_map{};
   std::vector<TrackSpec> tracks;
   std::vector<TrackScaleSpec> scales;
   std::vector<CurveLayerSpec> curve_layers;
@@ -130,6 +286,12 @@ ScenePresentation::depth_transform() const noexcept {
                    .reference_bottom = impl_->reference_depth_bottom,
                    .version = impl_->depth_transform_version,
                };
+}
+
+const DepthTransform &
+ScenePresentation::depth_transform_map() const noexcept {
+  static const DepthTransform k_identity{};
+  return impl_ == nullptr ? k_identity : impl_->depth_transform_map;
 }
 
 std::span<const TrackSpec> ScenePresentation::tracks() const noexcept {
@@ -227,6 +389,7 @@ ScenePresentationBuilder::ScenePresentationBuilder(
                 .font_asset_fingerprint = std::string{font_asset_fingerprint},
                 .presentation_version = PresentationVersion{},
                 .depth_transform_version = 0,
+                .depth_transform_map = DepthTransform{},
                 .tracks = {},
                 .scales = {},
                 .curve_layers = {},
@@ -290,6 +453,23 @@ ScenePresentationBuilder &ScenePresentationBuilder::set_depth_transform_version(
     std::uint64_t version) noexcept {
   if (impl_ != nullptr && !impl_->allocation_failed) {
     impl_->presentation.depth_transform_version = version;
+    impl_->presentation.depth_transform_map.version = version;
+  }
+  return *this;
+}
+
+ScenePresentationBuilder &ScenePresentationBuilder::set_depth_transform(
+    const DepthTransform &transform) noexcept {
+  if (impl_ != nullptr && !impl_->allocation_failed) {
+    impl_->presentation.depth_transform_map = transform;
+    if (transform.version != 0) {
+      impl_->presentation.depth_transform_version = transform.version;
+    } else if (!transform.control_points.empty()) {
+      impl_->presentation.depth_transform_version = std::max<std::uint64_t>(
+          1, impl_->presentation.depth_transform_version);
+      impl_->presentation.depth_transform_map.version =
+          impl_->presentation.depth_transform_version;
+    }
   }
   return *this;
 }
@@ -1117,7 +1297,10 @@ PreparedScene::pick_curve(const CurvePickQuery &query) const noexcept {
           .curve_id = layer.curve_id,
           .sample_index = best_point->sample_index,
           .reference_depth = best_point->reference_depth,
-          .display_depth = best_point->reference_depth,
+          .display_depth = best_point->display_depth != 0.0 ||
+                                   best_point->reference_depth == 0.0
+                               ? best_point->display_depth
+                               : best_point->reference_depth,
           .value = best_point->value,
           .distance = DeviceIndependentPixels{best_distance},
       };
@@ -1311,7 +1494,21 @@ std::optional<Error> detail::ScenePreparer::preflight(
     const WellLogDocument &document,
     const ScenePresentation &presentation) noexcept {
   try {
+    if (const auto xform = validate_depth_transform(
+            presentation.depth_transform_map());
+        xform.has_value()) {
+      return *xform;
+    }
     const auto depth_range = presentation.reference_depth_range();
+    // When a non-identity Depth Transform is active, sampling axes must already
+    // be in the presentation Reference Depth domain (no silent unit convert).
+    if (!presentation.depth_transform_map().control_points.empty()) {
+      for (const auto &axis : document.sampling_axes()) {
+        if (axis.domain != depth_range.domain) {
+          return presentation_error(axis.id);
+        }
+      }
+    }
     const auto layer_count =
         presentation.curve_layers().size() +
         presentation.interval_layers().size() +
@@ -1910,8 +2107,14 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         if (scale->second->direction == ScaleDirection::right_to_left) {
           normalized_value = 1.0 - normalized_value;
         }
+        // Reference Depth → Display Depth via the well Depth Transform (#161).
+        // Presentation depth_range is expressed in Display Depth space when a
+        // non-identity transform is set (shared multi-well viewport).
+        const auto display_depth = map_reference_to_display(
+            presentation.depth_transform_map(), *depth);
         const auto normalized_depth =
-            (*depth - depth_range.top) / (depth_range.bottom - depth_range.top);
+            (display_depth - depth_range.top) /
+            (depth_range.bottom - depth_range.top);
         const auto horizontal_offset = normalized_value * bounds.width.value;
         const auto left_position = bounds.left.value + horizontal_offset;
         const auto top_position =
@@ -1919,7 +2122,8 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         if (!std::isfinite(normalized_value) ||
             !std::isfinite(normalized_depth) ||
             !std::isfinite(horizontal_offset) ||
-            !std::isfinite(left_position) || !std::isfinite(top_position)) {
+            !std::isfinite(left_position) || !std::isfinite(top_position) ||
+            !std::isfinite(display_depth)) {
           return false;
         }
         scene->curve_points.push_back(PreparedCurvePoint{
@@ -1930,6 +2134,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                 },
             .sample_index = sample_index,
             .reference_depth = *depth,
+            .display_depth = display_depth,
             .value = *value,
         });
         return true;
@@ -2168,9 +2373,11 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
       scene->patterns.push_back(pattern);
     }
 
+    const auto &depth_xform = presentation.depth_transform_map();
     const auto depth_to_top = [&](double reference_depth) {
-      return (reference_depth - depth_range.top) /
-             (depth_range.bottom - depth_range.top) *
+      const auto display =
+          map_reference_to_display(depth_xform, reference_depth);
+      return (display - depth_range.top) / (depth_range.bottom - depth_range.top) *
              presentation.physical_height().value;
     };
 
@@ -2204,8 +2411,14 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
             !pattern_ids.contains(interval.pattern_id)) {
           return presentation_error(interval.id);
         }
-        if (interval.bottom_reference_depth <= depth_range.top ||
-            interval.top_reference_depth >= depth_range.bottom) {
+        // Cull in Display Depth space (depth_range is display when a transform
+        // is active — #161).
+        const auto interval_display_top = map_reference_to_display(
+            depth_xform, interval.top_reference_depth);
+        const auto interval_display_bottom = map_reference_to_display(
+            depth_xform, interval.bottom_reference_depth);
+        if (interval_display_bottom <= depth_range.top ||
+            interval_display_top >= depth_range.bottom) {
           continue;
         }
         const auto unclipped_top = depth_to_top(interval.top_reference_depth);
@@ -2849,8 +3062,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         if (stop_token.stop_requested()) {
           return cancellation_error();
         }
-        if (marker.reference_depth < depth_range.top ||
-            marker.reference_depth > depth_range.bottom) {
+        const auto marker_display =
+            map_reference_to_display(depth_xform, marker.reference_depth);
+        if (marker_display < depth_range.top ||
+            marker_display > depth_range.bottom) {
           continue;
         }
         const auto top = depth_to_top(marker.reference_depth);
@@ -2902,8 +3117,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         if (stop_token.stop_requested()) {
           return cancellation_error();
         }
-        if (symbol.reference_depth < depth_range.top ||
-            symbol.reference_depth > depth_range.bottom) {
+        const auto symbol_display =
+            map_reference_to_display(depth_xform, symbol.reference_depth);
+        if (symbol_display < depth_range.top ||
+            symbol_display > depth_range.bottom) {
           continue;
         }
         const auto top = depth_to_top(symbol.reference_depth);
@@ -3094,8 +3311,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         PhysicalPoint anchor;
         switch (annotation.anchor) {
         case AnnotationAnchor::reference_depth: {
-          if (annotation.reference_depth < depth_range.top ||
-              annotation.reference_depth > depth_range.bottom) {
+          const auto annotation_display = map_reference_to_display(
+              depth_xform, annotation.reference_depth);
+          if (annotation_display < depth_range.top ||
+              annotation_display > depth_range.bottom) {
             continue;
           }
           const auto bounds = track_bounds.at(layer.track_id);
@@ -3586,6 +3805,156 @@ pick_curve_multi_well(std::span<const WellScenePlacement> wells,
     }
   }
   return best;
+}
+
+Result<PreparedScene> append_surface_overlay_geometry(
+    PreparedScene surface,
+    std::span<const SurfaceOverlayGeometry> overlays) noexcept {
+  try {
+    if (surface.impl_ == nullptr || overlays.empty()) {
+      return surface;
+    }
+    // Copy so we never mutate a shared per-well or previously composed scene.
+    auto out = std::make_shared<PreparedScene::Impl>(*surface.impl_);
+    const auto width = out->physical_width.value;
+    const auto height = out->physical_height.value;
+    if (!std::isfinite(width) || width <= 0.0 || !std::isfinite(height) ||
+        height <= 0.0) {
+      return Error{.code = ErrorCode::invalid_presentation,
+                   .severity = Severity::error,
+                   .entity_id = std::nullopt,
+                   .message = MessageKey::presentation_invalid,
+                   .arguments = {}};
+    }
+
+    // Stable synthetic track id for the full-surface overlay lane.
+    static const EntityId k_overlay_track =
+        *EntityId::parse("16100000-0000-4000-8000-00000000ff01");
+    static const EntityId k_overlay_layer =
+        *EntityId::parse("16100000-0000-4000-8000-00000000ff02");
+
+    const PhysicalRect surface_rect{
+        .left = Millimetres{0.0},
+        .top = Millimetres{0.0},
+        .width = Millimetres{width},
+        .height = Millimetres{height},
+    };
+    // Highest z so overlays sit above well tracks when SVG iterates by track.
+    std::int32_t max_z = 0;
+    for (const auto &track : out->tracks) {
+      max_z = std::max(max_z, track.z_order);
+    }
+    for (const auto &overlay : overlays) {
+      max_z = std::max(max_z, overlay.z_order);
+    }
+    out->tracks.push_back(PreparedTrack{
+        .id = k_overlay_track,
+        .bounds = surface_rect,
+        .clip = surface_rect,
+        .z_order = max_z + 1,
+    });
+
+    const auto first_primitive =
+        static_cast<std::uint64_t>(out->custom_primitives.size());
+    std::uint64_t primitive_count = 0;
+
+    auto bounds_of_points =
+        [](std::initializer_list<PhysicalPoint> points) -> PhysicalRect {
+      double min_l = std::numeric_limits<double>::infinity();
+      double min_t = std::numeric_limits<double>::infinity();
+      double max_l = -std::numeric_limits<double>::infinity();
+      double max_t = -std::numeric_limits<double>::infinity();
+      for (const auto &p : points) {
+        min_l = std::min(min_l, p.left.value);
+        min_t = std::min(min_t, p.top.value);
+        max_l = std::max(max_l, p.left.value);
+        max_t = std::max(max_t, p.top.value);
+      }
+      return PhysicalRect{
+          .left = Millimetres{min_l},
+          .top = Millimetres{min_t},
+          .width = Millimetres{max_l - min_l},
+          .height = Millimetres{max_t - min_t},
+      };
+    };
+
+    for (const auto &overlay : overlays) {
+      if (overlay.id.is_nil()) {
+        continue;
+      }
+      if (overlay.kind == SurfaceOverlayGeometry::Kind::horizon_line) {
+        const auto first_vertex =
+            static_cast<std::uint64_t>(out->custom_vertices.size());
+        out->custom_vertices.push_back(overlay.left_top);
+        out->custom_vertices.push_back(overlay.right_top);
+        out->custom_primitives.push_back(PreparedCustomPrimitive{
+            .layer_id = k_overlay_layer,
+            .source_id = overlay.id,
+            .source_primitive_index = primitive_count,
+            .kind = CustomPrimitiveKind::polyline,
+            .color = overlay.color,
+            .stroke_width = overlay.line_width,
+            .first_vertex = first_vertex,
+            .vertex_count = 2,
+            .closed = false,
+            .bounds = bounds_of_points({overlay.left_top, overlay.right_top}),
+        });
+        ++primitive_count;
+      } else {
+        // Correlation band: two triangles (TL, TR, BR) + (TL, BR, BL).
+        const auto first_vertex =
+            static_cast<std::uint64_t>(out->custom_vertices.size());
+        const auto &lt = overlay.left_top;
+        const auto &rt = overlay.right_top;
+        const auto &rb = overlay.right_bottom;
+        const auto &lb = overlay.left_bottom;
+        out->custom_vertices.push_back(lt);
+        out->custom_vertices.push_back(rt);
+        out->custom_vertices.push_back(rb);
+        out->custom_vertices.push_back(lt);
+        out->custom_vertices.push_back(rb);
+        out->custom_vertices.push_back(lb);
+        out->custom_primitives.push_back(PreparedCustomPrimitive{
+            .layer_id = k_overlay_layer,
+            .source_id = overlay.id,
+            .source_primitive_index = primitive_count,
+            .kind = CustomPrimitiveKind::quad,
+            .color = overlay.color,
+            .first_vertex = first_vertex,
+            .vertex_count = 6,
+            .bounds = bounds_of_points({lt, rt, rb, lb}),
+        });
+        ++primitive_count;
+      }
+    }
+
+    if (primitive_count == 0) {
+      return PreparedScene{std::move(out)};
+    }
+    out->custom_layers.push_back(PreparedCustomLayer{
+        .id = k_overlay_layer,
+        .track_id = k_overlay_track,
+        .custom_source_id = k_overlay_layer,
+        .z_order = max_z + 1,
+        .first_primitive = first_primitive,
+        .primitive_count = primitive_count,
+        .clip_path_index = no_clip,
+        .visible = true,
+    });
+    return PreparedScene{std::move(out)};
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
 }
 
 } // namespace welllog

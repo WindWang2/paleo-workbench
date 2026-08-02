@@ -1145,6 +1145,18 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.multi-well-surface COMMAND welllog_multi_well_surface_tests)
 
+    add_executable(welllog_depth_transform_overlay_tests
+        tests/integration/depth_transform_overlay_test.cpp
+    )
+    target_compile_features(welllog_depth_transform_overlay_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_depth_transform_overlay_tests)
+    target_link_libraries(
+        welllog_depth_transform_overlay_tests
+        PRIVATE WellLog::ExportVector WellLog::Session
+    )
+    add_test(NAME welllog.depth-transform-overlay
+             COMMAND welllog_depth_transform_overlay_tests)
+
     add_executable(welllog_export_parity_tests
         tests/integration/export_parity_test.cpp
     )

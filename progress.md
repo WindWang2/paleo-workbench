@@ -249,3 +249,72 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 两轴 /code-review：子代理撞 5h 限额；inline 自审 Spec 4/4（prepared-scene annotation text-run 无 text engine 时诚实回退文档断言），Standards 干净。commit `a4d2570`。43/43 green。
 
 **#158 链状态**：#202 ✅ -> #203 ✅ -> #204 ✅ -> **#205 ✅** -> #206（seam validation，frontier，ready-for-agent，closes #158）。
+
+## Session: 2026-08-02 — #206 + 源适配 + 井位预览 + tracker hygiene (A)
+
+### WellLogEngine 收口
+
+| 工单 | 状态 | 关键提交 |
+|------|------|----------|
+| #205 | 代码先前完成 | `a4d2570` |
+| #206 | 代码完成并关闭 | `541ac7b` session seam validation |
+| #158 epic | **关闭** | 子链 #202–#206 全部 ✅ |
+| #154 / #155 | 代码先前完成，tracker 关闭 | Phase W1–W2 commits |
+| #164 LAS | 关闭 | `2435277` |
+| #165 DLIS | 关闭 | `097287b` |
+| #166 LIS79 | 关闭 | `b5ffb9f` + `98ff351`…`aab9217` 身份/归一化加固 |
+
+### 数据页井位预览 PRD #136（#133–#142）
+
+| 项 | 内容 |
+|----|------|
+| 功能 | ActiveWell 点选/聚焦/复位、可搜索列表双向联动、全量解析+数据质量、SourceXY/CRS 可信呈现、按资产状态恢复、50k + 双入口 |
+| 主提交 | `1060c3e` feat: complete well location preview workflow |
+| 审查修复 | `3c311b3`（缓存 CRS、旧版本状态回写、阻断错误重载、滚动恢复、EPSG 别名） |
+| 引擎 | `geo-viz-engine@43178a04` preserve well coordinate trust status |
+| 验证 | 工作台相关 **144 passed**；引擎 DAT/编解码 **59 passed**；Wayland Qt 冒烟 **passed**（未强制 xcb） |
+| 全量 | 根套件有既有失败；引擎全量因无关 QtWebEngine 慢测 10min 后终止 — 非本波 blocker |
+| GitHub | #133–#136、#138–#142 关闭（#137 先前已关）；PRD #136 关闭 |
+
+### Tracker hygiene（选项 A，2026-08-02）
+
+关闭代码已交付但仍 OPEN 的工单，并写交付摘要评论：
+
+- 井位：#133 #134 #135 #136 #138 #139 #140 #141 #142
+- WellLog：#154 #155 #158 #164 #165 #166 #206
+
+规划文件同步：`task_plan.md` Current Phase → W14–W16 / WL complete；`progress.md` 本段。
+
+**分支**：`agent/welllog-pdf-spike-185` @ `3c311b3`（相对 origin 大幅 ahead；未在本步 push）。
+
+**下一 frontier（示例）**：#167（716）、#169/#170（Workbench 迁移）、#174（一亿点门禁）、#183/#184（图像金字塔路径）、#157/#159–#161/#163/#168/#171–#173。
+
+## Session: 2026-08-02 — #167 Format716 Source Adapter
+
+`/implement` #167（716 Source Adapter）。支持 profile **`welllog-716-disk-v1`**（多曲线磁盘：128B 文件头 + 64B×曲线头 + sample-major float32）。
+
+| 项 | 内容 |
+|----|------|
+| 公共 seam | `Format716SourceAdapter::{detect_endian,inspect,import}` → `WellLogDocument`（不泄漏 716 类型到 Core） |
+| 策略 | 显式 endian/layout；`detect_endian` 在 0/2 匹配时拒猜；深度通道 DEPT/DEPTH/MD 或合成深度 |
+| 安全 | max_input/curves/samples；尺寸算术溢出检查；截断/区间不一致拒文 |
+| 测试 | `welllog.format716-adapter`：语义、方向/重复深度、limits、endian、NaN、table/SVG/CSV |
+| 审查 | Standards hard：checked size arithmetic + resource_exhausted 对齐 — 已修 |
+| 提交 | `feat(welllog): add Format716 disk source adapter (#167)` |
+
+**#167 验收**：AC 覆盖；well_name/刻度 min-max 仅 inspect（Core 无 well 槽）；文本仅 ASCII（非 ASCII 拒）。
+
+## Session: 2026-08-02 — #161 Marker 对齐 + Cross-Well Overlay（ADR 0013）
+
+`/implement` #161（依赖 #160 multi-well surface）。可逆 Depth Transform + 按 Marker 对齐多井 + Cross-Well Overlay 几何注入 multi-well surface。
+
+| 项 | 内容 |
+|----|------|
+| DepthTransform | 分段线性控制点；严格单调校验；clamp/linear 外推；正逆映射 `map_reference_to_display` / `map_display_to_reference` |
+| Prepare | 曲线/Interval/Marker/Symbol/Annotation 走 Display Depth；`PreparedCurvePoint.display_depth`；域不匹配 + 非恒等变换 → diagnostic |
+| Session | `SetDepthTransformCommand` / `AlignWellsToMarkersCommand` / `SetCrossWellOverlaysCommand`；存 `depth_transform` + `cross_well_overlays` |
+| Surface | `append_surface_overlay_geometry`：全宽 overlay track + horizon polyline / correlation-band quad；`prepared_surface_scene` 解析 Marker EntityId → 场景毫米 |
+| 测试 | `welllog.depth-transform-overlay`：round-trip 性质、冲突控制点、clamp/linear、session 变换、Align 共享 Display Depth、overlay SVG 实体 id、域不匹配 |
+| 回归 | multi-well-surface + session/layer/document-annotation green |
+
+**#161 验收**：AC 覆盖（参考域选择经 presentation domain + 变换时轴域校验；Patch/Undo 与 #158 文档补丁同轨——变换/overlay 为 session 状态命令 + state_version）。明确延后：host 完整 MD↔TVD 换算表、交互式拖拽控制点 UI、transform 入 history stack。

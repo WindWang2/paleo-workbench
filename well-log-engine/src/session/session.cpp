@@ -976,6 +976,9 @@ struct WellLogSession::Impl {
   std::optional<DepthViewport> shared_depth_viewport;
   std::optional<std::uint32_t> shared_pixel_height;
   std::optional<std::pair<double, double>> surface_horizontal_view;
+  // Per-document Depth Transform (#161). Applied via presentation rebuild.
+  std::unordered_map<EntityId, DepthTransform, EntityIdHash> depth_transforms;
+  std::vector<CrossWellOverlay> cross_well_overlays;
   // High-frequency append coalescing state (#201, ADR 0031). Per-document
   // staged tail-blocks awaiting a visible revision, plus the time the last
   // visible revision was produced (for the refresh-rate cap). Empty/disabled
@@ -2094,6 +2097,313 @@ WellLogSession::execute(const SetViewportCommand &command) {
       .pixel_height =
           viewport_pixel_height(command.document_id).value_or(std::uint32_t{}),
   });
+}
+
+namespace {
+
+[[nodiscard]] Result<ScenePresentation>
+rebuild_presentation_with_transform(const ScenePresentation &pres,
+                                    const DepthTransform &transform) {
+  ScenePresentationBuilder builder(
+      pres.document_id(), pres.reference_depth_range(), pres.physical_height(),
+      pres.font_asset_fingerprint());
+  builder.set_presentation_version(pres.presentation_version());
+  builder.set_depth_transform(transform);
+  for (const auto &track : pres.tracks()) {
+    builder.add_track(track);
+  }
+  for (const auto &scale : pres.scales()) {
+    builder.add_scale(scale);
+  }
+  for (const auto &layer : pres.curve_layers()) {
+    builder.add_curve_layer(layer);
+  }
+  for (const auto &pattern : pres.patterns()) {
+    builder.add_pattern(pattern);
+  }
+  for (const auto &layer : pres.interval_layers()) {
+    builder.add_interval_layer(layer);
+  }
+  for (const auto &layer : pres.crossover_fill_layers()) {
+    builder.add_crossover_fill_layer(layer);
+  }
+  for (const auto &layer : pres.image_layers()) {
+    builder.add_image_layer(layer);
+  }
+  for (const auto &layer : pres.marker_layers()) {
+    builder.add_marker_layer(layer);
+  }
+  for (const auto &layer : pres.symbol_layers()) {
+    builder.add_symbol_layer(layer);
+  }
+  for (const auto &layer : pres.text_layers()) {
+    builder.add_text_layer(layer);
+  }
+  for (const auto &layer : pres.custom_layers()) {
+    builder.add_custom_layer(layer);
+  }
+  auto built = builder.build();
+  if (built.document_id().is_nil()) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = pres.document_id(),
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  }
+  return built;
+}
+
+[[nodiscard]] std::optional<double>
+marker_reference_depth(const WellLogDocument &doc, EntityId marker_id) {
+  for (const auto &marker : doc.markers()) {
+    if (marker.id == marker_id) {
+      return marker.reference_depth;
+    }
+  }
+  return std::nullopt;
+}
+
+} // namespace
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetDepthTransformCommand &command) {
+  try {
+    if (const auto validated = validate_depth_transform(command.transform);
+        validated.has_value()) {
+      return *validated;
+    }
+    if (!impl_->documents.contains(command.document_id)) {
+      return Error{.code = ErrorCode::document_not_found,
+                   .severity = Severity::error,
+                   .entity_id = command.document_id,
+                   .message = MessageKey::document_structure_invalid,
+                   .arguments = {}};
+    }
+    impl_->depth_transforms[command.document_id] = command.transform;
+    const auto pres_it = impl_->presentations.find(command.document_id);
+    if (pres_it == impl_->presentations.end()) {
+      // Transform stored; applied when a presentation is next set.
+      if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
+        ++impl_->state_version;
+      }
+      return CommandReceipt{
+          .state_version = impl_->state_version,
+          .document_id = command.document_id,
+          .document_revision =
+              impl_->documents.at(command.document_id)->revision(),
+          .asynchronous_preparation_started = false,
+          .diagnostic_id = std::nullopt,
+      };
+    }
+    auto rebuilt =
+        rebuild_presentation_with_transform(pres_it->second, command.transform);
+    if (!rebuilt.has_value()) {
+      return rebuilt.error();
+    }
+    return execute(SetPresentationCommand{std::move(rebuilt.value())});
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = command.document_id,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = command.document_id,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const AlignWellsToMarkersCommand &command) {
+  try {
+    if (command.target_marker_ids.size() < 2 ||
+        command.wells.empty()) {
+      return Error{.code = ErrorCode::invalid_presentation,
+                   .severity = Severity::error,
+                   .entity_id = command.target_document_id,
+                   .message = MessageKey::presentation_invalid,
+                   .arguments = {}};
+    }
+    const auto target_doc = document(command.target_document_id);
+    if (target_doc == nullptr) {
+      return Error{.code = ErrorCode::document_not_found,
+                   .severity = Severity::error,
+                   .entity_id = command.target_document_id,
+                   .message = MessageKey::document_structure_invalid,
+                   .arguments = {}};
+    }
+    std::vector<double> target_depths;
+    target_depths.reserve(command.target_marker_ids.size());
+    for (const auto mid : command.target_marker_ids) {
+      const auto d = marker_reference_depth(*target_doc, mid);
+      if (!d.has_value()) {
+        return Error{.code = ErrorCode::invalid_document,
+                     .severity = Severity::error,
+                     .entity_id = mid,
+                     .message = MessageKey::document_structure_invalid,
+                     .arguments = {}};
+      }
+      // Target uses identity transform: display == reference.
+      target_depths.push_back(*d);
+    }
+    // Target well: identity transform.
+    {
+      auto r = execute(SetDepthTransformCommand{
+          .document_id = command.target_document_id,
+          .transform = DepthTransform{},
+      });
+      if (!r.has_value()) {
+        return r;
+      }
+    }
+    for (const auto &well : command.wells) {
+      if (well.marker_ids.size() != command.target_marker_ids.size()) {
+        return Error{.code = ErrorCode::invalid_presentation,
+                     .severity = Severity::error,
+                     .entity_id = well.document_id,
+                     .message = MessageKey::presentation_invalid,
+                     .arguments = {}};
+      }
+      const auto doc = document(well.document_id);
+      if (doc == nullptr) {
+        return Error{.code = ErrorCode::document_not_found,
+                     .severity = Severity::error,
+                     .entity_id = well.document_id,
+                     .message = MessageKey::document_structure_invalid,
+                     .arguments = {}};
+      }
+      std::vector<double> source_depths;
+      source_depths.reserve(well.marker_ids.size());
+      for (const auto mid : well.marker_ids) {
+        const auto d = marker_reference_depth(*doc, mid);
+        if (!d.has_value()) {
+          return Error{.code = ErrorCode::invalid_document,
+                       .severity = Severity::error,
+                       .entity_id = mid,
+                       .message = MessageKey::document_structure_invalid,
+                       .arguments = {}};
+        }
+        source_depths.push_back(*d);
+      }
+      auto xform = depth_transform_aligning_markers(source_depths, target_depths);
+      if (!xform.has_value()) {
+        return xform.error();
+      }
+      auto r = execute(SetDepthTransformCommand{
+          .document_id = well.document_id,
+          .transform = std::move(xform.value()),
+      });
+      if (!r.has_value()) {
+        return r;
+      }
+    }
+    if (valid_viewport(command.shared_viewport)) {
+      // Ensure layout includes all wells if not already.
+      if (impl_->well_layout.empty()) {
+        std::vector<WellPlacement> wells{
+            WellPlacement{.document_id = command.target_document_id}};
+        for (const auto &w : command.wells) {
+          wells.push_back(WellPlacement{.document_id = w.document_id});
+        }
+        auto layout = execute(SetWellLayoutCommand{
+            .wells = std::move(wells),
+            .pack_left_to_right = true,
+        });
+        if (!layout.has_value()) {
+          return layout;
+        }
+      }
+      return execute(SetSharedDepthViewportCommand{
+          .viewport = command.shared_viewport,
+          .pixel_height = command.pixel_height,
+      });
+    }
+    if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
+      ++impl_->state_version;
+    }
+    return CommandReceipt{
+        .state_version = impl_->state_version,
+        .document_id = command.target_document_id,
+        .document_revision = target_doc->revision(),
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = command.target_document_id,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = command.target_document_id,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
+}
+
+Result<CommandReceipt>
+WellLogSession::execute(const SetCrossWellOverlaysCommand &command) {
+  try {
+    for (const auto &overlay : command.overlays) {
+      if (overlay.id.is_nil() || overlay.left_document_id.is_nil() ||
+          overlay.right_document_id.is_nil() ||
+          overlay.left_marker_id.is_nil() ||
+          overlay.right_marker_id.is_nil()) {
+        return Error{.code = ErrorCode::invalid_document,
+                     .severity = Severity::error,
+                     .entity_id = overlay.id,
+                     .message = MessageKey::document_structure_invalid,
+                     .arguments = {}};
+      }
+      if (!impl_->documents.contains(overlay.left_document_id) ||
+          !impl_->documents.contains(overlay.right_document_id)) {
+        return Error{.code = ErrorCode::document_not_found,
+                     .severity = Severity::error,
+                     .entity_id = overlay.id,
+                     .message = MessageKey::document_structure_invalid,
+                     .arguments = {}};
+      }
+      if (overlay.kind == CrossWellOverlay::Kind::correlation_band &&
+          (overlay.left_bottom_marker_id.is_nil() ||
+           overlay.right_bottom_marker_id.is_nil())) {
+        return Error{.code = ErrorCode::invalid_document,
+                     .severity = Severity::error,
+                     .entity_id = overlay.id,
+                     .message = MessageKey::document_structure_invalid,
+                     .arguments = {}};
+      }
+    }
+    impl_->cross_well_overlays = command.overlays;
+    if (impl_->state_version != std::numeric_limits<std::uint64_t>::max()) {
+      ++impl_->state_version;
+    }
+    return CommandReceipt{
+        .state_version = impl_->state_version,
+        .document_id = impl_->well_layout.empty()
+                           ? EntityId{}
+                           : impl_->well_layout.front().document_id,
+        .document_revision = DocumentRevision{},
+        .asynchronous_preparation_started = false,
+        .diagnostic_id = std::nullopt,
+    };
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::resource_exhausted,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
 }
 
 Result<CommandReceipt>
@@ -4193,6 +4503,23 @@ WellLogSession::well_layout() const noexcept {
                           : std::span<const WellPlacement>{impl_->well_layout};
 }
 
+std::span<const CrossWellOverlay>
+WellLogSession::cross_well_overlays() const noexcept {
+  return impl_ == nullptr
+             ? std::span<const CrossWellOverlay>{}
+             : std::span<const CrossWellOverlay>{impl_->cross_well_overlays};
+}
+
+DepthTransform
+WellLogSession::depth_transform(EntityId document_id) const noexcept {
+  if (impl_ == nullptr) {
+    return {};
+  }
+  const auto found = impl_->depth_transforms.find(document_id);
+  return found == impl_->depth_transforms.end() ? DepthTransform{}
+                                                : found->second;
+}
+
 std::optional<DepthViewport>
 WellLogSession::shared_depth_viewport() const noexcept {
   return impl_ == nullptr ? std::nullopt : impl_->shared_depth_viewport;
@@ -4206,6 +4533,12 @@ WellLogSession::prepared_surface_scene() const noexcept {
     }
     std::vector<WellScenePlacement> placements;
     const auto view = impl_->surface_horizontal_view;
+    struct WellSpan {
+      EntityId document_id{};
+      double left{};
+      double right{};
+    };
+    std::vector<WellSpan> spans;
     for (const auto &well : impl_->well_layout) {
       if (!well.visible) {
         continue;
@@ -4229,6 +4562,9 @@ WellLogSession::prepared_surface_scene() const noexcept {
           .left = well.left,
           .scene = scene_it->second,
       });
+      spans.push_back(WellSpan{.document_id = well.document_id,
+                               .left = well.left.value,
+                               .right = right});
     }
     if (placements.empty()) {
       return nullptr;
@@ -4243,7 +4579,114 @@ WellLogSession::prepared_surface_scene() const noexcept {
     if (!composed.has_value()) {
       return nullptr;
     }
-    return std::make_shared<const PreparedScene>(std::move(composed.value()));
+    if (impl_->cross_well_overlays.empty()) {
+      return std::make_shared<const PreparedScene>(std::move(composed.value()));
+    }
+
+    // Resolve Marker EntityIds → Display Depth → surface millimetres, then
+    // decorate the composed surface with overlay polylines/bands (#161).
+    const auto depth_to_top =
+        [&](EntityId document_id, double reference_depth) -> std::optional<double> {
+      const auto scene_it = impl_->prepared_scenes.find(document_id);
+      if (scene_it == impl_->prepared_scenes.end() ||
+          scene_it->second == nullptr) {
+        return std::nullopt;
+      }
+      const auto range = scene_it->second->reference_depth_range();
+      const auto transform = depth_transform(document_id);
+      const auto display =
+          map_reference_to_display(transform, reference_depth);
+      const auto span = range.bottom - range.top;
+      if (!(span > 0.0) || !std::isfinite(display)) {
+        return std::nullopt;
+      }
+      const auto h = scene_it->second->physical_height().value;
+      return (display - range.top) / span * h;
+    };
+    const auto well_span = [&](EntityId document_id) -> std::optional<WellSpan> {
+      for (const auto &span : spans) {
+        if (span.document_id == document_id) {
+          return span;
+        }
+      }
+      return std::nullopt;
+    };
+    const auto marker_ref = [&](EntityId document_id,
+                                EntityId marker_id) -> std::optional<double> {
+      const auto doc = document(document_id);
+      if (doc == nullptr) {
+        return std::nullopt;
+      }
+      return marker_reference_depth(*doc, marker_id);
+    };
+
+    std::vector<SurfaceOverlayGeometry> geometry;
+    geometry.reserve(impl_->cross_well_overlays.size());
+    for (const auto &overlay : impl_->cross_well_overlays) {
+      const auto left_span = well_span(overlay.left_document_id);
+      const auto right_span = well_span(overlay.right_document_id);
+      if (!left_span.has_value() || !right_span.has_value()) {
+        continue; // culled or missing well
+      }
+      const auto left_ref =
+          marker_ref(overlay.left_document_id, overlay.left_marker_id);
+      const auto right_ref =
+          marker_ref(overlay.right_document_id, overlay.right_marker_id);
+      if (!left_ref.has_value() || !right_ref.has_value()) {
+        continue;
+      }
+      const auto left_top =
+          depth_to_top(overlay.left_document_id, *left_ref);
+      const auto right_top =
+          depth_to_top(overlay.right_document_id, *right_ref);
+      if (!left_top.has_value() || !right_top.has_value()) {
+        continue;
+      }
+      SurfaceOverlayGeometry geo{
+          .id = overlay.id,
+          .kind = overlay.kind == CrossWellOverlay::Kind::correlation_band
+                      ? SurfaceOverlayGeometry::Kind::correlation_band
+                      : SurfaceOverlayGeometry::Kind::horizon_line,
+          .left_top =
+              PhysicalPoint{Millimetres{left_span->right}, Millimetres{*left_top}},
+          .right_top =
+              PhysicalPoint{Millimetres{right_span->left}, Millimetres{*right_top}},
+          .color = overlay.color,
+          .line_width = overlay.line_width,
+          .z_order = overlay.z_order,
+      };
+      if (geo.kind == SurfaceOverlayGeometry::Kind::correlation_band) {
+        const auto left_bottom_ref = marker_ref(overlay.left_document_id,
+                                                overlay.left_bottom_marker_id);
+        const auto right_bottom_ref = marker_ref(
+            overlay.right_document_id, overlay.right_bottom_marker_id);
+        if (!left_bottom_ref.has_value() || !right_bottom_ref.has_value()) {
+          continue;
+        }
+        const auto left_bottom =
+            depth_to_top(overlay.left_document_id, *left_bottom_ref);
+        const auto right_bottom =
+            depth_to_top(overlay.right_document_id, *right_bottom_ref);
+        if (!left_bottom.has_value() || !right_bottom.has_value()) {
+          continue;
+        }
+        geo.left_bottom = PhysicalPoint{Millimetres{left_span->right},
+                                        Millimetres{*left_bottom}};
+        geo.right_bottom = PhysicalPoint{Millimetres{right_span->left},
+                                         Millimetres{*right_bottom}};
+      }
+      geometry.push_back(geo);
+    }
+
+    if (geometry.empty()) {
+      return std::make_shared<const PreparedScene>(std::move(composed.value()));
+    }
+    auto decorated =
+        append_surface_overlay_geometry(std::move(composed.value()), geometry);
+    if (!decorated.has_value()) {
+      return nullptr;
+    }
+    return std::make_shared<const PreparedScene>(std::move(decorated.value()));
   } catch (...) {
     return nullptr;
   }

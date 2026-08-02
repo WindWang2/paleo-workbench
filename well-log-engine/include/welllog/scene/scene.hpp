@@ -53,6 +53,52 @@ struct DepthTransformDescriptor {
                                    const DepthTransformDescriptor &) = default;
 };
 
+// Piecewise-linear, strictly monotonic, reversible depth map (#161, ADR 0013).
+// Empty control_points ⇒ identity (reference_depth == display_depth).
+struct DepthControlPoint {
+  double reference_depth{};
+  double display_depth{};
+};
+
+enum class DepthExtrapolatePolicy : std::uint8_t {
+  // Outside the control span, clamp to the nearest endpoint display/reference.
+  clamp,
+  // Continue the first/last segment slope (default).
+  linear,
+};
+
+struct DepthTransform {
+  std::vector<DepthControlPoint> control_points;
+  DepthExtrapolatePolicy extrapolate{DepthExtrapolatePolicy::linear};
+  std::uint64_t version{};
+  friend bool operator==(const DepthTransform &,
+                         const DepthTransform &) = default;
+};
+
+// Validates strict ordering of reference_depth and same-direction monotonic
+// display_depth. Empty transforms are valid (identity). Returns nullopt on
+// success, or an Error diagnostic on conflict/non-monotonic control points.
+[[nodiscard]] WELLLOG_SCENE_API std::optional<Error>
+validate_depth_transform(const DepthTransform &transform) noexcept;
+
+// Maps Reference Depth → Display Depth. Identity when control_points empty.
+[[nodiscard]] WELLLOG_SCENE_API double
+map_reference_to_display(const DepthTransform &transform,
+                         double reference_depth) noexcept;
+
+// Inverse map Display Depth → Reference Depth (unique when valid).
+[[nodiscard]] WELLLOG_SCENE_API double
+map_display_to_reference(const DepthTransform &transform,
+                         double display_depth) noexcept;
+
+// Builds a transform that places each source marker reference depth at the
+// corresponding target display depth (typically target's reference depth under
+// identity). Pairs must be sorted by source reference and form a valid transform.
+[[nodiscard]] WELLLOG_SCENE_API Result<DepthTransform>
+depth_transform_aligning_markers(
+    std::span<const double> source_reference_depths,
+    std::span<const double> target_display_depths) noexcept;
+
 struct DeviceIndependentPixels {
   double value{};
   friend constexpr bool operator==(DeviceIndependentPixels,
@@ -266,6 +312,8 @@ public:
   [[nodiscard]] std::string_view font_asset_fingerprint() const noexcept;
   [[nodiscard]] PresentationVersion presentation_version() const noexcept;
   [[nodiscard]] DepthTransformDescriptor depth_transform() const noexcept;
+  // Full piecewise Depth Transform (#161). Empty control points = identity.
+  [[nodiscard]] const DepthTransform &depth_transform_map() const noexcept;
   [[nodiscard]] std::span<const TrackSpec> tracks() const noexcept;
   [[nodiscard]] std::span<const TrackScaleSpec> scales() const noexcept;
   [[nodiscard]] std::span<const CurveLayerSpec> curve_layers() const noexcept;
@@ -312,6 +360,10 @@ public:
   set_presentation_version(PresentationVersion version) noexcept;
   ScenePresentationBuilder &
   set_depth_transform_version(std::uint64_t version) noexcept;
+  // Sets the full reversible Depth Transform (#161). Rejects invalid maps at
+  // prepare/preflight time. Also bumps the export version tag when non-zero.
+  ScenePresentationBuilder &
+  set_depth_transform(const DepthTransform &transform) noexcept;
   ScenePresentationBuilder &add_scale(const TrackScaleSpec &scale) noexcept;
   ScenePresentationBuilder &
   add_curve_layer(const CurveLayerSpec &layer) noexcept;
@@ -366,6 +418,9 @@ struct PreparedCurvePoint {
   PhysicalPoint position;
   std::uint64_t sample_index{};
   double reference_depth{};
+  // Display Depth after the well's Depth Transform (#161). Equals
+  // reference_depth when the transform is identity.
+  double display_depth{};
   double value{};
 };
 
@@ -730,6 +785,7 @@ class ScenePreparer;
 }
 
 struct WellScenePlacement;
+struct SurfaceOverlayGeometry;
 
 class WELLLOG_SCENE_API PreparedScene {
 public:
@@ -819,6 +875,10 @@ private:
   friend Result<PreparedScene>
   compose_multi_well_scene(std::span<const WellScenePlacement> wells,
                            Millimetres physical_height) noexcept;
+  friend Result<PreparedScene>
+  append_surface_overlay_geometry(
+      PreparedScene surface,
+      std::span<const SurfaceOverlayGeometry> overlays) noexcept;
 };
 
 // One well's prepared scene and its horizontal placement on a multi-well
@@ -837,6 +897,34 @@ struct WellScenePlacement {
 [[nodiscard]] WELLLOG_SCENE_API Result<PreparedScene>
 compose_multi_well_scene(std::span<const WellScenePlacement> wells,
                          Millimetres physical_height) noexcept;
+
+// Pre-resolved cross-well overlay geometry in surface scene millimetres
+// (#161). Session resolves Marker EntityIds → Display Depth → top before
+// calling append_surface_overlay_geometry.
+struct SurfaceOverlayGeometry {
+  EntityId id{};
+  enum class Kind : std::uint8_t {
+    horizon_line,
+    correlation_band,
+  };
+  Kind kind{Kind::horizon_line};
+  // Horizon: left_top ↔ right_top. Band: also left_bottom ↔ right_bottom.
+  PhysicalPoint left_top{};
+  PhysicalPoint right_top{};
+  PhysicalPoint left_bottom{};
+  PhysicalPoint right_bottom{};
+  RgbaColor color{255, 165, 0, 90};
+  Millimetres line_width{0.35};
+  std::int32_t z_order{50};
+};
+
+// Appends a full-width overlay track + custom primitives (polylines for
+// horizons, triangulated quads for correlation bands) so multi-well SVG/GL
+// export and visual snapshots include the overlays without mutating wells.
+[[nodiscard]] WELLLOG_SCENE_API Result<PreparedScene>
+append_surface_overlay_geometry(
+    PreparedScene surface,
+    std::span<const SurfaceOverlayGeometry> overlays) noexcept;
 
 // Picks a curve on a multi-well surface by testing each well in reverse order
 // (rightmost/topmost wins) with a left-shifted query. Returns the hit with
