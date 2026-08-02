@@ -1,4 +1,4 @@
-"""Main window chrome for Well Log Workstation — L layout (#216–#219)."""
+"""Main window chrome for Well Log Workstation — L layout (#216–#222)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -23,10 +26,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from well_log_workstation.correlation_canvas import CorrelationCanvas
+from well_log_workstation.export_plot import (
+    ExportError,
+    export_presentation_pdf,
+    export_presentation_svg,
+)
 from well_log_workstation.las_import import LasImportError, import_las_into_workspace
 from well_log_workstation.multi_track_canvas import MultiTrackCanvas
 from well_log_workstation.plot_document import (
     PlotDocument,
+    create_correlation_plot,
     create_single_well_plot,
     load_plot_document,
     save_plot_document,
@@ -61,7 +71,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self.session = HostSessionStore()
         self._selected_well_id: str | None = None
         self._active_plot_id: str | None = None
+        self._active_plot_type: str | None = None
         self._presentation: HostPresentation | None = None
+        self._correlation_presentations: list[HostPresentation] = []
         self._templates: list[PlotTemplate] = list_builtin_templates()
 
         self._build_menus()
@@ -81,6 +93,10 @@ class WellLogWorkstationWindow(QMainWindow):
     @property
     def active_plot_id(self) -> str | None:
         return self._active_plot_id
+
+    @property
+    def active_plot_type(self) -> str | None:
+        return self._active_plot_type
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -107,6 +123,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_new_single_plot.setObjectName("Action_NewSingleWellPlot")
         self._act_new_single_plot.triggered.connect(self._on_new_single_well_plot)
         self._act_new_single_plot.setEnabled(False)
+        self._act_new_correlation = plot_menu.addAction("新建地层对比图…")
+        self._act_new_correlation.setObjectName("Action_NewCorrelationPlot")
+        self._act_new_correlation.triggered.connect(self._on_new_correlation_plot)
+        self._act_new_correlation.setEnabled(False)
 
         template_menu = bar.addMenu("图版")
         template_menu.setObjectName("Menu_图版")
@@ -115,11 +135,21 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_apply_template.triggered.connect(self._on_apply_template)
         self._act_apply_template.setEnabled(False)
 
-        for name in ("导出", "帮助"):
-            menu = bar.addMenu(name)
-            menu.setObjectName(f"Menu_{name}")
-            act = menu.addAction("…")
-            act.setEnabled(False)
+        export_menu = bar.addMenu("导出")
+        export_menu.setObjectName("Menu_导出")
+        self._act_export_svg = export_menu.addAction("导出 SVG…")
+        self._act_export_svg.setObjectName("Action_ExportSvg")
+        self._act_export_svg.triggered.connect(self._on_export_svg)
+        self._act_export_svg.setEnabled(False)
+        self._act_export_pdf = export_menu.addAction("导出 PDF…")
+        self._act_export_pdf.setObjectName("Action_ExportPdf")
+        self._act_export_pdf.triggered.connect(self._on_export_pdf)
+        self._act_export_pdf.setEnabled(False)
+
+        help_menu = bar.addMenu("帮助")
+        help_menu.setObjectName("Menu_帮助")
+        act_about = help_menu.addAction("关于…")
+        act_about.setEnabled(False)
 
     def _build_body(self) -> None:
         root = QWidget()
@@ -175,7 +205,19 @@ class WellLogWorkstationWindow(QMainWindow):
         self.multi_track_canvas = MultiTrackCanvas()
         hl.addWidget(self.multi_track_canvas, 1)
 
+        corr_host = QWidget()
+        corr_host.setObjectName("CorrelationPlotHost")
+        cl = QVBoxLayout(corr_host)
+        self.correlation_caption = QLabel(
+            "地层对比图-lite · 多井并列 · 共享深度（需 ≥2 口井）"
+        )
+        self.correlation_caption.setObjectName("CorrelationCaption")
+        cl.addWidget(self.correlation_caption)
+        self.correlation_canvas = CorrelationCanvas()
+        cl.addWidget(self.correlation_canvas, 1)
+
         self.document_tabs.addTab(host, "单井分析图（多图道）")
+        self.document_tabs.addTab(corr_host, "地层对比图-lite")
         layout.addWidget(self.document_tabs, 1)
         return pane
 
@@ -244,6 +286,19 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_apply_template.setEnabled(ok)
         self._act_new_single_plot.setEnabled(ok)
 
+        n_wells = len(self._workspace.wells) if self._workspace else 0
+        can_corr = (
+            self._workspace is not None
+            and n_wells >= 2
+            and self.template_list.currentItem() is not None
+            and bool(self._templates)
+        )
+        self._act_new_correlation.setEnabled(can_corr)
+
+        can_export = self._presentation is not None and self._presentation.track_count > 0
+        self._act_export_svg.setEnabled(can_export)
+        self._act_export_pdf.setEnabled(can_export)
+
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
         if self._workspace is None:
@@ -253,11 +308,15 @@ class WellLogWorkstationWindow(QMainWindow):
             tracks = (
                 self._presentation.track_count if self._presentation else 0
             )
+            corr_n = self.correlation_canvas.column_count()
+            plot_kind = self._active_plot_type or "—"
             msg = (
                 f"工区: {self._workspace.name} · "
                 f"井 {len(self._workspace.wells)} · "
                 f"选中 {well[:8]}… · "
                 f"图道 {tracks} · "
+                f"对比列 {corr_n} · "
+                f"图件 {plot_kind} · "
                 f"Qt: {hint}"
             )
         self.statusBar().showMessage(msg)
@@ -268,10 +327,18 @@ class WellLogWorkstationWindow(QMainWindow):
             self.session.clear()
             self._selected_well_id = None
             self._active_plot_id = None
+            self._active_plot_type = None
             self._presentation = None
+            self._correlation_presentations = []
             self.multi_track_canvas.set_presentation(None)
+            self.correlation_canvas.set_columns([])
             self.plot_caption.setText("单井分析图 · 多图道（选择井并应用图版）")
+            self.correlation_caption.setText(
+                "地层对比图-lite · 多井并列 · 共享深度（需 ≥2 口井）"
+            )
             self.document_tabs.setTabText(0, "单井分析图（多图道）")
+            self.document_tabs.setTabText(1, "地层对比图-lite")
+            self.document_tabs.setCurrentIndex(0)
         self._act_import_las.setEnabled(ws is not None)
         self._refresh_tree()
         self._sync_apply_enabled()
@@ -317,6 +384,7 @@ class WellLogWorkstationWindow(QMainWindow):
             )
         self._selected_well_id = well_id
         self._presentation = presentation
+        self._active_plot_type = "single_well"
         if plot_id is not None:
             self._active_plot_id = plot_id
         self.multi_track_canvas.set_presentation(presentation)
@@ -329,6 +397,7 @@ class WellLogWorkstationWindow(QMainWindow):
         if self._active_plot_id:
             tab = f"{tab} · {self._active_plot_id[:8]}"
         self.document_tabs.setTabText(0, tab)
+        self.document_tabs.setCurrentIndex(0)
         self._sync_apply_enabled()
         self._update_status()
         return presentation
@@ -347,23 +416,100 @@ class WellLogWorkstationWindow(QMainWindow):
             template_id=template_id,
         )
         self._active_plot_id = plot.id
+        self._active_plot_type = "single_well"
         self.apply_template_to_well(well_id, template_id, plot_id=plot.id)
         self._refresh_tree()
         return plot
 
+    def create_correlation_plot_document(
+        self,
+        well_ids: list[str],
+        template_id: str,
+        *,
+        name: str | None = None,
+    ) -> PlotDocument:
+        """Create plots/<id>.json correlation doc and show shared-depth canvas."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        plot = create_correlation_plot(
+            self._workspace,
+            well_ids=well_ids,
+            template_id=template_id,
+            name=name,
+        )
+        self._active_plot_id = plot.id
+        self._active_plot_type = "correlation"
+        self._show_correlation(plot)
+        self._refresh_tree()
+        return plot
+
+    def _show_correlation(self, plot: PlotDocument) -> None:
+        """Load wells, apply template per column, shared depth on canvas."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        if not plot.template_id:
+            raise WorkspaceError("图件未绑定图版")
+        template = get_builtin_template(plot.template_id)
+        if template is None:
+            raise WorkspaceError(f"未知图版: {plot.template_id}")
+
+        presentations: list[HostPresentation] = []
+        for well_id in plot.well_ids:
+            doc = self.session.ensure_well_loaded(self._workspace, well_id)
+            pres = apply_template(template, doc)
+            if pres.curve_track_count < 1:
+                raise WorkspaceError(
+                    f"井 {doc.well_name} 图版未能绑定任何曲线"
+                )
+            presentations.append(pres)
+
+        self._correlation_presentations = presentations
+        self._active_plot_id = plot.id
+        self._active_plot_type = "correlation"
+        if plot.well_ids:
+            self._selected_well_id = plot.well_ids[0]
+        self.correlation_canvas.set_columns(presentations)
+        names = " · ".join(p.well_name for p in presentations[:4])
+        self.correlation_caption.setText(
+            f"地层对比图-lite · {names} · "
+            f"共享深度 · 图版 {template.name}"
+        )
+        tab = f"对比 · {len(presentations)}井"
+        if self._active_plot_id:
+            tab = f"{tab} · {self._active_plot_id[:8]}"
+        self.document_tabs.setTabText(1, tab)
+        self.document_tabs.setCurrentIndex(1)
+        # Keep template selection in sync
+        for i in range(self.template_list.count()):
+            item = self.template_list.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == plot.template_id:
+                self.template_list.setCurrentRow(i)
+                break
+        self._sync_apply_enabled()
+        self._update_status()
+
     def open_plot_document(self, plot_id: str) -> PlotDocument:
-        """Load plot metadata, reload well, re-apply template into canvas."""
+        """Load plot metadata and open single-well or correlation view."""
         if self._workspace is None:
             raise WorkspaceError("请先打开工区")
         plot = load_plot_document(self._workspace, plot_id)
-        if plot.type != "single_well":
-            raise WorkspaceError("暂仅支持打开单井分析图（#222 对比图）")
         if not plot.well_ids:
             raise WorkspaceError("图件未绑定井")
-        well_id = plot.well_ids[0]
         if not plot.template_id:
             raise WorkspaceError("图件未绑定图版")
+
+        if plot.type == "correlation":
+            self._show_correlation(plot)
+            if plot.well_ids:
+                self._select_well_in_tree(plot.well_ids[0])
+            self._refresh_tree()
+            return plot
+
+        if plot.type != "single_well":
+            raise WorkspaceError(f"未知图件类型: {plot.type}")
+        well_id = plot.well_ids[0]
         self._active_plot_id = plot.id
+        self._active_plot_type = "single_well"
         self._selected_well_id = well_id
         self.apply_template_to_well(well_id, plot.template_id, plot_id=plot.id)
         # Keep template selection in sync
@@ -375,6 +521,18 @@ class WellLogWorkstationWindow(QMainWindow):
         self._select_well_in_tree(well_id)
         self._refresh_tree()
         return plot
+
+    def export_active_plot_svg(self, path: Path | str) -> Path:
+        """Export active single-well multi-track presentation to SVG."""
+        if self._presentation is None or self._presentation.track_count < 1:
+            raise ExportError("无活动单井分析图可导出（请先应用图版）")
+        return export_presentation_svg(self._presentation, path)
+
+    def export_active_plot_pdf(self, path: Path | str) -> Path:
+        """Export active single-well multi-track presentation to PDF."""
+        if self._presentation is None or self._presentation.track_count < 1:
+            raise ExportError("无活动单井分析图可导出（请先应用图版）")
+        return export_presentation_pdf(self._presentation, path)
 
     def _select_well_in_tree(self, well_id: str) -> None:
         def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
@@ -591,3 +749,127 @@ class WellLogWorkstationWindow(QMainWindow):
             )
         except WorkspaceError as exc:
             QMessageBox.warning(self, "新建图件失败", str(exc))
+
+    def _pick_wells_for_correlation(self) -> list[str] | None:
+        """Multi-select dialog; returns well ids or None if cancelled."""
+        if self._workspace is None or len(self._workspace.wells) < 2:
+            return None
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择对比井（≥2）")
+        dlg.setObjectName("Dialog_PickCorrelationWells")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("按住 Ctrl 多选井；至少 2 口："))
+        lst = QListWidget()
+        lst.setObjectName("List_CorrelationWells")
+        lst.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        for well in self._workspace.wells:
+            item = QListWidgetItem(well.name)
+            item.setData(Qt.ItemDataRole.UserRole, well.id)
+            lst.addItem(item)
+            item.setSelected(True)
+        layout.addWidget(lst)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        ids = [
+            str(it.data(Qt.ItemDataRole.UserRole))
+            for it in lst.selectedItems()
+            if it.data(Qt.ItemDataRole.UserRole)
+        ]
+        if len(ids) < 2:
+            QMessageBox.information(
+                self, "新建地层对比图", "请至少选择 2 口井。"
+            )
+            return None
+        return ids
+
+    def _on_new_correlation_plot(self) -> None:
+        if self._workspace is None:
+            QMessageBox.information(self, "新建地层对比图", "请先打开工区。")
+            return
+        if len(self._workspace.wells) < 2:
+            QMessageBox.information(
+                self, "新建地层对比图", "工区至少需要 2 口井。"
+            )
+            return
+        template_id = self._current_template_id()
+        if not template_id:
+            QMessageBox.information(self, "新建地层对比图", "请选择图版模板。")
+            return
+        well_ids = self._pick_wells_for_correlation()
+        if not well_ids:
+            return
+        try:
+            plot = self.create_correlation_plot_document(well_ids, template_id)
+            QMessageBox.information(
+                self,
+                "对比图已创建",
+                f"已保存 {plot.path}\n"
+                f"井 {len(plot.well_ids)} 口 · 图版 {plot.template_id}\n"
+                f"滚轮缩放 / 拖动平移共享深度。\n"
+                f"双击左树图件可重新打开。",
+            )
+        except (WorkspaceError, ExportError) as exc:
+            QMessageBox.warning(self, "新建对比图失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "新建对比图失败", str(exc))
+
+    def _on_export_svg(self) -> None:
+        if self._presentation is None:
+            QMessageBox.information(
+                self, "导出 SVG", "请先打开/创建单井分析图并应用图版。"
+            )
+            return
+        default = f"{self._presentation.well_name or 'plot'}.svg"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出 SVG",
+            default,
+            "SVG (*.svg);;All (*.*)",
+        )
+        if not path:
+            return
+        try:
+            out = self.export_active_plot_svg(path)
+            QMessageBox.information(
+                self,
+                "导出成功",
+                f"SVG 已写入:\n{out}\n大小 {out.stat().st_size} 字节",
+            )
+        except ExportError as exc:
+            QMessageBox.warning(self, "导出 SVG 失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "导出 SVG 失败", str(exc))
+
+    def _on_export_pdf(self) -> None:
+        if self._presentation is None:
+            QMessageBox.information(
+                self, "导出 PDF", "请先打开/创建单井分析图并应用图版。"
+            )
+            return
+        default = f"{self._presentation.well_name or 'plot'}.pdf"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出 PDF",
+            default,
+            "PDF (*.pdf);;All (*.*)",
+        )
+        if not path:
+            return
+        try:
+            out = self.export_active_plot_pdf(path)
+            QMessageBox.information(
+                self,
+                "导出成功",
+                f"PDF 已写入:\n{out}\n大小 {out.stat().st_size} 字节",
+            )
+        except ExportError as exc:
+            QMessageBox.warning(self, "导出 PDF 失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "导出 PDF 失败", str(exc))

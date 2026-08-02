@@ -157,5 +157,38 @@ def create_single_well_plot(
     return doc
 
 
+def create_correlation_plot(
+    workspace: Workspace,
+    *,
+    well_ids: list[str],
+    template_id: str,
+    name: str | None = None,
+    plot_id: str | None = None,
+) -> PlotDocument:
+    """Create and persist a 地层对比图-lite document (≥2 wells)."""
+    if len(well_ids) < 2:
+        raise WorkspaceError("地层对比至少需要 2 口井")
+    catalog_ids = {w.id for w in workspace.wells}
+    for wid in well_ids:
+        if wid not in catalog_ids:
+            raise WorkspaceError(f"井不在工区目录中: {wid}")
+    names = []
+    for wid in well_ids:
+        entry = next(w for w in workspace.wells if w.id == wid)
+        names.append(entry.name)
+    pid = plot_id or str(uuid.uuid4())
+    label = name or f"{'–'.join(names[:3])} 地层对比"
+    doc = PlotDocument(
+        id=pid,
+        name=label,
+        type="correlation",
+        well_ids=list(well_ids),
+        template_id=template_id,
+        path=_plot_rel_path(pid),
+    )
+    save_plot_document(workspace, doc)
+    return doc
+
+
 def find_plot_entry(workspace: Workspace, plot_id: str) -> PlotCatalogEntry | None:
     return next((p for p in workspace.plots if p.id == plot_id), None)

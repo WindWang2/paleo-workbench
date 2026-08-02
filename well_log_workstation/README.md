@@ -48,6 +48,22 @@ Center canvas shows **one well, multiple tracks** (depth + GR/RT/DEN when presen
 - **图件 → 新建单井分析图…** — writes `plots/<id>.json` + catalog entry, opens multi-track view  
 - **Double-click** a plot under 图件 in the left tree — reloads well from `wells/` and re-applies template
 
+### 导出 SVG/PDF (#221)
+
+With an active multi-track presentation (apply template or open 单井分析图):
+
+- **导出 → 导出 SVG…** / **导出 PDF…**
+- Host paints the same multi-track layout via Qt `QSvgGenerator` / `QPdfWriter` (engine scene export lands later)
+
+### 地层对比图-lite (#222)
+
+Need **≥2 wells** in the workspace catalog:
+
+1. Choose a template in the right list  
+2. **图件 → 新建地层对比图…** — multi-select wells → `plots/<id>.json` type `correlation`  
+3. Center tab **地层对比图-lite**: side-by-side columns, **shared depth** pan (drag) / zoom (wheel)  
+4. Double-click catalog entry under 图件 to reopen
+
 Headless / CI:
 
 ```bash
@@ -73,4 +89,4 @@ WLWS_FORCE_XCB=1 QT_QPA_PLATFORM=xcb python -m well_log_workstation
 
 ## Ticket chain
 
-`#216` shell → `#217` workspace → `#218` LAS import → `#219` multi-track template → …
+`#216` shell → `#217` workspace → `#218` LAS import → `#219` multi-track template → `#220` plot docs → `#221` export → `#222` correlation-lite → `#223` tops …
