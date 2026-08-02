@@ -351,6 +351,67 @@ parse_lis_records(std::span<const std::byte> bytes, const LisLimits &limits) {
   return result;
 }
 
+struct BuiltinAliasRule {
+  std::string_view source;
+  std::string_view canonical;
+};
+
+constexpr std::array builtin_alias_rules{
+    BuiltinAliasRule{"GR", "GR"},      BuiltinAliasRule{"GAM", "GR"},
+    BuiltinAliasRule{"GAMMA", "GR"},   BuiltinAliasRule{"SP", "SP"},
+    BuiltinAliasRule{"AC", "AC"},      BuiltinAliasRule{"DT", "AC"},
+    BuiltinAliasRule{"DTC", "AC"},     BuiltinAliasRule{"DEN", "DEN"},
+    BuiltinAliasRule{"RHOB", "DEN"},   BuiltinAliasRule{"CNL", "CNL"},
+    BuiltinAliasRule{"NPHI", "CNL"},   BuiltinAliasRule{"TNPH", "CNL"},
+    BuiltinAliasRule{"CAL", "CAL"},    BuiltinAliasRule{"CALI", "CAL"},
+    BuiltinAliasRule{"RILD", "RDEEP"}, BuiltinAliasRule{"LLD", "RDEEP"},
+    BuiltinAliasRule{"RT", "RDEEP"},   BuiltinAliasRule{"RILM", "RMED"},
+    BuiltinAliasRule{"LLM", "RMED"},   BuiltinAliasRule{"RLLS", "RSHAL"},
+    BuiltinAliasRule{"LLS", "RSHAL"},
+};
+
+struct BuiltinUnitRule {
+  std::string_view canonical_mnemonic;
+  std::string_view source_unit;
+  std::string_view canonical_unit;
+  double multiplier;
+};
+
+constexpr std::array builtin_unit_rules{
+    BuiltinUnitRule{"GR", "API", "API", 1.0},
+    BuiltinUnitRule{"SP", "MV", "mV", 1.0},
+    BuiltinUnitRule{"DEN", "G/CC", "g/cm3", 1.0},
+    BuiltinUnitRule{"DEN", "G/CM3", "g/cm3", 1.0},
+    BuiltinUnitRule{"DEN", "KG/M3", "g/cm3", 0.001},
+    BuiltinUnitRule{"AC", "US/M", "us/m", 1.0},
+    BuiltinUnitRule{"AC", "US/FT", "us/m", 3.280839895013123},
+    BuiltinUnitRule{"CNL", "%", "%", 1.0},
+    BuiltinUnitRule{"CNL", "V/V", "%", 100.0},
+    BuiltinUnitRule{"CAL", "MM", "mm", 1.0},
+    BuiltinUnitRule{"CAL", "CM", "mm", 10.0},
+    BuiltinUnitRule{"CAL", "IN", "mm", 25.4},
+    BuiltinUnitRule{"RDEEP", "OHM.M", "ohm.m", 1.0},
+    BuiltinUnitRule{"RDEEP", "OHMM", "ohm.m", 1.0},
+    BuiltinUnitRule{"RDEEP", "OHM.FT", "ohm.m", 0.3048},
+    BuiltinUnitRule{"RMED", "OHM.M", "ohm.m", 1.0},
+    BuiltinUnitRule{"RMED", "OHMM", "ohm.m", 1.0},
+    BuiltinUnitRule{"RMED", "OHM.FT", "ohm.m", 0.3048},
+    BuiltinUnitRule{"RSHAL", "OHM.M", "ohm.m", 1.0},
+    BuiltinUnitRule{"RSHAL", "OHMM", "ohm.m", 1.0},
+    BuiltinUnitRule{"RSHAL", "OHM.FT", "ohm.m", 0.3048},
+};
+
+struct BuiltinDepthUnitRule {
+  std::string_view source_unit;
+  double metres_per_unit;
+};
+
+constexpr std::array builtin_depth_unit_rules{
+    BuiltinDepthUnitRule{"M", 1.0},
+    BuiltinDepthUnitRule{"FT", 0.3048},
+    BuiltinDepthUnitRule{"IN", 0.0254},
+};
+
 [[nodiscard]] std::optional<double> read_lis_f32(Cursor &cursor) {
   const auto encoded = cursor.read_u32();
   const auto sign = (encoded & 0x80000000U) != 0U;
@@ -545,14 +606,22 @@ profile_fingerprint(const LisNormalizationProfile &profile) {
   append_component(result, profile.name);
   append_component(result, profile.version);
   append_component(result, profile.text_encoding);
-  // Keep the built-in v1 vocabulary in the identity as well: changing a
-  // default mapping cannot silently reuse entities from the old behavior.
-  append_component(result,
-                   "GR=GR,GAM,GAMMA;SP=SP;AC=AC,DT,DTC;DEN=DEN,RHOB;"
-                   "CNL=CNL,NPHI,TNPH;CAL=CAL,CALI;RDEEP=RILD,LLD,RT;"
-                   "RMED=RILM,LLM;RSHAL=RLLS,LLS;"
-                   "GR/API;SP/mV;DEN/g/cc,g/cm3,kg/m3;AC/us/m,us/ft;"
-                   "CNL/%,v/v;CAL/mm,cm,in;R/ohm.m,ohm.ft;DEPTH/m,ft,in");
+  // These iterate the actual default rules, so changing one cannot silently
+  // reuse entities imported under the preceding normalization behavior.
+  for (const auto &alias : builtin_alias_rules) {
+    append_component(result, alias.source);
+    append_component(result, alias.canonical);
+  }
+  for (const auto &rule : builtin_unit_rules) {
+    append_component(result, rule.canonical_mnemonic);
+    append_component(result, rule.source_unit);
+    append_component(result, rule.canonical_unit);
+    append_component(result, std::to_string(rule.multiplier));
+  }
+  for (const auto &rule : builtin_depth_unit_rules) {
+    append_component(result, rule.source_unit);
+    append_component(result, std::to_string(rule.metres_per_unit));
+  }
   for (const auto value : profile.inferred_null_values) {
     append_component(result, std::to_string(value));
   }
@@ -624,32 +693,10 @@ canonical_mnemonic(std::string_view mnemonic,
       return upper_ascii(trim_ascii(rule.canonical_mnemonic));
     }
   }
-  if (key == "GR" || key == "GAM" || key == "GAMMA") {
-    return "GR";
-  }
-  if (key == "SP") {
-    return "SP";
-  }
-  if (key == "AC" || key == "DT" || key == "DTC") {
-    return "AC";
-  }
-  if (key == "DEN" || key == "RHOB") {
-    return "DEN";
-  }
-  if (key == "CNL" || key == "NPHI" || key == "TNPH") {
-    return "CNL";
-  }
-  if (key == "CAL" || key == "CALI") {
-    return "CAL";
-  }
-  if (key == "RILD" || key == "LLD" || key == "RT") {
-    return "RDEEP";
-  }
-  if (key == "RILM" || key == "LLM") {
-    return "RMED";
-  }
-  if (key == "RLLS" || key == "LLS") {
-    return "RSHAL";
+  for (const auto &rule : builtin_alias_rules) {
+    if (rule.source == key) {
+      return std::string{rule.canonical};
+    }
   }
   return std::nullopt;
 }
@@ -669,48 +716,10 @@ curve_unit_conversion(std::string_view mnemonic, std::string_view unit,
       return UnitConversion{rule.canonical_unit, rule.multiplier};
     }
   }
-  if (mnemonic == "GR" && key == "API") {
-    return UnitConversion{"API", 1.0};
-  }
-  if (mnemonic == "SP" && key == "MV") {
-    return UnitConversion{"mV", 1.0};
-  }
-  if (mnemonic == "DEN") {
-    if (key == "G/CC" || key == "G/CM3") {
-      return UnitConversion{"g/cm3", 1.0};
-    }
-    if (key == "KG/M3") {
-      return UnitConversion{"g/cm3", 0.001};
-    }
-  }
-  if (mnemonic == "AC") {
-    if (key == "US/M") {
-      return UnitConversion{"us/m", 1.0};
-    }
-    if (key == "US/FT") {
-      return UnitConversion{"us/m", 3.280839895013123};
-    }
-  }
-  if (mnemonic == "CNL" && (key == "%" || key == "V/V")) {
-    return UnitConversion{"%", key == "%" ? 1.0 : 100.0};
-  }
-  if (mnemonic == "CAL") {
-    if (key == "MM") {
-      return UnitConversion{"mm", 1.0};
-    }
-    if (key == "CM") {
-      return UnitConversion{"mm", 10.0};
-    }
-    if (key == "IN") {
-      return UnitConversion{"mm", 25.4};
-    }
-  }
-  if (mnemonic == "RDEEP" || mnemonic == "RMED" || mnemonic == "RSHAL") {
-    if (key == "OHM.M" || key == "OHMM") {
-      return UnitConversion{"ohm.m", 1.0};
-    }
-    if (key == "OHM.FT") {
-      return UnitConversion{"ohm.m", 0.3048};
+  const auto canonical_key = compact_ascii(mnemonic);
+  for (const auto &rule : builtin_unit_rules) {
+    if (rule.canonical_mnemonic == canonical_key && rule.source_unit == key) {
+      return UnitConversion{std::string{rule.canonical_unit}, rule.multiplier};
     }
   }
   return std::nullopt;
@@ -718,14 +727,10 @@ curve_unit_conversion(std::string_view mnemonic, std::string_view unit,
 
 [[nodiscard]] std::optional<double> depth_to_metres(std::string_view unit) {
   const auto key = compact_ascii(unit);
-  if (key == "M") {
-    return 1.0;
-  }
-  if (key == "FT") {
-    return 0.3048;
-  }
-  if (key == "IN") {
-    return 0.0254;
+  for (const auto &rule : builtin_depth_unit_rules) {
+    if (rule.source_unit == key) {
+      return rule.metres_per_unit;
+    }
   }
   return std::nullopt;
 }
@@ -1318,6 +1323,18 @@ LisSourceAdapter::import(std::span<const std::byte> bytes,
           });
         }
       }
+    }
+
+    if (data_set_ordinal == 0U) {
+      diagnostics.push_back(LisDiagnostic{
+          .code = LisDiagnosticCode::no_importable_curve,
+          .severity = Severity::warning,
+          .byte_offset = records[range.begin].byte_offset,
+          .logical_file_index = selected,
+          .data_set_ordinal = 0U,
+          .representation = 0U,
+          .channel_name = {},
+      });
     }
 
     return LisImport{.document = builder.build(),

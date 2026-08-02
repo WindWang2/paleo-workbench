@@ -1,4 +1,7 @@
+#include <welllog/export/svg.hpp>
 #include <welllog/io/lis.hpp>
+#include <welllog/scene/scene.hpp>
+#include <welllog/session/session.hpp>
 #include <welllog/table/table_projection.hpp>
 
 #include <algorithm>
@@ -32,6 +35,12 @@ void require_near(double actual, double expected, std::string_view message) {
   if (std::fabs(actual - expected) > 1.0e-6) {
     fail(message);
   }
+}
+
+EntityId id(std::string_view text) {
+  const auto parsed = EntityId::parse(text);
+  require(parsed.has_value(), "test UUID must be valid");
+  return *parsed;
 }
 
 class LisFixture {
@@ -353,6 +362,12 @@ private:
   return std::move(fixture).finish();
 }
 
+[[nodiscard]] std::vector<std::byte> header_only_lis() {
+  LisFixture fixture;
+  fixture.add_file_header();
+  return std::move(fixture).finish();
+}
+
 void append_le32(std::vector<std::byte> &out, std::uint32_t value) {
   for (std::uint32_t index{}; index < 4U; ++index) {
     out.push_back(static_cast<std::byte>((value >> (index * 8U)) & 0xffU));
@@ -427,6 +442,59 @@ void test_default_profile_normalizes_a_selected_lis79_logical_file() {
   require(tables.size() == 1U && tables.front().row_count() == 3U &&
               tables.front().column_count() == 3U,
           "an imported LIS document must enter the standard table projection");
+}
+
+void test_imported_lis_enters_the_standard_svg_consumer_path() {
+  const auto imported = LisSourceAdapter::import(
+      representative_lis(), BufferSourceReference{.uri = "asset://well/svg.lis",
+                                                  .checksum = "svg-v1"});
+  require(imported.has_value(),
+          "a representative LIS document must import for SVG");
+  const auto &document = imported.value().document;
+  WellLogSession session;
+  require(session.execute(SetDocumentCommand{document}).has_value(),
+          "an imported LIS document must enter a WellLogSession");
+
+  const auto track_id = id("16600000-0000-4000-8000-000000000001");
+  const auto scale_id = id("16600000-0000-4000-8000-000000000002");
+  const auto layer_id = id("16600000-0000-4000-8000-000000000003");
+  ScenePresentationBuilder presentation(
+      document.id(),
+      ReferenceDepthRange{.domain = DepthDomain::measured_depth,
+                          .unit = "m",
+                          .top = 304.8,
+                          .bottom = 305.4096},
+      Millimetres{80.0}, "font-fixture-v1");
+  presentation.add_track(
+      TrackSpec{.id = track_id, .width = Millimetres{30.0}, .z_order = 1});
+  presentation.add_scale(
+      TrackScaleSpec{.id = scale_id,
+                     .track_id = track_id,
+                     .mode = ScaleMode::linear,
+                     .minimum = 0.0,
+                     .maximum = 100.0,
+                     .direction = ScaleDirection::left_to_right,
+                     .unit = "API"});
+  presentation.add_curve_layer(CurveLayerSpec{
+      .id = layer_id,
+      .track_id = track_id,
+      .curve_id = document.curves().front().id,
+      .scale_id = scale_id,
+      .color = RgbaColor{.red = 1, .green = 2, .blue = 3, .alpha = 255},
+      .line_width = Millimetres{0.25},
+      .z_order = 2,
+      .visible = true,
+  });
+  require(
+      session.execute(SetPresentationCommand{presentation.build()}).has_value(),
+      "the standard scene seam must accept an imported LIS curve");
+  const auto scene = session.prepared_scene(document.id());
+  require(scene != nullptr && !scene->curve_points().empty(),
+          "the imported LIS curve must prepare into the standard scene");
+  const auto svg = SvgExporter::write(*scene);
+  require(svg.has_value() &&
+              svg.value().text().find("<path") != std::string_view::npos,
+          "the imported LIS curve must export through the standard SVG writer");
 }
 
 void test_multiple_logical_files_require_an_explicit_selection() {
@@ -800,6 +868,25 @@ void test_default_ascii_reports_non_ascii_text_and_explicit_codepage_decodes_it(
           "the explicit ISO-8859-1 profile must decode source text as UTF-8");
 }
 
+void test_valid_logical_file_without_a_data_set_returns_an_audited_empty_document() {
+  const auto imported = LisSourceAdapter::import(
+      header_only_lis(), BufferSourceReference{.uri = "asset://well/empty.lis",
+                                               .checksum = "empty-v1"});
+  require(imported.has_value(),
+          "a valid header-only logical file must import as empty");
+  require(imported.value().document.sampling_axes().empty() &&
+              imported.value().document.curves().empty(),
+          "an empty import must not synthesize axes or curves");
+  const auto reported = std::any_of(
+      imported.value().diagnostics.begin(), imported.value().diagnostics.end(),
+      [](const LisDiagnostic &diagnostic) {
+        return diagnostic.code == LisDiagnosticCode::no_importable_curve &&
+               diagnostic.severity == Severity::warning;
+      });
+  require(reported,
+          "an empty logical file must state why no curve was imported");
+}
+
 void test_redundant_format_and_unknown_records_are_audited_without_losing_data() {
   const auto redundant = LisSourceAdapter::import(
       redundant_format_lis(),
@@ -891,6 +978,7 @@ void test_malformed_bounded_data_set_isolated_from_following_data_set() {
 
 int main() {
   test_default_profile_normalizes_a_selected_lis79_logical_file();
+  test_imported_lis_enters_the_standard_svg_consumer_path();
   test_multiple_logical_files_require_an_explicit_selection();
   test_backtracking_index_creates_separate_axes_without_sorting();
   test_profile_infers_nulls_in_the_source_numeric_domain();
@@ -907,6 +995,7 @@ int main() {
   test_normalization_does_not_remove_internal_mnemonic_spaces();
   test_known_curve_with_incompatible_unit_is_a_normalization_conflict();
   test_default_ascii_reports_non_ascii_text_and_explicit_codepage_decodes_it();
+  test_valid_logical_file_without_a_data_set_returns_an_audited_empty_document();
   test_redundant_format_and_unknown_records_are_audited_without_losing_data();
   test_configured_lis_resource_limits_reject_without_truncating();
   test_malformed_bounded_data_set_isolated_from_following_data_set();
