@@ -326,6 +326,50 @@ def test_second_request_uses_disk_without_prepare(tmp_path: Path, qtbot):
     controller.shutdown()
 
 
+def test_project_comparison_crs_invalidates_preview_cache_context(
+    tmp_path: Path,
+    qtbot,
+):
+    root = tmp_path / "proj"
+    root.mkdir()
+    src = root / "wells.dat"
+    src.write_text(
+        "#WellHead File From SMI\n#Name X Y\nA1 100 200\n",
+        encoding="utf-8",
+    )
+    asset = ResourceItem(
+        id="r1",
+        name="wells",
+        path=str(src),
+        type="well_head",
+        format="dat",
+        parsed_summary={"comparison_crs": "EPSG:4326"},
+    )
+    provider = LocalVisualizationProvider(comparison_crs="EPSG:3857")
+    prepare_calls = {"n": 0}
+    original_prepare = provider.engine.prepare
+
+    def counting_prepare(*args, **kwargs):
+        prepare_calls["n"] += 1
+        return original_prepare(*args, **kwargs)
+
+    provider.engine.prepare = counting_prepare  # type: ignore[method-assign]
+    controller = PreviewRequestController(provider)
+    controller.set_project_root(root)
+    controller.set_comparison_crs("EPSG:3857")
+    controller.request(asset)
+    _wait_controller_idle(qtbot, controller)
+
+    provider.comparison_crs = "EPSG:4326"
+    controller.set_comparison_crs("EPSG:4326")
+    controller.request(asset)
+    _wait_controller_idle(qtbot, controller)
+
+    assert prepare_calls["n"] == 2
+    assert len(list((root / DIR_NAME / "entries").iterdir())) == 2
+    controller.shutdown()
+
+
 def test_las_never_writes_preview_cache(tmp_path: Path, qtbot):
     """LAS is not disk-cacheable; preview must not create .preview_cache entries."""
     root = tmp_path / "proj"

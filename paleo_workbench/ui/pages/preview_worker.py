@@ -168,6 +168,7 @@ class _PreviewWorker(QObject):
             self._disk = PreviewDiskCache(
                 disk_cache.project_root,
                 options=self._settings.to_geoviz_options(),
+                comparison_crs=disk_cache.comparison_crs,
             )
 
     @Slot()
@@ -269,6 +270,7 @@ class PreviewRequestController(QObject):
         self.cache = cache if cache is not None else PreviewCache(max_size=cache_max_size)
         self.disk_cache = disk_cache if disk_cache is not None else PreviewDiskCache(None)
         self.disk_cache.set_options(self.settings.to_geoviz_options())
+        self._comparison_crs: str | None = self.disk_cache.comparison_crs
         if request_kind not in {"default", "summary", "visualization"}:
             raise ValueError(f"unknown preview request kind: {request_kind}")
         self.request_kind = request_kind
@@ -289,6 +291,17 @@ class PreviewRequestController(QObject):
 
     def set_project_root(self, root: Path | str | None) -> None:
         self.disk_cache.set_project_root(root)
+
+    def set_comparison_crs(self, comparison_crs: str | None) -> bool:
+        """Invalidate prepared previews when their CRS comparison changes."""
+        normalized = str(comparison_crs).strip() if comparison_crs else None
+        if self.disk_cache.comparison_crs == normalized:
+            return False
+        self._comparison_crs = normalized
+        self.disk_cache.set_comparison_crs(normalized)
+        self.cache.clear()
+        self.invalidate()
+        return True
 
     def clear_disk_cache(self) -> None:
         """Clear project disk preview cache and in-memory LRU."""
@@ -341,7 +354,11 @@ class PreviewRequestController(QObject):
             )
             return
 
-        key = make_preview_cache_key(asset, self.settings.fingerprint())
+        key = make_preview_cache_key(
+            asset,
+            self.settings.fingerprint(),
+            comparison_crs=self._comparison_crs,
+        )
         hit = self.cache.get(key)
         if hit is not None:
             if needs_media_preload(hit):

@@ -5,6 +5,7 @@ import sys
 import textwrap
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QTableWidget
 
@@ -617,10 +618,13 @@ def test_reader_panel_retryable_visualization_error_requests_again(qtbot):
 
     tabs.setCurrentIndex(1)
     panel.show_visualization_error("temporary", retryable=True)
-    tabs.setCurrentIndex(0)
-    tabs.setCurrentIndex(1)
+    assert not tabs.reload_button.isHidden()
+    qtbot.mouseClick(tabs.reload_button, Qt.LeftButton)
 
     assert requested == ["visual", "visual"]
+
+    panel.show_visualization_error("invalid source", retryable=False)
+    assert not tabs.reload_button.isHidden()
 
 
 def test_reader_panel_visualization_completion_does_not_steal_data_tab(qtbot):

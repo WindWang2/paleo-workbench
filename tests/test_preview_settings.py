@@ -358,6 +358,39 @@ def test_preview_cache_key_includes_settings_fingerprint(tmp_path):
     assert second[-1] == "settings-b"
 
 
+def test_preview_cache_key_includes_xy_trust_metadata(tmp_path):
+    path = tmp_path / "wells.dat"
+    path.write_text("well data", encoding="utf-8")
+    resource = ResourceItem(
+        name=path.name,
+        path=str(path),
+        type="well_head",
+        format="dat",
+        crs="EPSG:32648",
+        parsed_summary={"coordinate_units": "m"},
+    )
+
+    base = make_preview_cache_key(resource, comparison_crs="EPSG:3857")
+    changed_crs = make_preview_cache_key(
+        resource.model_copy(update={"crs": "EPSG:4326"}),
+        comparison_crs="EPSG:3857",
+    )
+    changed_units = make_preview_cache_key(
+        resource.model_copy(
+            update={"parsed_summary": {"coordinate_units": "ft"}}
+        ),
+        comparison_crs="EPSG:3857",
+    )
+    changed_comparison = make_preview_cache_key(
+        resource,
+        comparison_crs="EPSG:4326",
+    )
+
+    assert base != changed_crs
+    assert base != changed_units
+    assert base != changed_comparison
+
+
 def test_preview_disk_cache_key_includes_geoviz_options(tmp_path):
     path = tmp_path / "points.dat"
     path.write_text("0 0\n1 1\n", encoding="utf-8")

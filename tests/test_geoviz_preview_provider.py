@@ -119,10 +119,17 @@ def test_resource_request_carries_versioned_source_coordinate_metadata(
 
     request = request_from_resource(resource)
 
-    assert request.source_version == "checksum:abc123"
+    stat = Path(resource.path).stat()
+    assert request.source_version == (
+        f"checksum:abc123|stat:{stat.st_size}:{stat.st_mtime_ns}"
+    )
     assert request.source_crs == "EPSG:32648"
     assert request.coordinate_units == "m"
     assert request.comparison_crs == "EPSG:4326"
+
+    path.write_text("well data repaired", encoding="utf-8")
+
+    assert request_from_resource(resource).source_version != request.source_version
 
 
 def test_provider_prefers_project_crs_as_the_explicit_comparison_context(

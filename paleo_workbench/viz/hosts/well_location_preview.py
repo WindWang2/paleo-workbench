@@ -10,6 +10,7 @@ from PySide6.QtCore import (
     QSignalBlocker,
     QSortFilterProxyModel,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QKeyEvent
@@ -35,6 +36,11 @@ from geoviz import (
 
 _POINT_INDEX_ROLE = Qt.ItemDataRole.UserRole
 _WELL_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+_METADATA_PROVENANCE_LABELS = {
+    "asset": "资产",
+    "file": "文件",
+    "asset+file": "资产与文件",
+}
 
 
 @dataclass(frozen=True)
@@ -138,6 +144,7 @@ class ActiveWell:
 
     identity: WellLocationId
     point_index: int
+    source_row: int | None
     name: str
     x: float
     y: float
@@ -166,12 +173,32 @@ class WellLocationPreviewStateStore:
         self._states: dict[
             tuple[str, str], WellLocationPreviewState
         ] = {}
+        self._active_versions: dict[str, str] = {}
+
+    def activate_version(self, resource_id: str, source_version: str) -> None:
+        """Make one immutable source version authoritative for an asset.
+
+        A temporary widget for an older preview can finish after a newer
+        version rendered. Its later save must not resurrect stale identity or
+        viewport state, so only rendering a version may advance this boundary.
+        """
+        previous = self._active_versions.get(resource_id)
+        if previous == source_version:
+            return
+        self._states = {
+            key: state
+            for key, state in self._states.items()
+            if key[0] != resource_id
+        }
+        self._active_versions[resource_id] = source_version
 
     def load(
         self,
         resource_id: str,
         source_version: str,
     ) -> WellLocationPreviewState | None:
+        if self._active_versions.get(resource_id) != source_version:
+            return None
         return self._states.get((resource_id, source_version))
 
     def save(
@@ -180,10 +207,15 @@ class WellLocationPreviewStateStore:
         source_version: str,
         state: WellLocationPreviewState,
     ) -> None:
+        if resource_id not in self._active_versions:
+            self.activate_version(resource_id, source_version)
+        if self._active_versions.get(resource_id) != source_version:
+            return
         self._states[(resource_id, source_version)] = state
 
     def clear(self) -> None:
         self._states.clear()
+        self._active_versions.clear()
 
 
 class WellLocationPreview(QWidget):
@@ -295,6 +327,7 @@ class WellLocationPreview(QWidget):
         self._state_store = state_store or WellLocationPreviewStateStore()
         self.active_well: ActiveWell | None = None
         self._released = False
+        self._scroll_restore_timer: QTimer | None = None
 
     def render(self, preview: PreparedPreview) -> None:
         if preview.kind is not PreviewKind.XY_SCATTER or not isinstance(
@@ -310,6 +343,14 @@ class WellLocationPreview(QWidget):
         try:
             self._preview = preview
             self._payload = preview.payload
+            if (
+                preview.payload.resource_id
+                and preview.payload.source_version
+            ):
+                self._state_store.activate_version(
+                    preview.payload.resource_id,
+                    preview.payload.source_version,
+                )
             self.active_well = None
             self.plot.setToolTip("")
             self.engine.render(self.plot, preview)
@@ -326,6 +367,9 @@ class WellLocationPreview(QWidget):
             return
         self._save_state()
         self._released = True
+        if self._scroll_restore_timer is not None:
+            self._scroll_restore_timer.stop()
+            self._scroll_restore_timer = None
         self.engine.release(self.plot)
 
     def reset_view(self) -> None:
@@ -370,14 +414,33 @@ class WellLocationPreview(QWidget):
 
     def _update_source_status(self, payload: XYPreviewPayload) -> None:
         diagnostics = payload.diagnostics
+        status = payload.coordinate_status
         total_records = diagnostics.total_records or len(payload.names)
         valid_records = diagnostics.valid_records or len(payload.names)
         skipped_count = max(0, total_records - valid_records)
+        crs_provenance = _METADATA_PROVENANCE_LABELS.get(
+            status.source_crs_provenance,
+            "",
+        )
+        unit_provenance = _METADATA_PROVENANCE_LABELS.get(
+            status.coordinate_units_provenance,
+            "",
+        )
         lines = [
             " · ".join(
                 (
-                    f"SourceCRS: {payload.source_crs or '未声明'}",
-                    f"坐标单位: {payload.coordinate_units or '未知'}",
+                    (
+                        f"SourceCRS: {payload.source_crs or '未声明'}"
+                        f"（{crs_provenance}）"
+                        if crs_provenance
+                        else f"SourceCRS: {payload.source_crs or '未声明'}"
+                    ),
+                    (
+                        f"坐标单位: {payload.coordinate_units or '未知'}"
+                        f"（{unit_provenance}）"
+                        if unit_provenance
+                        else f"坐标单位: {payload.coordinate_units or '未知'}"
+                    ),
                 )
             ),
             (
@@ -499,6 +562,11 @@ class WellLocationPreview(QWidget):
                 ),
             ),
             point_index=index,
+            source_row=(
+                payload.source_rows[index]
+                if index < len(payload.source_rows)
+                else None
+            ),
             name=payload.names[index],
             x=float(payload.x[index]),
             y=float(payload.y[index]),
@@ -574,9 +642,38 @@ class WellLocationPreview(QWidget):
                 self._activate_well(point_index, self._preview.title)
         if state.viewport is not None:
             self.plot.set_view_bounds(state.viewport)
-        self.well_list.verticalScrollBar().setValue(
-            state.list_scroll_position
+        resource_id = payload.resource_id
+        source_version = payload.source_version
+        if self._scroll_restore_timer is not None:
+            self._scroll_restore_timer.stop()
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(
+            lambda: self._restore_list_scroll(
+                resource_id,
+                source_version,
+                state.list_scroll_position,
+            )
         )
+        self._scroll_restore_timer = timer
+        timer.start(0)
+
+    def _restore_list_scroll(
+        self,
+        resource_id: str,
+        source_version: str,
+        position: int,
+    ) -> None:
+        self._scroll_restore_timer = None
+        payload = self._payload
+        if (
+            self._released
+            or payload is None
+            or payload.resource_id != resource_id
+            or payload.source_version != source_version
+        ):
+            return
+        self.well_list.verticalScrollBar().setValue(position)
 
     def _sync_list_selection(self, point_index: int) -> None:
         index = self._list_index_for_point_index(point_index)

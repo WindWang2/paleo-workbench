@@ -142,6 +142,7 @@ class VisualizationPage(QWidget):
         provider = self._preview_controller.provider
         if isinstance(provider, LocalVisualizationProvider):
             provider.comparison_crs = comparison_crs
+        self._preview_controller.set_comparison_crs(comparison_crs or None)
         project_root = getattr(getattr(project, "meta", None), "project_root", None)
         project_root_text = str(project_root or "").strip()
         self._preview_controller.set_project_root(

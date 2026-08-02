@@ -142,6 +142,9 @@ class DataPage(QWidget):
             settings=self.reader_panel.preview_settings,
             request_kind="visualization",
         )
+        comparison_crs = str(self.project.coordinate.project_crs or "")
+        self._preview_controller.set_comparison_crs(comparison_crs or None)
+        self._visualization_controller.set_comparison_crs(comparison_crs or None)
         self._visualization_controller.loading.connect(
             self.reader_panel.show_visualization_loading
         )

@@ -22,7 +22,11 @@ from paleo_workbench.viz.hosts.well_location_preview import (
 from paleo_workbench.viz.models import VizPayload
 
 
-def _well_preview(*, source_version: str = "version-1") -> PreparedPreview:
+def _well_preview(
+    *,
+    source_version: str = "version-1",
+    resource_id: str = "well-head-1",
+) -> PreparedPreview:
     return PreparedPreview(
         kind=PreviewKind.XY_SCATTER,
         title="Well locations",
@@ -30,7 +34,7 @@ def _well_preview(*, source_version: str = "version-1") -> PreparedPreview:
             names=("A1", "A2"),
             x=np.asarray([10.0, 30.0]),
             y=np.asarray([20.0, 40.0]),
-            resource_id="well-head-1",
+            resource_id=resource_id,
             record_ids=(8, 13),
             source_rows=(12, 18),
             source_version=source_version,
@@ -64,8 +68,12 @@ def _show_well_preview(
     prepared: PreparedPreview,
     *,
     size: tuple[int, int] = (900, 600),
+    state_store: WellLocationPreviewStateStore | None = None,
 ) -> WellLocationPreview:
-    preview = WellLocationPreview(GeoVizEngine.default())
+    preview = WellLocationPreview(
+        GeoVizEngine.default(),
+        state_store=state_store,
+    )
     qtbot.addWidget(preview)
     preview.resize(*size)
     preview.render(prepared)
@@ -313,6 +321,7 @@ def test_versioned_state_survives_widget_reconstruction_and_invalidates(
         source_version="version-1",
         record_id=8,
     )
+    assert restored.active_well.source_row == 12
     assert restored.well_search.text() == "A1"
     assert restored.plot.view_bounds() == pytest.approx(expected_view)
 
@@ -333,11 +342,72 @@ def test_stale_version_cannot_evict_newer_version_state():
     current = WellLocationPreviewState(search_text="current")
     stale = WellLocationPreviewState(search_text="stale")
 
+    store.activate_version("well-head-1", "version-2")
     store.save("well-head-1", "version-2", current)
     store.save("well-head-1", "version-1", stale)
 
     assert store.load("well-head-1", "version-2") == current
+    assert store.load("well-head-1", "version-1") is None
     assert store.load("well-head-1", "version-3") is None
+
+
+def test_preview_state_is_isolated_per_asset_and_clears_with_session(qtbot):
+    store = WellLocationPreviewStateStore()
+    first = _show_well_preview(
+        qtbot,
+        _well_preview(resource_id="well-head-1"),
+        state_store=store,
+    )
+    px, py = first.plot.data_to_pixel(10.0, 20.0)
+    qtbot.mouseClick(
+        first.plot,
+        Qt.LeftButton,
+        pos=QPoint(round(px), round(py)),
+    )
+    first.well_search.setText("A1")
+
+    other = _show_well_preview(
+        qtbot,
+        _well_preview(resource_id="well-head-2"),
+        state_store=store,
+    )
+    assert other.active_well is None
+    assert other.well_search.text() == ""
+
+    restored = _show_well_preview(
+        qtbot,
+        _well_preview(resource_id="well-head-1"),
+        state_store=store,
+    )
+    assert restored.active_well is not None
+    assert restored.well_search.text() == "A1"
+
+    store.clear()
+    cleared = _show_well_preview(
+        qtbot,
+        _well_preview(resource_id="well-head-1"),
+        state_store=store,
+    )
+    assert cleared.active_well is None
+    assert cleared.well_search.text() == ""
+
+
+def test_preview_state_restores_list_scroll_position(qtbot):
+    store = WellLocationPreviewStateStore()
+    prepared = _named_well_preview(
+        tuple(f"W{index}" for index in range(200)),
+        record_ids=tuple(range(200)),
+    )
+    first = _show_well_preview(qtbot, prepared, state_store=store)
+    scroll = first.well_list.verticalScrollBar()
+    assert scroll.maximum() > 0
+    scroll.setValue(scroll.maximum())
+    expected_scroll = scroll.value()
+    first.release()
+
+    restored = _show_well_preview(qtbot, prepared, state_store=store)
+
+    assert restored.well_list.verticalScrollBar().value() == expected_scroll
 
 
 def test_well_search_filters_names_only_and_preserves_plot_points(qtbot):
@@ -726,21 +796,27 @@ def test_both_data_page_entries_delegate_to_shared_well_preview(qtbot):
     qtbot.addWidget(reader_entry)
     qtbot.addWidget(visualization_entry.widget)
 
-    reader_entry.show_preview(_well_preview())
+    prepared = _well_preview()
+    reader_entry.show_preview(prepared)
     applied = visualization_entry.apply(
         VizPayload(
             kind="engine_preview",
             label="Well locations",
-            prepared=_well_preview(),
+            prepared=prepared,
         )
     )
 
     assert applied is True
-    assert isinstance(reader_entry.host.stack.currentWidget(), WellLocationPreview)
+    reader_preview = reader_entry.host.stack.currentWidget()
+    visualization_preview = visualization_entry.widget.stack.currentWidget()
+    assert isinstance(reader_preview, WellLocationPreview)
     assert isinstance(
-        visualization_entry.widget.stack.currentWidget(),
+        visualization_preview,
         WellLocationPreview,
     )
+    assert reader_preview.source_status.text() == visualization_preview.source_status.text()
+    assert reader_preview.well_list.model().rowCount() == 2
+    assert visualization_preview.well_list.model().rowCount() == 2
 
 
 def test_data_and_visualization_entries_share_one_session_state(qtbot):

@@ -188,6 +188,9 @@ def test_engine_preview_uses_shared_version_and_coordinate_request_rules(
     payload = VizAdapter().resolve(ref, project)
 
     assert payload.kind == "engine_preview"
-    assert payload.prepared.payload.source_version == "checksum:abc123"
+    stat = path.stat()
+    assert payload.prepared.payload.source_version == (
+        f"checksum:abc123|stat:{stat.st_size}:{stat.st_mtime_ns}"
+    )
     assert payload.prepared.payload.source_crs == "EPSG:32648"
     assert payload.prepared.payload.coordinate_units == "m"

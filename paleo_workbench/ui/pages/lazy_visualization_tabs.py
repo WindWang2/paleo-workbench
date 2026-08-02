@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QStackedWidget, QTabWidget
+from PySide6.QtWidgets import (
+    QPushButton,
+    QStackedWidget,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_widgets import (
@@ -44,10 +50,19 @@ class LazyVisualizationTabs(QTabWidget):
         self.prompt_label.set_message("点击此选项卡生成可视化预览")
         self.loading_label = MessagePreviewWidget()
         self.loading_label.set_message("正在生成可视化预览…")
-        self.message_label = MessagePreviewWidget()
+        self.message_panel = QWidget()
+        message_layout = QVBoxLayout(self.message_panel)
+        message_layout.setContentsMargins(0, 0, 0, 0)
+        self.message_label = MessagePreviewWidget(self.message_panel)
+        self.reload_button = QPushButton("重新加载", self.message_panel)
+        self.reload_button.setObjectName("VisualizationPreviewReloadButton")
+        self.reload_button.setAccessibleName("重新加载可视化预览")
+        self.reload_button.clicked.connect(self._request_retry)
+        message_layout.addWidget(self.message_label, 1)
+        message_layout.addWidget(self.reload_button)
         self.visual_stack.addWidget(self.prompt_label)
         self.visual_stack.addWidget(self.loading_label)
-        self.visual_stack.addWidget(self.message_label)
+        self.visual_stack.addWidget(self.message_panel)
         self.addTab(self.visual_stack, "可视化预览")
 
         self.currentChanged.connect(self._on_current_changed)
@@ -116,7 +131,10 @@ class LazyVisualizationTabs(QTabWidget):
         was_visual = self.currentIndex() == 1
         self._requested = not retryable
         self.message_label.set_message(message or "可视化预览不可用")
-        self.visual_stack.setCurrentWidget(self.message_label)
+        # A structural source error is not retryable from the cache's point of
+        # view, but the user can correct the external file and reload it.
+        self.reload_button.setVisible(True)
+        self.visual_stack.setCurrentWidget(self.message_panel)
         if activate or was_visual:
             self.setCurrentIndex(1)
 
@@ -143,5 +161,9 @@ class LazyVisualizationTabs(QTabWidget):
     def _on_current_changed(self, index: int) -> None:
         if index != 1 or self._requested:
             return
+        self._requested = True
+        self.visualization_requested.emit()
+
+    def _request_retry(self) -> None:
         self._requested = True
         self.visualization_requested.emit()

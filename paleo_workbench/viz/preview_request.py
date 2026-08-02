@@ -18,13 +18,13 @@ def request_from_resource(
 ) -> PreviewRequest:
     """Build the canonical, versioned engine request for a project resource."""
     source_path = path if path is not None else resource.path
-    source_version = ""
+    stat = safe_file_stat(Path(source_path))
+    version_parts = []
     if resource.checksum:
-        source_version = f"checksum:{resource.checksum}"
-    else:
-        stat = safe_file_stat(Path(source_path))
-        if stat is not None:
-            source_version = f"stat:{stat[0]}:{stat[1]}"
+        version_parts.append(f"checksum:{resource.checksum}")
+    if stat is not None:
+        version_parts.append(f"stat:{stat[0]}:{stat[1]}")
+    source_version = "|".join(version_parts)
     metadata = resource.parsed_summary or {}
     return PreviewRequest(
         resource_id=resource.id,
