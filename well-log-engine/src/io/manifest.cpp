@@ -1,5 +1,8 @@
 #include <welllog/io/manifest.hpp>
 
+#include <welllog/core/checked_math.hpp>
+#include <welllog/io/container_security.hpp>
+
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -34,7 +37,14 @@ public:
 
 class JsonParser {
 public:
-  explicit JsonParser(std::string_view input) : input_(input) {}
+  explicit JsonParser(std::string_view input,
+                      ContainerSecurityLimits limits =
+                          default_container_security_limits())
+      : input_(input), limits_(limits) {
+    if (input_.size() > limits_.max_manifest_bytes) {
+      throw ParseFailure{"manifest exceeds maximum size"};
+    }
+  }
 
   [[nodiscard]] JsonValue parse() {
     auto value = parse_value(0);
@@ -47,6 +57,7 @@ public:
 
 private:
   [[noreturn]] void fail(const char *message) const {
+    // Never embed raw JSON payload slices (may contain curve samples).
     throw ParseFailure{std::string{message} + " at byte " +
                        std::to_string(position_)};
   }
@@ -76,7 +87,7 @@ private:
   }
 
   [[nodiscard]] JsonValue parse_value(std::size_t depth) {
-    if (depth > 64) {
+    if (depth > limits_.max_json_depth) {
       fail("JSON nesting limit exceeded");
     }
     skip_space();
@@ -117,6 +128,9 @@ private:
       return result;
     }
     while (true) {
+      if (result.size() >= limits_.max_json_object_keys) {
+        fail("JSON object key limit exceeded");
+      }
       skip_space();
       if (position_ >= input_.size() || input_[position_] != '"') {
         fail("expected object key");
@@ -147,6 +161,9 @@ private:
       return result;
     }
     while (true) {
+      if (result.size() >= limits_.max_json_array_elements) {
+        fail("JSON array element limit exceeded");
+      }
       result.push_back(parse_value(depth));
       if (consume(']')) {
         return result;
@@ -176,6 +193,9 @@ private:
     }
     std::string result;
     while (position_ < input_.size()) {
+      if (result.size() >= limits_.max_json_string_bytes) {
+        fail("JSON string length limit exceeded");
+      }
       const auto character = static_cast<unsigned char>(input_[position_++]);
       if (character == '"') {
         return result;
@@ -290,6 +310,7 @@ private:
 
   std::string_view input_;
   std::size_t position_{};
+  ContainerSecurityLimits limits_{};
 };
 
 [[nodiscard]] const JsonObject &object(const JsonValue &value) {
@@ -702,6 +723,13 @@ void write_primitive(std::string &output, const CustomPrimitive &primitive) {
   if (result.length == 0 || result.stride_bytes == 0 ||
       result.byte_capacity == 0) {
     throw ParseFailure{"buffer dimensions must be positive"};
+  }
+  const auto element = scalar_size_bytes(result.scalar_type);
+  if (const auto err = validate_buffer_extent(
+          result.length, result.stride_bytes, element, result.byte_capacity);
+      err.has_value()) {
+    // Map to parse failure without echoing raw dimensions into diagnostics.
+    throw ParseFailure{"buffer extent invalid or exceeds capacity"};
   }
   return result;
 }

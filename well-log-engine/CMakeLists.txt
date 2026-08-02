@@ -482,7 +482,8 @@ if(WELLLOG_BUILD_ARROW)
     )
     target_compile_features(welllog_arrow PUBLIC cxx_std_20)
     welllog_enable_warnings(welllog_arrow)
-    target_link_libraries(welllog_arrow PUBLIC WellLog::Core)
+    # PRIVATE IO for container_security / mmap limits (#171).
+    target_link_libraries(welllog_arrow PUBLIC WellLog::Core PRIVATE WellLog::IO)
     target_include_directories(welllog_arrow
         PUBLIC
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -502,6 +503,7 @@ if(WELLLOG_BUILD_ARROW)
 endif()
 
 add_library(welllog_io ${WELLLOG_LIBRARY_TYPE}
+    src/io/container_security.cpp
     src/io/dlis.cpp
     src/io/format716.cpp
     src/io/las.cpp
@@ -519,7 +521,7 @@ set_target_properties(welllog_io PROPERTIES
 )
 target_compile_features(welllog_io PUBLIC cxx_std_20)
 welllog_enable_warnings(welllog_io)
-target_link_libraries(welllog_io PUBLIC WellLog::Core)
+target_link_libraries(welllog_io PUBLIC WellLog::Core PRIVATE ZLIB::ZLIB)
 target_include_directories(welllog_io
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -1229,6 +1231,18 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::Session
     )
     add_test(NAME welllog.observability COMMAND welllog_observability_tests)
+
+    add_executable(welllog_container_security_tests
+        tests/integration/container_security_test.cpp
+    )
+    target_compile_features(welllog_container_security_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_container_security_tests)
+    target_link_libraries(
+        welllog_container_security_tests
+        PRIVATE WellLog::IO
+    )
+    add_test(NAME welllog.container-security
+             COMMAND welllog_container_security_tests)
 
     if(WELLLOG_BUILD_ARROW AND WELLLOG_ARROW_HAS_IPC)
         add_executable(welllog_arrow_adapter_tests

@@ -5,15 +5,47 @@
 
 #include "zip_writer.hpp"
 
+#include <cctype>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace welllog {
 namespace export_table {
 
 namespace {
+
+// Local path policy (mirrors welllog::is_safe_archive_entry_name) so ExportTable
+// does not depend on WellLog::IO.
+[[nodiscard]] bool safe_entry_name(std::string_view name) noexcept {
+  if (name.empty() || name.size() > 512) {
+    return false;
+  }
+  if (name.front() == '/' || name.front() == '\\') {
+    return false;
+  }
+  if (name.size() >= 2 && std::isalpha(static_cast<unsigned char>(name[0])) &&
+      name[1] == ':') {
+    return false;
+  }
+  for (const auto c : name) {
+    if (static_cast<unsigned char>(c) < 0x20 || c == '\\') {
+      return false;
+    }
+  }
+  std::size_t pos = 0;
+  while ((pos = name.find("..", pos)) != std::string_view::npos) {
+    const bool left_ok = pos == 0 || name[pos - 1] == '/';
+    const bool right_ok = pos + 2 >= name.size() || name[pos + 2] == '/';
+    if (left_ok && right_ok) {
+      return false;
+    }
+    pos += 2;
+  }
+  return true;
+}
 
 // Little-endian byte writers.
 void put_u16(std::string &out, std::uint16_t v) {
@@ -63,6 +95,16 @@ deflate_or_store(const std::string &input) {
 
 bool ZipWriter::add_entry(const std::string &name, const std::string &content,
                           bool store) {
+  // Reject path traversal / absolute names so even host-built packages stay
+  // within the untrusted-container policy (#171).
+  if (!safe_entry_name(name)) {
+    return false;
+  }
+  constexpr std::size_t max_entries = 4096;
+  constexpr std::size_t max_entry_bytes = 256ULL * 1024ULL * 1024ULL;
+  if (entries_.size() >= max_entries || content.size() > max_entry_bytes) {
+    return false;
+  }
   ZipEntry e;
   e.name = name;
   e.crc32 = compute_crc32(content);

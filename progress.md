@@ -362,3 +362,18 @@ Composite-buffer 按 expand–contract 序列（#196 expand 旁置不破坏 → 
 | Hygiene | 关闭已交付 #183/#184 |
 
 **#168 验收**：AC 覆盖（GPU timer query 异步路径：字段预留 `gpu_pass_ms`，当前以 CPU draw 为主）。详细 Trace 默认关。
+
+## Session: 2026-08-02 — #171 加固 Manifest / XLSX / XML / 列式输入
+
+`/implement` #171（ADR 0042）。不可信容器：checked arithmetic、Manifest 深度/对象/数组/字符串上限、XML XXE 扫描、ZIP 路径/条目/压缩比/展开量、mmap 大小与 stride 校验。
+
+| 项 | 内容 |
+|----|------|
+| `checked_math.hpp` | checked_add/mul/strided_extent |
+| `container_security` | path 安全、scan_untrusted_xml、inspect_untrusted_zip、validate_buffer_extent |
+| Manifest JSON | 输入大小/深度/对象键/数组/字符串上限；buffer extent 校验 |
+| ZipWriter | 拒绝 `..`/绝对路径/超限条目 |
+| Arrow mmap | checked mul + max file size |
+| 测试 | `welllog.container-security`；xlsx/xml/csv/manifest 回归 |
+
+**#171 验收**：AC 覆盖。持续 fuzz harness 作为 follow-up（#172）；本票提供种子策略与 determininistic 回归。

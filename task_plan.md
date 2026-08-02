@@ -6,8 +6,8 @@
 
 ## Current Phase
 
-Phase W20 (#168 Profiler Overlay + Chrome Trace) complete.  
-**Open frontier (examples):** #174 (100M gate), #171–#173.
+Phase W21 (#171 container security hardening) complete.  
+**Open frontier (examples):** #174 (100M gate), #172–#173.
 
 > 本计划同时承载独立轨道 **WellLogEngine C++ 子系统**（`well-log-engine/`）的开发，见下方 Phase W1。
 
@@ -470,6 +470,14 @@ Workbench + `geo-viz-engine` 双入口 Well Location Preview：全量 Renderable
 - [x] WellLogView paintGL phase timing; toggleable overlay; trace export
 - [x] Tests: `welllog.observability`
 - [x] Tracker: close #183/#184 (already shipped)
+- **Status:** complete
+
+### Phase W21: #171 Manifest/XML/ZIP/列式输入加固（ADR 0042）
+
+- [x] `checked_math` + `container_security` (XML scan, ZIP inspect, buffer extent)
+- [x] Manifest JSON size/nesting/array/object/string limits
+- [x] ZipWriter path + entry size gates; Arrow mmap bounds
+- [x] Tests: `welllog.container-security` + export regressions
 - **Status:** complete
 
 ## Decisions Made

@@ -1,5 +1,8 @@
 #include <welllog/arrow/adapter.hpp>
 
+#include <welllog/core/checked_math.hpp>
+#include <welllog/io/container_security.hpp>
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -409,13 +412,20 @@ import_mmap_scalar_column(const std::filesystem::path &path, ScalarType type,
     if (width == 0) {
       return buffer_error();
     }
-    if (length > 0 &&
-        length > (std::numeric_limits<std::uint64_t>::max() / width)) {
+    const auto need_bytes = checked_mul_u64(length, width);
+    if (!need_bytes.has_value()) {
       return buffer_error(ErrorCode::arithmetic_overflow);
     }
-    const auto need_bytes = length * width;
+    if (const auto err = validate_buffer_extent(length, width, width, *need_bytes);
+        err.has_value()) {
+      return *err;
+    }
 
     const auto path_str = path.string();
+    // Reject empty / clearly non-file path strings that would confuse open.
+    if (path_str.empty() || path_str.find('\0') != std::string::npos) {
+      return buffer_error(ErrorCode::unresolved_buffer);
+    }
     const int fd = ::open(path_str.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
       return buffer_error(ErrorCode::unresolved_buffer);
@@ -426,11 +436,16 @@ import_mmap_scalar_column(const std::filesystem::path &path, ScalarType type,
       return buffer_error(ErrorCode::unresolved_buffer);
     }
     if (st.st_size < 0 ||
-        static_cast<std::uint64_t>(st.st_size) < need_bytes) {
+        static_cast<std::uint64_t>(st.st_size) < *need_bytes) {
       ::close(fd);
       return buffer_error();
     }
     const auto map_size = static_cast<std::size_t>(st.st_size);
+    if (static_cast<std::uint64_t>(map_size) >
+        default_container_security_limits().max_mmap_file_bytes) {
+      ::close(fd);
+      return buffer_error(ErrorCode::resource_exhausted);
+    }
     if (map_size == 0) {
       ::close(fd);
       // Empty file / empty column — still require an owner token.
@@ -451,7 +466,7 @@ import_mmap_scalar_column(const std::filesystem::path &path, ScalarType type,
     if (source.uri.empty()) {
       source.uri = path_str;
     }
-    auto view = BufferView::from_raw(addr, length, width, type, need_bytes,
+    auto view = BufferView::from_raw(addr, length, width, type, *need_bytes,
                                      SharedOwner{owner}, std::move(source),
                                      BufferAccessMode::zero_copy);
     if (!view.has_owner()) {
