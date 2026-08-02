@@ -43,6 +43,11 @@ With a workspace open: **文件 → 导入 LAS…**
 
 Center canvas shows **one well, multiple tracks** (depth + GR/RT/DEN when present).
 
+### 单井分析图文档 (#220)
+
+- **图件 → 新建单井分析图…** — writes `plots/<id>.json` + catalog entry, opens multi-track view  
+- **Double-click** a plot under 图件 in the left tree — reloads well from `wells/` and re-applies template
+
 Headless / CI:
 
 ```bash

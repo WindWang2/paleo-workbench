@@ -25,6 +25,12 @@ from PySide6.QtWidgets import (
 
 from well_log_workstation.las_import import LasImportError, import_las_into_workspace
 from well_log_workstation.multi_track_canvas import MultiTrackCanvas
+from well_log_workstation.plot_document import (
+    PlotDocument,
+    create_single_well_plot,
+    load_plot_document,
+    save_plot_document,
+)
 from well_log_workstation.qt_platform import effective_qt_platform_hint
 from well_log_workstation.session_store import HostSessionStore
 from well_log_workstation.template_model import (
@@ -54,6 +60,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._workspace: Workspace | None = None
         self.session = HostSessionStore()
         self._selected_well_id: str | None = None
+        self._active_plot_id: str | None = None
         self._presentation: HostPresentation | None = None
         self._templates: list[PlotTemplate] = list_builtin_templates()
 
@@ -70,6 +77,10 @@ class WellLogWorkstationWindow(QMainWindow):
     @property
     def active_presentation(self) -> HostPresentation | None:
         return self._presentation
+
+    @property
+    def active_plot_id(self) -> str | None:
+        return self._active_plot_id
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
@@ -92,8 +103,10 @@ class WellLogWorkstationWindow(QMainWindow):
 
         plot_menu = bar.addMenu("图件")
         plot_menu.setObjectName("Menu_图件")
-        act = plot_menu.addAction("…")
-        act.setEnabled(False)
+        self._act_new_single_plot = plot_menu.addAction("新建单井分析图…")
+        self._act_new_single_plot.setObjectName("Action_NewSingleWellPlot")
+        self._act_new_single_plot.triggered.connect(self._on_new_single_well_plot)
+        self._act_new_single_plot.setEnabled(False)
 
         template_menu = bar.addMenu("图版")
         template_menu.setObjectName("Menu_图版")
@@ -139,6 +152,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self.workspace_tree.setObjectName("WorkspaceTree")
         self.workspace_tree.setHeaderLabels(["名称"])
         self.workspace_tree.currentItemChanged.connect(self._on_tree_selection)
+        self.workspace_tree.itemDoubleClicked.connect(self._on_tree_double_click)
         layout.addWidget(self.workspace_tree, 1)
         return pane
 
@@ -213,15 +227,22 @@ class WellLogWorkstationWindow(QMainWindow):
         self.template_list.setCurrentRow(0)
 
     def _sync_apply_enabled(self) -> None:
+        has_well = self._workspace is not None and self._selected_well_id is not None
+        # Session may reload from disk on open; enable if well is in catalog.
+        in_catalog = False
+        if self._workspace and self._selected_well_id:
+            in_catalog = any(
+                w.id == self._selected_well_id for w in self._workspace.wells
+            )
         ok = (
-            self._workspace is not None
-            and self._selected_well_id is not None
-            and self.session.get(self._selected_well_id) is not None
+            has_well
+            and in_catalog
             and self.template_list.currentItem() is not None
             and bool(self._templates)
         )
         self.apply_btn.setEnabled(ok)
         self._act_apply_template.setEnabled(ok)
+        self._act_new_single_plot.setEnabled(ok)
 
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
@@ -246,8 +267,11 @@ class WellLogWorkstationWindow(QMainWindow):
         if ws is None:
             self.session.clear()
             self._selected_well_id = None
+            self._active_plot_id = None
             self._presentation = None
             self.multi_track_canvas.set_presentation(None)
+            self.plot_caption.setText("单井分析图 · 多图道（选择井并应用图版）")
+            self.document_tabs.setTabText(0, "单井分析图（多图道）")
         self._act_import_las.setEnabled(ws is not None)
         self._refresh_tree()
         self._sync_apply_enabled()
@@ -269,13 +293,20 @@ class WellLogWorkstationWindow(QMainWindow):
         self._update_status()
         return result.catalog_well_id
 
+    def _current_template_id(self) -> str | None:
+        item = self.template_list.currentItem()
+        if item is None:
+            return None
+        tid = item.data(Qt.ItemDataRole.UserRole)
+        return str(tid) if tid else None
+
     def apply_template_to_well(
-        self, well_id: str, template_id: str
+        self, well_id: str, template_id: str, *, plot_id: str | None = None
     ) -> HostPresentation:
         """Apply builtin template to a session well; show multi-track plot."""
-        doc = self.session.get(well_id)
-        if doc is None:
-            raise WorkspaceError("井未加载到会话（请先导入 LAS）")
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        doc = self.session.ensure_well_loaded(self._workspace, well_id)
         template = get_builtin_template(template_id)
         if template is None:
             raise WorkspaceError(f"未知图版: {template_id}")
@@ -286,18 +317,64 @@ class WellLogWorkstationWindow(QMainWindow):
             )
         self._selected_well_id = well_id
         self._presentation = presentation
+        if plot_id is not None:
+            self._active_plot_id = plot_id
         self.multi_track_canvas.set_presentation(presentation)
         self.plot_caption.setText(
             f"单井分析图 · {presentation.well_name} · "
             f"{presentation.template_name} · "
             f"{presentation.track_count} 图道"
         )
-        self.document_tabs.setTabText(
-            0, f"单井·多图道 · {presentation.well_name}"
-        )
+        tab = f"单井·多图道 · {presentation.well_name}"
+        if self._active_plot_id:
+            tab = f"{tab} · {self._active_plot_id[:8]}"
+        self.document_tabs.setTabText(0, tab)
         self._sync_apply_enabled()
         self._update_status()
         return presentation
+
+    def create_single_well_plot_document(
+        self, well_id: str, template_id: str
+    ) -> PlotDocument:
+        """Create plots/<id>.json, catalog entry, open multi-track view."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        doc = self.session.ensure_well_loaded(self._workspace, well_id)
+        plot = create_single_well_plot(
+            self._workspace,
+            well_id=well_id,
+            well_name=doc.well_name,
+            template_id=template_id,
+        )
+        self._active_plot_id = plot.id
+        self.apply_template_to_well(well_id, template_id, plot_id=plot.id)
+        self._refresh_tree()
+        return plot
+
+    def open_plot_document(self, plot_id: str) -> PlotDocument:
+        """Load plot metadata, reload well, re-apply template into canvas."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        plot = load_plot_document(self._workspace, plot_id)
+        if plot.type != "single_well":
+            raise WorkspaceError("暂仅支持打开单井分析图（#222 对比图）")
+        if not plot.well_ids:
+            raise WorkspaceError("图件未绑定井")
+        well_id = plot.well_ids[0]
+        if not plot.template_id:
+            raise WorkspaceError("图件未绑定图版")
+        self._active_plot_id = plot.id
+        self._selected_well_id = well_id
+        self.apply_template_to_well(well_id, plot.template_id, plot_id=plot.id)
+        # Keep template selection in sync
+        for i in range(self.template_list.count()):
+            item = self.template_list.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == plot.template_id:
+                self.template_list.setCurrentRow(i)
+                break
+        self._select_well_in_tree(well_id)
+        self._refresh_tree()
+        return plot
 
     def _select_well_in_tree(self, well_id: str) -> None:
         def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
@@ -326,6 +403,18 @@ class WellLogWorkstationWindow(QMainWindow):
             self._selected_well_id = str(data.get("id"))
             self._sync_apply_enabled()
             self._update_status()
+
+    def _on_tree_double_click(self, item: QTreeWidgetItem, _column: int) -> None:
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        if data.get("kind") != "plot":
+            return
+        plot_id = str(data.get("id") or "")
+        if not plot_id:
+            return
+        try:
+            self.open_plot_document(plot_id)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "打开图件失败", str(exc))
 
     def _refresh_tree(self) -> None:
         tree = self.workspace_tree
@@ -448,16 +537,27 @@ class WellLogWorkstationWindow(QMainWindow):
         if self._selected_well_id is None:
             QMessageBox.information(self, "应用图版", "请先在左树选择一口井。")
             return
-        item = self.template_list.currentItem()
-        if item is None:
+        template_id = self._current_template_id()
+        if not template_id:
             QMessageBox.information(self, "应用图版", "请选择图版模板。")
             return
-        template_id = item.data(Qt.ItemDataRole.UserRole)
-        if not template_id:
-            return
         try:
+            # Update open plot document template if one is active for this well
+            if (
+                self._active_plot_id
+                and self._workspace is not None
+            ):
+                try:
+                    plot = load_plot_document(self._workspace, self._active_plot_id)
+                    if plot.well_ids == [self._selected_well_id]:
+                        plot.template_id = template_id
+                        save_plot_document(self._workspace, plot)
+                except WorkspaceError:
+                    pass
             pres = self.apply_template_to_well(
-                self._selected_well_id, str(template_id)
+                self._selected_well_id,
+                template_id,
+                plot_id=self._active_plot_id,
             )
             QMessageBox.information(
                 self,
@@ -468,3 +568,26 @@ class WellLogWorkstationWindow(QMainWindow):
             )
         except WorkspaceError as exc:
             QMessageBox.warning(self, "应用图版失败", str(exc))
+
+    def _on_new_single_well_plot(self) -> None:
+        if self._selected_well_id is None:
+            QMessageBox.information(self, "新建单井分析图", "请先选择一口井。")
+            return
+        template_id = self._current_template_id()
+        if not template_id:
+            QMessageBox.information(self, "新建单井分析图", "请选择图版模板。")
+            return
+        try:
+            plot = self.create_single_well_plot_document(
+                self._selected_well_id, template_id
+            )
+            QMessageBox.information(
+                self,
+                "图件已创建",
+                f"已保存 {plot.path}\n"
+                f"井绑定 {', '.join(plot.well_ids)}\n"
+                f"图版 {plot.template_id}\n"
+                f"双击左树图件可重新打开。",
+            )
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "新建图件失败", str(exc))
