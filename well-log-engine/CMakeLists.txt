@@ -419,6 +419,7 @@ endif()
 
 add_library(welllog_io ${WELLLOG_LIBRARY_TYPE}
     src/io/dlis.cpp
+    src/io/format716.cpp
     src/io/las.cpp
     src/io/lis.cpp
     src/io/manifest.cpp
@@ -995,6 +996,18 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportVector WellLog::IO WellLog::Session WellLog::Table
     )
     add_test(NAME welllog.lis-adapter COMMAND welllog_lis_adapter_tests)
+
+    add_executable(welllog_format716_adapter_tests
+        tests/integration/format716_adapter_test.cpp
+    )
+    target_compile_features(welllog_format716_adapter_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_format716_adapter_tests)
+    target_link_libraries(
+        welllog_format716_adapter_tests
+        PRIVATE WellLog::ExportVector WellLog::ExportTable WellLog::IO
+                WellLog::Session WellLog::Table
+    )
+    add_test(NAME welllog.format716-adapter COMMAND welllog_format716_adapter_tests)
 
     add_executable(welllog_headless_svg_tests
         tests/integration/headless_svg_test.cpp
