@@ -418,6 +418,7 @@ if(WELLLOG_BUILD_SHARED)
 endif()
 
 add_library(welllog_io ${WELLLOG_LIBRARY_TYPE}
+    src/io/las.cpp
     src/io/manifest.cpp
 )
 add_library(WellLog::IO ALIAS welllog_io)
@@ -959,6 +960,17 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::IO WellLog::Session
     )
     add_test(NAME welllog.manifest COMMAND welllog_manifest_tests)
+
+    add_executable(welllog_las_adapter_tests
+        tests/integration/las_adapter_test.cpp
+    )
+    target_compile_features(welllog_las_adapter_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_las_adapter_tests)
+    target_link_libraries(
+        welllog_las_adapter_tests
+        PRIVATE WellLog::ExportVector WellLog::IO WellLog::Session WellLog::Table
+    )
+    add_test(NAME welllog.las-adapter COMMAND welllog_las_adapter_tests)
 
     add_executable(welllog_headless_svg_tests
         tests/integration/headless_svg_test.cpp
