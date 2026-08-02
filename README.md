@@ -64,3 +64,13 @@ The preparation combobox option **克里金(MVP·线性)** is an explicit MVP st
 it maps to SciPy **linear** triangulation, not full variogram kriging. Prefer
 **IDW** (with optional fault barriers) or **方向趋势** for production-style
 workflows until a true kriging backend is added.
+
+## Well Log Workstation
+
+Standalone log-first app (not the paleogeography workbench). See
+[`well_log_workstation/README.md`](well_log_workstation/README.md).
+
+```bash
+unset QT_QPA_PLATFORM   # Wayland session default
+python -m well_log_workstation
+```
