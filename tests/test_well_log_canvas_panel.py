@@ -4,7 +4,7 @@ from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument, ResourceItem
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 from paleo_workbench.viz.models import VizPayload
-
+from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 
 def test_well_log_canvas_panel_empty_state(qtbot):
     panel = WellLogCanvasPanel()
@@ -125,3 +125,90 @@ def test_well_log_canvas_bound_failure_shows_message(qtbot, monkeypatch):
     assert panel.well_log_data is None
     assert panel.stack.currentWidget() is panel.empty_label
     assert panel.empty_label.text() == "井数据文件不存在或不可读"
+
+
+def test_canvas_panel_default_backend_is_legacy(qtbot, monkeypatch):
+    monkeypatch.delenv("PALEO_USE_WELLLOG_ENGINE", raising=False)
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    assert panel.backend() == "legacy"
+
+
+def test_canvas_panel_env_defaults_to_engine(qtbot, monkeypatch):
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "1")
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    assert panel.backend() == "engine"
+
+
+def test_canvas_panel_explicit_backend_switch_keeps_legacy(qtbot, monkeypatch):
+    monkeypatch.delenv("PALEO_USE_WELLLOG_ENGINE", raising=False)
+    task = PredictionTask(
+        name="switch",
+        status="complete",
+        result_summary={"predicted_regions": [{"facies": "砂", "probability": 0.7}]},
+    )
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(task)
+    assert panel.backend() == "legacy"
+    assert panel.is_canvas_ready()
+    assert panel.stack.currentWidget() is panel.canvas
+
+    # Engine without binding → diagnostic host, Legacy still available.
+    panel.set_backend("engine")
+    assert panel.backend() == "engine"
+    # Either engine view ready (binding present) or placeholder/fallback.
+    if panel.engine_load_report() is None:
+        # Fallback paints legacy tracks so the page remains usable.
+        assert panel.stack.currentWidget() in (panel.engine_host, panel.canvas)
+    panel.set_backend("legacy")
+    assert panel.backend() == "legacy"
+    assert panel.stack.currentWidget() is panel.canvas
+    assert panel.is_canvas_ready()
+
+
+def test_canvas_panel_engine_path_with_fake_view(qtbot, monkeypatch):
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "1")
+
+    from PySide6.QtWidgets import QWidget
+
+    class FakeView(QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.submit_calls = 0
+
+        def submit_curve(self, *args, **kwargs):
+            self.submit_calls += 1
+            return {
+                "depth": {"access_mode": "zero_copy"},
+                "curve": {"access_mode": "zero_copy"},
+                "render_prepared": True,
+            }
+
+    def _fake_import():
+        return object(), FakeView, object()
+
+    monkeypatch.setattr(engine_adapter, "try_import_welllog", _fake_import)
+
+    task = PredictionTask(
+        name="engine-task",
+        status="complete",
+        result_summary={"predicted_regions": [{"facies": "砂", "probability": 0.8}]},
+    )
+    panel = WellLogCanvasPanel()
+    qtbot.addWidget(panel)
+    assert panel.backend() == "engine"
+    panel.update_state(task)
+
+    assert panel.engine_load_report() is not None
+    assert panel.engine_load_report()["sample_count"] > 0
+    assert panel.is_canvas_ready()
+    assert "WellLogEngine" in panel.track_kinds()
+    assert panel._engine_view is not None
+    assert panel._engine_view.submit_calls == 1
+
+    # Project/task clear releases load (no stale document report).
+    panel.update_state(None)
+    assert panel.engine_load_report() is None
+    assert panel.well_log_data is None

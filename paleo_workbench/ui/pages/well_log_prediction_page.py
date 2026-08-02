@@ -133,7 +133,25 @@ class WellLogPredictionPage(QWidget):
         if not path:
             return
         try:
-            export_well_canvas(self.canvas_panel.canvas, path, label)
+            if self.canvas_panel.backend() == "engine":
+                # Engine binding currently exposes curve submit + OpenGL view;
+                # vector export stays on the Legacy canvas path. PNG uses a
+                # widget grab so Feature Flag users still get a graphic export.
+                if label != "PNG":
+                    raise RuntimeError(
+                        "WellLogEngine 路径暂仅支持 PNG 抓屏导出；"
+                        "请切换到 Legacy 导出 SVG/PDF"
+                    )
+                view = self.canvas_panel._engine_view
+                if view is None:
+                    raise RuntimeError("WellLogEngine 视图不可用")
+                pixmap = view.grab()
+                if pixmap.isNull():
+                    raise RuntimeError("WellLogEngine 抓屏失败")
+                if not pixmap.save(path, "PNG"):
+                    raise RuntimeError("PNG 写入失败")
+            else:
+                export_well_canvas(self.canvas_panel.canvas, path, label)
         except Exception as exc:
             QMessageBox.warning(
                 self,
