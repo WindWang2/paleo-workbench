@@ -35,6 +35,14 @@ With a workspace open: **文件 → 导入 LAS…**
 - Updates `workspace.json` catalog
 - Loads curves into the host session store (readable via `session.sample_value`)
 
+### Multi-track template (#219)
+
+1. Select a well in the left tree  
+2. Choose a template in the right list (e.g. **标准三轨 GR-RT-DEN**)  
+3. **应用到选中井** / 图版 → 应用当前图版  
+
+Center canvas shows **one well, multiple tracks** (depth + GR/RT/DEN when present).
+
 Headless / CI:
 
 ```bash
