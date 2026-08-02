@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from geoviz import PreparedPreview, PreviewKind
 from geoviz.previews.dat import XYPreviewPayload
@@ -29,7 +30,13 @@ def _wait_controller_idle(qtbot, controller: PreviewRequestController, timeout: 
     )
 
 
-def _well_head_result(path: Path) -> PreviewResult:
+def _well_head_result(
+    path: Path,
+    *,
+    resource_id: str = "",
+    source_version: str = "",
+) -> PreviewResult:
+    has_identity = bool(resource_id or source_version)
     prepared = PreparedPreview(
         kind=PreviewKind.XY_SCATTER,
         title="wells",
@@ -37,6 +44,10 @@ def _well_head_result(path: Path) -> PreviewResult:
             names=("A1",),
             x=np.array([1.0]),
             y=np.array([2.0]),
+            resource_id=resource_id,
+            record_ids=(0,) if has_identity else (),
+            source_rows=(3,) if has_identity else (),
+            source_version=source_version,
         ),
         estimated_bytes=32,
     )
@@ -49,6 +60,98 @@ def _well_head_result(path: Path) -> PreviewResult:
         engine_preview=prepared,
         estimated_bytes=32,
     )
+
+
+def test_same_file_for_different_resources_keeps_separate_cached_identity(
+    tmp_path: Path,
+):
+    root = tmp_path / "proj"
+    root.mkdir()
+    src = root / "wells.dat"
+    src.write_text("#WellHead File From SMI\n", encoding="utf-8")
+    first = ResourceItem(
+        id="resource-a",
+        name="wells-a",
+        path=str(src),
+        type="well_head",
+        format="dat",
+        checksum="same-content",
+    )
+    second = first.model_copy(update={"id": "resource-b", "name": "wells-b"})
+    cache = PreviewDiskCache(project_root=root)
+
+    cache.store(
+        first,
+        _well_head_result(
+            src,
+            resource_id=first.id,
+            source_version="checksum:same-content",
+        ),
+    )
+    cache.store(
+        second,
+        _well_head_result(
+            src,
+            resource_id=second.id,
+            source_version="checksum:same-content",
+        ),
+    )
+
+    loaded_first = cache.try_load(first)
+    loaded_second = cache.try_load(second)
+    assert loaded_first is not None
+    assert loaded_second is not None
+    assert loaded_first.engine_preview.payload.resource_id == first.id
+    assert loaded_second.engine_preview.payload.resource_id == second.id
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"checksum": "content-v2"},
+        {"crs": "EPSG:4326"},
+        {
+            "parsed_summary": {
+                "coordinate_units": "ft",
+                "comparison_crs": "EPSG:3857",
+            }
+        },
+        {
+            "parsed_summary": {
+                "coordinate_units": "m",
+                "comparison_crs": "EPSG:4326",
+            }
+        },
+    ],
+    ids=("checksum", "source-crs", "coordinate-units", "comparison-crs"),
+)
+def test_changed_xy_trust_metadata_does_not_reuse_cached_payload(
+    tmp_path: Path,
+    update: dict[str, object],
+):
+    root = tmp_path / "proj"
+    root.mkdir()
+    src = root / "wells.dat"
+    src.write_text("#WellHead File From SMI\n", encoding="utf-8")
+    asset = ResourceItem(
+        id="resource-a",
+        name="wells",
+        path=str(src),
+        type="well_head",
+        format="dat",
+        checksum="content-v1",
+        crs="EPSG:32648",
+        parsed_summary={
+            "coordinate_units": "m",
+            "comparison_crs": "EPSG:3857",
+        },
+    )
+    cache = PreviewDiskCache(project_root=root)
+    cache.store(asset, _well_head_result(src))
+
+    changed_asset = asset.model_copy(update=update)
+
+    assert cache.try_load(changed_asset) is None
 
 
 def test_store_and_load_roundtrip(tmp_path: Path):

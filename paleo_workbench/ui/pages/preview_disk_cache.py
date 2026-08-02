@@ -55,14 +55,28 @@ def _entry_key_material(
 ) -> str:
     path = Path(asset.path).resolve()
     st = safe_file_stat(path)
-    parts = [
-        str(path),
-        asset.type,
-        asset.format,
-        str(st),
-        _options_fingerprint(options),
-    ]
-    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
+    metadata = asset.parsed_summary or {}
+    material = {
+        "source_path": str(path),
+        "resource_id": asset.id,
+        "semantic_type": asset.type,
+        "format": asset.format,
+        "source_stat": st,
+        "checksum": str(asset.checksum or ""),
+        "source_crs": str(asset.crs or ""),
+        "coordinate_units": str(
+            metadata.get("coordinate_units") or metadata.get("units") or ""
+        ),
+        "comparison_crs": str(metadata.get("comparison_crs") or ""),
+        "options": _options_fingerprint(options),
+    }
+    raw = json.dumps(
+        material,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 def _discard_entry(entry: Path) -> None:
