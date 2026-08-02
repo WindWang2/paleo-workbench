@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QEvent
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -22,6 +24,8 @@ from paleo_workbench.resources.export_service import (
 )
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
+from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
+from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.visualization_summary_panel import VisualizationSummaryPanel
 from paleo_workbench.ui.pages.visualization_trace_panel import VisualizationTracePanel
 from paleo_workbench.viz.adapter import VizAdapter
@@ -31,7 +35,7 @@ from paleo_workbench.viz.models import VizRef
 class VisualizationPage(QWidget):
     """Display-first 可视化 page combining geo-viz widgets."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, preview_provider=None):
         super().__init__(parent)
         self.setObjectName("VisualizationPage")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -43,6 +47,14 @@ class VisualizationPage(QWidget):
         self._project: ProjectDocument | None = None
         self._current_ref: VizRef | None = None
         self._adapter = VizAdapter()
+        self._preview_controller = PreviewRequestController(
+            preview_provider or LocalVisualizationProvider(),
+            self,
+            request_kind="visualization",
+        )
+        self._preview_controller.loading.connect(self._show_preview_loading)
+        self._preview_controller.result_ready.connect(self._apply_preview_result)
+        self._preview_controller.failed.connect(self._show_preview_error)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -116,6 +128,17 @@ class VisualizationPage(QWidget):
         self._prediction_tasks = list(prediction_tasks or [])
         self._map_documents = list(map_documents or [])
         self._project = project
+        comparison_crs = str(
+            getattr(getattr(project, "coordinate", None), "project_crs", "") or ""
+        )
+        provider = self._preview_controller.provider
+        if isinstance(provider, LocalVisualizationProvider):
+            provider.comparison_crs = comparison_crs
+        project_root = getattr(getattr(project, "meta", None), "project_root", None)
+        project_root_text = str(project_root or "").strip()
+        self._preview_controller.set_project_root(
+            project_root_text if project_root_text and project_root_text != "." else None
+        )
 
         self.summary_panel.update_state(
             self._resources, self._prediction_tasks, self._map_documents
@@ -179,10 +202,60 @@ class VisualizationPage(QWidget):
                 break
 
         project = self._project_stub()
+        if ref.kind == "engine_preview":
+            resource = self._adapter.engine_preview_resource(ref, project)
+            if resource is None:
+                self._show_preview_error("未找到对应的数据资产")
+                return
+            self.trace_panel.update_ref(ref, None)
+            self._preview_controller.request(resource)
+            return
+
+        self._preview_controller.invalidate()
         payload = self._adapter.resolve(ref, project)
         self.composite_panel.load_payload(payload)
         self.trace_panel.update_ref(ref, payload)
         self._sync_export_capabilities()
+
+    def _show_preview_loading(self) -> None:
+        ref = self._current_ref
+        label = ref.label if ref is not None else ""
+        self.composite_panel.status_label.setText(f"正在加载: {label or '引擎预览'}")
+
+    def _apply_preview_result(self, result) -> None:
+        ref = self._current_ref
+        if ref is None or ref.kind != "engine_preview":
+            return
+        payload = self._adapter.payload_from_engine_preview_result(ref, result)
+        self.composite_panel.load_payload(payload)
+        self.trace_panel.update_ref(ref, payload)
+        self._sync_export_capabilities()
+
+    def _show_preview_error(self, message: str) -> None:
+        ref = self._current_ref
+        if ref is None or ref.kind != "engine_preview":
+            return
+        from paleo_workbench.viz.models import VizPayload
+
+        payload = VizPayload(
+            kind="message",
+            label=ref.label or ref.id or ref.kind,
+            message=message or "引擎预览失败",
+        )
+        self.composite_panel.load_payload(payload)
+        self.trace_panel.update_ref(ref, payload)
+        self._sync_export_capabilities()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._preview_controller.shutdown()
+        super().closeEvent(event)
+
+    def event(self, event: QEvent) -> bool:  # type: ignore[override]
+        if event.type() == QEvent.Type.DeferredDelete and hasattr(
+            self, "_preview_controller"
+        ):
+            self._preview_controller.shutdown()
+        return super().event(event)
 
     def _reload_current(self) -> None:
         if self._current_ref is not None:

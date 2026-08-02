@@ -365,6 +365,42 @@ class VizAdapter:
             warning=getattr(prepared, "warning", "") or "",
         )
 
+    def engine_preview_resource(self, ref: VizRef, project: Any) -> Any | None:
+        """Return the normalized resource snapshot used by async preview workers."""
+        resource = self._find_resource(ref, project)
+        if resource is None:
+            return None
+        path = str(getattr(resource, "path", "") or ref.path)
+        path = self._absolute_path(path, project) if path else ""
+        resource_type = str(getattr(resource, "type", "") or "")
+        if resource_type == "formation_tops":
+            resource_type = "well_stratification"
+        return resource.model_copy(
+            update={
+                "path": path,
+                "type": resource_type,
+            }
+        )
+
+    @staticmethod
+    def payload_from_engine_preview_result(ref: VizRef, result: Any) -> VizPayload:
+        """Map a background provider result onto the visualization payload seam."""
+        label = ref.label or getattr(result, "title", "") or ref.id or ref.kind
+        prepared = getattr(result, "engine_preview", None)
+        if prepared is None:
+            message = (
+                getattr(result, "message", "")
+                or getattr(result, "warning", "")
+                or "未能生成引擎预览"
+            )
+            return VizPayload(kind="message", label=label, message=message)
+        return VizPayload(
+            kind="engine_preview",
+            label=label,
+            prepared=prepared,
+            warning=getattr(result, "warning", "") or "",
+        )
+
     @staticmethod
     def _find_resource(ref: VizRef, project: Any) -> Any | None:
         resources = getattr(project, "resources", None) or []
