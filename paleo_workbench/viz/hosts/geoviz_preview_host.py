@@ -61,7 +61,13 @@ class _WellLocationLifecycle:
 
 
 class GeoVizPreviewHost(QWidget):
-    def __init__(self, engine: GeoVizEngine | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        engine: GeoVizEngine | None = None,
+        parent=None,
+        *,
+        well_state_store: WellLocationPreviewStateStore | None = None,
+    ) -> None:
         super().__init__(parent)
         self.engine = engine or GeoVizEngine.default()
         self.stack = QStackedWidget(self)
@@ -70,7 +76,7 @@ class GeoVizPreviewHost(QWidget):
         layout.addWidget(self.stack)
         self.widgets: dict[PreviewKind, QWidget] = {}
         self._active_kind: PreviewKind | None = None
-        self._well_state_store = WellLocationPreviewStateStore()
+        self._well_state_store = well_state_store or WellLocationPreviewStateStore()
         self._default_lifecycle = _EnginePreviewLifecycle(self.engine)
         self._lifecycles = {
             PreviewKind.XY_SCATTER: _WellLocationLifecycle(

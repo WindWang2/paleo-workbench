@@ -1,6 +1,12 @@
+import threading
 from pathlib import Path
 
+import numpy as np
+from geoviz import PreparedPreview, PreviewKind
+from geoviz.previews.dat import XYPreviewPayload
+
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, ResourceItem
+from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
 from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 from paleo_workbench.viz.adapter import VizAdapter
 
@@ -69,6 +75,69 @@ def test_open_ref_map_selects_map_tab(qtbot):
     ref = VizAdapter().ref_from_map_document(doc)
     page.open_ref(ref)
     assert page.composite_panel.tabs.tabText(page.composite_panel.tabs.currentIndex()) == "古地理"
+
+
+def test_open_ref_engine_preview_prepares_off_the_ui_thread(qtbot, tmp_path: Path):
+    path = tmp_path / "wells.dat"
+    path.write_text(
+        "#WellHead File From SMI\n#Name X Y\nA1 10 20\n",
+        encoding="utf-8",
+    )
+    resource = ResourceItem(
+        name="wells.dat",
+        path=str(path),
+        type="well_head",
+        format="dat",
+    )
+    prepare_started = threading.Event()
+    release_prepare = threading.Event()
+    prepare_requests = []
+
+    class BlockingEngine:
+        def prepare(self, request, _options):
+            prepare_requests.append(request)
+            prepare_started.set()
+            assert release_prepare.wait(timeout=3.0)
+            return PreparedPreview(
+                kind=PreviewKind.XY_SCATTER,
+                title="wells.dat",
+                payload=XYPreviewPayload(
+                    names=("A1",),
+                    x=np.asarray([10.0]),
+                    y=np.asarray([20.0]),
+                    resource_id=resource.id,
+                    record_ids=(0,),
+                    source_rows=(3,),
+                    source_version="version-1",
+                ),
+            )
+
+    page = VisualizationPage(
+        preview_provider=LocalVisualizationProvider(BlockingEngine())
+    )
+    qtbot.addWidget(page)
+    project = ProjectDocument.new("P")
+    project.coordinate.project_crs = "EPSG:3857"
+    project.resources.append(resource)
+    page.update_state([resource], [], [], project)
+
+    page.open_ref(VizAdapter().ref_from_resource(resource))
+
+    assert prepare_started.wait(timeout=2.0)
+    assert page.composite_panel.status_label.text() == "正在加载: wells.dat"
+
+    release_prepare.set()
+    qtbot.waitUntil(
+        lambda: page.composite_panel.tabs.tabText(
+            page.composite_panel.tabs.currentIndex()
+        )
+        == "引擎预览",
+        timeout=5_000,
+    )
+    assert page.composite_panel.tabs.tabText(
+        page.composite_panel.tabs.currentIndex()
+    ) == "引擎预览"
+    assert prepare_requests[0].comparison_crs == "EPSG:3857"
 
 
 def test_summary_asset_selected_opens_ref(qtbot, tmp_path: Path):

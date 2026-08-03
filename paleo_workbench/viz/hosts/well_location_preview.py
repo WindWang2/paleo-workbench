@@ -10,6 +10,7 @@ from PySide6.QtCore import (
     QSignalBlocker,
     QSortFilterProxyModel,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QKeyEvent
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +36,11 @@ from geoviz import (
 
 _POINT_INDEX_ROLE = Qt.ItemDataRole.UserRole
 _WELL_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+_METADATA_PROVENANCE_LABELS = {
+    "asset": "资产",
+    "file": "文件",
+    "asset+file": "资产与文件",
+}
 
 
 @dataclass(frozen=True)
@@ -137,6 +144,7 @@ class ActiveWell:
 
     identity: WellLocationId
     point_index: int
+    source_row: int | None
     name: str
     x: float
     y: float
@@ -165,14 +173,32 @@ class WellLocationPreviewStateStore:
         self._states: dict[
             tuple[str, str], WellLocationPreviewState
         ] = {}
-        self._latest_versions: dict[str, str] = {}
+        self._active_versions: dict[str, str] = {}
+
+    def activate_version(self, resource_id: str, source_version: str) -> None:
+        """Make one immutable source version authoritative for an asset.
+
+        A temporary widget for an older preview can finish after a newer
+        version rendered. Its later save must not resurrect stale identity or
+        viewport state, so only rendering a version may advance this boundary.
+        """
+        previous = self._active_versions.get(resource_id)
+        if previous == source_version:
+            return
+        self._states = {
+            key: state
+            for key, state in self._states.items()
+            if key[0] != resource_id
+        }
+        self._active_versions[resource_id] = source_version
 
     def load(
         self,
         resource_id: str,
         source_version: str,
     ) -> WellLocationPreviewState | None:
-        self._accept_version(resource_id, source_version)
+        if self._active_versions.get(resource_id) != source_version:
+            return None
         return self._states.get((resource_id, source_version))
 
     def save(
@@ -181,26 +207,15 @@ class WellLocationPreviewStateStore:
         source_version: str,
         state: WellLocationPreviewState,
     ) -> None:
-        self._accept_version(resource_id, source_version)
+        if resource_id not in self._active_versions:
+            self.activate_version(resource_id, source_version)
+        if self._active_versions.get(resource_id) != source_version:
+            return
         self._states[(resource_id, source_version)] = state
 
     def clear(self) -> None:
         self._states.clear()
-        self._latest_versions.clear()
-
-    def _accept_version(
-        self,
-        resource_id: str,
-        source_version: str,
-    ) -> None:
-        previous = self._latest_versions.get(resource_id)
-        if previous is not None and previous != source_version:
-            self._states = {
-                key: state
-                for key, state in self._states.items()
-                if key[0] != resource_id
-            }
-        self._latest_versions[resource_id] = source_version
+        self._active_versions.clear()
 
 
 class WellLocationPreview(QWidget):
@@ -221,11 +236,15 @@ class WellLocationPreview(QWidget):
         if not isinstance(plot, PlotWidget):
             raise TypeError("XY scatter backend must create a PlotWidget")
         self.plot = plot
+        self._state_changes_suspended = False
         self.plot.set_equal_aspect(True)
         self.plot.point_hovered.connect(self._show_hovered_well)
         self.plot.point_hover_cleared.connect(self._clear_hover_tooltip)
         self.plot.point_clicked.connect(self._activate_clicked_well)
         self.plot.reset_requested.connect(self.reset_view)
+        self.plot.view_changed.connect(
+            lambda *_bounds: self._save_state()
+        )
 
         self.well_panel = QFrame(self)
         self.well_panel.setObjectName("WellLocationListPanel")
@@ -243,6 +262,26 @@ class WellLocationPreview(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         panel_layout.addWidget(self.source_status)
+        self.diagnostic_toggle = QToolButton(self.well_panel)
+        self.diagnostic_toggle.setObjectName("WellLocationDiagnosticToggle")
+        self.diagnostic_toggle.setAccessibleName("展开井位行级诊断")
+        self.diagnostic_toggle.setCheckable(True)
+        self.diagnostic_toggle.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextOnly
+        )
+        self.diagnostic_toggle.toggled.connect(
+            self._set_diagnostic_details_visible
+        )
+        self.diagnostic_toggle.hide()
+        panel_layout.addWidget(self.diagnostic_toggle)
+        self.diagnostic_details = QLabel(self.well_panel)
+        self.diagnostic_details.setAccessibleName("井位行级诊断详情")
+        self.diagnostic_details.setWordWrap(True)
+        self.diagnostic_details.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.diagnostic_details.hide()
+        panel_layout.addWidget(self.diagnostic_details)
         self.well_search = QLineEdit(self.well_panel)
         self.well_search.setAccessibleName("搜索井名")
         self.well_search.setPlaceholderText("搜索井名…")
@@ -271,6 +310,9 @@ class WellLocationPreview(QWidget):
         )
         self.well_list.clicked.connect(self._activate_list_well)
         self.well_list.activated.connect(self._activate_list_well)
+        self.well_list.verticalScrollBar().valueChanged.connect(
+            lambda _value: self._save_state()
+        )
         panel_layout.addWidget(self.well_list, 1)
 
         layout = QHBoxLayout(self)
@@ -285,6 +327,7 @@ class WellLocationPreview(QWidget):
         self._state_store = state_store or WellLocationPreviewStateStore()
         self.active_well: ActiveWell | None = None
         self._released = False
+        self._scroll_restore_timer: QTimer | None = None
 
     def render(self, preview: PreparedPreview) -> None:
         if preview.kind is not PreviewKind.XY_SCATTER or not isinstance(
@@ -296,21 +339,37 @@ class WellLocationPreview(QWidget):
             raise RuntimeError("cannot render a released WellLocationPreview")
 
         self._save_state()
-        self._preview = preview
-        self._payload = preview.payload
-        self.active_well = None
-        self.plot.setToolTip("")
-        self.engine.render(self.plot, preview)
-        self._populate_well_list(preview.payload)
-        self._update_source_status(preview.payload)
-        self._restore_state()
-        self._update_filter_status()
+        self._state_changes_suspended = True
+        try:
+            self._preview = preview
+            self._payload = preview.payload
+            if (
+                preview.payload.resource_id
+                and preview.payload.source_version
+            ):
+                self._state_store.activate_version(
+                    preview.payload.resource_id,
+                    preview.payload.source_version,
+                )
+            self.active_well = None
+            self.plot.setToolTip("")
+            self.engine.render(self.plot, preview)
+            self._populate_well_list(preview.payload)
+            self._update_source_status(preview.payload)
+            self._restore_state()
+            self._update_filter_status()
+        finally:
+            self._state_changes_suspended = False
+        self._save_state()
 
     def release(self) -> None:
         if self._released:
             return
         self._save_state()
         self._released = True
+        if self._scroll_restore_timer is not None:
+            self._scroll_restore_timer.stop()
+            self._scroll_restore_timer = None
         self.engine.release(self.plot)
 
     def reset_view(self) -> None:
@@ -321,6 +380,7 @@ class WellLocationPreview(QWidget):
         self.well_list.clearSelection()
         self.well_list.setCurrentIndex(QModelIndex())
         self._update_filter_status()
+        self._save_state()
         if had_active_well:
             self.active_well_changed.emit(None)
 
@@ -354,14 +414,33 @@ class WellLocationPreview(QWidget):
 
     def _update_source_status(self, payload: XYPreviewPayload) -> None:
         diagnostics = payload.diagnostics
+        status = payload.coordinate_status
         total_records = diagnostics.total_records or len(payload.names)
         valid_records = diagnostics.valid_records or len(payload.names)
-        skipped_count = total_records - valid_records
+        skipped_count = max(0, total_records - valid_records)
+        crs_provenance = _METADATA_PROVENANCE_LABELS.get(
+            status.source_crs_provenance,
+            "",
+        )
+        unit_provenance = _METADATA_PROVENANCE_LABELS.get(
+            status.coordinate_units_provenance,
+            "",
+        )
         lines = [
             " · ".join(
                 (
-                    f"SourceCRS: {payload.source_crs or '未声明'}",
-                    f"坐标单位: {payload.coordinate_units or '未知'}",
+                    (
+                        f"SourceCRS: {payload.source_crs or '未声明'}"
+                        f"（{crs_provenance}）"
+                        if crs_provenance
+                        else f"SourceCRS: {payload.source_crs or '未声明'}"
+                    ),
+                    (
+                        f"坐标单位: {payload.coordinate_units or '未知'}"
+                        f"（{unit_provenance}）"
+                        if unit_provenance
+                        else f"坐标单位: {payload.coordinate_units or '未知'}"
+                    ),
                 )
             ),
             (
@@ -370,15 +449,46 @@ class WellLocationPreview(QWidget):
                 f"跳过 {skipped_count}"
             ),
         ]
-        lines.extend(
-            f"源行 {issue.source_row}: {issue.reason}"
-            for issue in diagnostics.issues
-        )
-        if diagnostics.omitted_issue_count:
+        if total_records and valid_records / total_records <= 0.1:
             lines.append(
-                f"另有 {diagnostics.omitted_issue_count} 条诊断未展开"
+                "严重数据质量问题：可预览井位比例极低，请核对源文件。"
+            )
+        duplicate_group_count = sum(
+            count > 1 for count in Counter(payload.names).values()
+        )
+        if duplicate_group_count:
+            lines.append(
+                f"{duplicate_group_count} 个重名井名组，"
+                "已用 X/Y 或源行消歧。"
             )
         self.source_status.setText("\n".join(lines))
+
+        detail_lines = [
+            f"源行 {issue.source_row}: {issue.reason}"
+            for issue in diagnostics.issues
+        ]
+        if diagnostics.omitted_issue_count:
+            detail_lines.append(
+                f"另有 {diagnostics.omitted_issue_count} 条诊断未展开"
+            )
+        self.diagnostic_details.setText("\n".join(detail_lines))
+        has_details = bool(detail_lines)
+        self.diagnostic_toggle.setVisible(has_details)
+        if not has_details:
+            self.diagnostic_toggle.setChecked(False)
+            self.diagnostic_details.hide()
+            return
+        self.diagnostic_toggle.setText(
+            f"查看 {len(diagnostics.issues)} 条行级诊断"
+        )
+        self._set_diagnostic_details_visible(
+            self.diagnostic_toggle.isChecked()
+        )
+
+    def _set_diagnostic_details_visible(self, visible: bool) -> None:
+        self.diagnostic_details.setVisible(
+            visible and self.diagnostic_toggle.isVisible()
+        )
 
     def _filter_well_list(self, search_text: str) -> None:
         blocker = QSignalBlocker(self.well_list.selectionModel())
@@ -392,6 +502,7 @@ class WellLocationPreview(QWidget):
                 self.well_list.clearSelection()
         del blocker
         self._update_filter_status()
+        self._save_state()
 
     def _activate_list_well(
         self,
@@ -451,6 +562,11 @@ class WellLocationPreview(QWidget):
                 ),
             ),
             point_index=index,
+            source_row=(
+                payload.source_rows[index]
+                if index < len(payload.source_rows)
+                else None
+            ),
             name=payload.names[index],
             x=float(payload.x[index]),
             y=float(payload.y[index]),
@@ -468,9 +584,12 @@ class WellLocationPreview(QWidget):
         )
         self._sync_list_selection(index)
         self._update_filter_status()
+        self._save_state()
         self.active_well_changed.emit(active_well)
 
     def _save_state(self) -> None:
+        if self._state_changes_suspended:
+            return
         payload = self._payload
         if (
             payload is None
@@ -523,9 +642,38 @@ class WellLocationPreview(QWidget):
                 self._activate_well(point_index, self._preview.title)
         if state.viewport is not None:
             self.plot.set_view_bounds(state.viewport)
-        self.well_list.verticalScrollBar().setValue(
-            state.list_scroll_position
+        resource_id = payload.resource_id
+        source_version = payload.source_version
+        if self._scroll_restore_timer is not None:
+            self._scroll_restore_timer.stop()
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(
+            lambda: self._restore_list_scroll(
+                resource_id,
+                source_version,
+                state.list_scroll_position,
+            )
         )
+        self._scroll_restore_timer = timer
+        timer.start(0)
+
+    def _restore_list_scroll(
+        self,
+        resource_id: str,
+        source_version: str,
+        position: int,
+    ) -> None:
+        self._scroll_restore_timer = None
+        payload = self._payload
+        if (
+            self._released
+            or payload is None
+            or payload.resource_id != resource_id
+            or payload.source_version != source_version
+        ):
+            return
+        self.well_list.verticalScrollBar().setValue(position)
 
     def _sync_list_selection(self, point_index: int) -> None:
         index = self._list_index_for_point_index(point_index)

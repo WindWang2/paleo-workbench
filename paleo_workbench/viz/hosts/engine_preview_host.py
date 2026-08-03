@@ -3,6 +3,9 @@ from __future__ import annotations
 from geoviz import GeoVizEngine, PreparedPreview
 
 from paleo_workbench.viz.hosts.geoviz_preview_host import GeoVizPreviewHost
+from paleo_workbench.viz.hosts.well_location_preview import (
+    WellLocationPreviewStateStore,
+)
 from paleo_workbench.viz.models import VizPayload
 
 
@@ -15,9 +18,17 @@ class EnginePreviewHost:
 
     tab_title = "引擎预览"
 
-    def __init__(self, engine: GeoVizEngine | None = None) -> None:
+    def __init__(
+        self,
+        engine: GeoVizEngine | None = None,
+        *,
+        well_state_store: WellLocationPreviewStateStore | None = None,
+    ) -> None:
         self.engine = engine or GeoVizEngine.default()
-        self.widget = GeoVizPreviewHost(engine=self.engine)
+        self.widget = GeoVizPreviewHost(
+            engine=self.engine,
+            well_state_store=well_state_store,
+        )
 
     def clear(self) -> None:
         try:

@@ -41,8 +41,11 @@ native = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+well-log-workstation = "well_log_workstation.main:main"
+
 [tool.setuptools.packages.find]
-include = ["paleo_workbench*"]
+include = ["paleo_workbench*", "well_log_workstation*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

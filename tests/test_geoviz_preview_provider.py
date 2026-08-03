@@ -119,10 +119,36 @@ def test_resource_request_carries_versioned_source_coordinate_metadata(
 
     request = request_from_resource(resource)
 
-    assert request.source_version == "checksum:abc123"
+    stat = Path(resource.path).stat()
+    assert request.source_version == (
+        f"checksum:abc123|stat:{stat.st_size}:{stat.st_mtime_ns}"
+    )
     assert request.source_crs == "EPSG:32648"
     assert request.coordinate_units == "m"
     assert request.comparison_crs == "EPSG:4326"
+
+    path.write_text("well data repaired", encoding="utf-8")
+
+    assert request_from_resource(resource).source_version != request.source_version
+
+
+def test_provider_prefers_project_crs_as_the_explicit_comparison_context(
+    tmp_path: Path,
+):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import (
+        LocalVisualizationProvider,
+    )
+
+    resource = _las_resource(tmp_path / "well.las")
+    resource.parsed_summary["comparison_crs"] = "EPSG:4326"
+    engine = RecordingEngine()
+
+    LocalVisualizationProvider(
+        engine,
+        comparison_crs="EPSG:3857",
+    ).preview(resource)
+
+    assert engine.support_requests[0].comparison_crs == "EPSG:3857"
 
 
 def test_geoviz_error_falls_back_to_las_summary_and_merges_warning(tmp_path: Path):
@@ -241,3 +267,24 @@ def test_visualization_invalid_data_failure_is_not_retryable(tmp_path: Path):
     assert result.cacheable is False
     assert result.retryable is False
     assert result.message == "LAS曲线无效"
+
+
+def test_visualization_failure_preserves_specific_engine_detail(tmp_path: Path):
+    from paleo_workbench.ui.pages.geoviz_preview_provider import (
+        LocalVisualizationProvider,
+    )
+
+    resource = _las_resource(tmp_path / "well.las")
+    engine = RecordingEngine(
+        failure=GeoVizError(
+            ErrorCode.INVALID_DATA,
+            "DAT 数据结构与资源类型不匹配",
+            detail="missing required Name/X/Y columns",
+        )
+    )
+
+    result = LocalVisualizationProvider(engine).preview_visualization(resource)
+
+    assert result.mode == "message"
+    assert result.message == "missing required Name/X/Y columns"
+    assert "missing required Name/X/Y columns" in result.warning

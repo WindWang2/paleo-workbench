@@ -44,6 +44,36 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **SourceCRS（源坐标系）**: 对 SourceXY 坐标域的明确坐标参考系声明，只能来自井位文件自身或 `well_head` 资产的显式元数据。项目默认 CRS、显示 CRS、survey CRS 与数值范围都不能替代缺失的 SourceCRS，也不能用于推断 SourceXY 的含义。
 
 ### Well Log Visualization
+- **ResForm Compatibility Model（ResForm 兼容模型）**: 以商业软件 ResForm 的用户可见测井工作流为参照：导入后的深度、曲线、单位、空值和可视化语义应符合解释人员的预期；它不替代底层文件格式规范，也不要求复制其私有实现或文件识别规则。
+- **Whole-File Log Import（整文件测井导入）**: 用户打开一个测井文件时，所有可用曲线数据集都被导入；不同采样轴各自保留，不因曲线名或相邻深度而被隐式合并或重采样。
+- **Canonical Curve Mnemonic（标准曲线名）**: 由已知源道名别名归一出的测井曲线语义名称；原始道名仍作为显示名称保留。无法识别的道名不被改写，并作为需核对的导入诊断。
+- **Canonical Log Unit（规范测井单位）**: 已识别的源单位及其数值共同换算后使用的统一单位：深度为 `m`，自然伽马为 `API`，自然电位为 `mV`，电阻率为 `Ω·m`，声波时差为 `μs/m`，密度为 `g/cm³`，中子孔隙度为 `%`，井径为 `mm`。缺失、歧义或不支持的源单位不被推测或仅改写标签，而是保留为导入诊断。
+- **Inferred Null（推断空样点）**: 源格式未明确声明空值时，由白名单缺失哨兵值（`-999.25`、`-999`、`-9999`、`-99999`）或非有限值识别出的不可绘制样点；明确声明的空值优先，白名单不得叠加到该数据集。非有限值始终为空样点。推断空样点必须伴随可追溯的导入诊断，其他极端数值仍为测量值。
+- **Interpretation Correction（解释校正）**: 对已导入测井数据显式执行的深度校正、曲线拼接或插值对齐；它不属于文件打开过程，必须可由用户辨认并可撤销。
+- **LIS79 Import（LIS79 导入）**: 对 1979 版 Log Information Standard 的受支持导入范围；Enhanced LIS（LIS84）必须被识别并明确诊断，不被当作 LIS79 猜测读取。
+- **Recoverable LIS Record（可恢复 LIS 记录）**: 长度边界可确定但不受支持或损坏的 LIS 记录；它被跳过并诊断，且只隔离所属数据集。无法继续确定物理记录边界的文件损坏不是可恢复记录，必须拒绝整个文件。
+- **Imported Log Identity（导入测井身份）**: 由源文件内容指纹、逻辑数据集身份与归一化规则指纹共同确定的稳定文档、采样轴和曲线身份；相同内容及规则重复导入保持同一身份和初始 Revision，内容或规则变化则形成新文档。
+- **Log Normalization Profile（测井归一化配置）**: 一个工区可审计的曲线别名、单位和缺失值规则集合；它以显式、不可变的导入参数提供，未提供时使用内置默认配置，而不读取 ResForm 私有工区文件。内置默认配置名为 `resform-compatible-v1`，其版本与规则内容共同构成稳定指纹。它决定源测井如何成为标准曲线语义，并拥有参与导入身份计算的稳定指纹。
+- **LIS Text Decoding（LIS 文本解码）**: LIS 文本字段的可审计呈现规则：默认仅按 ASCII 解读；非 ASCII 原始字节保留并产生诊断，只有归一化配置显式指定代码页时才解码，绝不基于内容猜测编码。
+- **Invalid Normalization Profile（无效归一化配置）**: 包含冲突别名、无法闭合的单位转换或其他自相矛盾规则的归一化配置；导入必须在读取源文件前明确拒绝它，不能静默回退或任选规则。
+- **Normalization Conflict（归一化冲突）**: 源曲线名与单位分别指向不兼容测井语义的情形；该曲线保留源名称和数值而不自动换算，并作为警告交由用户核对。
+- **Curve Alias Match（曲线别名匹配）**: 在忽略大小写、首尾空格、连字符和下划线后，以精确名称匹配标准曲线名的规则；数字、测次和工具后缀仍区分独立曲线实例，且不使用模糊匹配。
+- **ResForm-Compatible v1 Aliases（ResForm 兼容 v1 别名）**: 内置归一化配置覆盖 `GR`（`GR`、`GAM`、`GAMMA`）、`SP`、`AC`（`AC`、`DT`、`DTC`）、`DEN`（`DEN`、`RHOB`）、`CNL`（`CNL`、`NPHI`、`TNPH`）、`CAL`（`CAL`、`CALI`），以及分别保留的深/中/浅探测电阻率语义；未列出的源道名保持原样并诊断。
+- **ResForm-Compatible v1 Units（ResForm 兼容 v1 单位）**: 内置配置可识别并换算深度（`m`、`ft`、`in`）、声波时差（`μs/m`、`μs/ft`）、密度（`g/cm³`、`kg/m³`）、中子孔隙度（`%`、`v/v`）、井径（`mm`、`cm`、`in`）、电阻率（`Ω·m`、`Ω·ft`）、以及 GR 的 `API` 和 SP 的 `mV`；未列单位不换算并明确诊断。
+- **Source-Domain Null（源域空值）**: 在应用 LIS 比例、偏移和规范单位换算之前识别的缺失样点；只有非空源样点可以参与这些数值变换。
+- **LIS Import Limits（LIS 导入上限）**: 可由宿主覆盖的输入安全边界；默认文件为 256 MiB、单逻辑记录为 4 MiB、记录数为 1,000,000、每数据集样点为 10,000,000、每数据集曲线为 4,096。超过任一上限时导入明确失败而不截断数据。
+- **LIS Production Fixture（LIS 生产样例）**: 随仓库提供、用于验证正常 LIS79 导入和表格导出的真实且去敏的数据文件；它必须附有可追溯来源与明确的再分发许可。来源或去敏状态不能证明的第三方样例即使随开源解析器发布也不得采用；程序化样例仅用于损坏与资源边界测试。
+- **Canonical Curve Instance（标准曲线实例）**: 同一标准曲线语义在一个采样轴内对应的独立源曲线；即使名称归一相同，实例仍保留各自源身份与显示名，不被自动覆盖、择优或拼接。
+- **LIS Curve Dataset（LIS 曲线数据集）**: 由 LIS79 数据格式说明与常规深度采样数据共同定义的可导入曲线集合；卷/文件头仅提供来源语义，其他 LIS 记录不进入标准文档而保留为诊断。
+- **LIS Physical Envelope（LIS 物理封装）**: LIS79 文件所用的 Tape Image Format（TIF）包装或直接物理记录流；导入器仅在结构校验唯一成立时自动识别，无法唯一识别时必须拒绝而不根据扩展名猜测。
+- **Unsupported LIS Channel（不支持的 LIS 通道）**: 字符串、掩码或多维样点等无法成为标量数值 Curve 的通道；它不被强转或压缩为伪曲线，而是以记录位置、通道名和表示类型明确诊断。
+- **LIS Data Run（LIS 数据段）**: 一个数据格式说明及其后连续数据记录构成的数据集；记录按源顺序追加，前一数据格式说明后已出现数据时，下一数据格式说明即使 schema 相似也开始新的独立数据集。相邻、无数据间隔且完全相同的重复数据格式说明只是冗余元数据，折叠为一份并产生信息诊断；若不完全相同，则后一个取代前一个，前一个作为未产生样点即被替换的警告处理，不生成空数据集。数据段稳定身份锚定其有效数据格式说明的源序号/物理位置，而非可重复的曲线名或 schema；即使不同数据段的索引、单位和方向完全相同，也各自拥有独立采样轴，绝不自动共享或合并。
+- **LIS Well Selection（LIS 井选择）**: 对包含多个逻辑文件或井的 LIS 物理流，先检查并列出可选逻辑文件/井身份，再显式选择其中一口井导入其全部数据集的过程；逻辑文件的稳定序号/物理位置是选择身份，井名仅作展示，缺失或重名均不得触发自动选择或跨井合并。仅一个候选时直接导入；多个候选时才要求显式选择。
+- **Empty Log Import（空测井导入）**: 源文件结构有效但没有可规范化数值数据集时的成功导入结果；它包含空文档和“无可导入曲线”警告，而不把内容不受支持误诊为文件损坏。
+- **LIS Depth Domain Match（LIS 深度域匹配）**: 对 LIS 索引赋予深度域的严格规则：索引名和长度单位必须同时匹配；`DEPT`、`DEPTH`、`MD` 对应 MD，`TVD` 对应 TVD，`TVDSS` 对应 TVDSS。不得仅凭单位或数值推断深度域。
+- **LIS Axis Segmentation（LIS 采样轴分段）**: 同一数据段内重复索引按源顺序保留；以首个非重复差值确定轴方向，首次反向即开始独立的采样轴和曲线段，绝不排序。若索引全相同，则按递增轴导入并产生诊断。
+- **Source Index Axis（源索引采样轴）**: 具有数值坐标但无法确认其深度语义的数据集索引；它可被导入和查看，但不得被解释为井深，并必须带有未知索引语义诊断。
+- **Import Audit（导入审计）**: 随导入结果返回的可定位说明：自动别名匹配、单位换算和 Null 推断为信息；未知元数据、跳过记录和局部损坏为警告；无法继续确定文件结构时才是错误。
 - **CurveTrack**: Native QPainter track widget displaying depth-aligned log curves with 4-point Min-Max LOD downsampling.
 - **LithologyTrack**: Track displaying geological lithology patterns (sandstone, mudstone, limestone, dolomite).
 - **WellIntervals**: Formation tops, series, system, and facies interval data mapped along well depth.

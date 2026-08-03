@@ -29,6 +29,8 @@ _safe_stat = safe_file_stat
 def make_preview_cache_key(
     asset: ResourceItem | ExportArtifact,
     settings_fingerprint: str | None = None,
+    *,
+    comparison_crs: str | None = None,
 ) -> tuple:
     """Stable key for preview LRU entries.
 
@@ -50,6 +52,7 @@ def make_preview_cache_key(
             settings_fingerprint,
         )
     path = Path(asset.path)
+    metadata = asset.parsed_summary or {}
     return (
         "resource",
         asset.id,
@@ -58,6 +61,13 @@ def make_preview_cache_key(
         asset.format,
         asset.checksum or "",
         safe_file_stat(path),
+        asset.crs or "",
+        metadata.get("coordinate_units") or metadata.get("units") or "",
+        (
+            comparison_crs
+            if comparison_crs is not None
+            else metadata.get("comparison_crs") or ""
+        ),
         settings_fingerprint,
     )
 

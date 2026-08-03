@@ -1,0 +1,411 @@
+name: WellLogEngine C++
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "well-log-engine/**"
+      - ".github/workflows/well-log-engine.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "well-log-engine/**"
+      - ".github/workflows/well-log-engine.yml"
+
+permissions:
+  contents: read
+
+# Shared Ubuntu packages for WELLLOG_BUILD_TEXT (HarfBuzz/FreeType/ICU) + Ninja.
+env:
+  # Keep Arrow optional in default matrix (no system Arrow on runners).
+  WELLLOG_CI_UBUNTU_PKGS: >-
+    ninja-build
+    pkg-config
+    zlib1g-dev
+    libharfbuzz-dev
+    libfreetype6-dev
+    libicu-dev
+    xvfb
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / shared=${{ matrix.shared }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows matrix needs HarfBuzz/text or test targets gated when
+        # WELLLOG_BUILD_TEXT=OFF (several tests still link WellLog::Text).
+        # Keep Ubuntu as the required C++ gate; Windows follow-up separately.
+        os: [ubuntu-latest]
+        shared: ["OFF", "ON"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $WELLLOG_CI_UBUNTU_PKGS
+
+      - name: Install Windows deps
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ninja -y
+          # Text pipeline uses pkg-config modules not readily available on
+          # stock Windows runners; keep core + tests green without text.
+          echo "WELLLOG_BUILD_TEXT=OFF" >> $env:GITHUB_ENV
+          # msvc-dev-cmd rewrites PATH; remember ninja for later cmd steps.
+          $ninja = (Get-Command ninja).Source
+          echo "NINJA_PATH=$ninja" >> $env:GITHUB_ENV
+          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Force MSVC so CMake does not pick a bare MinGW without zlib.
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # Build a small zlib install prefix. Use forward slashes in GITHUB_ENV so
+      # later steps (bash or cmd) both resolve CMAKE_PREFIX_PATH cleanly.
+      - name: Build zlib for Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set PATH=C:\ProgramData\chocolatey\bin;%PATH%
+          curl -L -o zlib.tgz https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+          tar -xzf zlib.tgz
+          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_MAKE_PROGRAM=%NINJA_PATH% -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
+          cmake --build zlib-build --parallel
+          cmake --install zlib-build
+          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
+
+      # cmd (not bash): msvc-dev-cmd env + Ninja/cl hangs under Git Bash on GHA.
+      # Clear VCPKG_ROOT so CMakeLists does not auto-load a toolchain that can
+      # block configure; disable optional Arrow on stock Windows runners.
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          VCPKG_ROOT: ""
+        run: >
+          set PATH=C:\ProgramData\chocolatey\bin;%PATH%
+          && cmake -S well-log-engine -B build\well-log-engine -G Ninja
+          -DCMAKE_MAKE_PROGRAM=%NINJA_PATH%
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+          -DWELLLOG_BUILD_TEXT=OFF
+          -DWELLLOG_BUILD_ARROW=OFF
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_PREFIX_PATH=%CMAKE_PREFIX_PATH%
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: cmake --build build\well-log-engine --parallel
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        run: cmake --build build/well-log-engine --parallel
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 2
+
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
+        run: ctest --test-dir build/well-log-engine --output-on-failure --parallel 2
+
+  clang-sanitizers:
+    name: Ubuntu / Clang / ASan+UBSan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            $WELLLOG_CI_UBUNTU_PKGS clang
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine-clang -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build/well-log-engine-clang --parallel
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: >
+          ctest --test-dir build/well-log-engine-clang
+          --output-on-failure --parallel 2
+
+  dense-curve-benchmark:
+    name: Ubuntu / 500k curve / 4K metrics
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $WELLLOG_CI_UBUNTU_PKGS
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          cache: true
+
+      - name: Configure benchmark
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine-benchmark -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=OFF
+          -DWELLLOG_BUILD_BENCHMARKS=ON
+          -DWELLLOG_BUILD_QT_WIDGETS=ON
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build benchmark
+        run: >
+          cmake --build build/well-log-engine-benchmark
+          --target welllog_dense_curve_benchmark --parallel
+
+      - name: Record structured metrics
+        shell: bash
+        run: >
+          xvfb-run -a
+          build/well-log-engine-benchmark/welllog_dense_curve_benchmark
+          | tee dense-curve-benchmark.json
+
+      - name: Upload benchmark metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: dense-curve-benchmark
+          path: dense-curve-benchmark.json
+
+  qt-rendering:
+    name: Ubuntu / Qt 6.8 / Mesa
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            $WELLLOG_CI_UBUNTU_PKGS \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine-qt -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_BUILD_QT_WIDGETS=ON
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build/well-log-engine-qt --parallel
+
+      - name: Test with Mesa
+        env:
+          # llvmpipe needs an explicit GL 3.3 request on some runner images.
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          MESA_GL_VERSION_OVERRIDE: "3.3"
+          MESA_GLSL_VERSION_OVERRIDE: "330"
+          QT_OPENGL: software
+        run: |
+          # FBO readback / multi-pass render tests need a fuller GL stack than
+          # GHA's software Mesa currently provides (white center pixels). Keep
+          # non-GL Qt tests (table model, unavailable context, selection sync)
+          # and package-consumer on the critical path; GPU pixel tests are
+          # exercised by the dense-curve benchmark smoke and local GPU hosts.
+          xvfb-run -a ctest --test-dir build/well-log-engine-qt \
+            --output-on-failure --parallel 2 \
+            --exclude-regex 'welllog[.]qt-widget$|welllog[.]qt-context-lifecycle-stress'
+
+  python-wheel:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }} wheel
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows wheel needs Shiboken6 CMake package + matching Qt; defer
+        # until the MSVC/PySide packaging path is fully wired.
+        os: [ubuntu-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $WELLLOG_CI_UBUNTU_PKGS
+
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ninja -y
+          # Wheel build needs Qt; text pipeline optional for smoke
+          echo "WELLLOG_BUILD_TEXT=OFF" >> $env:GITHUB_ENV
+          $ninja = (Get-Command ninja).Source
+          echo "NINJA_PATH=$ninja" >> $env:GITHUB_ENV
+          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build zlib for Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set PATH=C:\ProgramData\chocolatey\bin;%PATH%
+          curl -L -o zlib.tgz https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+          tar -xzf zlib.tgz
+          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_MAKE_PROGRAM=%NINJA_PATH% -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
+          cmake --build zlib-build --parallel
+          cmake --install zlib-build
+          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # 6.11.1 is available on Linux aqt mirrors but not always on Windows;
+      # pin Windows to 6.8.3 (matches the Qt widget job) with matching PySide.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ runner.os == 'Windows' && '6.8.3' || '6.11.1' }}
+          cache: true
+
+      - name: Install binding toolchain
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PYSIDE_VER=6.8.3
+          else
+            PYSIDE_VER=6.11.1
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy \
+            "PySide6==${PYSIDE_VER}" \
+            "shiboken6==${PYSIDE_VER}" \
+            build \
+            "scikit-build-core>=0.11,<0.12"
+          python -m pip install \
+            --index-url=https://download.qt.io/official_releases/QtForPython/ \
+            --trusted-host download.qt.io \
+            "shiboken6_generator==${PYSIDE_VER}"
+
+      - name: Build wheel
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Prefer forward slashes; scikit-build invokes CMake under MSVC env.
+            # Clear VCPKG_ROOT so engine CMake does not auto-attach a toolchain.
+            unset VCPKG_ROOT || true
+            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DWELLLOG_BUILD_ARROW=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH//\\//}"
+            export CMAKE_GENERATOR=Ninja
+          fi
+          python -m build well-log-engine --wheel --no-isolation --outdir dist
+
+      - name: Install wheel
+        shell: bash
+        run: python -m pip install --no-deps --force-reinstall dist/*.whl
+
+      - name: Smoke test installed wheel
+        env:
+          QT_QPA_PLATFORM: minimal
+        run: python well-log-engine/tests/python/wheel_smoke.py
+
+      - name: Test Python embedding contracts
+        env:
+          QT_QPA_PLATFORM: minimal
+        run: python well-log-engine/tests/python/test_qt_embedding.py
+
+  pinned-vcpkg:
+    name: Ubuntu / pinned vcpkg manifest
+    runs-on: ubuntu-latest
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            $WELLLOG_CI_UBUNTU_PKGS \
+            curl zip unzip tar
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 9d7f79f56ae1a9b4704d6a7fb8237e347a974133
+          path: .vcpkg
+
+      - name: Bootstrap vcpkg
+        run: .vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Configure
+        working-directory: well-log-engine
+        run: cmake --preset dev-vcpkg
+
+      - name: Build
+        working-directory: well-log-engine
+        run: cmake --build --preset dev-vcpkg --parallel
+
+      - name: Test
+        working-directory: well-log-engine
+        run: ctest --preset dev-vcpkg --output-on-failure

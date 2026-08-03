@@ -1,8 +1,14 @@
-"""地层对比 page: multi-well CrossWell section + tops from prediction facies."""
+"""地层对比 page: multi-well CrossWell section + tops from prediction facies.
+
+Dual path (#170): Feature Flag / combo selects Legacy geoviz CrossWell or
+WellLogEngine multi-well surface (shared Display Depth + Cross-Well Overlay).
+Legacy is never deleted.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Literal
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -20,6 +26,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +36,8 @@ from geoviz import FormationTop
 from paleo_workbench.resources.export_service import default_export_dir
 from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDialog
 from paleo_workbench.ui import tokens
+from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
+from paleo_workbench.viz import welllog_multi_well_adapter as multi_adapter
 from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
 from paleo_workbench.viz.models import VizPayload
 from paleo_workbench.viz.stratigraphic_correlation_engine import StratigraphicCorrelationEngine
@@ -42,6 +51,8 @@ from paleo_workbench.workflow.stratigraphy_correlation import (
     tops_to_intervals,
 )
 
+BackendName = Literal["legacy", "engine"]
+
 
 class StratigraphyCorrelationPage(QWidget):
     """Multi-well stratigraphic correlation using geo-viz CrossWell engine."""
@@ -53,6 +64,16 @@ class StratigraphyCorrelationPage(QWidget):
         self.setObjectName("StratigraphyCorrelationPage")
         self._project = None
         self._loaded_names: list[str] = []
+        self._loaded_logs: list[Any] = []
+        self._loaded_resource_ids: list[str] = []
+        self._engine_plan: multi_adapter.MultiWellEnginePlan | None = None
+        self._engine_report: dict[str, Any] | None = None
+        self._engine_error: str | None = None
+        self._engine_view: QWidget | None = None
+        self._WellLogView = None
+        self._backend: BackendName = (
+            "engine" if engine_adapter.welllog_engine_env_enabled() else "legacy"
+        )
         self.correlation_engine = StratigraphicCorrelationEngine()
 
         outer = QVBoxLayout(self)
@@ -112,10 +133,21 @@ class StratigraphyCorrelationPage(QWidget):
         self.section_title = QLabel("连井地层对比")
         self.section_title.setObjectName("MapDockTitle")
         center_layout.addWidget(self.section_title)
+
+        backend_row = QHBoxLayout()
+        backend_row.setSpacing(tokens.SPACE_2)
         self.status_label = QLabel("从左侧选择井后加载剖面（复用 CrossWell / DTW 引擎）")
         self.status_label.setObjectName("WorkFieldLabel")
         self.status_label.setWordWrap(True)
-        center_layout.addWidget(self.status_label)
+        backend_row.addWidget(self.status_label, 1)
+        self.backend_combo = QComboBox()
+        self.backend_combo.setObjectName("StratBackendCombo")
+        self.backend_combo.addItem("Legacy (CrossWell)", "legacy")
+        self.backend_combo.addItem("WellLogEngine", "engine")
+        self.backend_combo.setCurrentIndex(0 if self._backend == "legacy" else 1)
+        self.backend_combo.currentIndexChanged.connect(self._on_backend_combo)
+        backend_row.addWidget(self.backend_combo, 0)
+        center_layout.addLayout(backend_row)
 
         # Toolbar: correlation modes and engine interactions
         toolbar = QHBoxLayout()
@@ -179,6 +211,11 @@ class StratigraphyCorrelationPage(QWidget):
         toolbar.addStretch()
         center_layout.addLayout(toolbar)
 
+        self.view_stack_host = QFrame()
+        self.view_stack_host.setObjectName("StratViewStack")
+        self.view_stack = QStackedLayout(self.view_stack_host)
+        self.view_stack.setContentsMargins(0, 0, 0, 0)
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("StratCrossScrollArea")
         self.scroll_area.setWidgetResizable(True)
@@ -193,8 +230,24 @@ class StratigraphyCorrelationPage(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.scroll_area.setWidget(self.cross_host.widget)
+        self.view_stack.addWidget(self.scroll_area)  # 0 legacy
 
-        center_layout.addWidget(self.scroll_area, 1)
+        self.engine_host = QFrame()
+        self.engine_host.setObjectName("StratEngineHost")
+        engine_layout = QVBoxLayout(self.engine_host)
+        engine_layout.setContentsMargins(0, 0, 0, 0)
+        self.engine_placeholder = QLabel(
+            "WellLogEngine 多井路径未启用或不可用。\n"
+            "WellLogEngine 默认启用；安装带 multi-well 的 welllog 绑定，"
+            "或设 PALEO_USE_WELLLOG_ENGINE=0 使用 Legacy。"
+        )
+        self.engine_placeholder.setObjectName("EmptyStateLabel")
+        self.engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.engine_placeholder.setWordWrap(True)
+        engine_layout.addWidget(self.engine_placeholder)
+        self.view_stack.addWidget(self.engine_host)  # 1 engine
+
+        center_layout.addWidget(self.view_stack_host, 1)
         content.addWidget(center, 1)
 
         # Right: actions
@@ -242,9 +295,105 @@ class StratigraphyCorrelationPage(QWidget):
         content.addWidget(self.action_panel, 0)
 
         outer.addLayout(content, 1)
+        self._probe_engine()
+        self._sync_backend_stack()
 
     def set_project(self, project) -> None:
         self._project = project
+
+    def backend(self) -> str:
+        return self._backend
+
+    def engine_plan(self) -> multi_adapter.MultiWellEnginePlan | None:
+        return self._engine_plan
+
+    def engine_report(self) -> dict[str, Any] | None:
+        return self._engine_report
+
+    def engine_error(self) -> str | None:
+        return self._engine_error
+
+    def set_backend(self, name: str) -> None:
+        target: BackendName = "engine" if name == "engine" else "legacy"
+        if target == self._backend:
+            return
+        self._backend = target
+        idx = 0 if target == "legacy" else 1
+        if self.backend_combo.currentIndex() != idx:
+            self.backend_combo.blockSignals(True)
+            self.backend_combo.setCurrentIndex(idx)
+            self.backend_combo.blockSignals(False)
+        self._sync_backend_stack()
+        if self._loaded_logs:
+            self._reload_current_section()
+
+    def _on_backend_combo(self, _index: int) -> None:
+        data = self.backend_combo.currentData()
+        self.set_backend("engine" if data == "engine" else "legacy")
+
+    def _probe_engine(self) -> None:
+        mod, view_cls, _ = engine_adapter.try_import_welllog()
+        self._WellLogView = view_cls
+        if view_cls is None:
+            self._engine_error = "welllog 绑定未安装"
+            return
+        if not hasattr(view_cls, "submit_multi_well_section"):
+            self._engine_error = "welllog 绑定缺少 submit_multi_well_section"
+            self._WellLogView = None
+
+    def _sync_backend_stack(self) -> None:
+        self.view_stack.setCurrentIndex(0 if self._backend == "legacy" else 1)
+        # Correlation toolbar gestures only apply to Legacy CrossWell.
+        interactive = self._backend == "legacy"
+        for w in (
+            self.browse_btn,
+            self.pick_btn,
+            self.link_btn,
+            self.dtw_btn,
+            self.undo_btn,
+            self.redo_btn,
+            self.auto_link_btn,
+            self.tops_visible_box,
+            self.spacing_slider,
+            self.formation_combo,
+            self.snap_combo,
+            self.track_list,
+        ):
+            w.setEnabled(interactive)
+
+    def _ensure_engine_view(self) -> QWidget | None:
+        if self._engine_view is not None:
+            return self._engine_view
+        if self._WellLogView is None:
+            return None
+        try:
+            view = self._WellLogView()
+        except Exception as exc:  # noqa: BLE001 — surface to placeholder
+            self._engine_error = f"{exc.__class__.__name__}: {exc}"
+            return None
+        self._engine_view = view
+        layout = self.engine_host.layout()
+        if layout is not None:
+            self.engine_placeholder.hide()
+            layout.addWidget(view, 1)
+        return view
+
+    def _release_engine_view(self) -> None:
+        if self._engine_view is not None:
+            clear = getattr(self._engine_view, "clear_multi_well_section", None)
+            if callable(clear):
+                try:
+                    clear()
+                except Exception:
+                    pass
+            engine_adapter.clear_engine_view(self._engine_view)
+            layout = self.engine_host.layout()
+            if layout is not None:
+                layout.removeWidget(self._engine_view)
+            self._engine_view.setParent(None)
+            self._engine_view.deleteLater()
+            self._engine_view = None
+        self.engine_placeholder.show()
 
     def update_state(self, project=None) -> None:
         if project is not None:
@@ -437,16 +586,10 @@ class StratigraphyCorrelationPage(QWidget):
                 "未能加载任何井曲线\n" + "\n".join(warnings[:5]),
             )
             return
-        payload = VizPayload(
-            kind="cross_well",
-            label="地层对比",
-            well_logs=logs,
-            well_names=names,
-        )
-        ok = self.cross_host.apply(payload)
-        top_notices = self._inject_well_tops(names) if ok else []
-        self._refresh_track_list()
-        self._loaded_names = names
+        self._loaded_logs = list(logs)
+        self._loaded_names = list(names)
+        self._loaded_resource_ids = list(ids)[: len(logs)]
+        ok, top_notices, path_msg = self._apply_loaded_section()
         self.loaded_value.setText(f"已加载: {len(names)} 口井")
         tops_bits = []
         for data, name in zip(logs, names):
@@ -457,13 +600,106 @@ class StratigraphyCorrelationPage(QWidget):
         self.tops_value.setText(
             " · ".join(tops_bits) if tops_bits else "无预测相/岩性 tops（可先运行测井预测）"
         )
-        msg = f"已加载 {len(names)} 口井"
+        msg = f"已加载 {len(names)} 口井 ({path_msg})"
         if warnings:
             msg += f"；警告 {len(warnings)} 项"
         if top_notices:
             msg += "；" + "；".join(top_notices[:2])
+        if self._engine_error and self._backend == "engine":
+            msg += f"；Engine: {self._engine_error}"
         self.status_label.setText(msg if ok else "加载失败")
         self.section_updated.emit()
+
+    def _reload_current_section(self) -> None:
+        if not self._loaded_logs:
+            self._sync_backend_stack()
+            return
+        ok, _notices, path_msg = self._apply_loaded_section()
+        self.status_label.setText(
+            f"已切换到 {path_msg}" if ok else f"切换失败: {self._engine_error or path_msg}"
+        )
+
+    def _apply_loaded_section(self) -> tuple[bool, list[str], str]:
+        """Apply current _loaded_* to the active backend. Returns (ok, notices, path)."""
+        logs = self._loaded_logs
+        names = self._loaded_names
+        ids = self._loaded_resource_ids
+        top_notices: list[str] = []
+        if self._backend == "engine":
+            ok = self._apply_engine_section(logs, names, ids)
+            return ok, top_notices, "WellLogEngine"
+        payload = VizPayload(
+            kind="cross_well",
+            label="地层对比",
+            well_logs=logs,
+            well_names=names,
+        )
+        ok = self.cross_host.apply(payload)
+        if ok:
+            top_notices = self._inject_well_tops(names)
+            self._refresh_track_list()
+            # Keep spacing slider in sync for parity snapshot.
+            self.cross_host.inner.set_well_spacing(self.spacing_slider.value())
+        # Always build engine plan for parity even on Legacy (dual-path tests).
+        self._build_engine_plan_only(logs, names, ids)
+        return ok, top_notices, "Legacy"
+
+    def _build_engine_plan_only(
+        self, logs: list[Any], names: list[str], resource_ids: list[str]
+    ) -> None:
+        tops_by_well: dict[str, list[tuple[str, float]]] = {}
+        if self._project is not None:
+            raw_tops, _ = load_well_tops(self._project)
+            matched, _ = match_tops_to_wells(raw_tops, names)
+            tops_by_well = matched
+        horizon = ""
+        if self._project is not None:
+            horizon = active_target_horizon(self._project) or ""
+        self._engine_plan = multi_adapter.adapt_multi_well_section(
+            logs,
+            names,
+            resource_ids=resource_ids,
+            tops_by_well=tops_by_well,
+            spacing_px=int(self.spacing_slider.value()),
+            datum_mode="horizon" if horizon else "md",
+            target_horizon=horizon,
+        )
+
+    def _apply_engine_section(
+        self, logs: list[Any], names: list[str], resource_ids: list[str]
+    ) -> bool:
+        self._engine_error = None
+        self._engine_report = None
+        self._build_engine_plan_only(logs, names, resource_ids)
+        plan = self._engine_plan
+        if plan is None or not plan.wells:
+            self._engine_error = "多井计划为空"
+            self.engine_placeholder.setText(
+                f"WellLogEngine 无法构建多井计划。\n{self._engine_error}"
+            )
+            self.engine_placeholder.show()
+            return False
+        view = self._ensure_engine_view()
+        if view is None:
+            self._engine_error = self._engine_error or "WellLogView 不可用"
+            self.engine_placeholder.setText(
+                f"WellLogEngine 不可用。\n{self._engine_error}\n"
+                "可切换回 Legacy。"
+            )
+            self.engine_placeholder.show()
+            return False
+        try:
+            self._engine_report = multi_adapter.submit_multi_well_plan(view, plan)
+        except Exception as exc:  # noqa: BLE001
+            self._engine_error = f"{exc.__class__.__name__}: {exc}"
+            self.engine_placeholder.setText(
+                f"WellLogEngine 加载失败。\n{self._engine_error}"
+            )
+            self.engine_placeholder.show()
+            return False
+        self.engine_placeholder.hide()
+        view.show()
+        return True
 
     def clear_section(self) -> None:
         self.cross_host.clear()
@@ -472,12 +708,46 @@ class StratigraphyCorrelationPage(QWidget):
         canvas.picks_model.clear()
         self.formation_combo.clear()
         self.track_list.clear()
+        self._release_engine_view()
         self._loaded_names = []
+        self._loaded_logs = []
+        self._loaded_resource_ids = []
+        self._engine_plan = None
+        self._engine_report = None
+        self._engine_error = None
         self.loaded_value.setText("已加载: 0 口井")
         self.tops_value.setText("相/顶: —")
         self.status_label.setText("剖面已清空")
 
     def _export_section(self) -> None:
+        if self._backend == "engine":
+            if self._engine_view is None or self._engine_report is None:
+                QMessageBox.warning(self, "导出", "请先加载 WellLogEngine 连井剖面")
+                return
+            # Engine path: grab framebuffer PNG (same limitation as #169 single-well).
+            start_dir = default_export_dir(
+                Path(self._project.meta.project_root) / "x.paleo.json"
+                if self._project and self._project.meta.project_root not in ("", ".")
+                else None
+            )
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "导出连井剖面 (Engine PNG)",
+                str(start_dir / "cross_well_engine.png"),
+                "PNG (*.png)",
+            )
+            if not path:
+                return
+            try:
+                pix = self._engine_view.grab()
+                if pix.isNull() or not pix.save(path, "PNG"):
+                    raise RuntimeError("WellLogEngine 抓屏失败")
+            except Exception as exc:
+                QMessageBox.warning(self, "导出失败", f"{exc.__class__.__name__}: {exc}")
+                return
+            QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
+            return
+
         inner = self.cross_host.inner
         if not getattr(inner, "_canvases", None):
             QMessageBox.warning(self, "导出", "请先加载连井剖面")

@@ -66,7 +66,13 @@ class DataPage(QWidget):
     import_failed = Signal(str)
     open_in_visualization = Signal(object)  # VizRef
 
-    def __init__(self, project: ProjectDocument | None = None, parent=None):
+    def __init__(
+        self,
+        project: ProjectDocument | None = None,
+        parent=None,
+        *,
+        well_state_store=None,
+    ):
         super().__init__(parent)
         self.setObjectName("DataPage")
         self.project = project or ProjectDocument.new("Untitled Project")
@@ -90,7 +96,10 @@ class DataPage(QWidget):
         self.data_toolbar = DataToolbar()
         layout.addWidget(self.data_toolbar)
 
-        self.workspace = DataWorkspace()
+        self.workspace = DataWorkspace(
+            well_state_store=well_state_store,
+            comparison_crs=str(self.project.coordinate.project_crs or ""),
+        )
         layout.addWidget(self.workspace, 1)
 
         self.navigation_tree = self.workspace.navigation_tree
@@ -133,6 +142,9 @@ class DataPage(QWidget):
             settings=self.reader_panel.preview_settings,
             request_kind="visualization",
         )
+        comparison_crs = str(self.project.coordinate.project_crs or "")
+        self._preview_controller.set_comparison_crs(comparison_crs or None)
+        self._visualization_controller.set_comparison_crs(comparison_crs or None)
         self._visualization_controller.loading.connect(
             self.reader_panel.show_visualization_loading
         )

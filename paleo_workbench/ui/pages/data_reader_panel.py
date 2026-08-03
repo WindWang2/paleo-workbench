@@ -44,6 +44,8 @@ class DataReaderPanel(QFrame):
         parent=None,
         *,
         settings_store: PreviewSettingsStore | None = None,
+        well_state_store=None,
+        comparison_crs: str = "",
     ):
         super().__init__(parent)
         self.setObjectName("DataReaderPanel")
@@ -52,6 +54,7 @@ class DataReaderPanel(QFrame):
         # import it lazily so cold DataPage startup does not pay the geoviz cost
         # when a custom lightweight provider is injected by tests.
         self._settings_store = settings_store or PreviewSettingsStore()
+        self._comparison_crs = str(comparison_crs)
         self.preview_settings = self._settings_store.load()
         if provider is None:
             # Deferred: pulls in geoviz engine stack; keep startup cost lazy.
@@ -59,7 +62,10 @@ class DataReaderPanel(QFrame):
                 LocalVisualizationProvider,
             )
 
-            provider = LocalVisualizationProvider(settings=self.preview_settings)
+            provider = LocalVisualizationProvider(
+                settings=self.preview_settings,
+                comparison_crs=self._comparison_crs,
+            )
         self.provider = provider.with_settings(self.preview_settings)
         self.current_mode = "empty"
         self._current_result = PreviewResult(mode="empty", title="请选择数据项")
@@ -92,7 +98,8 @@ class DataReaderPanel(QFrame):
         # PreparedPreview on the UI thread.
         self._geoviz_host = None
         self.lazy_visualization_tabs = LazyVisualizationTabs(
-            getattr(self.provider, "engine", None)
+            getattr(self.provider, "engine", None),
+            well_state_store=well_state_store,
         )
         self.lazy_visualization_tabs.visualization_requested.connect(
             self.visualization_requested
@@ -206,7 +213,8 @@ class DataReaderPanel(QFrame):
 
             if not hasattr(self.provider, "engine"):
                 self.provider = LocalVisualizationProvider(
-                    settings=self.preview_settings
+                    settings=self.preview_settings,
+                    comparison_crs=self._comparison_crs,
                 )
             provider_engine = getattr(self.provider, "engine", None)
             self.lazy_visualization_tabs.set_engine(provider_engine)
