@@ -220,7 +220,13 @@ endif()
 
 function(welllog_enable_warnings target)
     if(MSVC)
-        target_compile_options("${target}" PRIVATE /W4 /permissive-)
+        # C4251/C4275: std::shared_ptr / unique_ptr members in exported PIMPL
+        # types — expected noise for MSVC shared builds; not fixable without
+        # exporting the entire STL (see #234 Windows shared=ON).
+        target_compile_options(
+            "${target}"
+            PRIVATE /W4 /permissive- /wd4251 /wd4275
+        )
         if(WELLLOG_WARNINGS_AS_ERRORS)
             target_compile_options("${target}" PRIVATE /WX)
         endif()
