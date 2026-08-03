@@ -380,8 +380,9 @@ def presentations_to_multi_well_payload(
     gap_mm: float = 5.0,
     shared_depth: tuple[float, float] | None = None,
     links: list[HorizonLink] | None = None,
+    multi_track: bool = True,
 ) -> dict[str, Any]:
-    """Build ``submit_multi_well_section`` payload (primary curve per well)."""
+    """Build multi-well payload; prefer multi-track columns when possible (#232)."""
     if len(presentations) < 1:
         raise EngineSubmitError("至少需要一口井")
     wells: list[dict[str, Any]] = []
@@ -393,10 +394,9 @@ def presentations_to_multi_well_payload(
     marker_id_by_well_name: dict[tuple[str, str], str] = {}
 
     for i, pres in enumerate(presentations):
-        primary = primary_curve_from_presentation(pres)
-        if primary is None:
-            raise EngineSubmitError(f"井 {pres.well_name} 无绑定曲线")
-        depth, values, mnemonic, value_unit = primary
+        depth = _readonly_f64(np.asarray(pres.depth, dtype=np.float64))
+        if depth.size < 2:
+            raise EngineSubmitError(f"井 {pres.well_name} 深度不足")
         dmin, dmax = float(np.nanmin(depth)), float(np.nanmax(depth))
         d0_global = dmin if d0_global is None else min(d0_global, dmin)
         d1_global = dmax if d1_global is None else max(d1_global, dmax)
@@ -406,18 +406,71 @@ def presentations_to_multi_well_payload(
             else str(uuid.uuid4())
         )
         doc_ids[pres.well_document_id] = doc_id
-        well: dict[str, Any] = {
-            "document_id": doc_id,
-            "axis_id": str(uuid.uuid4()),
-            "curve_id": str(uuid.uuid4()),
-            "mnemonic": mnemonic,
-            "depth_unit": pres.depth_unit or "m",
-            "value_unit": value_unit or "unit",
-            "depth": depth,
-            "values": values,
-            "width_mm": 35.0,
-        }
-        if tops_per_well is not None and i < len(tops_per_well):
+
+        use_mt = multi_track and pres.curve_track_count >= 1
+        well: dict[str, Any]
+        if use_mt:
+            try:
+                mt = presentation_to_multi_track_payload(
+                    pres,
+                    tops=(
+                        tops_per_well[i]
+                        if tops_per_well is not None and i < len(tops_per_well)
+                        else None
+                    ),
+                )
+            except EngineSubmitError:
+                use_mt = False
+                mt = None
+            if use_mt and mt is not None:
+                well = {
+                    "document_id": doc_id,
+                    "depth": mt["depth"],
+                    "depth_unit": mt["depth_unit"],
+                    "axis_id": mt.get("axis_id") or str(uuid.uuid4()),
+                    "curves": mt["curves"],
+                    "tracks": mt["tracks"],
+                    "width_mm": max(
+                        40.0, 30.0 * max(1, len(mt["tracks"]))
+                    ),
+                }
+                if mt.get("markers"):
+                    well["markers"] = mt["markers"]
+                    for m in mt["markers"]:
+                        label = str(m.get("label") or "")
+                        mid = str(m.get("id") or "")
+                        if label and mid:
+                            marker_id_by_well_name[
+                                (pres.well_document_id, label)
+                            ] = mid
+
+        if not use_mt:
+            primary = primary_curve_from_presentation(pres)
+            if primary is None:
+                raise EngineSubmitError(f"井 {pres.well_name} 无绑定曲线")
+            depth_p, values, mnemonic, value_unit = primary
+            well = {
+                "document_id": doc_id,
+                "axis_id": str(uuid.uuid4()),
+                "curve_id": str(uuid.uuid4()),
+                "mnemonic": mnemonic,
+                "depth_unit": pres.depth_unit or "m",
+                "value_unit": value_unit or "unit",
+                "depth": depth_p,
+                "values": values,
+                "width_mm": 35.0,
+            }
+            if tops_per_well is not None and i < len(tops_per_well):
+                markers = []
+                for t in tops_per_well[i]:
+                    mid = t.id if t.id and _is_uuid(t.id) else str(uuid.uuid4())
+                    marker_id_by_well_name[(pres.well_document_id, t.name)] = mid
+                    markers.append(
+                        {"id": mid, "depth": float(t.depth), "label": t.name}
+                    )
+                if markers:
+                    well["markers"] = markers
+        elif tops_per_well is not None and i < len(tops_per_well) and "markers" not in well:
             markers = []
             for t in tops_per_well[i]:
                 mid = t.id if t.id and _is_uuid(t.id) else str(uuid.uuid4())

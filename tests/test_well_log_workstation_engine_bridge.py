@@ -181,7 +181,10 @@ def test_multi_well_payload_two_wells(qtbot, tmp_path: Path, monkeypatch) -> Non
     assert len(payload["wells"]) == 2
     assert payload["shared_top"] == 1000.0
     assert payload["shared_bottom"] == 1003.0
-    assert all("depth" in w and "values" in w for w in payload["wells"])
+    for w in payload["wells"]:
+        assert "depth" in w
+        # multi-track (#232) or legacy single curve
+        assert ("curves" in w and "tracks" in w) or "values" in w
 
 
 def test_submit_multi_track_when_engine_present(
@@ -208,6 +211,32 @@ def test_submit_multi_track_when_engine_present(
     assert report.get("render_prepared") is True or "depth" in report
     if "track_count" in report:
         assert int(report["track_count"]) >= 1
+
+
+def test_multi_well_payload_has_multi_track_columns(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("WLWS_DISABLE_ENGINE", "1")
+    reset_engine_capability_cache()
+    from well_log_workstation.engine_bridge import presentations_to_multi_well_payload
+
+    ws = create_workspace(tmp_path / "mt-mw")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "a.las", "A"))
+    id2 = win.import_las_path(_write_las(tmp_path / "b.las", "B"))
+    p1 = win.apply_template_to_well(id1, "std-gr-rt-den")
+    p2 = win.apply_template_to_well(id2, "std-gr-rt-den")
+    assert p1.curve_track_count >= 1
+    payload = presentations_to_multi_well_payload([p1, p2], multi_track=True)
+    assert len(payload["wells"]) == 2
+    for well in payload["wells"]:
+        assert "curves" in well and len(well["curves"]) >= 1
+        assert "tracks" in well and len(well["tracks"]) >= 1
+        assert "depth" in well
+        # Legacy-only fields not required
+        assert "values" not in well or "curves" in well
 
 
 def test_correlation_prefers_host_without_engine(

@@ -119,8 +119,9 @@ python -m well_log_workstation
 # 层位拾取 switches to host canvas for click hit-testing, then can return to engine
 ```
 
-Correlation-lite (#228): with prefer-engine, create/open 对比图 calls
-`submit_multi_well_section` (shared depth); host `CorrelationCanvas` is fallback.
+Correlation-lite (#228 / #232): with prefer-engine, create/open 对比图 calls
+`submit_multi_well_section` (shared depth) with **multi-track per well** when
+the template has curve tracks; host `CorrelationCanvas` is fallback.
 
 Horizon links (#229–#231): tops with the **same name** on adjacent wells
 auto-link when opening a contrast plot (**图件 → 按层位名自动连线**).  

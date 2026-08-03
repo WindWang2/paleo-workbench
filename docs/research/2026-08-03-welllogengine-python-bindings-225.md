@@ -48,7 +48,7 @@ until wrappers are listed in `WELLLOG_PYTHON_GENERATED_SOURCES`.
 | G3 Interactive tops pick | Markers display via payload only; no pick API |
 | G4 Session undo for layout/overlays | Unchanged |
 | G5 Workspace catalog | Host (`well_log_workstation`) |
-| Full multi-track **per well** in multi-well section | Multi-well path still **one primary curve per well** |
+| Full multi-track **per well** in multi-well section | **#232**: `curves`+`tracks` per well in `submit_multi_well_section` (legacy single-curve retained) |
 | Grid layer / professional headers | Track header height set; no grid layer |
 | Session/command surface in Python | Still convenience bridges, not full Session binding |
 
