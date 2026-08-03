@@ -35,6 +35,7 @@ from well_log_workstation.engine_bridge import (
     engine_available,
     load_presentation_into_view,
     probe_engine,
+    submit_multi_well_presentations,
 )
 from well_log_workstation.export_plot import (
     ExportError,
@@ -152,6 +153,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_engine_preview.setObjectName("Action_EnginePreview")
         self._act_engine_preview.triggered.connect(self._on_engine_preview)
         self._act_engine_preview.setEnabled(False)
+        self._act_engine_corr = plot_menu.addAction("引擎对比预览…")
+        self._act_engine_corr.setObjectName("Action_EngineCorrelationPreview")
+        self._act_engine_corr.triggered.connect(self._on_engine_correlation_preview)
+        self._act_engine_corr.setEnabled(False)
 
         template_menu = bar.addMenu("图版")
         template_menu.setObjectName("Menu_图版")
@@ -364,6 +369,9 @@ class WellLogWorkstationWindow(QMainWindow):
 
         self._act_engine_preview.setEnabled(
             self._presentation is not None and self._presentation.curve_track_count > 0
+        )
+        self._act_engine_corr.setEnabled(
+            len(self._correlation_presentations) >= 2
         )
 
     def _update_status(self) -> None:
@@ -718,7 +726,7 @@ class WellLogWorkstationWindow(QMainWindow):
         return export_presentation_pdf(self._presentation, path)
 
     def open_engine_preview(self) -> dict[str, object]:
-        """Embed WellLogView (if available) and submit primary curve from active plot."""
+        """Embed WellLogView and submit multi-track presentation (or curve fallback)."""
         if self._presentation is None:
             raise EngineUnavailable("无活动单井图版展示")
         if not engine_available():
@@ -734,13 +742,49 @@ class WellLogWorkstationWindow(QMainWindow):
                 raise
             self._engine_placeholder.hide()
             self._engine_view_container.addWidget(self._engine_view, 1)
-        report = load_presentation_into_view(self._engine_view, self._presentation)
+        report = load_presentation_into_view(
+            self._engine_view,
+            self._presentation,
+            tops=self._active_tops,
+        )
         cap = probe_engine()
+        tracks = report.get("track_count", "?")
+        curves = report.get("curve_count", "?")
         self.engine_caption.setText(
             f"引擎预览 · {self._presentation.well_name} · "
-            f"{cap.detail} · 单曲线（非完整多图道）"
+            f"{cap.detail} · multi-track tracks={tracks} curves={curves}"
         )
         # Tab index: 0 single, 1 corr, 2 engine
+        self.document_tabs.setCurrentIndex(2)
+        self._update_status()
+        return report
+
+    def open_engine_correlation_preview(self) -> dict[str, object]:
+        """Submit correlation-lite multi-well section into WellLogView."""
+        if len(self._correlation_presentations) < 2:
+            raise EngineUnavailable("请先创建/打开 ≥2 井的地层对比图")
+        if not engine_available():
+            cap = probe_engine()
+            raise EngineUnavailable(
+                f"WellLogEngine 不可用: {cap.detail}\n"
+                "请安装 welllog-engine wheel 或将 build 产物加入 PYTHONPATH。"
+            )
+        if self._engine_view is None:
+            self._engine_view = create_well_log_view(self)
+            self._engine_placeholder.hide()
+            self._engine_view_container.addWidget(self._engine_view, 1)
+        tops_cols = self.correlation_canvas.tops_per_column()
+        depth = self.correlation_canvas.depth_range()
+        report = submit_multi_well_presentations(
+            self._engine_view,
+            self._correlation_presentations,
+            tops_per_well=tops_cols,
+            shared_depth=depth,
+        )
+        n = report.get("well_count", len(self._correlation_presentations))
+        self.engine_caption.setText(
+            f"引擎对比预览 · {n} 井 · 共享深度 · submit_multi_well_section"
+        )
         self.document_tabs.setCurrentIndex(2)
         self._update_status()
         return report
@@ -1140,9 +1184,31 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "引擎预览",
-                "已提交首条曲线到 WellLogView（可选引擎路径）。\n"
-                f"render_prepared={prepared}\n"
-                "完整多图道仍以左侧「单井分析图」主机画布为准。",
+                "已提交多图道 presentation 到 WellLogView（#225）。\n"
+                f"render_prepared={prepared} · "
+                f"tracks={report.get('track_count')} · "
+                f"curves={report.get('curve_count')}\n"
+                "主机多图道画布仍为默认路径；无引擎时自动降级。",
+            )
+        except EngineUnavailable as exc:
+            QMessageBox.warning(self, "引擎不可用", str(exc))
+        except EngineSubmitError as exc:
+            QMessageBox.warning(self, "引擎提交失败", str(exc))
+
+    def _on_engine_correlation_preview(self) -> None:
+        if len(self._correlation_presentations) < 2:
+            QMessageBox.information(
+                self, "引擎对比预览", "请先新建/打开地层对比图（≥2 井）。"
+            )
+            return
+        try:
+            report = self.open_engine_correlation_preview()
+            QMessageBox.information(
+                self,
+                "引擎对比预览",
+                "已提交 multi-well section（共享深度）。\n"
+                f"well_count={report.get('well_count')} · "
+                f"render_prepared={report.get('render_prepared')}",
             )
         except EngineUnavailable as exc:
             QMessageBox.warning(self, "引擎不可用", str(exc))

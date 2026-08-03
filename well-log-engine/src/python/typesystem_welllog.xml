@@ -5,6 +5,10 @@
     <load-typesystem name="typesystem_core.xml" generate="no"/>
 
     <namespace-type name="welllog">
+        <!-- std::string_view module fields crash Shiboken PrimitiveTypeConverter
+             (copyToPython nullptr) — reject until converters exist. -->
+        <rejection class="*" field-name="welllog_sdk_version"/>
+        <rejection class="*" field-name="manifest_sdk_requirement"/>
         <object-type name="WellLogView" parent-management="yes">
             <extra-includes>
                 <include file-name="numpy_bridge.hpp" location="local"/>
@@ -28,6 +32,15 @@
                 </inject-code>
             </add-function>
             <add-function
+                signature="submit_multi_track(PyObject*@payload@)"
+                return-type="PyObject*"
+            >
+                <inject-code class="target" position="beginning">
+                    %PYARG_0 = welllog::python::submit_multi_track(
+                        %CPPSELF, %PYARG_1);
+                </inject-code>
+            </add-function>
+            <add-function
                 signature="submit_multi_well_section(PyObject*@payload@)"
                 return-type="PyObject*"
             >
@@ -46,12 +59,8 @@
             </add-function>
         </object-type>
 
-        <!-- Virtualized Table Projection model (ADR 0022, #154). The core
-             TableProjection is bound as a value type so a Python host can pass
-             one to TableModel.set_projection(); the host builds it from a
-             session via a convenience bridge (the from_document factory needs
-             a full WellLogDocument binding, a separate follow-up). -->
-        <value-type name="TableProjection"/>
-        <object-type name="TableModel" parent-management="yes"/>
+        <!-- TableModel / TableProjection: not listed in WELLLOG_PYTHON_GENERATED_SOURCES
+             yet (CMake only compiles WellLogView wrappers). Re-enable when the
+             generated sources list and py.typed surface ship together (#225 follow-up). -->
     </namespace-type>
 </typesystem>

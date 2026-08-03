@@ -24,7 +24,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace welllog::python {
 namespace {
@@ -589,6 +591,505 @@ void dict_get_string_optional(PyObject *dict, const char *key, QString *out) {
   }
 }
 
+[[nodiscard]] RgbaColor parse_hex_color(const QString &text,
+                                        RgbaColor fallback) {
+  QString t = text.trimmed();
+  if (t.startsWith(QLatin1Char('#'))) {
+    t = t.mid(1);
+  }
+  if (t.size() == 6) {
+    bool ok = false;
+    const auto value = t.toUInt(&ok, 16);
+    if (ok) {
+      return RgbaColor{
+          .red = static_cast<std::uint8_t>((value >> 16) & 0xff),
+          .green = static_cast<std::uint8_t>((value >> 8) & 0xff),
+          .blue = static_cast<std::uint8_t>(value & 0xff),
+          .alpha = 0xff,
+      };
+    }
+  }
+  return fallback;
+}
+
+[[nodiscard]] double buffer_min_max(const BufferView &values, double *maximum) {
+  auto minimum = std::numeric_limits<double>::infinity();
+  auto max_v = -std::numeric_limits<double>::infinity();
+  for (std::uint64_t index = 0; index < values.length(); ++index) {
+    const auto value = values.value_as_double(index);
+    if (value.has_value() && std::isfinite(*value)) {
+      minimum = std::min(minimum, *value);
+      max_v = std::max(max_v, *value);
+    }
+  }
+  if (!std::isfinite(minimum) || !std::isfinite(max_v)) {
+    minimum = 0.0;
+    max_v = 1.0;
+  } else if (minimum == max_v) {
+    max_v = minimum + 1.0;
+  }
+  *maximum = max_v;
+  return minimum;
+}
+
+// Single-well multi-track (#225). Payload:
+// {
+//   document_id, depth, depth_unit,
+//   axis_id? (auto), top?, bottom?,
+//   curves: [{curve_id, mnemonic, values, value_unit}],
+//   tracks: [{width_mm?, scale_min?, scale_max?, scale_mode?,
+//             layers: [{curve_id, color?}]}],
+//   markers?: [{id, depth, label?}]
+// }
+[[nodiscard]] PyObject *
+submit_multi_track_impl(WellLogView *view, PyObject *payload) {
+  if (view == nullptr) {
+    set_welllog_error("WellLogValidationError", "invalid_view",
+                      "WellLogView is no longer valid");
+    return nullptr;
+  }
+  if (QThread::currentThread() != view->thread()) {
+    set_welllog_error("WellLogThreadError", "thread_violation",
+                      "multi-track submission must run on the Qt GUI thread");
+    return nullptr;
+  }
+  if (payload == nullptr || !PyDict_Check(payload)) {
+    set_welllog_error("WellLogValidationError", "invalid_document",
+                      "payload must be a dict");
+    return nullptr;
+  }
+
+  QString document_id_text;
+  QString depth_unit;
+  if (!dict_get_string(payload, "document_id", &document_id_text) ||
+      !dict_get_string(payload, "depth_unit", &depth_unit)) {
+    set_welllog_error("WellLogValidationError", "invalid_document",
+                      "document_id and depth_unit are required");
+    return nullptr;
+  }
+  if (depth_unit.isEmpty()) {
+    set_welllog_error("WellLogValidationError", "invalid_presentation",
+                      "depth_unit must be non-empty");
+    return nullptr;
+  }
+  auto *depth_obj = PyDict_GetItemString(payload, "depth");
+  if (depth_obj == nullptr) {
+    set_welllog_error("WellLogValidationError", "invalid_buffer",
+                      "payload.depth is required");
+    return nullptr;
+  }
+  auto *curves_obj = PyDict_GetItemString(payload, "curves");
+  auto *tracks_obj = PyDict_GetItemString(payload, "tracks");
+  if (curves_obj == nullptr || !PyList_Check(curves_obj) ||
+      PyList_Size(curves_obj) <= 0) {
+    set_welllog_error("WellLogValidationError", "invalid_document",
+                      "payload.curves must be a non-empty list");
+    return nullptr;
+  }
+  if (tracks_obj == nullptr || !PyList_Check(tracks_obj) ||
+      PyList_Size(tracks_obj) <= 0) {
+    set_welllog_error("WellLogValidationError", "invalid_document",
+                      "payload.tracks must be a non-empty list");
+    return nullptr;
+  }
+
+  const auto document_id = parse_id(document_id_text, "document_id");
+  if (!document_id) {
+    return nullptr;
+  }
+  QString axis_id_text;
+  dict_get_string_optional(payload, "axis_id", &axis_id_text);
+  if (axis_id_text.isEmpty()) {
+    axis_id_text = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  }
+  const auto axis_id = parse_id(axis_id_text, "axis_id");
+  if (!axis_id) {
+    return nullptr;
+  }
+
+  auto depth_buffer = adapt_buffer(depth_obj, "depth");
+  if (!depth_buffer) {
+    return nullptr;
+  }
+  if (depth_buffer->buffer.length() < 2) {
+    set_welllog_error("WellLogValidationError", "invalid_buffer",
+                      "depth must have at least 2 samples");
+    return nullptr;
+  }
+
+  struct CurveEntry {
+    EntityId id;
+    QString mnemonic;
+    QString value_unit;
+    AdaptedBuffer values;
+  };
+  std::vector<CurveEntry> curves;
+  curves.reserve(static_cast<std::size_t>(PyList_Size(curves_obj)));
+  std::unordered_map<std::string, std::size_t> curve_index_by_id;
+
+  WellLogDocumentBuilder builder(*document_id, DocumentRevision{1});
+  const auto depth_unit_utf8 = depth_unit.toUtf8();
+  const auto first_depth = depth_buffer->buffer.value_as_double(0).value();
+  const auto last_depth =
+      depth_buffer->buffer
+          .value_as_double(depth_buffer->buffer.length() - 1)
+          .value();
+  builder.add_sampling_axis(SamplingAxis{
+      .id = *axis_id,
+      .coordinates = depth_buffer->buffer,
+      .domain = DepthDomain::measured_depth,
+      .unit = depth_unit_utf8.constData(),
+      .direction = last_depth < first_depth ? AxisDirection::decreasing
+                                            : AxisDirection::increasing,
+  });
+
+  for (Py_ssize_t ci = 0; ci < PyList_Size(curves_obj); ++ci) {
+    auto *curve = PyList_GetItem(curves_obj, ci);
+    if (curve == nullptr || !PyDict_Check(curve)) {
+      set_welllog_error("WellLogValidationError", "invalid_document",
+                        "each curve must be a dict");
+      return nullptr;
+    }
+    QString curve_id_text;
+    QString mnemonic;
+    QString value_unit;
+    if (!dict_get_string(curve, "curve_id", &curve_id_text) ||
+        !dict_get_string(curve, "mnemonic", &mnemonic) ||
+        !dict_get_string(curve, "value_unit", &value_unit)) {
+      set_welllog_error("WellLogValidationError", "invalid_document",
+                        "curve needs curve_id, mnemonic, value_unit");
+      return nullptr;
+    }
+    if (value_unit.isEmpty()) {
+      value_unit = QStringLiteral("unit");
+    }
+    auto *values_obj = PyDict_GetItemString(curve, "values");
+    if (values_obj == nullptr) {
+      set_welllog_error("WellLogValidationError", "invalid_buffer",
+                        "curve.values is required");
+      return nullptr;
+    }
+    const auto curve_id = parse_id(curve_id_text, "curve_id");
+    if (!curve_id) {
+      return nullptr;
+    }
+    auto value_buffer = adapt_buffer(values_obj, "values");
+    if (!value_buffer) {
+      return nullptr;
+    }
+    if (value_buffer->buffer.length() != depth_buffer->buffer.length()) {
+      set_welllog_error("WellLogValidationError", "length_mismatch",
+                        "curve values length must match depth");
+      return nullptr;
+    }
+    const auto mnemonic_utf8 = mnemonic.toUtf8();
+    const auto value_unit_utf8 = value_unit.toUtf8();
+    builder.add_curve(Curve{
+        .id = *curve_id,
+        .mnemonic = mnemonic_utf8.constData(),
+        .display_name = mnemonic_utf8.constData(),
+        .unit = value_unit_utf8.constData(),
+        .sampling_axis_id = *axis_id,
+        .values = value_buffer->buffer,
+        .nulls = {},
+    });
+    curve_index_by_id[curve_id->to_string()] = curves.size();
+    curves.push_back(CurveEntry{
+        .id = *curve_id,
+        .mnemonic = mnemonic,
+        .value_unit = value_unit,
+        .values = std::move(*value_buffer),
+    });
+  }
+
+  // Optional markers
+  auto *markers_obj = PyDict_GetItemString(payload, "markers");
+  if (markers_obj != nullptr && PyList_Check(markers_obj)) {
+    const auto marker_count = PyList_Size(markers_obj);
+    for (Py_ssize_t mi = 0; mi < marker_count; ++mi) {
+      auto *marker = PyList_GetItem(markers_obj, mi);
+      if (marker == nullptr || !PyDict_Check(marker)) {
+        continue;
+      }
+      QString marker_id_text;
+      double marker_depth = 0.0;
+      QString label;
+      if (!dict_get_string(marker, "id", &marker_id_text) ||
+          !dict_get_float(marker, "depth", &marker_depth)) {
+        continue;
+      }
+      dict_get_string_optional(marker, "label", &label);
+      const auto marker_id = parse_id(marker_id_text, "marker_id");
+      if (!marker_id) {
+        PyErr_Clear();
+        continue;
+      }
+      const auto label_utf8 = label.toUtf8();
+      builder.add_marker(Marker{
+          .id = *marker_id,
+          .reference_depth = marker_depth,
+          .semantic = MarkerSemantic::formation_top,
+          .label = label_utf8.constData(),
+      });
+    }
+  }
+
+  auto built = builder.build();
+  if (built.id().is_nil()) {
+    set_welllog_error("WellLogError", "resource_exhausted",
+                      "document build failed");
+    return nullptr;
+  }
+  const auto doc_result =
+      view->session().execute(SetDocumentCommand{std::move(built)});
+  if (!doc_result.has_value()) {
+    set_result_error(doc_result.error(), "document submission");
+    return nullptr;
+  }
+
+  double top = first_depth;
+  double bottom = last_depth;
+  if (top > bottom) {
+    std::swap(top, bottom);
+  }
+  if (top == bottom) {
+    bottom = top + 1.0;
+  }
+  dict_get_float_optional(payload, "top", &top);
+  dict_get_float_optional(payload, "bottom", &bottom);
+  if (!(bottom > top)) {
+    set_welllog_error("WellLogValidationError", "invalid_viewport",
+                      "top/bottom must form a positive depth span");
+    return nullptr;
+  }
+
+  double track_width_total = 0.0;
+  ScenePresentationBuilder presentation_builder(
+      *document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = depth_unit_utf8.constData(),
+          .top = top,
+          .bottom = bottom,
+      },
+      Millimetres{100.0}, "welllog-python-multi-track");
+
+  const auto track_count = PyList_Size(tracks_obj);
+  int z_order = 0;
+  int curve_track_count = 0;
+  for (Py_ssize_t ti = 0; ti < track_count; ++ti) {
+    auto *track = PyList_GetItem(tracks_obj, ti);
+    if (track == nullptr || !PyDict_Check(track)) {
+      set_welllog_error("WellLogValidationError", "invalid_document",
+                        "each track must be a dict");
+      return nullptr;
+    }
+    auto *layers_obj = PyDict_GetItemString(track, "layers");
+    if (layers_obj == nullptr || !PyList_Check(layers_obj) ||
+        PyList_Size(layers_obj) <= 0) {
+      // Empty layers = skip (e.g. host depth-role track with no curves)
+      continue;
+    }
+    double width_mm = 40.0;
+    dict_get_float_optional(track, "width_mm", &width_mm);
+    if (width_mm < 5.0) {
+      width_mm = 5.0;
+    }
+    track_width_total += width_mm;
+    const auto track_role =
+        std::string{"welllog-python/mt-track/"} + std::to_string(ti);
+    const auto track_id = derive_presentation_id(
+        *document_id, track_role, {*document_id, *axis_id});
+    presentation_builder.add_track(TrackSpec{
+        .id = track_id,
+        .width = Millimetres{width_mm},
+        .z_order = z_order++,
+        .header = TrackHeaderSpec{.height = Millimetres{8.0},
+                                  .font_size = Millimetres{2.5}},
+    });
+
+    // Scale from first layer curve or explicit min/max
+    auto *first_layer = PyList_GetItem(layers_obj, 0);
+    QString first_curve_id_text;
+    if (first_layer != nullptr && PyDict_Check(first_layer)) {
+      dict_get_string_optional(first_layer, "curve_id", &first_curve_id_text);
+    }
+    double scale_min = 0.0;
+    double scale_max = 100.0;
+    bool have_explicit = dict_get_float(track, "scale_min", &scale_min);
+    if (!have_explicit) {
+      PyErr_Clear();
+    }
+    bool have_max = dict_get_float(track, "scale_max", &scale_max);
+    if (!have_max) {
+      PyErr_Clear();
+    }
+    if (!have_explicit || !have_max) {
+      auto it = curve_index_by_id.find(first_curve_id_text.toStdString());
+      if (it != curve_index_by_id.end()) {
+        double auto_max = 1.0;
+        const double auto_min =
+            buffer_min_max(curves[it->second].values.buffer, &auto_max);
+        if (!have_explicit) {
+          scale_min = auto_min;
+        }
+        if (!have_max) {
+          scale_max = auto_max;
+        }
+      }
+    }
+    if (!(scale_max > scale_min)) {
+      scale_max = scale_min + 1.0;
+    }
+    QString scale_mode_text;
+    dict_get_string_optional(track, "scale_mode", &scale_mode_text);
+    const ScaleMode scale_mode =
+        scale_mode_text.compare(QStringLiteral("log"), Qt::CaseInsensitive) == 0
+            ? ScaleMode::logarithmic
+            : ScaleMode::linear;
+
+    QString scale_unit = QStringLiteral("unit");
+    auto it_unit = curve_index_by_id.find(first_curve_id_text.toStdString());
+    if (it_unit != curve_index_by_id.end()) {
+      scale_unit = curves[it_unit->second].value_unit;
+    }
+    const auto scale_role =
+        std::string{"welllog-python/mt-scale/"} + std::to_string(ti);
+    const auto scale_id = derive_presentation_id(
+        *document_id, scale_role, {*document_id, *axis_id, track_id});
+    const auto scale_unit_utf8 = scale_unit.toUtf8();
+    presentation_builder.add_scale(TrackScaleSpec{
+        .id = scale_id,
+        .track_id = track_id,
+        .mode = scale_mode,
+        .minimum = scale_min,
+        .maximum = scale_max,
+        .direction = ScaleDirection::left_to_right,
+        .unit = scale_unit_utf8.constData(),
+    });
+
+    for (Py_ssize_t li = 0; li < PyList_Size(layers_obj); ++li) {
+      auto *layer = PyList_GetItem(layers_obj, li);
+      if (layer == nullptr || !PyDict_Check(layer)) {
+        continue;
+      }
+      QString layer_curve_id_text;
+      if (!dict_get_string(layer, "curve_id", &layer_curve_id_text)) {
+        continue;
+      }
+      const auto layer_curve_id = parse_id(layer_curve_id_text, "curve_id");
+      if (!layer_curve_id) {
+        PyErr_Clear();
+        continue;
+      }
+      if (curve_index_by_id.find(layer_curve_id->to_string()) ==
+          curve_index_by_id.end()) {
+        set_welllog_error("WellLogValidationError", "invalid_document",
+                          "track layer curve_id not in curves list");
+        return nullptr;
+      }
+      QString color_text;
+      dict_get_string_optional(layer, "color", &color_text);
+      const auto color = parse_hex_color(
+          color_text,
+          RgbaColor{.red = 0x19, .green = 0x72, .blue = 0xb8, .alpha = 0xff});
+      const auto layer_role = std::string{"welllog-python/mt-layer/"} +
+                              std::to_string(ti) + "/" + std::to_string(li);
+      const auto layer_id = derive_presentation_id(
+          *document_id, layer_role,
+          {*document_id, *axis_id, track_id, scale_id, *layer_curve_id});
+      presentation_builder.add_curve_layer(CurveLayerSpec{
+          .id = layer_id,
+          .track_id = track_id,
+          .curve_id = *layer_curve_id,
+          .scale_id = scale_id,
+          .color = color,
+          .line_width = Millimetres{0.35},
+          .z_order = static_cast<std::int32_t>(li),
+          .visible = true,
+      });
+    }
+    ++curve_track_count;
+  }
+
+  if (curve_track_count < 1) {
+    set_welllog_error("WellLogValidationError", "invalid_presentation",
+                      "no tracks with curve layers were provided");
+    return nullptr;
+  }
+
+  if (markers_obj != nullptr && PyList_Check(markers_obj) &&
+      PyList_Size(markers_obj) > 0) {
+    // Marker layer on the first track that has curve layers.
+    for (Py_ssize_t ti = 0; ti < track_count; ++ti) {
+      auto *track = PyList_GetItem(tracks_obj, ti);
+      auto *layers_obj =
+          track != nullptr ? PyDict_GetItemString(track, "layers") : nullptr;
+      if (layers_obj == nullptr || !PyList_Check(layers_obj) ||
+          PyList_Size(layers_obj) <= 0) {
+        continue;
+      }
+      const auto track_role =
+          std::string{"welllog-python/mt-track/"} + std::to_string(ti);
+      const auto track_id = derive_presentation_id(
+          *document_id, track_role, {*document_id, *axis_id});
+      const auto marker_layer_id = derive_presentation_id(
+          *document_id, "welllog-python/mt-marker-layer",
+          {*document_id, *axis_id, track_id});
+      presentation_builder.add_marker_layer(MarkerLayerSpec{
+          .id = marker_layer_id,
+          .track_id = track_id,
+          .z_order = 50,
+          .line_color = RgbaColor{200, 40, 40, 255},
+          .line_width = Millimetres{0.4},
+          .draw_labels = true,
+      });
+      break;
+    }
+  }
+  static_cast<void>(track_width_total);
+
+  auto presentation = presentation_builder.build();
+  if (presentation.document_id().is_nil()) {
+    set_welllog_error("WellLogError", "resource_exhausted",
+                      "presentation build failed");
+    return nullptr;
+  }
+  const auto pres_result = view->session().execute(
+      SetPresentationCommand{std::move(presentation)});
+  if (!pres_result.has_value()) {
+    set_result_error(pres_result.error(), "presentation preparation");
+    return nullptr;
+  }
+  // Clear multi-well layout so single-well multi-track is primary
+  static_cast<void>(view->session().execute(ClearWellLayoutCommand{}));
+  view->set_document_id(*document_id);
+
+  auto *report = PyDict_New();
+  if (report == nullptr) {
+    return nullptr;
+  }
+  auto *depth_report = buffer_report(*depth_buffer);
+  if (depth_report == nullptr ||
+      PyDict_SetItemString(report, "depth", depth_report) != 0 ||
+      PyDict_SetItemString(report, "curve_count",
+                           PyLong_FromLong(static_cast<long>(curves.size()))) !=
+          0 ||
+      PyDict_SetItemString(
+          report, "track_count",
+          PyLong_FromLong(static_cast<long>(curve_track_count))) != 0 ||
+      PyDict_SetItemString(report, "document_id",
+                           PyUnicode_FromString(
+                               document_id->to_string().c_str())) != 0 ||
+      PyDict_SetItemString(report, "render_prepared", Py_True) != 0) {
+    Py_XDECREF(depth_report);
+    Py_DECREF(report);
+    return nullptr;
+  }
+  Py_DECREF(depth_report);
+  return report;
+}
+
 [[nodiscard]] PyObject *
 submit_multi_well_section_impl(WellLogView *view, PyObject *payload) {
   if (view == nullptr) {
@@ -1024,6 +1525,21 @@ submit_multi_well_section_impl(WellLogView *view, PyObject *payload) {
 }
 
 } // namespace
+
+PyObject *submit_multi_track(WellLogView *view, PyObject *payload) noexcept {
+  try {
+    return submit_multi_track_impl(view, payload);
+  } catch (const std::bad_alloc &) {
+    return PyErr_NoMemory();
+  } catch (const std::exception &exc) {
+    set_welllog_error("WellLogError", "internal_error", exc.what());
+    return nullptr;
+  } catch (...) {
+    set_welllog_error("WellLogError", "internal_error",
+                      "unexpected native failure during multi-track submission");
+    return nullptr;
+  }
+}
 
 PyObject *submit_multi_well_section(WellLogView *view,
                                     PyObject *payload) noexcept {
