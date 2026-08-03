@@ -14,7 +14,8 @@ from PySide6 import QtWidgets as _PySideWidgets
 from . import _QtWidgets
 
 WellLogView = _QtWidgets.welllog.WellLogView
-TableModel = _QtWidgets.welllog.TableModel
+# TableModel may be absent from partial/extension builds — optional export.
+TableModel = getattr(_QtWidgets.welllog, "TableModel", None)
 
 __all__ = [
     "WellLogCapabilityError",

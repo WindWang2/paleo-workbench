@@ -28,6 +28,14 @@ from PySide6.QtWidgets import (
 )
 
 from well_log_workstation.correlation_canvas import CorrelationCanvas
+from well_log_workstation.engine_bridge import (
+    EngineSubmitError,
+    EngineUnavailable,
+    create_well_log_view,
+    engine_available,
+    load_presentation_into_view,
+    probe_engine,
+)
 from well_log_workstation.export_plot import (
     ExportError,
     export_presentation_pdf,
@@ -139,6 +147,11 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_new_correlation.setObjectName("Action_NewCorrelationPlot")
         self._act_new_correlation.triggered.connect(self._on_new_correlation_plot)
         self._act_new_correlation.setEnabled(False)
+        plot_menu.addSeparator()
+        self._act_engine_preview = plot_menu.addAction("打开引擎预览…")
+        self._act_engine_preview.setObjectName("Action_EnginePreview")
+        self._act_engine_preview.triggered.connect(self._on_engine_preview)
+        self._act_engine_preview.setEnabled(False)
 
         template_menu = bar.addMenu("图版")
         template_menu.setObjectName("Menu_图版")
@@ -239,8 +252,27 @@ class WellLogWorkstationWindow(QMainWindow):
         self.correlation_canvas = CorrelationCanvas()
         cl.addWidget(self.correlation_canvas, 1)
 
+        engine_host = QWidget()
+        engine_host.setObjectName("EnginePreviewHost")
+        el = QVBoxLayout(engine_host)
+        self.engine_caption = QLabel(
+            "引擎预览 (可选) · 需 welllog 包 · 当前仅单曲线 submit_curve"
+        )
+        self.engine_caption.setObjectName("EngineCaption")
+        el.addWidget(self.engine_caption)
+        self._engine_view_container = QVBoxLayout()
+        el.addLayout(self._engine_view_container, 1)
+        self._engine_view = None  # WellLogView | None
+        self._engine_placeholder = QLabel(
+            "未加载引擎视图。应用图版后使用「图件 → 打开引擎预览」。"
+        )
+        self._engine_placeholder.setObjectName("EnginePlaceholder")
+        self._engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._engine_view_container.addWidget(self._engine_placeholder)
+
         self.document_tabs.addTab(host, "单井分析图（多图道）")
         self.document_tabs.addTab(corr_host, "地层对比图-lite")
+        self.document_tabs.addTab(engine_host, "引擎预览 (可选)")
         layout.addWidget(self.document_tabs, 1)
         return pane
 
@@ -329,6 +361,10 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self._act_import_tops.setEnabled(can_tops)
         self._act_stub_tops.setEnabled(can_tops)
+
+        self._act_engine_preview.setEnabled(
+            self._presentation is not None and self._presentation.curve_track_count > 0
+        )
 
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
@@ -680,6 +716,34 @@ class WellLogWorkstationWindow(QMainWindow):
         if self._presentation is None or self._presentation.track_count < 1:
             raise ExportError("无活动单井分析图可导出（请先应用图版）")
         return export_presentation_pdf(self._presentation, path)
+
+    def open_engine_preview(self) -> dict[str, object]:
+        """Embed WellLogView (if available) and submit primary curve from active plot."""
+        if self._presentation is None:
+            raise EngineUnavailable("无活动单井图版展示")
+        if not engine_available():
+            cap = probe_engine()
+            raise EngineUnavailable(
+                f"WellLogEngine 不可用: {cap.detail}\n"
+                "请安装 welllog-engine wheel 或将 build 产物加入 PYTHONPATH。"
+            )
+        if self._engine_view is None:
+            try:
+                self._engine_view = create_well_log_view(self)
+            except EngineUnavailable:
+                raise
+            self._engine_placeholder.hide()
+            self._engine_view_container.addWidget(self._engine_view, 1)
+        report = load_presentation_into_view(self._engine_view, self._presentation)
+        cap = probe_engine()
+        self.engine_caption.setText(
+            f"引擎预览 · {self._presentation.well_name} · "
+            f"{cap.detail} · 单曲线（非完整多图道）"
+        )
+        # Tab index: 0 single, 1 corr, 2 engine
+        self.document_tabs.setCurrentIndex(2)
+        self._update_status()
+        return report
 
     def _select_well_in_tree(self, well_id: str) -> None:
         def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
@@ -1063,3 +1127,24 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "生成层位失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "生成层位失败", str(exc))
+
+    def _on_engine_preview(self) -> None:
+        if self._presentation is None:
+            QMessageBox.information(
+                self, "引擎预览", "请先应用图版或打开单井分析图。"
+            )
+            return
+        try:
+            report = self.open_engine_preview()
+            prepared = report.get("render_prepared")
+            QMessageBox.information(
+                self,
+                "引擎预览",
+                "已提交首条曲线到 WellLogView（可选引擎路径）。\n"
+                f"render_prepared={prepared}\n"
+                "完整多图道仍以左侧「单井分析图」主机画布为准。",
+            )
+        except EngineUnavailable as exc:
+            QMessageBox.warning(self, "引擎不可用", str(exc))
+        except EngineSubmitError as exc:
+            QMessageBox.warning(self, "引擎提交失败", str(exc))

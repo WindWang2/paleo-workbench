@@ -99,6 +99,22 @@ XWayland debug only:
 WLWS_FORCE_XCB=1 QT_QPA_PLATFORM=xcb python -m well_log_workstation
 ```
 
+### Optional WellLogEngine preview (#224)
+
+Default display is still host multi-track QPainter. When the `welllog` package is
+on `PYTHONPATH` / installed:
+
+```bash
+# Example using a local build of well-log-engine Python bindings:
+export PYTHONPATH="build/well-log-engine-python/python:well-log-engine/python${PYTHONPATH:+:$PYTHONPATH}"
+# Optional hard-disable:
+# export WLWS_DISABLE_ENGINE=1
+python -m well_log_workstation
+# 图件 → 打开引擎预览…  (submits first bound curve via WellLogView.submit_curve)
+```
+
+Full multi-track + tops + export remain on the host canvas until binding expansion (#225).
+
 ## Phase-1 scope (locked)
 
 | Decision | Choice |
@@ -110,4 +126,5 @@ WLWS_FORCE_XCB=1 QT_QPA_PLATFORM=xcb python -m well_log_workstation
 
 ## Ticket chain
 
-`#216`–`#223` host workstation vertical slice complete (shell → tops).
+`#216`–`#223` host workstation vertical slice complete (shell → tops).  
+`#224` optional engine preview; `#225` multi-track/session Python bindings.
