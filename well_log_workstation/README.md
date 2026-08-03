@@ -83,6 +83,9 @@ Tops are host JSON next to the well LAS (`wells/<id>/tops.json`):
 - Right pane **层位** list for the selected well  
 - Dashed depth markers on **单井** multi-track and **对比** columns  
 - **层位 → 导入层位 JSON…** / **生成示例层位**  
+- **层位 → 拾取层位（单击图道）** / **按深度添加层位…** (#226)  
+  - Pick mode: click on multi-track canvas (or **Shift+click** without mode)  
+  - Name dialog → save `tops.json` + inspector + markers  
 - Missing or corrupt files → empty list + diagnostics (no crash)
 
 Headless / CI:

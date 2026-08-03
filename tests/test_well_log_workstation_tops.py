@@ -178,6 +178,74 @@ def test_shell_tops_on_correlation(qtbot, tmp_path: Path) -> None:
     assert len(per[1]) >= 2
 
 
+def test_add_top_at_depth_persists_and_lists(qtbot, tmp_path: Path) -> None:
+    ws = create_workspace(tmp_path / "pick")
+    las = _write_las(tmp_path / "pick.las", "PICK")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(las)
+    win.apply_template_to_well(well_id, "std-gr-rt-den")
+
+    top = win.add_top_at_depth(well_id, "PickedTop", 1002.0)
+    assert top.name == "PickedTop"
+    assert top.depth == pytest.approx(1002.0)
+    assert tops_file_path(ws, well_id).is_file()
+
+    labels = [
+        win.tops_list.item(i).text() for i in range(win.tops_list.count())
+    ]
+    assert any("PickedTop" in t for t in labels)
+    canvas_names = [t.name for t in win.multi_track_canvas.tops()]
+    assert "PickedTop" in canvas_names
+
+    # Reload from disk
+    loaded, diags = load_tops_for_well(ws, well_id)
+    assert diags == []
+    assert any(t.name == "PickedTop" for t in loaded)
+
+
+def test_add_top_rejects_empty_name(qtbot, tmp_path: Path) -> None:
+    from well_log_workstation.tops_model import TopsError
+
+    ws = create_workspace(tmp_path / "empty")
+    las = _write_las(tmp_path / "e.las", "E")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(las)
+    win.apply_template_to_well(well_id, "std-gr-rt-den")
+    with pytest.raises(TopsError):
+        win.add_top_at_depth(well_id, "   ", 1001.0)
+
+
+def test_depth_at_y_and_pick_mode(qtbot, tmp_path: Path) -> None:
+    ws = create_workspace(tmp_path / "y")
+    las = _write_las(tmp_path / "y.las", "Y")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(las)
+    win.apply_template_to_well(well_id, "std-gr-rt-den")
+    canvas = win.multi_track_canvas
+    canvas.resize(600, 500)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+    canvas.set_depth_range(1000.0, 1004.0)
+    d0, d1 = canvas.depth_range()  # type: ignore[misc]
+    top_band, bottom_band = 36, canvas.height() - 16  # matches _plot_band header
+    mid_y = 0.5 * (top_band + bottom_band)
+    depth = canvas.depth_at_y(mid_y)
+    assert depth is not None
+    assert d0 <= depth <= d1
+    assert depth == pytest.approx(0.5 * (d0 + d1), abs=0.5)
+
+    canvas.set_pick_mode(True)
+    assert canvas.pick_mode() is True
+    canvas.set_pick_mode(False)
+    assert canvas.pick_mode() is False
+
+
 def test_inspector_lists_tops_on_well_select(qtbot, tmp_path: Path) -> None:
     ws = create_workspace(tmp_path / "sel")
     las = _write_las(tmp_path / "s.las", "SEL")

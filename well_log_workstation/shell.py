@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -186,6 +189,16 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_stub_tops.setObjectName("Action_StubTops")
         self._act_stub_tops.triggered.connect(self._on_stub_tops)
         self._act_stub_tops.setEnabled(False)
+        tops_menu.addSeparator()
+        self._act_pick_tops = tops_menu.addAction("拾取层位（单击图道）")
+        self._act_pick_tops.setObjectName("Action_PickTops")
+        self._act_pick_tops.setCheckable(True)
+        self._act_pick_tops.triggered.connect(self._on_toggle_pick_tops)
+        self._act_pick_tops.setEnabled(False)
+        self._act_add_top = tops_menu.addAction("按深度添加层位…")
+        self._act_add_top.setObjectName("Action_AddTopByDepth")
+        self._act_add_top.triggered.connect(self._on_add_top_by_depth)
+        self._act_add_top.setEnabled(False)
 
         help_menu = bar.addMenu("帮助")
         help_menu.setObjectName("Menu_帮助")
@@ -244,6 +257,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self.plot_caption.setObjectName("PlotCaption")
         hl.addWidget(self.plot_caption)
         self.multi_track_canvas = MultiTrackCanvas()
+        self.multi_track_canvas.top_pick_requested.connect(self._on_canvas_top_pick)
         hl.addWidget(self.multi_track_canvas, 1)
 
         corr_host = QWidget()
@@ -366,6 +380,16 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self._act_import_tops.setEnabled(can_tops)
         self._act_stub_tops.setEnabled(can_tops)
+        can_pick = (
+            can_tops
+            and self._presentation is not None
+            and self._presentation.well_document_id == self._selected_well_id
+        )
+        self._act_pick_tops.setEnabled(can_pick)
+        self._act_add_top.setEnabled(can_pick)
+        if not can_pick and self._act_pick_tops.isChecked():
+            self._act_pick_tops.setChecked(False)
+            self.multi_track_canvas.set_pick_mode(False)
 
         self._act_engine_preview.setEnabled(
             self._presentation is not None and self._presentation.curve_track_count > 0
@@ -471,6 +495,41 @@ class WellLogWorkstationWindow(QMainWindow):
         self._selected_well_id = well_id
         self._apply_tops_to_ui(well_id, tops, diags)
         return tops
+
+    def add_top_at_depth(
+        self,
+        well_id: str,
+        name: str,
+        depth: float,
+        *,
+        color: str = "#c0392b",
+        unit: str | None = None,
+    ) -> FormationTop:
+        """Add a formation top, persist, and refresh inspector/canvas (#226)."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        label = (name or "").strip()
+        if not label:
+            raise TopsError("层位名称不能为空")
+        if not math.isfinite(depth):
+            raise TopsError("深度无效")
+        tops, diags = load_tops_for_well(self._workspace, well_id)
+        depth_unit = unit or "m"
+        if self._presentation is not None:
+            depth_unit = self._presentation.depth_unit or depth_unit
+        top = FormationTop(
+            id=str(uuid.uuid4()),
+            name=label,
+            depth=float(depth),
+            unit=depth_unit,
+            color=color,
+        )
+        tops.append(top)
+        tops.sort(key=lambda t: t.depth)
+        save_tops_for_well(self._workspace, well_id, tops)
+        self._selected_well_id = well_id
+        self._apply_tops_to_ui(well_id, tops, diags)
+        return top
 
     def _load_and_apply_tops(self, well_id: str | None) -> list[FormationTop]:
         if self._workspace is None or not well_id:
@@ -1171,6 +1230,81 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "生成层位失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "生成层位失败", str(exc))
+
+    def _on_toggle_pick_tops(self, checked: bool = False) -> None:
+        enabled = bool(checked) if checked is not None else self._act_pick_tops.isChecked()
+        # Prefer checked state from action
+        enabled = self._act_pick_tops.isChecked()
+        if enabled and (
+            self._presentation is None or self._selected_well_id is None
+        ):
+            self._act_pick_tops.setChecked(False)
+            QMessageBox.information(
+                self, "拾取层位", "请先应用图版到选中井，再开启拾取。"
+            )
+            return
+        self.multi_track_canvas.set_pick_mode(enabled)
+        if enabled:
+            self.document_tabs.setCurrentIndex(0)
+            self.statusBar().showMessage(
+                "拾取层位：在单井图道上单击；Shift+单击也可 · 关闭菜单项退出",
+                8000,
+            )
+
+    def _on_canvas_top_pick(self, depth: float) -> None:
+        if self._selected_well_id is None or self._workspace is None:
+            return
+        if (
+            self._presentation is None
+            or self._presentation.well_document_id != self._selected_well_id
+        ):
+            return
+        name, ok = QInputDialog.getText(
+            self,
+            "新建层位",
+            f"深度 {depth:.3f} 的层位名称：",
+        )
+        if not ok:
+            return
+        try:
+            top = self.add_top_at_depth(self._selected_well_id, name, depth)
+            self.statusBar().showMessage(
+                f"已添加层位 {top.name} @ {top.depth:.3f}", 5000
+            )
+        except (TopsError, WorkspaceError) as exc:
+            QMessageBox.warning(self, "添加层位失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "添加层位失败", str(exc))
+
+    def _on_add_top_by_depth(self) -> None:
+        if self._selected_well_id is None or self._presentation is None:
+            QMessageBox.information(self, "添加层位", "请先选择井并应用图版。")
+            return
+        depth, ok = QInputDialog.getDouble(
+            self,
+            "按深度添加层位",
+            "深度：",
+            0.0,
+            -1e9,
+            1e9,
+            3,
+        )
+        if not ok:
+            return
+        name, ok2 = QInputDialog.getText(self, "新建层位", "层位名称：")
+        if not ok2:
+            return
+        try:
+            top = self.add_top_at_depth(self._selected_well_id, name, depth)
+            QMessageBox.information(
+                self,
+                "层位已添加",
+                f"{top.display_label()}\n已写入 wells/…/tops.json",
+            )
+        except (TopsError, WorkspaceError) as exc:
+            QMessageBox.warning(self, "添加层位失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "添加层位失败", str(exc))
 
     def _on_engine_preview(self) -> None:
         if self._presentation is None:

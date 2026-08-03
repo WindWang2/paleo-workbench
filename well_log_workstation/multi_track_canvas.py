@@ -22,6 +22,8 @@ class MultiTrackCanvas(QWidget):
     """Single-well multi-track view with shared depth window (pan/zoom)."""
 
     depth_range_changed = Signal(float, float)
+    # Emitted when user picks a depth for a new formation top (#226)
+    top_pick_requested = Signal(float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -36,8 +38,38 @@ class MultiTrackCanvas(QWidget):
         self._drag_y: int | None = None
         self._drag_d0: float | None = None
         self._drag_d1: float | None = None
+        self._pick_mode = False
+        self._press_y: int | None = None
+        self._press_x: int | None = None
+        self._did_drag = False
         self.setStyleSheet("background: #ffffff;")
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
+        self.setMouseTracking(True)
+
+    def set_pick_mode(self, enabled: bool) -> None:
+        """When True, left-click (no drag) requests a top at that depth."""
+        self._pick_mode = bool(enabled)
+        if enabled:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.unsetCursor()
+        self.update()
+
+    def pick_mode(self) -> bool:
+        return self._pick_mode
+
+    def depth_at_y(self, y: float) -> float | None:
+        """Map widget Y to depth in the current viewport, or None if outside band."""
+        if self._d0 is None or self._d1 is None:
+            return None
+        top, bottom = self._plot_band()
+        if bottom <= top:
+            return None
+        if y < top or y > bottom:
+            return None
+        t = (y - top) / (bottom - top)
+        t = max(0.0, min(1.0, t))
+        return self._d0 + t * (self._d1 - self._d0)
 
     def set_presentation(self, presentation: HostPresentation | None) -> None:
         self._presentation = presentation
@@ -123,7 +155,10 @@ class MultiTrackCanvas(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_y = int(event.position().y())
+            self._press_y = int(event.position().y())
+            self._press_x = int(event.position().x())
+            self._did_drag = False
+            self._drag_y = self._press_y
             self._drag_d0, self._drag_d1 = self._d0, self._d1
             event.accept()
 
@@ -136,7 +171,20 @@ class MultiTrackCanvas(QWidget):
             or self._d1 is None
         ):
             return
+        # In pick mode, ignore small moves; treat larger moves as pan cancel pick
         dy = int(event.position().y()) - self._drag_y
+        dx = int(event.position().x()) - (self._press_x or 0)
+        if abs(dy) > 3 or abs(dx) > 3:
+            self._did_drag = True
+        if self._pick_mode and not self._did_drag:
+            return
+        # Shift+click pick path: don't pan while Shift held without drag intent
+        if (
+            not self._pick_mode
+            and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            and not self._did_drag
+        ):
+            return
         top, bottom = self._plot_band()
         h = max(1, bottom - top)
         span = self._drag_d1 - self._drag_d0
@@ -145,11 +193,32 @@ class MultiTrackCanvas(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            y = float(event.position().y())
+            shift_held = bool(
+                event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            )
+            if not self._did_drag and (self._pick_mode or shift_held):
+                depth = self.depth_at_y(y)
+                if depth is not None:
+                    self.top_pick_requested.emit(depth)
+                    event.accept()
+                    self._drag_y = None
+                    self._press_y = None
+                    return
         self._drag_y = None
+        self._press_y = None
+        self._did_drag = False
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._pick_mode:
+                # Double-click in pick mode: still allow reset via Ctrl+double
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    self.reset_depth_range()
+                event.accept()
+                return
             self.reset_depth_range()
             event.accept()
             return
@@ -251,12 +320,14 @@ class MultiTrackCanvas(QWidget):
 
         p.setPen(QColor("#666"))
         tops_note = f" · 层位 {len(self._tops)}" if self._tops else ""
+        pick_note = " · 拾取层位中(单击)" if self._pick_mode else " · Shift+单击拾取层位"
         p.drawText(
             8,
             h - 4,
             f"{pres.well_name} · {pres.template_name} · "
             f"{pres.track_count} 图道 · {pres.depth_unit}{tops_note} · "
-            f"深度 {d0:.1f}–{d1:.1f} · 滚轮缩放 / 拖动平移 / 双击复位",
+            f"深度 {d0:.1f}–{d1:.1f} · 滚轮缩放 / 拖动平移 / 双击复位"
+            f"{pick_note}",
         )
         p.end()
 
