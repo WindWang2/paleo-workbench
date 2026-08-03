@@ -1,6 +1,6 @@
 # CI merge policy
 
-Last updated with issue **#234** (post Well Log Workstation / engine PR #233).
+Last updated with issue **#236** (re-enable Windows WellLogEngine CI matrix).
 
 ## Product merge gates (required)
 
@@ -24,13 +24,16 @@ Do **not** block merge solely on advisory red. Prefer fixing or adding an entry 
 
 ## Windows WellLogEngine
 
-**Status (as of #234 / PR #235):** matrix row **deferred** (Ubuntu-only `os`) until Actions can finish a full Windows ctest. Code for Windows is staged:
+**Status (as of #236):** matrix row **re-enabled** (`os: [ubuntu-latest, windows-latest]`) for `shared=OFF` and `shared=ON` in `.github/workflows/well-log-engine.yml`. Windows path runs with `WELLLOG_BUILD_TEXT=OFF` and `WELLLOG_BUILD_ARROW=OFF` (HarfBuzz/FreeType/ICU and Arrow not on stock Windows runners), `WELLLOG_WARNINGS_AS_ERRORS=OFF`, and a locally built zlib prefix.
 
-- Text-linked tests gated with `if(WELLLOG_BUILD_TEXT)` (multi-scale, PDF scene, export-parity).
-- MSVC portability: `std::numbers::pi_v` (no `M_PI`), `_popen`/`_pclose`, C4251/C4275 suppress, shadow renames (C4456), `WELLLOG_SCENE_API` on multi-well friends.
-- Workflow helpers: zlib prefix, empty `VCPKG_ROOT` ignored, MSVC `Werror` OFF, Ninja path after `msvc-dev-cmd`.
-- Re-enable: set `os: [ubuntu-latest, windows-latest]` in `well-log-engine.yml` and re-run.
-- **Python wheels remain Ubuntu-only** (Shiboken6/Qt aqt on Windows still open).
+Code staged in #234 that makes the Windows build clean:
+
+- Text-linked tests gated with `if(WELLLOG_BUILD_TEXT)` (multi-scale, PDF scene, export-parity), so `popen`/`pclose`/`M_PI` usage in those files never compiles on Windows.
+- `pdf_spike_test.cpp` (always built) uses `_popen`/`_pclose` under `#if defined(_WIN32)`.
+- MSVC portability: `std::numbers::pi_v` (no `M_PI`), C4251/C4275 suppress, shadow renames (C4456), `WELLLOG_SCENE_API` on multi-well friends.
+- Workflow helpers: zlib prefix, empty `VCPKG_ROOT` ignored, Ninja path pinned after `msvc-dev-cmd` (Git Bash hangs under msvc-dev-cmd env, so Windows steps use `cmd`).
+
+**Python wheels remain Ubuntu-only** (Shiboken6/Qt aqt on Windows still open).
 
 ## Hang prevention
 
@@ -40,6 +43,7 @@ Do **not** block merge solely on advisory red. Prefer fixing or adding an entry 
 
 ## Related
 
+- Issue #236 — re-enable Windows WellLogEngine CI matrix
 - Issue #234 — Windows CI + advisory suite cleanup
 - PR #233 — Well Log Workstation phase-1 + engine bridge
 - Map #207 — wayfinder product map (closed)

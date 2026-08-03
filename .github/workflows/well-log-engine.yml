@@ -34,12 +34,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows matrix temporarily deferred (#234 follow-up): MSVC portability
-        # patches are in tree (TEXT-off test gates, M_PI, _popen, C4251/C4456,
-        # friend linkage, Werror=OFF on MSVC) but need a clean Actions run to
-        # finish ctest. Re-enable windows-latest here when GHA minutes allow.
-        # See docs/ci-merge-policy.md.
-        os: [ubuntu-latest]
+        # Windows re-enabled (#236): MSVC portability patches landed in #234
+        # (TEXT-off test gating, M_PI->std::numbers, _popen, C4251/C4456,
+        # friend linkage, Werror=OFF on MSVC) and the engine tree builds clean
+        # under MSVC with TEXT=OFF / ARROW=OFF. See docs/ci-merge-policy.md.
+        os: [ubuntu-latest, windows-latest]
         shared: ["OFF", "ON"]
 
     steps:
