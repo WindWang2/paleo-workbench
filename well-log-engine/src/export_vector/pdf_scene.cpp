@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -374,7 +375,8 @@ build_pattern_body(const PatternDefinition &pattern) {
   // [cos sin −sin cos | (cos·ax − sin·ay, sin·ax + cos·ay)]. (The naive
   // T·R = [.. | (ax,ay)] only matches when θ = 0.) All in millimetres; the page
   // cm maps mm→points.
-  const auto theta = pattern.rotation_degrees * (M_PI / 180.0);
+  const auto theta =
+      pattern.rotation_degrees * (std::numbers::pi_v<double> / 180.0);
   const auto cos_t = std::cos(theta);
   const auto sin_t = std::sin(theta);
   const auto ax = pattern.scene_anchor.left.value;
@@ -603,7 +605,8 @@ void emit_text_run(PdfPathStream &stream, const PreparedScene &scene,
     // carry their own 90° glyph rotation while upright ones carry 0°, so this
     // must read glyph.rotation_degrees (matching SVG's `rotate(glyph.rotation)`)
     // rather than run.rotation_degrees.
-    const auto theta = glyph.rotation_degrees * (M_PI / 180.0);
+    const auto theta =
+        glyph.rotation_degrees * (std::numbers::pi_v<double> / 180.0);
     const auto cos_t = std::cos(theta);
     const auto sin_t = std::sin(theta);
     // M = translate(ox,oy) · rotate(θ) · scale(fs,-fs) as an affine [a b c d e f]
