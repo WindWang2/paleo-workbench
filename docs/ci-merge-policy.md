@@ -27,7 +27,8 @@ Do **not** block merge solely on advisory red. Prefer fixing or adding an entry 
 - Matrix includes `windows-latest` with **`WELLLOG_BUILD_TEXT=OFF`** and **`WELLLOG_BUILD_ARROW=OFF`**.
 - Tests that require HarfBuzz/text are gated with `if(WELLLOG_BUILD_TEXT)` in `well-log-engine/CMakeLists.txt`.
 - ZLIB is supplied via a small prebuild prefix on Windows; empty `VCPKG_ROOT` is ignored so CMake does not invent a broken toolchain path.
-- **Python wheels remain Ubuntu-only** until Shiboken6 + Qt aqt versions are aligned on Windows (tracked in #234).
+- **`WELLLOG_WARNINGS_AS_ERRORS` is OFF on Windows** (MSVC C4251/C4267/C4456 noise); Ubuntu keeps warnings-as-errors.
+- **Python wheels remain Ubuntu-only** until Shiboken6 + Qt aqt versions are aligned on Windows (follow-up beyond #234).
 
 ## Hang prevention
 
