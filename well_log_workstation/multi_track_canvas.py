@@ -1,7 +1,8 @@
 """QWidget multi-track canvas for a HostPresentation (#219).
 
-Paints depth track + curve tracks. This is the host display surface until
-Python binds engine ScenePresentation / WellLogView multi-track fully.
+Paints depth track + curve tracks with host depth pan/zoom. This is the host
+display surface until Python binds engine ScenePresentation / WellLogView
+multi-track fully.
 """
 
 from __future__ import annotations
@@ -9,8 +10,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
 from well_log_workstation.template_model import HostPresentation
@@ -18,16 +19,29 @@ from well_log_workstation.tops_model import FormationTop
 
 
 class MultiTrackCanvas(QWidget):
+    """Single-well multi-track view with shared depth window (pan/zoom)."""
+
+    depth_range_changed = Signal(float, float)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("MultiTrackCanvas")
         self.setMinimumSize(400, 400)
         self._presentation: HostPresentation | None = None
         self._tops: list[FormationTop] = []
+        self._d0: float | None = None
+        self._d1: float | None = None
+        self._data_d0: float | None = None
+        self._data_d1: float | None = None
+        self._drag_y: int | None = None
+        self._drag_d0: float | None = None
+        self._drag_d1: float | None = None
         self.setStyleSheet("background: #ffffff;")
+        self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
 
     def set_presentation(self, presentation: HostPresentation | None) -> None:
         self._presentation = presentation
+        self._fit_depth()
         self.update()
 
     def set_tops(self, tops: list[FormationTop] | None) -> None:
@@ -42,6 +56,109 @@ class MultiTrackCanvas(QWidget):
 
     def track_count(self) -> int:
         return 0 if self._presentation is None else self._presentation.track_count
+
+    def depth_range(self) -> tuple[float, float] | None:
+        if self._d0 is None or self._d1 is None:
+            return None
+        return self._d0, self._d1
+
+    def set_depth_range(self, d0: float, d1: float) -> None:
+        if d1 <= d0:
+            return
+        self._d0, self._d1 = float(d0), float(d1)
+        self.depth_range_changed.emit(self._d0, self._d1)
+        self.update()
+
+    def reset_depth_range(self) -> None:
+        """Fit viewport to full data depth (double-click)."""
+        if self._data_d0 is not None and self._data_d1 is not None:
+            self.set_depth_range(self._data_d0, self._data_d1)
+        else:
+            self._fit_depth()
+            self.update()
+
+    def _fit_depth(self) -> None:
+        self._data_d0 = self._data_d1 = None
+        self._d0 = self._d1 = None
+        if self._presentation is None:
+            return
+        depth = np.asarray(self._presentation.depth, dtype=np.float64)
+        if depth.size < 2:
+            return
+        d0, d1 = float(np.nanmin(depth)), float(np.nanmax(depth))
+        if not math.isfinite(d0) or not math.isfinite(d1) or d1 <= d0:
+            d0, d1 = 0.0, 1.0
+        self._data_d0, self._data_d1 = d0, d1
+        self._d0, self._d1 = d0, d1
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        if self._d0 is None or self._d1 is None:
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return
+        span = self._d1 - self._d0
+        factor = 0.9 if delta > 0 else 1.1
+        # Zoom toward cursor depth if possible
+        top, bottom = self._plot_band()
+        y = float(event.position().y())
+        if bottom > top:
+            t = (y - top) / (bottom - top)
+            t = max(0.0, min(1.0, t))
+            anchor = self._d0 + t * span
+        else:
+            anchor = 0.5 * (self._d0 + self._d1)
+        new_span = max(span * factor, 1e-3)
+        # Keep anchor under cursor
+        if bottom > top:
+            t = (y - top) / (bottom - top)
+            t = max(0.0, min(1.0, t))
+            new_d0 = anchor - t * new_span
+            new_d1 = new_d0 + new_span
+        else:
+            mid = 0.5 * (self._d0 + self._d1)
+            new_d0, new_d1 = mid - new_span / 2, mid + new_span / 2
+        self.set_depth_range(new_d0, new_d1)
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_y = int(event.position().y())
+            self._drag_d0, self._drag_d1 = self._d0, self._d1
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if (
+            self._drag_y is None
+            or self._drag_d0 is None
+            or self._drag_d1 is None
+            or self._d0 is None
+            or self._d1 is None
+        ):
+            return
+        dy = int(event.position().y()) - self._drag_y
+        top, bottom = self._plot_band()
+        h = max(1, bottom - top)
+        span = self._drag_d1 - self._drag_d0
+        shift = (dy / h) * span
+        self.set_depth_range(self._drag_d0 + shift, self._drag_d1 + shift)
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_y = None
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.reset_depth_range()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _plot_band(self) -> tuple[int, int]:
+        h = self.height()
+        header_h = 28
+        return 8 + header_h, h - 16
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
@@ -65,12 +182,14 @@ class MultiTrackCanvas(QWidget):
             p.end()
             return
 
-        d0, d1 = float(np.nanmin(depth)), float(np.nanmax(depth))
-        if not math.isfinite(d0) or not math.isfinite(d1) or d1 <= d0:
+        if self._d0 is None or self._d1 is None:
+            self._fit_depth()
+        d0 = self._d0 if self._d0 is not None else 0.0
+        d1 = self._d1 if self._d1 is not None else 1.0
+        if d1 <= d0:
             d0, d1 = 0.0, 1.0
 
-        header_h = 28
-        top, bottom = 8 + header_h, h - 16
+        top, bottom = self._plot_band()
         left_margin = 8
         usable_w = max(40, w - left_margin - 8)
         total_frac = sum(max(0.05, t.width_fraction) for t in pres.tracks) or 1.0
@@ -82,8 +201,8 @@ class MultiTrackCanvas(QWidget):
             tw = max(24, int(usable_w * (max(0.05, track.width_fraction) / total_frac)))
             # header
             p.setPen(QPen(QColor("#333"), 1))
-            p.drawRect(x, 8, tw - 4, header_h - 4)
-            p.drawText(x + 4, 8 + 16, track.title[:12])
+            p.drawRect(x, 8, tw - 4, 24)
+            p.drawText(x + 4, 24, track.title[:12])
 
             # track body
             p.setPen(QPen(QColor("#bbbbbb"), 1))
@@ -95,7 +214,7 @@ class MultiTrackCanvas(QWidget):
                     yy = top + int((bottom - top) * frac)
                     depth_v = d0 + (d1 - d0) * frac
                     p.drawLine(x, yy, x + 6, yy)
-                    p.drawText(x + 8, yy + 4, f"{depth_v:.0f}")
+                    p.drawText(x + 8, yy + 4, f"{depth_v:.1f}")
             else:
                 for layer in track.layers:
                     self._paint_curve(
@@ -136,7 +255,8 @@ class MultiTrackCanvas(QWidget):
             8,
             h - 4,
             f"{pres.well_name} · {pres.template_name} · "
-            f"{pres.track_count} 图道 · {pres.depth_unit}{tops_note}",
+            f"{pres.track_count} 图道 · {pres.depth_unit}{tops_note} · "
+            f"深度 {d0:.1f}–{d1:.1f} · 滚轮缩放 / 拖动平移 / 双击复位",
         )
         p.end()
 
@@ -190,8 +310,11 @@ class MultiTrackCanvas(QWidget):
             if null_mask is not None and bool(null_mask[i]):
                 prev = None
                 continue
-            v = float(vals[i])
             d = float(depth[i])
+            if d < d0 or d > d1:
+                prev = None
+                continue
+            v = float(vals[i])
             xx, yy = x_map(v), y_map(d)
             if not math.isfinite(xx) or not math.isfinite(yy):
                 prev = None

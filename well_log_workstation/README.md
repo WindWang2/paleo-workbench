@@ -43,6 +43,8 @@ With a workspace open: **文件 → 导入 LAS…**
 
 Center canvas shows **one well, multiple tracks** (depth + GR/RT/DEN when present).
 
+Depth viewport (host): **scroll wheel zoom**, **drag pan**, **double-click** reset to full range (same gestures on 对比-lite).
+
 ### 单井分析图文档 (#220)
 
 - **图件 → 新建单井分析图…** — writes `plots/<id>.json` + catalog entry, opens multi-track view  
