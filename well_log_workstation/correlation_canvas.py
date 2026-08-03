@@ -18,6 +18,8 @@ class CorrelationCanvas(QWidget):
     """Side-by-side well columns; shared depth window (pan/zoom)."""
 
     depth_range_changed = Signal(float, float)
+    # Manual link pick: well_document_id, top name, depth, top id (#231)
+    top_clicked = Signal(str, str, float, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -33,6 +35,10 @@ class CorrelationCanvas(QWidget):
         self._drag_y: int | None = None
         self._drag_d0: float | None = None
         self._drag_d1: float | None = None
+        self._link_pick_mode = False
+        self._press_y: int | None = None
+        self._did_drag = False
+        self._highlight: tuple[str, str] | None = None  # well_id, top name
 
     def set_columns(
         self,
@@ -93,6 +99,65 @@ class CorrelationCanvas(QWidget):
         self.depth_range_changed.emit(d0, d1)
         self.update()
 
+    def set_link_pick_mode(self, enabled: bool) -> None:
+        self._link_pick_mode = bool(enabled)
+        if enabled:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.unsetCursor()
+            self._highlight = None
+        self.update()
+
+    def link_pick_mode(self) -> bool:
+        return self._link_pick_mode
+
+    def set_pick_highlight(self, well_id: str | None, top_name: str | None) -> None:
+        if well_id and top_name:
+            self._highlight = (well_id, top_name)
+        else:
+            self._highlight = None
+        self.update()
+
+    def hit_test_top(
+        self, x: float, y: float, *, y_tol_px: float = 10.0
+    ) -> tuple[str, FormationTop] | None:
+        """Return (well_document_id, top) nearest to click, or None."""
+        if self._d0 is None or self._d1 is None or not self._columns:
+            return None
+        n = len(self._columns)
+        w, h = self.width(), self.height()
+        gap = 6
+        col_w = max(40, (w - 16 - gap * (n - 1)) // n)
+        top_band, bottom = 36, h - 24
+        if y < top_band or y > bottom or bottom <= top_band:
+            return None
+        # Column index from x
+        rel = x - 8
+        if rel < 0:
+            return None
+        idx = int(rel // (col_w + gap))
+        if idx < 0 or idx >= n:
+            return None
+        # x within column body
+        x0 = 8 + idx * (col_w + gap)
+        if x < x0 or x > x0 + col_w:
+            return None
+        d0, d1 = self._d0, self._d1
+        depth_at = d0 + ((y - top_band) / (bottom - top_band)) * (d1 - d0)
+        best: FormationTop | None = None
+        best_dd = float("inf")
+        for ft in self._tops_per_column[idx] if idx < len(self._tops_per_column) else []:
+            dd = abs(ft.depth - depth_at)
+            # convert depth delta to pixels
+            px = abs(dd) / (d1 - d0) * (bottom - top_band) if d1 > d0 else 1e9
+            if px <= y_tol_px and dd < best_dd:
+                best_dd = dd
+                best = ft
+        if best is None:
+            return None
+        well_id = self._columns[idx].well_document_id
+        return well_id, best
+
     def _fit_depth(self) -> None:
         mins: list[float] = []
         maxs: list[float] = []
@@ -121,7 +186,9 @@ class CorrelationCanvas(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_y = int(event.position().y())
+            self._press_y = int(event.position().y())
+            self._did_drag = False
+            self._drag_y = self._press_y
             self._drag_d0, self._drag_d1 = self._d0, self._d1
             event.accept()
 
@@ -135,6 +202,10 @@ class CorrelationCanvas(QWidget):
         ):
             return
         dy = int(event.position().y()) - self._drag_y
+        if abs(dy) > 3:
+            self._did_drag = True
+        if self._link_pick_mode and not self._did_drag:
+            return
         h = max(1, self.height() - 48)
         span = self._drag_d1 - self._drag_d0
         shift = (dy / h) * span
@@ -142,7 +213,24 @@ class CorrelationCanvas(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and not self._did_drag:
+            if self._link_pick_mode or (
+                event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
+                hit = self.hit_test_top(
+                    float(event.position().x()), float(event.position().y())
+                )
+                if hit is not None:
+                    well_id, top = hit
+                    self.top_clicked.emit(
+                        well_id, top.name, float(top.depth), top.id or ""
+                    )
+                    event.accept()
+                    self._drag_y = None
+                    self._did_drag = False
+                    return
         self._drag_y = None
+        self._did_drag = False
         event.accept()
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -238,10 +326,19 @@ class CorrelationCanvas(QWidget):
                 if not math.isfinite(ft.depth) or ft.depth < d0 or ft.depth > d1:
                     continue
                 yy = int(y_map(ft.depth))
-                pen = QPen(QColor(ft.color), 1.2, Qt.PenStyle.DashLine)
+                hl = (
+                    self._highlight is not None
+                    and self._highlight[0] == pres.well_document_id
+                    and self._highlight[1] == ft.name
+                )
+                pen = QPen(
+                    QColor("#f1c40f" if hl else ft.color),
+                    2.5 if hl else 1.2,
+                    Qt.PenStyle.DashLine,
+                )
                 p.setPen(pen)
                 p.drawLine(x0 + 2, yy, x0 + col_w - 4, yy)
-                p.setPen(QColor(ft.color))
+                p.setPen(QColor("#f1c40f" if hl else ft.color))
                 p.drawText(x0 + 4, yy - 2, ft.name[:12])
 
         # Horizon links between columns (#229)
@@ -273,11 +370,17 @@ class CorrelationCanvas(QWidget):
 
         tops_n = sum(len(t) for t in self._tops_per_column)
         links_n = len(self._links)
+        pick_note = (
+            " · 点选连线中(先后点两井层位)"
+            if self._link_pick_mode
+            else " · Shift+点层位连线"
+        )
         p.setPen(QColor("#555"))
         p.drawText(
             8,
             h - 6,
             f"对比-lite · {n} 井 · 共享深度 {d0:.1f}–{d1:.1f} · "
-            f"层位 {tops_n} · 连线 {links_n} · 滚轮缩放 / 拖动平移",
+            f"层位 {tops_n} · 连线 {links_n} · 滚轮缩放 / 拖动平移"
+            f"{pick_note}",
         )
         p.end()

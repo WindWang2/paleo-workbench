@@ -33,7 +33,11 @@ from PySide6.QtWidgets import (
 )
 
 from well_log_workstation.correlation_canvas import CorrelationCanvas
-from well_log_workstation.correlation_links import HorizonLink, match_tops_by_name
+from well_log_workstation.correlation_links import (
+    HorizonLink,
+    make_horizon_link,
+    match_tops_by_name,
+)
 from well_log_workstation.engine_bridge import (
     EngineSubmitError,
     EngineUnavailable,
@@ -99,6 +103,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._presentation: HostPresentation | None = None
         self._correlation_presentations: list[HostPresentation] = []
         self._correlation_links: list[HorizonLink] = []
+        self._link_pick_first: tuple[str, FormationTop] | None = None
         self._active_tops: list[FormationTop] = []
         self._tops_diagnostics: list[str] = []
         self._templates: list[PlotTemplate] = list_builtin_templates()
@@ -168,6 +173,11 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_clear_links.setObjectName("Action_ClearHorizonLinks")
         self._act_clear_links.triggered.connect(self._on_clear_horizon_links)
         self._act_clear_links.setEnabled(False)
+        self._act_pick_links = plot_menu.addAction("点选层位连线")
+        self._act_pick_links.setObjectName("Action_PickHorizonLinks")
+        self._act_pick_links.setCheckable(True)
+        self._act_pick_links.triggered.connect(self._on_toggle_pick_links)
+        self._act_pick_links.setEnabled(False)
         plot_menu.addSeparator()
         self._act_prefer_engine = plot_menu.addAction("优先使用引擎画布")
         self._act_prefer_engine.setObjectName("Action_PreferEngineCanvas")
@@ -318,6 +328,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self.correlation_stack = QStackedWidget()
         self.correlation_stack.setObjectName("CorrelationStack")
         self.correlation_canvas = CorrelationCanvas()
+        self.correlation_canvas.top_clicked.connect(self._on_correlation_top_clicked)
         self.correlation_stack.addWidget(self.correlation_canvas)  # 0 host
 
         self._corr_engine_page = QWidget()
@@ -465,10 +476,15 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         has_corr = len(self._correlation_presentations) >= 2
         self._act_auto_links.setEnabled(has_corr)
+        self._act_pick_links.setEnabled(has_corr)
         has_links = has_corr and len(self._correlation_links) > 0
         self._act_clear_links.setEnabled(has_links)
         self.clear_links_btn.setEnabled(has_links)
         self.remove_link_btn.setEnabled(has_links)
+        if not has_corr and self._act_pick_links.isChecked():
+            self._act_pick_links.setChecked(False)
+            self.correlation_canvas.set_link_pick_mode(False)
+            self._link_pick_first = None
 
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
@@ -1020,6 +1036,46 @@ class WellLogWorkstationWindow(QMainWindow):
             return False
         self._set_correlation_links(kept, persist=True)
         return True
+
+    def create_horizon_link(
+        self,
+        left_well_id: str,
+        left_top: FormationTop,
+        right_well_id: str,
+        right_top: FormationTop,
+        *,
+        name: str | None = None,
+    ) -> HorizonLink:
+        """Manually link two tops on different wells (#231)."""
+        if left_well_id == right_well_id:
+            raise WorkspaceError("连线两端必须是不同井")
+        # Order by column index so left is leftward on canvas
+        order = {
+            p.well_document_id: i for i, p in enumerate(self._correlation_presentations)
+        }
+        li = order.get(left_well_id, 0)
+        ri = order.get(right_well_id, 1)
+        if li > ri:
+            left_well_id, right_well_id = right_well_id, left_well_id
+            left_top, right_top = right_top, left_top
+        try:
+            link = make_horizon_link(
+                left_well_id, left_top, right_well_id, right_top, name=name
+            )
+        except ValueError as exc:
+            raise WorkspaceError(str(exc)) from exc
+        # Avoid exact duplicate ends
+        for existing in self._correlation_links:
+            if (
+                existing.left_well_id == link.left_well_id
+                and existing.right_well_id == link.right_well_id
+                and abs(existing.left_depth - link.left_depth) < 1e-6
+                and abs(existing.right_depth - link.right_depth) < 1e-6
+            ):
+                return existing
+        links = list(self._correlation_links) + [link]
+        self._set_correlation_links(links, persist=True)
+        return link
 
     def _set_correlation_links(
         self, links: list[HorizonLink], *, persist: bool
@@ -1591,6 +1647,58 @@ class WellLogWorkstationWindow(QMainWindow):
             return
         if self.remove_correlation_link(str(link_id)):
             self.statusBar().showMessage("已删除选中连线", 4000)
+
+    def _on_toggle_pick_links(self) -> None:
+        enabled = self._act_pick_links.isChecked()
+        if enabled and len(self._correlation_presentations) < 2:
+            self._act_pick_links.setChecked(False)
+            QMessageBox.information(self, "点选连线", "请先打开 ≥2 井对比图。")
+            return
+        self._link_pick_first = None
+        self.correlation_canvas.set_pick_highlight(None, None)
+        self.correlation_canvas.set_link_pick_mode(enabled)
+        # Prefer host stack for hit testing
+        if enabled:
+            self.correlation_stack.setCurrentIndex(0)
+            self.document_tabs.setCurrentIndex(1)
+            self.statusBar().showMessage(
+                "点选连线：依次点击两口井的层位虚线 · 再次点菜单退出",
+                8000,
+            )
+
+    def _on_correlation_top_clicked(
+        self, well_id: str, top_name: str, depth: float, top_id: str
+    ) -> None:
+        top = FormationTop(
+            name=top_name,
+            depth=depth,
+            id=top_id or str(uuid.uuid4()),
+        )
+        if self._link_pick_first is None:
+            self._link_pick_first = (well_id, top)
+            self.correlation_canvas.set_pick_highlight(well_id, top_name)
+            self.statusBar().showMessage(
+                f"已选 {top_name}@{depth:g} · 请点击另一口井的层位", 6000
+            )
+            return
+        first_well, first_top = self._link_pick_first
+        self._link_pick_first = None
+        self.correlation_canvas.set_pick_highlight(None, None)
+        if first_well == well_id:
+            # Restart with this pick as first
+            self._link_pick_first = (well_id, top)
+            self.correlation_canvas.set_pick_highlight(well_id, top_name)
+            self.statusBar().showMessage(
+                "请选择不同井上的层位 · 已将当前点设为起点", 5000
+            )
+            return
+        try:
+            link = self.create_horizon_link(first_well, first_top, well_id, top)
+            self.statusBar().showMessage(
+                f"已连线 {link.name}: {first_top.name} ↔ {top.name}", 5000
+            )
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "连线失败", str(exc))
 
     def _on_toggle_prefer_engine(self) -> None:
         self._prefer_engine_canvas = self._act_prefer_engine.isChecked()

@@ -57,6 +57,34 @@ class HorizonLink:
             return None
 
 
+def make_horizon_link(
+    left_well_id: str,
+    left_top: FormationTop,
+    right_well_id: str,
+    right_top: FormationTop,
+    *,
+    name: str | None = None,
+    color: str | None = None,
+) -> HorizonLink:
+    """Build a link between two tops on different wells."""
+    if left_well_id == right_well_id:
+        raise ValueError("连线两端必须是不同井")
+    label = (name or left_top.name or right_top.name or "link").strip()
+    if not label:
+        label = "link"
+    return HorizonLink(
+        id=str(uuid.uuid4()),
+        left_well_id=left_well_id,
+        right_well_id=right_well_id,
+        name=label,
+        left_depth=float(left_top.depth),
+        right_depth=float(right_top.depth),
+        left_marker_id=left_top.id or str(uuid.uuid4()),
+        right_marker_id=right_top.id or str(uuid.uuid4()),
+        color=color or left_top.color or right_top.color or "#8e44ad",
+    )
+
+
 def match_tops_by_name(
     well_ids: list[str],
     tops_by_well: dict[str, list[FormationTop]],

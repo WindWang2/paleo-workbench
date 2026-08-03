@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from well_log_workstation.correlation_links import (  # noqa: E402
     HorizonLink,
+    make_horizon_link,
     match_tops_by_name,
     links_to_engine_overlays,
 )
@@ -134,6 +135,82 @@ def test_shell_auto_links_persist(qtbot, tmp_path: Path) -> None:
     again = load_plot_document(ws, plot.id)
     assert len(again.links) >= 1
     assert again.links[0].name == "HorizonA"
+
+
+def test_make_horizon_link_rejects_same_well() -> None:
+    t1 = FormationTop(name="A", depth=1.0, id="00000000-0000-0000-0000-000000000001")
+    t2 = FormationTop(name="B", depth=2.0, id="00000000-0000-0000-0000-000000000002")
+    with pytest.raises(ValueError):
+        make_horizon_link("w1", t1, "w1", t2)
+
+
+def test_create_horizon_link_api(qtbot, tmp_path: Path) -> None:
+    ws = create_workspace(tmp_path / "manual")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "a.las", "A"))
+    id2 = win.import_las_path(_write_las(tmp_path / "b.las", "B"))
+    t1 = FormationTop(
+        name="TopX", depth=1001.0, id="00000000-0000-0000-0000-0000000000d1"
+    )
+    t2 = FormationTop(
+        name="TopY", depth=1002.5, id="00000000-0000-0000-0000-0000000000d2"
+    )
+    save_tops_for_well(ws, id1, [t1])
+    save_tops_for_well(ws, id2, [t2])
+    plot = win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    # Different names — auto match may be empty; manual still works
+    link = win.create_horizon_link(id1, t1, id2, t2, name="ManualLink")
+    assert link.name == "ManualLink"
+    assert any(lk.id == link.id for lk in win.correlation_canvas.links())
+    reloaded = load_plot_document(ws, plot.id)
+    assert any(lk.name == "ManualLink" for lk in reloaded.links)
+
+
+def test_hit_test_top_on_canvas(qtbot, tmp_path: Path) -> None:
+    ws = create_workspace(tmp_path / "hit")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "a.las", "A"))
+    id2 = win.import_las_path(_write_las(tmp_path / "b.las", "B"))
+    save_tops_for_well(
+        ws,
+        id1,
+        [
+            FormationTop(
+                name="HitMe",
+                depth=1002.0,
+                id="00000000-0000-0000-0000-0000000000e1",
+            )
+        ],
+    )
+    save_tops_for_well(
+        ws,
+        id2,
+        [
+            FormationTop(
+                name="Other",
+                depth=1002.0,
+                id="00000000-0000-0000-0000-0000000000e2",
+            )
+        ],
+    )
+    win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    canvas = win.correlation_canvas
+    canvas.resize(800, 500)
+    canvas.show()
+    qtbot.waitExposed(canvas)
+    canvas.set_depth_range(1000.0, 1004.0)
+    # Column 0 center-ish x; y for depth 1002
+    top_band, bottom = 36, canvas.height() - 24
+    y = top_band + ((1002.0 - 1000.0) / 4.0) * (bottom - top_band)
+    hit = canvas.hit_test_top(20.0, y, y_tol_px=20.0)
+    assert hit is not None
+    well_id, top = hit
+    assert well_id == id1
+    assert top.name == "HitMe"
 
 
 def test_clear_and_remove_links(qtbot, tmp_path: Path) -> None:

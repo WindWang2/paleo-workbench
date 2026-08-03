@@ -122,10 +122,11 @@ python -m well_log_workstation
 Correlation-lite (#228): with prefer-engine, create/open 对比图 calls
 `submit_multi_well_section` (shared depth); host `CorrelationCanvas` is fallback.
 
-Horizon links (#229 / #230): tops with the **same name** on adjacent wells
-auto-link when opening a contrast plot (**图件 → 按层位名自动连线**). Right pane
-**对比连线** lists them; **清除连线** / **删除选中** update canvas + `links[]`.
-Engine path submits `horizon_line` overlays.
+Horizon links (#229–#231): tops with the **same name** on adjacent wells
+auto-link when opening a contrast plot (**图件 → 按层位名自动连线**).  
+**图件 → 点选层位连线** (or Shift+click tops): pick two tops on different wells.  
+Right pane **对比连线** lists them; **清除连线** / **删除选中** update canvas +
+`links[]`. Engine path submits `horizon_line` overlays.
 
 Gap notes: `docs/research/2026-08-03-welllogengine-python-bindings-225.md`
 
