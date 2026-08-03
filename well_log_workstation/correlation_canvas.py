@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
+from well_log_workstation.correlation_links import HorizonLink
 from well_log_workstation.template_model import HostPresentation
 from well_log_workstation.tops_model import FormationTop
 
@@ -26,6 +27,7 @@ class CorrelationCanvas(QWidget):
         self._columns: list[HostPresentation] = []
         # Parallel to columns: tops per well column
         self._tops_per_column: list[list[FormationTop]] = []
+        self._links: list[HorizonLink] = []
         self._d0: float | None = None
         self._d1: float | None = None
         self._drag_y: int | None = None
@@ -36,6 +38,7 @@ class CorrelationCanvas(QWidget):
         self,
         presentations: list[HostPresentation],
         tops_per_column: list[list[FormationTop]] | None = None,
+        links: list[HorizonLink] | None = None,
     ) -> None:
         self._columns = list(presentations)
         if tops_per_column is None:
@@ -48,6 +51,8 @@ class CorrelationCanvas(QWidget):
                     self._tops_per_column.append(list(tops_per_column[i]))
                 else:
                     self._tops_per_column.append([])
+        if links is not None:
+            self._links = list(links)
         self._fit_depth()
         self.update()
 
@@ -59,6 +64,13 @@ class CorrelationCanvas(QWidget):
             else:
                 self._tops_per_column.append([])
         self.update()
+
+    def set_links(self, links: list[HorizonLink] | None) -> None:
+        self._links = list(links or [])
+        self.update()
+
+    def links(self) -> list[HorizonLink]:
+        return list(self._links)
 
     def tops_per_column(self) -> list[list[FormationTop]]:
         return [list(t) for t in self._tops_per_column]
@@ -232,12 +244,40 @@ class CorrelationCanvas(QWidget):
                 p.setPen(QColor(ft.color))
                 p.drawText(x0 + 4, yy - 2, ft.name[:12])
 
+        # Horizon links between columns (#229)
+        if self._links and n >= 2:
+            well_index = {
+                pres.well_document_id: i for i, pres in enumerate(self._columns)
+            }
+            for link in self._links:
+                li = well_index.get(link.left_well_id)
+                ri = well_index.get(link.right_well_id)
+                if li is None or ri is None:
+                    continue
+                if link.left_depth < d0 or link.left_depth > d1:
+                    continue
+                if link.right_depth < d0 or link.right_depth > d1:
+                    continue
+                lx0 = 8 + li * (col_w + gap)
+                rx0 = 8 + ri * (col_w + gap)
+                x_left = lx0 + col_w - 4
+                x_right = rx0 + 2
+                y_left = top + ((link.left_depth - d0) / (d1 - d0)) * (bottom - top)
+                y_right = top + ((link.right_depth - d0) / (d1 - d0)) * (bottom - top)
+                pen = QPen(QColor(link.color), 1.4, Qt.PenStyle.SolidLine)
+                p.setPen(pen)
+                p.drawLine(int(x_left), int(y_left), int(x_right), int(y_right))
+                mid_x = int(0.5 * (x_left + x_right))
+                mid_y = int(0.5 * (y_left + y_right))
+                p.drawText(mid_x - 10, mid_y - 2, link.name[:10])
+
         tops_n = sum(len(t) for t in self._tops_per_column)
+        links_n = len(self._links)
         p.setPen(QColor("#555"))
         p.drawText(
             8,
             h - 6,
             f"对比-lite · {n} 井 · 共享深度 {d0:.1f}–{d1:.1f} · "
-            f"层位 {tops_n} · 滚轮缩放 / 拖动平移",
+            f"层位 {tops_n} · 连线 {links_n} · 滚轮缩放 / 拖动平移",
         )
         p.end()

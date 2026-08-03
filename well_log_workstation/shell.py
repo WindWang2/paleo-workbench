@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_log_workstation.correlation_canvas import CorrelationCanvas
+from well_log_workstation.correlation_links import HorizonLink, match_tops_by_name
 from well_log_workstation.engine_bridge import (
     EngineSubmitError,
     EngineUnavailable,
@@ -97,6 +98,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._active_plot_type: str | None = None
         self._presentation: HostPresentation | None = None
         self._correlation_presentations: list[HostPresentation] = []
+        self._correlation_links: list[HorizonLink] = []
         self._active_tops: list[FormationTop] = []
         self._tops_diagnostics: list[str] = []
         self._templates: list[PlotTemplate] = list_builtin_templates()
@@ -158,6 +160,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_new_correlation.setObjectName("Action_NewCorrelationPlot")
         self._act_new_correlation.triggered.connect(self._on_new_correlation_plot)
         self._act_new_correlation.setEnabled(False)
+        self._act_auto_links = plot_menu.addAction("按层位名自动连线")
+        self._act_auto_links.setObjectName("Action_AutoHorizonLinks")
+        self._act_auto_links.triggered.connect(self._on_auto_horizon_links)
+        self._act_auto_links.setEnabled(False)
         plot_menu.addSeparator()
         self._act_prefer_engine = plot_menu.addAction("优先使用引擎画布")
         self._act_prefer_engine.setObjectName("Action_PreferEngineCanvas")
@@ -434,6 +440,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_engine_corr.setEnabled(
             len(self._correlation_presentations) >= 2
         )
+        self._act_auto_links.setEnabled(
+            len(self._correlation_presentations) >= 2
+        )
 
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
@@ -588,6 +597,7 @@ class WellLogWorkstationWindow(QMainWindow):
                 self._correlation_presentations,
                 tops_per_well=tops_cols,
                 shared_depth=depth,
+                links=self._correlation_links,
             )
             self._engine_last_error = None
             self._primary_surface = "engine"
@@ -618,11 +628,13 @@ class WellLogWorkstationWindow(QMainWindow):
             self._active_plot_type = None
             self._presentation = None
             self._correlation_presentations = []
+            self._correlation_links = []
             self._active_tops = []
             self._tops_diagnostics = []
             self.multi_track_canvas.set_presentation(None)
             self.multi_track_canvas.set_tops(None)
             self.correlation_canvas.set_columns([])
+            self.correlation_canvas.set_links(None)
             self._primary_surface = "host"
             if hasattr(self, "single_well_stack"):
                 self.single_well_stack.setCurrentIndex(0)
@@ -913,12 +925,27 @@ class WellLogWorkstationWindow(QMainWindow):
             self._active_tops = tops_cols[0] if tops_cols else []
             self._tops_diagnostics = all_diags
             self._refresh_tops_list_items(self._active_tops, all_diags)
-        self.correlation_canvas.set_columns(presentations, tops_cols)
+        # Links from document, or auto-match by top name when empty (#229)
+        links = list(plot.links)
+        if not links:
+            tops_by_well = {
+                wid: tops_cols[i] for i, wid in enumerate(plot.well_ids)
+            }
+            links = match_tops_by_name(plot.well_ids, tops_by_well)
+            if links:
+                plot.links = list(links)
+                try:
+                    save_plot_document(self._workspace, plot)
+                except WorkspaceError:
+                    pass
+        self._correlation_links = links
+        self.correlation_canvas.set_columns(presentations, tops_cols, links)
         names = " · ".join(p.well_name for p in presentations[:4])
         tops_n = sum(len(t) for t in tops_cols)
         self.correlation_caption.setText(
             f"地层对比图-lite · {names} · "
-            f"共享深度 · 图版 {template.name} · 层位 {tops_n}"
+            f"共享深度 · 图版 {template.name} · 层位 {tops_n} · "
+            f"连线 {len(links)}"
         )
         tab = f"对比 · {len(presentations)}井"
         if self._active_plot_id:
@@ -934,6 +961,38 @@ class WellLogWorkstationWindow(QMainWindow):
         self._sync_primary_correlation_surface()
         self._sync_apply_enabled()
         self._update_status()
+
+    def auto_link_correlation_tops(self) -> list[HorizonLink]:
+        """Match tops by name across adjacent wells; persist on active plot."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        if len(self._correlation_presentations) < 2:
+            raise WorkspaceError("请先打开地层对比图（≥2 井）")
+        well_ids = [p.well_document_id for p in self._correlation_presentations]
+        tops_by_well: dict[str, list[FormationTop]] = {}
+        for i, wid in enumerate(well_ids):
+            tops_by_well[wid] = (
+                self.correlation_canvas.tops_per_column()[i]
+                if i < len(self.correlation_canvas.tops_per_column())
+                else []
+            )
+        links = match_tops_by_name(well_ids, tops_by_well)
+        self._correlation_links = links
+        self.correlation_canvas.set_links(links)
+        if self._active_plot_id:
+            try:
+                plot = load_plot_document(self._workspace, self._active_plot_id)
+                plot.links = list(links)
+                save_plot_document(self._workspace, plot)
+            except WorkspaceError:
+                pass
+        # Refresh caption / engine
+        cap = self.correlation_caption.text().split(" · 连线")[0]
+        self.correlation_caption.setText(f"{cap} · 连线 {len(links)}")
+        if self._prefer_engine_canvas:
+            self._sync_primary_correlation_surface()
+        self._update_status()
+        return links
 
     def open_plot_document(self, plot_id: str) -> PlotDocument:
         """Load plot metadata and open single-well or correlation view."""
@@ -1044,6 +1103,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self._correlation_presentations,
             tops_per_well=tops_cols,
             shared_depth=depth,
+            links=self._correlation_links,
         )
 
     def _select_well_in_tree(self, well_id: str) -> None:
@@ -1428,6 +1488,18 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "生成层位失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "生成层位失败", str(exc))
+
+    def _on_auto_horizon_links(self) -> None:
+        try:
+            links = self.auto_link_correlation_tops()
+            QMessageBox.information(
+                self,
+                "自动连线",
+                f"已按层位名生成 {len(links)} 条相邻井连线。\n"
+                f"主机画布已绘制；引擎路径将作为 horizon_line 提交。",
+            )
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "自动连线失败", str(exc))
 
     def _on_toggle_prefer_engine(self) -> None:
         self._prefer_engine_canvas = self._act_prefer_engine.isChecked()

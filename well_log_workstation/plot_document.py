@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from well_log_workstation.correlation_links import HorizonLink
 from well_log_workstation.workspace import (
     PlotCatalogEntry,
     Workspace,
@@ -32,6 +33,8 @@ class PlotDocument:
     template_id: str | None
     # Relative path from workspace root
     path: str
+    # Correlation horizon links (#229); empty for single-well
+    links: list[HorizonLink] = field(default_factory=list)
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -42,7 +45,7 @@ def _plot_rel_path(plot_id: str) -> str:
 
 
 def _to_json(doc: PlotDocument) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "schemaVersion": PLOT_SCHEMA_VERSION,
         "id": doc.id,
         "name": doc.name,
@@ -50,6 +53,9 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
         "well_ids": list(doc.well_ids),
         "template_id": doc.template_id,
     }
+    if doc.links:
+        payload["links"] = [lk.to_json() for lk in doc.links]
+    return payload
 
 
 def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
@@ -62,6 +68,12 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     ptype = str(data.get("type") or "single_well")
     if ptype not in ("single_well", "correlation"):
         ptype = "single_well"
+    links: list[HorizonLink] = []
+    for raw in data.get("links") or []:
+        if isinstance(raw, dict):
+            link = HorizonLink.from_json(raw)
+            if link is not None:
+                links.append(link)
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -69,6 +81,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         well_ids=[str(x) for x in (data.get("well_ids") or [])],
         template_id=data.get("template_id"),
         path=path,
+        links=links,
     )
 
 
@@ -128,6 +141,7 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             well_ids=doc.well_ids,
             template_id=doc.template_id,
             path=rel,
+            links=list(doc.links),
         )
     return doc
 

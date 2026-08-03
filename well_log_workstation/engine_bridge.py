@@ -19,6 +19,10 @@ from typing import Any
 
 import numpy as np
 
+from well_log_workstation.correlation_links import (
+    HorizonLink,
+    links_to_engine_overlays,
+)
 from well_log_workstation.las_import import ImportedWellDocument
 from well_log_workstation.template_model import HostPresentation
 from well_log_workstation.tops_model import FormationTop
@@ -375,6 +379,7 @@ def presentations_to_multi_well_payload(
     tops_per_well: list[list[FormationTop]] | None = None,
     gap_mm: float = 5.0,
     shared_depth: tuple[float, float] | None = None,
+    links: list[HorizonLink] | None = None,
 ) -> dict[str, Any]:
     """Build ``submit_multi_well_section`` payload (primary curve per well)."""
     if len(presentations) < 1:
@@ -382,6 +387,10 @@ def presentations_to_multi_well_payload(
     wells: list[dict[str, Any]] = []
     d0_global: float | None = None
     d1_global: float | None = None
+    # well_document_id → payload document_id (usually same)
+    doc_ids: dict[str, str] = {}
+    # Ensure marker ids from tops match link marker ids when possible
+    marker_id_by_well_name: dict[tuple[str, str], str] = {}
 
     for i, pres in enumerate(presentations):
         primary = primary_curve_from_presentation(pres)
@@ -396,6 +405,7 @@ def presentations_to_multi_well_payload(
             if _is_uuid(pres.well_document_id)
             else str(uuid.uuid4())
         )
+        doc_ids[pres.well_document_id] = doc_id
         well: dict[str, Any] = {
             "document_id": doc_id,
             "axis_id": str(uuid.uuid4()),
@@ -411,6 +421,7 @@ def presentations_to_multi_well_payload(
             markers = []
             for t in tops_per_well[i]:
                 mid = t.id if t.id and _is_uuid(t.id) else str(uuid.uuid4())
+                marker_id_by_well_name[(pres.well_document_id, t.name)] = mid
                 markers.append(
                     {"id": mid, "depth": float(t.depth), "label": t.name}
                 )
@@ -426,12 +437,39 @@ def presentations_to_multi_well_payload(
     if not (shared_bottom > shared_top):
         shared_bottom = shared_top + 1.0
 
-    return {
+    payload: dict[str, Any] = {
         "gap_mm": float(gap_mm),
         "shared_top": float(shared_top),
         "shared_bottom": float(shared_bottom),
         "wells": wells,
     }
+    if links:
+        # Align marker ids with those just assigned from tops
+        fixed: list[HorizonLink] = []
+        for lk in links:
+            left_m = marker_id_by_well_name.get(
+                (lk.left_well_id, lk.name), lk.left_marker_id
+            )
+            right_m = marker_id_by_well_name.get(
+                (lk.right_well_id, lk.name), lk.right_marker_id
+            )
+            fixed.append(
+                HorizonLink(
+                    id=lk.id,
+                    left_well_id=lk.left_well_id,
+                    right_well_id=lk.right_well_id,
+                    name=lk.name,
+                    left_depth=lk.left_depth,
+                    right_depth=lk.right_depth,
+                    left_marker_id=left_m or lk.left_marker_id,
+                    right_marker_id=right_m or lk.right_marker_id,
+                    color=lk.color,
+                )
+            )
+        overlays = links_to_engine_overlays(fixed, well_document_ids=doc_ids)
+        if overlays:
+            payload["overlays"] = overlays
+    return payload
 
 
 def submit_multi_well_presentations(
@@ -441,6 +479,7 @@ def submit_multi_well_presentations(
     tops_per_well: list[list[FormationTop]] | None = None,
     gap_mm: float = 5.0,
     shared_depth: tuple[float, float] | None = None,
+    links: list[HorizonLink] | None = None,
 ) -> dict[str, object]:
     """Call WellLogView.submit_multi_well_section for correlation-lite."""
     if not hasattr(view, "submit_multi_well_section"):
@@ -452,6 +491,7 @@ def submit_multi_well_presentations(
         tops_per_well=tops_per_well,
         gap_mm=gap_mm,
         shared_depth=shared_depth,
+        links=links,
     )
     try:
         report = view.submit_multi_well_section(payload)
