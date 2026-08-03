@@ -142,5 +142,5 @@ Gap notes: `docs/research/2026-08-03-welllogengine-python-bindings-225.md`
 
 ## Ticket chain
 
-`#216`–`#223` host workstation vertical slice complete (shell → tops).  
-`#224` optional engine preview; `#225` multi-track/session Python bindings.
+Wayfinder map **#207 closed** (phase-1 path delivered): host `#216`–`#223`,
+engine bridge `#224`–`#228`, links `#229`–`#231`, multi-track multi-well `#232`.
