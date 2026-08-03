@@ -20,3 +20,14 @@ Always follow the Karpathy guidelines when writing, reviewing, or refactoring co
 - **Simplicity first** - write the minimum code that solves the problem; no speculative abstractions or unrequested configurability.
 - **Surgical changes** - touch only what the task requires; match existing style; don't refactor unrelated code.
 - **Goal-driven execution** - define verifiable success criteria (e.g., a failing test, then make it pass) and loop until met.
+
+## gstack (recommended)
+
+This project recommends [gstack](https://github.com/garrytan/gstack) for AI-assisted workflows. Install it for the best experience (requires Bun >= 1.3.10):
+
+```bash
+git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
+cd ~/.claude/skills/gstack && ./setup --team
+```
+
+After install, gstack skills like `/ship`, `/investigate`, `/browse`, `/design-shotgun`, and `/cso` become available. Note: gstack also registers `/qa` and `/review`, which shadow this repo's own `agent/skills/qa` and `agent/skills/code-review` - prefer the repo-vendored versions for project-specific review workflows. Use `/browse` for web browsing.

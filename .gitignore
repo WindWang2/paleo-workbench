@@ -46,4 +46,4 @@ native/**/*.egg-info/
 .gemini/
 .cursor/
 .claude/
-
+.gstack/
