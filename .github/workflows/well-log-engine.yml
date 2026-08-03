@@ -97,12 +97,22 @@ jobs:
           -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
           -DWELLLOG_WARNINGS_AS_ERRORS=ON
 
-      - name: Build
-        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: cmake --build build\well-log-engine --parallel
+
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
         run: cmake --build build/well-log-engine --parallel
 
-      - name: Test
-        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 2
+
+      - name: Test (Unix)
+        if: runner.os != 'Windows'
         run: ctest --test-dir build/well-log-engine --output-on-failure --parallel 2
 
   clang-sanitizers:
