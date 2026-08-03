@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
 
-if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
+# Only auto-load vcpkg when VCPKG_ROOT is a non-empty path. An empty
+# VCPKG_ROOT (common when CI clears it) is still "defined" in CMake and would
+# otherwise produce the invalid path "/scripts/buildsystems/vcpkg.cmake".
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE
+   AND DEFINED ENV{VCPKG_ROOT}
+   AND NOT "$ENV{VCPKG_ROOT}" STREQUAL "")
     set(
         CMAKE_TOOLCHAIN_FILE
         "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
