@@ -216,7 +216,7 @@ jobs:
           # exercised by the dense-curve benchmark smoke and local GPU hosts.
           xvfb-run -a ctest --test-dir build/well-log-engine-qt \
             --output-on-failure --parallel 2 \
-            --exclude-regex 'welllog\\.qt-widget$|welllog\\.qt-context-lifecycle-stress'
+            --exclude-regex 'welllog[.]qt-widget$|welllog[.]qt-context-lifecycle-stress'
 
   python-wheel:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }} wheel
