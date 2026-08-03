@@ -70,12 +70,18 @@ if(WIN32)
 else()
     set(path_separator ":")
 endif()
+# Shared installs put DLLs under bin (Windows) and .so under lib (Unix). PATH
+# alone is enough for Windows; Unix needs LD_LIBRARY_PATH for libwelllog-*.so.
 set(consumer_path "${prefix_dir}/bin${path_separator}$ENV{PATH}")
+set(consumer_lib_path
+    "${prefix_dir}/lib${path_separator}${prefix_dir}/lib64${path_separator}$ENV{LD_LIBRARY_PATH}"
+)
 
 execute_process(
     COMMAND
         "${CMAKE_COMMAND}" -E env
         "PATH=${consumer_path}"
+        "LD_LIBRARY_PATH=${consumer_lib_path}"
         "${CMAKE_CTEST_COMMAND}"
         --test-dir "${consumer_build_dir}"
         --output-on-failure ${ctest_config_args}

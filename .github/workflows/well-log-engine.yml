@@ -56,21 +56,10 @@ jobs:
           # stock Windows runners; keep core + tests green without text.
           echo "WELLLOG_BUILD_TEXT=OFF" >> $env:GITHUB_ENV
 
-      # MSVC + vcpkg zlib: stock windows-latest has no system ZLIB, and the
-      # runner may pick MinGW which also lacks it. Force the VS toolset.
+      # Force MSVC so CMake does not pick a bare MinGW without zlib.
       - name: Setup MSVC
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install zlib via vcpkg (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$GITHUB_WORKSPACE/.vcpkg-ci"
-          "$GITHUB_WORKSPACE/.vcpkg-ci/bootstrap-vcpkg.sh" -disableMetrics
-          "$GITHUB_WORKSPACE/.vcpkg-ci/vcpkg" install zlib:x64-windows --disable-metrics
-          echo "CMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.vcpkg-ci/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_ENV"
-          echo "VCPKG_TARGET_TRIPLET=x64-windows" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -78,8 +67,9 @@ jobs:
           EXTRA_FLAGS=()
           if [ "${{ runner.os }}" = "Windows" ]; then
             EXTRA_FLAGS+=(-DWELLLOG_BUILD_TEXT=OFF)
-            EXTRA_FLAGS+=(-DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN_FILE}")
-            EXTRA_FLAGS+=(-DVCPKG_TARGET_TRIPLET=x64-windows)
+            # Prefer cl from msvc-dev-cmd; FetchContent provides zlib when
+            # no system package is present (see well-log-engine/CMakeLists.txt).
+            EXTRA_FLAGS+=(-DCMAKE_CXX_COMPILER=cl)
           fi
           cmake -S well-log-engine -B build/well-log-engine -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -211,6 +201,14 @@ jobs:
         run: cmake --build build/well-log-engine-qt --parallel
 
       - name: Test with Mesa
+        env:
+          # llvmpipe needs an explicit GL 3.3 request on some runner images;
+          # without it Core Profile probes can succeed while FBO content stays white.
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+          MESA_GL_VERSION_OVERRIDE: "3.3"
+          MESA_GLSL_VERSION_OVERRIDE: "330"
+          QT_OPENGL: software
         run: >
           xvfb-run -a
           ctest --test-dir build/well-log-engine-qt
@@ -246,16 +244,6 @@ jobs:
       - name: Setup MSVC
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install zlib via vcpkg (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$GITHUB_WORKSPACE/.vcpkg-ci"
-          "$GITHUB_WORKSPACE/.vcpkg-ci/bootstrap-vcpkg.sh" -disableMetrics
-          "$GITHUB_WORKSPACE/.vcpkg-ci/vcpkg" install zlib:x64-windows --disable-metrics
-          echo "CMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.vcpkg-ci/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_ENV"
-          echo "VCPKG_TARGET_TRIPLET=x64-windows" >> "$GITHUB_ENV"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -294,7 +282,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} -DVCPKG_TARGET_TRIPLET=x64-windows"
+            # FetchContent supplies zlib; force MSVC + Ninja via scikit-build.
+            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja"
+            export CMAKE_GENERATOR=Ninja
           fi
           python -m build well-log-engine --wheel --no-isolation --outdir dist
 

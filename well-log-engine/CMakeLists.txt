@@ -23,8 +23,36 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
+include(FetchContent)
 find_package(Threads REQUIRED)
-find_package(ZLIB REQUIRED)
+# Prefer a system ZLIB; fall back to FetchContent so Windows runners without a
+# system install still configure cleanly. When fetched, we also install the
+# static archive so package.consumer's find_dependency(ZLIB) can resolve it.
+set(WELLLOG_FETCHED_ZLIB OFF)
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND)
+    message(STATUS "ZLIB not found; fetching madler/zlib 1.3.1 via FetchContent")
+    set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ZLIB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        welllog_zlib
+        URL https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+        URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(welllog_zlib)
+    if(TARGET zlibstatic AND NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+        set(WELLLOG_ZLIB_INSTALL_TARGET zlibstatic)
+    elseif(TARGET zlib AND NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlib)
+        set(WELLLOG_ZLIB_INSTALL_TARGET zlib)
+    endif()
+    if(NOT TARGET ZLIB::ZLIB)
+        message(FATAL_ERROR "Fetched zlib but no ZLIB::ZLIB target was created")
+    endif()
+    set(WELLLOG_FETCHED_ZLIB ON)
+endif()
 
 option(WELLLOG_BUILD_TESTS "Build WellLogEngine tests" ${BUILD_TESTING})
 option(WELLLOG_BUILD_SHARED "Build WellLogEngine shared libraries" OFF)
@@ -799,6 +827,31 @@ install(
     DESTINATION "${CMAKE_INSTALL_DATADIR}/welllog/schemas"
     FILES_MATCHING PATTERN "*.json"
 )
+if(WELLLOG_FETCHED_ZLIB AND DEFINED WELLLOG_ZLIB_INSTALL_TARGET)
+    # Ship the bundled static zlib next to WellLog so package.consumer can
+    # resolve ZLIB::ZLIB without a system install (Windows CI path).
+    install(
+        TARGETS ${WELLLOG_ZLIB_INSTALL_TARGET}
+        EXPORT WellLogZlibTargets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+    if(DEFINED welllog_zlib_SOURCE_DIR)
+        install(
+            FILES
+                "${welllog_zlib_SOURCE_DIR}/zlib.h"
+                "${welllog_zlib_BINARY_DIR}/zconf.h"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        )
+    endif()
+    install(
+        EXPORT WellLogZlibTargets
+        FILE WellLogZlibTargets.cmake
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/WellLog"
+    )
+endif()
 install(
     EXPORT WellLogTargets
     FILE WellLogTargets.cmake
