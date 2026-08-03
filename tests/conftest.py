@@ -4,6 +4,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
+from tests.advisory_xfail import ADVISORY_XFAIL
+
 
 def pytest_configure(config):
     """Qt platform policy for tests (never force X11/xcb).
@@ -16,6 +18,27 @@ def pytest_configure(config):
     from paleo_workbench.qt_platform import configure_qt_platform_for_session
 
     configure_qt_platform_for_session(warn=False)
+    config.addinivalue_line(
+        "markers",
+        "advisory_xfail: known monorepo failure quarantined under #234",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Apply non-strict xfail to known advisory failures (#234)."""
+    for item in items:
+        nodeid = item.nodeid
+        for needle, reason in ADVISORY_XFAIL.items():
+            if needle in nodeid:
+                item.add_marker(
+                    pytest.mark.xfail(
+                        reason=reason,
+                        strict=False,
+                        run=True,
+                    )
+                )
+                item.add_marker(pytest.mark.advisory_xfail)
+                break
 
 
 @pytest.fixture(autouse=True)

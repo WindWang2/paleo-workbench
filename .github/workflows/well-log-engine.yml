@@ -34,10 +34,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows matrix needs HarfBuzz/text or test targets gated when
-        # WELLLOG_BUILD_TEXT=OFF (several tests still link WellLog::Text).
-        # Keep Ubuntu as the required C++ gate; Windows follow-up separately.
-        os: [ubuntu-latest]
+        # Windows: WELLLOG_BUILD_TEXT=OFF; text-linked tests are gated in
+        # CMakeLists (#234). Wheels stay Ubuntu-only (Shiboken/Qt packaging).
+        os: [ubuntu-latest, windows-latest]
         shared: ["OFF", "ON"]
 
     steps:
@@ -270,8 +269,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows wheel needs Shiboken6 CMake package + matching Qt; defer
-        # until the MSVC/PySide packaging path is fully wired.
+        # Windows wheels deferred: Shiboken6 CMake package + Qt aqt pin (#234).
+        # Ubuntu wheels remain the binding gate.
         os: [ubuntu-latest]
         python-version: ["3.12", "3.13"]
 
