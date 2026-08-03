@@ -872,10 +872,12 @@ private:
   explicit PreparedScene(std::shared_ptr<const Impl> impl);
   std::shared_ptr<const Impl> impl_;
   friend class detail::ScenePreparer;
-  friend Result<PreparedScene>
+  // WELLLOG_SCENE_API must match free-function declarations below (MSVC C2375
+  // "redefinition; different linkage" on shared builds — #234).
+  friend WELLLOG_SCENE_API Result<PreparedScene>
   compose_multi_well_scene(std::span<const WellScenePlacement> wells,
                            Millimetres physical_height) noexcept;
-  friend Result<PreparedScene>
+  friend WELLLOG_SCENE_API Result<PreparedScene>
   append_surface_overlay_geometry(
       PreparedScene surface,
       std::span<const SurfaceOverlayGeometry> overlays) noexcept;

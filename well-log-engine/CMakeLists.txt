@@ -220,7 +220,13 @@ endif()
 
 function(welllog_enable_warnings target)
     if(MSVC)
-        target_compile_options("${target}" PRIVATE /W4 /permissive-)
+        # C4251/C4275: std::shared_ptr / unique_ptr members in exported PIMPL
+        # types — expected noise for MSVC shared builds; not fixable without
+        # exporting the entire STL (see #234 Windows shared=ON).
+        target_compile_options(
+            "${target}"
+            PRIVATE /W4 /permissive- /wd4251 /wd4275
+        )
         if(WELLLOG_WARNINGS_AS_ERRORS)
             target_compile_options("${target}" PRIVATE /WX)
         endif()
@@ -1089,24 +1095,27 @@ if(WELLLOG_BUILD_TESTS)
         )
     endif()
 
-    add_executable(welllog_multi_scale_tests
-        tests/integration/multi_scale_track_test.cpp
-    )
-    target_compile_features(welllog_multi_scale_tests PRIVATE cxx_std_20)
-    welllog_enable_warnings(welllog_multi_scale_tests)
-    target_compile_definitions(
-        welllog_multi_scale_tests
-        PRIVATE
-            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
-    )
-    target_link_libraries(
-        welllog_multi_scale_tests
-        PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Text WellLog::Session
-    )
-    add_test(
-        NAME welllog.multi-scale-track
-        COMMAND welllog_multi_scale_tests
-    )
+    # Multi-scale track headers exercise HarfBuzz text; skip when TEXT=OFF (#234).
+    if(WELLLOG_BUILD_TEXT)
+        add_executable(welllog_multi_scale_tests
+            tests/integration/multi_scale_track_test.cpp
+        )
+        target_compile_features(welllog_multi_scale_tests PRIVATE cxx_std_20)
+        welllog_enable_warnings(welllog_multi_scale_tests)
+        target_compile_definitions(
+            welllog_multi_scale_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_link_libraries(
+            welllog_multi_scale_tests
+            PRIVATE WellLog::ExportVector WellLog::RenderGL WellLog::Text WellLog::Session
+        )
+        add_test(
+            NAME welllog.multi-scale-track
+            COMMAND welllog_multi_scale_tests
+        )
+    endif()
 
     add_executable(welllog_crossover_fill_tests
         tests/integration/crossover_fill_test.cpp
@@ -1247,41 +1256,44 @@ if(WELLLOG_BUILD_TESTS)
     )
     add_test(NAME welllog.pdf-spike COMMAND welllog_pdf_spike_tests)
 
-    add_executable(welllog_pdf_scene_tests
-        tests/integration/pdf_scene_test.cpp
-    )
-    target_compile_features(welllog_pdf_scene_tests PRIVATE cxx_std_20)
-    welllog_enable_warnings(welllog_pdf_scene_tests)
-    target_compile_definitions(
-        welllog_pdf_scene_tests
-        PRIVATE
-            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
-    )
-    target_link_libraries(
-        welllog_pdf_scene_tests
-        PRIVATE WellLog::ExportPdf WellLog::Text WellLog::Session ZLIB::ZLIB
-    )
-    add_test(NAME welllog.pdf-scene COMMAND welllog_pdf_scene_tests)
+    # PDF scene/band text needs HarfBuzz; skip when TEXT=OFF (#234 Windows CI).
+    if(WELLLOG_BUILD_TEXT)
+        add_executable(welllog_pdf_scene_tests
+            tests/integration/pdf_scene_test.cpp
+        )
+        target_compile_features(welllog_pdf_scene_tests PRIVATE cxx_std_20)
+        welllog_enable_warnings(welllog_pdf_scene_tests)
+        target_compile_definitions(
+            welllog_pdf_scene_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_link_libraries(
+            welllog_pdf_scene_tests
+            PRIVATE WellLog::ExportPdf WellLog::Text WellLog::Session ZLIB::ZLIB
+        )
+        add_test(NAME welllog.pdf-scene COMMAND welllog_pdf_scene_tests)
 
-    add_executable(welllog_pdf_scene_full_tests
-        tests/integration/pdf_scene_full_test.cpp
-    )
-    target_compile_features(welllog_pdf_scene_full_tests PRIVATE cxx_std_20)
-    welllog_enable_warnings(welllog_pdf_scene_full_tests)
-    target_compile_definitions(
-        welllog_pdf_scene_full_tests
-        PRIVATE
-            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
-    )
-    target_include_directories(
-        welllog_pdf_scene_full_tests
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    target_link_libraries(
-        welllog_pdf_scene_full_tests
-        PRIVATE WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
-    )
-    add_test(NAME welllog.pdf-scene-full COMMAND welllog_pdf_scene_full_tests)
+        add_executable(welllog_pdf_scene_full_tests
+            tests/integration/pdf_scene_full_test.cpp
+        )
+        target_compile_features(welllog_pdf_scene_full_tests PRIVATE cxx_std_20)
+        welllog_enable_warnings(welllog_pdf_scene_full_tests)
+        target_compile_definitions(
+            welllog_pdf_scene_full_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_include_directories(
+            welllog_pdf_scene_full_tests
+            PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        )
+        target_link_libraries(
+            welllog_pdf_scene_full_tests
+            PRIVATE WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
+        )
+        add_test(NAME welllog.pdf-scene-full COMMAND welllog_pdf_scene_full_tests)
+    endif()
 
     add_executable(welllog_raster_export_tests
         tests/integration/raster_export_test.cpp
@@ -1413,25 +1425,28 @@ if(WELLLOG_BUILD_TESTS)
         add_test(NAME welllog.arrow-adapter COMMAND welllog_arrow_adapter_tests)
     endif()
 
-    add_executable(welllog_export_parity_tests
-        tests/integration/export_parity_test.cpp
-    )
-    target_compile_features(welllog_export_parity_tests PRIVATE cxx_std_20)
-    welllog_enable_warnings(welllog_export_parity_tests)
-    target_compile_definitions(
-        welllog_export_parity_tests
-        PRIVATE
-            "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
-    )
-    target_include_directories(
-        welllog_export_parity_tests
-        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    target_link_libraries(
-        welllog_export_parity_tests
-        PRIVATE WellLog::ExportVector WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
-    )
-    add_test(NAME welllog.export-parity COMMAND welllog_export_parity_tests)
+    # Export parity compares SVG/PDF with glyph outlines; needs TEXT (#234).
+    if(WELLLOG_BUILD_TEXT)
+        add_executable(welllog_export_parity_tests
+            tests/integration/export_parity_test.cpp
+        )
+        target_compile_features(welllog_export_parity_tests PRIVATE cxx_std_20)
+        welllog_enable_warnings(welllog_export_parity_tests)
+        target_compile_definitions(
+            welllog_export_parity_tests
+            PRIVATE
+                "WELLLOG_TEST_FONT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/fonts\""
+        )
+        target_include_directories(
+            welllog_export_parity_tests
+            PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        )
+        target_link_libraries(
+            welllog_export_parity_tests
+            PRIVATE WellLog::ExportVector WellLog::ExportPdf WellLog::Scene WellLog::Text WellLog::Session ZLIB::ZLIB
+        )
+        add_test(NAME welllog.export-parity COMMAND welllog_export_parity_tests)
+    endif()
 
     add_executable(welllog_table_projection_tests
         tests/integration/table_projection_test.cpp
@@ -1856,3 +1871,4 @@ if(WELLLOG_BUILD_TESTS)
         )
     endif()
 endif()
+

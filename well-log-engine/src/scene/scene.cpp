@@ -2976,16 +2976,21 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                         source->id, index, CustomPrimitiveKind::triangle,
                         triangle->fill_color);
           } else if (const auto *quad = std::get_if<CustomQuad>(&primitive)) {
-            const auto left = quad->rect.left.value;
-            const auto top = quad->rect.top.value;
-            const auto right = left + quad->rect.width.value;
-            const auto bottom = top + quad->rect.height.value;
+            // Names avoid shadowing outer track-layout `left`/`top` (MSVC C4456).
+            const auto quad_left = quad->rect.left.value;
+            const auto quad_top = quad->rect.top.value;
+            const auto quad_right = quad_left + quad->rect.width.value;
+            const auto quad_bottom = quad_top + quad->rect.height.value;
             emit_filled(
                 std::vector<PhysicalPoint>{
-                    PhysicalPoint{.left = Millimetres{left}, .top = Millimetres{top}},
-                    PhysicalPoint{.left = Millimetres{right}, .top = Millimetres{top}},
-                    PhysicalPoint{.left = Millimetres{right}, .top = Millimetres{bottom}},
-                    PhysicalPoint{.left = Millimetres{left}, .top = Millimetres{bottom}}},
+                    PhysicalPoint{.left = Millimetres{quad_left},
+                                  .top = Millimetres{quad_top}},
+                    PhysicalPoint{.left = Millimetres{quad_right},
+                                  .top = Millimetres{quad_top}},
+                    PhysicalPoint{.left = Millimetres{quad_right},
+                                  .top = Millimetres{quad_bottom}},
+                    PhysicalPoint{.left = Millimetres{quad_left},
+                                  .top = Millimetres{quad_bottom}}},
                 source->id, index, CustomPrimitiveKind::quad, quad->fill_color);
           } else {
             const auto &symbol =
@@ -3123,10 +3128,10 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
             symbol_display > depth_range.bottom) {
           continue;
         }
-        const auto top = depth_to_top(symbol.reference_depth);
-        const auto left = bounds->second.left.value +
-                          symbol.track_fraction * bounds->second.width.value;
-        if (!std::isfinite(top) || !std::isfinite(left)) {
+        const auto symbol_top = depth_to_top(symbol.reference_depth);
+        const auto symbol_left = bounds->second.left.value +
+                                 symbol.track_fraction * bounds->second.width.value;
+        if (!std::isfinite(symbol_top) || !std::isfinite(symbol_left)) {
           continue;
         }
         scene->symbols.push_back(PreparedSymbol{
@@ -3134,8 +3139,8 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
             .symbol_id = symbol.id,
             .center =
                 PhysicalPoint{
-                    .left = Millimetres{left},
-                    .top = Millimetres{top},
+                    .left = Millimetres{symbol_left},
+                    .top = Millimetres{symbol_top},
                 },
             .kind = symbol.kind,
             .reference_depth = symbol.reference_depth,

@@ -34,9 +34,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows matrix needs HarfBuzz/text or test targets gated when
-        # WELLLOG_BUILD_TEXT=OFF (several tests still link WellLog::Text).
-        # Keep Ubuntu as the required C++ gate; Windows follow-up separately.
+        # Windows matrix temporarily deferred (#234 follow-up): MSVC portability
+        # patches are in tree (TEXT-off test gates, M_PI, _popen, C4251/C4456,
+        # friend linkage, Werror=OFF on MSVC) but need a clean Actions run to
+        # finish ctest. Re-enable windows-latest here when GHA minutes allow.
+        # See docs/ci-merge-policy.md.
         os: [ubuntu-latest]
         shared: ["OFF", "ON"]
 
@@ -90,6 +92,8 @@ jobs:
         shell: cmd
         env:
           VCPKG_ROOT: ""
+        # WARNINGS_AS_ERRORS off on MSVC: C4251/C4267/C4456 noise on shared
+        # PIMPL + zlib size_t→uLong is endemic; Ubuntu keeps /Werror (#234).
         run: >
           set PATH=C:\ProgramData\chocolatey\bin;%PATH%
           && cmake -S well-log-engine -B build\well-log-engine -G Ninja
@@ -97,7 +101,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DWELLLOG_BUILD_TESTS=ON
           -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
-          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+          -DWELLLOG_WARNINGS_AS_ERRORS=OFF
           -DWELLLOG_BUILD_TEXT=OFF
           -DWELLLOG_BUILD_ARROW=OFF
           -DCMAKE_CXX_COMPILER=cl
@@ -270,8 +274,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows wheel needs Shiboken6 CMake package + matching Qt; defer
-        # until the MSVC/PySide packaging path is fully wired.
+        # Windows wheels deferred: Shiboken6 CMake package + Qt aqt pin (#234).
+        # Ubuntu wheels remain the binding gate.
         os: [ubuntu-latest]
         python-version: ["3.12", "3.13"]
 

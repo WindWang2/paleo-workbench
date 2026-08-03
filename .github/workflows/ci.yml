@@ -7,10 +7,9 @@ on:
     branches: [main, master]
 
 jobs:
-  # Full monorepo suite. Pre-existing hang after ~4% on GHA (outer `timeout`
-  # exits 124; pytest-timeout signal cannot interrupt native/Qt). Treated as
-  # **advisory** so product PRs can merge when the focused gates below pass.
-  # Prefer fixing the hung test over relying on continue-on-error long-term.
+  # Full monorepo suite — advisory (see docs/ci-merge-policy.md, issue #234).
+  # Known failures: tests/advisory_xfail.py. continue-on-error until suite is
+  # fully green without quarantine.
   test:
     name: Tests (Python ${{ matrix.python-version }}) [advisory]
     runs-on: ubuntu-latest
@@ -183,7 +182,7 @@ jobs:
             --timeout-method=thread \
             tests/test_well_log_workstation_*.py
 
-  # Explicit product merge gate for Well Log Workstation / engine PRs.
+  # Explicit product merge gate. See docs/ci-merge-policy.md.
   # Cross-workflow: WellLogEngine C++ must also be green (separate workflow).
   merge-gate:
     name: Merge gate (workstation host)
@@ -193,5 +192,6 @@ jobs:
       - name: Confirm product gates
         run: |
           echo "Well Log Workstation (host) matrix is green."
-          echo "Also require workflow 'WellLogEngine C++' on the same SHA (Ubuntu matrix)."
+          echo "Also require workflow 'WellLogEngine C++' on the same SHA."
           echo "Full monorepo Tests (Python) [advisory] is not a merge blocker."
+          echo "Policy: docs/ci-merge-policy.md (#234)."
