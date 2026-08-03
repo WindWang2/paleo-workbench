@@ -61,15 +61,27 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      # Build a small zlib install prefix (FetchContent mid-configure can hang
+      # on some Windows runners). CMAKE_PREFIX_PATH makes find_package(ZLIB) work.
+      - name: Build zlib for Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          curl -L -o zlib.tgz https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+          tar -xzf zlib.tgz
+          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
+          cmake --build zlib-build --parallel
+          cmake --install zlib-build
+          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%\zlib-prefix>> %GITHUB_ENV%
+
       - name: Configure
         shell: bash
         run: |
           EXTRA_FLAGS=()
           if [ "${{ runner.os }}" = "Windows" ]; then
             EXTRA_FLAGS+=(-DWELLLOG_BUILD_TEXT=OFF)
-            # Prefer cl from msvc-dev-cmd; FetchContent provides zlib when
-            # no system package is present (see well-log-engine/CMakeLists.txt).
             EXTRA_FLAGS+=(-DCMAKE_CXX_COMPILER=cl)
+            EXTRA_FLAGS+=(-DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}")
           fi
           cmake -S well-log-engine -B build/well-log-engine -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -249,6 +261,17 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Build zlib for Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          curl -L -o zlib.tgz https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+          tar -xzf zlib.tgz
+          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
+          cmake --build zlib-build --parallel
+          cmake --install zlib-build
+          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%\zlib-prefix>> %GITHUB_ENV%
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -286,8 +309,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            # FetchContent supplies zlib; force MSVC + Ninja via scikit-build.
-            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja"
+            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
             export CMAKE_GENERATOR=Ninja
           fi
           python -m build well-log-engine --wheel --no-isolation --outdir dist
