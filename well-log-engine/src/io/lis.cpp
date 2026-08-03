@@ -638,7 +638,10 @@ constexpr std::string_view resform_compatible_v1_identity_component =
     const auto exponent = static_cast<int>(encoded & 0x000fU);
     auto fraction = static_cast<std::uint16_t>((encoded & 0x7ff0U) >> 4U);
     if (sign) {
-      fraction = static_cast<std::uint16_t>((~fraction + 1U) & 0x07ffU);
+      // Two's-complement of the 11-bit fraction without promoting ~uint16
+      // through a signed int (Clang -Wsign-conversion).
+      fraction = static_cast<std::uint16_t>(
+          (0U - static_cast<unsigned>(fraction)) & 0x07ffU);
     }
     return (sign ? -1.0 : 1.0) *
            std::ldexp(static_cast<double>(fraction) / 2048.0, exponent);

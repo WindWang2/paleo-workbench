@@ -24,8 +24,11 @@ namespace {
 }
 
 [[nodiscard]] std::uint16_t read_u16_le(const std::byte *p) {
-  return static_cast<std::uint16_t>(static_cast<std::uint8_t>(p[0])) |
-         (static_cast<std::uint16_t>(static_cast<std::uint8_t>(p[1])) << 8);
+  // Cast the full expression: the `|` of two promoted ints is an `int` under
+  // usual arithmetic conversions; Clang -Wimplicit-int-conversion flags that.
+  return static_cast<std::uint16_t>(
+      static_cast<std::uint16_t>(static_cast<std::uint8_t>(p[0])) |
+      (static_cast<std::uint16_t>(static_cast<std::uint8_t>(p[1])) << 8));
 }
 
 [[nodiscard]] std::uint32_t read_u32_le(const std::byte *p) {

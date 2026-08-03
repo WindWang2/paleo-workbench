@@ -452,16 +452,27 @@ std::vector<std::string> inflate_all_streams(std::string_view bytes) {
     if (inflateInit(&zs) != Z_OK) {
       break;
     }
-    std::string sink(compressed.size() * 8 + 4096, '\0');
-    zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(compressed.data()));
+    // Grow the output buffer until inflate finishes — dense page content
+    // (glyphs + patterns) can exceed a fixed compressed×N estimate and was
+    // previously dropped, under-counting pagination band cms.
+    std::string sink(std::max<std::size_t>(compressed.size() * 16, 65536),
+                     '\0');
+    zs.next_in =
+        reinterpret_cast<Bytef *>(const_cast<char *>(compressed.data()));
     zs.avail_in = static_cast<uInt>(compressed.size());
-    zs.next_out = reinterpret_cast<Bytef *>(sink.data());
-    zs.avail_out = static_cast<uInt>(sink.size());
-    const auto rc = inflate(&zs, Z_FINISH);
-    inflateEnd(&zs);
+    int rc = Z_OK;
+    do {
+      if (zs.total_out >= sink.size()) {
+        sink.resize(sink.size() * 2, '\0');
+      }
+      zs.next_out = reinterpret_cast<Bytef *>(sink.data() + zs.total_out);
+      zs.avail_out = static_cast<uInt>(sink.size() - zs.total_out);
+      rc = inflate(&zs, Z_FINISH);
+    } while (rc == Z_BUF_ERROR || (rc == Z_OK && zs.avail_out == 0));
     if (rc == Z_STREAM_END) {
       out.emplace_back(sink.data(), zs.total_out);
     }
+    inflateEnd(&zs);
     search = endstream;
   }
   return out;
@@ -697,34 +708,14 @@ void depth_range_bands_are_emitted_and_continuous() {
        (p = fixed_bytes.find("/Type /Page ", p)) != std::string::npos;
        ++fixed_pages, p += 11) {
   }
-  // Every page emits one band cm → depth-range continuity (criterion 3). The
-  // content streams are Flate-compressed and binary, so count band cms in a
-  // qpdf --qdf decompression (qpdf is the same external tool the validity check
-  // uses); when qpdf is absent, fall back to asserting each page-content stream
-  // (parsed via the object table) carries a band cm.
-  bool qpdf_available = std::filesystem::exists("/usr/sbin/qpdf") ||
-                        std::filesystem::exists("/usr/bin/qpdf");
+  // Every page emits one band cm → depth-range continuity (criterion 3).
+  // Count from inflated object streams (not qpdf --qdf): QDF rewrites can
+  // merge/drop content streams so the band-cm total no longer equals page
+  // count on some qpdf versions, while the page-model check below remains
+  // the authoritative continuity assertion.
   std::size_t band_cms = 0;
-  if (qpdf_available) {
-    const auto in_path = write_temp(fixed_bytes);
-    const auto qdf_path =
-        std::filesystem::temp_directory_path() / "welllog_pdf_full_qdf.pdf";
-    std::string captured;
-    const auto rc = run("qpdf --qdf --object-streams=disable " +
-                            in_path.string() + " " + qdf_path.string() + " 2>&1",
-                        captured);
-    require(rc == 0, "qpdf --qdf must accept the fixed PDF: " + captured);
-    std::ifstream qdf(qdf_path, std::ios::binary);
-    const std::string qdf_bytes((std::istreambuf_iterator<char>(qdf)),
-                                std::istreambuf_iterator<char>());
-    band_cms = count_band_cms(qdf_bytes);
-    std::error_code ec;
-    std::filesystem::remove(in_path, ec);
-    std::filesystem::remove(qdf_path, ec);
-  } else {
-    for (const auto &stream : inflate_all_streams(fixed_bytes)) {
-      band_cms += count_band_cms(stream);
-    }
+  for (const auto &stream : inflate_all_streams(fixed_bytes)) {
+    band_cms += count_band_cms(stream);
   }
   require(band_cms == fixed_pages,
           "each fixed page must emit one pagination band cm (depth-range "

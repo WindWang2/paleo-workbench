@@ -5,11 +5,12 @@
 #include <span>
 #include <vector>
 
+#include <welllog/render_gl/export.hpp>
 #include <welllog/scene/scene.hpp>
 
 namespace welllog::detail {
 
-struct RasterImage {
+struct WELLLOG_RENDER_GL_API RasterImage {
   std::uint32_t width{};
   std::uint32_t height{};
   std::uint32_t channels{4};
@@ -20,11 +21,12 @@ struct RasterImage {
 // primitives) into an RGBA image. Rotation is not applied here; the
 // shader rotates tile coordinates around the scene anchor, matching the
 // vector export's patternTransform.
-[[nodiscard]] RasterImage
+// Exported so unit tests can link against shared libwelllog-render-gl.
+[[nodiscard]] WELLLOG_RENDER_GL_API RasterImage
 rasterize_pattern_tile(const PatternDefinition &pattern,
                        double pixels_per_millimetre);
 
-struct GlyphRaster {
+struct WELLLOG_RENDER_GL_API GlyphRaster {
   std::uint32_t width{};
   std::uint32_t height{};
   // Em-space position of the bitmap's left and top edges relative to the
@@ -37,13 +39,13 @@ struct GlyphRaster {
 
 // Rasterizes a glyph outline (em fractions, y-up) into an 8-bit alpha
 // bitmap with a one-pixel pad and 2x2 supersampling.
-[[nodiscard]] GlyphRaster
+[[nodiscard]] WELLLOG_RENDER_GL_API GlyphRaster
 rasterize_glyph_outline(std::span<const OutlineCommand> commands,
                         double left_em, double bottom_em, double right_em,
                         double top_em, double pixels_per_em);
 
 // Deterministic shelf packer for texture atlases.
-class ShelfAtlasPacker {
+class WELLLOG_RENDER_GL_API ShelfAtlasPacker {
 public:
   struct Rect {
     std::uint32_t left{};

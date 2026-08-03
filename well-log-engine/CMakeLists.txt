@@ -1603,6 +1603,14 @@ if(WELLLOG_BUILD_TESTS)
             tests/qt/well_log_view_test.cpp
         )
         welllog_enable_warnings(welllog_qt_widget_tests)
+        # Qt Test macros (QTRY_*_WITH_TIMEOUT) convert chrono::milliseconds::rep
+        # (long) to int under -Wconversion; the macros are third-party.
+        if(NOT MSVC)
+            target_compile_options(
+                welllog_qt_widget_tests
+                PRIVATE -Wno-conversion -Wno-sign-conversion
+            )
+        endif()
         target_link_libraries(
             welllog_qt_widget_tests
             PRIVATE WellLog::QtWidgets Qt6::Test
@@ -1630,6 +1638,12 @@ if(WELLLOG_BUILD_TESTS)
             tests/qt/context_lifecycle_stress_test.cpp
         )
         welllog_enable_warnings(welllog_qt_context_lifecycle_stress_tests)
+        if(NOT MSVC)
+            target_compile_options(
+                welllog_qt_context_lifecycle_stress_tests
+                PRIVATE -Wno-conversion -Wno-sign-conversion
+            )
+        endif()
         target_link_libraries(
             welllog_qt_context_lifecycle_stress_tests
             PRIVATE WellLog::QtWidgets Qt6::Test

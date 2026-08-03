@@ -1323,8 +1323,8 @@ Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
           .base_bucket_samples = 16,
           .maximum_derived_bytes = per_curve_budget,
       };
-      task->worker = std::jthread([document, state, per_curve_budget,
-                                   image_pyramid_options, reuse_map,
+      task->worker = std::jthread([document, state, image_pyramid_options,
+                                   reuse_map,
                                    build_options](std::stop_token stop_token) {
         auto output = LodBuildOutput{};
         try {
