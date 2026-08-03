@@ -102,21 +102,23 @@ XWayland debug only:
 WLWS_FORCE_XCB=1 QT_QPA_PLATFORM=xcb python -m well_log_workstation
 ```
 
-### Optional WellLogEngine preview (#224 / #225)
+### WellLogEngine primary canvas (#224 / #225 / #227)
 
-Default display is still host multi-track QPainter. When the `welllog` package is
-on `PYTHONPATH` / installed (rebuild with `WELLLOG_BUILD_PYTHON=ON`):
+When the `welllog` package is on `PYTHONPATH` / installed, **applying a multi-track
+template** prefers native `WellLogView` (`submit_multi_track`) as the single-well
+surface. Host `MultiTrackCanvas` remains automatic fallback.
 
 ```bash
 export PYTHONPATH="build/well-log-engine-python/python:well-log-engine/python${PYTHONPATH:+:$PYTHONPATH}"
-# Optional hard-disable:
+# Force host canvas:
 # export WLWS_DISABLE_ENGINE=1
+# export WLWS_FORCE_HOST_CANVAS=1
 python -m well_log_workstation
-# 图件 → 打开引擎预览…     → submit_multi_track (host template → engine)
-# 图件 → 引擎对比预览…     → submit_multi_well_section (shared depth)
+# 图件 → 优先使用引擎画布   (toggle)
+# 图件 → 刷新/打开引擎视图… / 引擎对比预览…
+# 层位拾取 switches to host canvas for click hit-testing, then can return to engine
 ```
 
-Host canvas remains the default for full multi-track UX offline / without the wheel.  
 Gap notes: `docs/research/2026-08-03-welllogengine-python-bindings-225.md`
 
 ## Phase-1 scope (locked)

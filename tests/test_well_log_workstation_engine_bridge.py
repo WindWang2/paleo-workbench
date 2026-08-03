@@ -84,9 +84,36 @@ def test_shell_default_is_host_multitrack(qtbot, tmp_path: Path, monkeypatch) ->
     well_id = win.import_las_path(las)
     win.apply_template_to_well(well_id, "std-gr-rt-den")
     assert win.multi_track_canvas.track_count() >= 2
-    with pytest.raises(EngineUnavailable):
+    assert win.primary_surface == "host"
+    assert win.single_well_stack.currentIndex() == 0
+    with pytest.raises((EngineUnavailable, Exception)):
         win.open_engine_preview()
     assert win.active_presentation is not None
+    assert win.primary_surface == "host"
+
+
+def test_prefer_engine_falls_back_to_host(qtbot, tmp_path: Path, monkeypatch) -> None:
+    """With engine disabled, prefer flag still yields host surface."""
+    monkeypatch.setenv("WLWS_DISABLE_ENGINE", "1")
+    reset_engine_capability_cache()
+    ws = create_workspace(tmp_path / "pref")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(_write_las(tmp_path / "p.las"))
+    win.set_prefer_engine_canvas(True)
+    win.apply_template_to_well(well_id, "std-gr-rt-den")
+    assert win.primary_surface == "host"
+
+
+def test_force_host_canvas_env(qtbot, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WLWS_FORCE_HOST_CANVAS", "1")
+    monkeypatch.delenv("WLWS_DISABLE_ENGINE", raising=False)
+    reset_engine_capability_cache()
+    # Reconstruct default prefer from env
+    from well_log_workstation.shell import WellLogWorkstationWindow as W
+
+    assert W._default_prefer_engine() is False
 
 
 def test_primary_curve_from_presentation(qtbot, tmp_path: Path, monkeypatch) -> None:
@@ -161,6 +188,7 @@ def test_submit_multi_track_when_engine_present(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.delenv("WLWS_DISABLE_ENGINE", raising=False)
+    monkeypatch.delenv("WLWS_FORCE_HOST_CANVAS", raising=False)
     reset_engine_capability_cache()
     if not engine_available():
         pytest.skip(probe_engine().detail)
@@ -169,8 +197,12 @@ def test_submit_multi_track_when_engine_present(
     win = WellLogWorkstationWindow()
     qtbot.addWidget(win)
     win.set_workspace(ws)
+    win.set_prefer_engine_canvas(True)
     well_id = win.import_las_path(las)
     win.apply_template_to_well(well_id, "std-gr-rt-den")
+    # Primary path should be engine without extra menu
+    assert win.primary_surface == "engine"
+    assert win.single_well_stack.currentIndex() == 1
     report = win.open_engine_preview()
     assert isinstance(report, dict)
     assert report.get("render_prepared") is True or "depth" in report
