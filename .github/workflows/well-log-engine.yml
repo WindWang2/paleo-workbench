@@ -75,9 +75,13 @@ jobs:
           echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
 
       # cmd (not bash): msvc-dev-cmd env + Ninja/cl hangs under Git Bash on GHA.
+      # Clear VCPKG_ROOT so CMakeLists does not auto-load a toolchain that can
+      # block configure; disable optional Arrow on stock Windows runners.
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        env:
+          VCPKG_ROOT: ""
         run: >
           cmake -S well-log-engine -B build\well-log-engine -G Ninja
           -DCMAKE_BUILD_TYPE=Release
@@ -85,6 +89,7 @@ jobs:
           -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
           -DWELLLOG_WARNINGS_AS_ERRORS=ON
           -DWELLLOG_BUILD_TEXT=OFF
+          -DWELLLOG_BUILD_ARROW=OFF
           -DCMAKE_CXX_COMPILER=cl
           -DCMAKE_PREFIX_PATH=%CMAKE_PREFIX_PATH%
 
@@ -329,7 +334,9 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
             # Prefer forward slashes; scikit-build invokes CMake under MSVC env.
-            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH//\\//}"
+            # Clear VCPKG_ROOT so engine CMake does not auto-attach a toolchain.
+            unset VCPKG_ROOT || true
+            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DWELLLOG_BUILD_ARROW=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH//\\//}"
             export CMAKE_GENERATOR=Ninja
           fi
           python -m build well-log-engine --wheel --no-isolation --outdir dist
