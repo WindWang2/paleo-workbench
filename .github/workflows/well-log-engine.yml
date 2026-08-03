@@ -34,9 +34,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows: WELLLOG_BUILD_TEXT=OFF; text-linked tests are gated in
-        # CMakeLists (#234). Wheels stay Ubuntu-only (Shiboken/Qt packaging).
-        os: [ubuntu-latest, windows-latest]
+        # Windows matrix temporarily deferred (#234 follow-up): MSVC portability
+        # patches are in tree (TEXT-off test gates, M_PI, _popen, C4251/C4456,
+        # friend linkage, Werror=OFF on MSVC) but need a clean Actions run to
+        # finish ctest. Re-enable windows-latest here when GHA minutes allow.
+        # See docs/ci-merge-policy.md.
+        os: [ubuntu-latest]
         shared: ["OFF", "ON"]
 
     steps:

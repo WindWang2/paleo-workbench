@@ -24,11 +24,13 @@ Do **not** block merge solely on advisory red. Prefer fixing or adding an entry 
 
 ## Windows WellLogEngine
 
-- Matrix includes `windows-latest` with **`WELLLOG_BUILD_TEXT=OFF`** and **`WELLLOG_BUILD_ARROW=OFF`**.
-- Tests that require HarfBuzz/text are gated with `if(WELLLOG_BUILD_TEXT)` in `well-log-engine/CMakeLists.txt`.
-- ZLIB is supplied via a small prebuild prefix on Windows; empty `VCPKG_ROOT` is ignored so CMake does not invent a broken toolchain path.
-- **`WELLLOG_WARNINGS_AS_ERRORS` is OFF on Windows** (MSVC C4251/C4267/C4456 noise); Ubuntu keeps warnings-as-errors.
-- **Python wheels remain Ubuntu-only** until Shiboken6 + Qt aqt versions are aligned on Windows (follow-up beyond #234).
+**Status (as of #234 / PR #235):** matrix row **deferred** (Ubuntu-only `os`) until Actions can finish a full Windows ctest. Code for Windows is staged:
+
+- Text-linked tests gated with `if(WELLLOG_BUILD_TEXT)` (multi-scale, PDF scene, export-parity).
+- MSVC portability: `std::numbers::pi_v` (no `M_PI`), `_popen`/`_pclose`, C4251/C4275 suppress, shadow renames (C4456), `WELLLOG_SCENE_API` on multi-well friends.
+- Workflow helpers: zlib prefix, empty `VCPKG_ROOT` ignored, MSVC `Werror` OFF, Ninja path after `msvc-dev-cmd`.
+- Re-enable: set `os: [ubuntu-latest, windows-latest]` in `well-log-engine.yml` and re-run.
+- **Python wheels remain Ubuntu-only** (Shiboken6/Qt aqt on Windows still open).
 
 ## Hang prevention
 
