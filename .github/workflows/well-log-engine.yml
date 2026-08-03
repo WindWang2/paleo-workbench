@@ -55,6 +55,10 @@ jobs:
           # Text pipeline uses pkg-config modules not readily available on
           # stock Windows runners; keep core + tests green without text.
           echo "WELLLOG_BUILD_TEXT=OFF" >> $env:GITHUB_ENV
+          # msvc-dev-cmd rewrites PATH; remember ninja for later cmd steps.
+          $ninja = (Get-Command ninja).Source
+          echo "NINJA_PATH=$ninja" >> $env:GITHUB_ENV
+          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Force MSVC so CMake does not pick a bare MinGW without zlib.
       - name: Setup MSVC
@@ -67,9 +71,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
+          set PATH=C:\ProgramData\chocolatey\bin;%PATH%
           curl -L -o zlib.tgz https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
           tar -xzf zlib.tgz
-          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
+          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_MAKE_PROGRAM=%NINJA_PATH% -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
           cmake --build zlib-build --parallel
           cmake --install zlib-build
           echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
@@ -83,7 +88,9 @@ jobs:
         env:
           VCPKG_ROOT: ""
         run: >
-          cmake -S well-log-engine -B build\well-log-engine -G Ninja
+          set PATH=C:\ProgramData\chocolatey\bin;%PATH%
+          && cmake -S well-log-engine -B build\well-log-engine -G Ninja
+          -DCMAKE_MAKE_PROGRAM=%NINJA_PATH%
           -DCMAKE_BUILD_TYPE=Release
           -DWELLLOG_BUILD_TESTS=ON
           -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
@@ -280,6 +287,9 @@ jobs:
           choco install ninja -y
           # Wheel build needs Qt; text pipeline optional for smoke
           echo "WELLLOG_BUILD_TEXT=OFF" >> $env:GITHUB_ENV
+          $ninja = (Get-Command ninja).Source
+          echo "NINJA_PATH=$ninja" >> $env:GITHUB_ENV
+          echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup MSVC
         if: runner.os == 'Windows'
@@ -289,9 +299,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
+          set PATH=C:\ProgramData\chocolatey\bin;%PATH%
           curl -L -o zlib.tgz https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
           tar -xzf zlib.tgz
-          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
+          cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_MAKE_PROGRAM=%NINJA_PATH% -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
           cmake --build zlib-build --parallel
           cmake --install zlib-build
           echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
