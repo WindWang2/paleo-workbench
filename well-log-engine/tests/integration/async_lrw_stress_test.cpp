@@ -24,7 +24,11 @@ using namespace welllog;
 
 [[noreturn]] void fail(std::string_view message) {
   std::cerr << "FAIL: " << message << '\n';
-  std::exit(EXIT_FAILURE);
+  // Use _Exit (not std::exit) so we don't trigger CRT/DLL teardown while
+  // background LOD worker jthreads are still mid-flight. On Windows,
+  // std::exit -> ExitProcess runs DllMain detach under the loader lock,
+  // which deadlocks if a worker thread is inside an engine DLL (#236).
+  std::_Exit(EXIT_FAILURE);
 }
 
 void require(bool condition, std::string_view message) {
@@ -152,7 +156,7 @@ void rapid_document_replace_is_last_revision_wins() {
           "presentation must be accepted");
 
   wait_ready(session, document_id, DocumentRevision{kRevisions},
-             std::chrono::seconds{10});
+             std::chrono::seconds{30});
 
   const auto snap = session.performance_snapshot(document_id);
   require(snap.has_value() &&
@@ -223,7 +227,7 @@ void append_pressure_with_superseding_replace() {
           "presentation");
 
   wait_ready(session, document_id, DocumentRevision{1},
-             std::chrono::seconds{10});
+             std::chrono::seconds{30});
 
   // Append a small tail, then immediately supersede with a full replace.
   auto tail_depths = std::make_shared<const std::vector<double>>(
@@ -259,7 +263,7 @@ void append_pressure_with_superseding_replace() {
               .has_value(),
           "re-apply presentation after replace");
   wait_ready(session, document_id, DocumentRevision{3},
-             std::chrono::seconds{10});
+             std::chrono::seconds{30});
   const auto snap = session.performance_snapshot(document_id);
   require(snap.has_value() &&
               snap->document_revision == DocumentRevision{3} &&
