@@ -11,6 +11,7 @@ on:
     paths:
       - "well-log-engine/**"
       - ".github/workflows/well-log-engine.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -127,7 +128,10 @@ jobs:
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 2
+        # --timeout 120 kills any single test that hangs for >2min (MSVC ctest
+        # was hanging ~55min with no output; likely a stress or GL test).
+        # --stop-on-failure surfaces the first failure's output immediately.
+        run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 2 --timeout 120 --stop-on-failure
 
       - name: Test (Unix)
         if: runner.os != 'Windows'
