@@ -83,6 +83,11 @@ jobs:
           cmake --build zlib-build --parallel
           cmake --install zlib-build
           echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
+          REM find_package(ZLIB) resolves to the import lib (zlib.lib), not
+          REM zlibstatic.lib, so every exe linking ZLIB::ZLIB needs zlib1.dll
+          REM at runtime. Without bin/ on PATH the Windows loader stalls on
+          REM process start and ctest reports a timeout (#241).
+          echo %GITHUB_WORKSPACE%\zlib-prefix\bin>> %GITHUB_PATH%
 
       # cmd (not bash): msvc-dev-cmd env + Ninja/cl hangs under Git Bash on GHA.
       # Clear VCPKG_ROOT so CMakeLists does not auto-load a toolchain that can
@@ -322,6 +327,11 @@ jobs:
           cmake --build zlib-build --parallel
           cmake --install zlib-build
           echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
+          REM find_package(ZLIB) resolves to the import lib (zlib.lib), not
+          REM zlibstatic.lib, so every exe linking ZLIB::ZLIB needs zlib1.dll
+          REM at runtime. Without bin/ on PATH the Windows loader stalls on
+          REM process start and ctest reports a timeout (#241).
+          echo %GITHUB_WORKSPACE%\zlib-prefix\bin>> %GITHUB_PATH%
 
       - name: Setup Python
         uses: actions/setup-python@v5
