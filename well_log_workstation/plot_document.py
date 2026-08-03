@@ -53,7 +53,8 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
         "well_ids": list(doc.well_ids),
         "template_id": doc.template_id,
     }
-    if doc.links:
+    # Always persist links for correlation docs so clear/remove is durable (#230)
+    if doc.type == "correlation" or doc.links:
         payload["links"] = [lk.to_json() for lk in doc.links]
     return payload
 

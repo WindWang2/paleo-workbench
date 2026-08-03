@@ -164,6 +164,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_auto_links.setObjectName("Action_AutoHorizonLinks")
         self._act_auto_links.triggered.connect(self._on_auto_horizon_links)
         self._act_auto_links.setEnabled(False)
+        self._act_clear_links = plot_menu.addAction("清除对比连线")
+        self._act_clear_links.setObjectName("Action_ClearHorizonLinks")
+        self._act_clear_links.triggered.connect(self._on_clear_horizon_links)
+        self._act_clear_links.setEnabled(False)
         plot_menu.addSeparator()
         self._act_prefer_engine = plot_menu.addAction("优先使用引擎画布")
         self._act_prefer_engine.setObjectName("Action_PreferEngineCanvas")
@@ -365,6 +369,25 @@ class WellLogWorkstationWindow(QMainWindow):
         self.tops_list.setObjectName("TopsList")
         self.tops_list.addItem("（无层位）")
         layout.addWidget(self.tops_list)
+
+        layout.addWidget(QLabel("对比连线"))
+        self.links_list = QListWidget()
+        self.links_list.setObjectName("LinksList")
+        self.links_list.addItem("（无连线）")
+        layout.addWidget(self.links_list)
+        link_btns = QHBoxLayout()
+        self.clear_links_btn = QPushButton("清除连线")
+        self.clear_links_btn.setObjectName("Button_ClearLinks")
+        self.clear_links_btn.clicked.connect(self._on_clear_horizon_links)
+        self.clear_links_btn.setEnabled(False)
+        self.remove_link_btn = QPushButton("删除选中")
+        self.remove_link_btn.setObjectName("Button_RemoveLink")
+        self.remove_link_btn.clicked.connect(self._on_remove_selected_link)
+        self.remove_link_btn.setEnabled(False)
+        link_btns.addWidget(self.clear_links_btn)
+        link_btns.addWidget(self.remove_link_btn)
+        layout.addLayout(link_btns)
+
         layout.addStretch(1)
         return pane
 
@@ -440,9 +463,12 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_engine_corr.setEnabled(
             len(self._correlation_presentations) >= 2
         )
-        self._act_auto_links.setEnabled(
-            len(self._correlation_presentations) >= 2
-        )
+        has_corr = len(self._correlation_presentations) >= 2
+        self._act_auto_links.setEnabled(has_corr)
+        has_links = has_corr and len(self._correlation_links) > 0
+        self._act_clear_links.setEnabled(has_links)
+        self.clear_links_btn.setEnabled(has_links)
+        self.remove_link_btn.setEnabled(has_links)
 
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
@@ -635,6 +661,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self.multi_track_canvas.set_tops(None)
             self.correlation_canvas.set_columns([])
             self.correlation_canvas.set_links(None)
+            self._refresh_links_list()
             self._primary_surface = "host"
             if hasattr(self, "single_well_stack"):
                 self.single_well_stack.setCurrentIndex(0)
@@ -940,6 +967,7 @@ class WellLogWorkstationWindow(QMainWindow):
                     pass
         self._correlation_links = links
         self.correlation_canvas.set_columns(presentations, tops_cols, links)
+        self._refresh_links_list()
         names = " · ".join(p.well_name for p in presentations[:4])
         tops_n = sum(len(t) for t in tops_cols)
         self.correlation_caption.setText(
@@ -977,22 +1005,68 @@ class WellLogWorkstationWindow(QMainWindow):
                 else []
             )
         links = match_tops_by_name(well_ids, tops_by_well)
-        self._correlation_links = links
-        self.correlation_canvas.set_links(links)
-        if self._active_plot_id:
+        self._set_correlation_links(links, persist=True)
+        return links
+
+    def clear_correlation_links(self) -> None:
+        """Remove all horizon links from the active correlation plot."""
+        self._set_correlation_links([], persist=True)
+
+    def remove_correlation_link(self, link_id: str) -> bool:
+        """Remove one link by id; return True if removed."""
+        before = len(self._correlation_links)
+        kept = [lk for lk in self._correlation_links if lk.id != link_id]
+        if len(kept) == before:
+            return False
+        self._set_correlation_links(kept, persist=True)
+        return True
+
+    def _set_correlation_links(
+        self, links: list[HorizonLink], *, persist: bool
+    ) -> None:
+        self._correlation_links = list(links)
+        self.correlation_canvas.set_links(self._correlation_links)
+        self._refresh_links_list()
+        if persist and self._workspace is not None and self._active_plot_id:
             try:
                 plot = load_plot_document(self._workspace, self._active_plot_id)
-                plot.links = list(links)
-                save_plot_document(self._workspace, plot)
+                if plot.type == "correlation":
+                    plot.links = list(self._correlation_links)
+                    save_plot_document(self._workspace, plot)
             except WorkspaceError:
                 pass
-        # Refresh caption / engine
         cap = self.correlation_caption.text().split(" · 连线")[0]
-        self.correlation_caption.setText(f"{cap} · 连线 {len(links)}")
-        if self._prefer_engine_canvas:
+        self.correlation_caption.setText(
+            f"{cap} · 连线 {len(self._correlation_links)}"
+        )
+        if (
+            self._prefer_engine_canvas
+            and self._active_plot_type == "correlation"
+            and self._correlation_presentations
+        ):
             self._sync_primary_correlation_surface()
+        self._sync_apply_enabled()
         self._update_status()
-        return links
+
+    def _refresh_links_list(self) -> None:
+        self.links_list.clear()
+        if not self._correlation_links:
+            self.links_list.addItem("（无连线）")
+            return
+        # Map well ids to short names when presentations available
+        name_by_id = {
+            p.well_document_id: p.well_name for p in self._correlation_presentations
+        }
+        for lk in self._correlation_links:
+            left = name_by_id.get(lk.left_well_id, lk.left_well_id[:8])
+            right = name_by_id.get(lk.right_well_id, lk.right_well_id[:8])
+            label = (
+                f"{lk.name}  {left}@{lk.left_depth:g} → "
+                f"{right}@{lk.right_depth:g}"
+            )
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, lk.id)
+            self.links_list.addItem(item)
 
     def open_plot_document(self, plot_id: str) -> PlotDocument:
         """Load plot metadata and open single-well or correlation view."""
@@ -1500,6 +1574,23 @@ class WellLogWorkstationWindow(QMainWindow):
             )
         except WorkspaceError as exc:
             QMessageBox.warning(self, "自动连线失败", str(exc))
+
+    def _on_clear_horizon_links(self) -> None:
+        if not self._correlation_links:
+            return
+        self.clear_correlation_links()
+        self.statusBar().showMessage("已清除全部对比连线", 4000)
+
+    def _on_remove_selected_link(self) -> None:
+        item = self.links_list.currentItem()
+        if item is None:
+            QMessageBox.information(self, "删除连线", "请先在右栏选中一条连线。")
+            return
+        link_id = item.data(Qt.ItemDataRole.UserRole)
+        if not link_id:
+            return
+        if self.remove_correlation_link(str(link_id)):
+            self.statusBar().showMessage("已删除选中连线", 4000)
 
     def _on_toggle_prefer_engine(self) -> None:
         self._prefer_engine_canvas = self._act_prefer_engine.isChecked()

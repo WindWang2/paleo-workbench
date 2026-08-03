@@ -136,6 +136,64 @@ def test_shell_auto_links_persist(qtbot, tmp_path: Path) -> None:
     assert again.links[0].name == "HorizonA"
 
 
+def test_clear_and_remove_links(qtbot, tmp_path: Path) -> None:
+    ws = create_workspace(tmp_path / "clr")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "a.las", "A"))
+    id2 = win.import_las_path(_write_las(tmp_path / "b.las", "B"))
+    save_tops_for_well(
+        ws,
+        id1,
+        [
+            FormationTop(
+                name="H1",
+                depth=1001.0,
+                id="00000000-0000-0000-0000-0000000000c1",
+            ),
+            FormationTop(
+                name="H2",
+                depth=1003.0,
+                id="00000000-0000-0000-0000-0000000000c2",
+            ),
+        ],
+    )
+    save_tops_for_well(
+        ws,
+        id2,
+        [
+            FormationTop(
+                name="H1",
+                depth=1001.5,
+                id="00000000-0000-0000-0000-0000000000c3",
+            ),
+            FormationTop(
+                name="H2",
+                depth=1003.5,
+                id="00000000-0000-0000-0000-0000000000c4",
+            ),
+        ],
+    )
+    plot = win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    links = win.auto_link_correlation_tops()
+    assert len(links) >= 2
+    assert win.links_list.count() >= 2
+
+    # Remove one
+    victim = links[0].id
+    assert win.remove_correlation_link(victim) is True
+    assert all(lk.id != victim for lk in win.correlation_canvas.links())
+    reloaded = load_plot_document(ws, plot.id)
+    assert all(lk.id != victim for lk in reloaded.links)
+
+    win.clear_correlation_links()
+    assert win.correlation_canvas.links() == []
+    assert "无连线" in win.links_list.item(0).text()
+    empty = load_plot_document(ws, plot.id)
+    assert empty.links == []
+
+
 def test_payload_includes_overlays(qtbot, tmp_path: Path) -> None:
     from well_log_workstation.engine_bridge import presentations_to_multi_well_payload
 
