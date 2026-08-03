@@ -304,8 +304,28 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self.correlation_caption.setObjectName("CorrelationCaption")
         cl.addWidget(self.correlation_caption)
+
+        self.correlation_stack = QStackedWidget()
+        self.correlation_stack.setObjectName("CorrelationStack")
         self.correlation_canvas = CorrelationCanvas()
-        cl.addWidget(self.correlation_canvas, 1)
+        self.correlation_stack.addWidget(self.correlation_canvas)  # 0 host
+
+        self._corr_engine_page = QWidget()
+        self._corr_engine_page.setObjectName("CorrelationEnginePage")
+        cel = QVBoxLayout(self._corr_engine_page)
+        cel.setContentsMargins(0, 0, 0, 0)
+        self.correlation_engine_caption = QLabel(
+            "引擎对比画布 · submit_multi_well_section · 共享深度"
+        )
+        self.correlation_engine_caption.setObjectName("CorrelationEngineCaption")
+        cel.addWidget(self.correlation_engine_caption)
+        self._corr_engine_placeholder = QLabel(
+            "引擎对比未激活。勾选「优先使用引擎画布」并打开对比图。"
+        )
+        self._corr_engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cel.addWidget(self._corr_engine_placeholder, 1)
+        self.correlation_stack.addWidget(self._corr_engine_page)  # 1 engine
+        cl.addWidget(self.correlation_stack, 1)
 
         self.document_tabs.addTab(host, "单井分析图（多图道）")
         self.document_tabs.addTab(corr_host, "地层对比图-lite")
@@ -469,18 +489,38 @@ class WellLogWorkstationWindow(QMainWindow):
         self._prefer_engine_canvas = bool(prefer)
         if hasattr(self, "_act_prefer_engine"):
             self._act_prefer_engine.setChecked(self._prefer_engine_canvas)
-        self._sync_primary_single_well_surface()
+        if self._active_plot_type == "correlation":
+            self._sync_primary_correlation_surface()
+        else:
+            self._sync_primary_single_well_surface()
 
-    def _ensure_engine_view(self) -> Any:
-        """Create WellLogView once and place it on the single-well engine page."""
-        if self._engine_view is not None:
-            return self._engine_view
-        view = create_well_log_view(self._engine_page)
-        self._engine_view = view
-        self._engine_placeholder.hide()
-        layout = self._engine_page.layout()
-        assert layout is not None
-        layout.addWidget(view, 1)
+    def _ensure_engine_view(self, parent: QWidget | None = None) -> Any:
+        """Create WellLogView once; optionally reparent onto ``parent`` page."""
+        host = parent or self._engine_page
+        if self._engine_view is None:
+            view = create_well_log_view(host)
+            self._engine_view = view
+        else:
+            view = self._engine_view
+            if view.parent() is not host:
+                view.setParent(host)
+        # Attach to layout of host page
+        layout = host.layout()
+        if layout is not None:
+            # Avoid double-add: only add if not already in this layout
+            found = False
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                if item is not None and item.widget() is view:
+                    found = True
+                    break
+            if not found:
+                layout.addWidget(view, 1)
+        if host is self._engine_page:
+            self._engine_placeholder.hide()
+        if host is getattr(self, "_corr_engine_page", None):
+            self._corr_engine_placeholder.hide()
+        view.show()
         return view
 
     def _sync_primary_single_well_surface(self) -> None:
@@ -501,7 +541,7 @@ class WellLogWorkstationWindow(QMainWindow):
             return
 
         try:
-            view = self._ensure_engine_view()
+            view = self._ensure_engine_view(self._engine_page)
             report = load_presentation_into_view(
                 view, self._presentation, tops=self._active_tops
             )
@@ -527,6 +567,48 @@ class WellLogWorkstationWindow(QMainWindow):
             self.single_well_stack.setCurrentIndex(0)
             self.engine_caption.setText(f"引擎不可用，已回退主机画布 · {exc}")
 
+    def _sync_primary_correlation_surface(self) -> None:
+        """Prefer engine multi-well for correlation; fall back to host canvas (#228)."""
+        if not self._correlation_presentations:
+            self.correlation_stack.setCurrentIndex(0)
+            return
+
+        want_engine = self._prefer_engine_canvas and engine_available()
+        if not want_engine:
+            self._primary_surface = "host"
+            self.correlation_stack.setCurrentIndex(0)
+            return
+
+        try:
+            view = self._ensure_engine_view(self._corr_engine_page)
+            tops_cols = self.correlation_canvas.tops_per_column()
+            depth = self.correlation_canvas.depth_range()
+            report = submit_multi_well_presentations(
+                view,
+                self._correlation_presentations,
+                tops_per_well=tops_cols,
+                shared_depth=depth,
+            )
+            self._engine_last_error = None
+            self._primary_surface = "engine"
+            self.correlation_stack.setCurrentIndex(1)
+            n = report.get("well_count", len(self._correlation_presentations))
+            cap = probe_engine()
+            self.correlation_engine_caption.setText(
+                f"引擎对比 · {n} 井 · 共享深度 · {cap.detail}"
+            )
+            # Reflect engine mode in host caption too
+            base = self.correlation_caption.text()
+            if "· 引擎" not in base:
+                self.correlation_caption.setText(f"{base} · 引擎")
+        except (EngineUnavailable, EngineSubmitError, Exception) as exc:  # noqa: BLE001
+            self._engine_last_error = str(exc)
+            self._primary_surface = "host"
+            self.correlation_stack.setCurrentIndex(0)
+            self.correlation_engine_caption.setText(
+                f"引擎对比不可用，已回退主机画布 · {exc}"
+            )
+
     def set_workspace(self, ws: Workspace | None) -> None:
         self._workspace = ws
         if ws is None:
@@ -544,6 +626,8 @@ class WellLogWorkstationWindow(QMainWindow):
             self._primary_surface = "host"
             if hasattr(self, "single_well_stack"):
                 self.single_well_stack.setCurrentIndex(0)
+            if hasattr(self, "correlation_stack"):
+                self.correlation_stack.setCurrentIndex(0)
             self.plot_caption.setText("单井分析图 · 多图道（选择井并应用图版）")
             self.correlation_caption.setText(
                 "地层对比图-lite · 多井并列 · 共享深度（需 ≥2 口井）"
@@ -847,6 +931,7 @@ class WellLogWorkstationWindow(QMainWindow):
             if item and item.data(Qt.ItemDataRole.UserRole) == plot.template_id:
                 self.template_list.setCurrentRow(i)
                 break
+        self._sync_primary_correlation_surface()
         self._sync_apply_enabled()
         self._update_status()
 
@@ -931,7 +1016,7 @@ class WellLogWorkstationWindow(QMainWindow):
         )
 
     def open_engine_correlation_preview(self) -> dict[str, object]:
-        """Submit correlation-lite multi-well section into WellLogView on engine page."""
+        """Force engine multi-well surface for the active correlation plot."""
         if len(self._correlation_presentations) < 2:
             raise EngineUnavailable("请先创建/打开 ≥2 井的地层对比图")
         if not engine_available():
@@ -940,24 +1025,26 @@ class WellLogWorkstationWindow(QMainWindow):
                 f"WellLogEngine 不可用: {cap.detail}\n"
                 "请安装 welllog-engine wheel 或将 build 产物加入 PYTHONPATH。"
             )
-        view = self._ensure_engine_view()
+        prev = self._prefer_engine_canvas
+        self._prefer_engine_canvas = True
+        self._act_prefer_engine.setChecked(True)
+        self.document_tabs.setCurrentIndex(1)
+        self._sync_primary_correlation_surface()
+        self._update_status()
+        if self._primary_surface != "engine" or self._engine_view is None:
+            self._prefer_engine_canvas = prev
+            self._act_prefer_engine.setChecked(prev)
+            raise EngineSubmitError(
+                self._engine_last_error or "引擎对比提交失败，已保持主机画布"
+            )
         tops_cols = self.correlation_canvas.tops_per_column()
         depth = self.correlation_canvas.depth_range()
-        report = submit_multi_well_presentations(
-            view,
+        return submit_multi_well_presentations(
+            self._engine_view,
             self._correlation_presentations,
             tops_per_well=tops_cols,
             shared_depth=depth,
         )
-        n = report.get("well_count", len(self._correlation_presentations))
-        self.engine_caption.setText(
-            f"引擎对比预览 · {n} 井 · 共享深度 · submit_multi_well_section"
-        )
-        self._primary_surface = "engine"
-        self.single_well_stack.setCurrentIndex(1)
-        self.document_tabs.setCurrentIndex(0)
-        self._update_status()
-        return report
 
     def _select_well_in_tree(self, well_id: str) -> None:
         def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
@@ -1344,10 +1431,15 @@ class WellLogWorkstationWindow(QMainWindow):
 
     def _on_toggle_prefer_engine(self) -> None:
         self._prefer_engine_canvas = self._act_prefer_engine.isChecked()
-        self._sync_primary_single_well_surface()
+        if self._active_plot_type == "correlation":
+            self._sync_primary_correlation_surface()
+            kind = "对比"
+        else:
+            self._sync_primary_single_well_surface()
+            kind = "单井"
         self._update_status()
         mode = "引擎" if self._primary_surface == "engine" else "主机"
-        self.statusBar().showMessage(f"单井画布: {mode}", 4000)
+        self.statusBar().showMessage(f"{kind}画布: {mode}", 4000)
 
     def _on_toggle_pick_tops(self, checked: bool = False) -> None:
         # Prefer checked state from action

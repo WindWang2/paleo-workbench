@@ -210,10 +210,29 @@ def test_submit_multi_track_when_engine_present(
         assert int(report["track_count"]) >= 1
 
 
+def test_correlation_prefers_host_without_engine(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("WLWS_DISABLE_ENGINE", "1")
+    reset_engine_capability_cache()
+    ws = create_workspace(tmp_path / "corr-host")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "w1.las", "W1"))
+    id2 = win.import_las_path(_write_las(tmp_path / "w2.las", "W2"))
+    win.set_prefer_engine_canvas(True)
+    win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    assert win.correlation_canvas.column_count() == 2
+    assert win.correlation_stack.currentIndex() == 0
+    assert win.primary_surface == "host"
+
+
 def test_submit_multi_well_when_engine_present(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.delenv("WLWS_DISABLE_ENGINE", raising=False)
+    monkeypatch.delenv("WLWS_FORCE_HOST_CANVAS", raising=False)
     reset_engine_capability_cache()
     if not engine_available():
         pytest.skip(probe_engine().detail)
@@ -224,9 +243,13 @@ def test_submit_multi_well_when_engine_present(
     win = WellLogWorkstationWindow()
     qtbot.addWidget(win)
     win.set_workspace(ws)
+    win.set_prefer_engine_canvas(True)
     id1 = win.import_las_path(_write_las(tmp_path / "w1.las", "W1"))
     id2 = win.import_las_path(_write_las(tmp_path / "w2.las", "W2"))
+    # Primary path: create correlation auto-submits multi-well when preferred
     win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    assert win.primary_surface == "engine"
+    assert win.correlation_stack.currentIndex() == 1
     report = win.open_engine_correlation_preview()
     assert report.get("render_prepared") is True
     assert int(report.get("well_count", 0)) == 2

@@ -114,10 +114,13 @@ export PYTHONPATH="build/well-log-engine-python/python:well-log-engine/python${P
 # export WLWS_DISABLE_ENGINE=1
 # export WLWS_FORCE_HOST_CANVAS=1
 python -m well_log_workstation
-# 图件 → 优先使用引擎画布   (toggle)
+# 图件 → 优先使用引擎画布   (toggle; single-well + correlation-lite)
 # 图件 → 刷新/打开引擎视图… / 引擎对比预览…
 # 层位拾取 switches to host canvas for click hit-testing, then can return to engine
 ```
+
+Correlation-lite (#228): with prefer-engine, create/open 对比图 calls
+`submit_multi_well_section` (shared depth); host `CorrelationCanvas` is fallback.
 
 Gap notes: `docs/research/2026-08-03-welllogengine-python-bindings-225.md`
 
