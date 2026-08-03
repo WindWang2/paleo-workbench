@@ -61,8 +61,8 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # Build a small zlib install prefix (FetchContent mid-configure can hang
-      # on some Windows runners). CMAKE_PREFIX_PATH makes find_package(ZLIB) work.
+      # Build a small zlib install prefix. Use forward slashes in GITHUB_ENV so
+      # later steps (bash or cmd) both resolve CMAKE_PREFIX_PATH cleanly.
       - name: Build zlib for Windows
         if: runner.os == 'Windows'
         shell: cmd
@@ -72,28 +72,37 @@ jobs:
           cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
           cmake --build zlib-build --parallel
           cmake --install zlib-build
-          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%\zlib-prefix>> %GITHUB_ENV%
+          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
 
-      - name: Configure
-        shell: bash
-        run: |
-          EXTRA_FLAGS=()
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            EXTRA_FLAGS+=(-DWELLLOG_BUILD_TEXT=OFF)
-            EXTRA_FLAGS+=(-DCMAKE_CXX_COMPILER=cl)
-            EXTRA_FLAGS+=(-DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}")
-          fi
-          cmake -S well-log-engine -B build/well-log-engine -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWELLLOG_BUILD_TESTS=ON \
-            -DWELLLOG_BUILD_SHARED=${{ matrix.shared }} \
-            -DWELLLOG_WARNINGS_AS_ERRORS=ON \
-            "${EXTRA_FLAGS[@]}"
+      # cmd (not bash): msvc-dev-cmd env + Ninja/cl hangs under Git Bash on GHA.
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: >
+          cmake -S well-log-engine -B build\well-log-engine -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
+          -DWELLLOG_BUILD_TEXT=OFF
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_PREFIX_PATH=%CMAKE_PREFIX_PATH%
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: >
+          cmake -S well-log-engine -B build/well-log-engine -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DWELLLOG_BUILD_TESTS=ON
+          -DWELLLOG_BUILD_SHARED=${{ matrix.shared }}
+          -DWELLLOG_WARNINGS_AS_ERRORS=ON
 
       - name: Build
+        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
         run: cmake --build build/well-log-engine --parallel
 
       - name: Test
+        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
         run: ctest --test-dir build/well-log-engine --output-on-failure --parallel 2
 
   clang-sanitizers:
@@ -270,7 +279,7 @@ jobs:
           cmake -S zlib-1.3.1 -B zlib-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%\zlib-prefix
           cmake --build zlib-build --parallel
           cmake --install zlib-build
-          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%\zlib-prefix>> %GITHUB_ENV%
+          echo CMAKE_PREFIX_PATH=%GITHUB_WORKSPACE%/zlib-prefix>> %GITHUB_ENV%
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -309,7 +318,8 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+            # Prefer forward slashes; scikit-build invokes CMake under MSVC env.
+            export CMAKE_ARGS="-DWELLLOG_BUILD_TEXT=OFF -DCMAKE_CXX_COMPILER=cl -G Ninja -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH//\\//}"
             export CMAKE_GENERATOR=Ninja
           fi
           python -m build well-log-engine --wheel --no-isolation --outdir dist
