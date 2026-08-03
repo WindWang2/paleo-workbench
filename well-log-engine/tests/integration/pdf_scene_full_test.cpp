@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -385,15 +386,24 @@ std::filesystem::path write_temp(std::string_view bytes) {
 int run(std::string_view command, std::string &captured) {
   std::array<char, 128> buffer{};
   captured.clear();
+#if defined(_WIN32)
+  const auto pipe =
+      _popen(std::string{command}.c_str(), "r"); // NOLINT(cert-env33-c)
+#else
   const auto pipe =
       popen(std::string{command}.c_str(), "r"); // NOLINT(cert-env33-c)
+#endif
   if (pipe == nullptr) {
     return -1;
   }
   while (std::fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
     captured += buffer.data();
   }
+#if defined(_WIN32)
+  return _pclose(pipe); // NOLINT(cert-env33-c)
+#else
   return pclose(pipe); // NOLINT(cert-env33-c)
+#endif
 }
 
 // Inflates the FIRST FlateDecode stream after a given needle (used to read a
