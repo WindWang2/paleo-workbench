@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -50,6 +51,14 @@ from well_log_workstation.template_model import (
     get_builtin_template,
     list_builtin_templates,
 )
+from well_log_workstation.tops_model import (
+    FormationTop,
+    TopsError,
+    import_tops_from_json_file,
+    load_tops_for_well,
+    make_stub_tops,
+    save_tops_for_well,
+)
 from well_log_workstation.workspace import (
     Workspace,
     WorkspaceError,
@@ -74,6 +83,8 @@ class WellLogWorkstationWindow(QMainWindow):
         self._active_plot_type: str | None = None
         self._presentation: HostPresentation | None = None
         self._correlation_presentations: list[HostPresentation] = []
+        self._active_tops: list[FormationTop] = []
+        self._tops_diagnostics: list[str] = []
         self._templates: list[PlotTemplate] = list_builtin_templates()
 
         self._build_menus()
@@ -81,6 +92,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._build_status()
         self._populate_templates()
         self._refresh_tree()
+        self._refresh_tops_list()
 
     @property
     def workspace(self) -> Workspace | None:
@@ -145,6 +157,17 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_pdf.setObjectName("Action_ExportPdf")
         self._act_export_pdf.triggered.connect(self._on_export_pdf)
         self._act_export_pdf.setEnabled(False)
+
+        tops_menu = bar.addMenu("层位")
+        tops_menu.setObjectName("Menu_层位")
+        self._act_import_tops = tops_menu.addAction("导入层位 JSON…")
+        self._act_import_tops.setObjectName("Action_ImportTops")
+        self._act_import_tops.triggered.connect(self._on_import_tops)
+        self._act_import_tops.setEnabled(False)
+        self._act_stub_tops = tops_menu.addAction("生成示例层位")
+        self._act_stub_tops.setObjectName("Action_StubTops")
+        self._act_stub_tops.triggered.connect(self._on_stub_tops)
+        self._act_stub_tops.setEnabled(False)
 
         help_menu = bar.addMenu("帮助")
         help_menu.setObjectName("Menu_帮助")
@@ -299,6 +322,14 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_svg.setEnabled(can_export)
         self._act_export_pdf.setEnabled(can_export)
 
+        can_tops = (
+            self._workspace is not None
+            and self._selected_well_id is not None
+            and any(w.id == self._selected_well_id for w in self._workspace.wells)
+        )
+        self._act_import_tops.setEnabled(can_tops)
+        self._act_stub_tops.setEnabled(can_tops)
+
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
         if self._workspace is None:
@@ -310,11 +341,13 @@ class WellLogWorkstationWindow(QMainWindow):
             )
             corr_n = self.correlation_canvas.column_count()
             plot_kind = self._active_plot_type or "—"
+            tops_n = len(self._active_tops)
             msg = (
                 f"工区: {self._workspace.name} · "
                 f"井 {len(self._workspace.wells)} · "
                 f"选中 {well[:8]}… · "
                 f"图道 {tracks} · "
+                f"层位 {tops_n} · "
                 f"对比列 {corr_n} · "
                 f"图件 {plot_kind} · "
                 f"Qt: {hint}"
@@ -330,7 +363,10 @@ class WellLogWorkstationWindow(QMainWindow):
             self._active_plot_type = None
             self._presentation = None
             self._correlation_presentations = []
+            self._active_tops = []
+            self._tops_diagnostics = []
             self.multi_track_canvas.set_presentation(None)
+            self.multi_track_canvas.set_tops(None)
             self.correlation_canvas.set_columns([])
             self.plot_caption.setText("单井分析图 · 多图道（选择井并应用图版）")
             self.correlation_caption.setText(
@@ -341,6 +377,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self.document_tabs.setCurrentIndex(0)
         self._act_import_las.setEnabled(ws is not None)
         self._refresh_tree()
+        self._refresh_tops_list()
         self._sync_apply_enabled()
         self._update_status()
         if ws is not None:
@@ -356,9 +393,105 @@ class WellLogWorkstationWindow(QMainWindow):
         self._selected_well_id = result.catalog_well_id
         self._refresh_tree()
         self._select_well_in_tree(result.catalog_well_id)
+        self._refresh_tops_list()
         self._sync_apply_enabled()
         self._update_status()
         return result.catalog_well_id
+
+    def load_tops_for_selected_well(self) -> list[FormationTop]:
+        """Load tops for selection; update inspector + single-well canvas."""
+        return self._load_and_apply_tops(self._selected_well_id)
+
+    def generate_stub_tops_for_well(self, well_id: str) -> list[FormationTop]:
+        """Write demo tops from well depth range; show on canvas/inspector."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        doc = self.session.ensure_well_loaded(self._workspace, well_id)
+        depth = doc.depth
+        if depth.size:
+            d0, d1 = float(np.nanmin(depth)), float(np.nanmax(depth))
+        else:
+            d0, d1 = 0.0, 100.0
+        tops = make_stub_tops(d0, d1, unit=doc.depth_unit or "m")
+        save_tops_for_well(self._workspace, well_id, tops)
+        self._selected_well_id = well_id
+        self._apply_tops_to_ui(well_id, tops, [])
+        return tops
+
+    def import_tops_json_for_well(
+        self, well_id: str, path: Path | str
+    ) -> list[FormationTop]:
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        tops, diags = import_tops_from_json_file(self._workspace, well_id, path)
+        self._selected_well_id = well_id
+        self._apply_tops_to_ui(well_id, tops, diags)
+        return tops
+
+    def _load_and_apply_tops(self, well_id: str | None) -> list[FormationTop]:
+        if self._workspace is None or not well_id:
+            self._apply_tops_to_ui(None, [], [])
+            return []
+        try:
+            tops, diags = load_tops_for_well(self._workspace, well_id)
+        except Exception as exc:  # noqa: BLE001 — degrade, never crash shell
+            tops, diags = [], [f"层位加载异常: {exc}"]
+        self._apply_tops_to_ui(well_id, tops, diags)
+        return tops
+
+    def _apply_tops_to_ui(
+        self,
+        well_id: str | None,
+        tops: list[FormationTop],
+        diagnostics: list[str],
+    ) -> None:
+        self._active_tops = list(tops)
+        self._tops_diagnostics = list(diagnostics)
+        self._refresh_tops_list_items(tops, diagnostics)
+        # Single-well canvas: only if presentation matches this well
+        if (
+            self._presentation is not None
+            and well_id is not None
+            and self._presentation.well_document_id == well_id
+        ):
+            self.multi_track_canvas.set_tops(tops)
+        elif well_id is None:
+            self.multi_track_canvas.set_tops(None)
+        # Correlation: refresh tops for all columns if open
+        if self._correlation_presentations and self._workspace is not None:
+            tops_cols: list[list[FormationTop]] = []
+            for pres in self._correlation_presentations:
+                t, _ = load_tops_for_well(
+                    self._workspace, pres.well_document_id
+                )
+                tops_cols.append(t)
+            self.correlation_canvas.set_tops_per_column(tops_cols)
+        self._sync_apply_enabled()
+        self._update_status()
+
+    def _refresh_tops_list(self) -> None:
+        self._load_and_apply_tops(self._selected_well_id)
+
+    def _refresh_tops_list_items(
+        self, tops: list[FormationTop], diagnostics: list[str]
+    ) -> None:
+        self.tops_list.clear()
+        if not tops:
+            label = "（无层位）"
+            if diagnostics:
+                label = f"（无层位 · {diagnostics[0][:40]}）"
+            self.tops_list.addItem(label)
+            return
+        for t in tops:
+            item = QListWidgetItem(t.display_label())
+            item.setData(Qt.ItemDataRole.UserRole, t.id or t.name)
+            item.setForeground(Qt.GlobalColor.darkRed)
+            self.tops_list.addItem(item)
+        if diagnostics:
+            for d in diagnostics[:3]:
+                hint = QListWidgetItem(f"⚠ {d}")
+                hint.setDisabled(True)
+                self.tops_list.addItem(hint)
 
     def _current_template_id(self) -> str | None:
         item = self.template_list.currentItem()
@@ -388,6 +521,11 @@ class WellLogWorkstationWindow(QMainWindow):
         if plot_id is not None:
             self._active_plot_id = plot_id
         self.multi_track_canvas.set_presentation(presentation)
+        tops, diags = load_tops_for_well(self._workspace, well_id)
+        self._active_tops = tops
+        self._tops_diagnostics = diags
+        self.multi_track_canvas.set_tops(tops)
+        self._refresh_tops_list_items(tops, diags)
         self.plot_caption.setText(
             f"单井分析图 · {presentation.well_name} · "
             f"{presentation.template_name} · "
@@ -454,6 +592,8 @@ class WellLogWorkstationWindow(QMainWindow):
             raise WorkspaceError(f"未知图版: {plot.template_id}")
 
         presentations: list[HostPresentation] = []
+        tops_cols: list[list[FormationTop]] = []
+        all_diags: list[str] = []
         for well_id in plot.well_ids:
             doc = self.session.ensure_well_loaded(self._workspace, well_id)
             pres = apply_template(template, doc)
@@ -462,17 +602,24 @@ class WellLogWorkstationWindow(QMainWindow):
                     f"井 {doc.well_name} 图版未能绑定任何曲线"
                 )
             presentations.append(pres)
+            t, diags = load_tops_for_well(self._workspace, well_id)
+            tops_cols.append(t)
+            all_diags.extend(diags)
 
         self._correlation_presentations = presentations
         self._active_plot_id = plot.id
         self._active_plot_type = "correlation"
         if plot.well_ids:
             self._selected_well_id = plot.well_ids[0]
-        self.correlation_canvas.set_columns(presentations)
+            self._active_tops = tops_cols[0] if tops_cols else []
+            self._tops_diagnostics = all_diags
+            self._refresh_tops_list_items(self._active_tops, all_diags)
+        self.correlation_canvas.set_columns(presentations, tops_cols)
         names = " · ".join(p.well_name for p in presentations[:4])
+        tops_n = sum(len(t) for t in tops_cols)
         self.correlation_caption.setText(
             f"地层对比图-lite · {names} · "
-            f"共享深度 · 图版 {template.name}"
+            f"共享深度 · 图版 {template.name} · 层位 {tops_n}"
         )
         tab = f"对比 · {len(presentations)}井"
         if self._active_plot_id:
@@ -559,6 +706,7 @@ class WellLogWorkstationWindow(QMainWindow):
         data = cur.data(0, Qt.ItemDataRole.UserRole) or {}
         if data.get("kind") == "well":
             self._selected_well_id = str(data.get("id"))
+            self._refresh_tops_list()
             self._sync_apply_enabled()
             self._update_status()
 
@@ -873,3 +1021,45 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "导出 PDF 失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "导出 PDF 失败", str(exc))
+
+    def _on_import_tops(self) -> None:
+        if self._selected_well_id is None or self._workspace is None:
+            QMessageBox.information(self, "导入层位", "请先选择一口井。")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择层位 JSON",
+            "",
+            "JSON (*.json);;All (*.*)",
+        )
+        if not path:
+            return
+        try:
+            tops = self.import_tops_json_for_well(self._selected_well_id, path)
+            QMessageBox.information(
+                self,
+                "层位已导入",
+                f"已关联 {len(tops)} 个层位到选中井。\n"
+                f"单井/对比图会以虚线标记深度。",
+            )
+        except (TopsError, WorkspaceError) as exc:
+            QMessageBox.warning(self, "导入层位失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "导入层位失败", str(exc))
+
+    def _on_stub_tops(self) -> None:
+        if self._selected_well_id is None or self._workspace is None:
+            QMessageBox.information(self, "示例层位", "请先选择一口井。")
+            return
+        try:
+            tops = self.generate_stub_tops_for_well(self._selected_well_id)
+            QMessageBox.information(
+                self,
+                "示例层位",
+                f"已生成 {len(tops)} 个示例层位（深度均分）。\n"
+                f"正式数据请用「导入层位 JSON…」。",
+            )
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "生成层位失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "生成层位失败", str(exc))

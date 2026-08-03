@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
 from well_log_workstation.template_model import HostPresentation
+from well_log_workstation.tops_model import FormationTop
 
 
 class CorrelationCanvas(QWidget):
@@ -23,16 +24,44 @@ class CorrelationCanvas(QWidget):
         self.setMinimumSize(480, 400)
         self.setStyleSheet("background: #ffffff;")
         self._columns: list[HostPresentation] = []
+        # Parallel to columns: tops per well column
+        self._tops_per_column: list[list[FormationTop]] = []
         self._d0: float | None = None
         self._d1: float | None = None
         self._drag_y: int | None = None
         self._drag_d0: float | None = None
         self._drag_d1: float | None = None
 
-    def set_columns(self, presentations: list[HostPresentation]) -> None:
+    def set_columns(
+        self,
+        presentations: list[HostPresentation],
+        tops_per_column: list[list[FormationTop]] | None = None,
+    ) -> None:
         self._columns = list(presentations)
+        if tops_per_column is None:
+            self._tops_per_column = [[] for _ in self._columns]
+        else:
+            # Pad / trim to column count
+            self._tops_per_column = []
+            for i in range(len(self._columns)):
+                if i < len(tops_per_column):
+                    self._tops_per_column.append(list(tops_per_column[i]))
+                else:
+                    self._tops_per_column.append([])
         self._fit_depth()
         self.update()
+
+    def set_tops_per_column(self, tops_per_column: list[list[FormationTop]]) -> None:
+        self._tops_per_column = []
+        for i in range(len(self._columns)):
+            if i < len(tops_per_column):
+                self._tops_per_column.append(list(tops_per_column[i]))
+            else:
+                self._tops_per_column.append([])
+        self.update()
+
+    def tops_per_column(self) -> list[list[FormationTop]]:
+        return [list(t) for t in self._tops_per_column]
 
     def columns(self) -> list[HostPresentation]:
         return list(self._columns)
@@ -187,10 +216,28 @@ class CorrelationCanvas(QWidget):
                     p.drawLine(int(prev[0]), int(prev[1]), int(xx), int(yy))
                 prev = (xx, yy)
 
+            # Per-column formation tops as depth references
+            col_tops = (
+                self._tops_per_column[i]
+                if i < len(self._tops_per_column)
+                else []
+            )
+            for ft in col_tops:
+                if not math.isfinite(ft.depth) or ft.depth < d0 or ft.depth > d1:
+                    continue
+                yy = int(y_map(ft.depth))
+                pen = QPen(QColor(ft.color), 1.2, Qt.PenStyle.DashLine)
+                p.setPen(pen)
+                p.drawLine(x0 + 2, yy, x0 + col_w - 4, yy)
+                p.setPen(QColor(ft.color))
+                p.drawText(x0 + 4, yy - 2, ft.name[:12])
+
+        tops_n = sum(len(t) for t in self._tops_per_column)
         p.setPen(QColor("#555"))
         p.drawText(
             8,
             h - 6,
-            f"对比-lite · {n} 井 · 共享深度 {d0:.1f}–{d1:.1f} · 滚轮缩放 / 拖动平移",
+            f"对比-lite · {n} 井 · 共享深度 {d0:.1f}–{d1:.1f} · "
+            f"层位 {tops_n} · 滚轮缩放 / 拖动平移",
         )
         p.end()

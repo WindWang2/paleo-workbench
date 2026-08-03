@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from well_log_workstation.template_model import HostPresentation
+from well_log_workstation.tops_model import FormationTop
 
 
 class MultiTrackCanvas(QWidget):
@@ -22,11 +23,19 @@ class MultiTrackCanvas(QWidget):
         self.setObjectName("MultiTrackCanvas")
         self.setMinimumSize(400, 400)
         self._presentation: HostPresentation | None = None
+        self._tops: list[FormationTop] = []
         self.setStyleSheet("background: #ffffff;")
 
     def set_presentation(self, presentation: HostPresentation | None) -> None:
         self._presentation = presentation
         self.update()
+
+    def set_tops(self, tops: list[FormationTop] | None) -> None:
+        self._tops = list(tops or [])
+        self.update()
+
+    def tops(self) -> list[FormationTop]:
+        return list(self._tops)
 
     def presentation(self) -> HostPresentation | None:
         return self._presentation
@@ -67,6 +76,8 @@ class MultiTrackCanvas(QWidget):
         total_frac = sum(max(0.05, t.width_fraction) for t in pres.tracks) or 1.0
 
         x = left_margin
+        track_left = left_margin
+        track_right = left_margin
         for track in pres.tracks:
             tw = max(24, int(usable_w * (max(0.05, track.width_fraction) / total_frac)))
             # header
@@ -103,14 +114,29 @@ class MultiTrackCanvas(QWidget):
                         track.scale.mode if track.scale else "linear",
                         QColor(layer.color),
                     )
+            track_right = x + tw - 4
             x += tw
 
+        # Formation tops as depth markers across tracks
+        if self._tops:
+            th = max(1, bottom - top)
+            for ft in self._tops:
+                if not math.isfinite(ft.depth) or ft.depth < d0 or ft.depth > d1:
+                    continue
+                yy = top + int(((ft.depth - d0) / (d1 - d0)) * th)
+                pen = QPen(QColor(ft.color), 1.2, Qt.PenStyle.DashLine)
+                p.setPen(pen)
+                p.drawLine(track_left, yy, track_right, yy)
+                p.setPen(QColor(ft.color))
+                p.drawText(track_left + 4, yy - 2, ft.name[:16])
+
         p.setPen(QColor("#666"))
+        tops_note = f" · 层位 {len(self._tops)}" if self._tops else ""
         p.drawText(
             8,
             h - 4,
             f"{pres.well_name} · {pres.template_name} · "
-            f"{pres.track_count} 图道 · {pres.depth_unit}",
+            f"{pres.track_count} 图道 · {pres.depth_unit}{tops_note}",
         )
         p.end()
 

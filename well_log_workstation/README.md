@@ -64,6 +64,25 @@ Need **≥2 wells** in the workspace catalog:
 3. Center tab **地层对比图-lite**: side-by-side columns, **shared depth** pan (drag) / zoom (wheel)  
 4. Double-click catalog entry under 图件 to reopen
 
+### 层位 / Formation tops (#223)
+
+Tops are host JSON next to the well LAS (`wells/<id>/tops.json`):
+
+```json
+{
+  "schemaVersion": 1,
+  "well_id": "…",
+  "tops": [
+    { "name": "T1", "depth": 1001.0, "unit": "m", "color": "#c0392b" }
+  ]
+}
+```
+
+- Right pane **层位** list for the selected well  
+- Dashed depth markers on **单井** multi-track and **对比** columns  
+- **层位 → 导入层位 JSON…** / **生成示例层位**  
+- Missing or corrupt files → empty list + diagnostics (no crash)
+
 Headless / CI:
 
 ```bash
@@ -89,4 +108,4 @@ WLWS_FORCE_XCB=1 QT_QPA_PLATFORM=xcb python -m well_log_workstation
 
 ## Ticket chain
 
-`#216` shell → `#217` workspace → `#218` LAS import → `#219` multi-track template → `#220` plot docs → `#221` export → `#222` correlation-lite → `#223` tops …
+`#216`–`#223` host workstation vertical slice complete (shell → tops).

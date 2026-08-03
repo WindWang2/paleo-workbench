@@ -50,7 +50,7 @@ def test_shell_has_l_chrome(qtbot) -> None:
     assert win.tops_list.objectName() == "TopsList"
 
     menu_titles = [a.text().replace("&", "") for a in win.menuBar().actions()]
-    for expected in ("文件", "图件", "图版", "导出", "帮助"):
+    for expected in ("文件", "图件", "图版", "导出", "层位", "帮助"):
         assert expected in menu_titles
 
     from PySide6.QtWidgets import QSplitter
