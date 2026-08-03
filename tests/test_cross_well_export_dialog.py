@@ -53,9 +53,16 @@ def test_dialog_pdf_page_size(qtbot):
 
 
 def test_page_export_flow(qtbot, monkeypatch, tmp_path):
-    """_export_section: dialog options -> engine export_composite kwargs."""
+    """_export_section: dialog options -> legacy export_composite kwargs.
+
+    Must force the legacy backend: default may be ``engine`` when the
+    WellLogEngine env flag is set, and the engine branch opens a modal
+    ``QMessageBox.warning`` that hangs headless CI (was the monorepo suite
+    hang after ~4%).
+    """
     page = StratigraphyCorrelationPage()
     qtbot.addWidget(page)
+    page.set_backend("legacy")
 
     calls = []
 
@@ -85,7 +92,9 @@ def test_page_export_flow(qtbot, monkeypatch, tmp_path):
         "getSaveFileName",
         staticmethod(lambda *a, **k: (str(tmp_path / "out.png"), "PNG (*.png)")),
     )
+    # Both paths: success toast and any residual warning must not block.
     monkeypatch.setattr(mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(mod.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
 
     page._export_section()
     assert len(calls) == 1
