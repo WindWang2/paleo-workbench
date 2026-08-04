@@ -39,6 +39,7 @@ from well_log_workstation.correlation_links import (
     match_tops_by_name,
 )
 from well_log_workstation.crs_dialog import CoordinateReferenceDialog
+from well_log_workstation.datum.well_section_datum import WellSectionDatum
 from well_log_workstation.engine_bridge import (
     EngineSubmitError,
     EngineUnavailable,
@@ -62,11 +63,21 @@ from well_log_workstation.plot_document import (
     create_correlation_plot,
     create_fence_3d_plot,
     create_plane_map_plot,
+    create_section_plot,
     create_single_well_plot,
     load_plot_document,
     save_plot_document,
 )
 from well_log_workstation.qt_platform import effective_qt_platform_hint
+from well_log_workstation.section_canvas import SectionCanvas
+from well_log_workstation.section_geometry import (
+    ContactSegment2D,
+    FaultSegment2D,
+    TieQuad2D,
+    contact_polyline,
+    curtain_slice_fault,
+    tie_quads,
+)
 from well_log_workstation.session_store import HostSessionStore
 from well_log_workstation.template_model import (
     HostPresentation,
@@ -183,7 +194,8 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_new_fence_3d.setEnabled(False)
         self._act_new_section = plot_menu.addAction("新建油藏剖面…")
         self._act_new_section.setObjectName("Action_NewSectionPlot")
-        self._act_new_section.setEnabled(False)  # wired in PR-C3
+        self._act_new_section.triggered.connect(self._on_new_section_plot)
+        self._act_new_section.setEnabled(False)
         self._act_new_composite = plot_menu.addAction("新建油藏综合图…")
         self._act_new_composite.setObjectName("Action_NewCompositePlot")
         self._act_new_composite.setEnabled(False)  # wired in PR-C4
@@ -403,6 +415,19 @@ class WellLogWorkstationWindow(QMainWindow):
         self.fence_3d_view = FenceView()
         f3l.addWidget(self.fence_3d_view, 1)
         self.document_tabs.addTab(self._fence_3d_host, "三维栅状图")
+
+        # Phase-2 PR-C3: 油藏剖面 host surface.
+        self._section_host = QWidget()
+        self._section_host.setObjectName("SectionHost")
+        sl = QVBoxLayout(self._section_host)
+        self.section_caption = QLabel(
+            "油藏剖面 · 井列 + 断层/接触/充填覆盖（host QPainter 渲染）"
+        )
+        self.section_caption.setObjectName("SectionCaption")
+        sl.addWidget(self.section_caption)
+        self.section_canvas = SectionCanvas()
+        sl.addWidget(self.section_canvas, 1)
+        self.document_tabs.addTab(self._section_host, "油藏剖面")
 
         layout.addWidget(self.document_tabs, 1)
         return pane
@@ -754,6 +779,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self._act_new_fence_3d.setToolTip(
                 "三维栅状图需要 pyqtgraph + OpenGL"
             )
+        self._act_new_section.setEnabled(ws is not None)
         self._act_set_crs.setEnabled(ws is not None)
         self._refresh_tree()
         self._refresh_tops_list()
@@ -1119,6 +1145,87 @@ class WellLogWorkstationWindow(QMainWindow):
         self.document_tabs.setCurrentWidget(self._fence_3d_host)
         self._update_status()
 
+    def _show_section(self, plot: PlotDocument) -> None:
+        """Render the reservoir section (host-side, Phase-2 T4/T5)."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        if not plot.template_id:
+            raise WorkspaceError("图件未绑定图版")
+        template = get_builtin_template(plot.template_id)
+        if template is None:
+            raise WorkspaceError(f"未知图版: {plot.template_id}")
+
+        presentations: list[HostPresentation] = []
+        tops_cols: list[list[FormationTop]] = []
+        well_positions: list[tuple[float, float]] = []
+        for well_id in plot.well_ids:
+            doc = self.session.ensure_well_loaded(self._workspace, well_id)
+            pres = apply_template(template, doc)
+            presentations.append(pres)
+            t, _diags = load_tops_for_well(self._workspace, well_id)
+            tops_cols.append(t)
+            entry = next(
+                (w for w in self._workspace.wells if w.id == well_id), None
+            )
+            lng = float(entry.lng) if entry and entry.lng is not None else float(len(well_positions))
+            lat = float(entry.lat) if entry and entry.lat is not None else 0.0
+            well_positions.append((lng, lat))
+
+        # Datum shifts (T5): md / tvdss / horizon flatten.
+        datum_mode = "md"
+        target_horizon = None
+        datum = WellSectionDatum(mode=datum_mode, target_horizon=target_horizon)
+        well_dicts = [
+            {
+                "name": pres.well_name,
+                "tops": [
+                    {"name": ft.name, "depth": ft.depth}
+                    for ft in (tops_cols[i] if i < len(tops_cols) else [])
+                ],
+            }
+            for i, pres in enumerate(presentations)
+        ]
+        shifts = datum.compute_shifts(well_dicts)
+
+        # Section geometry (T4): faults / contacts / tie quads from user
+        # annotations in the catalog (defaults: none -> empty overlays).
+        faults: list[FaultSegment2D] = []
+        contacts: list[ContactSegment2D] = []
+        quads: list[TieQuad2D] = []
+        fault_pts = getattr(plot, "fault_annotations", None)
+        if fault_pts:
+            faults = curtain_slice_fault(fault_pts, well_positions, shifts)
+        contact_depths = getattr(plot, "contact_annotations", None)
+        if contact_depths:
+            contacts = contact_polyline(
+                [{"depth": d} for d in contact_depths],
+                well_positions,
+                fluid_type="owc",
+                datum_shifts=shifts,
+            )
+        tops_as_dicts = [
+            [{"name": ft.name, "depth": ft.depth} for ft in col]
+            for col in tops_cols
+        ]
+        quads = tie_quads(tops_as_dicts, well_positions, datum_shifts=shifts)
+
+        self._active_plot_id = plot.id
+        self._active_plot_type = "section"
+        self.section_canvas.set_section(
+            presentations,
+            tops_cols,
+            faults=faults,
+            contacts=contacts,
+            tie_quads=quads,
+        )
+        names = " · ".join(p.well_name for p in presentations[:4])
+        self.section_caption.setText(
+            f"油藏剖面 · {names} · 基准 {datum_mode} · "
+            f"断层 {len(faults)} · 接触 {len(contacts)} · 充填 {len(quads)}"
+        )
+        self.document_tabs.setCurrentWidget(self._section_host)
+        self._update_status()
+
     def auto_link_correlation_tops(self) -> list[HorizonLink]:
         """Match tops by name across adjacent wells; persist on active plot."""
         if self._workspace is None:
@@ -1265,9 +1372,14 @@ class WellLogWorkstationWindow(QMainWindow):
             self._refresh_tree()
             return plot
 
-        if plot.type in ("section", "composite"):
-            # Landed in later PR-C batches (PR-C3 / PR-C4).
-            raise WorkspaceError(f"图件类型尚未接入: {plot.type}")
+        if plot.type == "section":
+            self._show_section(plot)
+            self._refresh_tree()
+            return plot
+
+        if plot.type == "composite":
+            # Landed in PR-C4.
+            raise WorkspaceError("图件类型尚未接入: composite")
 
         if plot.type != "single_well":
             raise WorkspaceError(f"未知图件类型: {plot.type}")
@@ -1735,6 +1847,46 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "新建三维栅状图失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "新建三维栅状图失败", str(exc))
+
+    def _on_new_section_plot(self) -> None:
+        """Create + open a reservoir section plot (Phase-2 T4/T5)."""
+        if self._workspace is None:
+            QMessageBox.information(self, "新建油藏剖面", "请先打开工区。")
+            return
+        if len(self._workspace.wells) < 2:
+            QMessageBox.information(
+                self, "新建油藏剖面", "油藏剖面至少需要 2 口井。"
+            )
+            return
+        template_id = self._current_template_id()
+        if not template_id:
+            QMessageBox.information(self, "新建油藏剖面", "请选择图版模板。")
+            return
+        well_ids = self._pick_wells_for_correlation()
+        if not well_ids or len(well_ids) < 2:
+            QMessageBox.information(
+                self, "新建油藏剖面", "请至少选择 2 口井。"
+            )
+            return
+        try:
+            plot = create_section_plot(
+                self._workspace,
+                well_ids=well_ids,
+                template_id=template_id,
+            )
+            self._active_plot_id = plot.id
+            self._active_plot_type = "section"
+            self._show_section(plot)
+            self._refresh_tree()
+            QMessageBox.information(
+                self, "油藏剖面已创建",
+                f"已保存 {plot.path}\n"
+                f"{len(plot.well_ids)} 口井 · 滚轮缩放 / 拖动平移。",
+            )
+        except (WorkspaceError, ExportError) as exc:
+            QMessageBox.warning(self, "新建油藏剖面失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "新建油藏剖面失败", str(exc))
 
     def _on_set_coordinate_reference(self) -> None:
         """Open the CRS trio editor (Phase-2 T2 / #246)."""
