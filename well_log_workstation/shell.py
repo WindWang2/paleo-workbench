@@ -38,6 +38,7 @@ from well_log_workstation.correlation_links import (
     make_horizon_link,
     match_tops_by_name,
 )
+from well_log_workstation.crs_dialog import CoordinateReferenceDialog
 from well_log_workstation.engine_bridge import (
     EngineSubmitError,
     EngineUnavailable,
@@ -52,11 +53,15 @@ from well_log_workstation.export_plot import (
     export_presentation_pdf,
     export_presentation_svg,
 )
+from well_log_workstation.fence_view import FenceView
 from well_log_workstation.las_import import LasImportError, import_las_into_workspace
 from well_log_workstation.multi_track_canvas import MultiTrackCanvas
+from well_log_workstation.plane_map_view import PlaneMapView
 from well_log_workstation.plot_document import (
     PlotDocument,
     create_correlation_plot,
+    create_fence_3d_plot,
+    create_plane_map_plot,
     create_single_well_plot,
     load_plot_document,
     save_plot_document,
@@ -70,6 +75,7 @@ from well_log_workstation.template_model import (
     get_builtin_template,
     list_builtin_templates,
 )
+from well_log_workstation.three_d_bridge import probe_3d
 from well_log_workstation.tops_model import (
     FormationTop,
     TopsError,
@@ -165,6 +171,27 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_new_correlation.setObjectName("Action_NewCorrelationPlot")
         self._act_new_correlation.triggered.connect(self._on_new_correlation_plot)
         self._act_new_correlation.setEnabled(False)
+        # Phase-2 PR-C: plane_map + fence_3d (section/composite land in
+        # later PR-C batches; their menu items are stubs until then).
+        self._act_new_plane_map = plot_menu.addAction("新建平面图…")
+        self._act_new_plane_map.setObjectName("Action_NewPlaneMapPlot")
+        self._act_new_plane_map.triggered.connect(self._on_new_plane_map_plot)
+        self._act_new_plane_map.setEnabled(False)
+        self._act_new_fence_3d = plot_menu.addAction("新建三维栅状图…")
+        self._act_new_fence_3d.setObjectName("Action_NewFence3dPlot")
+        self._act_new_fence_3d.triggered.connect(self._on_new_fence_3d_plot)
+        self._act_new_fence_3d.setEnabled(False)
+        self._act_new_section = plot_menu.addAction("新建油藏剖面…")
+        self._act_new_section.setObjectName("Action_NewSectionPlot")
+        self._act_new_section.setEnabled(False)  # wired in PR-C3
+        self._act_new_composite = plot_menu.addAction("新建油藏综合图…")
+        self._act_new_composite.setObjectName("Action_NewCompositePlot")
+        self._act_new_composite.setEnabled(False)  # wired in PR-C4
+        plot_menu.addSeparator()
+        self._act_set_crs = plot_menu.addAction("坐标系设置（CRS）…")
+        self._act_set_crs.setObjectName("Action_SetCoordinateReference")
+        self._act_set_crs.triggered.connect(self._on_set_coordinate_reference)
+        self._act_set_crs.setEnabled(False)
         self._act_auto_links = plot_menu.addAction("按层位名自动连线")
         self._act_auto_links.setObjectName("Action_AutoHorizonLinks")
         self._act_auto_links.triggered.connect(self._on_auto_horizon_links)
@@ -350,6 +377,33 @@ class WellLogWorkstationWindow(QMainWindow):
 
         self.document_tabs.addTab(host, "单井分析图（多图道）")
         self.document_tabs.addTab(corr_host, "地层对比图-lite")
+
+        # Phase-2 PR-C: plane_map + fence_3d host surfaces (section/composite
+        # tabs are added in later PR-C batches).
+        self._plane_map_host = QWidget()
+        self._plane_map_host.setObjectName("PlaneMapHost")
+        pml = QVBoxLayout(self._plane_map_host)
+        self.plane_map_caption = QLabel(
+            "平面图 · 井位（需井含 lng/lat/crs）· 按工区坐标系投影"
+        )
+        self.plane_map_caption.setObjectName("PlaneMapCaption")
+        pml.addWidget(self.plane_map_caption)
+        self.plane_map_view = PlaneMapView()
+        pml.addWidget(self.plane_map_view, 1)
+        self.document_tabs.addTab(self._plane_map_host, "平面图")
+
+        self._fence_3d_host = QWidget()
+        self._fence_3d_host.setObjectName("Fence3dHost")
+        f3l = QVBoxLayout(self._fence_3d_host)
+        self.fence_3d_caption = QLabel(
+            "三维栅状图 · pyqtgraph 3D · 拖拽旋转 / 滚轮缩放"
+        )
+        self.fence_3d_caption.setObjectName("Fence3dCaption")
+        f3l.addWidget(self.fence_3d_caption)
+        self.fence_3d_view = FenceView()
+        f3l.addWidget(self.fence_3d_view, 1)
+        self.document_tabs.addTab(self._fence_3d_host, "三维栅状图")
+
         layout.addWidget(self.document_tabs, 1)
         return pane
 
@@ -691,6 +745,16 @@ class WellLogWorkstationWindow(QMainWindow):
             self.document_tabs.setTabText(1, "地层对比图-lite")
             self.document_tabs.setCurrentIndex(0)
         self._act_import_las.setEnabled(ws is not None)
+        # Phase-2 PR-C: new plot-type menu items (fence_3d needs 3D).
+        self._act_new_plane_map.setEnabled(ws is not None)
+        self._act_new_fence_3d.setEnabled(
+            ws is not None and probe_3d().available
+        )
+        if ws is not None and not probe_3d().available:
+            self._act_new_fence_3d.setToolTip(
+                "三维栅状图需要 pyqtgraph + OpenGL"
+            )
+        self._act_set_crs.setEnabled(ws is not None)
         self._refresh_tree()
         self._refresh_tops_list()
         self._sync_apply_enabled()
@@ -1006,6 +1070,55 @@ class WellLogWorkstationWindow(QMainWindow):
         self._sync_apply_enabled()
         self._update_status()
 
+    def _show_plane_map(self, plot: PlotDocument) -> None:
+        """Render well positions on the paleo_map canvas (Phase-2 T2)."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        self._active_plot_id = plot.id
+        self._active_plot_type = "plane_map"
+        self.plane_map_view.set_coordinate(self._workspace.coordinate)
+        self.plane_map_view.set_plot_data(self._workspace.wells)
+        drawn = len(PlaneMapView.filter_wells_with_coords(self._workspace.wells))
+        total = len(self._workspace.wells)
+        self.plane_map_caption.setText(
+            f"平面图 · 绘制 {drawn}/{total} 口井（含坐标）· "
+            f"项目坐标系 {self._workspace.coordinate.project_crs}"
+        )
+        self.document_tabs.setCurrentWidget(self._plane_map_host)
+        self._update_status()
+
+    def _show_fence_3d(self, plot: PlotDocument) -> None:
+        """Render the 3D fence surface from well x/y/depth (Phase-2 T6)."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        if not probe_3d().available:
+            raise WorkspaceError(
+                "三维栅状图需要 pyqtgraph + OpenGL（3D 能力探测失败）"
+            )
+        self._active_plot_id = plot.id
+        self._active_plot_type = "fence_3d"
+        wells = []
+        for wid in plot.well_ids:
+            entry = next(
+                (w for w in self._workspace.wells if w.id == wid), None
+            )
+            if entry is None:
+                continue
+            doc = self.session.ensure_well_loaded(self._workspace, wid)
+            depth = float(np.nanmax(doc.depth)) if doc.depth.size else 1000.0
+            # x/y from catalog coords (project CRS), depth from LAS.
+            lng = float(entry.lng) if entry.lng is not None else 0.0
+            lat = float(entry.lat) if entry.lat is not None else 0.0
+            wells.append(
+                {"name": entry.name, "x": lng, "y": lat, "depth": depth}
+            )
+        self.fence_3d_view.set_wells(wells)
+        self.fence_3d_caption.setText(
+            f"三维栅状图 · {len(wells)} 井 · 拖拽旋转 / 滚轮缩放"
+        )
+        self.document_tabs.setCurrentWidget(self._fence_3d_host)
+        self._update_status()
+
     def auto_link_correlation_tops(self) -> list[HorizonLink]:
         """Match tops by name across adjacent wells; persist on active plot."""
         if self._workspace is None:
@@ -1125,11 +1238,12 @@ class WellLogWorkstationWindow(QMainWindow):
             self.links_list.addItem(item)
 
     def open_plot_document(self, plot_id: str) -> PlotDocument:
-        """Load plot metadata and open single-well or correlation view."""
+        """Load plot metadata and open the matching plot-type view."""
         if self._workspace is None:
             raise WorkspaceError("请先打开工区")
         plot = load_plot_document(self._workspace, plot_id)
-        if not plot.well_ids:
+        # plane_map / composite may legitimately have no wells bound.
+        if not plot.well_ids and plot.type not in ("plane_map", "composite"):
             raise WorkspaceError("图件未绑定井")
         if not plot.template_id:
             raise WorkspaceError("图件未绑定图版")
@@ -1140,6 +1254,20 @@ class WellLogWorkstationWindow(QMainWindow):
                 self._select_well_in_tree(plot.well_ids[0])
             self._refresh_tree()
             return plot
+
+        if plot.type == "plane_map":
+            self._show_plane_map(plot)
+            self._refresh_tree()
+            return plot
+
+        if plot.type == "fence_3d":
+            self._show_fence_3d(plot)
+            self._refresh_tree()
+            return plot
+
+        if plot.type in ("section", "composite"):
+            # Landed in later PR-C batches (PR-C3 / PR-C4).
+            raise WorkspaceError(f"图件类型尚未接入: {plot.type}")
 
         if plot.type != "single_well":
             raise WorkspaceError(f"未知图件类型: {plot.type}")
@@ -1314,10 +1442,18 @@ class WellLogWorkstationWindow(QMainWindow):
         plots_node.setData(0, Qt.ItemDataRole.UserRole, {"kind": "plots_folder"})
         for plot in ws.plots:
             label = plot.name
-            if plot.type == "correlation":
-                label = f"{plot.name} [对比]"
-            elif plot.type == "single_well":
-                label = f"{plot.name} [单井·多图道]"
+            # Phase-2 PR-C: 6 plot types with Chinese labels (T9).
+            type_labels = {
+                "single_well": "[单井·多图道]",
+                "correlation": "[对比]",
+                "section": "[剖面]",
+                "plane_map": "[平面图]",
+                "fence_3d": "[栅状图]",
+                "composite": "[综合图]",
+            }
+            suffix = type_labels.get(plot.type, "")
+            if suffix:
+                label = f"{plot.name} {suffix}"
             item = QTreeWidgetItem([label])
             item.setData(
                 0,
@@ -1522,6 +1658,104 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "新建对比图失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "新建对比图失败", str(exc))
+
+    def _on_new_plane_map_plot(self) -> None:
+        """Create + open a plane_map plot (Phase-2 T2 / #246)."""
+        if self._workspace is None:
+            QMessageBox.information(self, "新建平面图", "请先打开工区。")
+            return
+        if not self.plane_map_view.mapping_available():
+            QMessageBox.warning(
+                self, "新建平面图",
+                "平面图需要 geoviz mapping 表面（geoviz_paleo_map + CRS helpers）。"
+                "请确认 geo-viz-engine 已安装。",
+            )
+            return
+        template_id = self._current_template_id() or "std-gr-rt-den"
+        try:
+            plot = create_plane_map_plot(
+                self._workspace,
+                wells=[w.id for w in self._workspace.wells],
+                template_id=template_id,
+            )
+            self._active_plot_id = plot.id
+            self._active_plot_type = "plane_map"
+            self._show_plane_map(plot)
+            self._refresh_tree()
+            QMessageBox.information(
+                self, "平面图已创建",
+                f"已保存 {plot.path}\n"
+                f"绘制 {len(PlaneMapView.filter_wells_with_coords(self._workspace.wells))}"
+                f"/{len(self._workspace.wells)} 口含坐标井。",
+            )
+        except (WorkspaceError, ExportError) as exc:
+            QMessageBox.warning(self, "新建平面图失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "新建平面图失败", str(exc))
+
+    def _on_new_fence_3d_plot(self) -> None:
+        """Create + open a fence_3d plot (Phase-2 T6 / #250)."""
+        if self._workspace is None:
+            QMessageBox.information(self, "新建三维栅状图", "请先打开工区。")
+            return
+        if not probe_3d().available:
+            cap = probe_3d()
+            QMessageBox.warning(
+                self, "新建三维栅状图",
+                f"三维栅状图需要 pyqtgraph + OpenGL。\n{cap.detail}",
+            )
+            return
+        wells_with_coords = [
+            w for w in self._workspace.wells
+            if w.lng is not None and w.lat is not None
+        ]
+        if len(wells_with_coords) < 2:
+            QMessageBox.information(
+                self, "新建三维栅状图",
+                "三维栅状图至少需要 2 口含坐标（lng/lat）的井。",
+            )
+            return
+        template_id = self._current_template_id() or "std-gr-rt-den"
+        try:
+            plot = create_fence_3d_plot(
+                self._workspace,
+                well_ids=[w.id for w in wells_with_coords],
+                template_id=template_id,
+            )
+            self._active_plot_id = plot.id
+            self._active_plot_type = "fence_3d"
+            self._show_fence_3d(plot)
+            self._refresh_tree()
+            QMessageBox.information(
+                self, "三维栅状图已创建",
+                f"已保存 {plot.path}\n"
+                f"{len(plot.well_ids)} 口井 · 拖拽旋转 / 滚轮缩放。",
+            )
+        except (WorkspaceError, ExportError) as exc:
+            QMessageBox.warning(self, "新建三维栅状图失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "新建三维栅状图失败", str(exc))
+
+    def _on_set_coordinate_reference(self) -> None:
+        """Open the CRS trio editor (Phase-2 T2 / #246)."""
+        if self._workspace is None:
+            QMessageBox.information(self, "坐标系设置", "请先打开工区。")
+            return
+        dlg = CoordinateReferenceDialog(self._workspace.coordinate, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._workspace.coordinate = dlg.result_coordinate()
+        save_workspace(self._workspace)
+        # Re-project the active plane map if open.
+        if self._active_plot_type == "plane_map":
+            self.plane_map_view.set_coordinate(self._workspace.coordinate)
+            self.plane_map_view.set_plot_data(self._workspace.wells)
+        QMessageBox.information(
+            self, "坐标系已更新",
+            f"项目坐标系: {self._workspace.coordinate.project_crs}\n"
+            f"目标坐标系: {self._workspace.coordinate.target_crs or '—'}\n"
+            f"显示坐标系: {self._workspace.coordinate.display_crs}",
+        )
 
     def _on_export_svg(self) -> None:
         if self._presentation is None:
