@@ -1,4 +1,4 @@
-"""In-process plot-change signal bus (Phase-2, T7 / #251).
+"""In-process plot-change signal bus (Phase-2, T7 / #251; ADR 0051).
 
 The composite figure (油藏综合图) must refresh its embedded source-plot
 panels when the source plots change. The Workstation has no engine observer
@@ -7,10 +7,11 @@ emits ``plot_changed`` after its own imperative save/render calls.
 
 - ``plot_bus`` is a module-level singleton.
 - ``plot_changed(plot_id: str, revision: int)`` - revision is a per-plot
-  in-memory monotonic counter (NOT persisted; workspace.json stores no
-  revision field per T7 - avoids another T9 schema bump).
-- Emit sites (T7): shell save_plot_document callers, MultiTrackCanvas /
-  CorrelationCanvas depth_range_changed handlers, editor dirty->save hooks.
+  monotonic counter, persisted in ``plots/<id>.json`` (schema v3, ADR 0051):
+  ``save_plot_document`` bumps on save (new committed state), ``load_plot_document``
+  restores the persisted value on load (never regresses), ``emit_plot_changed``
+  bumps on emit.
+- Emit sites: shell create/display paths (save bumps without emitting).
 """
 
 from __future__ import annotations
@@ -27,15 +28,23 @@ class PlotEventBus(QObject):
 # Module-level singleton (T7).
 plot_bus = PlotEventBus()
 
-# In-memory per-plot revision counters (NOT persisted - T7).
+# Per-plot revision counters, seeded from persisted state on load (ADR 0051).
 _revisions: dict[str, int] = {}
 
 
 def bump_plot_revision(plot_id: str) -> int:
-    """Increment + return the revision for a plot id (in-memory only)."""
+    """Increment + return the revision for a plot id."""
     rev = _revisions.get(plot_id, 0) + 1
     _revisions[plot_id] = rev
     return rev
+
+
+def restore_plot_revision(plot_id: str, revision: int) -> int:
+    """Seed the in-memory counter from persisted state; never regresses."""
+    current = _revisions.get(plot_id, 0)
+    restored = max(current, int(revision))
+    _revisions[plot_id] = restored
+    return restored
 
 
 def emit_plot_changed(plot_id: str) -> int:
