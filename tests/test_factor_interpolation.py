@@ -128,7 +128,11 @@ def test_synthetic_points_do_not_depend_on_python_hash(monkeypatch):
 
 
 def test_large_sample_loo_uses_a_bounded_deterministic_subset(monkeypatch):
-    from paleo_workbench.workflow import factor_interpolation as interpolation
+    # The pure interpolation core (_run_grid / _leave_one_out_r2) was promoted
+    # to geo-viz-engine's geoviz_plots.factor.interpolation (PR-A #256); it is
+    # not re-exported through the public geoviz facade, so the test imports the
+    # promoted module directly to verify the bounded LOO subset contract.
+    from geoviz_plots.factor import interpolation as interpolation
 
     calls: list[float] = []
 
