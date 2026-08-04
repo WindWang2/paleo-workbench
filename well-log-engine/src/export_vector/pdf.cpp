@@ -266,6 +266,21 @@ PdfPathStream &PdfPathStream::set_line_width(double width) noexcept {
   return *this;
 }
 
+PdfPathStream &PdfPathStream::set_dash(std::span<const double> dash_array,
+                                       double phase) noexcept {
+  impl_->operators += "[";
+  for (std::size_t i = 0; i < dash_array.size(); ++i) {
+    if (i > 0) {
+      impl_->operators.push_back(' ');
+    }
+    append_number(impl_->operators, dash_array[i]);
+  }
+  impl_->operators += "] ";
+  append_number(impl_->operators, phase);
+  impl_->operators += " d\n";
+  return *this;
+}
+
 PdfPathStream &PdfPathStream::save_state() noexcept {
   impl_->operators += "q\n";
   return *this;

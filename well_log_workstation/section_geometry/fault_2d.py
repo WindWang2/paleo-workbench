@@ -6,8 +6,7 @@ fault polyline in 3D (x, y, z) + the participating well positions; output:
 per-fault curtain-slice segments in section 2D space (x = across-section
 position, y = depth), ready for the host SectionCanvas to paint.
 
-T4 resolution: solid red polylines; no dash pattern (engine CustomPolyline
-has color + width only).
+T4 resolution: red polylines with a default dashed pattern (ADR 0050).
 """
 
 from __future__ import annotations
@@ -24,6 +23,9 @@ class FaultSegment2D:
     points: np.ndarray  # (N, 2) float64: (x, y) in section space
     color: str = "#dc2626"  # red family (T4)
     width_mm: float = 0.35
+    # Dash pattern as [on, off, on, off, ...] in mm (ADR 0050). Default is a
+    # dashed line — the Chinese industry standard for faults.
+    dash_pattern: tuple[float, ...] = (3.0, 1.5)
 
 
 def curtain_slice_fault(

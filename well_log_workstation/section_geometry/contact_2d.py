@@ -1,9 +1,9 @@
 """contact_2d — OWC/GOC fluid-contact polylines between wells (Phase-2, T4).
 
 Pure numpy, headless. The reservoir section renders fluid contacts (OWC
-blue, GOC orange) as solid polylines connecting per-well contact depths
-across the section x-axis. No dash pattern (T4: CustomPolyline is solid
-only) - color + position distinguish the contact type.
+blue, GOC orange) as polylines connecting per-well contact depths across
+the section x-axis. Contacts use a dotted/dashed pattern by default
+(ADR 0050); color + position also distinguish the contact type.
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ class ContactSegment2D:
     fluid_type: str  # "owc" | "goc"
     color: str  # resolved from fluid_type
     width_mm: float = 0.35
+    # Dash pattern as [on, off, ...] in mm (ADR 0050). Default dotted line —
+    # the standard convention for fluid contacts.
+    dash_pattern: tuple[float, ...] = (1.0, 1.0)
 
 
 _CONTACT_COLORS = {

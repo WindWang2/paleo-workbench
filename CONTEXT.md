@@ -115,3 +115,17 @@ A deep colormap pipeline module (`geo-viz-engine/.../geoviz_seismic/colormap.py`
 
 ### LASParserProvider
 An AccelerationProvider hook (`set_las_parser_provider` / `get_las_parser_provider`) injected by the workbench at startup, enabling the engine's `load_las_preview(path, fast=True)` to use the C++ `fast_las_parse_data` for header-only parse + full-block data extraction + `CurveData.model_construct` (skipping Pydantic validation for the trusted C++ source). When the provider is absent or the file is wrapped/malformed, the engine falls back internally to the pure-Python `inspect_las_file` + `read_sampled_ascii` path.
+
+### Custom Layer Primitives
+
+- **PatternDefinition**: The single vector source of truth for a geological fill pattern (ADR 0020). Restricted vector primitives + repeat unit + physical tile size, anchored in scene coordinates to avoid translation drift. The GL backend caches it as a texture atlas / distance field; PDF/SVG backends consume the raw vectors. Referenced by EntityId from Intervals and CustomQuads.
+_Avoid_: hatch, fill style, texture
+
+- **CustomPolyline**: A declarative polyline stroke primitive in the Custom Layer (ADR 0018/0046). Scene-mm points, optional ring closure, color, stroke width, and optional dash pattern. Decomposed into GL quad ribbons and SVG/PDF path elements by the kernel — extensions never emit rendering calls directly.
+_Avoid_: freehand line, annotation line
+
+- **CustomQuad**: A declarative filled rectangle primitive in the Custom Layer. Axis-aligned in scene millimetres, solid `fill_color` or pattern-filled via a `pattern_id` referencing a registered PatternDefinition.
+_Avoid_: rectangle annotation, box primitive
+
+- **DashPattern**: An explicit on/off segment array in scene millimetres defining a stroke's dash style (e.g. `[4.0, 2.0]` = 4mm dash, 2mm gap). Maps directly to SVG `stroke-dasharray` and PDF line dash arrays; GL renders it via CPU segment subdivision. An empty array means solid.
+_Avoid_: line style, stroke style, dash style

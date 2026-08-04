@@ -689,6 +689,17 @@ void append_layer_body(std::string &output, const PreparedScene &scene) {
                         static_cast<double>(primitive.color.alpha) / 255.0);
           output += "\" stroke-width=\"";
           append_number(output, primitive.stroke_width.value);
+          if (!primitive.dash_pattern.segments.empty()) {
+            output += "\" stroke-dasharray=\"";
+            for (std::size_t si = 0;
+                 si < primitive.dash_pattern.segments.size(); ++si) {
+              if (si > 0) {
+                output.push_back(' ');
+              }
+              append_number(output,
+                            primitive.dash_pattern.segments[si].value);
+            }
+          }
           output += "\" d=\"";
           bool first = true;
           for (std::uint64_t point_offset = 0;
@@ -713,12 +724,20 @@ void append_layer_body(std::string &output, const PreparedScene &scene) {
           // Triangles and quads are stored as clipped, triangulated geometry
           // (vertex_count vertices in groups of 3). Emit each triangle as a
           // closed sub-path so one <path> covers the whole primitive.
-          output += "\" fill=\"";
-          append_color(output, primitive.color);
-          output += "\" fill-opacity=\"";
-          append_number(output,
-                        static_cast<double>(primitive.color.alpha) / 255.0);
-          output += "\" d=\"";
+          if (primitive.kind == CustomPrimitiveKind::quad &&
+              !primitive.pattern_id.is_nil()) {
+            output += "\" fill=\"url(#pat-";
+            output += primitive.pattern_id.to_string();
+            output += ")\"";
+          } else {
+            output += "\" fill=\"";
+            append_color(output, primitive.color);
+            output += "\" fill-opacity=\"";
+            append_number(output,
+                          static_cast<double>(primitive.color.alpha) / 255.0);
+            output += "\"";
+          }
+          output += " d=\"";
           const auto triangle_count = primitive.vertex_count / 3;
           for (std::uint64_t tri = 0; tri < triangle_count; ++tri) {
             if (tri > 0) {

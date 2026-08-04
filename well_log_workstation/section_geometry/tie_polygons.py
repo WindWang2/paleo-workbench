@@ -1,9 +1,11 @@
 """tie_polygons — inter-well tie quads between adjacent wells (Phase-2, T4).
 
 Pure numpy, headless. The reservoir section fills the interval between two
-formation tops on adjacent wells with a solid quad (CustomQuad-style: solid
-fill_color only - no vector pattern, T4 tradeoff). Output quads are
-4-corner polygons in section 2D space (x across, y depth).
+formation tops on adjacent wells with a quad. Quads support an optional
+``pattern_id`` referencing a registered PatternDefinition for lithology
+hatch fill (ADR 0050); when None the quad is solid-filled with
+``fill_color``. Output quads are 4-corner polygons in section 2D space
+(x across, y depth).
 """
 
 from __future__ import annotations
@@ -20,6 +22,9 @@ class TieQuad2D:
     corners: np.ndarray  # (4, 2) float64: [left_top, right_top, right_bottom, left_bottom]
     fill_color: str
     label: str = ""
+    # Optional PatternDefinition EntityId for lithology hatch fill (ADR 0050).
+    # None = solid fill_color (backward-compatible default).
+    pattern_id: str | None = None
 
 
 def tie_quads(
@@ -27,6 +32,7 @@ def tie_quads(
     well_positions: list[tuple[float, float]],
     fill_color: str = "#cbd5e1",
     datum_shifts: dict[str, float] | None = None,
+    pattern_id: str | None = None,
 ) -> list[TieQuad2D]:
     """Build inter-well tie quads between adjacent wells sharing a top name.
 
@@ -35,9 +41,11 @@ def tie_quads(
             (aligned by name across wells).
         well_positions: ``(x, y)`` per well in project CRS (section x-axis
             is cumulative distance).
-        fill_color: solid fill for the quads (T4: solid only).
+        fill_color: solid fill for the quads (used when ``pattern_id`` is None).
         datum_shifts: per-well-name shift applied to top depths before
             section placement.
+        pattern_id: optional PatternDefinition EntityId for lithology hatch
+            fill (ADR 0050). None = solid ``fill_color``.
 
     Returns:
         One quad per adjacent well pair that shares at least one top name.
@@ -94,6 +102,7 @@ def tie_quads(
                 corners=corners,
                 fill_color=fill_color,
                 label=",".join(shared[:2]),
+                pattern_id=pattern_id,
             )
         )
     return quads
