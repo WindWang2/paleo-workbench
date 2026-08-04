@@ -18,7 +18,9 @@ using namespace welllog;
 
 [[noreturn]] void fail(std::string_view message) {
   std::cerr << "FAIL: " << message << '\n';
-  std::exit(EXIT_FAILURE);
+  // _Exit, not std::exit: avoid CRT/DLL teardown while LOD/frame worker
+  // jthreads are still mid-flight (Windows loader-lock deadlock, #241).
+  std::_Exit(EXIT_FAILURE);
 }
 
 void require(bool condition, std::string_view message) {
