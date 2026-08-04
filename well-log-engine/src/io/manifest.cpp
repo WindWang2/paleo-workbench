@@ -576,6 +576,12 @@ void write_point(std::string &output, const PhysicalPoint &point) {
   };
 }
 
+// Defined below; forward-declared so the ADR 0050 dashPattern/patternId
+// readers in parse_primitive can use it (declaration order in this file
+// otherwise puts its definition after the first use).
+[[nodiscard]] const JsonValue *optional_field(const JsonObject &value,
+                                              std::string_view name);
+
 [[nodiscard]] CustomPrimitive parse_primitive(const JsonValue &value) {
   const auto &obj = object(value);
   const auto kind = string(field(obj, "kind"));

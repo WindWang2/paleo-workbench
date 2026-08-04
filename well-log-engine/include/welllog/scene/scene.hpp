@@ -640,10 +640,10 @@ struct PreparedCustomPrimitive {
   // point back to the first). Unused by filled kinds.
   bool closed{};
   // For polylines: the dash pattern (empty = solid, ADR 0050).
-  DashPattern dash_pattern;
+  DashPattern dash_pattern{};
   // For quads: references a PatternDefinition on the ScenePresentation; nil =
   // solid fill (ADR 0050, same mechanism as Interval).
-  EntityId pattern_id;
+  EntityId pattern_id{};
   // For symbols: the symbol kind (circle/square/...). Unused by other kinds.
   SymbolKind symbol_kind{SymbolKind::circle};
   // Triangle/quad extent in scene millimetres (used by point-in-shape picking).

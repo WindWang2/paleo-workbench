@@ -540,7 +540,7 @@ struct CustomPolyline {
   bool closed{};
   RgbaColor color{0, 0, 0, 255};
   Millimetres width{0.3};
-  DashPattern dash_pattern;
+  DashPattern dash_pattern{};
 };
 
 // A filled triangle defined by three scene-mm points.
@@ -557,7 +557,7 @@ struct CustomTriangle {
 struct CustomQuad {
   PhysicalRect rect;
   RgbaColor fill_color{0, 0, 0, 255};
-  EntityId pattern_id;
+  EntityId pattern_id{};
 };
 
 // A discrete symbol, mirroring SymbolOccurrence but positioned directly in

@@ -2918,9 +2918,9 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                   .source_primitive_index = primitive_index,
                   .kind = kind,
                   .color = color,
-                  .pattern_id = pattern_id,
                   .first_vertex = first_vertex,
                   .vertex_count = emitted.size(),
+                  .pattern_id = pattern_id,
                   .bounds = bounds_of(emitted),
               });
             };
