@@ -26,15 +26,24 @@ PLOT_SCHEMA_VERSION = 2
 
 @dataclass
 class PanelRef:
-    """Composite-figure panel reference (Phase-2 T9 / #253).
+    """Composite-figure panel reference (Phase-2 T9 / #253, T7 / #251).
 
     A composite figure (油藏综合图) lays out several sub-plots in panels.
-    Layout detail (position/size) lives in template_model; this dataclass
-    only records which plot each panel hosts and its display slot.
+    T7 adds the paper-side placement + render mode:
+
+    - ``source_plot_type``: the source plot's PlotType (drives live vs
+      snapshot - GL/engine plots must snapshot).
+    - ``rect_mm``: panel rect on the paper in mm (``[x, y, w, h]``); None
+      means the layout window picks a default position.
+    - ``render_mode``: ``"live"`` (QGraphicsProxyWidget, non-GL) or
+      ``"snapshot"`` (QPixmap via source.grab(), GL/engine plots).
     """
 
     plot_id: str
     slot: str = "main"
+    source_plot_type: str = "single_well"
+    rect_mm: list[float] | None = None  # [x, y, w, h] in mm
+    render_mode: str = "live"
 
 
 @dataclass
@@ -73,7 +82,14 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
         payload["links"] = [lk.to_json() for lk in doc.links]
     if doc.type == "composite" or doc.panels:
         payload["panels"] = [
-            {"plot_id": p.plot_id, "slot": p.slot} for p in doc.panels
+            {
+                "plot_id": p.plot_id,
+                "slot": p.slot,
+                "source_plot_type": p.source_plot_type,
+                "rect_mm": p.rect_mm,
+                "render_mode": p.render_mode,
+            }
+            for p in doc.panels
         ]
     return payload
 
@@ -102,10 +118,18 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     panels: list[PanelRef] = []
     for raw in data.get("panels") or []:
         if isinstance(raw, dict):
+            rect = raw.get("rect_mm")
             panels.append(
                 PanelRef(
                     plot_id=str(raw.get("plot_id") or ""),
                     slot=str(raw.get("slot") or "main"),
+                    source_plot_type=str(raw.get("source_plot_type") or "single_well"),
+                    rect_mm=(
+                        [float(v) for v in rect]
+                        if isinstance(rect, (list, tuple)) and len(rect) == 4
+                        else None
+                    ),
+                    render_mode=str(raw.get("render_mode") or "live"),
                 )
             )
     return PlotDocument(
