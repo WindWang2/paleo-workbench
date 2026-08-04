@@ -1200,6 +1200,64 @@ struct WellLogSession::Impl {
     }
     return first_diagnostic;
   }
+
+  // Cooperatively cancel and reap all LOD/frame worker jthreads with a bounded
+  // wait. Called from ~WellLogSession so that normal teardown (workers already
+  // finished, or finishing within milliseconds of a stop request) reaps them
+  // promptly via try_lock, and only starved workers fall through to the jthread
+  // dtor's implicit join. std::jthread has no detach() — once request_stop() +
+  // a yield window has been offered, remaining workers are left for the dtor,
+  // which will join (the stop_token cooperation is fine-grained: LOD workers
+  // check every 4096 samples, scene prepare checks per track/layer). The real
+  // loader-lock deadlock (#241) is avoided at the test layer by using _Exit in
+  // fail() so DLL_PROCESS_DETACH never runs while workers are mid-flight; this
+  // drain ensures the non-exit teardown path also reaps promptly.
+  void drain_workers() {
+    drain_task_vector(lod_tasks);
+    drain_task_vector(frame_tasks);
+  }
+
+  template <typename TaskPtr>
+  void drain_task_vector(std::vector<TaskPtr> &tasks) {
+    if (tasks.empty()) {
+      return;
+    }
+    // Request cooperative cancellation on every outstanding worker first, so
+    // they all observe the stop_token concurrently rather than one-at-a-time.
+    for (auto &task : tasks) {
+      if (task->worker.joinable()) {
+        task->worker.request_stop();
+      }
+    }
+    // Bounded wait: give workers a short window to observe the token and
+    // finish. Normal teardown (workers already done) reaps immediately.
+    constexpr auto drain_deadline = std::chrono::seconds{2};
+    const auto deadline = std::chrono::steady_clock::now() + drain_deadline;
+    while (!tasks.empty() &&
+           std::chrono::steady_clock::now() < deadline) {
+      const auto task_iter =
+          std::find_if(tasks.begin(), tasks.end(), [](const auto &task) {
+            // try_lock mirrors poll_async: never block the drainer on a
+            // worker's publish lock (#241). finished is set under that lock.
+            auto lock =
+                std::unique_lock{task->state->mutex, std::try_to_lock};
+            return lock.owns_lock() && task->state->finished;
+          });
+      if (task_iter == tasks.end()) {
+        // No worker has finished yet; yield the timeslice so starved workers
+        // get CPU to observe the stop_token and proceed.
+        std::this_thread::yield();
+        continue;
+      }
+      // Worker is done — erasing the task destroys its jthread, but the thread
+      // has already exited so the implicit join returns immediately.
+      tasks.erase(task_iter);
+    }
+    // Workers still running after the deadline remain in `tasks`; their jthread
+    // dtors (triggered by Impl destruction) will request_stop + join. The stop
+    // token cooperation guarantees eventual completion — the bounded drain just
+    // fast-paths the common case so well-behaved teardown doesn't wait.
+  }
 };
 
 WellLogSession::WellLogSession() : WellLogSession(PerformanceBudgets{}) {}
@@ -1207,9 +1265,34 @@ WellLogSession::WellLogSession(PerformanceBudgets budgets)
     : impl_(std::make_unique<Impl>()) {
   impl_->budgets = budgets;
 }
-WellLogSession::~WellLogSession() = default;
+WellLogSession::~WellLogSession() {
+  // Cooperatively cancel + bounded-wait all LOD/frame workers before the Impl
+  // is destroyed. Without this, the vector-of-unique_ptr<LodTask> destruction
+  // triggers each jthread dtor's unconditional request_stop + join, which can
+  // block indefinitely under Windows CPU starvation or inside the loader lock
+  // during DLL_PROCESS_DETACH (#241).
+  if (impl_) {
+    try {
+      impl_->drain_workers();
+    } catch (...) {
+      // drain_workers is noexcept in spirit (try_lock + yield + erase); swallow
+      // any exception so the destructor never throws.
+    }
+  }
+}
 WellLogSession::WellLogSession(WellLogSession &&) noexcept = default;
-WellLogSession &WellLogSession::operator=(WellLogSession &&) noexcept = default;
+WellLogSession &WellLogSession::operator=(WellLogSession &&other) noexcept {
+  // Drain the outgoing session's workers before the default unique_ptr move
+  // destroys Impl (which would otherwise join unconditionally, #241).
+  if (this != &other && impl_) {
+    try {
+      impl_->drain_workers();
+    } catch (...) {
+    }
+  }
+  impl_ = std::move(other.impl_);
+  return *this;
+}
 
 void WellLogSession::set_text_engine(
     std::shared_ptr<TextEngine> text_engine) noexcept {

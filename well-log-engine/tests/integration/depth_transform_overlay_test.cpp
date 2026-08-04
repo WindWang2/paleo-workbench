@@ -16,7 +16,9 @@ using namespace welllog;
 
 [[noreturn]] void fail(std::string_view message) {
   std::cerr << "FAIL: " << message << '\n';
-  std::exit(EXIT_FAILURE);
+  // _Exit, not std::exit: avoid CRT/DLL teardown while LOD/frame worker
+  // jthreads are still mid-flight (Windows loader-lock deadlock, #241).
+  std::_Exit(EXIT_FAILURE);
 }
 
 void require(bool condition, std::string_view message) {
@@ -30,7 +32,7 @@ void require_near(double actual, double expected, double tol,
   if (!(std::isfinite(actual) && std::abs(actual - expected) <= tol)) {
     std::cerr << "FAIL: " << message << " (actual=" << actual
               << " expected=" << expected << ")\n";
-    std::exit(EXIT_FAILURE);
+    std::_Exit(EXIT_FAILURE); // #241: see fail() — no CRT/DLL teardown
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -770,6 +771,24 @@ RasterExportJob::RasterExportJob(std::unique_ptr<Impl> impl)
 RasterExportJob::~RasterExportJob() {
   if (impl_ && impl_->worker.joinable()) {
     impl_->worker.request_stop();
+    // Unlike WellLogSession, the raster worker captures a raw Impl* (not a
+    // shared_ptr), so we cannot detach — the worker must finish before Impl is
+    // destroyed. Give it a bounded window to observe the stop_token and exit
+    // cooperatively; render_export checks stop at each tile so this is normally
+    // fast. After the window, the jthread dtor's implicit join completes the
+    // reap. The DLL-teardown loader-lock deadlock (#241) itself is avoided at
+    // the test layer via _Exit in fail().
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (std::chrono::steady_clock::now() < deadline) {
+      {
+        std::lock_guard lock(impl_->mutex);
+        if (impl_->state != RasterExportState::running) {
+          break; // worker has transitioned to a terminal state
+        }
+      }
+      std::this_thread::yield();
+    }
   }
 }
 
