@@ -1,6 +1,6 @@
 import pytest
 
-from paleo_workbench.mapping.map_edit_api import (
+from geoviz import (
     HAS_SHAPELY,
     merge_rings,
     rebuild_topology,

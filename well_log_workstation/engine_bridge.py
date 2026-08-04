@@ -121,6 +121,63 @@ def engine_available() -> bool:
     return probe_engine().available
 
 
+@dataclass(frozen=True)
+class MappingCapability:
+    """Capability probe for the geoviz mapping surface (Phase-2 T2 / #246).
+
+    ``probe_mapping()`` checks that the ``geoviz`` facade exposes the
+    Phase-2 mapping helpers (CRS coercion + FilledContourLayer) the
+    Workstation draws with at plane-map time.
+    """
+
+    available: bool
+    detail: str
+
+
+_cached_mapping: MappingCapability | None = None
+
+
+def reset_mapping_capability_cache() -> None:
+    """Clear the cached mapping-capability probe (test/CI hook)."""
+    global _cached_mapping
+    _cached_mapping = None
+
+
+def probe_mapping() -> MappingCapability:
+    """Detect the geoviz mapping facade without raising; result is cached.
+
+    Same cached-probe shape as :func:`probe_engine`. Fails closed (available
+    False) when the geoviz package is missing or the Phase-2 mapping names
+    are absent - callers degrade to list-only UI.
+    """
+    global _cached_mapping
+    if _cached_mapping is not None:
+        return _cached_mapping
+
+    if os.environ.get("WLWS_DISABLE_MAPPING", "").strip() in ("1", "true", "yes"):
+        _cached_mapping = MappingCapability(False, "WLWS_DISABLE_MAPPING set")
+        return _cached_mapping
+
+    try:
+        from geoviz import (  # noqa: F401
+            FilledContourLayer,
+            coerce_to_project_crs,
+            list_known_crs,
+            set_project_crs,
+        )
+        _cached_mapping = MappingCapability(
+            True, "geoviz mapping surface (FilledContourLayer + CRS helpers)"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _cached_mapping = MappingCapability(False, f"geoviz mapping unavailable: {exc}")
+    return _cached_mapping
+
+
+def mapping_available() -> bool:
+    """True when the geoviz mapping surface can be used."""
+    return probe_mapping().available
+
+
 def create_well_log_view(parent=None) -> Any:
     """Instantiate native WellLogView or raise EngineUnavailable."""
     cap = probe_engine()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from paleo_workbench.mapping import map_edit_api as api
+import geoviz as api
 from paleo_workbench.ui.pages.map_edit_items import (
     FaciesPolygonItem,
     LabelItem,

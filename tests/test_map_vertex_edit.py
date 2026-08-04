@@ -2,7 +2,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QGraphicsSceneMouseEvent
 
-from paleo_workbench.mapping import map_edit_api as api
+import geoviz as api
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_commands import EditCommandStack, VertexEditCommand
 from paleo_workbench.ui.pages.map_edit_items import VertexHandleItem

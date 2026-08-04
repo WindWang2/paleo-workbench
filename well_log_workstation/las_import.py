@@ -41,6 +41,11 @@ class ImportedWellDocument:
     depth_unit: str
     curves: list[ImportedCurve] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
+    # Phase-2 T2 (#246): wellhead coordinates from LAS headers
+    # (WELL-X/WELL-Y in ft, or LAT/LONG/LONGITUDE/LATITUDE in decimal degrees).
+    lng: float | None = None
+    lat: float | None = None
+    crs: str | None = "EPSG:4326"
 
     def curve_by_mnemonic(self, mnemonic: str) -> ImportedCurve | None:
         key = mnemonic.strip().upper()
@@ -100,6 +105,43 @@ def parse_las_file(path: Path | str) -> ImportedWellDocument:
         well_name = src.stem
         diagnostics.append("缺少 WELL 头；使用文件名作为井名")
 
+    # Phase-2 T2 (#246): wellhead coordinates from LAS headers. All reads are
+    # tolerant of absence - wells without headers stay in the catalog but
+    # with lng/lat = None (marked, not drawn on the plane map).
+    lng: float | None = None
+    lat: float | None = None
+    crs: str | None = "EPSG:4326"
+
+    def _header_float(*mnemonics: str) -> float | None:
+        for mnem in mnemonics:
+            try:
+                item = getattr(las.well, mnem, None)
+                if item is not None and item.value not in (None, ""):
+                    val = float(str(item.value).strip())
+                    if np.isfinite(val):
+                        return val
+            except Exception:
+                continue
+        return None
+
+    # WELL-X / WELL-Y (ft) take precedence; fall back to LAT / LONG /
+    # LONGITUDE / LATITUDE (decimal degrees).
+    well_x = _header_float("WELL_X", "WELLX", "X")
+    well_y = _header_float("WELL_Y", "WELLY", "Y")
+    if well_x is not None and well_y is not None:
+        lng, lat = well_x, well_y
+        crs = "EPSG:32650"  # UTM zone 50N (conventional Chinese onshore default)
+        diagnostics.append("使用 WELL-X/WELL-Y（ft，假定 UTM 50N）作为井位")
+    else:
+        lat_deg = _header_float("LAT", "LATITUDE")
+        lng_deg = _header_float("LONG", "LONGITUDE")
+        if lat_deg is not None and lng_deg is not None:
+            lng, lat = lng_deg, lat_deg
+            crs = "EPSG:4326"
+            diagnostics.append("使用 LAT/LONG（十进制度，WGS84）作为井位")
+        else:
+            diagnostics.append("缺少 WELL-X/Y/LAT/LONG 井位头；井位标记为 None")
+
     depth_unit = (depth_curve.unit or "m").strip() or "m"
     depth_out = _freeze(depth)
 
@@ -150,6 +192,9 @@ def parse_las_file(path: Path | str) -> ImportedWellDocument:
         depth_unit=depth_unit,
         curves=curves,
         diagnostics=diagnostics,
+        lng=lng,
+        lat=lat,
+        crs=crs,
     )
 
 
@@ -180,5 +225,13 @@ def import_las_into_workspace(
     # Stable catalog id == folder id; document_id separate for engine-facing id
     document.document_id = well_id
 
-    add_well(workspace, name=document.well_name, path=rel, well_id=well_id)
+    add_well(
+        workspace,
+        name=document.well_name,
+        path=rel,
+        well_id=well_id,
+        lng=document.lng,
+        lat=document.lat,
+        crs=document.crs,
+    )
     return LasImportResult(catalog_well_id=well_id, document=document)

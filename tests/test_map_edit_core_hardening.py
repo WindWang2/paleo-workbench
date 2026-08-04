@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import pytest
 
-from paleo_workbench.mapping import map_edit_api as api
+import geoviz as api
+# Private pure-core helper (not part of the facade surface).
+from geoviz_plots.map_edit.api import _hit_test_python
 
 pytestmark = pytest.mark.skipif(
     not api.HAS_CPP,
@@ -122,4 +124,4 @@ def test_i6_hit_test_point_and_polygon_match_python_contract():
     assert api.hit_test(records, 5.0, 5.0, 0.0) == "f1"
     assert api.hit_test(records, 50.0, 50.0, 0.0) is None
     # Python fallback agrees on the polygon hit (tolerance contract is shared).
-    assert api._hit_test_python(records, 5.0, 5.0, 0.0) == "f1"
+    assert _hit_test_python(records, 5.0, 5.0, 0.0) == "f1"

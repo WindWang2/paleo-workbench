@@ -12,8 +12,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QObject, Signal
 
 from geoviz import CancellationToken, JobCancelled
-
-import paleo_workbench.workflow.factor_interpolation as factor_interpolation
+from paleo_workbench.workflow.factor_interpolation import batch_prepare_factor_maps
 
 
 @dataclass(frozen=True)
@@ -46,7 +45,7 @@ class FactorPrepareWorker(QObject):
     def run(self) -> None:
         try:
             self._cancellation_token.raise_if_cancelled()
-            prepared = factor_interpolation.batch_prepare_factor_maps(
+            prepared = batch_prepare_factor_maps(
                 self._project,
                 method=self._method,
                 cancellation_token=self._cancellation_token,

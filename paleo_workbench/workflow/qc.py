@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from paleo_workbench.mapping.map_edit_api import validate_ring
+from geoviz import validate_ring
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, QualityReport, _now_iso
 
 # Ordered rule keys stored on QualityReport.rules (engine keys, not Chinese chips).
