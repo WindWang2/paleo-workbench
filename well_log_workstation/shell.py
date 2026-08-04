@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -38,6 +38,7 @@ from well_log_workstation.correlation_links import (
     make_horizon_link,
     match_tops_by_name,
 )
+from well_log_workstation.composite_view import CompositeView
 from well_log_workstation.crs_dialog import CoordinateReferenceDialog
 from well_log_workstation.datum.well_section_datum import WellSectionDatum
 from well_log_workstation.engine_bridge import (
@@ -49,6 +50,13 @@ from well_log_workstation.engine_bridge import (
     probe_engine,
     submit_multi_well_presentations,
 )
+from well_log_workstation.events import emit_plot_changed
+from well_log_workstation.export_dispatch import (
+    ExportFormat,
+    PageSpec,
+    UnsupportedFormatError,
+    export_plot,
+)
 from well_log_workstation.export_plot import (
     ExportError,
     export_presentation_pdf,
@@ -59,7 +67,9 @@ from well_log_workstation.las_import import LasImportError, import_las_into_work
 from well_log_workstation.multi_track_canvas import MultiTrackCanvas
 from well_log_workstation.plane_map_view import PlaneMapView
 from well_log_workstation.plot_document import (
+    PanelRef,
     PlotDocument,
+    create_composite_plot,
     create_correlation_plot,
     create_fence_3d_plot,
     create_plane_map_plot,
@@ -198,7 +208,8 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_new_section.setEnabled(False)
         self._act_new_composite = plot_menu.addAction("新建油藏综合图…")
         self._act_new_composite.setObjectName("Action_NewCompositePlot")
-        self._act_new_composite.setEnabled(False)  # wired in PR-C4
+        self._act_new_composite.triggered.connect(self._on_new_composite_plot)
+        self._act_new_composite.setEnabled(False)
         plot_menu.addSeparator()
         self._act_set_crs = plot_menu.addAction("坐标系设置（CRS）…")
         self._act_set_crs.setObjectName("Action_SetCoordinateReference")
@@ -428,6 +439,19 @@ class WellLogWorkstationWindow(QMainWindow):
         self.section_canvas = SectionCanvas()
         sl.addWidget(self.section_canvas, 1)
         self.document_tabs.addTab(self._section_host, "油藏剖面")
+
+        # Phase-2 PR-C4: 油藏综合图 host surface (cartography paper).
+        self._composite_host = QWidget()
+        self._composite_host.setObjectName("CompositeHost")
+        cl2 = QVBoxLayout(self._composite_host)
+        self.composite_caption = QLabel(
+            "油藏综合图 · 纸面排版 · 图件面板（live / snapshot）"
+        )
+        self.composite_caption.setObjectName("CompositeCaption")
+        cl2.addWidget(self.composite_caption)
+        self.composite_view = CompositeView()
+        cl2.addWidget(self.composite_view, 1)
+        self.document_tabs.addTab(self._composite_host, "油藏综合图")
 
         layout.addWidget(self.document_tabs, 1)
         return pane
@@ -780,6 +804,7 @@ class WellLogWorkstationWindow(QMainWindow):
                 "三维栅状图需要 pyqtgraph + OpenGL"
             )
         self._act_new_section.setEnabled(ws is not None)
+        self._act_new_composite.setEnabled(ws is not None)
         self._act_set_crs.setEnabled(ws is not None)
         self._refresh_tree()
         self._refresh_tops_list()
@@ -999,7 +1024,8 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self._active_plot_id = plot.id
         self._active_plot_type = "single_well"
-        self.apply_template_to_well(well_id, template_id, plot_id=plot.id)
+        self.apply_template_to_well(well_id, plot.template_id, plot_id=plot.id)
+        emit_plot_changed(plot.id)
         self._refresh_tree()
         return plot
 
@@ -1022,6 +1048,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._active_plot_id = plot.id
         self._active_plot_type = "correlation"
         self._show_correlation(plot)
+        emit_plot_changed(plot.id)
         self._refresh_tree()
         return plot
 
@@ -1111,6 +1138,7 @@ class WellLogWorkstationWindow(QMainWindow):
             f"项目坐标系 {self._workspace.coordinate.project_crs}"
         )
         self.document_tabs.setCurrentWidget(self._plane_map_host)
+        emit_plot_changed(plot.id)
         self._update_status()
 
     def _show_fence_3d(self, plot: PlotDocument) -> None:
@@ -1143,6 +1171,7 @@ class WellLogWorkstationWindow(QMainWindow):
             f"三维栅状图 · {len(wells)} 井 · 拖拽旋转 / 滚轮缩放"
         )
         self.document_tabs.setCurrentWidget(self._fence_3d_host)
+        emit_plot_changed(plot.id)
         self._update_status()
 
     def _show_section(self, plot: PlotDocument) -> None:
@@ -1224,6 +1253,29 @@ class WellLogWorkstationWindow(QMainWindow):
             f"断层 {len(faults)} · 接触 {len(contacts)} · 充填 {len(quads)}"
         )
         self.document_tabs.setCurrentWidget(self._section_host)
+        emit_plot_changed(plot.id)
+        self._update_status()
+
+    def _show_composite(self, plot: PlotDocument) -> None:
+        """Render the composite figure paper layout (Phase-2 T7)."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        self._active_plot_id = plot.id
+        self._active_plot_type = "composite"
+        self.composite_view.set_workspace(self._workspace)
+        # Register the active source widgets for snapshot grabs.
+        if self._presentation is not None:
+            self.composite_view.register_source_widget(
+                self._active_plot_id or "", self.multi_track_canvas
+            )
+        # Recreate panels from the persisted PanelRef list.
+        for panel in plot.panels:
+            self.composite_view.add_panel_ref(panel)
+        self.composite_caption.setText(
+            f"油藏综合图 · {len(plot.panels)} 个面板 · 纸面排版"
+        )
+        self.document_tabs.setCurrentWidget(self._composite_host)
+        emit_plot_changed(plot.id)
         self._update_status()
 
     def auto_link_correlation_tops(self) -> list[HorizonLink]:
@@ -1378,8 +1430,9 @@ class WellLogWorkstationWindow(QMainWindow):
             return plot
 
         if plot.type == "composite":
-            # Landed in PR-C4.
-            raise WorkspaceError("图件类型尚未接入: composite")
+            self._show_composite(plot)
+            self._refresh_tree()
+            return plot
 
         if plot.type != "single_well":
             raise WorkspaceError(f"未知图件类型: {plot.type}")
@@ -1888,6 +1941,41 @@ class WellLogWorkstationWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "新建油藏剖面失败", str(exc))
 
+    def _on_new_composite_plot(self) -> None:
+        """Create + open a composite figure (Phase-2 T7)."""
+        if self._workspace is None:
+            QMessageBox.information(self, "新建油藏综合图", "请先打开工区。")
+            return
+        template_id = self._current_template_id() or "std-gr-rt-den"
+        source_ids = [
+            p.id for p in self._workspace.plots if p.type != "composite"
+        ]
+        if not source_ids:
+            QMessageBox.information(
+                self, "新建油藏综合图",
+                "请先创建其他图件（单井/对比/剖面/平面图/栅状图）作为面板来源。",
+            )
+            return
+        try:
+            plot = create_composite_plot(
+                self._workspace,
+                panels=[PanelRef(plot_id=sid) for sid in source_ids[:4]],
+                template_id=template_id,
+            )
+            self._active_plot_id = plot.id
+            self._active_plot_type = "composite"
+            self._show_composite(plot)
+            self._refresh_tree()
+            QMessageBox.information(
+                self, "油藏综合图已创建",
+                f"已保存 {plot.path}\n"
+                f"{len(plot.panels)} 个面板 · 可在纸面拖拽排版。",
+            )
+        except (WorkspaceError, ExportError) as exc:
+            QMessageBox.warning(self, "新建油藏综合图失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "新建油藏综合图失败", str(exc))
+
     def _on_set_coordinate_reference(self) -> None:
         """Open the CRS trio editor (Phase-2 T2 / #246)."""
         if self._workspace is None:
@@ -1909,59 +1997,68 @@ class WellLogWorkstationWindow(QMainWindow):
             f"显示坐标系: {self._workspace.coordinate.display_crs}",
         )
 
-    def _on_export_svg(self) -> None:
-        if self._presentation is None:
+    def _export_active_plot(self, fmt: ExportFormat) -> None:
+        """Route the active plot's export through the T8 dispatcher."""
+        if self._workspace is None or not self._active_plot_id:
             QMessageBox.information(
-                self, "导出 SVG", "请先打开/创建单井分析图并应用图版。"
+                self, "导出", "请先打开/创建图件。"
             )
             return
-        default = f"{self._presentation.well_name or 'plot'}.svg"
+        plot = load_plot_document(self._workspace, self._active_plot_id)
+        default = f"{plot.name or 'plot'}.{fmt}"
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "导出 SVG",
+            f"导出 {fmt.upper()}",
             default,
-            "SVG (*.svg);;All (*.*)",
+            f"{fmt.upper()} (*.{fmt});;All (*.*)",
         )
         if not path:
             return
+        kwargs: dict = {"path": path, "page_spec": PageSpec()}
         try:
-            out = self.export_active_plot_svg(path)
+            if plot.type in ("single_well", "correlation", "section"):
+                kwargs["paint_fn"] = self._paint_active_plot
+            elif plot.type == "plane_map":
+                kwargs["canvas"] = self.plane_map_view._canvas
+            elif plot.type == "fence_3d":
+                kwargs["view"] = self.fence_3d_view
+            elif plot.type == "composite":
+                kwargs["window"] = self.composite_view._layout_window
+            out = export_plot(plot, fmt, **kwargs)
             QMessageBox.information(
                 self,
                 "导出成功",
-                f"SVG 已写入:\n{out}\n大小 {out.stat().st_size} 字节",
+                f"{fmt.upper()} 已写入:\n{out}\n大小 {out.stat().st_size} 字节",
             )
-        except ExportError as exc:
-            QMessageBox.warning(self, "导出 SVG 失败", str(exc))
+        except (ExportError, UnsupportedFormatError) as exc:
+            QMessageBox.warning(self, f"导出 {fmt.upper()} 失败", str(exc))
         except OSError as exc:
-            QMessageBox.warning(self, "导出 SVG 失败", str(exc))
+            QMessageBox.warning(self, f"导出 {fmt.upper()} 失败", str(exc))
+
+    def _paint_active_plot(self, painter, rect) -> None:
+        """Paint callback for the T8 Qt-paint export path (single/corr/section)."""
+        if self._active_plot_type == "single_well" and self._presentation is not None:
+            from well_log_workstation.export_plot import _paint_presentation
+            _paint_presentation(painter, self._presentation, rect)
+        elif self._active_plot_type == "correlation":
+            # Correlation: paint each column side-by-side in the rect.
+            n = max(1, len(self._correlation_presentations))
+            col_w = rect.width() / n
+            from well_log_workstation.export_plot import _paint_presentation
+            for i, pres in enumerate(self._correlation_presentations):
+                sub = QRectF(
+                    rect.x() + i * col_w, rect.y(), col_w, rect.height()
+                )
+                _paint_presentation(painter, pres, sub)
+        elif self._active_plot_type == "section":
+            # Section: paint the section canvas into the rect.
+            self.section_canvas.render(painter)
+
+    def _on_export_svg(self) -> None:
+        self._export_active_plot("svg")
 
     def _on_export_pdf(self) -> None:
-        if self._presentation is None:
-            QMessageBox.information(
-                self, "导出 PDF", "请先打开/创建单井分析图并应用图版。"
-            )
-            return
-        default = f"{self._presentation.well_name or 'plot'}.pdf"
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "导出 PDF",
-            default,
-            "PDF (*.pdf);;All (*.*)",
-        )
-        if not path:
-            return
-        try:
-            out = self.export_active_plot_pdf(path)
-            QMessageBox.information(
-                self,
-                "导出成功",
-                f"PDF 已写入:\n{out}\n大小 {out.stat().st_size} 字节",
-            )
-        except ExportError as exc:
-            QMessageBox.warning(self, "导出 PDF 失败", str(exc))
-        except OSError as exc:
-            QMessageBox.warning(self, "导出 PDF 失败", str(exc))
+        self._export_active_plot("pdf")
 
     def _on_import_tops(self) -> None:
         if self._selected_well_id is None or self._workspace is None:
