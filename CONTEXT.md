@@ -81,6 +81,7 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **FormationTopCorrelator**: An interactive multi-well formation top correlation engine (`paleo_workbench/viz/formation_top_correlator.py`) managing inter-well correlation polygon bands, marker line drag-adjustments, and `DTWLogMatcher` automated depth transfer recommendations.
 - **CrossWellFenceGenerator**: A 3D curtain/fence mesh generator (`paleo_workbench/viz/geomodel/fence_generator.py`) that extracts inter-well seismic slices along multi-well trajectory paths and projects 2D correlation sections into 3D OpenGL viewports.
 - **StratigraphicCorrelationEngine**: A deepened fluent correlation engine (`paleo_workbench/viz/stratigraphic_correlation_engine.py`) unifying `WellSectionDatum`, `DTWLogMatcher`, and `FormationTopCorrelator` into an expressive pipeline.
+- **Plot Revision（图件修订）**: `well_log_workstation/events.py` 中 per-plot 的单调修订计数器，以 plot id 为键、随图件内容变更（emit）递增。它持久化于 `plots/<id>.json` 顶层字段（schema v3，ADR 0051），由宿主负责保存与恢复：保存时 bump 为新的已提交状态、加载时以 max 语义恢复（不回退）、emit 时 bump。它与引擎 DocumentRevision 是两套概念：后者由内核维护并描述引擎内文档内容版本，已通过 `WellLogView.documentChanged` 信号暴露到 Python 但本期不接线；Plot Revision 是宿主侧图件保存状态，供 `plot_changed` 信号的消费方（如未来 composite 面板按 revision 判断刷新或使 snapshot 失效）使用。
 
 ### Seismic 3D & 2D Profile
 - **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.

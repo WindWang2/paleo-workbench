@@ -21,7 +21,7 @@ from well_log_workstation.workspace import (
     save_workspace,
 )
 
-PLOT_SCHEMA_VERSION = 2
+PLOT_SCHEMA_VERSION = 3
 
 
 @dataclass
@@ -59,6 +59,8 @@ class PlotDocument:
     links: list[HorizonLink] = field(default_factory=list)
     # Composite-figure panels (Phase-2 T9); only ``composite`` plots use it.
     panels: list[PanelRef] = field(default_factory=list)
+    # Per-plot revision, persisted in plots/<id>.json (schema v3, ADR 0051).
+    revision: int = 0
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -91,6 +93,9 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
             }
             for p in doc.panels
         ]
+    # Always persist the revision (ADR 0051); unlike links/panels it is
+    # unconditional so a stale file can never look unversioned.
+    payload["revision"] = int(doc.revision)
     return payload
 
 
@@ -100,6 +105,11 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         # v1 -> v2 additive: panels is new and defaults to empty.
         data = dict(data)
         data.setdefault("panels", [])
+        version = 2
+    if version == 2:
+        # v2 -> v3 additive: revision is new and defaults to 0 (ADR 0051).
+        data = dict(data)
+        data.setdefault("revision", 0)
         version = PLOT_SCHEMA_VERSION
     if version != PLOT_SCHEMA_VERSION:
         raise WorkspaceError(
@@ -141,6 +151,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         path=path,
         links=links,
         panels=panels,
+        revision=max(0, int(data.get("revision") or 0)),
     )
 
 
@@ -151,6 +162,13 @@ def save_plot_document(workspace: Workspace, doc: PlotDocument) -> None:
     doc.path = rel
     abs_path = workspace.root / rel
     abs_path.parent.mkdir(parents=True, exist_ok=True)
+    # Lazy import: keep this schema/persistence module importable without
+    # PySide6 (events.py imports QtCore) for /usr/bin/python3 verification.
+    from well_log_workstation.events import bump_plot_revision
+
+    # Saving commits a new revision; bump (no emit) before writing the file.
+    # Shared by both branches below (file write + catalog upsert).
+    doc.revision = bump_plot_revision(doc.id)
     tmp = abs_path.with_suffix(".json.tmp")
     payload = json.dumps(_to_json(doc), indent=2, ensure_ascii=False) + "\n"
     tmp.write_text(payload, encoding="utf-8")
@@ -202,7 +220,14 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             path=rel,
             links=list(doc.links),
             panels=list(doc.panels),
+            revision=doc.revision,
         )
+    # Lazy import: keep this module importable without PySide6 (see save).
+    from well_log_workstation.events import restore_plot_revision
+
+    # Seed the in-memory counter from the persisted value; both return paths
+    # above (with/without id-mismatch rebuild) share this single restore.
+    restore_plot_revision(doc.id, doc.revision)
     return doc
 
 
