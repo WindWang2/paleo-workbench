@@ -104,7 +104,7 @@ class CompositeView(QWidget):
         win = CartographyLayoutWindow()
         self._layout_window = win
         # Re-parent the paper view into this widget.
-        view = win._view
+        view = win.view()
         view.setParent(self._view_host)
         self._view_host.layout().addWidget(view)
         self._paper_view = view
