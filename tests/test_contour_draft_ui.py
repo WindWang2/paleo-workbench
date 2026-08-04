@@ -171,9 +171,12 @@ def test_preparation_contour_extraction_runs_off_gui_thread(qtbot, monkeypatch):
     )
     project.factor_map_tasks.append(task)
 
-    from paleo_workbench.workflow import contour_draft as contour_module
+    # ContourDraftWorker binds compile_contour_drafts_for_project into its own
+    # module namespace via `from ... import`, so the wrapper must be patched on
+    # the worker module (patching the workflow module cannot intercept it).
+    from paleo_workbench.ui.pages import contour_draft_worker as contour_worker_module
 
-    original = contour_module.compile_contour_drafts_for_project
+    original = contour_worker_module.compile_contour_drafts_for_project
     ran_off_gui = []
 
     def checked_compile(*args, **kwargs):
@@ -181,7 +184,7 @@ def test_preparation_contour_extraction_runs_off_gui_thread(qtbot, monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(
-        contour_module, "compile_contour_drafts_for_project", checked_compile
+        contour_worker_module, "compile_contour_drafts_for_project", checked_compile
     )
     page = PreparationPage()
     qtbot.addWidget(page)

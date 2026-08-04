@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from PySide6.QtCore import Qt
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from well_log_workstation.plane_map_view import PlaneMapView  # noqa: E402
@@ -112,7 +114,8 @@ def test_shell_tree_labels_six_plot_types(tmp_path: Path):
         item = tree.topLevelItem(i)
         for j in range(item.childCount()):
             child = item.child(j)
-            if child.data(0, 32) and (child.data(0, 32).get("kind") == "plots_folder"):
+            meta = child.data(0, Qt.ItemDataRole.UserRole)
+            if meta and meta.get("kind") == "plots_folder":
                 for k in range(child.childCount()):
                     labels.append(child.child(k).text(0))
     joined = " | ".join(labels)

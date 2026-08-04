@@ -189,7 +189,10 @@ def test_running_prepare_shutdown_is_kept_and_stale_snapshot_never_commits(
         return snapshot.factor_map_tasks
 
     monkeypatch.setattr(
-        "paleo_workbench.workflow.factor_interpolation.batch_prepare_factor_maps",
+        # FactorPrepareWorker imports batch_prepare_factor_maps into its own
+        # module namespace, so the blocker must be patched there (patching the
+        # workflow module cannot intercept the worker-thread call).
+        "paleo_workbench.ui.pages.factor_prepare_worker.batch_prepare_factor_maps",
         blocked_prepare,
     )
     page._start_prepare_worker("IDW")

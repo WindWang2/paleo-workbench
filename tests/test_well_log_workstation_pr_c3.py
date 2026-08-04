@@ -124,6 +124,7 @@ def test_tie_quads_requires_two_wells():
 
 def test_section_canvas_constructs_and_paints(qtbot):
     from well_log_workstation.section_canvas import SectionCanvas
+    from PySide6.QtCore import QPoint
     from PySide6.QtGui import QImage, QPainter
 
     canvas = SectionCanvas()
@@ -133,7 +134,11 @@ def test_section_canvas_constructs_and_paints(qtbot):
     img = QImage(600, 400, QImage.Format.Format_RGB32)
     img.fill(0xFFFFFFFF)
     p = QPainter(img)
-    canvas.render(p)
-    p.end()
+    try:
+        canvas.render(p, QPoint())
+    finally:
+        # Always end the painter so an exception cannot leave an active
+        # QPainter on img and crash in its GC/destructor.
+        p.end()
     # Empty canvas paints the placeholder text; no crash.
     assert img.width() == 600
