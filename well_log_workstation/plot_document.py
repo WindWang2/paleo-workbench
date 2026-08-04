@@ -21,7 +21,7 @@ from well_log_workstation.workspace import (
     save_workspace,
 )
 
-PLOT_SCHEMA_VERSION = 3
+PLOT_SCHEMA_VERSION = 4
 
 
 @dataclass
@@ -61,6 +61,10 @@ class PlotDocument:
     panels: list[PanelRef] = field(default_factory=list)
     # Per-plot revision, persisted in plots/<id>.json (schema v3, ADR 0051).
     revision: int = 0
+    # Composite free graphics (schema v4): raw shape dicts placed on the
+    # paper directly, independent of panels/templates. Empty for all other
+    # plot types.
+    free_graphics: list[dict] = field(default_factory=list)
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -96,6 +100,10 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
     # Always persist the revision (ADR 0051); unlike links/panels it is
     # unconditional so a stale file can never look unversioned.
     payload["revision"] = int(doc.revision)
+    # Free graphics (schema v4): persist for composite docs, and also for any
+    # doc that carries them (mirrors links/panels so stale values never drop).
+    if doc.type == "composite" or doc.free_graphics:
+        payload["free_graphics"] = list(doc.free_graphics)
     return payload
 
 
@@ -110,6 +118,11 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         # v2 -> v3 additive: revision is new and defaults to 0 (ADR 0051).
         data = dict(data)
         data.setdefault("revision", 0)
+        version = PLOT_SCHEMA_VERSION
+    if version == 3:
+        # v3 -> v4 additive: free_graphics is new and defaults to empty.
+        data = dict(data)
+        data.setdefault("free_graphics", [])
         version = PLOT_SCHEMA_VERSION
     if version != PLOT_SCHEMA_VERSION:
         raise WorkspaceError(
@@ -142,6 +155,10 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
                     render_mode=str(raw.get("render_mode") or "live"),
                 )
             )
+    free_graphics: list[dict] = []
+    for raw in data.get("free_graphics") or []:
+        if isinstance(raw, dict):
+            free_graphics.append(raw)
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -151,6 +168,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         path=path,
         links=links,
         panels=panels,
+        free_graphics=free_graphics,
         revision=max(0, int(data.get("revision") or 0)),
     )
 
@@ -220,6 +238,7 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             path=rel,
             links=list(doc.links),
             panels=list(doc.panels),
+            free_graphics=list(doc.free_graphics),
             revision=doc.revision,
         )
     # Lazy import: keep this module importable without PySide6 (see save).

@@ -1271,6 +1271,12 @@ class WellLogWorkstationWindow(QMainWindow):
         # Recreate panels from the persisted PanelRef list.
         for panel in plot.panels:
             self.composite_view.add_panel_ref(panel)
+        self.composite_view.set_active_plot_id(plot.id)
+        failed = self.composite_view.restore_free_graphics(plot.free_graphics)
+        if failed > 0:
+            self.statusBar().showMessage(
+                f"{failed} 条图形记录无法恢复（未知类型或格式错误）", 5000
+            )
         self.composite_caption.setText(
             f"油藏综合图 · {len(plot.panels)} 个面板 · 纸面排版"
         )
