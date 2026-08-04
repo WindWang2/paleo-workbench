@@ -4201,8 +4201,13 @@ void WellLogSession::poll_async() noexcept {
     while (task != impl_->lod_tasks.end()) {
       auto output = LodBuildOutput{};
       {
-        const auto guard = std::lock_guard{(*task)->state->mutex};
-        if (!(*task)->state->finished) {
+        // try_lock (not lock_guard): the poller must never block on a worker's
+        // mutex. A worker holds this lock only to publish its output, but under
+        // CPU starvation it can be preempted mid-critical-section — a blocking
+        // poll then stalls the caller's deadline loop forever (#241). If the
+        // lock isn't free, leave the task for the next poll.
+        auto lock = std::unique_lock{(*task)->state->mutex, std::try_to_lock};
+        if (!lock.owns_lock() || !(*task)->state->finished) {
           ++task;
           continue;
         }
@@ -4337,8 +4342,11 @@ void WellLogSession::poll_async() noexcept {
     while (frame_task != impl_->frame_tasks.end()) {
       auto output = FrameBuildOutput{};
       {
-        const auto guard = std::lock_guard{(*frame_task)->state->mutex};
-        if (!(*frame_task)->state->finished) {
+        // try_lock for the same reason as the LOD loop above (#241): never
+        // block the poller on a worker's publish lock.
+        auto lock =
+            std::unique_lock{(*frame_task)->state->mutex, std::try_to_lock};
+        if (!lock.owns_lock() || !(*frame_task)->state->finished) {
           ++frame_task;
           continue;
         }
