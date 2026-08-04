@@ -133,14 +133,11 @@ jobs:
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        # Windows ctest is advisory (continue-on-error): multiple tests hang
-        # non-deterministically on the 2-vCPU runner (async-lrw-stress,
-        # pdf-spike, manifest, las-adapter -- different victim each run).
-        # Root cause is a mix of jthread/LOD mutex contention (#241) and
-        # process-exit DLL teardown. The build+configure gate (shared OFF+ON)
-        # proves MSVC portability; Ubuntu CI validates full ctest.
-        continue-on-error: true
-        run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 1 --timeout 60 --exclude-regex async-lrw-stress
+        # Full ctest gate on Windows again: #242 (poll_async try_lock) fixed the
+        # jthread/LOD mutex contention and #263 (drain_workers + std::_Exit in
+        # test fail() helpers) fixed the process-exit DLL teardown loader-lock;
+        # the non-deterministic hangs that made this step advisory are gone.
+        run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 1 --timeout 60
 
       - name: Test (Unix)
         if: runner.os != 'Windows'
