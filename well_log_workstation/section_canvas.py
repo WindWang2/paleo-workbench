@@ -181,7 +181,16 @@ class SectionCanvas(QWidget):
                 cx = 8 + xi * (col_w + gap) + col_w / 2
                 poly.append(QPointF(cx, y_map(qy)))
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(QColor(quad.fill_color)))
+            if quad.pattern_id:
+                # Host-side approximation: Qt hatch brush for the pattern fill
+                # (ADR 0050). The engine SVG/PDF export renders the true vector
+                # PatternDefinition; this is the interactive-preview fallback.
+                brush = QBrush(
+                    QColor(quad.fill_color), Qt.BrushStyle.Dense4Pattern
+                )
+            else:
+                brush = QBrush(QColor(quad.fill_color))
+            p.setBrush(brush)
             p.drawPolygon(poly)
 
         # 1. Well columns + curves (mirror CorrelationCanvas)
@@ -233,9 +242,11 @@ class SectionCanvas(QWidget):
                     p.drawLine(int(prev[0]), int(prev[1]), int(xx), int(yy))
                 prev = (xx, yy)
 
-        # 2. Fault polylines (red, solid)
+        # 2. Fault polylines (red, dashed per ADR 0050)
         for fault in self._faults:
             pen = QPen(QColor(fault.color), 1.4, Qt.PenStyle.SolidLine)
+            if fault.dash_pattern:
+                pen.setDashPattern(list(fault.dash_pattern))
             p.setPen(pen)
             prev = None
             for (fx, fy) in fault.points:
@@ -246,9 +257,11 @@ class SectionCanvas(QWidget):
                     p.drawLine(int(prev[0]), int(prev[1]), int(cx), int(yy))
                 prev = (cx, yy)
 
-        # 3. Contact polylines (OWC blue / GOC orange, solid)
+        # 3. Contact polylines (OWC blue / GOC orange, dotted per ADR 0050)
         for contact in self._contacts:
             pen = QPen(QColor(contact.color), 1.4, Qt.PenStyle.SolidLine)
+            if contact.dash_pattern:
+                pen.setDashPattern(list(contact.dash_pattern))
             p.setPen(pen)
             prev = None
             for (cx0, cy) in contact.points:

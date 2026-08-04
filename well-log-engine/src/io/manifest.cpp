@@ -587,6 +587,18 @@ void write_point(std::string &output, const PhysicalPoint &point) {
     for (const auto &pt : array(field(obj, "points"))) {
       p.points.push_back(parse_point(pt));
     }
+    if (const auto *dash = optional_field(obj, "dashPattern")) {
+      const auto &dash_obj = object(*dash);
+      if (const auto *segs = optional_field(dash_obj, "segments")) {
+        for (const auto &seg : array(*segs)) {
+          p.dash_pattern.segments.push_back(Millimetres{number(seg)});
+        }
+      }
+      p.dash_pattern.offset =
+          optional_field(dash_obj, "offset") != nullptr
+              ? number(*optional_field(dash_obj, "offset"))
+              : 0.0;
+    }
     return p;
   }
   if (kind == "triangle") {
@@ -599,7 +611,7 @@ void write_point(std::string &output, const PhysicalPoint &point) {
   }
   if (kind == "quad") {
     const auto &rect = object(field(obj, "rect"));
-    return CustomQuad{
+    CustomQuad q{
         .rect = PhysicalRect{
             .left = Millimetres{number(field(rect, "left"))},
             .top = Millimetres{number(field(rect, "top"))},
@@ -608,6 +620,10 @@ void write_point(std::string &output, const PhysicalPoint &point) {
         },
         .fill_color = parse_color(field(obj, "fillColor")),
     };
+    if (const auto *pid = optional_field(obj, "patternId")) {
+      q.pattern_id = entity_id(*pid);
+    }
+    return q;
   }
   if (kind == "symbol") {
     return CustomSymbolOccurrence{
@@ -637,7 +653,20 @@ void write_primitive(std::string &output, const CustomPrimitive &primitive) {
             first = false;
             write_point(output, pt);
           }
-          output += "]}";
+          output += "]";
+          if (!p.dash_pattern.segments.empty()) {
+            output += ",\"dashPattern\":{\"segments\":[";
+            bool seg_first = true;
+            for (const auto &seg : p.dash_pattern.segments) {
+              if (!seg_first) output.push_back(',');
+              seg_first = false;
+              output += std::to_string(seg.value);
+            }
+            output += "],\"offset\":";
+            output += std::to_string(p.dash_pattern.offset);
+            output += "}";
+          }
+          output += "}";
         } else if constexpr (std::is_same_v<T, CustomTriangle>) {
           output += "{\"kind\":\"triangle\",\"a\":";
           write_point(output, p.a);
@@ -656,6 +685,11 @@ void write_primitive(std::string &output, const CustomPrimitive &primitive) {
           output += ",\"height\":" + std::to_string(p.rect.height.value);
           output += "},\"fillColor\":";
           write_color(output, p.fill_color);
+          if (!p.pattern_id.is_nil()) {
+            output += ",\"patternId\":\"";
+            output += p.pattern_id.to_string();
+            output += "\"";
+          }
           output += "}";
         } else if constexpr (std::is_same_v<T, CustomSymbolOccurrence>) {
           output += "{\"kind\":\"symbol\",\"center\":";

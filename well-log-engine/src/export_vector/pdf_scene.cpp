@@ -760,7 +760,8 @@ void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
 // per-backend clip: the geometry is pre-clipped to the source's clip ring at
 // prepare time (the same data GL/SVG draw).
 void emit_custom_layer(PdfPathStream &stream, const PreparedScene &scene,
-                       const PreparedCustomLayer &layer) noexcept {
+                       const PreparedCustomLayer &layer,
+                       PageResources &resources) noexcept {
   if (!layer.visible) {
     return;
   }
@@ -772,6 +773,14 @@ void emit_custom_layer(PdfPathStream &stream, const PreparedScene &scene,
       stream.set_stroke_color(primitive.color.red, primitive.color.green,
                               primitive.color.blue);
       stream.set_line_width(primitive.stroke_width.value);
+      if (!primitive.dash_pattern.segments.empty()) {
+        std::vector<double> dash_array;
+        dash_array.reserve(primitive.dash_pattern.segments.size());
+        for (const auto &seg : primitive.dash_pattern.segments) {
+          dash_array.push_back(seg.value);
+        }
+        stream.set_dash(dash_array, primitive.dash_pattern.offset);
+      }
       for (std::uint64_t point_offset = 0;
            point_offset < primitive.vertex_count; ++point_offset) {
         const auto &point = custom_vertices[static_cast<std::size_t>(
@@ -786,9 +795,19 @@ void emit_custom_layer(PdfPathStream &stream, const PreparedScene &scene,
         stream.close();
       }
       stream.stroke();
+      if (!primitive.dash_pattern.segments.empty()) {
+        // Reset to solid so the dash doesn't leak to subsequent strokes.
+        stream.set_dash({}, 0.0);
+      }
     } else if (primitive.kind == CustomPrimitiveKind::triangle ||
                primitive.kind == CustomPrimitiveKind::quad) {
-      set_solid_fill(stream, primitive.color);
+      if (primitive.kind == CustomPrimitiveKind::quad &&
+          !primitive.pattern_id.is_nil()) {
+        stream.set_pattern_fill(
+            resources.name_for_pattern(primitive.pattern_id));
+      } else {
+        set_solid_fill(stream, primitive.color);
+      }
       const auto triangle_count = primitive.vertex_count / 3;
       for (std::uint64_t tri = 0; tri < triangle_count; ++tri) {
         for (std::uint64_t point_offset = 0; point_offset < 3; ++point_offset) {
@@ -947,7 +966,7 @@ void emit_track_body(PdfPathStream &stream, const PreparedScene &scene,
   // Custom layer primitives.
   for (const auto &custom_layer : scene.custom_layers()) {
     if (custom_layer.track_id == track.id) {
-      emit_custom_layer(stream, scene, custom_layer);
+      emit_custom_layer(stream, scene, custom_layer, resources);
     }
   }
   // Text runs (vector outlines).

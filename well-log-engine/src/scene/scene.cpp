@@ -2883,7 +2883,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
         const auto emit_filled =
             [&](const std::vector<PhysicalPoint> &ring, EntityId source_id,
                 std::size_t primitive_index, CustomPrimitiveKind kind,
-                RgbaColor color) {
+                RgbaColor color, EntityId pattern_id = {}) {
               std::vector<detail::PolygonPoint> polygon;
               polygon.reserve(ring.size());
               for (const auto &point : ring) {
@@ -2918,6 +2918,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                   .source_primitive_index = primitive_index,
                   .kind = kind,
                   .color = color,
+                  .pattern_id = pattern_id,
                   .first_vertex = first_vertex,
                   .vertex_count = emitted.size(),
                   .bounds = bounds_of(emitted),
@@ -2966,6 +2967,7 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                 .first_vertex = first_vertex,
                 .vertex_count = kept.size(),
                 .closed = polyline->closed,
+                .dash_pattern = polyline->dash_pattern,
                 .bounds = bounds_of(kept),
             });
             continue;
@@ -2991,7 +2993,8 @@ Result<PreparedScene> detail::ScenePreparer::prepare_impl(
                                   .top = Millimetres{quad_bottom}},
                     PhysicalPoint{.left = Millimetres{quad_left},
                                   .top = Millimetres{quad_bottom}}},
-                source->id, index, CustomPrimitiveKind::quad, quad->fill_color);
+                source->id, index, CustomPrimitiveKind::quad, quad->fill_color,
+                quad->pattern_id);
           } else {
             const auto &symbol =
                 std::get<CustomSymbolOccurrence>(primitive);

@@ -522,13 +522,25 @@ enum class CustomPrimitiveKind : std::uint8_t {
   symbol,
 };
 
+// An explicit on/off segment array defining a stroke's dash style, in scene
+// millimetres (ADR 0050). `segments` alternates [on, off, on, off, ...]; the
+// pattern repeats along the polyline. An empty array means solid. `offset`
+// shifts the starting position along the dash cycle. Maps directly to SVG
+// stroke-dasharray and PDF line dash arrays.
+struct DashPattern {
+  std::vector<Millimetres> segments;
+  double offset{};
+};
+
 // A polyline stroke. `closed` closes the ring with a final segment (and, for
 // SVG/GL, treats it as a closed path). `width` is the stroke width.
+// `dash_pattern` is empty for a solid line (ADR 0050).
 struct CustomPolyline {
   std::vector<PhysicalPoint> points;
   bool closed{};
   RgbaColor color{0, 0, 0, 255};
   Millimetres width{0.3};
+  DashPattern dash_pattern;
 };
 
 // A filled triangle defined by three scene-mm points.
@@ -539,10 +551,13 @@ struct CustomTriangle {
   RgbaColor fill_color{0, 0, 0, 255};
 };
 
-// A filled axis-aligned rectangle in scene millimetres.
+// A filled axis-aligned rectangle in scene millimetres. `pattern_id` references
+// a PatternDefinition registered on the ScenePresentation; when nil the quad is
+// solid-filled with `fill_color` (ADR 0050, same mechanism as Interval).
 struct CustomQuad {
   PhysicalRect rect;
   RgbaColor fill_color{0, 0, 0, 255};
+  EntityId pattern_id;
 };
 
 // A discrete symbol, mirroring SymbolOccurrence but positioned directly in

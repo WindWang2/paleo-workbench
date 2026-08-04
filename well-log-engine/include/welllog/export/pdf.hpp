@@ -61,6 +61,11 @@ public:
                                   std::uint8_t b) noexcept;
   // Set the line width in points.
   PdfPathStream &set_line_width(double width) noexcept;
+  // Set the line dash pattern (PDF `d`). `dash_array` alternates on/off lengths
+  // in points; an empty vector means solid. `phase` is the offset into the
+  // pattern at which to start.
+  PdfPathStream &set_dash(std::span<const double> dash_array,
+                          double phase) noexcept;
   // Save/restore the graphics state (PDF `q`/`Q`). Used to scope per-track
   // clips and per-glyph transforms so they never leak across layers.
   PdfPathStream &save_state() noexcept;

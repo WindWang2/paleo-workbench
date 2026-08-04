@@ -1427,9 +1427,24 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
         if (primitive.kind == CustomPrimitiveKind::polyline) {
           // Stroke as a quad ribbon: one thin quad (two triangles) per
           // segment, offset along the segment normal by half the stroke width.
+          // When a dash_pattern is present, only the "on" portions of the
+          // pattern are emitted (ADR 0050 CPU dash subdivision).
           const auto width = primitive.stroke_width.value;
-          const auto emit_segment = [&](const PhysicalPoint &p0,
-                                        const PhysicalPoint &p1) {
+          const auto &dash = primitive.dash_pattern.segments;
+          // dash_phase accumulates along the polyline so the pattern is
+          // continuous across segments. It is advanced through the full
+          // segment length even for "off" gaps.
+          double dash_phase = primitive.dash_pattern.offset;
+          const auto dash_cycle =
+              [&dash]() -> double {
+            double total = 0.0;
+            for (const auto &s : dash) {
+              total += s.value;
+            }
+            return total;
+          }();
+          const auto emit_ribbon = [&](const PhysicalPoint &p0,
+                                       const PhysicalPoint &p1) {
             const auto dx = p1.left.value - p0.left.value;
             const auto dy = p1.top.value - p0.top.value;
             const auto length = std::hypot(dx, dy);
@@ -1448,6 +1463,65 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
                             p1.top.value - ny, p1.left.value + nx,
                             p1.top.value + ny);
           };
+          // emit_segment handles both solid (no dash) and dashed lines.
+          // For dashed, it subdivides the segment into on/off sub-segments
+          // based on the dash cycle, emitting ribbons only for "on" parts.
+          const auto emit_segment = [&](const PhysicalPoint &p0,
+                                        const PhysicalPoint &p1) {
+            if (dash.empty()) {
+              emit_ribbon(p0, p1);
+              return;
+            }
+            const auto dx = p1.left.value - p0.left.value;
+            const auto dy = p1.top.value - p0.top.value;
+            const auto length = std::hypot(dx, dy);
+            if (length <= 0.0) {
+              return;
+            }
+            const auto ux = dx / length;
+            const auto uy = dy / length;
+            double pos = 0.0;
+            while (pos < length) {
+              // Find which dash element we're currently in.
+              auto phase_in_cycle =
+                  std::fmod(dash_phase, dash_cycle);
+              if (phase_in_cycle < 0.0) {
+                phase_in_cycle += dash_cycle;
+              }
+              std::size_t seg_index = 0;
+              double acc = 0.0;
+              for (std::size_t i = 0; i < dash.size(); ++i) {
+                if (phase_in_cycle < acc + dash[i].value) {
+                  seg_index = i;
+                  break;
+                }
+                acc += dash[i].value;
+              }
+              const bool is_on = (seg_index % 2 == 0);
+              const auto remaining_in_element =
+                  dash[seg_index].value -
+                  (phase_in_cycle -
+                   [&] {
+                     double a = 0.0;
+                     for (std::size_t i = 0; i < seg_index; ++i) {
+                       a += dash[i].value;
+                     }
+                     return a;
+                   }());
+              const auto chunk = std::min(remaining_in_element, length - pos);
+              if (is_on && chunk > 0.0) {
+                const PhysicalPoint sub0{
+                    .left = Millimetres{p0.left.value + ux * pos},
+                    .top = Millimetres{p0.top.value + uy * pos}};
+                const PhysicalPoint sub1{
+                    .left = Millimetres{p0.left.value + ux * (pos + chunk)},
+                    .top = Millimetres{p0.top.value + uy * (pos + chunk)}};
+                emit_ribbon(sub0, sub1);
+              }
+              pos += chunk;
+              dash_phase += chunk;
+            }
+          };
           for (std::uint64_t point_offset = 1;
                point_offset < primitive.vertex_count; ++point_offset) {
             emit_segment(
@@ -1465,6 +1539,52 @@ bool GlRenderer::queue_upload(const PreparedScene &scene,
           }
         } else if (primitive.kind == CustomPrimitiveKind::triangle ||
                    primitive.kind == CustomPrimitiveKind::quad) {
+          // Pattern-filled quads use the same PrimitiveKind::pattern batch path
+          // as Intervals (ADR 0050): a single quad with pattern UVs from the
+          // shared atlas. Solid quads and triangles fall through to the
+          // triangulated solid path.
+          if (primitive.kind == CustomPrimitiveKind::quad &&
+              !primitive.pattern_id.is_nil()) {
+            const auto pattern_uv = pattern_uvs.find(primitive.pattern_id);
+            const auto pattern =
+                pattern_uv == pattern_uvs.end()
+                    ? scene.patterns().end()
+                    : std::find_if(
+                          scene.patterns().begin(), scene.patterns().end(),
+                          [&](const PatternDefinition &candidate) {
+                            return candidate.id == primitive.pattern_id;
+                          });
+            if (pattern != scene.patterns().end()) {
+              const auto &b = primitive.bounds;
+              const auto first_vertex = primitive_vertices.size();
+              append_quad(primitive_vertices, b.left.value, b.top.value,
+                          b.left.value + b.width.value,
+                          b.top.value + b.height.value, 0.0F, 0.0F, 0.0F,
+                          0.0F);
+              const auto theta =
+                  pattern->rotation_degrees * 3.14159265358979323846 / 180.0;
+              const auto &uv = pattern_uv->second;
+              primitive_batches.push_back(PrimitiveBatch{
+                  .kind = PrimitiveKind::pattern,
+                  .first_vertex = static_cast<GlInt>(first_vertex),
+                  .vertex_count = static_cast<GlSize>(6),
+                  .color = {},
+                  .clip = clip,
+                  .anchor_left = pattern->scene_anchor.left.value,
+                  .anchor_top = pattern->scene_anchor.top.value,
+                  .tile_width = pattern->tile_width.value,
+                  .tile_height = pattern->tile_height.value,
+                  .rotation_cos = std::cos(theta),
+                  .rotation_sin = std::sin(theta),
+                  .atlas_u = uv[0],
+                  .atlas_v = uv[1],
+                  .atlas_du = uv[2],
+                  .atlas_dv = uv[3],
+              });
+              continue;
+            }
+            // Pattern not found → fall through to solid fill.
+          }
           // Triangles and quads are stored as clipped, triangulated geometry:
           // vertex_count vertices in groups of 3 (one solid triangle each).
           // Quads may produce fewer/more than their original two triangles
