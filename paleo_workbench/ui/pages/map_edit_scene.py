@@ -7,7 +7,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QKeyEvent, QPainterPath
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsSceneMouseEvent
 
-from paleo_workbench.mapping import map_edit_api as api
+import geoviz as api
 from paleo_workbench.mapping.document_io import features_from_document
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.project.models import PaleoMapDocument

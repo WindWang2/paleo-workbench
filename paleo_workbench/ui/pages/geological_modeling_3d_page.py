@@ -28,6 +28,7 @@ from paleo_workbench.viz.joint_well_pick import (
     build_well_screen_geoms,
     pick_well_name,
 )
+from geoviz import generate_fence_mesh
 from paleo_workbench.viz.geomodel import (
     ClippedGLMeshItem,
     ClippedGLVolumeItem,
@@ -35,7 +36,6 @@ from paleo_workbench.viz.geomodel import (
     WellCurve3DGenerator,
     RGBAttributeFusion,
     LithologyCrossplotEngine,
-    CrossWellFenceGenerator,
 )
 from paleo_workbench.viz.geomodel.models import GridSpec
 from paleo_workbench.ui.pages.geological_modeling_workers import (
@@ -2437,7 +2437,7 @@ class GeologicalModeling3DPage(QWidget):
             for bh in self.bh_raw_data
         ]
 
-        verts, faces, colors = CrossWellFenceGenerator.generate_fence_mesh(wells, nz_samples=25)
+        verts, faces, colors = generate_fence_mesh(wells, nz_samples=25)
         if len(verts) == 0:
             return
 

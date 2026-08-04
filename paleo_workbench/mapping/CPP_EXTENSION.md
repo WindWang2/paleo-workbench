@@ -126,23 +126,26 @@ PYBIND11_MODULE(map_edit_core, m) {
 }
 ```
 
-## Build notes (`native/map_edit_core/`)
+## Build notes (`geo-viz-engine/native/map_edit_core/`)
 
-Source lives at `native/map_edit_core/src/map_edit_core.cpp` (pybind11 + C++17).
+Phase-2 promote-down (PR-A #256): the C++ source now lives in the
+`geo-viz-engine` submodule at `geo-viz-engine/native/map_edit_core/src/map_edit_core.cpp`
+(pybind11 + C++17). The consumer (this repo) builds it - "source in
+submodule, build in consumer".
 
 ```bash
 # From repo root, with project venv active:
 python -m pip install -e ".[native]"   # pulls pybind11
-python -m pip install -e native/map_edit_core
+python -m pip install -e geo-viz-engine/native/map_edit_core
 
 # Verify:
-python -c "from paleo_workbench.mapping.map_edit_api import HAS_CPP; assert HAS_CPP"
+python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP"
 ```
 
 In-place build (dev):
 
 ```bash
-cd native/map_edit_core && python setup.py build_ext --inplace
+cd geo-viz-engine/native/map_edit_core && python setup.py build_ext --inplace
 ```
 
 Behavioral parity: `tests/test_map_topology.py` (Python path) and

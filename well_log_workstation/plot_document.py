@@ -9,19 +9,32 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from well_log_workstation.correlation_links import HorizonLink
 from well_log_workstation.workspace import (
     PlotCatalogEntry,
+    PlotType,
     Workspace,
     WorkspaceError,
     add_plot,
     save_workspace,
 )
 
-PLOT_SCHEMA_VERSION = 1
-PlotType = Literal["single_well", "correlation"]
+PLOT_SCHEMA_VERSION = 2
+
+
+@dataclass
+class PanelRef:
+    """Composite-figure panel reference (Phase-2 T9 / #253).
+
+    A composite figure (油藏综合图) lays out several sub-plots in panels.
+    Layout detail (position/size) lives in template_model; this dataclass
+    only records which plot each panel hosts and its display slot.
+    """
+
+    plot_id: str
+    slot: str = "main"
 
 
 @dataclass
@@ -35,6 +48,8 @@ class PlotDocument:
     path: str
     # Correlation horizon links (#229); empty for single-well
     links: list[HorizonLink] = field(default_factory=list)
+    # Composite-figure panels (Phase-2 T9); only ``composite`` plots use it.
+    panels: list[PanelRef] = field(default_factory=list)
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -56,18 +71,27 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
     # Always persist links for correlation docs so clear/remove is durable (#230)
     if doc.type == "correlation" or doc.links:
         payload["links"] = [lk.to_json() for lk in doc.links]
+    if doc.type == "composite" or doc.panels:
+        payload["panels"] = [
+            {"plot_id": p.plot_id, "slot": p.slot} for p in doc.panels
+        ]
     return payload
 
 
 def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     version = int(data.get("schemaVersion", 0))
+    if version == 1:
+        # v1 -> v2 additive: panels is new and defaults to empty.
+        data = dict(data)
+        data.setdefault("panels", [])
+        version = PLOT_SCHEMA_VERSION
     if version != PLOT_SCHEMA_VERSION:
         raise WorkspaceError(
             f"unsupported plot schemaVersion={version} "
             f"(expected {PLOT_SCHEMA_VERSION})"
         )
     ptype = str(data.get("type") or "single_well")
-    if ptype not in ("single_well", "correlation"):
+    if ptype not in ("single_well", "correlation", "section", "plane_map", "fence_3d", "composite"):
         ptype = "single_well"
     links: list[HorizonLink] = []
     for raw in data.get("links") or []:
@@ -75,6 +99,15 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
             link = HorizonLink.from_json(raw)
             if link is not None:
                 links.append(link)
+    panels: list[PanelRef] = []
+    for raw in data.get("panels") or []:
+        if isinstance(raw, dict):
+            panels.append(
+                PanelRef(
+                    plot_id=str(raw.get("plot_id") or ""),
+                    slot=str(raw.get("slot") or "main"),
+                )
+            )
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -83,6 +116,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         template_id=data.get("template_id"),
         path=path,
         links=links,
+        panels=panels,
     )
 
 
@@ -143,6 +177,7 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             template_id=doc.template_id,
             path=rel,
             links=list(doc.links),
+            panels=list(doc.panels),
         )
     return doc
 
@@ -200,6 +235,118 @@ def create_correlation_plot(
         well_ids=list(well_ids),
         template_id=template_id,
         path=_plot_rel_path(pid),
+    )
+    save_plot_document(workspace, doc)
+    return doc
+
+
+def _validate_well_ids(workspace: Workspace, well_ids: list[str], *, min_count: int) -> list[str]:
+    """Shared well-id validation for the Phase-2 T9 create_* helpers."""
+    if len(well_ids) < min_count:
+        raise WorkspaceError(f"至少需要 {min_count} 口井")
+    catalog_ids = {w.id for w in workspace.wells}
+    for wid in well_ids:
+        if wid not in catalog_ids:
+            raise WorkspaceError(f"井不在工区目录中: {wid}")
+    return list(well_ids)
+
+
+def create_section_plot(
+    workspace: Workspace,
+    *,
+    well_ids: list[str],
+    template_id: str,
+    name: str | None = None,
+    plot_id: str | None = None,
+) -> PlotDocument:
+    """Create and persist a 油藏剖面图 document (≥2 wells; Phase-2 T9 / #253)."""
+    ids = _validate_well_ids(workspace, well_ids, min_count=2)
+    pid = plot_id or str(uuid.uuid4())
+    doc = PlotDocument(
+        id=pid,
+        name=name or f"油藏剖面（{len(ids)} 井）",
+        type="section",
+        well_ids=ids,
+        template_id=template_id,
+        path=_plot_rel_path(pid),
+    )
+    save_plot_document(workspace, doc)
+    return doc
+
+
+def create_plane_map_plot(
+    workspace: Workspace,
+    *,
+    wells: list[str] | None = None,
+    template_id: str,
+    name: str | None = None,
+    plot_id: str | None = None,
+) -> PlotDocument:
+    """Create and persist a 平面图 document (requires a project CRS; Phase-2 T9).
+
+    ``workspace.coordinate`` must be set (defaults to WGS84) so the map has a
+    CRS context for the paleo_map Plate Carrée identity.
+    """
+    if not workspace.coordinate:
+        raise WorkspaceError("平面图需要先设置工区坐标系（workspace.coordinate）")
+    ids = _validate_well_ids(workspace, list(wells or []), min_count=1) if wells else []
+    pid = plot_id or str(uuid.uuid4())
+    doc = PlotDocument(
+        id=pid,
+        name=name or "平面图",
+        type="plane_map",
+        well_ids=ids,
+        template_id=template_id,
+        path=_plot_rel_path(pid),
+    )
+    save_plot_document(workspace, doc)
+    return doc
+
+
+def create_fence_3d_plot(
+    workspace: Workspace,
+    *,
+    well_ids: list[str],
+    template_id: str,
+    name: str | None = None,
+    plot_id: str | None = None,
+) -> PlotDocument:
+    """Create and persist a 3D fence plot document (≥2 wells; Phase-2 T9)."""
+    ids = _validate_well_ids(workspace, well_ids, min_count=2)
+    pid = plot_id or str(uuid.uuid4())
+    doc = PlotDocument(
+        id=pid,
+        name=name or f"三维栅状图（{len(ids)} 井）",
+        type="fence_3d",
+        well_ids=ids,
+        template_id=template_id,
+        path=_plot_rel_path(pid),
+    )
+    save_plot_document(workspace, doc)
+    return doc
+
+
+def create_composite_plot(
+    workspace: Workspace,
+    *,
+    panels: list[PanelRef] | None = None,
+    template_id: str,
+    name: str | None = None,
+    plot_id: str | None = None,
+) -> PlotDocument:
+    """Create and persist a 油藏综合图 document (≥1 PanelRef; Phase-2 T9)."""
+    panel_list = list(panels or [])
+    if not panel_list:
+        raise WorkspaceError("综合图至少需要 1 个面板（PanelRef）")
+    pid = plot_id or str(uuid.uuid4())
+    doc = PlotDocument(
+        id=pid,
+        name=name or "油藏综合图",
+        type="composite",
+        well_ids=[],
+        template_id=template_id,
+        path=_plot_rel_path(pid),
+        panels=panel_list,
     )
     save_plot_document(workspace, doc)
     return doc

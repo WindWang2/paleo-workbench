@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox
 
-import paleo_workbench.workflow.factor_interpolation as factor_interpolation
+from paleo_workbench.workflow.factor_interpolation import batch_prepare_factor_maps
 from paleo_workbench.pipeline.compile_map import compile_map_draft
 from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
@@ -137,7 +137,7 @@ class WorkflowController:
             QMessageBox.information(self.window, "发送制备", "请先运行测井预测")
             return
         try:
-            factor_interpolation.batch_prepare_factor_maps(self.window.project, method="IDW")
+            batch_prepare_factor_maps(self.window.project, method="IDW")
         except Exception as exc:
             QMessageBox.warning(
                 self.window,

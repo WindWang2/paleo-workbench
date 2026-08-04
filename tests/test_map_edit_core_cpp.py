@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from paleo_workbench.mapping import map_edit_api as api
+import geoviz as api
 
 pytestmark = pytest.mark.skipif(
     not api.HAS_CPP,

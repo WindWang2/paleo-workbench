@@ -268,19 +268,19 @@ def _py_fast_las_parse_data(
 
 
 def _py_hit_test(features: list, x: float, y: float, tol: float) -> str | None:
-    from paleo_workbench.mapping.map_edit_api import _hit_test_python
+    from geoviz_plots.map_edit.api import _hit_test_python
     return _hit_test_python(features, x, y, tol)
 
 
 def _py_snap_point(
     candidates: list[tuple[float, float]], x: float, y: float, tol: float
 ) -> tuple[float, float]:
-    from paleo_workbench.mapping.map_edit_api import _snap_point_python
+    from geoviz_plots.map_edit.api import _snap_point_python
     return _snap_point_python(candidates, x, y, tol)
 
 
 def _py_validate_ring(ring: list[list[float]]) -> list[dict[str, Any]]:
-    from paleo_workbench.mapping.map_edit_api import _validate_ring_python
+    from geoviz_plots.map_edit.api import _validate_ring_python
     return _validate_ring_python(ring)
 
 

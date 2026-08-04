@@ -45,6 +45,33 @@ RT  .OHMM                          : Resistivity
     return path
 
 
+def _write_las_with_coords(path: Path, *, lat: str, long: str, well: str = "DEMO-2") -> Path:
+    """Minimal LAS with LAT/LONG decimal-degree headers (Phase-2 T2 / #246)."""
+    text = f"""~VERSION INFORMATION
+VERS.                          2.0 : CWLS LOG ASCII STANDARD - VERSION 2.0
+WRAP.                          NO  : ONE LINE PER DEPTH STEP
+~WELL INFORMATION
+STRT.M                      1000.0 : START DEPTH
+STOP.M                      1004.0 : STOP DEPTH
+STEP.M                         1.0 : STEP
+NULL.                       -999.25 : NULL VALUE
+WELL.                       {well} : WELL
+LAT.                        {lat} : LATITUDE (DEG)
+LONG.                       {long} : LONGITUDE (DEG)
+~CURVE INFORMATION
+DEPT.M                             : Depth
+GR  .GAPI                          : Gamma Ray
+~ASCII
+1000.0  40.0
+1001.0  45.0
+1002.0  50.0
+1003.0  55.0
+1004.0  60.0
+"""
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def test_parse_las_curves(tmp_path: Path) -> None:
     las = _write_minimal_las(tmp_path / "demo.las")
     doc = parse_las_file(las)
@@ -83,6 +110,40 @@ def test_import_into_workspace_catalog_and_session(tmp_path: Path) -> None:
 def test_parse_missing_file(tmp_path: Path) -> None:
     with pytest.raises(LasImportError, match="不存在"):
         parse_las_file(tmp_path / "nope.las")
+
+
+def test_parse_las_lat_long_headers_populate_coords(tmp_path: Path) -> None:
+    """Phase-2 T2 (#246): LAT/LONG decimal-degree headers -> lng/lat/crs."""
+    las = _write_las_with_coords(tmp_path / "coords.las", lat="30.25", long="116.5")
+    doc = parse_las_file(las)
+    assert doc.lng == pytest.approx(116.5)
+    assert doc.lat == pytest.approx(30.25)
+    assert doc.crs == "EPSG:4326"
+
+
+def test_parse_las_without_coords_marks_none(tmp_path: Path) -> None:
+    """Wells without coordinate headers stay in the catalog marked None."""
+    las = _write_minimal_las(tmp_path / "nocoords.las", well="NoCoords")
+    doc = parse_las_file(las)
+    assert doc.lng is None
+    assert doc.lat is None
+    assert doc.crs == "EPSG:4326"
+
+
+def test_import_las_coords_flow_into_catalog(tmp_path: Path) -> None:
+    """Phase-2 T2 (#246): imported wellhead coords reach the catalog entry."""
+    ws = create_workspace(tmp_path / "ws-coords")
+    las = _write_las_with_coords(tmp_path / "src-coords.las", lat="30.25", long="116.5")
+    result = import_las_into_workspace(ws, las)
+    entry = next(w for w in ws.wells if w.id == result.catalog_well_id)
+    assert entry.lng == pytest.approx(116.5)
+    assert entry.lat == pytest.approx(30.25)
+    assert entry.crs == "EPSG:4326"
+
+    again = open_workspace(ws.root)
+    persisted = next(w for w in again.wells if w.id == result.catalog_well_id)
+    assert persisted.lng == pytest.approx(116.5)
+    assert persisted.lat == pytest.approx(30.25)
 
 
 def test_shell_import_las_updates_tree(qtbot, tmp_path: Path) -> None:

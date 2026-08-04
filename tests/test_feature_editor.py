@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from paleo_workbench.mapping.feature_editor import FeatureEditor, TopologyError
+from geoviz import FeatureEditor, TopologyError
 
 
 @pytest.fixture

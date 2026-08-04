@@ -47,7 +47,7 @@ def test_edit_command_stack_max_depth_and_clear():
 
 
 def test_move_features_mutates_coordinate_lists():
-    from paleo_workbench.mapping import map_edit_api as api
+    import geoviz as api
 
     records = {
         "poly": {

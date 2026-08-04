@@ -8,6 +8,7 @@ from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
 ensure_geoviz_on_path()
 
+from geoviz import generate_fence_mesh
 from paleo_workbench.viz.geomodel import CrossWellFenceGenerator
 
 
@@ -18,7 +19,8 @@ def test_cross_well_fence_generator_mesh():
         {"name": "W3", "x": 20.0, "y": 5.0, "depth": 1100.0},
     ]
 
-    verts, faces, colors = CrossWellFenceGenerator.generate_fence_mesh(wells, nz_samples=10)
+    # generate_fence_mesh was promoted to the geoviz facade (Phase-2 PR-A).
+    verts, faces, colors = generate_fence_mesh(wells, nz_samples=10)
 
     assert len(verts) > 0
     assert len(faces) > 0

@@ -1,4 +1,11 @@
-"""CrossWellFenceGenerator: 3D curtain/fence mesh generator and 2D/3D seismic slice extractor."""
+"""CrossWellFenceGenerator: 2D/3D seismic slice extractor.
+
+Phase-2 promote-down (#256 / PR-A): ``generate_fence_mesh`` was promoted to
+``geoviz_plots.fence`` (headless numpy) and is exposed via the ``geoviz``
+facade as ``generate_fence_mesh`` / ``CrossWellFenceGenerator``. This local
+module keeps only ``extract_seismic_slice`` (per #257: "仅移
+generate_fence_mesh；其余几何若仍需保留则留在原处").
+"""
 
 from __future__ import annotations
 
@@ -6,62 +13,12 @@ import numpy as np
 
 
 class CrossWellFenceGenerator:
-    """Generates 3D curtain/fence surface meshes and extracts inter-well 2D seismic slices."""
+    """Extracts inter-well 2D seismic slices.
 
-    @staticmethod
-    def generate_fence_mesh(wells: list[dict], nz_samples: int = 20) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Generate 3D triangulated quad strip mesh curtain connecting consecutive wells.
-
-        Each well dict should contain: 'name', 'x', 'y', 'depth'.
-        Returns:
-            (vertices, faces, face_colors)
-        """
-        if len(wells) < 2:
-            return np.empty((0, 3), dtype=np.float32), np.empty((0, 3), dtype=np.int32), np.empty((0, 4), dtype=np.float32)
-
-        vertices = []
-        faces = []
-        face_colors = []
-
-        vert_offset = 0
-        for w_idx in range(len(wells) - 1):
-            w1 = wells[w_idx]
-            w2 = wells[w_idx + 1]
-
-            x1, y1, d1 = w1["x"], w1["y"], w1["depth"]
-            x2, y2, d2 = w2["x"], w2["y"], w2["depth"]
-
-            z_left = np.linspace(0.0, -d1, nz_samples, dtype=np.float32)
-            z_right = np.linspace(0.0, -d2, nz_samples, dtype=np.float32)
-
-            v_left = np.column_stack([np.full(nz_samples, x1), np.full(nz_samples, y1), z_left])
-            v_right = np.column_stack([np.full(nz_samples, x2), np.full(nz_samples, y2), z_right])
-
-            panel_verts = np.vstack([v_left, v_right])
-            vertices.append(panel_verts)
-
-            max_d = max(d1, d2)
-            for k in range(nz_samples - 1):
-                idx_l1 = vert_offset + k
-                idx_l2 = vert_offset + k + 1
-                idx_r1 = vert_offset + nz_samples + k
-                idx_r2 = vert_offset + nz_samples + k + 1
-
-                faces.append([idx_l1, idx_r1, idx_l2])
-                faces.append([idx_r1, idx_r2, idx_l2])
-
-                depth_ratio = abs(float(z_left[k])) / max(max_d, 1.0)
-                c = [0.1, 0.4 + 0.5 * (1 - depth_ratio), 0.7 + 0.3 * depth_ratio, 0.75]
-                face_colors.append(c)
-                face_colors.append(c)
-
-            vert_offset += 2 * nz_samples
-
-        all_verts = np.vstack(vertices).astype(np.float32)
-        all_faces = np.array(faces, dtype=np.int32)
-        all_colors = np.array(face_colors, dtype=np.float32)
-
-        return all_verts, all_faces, all_colors
+    The 3D curtain mesh half of this class now lives in the geoviz facade
+    (``geoviz.generate_fence_mesh``); this class retains the seismic-slice
+    geometry that was not promoted.
+    """
 
     @staticmethod
     def extract_seismic_slice(

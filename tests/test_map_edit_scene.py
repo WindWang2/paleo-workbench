@@ -5,7 +5,7 @@ from paleo_workbench.ui.pages.map_edit_items import FaciesPolygonItem, WellPoint
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
 from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.mapping_page import MappingPage
-from paleo_workbench.mapping.map_edit_api import HAS_CPP, hit_test
+from geoviz import HAS_CPP, hit_test
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 

@@ -7,8 +7,11 @@ from dataclasses import dataclass
 from PySide6.QtCore import QObject, Signal
 
 from geoviz import CancellationToken, JobCancelled
-
-import paleo_workbench.workflow.contour_draft as contour_draft
+from paleo_workbench.workflow.contour_draft import (
+    apply_contour_draft_to_map,
+    compile_contour_drafts_for_project,
+    upsert_contour_draft,
+)
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,7 @@ class ContourDraftWorker(QObject):
     def run(self) -> None:
         try:
             self._cancellation_token.raise_if_cancelled()
-            drafts = contour_draft.compile_contour_drafts_for_project(
+            drafts = compile_contour_drafts_for_project(
                 self._project,
                 apply_to_map=False,
                 cancellation_token=self._cancellation_token,
@@ -65,7 +68,7 @@ def commit_contour_drafts(project, result: ContourDraftResult) -> list:
     """Apply a worker result to the live project as a bounded GUI commit."""
     committed = []
     for draft in result.drafts:
-        contour_draft.upsert_contour_draft(project, draft)
-        contour_draft.apply_contour_draft_to_map(project, draft)
+        upsert_contour_draft(project, draft)
+        apply_contour_draft_to_map(project, draft)
         committed.append(draft)
     return committed

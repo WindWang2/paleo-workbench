@@ -1,11 +1,13 @@
-from paleo_workbench.mapping.map_edit_api import (
+from geoviz import (
     SnapCandidateIndex,
-    _snap_point_python,
     snap_point,
     snap_point_indexed,
     validate_adjacency,
     validate_ring,
 )
+# Private pure-core helper (not part of the facade surface): the promoted
+# map_edit geometry API lives in geoviz_plots.map_edit.
+from geoviz_plots.map_edit.api import _snap_point_python
 from paleo_workbench.native_backend import native_backend
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_scene import MapEditScene

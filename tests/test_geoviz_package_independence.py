@@ -73,6 +73,56 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "validate_polygon_geometry",
         "extract_contour_lines",
         "extract_filled_contours",
+        "ContourSegment",
+        "DEFAULT_N_LEVELS",
+        "GENERATOR_VERSION",
+        "coerce_grid",
+        "extract_contour_segments",
+        "segments_to_line_features",
+        "suggest_levels",
+        "DEFAULT_FACTOR_TYPES",
+        "DEFAULT_GRID_N",
+        "DEFAULT_SEMI_MAJOR",
+        "DEFAULT_SEMI_MINOR",
+        "MAX_LOO_SAMPLES",
+        "extract_xy_values",
+        "extract_xy_z_weights",
+        "interpolate_factor_grid",
+        "method_to_backend",
+        "mvp_note_for",
+        "resolve_anisotropy_params",
+        "snapshot_hash",
+        "synthetic_sample_points",
+        "FeatureEditor",
+        "HAS_CPP",
+        "HAS_SHAPELY",
+        "SnapCandidateIndex",
+        "TopologyError",
+        "closest_edge",
+        "delete_vertex",
+        "hit_test",
+        "insert_vertex",
+        "merge_rings",
+        "move_features",
+        "rebuild_topology",
+        "set_vertex",
+        "snap_point",
+        "snap_point_indexed",
+        "snap_shared_nodes",
+        "split_ring_by_line",
+        "validate_adjacency",
+        "validate_ring",
+        "CrossWellFenceGenerator",
+        "generate_fence_mesh",
+        # Phase-2 PR-A #32: BandedFill + FilledContourLayer + CRS helpers (T2/T3).
+        "BandedFill",
+        "FilledContourLayer",
+        "coerce_to_project_crs",
+        "get_project_crs",
+        "list_known_crs",
+        "set_project_crs",
+        # Phase-2 PR-A #32: plan_section facade re-export (T5).
+        "plan_section",
         "FaciesData",
         "FaciesInterval",
         "FormationTop",
@@ -87,6 +137,12 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "set_isosurface_extractor",
         "get_isosurface_extractor",
         "WellSeismicScene",
+        # Pre-existing drift fix (documented on #256): well-seismic joint 3D
+        # names the facade exports but the allow-list was missing.
+        "JointDisplaySettings",
+        "JointWellId",
+        "OrthogonalSliceState",
+        "TimeSliceState",
         "WellSeismicJointWidget",
         "WellHead",
         "TimeDepthTable",
@@ -125,8 +181,13 @@ def _workbench_geoviz_import_violations(root: Path) -> list[str]:
     return violations
 
 
-def test_workbench_production_imports_only_geoviz_facade():
-    root = Path(__file__).resolve().parents[1] / "paleo_workbench"
+@pytest.mark.parametrize("root_name", ["paleo_workbench", "well_log_workstation"])
+def test_workbench_production_imports_only_geoviz_facade(root_name: str):
+    """Workbench + Workstation production code must import only the public facade.
+
+    Phase-2 T1 (#245): the shared allow-list is enforced for both roots.
+    """
+    root = Path(__file__).resolve().parents[1] / root_name
     violations = _workbench_geoviz_import_violations(root)
     assert not violations, violations
 

@@ -15,9 +15,34 @@ WORKSPACE_FILENAME = "workspace.json"
 WELLS_DIRNAME = "wells"
 PLOTS_DIRNAME = "plots"
 TEMPLATES_DIRNAME = "templates"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-PlotType = Literal["single_well", "correlation"]
+# Phase-2 T9 (#253): PlotType expanded from 2 to 6 classes for the four
+# Phase-2 figure types (section / plane_map / fence_3d / composite).
+PlotType = Literal[
+    "single_well",
+    "correlation",
+    "section",
+    "plane_map",
+    "fence_3d",
+    "composite",
+]
+
+
+@dataclass
+class CoordinateReference:
+    """Workstation-side CRS trio (same shape as the Workbench type, independent).
+
+    Phase-2 T2 (#246): the Workstation holds its own ``CoordinateReference``
+    instead of sharing ``paleo_workbench.project.models.CoordinateReference``
+    (T10: ``project/models.py`` is NOT promoted). The default is WGS84 lng/lat
+    (EPSG:4326) - the paleo_map Plate Carrée identity.
+    """
+
+    project_crs: str = "EPSG:4326"
+    target_crs: str | None = None
+    display_crs: str = "EPSG:4326"
+    transform_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -26,6 +51,10 @@ class WellCatalogEntry:
     name: str
     # Relative to workspace root (posix-style preferred in JSON).
     path: str = ""
+    # Phase-2 T2 (#246): optional wellhead coordinates + CRS (from LAS headers).
+    lng: float | None = None
+    lat: float | None = None
+    crs: str | None = "EPSG:4326"
 
 
 @dataclass
@@ -49,6 +78,9 @@ class Workspace:
     plots: list[PlotCatalogEntry] = field(default_factory=list)
     default_template_id: str | None = None
     schema_version: int = SCHEMA_VERSION
+    # Phase-2 T2 (#246): project/target/display CRS trio held by the
+    # Workstation. Defaults to WGS84 (paleo_map Plate Carrée identity).
+    coordinate: CoordinateReference = field(default_factory=CoordinateReference)
 
     @property
     def wells_dir(self) -> Path:
@@ -80,36 +112,90 @@ def _to_json_dict(ws: Workspace) -> dict[str, Any]:
         "schemaVersion": ws.schema_version,
         "name": ws.name,
         "defaultTemplateId": ws.default_template_id,
+        "coordinate": asdict(ws.coordinate),
         "wells": [asdict(w) for w in ws.wells],
         "plots": [asdict(p) for p in ws.plots],
     }
 
 
+# Valid plot types across all schema versions (v1 whitelist + v2 additions).
+_ALL_PLOT_TYPES = (
+    "single_well",
+    "correlation",
+    "section",
+    "plane_map",
+    "fence_3d",
+    "composite",
+)
+
+
+def _coerce_plot_type(raw: Any) -> str:
+    ptype = str(raw or "single_well")
+    return ptype if ptype in _ALL_PLOT_TYPES else "single_well"
+
+
+def _upgrade_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """Additive v1 -> v2 migration: well coords + CRS defaults, coordinate trio.
+
+    v1 workspaces serialize wells without ``lng``/``lat``/``crs`` and have no
+    ``coordinate`` block. This migration fills the new fields with defaults
+    (WGS84 lng/lat; unknown plot types fall back to ``single_well``) and
+    returns a v2-shaped dict for the common parser.
+    """
+    out = dict(data)
+    wells: list[dict[str, Any]] = []
+    for w in data.get("wells") or []:
+        wd = dict(w)
+        wd.setdefault("lng", None)
+        wd.setdefault("lat", None)
+        wd.setdefault("crs", "EPSG:4326")
+        wells.append(wd)
+    out["wells"] = wells
+    plots: list[dict[str, Any]] = []
+    for p in data.get("plots") or []:
+        pd = dict(p)
+        pd["type"] = _coerce_plot_type(pd.get("type"))
+        plots.append(pd)
+    out["plots"] = plots
+    out.setdefault("coordinate", asdict(CoordinateReference()))
+    return out
+
+
 def _from_json_dict(root: Path, data: dict[str, Any]) -> Workspace:
     version = int(data.get("schemaVersion", 0))
+    if version == 1:
+        data = _upgrade_v1_to_v2(data)
+        version = SCHEMA_VERSION
     if version != SCHEMA_VERSION:
         raise WorkspaceError(
             f"unsupported workspace schemaVersion={version} "
             f"(expected {SCHEMA_VERSION})"
         )
+    coord_raw = data.get("coordinate") or {}
+    coordinate = CoordinateReference(
+        project_crs=str(coord_raw.get("project_crs") or "EPSG:4326"),
+        target_crs=coord_raw.get("target_crs"),
+        display_crs=str(coord_raw.get("display_crs") or "EPSG:4326"),
+        transform_history=list(coord_raw.get("transform_history") or []),
+    )
     wells = [
         WellCatalogEntry(
             id=str(w["id"]),
             name=str(w.get("name") or w["id"]),
             path=str(w.get("path") or ""),
+            lng=_opt_float(w.get("lng")),
+            lat=_opt_float(w.get("lat")),
+            crs=str(w.get("crs") or "EPSG:4326"),
         )
         for w in data.get("wells") or []
     ]
     plots: list[PlotCatalogEntry] = []
     for p in data.get("plots") or []:
-        ptype = str(p.get("type") or "single_well")
-        if ptype not in ("single_well", "correlation"):
-            ptype = "single_well"
         plots.append(
             PlotCatalogEntry(
                 id=str(p["id"]),
                 name=str(p.get("name") or p["id"]),
-                type=ptype,  # type: ignore[arg-type]
+                type=_coerce_plot_type(p.get("type")),  # type: ignore[arg-type]
                 well_ids=[str(x) for x in (p.get("well_ids") or [])],
                 template_id=p.get("template_id"),
                 path=str(p.get("path") or ""),
@@ -122,7 +208,18 @@ def _from_json_dict(root: Path, data: dict[str, Any]) -> Workspace:
         plots=plots,
         default_template_id=data.get("defaultTemplateId"),
         schema_version=version,
+        coordinate=coordinate,
     )
+
+
+def _opt_float(raw: Any) -> float | None:
+    """Coerce a JSON number to float, tolerating None / invalid values."""
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def create_workspace(path: Path | str, *, name: str | None = None) -> Workspace:
@@ -181,9 +278,19 @@ def add_well(
     name: str,
     path: str = "",
     well_id: str | None = None,
+    lng: float | None = None,
+    lat: float | None = None,
+    crs: str | None = "EPSG:4326",
 ) -> WellCatalogEntry:
     """Append a well catalog entry and persist."""
-    entry = WellCatalogEntry(id=well_id or _new_id(), name=name, path=path)
+    entry = WellCatalogEntry(
+        id=well_id or _new_id(),
+        name=name,
+        path=path,
+        lng=lng,
+        lat=lat,
+        crs=crs,
+    )
     ws.wells.append(entry)
     save_workspace(ws)
     return entry

@@ -95,8 +95,8 @@ jobs:
 
       - name: Build map_edit_core (required)
         run: |
-          python -m pip install -e native/map_edit_core
-          python -c "from paleo_workbench.mapping.map_edit_api import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
+          python -m pip install -e geo-viz-engine/native/map_edit_core
+          python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
 
       - name: Run tests
         env:

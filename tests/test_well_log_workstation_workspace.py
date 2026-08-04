@@ -32,10 +32,13 @@ def test_create_workspace_skeleton(tmp_path: Path) -> None:
     assert (root / "plots").is_dir()
     assert (root / "templates").is_dir()
     data = json.loads((root / WORKSPACE_FILENAME).read_text(encoding="utf-8"))
-    assert data["schemaVersion"] == 1
+    assert data["schemaVersion"] == 2
     assert data["name"] == "Field A"
     assert data["wells"] == []
     assert data["plots"] == []
+    # Phase-2 T2 (#246): workspace serializes its CRS trio.
+    assert data["coordinate"]["project_crs"] == "EPSG:4326"
+    assert data["coordinate"]["display_crs"] == "EPSG:4326"
     # Must not look like an engine Manifest whole-project
     assert "schemaVersion" in data
     assert "document" not in data
@@ -75,6 +78,72 @@ def test_open_round_trip_catalog_entries(tmp_path: Path) -> None:
     assert single.type == "single_well"
     assert single.well_ids == [well.id]
     assert single.template_id == "std-gr-rt-den"
+
+
+def test_open_workspace_v1_upgrades_to_v2(tmp_path: Path) -> None:
+    """A v1 workspace.json opens as v2 with additive coordinate defaults.
+
+    Phase-2 T9 (#253): wells gain lng/lat/crs, the workspace gains a
+    ``coordinate`` CRS trio, and unknown plot types fall back to
+    ``single_well``.
+    """
+    root = tmp_path / "legacy"
+    (root / "wells").mkdir(parents=True)
+    (root / "plots").mkdir()
+    (root / "templates").mkdir()
+    v1 = {
+        "schemaVersion": 1,
+        "name": "Legacy Field",
+        "defaultTemplateId": None,
+        "wells": [{"id": "w1", "name": "Well-1", "path": "wells/w1.las"}],
+        "plots": [
+            {"id": "p1", "name": "Legacy Plot", "type": "weird_type", "well_ids": ["w1"]},
+            {"id": "p2", "name": "A-C", "type": "correlation", "well_ids": ["w1"]},
+        ],
+    }
+    (root / WORKSPACE_FILENAME).write_text(
+        json.dumps(v1, ensure_ascii=False), encoding="utf-8"
+    )
+
+    ws = open_workspace(root)
+    assert ws.schema_version == 2
+    # Wells gained coordinate defaults.
+    assert ws.wells[0].lng is None
+    assert ws.wells[0].lat is None
+    assert ws.wells[0].crs == "EPSG:4326"
+    # Workspace gained the CRS trio.
+    assert ws.coordinate.project_crs == "EPSG:4326"
+    assert ws.coordinate.display_crs == "EPSG:4326"
+    assert ws.coordinate.target_crs is None
+    # Unknown plot type fell back to single_well; correlation preserved.
+    by_id = {p.id: p for p in ws.plots}
+    assert by_id["p1"].type == "single_well"
+    assert by_id["p2"].type == "correlation"
+    # Re-saving persists v2.
+    save_workspace(ws)
+    data = json.loads((root / WORKSPACE_FILENAME).read_text(encoding="utf-8"))
+    assert data["schemaVersion"] == 2
+    assert data["coordinate"]["project_crs"] == "EPSG:4326"
+    assert data["wells"][0]["crs"] == "EPSG:4326"
+
+
+def test_add_well_with_coordinates_round_trips(tmp_path: Path) -> None:
+    """Phase-2 T2 (#246): wellhead coords persist through save/open."""
+    root = tmp_path / "coords"
+    ws = create_workspace(root)
+    well = add_well(
+        ws,
+        name="Well-CRS",
+        path="wells/crs.las",
+        lng=116.5,
+        lat=30.25,
+        crs="EPSG:4326",
+    )
+    again = open_workspace(root)
+    assert again.wells[0].id == well.id
+    assert again.wells[0].lng == pytest.approx(116.5)
+    assert again.wells[0].lat == pytest.approx(30.25)
+    assert again.wells[0].crs == "EPSG:4326"
 
 
 def test_create_rejects_nonempty_without_clobber(tmp_path: Path) -> None:
