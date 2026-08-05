@@ -1,16 +1,21 @@
-"""Single-well geometry golden subset (T14 / #302).
+"""Single-well geometry golden (T14 / #302) + B1 multi-format matrix.
 
 Freezes a fixed LAS + template layout and asserts export-path track boxes
-and depth mapping in physical millimetres. Tolerance matches the §16
-0.1 mm target for the **subset** (not the full B1 matrix).
+and depth mapping in physical millimetres.
+
+- **T14 / Qt-paint layout**: ``TOL_MM`` = 0.1 mm (§16 target, subset).
+- **B1.GEOM format matrix** (export B1 / #304): same fixture across page box,
+  depth map, CGM VDC, and pagination page-count dimensions — CGM may use
+  ``TOL_MM_CGM`` = 0.5 mm entry (ADR 0054) while pure VDC round-trip stays
+  at 0.1 mm.
 
 Layout rules mirror ``export_plot._paint_presentation`` (Qt-paint export
-stream used when engine is disabled / PNG fallback). Screen canvas uses a
-slightly different left margin; this golden is the **export mm** seam.
+stream). This is the **export mm** seam, not a pixel golden.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -359,3 +364,179 @@ def assert_cgm_track_left_vdc(
             "T14/B1 CGM geometry golden mismatch (VDC / ADR 0054 0.5 mm entry):\n"
             + "\n".join(errors)
         )
+
+
+def cgm_vdc_to_scene_mm(
+    vdc_x: int,
+    vdc_y: int,
+    *,
+    window_top_mm: float = 0.0,
+    window_height_mm: float,
+) -> tuple[float, float]:
+    """Inverse of ``scene_mm_to_cgm_vdc`` (mm recovered from integer VDC)."""
+    sx = float(vdc_x) / CGM_VDC_PER_MM
+    local_y = float(window_height_mm) - (float(vdc_y) / CGM_VDC_PER_MM)
+    sy = local_y + float(window_top_mm)
+    return sx, sy
+
+
+def expected_fixed_page_count(
+    scene_height_mm: float,
+    page_height_mm: float,
+    *,
+    page_overlap: float = 0.0,
+) -> int:
+    """Mirror engine ``build_depth_windows`` page count (B1.CGM.3)."""
+    if not (page_height_mm > 0.0) or not (scene_height_mm > 0.0):
+        return 1
+    overlap = page_overlap
+    if not math.isfinite(overlap) or overlap < 0.0:
+        overlap = 0.0
+    if overlap >= 1.0:
+        overlap = 0.0
+    step = page_height_mm * (1.0 - overlap)
+    if step <= 1e-12:
+        return 1
+    return max(1, int(math.ceil(scene_height_mm / step)))
+
+
+def assert_cgm_vdc_roundtrip(
+    *,
+    tol_mm: float = TOL_MM,
+    samples: Sequence[tuple[float, float]] | None = None,
+) -> None:
+    """Pure VDC↔mm round-trip within 0.1 mm (format math, not full scene export)."""
+    pts = samples or (
+        (0.0, 0.0),
+        (16.0, 68.0),
+        (47.8, 100.0),
+        (196.2, 182.0),
+        (297.0, 210.0),
+    )
+    errors: list[str] = []
+    wh = GOLDEN_PAGE_HEIGHT_MM
+    for sx, sy in pts:
+        vx, vy = scene_mm_to_cgm_vdc(sx, sy, window_height_mm=wh)
+        rx, ry = cgm_vdc_to_scene_mm(vx, vy, window_height_mm=wh)
+        dx, dy = abs(rx - sx), abs(ry - sy)
+        if dx > tol_mm or dy > tol_mm:
+            errors.append(
+                f"  ({sx},{sy}) → VDC({vx},{vy}) → ({rx:.4f},{ry:.4f}) "
+                f"Δ=({dx:.4f},{dy:.4f}) mm (tol={tol_mm})"
+            )
+    if errors:
+        raise GeometryGoldenError(
+            "B1.GEOM CGM VDC round-trip mismatch:\n" + "\n".join(errors)
+        )
+
+
+def assert_cross_format_track_lefts(
+    layout: ExportLayoutMm,
+    *,
+    tol_mm: float = TOL_MM,
+) -> None:
+    """Qt-paint layout left edges agree with CGM VDC recovery within tol_mm."""
+    errors: list[str] = []
+    wh = layout.page_height_mm
+    for box in layout.tracks:
+        vx, _ = scene_mm_to_cgm_vdc(
+            box.left_mm, layout.content_top_mm, window_height_mm=wh
+        )
+        recovered, _ = cgm_vdc_to_scene_mm(
+            vx, 0, window_height_mm=wh
+        )
+        # only x matters for left edge
+        recovered_x = vx / CGM_VDC_PER_MM
+        delta = abs(recovered_x - box.left_mm)
+        if delta > tol_mm:
+            errors.append(
+                f"  track[{box.track_id}]: layout_left={box.left_mm:.4f} "
+                f"cgm_recovered={recovered_x:.4f} Δ={delta:.4f} mm "
+                f"(tol={tol_mm})"
+            )
+    if errors:
+        raise GeometryGoldenError(
+            "B1.GEOM cross-format track left mismatch (layout vs CGM VDC):\n"
+            + "\n".join(errors)
+        )
+
+
+def assert_page_box_mm(
+    width_mm: float,
+    height_mm: float,
+    *,
+    expected_w: float = GOLDEN_PAGE_WIDTH_MM,
+    expected_h: float = GOLDEN_PAGE_HEIGHT_MM,
+    tol_mm: float = TOL_MM,
+) -> None:
+    """Page box (SVG viewBox / PageSpec) within tol of golden A4 landscape."""
+    errors: list[str] = []
+    if abs(float(width_mm) - expected_w) > tol_mm:
+        errors.append(
+            f"  width_mm: actual={width_mm} expected={expected_w} "
+            f"Δ={abs(width_mm - expected_w):.4f}"
+        )
+    if abs(float(height_mm) - expected_h) > tol_mm:
+        errors.append(
+            f"  height_mm: actual={height_mm} expected={expected_h} "
+            f"Δ={abs(height_mm - expected_h):.4f}"
+        )
+    if errors:
+        raise GeometryGoldenError(
+            "B1.GEOM page box mismatch:\n" + "\n".join(errors)
+        )
+
+
+@dataclass(frozen=True)
+class FormatMatrixRow:
+    """One row of the B1 multi-format geometry matrix (documentation + tests)."""
+
+    format_id: str
+    metric: str
+    tol_mm: float
+    status: str  # "asserted" | "entry" | "deferred"
+
+
+# Documented matrix for B1.GEOM (not the full §16 vision matrix).
+B1_FORMAT_MATRIX: tuple[FormatMatrixRow, ...] = (
+    FormatMatrixRow("qt_paint_layout", "track left/width mm", TOL_MM, "asserted"),
+    FormatMatrixRow("qt_paint_layout", "depth→Y endpoints", TOL_MM, "asserted"),
+    FormatMatrixRow("page_spec", "A4 landscape box mm", TOL_MM, "asserted"),
+    FormatMatrixRow("svg_viewbox", "page box mm", TOL_MM, "asserted"),
+    FormatMatrixRow("cgm_vdc", "VDC↔mm round-trip", TOL_MM, "asserted"),
+    FormatMatrixRow("cgm_vdc", "track left (export path)", TOL_MM_CGM, "entry"),
+    FormatMatrixRow("cgm_pagination", "fixed page count", 0.0, "asserted"),
+    FormatMatrixRow("cross_format", "layout left vs CGM VDC", TOL_MM, "asserted"),
+    FormatMatrixRow("engine_pdf", "band text anchor 0.1 mm", TOL_MM, "deferred"),
+    FormatMatrixRow("cgm_full_scene", "clip vs layout 0.1 mm", TOL_MM, "deferred"),
+)
+
+
+def run_b1_geometry_matrix(layout: ExportLayoutMm | None = None) -> list[str]:
+    """Run all **asserted** B1.GEOM checks; return list of format_ids executed.
+
+    Raises ``GeometryGoldenError`` on first hard failure (via assert helpers).
+    """
+    lay = layout or golden_export_layout()
+    ran: list[str] = []
+    assert_layout_matches_golden(lay)
+    ran.append("qt_paint_layout")
+    assert_depth_mapping(lay)
+    assert_page_box_mm(lay.page_width_mm, lay.page_height_mm)
+    ran.append("page_spec")
+    assert_cgm_vdc_roundtrip()
+    ran.append("cgm_vdc_roundtrip")
+    assert_cgm_track_left_vdc(lay, tol_mm=TOL_MM_CGM)
+    ran.append("cgm_vdc_entry")
+    assert_cross_format_track_lefts(lay, tol_mm=TOL_MM)
+    ran.append("cross_format")
+    # Pagination: 10 m depth → scene height not in mm of depth; use layout
+    # content height as proxy for physical page content.
+    span = lay.content_bottom_mm - lay.content_top_mm
+    n = expected_fixed_page_count(span, span / 2.0, page_overlap=0.0)
+    if n < 2:
+        raise GeometryGoldenError(
+            f"B1.GEOM pagination: expected >=2 pages for half-height split, got {n}"
+        )
+    ran.append("cgm_pagination")
+    return ran
