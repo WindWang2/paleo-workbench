@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QStatusBar,
@@ -484,6 +485,32 @@ class WellLogWorkstationWindow(QMainWindow):
         self.tops_list.addItem("（无层位）")
         layout.addWidget(self.tops_list)
 
+        layout.addWidget(QLabel("对比井序 / 间距"))
+        self.corr_well_list = QListWidget()
+        self.corr_well_list.setObjectName("CorrelationWellList")
+        layout.addWidget(self.corr_well_list)
+        corr_order_row = QHBoxLayout()
+        self.corr_well_up_btn = QPushButton("上移")
+        self.corr_well_up_btn.setObjectName("Button_CorrWellUp")
+        self.corr_well_up_btn.clicked.connect(lambda: self._move_correlation_well(-1))
+        self.corr_well_down_btn = QPushButton("下移")
+        self.corr_well_down_btn.setObjectName("Button_CorrWellDown")
+        self.corr_well_down_btn.clicked.connect(lambda: self._move_correlation_well(1))
+        corr_order_row.addWidget(self.corr_well_up_btn)
+        corr_order_row.addWidget(self.corr_well_down_btn)
+        layout.addLayout(corr_order_row)
+        gap_row = QHBoxLayout()
+        gap_row.addWidget(QLabel("井间距(px)"))
+        self.corr_gap_spin = QSpinBox()
+        self.corr_gap_spin.setObjectName("CorrelationColumnGap")
+        self.corr_gap_spin.setRange(0, 200)
+        self.corr_gap_spin.setValue(6)
+        self.corr_gap_spin.valueChanged.connect(self._on_correlation_gap_changed)
+        gap_row.addWidget(self.corr_gap_spin)
+        layout.addLayout(gap_row)
+        self._corr_layout_guard = False
+        self._set_correlation_layout_enabled(False)
+
         layout.addWidget(QLabel("对比连线"))
         self.links_list = QListWidget()
         self.links_list.setObjectName("LinksList")
@@ -781,6 +808,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self.correlation_canvas.set_columns([])
             self.correlation_canvas.set_links(None)
             self._refresh_links_list()
+            self._refresh_correlation_well_list(None)
             self._primary_surface = "host"
             if hasattr(self, "single_well_stack"):
                 self.single_well_stack.setCurrentIndex(0)
@@ -1006,6 +1034,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self.document_tabs.setCurrentIndex(0)
         self._sync_primary_single_well_surface()
         self._sync_apply_enabled()
+        self._refresh_correlation_well_list(None)
         self._update_status()
         return presentation
 
@@ -1099,14 +1128,17 @@ class WellLogWorkstationWindow(QMainWindow):
                 except WorkspaceError:
                     pass
         self._correlation_links = links
+        gap = getattr(plot, "column_gap_px", 6) or 6
+        self.correlation_canvas.set_column_gap(gap)
         self.correlation_canvas.set_columns(presentations, tops_cols, links)
         self._refresh_links_list()
+        self._refresh_correlation_well_list(plot)
         names = " · ".join(p.well_name for p in presentations[:4])
         tops_n = sum(len(t) for t in tops_cols)
         self.correlation_caption.setText(
             f"地层对比图-lite · {names} · "
             f"共享深度 · 图版 {template.name} · 层位 {tops_n} · "
-            f"连线 {len(links)}"
+            f"连线 {len(links)} · 间距 {gap}px"
         )
         tab = f"对比 · {len(presentations)}井"
         if self._active_plot_id:
@@ -1139,6 +1171,7 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self.document_tabs.setCurrentWidget(self._plane_map_host)
         emit_plot_changed(plot.id)
+        self._refresh_correlation_well_list(None)
         self._update_status()
 
     def _show_fence_3d(self, plot: PlotDocument) -> None:
@@ -1283,6 +1316,105 @@ class WellLogWorkstationWindow(QMainWindow):
         self.document_tabs.setCurrentWidget(self._composite_host)
         emit_plot_changed(plot.id)
         self._update_status()
+
+    def _set_correlation_layout_enabled(self, enabled: bool) -> None:
+        if not hasattr(self, "corr_well_list"):
+            return
+        self.corr_well_list.setEnabled(enabled)
+        self.corr_well_up_btn.setEnabled(enabled)
+        self.corr_well_down_btn.setEnabled(enabled)
+        self.corr_gap_spin.setEnabled(enabled)
+
+    def _refresh_correlation_well_list(self, plot: PlotDocument | None = None) -> None:
+        """Fill well-order list for active correlation plot (#295)."""
+        if not hasattr(self, "corr_well_list"):
+            return
+        self.corr_well_list.clear()
+        if (
+            plot is None
+            or plot.type != "correlation"
+            or self._workspace is None
+            or len(plot.well_ids) < 2
+        ):
+            self._set_correlation_layout_enabled(False)
+            self._corr_layout_guard = True
+            try:
+                self.corr_gap_spin.setValue(6)
+            finally:
+                self._corr_layout_guard = False
+            return
+        name_by_id = {w.id: w.name for w in self._workspace.wells}
+        for i, wid in enumerate(plot.well_ids):
+            label = f"{i + 1}. {name_by_id.get(wid, wid[:8])}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, wid)
+            self.corr_well_list.addItem(item)
+        self._corr_layout_guard = True
+        try:
+            self.corr_gap_spin.setValue(int(getattr(plot, "column_gap_px", 6) or 6))
+        finally:
+            self._corr_layout_guard = False
+        self._set_correlation_layout_enabled(True)
+        if self.corr_well_list.count() > 0:
+            self.corr_well_list.setCurrentRow(0)
+
+    def _move_correlation_well(self, delta: int) -> None:
+        """Reorder well_ids on the active correlation plot and refresh canvas."""
+        if (
+            self._workspace is None
+            or self._active_plot_type != "correlation"
+            or not self._active_plot_id
+        ):
+            return
+        row = self.corr_well_list.currentRow()
+        if row < 0:
+            return
+        new_row = row + int(delta)
+        if new_row < 0 or new_row >= self.corr_well_list.count():
+            return
+        try:
+            plot = load_plot_document(self._workspace, self._active_plot_id)
+        except WorkspaceError:
+            return
+        ids = list(plot.well_ids)
+        if row >= len(ids) or new_row >= len(ids):
+            return
+        ids[row], ids[new_row] = ids[new_row], ids[row]
+        plot.well_ids = ids
+        try:
+            save_plot_document(self._workspace, plot)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "保存井序失败", str(exc))
+            return
+        self._show_correlation(plot)
+        self.corr_well_list.setCurrentRow(new_row)
+
+    def _on_correlation_gap_changed(self, value: int) -> None:
+        if self._corr_layout_guard:
+            return
+        if (
+            self._workspace is None
+            or self._active_plot_type != "correlation"
+            or not self._active_plot_id
+        ):
+            return
+        gap = max(0, min(200, int(value)))
+        self.correlation_canvas.set_column_gap(gap)
+        try:
+            plot = load_plot_document(self._workspace, self._active_plot_id)
+        except WorkspaceError:
+            return
+        plot.column_gap_px = gap
+        try:
+            save_plot_document(self._workspace, plot)
+        except WorkspaceError:
+            return
+        # Refresh caption spacing note without full rebuild
+        base = self.correlation_caption.text()
+        if "· 间距" in base:
+            head = base.split("· 间距")[0].rstrip()
+            self.correlation_caption.setText(f"{head} · 间距 {gap}px")
+        self._sync_primary_correlation_surface()
 
     def auto_link_correlation_tops(self) -> list[HorizonLink]:
         """Match tops by name across adjacent wells; persist on active plot."""

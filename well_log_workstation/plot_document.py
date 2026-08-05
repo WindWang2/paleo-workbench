@@ -65,6 +65,9 @@ class PlotDocument:
     # paper directly, independent of panels/templates. Empty for all other
     # plot types.
     free_graphics: list[dict] = field(default_factory=list)
+    # Correlation column gap in pixels (#295 / T7). Optional field; default 6.
+    # Well order is the existing ``well_ids`` list order.
+    column_gap_px: int = 6
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -104,6 +107,9 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
     # doc that carries them (mirrors links/panels so stale values never drop).
     if doc.type == "composite" or doc.free_graphics:
         payload["free_graphics"] = list(doc.free_graphics)
+    # Correlation layout (T7): always write when correlation so re-open is stable.
+    if doc.type == "correlation" or doc.column_gap_px != 6:
+        payload["column_gap_px"] = int(doc.column_gap_px)
     return payload
 
 
@@ -159,6 +165,11 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     for raw in data.get("free_graphics") or []:
         if isinstance(raw, dict):
             free_graphics.append(raw)
+    try:
+        column_gap_px = int(data.get("column_gap_px", 6))
+    except (TypeError, ValueError):
+        column_gap_px = 6
+    column_gap_px = max(0, min(200, column_gap_px))
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -170,6 +181,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         panels=panels,
         free_graphics=free_graphics,
         revision=max(0, int(data.get("revision") or 0)),
+        column_gap_px=column_gap_px,
     )
 
 
@@ -240,6 +252,7 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             panels=list(doc.panels),
             free_graphics=list(doc.free_graphics),
             revision=doc.revision,
+            column_gap_px=doc.column_gap_px,
         )
     # Lazy import: keep this module importable without PySide6 (see save).
     from well_log_workstation.events import restore_plot_revision
