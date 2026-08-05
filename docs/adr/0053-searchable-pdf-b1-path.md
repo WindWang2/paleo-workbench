@@ -48,9 +48,9 @@ status: accepted
 
 | 切片 | 内容 |
 |------|------|
-| **B1.PDF.1** | 单井引擎 `pdf_searchable`：ASCII/拉丁 + 数字深度；ToUnicode；导出 UI 双选项 |
-| **B1.PDF.2** | CJK 常用字子集 + 失败诊断；严格模式开关 |
-| **B1.PDF.3** | 连井/分页场景；与 0.1 mm 全矩阵联调 |
+| **B1.PDF.1** | 导出 UI 双选项 + 产品模式名 `outline`/`searchable`；**searchable 走 Qt `QPdfWriter`**（诚实标注，非引擎 ToUnicode）；outline 仍默认引擎轮廓 PDF |
+| **B1.PDF.2** | 引擎 `pdf_searchable`：ASCII/拉丁 + 数字；ToUnicode / 标准字；失败诊断 |
+| **B1.PDF.3** | CJK 子集 + 连井/分页；与 0.1 mm 全矩阵联调 |
 
 ### 5. 与既有 ADR 的关系
 

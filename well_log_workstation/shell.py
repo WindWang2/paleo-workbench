@@ -65,12 +65,15 @@ from well_log_workstation.engine_bridge import (
 from well_log_workstation.events import emit_plot_changed
 from well_log_workstation.export_dispatch import (
     ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
+    PDF_SEARCHABLE_MODE_NOTE,
     ExportFormat,
     PageSpec,
+    PdfTextMode,
     UnsupportedFormatError,
     engine_pdf_needs_disclosure,
     export_plot,
     prefer_engine_for_single_well,
+    resolve_single_well_pdf_export,
 )
 from well_log_workstation.print_preview import (
     PrintPreviewDialog,
@@ -2932,11 +2935,42 @@ class WellLogWorkstationWindow(QMainWindow):
             f"显示坐标系: {self._workspace.coordinate.display_crs}",
         )
 
+    def _choose_single_well_pdf_text_mode(self) -> PdfTextMode | None:
+        """ADR 0053 dual option: outline (engine) vs searchable (Qt B1.PDF.1).
+
+        Returns None if the user cancels.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle("导出 PDF — 文本模式")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(
+            "请选择单井 PDF 文本模式（ADR 0053 / 导出 B1）："
+        )
+        box.setInformativeText(
+            "• 引擎图形 PDF：高保真矢量，文字为轮廓、不可搜索（B0 默认）。\n"
+            "• 可搜索 PDF：文字可选中/可复制（B1.PDF.1，当前 Qt 路径）。"
+        )
+        btn_outline = box.addButton(
+            "引擎图形 PDF（不可搜索）", QMessageBox.ButtonRole.AcceptRole
+        )
+        btn_search = box.addButton(
+            "可搜索 PDF", QMessageBox.ButtonRole.AcceptRole
+        )
+        btn_cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(btn_outline)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is None or clicked == btn_cancel:
+            return None
+        if clicked == btn_search:
+            return "searchable"
+        return "outline"
+
     def _export_active_plot(self, fmt: ExportFormat) -> None:
         """Route the active plot's export through the T8 dispatcher.
 
-        Single-well SVG/PDF default to the engine backend when available (T11),
-        with PDF non-searchable disclosure (ADR 0047).
+        Single-well SVG/PDF default to the engine backend when available (T11).
+        Single-well PDF offers outline vs searchable dual mode (ADR 0053).
         """
         if self._workspace is None or not self._active_plot_id:
             QMessageBox.information(
@@ -2957,16 +2991,33 @@ class WellLogWorkstationWindow(QMainWindow):
         backend_note = ""
         try:
             if plot.type == "single_well" and fmt in ("svg", "pdf"):
-                backend = prefer_engine_for_single_well(
-                    fmt, engine_available=engine_available()
-                )
+                eng_ok = engine_available()
+                if fmt == "pdf":
+                    chosen = self._choose_single_well_pdf_text_mode()
+                    if chosen is None:
+                        return
+                    if chosen == "searchable":
+                        QMessageBox.information(
+                            self, "可搜索 PDF", PDF_SEARCHABLE_MODE_NOTE
+                        )
+                    backend, backend_note = resolve_single_well_pdf_export(
+                        engine_available=eng_ok,
+                        pdf_text_mode=chosen,
+                    )
+                else:
+                    backend = prefer_engine_for_single_well(
+                        "svg", engine_available=eng_ok
+                    )
+                    backend_note = (
+                        "（引擎）" if backend == "engine" else "（Qt）"
+                    )
                 if backend == "engine":
                     if engine_pdf_needs_disclosure("engine", fmt):
                         reply = QMessageBox.warning(
                             self,
                             "引擎 PDF 说明",
                             ENGINE_PDF_NONSEARCHABLE_DISCLOSURE
-                            + "\n\n是否继续使用引擎 PDF 导出？",
+                            + "\n\n是否继续使用引擎图形 PDF 导出？",
                             QMessageBox.StandardButton.Ok
                             | QMessageBox.StandardButton.Cancel,
                             QMessageBox.StandardButton.Ok,
@@ -2978,7 +3029,6 @@ class WellLogWorkstationWindow(QMainWindow):
                         kwargs["backend"] = "engine"
                         kwargs["view"] = view
                         kwargs["document_id"] = doc_id
-                        backend_note = "（引擎）"
                     except (EngineUnavailable, EngineSubmitError, ExportError):
                         kwargs["backend"] = "qt"
                         kwargs["paint_fn"] = self._paint_active_plot
