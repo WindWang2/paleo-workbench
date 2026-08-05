@@ -14,9 +14,16 @@ T8 resolution: no new engine bindings; host-side dispatcher that routes by
 Stage 1 (#277) adds an **engine** backend for ``single_well`` that routes
 SVG/PDF through the engine vector exporters. Desktop first-ship B0 (#299 / T11)
 defaults the **UI export path** to ``backend="engine"`` when WellLogView is
-available; callers may still pass ``backend="qt"`` for searchable PDF text
-(ADR 0047). Engine PDF is non-searchable — see
-``ENGINE_PDF_NONSEARCHABLE_DISCLOSURE`` / ``engine_pdf_needs_disclosure``.
+available.
+
+Export B1 / ADR 0053 adds an explicit **PDF text mode**:
+
+- ``pdf_outline`` (default / B0): engine glyph-outline PDF when available;
+  non-searchable — see ``ENGINE_PDF_NONSEARCHABLE_DISCLOSURE``.
+- ``pdf_searchable`` (B1.PDF.1): force the Qt ``QPdfWriter`` path so text is
+  extractable/selectable. This is the product dual-option for searchable PDF
+  until the engine embeds ToUnicode text operators (B1.PDF.2+). Do **not**
+  claim "engine searchable PDF" for this mode.
 
 Pagination is host-side and only applies to depth-axis types
 (single_well / correlation / section).
@@ -33,6 +40,8 @@ from well_log_workstation.plot_document import PlotDocument
 
 ExportFormat = Literal["svg", "pdf", "png"]
 ExportBackend = Literal["qt", "engine"]
+# ADR 0053 dual mode names (product-facing).
+PdfTextMode = Literal["outline", "searchable"]
 
 
 class UnsupportedFormatError(ExportError):
@@ -42,13 +51,18 @@ class UnsupportedFormatError(ExportError):
 # ADR 0047 / ADR 0021 (T6 / #278): the engine PDF backend emits text as
 # glyph outlines (non-searchable) — a regression vs the Qt QPdfWriter path,
 # whose text is searchable. The host UI MUST surface this disclosure when
-# the user selects the engine PDF backend, and keep Qt paint as the default
-# where searchable text matters (ADR 0021 explicit pure-vector vs mixed
-# choice). This is the disclosure contract; the actual UI widget wiring is
-# the host's responsibility.
+# the user selects the engine PDF backend / outline mode.
 ENGINE_PDF_NONSEARCHABLE_DISCLOSURE = (
-    "引擎 PDF 后端将文字渲染为字形轮廓，不可搜索/不可复制"
-    "（相对 Qt PDF 路径的倒退，ADR 0047）。如需可搜索文本，请使用 Qt paint 后端。"
+    "引擎 PDF（图形模式 / pdf_outline）将文字渲染为字形轮廓，不可搜索/不可复制"
+    "（ADR 0047）。如需可搜索文本，请在导出时选择「可搜索 PDF」（pdf_searchable，"
+    "ADR 0053 / B1.PDF.1，当前为 Qt 矢量路径）。"
+)
+
+# Shown when the user picks searchable mode (honest about backend, ADR 0053).
+PDF_SEARCHABLE_MODE_NOTE = (
+    "可搜索 PDF（pdf_searchable）：文字可选中/可复制。"
+    "B1.PDF.1 经 Qt 矢量路径输出；引擎原生可搜索（ToUnicode）为后续切片，"
+    "不得与「引擎轮廓 PDF」混淆。"
 )
 
 
@@ -64,17 +78,44 @@ def prefer_engine_for_single_well(
     *,
     engine_available: bool,
     force_backend: ExportBackend | None = None,
+    pdf_text_mode: PdfTextMode = "outline",
 ) -> ExportBackend:
-    """Resolve export backend for single_well SVG/PDF (T11 / #299).
+    """Resolve export backend for single_well SVG/PDF (T11 / #299 + ADR 0053).
 
-    Desktop default is engine when available; PNG always stays on Qt paint.
-    Explicit ``force_backend`` wins.
+    - Explicit ``force_backend`` wins.
+    - PDF + ``pdf_text_mode="searchable"`` → always Qt (B1.PDF.1 searchable).
+    - Else SVG/PDF default to engine when available; PNG always Qt.
     """
     if force_backend is not None:
         return force_backend
+    if fmt == "pdf" and pdf_text_mode == "searchable":
+        return "qt"
     if fmt in ("svg", "pdf") and engine_available:
         return "engine"
     return "qt"
+
+
+def resolve_single_well_pdf_export(
+    *,
+    engine_available: bool,
+    pdf_text_mode: PdfTextMode = "outline",
+    force_backend: ExportBackend | None = None,
+) -> tuple[ExportBackend, str]:
+    """Backend + short note for single-well PDF (UI / tests).
+
+    Returns ``(backend, note)`` where note is a user-visible parenthetical.
+    """
+    backend = prefer_engine_for_single_well(
+        "pdf",
+        engine_available=engine_available,
+        force_backend=force_backend,
+        pdf_text_mode=pdf_text_mode,
+    )
+    if pdf_text_mode == "searchable":
+        return backend, "（可搜索 · Qt）"
+    if backend == "engine":
+        return backend, "（引擎 · 图形/不可搜索）"
+    return backend, "（Qt）"
 
 
 @dataclass(frozen=True)

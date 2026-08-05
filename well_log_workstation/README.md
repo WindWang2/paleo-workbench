@@ -73,11 +73,12 @@ Depth viewport (host): **scroll wheel zoom**, **drag pan**, **double-click** res
 
 | 图件 | SVG | PDF | PNG | 后端 |
 |---|---|---|---|---|
-| **单井分析图** | ✓ | ✓ | ✓ | **默认引擎**（有 WellLogEngine 时）；失败回退 Qt paint。引擎 PDF 文字不可搜索（导出前会提示，ADR 0047） |
+| **单井分析图** | ✓ | ✓ 双模式 | ✓ | SVG：**默认引擎**。PDF：**双选项（ADR 0053）** — 引擎图形/不可搜索（B0，ADR 0047 披露）或 **可搜索 PDF**（B1.PDF.1，当前 Qt 矢量路径，文字可选中） |
 | **地层对比图** | ✓ | ✓ | ✓ | **Qt paint**（多列 + 连线）；PNG 优先抓取对比画布（含拉平/连线） |
 | 其他类型 | 视类型 | 视类型 | 视类型 | 见 `export_dispatch.py` |
 
-菜单：**导出 → 导出 SVG… / PDF… / PNG…**（有活动单井或对比图时启用）。
+菜单：**导出 → 导出 SVG… / PDF… / PNG…**（有活动单井或对比图时启用）。  
+单井 PDF 会先询问文本模式（引擎图形 vs 可搜索）；引擎原生 ToUnicode 可搜索为后续 B1 切片。
 
 ### 地层对比图-lite (#222)
 
