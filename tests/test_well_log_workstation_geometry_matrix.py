@@ -16,6 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from well_log_workstation.export_dispatch import PageSpec, export_plot
 from well_log_workstation.geometry_golden import (
+    B1_ASSERTED_RUN_MAP,
     B1_FORMAT_MATRIX,
     GOLDEN_PAGE_HEIGHT_MM,
     GOLDEN_PAGE_WIDTH_MM,
@@ -23,7 +24,10 @@ from well_log_workstation.geometry_golden import (
     TOL_MM,
     TOL_MM_CGM,
     assert_page_box_mm,
+    asserted_matrix_rows,
+    deferred_matrix_rows,
     expected_fixed_page_count,
+    fixture_las_path,
     golden_export_layout,
     run_b1_geometry_matrix,
     scene_mm_to_cgm_vdc,
@@ -32,7 +36,6 @@ from well_log_workstation.geometry_golden import (
 from well_log_workstation.plot_document import load_plot_document
 from well_log_workstation.shell import WellLogWorkstationWindow
 from well_log_workstation.workspace import create_workspace
-from well_log_workstation.geometry_golden import fixture_las_path
 
 
 def test_b1_format_matrix_is_documented() -> None:
@@ -41,14 +44,74 @@ def test_b1_format_matrix_is_documented() -> None:
     assert "asserted" in statuses
     # At least one deferred row remains for honesty (full §16 not claimed).
     assert "deferred" in statuses
+    assert statuses <= {"asserted", "entry", "deferred"}
+
+
+def test_asserted_and_deferred_helpers() -> None:
+    asserted = asserted_matrix_rows()
+    deferred = deferred_matrix_rows()
+    assert len(asserted) >= 1
+    assert len(deferred) >= 1
+    assert all(r.status == "asserted" for r in asserted)
+    assert all(r.status == "deferred" for r in deferred)
+    # Partition: helpers are disjoint subsets of the full matrix.
+    assert {id(r) for r in asserted} | {id(r) for r in deferred} <= {
+        id(r) for r in B1_FORMAT_MATRIX
+    }
+    assert not ({(r.format_id, r.metric) for r in asserted} & {
+        (r.format_id, r.metric) for r in deferred
+    })
+
+
+def test_deferred_matrix_rows_non_empty() -> None:
+    """B1 closeout must keep at least one honest deferred §16 gap."""
+    rows = deferred_matrix_rows()
+    assert len(rows) >= 1
+    format_ids = {r.format_id for r in rows}
+    assert "engine_pdf" in format_ids or "cgm_full_scene" in format_ids
+
+
+def test_asserted_rows_map_to_runner_or_documented_live() -> None:
+    """Every asserted matrix row has a pure-runner token or a documented None map.
+
+    None means covered by a dedicated live/integration test (see
+    ``B1_ASSERTED_RUN_MAP`` comments), not by ``run_b1_geometry_matrix``.
+    """
+    ran = set(run_b1_geometry_matrix())
+    asserted = asserted_matrix_rows()
+    assert asserted, "expected at least one asserted matrix row"
+
+    map_keys = set(B1_ASSERTED_RUN_MAP)
+    row_keys = {(r.format_id, r.metric) for r in asserted}
+    assert row_keys == map_keys, (
+        f"B1_ASSERTED_RUN_MAP keys must match asserted_matrix_rows exactly.\n"
+        f"  only in matrix: {sorted(row_keys - map_keys)}\n"
+        f"  only in map: {sorted(map_keys - row_keys)}"
+    )
+
+    for row in asserted:
+        key = (row.format_id, row.metric)
+        token = B1_ASSERTED_RUN_MAP[key]
+        if token is None:
+            # Documented external coverage (e.g. svg_viewbox live export).
+            assert row.format_id == "svg_viewbox", (
+                f"{key}: only svg_viewbox may use None mapping today"
+            )
+            continue
+        assert token in ran, (
+            f"asserted row {key} maps to run token {token!r}, "
+            f"but run_b1_geometry_matrix returned {sorted(ran)}"
+        )
 
 
 def test_run_b1_geometry_matrix() -> None:
     ran = run_b1_geometry_matrix()
     assert "qt_paint_layout" in ran
+    assert "qt_paint_layout_depth" in ran
     assert "cross_format" in ran
     assert "cgm_pagination" in ran
     assert "cgm_vdc_roundtrip" in ran
+    assert "cgm_vdc_entry" in ran
 
 
 def test_cgm_vdc_roundtrip_at_01mm() -> None:

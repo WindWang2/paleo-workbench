@@ -35,7 +35,10 @@ from well_log_workstation.export_plot import (  # noqa: E402
 )
 from well_log_workstation.shell import WellLogWorkstationWindow  # noqa: E402
 from well_log_workstation.workspace import create_workspace  # noqa: E402
-from well_log_workstation.plot_document import load_plot_document  # noqa: E402
+from well_log_workstation.plot_document import (  # noqa: E402
+    PlotDocument,
+    load_plot_document,
+)
 
 
 def _write_las(path: Path, well: str = "EXP-1") -> Path:
@@ -429,11 +432,12 @@ def test_searchable_pdf_export_is_qt_and_nonempty(
 
 
 def test_cgm_format_routing_and_disclosure() -> None:
-    """B1.CGM.2: CGM is engine-only; disclosure text present."""
+    """B1.CGM.2/3: CGM is engine-only; disclosure mentions multi-page option."""
     assert prefer_engine_for_single_well("cgm", engine_available=True) == "engine"
     assert prefer_engine_for_single_well("cgm", engine_available=False) == "qt"
     assert "CGM" in CGM_EXPORT_DISCLOSURE
     assert "ADR 0054" in CGM_EXPORT_DISCLOSURE or "B1.CGM" in CGM_EXPORT_DISCLOSURE
+    assert "PICTURE" in CGM_EXPORT_DISCLOSURE or "分页" in CGM_EXPORT_DISCLOSURE
 
 
 def test_cgm_without_engine_binding_raises(
@@ -466,3 +470,94 @@ def test_cgm_without_engine_binding_raises(
 
     with pytest.raises(UnsupportedFormatError):
         export_plot(plot_doc, "cgm", backend="qt", path=str(tmp_path / "y.cgm"))
+
+
+def _minimal_single_well_doc(doc_id: str, name: str) -> PlotDocument:
+    return PlotDocument(
+        id=doc_id,
+        name=name,
+        type="single_well",
+        well_ids=["w1"],
+        template_id=None,
+        path=f"plots/{doc_id}.json",
+    )
+
+
+def test_cgm_export_passes_page_height_mm(tmp_path: Path) -> None:
+    """B1 closeout: page_height_mm is forwarded to export_scene_cgm when set."""
+    captured: dict[str, object] = {}
+
+    class _FakeView:
+        def export_scene_cgm(self, document_id, page_height_mm=0.0):
+            captured["document_id"] = document_id
+            captured["page_height_mm"] = page_height_mm
+            # Minimal CGM-ish payload (>= 20 bytes for host size check).
+            return b"BEGMF" + b"\x00" * 32
+
+    plot_doc = _minimal_single_well_doc("pd-cgm-page", "CGM page test")
+    out = export_plot(
+        plot_doc,
+        "cgm",
+        backend="engine",
+        view=_FakeView(),
+        document_id="00000000-0000-4000-8000-000000000099",
+        path=str(tmp_path / "paged.cgm"),
+        page_height_mm=125.5,
+    )
+    assert out.is_file() and out.stat().st_size >= 20
+    assert captured["document_id"] == "00000000-0000-4000-8000-000000000099"
+    assert captured["page_height_mm"] == pytest.approx(125.5)
+
+
+def test_cgm_export_omits_page_height_when_unset(tmp_path: Path) -> None:
+    """Continuous export calls export_scene_cgm with document_id only (or default 0)."""
+    captured: list[tuple] = []
+
+    class _FakeView:
+        def export_scene_cgm(self, document_id, page_height_mm=0.0):
+            captured.append((document_id, page_height_mm))
+            return b"BEGMF" + b"\x00" * 32
+
+    plot_doc = _minimal_single_well_doc("pd-cgm-cont", "CGM continuous")
+    out = export_plot(
+        plot_doc,
+        "cgm",
+        backend="engine",
+        view=_FakeView(),
+        document_id="doc-continuous",
+        path=str(tmp_path / "continuous.cgm"),
+    )
+    assert out.is_file()
+    assert len(captured) == 1
+    assert captured[0][0] == "doc-continuous"
+    # Host continuous path does not pass page_height_mm; binding default is 0.0.
+    assert captured[0][1] == 0.0
+
+
+def test_cgm_export_page_height_typeerror_fallback(tmp_path: Path) -> None:
+    """Old bindings that reject page_height_mm still export via one-arg call."""
+    calls: list[int] = []
+
+    # Simulate binding that only accepts document_id: host tries 2-arg then 1-arg.
+    class _StrictOneArgView:
+        def export_scene_cgm(self, *args):
+            if len(args) != 1:
+                raise TypeError(
+                    f"export_scene_cgm() takes 1 positional argument but {len(args)} were given"
+                )
+            calls.append(len(args))
+            return b"BEGMF" + b"\x00" * 32
+
+    plot_doc = _minimal_single_well_doc("pd-cgm-old", "CGM old binding")
+    out = export_plot(
+        plot_doc,
+        "cgm",
+        backend="engine",
+        view=_StrictOneArgView(),
+        document_id="doc-old",
+        path=str(tmp_path / "old.cgm"),
+        page_height_mm=80.0,
+    )
+    assert out.is_file()
+    # Two-arg attempt TypeError → one-arg success.
+    assert calls == [1]

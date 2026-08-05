@@ -3226,7 +3226,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._export_active_plot("png")
 
     def _on_export_cgm(self) -> None:
-        """Single-well CGM export (B1.CGM.2 / ADR 0054)."""
+        """Single-well CGM export (B1.CGM.2/3 / ADR 0054)."""
         if self._workspace is None or not self._active_plot_id:
             QMessageBox.information(self, "导出 CGM", "请先打开/创建单井图件。")
             return
@@ -3237,6 +3237,34 @@ class WellLogWorkstationWindow(QMainWindow):
             )
             return
         QMessageBox.information(self, "导出 CGM", CGM_EXPORT_DISCLOSURE)
+        # Continuous (default) vs multi-page (B1.CGM.3 fixed page height).
+        page_choice = QMessageBox.question(
+            self,
+            "CGM 分页",
+            "选择导出方式：\n\n"
+            "• 是：连续单 PICTURE（整井深度一段）\n"
+            "• 否：多页分页（固定页高，多 PICTURE）\n"
+            "• 取消：中止导出",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if page_choice == QMessageBox.StandardButton.Cancel:
+            return
+        page_height_mm: float | None = None
+        if page_choice == QMessageBox.StandardButton.No:
+            # Proxy page height from presentation depth span (half span, min 1 mm),
+            # matching print-preview skeleton; fallback 50 mm if no presentation.
+            if self._presentation is not None:
+                d0, d1 = depth_range_from_presentation(self._presentation)
+                vr = self.multi_track_canvas.depth_range()
+                if vr is not None:
+                    d0, d1 = vr
+                depth_span = max(float(d1) - float(d0), 0.0)
+                page_height_mm = max(depth_span / 2.0, 1.0)
+            else:
+                page_height_mm = 50.0
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出 CGM",
@@ -3249,18 +3277,24 @@ class WellLogWorkstationWindow(QMainWindow):
             if not engine_available():
                 raise ExportError("WellLogEngine 不可用，无法导出 CGM")
             view, doc_id = self._prepare_engine_export_view()
-            out = export_plot(
-                plot,
-                "cgm",
-                backend="engine",
-                view=view,
-                document_id=doc_id,
-                path=path,
+            kwargs: dict[str, Any] = {
+                "backend": "engine",
+                "view": view,
+                "document_id": doc_id,
+                "path": path,
+            }
+            if page_height_mm is not None:
+                kwargs["page_height_mm"] = page_height_mm
+            out = export_plot(plot, "cgm", **kwargs)
+            mode_note = (
+                f"多页分页（page_height_mm={page_height_mm:.1f}）"
+                if page_height_mm is not None
+                else "连续单 PICTURE"
             )
             QMessageBox.information(
                 self,
                 "导出成功",
-                f"CGM 已写入（引擎）:\n{out}\n"
+                f"CGM 已写入（引擎 · {mode_note}）:\n{out}\n"
                 f"大小 {out.stat().st_size} 字节\n\n{CGM_EXPORT_DISCLOSURE}",
             )
         except (ExportError, UnsupportedFormatError, EngineUnavailable, EngineSubmitError) as exc:
