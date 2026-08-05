@@ -9,11 +9,12 @@ T8 resolution: no new engine bindings; host-side dispatcher that routes by
   ``UnsupportedFormatError``
 - composite -> cartography window (SVG/PDF/PNG; mixed vector+raster)
 
-Stage 1 (#277) adds an opt-in **engine** backend for ``single_well`` that
-routes SVG/PDF through the engine vector exporters (T1/#273 + T2/#274),
-returning bytes the host writes to disk. The Qt paint path remains the
-default (searchable PDF text, ADR 0047); select the engine backend with
-``backend="engine"`` plus a ``view`` (WellLogView) and ``document_id``.
+Stage 1 (#277) adds an **engine** backend for ``single_well`` that routes
+SVG/PDF through the engine vector exporters. Desktop first-ship B0 (#299 / T11)
+defaults the **UI export path** to ``backend="engine"`` when WellLogView is
+available; callers may still pass ``backend="qt"`` for searchable PDF text
+(ADR 0047). Engine PDF is non-searchable — see
+``ENGINE_PDF_NONSEARCHABLE_DISCLOSURE`` / ``engine_pdf_needs_disclosure``.
 
 Pagination is host-side and only applies to depth-axis types
 (single_well / correlation / section).
@@ -54,6 +55,24 @@ def engine_pdf_needs_disclosure(backend: ExportBackend, fmt: ExportFormat) -> bo
     disclosure (T6 / #278). The host UI calls this to decide whether to warn
     before routing an export through the engine PDF path."""
     return backend == "engine" and fmt == "pdf"
+
+
+def prefer_engine_for_single_well(
+    fmt: ExportFormat,
+    *,
+    engine_available: bool,
+    force_backend: ExportBackend | None = None,
+) -> ExportBackend:
+    """Resolve export backend for single_well SVG/PDF (T11 / #299).
+
+    Desktop default is engine when available; PNG always stays on Qt paint.
+    Explicit ``force_backend`` wins.
+    """
+    if force_backend is not None:
+        return force_backend
+    if fmt in ("svg", "pdf") and engine_available:
+        return "engine"
+    return "qt"
 
 
 @dataclass(frozen=True)

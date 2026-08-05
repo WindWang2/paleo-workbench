@@ -64,10 +64,13 @@ from well_log_workstation.engine_bridge import (
 )
 from well_log_workstation.events import emit_plot_changed
 from well_log_workstation.export_dispatch import (
+    ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
     ExportFormat,
     PageSpec,
     UnsupportedFormatError,
+    engine_pdf_needs_disclosure,
     export_plot,
+    prefer_engine_for_single_well,
 )
 from well_log_workstation.export_plot import (
     ExportError,
@@ -2109,16 +2112,86 @@ class WellLogWorkstationWindow(QMainWindow):
         return plot
 
     def export_active_plot_svg(self, path: Path | str) -> Path:
-        """Export active single-well multi-track presentation to SVG."""
-        if self._presentation is None or self._presentation.track_count < 1:
-            raise ExportError("无活动单井分析图可导出（请先应用图版）")
-        return export_presentation_svg(self._presentation, path)
+        """Export active single-well multi-track to SVG (engine default when available)."""
+        return self._export_single_well_file(path, "svg")
 
     def export_active_plot_pdf(self, path: Path | str) -> Path:
-        """Export active single-well multi-track presentation to PDF."""
+        """Export active single-well multi-track to PDF (engine default when available).
+
+        Engine PDF is non-searchable (ADR 0047); callers that need UI disclosure
+        should use the menu export path which shows the warning dialog.
+        """
+        return self._export_single_well_file(path, "pdf")
+
+    def _export_single_well_file(
+        self,
+        path: Path | str,
+        fmt: ExportFormat,
+        *,
+        force_backend: str | None = None,
+    ) -> Path:
+        """Programmatic single_well export; prefers engine SVG/PDF when available."""
         if self._presentation is None or self._presentation.track_count < 1:
             raise ExportError("无活动单井分析图可导出（请先应用图版）")
-        return export_presentation_pdf(self._presentation, path)
+        if self._workspace is None or not self._active_plot_id:
+            # No plot document — fall back to presentation-only Qt paint
+            if fmt == "svg":
+                return export_presentation_svg(self._presentation, path)
+            if fmt == "pdf":
+                return export_presentation_pdf(self._presentation, path)
+            raise ExportError(f"不支持的格式: {fmt}")
+
+        plot = load_plot_document(self._workspace, self._active_plot_id)
+        backend = prefer_engine_for_single_well(
+            fmt,
+            engine_available=engine_available(),
+            force_backend=force_backend,  # type: ignore[arg-type]
+        )
+        kwargs: dict[str, Any] = {
+            "path": str(path),
+            "page_spec": PageSpec(),
+            "backend": backend,
+            "paint_fn": self._paint_active_plot,
+        }
+        if backend == "engine":
+            view, doc_id = self._prepare_engine_export_view()
+            kwargs["view"] = view
+            kwargs["document_id"] = doc_id
+        try:
+            return export_plot(plot, fmt, **kwargs)
+        except (ExportError, Exception):
+            if backend != "engine":
+                raise
+            # Graceful fallback to Qt paint
+            kwargs["backend"] = "qt"
+            kwargs.pop("view", None)
+            kwargs.pop("document_id", None)
+            return export_plot(plot, fmt, **kwargs)
+
+    def _prepare_engine_export_view(self) -> tuple[Any, str]:
+        """Ensure WellLogView has the current single-well scene for export."""
+        if self._presentation is None:
+            raise ExportError("无活动单井图版")
+        if not engine_available():
+            raise EngineUnavailable("WellLogEngine 不可用")
+        prev = self._prefer_engine_canvas
+        self._prefer_engine_canvas = True
+        try:
+            if self.multi_track_canvas.pick_mode():
+                self._act_pick_tops.setChecked(False)
+                self.multi_track_canvas.set_pick_mode(False)
+            self._sync_primary_single_well_surface()
+            if self._engine_view is None or self._primary_surface != "engine":
+                # Force submit even if user preferred host
+                view = self._ensure_engine_view(self._engine_page)
+                load_presentation_into_view(
+                    view, self._presentation, tops=self._active_tops
+                )
+                self._engine_view = view
+            doc_id = self._presentation.well_document_id
+            return self._engine_view, doc_id
+        finally:
+            self._prefer_engine_canvas = prev
 
     def open_engine_preview(self) -> dict[str, object]:
         """Force engine primary surface and submit multi-track presentation."""
@@ -2655,7 +2728,11 @@ class WellLogWorkstationWindow(QMainWindow):
         )
 
     def _export_active_plot(self, fmt: ExportFormat) -> None:
-        """Route the active plot's export through the T8 dispatcher."""
+        """Route the active plot's export through the T8 dispatcher.
+
+        Single-well SVG/PDF default to the engine backend when available (T11),
+        with PDF non-searchable disclosure (ADR 0047).
+        """
         if self._workspace is None or not self._active_plot_id:
             QMessageBox.information(
                 self, "导出", "请先打开/创建图件。"
@@ -2672,8 +2749,39 @@ class WellLogWorkstationWindow(QMainWindow):
         if not path:
             return
         kwargs: dict = {"path": path, "page_spec": PageSpec()}
+        backend_note = ""
         try:
-            if plot.type in ("single_well", "correlation", "section"):
+            if plot.type == "single_well" and fmt in ("svg", "pdf"):
+                backend = prefer_engine_for_single_well(
+                    fmt, engine_available=engine_available()
+                )
+                if backend == "engine":
+                    if engine_pdf_needs_disclosure("engine", fmt):
+                        reply = QMessageBox.warning(
+                            self,
+                            "引擎 PDF 说明",
+                            ENGINE_PDF_NONSEARCHABLE_DISCLOSURE
+                            + "\n\n是否继续使用引擎 PDF 导出？",
+                            QMessageBox.StandardButton.Ok
+                            | QMessageBox.StandardButton.Cancel,
+                            QMessageBox.StandardButton.Ok,
+                        )
+                        if reply != QMessageBox.StandardButton.Ok:
+                            return
+                    try:
+                        view, doc_id = self._prepare_engine_export_view()
+                        kwargs["backend"] = "engine"
+                        kwargs["view"] = view
+                        kwargs["document_id"] = doc_id
+                        backend_note = "（引擎）"
+                    except (EngineUnavailable, EngineSubmitError, ExportError):
+                        kwargs["backend"] = "qt"
+                        kwargs["paint_fn"] = self._paint_active_plot
+                        backend_note = "（引擎不可用，已回退 Qt）"
+                else:
+                    kwargs["backend"] = "qt"
+                    kwargs["paint_fn"] = self._paint_active_plot
+            elif plot.type in ("correlation", "section"):
                 kwargs["paint_fn"] = self._paint_active_plot
             elif plot.type == "plane_map":
                 kwargs["canvas"] = self.plane_map_view._canvas
@@ -2685,13 +2793,13 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "导出成功",
-                f"{fmt.upper()} 已写入:\n{out}\n大小 {out.stat().st_size} 字节",
+                f"{fmt.upper()} 已写入{backend_note}:\n{out}\n"
+                f"大小 {out.stat().st_size} 字节",
             )
         except (ExportError, UnsupportedFormatError) as exc:
             QMessageBox.warning(self, f"导出 {fmt.upper()} 失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, f"导出 {fmt.upper()} 失败", str(exc))
-
     def _paint_active_plot(self, painter, rect) -> None:
         """Paint callback for the T8 Qt-paint export path (single/corr/section)."""
         if self._active_plot_type == "single_well" and self._presentation is not None:
