@@ -1303,9 +1303,9 @@ void WellLogSession::set_text_engine(
   }
 }
 
-TextEngine *WellLogSession::text_engine() const noexcept {
+std::shared_ptr<TextEngine> WellLogSession::text_engine() const noexcept {
   const auto guard = std::lock_guard{impl_->text_engine_mutex};
-  return impl_->text_engine.get();
+  return impl_->text_engine;
 }
 
 Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {

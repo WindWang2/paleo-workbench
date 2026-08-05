@@ -289,6 +289,14 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
             view.export_scene_svg("not-a-uuid")
         self.assertEqual(raised.exception.code, "invalid_document")
 
+        # Regression (review D-003): a well-formed nil UUID must surface a
+        # typed invalid_document error, NOT a SystemError. Previously
+        # parse_id returned an engaged-but-nil id, leaving a stale Python
+        # error that shiboken surfaced as SystemError.
+        with self.assertRaises(WellLogValidationError) as raised:
+            view.export_scene_svg("00000000-0000-0000-0000-000000000000")
+        self.assertEqual(raised.exception.code, "invalid_document")
+
         view.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         self.app.processEvents()
