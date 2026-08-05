@@ -82,6 +82,7 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **CrossWellFenceGenerator**: A 3D curtain/fence mesh generator (`paleo_workbench/viz/geomodel/fence_generator.py`) that extracts inter-well seismic slices along multi-well trajectory paths and projects 2D correlation sections into 3D OpenGL viewports.
 - **StratigraphicCorrelationEngine**: A deepened fluent correlation engine (`paleo_workbench/viz/stratigraphic_correlation_engine.py`) unifying `WellSectionDatum`, `DTWLogMatcher`, and `FormationTopCorrelator` into an expressive pipeline.
 - **Plot Revision（图件修订）**: `well_log_workstation/events.py` 中 per-plot 的单调修订计数器，以 plot id 为键、随图件内容变更（emit）递增。它持久化于 `plots/<id>.json` 顶层字段（schema v3，ADR 0051），由宿主负责保存与恢复：保存时 bump 为新的已提交状态、加载时以 max 语义恢复（不回退）、emit 时 bump。它与引擎 DocumentRevision 是两套概念：后者由内核维护并描述引擎内文档内容版本，已通过 `WellLogView.documentChanged` 信号暴露到 Python 但本期不接线；Plot Revision 是宿主侧图件保存状态，供 `plot_changed` 信号的消费方（如未来 composite 面板按 revision 判断刷新或使 snapshot 失效）使用。
+- **Engine Vector Exporters（引擎矢量导出器）**: well-log-engine 的 C++ SVG（物理分页）/PDF/PNG/TIFF 导出器（`src/export_vector/`、`src/export_raster/`），输入为 `PreparedScene + ExportSnapshot`，可无头纯 CPU 运行。当前无任何 Python 绑定，宿主 6 类图件导出全部经 Qt paint（T8 决策）。评估与分期接入路线（Stage 1 单井绑定试点 → Stage 2 对比图 → Stage 3 剖面图场景通路）见 ADR 0052。_Avoid_: 不要重新评估绑定选型（已定为 numpy_bridge 注入函数路径）；不要在触发条件出现前启动实现。
 
 ### Seismic 3D & 2D Profile
 - **SeismicVolume**: 3D SEG-Y volume data indexed by Inline, Crossline, and Time/Depth.
