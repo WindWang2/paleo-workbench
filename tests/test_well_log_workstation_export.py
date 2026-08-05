@@ -22,6 +22,7 @@ from well_log_workstation.export_dispatch import (  # noqa: E402
     ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
     engine_pdf_needs_disclosure,
     export_plot,
+    prefer_engine_for_single_well,
 )
 from well_log_workstation.export_plot import (  # noqa: E402
     ExportError,
@@ -139,6 +140,34 @@ def _engine_setup(qtbot, tmp_path: Path, monkeypatch):
     plot_doc = load_plot_document(ws, win.active_plot_id)
     doc_id = pres.well_document_id
     return win, plot_doc, doc_id
+
+
+def test_prefer_engine_for_single_well_default() -> None:
+    """T11: single_well SVG/PDF prefer engine when available."""
+    assert prefer_engine_for_single_well("svg", engine_available=True) == "engine"
+    assert prefer_engine_for_single_well("pdf", engine_available=True) == "engine"
+    assert prefer_engine_for_single_well("png", engine_available=True) == "qt"
+    assert prefer_engine_for_single_well("svg", engine_available=False) == "qt"
+    assert (
+        prefer_engine_for_single_well(
+            "pdf", engine_available=True, force_backend="qt"
+        )
+        == "qt"
+    )
+    assert engine_pdf_needs_disclosure("engine", "pdf") is True
+    assert engine_pdf_needs_disclosure("engine", "svg") is False
+    assert "不可搜索" in ENGINE_PDF_NONSEARCHABLE_DISCLOSURE
+
+
+def test_shell_default_export_uses_engine_when_available(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    """export_active_plot_* defaults to engine for single_well (T11)."""
+    win, _plot_doc, _doc_id = _engine_setup(qtbot, tmp_path, monkeypatch)
+    svg = win.export_active_plot_svg(tmp_path / "def.svg")
+    pdf = win.export_active_plot_pdf(tmp_path / "def.pdf")
+    assert svg.is_file() and svg.stat().st_size >= 50
+    assert pdf.is_file() and pdf.read_bytes()[:5] == b"%PDF-"
 
 
 def test_engine_route_svg_nonempty(qtbot, tmp_path: Path, monkeypatch) -> None:
