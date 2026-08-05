@@ -7,6 +7,7 @@
 #include "numpy_bridge.hpp"
 
 #include <welllog/core/document.hpp>
+#include <welllog/export/svg.hpp>
 #include <welllog/qtwidgets/well_log_view.hpp>
 
 #include <QByteArray>
@@ -1760,6 +1761,43 @@ submit_multi_well_section_impl(WellLogView *view, PyObject *payload) {
   Py_RETURN_NONE;
 }
 
+// SVG export of a single-well prepared scene (T1 / #273). The engine
+// renders to an in-memory SvgDocument; we copy its text out as PyBytes so
+// the host controls filesystem writes (atomic save, cancellation).
+[[nodiscard]] PyObject *
+export_scene_svg_impl(WellLogView *view, const QString &document_id_text) {
+  if (view == nullptr) {
+    set_welllog_error("WellLogValidationError", "invalid_view",
+                      "WellLogView is no longer valid");
+    return nullptr;
+  }
+  if (QThread::currentThread() != view->thread()) {
+    set_welllog_error("WellLogThreadError", "thread_violation",
+                      "SVG export must run on the Qt GUI thread");
+    return nullptr;
+  }
+  const auto document_id = parse_id(document_id_text, "document_id");
+  if (!document_id) {
+    return nullptr;
+  }
+  // Acquire the prepared scene for this document. A null shared_ptr means
+  // the document has no prepared scene yet (not submitted / not rendered).
+  const auto scene = view->session().prepared_scene(*document_id);
+  if (scene == nullptr) {
+    set_welllog_error("WellLogValidationError", "document_not_found",
+                      "no prepared scene for the given document_id");
+    return nullptr;
+  }
+  const auto result = SvgExporter::write(*scene);
+  if (!result.has_value()) {
+    set_result_error(result.error(), "SVG export");
+    return nullptr;
+  }
+  const auto svg = result.value().text();
+  return PyBytes_FromStringAndSize(svg.data(),
+                                   static_cast<Py_ssize_t>(svg.size()));
+}
+
 } // namespace
 
 PyObject *submit_multi_track(WellLogView *view, PyObject *payload) noexcept {
@@ -1798,6 +1836,19 @@ PyObject *clear_multi_well_section(WellLogView *view) noexcept {
   } catch (...) {
     set_welllog_error("WellLogError", "internal_error",
                       "unexpected native failure clearing multi-well section");
+    return nullptr;
+  }
+}
+
+PyObject *export_scene_svg(WellLogView *view,
+                           const QString &document_id) noexcept {
+  try {
+    return export_scene_svg_impl(view, document_id);
+  } catch (const std::bad_alloc &) {
+    return PyErr_NoMemory();
+  } catch (...) {
+    set_welllog_error("WellLogError", "internal_error",
+                      "unexpected native failure during SVG export");
     return nullptr;
   }
 }

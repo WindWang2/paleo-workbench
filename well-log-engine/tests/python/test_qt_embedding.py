@@ -245,6 +245,55 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         self.assertIsNone(depth_ref())
         self.assertIsNone(values_ref())
 
+    def test_export_scene_svg_returns_non_empty_bytes(self) -> None:
+        # T1 / #273: the engine SVG exporter is reachable from Python and
+        # returns the document as in-memory bytes (the engine never writes
+        # to disk). submit_curve prepares a single-well scene we then export.
+        view = WellLogView()
+        depth = np.arange(1000.0, 1006.0, dtype=np.float64)
+        values = np.arange(6.0, dtype=np.float32)
+        depth.flags.writeable = False
+        values.flags.writeable = False
+        view.submit_curve(
+            depth,
+            values,
+            "10000000-0000-4000-8000-000000000001",
+            "10000000-0000-4000-8000-000000000002",
+            "10000000-0000-4000-8000-000000000003",
+            "GR",
+            "m",
+            "API",
+        )
+
+        svg = view.export_scene_svg(
+            "10000000-0000-4000-8000-000000000001",
+        )
+        self.assertIsInstance(svg, bytes)
+        self.assertGreater(len(svg), 0)
+        # SVG documents begin with an XML declaration or the <svg> root.
+        self.assertTrue(
+            svg.lstrip().startswith(b"<?xml") or
+            svg.lstrip().startswith(b"<svg"),
+            f"unexpected SVG preamble: {svg[:40]!r}",
+        )
+
+        # Error path: an unknown (but valid) document_id surfaces a typed
+        # document_not_found error. (A malformed UUID surfaces
+        # invalid_document via parse_id — see test_rejected_presentation_input
+        # for that parse path.)
+        with self.assertRaises(WellLogValidationError) as raised:
+            view.export_scene_svg("99999999-0000-4000-8000-000000000099")
+        self.assertEqual(raised.exception.code, "document_not_found")
+
+        with self.assertRaises(WellLogValidationError) as raised:
+            view.export_scene_svg("not-a-uuid")
+        self.assertEqual(raised.exception.code, "invalid_document")
+
+        view.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.app.processEvents()
+        gc.collect()
+
 
 if __name__ == "__main__":
     unittest.main()
