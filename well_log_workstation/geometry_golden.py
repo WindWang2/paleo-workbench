@@ -17,6 +17,10 @@ from typing import Sequence
 
 # §16 export accuracy target (subset uses the same number).
 TOL_MM = 0.1
+# ADR 0054: CGM format dimension may enter at 0.5 mm before converging to 0.1 mm.
+TOL_MM_CGM = 0.5
+# Engine CGM integer VDC (see welllog::k_cgm_vdc_per_mm).
+CGM_VDC_PER_MM = 100.0
 
 GOLDEN_DATASET_ID = "T14_GOLDEN_V1"
 GOLDEN_TEMPLATE_ID = "std-gr-rt-den"
@@ -305,4 +309,53 @@ def assert_depth_mapping(
     if errors:
         raise GeometryGoldenError(
             "T14 depth mapping golden mismatch:\n" + "\n".join(errors)
+        )
+
+
+def scene_mm_to_cgm_vdc(
+    scene_x_mm: float,
+    scene_y_mm: float,
+    *,
+    window_top_mm: float = 0.0,
+    window_height_mm: float,
+) -> tuple[int, int]:
+    """Mirror welllog::cgm_scene_to_vdc (integer VDC, y-up)."""
+    local_y = float(scene_y_mm) - float(window_top_mm)
+    vx = int(round(float(scene_x_mm) * CGM_VDC_PER_MM))
+    vy = int(round((float(window_height_mm) - local_y) * CGM_VDC_PER_MM))
+    # clamp to int16 range like the engine
+    vx = max(-32768, min(32767, vx))
+    vy = max(-32768, min(32767, vy))
+    return vx, vy
+
+
+def assert_cgm_track_left_vdc(
+    layout: ExportLayoutMm,
+    *,
+    tol_mm: float = TOL_MM_CGM,
+) -> None:
+    """CGM format-dimension golden: track left edges in VDC within tol_mm.
+
+    Engine CGM places track frames using scene clip left (export layout left
+    for the host paint model is a proxy for first-ship track columns).
+    """
+    tol_vdc = tol_mm * CGM_VDC_PER_MM
+    errors: list[str] = []
+    wh = layout.page_height_mm
+    for box in layout.tracks:
+        actual_vdc, _ = scene_mm_to_cgm_vdc(
+            box.left_mm, layout.content_top_mm, window_height_mm=wh
+        )
+        expected_vdc = int(round(box.left_mm * CGM_VDC_PER_MM))
+        delta = abs(actual_vdc - expected_vdc)
+        if delta > tol_vdc + 1e-9:
+            errors.append(
+                f"  track[{box.track_id}].left_vdc: actual={actual_vdc} "
+                f"expected={expected_vdc} Δ={delta:.1f} VDC "
+                f"(tol={tol_vdc:.1f} VDC = {tol_mm} mm)"
+            )
+    if errors:
+        raise GeometryGoldenError(
+            "T14/B1 CGM geometry golden mismatch (VDC / ADR 0054 0.5 mm entry):\n"
+            + "\n".join(errors)
         )

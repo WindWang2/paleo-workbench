@@ -51,10 +51,11 @@ export_scene_pdf(WellLogView *view, const QString &document_id,
                  std::uint64_t export_pixel_height = 0,
                  bool searchable_text = false) noexcept;
 
-// CGM Version 3 Binary export (B1.CGM.2 / ADR 0054). Returns metafile bytes;
-// pattern fills are flattened to solid (see diagnostics in engine logs/tests).
+// CGM Version 3 Binary export (B1.CGM.2–3 / ADR 0054). Returns metafile bytes.
+// ``page_height_mm > 0`` enables multi-PICTURE pagination (B1.CGM.3).
 [[nodiscard]] PyObject *
-export_scene_cgm(WellLogView *view, const QString &document_id) noexcept;
+export_scene_cgm(WellLogView *view, const QString &document_id,
+                 double page_height_mm = 0.0) noexcept;
 
 } // namespace python
 } // namespace welllog

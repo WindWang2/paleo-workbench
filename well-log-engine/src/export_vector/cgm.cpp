@@ -1,4 +1,4 @@
-// CGM Version 3 Binary subset writer (B1.CGM.1–2 / ADR 0054).
+// CGM Version 3 Binary subset writer (B1.CGM.1–3 / ADR 0054).
 // Encoding follows ISO/IEC 8632-3 command headers (big-endian).
 
 #include <welllog/export/cgm.hpp>
@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <string>
 #include <utility>
@@ -27,9 +28,6 @@ namespace {
       .arguments = {},
   };
 }
-
-// 1 VDC unit = 0.01 mm.
-constexpr double k_vdc_per_mm = 100.0;
 
 [[nodiscard]] std::int16_t clamp_i16(double v) noexcept {
   if (!std::isfinite(v)) {
@@ -186,6 +184,11 @@ std::string CgmExportDiagnostics::summary() const {
     s += std::to_string(patterns_flattened_to_solid);
     s += "; ";
   }
+  if (patterns_hatch_approximated > 0) {
+    s += "patterns_hatch_approximated=";
+    s += std::to_string(patterns_hatch_approximated);
+    s += "; ";
+  }
   if (alpha_flattened_to_opaque > 0) {
     s += "alpha_flattened_to_opaque=";
     s += std::to_string(alpha_flattened_to_opaque);
@@ -196,7 +199,9 @@ std::string CgmExportDiagnostics::summary() const {
     s += std::to_string(non_latin_text_dropped);
     s += "; ";
   }
-  s += "intervals=";
+  s += "pictures=";
+  s += std::to_string(pictures_emitted);
+  s += " intervals=";
   s += std::to_string(intervals_emitted);
   s += " fills=";
   s += std::to_string(fill_regions_emitted);
@@ -205,6 +210,14 @@ std::string CgmExportDiagnostics::summary() const {
     s += n;
   }
   return s;
+}
+
+std::pair<std::int16_t, std::int16_t>
+cgm_scene_to_vdc(double scene_x_mm, double scene_y_mm, double window_top_mm,
+                 double window_height_mm) noexcept {
+  const auto local_y = scene_y_mm - window_top_mm;
+  return {clamp_i16(scene_x_mm * k_cgm_vdc_per_mm),
+          clamp_i16((window_height_mm - local_y) * k_cgm_vdc_per_mm)};
 }
 
 struct CgmBinaryWriter::Impl {
@@ -441,8 +454,107 @@ Result<CgmDocument> CgmBinaryWriter::finish() noexcept {
   }
 }
 
+namespace {
+
+struct DepthWindow {
+  double top_mm{};
+  double bottom_mm{};
+  double height_mm{}; // printable height used for VDC (bottom-top or fixed)
+};
+
+[[nodiscard]] std::vector<DepthWindow>
+build_depth_windows(double scene_height_mm, const CgmExportOptions &opt) {
+  std::vector<DepthWindow> windows;
+  if (!(opt.page_height_mm > 0.0) || !(scene_height_mm > 0.0)) {
+    windows.push_back({0.0, scene_height_mm, scene_height_mm});
+    return windows;
+  }
+  auto overlap = opt.page_overlap;
+  if (!std::isfinite(overlap) || overlap < 0.0) {
+    overlap = 0.0;
+  }
+  if (overlap >= 1.0) {
+    overlap = 0.0;
+  }
+  const auto step = opt.page_height_mm * (1.0 - overlap);
+  auto count = static_cast<std::uint32_t>(
+      std::ceil(scene_height_mm / std::max(step, 1e-9)));
+  if (count == 0) {
+    count = 1;
+  }
+  for (std::uint32_t i = 0; i < count; ++i) {
+    const auto top = static_cast<double>(i) * step;
+    auto bottom = top + opt.page_height_mm;
+    if (bottom > scene_height_mm || i + 1 == count) {
+      bottom = scene_height_mm;
+    }
+    const auto h = std::max(bottom - top, 1e-9);
+    windows.push_back({top, bottom, h});
+  }
+  return windows;
+}
+
+// Emit diagonal hatch lines across an axis-aligned rect in scene mm.
+void emit_hatch(CgmBinaryWriter &w,
+                std::function<std::pair<std::int16_t, std::int16_t>(double,
+                                                                   double)>
+                    to_vdc,
+                double left, double top, double width, double height,
+                double step_mm, RgbaColor fg) {
+  if (!(width > 0.0) || !(height > 0.0) || !(step_mm > 0.0)) {
+    return;
+  }
+  w.line_colour(fg.red, fg.green, fg.blue);
+  w.line_width(std::max<std::int16_t>(5, clamp_i16(0.15 * k_cgm_vdc_per_mm)));
+  // Diagonal family: y - x = c
+  const auto c_min = top - (left + width);
+  const auto c_max = (top + height) - left;
+  for (double c = c_min; c <= c_max + 1e-9; c += step_mm) {
+    // Clip line x+c = y to the rectangle.
+    double x0 = left;
+    double y0 = left + c;
+    double x1 = left + width;
+    double y1 = left + width + c;
+    // Clamp y to [top, top+height] and adjust x.
+    auto clip = [&](double &x, double &y) {
+      if (y < top) {
+        x += (top - y);
+        y = top;
+      } else if (y > top + height) {
+        x -= (y - (top + height));
+        y = top + height;
+      }
+    };
+    clip(x0, y0);
+    clip(x1, y1);
+    if (x0 > left + width || x1 < left) {
+      continue;
+    }
+    x0 = std::clamp(x0, left, left + width);
+    x1 = std::clamp(x1, left, left + width);
+    y0 = std::clamp(y0, top, top + height);
+    y1 = std::clamp(y1, top, top + height);
+    if (std::hypot(x1 - x0, y1 - y0) < 1e-6) {
+      continue;
+    }
+    const auto p0 = to_vdc(x0, y0);
+    const auto p1 = to_vdc(x1, y1);
+    const std::array<std::pair<std::int16_t, std::int16_t>, 2> pts{{p0, p1}};
+    w.polyline(pts);
+  }
+}
+
+} // namespace
+
 Result<CgmDocument>
 CgmSceneExporter::write(const PreparedScene &scene,
+                        CgmExportDiagnostics *diagnostics) noexcept {
+  return write(scene, CgmExportOptions{}, diagnostics);
+}
+
+Result<CgmDocument>
+CgmSceneExporter::write(const PreparedScene &scene,
+                        const CgmExportOptions &options,
                         CgmExportDiagnostics *diagnostics) noexcept {
   try {
     CgmExportDiagnostics local_diag;
@@ -458,20 +570,15 @@ CgmSceneExporter::write(const PreparedScene &scene,
                        MessageKey::presentation_invalid);
     }
 
-    const auto vdc_w = clamp_i16(width_mm * k_vdc_per_mm);
-    const auto vdc_h = clamp_i16(height_mm * k_vdc_per_mm);
-    if (vdc_w <= 0 || vdc_h <= 0) {
+    const auto vdc_w = clamp_i16(width_mm * k_cgm_vdc_per_mm);
+    if (vdc_w <= 0) {
       return cgm_error(ErrorCode::invalid_presentation,
                        MessageKey::presentation_invalid);
     }
 
-    // Scene mm is y-down; CGM VDC y-up.
-    const auto to_vdc = [&](double sx, double sy) {
-      return std::pair<std::int16_t, std::int16_t>{
-          clamp_i16(sx * k_vdc_per_mm),
-          clamp_i16((height_mm - sy) * k_vdc_per_mm),
-      };
-    };
+    const auto windows = build_depth_windows(height_mm, options);
+    const auto hatch_step =
+        options.hatch_step_mm > 0.0 ? options.hatch_step_mm : 2.0;
 
     const auto solid_rgb = [&](RgbaColor c) {
       if (c.alpha < 255) {
@@ -483,152 +590,224 @@ CgmSceneExporter::write(const PreparedScene &scene,
     CgmBinaryWriter w;
     w.begin_metafile("WellLogEngine");
     w.metafile_version(3);
-    w.metafile_description("WellLog CGM B1.CGM.2 subset (ADR 0054)");
+    w.metafile_description("WellLog CGM B1.CGM.3 subset (ADR 0054)");
     w.vdc_type_integer();
     w.integer_precision(16);
     w.colour_precision(8);
     w.colour_value_extent();
     w.metafile_element_list_drawing_plus();
 
-    w.begin_picture("page1");
-    w.colour_selection_mode_direct();
-    w.vdc_extent(0, 0, vdc_w, vdc_h);
-    w.background_colour(255, 255, 255);
-    w.begin_picture_body();
+    const auto segments = scene.curve_segments();
+    const auto points = scene.curve_points();
+    const auto fill_vertices = scene.fill_vertices();
 
-    // Intervals as solid filled rects (pattern → solid fill_color + note).
-    for (const auto &layer : scene.interval_layers()) {
-      for (std::uint64_t oi = 0; oi < layer.interval_count; ++oi) {
-        const auto &iv =
-            scene.intervals()[static_cast<std::size_t>(layer.first_interval +
-                                                       oi)];
-        if (!iv.pattern_id.is_nil()) {
-          diag.patterns_flattened_to_solid += 1;
+    for (std::size_t pi = 0; pi < windows.size(); ++pi) {
+      const auto &win = windows[pi];
+      const auto vdc_h = clamp_i16(win.height_mm * k_cgm_vdc_per_mm);
+      if (vdc_h <= 0) {
+        continue;
+      }
+      const auto to_vdc = [&](double sx, double sy) {
+        return cgm_scene_to_vdc(sx, sy, win.top_mm, win.height_mm);
+      };
+      const auto in_window = [&](double sy) {
+        return sy >= win.top_mm - 1e-9 && sy <= win.bottom_mm + 1e-9;
+      };
+      const auto intersects_window = [&](double top, double bottom) {
+        return bottom >= win.top_mm && top <= win.bottom_mm;
+      };
+
+      std::string pic_name = "page";
+      pic_name += std::to_string(pi + 1);
+      w.begin_picture(pic_name);
+      w.colour_selection_mode_direct();
+      w.vdc_extent(0, 0, vdc_w, vdc_h);
+      w.background_colour(255, 255, 255);
+      w.begin_picture_body();
+
+      // Intervals: solid fill + optional hatch for patterns (B1.CGM.3).
+      for (const auto &layer : scene.interval_layers()) {
+        for (std::uint64_t oi = 0; oi < layer.interval_count; ++oi) {
+          const auto &iv = scene.intervals()[static_cast<std::size_t>(
+              layer.first_interval + oi)];
+          if (!intersects_window(iv.rect.top.value,
+                                 iv.rect.top.value + iv.rect.height.value)) {
+            continue;
+          }
+          const bool patterned = !iv.pattern_id.is_nil();
+          if (patterned) {
+            diag.patterns_flattened_to_solid += 1;
+            diag.patterns_hatch_approximated += 1;
+          }
+          const auto col = solid_rgb(iv.fill_color);
+          w.fill_colour(col.red, col.green, col.blue);
+          const auto tl = to_vdc(iv.rect.left.value, iv.rect.top.value);
+          const auto br =
+              to_vdc(iv.rect.left.value + iv.rect.width.value,
+                     iv.rect.top.value + iv.rect.height.value);
+          const auto x = std::min(tl.first, br.first);
+          const auto y = std::min(tl.second, br.second);
+          const auto rw =
+              static_cast<std::int16_t>(std::abs(br.first - tl.first));
+          const auto rh =
+              static_cast<std::int16_t>(std::abs(br.second - tl.second));
+          w.rectangle_fill(x, y, rw, rh);
+          if (patterned) {
+            emit_hatch(w, to_vdc, iv.rect.left.value, iv.rect.top.value,
+                       iv.rect.width.value, iv.rect.height.value, hatch_step,
+                       RgbaColor{static_cast<std::uint8_t>(col.red / 2),
+                                 static_cast<std::uint8_t>(col.green / 2),
+                                 static_cast<std::uint8_t>(col.blue / 2), 255});
+          }
+          diag.intervals_emitted += 1;
         }
-        const auto col = solid_rgb(iv.fill_color);
-        w.fill_colour(col.red, col.green, col.blue);
-        const auto tl = to_vdc(iv.rect.left.value, iv.rect.top.value);
-        const auto br = to_vdc(iv.rect.left.value + iv.rect.width.value,
-                               iv.rect.top.value + iv.rect.height.value);
+      }
+
+      // Fill regions (solid; pattern → solid + hatch).
+      for (const auto &fill_layer : scene.fill_layers()) {
+        for (std::uint64_t ri = 0; ri < fill_layer.region_count; ++ri) {
+          const auto &region = scene.fill_regions()[static_cast<std::size_t>(
+              fill_layer.first_region + ri)];
+          if (region.vertex_count < 3) {
+            continue;
+          }
+          if (!intersects_window(region.bounds.top.value,
+                                 region.bounds.top.value +
+                                     region.bounds.height.value)) {
+            continue;
+          }
+          const bool patterned = !region.pattern_id.is_nil();
+          if (patterned) {
+            diag.patterns_flattened_to_solid += 1;
+            diag.patterns_hatch_approximated += 1;
+          }
+          const auto col = solid_rgb(region.fill_color);
+          w.fill_colour(col.red, col.green, col.blue);
+          std::vector<std::pair<std::int16_t, std::int16_t>> pts;
+          pts.reserve(static_cast<std::size_t>(region.vertex_count));
+          for (std::uint64_t vi = 0; vi < region.vertex_count; ++vi) {
+            const auto &v = fill_vertices[static_cast<std::size_t>(
+                region.first_vertex + vi)];
+            pts.push_back(
+                to_vdc(v.position.left.value, v.position.top.value));
+          }
+          w.interior_style_solid();
+          w.edge_visibility_off();
+          w.polygon(pts);
+          if (patterned) {
+            emit_hatch(w, to_vdc, region.bounds.left.value,
+                       region.bounds.top.value, region.bounds.width.value,
+                       region.bounds.height.value, hatch_step,
+                       RgbaColor{static_cast<std::uint8_t>(col.red / 2),
+                                 static_cast<std::uint8_t>(col.green / 2),
+                                 static_cast<std::uint8_t>(col.blue / 2), 255});
+          }
+          diag.fill_regions_emitted += 1;
+        }
+      }
+
+      // Track frames (clipped to window vertically).
+      for (const auto &track : scene.tracks()) {
+        const auto &c = track.clip;
+        if (!intersects_window(c.top.value, c.top.value + c.height.value)) {
+          continue;
+        }
+        const auto tl = to_vdc(c.left.value, std::max(c.top.value, win.top_mm));
+        const auto br = to_vdc(
+            c.left.value + c.width.value,
+            std::min(c.top.value + c.height.value, win.bottom_mm));
         const auto x = std::min(tl.first, br.first);
         const auto y = std::min(tl.second, br.second);
         const auto rw =
             static_cast<std::int16_t>(std::abs(br.first - tl.first));
         const auto rh =
             static_cast<std::int16_t>(std::abs(br.second - tl.second));
-        w.rectangle_fill(x, y, rw, rh);
-        diag.intervals_emitted += 1;
+        w.line_colour(180, 180, 180);
+        w.line_width(10);
+        w.rectangle_polyline(x, y, rw, rh);
       }
-    }
 
-    // Crossover fill regions as solid polygons (pattern flattened).
-    const auto fill_vertices = scene.fill_vertices();
-    for (const auto &fill_layer : scene.fill_layers()) {
-      for (std::uint64_t ri = 0; ri < fill_layer.region_count; ++ri) {
-        const auto &region = scene.fill_regions()[static_cast<std::size_t>(
-            fill_layer.first_region + ri)];
-        if (region.vertex_count < 3) {
+      // Headers only on first picture (continuous) or every picture.
+      w.text_colour(40, 40, 40);
+      w.character_height(300);
+      for (const auto &entry : scene.track_header_entries()) {
+        double sx = 2.0;
+        double sy = win.top_mm + 5.0;
+        for (const auto &track : scene.tracks()) {
+          if (track.id == entry.track_id) {
+            sx = track.clip.left.value + 1.0;
+            sy = std::max(track.clip.top.value, win.top_mm) + 4.0;
+            break;
+          }
+        }
+        if (!in_window(sy)) {
           continue;
         }
-        if (!region.pattern_id.is_nil()) {
-          diag.patterns_flattened_to_solid += 1;
-        }
-        const auto col = solid_rgb(region.fill_color);
-        w.fill_colour(col.red, col.green, col.blue);
-        std::vector<std::pair<std::int16_t, std::int16_t>> pts;
-        pts.reserve(static_cast<std::size_t>(region.vertex_count));
-        for (std::uint64_t vi = 0; vi < region.vertex_count; ++vi) {
-          const auto &v = fill_vertices[static_cast<std::size_t>(
-              region.first_vertex + vi)];
-          pts.push_back(to_vdc(v.position.left.value, v.position.top.value));
-        }
-        w.interior_style_solid();
-        w.edge_visibility_off();
-        w.polygon(pts);
-        diag.fill_regions_emitted += 1;
-      }
-    }
-
-    // Track frames.
-    for (const auto &track : scene.tracks()) {
-      const auto &c = track.clip;
-      const auto tl = to_vdc(c.left.value, c.top.value);
-      const auto br =
-          to_vdc(c.left.value + c.width.value, c.top.value + c.height.value);
-      const auto x = std::min(tl.first, br.first);
-      const auto y = std::min(tl.second, br.second);
-      const auto rw =
-          static_cast<std::int16_t>(std::abs(br.first - tl.first));
-      const auto rh =
-          static_cast<std::int16_t>(std::abs(br.second - tl.second));
-      w.line_colour(180, 180, 180);
-      w.line_width(10); // 0.1 mm
-      w.rectangle_polyline(x, y, rw, rh);
-    }
-
-    // Legend / track header mnemonics as restricted TEXT (Latin only).
-    w.text_colour(40, 40, 40);
-    w.character_height(300); // 3 mm
-    for (const auto &entry : scene.track_header_entries()) {
-      double sx = 2.0;
-      double sy = 5.0;
-      for (const auto &track : scene.tracks()) {
-        if (track.id == entry.track_id) {
-          sx = track.clip.left.value + 1.0;
-          sy = track.clip.top.value + 4.0;
-          break;
-        }
-      }
-      const auto label_pt = to_vdc(sx, sy);
-      if (!w.text(label_pt.first, label_pt.second, entry.curve_name)) {
-        if (!entry.curve_name.empty()) {
+        const auto label_pt = to_vdc(sx, sy);
+        if (!w.text(label_pt.first, label_pt.second, entry.curve_name)) {
+          if (!entry.curve_name.empty()) {
+            diag.non_latin_text_dropped += 1;
+          }
+        } else if (filter_latin(entry.curve_name).size() <
+                   entry.curve_name.size()) {
           diag.non_latin_text_dropped += 1;
         }
-      } else if (filter_latin(entry.curve_name).size() <
-                 entry.curve_name.size()) {
-        // Mixed Latin + non-Latin: partial emit still drops non-Latin bytes.
-        diag.non_latin_text_dropped += 1;
       }
-    }
 
-    // Curve polylines.
-    const auto segments = scene.curve_segments();
-    const auto points = scene.curve_points();
-    for (const auto &layer : scene.curve_layers()) {
-      if (!layer.visible || layer.segment_count == 0) {
-        continue;
-      }
-      w.line_colour(layer.color.red, layer.color.green, layer.color.blue);
-      w.line_width(std::max<std::int16_t>(
-          5, clamp_i16(layer.line_width.value * k_vdc_per_mm)));
-      for (std::uint64_t seg_i = 0; seg_i < layer.segment_count; ++seg_i) {
-        const auto &segment =
-            segments[static_cast<std::size_t>(layer.first_segment + seg_i)];
-        if (segment.point_count < 2) {
+      // Curves: keep points that fall in the window (simple filter).
+      for (const auto &layer : scene.curve_layers()) {
+        if (!layer.visible || layer.segment_count == 0) {
           continue;
         }
-        std::vector<std::pair<std::int16_t, std::int16_t>> pts;
-        pts.reserve(static_cast<std::size_t>(segment.point_count));
-        for (std::uint64_t pi = 0; pi < segment.point_count; ++pi) {
-          const auto &pt =
-              points[static_cast<std::size_t>(segment.first_point + pi)];
-          pts.push_back(
-              to_vdc(pt.position.left.value, pt.position.top.value));
+        w.line_colour(layer.color.red, layer.color.green, layer.color.blue);
+        w.line_width(std::max<std::int16_t>(
+            5, clamp_i16(layer.line_width.value * k_cgm_vdc_per_mm)));
+        for (std::uint64_t seg_i = 0; seg_i < layer.segment_count; ++seg_i) {
+          const auto &segment =
+              segments[static_cast<std::size_t>(layer.first_segment + seg_i)];
+          if (segment.point_count < 2) {
+            continue;
+          }
+          std::vector<std::pair<std::int16_t, std::int16_t>> pts;
+          pts.reserve(static_cast<std::size_t>(segment.point_count));
+          for (std::uint64_t pti = 0; pti < segment.point_count; ++pti) {
+            const auto &pt =
+                points[static_cast<std::size_t>(segment.first_point + pti)];
+            if (!in_window(pt.position.top.value)) {
+              if (pts.size() >= 2) {
+                w.polyline(pts);
+              }
+              pts.clear();
+              continue;
+            }
+            pts.push_back(
+                to_vdc(pt.position.left.value, pt.position.top.value));
+          }
+          if (pts.size() >= 2) {
+            w.polyline(pts);
+          }
         }
-        w.polyline(pts);
       }
+
+      w.end_picture();
+      diag.pictures_emitted += 1;
     }
 
-    if (diag.patterns_flattened_to_solid > 0) {
+    if (diag.patterns_hatch_approximated > 0) {
       diag.notes.push_back(
-          "pattern fills flattened to solid colour (B1.CGM.2)");
+          "pattern fills: solid + diagonal hatch approx (B1.CGM.3)");
+    } else if (diag.patterns_flattened_to_solid > 0) {
+      diag.notes.push_back(
+          "pattern fills flattened to solid colour");
     }
     if (diag.alpha_flattened_to_opaque > 0) {
       diag.notes.push_back(
           "semi-transparent fills forced opaque (CGM limit)");
     }
+    if (diag.pictures_emitted > 1) {
+      diag.notes.push_back("multi-PICTURE pagination (B1.CGM.3)");
+    }
 
-    w.end_picture();
     w.end_metafile();
     return w.finish();
   } catch (const std::bad_alloc &) {
@@ -661,6 +840,22 @@ std::size_t cgm_count_polygons(std::string_view cgm_bytes) noexcept {
   CmdView cmd{};
   while (read_command(cgm_bytes, offset, cmd)) {
     if (cmd.cls == 4 && cmd.id == 7) {
+      ++count;
+    }
+    if (cmd.next_offset <= offset) {
+      break;
+    }
+    offset = cmd.next_offset;
+  }
+  return count;
+}
+
+std::size_t cgm_count_pictures(std::string_view cgm_bytes) noexcept {
+  std::size_t count = 0;
+  std::size_t offset = 0;
+  CmdView cmd{};
+  while (read_command(cgm_bytes, offset, cmd)) {
+    if (cmd.cls == 0 && cmd.id == 3) {
       ++count;
     }
     if (cmd.next_offset <= offset) {
