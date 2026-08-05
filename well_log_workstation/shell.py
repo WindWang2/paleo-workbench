@@ -109,6 +109,7 @@ from well_log_workstation.template_model import (
     track_overrides_snapshot,
 )
 from well_log_workstation.three_d_bridge import probe_3d
+from well_log_workstation.tops_history import TopsHistoryBook
 from well_log_workstation.tops_model import (
     FormationTop,
     TopsError,
@@ -145,6 +146,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._link_pick_first: tuple[str, FormationTop] | None = None
         self._active_tops: list[FormationTop] = []
         self._tops_diagnostics: list[str] = []
+        self._tops_history = TopsHistoryBook()
         self._templates: list[PlotTemplate] = list_builtin_templates()
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
@@ -293,6 +295,25 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_add_top.setObjectName("Action_AddTopByDepth")
         self._act_add_top.triggered.connect(self._on_add_top_by_depth)
         self._act_add_top.setEnabled(False)
+        self._act_edit_top_depth = tops_menu.addAction("修改选中层位深度…")
+        self._act_edit_top_depth.setObjectName("Action_EditTopDepth")
+        self._act_edit_top_depth.triggered.connect(self._on_edit_top_depth)
+        self._act_edit_top_depth.setEnabled(False)
+        self._act_remove_top = tops_menu.addAction("删除选中层位")
+        self._act_remove_top.setObjectName("Action_RemoveTop")
+        self._act_remove_top.triggered.connect(self._on_remove_top)
+        self._act_remove_top.setEnabled(False)
+        tops_menu.addSeparator()
+        self._act_undo_tops = tops_menu.addAction("撤销层位编辑")
+        self._act_undo_tops.setObjectName("Action_UndoTops")
+        self._act_undo_tops.setShortcut("Ctrl+Z")
+        self._act_undo_tops.triggered.connect(self._on_undo_tops)
+        self._act_undo_tops.setEnabled(False)
+        self._act_redo_tops = tops_menu.addAction("重做层位编辑")
+        self._act_redo_tops.setObjectName("Action_RedoTops")
+        self._act_redo_tops.setShortcut("Ctrl+Shift+Z")
+        self._act_redo_tops.triggered.connect(self._on_redo_tops)
+        self._act_redo_tops.setEnabled(False)
 
         help_menu = bar.addMenu("帮助")
         help_menu.setObjectName("Menu_帮助")
@@ -531,6 +552,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self.tops_list = QListWidget()
         self.tops_list.setObjectName("TopsList")
         self.tops_list.addItem("（无层位）")
+        self.tops_list.currentItemChanged.connect(
+            lambda *_: self._sync_apply_enabled()
+        )
         layout.addWidget(self.tops_list)
 
         layout.addWidget(QLabel("对比连线"))
@@ -609,6 +633,18 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self._act_import_tops.setEnabled(can_tops)
         self._act_stub_tops.setEnabled(can_tops)
+        has_selected_top = can_tops and bool(self._active_tops) and (
+            self.tops_list.currentItem() is not None
+            and self.tops_list.currentItem().data(Qt.ItemDataRole.UserRole)
+        )
+        self._act_edit_top_depth.setEnabled(bool(has_selected_top))
+        self._act_remove_top.setEnabled(bool(has_selected_top))
+        self._act_undo_tops.setEnabled(
+            can_tops and self._tops_history.can_undo(self._selected_well_id)
+        )
+        self._act_redo_tops.setEnabled(
+            can_tops and self._tops_history.can_redo(self._selected_well_id)
+        )
         can_pick = (
             can_tops
             and self._presentation is not None
@@ -832,6 +868,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self._correlation_links = []
             self._active_tops = []
             self._tops_diagnostics = []
+            self._tops_history.clear_all()
             self.multi_track_canvas.set_presentation(None)
             self._refresh_track_list()
             self.multi_track_canvas.set_tops(None)
@@ -900,9 +937,7 @@ class WellLogWorkstationWindow(QMainWindow):
         else:
             d0, d1 = 0.0, 100.0
         tops = make_stub_tops(d0, d1, unit=doc.depth_unit or "m")
-        save_tops_for_well(self._workspace, well_id, tops)
-        self._selected_well_id = well_id
-        self._apply_tops_to_ui(well_id, tops, [])
+        self._commit_tops_edit(well_id, tops, [])
         return tops
 
     def import_tops_json_for_well(
@@ -910,9 +945,13 @@ class WellLogWorkstationWindow(QMainWindow):
     ) -> list[FormationTop]:
         if self._workspace is None:
             raise WorkspaceError("请先打开工区")
+        before, _ = load_tops_for_well(self._workspace, well_id)
         tops, diags = import_tops_from_json_file(self._workspace, well_id, path)
+        # import writes disk; record pre-import state for undo.
+        self._tops_history.record_before_commit(well_id, before)
         self._selected_well_id = well_id
         self._apply_tops_to_ui(well_id, tops, diags)
+        self._sync_apply_enabled()
         return tops
 
     def add_top_at_depth(
@@ -924,7 +963,7 @@ class WellLogWorkstationWindow(QMainWindow):
         color: str = "#c0392b",
         unit: str | None = None,
     ) -> FormationTop:
-        """Add a formation top, persist, and refresh inspector/canvas (#226)."""
+        """Add a formation top, persist, and refresh inspector/canvas (#226/#294)."""
         if self._workspace is None:
             raise WorkspaceError("请先打开工区")
         label = (name or "").strip()
@@ -943,12 +982,101 @@ class WellLogWorkstationWindow(QMainWindow):
             unit=depth_unit,
             color=color,
         )
-        tops.append(top)
-        tops.sort(key=lambda t: t.depth)
-        save_tops_for_well(self._workspace, well_id, tops)
-        self._selected_well_id = well_id
-        self._apply_tops_to_ui(well_id, tops, diags)
+        new_tops = list(tops)
+        new_tops.append(top)
+        new_tops.sort(key=lambda t: t.depth)
+        self._commit_tops_edit(well_id, new_tops, diags)
         return top
+
+    def remove_top_by_id(self, well_id: str, top_id: str) -> bool:
+        """Remove one top by id; returns False if not found."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        tops, diags = load_tops_for_well(self._workspace, well_id)
+        key = (top_id or "").strip()
+        kept = [t for t in tops if (t.id or t.name) != key]
+        if len(kept) == len(tops):
+            return False
+        self._commit_tops_edit(well_id, kept, diags)
+        return True
+
+    def set_top_depth(self, well_id: str, top_id: str, depth: float) -> FormationTop:
+        """Change depth of an existing top (command + undoable)."""
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        if not math.isfinite(depth):
+            raise TopsError("深度无效")
+        tops, diags = load_tops_for_well(self._workspace, well_id)
+        key = (top_id or "").strip()
+        updated: list[FormationTop] = []
+        found: FormationTop | None = None
+        for t in tops:
+            if (t.id or t.name) == key:
+                found = FormationTop(
+                    id=t.id,
+                    name=t.name,
+                    depth=float(depth),
+                    unit=t.unit,
+                    color=t.color,
+                )
+                updated.append(found)
+            else:
+                updated.append(t)
+        if found is None:
+            raise TopsError("未找到选中层位")
+        updated.sort(key=lambda t: t.depth)
+        self._commit_tops_edit(well_id, updated, diags)
+        return found
+
+    def undo_tops_edit(self, well_id: str | None = None) -> bool:
+        """Undo last tops edit for the well; restore disk + UI + engine markers."""
+        wid = well_id or self._selected_well_id
+        if self._workspace is None or not wid:
+            return False
+        current, _ = load_tops_for_well(self._workspace, wid)
+        previous = self._tops_history.undo(wid, current)
+        if previous is None:
+            return False
+        save_tops_for_well(self._workspace, wid, previous)
+        self._selected_well_id = wid
+        self._apply_tops_to_ui(wid, previous, [])
+        self._sync_apply_enabled()
+        return True
+
+    def redo_tops_edit(self, well_id: str | None = None) -> bool:
+        """Redo last undone tops edit."""
+        wid = well_id or self._selected_well_id
+        if self._workspace is None or not wid:
+            return False
+        current, _ = load_tops_for_well(self._workspace, wid)
+        nxt = self._tops_history.redo(wid, current)
+        if nxt is None:
+            return False
+        save_tops_for_well(self._workspace, wid, nxt)
+        self._selected_well_id = wid
+        self._apply_tops_to_ui(wid, nxt, [])
+        self._sync_apply_enabled()
+        return True
+
+    def _commit_tops_edit(
+        self,
+        well_id: str,
+        new_tops: list[FormationTop],
+        diagnostics: list[str] | None = None,
+    ) -> None:
+        """Single write path for tops: history → tops.json → UI/engine refresh.
+
+        Does not mutate curve buffers. Engine markers update via multi-track
+        resubmit when the engine canvas is primary (#294 / T6).
+        """
+        if self._workspace is None:
+            raise WorkspaceError("请先打开工区")
+        before, _ = load_tops_for_well(self._workspace, well_id)
+        self._tops_history.record_before_commit(well_id, before)
+        save_tops_for_well(self._workspace, well_id, new_tops)
+        self._selected_well_id = well_id
+        self._apply_tops_to_ui(well_id, new_tops, list(diagnostics or []))
+        self._sync_apply_enabled()
 
     def _load_and_apply_tops(self, well_id: str | None) -> list[FormationTop]:
         if self._workspace is None or not well_id:
@@ -2452,6 +2580,71 @@ class WellLogWorkstationWindow(QMainWindow):
             QMessageBox.warning(self, "添加层位失败", str(exc))
         except OSError as exc:
             QMessageBox.warning(self, "添加层位失败", str(exc))
+
+    def _selected_top_key(self) -> str | None:
+        item = self.tops_list.currentItem()
+        if item is None:
+            return None
+        key = item.data(Qt.ItemDataRole.UserRole)
+        return str(key) if key else None
+
+    def _on_undo_tops(self) -> None:
+        if not self.undo_tops_edit():
+            self.statusBar().showMessage("无可撤销的层位编辑", 3000)
+            return
+        self.statusBar().showMessage("已撤销层位编辑", 3000)
+
+    def _on_redo_tops(self) -> None:
+        if not self.redo_tops_edit():
+            self.statusBar().showMessage("无可重做的层位编辑", 3000)
+            return
+        self.statusBar().showMessage("已重做层位编辑", 3000)
+
+    def _on_remove_top(self) -> None:
+        if self._selected_well_id is None:
+            return
+        key = self._selected_top_key()
+        if not key:
+            QMessageBox.information(self, "删除层位", "请先在层位列表中选择一项。")
+            return
+        try:
+            if not self.remove_top_by_id(self._selected_well_id, key):
+                QMessageBox.information(self, "删除层位", "未找到选中层位。")
+                return
+            self.statusBar().showMessage("已删除层位", 3000)
+        except (TopsError, WorkspaceError, OSError) as exc:
+            QMessageBox.warning(self, "删除层位失败", str(exc))
+
+    def _on_edit_top_depth(self) -> None:
+        if self._selected_well_id is None:
+            return
+        key = self._selected_top_key()
+        if not key:
+            QMessageBox.information(self, "修改深度", "请先在层位列表中选择一项。")
+            return
+        current = next(
+            (t for t in self._active_tops if (t.id or t.name) == key),
+            None,
+        )
+        default = float(current.depth) if current is not None else 0.0
+        depth, ok = QInputDialog.getDouble(
+            self,
+            "修改层位深度",
+            "新深度：",
+            default,
+            -1e7,
+            1e7,
+            3,
+        )
+        if not ok:
+            return
+        try:
+            top = self.set_top_depth(self._selected_well_id, key, depth)
+            self.statusBar().showMessage(
+                f"已更新 {top.name} → {top.depth:.3f}", 4000
+            )
+        except (TopsError, WorkspaceError, OSError) as exc:
+            QMessageBox.warning(self, "修改深度失败", str(exc))
 
     def _on_add_top_by_depth(self) -> None:
         if self._selected_well_id is None or self._presentation is None:
