@@ -6,6 +6,8 @@ status: accepted
 
 PDF 导出后端由引擎自写的极简写入器生成，不引入第三方 PDF 库；仅新增 zlib（FlateDecode 流压缩）依赖。字体通过字形轮廓转矢量路径嵌入，不做子集化。输出按构造确定性（无 CreationDate/ModDate/ID）。
 
+> **B1 修订指针（不废止本 ADR）**：默认路径仍为轮廓字不可搜索（Desktop B0 披露）。**可搜索 PDF** 为显式可选模式，见 **ADR 0053**；不得将本 ADR 的默认语义静默改为可搜索。
+
 ## 背景
 
 rendering.md / #156 要求从 Export Snapshot 输出物理比例准确的 PDF/SVG，覆盖曲线、区间、Pattern、Unicode 文本、Custom Layer 与源栅格图像，并支持长页与分页。PRD #143 的"实现前必须关闭的具体项"列出"PDF 实现库及字体子集方案"需经技术 Spike 定案。本 ADR 落实 #185 Spike 的结论。

@@ -244,10 +244,13 @@ page_depth_span = printable_height * N
 
 ## 11. CGM
 
-CGM 不在首期。若企业交换需求得到确认，应作为独立 Export Backend：
+CGM **不在 Desktop 导出 B0**。导出 **B1** 将其作为独立 Export Backend（**ADR 0054**）：
 
-- 消费 Prepared Scene；
-- 定义字体、Pattern、裁切和透明度降级策略；
-- 具有独立一致性测试；
+- 消费 Prepared Scene + Export Snapshot；
+- 自研 CGM Version 3 Binary 子集写入器（非默第三方 SDK）；
+- 定义字体、Pattern、裁切和透明度降级策略，并写出 Diagnostic；
+- 具有独立一致性测试；实现前不得宣称已支持；
 - 不修改 Core/Scene 语义。
+
+可搜索 PDF 可选路径见 **ADR 0053**（默认轮廓 PDF 仍为 ADR 0047）。
 

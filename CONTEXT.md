@@ -86,8 +86,8 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 _Avoid_: WellPlot Desktop 与 Workstation 当成两套长期分叉产品
 - **Layered Log Truth（分层测井真源）**: 文档与修订的权威在 WellLog Document 与 Data Patch；运行时样点以引擎不可变自有缓冲区为准；Apache Arrow 是跨语言零拷贝交换边界，不是强制唯一运行时内存载体。
 _Avoid_: “Arrow 是唯一运行时真源”作为 phase-one 实现描述
-- **Export B0 / B1（导出分期验收）**: **B0 首发门禁已兑现**（单井引擎 SVG/PDF/PNG、连井矢量/PNG、打印预览骨架、引擎 PDF 不可搜索披露、单井几何金标子集、可安装 Desktop）。B1 仍为愿景全量（CGM、可搜索 PDF、0.1 mm 全矩阵与完整 WYSIWYG；占位 #304），实施前须新 ADR。
-_Avoid_: 在未选型时宣称已支持 CGM；把 B1 绑死在已发布的 B0 安装包
+- **Export B0 / B1（导出分期验收）**: **B0 首发门禁已兑现**（单井引擎 SVG/PDF/PNG、连井矢量/PNG、打印预览骨架、引擎 PDF 不可搜索披露、单井几何金标子集、可安装 Desktop）。**B1 选型 ADR 已闭合**：可搜索 PDF 为显式可选模式（ADR 0053，默认仍 0047 轮廓字）；CGM 为独立后端自研子集（ADR 0054）；实现与 0.1 mm 全矩阵见 #304 切片，未实现前不得宣称支持。
+_Avoid_: 在未实现时宣称已支持 CGM 或引擎 PDF 默认可搜索；把 B1 绑死在 B0 安装包同一版本
 - **Engine Vector Exporters（引擎矢量导出器）**: well-log-engine 的 C++ SVG（物理分页）/PDF/PNG/TIFF 导出器，输入为 `PreparedScene + ExportSnapshot`，可无头纯 CPU 运行。Stage 1 已为单井提供 Python 绑定（`export_scene_svg` / `export_scene_pdf`）及宿主 `backend="engine"` 路由；对比图与剖面图场景通路仍按 ADR 0052 后续 Stage。引擎 PDF 为字形轮廓、默认不可搜索（ADR 0047）。
 _Avoid_: 假设全部六类图件已走引擎导出；忽略 PDF 不可搜索披露
 
