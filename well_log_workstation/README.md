@@ -56,12 +56,15 @@ Depth viewport (host): **scroll wheel zoom**, **drag pan**, **double-click** res
 - **图件 → 新建单井分析图…** — writes `plots/<id>.json` + catalog entry, opens multi-track view  
 - **Double-click** a plot under 图件 in the left tree — reloads well from `wells/` and re-applies template
 
-### 导出 SVG/PDF (#221)
+### 导出 SVG/PDF/PNG (#221, B0 #299/#300)
 
-With an active multi-track presentation (apply template or open 单井分析图):
+| 图件 | SVG | PDF | PNG | 后端 |
+|---|---|---|---|---|
+| **单井分析图** | ✓ | ✓ | ✓ | **默认引擎**（有 WellLogEngine 时）；失败回退 Qt paint。引擎 PDF 文字不可搜索（导出前会提示，ADR 0047） |
+| **地层对比图** | ✓ | ✓ | ✓ | **Qt paint**（多列 + 连线）；PNG 优先抓取对比画布（含拉平/连线） |
+| 其他类型 | 视类型 | 视类型 | 视类型 | 见 `export_dispatch.py` |
 
-- **导出 → 导出 SVG…** / **导出 PDF…**
-- Host paints the same multi-track layout via Qt `QSvgGenerator` / `QPdfWriter` (engine scene export lands later)
+菜单：**导出 → 导出 SVG… / PDF… / PNG…**（有活动单井或对比图时启用）。
 
 ### 地层对比图-lite (#222)
 

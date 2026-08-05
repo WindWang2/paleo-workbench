@@ -228,6 +228,52 @@ def test_engine_route_missing_view_raises(
         )
 
 
+def test_correlation_export_svg_and_png(qtbot, tmp_path: Path) -> None:
+    """T12 / #300: correlation exports vector SVG + PNG nonempty."""
+    from well_log_workstation.tops_model import FormationTop, save_tops_for_well
+
+    ws = create_workspace(tmp_path / "corr-exp", name="CorrExp")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "c1.las", well="C1"))
+    id2 = win.import_las_path(_write_las(tmp_path / "c2.las", well="C2"))
+    save_tops_for_well(
+        ws, id1, [FormationTop(name="T1", depth=1001.0, id="a1")]
+    )
+    save_tops_for_well(
+        ws, id2, [FormationTop(name="T1", depth=1001.5, id="a2")]
+    )
+    win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    assert len(win._correlation_presentations) >= 2
+
+    svg = win.export_active_correlation(tmp_path / "corr.svg", "svg")
+    pdf = win.export_active_correlation(tmp_path / "corr.pdf", "pdf")
+    png = win.export_active_correlation(tmp_path / "corr.png", "png")
+
+    assert svg.is_file() and svg.stat().st_size >= 50
+    text = svg.read_text(encoding="utf-8", errors="replace").lower()
+    assert "svg" in text
+    assert pdf.is_file() and pdf.read_bytes()[:4] == b"%PDF"
+    assert png.is_file() and png.stat().st_size >= 50
+    # PNG magic
+    assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_correlation_export_menu_enabled(qtbot, tmp_path: Path) -> None:
+    """Export actions enable when a correlation plot is active."""
+    ws = create_workspace(tmp_path / "corr-m", name="CorrM")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    id1 = win.import_las_path(_write_las(tmp_path / "m1.las", well="M1"))
+    id2 = win.import_las_path(_write_las(tmp_path / "m2.las", well="M2"))
+    win.create_correlation_plot_document([id1, id2], "std-gr-rt-den")
+    assert win._act_export_svg.isEnabled()
+    assert win._act_export_pdf.isEnabled()
+    assert win._act_export_png.isEnabled()
+
+
 def test_engine_route_png_falls_back_to_qt(
     qtbot, tmp_path: Path, monkeypatch
 ) -> None:

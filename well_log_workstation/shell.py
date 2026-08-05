@@ -279,6 +279,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_pdf.setObjectName("Action_ExportPdf")
         self._act_export_pdf.triggered.connect(self._on_export_pdf)
         self._act_export_pdf.setEnabled(False)
+        self._act_export_png = export_menu.addAction("导出 PNG…")
+        self._act_export_png.setObjectName("Action_ExportPng")
+        self._act_export_png.triggered.connect(self._on_export_png)
+        self._act_export_png.setEnabled(False)
 
         tops_menu = bar.addMenu("层位")
         tops_menu.setObjectName("Menu_层位")
@@ -673,9 +677,15 @@ class WellLogWorkstationWindow(QMainWindow):
         )
         self._act_new_correlation.setEnabled(can_corr)
 
-        can_export = self._presentation is not None and self._presentation.track_count > 0
+        can_export_single = (
+            self._presentation is not None and self._presentation.track_count > 0
+        )
+        can_export_corr = len(self._correlation_presentations) >= 2
+        can_export = can_export_single or can_export_corr
         self._act_export_svg.setEnabled(can_export)
         self._act_export_pdf.setEnabled(can_export)
+        if hasattr(self, "_act_export_png"):
+            self._act_export_png.setEnabled(can_export)
 
         can_tops = (
             self._workspace is not None
@@ -2781,7 +2791,22 @@ class WellLogWorkstationWindow(QMainWindow):
                 else:
                     kwargs["backend"] = "qt"
                     kwargs["paint_fn"] = self._paint_active_plot
-            elif plot.type in ("correlation", "section"):
+            elif plot.type == "correlation":
+                # B0 (#300): Qt paint for SVG/PDF; PNG prefers widget grab for
+                # links/datum fidelity, with paint_fn fallback.
+                if fmt == "png":
+                    out = self._export_correlation_png(Path(path))
+                    QMessageBox.information(
+                        self,
+                        "导出成功",
+                        f"PNG 已写入（对比图 · Qt 画布抓取）:\n{out}\n"
+                        f"大小 {out.stat().st_size} 字节",
+                    )
+                    return
+                kwargs["paint_fn"] = self._paint_active_plot
+                kwargs["backend"] = "qt"
+                backend_note = "（对比图 · Qt 矢量）"
+            elif plot.type == "section":
                 kwargs["paint_fn"] = self._paint_active_plot
             elif plot.type == "plane_map":
                 kwargs["canvas"] = self.plane_map_view._canvas
@@ -2806,18 +2831,129 @@ class WellLogWorkstationWindow(QMainWindow):
             from well_log_workstation.export_plot import _paint_presentation
             _paint_presentation(painter, self._presentation, rect)
         elif self._active_plot_type == "correlation":
-            # Correlation: paint each column side-by-side in the rect.
-            n = max(1, len(self._correlation_presentations))
-            col_w = rect.width() / n
-            from well_log_workstation.export_plot import _paint_presentation
-            for i, pres in enumerate(self._correlation_presentations):
-                sub = QRectF(
-                    rect.x() + i * col_w, rect.y(), col_w, rect.height()
-                )
-                _paint_presentation(painter, pres, sub)
+            self._paint_correlation_export(painter, rect)
         elif self._active_plot_type == "section":
             # Section: paint the section canvas into the rect.
             self.section_canvas.render(painter)
+
+    def _paint_correlation_export(self, painter, rect) -> None:
+        """Vector export for correlation: columns + links (Qt paint, B0 #300)."""
+        from well_log_workstation.export_plot import _paint_presentation
+
+        presentations = self._correlation_presentations
+        n = max(1, len(presentations))
+        gap = 6.0
+        col_w = (rect.width() - gap * (n - 1)) / n if n else rect.width()
+        for i, pres in enumerate(presentations):
+            sub = QRectF(
+                rect.x() + i * (col_w + gap),
+                rect.y(),
+                col_w,
+                rect.height(),
+            )
+            _paint_presentation(painter, pres, sub)
+        # Overlay horizon links in shared display depth if available
+        links = self._correlation_links
+        if not links or n < 2:
+            return
+        from PySide6.QtGui import QColor, QPen
+
+        # Approximate shared depth band (middle 80% of column height)
+        top = rect.y() + rect.height() * 0.12
+        bottom = rect.y() + rect.height() * 0.92
+        # Collect depth ranges from presentations
+        import numpy as np
+
+        shifts = self.correlation_canvas.depth_shifts()
+        d0s: list[float] = []
+        d1s: list[float] = []
+        for pres in presentations:
+            depth = np.asarray(pres.depth, dtype=np.float64)
+            if depth.size:
+                s = float(shifts.get(pres.well_document_id, 0.0))
+                d0s.append(float(np.nanmin(depth)) + s)
+                d1s.append(float(np.nanmax(depth)) + s)
+        if not d0s:
+            return
+        d0, d1 = min(d0s), max(d1s)
+        if d1 <= d0:
+            return
+        id_to_i = {p.well_document_id: i for i, p in enumerate(presentations)}
+
+        def y_of(d_disp: float) -> float:
+            return top + ((d_disp - d0) / (d1 - d0)) * (bottom - top)
+
+        for link in links:
+            li = id_to_i.get(link.left_well_id)
+            ri = id_to_i.get(link.right_well_id)
+            if li is None or ri is None:
+                continue
+            ld = float(link.left_depth) + float(
+                shifts.get(link.left_well_id, 0.0)
+            )
+            rd = float(link.right_depth) + float(
+                shifts.get(link.right_well_id, 0.0)
+            )
+            x_l = rect.x() + li * (col_w + gap) + col_w - 4
+            x_r = rect.x() + ri * (col_w + gap) + 4
+            painter.setPen(QPen(QColor(link.color or "#c0392b"), 1.2))
+            painter.drawLine(
+                int(x_l), int(y_of(ld)), int(x_r), int(y_of(rd))
+            )
+
+    def export_active_correlation(
+        self, path: Path | str, fmt: ExportFormat
+    ) -> Path:
+        """Export active correlation plot to SVG/PDF/PNG (B0 #300).
+
+        Backend: **Qt paint** for SVG/PDF (host multi-column + links);
+        **PNG** via correlation canvas grab when possible.
+        """
+        if self._workspace is None or not self._active_plot_id:
+            raise ExportError("请先打开地层对比图")
+        if len(self._correlation_presentations) < 2:
+            raise ExportError("对比图至少需要 2 口井")
+        plot = load_plot_document(self._workspace, self._active_plot_id)
+        if plot.type != "correlation":
+            raise ExportError("当前图件不是对比图")
+        out = Path(path)
+        if fmt == "png":
+            return self._export_correlation_png(out)
+        return export_plot(
+            plot,
+            fmt,
+            path=str(out),
+            page_spec=PageSpec(),
+            backend="qt",
+            paint_fn=self._paint_active_plot,
+        )
+
+    def _export_correlation_png(self, path: Path) -> Path:
+        """Raster export of the correlation canvas (links + datum included)."""
+        from PySide6.QtGui import QImage
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canvas = self.correlation_canvas
+        # Ensure visible size for grab
+        if canvas.width() < 100 or canvas.height() < 100:
+            canvas.resize(960, 720)
+        img = canvas.grab().toImage()
+        if img.isNull() or img.width() < 2:
+            # Fallback: paint into pixmap via export_plot path
+            plot = load_plot_document(self._workspace, self._active_plot_id)  # type: ignore[arg-type]
+            return export_plot(
+                plot,
+                "png",
+                path=str(path),
+                page_spec=PageSpec(),
+                paint_fn=self._paint_active_plot,
+            )
+        if not img.save(str(path), "PNG"):
+            raise ExportError(f"无法保存 PNG: {path}")
+        if not path.is_file() or path.stat().st_size < 50:
+            raise ExportError("PNG 导出为空")
+        return path
 
     def _on_export_svg(self) -> None:
         self._export_active_plot("svg")
@@ -2825,6 +2961,8 @@ class WellLogWorkstationWindow(QMainWindow):
     def _on_export_pdf(self) -> None:
         self._export_active_plot("pdf")
 
+    def _on_export_png(self) -> None:
+        self._export_active_plot("png")
     def _on_import_tops(self) -> None:
         if self._selected_well_id is None or self._workspace is None:
             QMessageBox.information(self, "导入层位", "请先选择一口井。")
