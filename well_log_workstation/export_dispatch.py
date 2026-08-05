@@ -36,6 +36,26 @@ class UnsupportedFormatError(ExportError):
     """Raised when a plot type cannot produce the requested format (T8)."""
 
 
+# ADR 0047 / ADR 0021 (T6 / #278): the engine PDF backend emits text as
+# glyph outlines (non-searchable) — a regression vs the Qt QPdfWriter path,
+# whose text is searchable. The host UI MUST surface this disclosure when
+# the user selects the engine PDF backend, and keep Qt paint as the default
+# where searchable text matters (ADR 0021 explicit pure-vector vs mixed
+# choice). This is the disclosure contract; the actual UI widget wiring is
+# the host's responsibility.
+ENGINE_PDF_NONSEARCHABLE_DISCLOSURE = (
+    "引擎 PDF 后端将文字渲染为字形轮廓，不可搜索/不可复制"
+    "（相对 Qt PDF 路径的倒退，ADR 0047）。如需可搜索文本，请使用 Qt paint 后端。"
+)
+
+
+def engine_pdf_needs_disclosure(backend: ExportBackend, fmt: ExportFormat) -> bool:
+    """True iff the selected backend+format requires the non-searchable-text
+    disclosure (T6 / #278). The host UI calls this to decide whether to warn
+    before routing an export through the engine PDF path."""
+    return backend == "engine" and fmt == "pdf"
+
+
 @dataclass(frozen=True)
 class PageSpec:
     """Export page specification (host-side pagination; ADR 0039 mm units)."""

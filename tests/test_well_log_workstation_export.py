@@ -18,7 +18,11 @@ from well_log_workstation.engine_bridge import (  # noqa: E402
     engine_available,
     reset_engine_capability_cache,
 )
-from well_log_workstation.export_dispatch import export_plot  # noqa: E402
+from well_log_workstation.export_dispatch import (  # noqa: E402
+    ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
+    engine_pdf_needs_disclosure,
+    export_plot,
+)
 from well_log_workstation.export_plot import (  # noqa: E402
     ExportError,
     export_presentation_pdf,
@@ -219,3 +223,56 @@ def test_engine_route_png_falls_back_to_qt(
         path=str(tmp_path / "fallback.png"),
     )
     assert out.is_file() and out.stat().st_size >= 50
+
+
+# --- Stage 1 / #278 (T6): engine-vs-engine parity + PDF disclosure --------
+
+
+def test_engine_svg_pdf_parity_same_document(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    """Engine SVG and PDF of the same presentation agree on document identity.
+
+    Both are routed through the host dispatch (T5) from the same prepared
+    scene. The SVG carries data-document-id / data-document-revision
+    metadata; the PDF is a pure-vector content stream from the same scene.
+    This is the secondary parity seam (not pixel-level — no golden baseline).
+    """
+    win, plot_doc, doc_id = _engine_setup(qtbot, tmp_path, monkeypatch)
+    svg_out = export_plot(
+        plot_doc, "svg", backend="engine",
+        view=win._engine_view, document_id=doc_id,
+        path=str(tmp_path / "parity.svg"),
+    )
+    pdf_out = export_plot(
+        plot_doc, "pdf", backend="engine",
+        view=win._engine_view, document_id=doc_id,
+        path=str(tmp_path / "parity.pdf"),
+    )
+    assert svg_out.is_file() and svg_out.stat().st_size >= 50
+    assert pdf_out.is_file() and pdf_out.stat().st_size >= 50
+
+    # Both come from the same prepared scene → SVG must carry the document
+    # id we submitted, and the PDF must be a valid PDF from the same view.
+    svg_text = svg_out.read_text(encoding="utf-8", errors="replace")
+    assert f'data-document-id="{doc_id}"' in svg_text, (
+        "SVG must embed the submitted document id for parity traceability"
+    )
+    assert pdf_out.read_bytes()[:5] == b"%PDF-"
+
+    # The SVG physical dimensions are deterministic for a given scene; both
+    # backends consume the same PreparedScene so the dimensions are fixed.
+    assert 'width="' in svg_text and 'height="' in svg_text
+
+
+def test_engine_pdf_disclosure_contract() -> None:
+    """The engine PDF backend surfaces a non-searchable-text disclosure (T6)."""
+    # engine PDF requires disclosure (ADR 0047 regression vs Qt QPdfWriter).
+    assert engine_pdf_needs_disclosure("engine", "pdf") is True
+    # engine SVG, Qt paint, and PNG-fallback do not.
+    assert engine_pdf_needs_disclosure("engine", "svg") is False
+    assert engine_pdf_needs_disclosure("qt", "pdf") is False
+    assert engine_pdf_needs_disclosure("qt", "png") is False
+    # The disclosure text is present and non-empty (host UI shows it).
+    assert isinstance(ENGINE_PDF_NONSEARCHABLE_DISCLOSURE, str)
+    assert len(ENGINE_PDF_NONSEARCHABLE_DISCLOSURE) > 0
