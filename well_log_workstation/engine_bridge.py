@@ -315,8 +315,19 @@ def presentation_to_multi_track_payload(
     presentation: HostPresentation,
     *,
     tops: list[FormationTop] | None = None,
+    intervals: list[dict[str, Any]] | None = None,
+    patterns: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build ``submit_multi_track`` payload from a host multi-track presentation."""
+    """Build ``submit_multi_track`` payload from a host multi-track presentation.
+
+    ``intervals`` (T4 / #276) is an optional list of depth-span dicts each
+    shaped ``{id, top_depth, bottom_depth, fill_color?, pattern_id?, label?}``;
+    ``patterns`` an optional list of vector-tile pattern dicts
+    ``{id, tile_width_mm, tile_height_mm, foreground?, background?, primitives?}``.
+    Both are passed through to the engine so exports match the screen's
+    interval/pattern fills. The host sources these from the section view's
+    TieQuad2D fills or other interval providers.
+    """
     depth = _readonly_f64(np.asarray(presentation.depth, dtype=np.float64))
     if depth.size < 2:
         raise EngineSubmitError("深度样本不足")
@@ -408,6 +419,21 @@ def presentation_to_multi_track_payload(
             )
         if markers:
             payload["markers"] = markers
+    if intervals:
+        payload["intervals"] = [
+            {
+                "id": iv["id"],
+                "top_depth": float(iv["top_depth"]),
+                "bottom_depth": float(iv["bottom_depth"]),
+                **({"fill_color": iv["fill_color"]} if iv.get("fill_color") else {}),
+                **({"pattern_id": iv["pattern_id"]} if iv.get("pattern_id") else {}),
+                **({"label": iv["label"]} if iv.get("label") else {}),
+            }
+            for iv in intervals
+            if iv.get("id") and float(iv.get("bottom_depth", 0)) > float(iv.get("top_depth", 0))
+        ]
+    if patterns:
+        payload["patterns"] = patterns
     return payload
 
 

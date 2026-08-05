@@ -58,19 +58,19 @@
                 </inject-code>
             </add-function>
             <add-function
-                signature="export_scene_svg(QString@document_id@)"
+                signature="export_scene_svg(QString@document_id@,unsigned int@export_pixel_height@=0)"
                 return-type="PyObject*"
             >
                 <inject-code class="target" position="beginning">
-                    %PYARG_0 = welllog::python::export_scene_svg(%CPPSELF, %1);
+                    %PYARG_0 = welllog::python::export_scene_svg(%CPPSELF, %1, %2);
                 </inject-code>
             </add-function>
             <add-function
-                signature="export_scene_pdf(QString@document_id@)"
+                signature="export_scene_pdf(QString@document_id@,unsigned int@export_pixel_height@=0)"
                 return-type="PyObject*"
             >
                 <inject-code class="target" position="beginning">
-                    %PYARG_0 = welllog::python::export_scene_pdf(%CPPSELF, %1);
+                    %PYARG_0 = welllog::python::export_scene_pdf(%CPPSELF, %1, %2);
                 </inject-code>
             </add-function>
         </object-type>

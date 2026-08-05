@@ -4593,6 +4593,87 @@ WellLogSession::prepared_scene(EntityId document_id) const noexcept {
   return found == impl_->prepared_scenes.end() ? nullptr : found->second;
 }
 
+Result<PreparedScene> WellLogSession::prepare_for_export(
+    EntityId document_id, std::uint32_t aggregate_pixel_height) noexcept {
+  try {
+    const auto document = impl_->documents.find(document_id);
+    if (document == impl_->documents.end()) {
+      return Error{
+          .code = ErrorCode::document_not_found,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::presentation_document_missing,
+          .arguments = {},
+      };
+    }
+    const auto presentation = impl_->presentations.find(document_id);
+    if (presentation == impl_->presentations.end()) {
+      return Error{
+          .code = ErrorCode::invalid_presentation,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::presentation_document_missing,
+          .arguments = {},
+      };
+    }
+    const auto depth_range = presentation->second.reference_depth_range();
+    const auto preparation = impl_->preparations.find(document_id);
+    const bool lods_ready =
+        preparation != impl_->preparations.end() &&
+        preparation->second.state == PreparationState::ready &&
+        preparation->second.pyramids != nullptr;
+    {
+      const auto text_guard =
+          impl_->text_engine == nullptr
+              ? std::unique_lock<std::mutex>{}
+              : std::unique_lock<std::mutex>{impl_->text_engine_mutex};
+      if (lods_ready) {
+        // Prepare at the requested export density using the document's LOD
+        // pyramids so fixed-page pagination resolves the correct per-page
+        // curve detail (T3 / #275). Full document depth, no prefetch.
+        const CurveLodQuery query{
+            .viewport_top = depth_range.top,
+            .viewport_bottom = depth_range.bottom,
+            .pixel_height = aggregate_pixel_height,
+            .prefetch_viewports = 0.0,
+        };
+        const ImagePyramidQuery image_query{
+            .viewport_top = depth_range.top,
+            .viewport_bottom = depth_range.bottom,
+            .pixel_height = static_cast<double>(aggregate_pixel_height),
+            .prefetch_viewports = 0.0,
+        };
+        const auto &image_pyramids =
+            preparation->second.image_pyramids
+                ? *preparation->second.image_pyramids
+                : detail::ScenePreparer::ImagePyramidMap{};
+        return detail::ScenePreparer::prepare(
+            *document->second, presentation->second,
+            *preparation->second.pyramids, query, image_pyramids, image_query,
+            {}, impl_->text_engine.get());
+      }
+      // No LOD pyramids yet: density has no effect on raw-sample emission,
+      // so fall back to the no-query prepare (mirrors the interactive sync
+      // path). The export is still valid; curve detail is just unconstrained.
+      return detail::ScenePreparer::prepare(*document->second,
+                                            presentation->second,
+                                            impl_->text_engine.get());
+    }
+  } catch (const std::bad_alloc &) {
+    return Error{.code = ErrorCode::resource_exhausted,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  } catch (...) {
+    return Error{.code = ErrorCode::internal_error,
+                 .severity = Severity::error,
+                 .entity_id = std::nullopt,
+                 .message = MessageKey::internal_error,
+                 .arguments = {}};
+  }
+}
+
 std::span<const WellPlacement>
 WellLogSession::well_layout() const noexcept {
   return impl_ == nullptr ? std::span<const WellPlacement>{}
