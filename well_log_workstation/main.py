@@ -1,12 +1,14 @@
-"""Entry point: ``python -m well_log_workstation`` (#216).
+"""Entry point: ``python -m well_log_workstation`` (#216 / #290).
 
 Must configure Qt platform **before** QApplication is created.
+Product display name: WellPlot Desktop (package path unchanged).
 """
 
 from __future__ import annotations
 
 import sys
 
+from well_log_workstation.branding import ORGANIZATION_NAME, PRODUCT_NAME
 from well_log_workstation.qt_platform import configure_qt_platform_for_session
 
 
@@ -19,8 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     from well_log_workstation.shell import WellLogWorkstationWindow
 
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("Well Log Workstation")
-    app.setOrganizationName("paleo-workbench")
+    app.setApplicationName(PRODUCT_NAME)
+    app.setOrganizationName(ORGANIZATION_NAME)
 
     window = WellLogWorkstationWindow()
     window.show()

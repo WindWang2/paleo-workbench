@@ -1,7 +1,11 @@
-# Well Log Workstation
+# WellPlot Desktop
+
+**Product name:** WellPlot Desktop (epic #288 / T2 #290).  
+**Python package / entrypoint:** `well_log_workstation` (unchanged for now).
 
 Standalone **log-first** desktop product (wayfinder #207).  
-Not Paleo Workbench. Rendering uses **WellLogEngine** in later tickets.
+Formerly branded “Well Log Workstation”; same shell, product identity upgraded toward an installable Desktop (轨 D).  
+Not Paleo Workbench. Rendering uses **WellLogEngine** when available.
 
 ## Run
 
@@ -14,6 +18,8 @@ unset WLWS_FORCE_XCB
 
 python -m well_log_workstation
 ```
+
+Window title and **帮助 → 关于…** show **WellPlot Desktop**.
 
 ### Workspace (#217)
 
