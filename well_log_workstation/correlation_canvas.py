@@ -5,11 +5,12 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
 from well_log_workstation.correlation_links import HorizonLink
+from well_log_workstation.interwell_fill import build_interwell_fill_bands
 from well_log_workstation.template_model import HostPresentation
 from well_log_workstation.tops_model import FormationTop
 
@@ -43,6 +44,9 @@ class CorrelationCanvas(QWidget):
         self._column_gap: int = 6
         # Per-well display-depth shift (MD + shift = display) for datum flatten (#296).
         self._depth_shifts: dict[str, float] = {}
+        # Inter-well fill bands (#297 / T9)
+        self._show_interwell_fill: bool = False
+        self._fill_color: str = "#93c5fd80"  # light blue, semi via alpha in paint
 
     def column_gap(self) -> int:
         return self._column_gap
@@ -65,6 +69,17 @@ class CorrelationCanvas(QWidget):
 
     def _shift_for(self, well_id: str) -> float:
         return float(self._depth_shifts.get(well_id, 0.0))
+
+    def show_interwell_fill(self) -> bool:
+        return self._show_interwell_fill
+
+    def set_show_interwell_fill(self, enabled: bool) -> None:
+        self._show_interwell_fill = bool(enabled)
+        self.update()
+
+    def set_fill_color(self, color: str) -> None:
+        self._fill_color = str(color or "#93c5fd80")
+        self.update()
 
     def set_columns(
         self,
@@ -283,6 +298,10 @@ class CorrelationCanvas(QWidget):
         top, bottom = 36, h - 24
         d0, d1 = self._d0, self._d1
 
+        # Inter-well fill behind curves (#297)
+        if self._show_interwell_fill and n >= 2:
+            self._paint_interwell_fills(p, n, gap, col_w, top, bottom, d0, d1)
+
         for i, pres in enumerate(self._columns):
             x0 = 8 + i * (col_w + gap)
             well_shift = self._shift_for(pres.well_document_id)
@@ -403,17 +422,74 @@ class CorrelationCanvas(QWidget):
 
         tops_n = sum(len(t) for t in self._tops_per_column)
         links_n = len(self._links)
+        fill_n = (
+            len(build_interwell_fill_bands(self._tops_per_column))
+            if self._show_interwell_fill
+            else 0
+        )
         pick_note = (
             " · 点选连线中(先后点两井层位)"
             if self._link_pick_mode
             else " · Shift+点层位连线"
         )
+        fill_note = f" · 充填 {fill_n}" if self._show_interwell_fill else ""
         p.setPen(QColor("#555"))
         p.drawText(
             8,
             h - 6,
             f"对比-lite · {n} 井 · 共享深度 {d0:.1f}–{d1:.1f} · "
-            f"层位 {tops_n} · 连线 {links_n} · 滚轮缩放 / 拖动平移"
+            f"层位 {tops_n} · 连线 {links_n}{fill_note} · 滚轮缩放 / 拖动平移"
             f"{pick_note}",
         )
         p.end()
+
+    def _paint_interwell_fills(
+        self,
+        p: QPainter,
+        n: int,
+        gap: int,
+        col_w: int,
+        top: int,
+        bottom: int,
+        d0: float,
+        d1: float,
+    ) -> None:
+        """Paint solid fill quads between adjacent wells for shared top pairs."""
+        if d1 <= d0:
+            return
+        bands = build_interwell_fill_bands(self._tops_per_column)
+        color = QColor(self._fill_color)
+        if color.alpha() == 255:
+            color.setAlpha(96)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+
+        def y_of(d_disp: float) -> float:
+            return top + ((d_disp - d0) / (d1 - d0)) * (bottom - top)
+
+        for band in bands:
+            if band.left_col >= n or band.right_col >= n:
+                continue
+            left_id = self._columns[band.left_col].well_document_id
+            right_id = self._columns[band.right_col].well_document_id
+            ls = self._shift_for(left_id)
+            rs = self._shift_for(right_id)
+            lt = band.left_top_depth + ls
+            rt = band.right_top_depth + rs
+            lb = band.left_bottom_depth + ls
+            rb = band.right_bottom_depth + rs
+            # Skip if fully outside viewport
+            if max(lt, rt, lb, rb) < d0 or min(lt, rt, lb, rb) > d1:
+                continue
+            x_l = 8 + band.left_col * (col_w + gap) + col_w - 2
+            x_r = 8 + band.right_col * (col_w + gap) + 2
+            poly = QPolygonF(
+                [
+                    QPointF(x_l, y_of(lt)),
+                    QPointF(x_r, y_of(rt)),
+                    QPointF(x_r, y_of(rb)),
+                    QPointF(x_l, y_of(lb)),
+                ]
+            )
+            p.drawPolygon(poly)
+        p.setBrush(Qt.BrushStyle.NoBrush)

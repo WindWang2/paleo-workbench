@@ -74,6 +74,9 @@ class PlotDocument:
     # Correlation display datum (#296 / T8): md | tvdss | horizon.
     datum_mode: str = "md"
     datum_horizon: str | None = None
+    # Inter-well fill MVP (#297 / T9)
+    show_interwell_fill: bool = False
+    interwell_fill_color: str = "#93c5fd"
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -124,6 +127,11 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
         payload["datum_mode"] = str(doc.datum_mode or "md")
         if doc.datum_horizon:
             payload["datum_horizon"] = str(doc.datum_horizon)
+    if doc.type == "correlation" or doc.show_interwell_fill:
+        payload["show_interwell_fill"] = bool(doc.show_interwell_fill)
+        payload["interwell_fill_color"] = str(
+            doc.interwell_fill_color or "#93c5fd"
+        )
     return payload
 
 
@@ -202,6 +210,8 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     datum_horizon = str(raw_h).strip() if raw_h else None
     if datum_horizon == "":
         datum_horizon = None
+    show_interwell_fill = bool(data.get("show_interwell_fill", False))
+    interwell_fill_color = str(data.get("interwell_fill_color") or "#93c5fd")
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -217,6 +227,8 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         column_gap_px=column_gap_px,
         datum_mode=datum_mode,
         datum_horizon=datum_horizon,
+        show_interwell_fill=show_interwell_fill,
+        interwell_fill_color=interwell_fill_color,
     )
 
 
@@ -291,6 +303,8 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             column_gap_px=doc.column_gap_px,
             datum_mode=doc.datum_mode,
             datum_horizon=doc.datum_horizon,
+            show_interwell_fill=doc.show_interwell_fill,
+            interwell_fill_color=doc.interwell_fill_color,
         )
     # Lazy import: keep this module importable without PySide6 (see save).
     from well_log_workstation.events import restore_plot_revision

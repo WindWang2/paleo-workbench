@@ -623,6 +623,18 @@ class WellLogWorkstationWindow(QMainWindow):
         self.corr_undo_btn.clicked.connect(self._on_correlation_layout_undo)
         self.corr_undo_btn.setEnabled(False)
         layout.addWidget(self.corr_undo_btn)
+        self.corr_fill_check = QCheckBox("显示井间充填")
+        self.corr_fill_check.setObjectName("CorrelationInterwellFill")
+        self.corr_fill_check.toggled.connect(self._on_correlation_fill_toggled)
+        layout.addWidget(self.corr_fill_check)
+        self.corr_refresh_btn = QPushButton("刷新对比图（层位）")
+        self.corr_refresh_btn.setObjectName("Button_RefreshCorrelationTops")
+        self.corr_refresh_btn.setToolTip(
+            "从磁盘重载各井层位并更新连线深度/充填/拉平。"
+            "单井层位编辑后会自动刷新；此按钮为显式重载。"
+        )
+        self.corr_refresh_btn.clicked.connect(self._on_refresh_correlation_tops)
+        layout.addWidget(self.corr_refresh_btn)
         self._corr_layout_guard = False
         self._corr_layout_undo: list[dict[str, Any]] = []
         self._set_correlation_layout_enabled(False)
@@ -1198,15 +1210,10 @@ class WellLogWorkstationWindow(QMainWindow):
                 self._sync_primary_single_well_surface()
         elif well_id is None:
             self.multi_track_canvas.set_tops(None)
-        # Correlation: refresh tops for all columns if open
+        # Correlation: auto-refresh tops/links/fill when a correlation plot
+        # is loaded (T10 strategy: automatic on tops commit).
         if self._correlation_presentations and self._workspace is not None:
-            tops_cols: list[list[FormationTop]] = []
-            for pres in self._correlation_presentations:
-                t, _ = load_tops_for_well(
-                    self._workspace, pres.well_document_id
-                )
-                tops_cols.append(t)
-            self.correlation_canvas.set_tops_per_column(tops_cols)
+            self.refresh_correlation_from_sources(reason="auto")
         self._sync_apply_enabled()
         self._update_status()
 
@@ -1525,6 +1532,12 @@ class WellLogWorkstationWindow(QMainWindow):
         gap = getattr(plot, "column_gap_px", 6) or 6
         self.correlation_canvas.set_column_gap(gap)
         self.correlation_canvas.set_columns(presentations, tops_cols, links)
+        self.correlation_canvas.set_show_interwell_fill(
+            bool(getattr(plot, "show_interwell_fill", False))
+        )
+        self.correlation_canvas.set_fill_color(
+            str(getattr(plot, "interwell_fill_color", None) or "#93c5fd")
+        )
         self._apply_correlation_datum_shifts(plot, presentations, tops_cols)
         self._refresh_links_list()
         self._refresh_correlation_well_list(plot)
@@ -1728,6 +1741,9 @@ class WellLogWorkstationWindow(QMainWindow):
             self.corr_undo_btn.setEnabled(
                 enabled and bool(self._corr_layout_undo)
             )
+        if hasattr(self, "corr_fill_check"):
+            self.corr_fill_check.setEnabled(enabled)
+            self.corr_refresh_btn.setEnabled(enabled)
 
     def _refresh_correlation_well_list(self, plot: PlotDocument | None = None) -> None:
         """Fill well-order list for active correlation plot (#295)."""
@@ -1762,6 +1778,10 @@ class WellLogWorkstationWindow(QMainWindow):
                 self.corr_datum_mode.setCurrentIndex(idx if idx >= 0 else 0)
                 self.corr_datum_horizon.setText(
                     str(getattr(plot, "datum_horizon", None) or "")
+                )
+            if hasattr(self, "corr_fill_check"):
+                self.corr_fill_check.setChecked(
+                    bool(getattr(plot, "show_interwell_fill", False))
                 )
         finally:
             self._corr_layout_guard = False
@@ -1972,6 +1992,114 @@ class WellLogWorkstationWindow(QMainWindow):
             self.statusBar().showMessage("无可撤销的对比布局编辑", 3000)
             return
         self.statusBar().showMessage("已撤销连线/拉平/井序编辑", 3000)
+
+    def refresh_correlation_from_sources(self, *, reason: str = "manual") -> None:
+        """Reload tops for open correlation columns; update links & fill (T10).
+
+        **Strategy (documented):**
+
+        - **auto** — invoked after single-well tops commits (add/remove/move/
+          stub/import/undo/redo) when a correlation plot is loaded.
+        - **manual** — 右栏「刷新对比图（层位）」button for explicit reload.
+
+        Does not re-run auto-match of *new* links; only refreshes depths of
+        existing links that still have matching top names, and repaints fills.
+        """
+        if self._workspace is None or not self._correlation_presentations:
+            return
+        tops_cols: list[list[FormationTop]] = []
+        for pres in self._correlation_presentations:
+            t, _ = load_tops_for_well(self._workspace, pres.well_document_id)
+            tops_cols.append(t)
+        self.correlation_canvas.set_tops_per_column(tops_cols)
+
+        # Update link depths from current tops (by name match)
+        tops_by_well: dict[str, dict[str, FormationTop]] = {}
+        for i, pres in enumerate(self._correlation_presentations):
+            tops_by_well[pres.well_document_id] = {
+                t.name.strip(): t for t in tops_cols[i] if t.name.strip()
+            }
+        updated_links: list[HorizonLink] = []
+        for lk in self._correlation_links:
+            left_map = tops_by_well.get(lk.left_well_id, {})
+            right_map = tops_by_well.get(lk.right_well_id, {})
+            lt = left_map.get(lk.name.strip())
+            rt = right_map.get(lk.name.strip())
+            if lt is None or rt is None:
+                # Drop links whose tops vanished
+                continue
+            updated_links.append(
+                HorizonLink(
+                    id=lk.id,
+                    left_well_id=lk.left_well_id,
+                    right_well_id=lk.right_well_id,
+                    name=lk.name,
+                    left_depth=float(lt.depth),
+                    right_depth=float(rt.depth),
+                    left_marker_id=lt.id or lk.left_marker_id,
+                    right_marker_id=rt.id or lk.right_marker_id,
+                    color=lk.color,
+                )
+            )
+        self._correlation_links = updated_links
+        self.correlation_canvas.set_links(updated_links)
+        self._refresh_links_list()
+
+        # Re-apply datum + keep fill flag
+        if self._active_plot_id and self._active_plot_type == "correlation":
+            try:
+                plot = load_plot_document(self._workspace, self._active_plot_id)
+            except WorkspaceError:
+                plot = None
+            if plot is not None:
+                self._apply_correlation_datum_shifts(
+                    plot, self._correlation_presentations, tops_cols
+                )
+                self.correlation_canvas.set_show_interwell_fill(
+                    bool(plot.show_interwell_fill)
+                )
+                # Persist updated link depths (auto path only if links changed)
+                if reason == "auto" and plot.links != updated_links:
+                    plot.links = list(updated_links)
+                    try:
+                        save_plot_document(self._workspace, plot)
+                    except WorkspaceError:
+                        pass
+        if reason == "manual":
+            self.statusBar().showMessage(
+                f"已刷新对比图层位（{sum(len(t) for t in tops_cols)} 个标记 · "
+                f"{len(updated_links)} 条连线）",
+                4000,
+            )
+        if (
+            self._prefer_engine_canvas
+            and self._active_plot_type == "correlation"
+        ):
+            self._sync_primary_correlation_surface()
+
+    def _on_refresh_correlation_tops(self) -> None:
+        self.refresh_correlation_from_sources(reason="manual")
+
+    def _on_correlation_fill_toggled(self, checked: bool = False) -> None:
+        if self._corr_layout_guard:
+            return
+        enabled = self.corr_fill_check.isChecked()
+        self.correlation_canvas.set_show_interwell_fill(enabled)
+        if (
+            self._workspace is None
+            or self._active_plot_type != "correlation"
+            or not self._active_plot_id
+        ):
+            return
+        try:
+            plot = load_plot_document(self._workspace, self._active_plot_id)
+        except WorkspaceError:
+            return
+        plot.show_interwell_fill = enabled
+        try:
+            save_plot_document(self._workspace, plot)
+        except WorkspaceError:
+            pass
 
     def auto_link_correlation_tops(self) -> list[HorizonLink]:
         """Match tops by name across adjacent wells; persist on active plot."""
