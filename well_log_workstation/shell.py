@@ -123,6 +123,8 @@ from well_log_workstation.tops_model import (
     make_stub_tops,
     save_tops_for_well,
 )
+from well_log_workstation.recent_workspaces import add_recent, remove_recent
+from well_log_workstation.startup_page import StartupPage
 from well_log_workstation.workspace import (
     Workspace,
     WorkspaceError,
@@ -331,10 +333,19 @@ class WellLogWorkstationWindow(QMainWindow):
         act_about.triggered.connect(self._on_about)
 
     def _build_body(self) -> None:
-        root = QWidget()
-        root.setObjectName("ShellRoot")
-        self.setCentralWidget(root)
-        outer = QVBoxLayout(root)
+        # Stack: [0] startup welcome (no workspace) · [1] main L-shell (#291)
+        self._main_stack = QStackedWidget()
+        self._main_stack.setObjectName("MainStack")
+
+        self.startup_page = StartupPage()
+        self.startup_page.new_requested.connect(self._on_new_workspace)
+        self.startup_page.open_requested.connect(self._on_open_workspace)
+        self.startup_page.recent_open_requested.connect(self._on_open_recent_workspace)
+        self._main_stack.addWidget(self.startup_page)
+
+        shell_root = QWidget()
+        shell_root.setObjectName("ShellRoot")
+        outer = QVBoxLayout(shell_root)
         outer.setContentsMargins(4, 4, 4, 4)
         outer.setSpacing(4)
 
@@ -348,6 +359,10 @@ class WellLogWorkstationWindow(QMainWindow):
         split.setStretchFactor(1, 1)
         split.setStretchFactor(2, 0)
         outer.addWidget(split, 1)
+
+        self._main_stack.addWidget(shell_root)
+        self.setCentralWidget(self._main_stack)
+        self._main_stack.setCurrentIndex(0)  # cold start: welcome
 
     def _build_left(self) -> QWidget:
         pane = QWidget()
@@ -968,9 +983,20 @@ class WellLogWorkstationWindow(QMainWindow):
         self._update_status()
         if ws is not None:
             self.setWindowTitle(window_title(workspace_name=ws.name))
+            try:
+                add_recent(ws.root)
+            except OSError:
+                pass
+            if hasattr(self, "_main_stack"):
+                self._main_stack.setCurrentIndex(1)
+            if hasattr(self, "startup_page"):
+                self.startup_page.refresh_recent()
         else:
             self.setWindowTitle(window_title())
-
+            if hasattr(self, "_main_stack"):
+                self._main_stack.setCurrentIndex(0)
+            if hasattr(self, "startup_page"):
+                self.startup_page.refresh_recent()
     def import_las_path(self, las_path: Path | str) -> str:
         if self._workspace is None:
             raise WorkspaceError("请先打开或新建工区")
@@ -2402,6 +2428,34 @@ class WellLogWorkstationWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "打开工区失败", str(exc))
 
+    def _on_open_recent_workspace(self, path: str) -> None:
+        """Open a path from the startup recent list (#291)."""
+        p = Path(path).expanduser()
+        if not p.is_dir():
+            QMessageBox.warning(
+                self,
+                "无法打开",
+                f"路径不存在或不是目录：\n{path}\n\n已从最近列表移除。",
+            )
+            remove_recent(path)
+            if hasattr(self, "startup_page"):
+                self.startup_page.refresh_recent()
+            return
+        try:
+            ws = open_workspace(p)
+            self.set_workspace(ws)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "打开工区失败", str(exc))
+            # Keep in list if still a dir but invalid workspace? remove if hard fail
+            if "不存在" in str(exc) or "workspace" in str(exc).lower():
+                remove_recent(path)
+                if hasattr(self, "startup_page"):
+                    self.startup_page.refresh_recent()
+        except OSError as exc:
+            QMessageBox.warning(self, "打开工区失败", str(exc))
+            remove_recent(path)
+            if hasattr(self, "startup_page"):
+                self.startup_page.refresh_recent()
     def _on_import_las(self) -> None:
         if self._workspace is None:
             QMessageBox.information(self, "导入 LAS", "请先打开或新建工区。")
