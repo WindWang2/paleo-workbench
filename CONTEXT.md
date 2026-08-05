@@ -82,12 +82,12 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **CrossWellFenceGenerator**: A 3D curtain/fence mesh generator (`paleo_workbench/viz/geomodel/fence_generator.py`) that extracts inter-well seismic slices along multi-well trajectory paths and projects 2D correlation sections into 3D OpenGL viewports.
 - **StratigraphicCorrelationEngine**: A deepened fluent correlation engine (`paleo_workbench/viz/stratigraphic_correlation_engine.py`) unifying `WellSectionDatum`, `DTWLogMatcher`, and `FormationTopCorrelator` into an expressive pipeline.
 - **Plot Revision（图件修订）**: `well_log_workstation/events.py` 中 per-plot 的单调修订计数器，以 plot id 为键、随图件内容变更（emit）递增。它持久化于 `plots/<id>.json` 顶层字段（schema v3，ADR 0051），由宿主负责保存与恢复：保存时 bump 为新的已提交状态、加载时以 max 语义恢复（不回退）、emit 时 bump。它与引擎 DocumentRevision 是两套概念：后者由内核维护并描述引擎内文档内容版本，已通过 `WellLogView.documentChanged` 信号暴露到 Python 但本期不接线；Plot Revision 是宿主侧图件保存状态，供 `plot_changed` 信号的消费方（如未来 composite 面板按 revision 判断刷新或使 snapshot 失效）使用。
-- **WellPlot Desktop（测井桌面产品）**: 面向测井绘图的可独立安装桌面应用愿景名；当前代码基线为 `well_log_workstation`（独立 QApplication 壳），产品化路径是将其升格为 Desktop 发行物（安装包、启动页、升级卸载），而非另起第二套画布实现。Paleo Workbench 内嵌测井为次要集成路径。
+- **WellPlot Desktop（测井桌面产品）**: 面向测井绘图的可独立安装桌面应用；代码基线为 `well_log_workstation`（独立 QApplication 壳），**首发 epic #288（轨 F/D/E · 导出 B0，T1–T15）已交付**：品牌/启动页、单井+连井、导出 B0、打印预览骨架、几何金标子集、Win/Linux 安装包。不另起第二套画布。Paleo Workbench 内嵌测井为次要集成路径。后续：导出 B1（#304）、插件 Runtime（#305）。
 _Avoid_: WellPlot Desktop 与 Workstation 当成两套长期分叉产品
 - **Layered Log Truth（分层测井真源）**: 文档与修订的权威在 WellLog Document 与 Data Patch；运行时样点以引擎不可变自有缓冲区为准；Apache Arrow 是跨语言零拷贝交换边界，不是强制唯一运行时内存载体。
 _Avoid_: “Arrow 是唯一运行时真源”作为 phase-one 实现描述
-- **Export B0 / B1（导出分期验收）**: B0 为 Desktop 首发硬门（单井引擎 SVG/PDF/PNG、连井至少一种矢量或高分栅格、打印预览骨架、引擎 PDF 不可搜索须披露、单井几何金标子集）；B1 兑现愿景全量（CGM、可搜索 PDF、0.1 mm 全矩阵与完整 WYSIWYG）。愿景格式清单不删，按 B0→B1 兑现。
-_Avoid_: 在未选型时宣称已支持 CGM；把 B1 绑死在第一个可安装版本
+- **Export B0 / B1（导出分期验收）**: **B0 首发门禁已兑现**（单井引擎 SVG/PDF/PNG、连井矢量/PNG、打印预览骨架、引擎 PDF 不可搜索披露、单井几何金标子集、可安装 Desktop）。B1 仍为愿景全量（CGM、可搜索 PDF、0.1 mm 全矩阵与完整 WYSIWYG；占位 #304），实施前须新 ADR。
+_Avoid_: 在未选型时宣称已支持 CGM；把 B1 绑死在已发布的 B0 安装包
 - **Engine Vector Exporters（引擎矢量导出器）**: well-log-engine 的 C++ SVG（物理分页）/PDF/PNG/TIFF 导出器，输入为 `PreparedScene + ExportSnapshot`，可无头纯 CPU 运行。Stage 1 已为单井提供 Python 绑定（`export_scene_svg` / `export_scene_pdf`）及宿主 `backend="engine"` 路由；对比图与剖面图场景通路仍按 ADR 0052 后续 Stage。引擎 PDF 为字形轮廓、默认不可搜索（ADR 0047）。
 _Avoid_: 假设全部六类图件已走引擎导出；忽略 PDF 不可搜索披露
 
