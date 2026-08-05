@@ -239,7 +239,7 @@ def _composite_export(
         pm.fill()
         painter = QPainter(pm)
         try:
-            window._scene.render(painter, QRectF(), window._scene.paper_rect())
+            window.scene().render(painter, QRectF(), window.scene().paper_rect())
         finally:
             painter.end()
         if not pm.save(str(out)):
