@@ -2037,7 +2037,8 @@ export_scene_svg_impl(WellLogView *view, const QString &document_id_text,
 // metadata band text is omitted — geometry bands still render).
 [[nodiscard]] PyObject *
 export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
-                      std::uint64_t export_pixel_height) {
+                      std::uint64_t export_pixel_height,
+                      bool searchable_text) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -2095,8 +2096,8 @@ export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
   // Hold the shared_ptr for the write's duration so a concurrent
   // set_text_engine cannot free the engine mid-export (review D-001).
   const auto text_engine = view->session().text_engine();
-  const auto result = PdfSceneExporter::write(*export_scene, snapshot, {},
-                                              text_engine.get());
+  const auto result = PdfSceneExporter::write(
+      *export_scene, snapshot, {}, text_engine.get(), nullptr, searchable_text);
   if (!result.has_value()) {
     set_result_error(result.error(), "PDF export");
     return nullptr;
@@ -2162,9 +2163,11 @@ PyObject *export_scene_svg(WellLogView *view, const QString &document_id,
 }
 
 PyObject *export_scene_pdf(WellLogView *view, const QString &document_id,
-                           std::uint64_t export_pixel_height) noexcept {
+                           std::uint64_t export_pixel_height,
+                           bool searchable_text) noexcept {
   try {
-    return export_scene_pdf_impl(view, document_id, export_pixel_height);
+    return export_scene_pdf_impl(view, document_id, export_pixel_height,
+                                 searchable_text);
   } catch (const std::bad_alloc &) {
     return PyErr_NoMemory();
   } catch (...) {

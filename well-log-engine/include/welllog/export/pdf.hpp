@@ -102,6 +102,14 @@ public:
   // The XObject is registered separately and named in the page Resources.
   PdfPathStream &invoke_xobject(std::string_view name) noexcept;
 
+  // Emit a searchable Latin/ASCII text run using the PDF standard Type1
+  // Helvetica font (Base-14 — no embedded font program). Used by B1.PDF.2
+  // (ADR 0053) as an overlay alongside glyph-outline visuals. Non-ASCII code
+  // points are dropped; empty result is a no-op. Marks the stream so the
+  // writer names `/F1 /Helvetica` in page Resources.
+  PdfPathStream &draw_standard_text(double x, double y, double font_size,
+                                    std::string_view text) noexcept;
+
   // The raw (uncompressed) content-stream operators.
   [[nodiscard]] std::string_view operators() const noexcept;
   // The distinct fill-alpha values this stream emitted `gs /GSn` for, in
@@ -109,6 +117,8 @@ public:
   // and names them /GS0, /GS1, … by this same order. Empty when no alpha was
   // set (opaque only).
   [[nodiscard]] std::span<const double> fill_alphas() const noexcept;
+  // True if draw_standard_text was used (writer must emit /Font Helvetica).
+  [[nodiscard]] bool needs_standard_font() const noexcept;
 
 private:
   struct Impl;

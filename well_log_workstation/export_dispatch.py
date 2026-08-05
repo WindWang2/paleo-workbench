@@ -20,10 +20,10 @@ Export B1 / ADR 0053 adds an explicit **PDF text mode**:
 
 - ``pdf_outline`` (default / B0): engine glyph-outline PDF when available;
   non-searchable — see ``ENGINE_PDF_NONSEARCHABLE_DISCLOSURE``.
-- ``pdf_searchable`` (B1.PDF.1): force the Qt ``QPdfWriter`` path so text is
-  extractable/selectable. This is the product dual-option for searchable PDF
-  until the engine embeds ToUnicode text operators (B1.PDF.2+). Do **not**
-  claim "engine searchable PDF" for this mode.
+- ``pdf_searchable`` (B1.PDF.1/2): prefer **engine** PDF with
+  ``searchable_text=True`` (B1.PDF.2 Base-14 Helvetica Latin band labels) when
+  the bound ``export_scene_pdf`` accepts the flag; otherwise fall back to Qt
+  ``QPdfWriter`` (B1.PDF.1). Do not claim full CJK ToUnicode until B1.PDF.3.
 
 Pagination is host-side and only applies to depth-axis types
 (single_well / correlation / section).
@@ -60,9 +60,9 @@ ENGINE_PDF_NONSEARCHABLE_DISCLOSURE = (
 
 # Shown when the user picks searchable mode (honest about backend, ADR 0053).
 PDF_SEARCHABLE_MODE_NOTE = (
-    "可搜索 PDF（pdf_searchable）：文字可选中/可复制。"
-    "B1.PDF.1 经 Qt 矢量路径输出；引擎原生可搜索（ToUnicode）为后续切片，"
-    "不得与「引擎轮廓 PDF」混淆。"
+    "可搜索 PDF（pdf_searchable）：优先引擎 Latin/ASCII 可提取文本层"
+    "（B1.PDF.2，Base-14 Helvetica 页眉/深度等）；若绑定未重建则回退 Qt 矢量路径"
+    "（B1.PDF.1）。CJK 全量 ToUnicode 为后续切片，不得与「引擎轮廓 PDF」混淆。"
 )
 
 
@@ -83,13 +83,14 @@ def prefer_engine_for_single_well(
     """Resolve export backend for single_well SVG/PDF (T11 / #299 + ADR 0053).
 
     - Explicit ``force_backend`` wins.
-    - PDF + ``pdf_text_mode="searchable"`` → always Qt (B1.PDF.1 searchable).
+    - PDF + ``pdf_text_mode="searchable"`` → engine when available (B1.PDF.2
+      flag; host falls back to Qt if the binding rejects the arg).
     - Else SVG/PDF default to engine when available; PNG always Qt.
     """
     if force_backend is not None:
         return force_backend
     if fmt == "pdf" and pdf_text_mode == "searchable":
-        return "qt"
+        return "engine" if engine_available else "qt"
     if fmt in ("svg", "pdf") and engine_available:
         return "engine"
     return "qt"
@@ -112,6 +113,8 @@ def resolve_single_well_pdf_export(
         pdf_text_mode=pdf_text_mode,
     )
     if pdf_text_mode == "searchable":
+        if backend == "engine":
+            return backend, "（可搜索 · 引擎 Latin）"
         return backend, "（可搜索 · Qt）"
     if backend == "engine":
         return backend, "（引擎 · 图形/不可搜索）"
@@ -187,9 +190,11 @@ def _engine_export(
     to disk atomically. Requires a ``view`` (WellLogView with a submitted
     prepared scene) and ``document_id`` in kwargs.
 
-    Returns a ``Path`` (same contract as the Qt backend). PDF text is
-    glyph-outlines / non-searchable (ADR 0047) — the host UI must disclose
-    this when the engine backend is selected (T6 / #278).
+    Returns a ``Path`` (same contract as the Qt backend). Default PDF text is
+    glyph-outlines / non-searchable (ADR 0047). Pass
+    ``pdf_text_mode="searchable"`` for B1.PDF.2 Latin extractable band text
+    (``export_scene_pdf(..., searchable_text=True)``); falls back to Qt path
+    via the caller if the binding does not accept the flag.
     """
     view = kwargs.get("view")
     document_id = kwargs.get("document_id")
@@ -199,18 +204,31 @@ def _engine_export(
         )
     out = Path(kwargs.get("path") or f"export_{plot_doc.id}.{fmt}")
     out.parent.mkdir(parents=True, exist_ok=True)
+    pdf_text_mode: PdfTextMode = kwargs.get("pdf_text_mode") or "outline"
     try:
         if fmt == "svg":
             data: bytes = view.export_scene_svg(document_id)
         else:  # pdf
-            data = view.export_scene_pdf(document_id)
+            searchable = pdf_text_mode == "searchable"
+            if searchable:
+                try:
+                    data = view.export_scene_pdf(document_id, 0, True)
+                except TypeError:
+                    # Binding built before B1.PDF.2 — signal caller to use Qt.
+                    raise ExportError(
+                        "engine searchable PDF 需要重建 Python 绑定"
+                        "（export_scene_pdf searchable_text）；请改用 Qt 可搜索路径"
+                    ) from None
+            else:
+                data = view.export_scene_pdf(document_id)
+    except ExportError:
+        raise
     except Exception as exc:  # typed WellLogError surfaces here
         raise ExportError(f"引擎 {fmt} 导出失败: {exc}") from exc
     if not isinstance(data, bytes) or len(data) < 50:
         raise ExportError(f"引擎 {fmt} 导出返回空数据")
     out.write_bytes(data)
     return out
-
 
 # -- per-type backends ---------------------------------------------------
 

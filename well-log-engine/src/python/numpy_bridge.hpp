@@ -42,12 +42,14 @@ export_scene_svg(WellLogView *view, const QString &document_id,
                  std::uint64_t export_pixel_height = 0) noexcept;
 
 // Render the prepared scene for ``document_id`` to PDF and return the
-// document bytes (T2 / #274). Text is glyph outlines (non-searchable,
-// ADR 0047). Single-page continuous mode; ``export_pixel_height`` opts
-// into export-density re-prepare (T3 / #275).
+// document bytes (T2 / #274). Default text is glyph outlines (non-searchable,
+// ADR 0047). ``searchable_text`` (B1.PDF.2 / ADR 0053) overlays Base-14
+// Helvetica for Latin/ASCII band labels. ``export_pixel_height`` opts into
+// export-density re-prepare (T3 / #275).
 [[nodiscard]] PyObject *
 export_scene_pdf(WellLogView *view, const QString &document_id,
-                 std::uint64_t export_pixel_height = 0) noexcept;
+                 std::uint64_t export_pixel_height = 0,
+                 bool searchable_text = false) noexcept;
 
 } // namespace python
 } // namespace welllog

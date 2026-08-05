@@ -66,11 +66,11 @@
                 </inject-code>
             </add-function>
             <add-function
-                signature="export_scene_pdf(QString@document_id@,unsigned long long@export_pixel_height@=0)"
+                signature="export_scene_pdf(QString@document_id@,unsigned long long@export_pixel_height@=0,bool@searchable_text@=false)"
                 return-type="PyObject*"
             >
                 <inject-code class="target" position="beginning">
-                    %PYARG_0 = welllog::python::export_scene_pdf(%CPPSELF, %1, %2);
+                    %PYARG_0 = welllog::python::export_scene_pdf(%CPPSELF, %1, %2, %3);
                 </inject-code>
             </add-function>
         </object-type>
