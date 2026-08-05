@@ -1,4 +1,4 @@
-"""Smoke tests for Well Log Workstation L-shell (#216)."""
+"""Smoke tests for WellPlot Desktop L-shell (#216 / brand #290)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,11 @@ import pytest
 # Platform must be set before any QApplication in this process when possible.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from well_log_workstation.branding import (  # noqa: E402
+    PRODUCT_NAME,
+    about_text,
+    window_title,
+)
 from well_log_workstation.qt_platform import (  # noqa: E402
     configure_qt_platform_for_session,
     effective_qt_platform_hint,
@@ -44,6 +49,7 @@ def test_shell_has_l_chrome(qtbot) -> None:
     win.show()
 
     assert win.objectName() == "WellLogWorkstationWindow"
+    assert win.windowTitle() == PRODUCT_NAME
     assert win.workspace_tree.objectName() == "WorkspaceTree"
     assert win.document_tabs.objectName() == "DocumentTabs"
     assert win.template_list.objectName() == "TemplateList"
@@ -62,6 +68,33 @@ def test_shell_has_l_chrome(qtbot) -> None:
     assert win.document_tabs.count() >= 1
     msg = win.statusBar().currentMessage() or ""
     assert "Qt:" in msg
+    assert PRODUCT_NAME in msg
+
+
+def test_product_branding_helpers() -> None:
+    assert PRODUCT_NAME == "WellPlot Desktop"
+    assert window_title() == PRODUCT_NAME
+    assert window_title(workspace_name="Demo") == f"Demo — {PRODUCT_NAME}"
+    body = about_text(version="0.1.0")
+    assert PRODUCT_NAME in body
+    assert "well_log_workstation" in body
+    assert "Workstation" in body  # upgrade note
+
+
+def test_about_action_enabled(qtbot) -> None:
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    about = None
+    for action in win.menuBar().actions():
+        menu = action.menu()
+        if menu is None:
+            continue
+        for a in menu.actions():
+            if a.objectName() == "Action_About":
+                about = a
+                break
+    assert about is not None
+    assert about.isEnabled()
 
 
 def test_effective_hint_nonempty() -> None:

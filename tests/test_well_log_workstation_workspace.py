@@ -185,4 +185,4 @@ def test_shell_tree_shows_catalog(qtbot, tmp_path: Path) -> None:
     assert any("UI Field" in x or x == "UI Field" for x in labels)
     assert "Well-X" in labels
     assert any("X 单井" in x for x in labels)
-    assert "Well Log Workstation" in win.windowTitle() or "UI Field" in win.windowTitle()
+    assert "WellPlot Desktop" in win.windowTitle() or "UI Field" in win.windowTitle()

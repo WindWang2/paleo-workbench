@@ -1,6 +1,11 @@
-"""Well Log Workstation — standalone log-first desktop product (#207 / #216).
+"""WellPlot Desktop package (module path: ``well_log_workstation``).
 
-Not Paleo Workbench. Rendering will use WellLogEngine in later tickets.
+Product display name is **WellPlot Desktop** (#290). Import path stays
+``well_log_workstation`` until a deliberate rename. Not Paleo Workbench.
 """
 
 __version__ = "0.1.0"
+
+from well_log_workstation.branding import PRODUCT_NAME as PRODUCT_NAME
+
+__all__ = ["PRODUCT_NAME", "__version__"]

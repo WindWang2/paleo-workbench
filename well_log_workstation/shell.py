@@ -1,4 +1,4 @@
-"""Main window chrome for Well Log Workstation — L layout (#216–#222)."""
+"""Main window chrome for WellPlot Desktop — L layout (#216–#222, brand #290)."""
 
 from __future__ import annotations
 
@@ -32,6 +32,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from well_log_workstation import __version__
+from well_log_workstation.branding import (
+    PRODUCT_NAME,
+    about_text,
+    window_title,
+)
 from well_log_workstation.correlation_canvas import CorrelationCanvas
 from well_log_workstation.correlation_links import (
     HorizonLink,
@@ -119,7 +125,7 @@ class WellLogWorkstationWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("WellLogWorkstationWindow")
-        self.setWindowTitle("Well Log Workstation")
+        self.setWindowTitle(window_title())
         self.resize(1280, 800)
 
         self._workspace: Workspace | None = None
@@ -285,7 +291,8 @@ class WellLogWorkstationWindow(QMainWindow):
         help_menu = bar.addMenu("帮助")
         help_menu.setObjectName("Menu_帮助")
         act_about = help_menu.addAction("关于…")
-        act_about.setEnabled(False)
+        act_about.setObjectName("Action_About")
+        act_about.triggered.connect(self._on_about)
 
     def _build_body(self) -> None:
         root = QWidget()
@@ -589,10 +596,17 @@ class WellLogWorkstationWindow(QMainWindow):
             self.correlation_canvas.set_link_pick_mode(False)
             self._link_pick_first = None
 
+    def _on_about(self) -> None:
+        QMessageBox.about(
+            self,
+            f"关于 {PRODUCT_NAME}",
+            about_text(version=__version__),
+        )
+
     def _update_status(self) -> None:
         hint = effective_qt_platform_hint()
         if self._workspace is None:
-            msg = f"Well Log Workstation · 未打开工区 · Qt: {hint}"
+            msg = f"{PRODUCT_NAME} · 未打开工区 · Qt: {hint}"
         else:
             well = self._selected_well_id or "—"
             tracks = (
@@ -811,9 +825,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self._sync_apply_enabled()
         self._update_status()
         if ws is not None:
-            self.setWindowTitle(f"{ws.name} — Well Log Workstation")
+            self.setWindowTitle(window_title(workspace_name=ws.name))
         else:
-            self.setWindowTitle("Well Log Workstation")
+            self.setWindowTitle(window_title())
 
     def import_las_path(self, las_path: Path | str) -> str:
         if self._workspace is None:
