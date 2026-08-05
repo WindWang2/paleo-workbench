@@ -339,6 +339,59 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         self.app.processEvents()
         gc.collect()
 
+    def test_multi_track_intervals_and_patterns_reach_export(self) -> None:
+        # T4 / #276: intervals + patterns submitted via submit_multi_track
+        # reach the engine PreparedScene and appear in the exported SVG.
+        view = WellLogView()
+        depth = np.arange(1000.0, 1006.0, dtype=np.float64)
+        gr = np.arange(6.0, dtype=np.float32)
+        depth.flags.writeable = False
+        gr.flags.writeable = False
+        doc_id = "10000000-0000-4000-8000-000000000001"
+        curve_id = "10000000-0000-4000-8000-000000000010"
+        pattern_id = "10000000-0000-4000-8000-000000000020"
+        interval_id = "10000000-0000-4000-8000-000000000030"
+        payload = {
+            "document_id": doc_id,
+            "depth": depth,
+            "depth_unit": "m",
+            "curves": [
+                {"curve_id": curve_id, "mnemonic": "GR", "values": gr,
+                 "value_unit": "API"},
+            ],
+            "tracks": [
+                {"width_mm": 40.0,
+                 "layers": [{"curve_id": curve_id, "color": "#1972b8"}]},
+            ],
+            "intervals": [
+                {"id": interval_id, "top_depth": 1001.0,
+                 "bottom_depth": 1004.0, "fill_color": "#cc6633",
+                 "pattern_id": pattern_id, "label": "Sand"},
+            ],
+            "patterns": [
+                {"id": pattern_id, "tile_width_mm": 3.0,
+                 "tile_height_mm": 3.0, "foreground": "#333333",
+                 "primitives": [
+                     {"line": {"from_x": 0.0, "from_y": 0.0,
+                               "to_x": 3.0, "to_y": 3.0}},
+                 ]},
+            ],
+        }
+        report = view.submit_multi_track(payload)
+        self.assertIs(report["render_prepared"], True)
+
+        svg = view.export_scene_svg(doc_id)
+        self.assertIsInstance(svg, bytes)
+        text = svg.decode("utf-8", errors="replace")
+        # The engine SVG emits an <rect id="interval-<uuid>"> per interval.
+        self.assertIn(f"interval-{interval_id}", text,
+                      "exported SVG must contain the submitted interval")
+
+        view.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.app.processEvents()
+        gc.collect()
+
 
 if __name__ == "__main__":
     unittest.main()

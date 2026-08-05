@@ -484,6 +484,16 @@ public:
   document(EntityId id) const noexcept;
   [[nodiscard]] std::shared_ptr<const PreparedScene>
   prepared_scene(EntityId document_id) const noexcept;
+  // Prepares (or re-prepares) the document's scene at export density so
+  // fixed-page depth pagination resolves to the correct per-page curve
+  // detail (T3 / #275). ``aggregate_pixel_height`` is the target — typically
+  // ``PaginatedSvgExporter::required_aggregate_pixel_height(scene, page)``.
+  // Returns a fresh scene WITHOUT disturbing the interactive prepared scene
+  // (which stays at the viewport density). Uses the document's LOD pyramids
+  // when ready; otherwise emits raw samples (density has no effect then).
+  [[nodiscard]] Result<PreparedScene>
+  prepare_for_export(EntityId document_id,
+                     std::uint32_t aggregate_pixel_height) noexcept;
   // Active multi-well layout placements (empty when single-well mode).
   [[nodiscard]] std::span<const WellPlacement> well_layout() const noexcept;
   [[nodiscard]] std::span<const CrossWellOverlay>

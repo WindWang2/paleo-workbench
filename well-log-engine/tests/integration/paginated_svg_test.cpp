@@ -398,6 +398,100 @@ void invalid_scene_or_snapshot_is_rejected() {
           "margins consuming the page must be rejected");
 }
 
+// T3 / #275: prepare_for_export produces an export-density scene without
+// disturbing the interactive scene. With no LOD pyramids built (this
+// fixture's synchronous path), the density has no effect on raw-sample
+// emission, but the API must still return a valid scene and leave the
+// interactive prepared_scene intact.
+void prepare_for_export_returns_scene_and_preserves_interactive() {
+  const auto document_id = id("60000000-0000-4000-8000-000000000001");
+  // prepare_tall_scene builds the session internally; rebuild here so we
+  // keep a handle to the session for the prepare_for_export call.
+  WellLogSession session;
+  {
+    const auto axis_id = id("60000000-0000-4000-8000-000000000002");
+    const auto curve_id = id("60000000-0000-4000-8000-000000000003");
+    auto depths = std::make_shared<const std::vector<double>>(
+        std::initializer_list<double>{1000.0, 1100.0, 1200.0, 1300.0, 1400.0,
+                                      1500.0, 1600.0, 1700.0, 1800.0});
+    auto values = std::make_shared<const std::vector<double>>(
+        std::initializer_list<double>{0.0, 12.5, 25.0, 37.5, 50.0, 62.5, 75.0,
+                                      87.5, 100.0});
+    WellLogDocumentBuilder document_builder(document_id, DocumentRevision{7});
+    document_builder.add_sampling_axis(SamplingAxis{
+        .id = axis_id,
+        .coordinates = BufferView::from_vector(depths),
+        .domain = DepthDomain::measured_depth,
+        .unit = "m",
+        .direction = AxisDirection::increasing,
+    });
+    document_builder.add_curve(Curve{
+        .id = curve_id,
+        .mnemonic = "GR",
+        .display_name = "Gamma Ray",
+        .unit = "API",
+        .sampling_axis_id = axis_id,
+        .values = BufferView::from_vector(values),
+        .nulls = {},
+    });
+    require(session.execute(SetDocumentCommand{document_builder.build()})
+                .has_value(),
+            "export-prepare document must be accepted");
+    ScenePresentationBuilder presentation_builder(
+        document_id,
+        ReferenceDepthRange{
+            .domain = DepthDomain::measured_depth,
+            .unit = "m",
+            .top = 1000.0,
+            .bottom = 1800.0,
+        },
+        Millimetres{400.0}, "font-fixture-v1");
+    const auto track_id = id("60000000-0000-4000-8000-000000000004");
+    const auto scale_id = id("60000000-0000-4000-8000-000000000005");
+    const auto layer_id = id("60000000-0000-4000-8000-000000000006");
+    presentation_builder.add_track(TrackSpec{
+        .id = track_id, .width = Millimetres{80.0}, .z_order = 10});
+    presentation_builder.add_scale(TrackScaleSpec{
+        .id = scale_id, .track_id = track_id, .mode = ScaleMode::linear,
+        .minimum = 0.0, .maximum = 100.0,
+        .direction = ScaleDirection::left_to_right, .unit = "API"});
+    presentation_builder.add_curve_layer(CurveLayerSpec{
+        .id = layer_id, .track_id = track_id, .curve_id = curve_id,
+        .scale_id = scale_id,
+        .color = RgbaColor{0x11, 0x22, 0x33, 0xff},
+        .line_width = Millimetres{0.25}, .z_order = 20, .visible = true});
+    require(session
+                .execute(SetPresentationCommand{presentation_builder.build()})
+                .has_value(),
+            "export-prepare presentation must be accepted");
+  }
+  const auto interactive = session.prepared_scene(document_id);
+  require(interactive != nullptr, "interactive scene must exist");
+  const auto interactive_points = interactive->curve_points().size();
+
+  // Re-prepare at an export density. With no LOD pyramids, this takes the
+  // raw-sample fallback (same point count) but must return a valid scene.
+  auto export_result = session.prepare_for_export(document_id, 8000u);
+  require(export_result.has_value(),
+          "prepare_for_export must succeed for a prepared document");
+  require(export_result.value().document_id() == document_id,
+          "export scene must carry the document id");
+
+  // The interactive scene must be untouched by the export-density prepare.
+  const auto interactive_after = session.prepared_scene(document_id);
+  require(interactive_after != nullptr,
+          "interactive scene must still exist after export prepare");
+  require(interactive_after->curve_points().size() == interactive_points,
+          "export-density prepare must not disturb the interactive scene");
+
+  // An unknown document must surface document_not_found.
+  const auto unknown = session.prepare_for_export(
+      id("99999999-0000-4000-8000-000000000001"), 8000u);
+  require(!unknown.has_value() &&
+              unknown.error().code == ErrorCode::document_not_found,
+          "prepare_for_export must reject an unknown document");
+}
+
 } // namespace
 
 int main() {
@@ -406,6 +500,7 @@ int main() {
   aggregate_pixel_height_is_positive_and_scale_aware();
   single_scene_exporter_is_unchanged();
   invalid_scene_or_snapshot_is_rejected();
+  prepare_for_export_returns_scene_and_preserves_interactive();
   std::cout << "PASS: paginated SVG behavior\n";
   return EXIT_SUCCESS;
 }

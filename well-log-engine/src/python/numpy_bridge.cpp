@@ -836,6 +836,66 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
     }
   }
 
+  // Intervals (T4 / #276): document-side depth spans with optional pattern
+  // fill. Mirrors the markers block above. The presentation-side
+  // add_interval_layer (drawn per track below) renders all document
+  // intervals in the track.
+  auto *intervals_obj = PyDict_GetItemString(payload, "intervals");
+  if (intervals_obj != nullptr && PyList_Check(intervals_obj)) {
+    const auto interval_count = PyList_Size(intervals_obj);
+    for (Py_ssize_t ii = 0; ii < interval_count; ++ii) {
+      auto *interval = PyList_GetItem(intervals_obj, ii);
+      if (interval == nullptr || !PyDict_Check(interval)) {
+        continue;
+      }
+      QString interval_id_text;
+      double top_depth = 0.0;
+      double bottom_depth = 0.0;
+      if (!dict_get_string(interval, "id", &interval_id_text) ||
+          !dict_get_float(interval, "top_depth", &top_depth) ||
+          !dict_get_float(interval, "bottom_depth", &bottom_depth)) {
+        continue;
+      }
+      if (!(bottom_depth > top_depth)) {
+        continue;  // zero/negative thickness — treat as a marker, not interval
+      }
+      const auto interval_id = parse_id(interval_id_text, "interval_id");
+      if (!interval_id) {
+        PyErr_Clear();
+        continue;
+      }
+      QString fill_text;
+      dict_get_string_optional(interval, "fill_color", &fill_text);
+      const auto fill = parse_hex_color(
+          fill_text, RgbaColor{0xcc, 0xcc, 0xcc, 0xff});
+      QString label;
+      dict_get_string_optional(interval, "label", &label);
+      // Optional pattern_id: references a pattern registered on the
+      // presentation (parsed below). A nil id = solid fill only.
+      EntityId pattern_id{};
+      QString pattern_id_text;
+      dict_get_string_optional(interval, "pattern_id", &pattern_id_text);
+      if (!pattern_id_text.isEmpty()) {
+        const auto parsed = parse_id(pattern_id_text, "pattern_id");
+        if (parsed) {
+          pattern_id = *parsed;
+        } else {
+          PyErr_Clear();
+        }
+      }
+      const auto label_utf8 = label.toUtf8();
+      builder.add_interval(Interval{
+          .id = *interval_id,
+          .top_reference_depth = top_depth,
+          .bottom_reference_depth = bottom_depth,
+          .semantic = IntervalSemantic::custom,
+          .pattern_id = pattern_id,
+          .fill_color = fill,
+          .label = label_utf8.constData(),
+      });
+    }
+  }
+
   auto built = builder.build();
   if (built.id().is_nil()) {
     set_welllog_error("WellLogError", "resource_exhausted",
@@ -1050,6 +1110,157 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
     }
   }
   static_cast<void>(track_width_total);
+
+  // Patterns (T4 / #276): presentation-level vector tile sources
+  // referenced by interval fills. Parsed and registered before build so
+  // add_interval_layer can emit referencing them.
+  auto *patterns_obj = PyDict_GetItemString(payload, "patterns");
+  if (patterns_obj != nullptr && PyList_Check(patterns_obj)) {
+    const auto pattern_count = PyList_Size(patterns_obj);
+    for (Py_ssize_t pi = 0; pi < pattern_count; ++pi) {
+      auto *pattern = PyList_GetItem(patterns_obj, pi);
+      if (pattern == nullptr || !PyDict_Check(pattern)) {
+        continue;
+      }
+      QString pattern_id_text;
+      double tile_w = 5.0;
+      double tile_h = 5.0;
+      if (!dict_get_string(pattern, "id", &pattern_id_text) ||
+          !dict_get_float(pattern, "tile_width_mm", &tile_w) ||
+          !dict_get_float(pattern, "tile_height_mm", &tile_h)) {
+        continue;
+      }
+      const auto pattern_id = parse_id(pattern_id_text, "pattern_id");
+      if (!pattern_id) {
+        PyErr_Clear();
+        continue;
+      }
+      double rotation = 0.0;
+      dict_get_float_optional(pattern, "rotation_degrees", &rotation);
+      double stroke_w = 0.2;
+      dict_get_float_optional(pattern, "stroke_width_mm", &stroke_w);
+      QString fg_text;
+      QString bg_text;
+      dict_get_string_optional(pattern, "foreground", &fg_text);
+      dict_get_string_optional(pattern, "background", &bg_text);
+      const auto foreground =
+          parse_hex_color(fg_text, RgbaColor{0x33, 0x33, 0x33, 0xff});
+      const auto background =
+          parse_hex_color(bg_text, RgbaColor{0xff, 0xff, 0xff, 0x00});
+      // Primitives: a list of {line/polyline/circle: {...}} dicts.
+      std::vector<PatternPrimitive> primitives;
+      auto *prims_obj = PyDict_GetItemString(pattern, "primitives");
+      if (prims_obj != nullptr && PyList_Check(prims_obj)) {
+        for (Py_ssize_t pri = 0; pri < PyList_Size(prims_obj); ++pri) {
+          auto *prim = PyList_GetItem(prims_obj, pri);
+          if (prim == nullptr || !PyDict_Check(prim)) {
+            continue;
+          }
+          if (auto *line_obj = PyDict_GetItemString(prim, "line")) {
+            double fx = 0, fy = 0, tx = 0, ty = 0;
+            if (PyDict_Check(line_obj) &&
+                dict_get_float(line_obj, "from_x", &fx) &&
+                dict_get_float(line_obj, "from_y", &fy) &&
+                dict_get_float(line_obj, "to_x", &tx) &&
+                dict_get_float(line_obj, "to_y", &ty)) {
+              primitives.emplace_back(PatternLine{
+                  .from = PhysicalPoint{Millimetres{fx}, Millimetres{fy}},
+                  .to = PhysicalPoint{Millimetres{tx}, Millimetres{ty}}});
+            }
+          } else if (auto *poly_obj =
+                         PyDict_GetItemString(prim, "polyline")) {
+            auto *pts_obj =
+                poly_obj != nullptr && PyDict_Check(poly_obj)
+                    ? PyDict_GetItemString(poly_obj, "points")
+                    : nullptr;
+            if (pts_obj != nullptr && PyList_Check(pts_obj)) {
+              PatternPolyline poly{};
+              for (Py_ssize_t ppi = 0; ppi < PyList_Size(pts_obj); ++ppi) {
+                auto *pt = PyList_GetItem(pts_obj, ppi);
+                if (pt == nullptr || !PyList_Check(pt) ||
+                    PyList_Size(pt) < 2) {
+                  continue;
+                }
+                auto *px = PyList_GetItem(pt, 0);
+                auto *py = PyList_GetItem(pt, 1);
+                if (px != nullptr && py != nullptr) {
+                  poly.points.push_back(PhysicalPoint{
+                      Millimetres{PyFloat_AsDouble(px)},
+                      Millimetres{PyFloat_AsDouble(py)}});
+                }
+              }
+              PyErr_Clear();
+              if (!poly.points.empty()) {
+                if (PyDict_Check(poly_obj)) {
+                  double closed = 0.0;
+                  dict_get_float_optional(poly_obj, "closed", &closed);
+                  poly.closed = closed != 0.0;
+                }
+                primitives.emplace_back(std::move(poly));
+              }
+            }
+          } else if (auto *circ_obj =
+                         PyDict_GetItemString(prim, "circle")) {
+            double cx = 0, cy = 0, r = 0;
+            if (circ_obj != nullptr && PyDict_Check(circ_obj) &&
+                dict_get_float(circ_obj, "center_x", &cx) &&
+                dict_get_float(circ_obj, "center_y", &cy) &&
+                dict_get_float(circ_obj, "radius_mm", &r)) {
+              double filled = 0.0;
+              dict_get_float_optional(circ_obj, "filled", &filled);
+              primitives.emplace_back(PatternCircle{
+                  .center = PhysicalPoint{Millimetres{cx}, Millimetres{cy}},
+                  .radius = Millimetres{r},
+                  .filled = filled != 0.0});
+            }
+          }
+        }
+        PyErr_Clear();
+      }
+      presentation_builder.add_pattern(PatternDefinition{
+          .id = *pattern_id,
+          .tile_width = Millimetres{tile_w},
+          .tile_height = Millimetres{tile_h},
+          .rotation_degrees = rotation,
+          .foreground = foreground,
+          .background = background,
+          .stroke_width = Millimetres{stroke_w},
+          .primitives = std::move(primitives),
+      });
+    }
+  }
+
+  // Interval layer (T4 / #276): one per curve track when the payload
+  // carried intervals. The engine draws ALL document intervals on every
+  // interval layer (no semantic filter), so one per track suffices.
+  if (intervals_obj != nullptr && PyList_Check(intervals_obj) &&
+      PyList_Size(intervals_obj) > 0) {
+    for (Py_ssize_t ti = 0; ti < track_count; ++ti) {
+      auto *track = PyList_GetItem(tracks_obj, ti);
+      auto *layers_obj =
+          track != nullptr ? PyDict_GetItemString(track, "layers") : nullptr;
+      if (layers_obj == nullptr || !PyList_Check(layers_obj) ||
+          PyList_Size(layers_obj) <= 0) {
+        continue;
+      }
+      const auto track_role =
+          std::string{"welllog-python/mt-track/"} + std::to_string(ti);
+      const auto track_id = derive_presentation_id(
+          *document_id, track_role, {*document_id, *axis_id});
+      const auto interval_layer_id = derive_presentation_id(
+          *document_id, "welllog-python/mt-interval-layer",
+          {*document_id, *axis_id, track_id});
+      presentation_builder.add_interval_layer(IntervalLayerSpec{
+          .id = interval_layer_id,
+          .track_id = track_id,
+          .z_order = 5,  // below curves (z_order 0+) so fills sit behind
+          .draw_labels = true,
+          .label_font_size = Millimetres{2.5},
+          .label_color = RgbaColor{0x33, 0x33, 0x33, 0xff},
+      });
+      break;  // one interval layer renders all intervals
+    }
+  }
 
   auto presentation = presentation_builder.build();
   if (presentation.document_id().is_nil()) {
@@ -1765,8 +1976,12 @@ submit_multi_well_section_impl(WellLogView *view, PyObject *payload) {
 // SVG export of a single-well prepared scene (T1 / #273). The engine
 // renders to an in-memory SvgDocument; we copy its text out as PyBytes so
 // the host controls filesystem writes (atomic save, cancellation).
+// When ``export_pixel_height > 0`` the scene is re-prepared at that
+// aggregate density (T3 / #275) so fixed-page pagination resolves the
+// correct per-page curve detail.
 [[nodiscard]] PyObject *
-export_scene_svg_impl(WellLogView *view, const QString &document_id_text) {
+export_scene_svg_impl(WellLogView *view, const QString &document_id_text,
+                      std::uint32_t export_pixel_height) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -1783,13 +1998,28 @@ export_scene_svg_impl(WellLogView *view, const QString &document_id_text) {
   }
   // Acquire the prepared scene for this document. A null shared_ptr means
   // the document has no prepared scene yet (not submitted / not rendered).
-  const auto scene = view->session().prepared_scene(*document_id);
+  auto scene = view->session().prepared_scene(*document_id);
   if (scene == nullptr) {
     set_welllog_error("WellLogValidationError", "document_not_found",
                       "no prepared scene for the given document_id");
     return nullptr;
   }
-  const auto result = SvgExporter::write(*scene);
+  // Optional export-density re-prepare (T3 / #275). The host computes the
+  // target height via PaginatedSvgExporter::required_aggregate_pixel_height
+  // and passes it here; we re-prepare without disturbing the interactive
+  // scene.
+  std::shared_ptr<const PreparedScene> export_scene = scene;
+  if (export_pixel_height > 0) {
+    auto reprepared =
+        view->session().prepare_for_export(*document_id, export_pixel_height);
+    if (!reprepared.has_value()) {
+      set_result_error(reprepared.error(), "export-density prepare");
+      return nullptr;
+    }
+    export_scene =
+        std::make_shared<const PreparedScene>(std::move(reprepared).value());
+  }
+  const auto result = SvgExporter::write(*export_scene);
   if (!result.has_value()) {
     set_result_error(result.error(), "SVG export");
     return nullptr;
@@ -1805,7 +2035,8 @@ export_scene_svg_impl(WellLogView *view, const QString &document_id_text) {
 // optional TextEngine (for pagination metadata text; without it the
 // metadata band text is omitted — geometry bands still render).
 [[nodiscard]] PyObject *
-export_scene_pdf_impl(WellLogView *view, const QString &document_id_text) {
+export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
+                      std::uint32_t export_pixel_height) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -1826,30 +2057,41 @@ export_scene_pdf_impl(WellLogView *view, const QString &document_id_text) {
                       "no prepared scene for the given document_id");
     return nullptr;
   }
+  // Optional export-density re-prepare (T3 / #275), mirroring the SVG path.
+  std::shared_ptr<const PreparedScene> export_scene = scene;
+  if (export_pixel_height > 0) {
+    auto reprepared =
+        view->session().prepare_for_export(*document_id, export_pixel_height);
+    if (!reprepared.has_value()) {
+      set_result_error(reprepared.error(), "export-density prepare");
+      return nullptr;
+    }
+    export_scene =
+        std::make_shared<const PreparedScene>(std::move(reprepared).value());
+  }
   // Build a continuous-mode snapshot from the scene's own metadata so the
   // export is reproducible without the host supplying extra fields.
-  // Pagination (fixed-mode / depth_per_page_mm) is T3 (#275); here we emit
-  // one continuous page preserving the true depth length.
   ExportSnapshot snapshot{
-      .document_id = scene->document_id(),
-      .document_revision = scene->document_revision(),
-      .presentation_version = scene->presentation_version(),
-      .depth_transform = scene->depth_transform(),
-      .font_asset_fingerprint = std::string{scene->font_asset_fingerprint()},
+      .document_id = export_scene->document_id(),
+      .document_revision = export_scene->document_revision(),
+      .presentation_version = export_scene->presentation_version(),
+      .depth_transform = export_scene->depth_transform(),
+      .font_asset_fingerprint =
+          std::string{export_scene->font_asset_fingerprint()},
       .pattern_versions = {},
       .page = ExportPageSpec{
           .mode = PaginationMode::continuous,
-          .page_width = scene->physical_width(),
-          .page_height = scene->physical_height(),
+          .page_width = export_scene->physical_width(),
+          .page_height = export_scene->physical_height(),
       },
   };
-  snapshot.pattern_versions.reserve(scene->patterns().size());
-  for (const auto &pattern : scene->patterns()) {
+  snapshot.pattern_versions.reserve(export_scene->patterns().size());
+  for (const auto &pattern : export_scene->patterns()) {
     snapshot.pattern_versions.push_back(pattern.version);
   }
   // Pass the session's installed text engine (if any) so pagination
   // metadata band text renders; geometry bands always render regardless.
-  const auto result = PdfSceneExporter::write(*scene, snapshot, {},
+  const auto result = PdfSceneExporter::write(*export_scene, snapshot, {},
                                               view->session().text_engine());
   if (!result.has_value()) {
     set_result_error(result.error(), "PDF export");
@@ -1902,10 +2144,10 @@ PyObject *clear_multi_well_section(WellLogView *view) noexcept {
   }
 }
 
-PyObject *export_scene_svg(WellLogView *view,
-                           const QString &document_id) noexcept {
+PyObject *export_scene_svg(WellLogView *view, const QString &document_id,
+                           std::uint32_t export_pixel_height) noexcept {
   try {
-    return export_scene_svg_impl(view, document_id);
+    return export_scene_svg_impl(view, document_id, export_pixel_height);
   } catch (const std::bad_alloc &) {
     return PyErr_NoMemory();
   } catch (...) {
@@ -1915,10 +2157,10 @@ PyObject *export_scene_svg(WellLogView *view,
   }
 }
 
-PyObject *export_scene_pdf(WellLogView *view,
-                           const QString &document_id) noexcept {
+PyObject *export_scene_pdf(WellLogView *view, const QString &document_id,
+                           std::uint32_t export_pixel_height) noexcept {
   try {
-    return export_scene_pdf_impl(view, document_id);
+    return export_scene_pdf_impl(view, document_id, export_pixel_height);
   } catch (const std::bad_alloc &) {
     return PyErr_NoMemory();
   } catch (...) {

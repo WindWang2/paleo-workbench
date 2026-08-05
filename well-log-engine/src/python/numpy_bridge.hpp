@@ -35,14 +35,19 @@ submit_multi_well_section(WellLogView *view, PyObject *payload) noexcept;
 // Render the prepared scene for ``document_id`` to SVG and return the
 // document bytes (T1 / #273). The engine builds the SVG in memory only —
 // it never touches the filesystem; the host writes the returned bytes.
+// When ``export_pixel_height > 0`` the scene is re-prepared at that
+// aggregate density (T3 / #275) for correct fixed-page pagination.
 [[nodiscard]] PyObject *
-export_scene_svg(WellLogView *view, const QString &document_id) noexcept;
+export_scene_svg(WellLogView *view, const QString &document_id,
+                 std::uint32_t export_pixel_height = 0) noexcept;
 
 // Render the prepared scene for ``document_id`` to PDF and return the
 // document bytes (T2 / #274). Text is glyph outlines (non-searchable,
-// ADR 0047). Single-page continuous mode, curves-only fidelity.
+// ADR 0047). Single-page continuous mode; ``export_pixel_height`` opts
+// into export-density re-prepare (T3 / #275).
 [[nodiscard]] PyObject *
-export_scene_pdf(WellLogView *view, const QString &document_id) noexcept;
+export_scene_pdf(WellLogView *view, const QString &document_id,
+                 std::uint32_t export_pixel_height = 0) noexcept;
 
 } // namespace python
 } // namespace welllog
