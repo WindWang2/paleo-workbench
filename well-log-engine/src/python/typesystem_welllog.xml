@@ -74,11 +74,11 @@
                 </inject-code>
             </add-function>
             <add-function
-                signature="export_scene_cgm(QString@document_id@)"
+                signature="export_scene_cgm(QString@document_id@,double@page_height_mm@=0.0)"
                 return-type="PyObject*"
             >
                 <inject-code class="target" position="beginning">
-                    %PYARG_0 = welllog::python::export_scene_cgm(%CPPSELF, %1);
+                    %PYARG_0 = welllog::python::export_scene_cgm(%CPPSELF, %1, %2);
                 </inject-code>
             </add-function>
         </object-type>

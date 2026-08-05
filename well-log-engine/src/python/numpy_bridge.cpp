@@ -2109,7 +2109,8 @@ export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
 }
 
 [[nodiscard]] PyObject *
-export_scene_cgm_impl(WellLogView *view, const QString &document_id_text) {
+export_scene_cgm_impl(WellLogView *view, const QString &document_id_text,
+                      double page_height_mm) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -2131,7 +2132,11 @@ export_scene_cgm_impl(WellLogView *view, const QString &document_id_text) {
     return nullptr;
   }
   CgmExportDiagnostics diag;
-  const auto result = CgmSceneExporter::write(*scene, &diag);
+  CgmExportOptions opt{};
+  if (page_height_mm > 0.0 && std::isfinite(page_height_mm)) {
+    opt.page_height_mm = page_height_mm;
+  }
+  const auto result = CgmSceneExporter::write(*scene, opt, &diag);
   if (!result.has_value()) {
     set_result_error(result.error(), "CGM export");
     return nullptr;
@@ -2211,10 +2216,10 @@ PyObject *export_scene_pdf(WellLogView *view, const QString &document_id,
   }
 }
 
-PyObject *export_scene_cgm(WellLogView *view,
-                           const QString &document_id) noexcept {
+PyObject *export_scene_cgm(WellLogView *view, const QString &document_id,
+                           double page_height_mm) noexcept {
   try {
-    return export_scene_cgm_impl(view, document_id);
+    return export_scene_cgm_impl(view, document_id, page_height_mm);
   } catch (const std::bad_alloc &) {
     return PyErr_NoMemory();
   } catch (...) {

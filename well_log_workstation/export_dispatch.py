@@ -45,9 +45,9 @@ PdfTextMode = Literal["outline", "searchable"]
 
 # B1.CGM.2 host disclosure (pattern/alpha degradation — ADR 0054).
 CGM_EXPORT_DISCLOSURE = (
-    "CGM 导出（B1.CGM.2 / ADR 0054）：引擎自研 CGM V3 Binary 子集。"
-    "花纹填充降级为纯色，半透明强制不透明；非 Latin 标签可能省略。"
-    "多页 PICTURE / 0.1 mm 矩阵见 B1.CGM.3。"
+    "CGM 导出（B1.CGM.3 / ADR 0054）：引擎自研 CGM V3 Binary 子集；"
+    "支持固定页高多 PICTURE 分页。花纹 = 纯色 + 对角 hatch 近似；"
+    "半透明强制不透明；非 Latin 标签可能省略。几何入口容差 0.5 mm。"
 )
 
 

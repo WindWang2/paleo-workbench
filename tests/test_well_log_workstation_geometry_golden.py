@@ -24,12 +24,15 @@ from well_log_workstation.geometry_golden import (
     GOLDEN_WELL_NAME,
     GeometryGoldenError,
     TOL_MM,
+    TOL_MM_CGM,
+    assert_cgm_track_left_vdc,
     assert_depth_mapping,
     assert_layout_matches_golden,
     assert_within_tol,
     fixture_las_path,
     golden_export_layout,
     layout_export_tracks_mm,
+    scene_mm_to_cgm_vdc,
 )
 from well_log_workstation.plot_document import load_plot_document
 from well_log_workstation.shell import WellLogWorkstationWindow
@@ -168,3 +171,13 @@ def test_qt_paint_svg_page_box_mm(qtbot, tmp_path: Path, monkeypatch) -> None:
 
 def test_tol_constant_is_section_16_target() -> None:
     assert TOL_MM == pytest.approx(0.1)
+
+
+def test_cgm_format_dimension_vdc_golden() -> None:
+    """B1.CGM.3 / ADR 0054: CGM VDC track edges within 0.5 mm entry tol."""
+    assert TOL_MM_CGM == pytest.approx(0.5)
+    layout = golden_export_layout()
+    assert_cgm_track_left_vdc(layout)
+    # Spot-check transform: top of page → high VDC y
+    _vx, vy = scene_mm_to_cgm_vdc(0.0, 0.0, window_height_mm=210.0)
+    assert vy == 21000

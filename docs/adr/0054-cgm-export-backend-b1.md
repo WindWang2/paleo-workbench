@@ -61,7 +61,7 @@ status: accepted
 |------|------|
 | **B1.CGM.1** | ✅ 自写 CGM V3 Binary：`CgmBinaryWriter` + `CgmSceneExporter`（曲线折线、道框、Latin TEXT）；`welllog.cgm-spike` 无头烟测；**尚未**挂宿主菜单（不得宣称产品支持） |
 | **B1.CGM.2** | ✅ 区间/交叉填充 → 纯色 POLYGON + `CgmExportDiagnostics`；`export_scene_cgm` 绑定；宿主 **导出 → CGM…** + 披露文案 |
-| **B1.CGM.3** | 分页 PICTURE；Pattern 策略增强；纳入几何矩阵格式维 |
+| **B1.CGM.3** | ✅ 固定页高多 PICTURE 分页；花纹 = 纯色 + 对角 hatch 近似 + 诊断；`cgm_scene_to_vdc` + 宿主金标 `TOL_MM_CGM=0.5` 格式维 |
 
 ### 6. 与既有 ADR 的关系
 

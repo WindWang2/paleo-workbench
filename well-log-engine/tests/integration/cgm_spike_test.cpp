@@ -196,7 +196,6 @@ void scene_exporter_emits_curve_polylines() {
 
 void diagnostics_report_pattern_flattening() {
   CgmExportDiagnostics diag;
-  // Empty-ish scene still needs valid size — reuse writer-level polygon only.
   CgmBinaryWriter w;
   w.begin_metafile("d");
   w.metafile_version(3);
@@ -218,10 +217,116 @@ void diagnostics_report_pattern_flattening() {
   require(cgm_count_polygons(doc.value().bytes()) >= 1,
           "rectangle_fill must emit POLYGON");
   diag.patterns_flattened_to_solid = 2;
-  diag.notes.push_back("pattern fills flattened to solid colour (B1.CGM.2)");
+  diag.patterns_hatch_approximated = 2;
+  diag.notes.push_back("pattern fills: solid + diagonal hatch approx (B1.CGM.3)");
   const auto sum = diag.summary();
-  require(sum.find("patterns_flattened_to_solid=2") != std::string::npos,
-          "diagnostics summary must list pattern flatten count");
+  require(sum.find("patterns_hatch_approximated=2") != std::string::npos,
+          "diagnostics summary must list hatch approx count");
+}
+
+void multi_picture_pagination() {
+  // Reuse the working single-well fixture from scene_exporter_emits_curve_polylines
+  // by building the same document, then paginate with a small page_height_mm.
+  const auto document_id = id("20000000-0000-4000-8000-000000000001");
+  const auto axis_id = id("20000000-0000-4000-8000-000000000002");
+  const auto curve_id = id("20000000-0000-4000-8000-000000000003");
+  const auto track_id = id("20000000-0000-4000-8000-000000000004");
+  const auto scale_id = id("20000000-0000-4000-8000-000000000005");
+  const auto layer_id = id("20000000-0000-4000-8000-000000000006");
+
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1001.0, 1002.0, 1003.0, 1004.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{10.0, 20.0, 30.0, 40.0, 50.0});
+  auto nulls = std::make_shared<const std::vector<std::uint8_t>>(
+      std::initializer_list<std::uint8_t>{0});
+
+  WellLogDocumentBuilder document_builder(document_id, DocumentRevision{5});
+  document_builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id,
+      .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth,
+      .unit = "m",
+      .direction = AxisDirection::increasing,
+  });
+  document_builder.add_curve(Curve{
+      .id = curve_id,
+      .mnemonic = "GR",
+      .display_name = "Gamma Ray",
+      .unit = "API",
+      .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values),
+      .nulls = NullBitmapView::from_raw(nulls->data(), values->size(),
+                                        nulls->size(), SharedOwner{nulls}),
+  });
+  WellLogSession session;
+  require(
+      session.execute(SetDocumentCommand{document_builder.build()}).has_value(),
+      "document must be accepted");
+  ScenePresentationBuilder presentation_builder(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = "m",
+          .top = 1000.0,
+          .bottom = 1004.0,
+      },
+      Millimetres{80.0}, "font-fixture-v1");
+  presentation_builder.add_track(TrackSpec{
+      .id = track_id,
+      .width = Millimetres{30.0},
+      .z_order = 10,
+  });
+  presentation_builder.add_scale(TrackScaleSpec{
+      .id = scale_id,
+      .track_id = track_id,
+      .mode = ScaleMode::linear,
+      .minimum = 0.0,
+      .maximum = 80.0,
+      .direction = ScaleDirection::left_to_right,
+      .unit = "API",
+  });
+  presentation_builder.add_curve_layer(CurveLayerSpec{
+      .id = layer_id,
+      .track_id = track_id,
+      .curve_id = curve_id,
+      .scale_id = scale_id,
+      .color =
+          RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56, .alpha = 0xff},
+      .line_width = Millimetres{0.25},
+      .z_order = 20,
+      .visible = true,
+  });
+  require(session.execute(SetPresentationCommand{presentation_builder.build()})
+              .has_value(),
+          "presentation must be accepted");
+  const auto scene = session.prepared_scene(document_id);
+  require(scene != nullptr, "prepared scene required");
+  // Force at least 2 pictures: page height = 40% of scene height.
+  const auto page_h = scene->physical_height().value * 0.4;
+  CgmExportDiagnostics diag;
+  CgmExportOptions opt{.page_height_mm = page_h, .page_overlap = 0.0};
+  const auto cgm = CgmSceneExporter::write(*scene, opt, &diag);
+  require(cgm.has_value(), "paginated CGM must succeed");
+  const auto bytes = cgm.value().bytes();
+  require(cgm_count_pictures(bytes) >= 2, "fixed pages need >= 2 PICTURE");
+  require(diag.pictures_emitted >= 2, "diagnostics pictures_emitted");
+  require(cgm_has_metafile_delimiters(bytes), "delimiters");
+}
+
+void vdc_geometry_within_half_mm() {
+  // ADR 0054: CGM entry golden 0.5 mm → 50 VDC units.
+  const auto p = cgm_scene_to_vdc(/*x*/ 16.0, /*y*/ 0.0, /*wtop*/ 0.0,
+                                  /*wheight*/ 210.0);
+  require(p.first == 1600, "16 mm → 1600 VDC");
+  // y=0 (top of window) → vdc_y = height * 100
+  require(p.second == 21000, "top of window maps to VDC height");
+  const auto p2 = cgm_scene_to_vdc(16.0, 210.0, 0.0, 210.0);
+  require(p2.second == 0, "bottom of window maps to VDC 0");
+  // 0.5 mm tolerance = 50 VDC
+  const auto expected = 1600;
+  const auto actual = static_cast<int>(std::lround(16.0 * k_cgm_vdc_per_mm));
+  require(std::abs(actual - expected) <= 50, "0.5 mm VDC entry golden");
 }
 
 } // namespace
@@ -230,6 +335,8 @@ int main() {
   low_level_writer_emits_delimiters_and_polyline();
   scene_exporter_emits_curve_polylines();
   diagnostics_report_pattern_flattening();
+  multi_picture_pagination();
+  vdc_geometry_within_half_mm();
   std::cout << "welllog.cgm-spike: all cases passed\n";
   return 0;
 }
