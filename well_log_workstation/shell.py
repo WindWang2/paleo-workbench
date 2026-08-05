@@ -63,6 +63,7 @@ from well_log_workstation.engine_bridge import (
     submit_multi_well_presentations,
 )
 from well_log_workstation.events import emit_plot_changed
+from well_log_workstation.command_audit import audit as audit_command
 from well_log_workstation.export_dispatch import (
     CGM_EXPORT_DISCLOSURE,
     ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
@@ -3076,6 +3077,12 @@ class WellLogWorkstationWindow(QMainWindow):
             elif plot.type == "composite":
                 kwargs["window"] = self.composite_view._layout_window
             out = export_plot(plot, fmt, **kwargs)
+            audit_command(
+                f"export.{fmt}",
+                ok=True,
+                target=str(self._active_plot_id or ""),
+                detail=backend_note,
+            )
             QMessageBox.information(
                 self,
                 "导出成功",
@@ -3083,9 +3090,22 @@ class WellLogWorkstationWindow(QMainWindow):
                 f"大小 {out.stat().st_size} 字节",
             )
         except (ExportError, UnsupportedFormatError) as exc:
+            audit_command(
+                f"export.{fmt}",
+                ok=False,
+                target=str(getattr(self, "_active_plot_id", "") or ""),
+                detail=str(exc)[:200],
+            )
             QMessageBox.warning(self, f"导出 {fmt.upper()} 失败", str(exc))
         except OSError as exc:
+            audit_command(
+                f"export.{fmt}",
+                ok=False,
+                target=str(getattr(self, "_active_plot_id", "") or ""),
+                detail=str(exc)[:200],
+            )
             QMessageBox.warning(self, f"导出 {fmt.upper()} 失败", str(exc))
+
     def _paint_active_plot(self, painter, rect) -> None:
         """Paint callback for the T8 Qt-paint export path (single/corr/section)."""
         if self._active_plot_type == "single_well" and self._presentation is not None:
@@ -3291,6 +3311,12 @@ class WellLogWorkstationWindow(QMainWindow):
                 if page_height_mm is not None
                 else "连续单 PICTURE"
             )
+            audit_command(
+                "export.cgm",
+                ok=True,
+                target=str(self._active_plot_id or ""),
+                detail=mode_note,
+            )
             QMessageBox.information(
                 self,
                 "导出成功",
@@ -3298,8 +3324,20 @@ class WellLogWorkstationWindow(QMainWindow):
                 f"大小 {out.stat().st_size} 字节\n\n{CGM_EXPORT_DISCLOSURE}",
             )
         except (ExportError, UnsupportedFormatError, EngineUnavailable, EngineSubmitError) as exc:
+            audit_command(
+                "export.cgm",
+                ok=False,
+                target=str(getattr(self, "_active_plot_id", "") or ""),
+                detail=str(exc)[:200],
+            )
             QMessageBox.warning(self, "导出 CGM 失败", str(exc))
         except OSError as exc:
+            audit_command(
+                "export.cgm",
+                ok=False,
+                target=str(getattr(self, "_active_plot_id", "") or ""),
+                detail=str(exc)[:200],
+            )
             QMessageBox.warning(self, "导出 CGM 失败", str(exc))
 
     def open_print_preview(self, *, show: bool = True):
