@@ -19,11 +19,11 @@ def _shape() -> dict:
     return {"kind": "rect", "geometry": {"x": 1.0, "y": 1.0, "w": 2.0, "h": 2.0}}
 
 
-def test_schema_version_is_4() -> None:
-    """Task 11 bumps PLOT_SCHEMA_VERSION from 3 to 4."""
+def test_schema_version_current() -> None:
+    """Current plot schema is v5 (track_overrides / correlation layout fields)."""
     from well_log_workstation.plot_document import PLOT_SCHEMA_VERSION
 
-    assert PLOT_SCHEMA_VERSION == 4
+    assert PLOT_SCHEMA_VERSION == 5
 
 
 def test_v3_upgrades_to_v4_with_empty_free_graphics() -> None:
@@ -104,7 +104,7 @@ def test_to_json_emits_free_graphics_for_composite() -> None:
         free_graphics=[shape],
     )
     payload = _to_json(doc)
-    assert payload["schemaVersion"] == PLOT_SCHEMA_VERSION == 4
+    assert payload["schemaVersion"] == PLOT_SCHEMA_VERSION == 5
     assert payload["free_graphics"] == [shape]
 
 

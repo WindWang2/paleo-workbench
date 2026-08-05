@@ -71,6 +71,9 @@ class PlotDocument:
     # Correlation column gap in pixels (#295 / T7). Optional field; default 6.
     # Well order is the existing ``well_ids`` list order.
     column_gap_px: int = 6
+    # Correlation display datum (#296 / T8): md | tvdss | horizon.
+    datum_mode: str = "md"
+    datum_horizon: str | None = None
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -114,9 +117,13 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
         payload["track_overrides"] = {
             str(k): dict(v) for k, v in doc.track_overrides.items() if isinstance(v, dict)
         }
-    # Correlation layout (T7): always write when correlation so re-open is stable.
+    # Correlation layout (T7/T8): write when correlation so re-open is stable.
     if doc.type == "correlation" or doc.column_gap_px != 6:
         payload["column_gap_px"] = int(doc.column_gap_px)
+    if doc.type == "correlation" or doc.datum_mode != "md" or doc.datum_horizon:
+        payload["datum_mode"] = str(doc.datum_mode or "md")
+        if doc.datum_horizon:
+            payload["datum_horizon"] = str(doc.datum_horizon)
     return payload
 
 
@@ -188,6 +195,13 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     except (TypeError, ValueError):
         column_gap_px = 6
     column_gap_px = max(0, min(200, column_gap_px))
+    datum_mode = str(data.get("datum_mode") or "md")
+    if datum_mode not in ("md", "tvdss", "horizon"):
+        datum_mode = "md"
+    raw_h = data.get("datum_horizon")
+    datum_horizon = str(raw_h).strip() if raw_h else None
+    if datum_horizon == "":
+        datum_horizon = None
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -201,6 +215,8 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         revision=max(0, int(data.get("revision") or 0)),
         track_overrides=track_overrides,
         column_gap_px=column_gap_px,
+        datum_mode=datum_mode,
+        datum_horizon=datum_horizon,
     )
 
 
@@ -273,6 +289,8 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             revision=doc.revision,
             track_overrides=dict(doc.track_overrides),
             column_gap_px=doc.column_gap_px,
+            datum_mode=doc.datum_mode,
+            datum_horizon=doc.datum_horizon,
         )
     # Lazy import: keep this module importable without PySide6 (see save).
     from well_log_workstation.events import restore_plot_revision
