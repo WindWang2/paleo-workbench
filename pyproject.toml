@@ -43,9 +43,17 @@ build-backend = "setuptools.build_meta"
 
 [project.scripts]
 well-log-workstation = "well_log_workstation.main:main"
+wellplot-desktop = "well_log_workstation.main:main"
 
 [tool.setuptools.packages.find]
 include = ["paleo_workbench*", "well_log_workstation*"]
+
+[tool.setuptools.package-data]
+well_log_workstation = [
+    "templates/*.json",
+    "testdata/geometry_golden/*",
+    "packaging/**/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

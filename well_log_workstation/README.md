@@ -17,9 +17,22 @@ unset PALEO_FORCE_XCB
 unset WLWS_FORCE_XCB
 
 python -m well_log_workstation
+# or (after pip install -e .):
+# wellplot-desktop
+# wellplot-desktop --version   # no GUI; installer smoke (T15)
 ```
 
 Window title and **帮助 → 关于…** show **WellPlot Desktop**.
+
+## Installers (T15 / #303)
+
+Independent Windows / Linux install packages (PyInstaller onedir + install/uninstall scripts).
+
+See **[`packaging/README.md`](packaging/README.md)** for:
+
+- `build.sh` / `build.ps1` (and optional Inno Setup `.iss`)
+- install → start → uninstall acceptance steps
+- residual config after uninstall (`--purge-config` / `-PurgeConfig`)
 
 ### Workspace (#217)
 
