@@ -294,6 +294,51 @@ class WellLogViewEmbeddingTest(unittest.TestCase):
         self.app.processEvents()
         gc.collect()
 
+    def test_export_scene_pdf_returns_non_empty_bytes(self) -> None:
+        # T2 / #274: the engine PDF exporter is reachable from Python.
+        # Text is glyph outlines (non-searchable, ADR 0047). Mirrors the SVG
+        # smoke; the PDF path also exercises ExportSnapshot construction.
+        view = WellLogView()
+        depth = np.arange(1000.0, 1006.0, dtype=np.float64)
+        values = np.arange(6.0, dtype=np.float32)
+        depth.flags.writeable = False
+        values.flags.writeable = False
+        view.submit_curve(
+            depth,
+            values,
+            "10000000-0000-4000-8000-000000000001",
+            "10000000-0000-4000-8000-000000000002",
+            "10000000-0000-4000-8000-000000000003",
+            "GR",
+            "m",
+            "API",
+        )
+
+        pdf = view.export_scene_pdf(
+            "10000000-0000-4000-8000-000000000001",
+        )
+        self.assertIsInstance(pdf, bytes)
+        self.assertGreater(len(pdf), 0)
+        # PDF files begin with the %PDF- header.
+        self.assertTrue(
+            pdf.startswith(b"%PDF-"),
+            f"unexpected PDF header: {pdf[:16]!r}",
+        )
+
+        # Error path mirrors the SVG binding.
+        with self.assertRaises(WellLogValidationError) as raised:
+            view.export_scene_pdf("99999999-0000-4000-8000-000000000099")
+        self.assertEqual(raised.exception.code, "document_not_found")
+
+        with self.assertRaises(WellLogValidationError) as raised:
+            view.export_scene_pdf("not-a-uuid")
+        self.assertEqual(raised.exception.code, "invalid_document")
+
+        view.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.app.processEvents()
+        gc.collect()
+
 
 if __name__ == "__main__":
     unittest.main()
