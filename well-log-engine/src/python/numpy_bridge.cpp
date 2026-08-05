@@ -259,6 +259,7 @@ scalar_type_for_buffer(const Py_buffer &view) noexcept {
     const auto message = std::string{role} + " must be a non-nil UUID";
     set_welllog_error("WellLogValidationError", "invalid_document",
                       message.c_str());
+    return std::nullopt;
   }
   return result;
 }
@@ -561,6 +562,9 @@ namespace {
   // PyUnicode_AsUTF8AndSize is available under limited API 3.10+.
   const char *utf8 = PyUnicode_AsUTF8AndSize(item, &size);
   if (utf8 == nullptr) {
+    // Clear the conversion error so a failed read never leaves a stale
+    // error indicator that poisons later binding calls (review D-002).
+    PyErr_Clear();
     return false;
   }
   *out = QString::fromUtf8(utf8, static_cast<qsizetype>(size));
@@ -574,6 +578,9 @@ namespace {
   }
   const auto value = PyFloat_AsDouble(item);
   if (PyErr_Occurred()) {
+    // Non-numeric value: clear the TypeError so callers that skip the item
+    // don't carry a stale error into later successful work (review D-002).
+    PyErr_Clear();
     return false;
   }
   *out = value;
@@ -925,7 +932,6 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
     return nullptr;
   }
 
-  double track_width_total = 0.0;
   ScenePresentationBuilder presentation_builder(
       *document_id,
       ReferenceDepthRange{
@@ -957,7 +963,6 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
     if (width_mm < 5.0) {
       width_mm = 5.0;
     }
-    track_width_total += width_mm;
     const auto track_role =
         std::string{"welllog-python/mt-track/"} + std::to_string(ti);
     const auto track_id = derive_presentation_id(
@@ -1109,7 +1114,6 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
       break;
     }
   }
-  static_cast<void>(track_width_total);
 
   // Patterns (T4 / #276): presentation-level vector tile sources
   // referenced by interval fills. Parsed and registered before build so
@@ -2091,8 +2095,11 @@ export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
   }
   // Pass the session's installed text engine (if any) so pagination
   // metadata band text renders; geometry bands always render regardless.
+  // Hold the shared_ptr for the write's duration so a concurrent
+  // set_text_engine cannot free the engine mid-export (review D-001).
+  const auto text_engine = view->session().text_engine();
   const auto result = PdfSceneExporter::write(*export_scene, snapshot, {},
-                                              view->session().text_engine());
+                                              text_engine.get());
   if (!result.has_value()) {
     set_result_error(result.error(), "PDF export");
     return nullptr;
