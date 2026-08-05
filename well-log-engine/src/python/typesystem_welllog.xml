@@ -73,6 +73,14 @@
                     %PYARG_0 = welllog::python::export_scene_pdf(%CPPSELF, %1, %2, %3);
                 </inject-code>
             </add-function>
+            <add-function
+                signature="export_scene_cgm(QString@document_id@)"
+                return-type="PyObject*"
+            >
+                <inject-code class="target" position="beginning">
+                    %PYARG_0 = welllog::python::export_scene_cgm(%CPPSELF, %1);
+                </inject-code>
+            </add-function>
         </object-type>
 
         <!-- TableModel / TableProjection: not listed in WELLLOG_PYTHON_GENERATED_SOURCES

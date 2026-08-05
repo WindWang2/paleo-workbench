@@ -73,7 +73,7 @@ Depth viewport (host): **scroll wheel zoom**, **drag pan**, **double-click** res
 
 | 图件 | SVG | PDF | PNG | 后端 |
 |---|---|---|---|---|
-| **单井分析图** | ✓ | ✓ 双模式 | ✓ | SVG：**默认引擎**。PDF：**双选项（ADR 0053）** — 引擎图形/不可搜索（B0）或 **可搜索**（B1.PDF.2 引擎 Latin Helvetica 层，绑定缺失则 Qt 回退） |
+| **单井分析图** | ✓ | ✓ 双模式 | ✓ | + **CGM**（B1.CGM.2 引擎） | SVG/PDF 默认引擎。PDF 双选项（轮廓 / 可搜索 Latin-1）。**CGM**：导出菜单，花纹降纯色（披露） |
 | **地层对比图** | ✓ | ✓ | ✓ | **Qt paint**（多列 + 连线）；PNG 优先抓取对比画布（含拉平/连线） |
 | 其他类型 | 视类型 | 视类型 | 视类型 | 见 `export_dispatch.py` |
 

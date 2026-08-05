@@ -60,7 +60,7 @@ status: accepted
 | 切片 | 内容 |
 |------|------|
 | **B1.CGM.1** | ✅ 自写 CGM V3 Binary：`CgmBinaryWriter` + `CgmSceneExporter`（曲线折线、道框、Latin TEXT）；`welllog.cgm-spike` 无头烟测；**尚未**挂宿主菜单（不得宣称产品支持） |
-| **B1.CGM.2** | 区间/填充降级策略 + 诊断；单井导出菜单 / `export_scene_cgm` 绑定 |
+| **B1.CGM.2** | ✅ 区间/交叉填充 → 纯色 POLYGON + `CgmExportDiagnostics`；`export_scene_cgm` 绑定；宿主 **导出 → CGM…** + 披露文案 |
 | **B1.CGM.3** | 分页 PICTURE；Pattern 策略增强；纳入几何矩阵格式维 |
 
 ### 6. 与既有 ADR 的关系

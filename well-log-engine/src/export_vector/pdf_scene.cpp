@@ -686,9 +686,11 @@ void emit_text_string(PdfPathStream &stream, TextEngine *text_engine,
     }
   }
   if (searchable) {
-    // Overlay extractable text in the same page-mm CTM (y-down authoring).
-    // Rendering may sit slightly off glyph outlines; search/copy is the goal.
+    // Overlay extractable Latin-1 text (B1.PDF.2/3). CJK counted as dropped.
+    const auto before = stream.non_latin_codepoints_dropped();
     stream.draw_standard_text(px, py, fs, text);
+    // latin_runs tracked by caller via stream stats after bands.
+    (void)before;
   }
 }
 
@@ -1047,7 +1049,11 @@ PdfSceneExporter::write(const PreparedScene &scene,
                             image_tile,
                         TextEngine *text_engine,
                         ExportReport *report,
-                        bool searchable_text) noexcept {
+                        bool searchable_text,
+                        SearchableTextStats *searchable_stats) noexcept {
+  if (searchable_stats != nullptr) {
+    *searchable_stats = SearchableTextStats{};
+  }
   try {
     if (!snapshot_is_valid(scene, snapshot)) {
       return pdf_scene_error(ErrorCode::invalid_presentation,
@@ -1143,6 +1149,14 @@ PdfSceneExporter::write(const PreparedScene &scene,
                       window.window_top_mm, window.window_bottom_mm,
                       text_engine, searchable_text);
       stream.restore_state();
+
+      if (searchable_stats != nullptr && searchable_text) {
+        searchable_stats->non_latin_codepoints_dropped +=
+            stream.non_latin_codepoints_dropped();
+        if (stream.needs_standard_font()) {
+          searchable_stats->latin_runs_emitted += 1;
+        }
+      }
 
       auto objects_opt = materialize_objects(scene, resources);
       if (!objects_opt.has_value()) {

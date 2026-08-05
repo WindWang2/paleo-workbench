@@ -194,11 +194,42 @@ void scene_exporter_emits_curve_polylines() {
   require(bytes.size() > 64, "scene CGM must be non-trivial");
 }
 
+void diagnostics_report_pattern_flattening() {
+  CgmExportDiagnostics diag;
+  // Empty-ish scene still needs valid size — reuse writer-level polygon only.
+  CgmBinaryWriter w;
+  w.begin_metafile("d");
+  w.metafile_version(3);
+  w.vdc_type_integer();
+  w.integer_precision(16);
+  w.colour_precision(8);
+  w.colour_value_extent();
+  w.metafile_element_list_drawing_plus();
+  w.begin_picture("p");
+  w.colour_selection_mode_direct();
+  w.vdc_extent(0, 0, 100, 100);
+  w.begin_picture_body();
+  w.fill_colour(200, 100, 50);
+  w.rectangle_fill(10, 10, 40, 40);
+  w.end_picture();
+  w.end_metafile();
+  const auto doc = w.finish();
+  require(doc.has_value(), "polygon fill metafile must build");
+  require(cgm_count_polygons(doc.value().bytes()) >= 1,
+          "rectangle_fill must emit POLYGON");
+  diag.patterns_flattened_to_solid = 2;
+  diag.notes.push_back("pattern fills flattened to solid colour (B1.CGM.2)");
+  const auto sum = diag.summary();
+  require(sum.find("patterns_flattened_to_solid=2") != std::string::npos,
+          "diagnostics summary must list pattern flatten count");
+}
+
 } // namespace
 
 int main() {
   low_level_writer_emits_delimiters_and_polyline();
   scene_exporter_emits_curve_polylines();
+  diagnostics_report_pattern_flattening();
   std::cout << "welllog.cgm-spike: all cases passed\n";
   return 0;
 }

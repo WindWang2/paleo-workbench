@@ -102,11 +102,14 @@ public:
   // The XObject is registered separately and named in the page Resources.
   PdfPathStream &invoke_xobject(std::string_view name) noexcept;
 
-  // Emit a searchable Latin/ASCII text run using the PDF standard Type1
-  // Helvetica font (Base-14 — no embedded font program). Used by B1.PDF.2
-  // (ADR 0053) as an overlay alongside glyph-outline visuals. Non-ASCII code
-  // points are dropped; empty result is a no-op. Marks the stream so the
-  // writer names `/F1 /Helvetica` in page Resources.
+  // Emit a searchable Latin text run using the PDF standard Type1 Helvetica
+  // font (Base-14 — no embedded font program). Used by B1.PDF.2/3 (ADR 0053)
+  // as an overlay alongside glyph-outline visuals.
+  //
+  // B1.PDF.3: accepts UTF-8; emits WinAnsi-compatible Latin-1 (U+0020–007E and
+  // U+00A0–00FF). CJK / other code points are dropped and counted in
+  // ``non_latin_codepoints_dropped()``. Empty result is a no-op. Marks the
+  // stream so the writer names `/F1 /Helvetica` with WinAnsiEncoding.
   PdfPathStream &draw_standard_text(double x, double y, double font_size,
                                     std::string_view text) noexcept;
 
@@ -119,6 +122,9 @@ public:
   [[nodiscard]] std::span<const double> fill_alphas() const noexcept;
   // True if draw_standard_text was used (writer must emit /Font Helvetica).
   [[nodiscard]] bool needs_standard_font() const noexcept;
+  // B1.PDF.3: count of Unicode code points dropped from searchable overlay
+  // (CJK etc.). Outline glyphs may still render via TextEngine.
+  [[nodiscard]] std::uint32_t non_latin_codepoints_dropped() const noexcept;
 
 private:
   struct Impl;

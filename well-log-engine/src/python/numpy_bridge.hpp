@@ -51,5 +51,10 @@ export_scene_pdf(WellLogView *view, const QString &document_id,
                  std::uint64_t export_pixel_height = 0,
                  bool searchable_text = false) noexcept;
 
+// CGM Version 3 Binary export (B1.CGM.2 / ADR 0054). Returns metafile bytes;
+// pattern fills are flattened to solid (see diagnostics in engine logs/tests).
+[[nodiscard]] PyObject *
+export_scene_cgm(WellLogView *view, const QString &document_id) noexcept;
+
 } // namespace python
 } // namespace welllog
