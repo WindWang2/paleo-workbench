@@ -3,7 +3,9 @@
 T8 resolution: no new engine bindings; host-side dispatcher that routes by
 ``PlotDocument.type``:
 
-- single_well / correlation / section -> Qt paint (SVG/PDF/PNG)
+- single_well -> Qt paint (SVG/PDF/PNG); UI defaults SVG/PDF to engine when available (T11)
+- correlation -> **Qt paint** SVG/PDF + PNG grab (B0 #300; engine multi-well export later)
+- section -> Qt paint (SVG/PDF/PNG)
 - plane_map -> ``export_professional_figure`` (PaleoMapCanvas contract)
 - fence_3d -> PNG only via ``grabFramebuffer()``; SVG/PDF raise
   ``UnsupportedFormatError``
