@@ -1,4 +1,4 @@
-"""Export dispatch — per-plot-type export routing (Phase-2, T8 / #252).
+"""Export dispatch — per-plot-type export routing (Phase-2, T8 / #252; Stage 1 / #277).
 
 T8 resolution: no new engine bindings; host-side dispatcher that routes by
 ``PlotDocument.type``:
@@ -8,6 +8,12 @@ T8 resolution: no new engine bindings; host-side dispatcher that routes by
 - fence_3d -> PNG only via ``grabFramebuffer()``; SVG/PDF raise
   ``UnsupportedFormatError``
 - composite -> cartography window (SVG/PDF/PNG; mixed vector+raster)
+
+Stage 1 (#277) adds an opt-in **engine** backend for ``single_well`` that
+routes SVG/PDF through the engine vector exporters (T1/#273 + T2/#274),
+returning bytes the host writes to disk. The Qt paint path remains the
+default (searchable PDF text, ADR 0047); select the engine backend with
+``backend="engine"`` plus a ``view`` (WellLogView) and ``document_id``.
 
 Pagination is host-side and only applies to depth-axis types
 (single_well / correlation / section).
@@ -23,6 +29,7 @@ from well_log_workstation.export_plot import ExportError
 from well_log_workstation.plot_document import PlotDocument
 
 ExportFormat = Literal["svg", "pdf", "png"]
+ExportBackend = Literal["qt", "engine"]
 
 
 class UnsupportedFormatError(ExportError):
@@ -56,15 +63,23 @@ def export_plot(
     fmt: ExportFormat,
     *,
     page_spec: PageSpec | None = None,
+    backend: ExportBackend = "qt",
     **kwargs: Any,
 ) -> Path:
     """Export a plot document in the requested format, routed by type.
 
     Extra kwargs are forwarded to the per-type backend (e.g. the source
     widget / canvas instance for plane_map / fence_3d / composite).
+
+    ``backend="engine"`` routes ``single_well`` SVG/PDF through the engine
+    vector exporters (Stage 1 / #277), requiring a ``view`` (WellLogView
+    with a submitted scene) and ``document_id`` in kwargs. Other plot
+    types ignore ``backend`` (engine exporters don't cover them yet).
     """
     spec = page_spec or PageSpec()
     match plot_doc.type:
+        case "single_well" if backend == "engine" and fmt in ("svg", "pdf"):
+            return _engine_export(plot_doc, fmt, spec, **kwargs)
         case "single_well" | "correlation" | "section":
             return _qt_paint_export(plot_doc, fmt, spec, **kwargs)
         case "plane_map":
@@ -75,6 +90,44 @@ def export_plot(
             return _composite_export(plot_doc, fmt, spec, **kwargs)
         case _:
             raise UnsupportedFormatError(f"未知图件类型: {plot_doc.type}")
+
+
+def _engine_export(
+    plot_doc: PlotDocument,
+    fmt: ExportFormat,
+    spec: PageSpec,
+    **kwargs: Any,
+) -> Path:
+    """Engine vector-export backend for single_well (Stage 1 / #277).
+
+    Routes SVG/PDF through the engine exporters bound in T1 (#273) and
+    T2 (#274): the engine renders to in-memory bytes; the host writes them
+    to disk atomically. Requires a ``view`` (WellLogView with a submitted
+    prepared scene) and ``document_id`` in kwargs.
+
+    Returns a ``Path`` (same contract as the Qt backend). PDF text is
+    glyph-outlines / non-searchable (ADR 0047) — the host UI must disclose
+    this when the engine backend is selected (T6 / #278).
+    """
+    view = kwargs.get("view")
+    document_id = kwargs.get("document_id")
+    if view is None or document_id is None:
+        raise ExportError(
+            "engine 导出需要 view（WellLogView）与 document_id"
+        )
+    out = Path(kwargs.get("path") or f"export_{plot_doc.id}.{fmt}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if fmt == "svg":
+            data: bytes = view.export_scene_svg(document_id)
+        else:  # pdf
+            data = view.export_scene_pdf(document_id)
+    except Exception as exc:  # typed WellLogError surfaces here
+        raise ExportError(f"引擎 {fmt} 导出失败: {exc}") from exc
+    if not isinstance(data, bytes) or len(data) < 50:
+        raise ExportError(f"引擎 {fmt} 导出返回空数据")
+    out.write_bytes(data)
+    return out
 
 
 # -- per-type backends ---------------------------------------------------

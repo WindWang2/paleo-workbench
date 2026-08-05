@@ -1,4 +1,9 @@
-"""Export active multi-track presentation to SVG/PDF (#221)."""
+"""Export active multi-track presentation to SVG/PDF (#221).
+
+Stage 1 / #277 (T5): engine-backend export route for single_well, routed
+through export_dispatch with ``backend="engine"`` (T1 SVG + T2 PDF
+bindings). The Qt paint path remains the default.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,11 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from well_log_workstation.engine_bridge import (  # noqa: E402
+    engine_available,
+    reset_engine_capability_cache,
+)
+from well_log_workstation.export_dispatch import export_plot  # noqa: E402
 from well_log_workstation.export_plot import (  # noqa: E402
     ExportError,
     export_presentation_pdf,
@@ -16,6 +26,7 @@ from well_log_workstation.export_plot import (  # noqa: E402
 )
 from well_log_workstation.shell import WellLogWorkstationWindow  # noqa: E402
 from well_log_workstation.workspace import create_workspace  # noqa: E402
+from well_log_workstation.plot_document import load_plot_document  # noqa: E402
 
 
 def _write_las(path: Path, well: str = "EXP-1") -> Path:
@@ -94,3 +105,117 @@ def test_export_presentation_api_direct(qtbot, tmp_path: Path) -> None:
     pdf = export_presentation_pdf(pres, tmp_path / "direct.pdf")
     assert svg.stat().st_size >= 50
     assert pdf.stat().st_size >= 50
+
+
+# --- Stage 1 / #277 (T5): engine-backend export route ---------------------
+
+
+def _engine_setup(qtbot, tmp_path: Path, monkeypatch):
+    """Shared setup: a workstation with an engine surface + submitted scene.
+
+    Returns ``(win, plot_doc, document_id)``. Skips when the engine is
+    unavailable.
+    """
+    monkeypatch.delenv("WLWS_DISABLE_ENGINE", raising=False)
+    monkeypatch.delenv("WLWS_FORCE_HOST_CANVAS", raising=False)
+    reset_engine_capability_cache()
+    if not engine_available():
+        pytest.skip("WellLogEngine unavailable")
+    ws = create_workspace(tmp_path / "eng")
+    las = _write_las(tmp_path / "g.las", well="ENG-EXP")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    win.set_prefer_engine_canvas(True)
+    well_id = win.import_las_path(las)
+    win.create_single_well_plot_document(well_id, "std-gr-rt-den")
+    pres = win.active_presentation
+    assert pres is not None and pres.track_count >= 1
+    win.open_engine_preview()  # submits the presentation to WellLogView
+    plot_doc = load_plot_document(ws, win.active_plot_id)
+    doc_id = pres.well_document_id
+    return win, plot_doc, doc_id
+
+
+def test_engine_route_svg_nonempty(qtbot, tmp_path: Path, monkeypatch) -> None:
+    """engine backend produces a valid SVG file via export_dispatch."""
+    win, plot_doc, doc_id = _engine_setup(qtbot, tmp_path, monkeypatch)
+    out = export_plot(
+        plot_doc,
+        "svg",
+        backend="engine",
+        view=win._engine_view,
+        document_id=doc_id,
+        path=str(tmp_path / "engine.svg"),
+    )
+    assert out.is_file()
+    assert out.stat().st_size >= 50
+    text = out.read_text(encoding="utf-8", errors="replace").lstrip()
+    assert text.startswith("<?xml") or text.startswith("<svg")
+
+
+def test_engine_route_pdf_nonempty(qtbot, tmp_path: Path, monkeypatch) -> None:
+    """engine backend produces a valid PDF file via export_dispatch."""
+    win, plot_doc, doc_id = _engine_setup(qtbot, tmp_path, monkeypatch)
+    out = export_plot(
+        plot_doc,
+        "pdf",
+        backend="engine",
+        view=win._engine_view,
+        document_id=doc_id,
+        path=str(tmp_path / "engine.pdf"),
+    )
+    assert out.is_file()
+    assert out.stat().st_size >= 50
+    assert out.read_bytes()[:5] == b"%PDF-"
+
+
+def test_engine_route_missing_view_raises(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    """engine backend without view/document_id surfaces a host ExportError."""
+    monkeypatch.delenv("WLWS_DISABLE_ENGINE", raising=False)
+    reset_engine_capability_cache()
+    if not engine_available():
+        pytest.skip("WellLogEngine unavailable")
+    ws = create_workspace(tmp_path / "eng2")
+    las = _write_las(tmp_path / "g2.las")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(las)
+    win.create_single_well_plot_document(well_id, "std-gr-rt-den")
+    plot_doc = load_plot_document(ws, win.active_plot_id)
+    with pytest.raises(ExportError):
+        export_plot(
+            plot_doc,
+            "svg",
+            backend="engine",
+            path=str(tmp_path / "nope.svg"),
+        )
+
+
+def test_engine_route_png_falls_back_to_qt(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    """PNG is not covered by the engine route; falls back to Qt paint."""
+    monkeypatch.delenv("WLWS_DISABLE_ENGINE", raising=False)
+    reset_engine_capability_cache()
+    ws = create_workspace(tmp_path / "eng3")
+    las = _write_las(tmp_path / "g3.las")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(las)
+    win.create_single_well_plot_document(well_id, "std-gr-rt-den")
+    plot_doc = load_plot_document(ws, win.active_plot_id)
+    # backend=engine + fmt=png must not raise UnsupportedFormatError; it
+    # routes through Qt paint (engine route only covers svg/pdf).
+    out = export_plot(
+        plot_doc,
+        "png",
+        backend="engine",
+        paint_fn=win._paint_active_plot,
+        path=str(tmp_path / "fallback.png"),
+    )
+    assert out.is_file() and out.stat().st_size >= 50
