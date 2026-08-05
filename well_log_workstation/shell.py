@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -581,7 +582,27 @@ class WellLogWorkstationWindow(QMainWindow):
         self.corr_gap_spin.valueChanged.connect(self._on_correlation_gap_changed)
         gap_row.addWidget(self.corr_gap_spin)
         layout.addLayout(gap_row)
+        layout.addWidget(QLabel("对比基准 / 拉平"))
+        datum_row = QHBoxLayout()
+        self.corr_datum_mode = QComboBox()
+        self.corr_datum_mode.setObjectName("CorrelationDatumMode")
+        self.corr_datum_mode.addItem("MD（原始深度）", "md")
+        self.corr_datum_mode.addItem("层位拉平", "horizon")
+        self.corr_datum_mode.currentIndexChanged.connect(self._on_correlation_datum_changed)
+        datum_row.addWidget(self.corr_datum_mode)
+        layout.addLayout(datum_row)
+        self.corr_datum_horizon = QLineEdit()
+        self.corr_datum_horizon.setObjectName("CorrelationDatumHorizon")
+        self.corr_datum_horizon.setPlaceholderText("拉平层位名，如 T1")
+        self.corr_datum_horizon.editingFinished.connect(self._on_correlation_datum_changed)
+        layout.addWidget(self.corr_datum_horizon)
+        self.corr_undo_btn = QPushButton("撤销连线/拉平")
+        self.corr_undo_btn.setObjectName("Button_CorrLayoutUndo")
+        self.corr_undo_btn.clicked.connect(self._on_correlation_layout_undo)
+        self.corr_undo_btn.setEnabled(False)
+        layout.addWidget(self.corr_undo_btn)
         self._corr_layout_guard = False
+        self._corr_layout_undo: list[dict[str, Any]] = []
         self._set_correlation_layout_enabled(False)
 
         layout.addWidget(QLabel("对比连线"))
@@ -1410,6 +1431,16 @@ class WellLogWorkstationWindow(QMainWindow):
         self._active_plot_id = plot.id
         self._active_plot_type = "correlation"
         self._show_correlation(plot)
+        # Initial auto-match once on create (not on every reopen/undo).
+        if not plot.links:
+            try:
+                self.auto_link_correlation_tops()
+            except WorkspaceError:
+                pass
+            try:
+                plot = load_plot_document(self._workspace, plot.id)
+            except WorkspaceError:
+                pass
         emit_plot_changed(plot.id)
         self._refresh_tree()
         return plot
@@ -1447,31 +1478,26 @@ class WellLogWorkstationWindow(QMainWindow):
             self._active_tops = tops_cols[0] if tops_cols else []
             self._tops_diagnostics = all_diags
             self._refresh_tops_list_items(self._active_tops, all_diags)
-        # Links from document, or auto-match by top name when empty (#229)
+        # Links from document only. Auto-match on first create is done in
+        # create_correlation_plot_document so intentional empty (clear/undo)
+        # is not refilled (#296).
         links = list(plot.links)
-        if not links:
-            tops_by_well = {
-                wid: tops_cols[i] for i, wid in enumerate(plot.well_ids)
-            }
-            links = match_tops_by_name(plot.well_ids, tops_by_well)
-            if links:
-                plot.links = list(links)
-                try:
-                    save_plot_document(self._workspace, plot)
-                except WorkspaceError:
-                    pass
         self._correlation_links = links
         gap = getattr(plot, "column_gap_px", 6) or 6
         self.correlation_canvas.set_column_gap(gap)
         self.correlation_canvas.set_columns(presentations, tops_cols, links)
+        self._apply_correlation_datum_shifts(plot, presentations, tops_cols)
         self._refresh_links_list()
         self._refresh_correlation_well_list(plot)
         names = " · ".join(p.well_name for p in presentations[:4])
         tops_n = sum(len(t) for t in tops_cols)
+        datum = getattr(plot, "datum_mode", None) or "md"
+        horiz = getattr(plot, "datum_horizon", None) or ""
+        datum_note = f"基准 {datum}" + (f"/{horiz}" if horiz else "")
         self.correlation_caption.setText(
             f"地层对比图-lite · {names} · "
             f"共享深度 · 图版 {template.name} · 层位 {tops_n} · "
-            f"连线 {len(links)} · 间距 {gap}px"
+            f"连线 {len(links)} · 间距 {gap}px · {datum_note}"
         )
         tab = f"对比 · {len(presentations)}井"
         if self._active_plot_id:
@@ -1657,6 +1683,12 @@ class WellLogWorkstationWindow(QMainWindow):
         self.corr_well_up_btn.setEnabled(enabled)
         self.corr_well_down_btn.setEnabled(enabled)
         self.corr_gap_spin.setEnabled(enabled)
+        if hasattr(self, "corr_datum_mode"):
+            self.corr_datum_mode.setEnabled(enabled)
+            self.corr_datum_horizon.setEnabled(enabled)
+            self.corr_undo_btn.setEnabled(
+                enabled and bool(self._corr_layout_undo)
+            )
 
     def _refresh_correlation_well_list(self, plot: PlotDocument | None = None) -> None:
         """Fill well-order list for active correlation plot (#295)."""
@@ -1685,6 +1717,13 @@ class WellLogWorkstationWindow(QMainWindow):
         self._corr_layout_guard = True
         try:
             self.corr_gap_spin.setValue(int(getattr(plot, "column_gap_px", 6) or 6))
+            if hasattr(self, "corr_datum_mode"):
+                mode = str(getattr(plot, "datum_mode", None) or "md")
+                idx = self.corr_datum_mode.findData(mode)
+                self.corr_datum_mode.setCurrentIndex(idx if idx >= 0 else 0)
+                self.corr_datum_horizon.setText(
+                    str(getattr(plot, "datum_horizon", None) or "")
+                )
         finally:
             self._corr_layout_guard = False
         self._set_correlation_layout_enabled(True)
@@ -1712,6 +1751,7 @@ class WellLogWorkstationWindow(QMainWindow):
         ids = list(plot.well_ids)
         if row >= len(ids) or new_row >= len(ids):
             return
+        self._push_correlation_layout_undo(plot)
         ids[row], ids[new_row] = ids[new_row], ids[row]
         plot.well_ids = ids
         try:
@@ -1737,6 +1777,7 @@ class WellLogWorkstationWindow(QMainWindow):
             plot = load_plot_document(self._workspace, self._active_plot_id)
         except WorkspaceError:
             return
+        self._push_correlation_layout_undo(plot)
         plot.column_gap_px = gap
         try:
             save_plot_document(self._workspace, plot)
@@ -1748,6 +1789,150 @@ class WellLogWorkstationWindow(QMainWindow):
             head = base.split("· 间距")[0].rstrip()
             self.correlation_caption.setText(f"{head} · 间距 {gap}px")
         self._sync_primary_correlation_surface()
+        self._set_correlation_layout_enabled(True)
+
+    def _correlation_layout_snapshot(self, plot: PlotDocument) -> dict[str, Any]:
+        return {
+            "links": [lk.to_json() for lk in plot.links],
+            "column_gap_px": int(getattr(plot, "column_gap_px", 6) or 6),
+            "datum_mode": str(getattr(plot, "datum_mode", None) or "md"),
+            "datum_horizon": getattr(plot, "datum_horizon", None),
+            "well_ids": list(plot.well_ids),
+        }
+
+    def _push_correlation_layout_undo(self, plot: PlotDocument) -> None:
+        self._corr_layout_undo.append(self._correlation_layout_snapshot(plot))
+        if len(self._corr_layout_undo) > 32:
+            self._corr_layout_undo = self._corr_layout_undo[-32:]
+        if hasattr(self, "corr_undo_btn"):
+            self.corr_undo_btn.setEnabled(True)
+
+    def _apply_correlation_datum_shifts(
+        self,
+        plot: PlotDocument,
+        presentations: list[HostPresentation],
+        tops_cols: list[list[FormationTop]],
+    ) -> None:
+        """Compute WellSectionDatum shifts and apply to correlation canvas (#296)."""
+        mode = str(getattr(plot, "datum_mode", None) or "md")
+        horizon = getattr(plot, "datum_horizon", None)
+        if mode not in WellSectionDatum.VALID_MODES:
+            mode = "md"
+        datum = WellSectionDatum(mode=mode, target_horizon=horizon)
+        well_dicts: list[dict[str, Any]] = []
+        id_by_name: dict[str, str] = {}
+        for i, pres in enumerate(presentations):
+            tops = tops_cols[i] if i < len(tops_cols) else []
+            well_dicts.append(
+                {
+                    "name": pres.well_name,
+                    "tops": [{"name": t.name, "depth": t.depth} for t in tops],
+                }
+            )
+            id_by_name[pres.well_name] = pres.well_document_id
+        shifts_by_name = datum.compute_shifts(well_dicts)
+        shifts_by_id = {
+            id_by_name.get(name, name): float(shift)
+            for name, shift in shifts_by_name.items()
+        }
+        self.correlation_canvas.set_depth_shifts(shifts_by_id)
+
+    def set_correlation_datum(
+        self,
+        *,
+        mode: str = "md",
+        horizon: str | None = None,
+        persist: bool = True,
+    ) -> None:
+        """Set correlation display datum and refresh canvas (undoable when persist)."""
+        if (
+            self._workspace is None
+            or self._active_plot_type != "correlation"
+            or not self._active_plot_id
+        ):
+            return
+        if mode not in WellSectionDatum.VALID_MODES:
+            mode = "md"
+        try:
+            plot = load_plot_document(self._workspace, self._active_plot_id)
+        except WorkspaceError:
+            return
+        if persist:
+            self._push_correlation_layout_undo(plot)
+        plot.datum_mode = mode
+        plot.datum_horizon = (horizon or "").strip() or None
+        if persist:
+            try:
+                save_plot_document(self._workspace, plot)
+            except WorkspaceError:
+                pass
+        if self._correlation_presentations:
+            tops_cols = self.correlation_canvas.tops_per_column()
+            self._apply_correlation_datum_shifts(
+                plot, self._correlation_presentations, tops_cols
+            )
+        self._corr_layout_guard = True
+        try:
+            if hasattr(self, "corr_datum_mode"):
+                idx = self.corr_datum_mode.findData(mode)
+                self.corr_datum_mode.setCurrentIndex(idx if idx >= 0 else 0)
+                self.corr_datum_horizon.setText(plot.datum_horizon or "")
+        finally:
+            self._corr_layout_guard = False
+        self._sync_primary_correlation_surface()
+        self._set_correlation_layout_enabled(True)
+
+    def _on_correlation_datum_changed(self, *_args) -> None:
+        if self._corr_layout_guard:
+            return
+        if not hasattr(self, "corr_datum_mode"):
+            return
+        mode = self.corr_datum_mode.currentData() or "md"
+        horizon = self.corr_datum_horizon.text().strip() or None
+        self.set_correlation_datum(mode=str(mode), horizon=horizon, persist=True)
+
+    def undo_correlation_layout(self) -> bool:
+        """Restore previous links / gap / datum / well order for active correlation."""
+        if (
+            self._workspace is None
+            or self._active_plot_type != "correlation"
+            or not self._active_plot_id
+            or not self._corr_layout_undo
+        ):
+            return False
+        snap = self._corr_layout_undo.pop()
+        try:
+            plot = load_plot_document(self._workspace, self._active_plot_id)
+        except WorkspaceError:
+            return False
+        from well_log_workstation.correlation_links import HorizonLink as HL
+
+        restored: list[HorizonLink] = []
+        for raw in snap.get("links") or []:
+            if isinstance(raw, dict):
+                lk = HL.from_json(raw)
+                if lk is not None:
+                    restored.append(lk)
+        plot.links = restored
+        plot.column_gap_px = int(snap.get("column_gap_px", 6) or 6)
+        plot.datum_mode = str(snap.get("datum_mode") or "md")
+        plot.datum_horizon = snap.get("datum_horizon")
+        if snap.get("well_ids"):
+            plot.well_ids = [str(x) for x in snap["well_ids"]]
+        try:
+            save_plot_document(self._workspace, plot)
+        except WorkspaceError:
+            return False
+        self._show_correlation(plot)
+        if hasattr(self, "corr_undo_btn"):
+            self.corr_undo_btn.setEnabled(bool(self._corr_layout_undo))
+        return True
+
+    def _on_correlation_layout_undo(self) -> None:
+        if not self.undo_correlation_layout():
+            self.statusBar().showMessage("无可撤销的对比布局编辑", 3000)
+            return
+        self.statusBar().showMessage("已撤销连线/拉平/井序编辑", 3000)
 
     def auto_link_correlation_tops(self) -> list[HorizonLink]:
         """Match tops by name across adjacent wells; persist on active plot."""
@@ -1830,6 +2015,7 @@ class WellLogWorkstationWindow(QMainWindow):
             try:
                 plot = load_plot_document(self._workspace, self._active_plot_id)
                 if plot.type == "correlation":
+                    self._push_correlation_layout_undo(plot)
                     plot.links = list(self._correlation_links)
                     save_plot_document(self._workspace, plot)
             except WorkspaceError:

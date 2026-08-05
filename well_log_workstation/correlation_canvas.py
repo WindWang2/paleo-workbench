@@ -41,6 +41,8 @@ class CorrelationCanvas(QWidget):
         self._highlight: tuple[str, str] | None = None  # well_id, top name
         # Pixel gap between well columns (#295 / T7); default matches legacy paint.
         self._column_gap: int = 6
+        # Per-well display-depth shift (MD + shift = display) for datum flatten (#296).
+        self._depth_shifts: dict[str, float] = {}
 
     def column_gap(self) -> int:
         return self._column_gap
@@ -49,6 +51,20 @@ class CorrelationCanvas(QWidget):
         """Set horizontal spacing between columns (pixels, clamped)."""
         self._column_gap = max(0, min(200, int(gap_px)))
         self.update()
+
+    def depth_shifts(self) -> dict[str, float]:
+        return dict(self._depth_shifts)
+
+    def set_depth_shifts(self, shifts: dict[str, float] | None) -> None:
+        """Apply per-well display shifts (well_document_id → additive offset)."""
+        self._depth_shifts = {
+            str(k): float(v) for k, v in (shifts or {}).items()
+        }
+        self._fit_depth()
+        self.update()
+
+    def _shift_for(self, well_id: str) -> float:
+        return float(self._depth_shifts.get(well_id, 0.0))
 
     def set_columns(
         self,
@@ -155,10 +171,12 @@ class CorrelationCanvas(QWidget):
             return None
         d0, d1 = self._d0, self._d1
         depth_at = d0 + ((y - top_band) / (bottom - top_band)) * (d1 - d0)
+        well_id = self._columns[idx].well_document_id
+        shift = self._shift_for(well_id)
         best: FormationTop | None = None
         best_dd = float("inf")
         for ft in self._tops_per_column[idx] if idx < len(self._tops_per_column) else []:
-            dd = abs(ft.depth - depth_at)
+            dd = abs((ft.depth + shift) - depth_at)
             # convert depth delta to pixels
             px = abs(dd) / (d1 - d0) * (bottom - top_band) if d1 > d0 else 1e9
             if px <= y_tol_px and dd < best_dd:
@@ -166,7 +184,6 @@ class CorrelationCanvas(QWidget):
                 best = ft
         if best is None:
             return None
-        well_id = self._columns[idx].well_document_id
         return well_id, best
 
     def _fit_depth(self) -> None:
@@ -175,8 +192,9 @@ class CorrelationCanvas(QWidget):
         for pres in self._columns:
             depth = np.asarray(pres.depth, dtype=np.float64)
             if depth.size:
-                mins.append(float(np.nanmin(depth)))
-                maxs.append(float(np.nanmax(depth)))
+                shift = self._shift_for(pres.well_document_id)
+                mins.append(float(np.nanmin(depth)) + shift)
+                maxs.append(float(np.nanmax(depth)) + shift)
         if mins and maxs:
             self._d0, self._d1 = min(mins), max(maxs)
         else:
@@ -267,6 +285,7 @@ class CorrelationCanvas(QWidget):
 
         for i, pres in enumerate(self._columns):
             x0 = 8 + i * (col_w + gap)
+            well_shift = self._shift_for(pres.well_document_id)
             p.setPen(QPen(QColor("#333"), 1))
             p.drawRect(x0, 8, col_w - 2, 22)
             p.drawText(x0 + 4, 24, pres.well_name[:18])
@@ -304,8 +323,8 @@ class CorrelationCanvas(QWidget):
                     t = (v - vmin) / (vmax - vmin) if vmax > vmin else 0.5
                 return x0 + 4 + max(0.0, min(1.0, t)) * (col_w - 12)
 
-            def y_map(d: float) -> float:
-                return top + ((d - d0) / (d1 - d0)) * (bottom - top)
+            def y_map(d_display: float) -> float:
+                return top + ((d_display - d0) / (d1 - d0)) * (bottom - top)
 
             p.setPen(QPen(QColor(layer.color), 1.5))
             prev = None
@@ -315,7 +334,7 @@ class CorrelationCanvas(QWidget):
                 if bool(nulls[j]):
                     prev = None
                     continue
-                d = float(depth[j])
+                d = float(depth[j]) + well_shift
                 if d < d0 or d > d1:
                     prev = None
                     continue
@@ -334,9 +353,10 @@ class CorrelationCanvas(QWidget):
                 else []
             )
             for ft in col_tops:
-                if not math.isfinite(ft.depth) or ft.depth < d0 or ft.depth > d1:
+                d_disp = float(ft.depth) + well_shift
+                if not math.isfinite(ft.depth) or d_disp < d0 or d_disp > d1:
                     continue
-                yy = int(y_map(ft.depth))
+                yy = int(y_map(d_disp))
                 hl = (
                     self._highlight is not None
                     and self._highlight[0] == pres.well_document_id
@@ -362,16 +382,18 @@ class CorrelationCanvas(QWidget):
                 ri = well_index.get(link.right_well_id)
                 if li is None or ri is None:
                     continue
-                if link.left_depth < d0 or link.left_depth > d1:
+                ld = float(link.left_depth) + self._shift_for(link.left_well_id)
+                rd = float(link.right_depth) + self._shift_for(link.right_well_id)
+                if ld < d0 or ld > d1:
                     continue
-                if link.right_depth < d0 or link.right_depth > d1:
+                if rd < d0 or rd > d1:
                     continue
                 lx0 = 8 + li * (col_w + gap)
                 rx0 = 8 + ri * (col_w + gap)
                 x_left = lx0 + col_w - 4
                 x_right = rx0 + 2
-                y_left = top + ((link.left_depth - d0) / (d1 - d0)) * (bottom - top)
-                y_right = top + ((link.right_depth - d0) / (d1 - d0)) * (bottom - top)
+                y_left = top + ((ld - d0) / (d1 - d0)) * (bottom - top)
+                y_right = top + ((rd - d0) / (d1 - d0)) * (bottom - top)
                 pen = QPen(QColor(link.color), 1.4, Qt.PenStyle.SolidLine)
                 p.setPen(pen)
                 p.drawLine(int(x_left), int(y_left), int(x_right), int(y_right))
