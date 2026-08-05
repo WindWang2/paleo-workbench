@@ -224,10 +224,26 @@ class MultiTrackCanvas(QWidget):
             return
         super().mouseDoubleClickEvent(event)
 
+    def _header_lines(self, pres) -> list[str]:
+        hdr = getattr(pres, "header", None)
+        if hdr is None:
+            return [pres.template_name or "单井图"]
+        return hdr.header_lines(
+            well_name=pres.well_name,
+            template_name=pres.template_name,
+            depth_unit=pres.depth_unit or "m",
+            scale_summary=pres.scale_summary(),
+        )
+
     def _plot_band(self) -> tuple[int, int]:
         h = self.height()
-        header_h = 28
-        return 8 + header_h, h - 16
+        n_lines = 2
+        if self._presentation is not None:
+            n_lines = max(1, len(self._header_lines(self._presentation)))
+        title_h = 6 + n_lines * 16
+        track_hdr = 26
+        footer_h = 18
+        return title_h + track_hdr, h - footer_h
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
@@ -258,6 +274,18 @@ class MultiTrackCanvas(QWidget):
         if d1 <= d0:
             d0, d1 = 0.0, 1.0
 
+        # Plot header band (#293)
+        header_lines = self._header_lines(pres)
+        y_text = 14
+        for i, line in enumerate(header_lines):
+            font = p.font()
+            font.setBold(i == 0)
+            font.setPointSize(10 if i == 0 else 8)
+            p.setFont(font)
+            p.setPen(QColor("#222"))
+            p.drawText(8, y_text, line[:120])
+            y_text += 16 if i == 0 else 14
+
         top, bottom = self._plot_band()
         left_margin = 8
         usable_w = max(40, w - left_margin - 8)
@@ -273,15 +301,16 @@ class MultiTrackCanvas(QWidget):
             return
         total_frac = sum(max(0.05, t.width_fraction) for t in paint_tracks) or 1.0
 
+        track_hdr_y = top - 26
         x = left_margin
         track_left = left_margin
         track_right = left_margin
         for track in paint_tracks:
             tw = max(24, int(usable_w * (max(0.05, track.width_fraction) / total_frac)))
-            # header
+            # per-track column header
             p.setPen(QPen(QColor("#333"), 1))
-            p.drawRect(x, 8, tw - 4, 24)
-            p.drawText(x + 4, 24, track.title[:12])
+            p.drawRect(x, track_hdr_y, tw - 4, 24)
+            p.drawText(x + 4, track_hdr_y + 16, track.title[:12])
 
             # track body
             p.setPen(QPen(QColor("#bbbbbb"), 1))
@@ -328,17 +357,23 @@ class MultiTrackCanvas(QWidget):
                 p.setPen(QColor(ft.color))
                 p.drawText(track_left + 4, yy - 2, ft.name[:16])
 
+        # Footer (#293) — template footer + interaction hint
         p.setPen(QColor("#666"))
-        tops_note = f" · 层位 {len(self._tops)}" if self._tops else ""
-        pick_note = " · 拾取层位中(单击)" if self._pick_mode else " · Shift+单击拾取层位"
-        p.drawText(
-            8,
-            h - 4,
-            f"{pres.well_name} · {pres.template_name} · "
-            f"{pres.track_count} 图道 · {pres.depth_unit}{tops_note} · "
-            f"深度 {d0:.1f}–{d1:.1f} · 滚轮缩放 / 拖动平移 / 双击复位"
-            f"{pick_note}",
-        )
+        font = p.font()
+        font.setBold(False)
+        font.setPointSize(8)
+        p.setFont(font)
+        footer = ""
+        hdr = getattr(pres, "header", None)
+        if hdr is not None:
+            footer = hdr.footer_line(
+                depth_range=(d0, d1),
+                depth_unit=pres.depth_unit or "m",
+            )
+        tops_note = f"层位 {len(self._tops)}" if self._tops else ""
+        pick_note = "拾取层位中" if self._pick_mode else "滚轮缩放/拖动平移/双击复位"
+        tail = " · ".join(x for x in (footer, tops_note, pick_note) if x)
+        p.drawText(8, h - 4, tail[:160] if tail else f"深度 {d0:.1f}–{d1:.1f}")
         p.end()
 
     def _paint_curve(

@@ -2,6 +2,15 @@
   "id": "gr-only",
   "name": "简化 GR-only",
   "schemaVersion": 1,
+  "header": {
+    "title": "GR 单轨图",
+    "show_well_name": true,
+    "show_depth_scale": true,
+    "show_template_name": true
+  },
+  "footer": {
+    "show_depth_range": true
+  },
   "tracks": [
     {
       "id": "depth",

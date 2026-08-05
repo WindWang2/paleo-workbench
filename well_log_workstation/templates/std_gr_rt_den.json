@@ -2,6 +2,17 @@
   "id": "std-gr-rt-den",
   "name": "标准三轨 GR-RT-DEN",
   "schemaVersion": 1,
+  "header": {
+    "title": "单井综合测井图",
+    "show_well_name": true,
+    "show_depth_scale": true,
+    "show_template_name": true,
+    "lines": []
+  },
+  "footer": {
+    "show_depth_range": true,
+    "text": ""
+  },
   "tracks": [
     {
       "id": "depth",
