@@ -1,0 +1,204 @@
+// CGM Version 3 Binary subset spike (B1.CGM.1 / ADR 0054).
+// Proves the hand-rolled writer emits delimiter + POLYLINE commands and that
+// CgmSceneExporter maps a single-well prepared scene without crashing.
+
+#include <welllog/export/cgm.hpp>
+#include <welllog/scene/scene.hpp>
+#include <welllog/session/session.hpp>
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using namespace welllog;
+
+[[noreturn]] void fail(std::string_view message) {
+  std::cerr << "FAIL: " << message << '\n';
+  std::_Exit(EXIT_FAILURE);
+}
+
+void require(bool condition, std::string_view message) {
+  if (!condition) {
+    fail(message);
+  }
+}
+
+EntityId id(std::string_view text) {
+  const auto parsed = EntityId::parse(text);
+  require(parsed.has_value(), "test UUID must be valid");
+  return *parsed;
+}
+
+void low_level_writer_emits_delimiters_and_polyline() {
+  CgmBinaryWriter w;
+  w.begin_metafile("spike");
+  w.metafile_version(3);
+  w.metafile_description("B1.CGM.1 spike");
+  w.vdc_type_integer();
+  w.integer_precision(16);
+  w.colour_precision(8);
+  w.colour_value_extent();
+  w.metafile_element_list_drawing_plus();
+  w.begin_picture("p1");
+  w.colour_selection_mode_direct();
+  w.vdc_extent(0, 0, 1000, 1000);
+  w.background_colour(255, 255, 255);
+  w.begin_picture_body();
+  w.line_colour(0, 0, 0);
+  w.line_width(10);
+  const std::array<std::pair<std::int16_t, std::int16_t>, 3> pts{{
+      {0, 0},
+      {500, 500},
+      {1000, 0},
+  }};
+  w.polyline(pts);
+  w.text_colour(0, 0, 0);
+  w.character_height(100);
+  w.text(10, 900, "GR 1000");
+  w.end_picture();
+  w.end_metafile();
+
+  const auto doc = w.finish();
+  require(doc.has_value(), "finish() must succeed");
+  const auto bytes = doc.value().bytes();
+  require(bytes.size() > 32, "CGM must be non-empty");
+  require(cgm_has_metafile_delimiters(bytes),
+          "BEGIN/END METAFILE must be present");
+  require(cgm_count_polylines(bytes) >= 1,
+          "at least one POLYLINE command expected");
+
+  // Determinism: same input → same bytes.
+  CgmBinaryWriter w2;
+  w2.begin_metafile("spike");
+  w2.metafile_version(3);
+  w2.metafile_description("B1.CGM.1 spike");
+  w2.vdc_type_integer();
+  w2.integer_precision(16);
+  w2.colour_precision(8);
+  w2.colour_value_extent();
+  w2.metafile_element_list_drawing_plus();
+  w2.begin_picture("p1");
+  w2.colour_selection_mode_direct();
+  w2.vdc_extent(0, 0, 1000, 1000);
+  w2.background_colour(255, 255, 255);
+  w2.begin_picture_body();
+  w2.line_colour(0, 0, 0);
+  w2.line_width(10);
+  w2.polyline(pts);
+  w2.text_colour(0, 0, 0);
+  w2.character_height(100);
+  w2.text(10, 900, "GR 1000");
+  w2.end_picture();
+  w2.end_metafile();
+  const auto doc2 = w2.finish();
+  require(doc2.has_value(), "second finish() must succeed");
+  require(std::string{doc2.value().bytes()} == std::string{bytes},
+          "CGM writer must be byte-deterministic");
+}
+
+void scene_exporter_emits_curve_polylines() {
+  const auto document_id = id("20000000-0000-4000-8000-000000000001");
+  const auto axis_id = id("20000000-0000-4000-8000-000000000002");
+  const auto curve_id = id("20000000-0000-4000-8000-000000000003");
+  const auto track_id = id("20000000-0000-4000-8000-000000000004");
+  const auto scale_id = id("20000000-0000-4000-8000-000000000005");
+  const auto layer_id = id("20000000-0000-4000-8000-000000000006");
+
+  auto depths = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{1000.0, 1001.0, 1002.0, 1003.0, 1004.0});
+  auto values = std::make_shared<const std::vector<double>>(
+      std::initializer_list<double>{10.0, 20.0, 30.0, 40.0, 50.0});
+  auto nulls = std::make_shared<const std::vector<std::uint8_t>>(
+      std::initializer_list<std::uint8_t>{0});
+
+  WellLogDocumentBuilder document_builder(document_id, DocumentRevision{5});
+  document_builder.add_sampling_axis(SamplingAxis{
+      .id = axis_id,
+      .coordinates = BufferView::from_vector(depths),
+      .domain = DepthDomain::measured_depth,
+      .unit = "m",
+      .direction = AxisDirection::increasing,
+  });
+  document_builder.add_curve(Curve{
+      .id = curve_id,
+      .mnemonic = "GR",
+      .display_name = "Gamma Ray",
+      .unit = "API",
+      .sampling_axis_id = axis_id,
+      .values = BufferView::from_vector(values),
+      .nulls = NullBitmapView::from_raw(nulls->data(), values->size(),
+                                        nulls->size(), SharedOwner{nulls}),
+  });
+
+  WellLogSession session;
+  require(
+      session.execute(SetDocumentCommand{document_builder.build()}).has_value(),
+      "document must be accepted");
+
+  ScenePresentationBuilder presentation_builder(
+      document_id,
+      ReferenceDepthRange{
+          .domain = DepthDomain::measured_depth,
+          .unit = "m",
+          .top = 1000.0,
+          .bottom = 1004.0,
+      },
+      Millimetres{80.0}, "font-fixture-v1");
+  presentation_builder.add_track(TrackSpec{
+      .id = track_id,
+      .width = Millimetres{30.0},
+      .z_order = 10,
+  });
+  presentation_builder.add_scale(TrackScaleSpec{
+      .id = scale_id,
+      .track_id = track_id,
+      .mode = ScaleMode::linear,
+      .minimum = 0.0,
+      .maximum = 80.0,
+      .direction = ScaleDirection::left_to_right,
+      .unit = "API",
+  });
+  presentation_builder.add_curve_layer(CurveLayerSpec{
+      .id = layer_id,
+      .track_id = track_id,
+      .curve_id = curve_id,
+      .scale_id = scale_id,
+      .color =
+          RgbaColor{.red = 0x12, .green = 0x34, .blue = 0x56, .alpha = 0xff},
+      .line_width = Millimetres{0.25},
+      .z_order = 20,
+      .visible = true,
+  });
+
+  require(session.execute(SetPresentationCommand{presentation_builder.build()})
+              .has_value(),
+          "presentation must be accepted");
+  const auto scene = session.prepared_scene(document_id);
+  require(scene != nullptr, "presentation must prepare a scene");
+
+  const auto cgm = CgmSceneExporter::write(*scene);
+  require(cgm.has_value(), "CgmSceneExporter::write must succeed");
+  const auto bytes = cgm.value().bytes();
+  require(cgm_has_metafile_delimiters(bytes), "scene CGM needs delimiters");
+  // Track frame polyline + at least one curve segment.
+  require(cgm_count_polylines(bytes) >= 2,
+          "scene CGM must contain track frame + curve polylines");
+  require(bytes.size() > 64, "scene CGM must be non-trivial");
+}
+
+} // namespace
+
+int main() {
+  low_level_writer_emits_delimiters_and_polyline();
+  scene_exporter_emits_curve_polylines();
+  std::cout << "welllog.cgm-spike: all cases passed\n";
+  return 0;
+}

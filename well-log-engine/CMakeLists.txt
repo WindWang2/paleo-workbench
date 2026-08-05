@@ -439,6 +439,36 @@ if(WELLLOG_BUILD_SHARED)
     )
 endif()
 
+# CGM Version 3 Binary subset (B1.CGM.1 / ADR 0054). Self-written; no third-party
+# CGM SDK. Skeleton: metafile + one PICTURE, curves + track frames + Latin text.
+add_library(welllog_export_cgm ${WELLLOG_LIBRARY_TYPE}
+    src/export_vector/cgm.cpp
+)
+add_library(WellLog::ExportCgm ALIAS welllog_export_cgm)
+set_target_properties(welllog_export_cgm PROPERTIES
+    EXPORT_NAME ExportCgm
+    OUTPUT_NAME welllog-export-cgm
+    VERSION "${PROJECT_VERSION}"
+    SOVERSION "${PROJECT_VERSION_MAJOR}"
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+target_compile_features(welllog_export_cgm PUBLIC cxx_std_20)
+welllog_enable_warnings(welllog_export_cgm)
+target_link_libraries(welllog_export_cgm PUBLIC WellLog::Scene)
+target_include_directories(welllog_export_cgm
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+if(WELLLOG_BUILD_SHARED)
+    target_compile_definitions(
+        welllog_export_cgm
+        PRIVATE WELLLOG_EXPORT_CGM_BUILD
+        PUBLIC WELLLOG_EXPORT_CGM_SHARED
+    )
+endif()
+
 # Raster PNG/TIFF export (#157, ADR 0021). CPU tiled rendering + zlib PNG /
 # hand-rolled TIFF; never QOpenGLWidget framebuffer readback.
 add_library(welllog_export_raster ${WELLLOG_LIBRARY_TYPE}
@@ -772,6 +802,7 @@ install(
         welllog_scene
         welllog_export_vector
         welllog_export_pdf
+        welllog_export_cgm
         welllog_export_raster
         welllog_export_table
         welllog_session
@@ -1257,6 +1288,17 @@ if(WELLLOG_BUILD_TESTS)
         PRIVATE WellLog::ExportPdf ZLIB::ZLIB
     )
     add_test(NAME welllog.pdf-spike COMMAND welllog_pdf_spike_tests)
+
+    add_executable(welllog_cgm_spike_tests
+        tests/integration/cgm_spike_test.cpp
+    )
+    target_compile_features(welllog_cgm_spike_tests PRIVATE cxx_std_20)
+    welllog_enable_warnings(welllog_cgm_spike_tests)
+    target_link_libraries(
+        welllog_cgm_spike_tests
+        PRIVATE WellLog::ExportCgm WellLog::Session WellLog::Scene
+    )
+    add_test(NAME welllog.cgm-spike COMMAND welllog_cgm_spike_tests)
 
     # PDF scene/band text needs HarfBuzz; skip when TEXT=OFF (#234 Windows CI).
     if(WELLLOG_BUILD_TEXT)

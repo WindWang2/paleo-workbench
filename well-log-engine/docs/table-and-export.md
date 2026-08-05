@@ -246,10 +246,10 @@ page_depth_span = printable_height * N
 
 CGM **不在 Desktop 导出 B0**。导出 **B1** 将其作为独立 Export Backend（**ADR 0054**）：
 
-- 消费 Prepared Scene + Export Snapshot；
-- 自研 CGM Version 3 Binary 子集写入器（非默第三方 SDK）；
-- 定义字体、Pattern、裁切和透明度降级策略，并写出 Diagnostic；
-- 具有独立一致性测试；实现前不得宣称已支持；
+- 消费 Prepared Scene（+ 后续 Export Snapshot 分页）；
+- 自研 CGM Version 3 Binary 子集写入器（`welllog_export_cgm`，B1.CGM.1 骨架：曲线/道框/Latin TEXT）；
+- 定义字体、Pattern、裁切和透明度降级策略，并写出 Diagnostic（B1.CGM.2+）；
+- 具有独立一致性测试（`welllog.cgm-spike`）；**宿主菜单未接前不得宣称产品支持**；
 - 不修改 Core/Scene 语义。
 
 可搜索 PDF 可选路径见 **ADR 0053**（默认轮廓 PDF 仍为 ADR 0047）。
