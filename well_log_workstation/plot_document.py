@@ -68,6 +68,9 @@ class PlotDocument:
     # Single-well track property overrides (schema v5 / #292): track_id → props.
     # Keys: visible, title, width_fraction, scale_min, scale_max, scale_mode.
     track_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Correlation column gap in pixels (#295 / T7). Optional field; default 6.
+    # Well order is the existing ``well_ids`` list order.
+    column_gap_px: int = 6
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -111,6 +114,9 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
         payload["track_overrides"] = {
             str(k): dict(v) for k, v in doc.track_overrides.items() if isinstance(v, dict)
         }
+    # Correlation layout (T7): always write when correlation so re-open is stable.
+    if doc.type == "correlation" or doc.column_gap_px != 6:
+        payload["column_gap_px"] = int(doc.column_gap_px)
     return payload
 
 
@@ -177,6 +183,11 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         for tid, props in raw_ov.items():
             if isinstance(props, dict):
                 track_overrides[str(tid)] = dict(props)
+    try:
+        column_gap_px = int(data.get("column_gap_px", 6))
+    except (TypeError, ValueError):
+        column_gap_px = 6
+    column_gap_px = max(0, min(200, column_gap_px))
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -189,6 +200,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         free_graphics=free_graphics,
         revision=max(0, int(data.get("revision") or 0)),
         track_overrides=track_overrides,
+        column_gap_px=column_gap_px,
     )
 
 
@@ -260,6 +272,7 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             free_graphics=list(doc.free_graphics),
             revision=doc.revision,
             track_overrides=dict(doc.track_overrides),
+            column_gap_px=doc.column_gap_px,
         )
     # Lazy import: keep this module importable without PySide6 (see save).
     from well_log_workstation.events import restore_plot_revision

@@ -39,6 +39,16 @@ class CorrelationCanvas(QWidget):
         self._press_y: int | None = None
         self._did_drag = False
         self._highlight: tuple[str, str] | None = None  # well_id, top name
+        # Pixel gap between well columns (#295 / T7); default matches legacy paint.
+        self._column_gap: int = 6
+
+    def column_gap(self) -> int:
+        return self._column_gap
+
+    def set_column_gap(self, gap_px: int) -> None:
+        """Set horizontal spacing between columns (pixels, clamped)."""
+        self._column_gap = max(0, min(200, int(gap_px)))
+        self.update()
 
     def set_columns(
         self,
@@ -126,8 +136,8 @@ class CorrelationCanvas(QWidget):
             return None
         n = len(self._columns)
         w, h = self.width(), self.height()
-        gap = 6
-        col_w = max(40, (w - 16 - gap * (n - 1)) // n)
+        gap = self._column_gap
+        col_w = max(40, (w - 16 - gap * (n - 1)) // n) if n else 40
         top_band, bottom = 36, h - 24
         if y < top_band or y > bottom or bottom <= top_band:
             return None
@@ -135,11 +145,12 @@ class CorrelationCanvas(QWidget):
         rel = x - 8
         if rel < 0:
             return None
-        idx = int(rel // (col_w + gap))
+        stride = col_w + gap
+        idx = int(rel // stride) if stride > 0 else 0
         if idx < 0 or idx >= n:
             return None
         # x within column body
-        x0 = 8 + idx * (col_w + gap)
+        x0 = 8 + idx * stride
         if x < x0 or x > x0 + col_w:
             return None
         d0, d1 = self._d0, self._d1
@@ -249,8 +260,8 @@ class CorrelationCanvas(QWidget):
             return
 
         n = len(self._columns)
-        gap = 6
-        col_w = max(40, (w - 16 - gap * (n - 1)) // n)
+        gap = self._column_gap
+        col_w = max(40, (w - 16 - gap * (n - 1)) // n) if n else 40
         top, bottom = 36, h - 24
         d0, d1 = self._d0, self._d1
 
