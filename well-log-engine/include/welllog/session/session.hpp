@@ -494,7 +494,7 @@ public:
   // when ready; otherwise emits raw samples (density has no effect then).
   [[nodiscard]] Result<PreparedScene>
   prepare_for_export(EntityId document_id,
-                     std::uint32_t aggregate_pixel_height) noexcept;
+                     std::uint64_t aggregate_pixel_height) const noexcept;
   // Active multi-well layout placements (empty when single-well mode).
   [[nodiscard]] std::span<const WellPlacement> well_layout() const noexcept;
   [[nodiscard]] std::span<const CrossWellOverlay>

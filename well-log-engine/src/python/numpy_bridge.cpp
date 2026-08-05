@@ -981,18 +981,15 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
     if (first_layer != nullptr && PyDict_Check(first_layer)) {
       dict_get_string_optional(first_layer, "curve_id", &first_curve_id_text);
     }
+    // Hoist the lookup key once per track (review D-008: avoid repeated
+    // toStdString heap allocations in the scale/unit lookups below).
+    const auto first_curve_key = first_curve_id_text.toStdString();
     double scale_min = 0.0;
     double scale_max = 100.0;
     bool have_explicit = dict_get_float(track, "scale_min", &scale_min);
-    if (!have_explicit) {
-      PyErr_Clear();
-    }
     bool have_max = dict_get_float(track, "scale_max", &scale_max);
-    if (!have_max) {
-      PyErr_Clear();
-    }
     if (!have_explicit || !have_max) {
-      auto it = curve_index_by_id.find(first_curve_id_text.toStdString());
+      auto it = curve_index_by_id.find(first_curve_key);
       if (it != curve_index_by_id.end()) {
         double auto_max = 1.0;
         const double auto_min =
@@ -1016,7 +1013,7 @@ submit_multi_track_impl(WellLogView *view, PyObject *payload) {
             : ScaleMode::linear;
 
     QString scale_unit = QStringLiteral("unit");
-    auto it_unit = curve_index_by_id.find(first_curve_id_text.toStdString());
+    auto it_unit = curve_index_by_id.find(first_curve_key);
     if (it_unit != curve_index_by_id.end()) {
       scale_unit = curves[it_unit->second].value_unit;
     }
@@ -1985,7 +1982,7 @@ submit_multi_well_section_impl(WellLogView *view, PyObject *payload) {
 // correct per-page curve detail.
 [[nodiscard]] PyObject *
 export_scene_svg_impl(WellLogView *view, const QString &document_id_text,
-                      std::uint32_t export_pixel_height) {
+                      std::uint64_t export_pixel_height) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -2040,7 +2037,7 @@ export_scene_svg_impl(WellLogView *view, const QString &document_id_text,
 // metadata band text is omitted — geometry bands still render).
 [[nodiscard]] PyObject *
 export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
-                      std::uint32_t export_pixel_height) {
+                      std::uint64_t export_pixel_height) {
   if (view == nullptr) {
     set_welllog_error("WellLogValidationError", "invalid_view",
                       "WellLogView is no longer valid");
@@ -2152,7 +2149,7 @@ PyObject *clear_multi_well_section(WellLogView *view) noexcept {
 }
 
 PyObject *export_scene_svg(WellLogView *view, const QString &document_id,
-                           std::uint32_t export_pixel_height) noexcept {
+                           std::uint64_t export_pixel_height) noexcept {
   try {
     return export_scene_svg_impl(view, document_id, export_pixel_height);
   } catch (const std::bad_alloc &) {
@@ -2165,7 +2162,7 @@ PyObject *export_scene_svg(WellLogView *view, const QString &document_id,
 }
 
 PyObject *export_scene_pdf(WellLogView *view, const QString &document_id,
-                           std::uint32_t export_pixel_height) noexcept {
+                           std::uint64_t export_pixel_height) noexcept {
   try {
     return export_scene_pdf_impl(view, document_id, export_pixel_height);
   } catch (const std::bad_alloc &) {
