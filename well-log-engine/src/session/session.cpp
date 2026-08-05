@@ -1303,6 +1303,11 @@ void WellLogSession::set_text_engine(
   }
 }
 
+TextEngine *WellLogSession::text_engine() const noexcept {
+  const auto guard = std::lock_guard{impl_->text_engine_mutex};
+  return impl_->text_engine.get();
+}
+
 Result<CommandReceipt> WellLogSession::execute(SetDocumentCommand command) {
   try {
     if (const auto error = validate_document(command.document)) {

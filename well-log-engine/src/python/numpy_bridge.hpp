@@ -38,5 +38,11 @@ submit_multi_well_section(WellLogView *view, PyObject *payload) noexcept;
 [[nodiscard]] PyObject *
 export_scene_svg(WellLogView *view, const QString &document_id) noexcept;
 
+// Render the prepared scene for ``document_id`` to PDF and return the
+// document bytes (T2 / #274). Text is glyph outlines (non-searchable,
+// ADR 0047). Single-page continuous mode, curves-only fidelity.
+[[nodiscard]] PyObject *
+export_scene_pdf(WellLogView *view, const QString &document_id) noexcept;
+
 } // namespace python
 } // namespace welllog

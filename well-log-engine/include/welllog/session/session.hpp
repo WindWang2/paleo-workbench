@@ -471,6 +471,10 @@ public:
   // scene preparation (ADR 0029). Without an engine, text layers prepare
   // empty and a text_engine_unavailable diagnostic is published.
   void set_text_engine(std::shared_ptr<TextEngine> text_engine) noexcept;
+  // Returns the installed text engine, or nullptr when none was set. The
+  // pointer aliases the shared engine (caller must not outlive the session
+  // without taking a copy); used to feed PdfSceneExporter (#274 / T2).
+  [[nodiscard]] TextEngine *text_engine() const noexcept;
   [[nodiscard]] std::span<const ViewEvent> events() const noexcept;
   void clear_events() noexcept;
   [[nodiscard]] std::span<const Diagnostic> diagnostics() const noexcept;

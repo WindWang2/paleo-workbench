@@ -7,6 +7,7 @@
 #include "numpy_bridge.hpp"
 
 #include <welllog/core/document.hpp>
+#include <welllog/export/pdf_scene.hpp>
 #include <welllog/export/svg.hpp>
 #include <welllog/qtwidgets/well_log_view.hpp>
 
@@ -1798,6 +1799,67 @@ export_scene_svg_impl(WellLogView *view, const QString &document_id_text) {
                                    static_cast<Py_ssize_t>(svg.size()));
 }
 
+// PDF export of a single-well prepared scene (T2 / #274). Mirrors the SVG
+// path but PdfSceneExporter needs an ExportSnapshot (carries depth
+// transform, font fingerprint, pattern versions, page spec) and an
+// optional TextEngine (for pagination metadata text; without it the
+// metadata band text is omitted — geometry bands still render).
+[[nodiscard]] PyObject *
+export_scene_pdf_impl(WellLogView *view, const QString &document_id_text) {
+  if (view == nullptr) {
+    set_welllog_error("WellLogValidationError", "invalid_view",
+                      "WellLogView is no longer valid");
+    return nullptr;
+  }
+  if (QThread::currentThread() != view->thread()) {
+    set_welllog_error("WellLogThreadError", "thread_violation",
+                      "PDF export must run on the Qt GUI thread");
+    return nullptr;
+  }
+  const auto document_id = parse_id(document_id_text, "document_id");
+  if (!document_id) {
+    return nullptr;
+  }
+  const auto scene = view->session().prepared_scene(*document_id);
+  if (scene == nullptr) {
+    set_welllog_error("WellLogValidationError", "document_not_found",
+                      "no prepared scene for the given document_id");
+    return nullptr;
+  }
+  // Build a continuous-mode snapshot from the scene's own metadata so the
+  // export is reproducible without the host supplying extra fields.
+  // Pagination (fixed-mode / depth_per_page_mm) is T3 (#275); here we emit
+  // one continuous page preserving the true depth length.
+  ExportSnapshot snapshot{
+      .document_id = scene->document_id(),
+      .document_revision = scene->document_revision(),
+      .presentation_version = scene->presentation_version(),
+      .depth_transform = scene->depth_transform(),
+      .font_asset_fingerprint = std::string{scene->font_asset_fingerprint()},
+      .pattern_versions = {},
+      .page = ExportPageSpec{
+          .mode = PaginationMode::continuous,
+          .page_width = scene->physical_width(),
+          .page_height = scene->physical_height(),
+      },
+  };
+  snapshot.pattern_versions.reserve(scene->patterns().size());
+  for (const auto &pattern : scene->patterns()) {
+    snapshot.pattern_versions.push_back(pattern.version);
+  }
+  // Pass the session's installed text engine (if any) so pagination
+  // metadata band text renders; geometry bands always render regardless.
+  const auto result = PdfSceneExporter::write(*scene, snapshot, {},
+                                              view->session().text_engine());
+  if (!result.has_value()) {
+    set_result_error(result.error(), "PDF export");
+    return nullptr;
+  }
+  const auto pdf = result.value().bytes();
+  return PyBytes_FromStringAndSize(pdf.data(),
+                                   static_cast<Py_ssize_t>(pdf.size()));
+}
+
 } // namespace
 
 PyObject *submit_multi_track(WellLogView *view, PyObject *payload) noexcept {
@@ -1849,6 +1911,19 @@ PyObject *export_scene_svg(WellLogView *view,
   } catch (...) {
     set_welllog_error("WellLogError", "internal_error",
                       "unexpected native failure during SVG export");
+    return nullptr;
+  }
+}
+
+PyObject *export_scene_pdf(WellLogView *view,
+                           const QString &document_id) noexcept {
+  try {
+    return export_scene_pdf_impl(view, document_id);
+  } catch (const std::bad_alloc &) {
+    return PyErr_NoMemory();
+  } catch (...) {
+    set_welllog_error("WellLogError", "internal_error",
+                      "unexpected native failure during PDF export");
     return nullptr;
   }
 }
