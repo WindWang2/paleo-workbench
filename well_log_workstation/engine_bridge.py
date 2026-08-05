@@ -202,6 +202,8 @@ def primary_curve_from_presentation(
     """Return (depth, values, mnemonic, value_unit) for first bound curve layer."""
     depth = _readonly_f64(np.asarray(presentation.depth, dtype=np.float64))
     for track in presentation.tracks:
+        if not track.visible:
+            continue
         if track.role != "curve" or not track.layers:
             continue
         layer = track.layers[0]
@@ -342,6 +344,8 @@ def presentation_to_multi_track_payload(
     n = depth.size
 
     for track in presentation.tracks:
+        if not track.visible:
+            continue
         if track.role != "curve":
             continue
         for layer in track.layers:
@@ -377,6 +381,8 @@ def presentation_to_multi_track_payload(
 
     tracks_payload: list[dict[str, Any]] = []
     for track in presentation.tracks:
+        if not track.visible:
+            continue
         if track.role != "curve" or not track.layers:
             continue
         layers_out: list[dict[str, Any]] = []

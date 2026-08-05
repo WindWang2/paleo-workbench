@@ -11,9 +11,13 @@ import numpy as np
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -93,8 +97,10 @@ from well_log_workstation.template_model import (
     HostPresentation,
     PlotTemplate,
     apply_template,
+    apply_track_overrides,
     get_builtin_template,
     list_builtin_templates,
+    track_overrides_snapshot,
 )
 from well_log_workstation.three_d_bridge import probe_3d
 from well_log_workstation.tops_model import (
@@ -478,6 +484,42 @@ class WellLogWorkstationWindow(QMainWindow):
         btn_row.addWidget(self.apply_btn)
         layout.addLayout(btn_row)
 
+        layout.addWidget(QLabel("图道（当前单井）"))
+        self.track_list = QListWidget()
+        self.track_list.setObjectName("TrackList")
+        self.track_list.currentItemChanged.connect(self._on_track_list_selection)
+        layout.addWidget(self.track_list)
+
+        props = QWidget()
+        props.setObjectName("TrackPropsForm")
+        form = QFormLayout(props)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.track_visible = QCheckBox("可见")
+        self.track_visible.setObjectName("TrackVisible")
+        self.track_visible.toggled.connect(self._on_track_props_changed)
+        form.addRow(self.track_visible)
+        self.track_scale_min = QDoubleSpinBox()
+        self.track_scale_min.setObjectName("TrackScaleMin")
+        self.track_scale_min.setRange(-1e9, 1e9)
+        self.track_scale_min.setDecimals(4)
+        self.track_scale_min.valueChanged.connect(self._on_track_props_changed)
+        form.addRow("比例最小", self.track_scale_min)
+        self.track_scale_max = QDoubleSpinBox()
+        self.track_scale_max.setObjectName("TrackScaleMax")
+        self.track_scale_max.setRange(-1e9, 1e9)
+        self.track_scale_max.setDecimals(4)
+        self.track_scale_max.valueChanged.connect(self._on_track_props_changed)
+        form.addRow("比例最大", self.track_scale_max)
+        self.track_scale_mode = QComboBox()
+        self.track_scale_mode.setObjectName("TrackScaleMode")
+        self.track_scale_mode.addItem("线性", "linear")
+        self.track_scale_mode.addItem("对数", "log")
+        self.track_scale_mode.currentIndexChanged.connect(self._on_track_props_changed)
+        form.addRow("比例类型", self.track_scale_mode)
+        layout.addWidget(props)
+        self._track_props_guard = False
+        self._set_track_props_enabled(False)
+
         layout.addWidget(QLabel("层位"))
         self.tops_list = QListWidget()
         self.tops_list.setObjectName("TopsList")
@@ -777,6 +819,7 @@ class WellLogWorkstationWindow(QMainWindow):
             self._active_tops = []
             self._tops_diagnostics = []
             self.multi_track_canvas.set_presentation(None)
+            self._refresh_track_list()
             self.multi_track_canvas.set_tops(None)
             self.correlation_canvas.set_columns([])
             self.correlation_canvas.set_links(None)
@@ -968,6 +1011,145 @@ class WellLogWorkstationWindow(QMainWindow):
         tid = item.data(Qt.ItemDataRole.UserRole)
         return str(tid) if tid else None
 
+    def _set_track_props_enabled(self, enabled: bool) -> None:
+        self.track_visible.setEnabled(enabled)
+        self.track_scale_min.setEnabled(enabled)
+        self.track_scale_max.setEnabled(enabled)
+        self.track_scale_mode.setEnabled(enabled)
+
+    def _selected_track_id(self) -> str | None:
+        item = self.track_list.currentItem()
+        if item is None:
+            return None
+        tid = item.data(Qt.ItemDataRole.UserRole)
+        return str(tid) if tid else None
+
+    def _find_bound_track(self, track_id: str | None):
+        if self._presentation is None or not track_id:
+            return None
+        for t in self._presentation.tracks:
+            if t.id == track_id:
+                return t
+        return None
+
+    def _refresh_track_list(self) -> None:
+        """Populate right-pane track list from active single-well presentation."""
+        if not hasattr(self, "track_list"):
+            return
+        prev = self._selected_track_id()
+        self.track_list.blockSignals(True)
+        self.track_list.clear()
+        if self._presentation is None:
+            self.track_list.addItem("（无图道 · 请应用图版）")
+            self.track_list.blockSignals(False)
+            self._load_track_props_form(None)
+            return
+        select_row = 0
+        for i, track in enumerate(self._presentation.tracks):
+            vis = "" if track.visible else " [隐藏]"
+            role = "深度" if track.role == "depth" else "曲线"
+            label = f"{track.title} ({role}){vis}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, track.id)
+            self.track_list.addItem(item)
+            if prev is not None and track.id == prev:
+                select_row = i
+        self.track_list.setCurrentRow(select_row)
+        self.track_list.blockSignals(False)
+        self._on_track_list_selection(self.track_list.currentItem(), None)
+
+    def _load_track_props_form(self, track) -> None:
+        self._track_props_guard = True
+        try:
+            if track is None:
+                self.track_visible.setChecked(True)
+                self.track_scale_min.setValue(0.0)
+                self.track_scale_max.setValue(100.0)
+                self.track_scale_mode.setCurrentIndex(0)
+                self._set_track_props_enabled(False)
+                return
+            self.track_visible.setChecked(bool(track.visible))
+            has_scale = track.scale is not None and track.role == "curve"
+            self.track_scale_min.setEnabled(has_scale)
+            self.track_scale_max.setEnabled(has_scale)
+            self.track_scale_mode.setEnabled(has_scale)
+            self.track_visible.setEnabled(True)
+            if track.scale is not None:
+                self.track_scale_min.setValue(float(track.scale.min))
+                self.track_scale_max.setValue(float(track.scale.max))
+                mode = track.scale.mode
+                idx = self.track_scale_mode.findData(mode)
+                self.track_scale_mode.setCurrentIndex(idx if idx >= 0 else 0)
+            else:
+                self.track_scale_min.setValue(0.0)
+                self.track_scale_max.setValue(100.0)
+                self.track_scale_mode.setCurrentIndex(0)
+        finally:
+            self._track_props_guard = False
+
+    def _on_track_list_selection(self, current, _previous) -> None:
+        if current is None or self._presentation is None:
+            self._load_track_props_form(None)
+            return
+        tid = current.data(Qt.ItemDataRole.UserRole)
+        track = self._find_bound_track(str(tid) if tid else None)
+        self._load_track_props_form(track)
+
+    def _on_track_props_changed(self, *_args) -> None:
+        if self._track_props_guard or self._presentation is None:
+            return
+        track = self._find_bound_track(self._selected_track_id())
+        if track is None:
+            return
+        track.visible = self.track_visible.isChecked()
+        if track.scale is not None and track.role == "curve":
+            smin = float(self.track_scale_min.value())
+            smax = float(self.track_scale_max.value())
+            if smax <= smin:
+                smax = smin + 1.0
+                self._track_props_guard = True
+                try:
+                    self.track_scale_max.setValue(smax)
+                finally:
+                    self._track_props_guard = False
+            track.scale.min = smin
+            track.scale.max = smax
+            mode = self.track_scale_mode.currentData()
+            if mode in ("linear", "log"):
+                track.scale.mode = mode  # type: ignore[assignment]
+        # Refresh list labels (hidden marker) without losing selection
+        self._refresh_track_list_labels_only()
+        self.multi_track_canvas.set_presentation(self._presentation)
+        self._sync_primary_single_well_surface()
+        self._persist_track_overrides()
+
+    def _refresh_track_list_labels_only(self) -> None:
+        if self._presentation is None or not hasattr(self, "track_list"):
+            return
+        for i, track in enumerate(self._presentation.tracks):
+            item = self.track_list.item(i)
+            if item is None:
+                continue
+            vis = "" if track.visible else " [隐藏]"
+            role = "深度" if track.role == "depth" else "曲线"
+            item.setText(f"{track.title} ({role}){vis}")
+
+    def _persist_track_overrides(self) -> None:
+        """Write current track props into the active single-well plot document."""
+        if (
+            self._workspace is None
+            or self._presentation is None
+            or not self._active_plot_id
+            or self._active_plot_type != "single_well"
+        ):
+            return
+        try:
+            plot = load_plot_document(self._workspace, self._active_plot_id)
+        except WorkspaceError:
+            return
+        plot.track_overrides = track_overrides_snapshot(self._presentation)
+        save_plot_document(self._workspace, plot)
+
     def apply_template_to_well(
         self, well_id: str, template_id: str, *, plot_id: str | None = None
     ) -> HostPresentation:
@@ -983,6 +1165,14 @@ class WellLogWorkstationWindow(QMainWindow):
             raise WorkspaceError(
                 "图版未能绑定任何曲线（检查 LAS 助记符与图版 mnemonics）"
             )
+        # Restore layout edits from plot document when reopening (#292).
+        effective_plot_id = plot_id if plot_id is not None else self._active_plot_id
+        if effective_plot_id is not None:
+            try:
+                plot_doc = load_plot_document(self._workspace, effective_plot_id)
+                apply_track_overrides(presentation, plot_doc.track_overrides)
+            except WorkspaceError:
+                pass
         self._selected_well_id = well_id
         self._presentation = presentation
         self._active_plot_type = "single_well"
@@ -994,6 +1184,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._tops_diagnostics = diags
         self.multi_track_canvas.set_tops(tops)
         self._refresh_tops_list_items(tops, diags)
+        self._refresh_track_list()
         self.plot_caption.setText(
             f"单井分析图 · {presentation.well_name} · "
             f"{presentation.template_name} · "
