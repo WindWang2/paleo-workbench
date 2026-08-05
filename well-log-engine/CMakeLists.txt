@@ -698,6 +698,7 @@ if(WELLLOG_BUILD_QT_WIDGETS)
         welllog_qtwidgets
         PUBLIC
             WellLog::ExportPdf
+            WellLog::ExportCgm
             WellLog::ExportVector
             WellLog::RenderGL
             WellLog::Session

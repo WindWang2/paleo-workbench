@@ -38,10 +38,17 @@ from typing import Any, Literal
 from well_log_workstation.export_plot import ExportError
 from well_log_workstation.plot_document import PlotDocument
 
-ExportFormat = Literal["svg", "pdf", "png"]
+ExportFormat = Literal["svg", "pdf", "png", "cgm"]
 ExportBackend = Literal["qt", "engine"]
 # ADR 0053 dual mode names (product-facing).
 PdfTextMode = Literal["outline", "searchable"]
+
+# B1.CGM.2 host disclosure (pattern/alpha degradation — ADR 0054).
+CGM_EXPORT_DISCLOSURE = (
+    "CGM 导出（B1.CGM.2 / ADR 0054）：引擎自研 CGM V3 Binary 子集。"
+    "花纹填充降级为纯色，半透明强制不透明；非 Latin 标签可能省略。"
+    "多页 PICTURE / 0.1 mm 矩阵见 B1.CGM.3。"
+)
 
 
 class UnsupportedFormatError(ExportError):
@@ -60,9 +67,10 @@ ENGINE_PDF_NONSEARCHABLE_DISCLOSURE = (
 
 # Shown when the user picks searchable mode (honest about backend, ADR 0053).
 PDF_SEARCHABLE_MODE_NOTE = (
-    "可搜索 PDF（pdf_searchable）：优先引擎 Latin/ASCII 可提取文本层"
-    "（B1.PDF.2，Base-14 Helvetica 页眉/深度等）；若绑定未重建则回退 Qt 矢量路径"
-    "（B1.PDF.1）。CJK 全量 ToUnicode 为后续切片，不得与「引擎轮廓 PDF」混淆。"
+    "可搜索 PDF（pdf_searchable）：优先引擎 Latin-1 可提取文本层"
+    "（B1.PDF.2/3，Base-14 Helvetica + WinAnsi；CJK 从可搜索层丢弃并计数，"
+    "视觉轮廓仍由字形绘制）。若绑定未重建则回退 Qt 矢量路径（B1.PDF.1，含 CJK）。"
+    "完整嵌入字体 ToUnicode 子集仍为后续增强。"
 )
 
 
@@ -89,6 +97,8 @@ def prefer_engine_for_single_well(
     """
     if force_backend is not None:
         return force_backend
+    if fmt == "cgm":
+        return "engine" if engine_available else "qt"
     if fmt == "pdf" and pdf_text_mode == "searchable":
         return "engine" if engine_available else "qt"
     if fmt in ("svg", "pdf") and engine_available:
@@ -156,16 +166,28 @@ def export_plot(
     Extra kwargs are forwarded to the per-type backend (e.g. the source
     widget / canvas instance for plane_map / fence_3d / composite).
 
-    ``backend="engine"`` routes ``single_well`` SVG/PDF through the engine
-    vector exporters (Stage 1 / #277), requiring a ``view`` (WellLogView
-    with a submitted scene) and ``document_id`` in kwargs. Other plot
-    types ignore ``backend`` (engine exporters don't cover them yet).
+    ``backend="engine"`` routes ``single_well`` SVG/PDF/CGM through the engine
+    vector exporters (Stage 1 / #277 + B1.CGM.2), requiring a ``view``
+    (WellLogView with a submitted scene) and ``document_id`` in kwargs. Other
+    plot types ignore ``backend`` (engine exporters don't cover them yet).
     """
     spec = page_spec or PageSpec()
     match plot_doc.type:
-        case "single_well" if backend == "engine" and fmt in ("svg", "pdf"):
+        case "single_well" if backend == "engine" and fmt in (
+            "svg",
+            "pdf",
+            "cgm",
+        ):
             return _engine_export(plot_doc, fmt, spec, **kwargs)
+        case "single_well" if fmt == "cgm":
+            raise UnsupportedFormatError(
+                "CGM 需要引擎后端（WellLogView）；当前不可用"
+            )
         case "single_well" | "correlation" | "section":
+            if fmt == "cgm":
+                raise UnsupportedFormatError(
+                    f"{plot_doc.type} 暂不支持 CGM（仅单井引擎路径）"
+                )
             return _qt_paint_export(plot_doc, fmt, spec, **kwargs)
         case "plane_map":
             return _plane_map_export(plot_doc, fmt, spec, **kwargs)
@@ -208,6 +230,13 @@ def _engine_export(
     try:
         if fmt == "svg":
             data: bytes = view.export_scene_svg(document_id)
+        elif fmt == "cgm":
+            export_cgm = getattr(view, "export_scene_cgm", None)
+            if export_cgm is None:
+                raise ExportError(
+                    "engine CGM 需要重建 Python 绑定（export_scene_cgm）"
+                )
+            data = export_cgm(document_id)
         else:  # pdf
             searchable = pdf_text_mode == "searchable"
             if searchable:
@@ -225,7 +254,8 @@ def _engine_export(
         raise
     except Exception as exc:  # typed WellLogError surfaces here
         raise ExportError(f"引擎 {fmt} 导出失败: {exc}") from exc
-    if not isinstance(data, bytes) or len(data) < 50:
+    min_size = 20 if fmt == "cgm" else 50
+    if not isinstance(data, bytes) or len(data) < min_size:
         raise ExportError(f"引擎 {fmt} 导出返回空数据")
     out.write_bytes(data)
     return out

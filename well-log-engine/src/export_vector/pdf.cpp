@@ -128,6 +128,8 @@ struct PdfPathStream::Impl {
   std::vector<double> fill_alphas;
   // B1.PDF.2: draw_standard_text was used → writer must name /F1 Helvetica.
   bool uses_standard_font{false};
+  // B1.PDF.3: non-Latin-1 code points dropped from searchable overlay.
+  std::uint32_t non_latin_codepoints_dropped{0};
 };
 
 PdfPathStream::PdfPathStream() : impl_(std::make_unique<Impl>()) {}
@@ -384,16 +386,51 @@ PdfPathStream &PdfPathStream::invoke_xobject(std::string_view name) noexcept {
 PdfPathStream &PdfPathStream::draw_standard_text(double x, double y,
                                                 double font_size,
                                                 std::string_view text) noexcept {
-  // PDF literal-string escape + printable ASCII filter (B1.PDF.2 Latin slice).
+  // UTF-8 → WinAnsi Latin-1 for Base-14 Helvetica (B1.PDF.3). CJK dropped.
   std::string filtered;
   filtered.reserve(text.size());
-  for (char ch : text) {
-    const auto c = static_cast<unsigned char>(ch);
-    if (c >= 32 && c < 127) {
-      if (c == '(' || c == ')' || c == '\\') {
+  const auto *p = reinterpret_cast<const unsigned char *>(text.data());
+  const auto *end = p + text.size();
+  while (p < end) {
+    std::uint32_t cp = 0;
+    if (*p < 0x80) {
+      cp = *p++;
+    } else if ((*p & 0xE0) == 0xC0 && p + 1 < end) {
+      cp = (static_cast<std::uint32_t>(p[0] & 0x1F) << 6) |
+           static_cast<std::uint32_t>(p[1] & 0x3F);
+      p += 2;
+    } else if ((*p & 0xF0) == 0xE0 && p + 2 < end) {
+      cp = (static_cast<std::uint32_t>(p[0] & 0x0F) << 12) |
+           (static_cast<std::uint32_t>(p[1] & 0x3F) << 6) |
+           static_cast<std::uint32_t>(p[2] & 0x3F);
+      p += 3;
+    } else if ((*p & 0xF8) == 0xF0 && p + 3 < end) {
+      cp = (static_cast<std::uint32_t>(p[0] & 0x07) << 18) |
+           (static_cast<std::uint32_t>(p[1] & 0x3F) << 12) |
+           (static_cast<std::uint32_t>(p[2] & 0x3F) << 6) |
+           static_cast<std::uint32_t>(p[3] & 0x3F);
+      p += 4;
+    } else {
+      ++p;
+      impl_->non_latin_codepoints_dropped += 1;
+      continue;
+    }
+    if (cp >= 32 && cp < 127) {
+      if (cp == '(' || cp == ')' || cp == '\\') {
         filtered.push_back('\\');
       }
-      filtered.push_back(static_cast<char>(c));
+      filtered.push_back(static_cast<char>(cp));
+    } else if (cp >= 0xA0 && cp <= 0xFF) {
+      // WinAnsi high byte as octal escape.
+      const auto b = static_cast<unsigned>(cp);
+      filtered.push_back('\\');
+      filtered.push_back(static_cast<char>('0' + ((b >> 6) & 7)));
+      filtered.push_back(static_cast<char>('0' + ((b >> 3) & 7)));
+      filtered.push_back(static_cast<char>('0' + (b & 7)));
+    } else if (cp == 0x09 || cp == 0x0A || cp == 0x0D) {
+      // skip whitespace control
+    } else {
+      impl_->non_latin_codepoints_dropped += 1;
     }
   }
   if (filtered.empty() || !std::isfinite(font_size) || font_size <= 0.0) {
@@ -425,6 +462,10 @@ std::span<const double> PdfPathStream::fill_alphas() const noexcept {
 
 bool PdfPathStream::needs_standard_font() const noexcept {
   return impl_->uses_standard_font;
+}
+
+std::uint32_t PdfPathStream::non_latin_codepoints_dropped() const noexcept {
+  return impl_->non_latin_codepoints_dropped;
 }
 
 struct PdfDocument::Impl {
@@ -651,10 +692,9 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
           }
         }
         if (has_font) {
-          // Inline Base-14 Type1 font dict — no font file / ToUnicode needed
-          // for WinAnsi Latin extractability in common PDF tools.
+          // Inline Base-14 Type1 + WinAnsiEncoding for Latin-1 (B1.PDF.3).
           out += " /Font << /F1 << /Type /Font /Subtype /Type1 "
-                 "/BaseFont /Helvetica >> >>";
+                 "/BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >>";
         }
         out += " >> >>\nendobj\n";
       }

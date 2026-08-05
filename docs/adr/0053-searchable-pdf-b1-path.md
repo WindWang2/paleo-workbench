@@ -50,7 +50,7 @@ status: accepted
 |------|------|
 | **B1.PDF.1** | 导出 UI 双选项 + 产品模式名 `outline`/`searchable`；searchable 先经 Qt（过渡） |
 | **B1.PDF.2** | 引擎 `searchable_text`：Base-14 **Helvetica** Latin/ASCII 页眉带叠加；`PdfPathStream::draw_standard_text`；Python `export_scene_pdf(..., searchable_text)`；无绑定则回退 Qt |
-| **B1.PDF.3** | 嵌入字体子集 + ToUnicode + CJK；连井/分页；与 0.1 mm 全矩阵联调 |
+| **B1.PDF.3** | ✅ Latin-1（WinAnsi Helvetica）+ UTF-8 解码；CJK 从可搜索层丢弃并计数（`SearchableTextStats` / `non_latin_codepoints_dropped`）；完整嵌入字体 ToUnicode 子集与连井矩阵仍为后续增强 |
 
 
 ### 5. 与既有 ADR 的关系

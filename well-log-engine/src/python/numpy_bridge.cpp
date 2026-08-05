@@ -7,6 +7,7 @@
 #include "numpy_bridge.hpp"
 
 #include <welllog/core/document.hpp>
+#include <welllog/export/cgm.hpp>
 #include <welllog/export/pdf_scene.hpp>
 #include <welllog/export/svg.hpp>
 #include <welllog/qtwidgets/well_log_view.hpp>
@@ -2107,6 +2108,39 @@ export_scene_pdf_impl(WellLogView *view, const QString &document_id_text,
                                    static_cast<Py_ssize_t>(pdf.size()));
 }
 
+[[nodiscard]] PyObject *
+export_scene_cgm_impl(WellLogView *view, const QString &document_id_text) {
+  if (view == nullptr) {
+    set_welllog_error("WellLogValidationError", "invalid_view",
+                      "WellLogView is no longer valid");
+    return nullptr;
+  }
+  if (QThread::currentThread() != view->thread()) {
+    set_welllog_error("WellLogThreadError", "thread_violation",
+                      "CGM export must run on the Qt GUI thread");
+    return nullptr;
+  }
+  const auto document_id = parse_id(document_id_text, "document_id");
+  if (!document_id) {
+    return nullptr;
+  }
+  const auto scene = view->session().prepared_scene(*document_id);
+  if (scene == nullptr) {
+    set_welllog_error("WellLogValidationError", "document_not_found",
+                      "no prepared scene for the given document_id");
+    return nullptr;
+  }
+  CgmExportDiagnostics diag;
+  const auto result = CgmSceneExporter::write(*scene, &diag);
+  if (!result.has_value()) {
+    set_result_error(result.error(), "CGM export");
+    return nullptr;
+  }
+  const auto cgm = result.value().bytes();
+  return PyBytes_FromStringAndSize(cgm.data(),
+                                   static_cast<Py_ssize_t>(cgm.size()));
+}
+
 } // namespace
 
 PyObject *submit_multi_track(WellLogView *view, PyObject *payload) noexcept {
@@ -2173,6 +2207,19 @@ PyObject *export_scene_pdf(WellLogView *view, const QString &document_id,
   } catch (...) {
     set_welllog_error("WellLogError", "internal_error",
                       "unexpected native failure during PDF export");
+    return nullptr;
+  }
+}
+
+PyObject *export_scene_cgm(WellLogView *view,
+                           const QString &document_id) noexcept {
+  try {
+    return export_scene_cgm_impl(view, document_id);
+  } catch (const std::bad_alloc &) {
+    return PyErr_NoMemory();
+  } catch (...) {
+    set_welllog_error("WellLogError", "internal_error",
+                      "unexpected native failure during CGM export");
     return nullptr;
   }
 }

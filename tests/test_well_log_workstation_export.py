@@ -19,8 +19,10 @@ from well_log_workstation.engine_bridge import (  # noqa: E402
     reset_engine_capability_cache,
 )
 from well_log_workstation.export_dispatch import (  # noqa: E402
+    CGM_EXPORT_DISCLOSURE,
     ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
     PDF_SEARCHABLE_MODE_NOTE,
+    UnsupportedFormatError,
     engine_pdf_needs_disclosure,
     export_plot,
     prefer_engine_for_single_well,
@@ -424,3 +426,43 @@ def test_searchable_pdf_export_is_qt_and_nonempty(
     assert prefer_engine_for_single_well(
         "pdf", engine_available=False, pdf_text_mode="searchable"
     ) == "qt"
+
+
+def test_cgm_format_routing_and_disclosure() -> None:
+    """B1.CGM.2: CGM is engine-only; disclosure text present."""
+    assert prefer_engine_for_single_well("cgm", engine_available=True) == "engine"
+    assert prefer_engine_for_single_well("cgm", engine_available=False) == "qt"
+    assert "CGM" in CGM_EXPORT_DISCLOSURE
+    assert "ADR 0054" in CGM_EXPORT_DISCLOSURE or "B1.CGM" in CGM_EXPORT_DISCLOSURE
+
+
+def test_cgm_without_engine_binding_raises(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    """Without export_scene_cgm on the view, engine CGM fails clearly."""
+    monkeypatch.setenv("WLWS_DISABLE_ENGINE", "1")
+    reset_engine_capability_cache()
+    ws = create_workspace(tmp_path / "ws-cgm", name="CGM")
+    las = _write_las(tmp_path / "c.las")
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    win.set_workspace(ws)
+    well_id = win.import_las_path(las)
+    win.create_single_well_plot_document(well_id, "std-gr-rt-den")
+    plot_doc = load_plot_document(ws, win.active_plot_id)
+
+    class _FakeView:
+        pass
+
+    with pytest.raises(ExportError, match="export_scene_cgm|CGM"):
+        export_plot(
+            plot_doc,
+            "cgm",
+            backend="engine",
+            view=_FakeView(),
+            document_id="00000000-0000-4000-8000-000000000001",
+            path=str(tmp_path / "x.cgm"),
+        )
+
+    with pytest.raises(UnsupportedFormatError):
+        export_plot(plot_doc, "cgm", backend="qt", path=str(tmp_path / "y.cgm"))

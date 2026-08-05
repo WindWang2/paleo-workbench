@@ -64,6 +64,7 @@ from well_log_workstation.engine_bridge import (
 )
 from well_log_workstation.events import emit_plot_changed
 from well_log_workstation.export_dispatch import (
+    CGM_EXPORT_DISCLOSURE,
     ENGINE_PDF_NONSEARCHABLE_DISCLOSURE,
     PDF_SEARCHABLE_MODE_NOTE,
     ExportFormat,
@@ -293,6 +294,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_png.setObjectName("Action_ExportPng")
         self._act_export_png.triggered.connect(self._on_export_png)
         self._act_export_png.setEnabled(False)
+        self._act_export_cgm = export_menu.addAction("导出 CGM…")
+        self._act_export_cgm.setObjectName("Action_ExportCgm")
+        self._act_export_cgm.triggered.connect(self._on_export_cgm)
+        self._act_export_cgm.setEnabled(False)
         export_menu.addSeparator()
         self._act_print_preview = export_menu.addAction("打印预览…")
         self._act_print_preview.setObjectName("Action_PrintPreview")
@@ -726,6 +731,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_pdf.setEnabled(can_export)
         if hasattr(self, "_act_export_png"):
             self._act_export_png.setEnabled(can_export)
+        if hasattr(self, "_act_export_cgm"):
+            # CGM is single-well engine-only (B1.CGM.2)
+            self._act_export_cgm.setEnabled(can_export_single)
         if hasattr(self, "_act_print_preview"):
             # Preview primarily for single-well export stream (T13); correlation OK too
             self._act_print_preview.setEnabled(can_export)
@@ -3216,6 +3224,49 @@ class WellLogWorkstationWindow(QMainWindow):
 
     def _on_export_png(self) -> None:
         self._export_active_plot("png")
+
+    def _on_export_cgm(self) -> None:
+        """Single-well CGM export (B1.CGM.2 / ADR 0054)."""
+        if self._workspace is None or not self._active_plot_id:
+            QMessageBox.information(self, "导出 CGM", "请先打开/创建单井图件。")
+            return
+        plot = load_plot_document(self._workspace, self._active_plot_id)
+        if plot.type != "single_well":
+            QMessageBox.information(
+                self, "导出 CGM", "CGM 目前仅支持单井分析图（引擎路径）。"
+            )
+            return
+        QMessageBox.information(self, "导出 CGM", CGM_EXPORT_DISCLOSURE)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出 CGM",
+            f"{plot.name or 'plot'}.cgm",
+            "CGM (*.cgm);;All (*.*)",
+        )
+        if not path:
+            return
+        try:
+            if not engine_available():
+                raise ExportError("WellLogEngine 不可用，无法导出 CGM")
+            view, doc_id = self._prepare_engine_export_view()
+            out = export_plot(
+                plot,
+                "cgm",
+                backend="engine",
+                view=view,
+                document_id=doc_id,
+                path=path,
+            )
+            QMessageBox.information(
+                self,
+                "导出成功",
+                f"CGM 已写入（引擎）:\n{out}\n"
+                f"大小 {out.stat().st_size} 字节\n\n{CGM_EXPORT_DISCLOSURE}",
+            )
+        except (ExportError, UnsupportedFormatError, EngineUnavailable, EngineSubmitError) as exc:
+            QMessageBox.warning(self, "导出 CGM 失败", str(exc))
+        except OSError as exc:
+            QMessageBox.warning(self, "导出 CGM 失败", str(exc))
 
     def open_print_preview(self, *, show: bool = True):
         """Open print-preview skeleton for active single-well or correlation (T13).

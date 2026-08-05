@@ -1,4 +1,4 @@
-// CGM Version 3 Binary subset writer (B1.CGM.1 / ADR 0054).
+// CGM Version 3 Binary subset writer (B1.CGM.1–2 / ADR 0054).
 // Encoding follows ISO/IEC 8632-3 command headers (big-endian).
 
 #include <welllog/export/cgm.hpp>
@@ -179,6 +179,34 @@ std::string_view CgmDocument::bytes() const noexcept {
   return impl_ == nullptr ? std::string_view{} : std::string_view{impl_->bytes};
 }
 
+std::string CgmExportDiagnostics::summary() const {
+  std::string s;
+  if (patterns_flattened_to_solid > 0) {
+    s += "patterns_flattened_to_solid=";
+    s += std::to_string(patterns_flattened_to_solid);
+    s += "; ";
+  }
+  if (alpha_flattened_to_opaque > 0) {
+    s += "alpha_flattened_to_opaque=";
+    s += std::to_string(alpha_flattened_to_opaque);
+    s += "; ";
+  }
+  if (non_latin_text_dropped > 0) {
+    s += "non_latin_text_dropped=";
+    s += std::to_string(non_latin_text_dropped);
+    s += "; ";
+  }
+  s += "intervals=";
+  s += std::to_string(intervals_emitted);
+  s += " fills=";
+  s += std::to_string(fill_regions_emitted);
+  for (const auto &n : notes) {
+    s += " | ";
+    s += n;
+  }
+  return s;
+}
+
 struct CgmBinaryWriter::Impl {
   std::string bytes;
   bool finished{false};
@@ -290,6 +318,11 @@ void CgmBinaryWriter::interior_style_solid() noexcept {
   append_command_i16(impl_->bytes, 5, 22, 1);
 }
 
+void CgmBinaryWriter::edge_visibility_off() noexcept {
+  // EDGE VISIBILITY (class 5, id 30): enum 0 = off
+  append_command_i16(impl_->bytes, 5, 30, 0);
+}
+
 void CgmBinaryWriter::character_height(std::int16_t height_vdc) noexcept {
   append_command_i16(impl_->bytes, 5, 15, height_vdc);
 }
@@ -315,6 +348,20 @@ void CgmBinaryWriter::polyline(
   append_command(impl_->bytes, 4, 1, params);
 }
 
+void CgmBinaryWriter::polygon(
+    std::span<const std::pair<std::int16_t, std::int16_t>> points) noexcept {
+  if (points.size() < 3) {
+    return;
+  }
+  std::string params;
+  params.reserve(points.size() * 4);
+  for (const auto &p : points) {
+    append_i16_be(params, p.first);
+    append_i16_be(params, p.second);
+  }
+  append_command(impl_->bytes, 4, 7, params);
+}
+
 void CgmBinaryWriter::rectangle_polyline(std::int16_t x, std::int16_t y,
                                          std::int16_t w,
                                          std::int16_t h) noexcept {
@@ -331,11 +378,27 @@ void CgmBinaryWriter::rectangle_polyline(std::int16_t x, std::int16_t y,
   polyline(pts);
 }
 
-void CgmBinaryWriter::text(std::int16_t x, std::int16_t y,
+void CgmBinaryWriter::rectangle_fill(std::int16_t x, std::int16_t y,
+                                     std::int16_t w, std::int16_t h) noexcept {
+  if (w <= 0 || h <= 0) {
+    return;
+  }
+  const std::array<std::pair<std::int16_t, std::int16_t>, 4> pts{{
+      {x, y},
+      {static_cast<std::int16_t>(x + w), y},
+      {static_cast<std::int16_t>(x + w), static_cast<std::int16_t>(y + h)},
+      {x, static_cast<std::int16_t>(y + h)},
+  }};
+  interior_style_solid();
+  edge_visibility_off();
+  polygon(pts);
+}
+
+bool CgmBinaryWriter::text(std::int16_t x, std::int16_t y,
                            std::string_view s) noexcept {
   const auto filtered = filter_latin(s);
   if (filtered.empty()) {
-    return;
+    return false;
   }
   // TEXT: point, final/not-final flag (enum 1 = final), string
   std::string params;
@@ -344,6 +407,7 @@ void CgmBinaryWriter::text(std::int16_t x, std::int16_t y,
   append_i16_be(params, 1); // final
   append_cgm_string(params, filtered);
   append_command(impl_->bytes, 4, 4, params);
+  return true;
 }
 
 void CgmBinaryWriter::end_picture() noexcept {
@@ -377,8 +441,16 @@ Result<CgmDocument> CgmBinaryWriter::finish() noexcept {
   }
 }
 
-Result<CgmDocument> CgmSceneExporter::write(const PreparedScene &scene) noexcept {
+Result<CgmDocument>
+CgmSceneExporter::write(const PreparedScene &scene,
+                        CgmExportDiagnostics *diagnostics) noexcept {
   try {
+    CgmExportDiagnostics local_diag;
+    auto &diag = diagnostics != nullptr ? *diagnostics : local_diag;
+    if (diagnostics != nullptr) {
+      *diagnostics = CgmExportDiagnostics{};
+    }
+
     const auto width_mm = scene.physical_width().value;
     const auto height_mm = scene.physical_height().value;
     if (!(width_mm > 0.0) || !(height_mm > 0.0)) {
@@ -401,10 +473,17 @@ Result<CgmDocument> CgmSceneExporter::write(const PreparedScene &scene) noexcept
       };
     };
 
+    const auto solid_rgb = [&](RgbaColor c) {
+      if (c.alpha < 255) {
+        diag.alpha_flattened_to_opaque += 1;
+      }
+      return c;
+    };
+
     CgmBinaryWriter w;
     w.begin_metafile("WellLogEngine");
     w.metafile_version(3);
-    w.metafile_description("WellLog CGM B1.CGM.1 subset (ADR 0054)");
+    w.metafile_description("WellLog CGM B1.CGM.2 subset (ADR 0054)");
     w.vdc_type_integer();
     w.integer_precision(16);
     w.colour_precision(8);
@@ -416,6 +495,59 @@ Result<CgmDocument> CgmSceneExporter::write(const PreparedScene &scene) noexcept
     w.vdc_extent(0, 0, vdc_w, vdc_h);
     w.background_colour(255, 255, 255);
     w.begin_picture_body();
+
+    // Intervals as solid filled rects (pattern → solid fill_color + note).
+    for (const auto &layer : scene.interval_layers()) {
+      for (std::uint64_t oi = 0; oi < layer.interval_count; ++oi) {
+        const auto &iv =
+            scene.intervals()[static_cast<std::size_t>(layer.first_interval +
+                                                       oi)];
+        if (!iv.pattern_id.is_nil()) {
+          diag.patterns_flattened_to_solid += 1;
+        }
+        const auto col = solid_rgb(iv.fill_color);
+        w.fill_colour(col.red, col.green, col.blue);
+        const auto tl = to_vdc(iv.rect.left.value, iv.rect.top.value);
+        const auto br = to_vdc(iv.rect.left.value + iv.rect.width.value,
+                               iv.rect.top.value + iv.rect.height.value);
+        const auto x = std::min(tl.first, br.first);
+        const auto y = std::min(tl.second, br.second);
+        const auto rw =
+            static_cast<std::int16_t>(std::abs(br.first - tl.first));
+        const auto rh =
+            static_cast<std::int16_t>(std::abs(br.second - tl.second));
+        w.rectangle_fill(x, y, rw, rh);
+        diag.intervals_emitted += 1;
+      }
+    }
+
+    // Crossover fill regions as solid polygons (pattern flattened).
+    const auto fill_vertices = scene.fill_vertices();
+    for (const auto &fill_layer : scene.fill_layers()) {
+      for (std::uint64_t ri = 0; ri < fill_layer.region_count; ++ri) {
+        const auto &region = scene.fill_regions()[static_cast<std::size_t>(
+            fill_layer.first_region + ri)];
+        if (region.vertex_count < 3) {
+          continue;
+        }
+        if (!region.pattern_id.is_nil()) {
+          diag.patterns_flattened_to_solid += 1;
+        }
+        const auto col = solid_rgb(region.fill_color);
+        w.fill_colour(col.red, col.green, col.blue);
+        std::vector<std::pair<std::int16_t, std::int16_t>> pts;
+        pts.reserve(static_cast<std::size_t>(region.vertex_count));
+        for (std::uint64_t vi = 0; vi < region.vertex_count; ++vi) {
+          const auto &v = fill_vertices[static_cast<std::size_t>(
+              region.first_vertex + vi)];
+          pts.push_back(to_vdc(v.position.left.value, v.position.top.value));
+        }
+        w.interior_style_solid();
+        w.edge_visibility_off();
+        w.polygon(pts);
+        diag.fill_regions_emitted += 1;
+      }
+    }
 
     // Track frames.
     for (const auto &track : scene.tracks()) {
@@ -438,7 +570,6 @@ Result<CgmDocument> CgmSceneExporter::write(const PreparedScene &scene) noexcept
     w.text_colour(40, 40, 40);
     w.character_height(300); // 3 mm
     for (const auto &entry : scene.track_header_entries()) {
-      // Place near top of the matching track clip if found.
       double sx = 2.0;
       double sy = 5.0;
       for (const auto &track : scene.tracks()) {
@@ -449,10 +580,18 @@ Result<CgmDocument> CgmSceneExporter::write(const PreparedScene &scene) noexcept
         }
       }
       const auto label_pt = to_vdc(sx, sy);
-      w.text(label_pt.first, label_pt.second, entry.curve_name);
+      if (!w.text(label_pt.first, label_pt.second, entry.curve_name)) {
+        if (!entry.curve_name.empty()) {
+          diag.non_latin_text_dropped += 1;
+        }
+      } else if (filter_latin(entry.curve_name).size() <
+                 entry.curve_name.size()) {
+        // Mixed Latin + non-Latin: partial emit still drops non-Latin bytes.
+        diag.non_latin_text_dropped += 1;
+      }
     }
 
-    // Curve polylines (minimal set for B1.CGM.1).
+    // Curve polylines.
     const auto segments = scene.curve_segments();
     const auto points = scene.curve_points();
     for (const auto &layer : scene.curve_layers()) {
@@ -480,6 +619,15 @@ Result<CgmDocument> CgmSceneExporter::write(const PreparedScene &scene) noexcept
       }
     }
 
+    if (diag.patterns_flattened_to_solid > 0) {
+      diag.notes.push_back(
+          "pattern fills flattened to solid colour (B1.CGM.2)");
+    }
+    if (diag.alpha_flattened_to_opaque > 0) {
+      diag.notes.push_back(
+          "semi-transparent fills forced opaque (CGM limit)");
+    }
+
     w.end_picture();
     w.end_metafile();
     return w.finish();
@@ -497,6 +645,22 @@ std::size_t cgm_count_polylines(std::string_view cgm_bytes) noexcept {
   CmdView cmd{};
   while (read_command(cgm_bytes, offset, cmd)) {
     if (cmd.cls == 4 && cmd.id == 1) {
+      ++count;
+    }
+    if (cmd.next_offset <= offset) {
+      break;
+    }
+    offset = cmd.next_offset;
+  }
+  return count;
+}
+
+std::size_t cgm_count_polygons(std::string_view cgm_bytes) noexcept {
+  std::size_t count = 0;
+  std::size_t offset = 0;
+  CmdView cmd{};
+  while (read_command(cgm_bytes, offset, cmd)) {
+    if (cmd.cls == 4 && cmd.id == 7) {
       ++count;
     }
     if (cmd.next_offset <= offset) {

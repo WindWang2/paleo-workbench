@@ -154,6 +154,8 @@ void standard_font_searchable_text_is_present() {
   const auto bytes = std::string{result.value().bytes()};
   require(bytes.find("/BaseFont /Helvetica") != std::string::npos,
           "Resources must name Helvetica (Base-14)");
+  require(bytes.find("/Encoding /WinAnsiEncoding") != std::string::npos,
+          "Helvetica must declare WinAnsiEncoding (B1.PDF.3 Latin-1)");
   require(bytes.find("/Type /Font") != std::string::npos,
           "Resources must include a Font dictionary");
   // Operators are Flate-compressed — inflate and look for the literal string.
@@ -180,11 +182,17 @@ void standard_font_searchable_text_is_present() {
           "inflated operators must contain the Latin text literal");
   require(inflated.find("/F1 ") != std::string::npos,
           "inflated operators must select /F1");
-  // Non-ASCII is dropped (Latin slice only).
+  // CJK is dropped from searchable overlay; Latin-1 (e.g. ° via UTF-8) emits.
   PdfPageContent page2;
   page2.stream.draw_standard_text(10.0, 10.0, 10.0, "深度");
   require(!page2.stream.needs_standard_font(),
           "CJK-only string must not register a font (dropped)");
+  require(page2.stream.non_latin_codepoints_dropped() >= 1,
+          "CJK code points must be counted as dropped (B1.PDF.3)");
+  PdfPageContent page3;
+  page3.stream.draw_standard_text(10.0, 10.0, 10.0, "caf\xc3\xa9"); // café
+  require(page3.stream.needs_standard_font(),
+          "Latin-1 UTF-8 must emit Helvetica text");
 }
 
 // The compressed content stream embedded by the writer must inflate back to

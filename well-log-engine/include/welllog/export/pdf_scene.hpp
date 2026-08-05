@@ -56,8 +56,18 @@ namespace welllog {
 // no text engine the text portions are omitted but the layout bands remain.
 // ``searchable_text`` (default false) keeps B0 outline-only behaviour; when
 // true, pagination band strings also emit Base-14 Helvetica text operators
-// for printable ASCII (B1.PDF.2). Outline PDF remains byte-deterministic when
-// searchable_text is false.
+// for Latin-1 (B1.PDF.2/3). CJK code points are dropped from the extractable
+// layer (visual outlines still use TextEngine); counts go to
+// ``SearchableTextStats`` when provided. Outline PDF remains byte-deterministic
+// when searchable_text is false.
+struct WELLLOG_EXPORT_PDF_API SearchableTextStats {
+  std::uint32_t non_latin_codepoints_dropped{0};
+  std::uint32_t latin_runs_emitted{0};
+  [[nodiscard]] bool empty() const noexcept {
+    return non_latin_codepoints_dropped == 0 && latin_runs_emitted == 0;
+  }
+};
+
 class WELLLOG_EXPORT_PDF_API PdfSceneExporter {
 public:
   [[nodiscard]] static Result<PdfDocument>
@@ -66,7 +76,8 @@ public:
             image_tile = {},
         TextEngine *text_engine = nullptr,
         ExportReport *report = nullptr,
-        bool searchable_text = false) noexcept;
+        bool searchable_text = false,
+        SearchableTextStats *searchable_stats = nullptr) noexcept;
 };
 
 } // namespace welllog
