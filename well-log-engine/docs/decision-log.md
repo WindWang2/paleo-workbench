@@ -53,7 +53,7 @@
 - [ADR 0048：Export Snapshot 与物理分页 SVG](../../docs/adr/0048-export-snapshot-and-paginated-svg.md)
 - [ADR 0052：引擎矢量导出器分期路线](../../docs/adr/0052-engine-vector-exporters-staged-roadmap.md)
 - [ADR 0053：B1 可搜索 PDF 可选路径](../../docs/adr/0053-searchable-pdf-b1-path.md)
-- [ADR 0054：B1 CGM 独立导出后端](../../docs/adr/0054-cgm-export-backend-b1.md)
+- [ADR 0054：B1 CGM 独立导出后端](../../docs/adr/0054-cgm-export-backend-b1.md)（B1.CGM.1 骨架已实现：`welllog_export_cgm`）
 
 ## 性能、质量、安全与交付
 
