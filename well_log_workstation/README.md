@@ -75,6 +75,10 @@ Need **≥2 wells** in the workspace catalog:
 3. Center tab **地层对比图-lite**: side-by-side columns, **shared depth** pan (drag) / zoom (wheel)  
 4. Double-click catalog entry under 图件 to reopen
 
+**层位刷新（T10 / #298）：** 单井层位增删改后，若对比图已打开，**自动**重载各井 `tops.json`、更新连线深度与充填。右栏 **刷新对比图（层位）** 为显式重载。
+
+**井间充填（T9 / #297）：** 右栏勾选 **显示井间充填** — 在相邻井之间、对共有且深度相邻的层位对绘制半透明四边形（不复制单井渲染）。状态写入图件 JSON；PNG 导出抓画布时一并可见。
+
 ### 层位 / Formation tops (#223)
 
 Tops are host JSON next to the well LAS (`wells/<id>/tops.json`):
