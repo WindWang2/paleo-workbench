@@ -4594,8 +4594,25 @@ WellLogSession::prepared_scene(EntityId document_id) const noexcept {
 }
 
 Result<PreparedScene> WellLogSession::prepare_for_export(
-    EntityId document_id, std::uint32_t aggregate_pixel_height) noexcept {
+    EntityId document_id, std::uint64_t aggregate_pixel_height) const noexcept {
   try {
+    // Reject absurd export densities up front (review D-007): a host passing
+    // a huge value (e.g. from a Python int >= 2^32 that survived the binding
+    // as unsigned long long) would otherwise truncate into CurveLodQuery and
+    // silently produce a wrong-density scene. 2^32 px is far beyond any real
+    // export; required_aggregate_pixel_height returns values orders of
+    // magnitude smaller.
+    if (aggregate_pixel_height > std::numeric_limits<std::uint32_t>::max()) {
+      return Error{
+          .code = ErrorCode::invalid_viewport,
+          .severity = Severity::error,
+          .entity_id = document_id,
+          .message = MessageKey::internal_error,
+          .arguments = {},
+      };
+    }
+    const auto density =
+        static_cast<std::uint32_t>(aggregate_pixel_height);
     const auto document = impl_->documents.find(document_id);
     if (document == impl_->documents.end()) {
       return Error{
@@ -4634,13 +4651,13 @@ Result<PreparedScene> WellLogSession::prepare_for_export(
         const CurveLodQuery query{
             .viewport_top = depth_range.top,
             .viewport_bottom = depth_range.bottom,
-            .pixel_height = aggregate_pixel_height,
+            .pixel_height = density,
             .prefetch_viewports = 0.0,
         };
         const ImagePyramidQuery image_query{
             .viewport_top = depth_range.top,
             .viewport_bottom = depth_range.bottom,
-            .pixel_height = static_cast<double>(aggregate_pixel_height),
+            .pixel_height = static_cast<double>(density),
             .prefetch_viewports = 0.0,
         };
         const auto &image_pyramids =
