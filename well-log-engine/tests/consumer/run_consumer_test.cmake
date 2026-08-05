@@ -10,10 +10,16 @@ file(REMOVE_RECURSE "${TEST_ROOT}")
 
 set(config_args)
 set(ctest_config_args)
+set(configure_args)
 set(generator_args)
 if(DEFINED TEST_CONFIG AND NOT TEST_CONFIG STREQUAL "")
     list(APPEND config_args --config "${TEST_CONFIG}")
     list(APPEND ctest_config_args -C "${TEST_CONFIG}")
+    # Single-config generators (Ninja, Unix Makefiles) ignore --config at
+    # build time; build type is fixed at configure. Without CMAKE_BUILD_TYPE,
+    # MSVC defaults to Debug (MDd / _ITERATOR_DEBUG_LEVEL=2) while the engine
+    # package under CI is Release (MD / IDL=0) → LNK2038 (#286).
+    list(APPEND configure_args "-DCMAKE_BUILD_TYPE=${TEST_CONFIG}")
 endif()
 if(DEFINED ENGINE_GENERATOR AND NOT ENGINE_GENERATOR STREQUAL "")
     list(APPEND generator_args -G "${ENGINE_GENERATOR}")
@@ -44,6 +50,7 @@ execute_process(
         -S "${CONSUMER_SOURCE_DIR}"
         -B "${consumer_build_dir}"
         ${generator_args}
+        ${configure_args}
         "-DCMAKE_PREFIX_PATH=${prefix_dir}"
         "-DCMAKE_CXX_COMPILER=${ENGINE_CXX_COMPILER}"
         "-DCMAKE_CXX_FLAGS=${ENGINE_CXX_FLAGS}"
