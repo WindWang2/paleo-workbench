@@ -32,5 +32,11 @@ submit_multi_well_section(WellLogView *view, PyObject *payload) noexcept;
 [[nodiscard]] PyObject *sample_value(WellLogView *view, const QString &curve_id,
                                      unsigned long long sample_index) noexcept;
 
+// Render the prepared scene for ``document_id`` to SVG and return the
+// document bytes (T1 / #273). The engine builds the SVG in memory only —
+// it never touches the filesystem; the host writes the returned bytes.
+[[nodiscard]] PyObject *
+export_scene_svg(WellLogView *view, const QString &document_id) noexcept;
+
 } // namespace python
 } // namespace welllog

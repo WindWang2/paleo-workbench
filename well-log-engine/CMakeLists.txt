@@ -667,6 +667,7 @@ if(WELLLOG_BUILD_QT_WIDGETS)
     target_link_libraries(
         welllog_qtwidgets
         PUBLIC
+            WellLog::ExportVector
             WellLog::RenderGL
             WellLog::Session
             WellLog::Table
