@@ -498,6 +498,10 @@ class FormatMatrixRow:
 
 
 # Documented matrix for B1.GEOM (not the full §16 vision matrix).
+# status meanings:
+#   asserted — hard CI check @ listed tol (pure runner and/or live export test)
+#   entry    — exercised now at looser tol (ADR 0054 CGM 0.5 mm); not §16-final
+#   deferred — not claimed for B1 closeout (honest gap vs full §16)
 B1_FORMAT_MATRIX: tuple[FormatMatrixRow, ...] = (
     FormatMatrixRow("qt_paint_layout", "track left/width mm", TOL_MM, "asserted"),
     FormatMatrixRow("qt_paint_layout", "depth→Y endpoints", TOL_MM, "asserted"),
@@ -512,8 +516,38 @@ B1_FORMAT_MATRIX: tuple[FormatMatrixRow, ...] = (
 )
 
 
+def asserted_matrix_rows() -> tuple[FormatMatrixRow, ...]:
+    """Rows with status ``asserted`` (hard geometry checks for B1.GEOM)."""
+    return tuple(r for r in B1_FORMAT_MATRIX if r.status == "asserted")
+
+
+def deferred_matrix_rows() -> tuple[FormatMatrixRow, ...]:
+    """Rows with status ``deferred`` (honest gaps; not claimed at closeout)."""
+    return tuple(r for r in B1_FORMAT_MATRIX if r.status == "deferred")
+
+
+# Pure-runner token for each asserted matrix row, or None when the row is
+# covered only by a dedicated integration test (documented below).
+# Keys are (format_id, metric). Tokens match run_b1_geometry_matrix() returns.
+B1_ASSERTED_RUN_MAP: dict[tuple[str, str], str | None] = {
+    ("qt_paint_layout", "track left/width mm"): "qt_paint_layout",
+    ("qt_paint_layout", "depth→Y endpoints"): "qt_paint_layout_depth",
+    ("page_spec", "A4 landscape box mm"): "page_spec",
+    # Live Qt-paint SVG viewBox — tests/test_well_log_workstation_geometry_matrix.py
+    # ::test_svg_page_box_in_matrix (not pure mm math; needs export stream).
+    ("svg_viewbox", "page box mm"): None,
+    ("cgm_vdc", "VDC↔mm round-trip"): "cgm_vdc_roundtrip",
+    ("cgm_pagination", "fixed page count"): "cgm_pagination",
+    ("cross_format", "layout left vs CGM VDC"): "cross_format",
+}
+
+
 def run_b1_geometry_matrix(layout: ExportLayoutMm | None = None) -> list[str]:
-    """Run all **asserted** B1.GEOM checks; return list of format_ids executed.
+    """Run asserted (+ entry) pure B1.GEOM checks; return tokens executed.
+
+    Tokens correspond to ``B1_ASSERTED_RUN_MAP`` values (plus ``cgm_vdc_entry``
+    for the ADR 0054 entry-tol track-left check). ``svg_viewbox`` is intentionally
+    omitted — covered by the live SVG export test (see map note).
 
     Raises ``GeometryGoldenError`` on first hard failure (via assert helpers).
     """
@@ -522,16 +556,16 @@ def run_b1_geometry_matrix(layout: ExportLayoutMm | None = None) -> list[str]:
     assert_layout_matches_golden(lay)
     ran.append("qt_paint_layout")
     assert_depth_mapping(lay)
+    ran.append("qt_paint_layout_depth")
     assert_page_box_mm(lay.page_width_mm, lay.page_height_mm)
     ran.append("page_spec")
-    assert_cgm_vdc_roundtrip()
+    assert_cgm_vdc_roundtrip()  # 0.1 mm pure VDC math; track left stays TOL_MM_CGM
     ran.append("cgm_vdc_roundtrip")
     assert_cgm_track_left_vdc(lay, tol_mm=TOL_MM_CGM)
     ran.append("cgm_vdc_entry")
     assert_cross_format_track_lefts(lay, tol_mm=TOL_MM)
     ran.append("cross_format")
-    # Pagination: 10 m depth → scene height not in mm of depth; use layout
-    # content height as proxy for physical page content.
+    # Pagination: use layout content height as proxy for physical page content.
     span = lay.content_bottom_mm - lay.content_top_mm
     n = expected_fixed_page_count(span, span / 2.0, page_overlap=0.0)
     if n < 2:

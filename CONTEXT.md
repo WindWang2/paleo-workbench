@@ -82,11 +82,11 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **CrossWellFenceGenerator**: A 3D curtain/fence mesh generator (`paleo_workbench/viz/geomodel/fence_generator.py`) that extracts inter-well seismic slices along multi-well trajectory paths and projects 2D correlation sections into 3D OpenGL viewports.
 - **StratigraphicCorrelationEngine**: A deepened fluent correlation engine (`paleo_workbench/viz/stratigraphic_correlation_engine.py`) unifying `WellSectionDatum`, `DTWLogMatcher`, and `FormationTopCorrelator` into an expressive pipeline.
 - **Plot Revision（图件修订）**: `well_log_workstation/events.py` 中 per-plot 的单调修订计数器，以 plot id 为键、随图件内容变更（emit）递增。它持久化于 `plots/<id>.json` 顶层字段（schema v3，ADR 0051），由宿主负责保存与恢复：保存时 bump 为新的已提交状态、加载时以 max 语义恢复（不回退）、emit 时 bump。它与引擎 DocumentRevision 是两套概念：后者由内核维护并描述引擎内文档内容版本，已通过 `WellLogView.documentChanged` 信号暴露到 Python 但本期不接线；Plot Revision 是宿主侧图件保存状态，供 `plot_changed` 信号的消费方（如未来 composite 面板按 revision 判断刷新或使 snapshot 失效）使用。
-- **WellPlot Desktop（测井桌面产品）**: 面向测井绘图的可独立安装桌面应用；代码基线为 `well_log_workstation`（独立 QApplication 壳），**首发 epic #288（轨 F/D/E · 导出 B0，T1–T15）已交付**：品牌/启动页、单井+连井、导出 B0、打印预览骨架、几何金标子集、Win/Linux 安装包。不另起第二套画布。Paleo Workbench 内嵌测井为次要集成路径。后续：导出 B1（#304）、插件 Runtime（#305）。
+- **WellPlot Desktop（测井桌面产品）**: 面向测井绘图的可独立安装桌面应用；代码基线为 `well_log_workstation`（独立 QApplication 壳），**首发 epic #288（轨 F/D/E · 导出 B0，T1–T15）已交付**：品牌/启动页、单井+连井、导出 B0、打印预览骨架、几何金标子集、Win/Linux 安装包。不另起第二套画布。Paleo Workbench 内嵌测井为次要集成路径。**导出 B1 核心切片已交付**（#304 / T16；见 `docs/export-b1-status.md`）。后续：插件 Runtime（#305）、B1 延期项（§16 全矩阵 / 完整 ToUnicode 等）。
 _Avoid_: WellPlot Desktop 与 Workstation 当成两套长期分叉产品
 - **Layered Log Truth（分层测井真源）**: 文档与修订的权威在 WellLog Document 与 Data Patch；运行时样点以引擎不可变自有缓冲区为准；Apache Arrow 是跨语言零拷贝交换边界，不是强制唯一运行时内存载体。
 _Avoid_: “Arrow 是唯一运行时真源”作为 phase-one 实现描述
-- **Export B0 / B1（导出分期验收）**: **B0 首发门禁已兑现**。**B1 选型 ADR 已闭合**（0053 可搜索 PDF、0054 CGM）。实现切片：PDF 双模式 + Latin-1 可搜索层；CGM.1–3（菜单、诊断、多 PICTURE、hatch）；**B1.GEOM** 多格式几何矩阵（0.1 mm 主容差，CGM 入口 0.5 mm）。§16 全矩阵 / 引擎 PDF 字形锚点 / 完整 ToUnicode 子集仍为后续，未宣称已交付。
+- **Export B0 / B1（导出分期验收）**: **B0 首发门禁已兑现**。**B1 核心切片已交付**（#304；选型 ADR 0053/0054 + 实现）：PDF 双模式 + Latin-1 可搜索层（B1.PDF.1–3）；CGM.1–3（写入器、宿主菜单、诊断、多 PICTURE、hatch）；**B1.GEOM** 多格式几何矩阵（0.1 mm 主容差，CGM 入口 0.5 mm）。明细见 `docs/export-b1-status.md`。**延期未宣称**：§16 全矩阵、完整 CJK ToUnicode 子集、引擎 PDF 字形锚点 0.1 mm、CGM 场景裁剪 0.1 mm。
 _Avoid_: 在未实现时宣称已支持完整 0.1 mm 全矩阵或引擎 PDF 默认可搜索 CJK
 - **Engine Vector Exporters（引擎矢量导出器）**: well-log-engine 的 C++ SVG（物理分页）/PDF/PNG/TIFF 导出器，输入为 `PreparedScene + ExportSnapshot`，可无头纯 CPU 运行。Stage 1 已为单井提供 Python 绑定（`export_scene_svg` / `export_scene_pdf`）及宿主 `backend="engine"` 路由；对比图与剖面图场景通路仍按 ADR 0052 后续 Stage。引擎 PDF 为字形轮廓、默认不可搜索（ADR 0047）。
 _Avoid_: 假设全部六类图件已走引擎导出；忽略 PDF 不可搜索披露

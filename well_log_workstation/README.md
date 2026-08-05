@@ -69,7 +69,7 @@ Depth viewport (host): **scroll wheel zoom**, **drag pan**, **double-click** res
 - **图件 → 新建单井分析图…** — writes `plots/<id>.json` + catalog entry, opens multi-track view  
 - **Double-click** a plot under 图件 in the left tree — reloads well from `wells/` and re-applies template
 
-### 导出 SVG/PDF/PNG (#221, B0 #299/#300)
+### 导出 SVG/PDF/PNG (#221, B0 #299/#300; B1 #304)
 
 | 图件 | SVG | PDF | PNG | 后端 |
 |---|---|---|---|---|
@@ -77,8 +77,9 @@ Depth viewport (host): **scroll wheel zoom**, **drag pan**, **double-click** res
 | **地层对比图** | ✓ | ✓ | ✓ | **Qt paint**（多列 + 连线）；PNG 优先抓取对比画布（含拉平/连线） |
 | 其他类型 | 视类型 | 视类型 | 视类型 | 见 `export_dispatch.py` |
 
-菜单：**导出 → 导出 SVG… / PDF… / PNG…**（有活动单井或对比图时启用）。  
-单井 PDF 会先询问文本模式（引擎图形 vs 可搜索）；引擎原生 ToUnicode 可搜索为后续 B1 切片。
+菜单：**导出 → 导出 SVG… / PDF… / PNG…**（有活动单井或对比图时启用）；单井另有 **CGM…**。  
+单井 PDF 会先询问文本模式（引擎图形 vs 可搜索 Latin-1）；完整 CJK ToUnicode 子集仍未交付。  
+**B1 关闭状态**（已交付切片 / 明确未宣称项）：[`docs/export-b1-status.md`](../docs/export-b1-status.md)。
 
 ### 地层对比图-lite (#222)
 

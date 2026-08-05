@@ -43,11 +43,12 @@ ExportBackend = Literal["qt", "engine"]
 # ADR 0053 dual mode names (product-facing).
 PdfTextMode = Literal["outline", "searchable"]
 
-# B1.CGM.2 host disclosure (pattern/alpha degradation — ADR 0054).
+# B1.CGM.2/3 host disclosure (pattern/alpha + continuous vs multi-page — ADR 0054).
 CGM_EXPORT_DISCLOSURE = (
     "CGM 导出（B1.CGM.3 / ADR 0054）：引擎自研 CGM V3 Binary 子集；"
-    "支持固定页高多 PICTURE 分页。花纹 = 纯色 + 对角 hatch 近似；"
-    "半透明强制不透明；非 Latin 标签可能省略。几何入口容差 0.5 mm。"
+    "可选连续单 PICTURE，或固定页高多 PICTURE 分页。"
+    "花纹 = 纯色 + 对角 hatch 近似；半透明强制不透明；"
+    "非 Latin 标签可能省略。几何入口容差 0.5 mm。"
 )
 
 
@@ -236,7 +237,16 @@ def _engine_export(
                 raise ExportError(
                     "engine CGM 需要重建 Python 绑定（export_scene_cgm）"
                 )
-            data = export_cgm(document_id)
+            # B1.CGM.3: optional page_height_mm enables multi-PICTURE pagination.
+            # Old bindings accept only document_id — fall back via TypeError.
+            page_height_mm = kwargs.get("page_height_mm")
+            if page_height_mm is not None:
+                try:
+                    data = export_cgm(document_id, float(page_height_mm))
+                except TypeError:
+                    data = export_cgm(document_id)
+            else:
+                data = export_cgm(document_id)
         else:  # pdf
             searchable = pdf_text_mode == "searchable"
             if searchable:
