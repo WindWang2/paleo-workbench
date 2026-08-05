@@ -261,12 +261,22 @@ class MultiTrackCanvas(QWidget):
         top, bottom = self._plot_band()
         left_margin = 8
         usable_w = max(40, w - left_margin - 8)
-        total_frac = sum(max(0.05, t.width_fraction) for t in pres.tracks) or 1.0
+        paint_tracks = list(pres.visible_tracks)
+        if not paint_tracks:
+            p.setPen(QColor("#888"))
+            p.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                "全部图道已隐藏（右栏属性中恢复「可见」）",
+            )
+            p.end()
+            return
+        total_frac = sum(max(0.05, t.width_fraction) for t in paint_tracks) or 1.0
 
         x = left_margin
         track_left = left_margin
         track_right = left_margin
-        for track in pres.tracks:
+        for track in paint_tracks:
             tw = max(24, int(usable_w * (max(0.05, track.width_fraction) / total_frac)))
             # header
             p.setPen(QPen(QColor("#333"), 1))

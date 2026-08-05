@@ -43,6 +43,8 @@ class BoundTrack:
     width_fraction: float
     scale: ScaleSpec | None
     layers: list[BoundCurveLayer] = field(default_factory=list)
+    # Runtime layout edit (#292 / T4); default visible.
+    visible: bool = True
 
 
 @dataclass
@@ -60,6 +62,10 @@ class HostPresentation:
     @property
     def track_count(self) -> int:
         return len(self.tracks)
+
+    @property
+    def visible_tracks(self) -> list[BoundTrack]:
+        return [t for t in self.tracks if t.visible]
 
     @property
     def curve_track_count(self) -> int:
@@ -195,3 +201,76 @@ def apply_template(
         depth_unit=document.depth_unit,
         tracks=bound_tracks,
     )
+
+
+def track_overrides_snapshot(presentation: HostPresentation) -> dict[str, dict[str, Any]]:
+    """Serialize editable track props for plot-document persistence (#292)."""
+    out: dict[str, dict[str, Any]] = {}
+    for track in presentation.tracks:
+        entry: dict[str, Any] = {
+            "visible": bool(track.visible),
+            "title": track.title,
+            "width_fraction": float(track.width_fraction),
+        }
+        if track.scale is not None:
+            entry["scale_min"] = float(track.scale.min)
+            entry["scale_max"] = float(track.scale.max)
+            entry["scale_mode"] = str(track.scale.mode)
+        out[track.id] = entry
+    return out
+
+
+def apply_track_overrides(
+    presentation: HostPresentation,
+    overrides: dict[str, dict[str, Any]] | None,
+) -> HostPresentation:
+    """Mutate presentation tracks in place from saved overrides; return same object."""
+    if not overrides:
+        return presentation
+    for track in presentation.tracks:
+        raw = overrides.get(track.id)
+        if not isinstance(raw, dict):
+            continue
+        if "visible" in raw:
+            track.visible = bool(raw["visible"])
+        if "title" in raw and str(raw["title"]).strip():
+            track.title = str(raw["title"])
+        if "width_fraction" in raw:
+            try:
+                wf = float(raw["width_fraction"])
+                if wf > 0:
+                    track.width_fraction = wf
+            except (TypeError, ValueError):
+                pass
+        if track.scale is not None:
+            if "scale_min" in raw:
+                try:
+                    track.scale.min = float(raw["scale_min"])
+                except (TypeError, ValueError):
+                    pass
+            if "scale_max" in raw:
+                try:
+                    track.scale.max = float(raw["scale_max"])
+                except (TypeError, ValueError):
+                    pass
+            if "scale_mode" in raw:
+                mode = str(raw["scale_mode"] or "linear")
+                if mode in ("linear", "log"):
+                    track.scale.mode = mode  # type: ignore[assignment]
+            # Keep scale valid
+            if track.scale.max <= track.scale.min:
+                track.scale.max = track.scale.min + 1.0
+        elif any(k in raw for k in ("scale_min", "scale_max", "scale_mode")):
+            # Curve tracks without scale (unusual) — create one if edited
+            try:
+                smin = float(raw.get("scale_min", 0.0))
+                smax = float(raw.get("scale_max", 100.0))
+            except (TypeError, ValueError):
+                smin, smax = 0.0, 100.0
+            if smax <= smin:
+                smax = smin + 1.0
+            mode = str(raw.get("scale_mode") or "linear")
+            if mode not in ("linear", "log"):
+                mode = "linear"
+            track.scale = ScaleSpec(mode=mode, min=smin, max=smax)  # type: ignore[arg-type]
+    return presentation

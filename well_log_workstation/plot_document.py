@@ -21,7 +21,7 @@ from well_log_workstation.workspace import (
     save_workspace,
 )
 
-PLOT_SCHEMA_VERSION = 4
+PLOT_SCHEMA_VERSION = 5
 
 
 @dataclass
@@ -65,6 +65,9 @@ class PlotDocument:
     # paper directly, independent of panels/templates. Empty for all other
     # plot types.
     free_graphics: list[dict] = field(default_factory=list)
+    # Single-well track property overrides (schema v5 / #292): track_id → props.
+    # Keys: visible, title, width_fraction, scale_min, scale_max, scale_mode.
+    track_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def absolute_path(self, workspace: Workspace) -> Path:
         return workspace.root / self.path
@@ -104,6 +107,10 @@ def _to_json(doc: PlotDocument) -> dict[str, Any]:
     # doc that carries them (mirrors links/panels so stale values never drop).
     if doc.type == "composite" or doc.free_graphics:
         payload["free_graphics"] = list(doc.free_graphics)
+    if doc.type == "single_well" or doc.track_overrides:
+        payload["track_overrides"] = {
+            str(k): dict(v) for k, v in doc.track_overrides.items() if isinstance(v, dict)
+        }
     return payload
 
 
@@ -118,11 +125,16 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         # v2 -> v3 additive: revision is new and defaults to 0 (ADR 0051).
         data = dict(data)
         data.setdefault("revision", 0)
-        version = PLOT_SCHEMA_VERSION
+        version = 3
     if version == 3:
         # v3 -> v4 additive: free_graphics is new and defaults to empty.
         data = dict(data)
         data.setdefault("free_graphics", [])
+        version = 4
+    if version == 4:
+        # v4 -> v5 additive: track_overrides for single-well layout edits (#292).
+        data = dict(data)
+        data.setdefault("track_overrides", {})
         version = PLOT_SCHEMA_VERSION
     if version != PLOT_SCHEMA_VERSION:
         raise WorkspaceError(
@@ -159,6 +171,12 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
     for raw in data.get("free_graphics") or []:
         if isinstance(raw, dict):
             free_graphics.append(raw)
+    track_overrides: dict[str, dict[str, Any]] = {}
+    raw_ov = data.get("track_overrides") or {}
+    if isinstance(raw_ov, dict):
+        for tid, props in raw_ov.items():
+            if isinstance(props, dict):
+                track_overrides[str(tid)] = dict(props)
     return PlotDocument(
         id=str(data["id"]),
         name=str(data.get("name") or data["id"]),
@@ -170,6 +188,7 @@ def _from_json(data: dict[str, Any], *, path: str) -> PlotDocument:
         panels=panels,
         free_graphics=free_graphics,
         revision=max(0, int(data.get("revision") or 0)),
+        track_overrides=track_overrides,
     )
 
 
@@ -240,6 +259,7 @@ def load_plot_document(workspace: Workspace, plot_id: str) -> PlotDocument:
             panels=list(doc.panels),
             free_graphics=list(doc.free_graphics),
             revision=doc.revision,
+            track_overrides=dict(doc.track_overrides),
         )
     # Lazy import: keep this module importable without PySide6 (see save).
     from well_log_workstation.events import restore_plot_revision

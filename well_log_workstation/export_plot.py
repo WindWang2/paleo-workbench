@@ -49,10 +49,15 @@ def _paint_presentation(
     bottom = y_origin + h - 28
     left = x_origin + 16
     usable_w = max(40.0, w - 32)
-    total_frac = sum(max(0.05, t.width_fraction) for t in pres.tracks) or 1.0
+    paint_tracks = list(pres.visible_tracks)
+    if not paint_tracks:
+        painter.setPen(QColor("#888"))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "全部图道已隐藏")
+        return
+    total_frac = sum(max(0.05, t.width_fraction) for t in paint_tracks) or 1.0
 
     x = left
-    for track in pres.tracks:
+    for track in paint_tracks:
         tw = max(28.0, usable_w * (max(0.05, track.width_fraction) / total_frac))
         painter.setPen(QPen(QColor("#333"), 1))
         painter.drawRect(QRectF(x, y_origin + 10, tw - 6, header_h - 6))
