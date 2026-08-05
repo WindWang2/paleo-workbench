@@ -2992,17 +2992,19 @@ class WellLogWorkstationWindow(QMainWindow):
         try:
             if plot.type == "single_well" and fmt in ("svg", "pdf"):
                 eng_ok = engine_available()
+                pdf_text_mode: PdfTextMode = "outline"
                 if fmt == "pdf":
                     chosen = self._choose_single_well_pdf_text_mode()
                     if chosen is None:
                         return
-                    if chosen == "searchable":
+                    pdf_text_mode = chosen
+                    if pdf_text_mode == "searchable":
                         QMessageBox.information(
                             self, "可搜索 PDF", PDF_SEARCHABLE_MODE_NOTE
                         )
                     backend, backend_note = resolve_single_well_pdf_export(
                         engine_available=eng_ok,
-                        pdf_text_mode=chosen,
+                        pdf_text_mode=pdf_text_mode,
                     )
                 else:
                     backend = prefer_engine_for_single_well(
@@ -3012,7 +3014,11 @@ class WellLogWorkstationWindow(QMainWindow):
                         "（引擎）" if backend == "engine" else "（Qt）"
                     )
                 if backend == "engine":
-                    if engine_pdf_needs_disclosure("engine", fmt):
+                    # Outline engine PDF still needs the non-searchable disclosure.
+                    if (
+                        pdf_text_mode == "outline"
+                        and engine_pdf_needs_disclosure("engine", fmt)
+                    ):
                         reply = QMessageBox.warning(
                             self,
                             "引擎 PDF 说明",
@@ -3029,6 +3035,8 @@ class WellLogWorkstationWindow(QMainWindow):
                         kwargs["backend"] = "engine"
                         kwargs["view"] = view
                         kwargs["document_id"] = doc_id
+                        if fmt == "pdf":
+                            kwargs["pdf_text_mode"] = pdf_text_mode
                     except (EngineUnavailable, EngineSubmitError, ExportError):
                         kwargs["backend"] = "qt"
                         kwargs["paint_fn"] = self._paint_active_plot

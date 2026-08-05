@@ -126,6 +126,8 @@ struct PdfPathStream::Impl {
   // first-encountered order (deduplicated) so the writer's /ExtGState objects
   // are named in the exact order the stream assigns /GSn names.
   std::vector<double> fill_alphas;
+  // B1.PDF.2: draw_standard_text was used → writer must name /F1 Helvetica.
+  bool uses_standard_font{false};
 };
 
 PdfPathStream::PdfPathStream() : impl_(std::make_unique<Impl>()) {}
@@ -379,12 +381,50 @@ PdfPathStream &PdfPathStream::invoke_xobject(std::string_view name) noexcept {
   return *this;
 }
 
+PdfPathStream &PdfPathStream::draw_standard_text(double x, double y,
+                                                double font_size,
+                                                std::string_view text) noexcept {
+  // PDF literal-string escape + printable ASCII filter (B1.PDF.2 Latin slice).
+  std::string filtered;
+  filtered.reserve(text.size());
+  for (char ch : text) {
+    const auto c = static_cast<unsigned char>(ch);
+    if (c >= 32 && c < 127) {
+      if (c == '(' || c == ')' || c == '\\') {
+        filtered.push_back('\\');
+      }
+      filtered.push_back(static_cast<char>(c));
+    }
+  }
+  if (filtered.empty() || !std::isfinite(font_size) || font_size <= 0.0) {
+    return *this;
+  }
+  if (!std::isfinite(x) || !std::isfinite(y)) {
+    return *this;
+  }
+  impl_->uses_standard_font = true;
+  impl_->operators += "BT\n/F1 ";
+  append_number(impl_->operators, font_size);
+  impl_->operators += " Tf\n";
+  append_number(impl_->operators, x);
+  impl_->operators.push_back(' ');
+  append_number(impl_->operators, y);
+  impl_->operators += " Td\n(";
+  impl_->operators += filtered;
+  impl_->operators += ") Tj\nET\n";
+  return *this;
+}
+
 std::string_view PdfPathStream::operators() const noexcept {
   return impl_->operators;
 }
 
 std::span<const double> PdfPathStream::fill_alphas() const noexcept {
   return impl_->fill_alphas;
+}
+
+bool PdfPathStream::needs_standard_font() const noexcept {
+  return impl_->uses_standard_font;
 }
 
 struct PdfDocument::Impl {
@@ -537,13 +577,15 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
       out += "/Contents ";
       append_integer(out, static_cast<std::int64_t>(3 + 2 * p));
       out += " 0 R ";
-      // Resources. With no alphas AND no caller objects (opaque-only + no
-      // images/patterns, e.g. the #185 spike) this stays `/Resources << >>`,
-      // byte-identical to the pre-#188 writer. Otherwise build a dict naming
-      // /ExtGState (alphas), /XObject (images) and /Pattern (tiling patterns).
+      // Resources. With no alphas AND no caller objects AND no standard font
+      // (opaque-only + no images/patterns, e.g. the #185 spike) this stays
+      // `/Resources << >>`, byte-identical to the pre-#188 / pre-B1.PDF.2
+      // writer. Otherwise build a dict naming /ExtGState, /XObject, /Pattern,
+      // and optionally /Font (Base-14 Helvetica for searchable Latin text).
       const bool has_alphas = !page_alphas[p].empty();
       const bool has_objects = !pages[p].objects.empty();
-      if (!has_alphas && !has_objects) {
+      const bool has_font = pages[p].stream.needs_standard_font();
+      if (!has_alphas && !has_objects && !has_font) {
         out += "/Resources << >> >>\nendobj\n";
       } else {
         out += "/Resources <<";
@@ -607,6 +649,12 @@ Result<PdfDocument> PdfWriter::write(std::span<const PdfPageContent> pages,
             }
             out += ">>";
           }
+        }
+        if (has_font) {
+          // Inline Base-14 Type1 font dict — no font file / ToUnicode needed
+          // for WinAnsi Latin extractability in common PDF tools.
+          out += " /Font << /F1 << /Type /Font /Subtype /Type1 "
+                 "/BaseFont /Helvetica >> >>";
         }
         out += " >> >>\nendobj\n";
       }

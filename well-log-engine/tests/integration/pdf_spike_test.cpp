@@ -141,6 +141,52 @@ void output_is_byte_deterministic() {
           "no ModDate may appear");
 }
 
+// B1.PDF.2 / ADR 0053: Base-14 Helvetica Latin text is named in Resources and
+// the operators include a literal string (extractable by PDF text tools).
+void standard_font_searchable_text_is_present() {
+  PdfPageContent page;
+  page.stream.set_fill_color(0, 0, 0)
+      .draw_standard_text(72.0, 720.0, 12.0, "GR depth 1000.0");
+  require(page.stream.needs_standard_font(),
+          "draw_standard_text must mark the stream for /Font resources");
+  const auto result = PdfWriter::write(std::span<const PdfPageContent>(&page, 1));
+  require(result.has_value(), "searchable-text PDF must build");
+  const auto bytes = std::string{result.value().bytes()};
+  require(bytes.find("/BaseFont /Helvetica") != std::string::npos,
+          "Resources must name Helvetica (Base-14)");
+  require(bytes.find("/Type /Font") != std::string::npos,
+          "Resources must include a Font dictionary");
+  // Operators are Flate-compressed — inflate and look for the literal string.
+  const auto filter_pos = bytes.find("/Filter /FlateDecode");
+  require(filter_pos != std::string::npos, "content stream must be Flate");
+  const auto stream_kw = bytes.find("stream\n", filter_pos);
+  require(stream_kw != std::string::npos, "stream keyword must follow dict");
+  const auto payload_start = stream_kw + std::strlen("stream\n");
+  const auto endstream = bytes.find("\nendstream", payload_start);
+  require(endstream != std::string::npos, "endstream required");
+  const std::string compressed =
+      bytes.substr(payload_start, endstream - payload_start);
+  z_stream zs{};
+  require(inflateInit(&zs) == Z_OK, "inflateInit");
+  std::string sink(compressed.size() * 8 + 256, '\0');
+  zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(compressed.data()));
+  zs.avail_in = static_cast<uInt>(compressed.size());
+  zs.next_out = reinterpret_cast<Bytef *>(sink.data());
+  zs.avail_out = static_cast<uInt>(sink.size());
+  require(inflate(&zs, Z_FINISH) == Z_STREAM_END, "inflate content");
+  inflateEnd(&zs);
+  const std::string inflated(sink.data(), zs.total_out);
+  require(inflated.find("(GR depth 1000.0)") != std::string::npos,
+          "inflated operators must contain the Latin text literal");
+  require(inflated.find("/F1 ") != std::string::npos,
+          "inflated operators must select /F1");
+  // Non-ASCII is dropped (Latin slice only).
+  PdfPageContent page2;
+  page2.stream.draw_standard_text(10.0, 10.0, 10.0, "深度");
+  require(!page2.stream.needs_standard_font(),
+          "CJK-only string must not register a font (dropped)");
+}
+
 // The compressed content stream embedded by the writer must inflate back to
 // the original operators. This extracts the writer's ACTUAL FlateDecode stream
 // from the produced PDF bytes and inflates it — proving the compression is
@@ -264,6 +310,7 @@ void external_tools_accept_the_pdf() {
 int main() {
   multi_page_pdf_is_structurally_complete();
   output_is_byte_deterministic();
+  standard_font_searchable_text_is_present();
   flate_stream_round_trips();
   outline_command_maps_to_pdf_operators();
   external_tools_accept_the_pdf();

@@ -5,8 +5,10 @@
 // #186 (ADR 0048): a PreparedScene + ExportSnapshot are serialized to a PDF
 // whose content stream is pure vector geometry — interval rects, marker lines,
 // symbol paths, curve polylines, crossover-fill rings, and text rendered as
-// glyph vector outlines (no font program embedded; text is graphical, not
-// searchable, per the #185 decision). Mirrors src/export_vector/svg.cpp's
+// glyph vector outlines (no font program embedded by default; text is
+// graphical / non-searchable, ADR 0047). Optional ``searchable_text`` (B1.PDF.2
+// / ADR 0053) overlays PDF standard Helvetica operators for Latin/ASCII runs
+// so band labels are extractable. Mirrors src/export_vector/svg.cpp's
 // append_layer_body 1:1, emitting PDF operators instead of SVG elements.
 //
 // Coordinate model: the engine's geometry is in scene millimetres (y-down);
@@ -52,6 +54,10 @@ namespace welllog {
 // outlines via the optional `text_engine` (no font program embedded — ADR
 // 0047); geometric band parts (legend colour swatches) are always emitted. With
 // no text engine the text portions are omitted but the layout bands remain.
+// ``searchable_text`` (default false) keeps B0 outline-only behaviour; when
+// true, pagination band strings also emit Base-14 Helvetica text operators
+// for printable ASCII (B1.PDF.2). Outline PDF remains byte-deterministic when
+// searchable_text is false.
 class WELLLOG_EXPORT_PDF_API PdfSceneExporter {
 public:
   [[nodiscard]] static Result<PdfDocument>
@@ -59,7 +65,8 @@ public:
         std::function<Result<RasterTile>(const ImageTileRequest &)>
             image_tile = {},
         TextEngine *text_engine = nullptr,
-        ExportReport *report = nullptr) noexcept;
+        ExportReport *report = nullptr,
+        bool searchable_text = false) noexcept;
 };
 
 } // namespace welllog

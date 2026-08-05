@@ -648,39 +648,48 @@ double measure_text_mm(TextEngine *text_engine, std::string_view text,
 // Used for the pagination metadata bands (well name, page number, depth range,
 // legend mnemonics) — the same no-font policy as scene text (ADR 0047). Must be
 // called inside a page-mm (y-flipped) `cm` so the per-glyph placement
-// [fs 0 0 -fs px py] lands upright. No-op when text_engine is null.
+// [fs 0 0 -fs px py] lands upright. Outline path no-op when text_engine is null.
+// When ``searchable`` is true (B1.PDF.2), also emits Base-14 Helvetica operators
+// for printable ASCII so band labels are extractable (ADR 0053).
 void emit_text_string(PdfPathStream &stream, TextEngine *text_engine,
                       std::string_view text, double px, double py, double fs,
-                      RgbaColor color) noexcept {
-  if (text_engine == nullptr || text.empty()) {
+                      RgbaColor color, bool searchable) noexcept {
+  if (text.empty()) {
     return;
   }
-  const auto run = text_engine->shape(TextShapeRequest{
-      .text = text, .language = "en", .direction = TextDirection::left_to_right});
-  if (!run.has_value() || run.value().glyphs.empty()) {
-    return;
-  }
-  stream.save_state();
-  stream.set_fill_color(color.red, color.green, color.blue);
-  if (color.alpha < 255) {
-    stream.set_fill_alpha(static_cast<double>(color.alpha) / 255.0);
-  }
-  double pen_x = px;
-  for (const auto &glyph : run.value().glyphs) {
-    const auto outline =
-        text_engine->glyph_outline(glyph.font_index, glyph.glyph_id);
-    if (outline.has_value() && !outline.value().commands.empty()) {
-      // Em-space (y-up) → page-mm (y-down): [fs 0 0 -fs pen_x py]. No rotation
-      // (horizontal band text); no per-glyph rotation in band strings.
+  if (text_engine != nullptr) {
+    const auto run = text_engine->shape(TextShapeRequest{
+        .text = text,
+        .language = "en",
+        .direction = TextDirection::left_to_right});
+    if (run.has_value() && !run.value().glyphs.empty()) {
       stream.save_state();
-      stream.concat_matrix(fs, 0.0, 0.0, -fs, pen_x, py);
-      stream.append_outline(outline.value().commands);
-      stream.fill();
+      stream.set_fill_color(color.red, color.green, color.blue);
+      if (color.alpha < 255) {
+        stream.set_fill_alpha(static_cast<double>(color.alpha) / 255.0);
+      }
+      double pen_x = px;
+      for (const auto &glyph : run.value().glyphs) {
+        const auto outline =
+            text_engine->glyph_outline(glyph.font_index, glyph.glyph_id);
+        if (outline.has_value() && !outline.value().commands.empty()) {
+          // Em-space (y-up) → page-mm (y-down): [fs 0 0 -fs pen_x py].
+          stream.save_state();
+          stream.concat_matrix(fs, 0.0, 0.0, -fs, pen_x, py);
+          stream.append_outline(outline.value().commands);
+          stream.fill();
+          stream.restore_state();
+        }
+        pen_x += glyph.advance_x * fs;
+      }
       stream.restore_state();
     }
-    pen_x += glyph.advance_x * fs;
   }
-  stream.restore_state();
+  if (searchable) {
+    // Overlay extractable text in the same page-mm CTM (y-down authoring).
+    // Rendering may sit slightly off glyph outlines; search/copy is the goal.
+    stream.draw_standard_text(px, py, fs, text);
+  }
 }
 
 // Emits the pagination metadata bands for one page, mirroring
@@ -689,13 +698,13 @@ void emit_text_string(PdfPathStream &stream, TextEngine *text_engine,
 // are 1-based/total; `window_top_mm`/`window_bottom_mm` are the scene depth
 // window this page shows (for the depth-range footer). Emitted in PAGE-mm space
 // (y-down) — must be called inside the page-mm (y-flipped) `cm` established by
-// write(). Geometric bands (legend swatches) always emit; text bands emit only
-// when a text engine is supplied.
+// write(). Geometric bands (legend swatches) always emit; outline text needs a
+// text engine; searchable Latin overlay (B1.PDF.2) works without a text engine.
 void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
                      const ExportSnapshot &snapshot, std::uint32_t page_index,
                      std::uint32_t page_count, double window_top_mm,
-                     double window_bottom_mm,
-                     TextEngine *text_engine) noexcept {
+                     double window_bottom_mm, TextEngine *text_engine,
+                     bool searchable_text) noexcept {
   const auto &page = snapshot.page;
   const auto content_left = page.margins.left.value;
   const auto content_top = page.margins.top.value;
@@ -705,7 +714,8 @@ void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
   if (page.repeat_headers) {
     if (!page.well_name.empty()) {
       emit_text_string(stream, text_engine, page.well_name, content_left,
-                       content_top + band_font_size, band_font_size, label_color);
+                       content_top + band_font_size, band_font_size, label_color,
+                       searchable_text);
     }
     if (page.show_page_numbers) {
       std::string label = "page ";
@@ -718,7 +728,7 @@ void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
       const auto right_x = page.page_width.value - page.margins.right.value;
       emit_text_string(stream, text_engine, label, right_x - width,
                        content_top + band_font_size, band_font_size,
-                       label_color);
+                       label_color, searchable_text);
     }
   }
   if (page.show_depth_range) {
@@ -731,7 +741,7 @@ void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
     footer += " .. ";
     append_number(footer, depth_bottom);
     emit_text_string(stream, text_engine, footer, content_left, footer_y,
-                     band_font_size, label_color);
+                     band_font_size, label_color, searchable_text);
   }
   if (page.repeat_legend) {
     const auto headers = scene.track_header_entries();
@@ -748,7 +758,7 @@ void emit_page_bands(PdfPathStream &stream, const PreparedScene &scene,
       mnemonic += " ";
       mnemonic += entry.unit;
       emit_text_string(stream, text_engine, mnemonic, content_left + 4.0,
-                       legend_y, band_font_size, label_color);
+                       legend_y, band_font_size, label_color, searchable_text);
       legend_y -= 4.0;
     }
   }
@@ -1036,7 +1046,8 @@ PdfSceneExporter::write(const PreparedScene &scene,
                         std::function<Result<RasterTile>(const ImageTileRequest &)>
                             image_tile,
                         TextEngine *text_engine,
-                        ExportReport *report) noexcept {
+                        ExportReport *report,
+                        bool searchable_text) noexcept {
   try {
     if (!snapshot_is_valid(scene, snapshot)) {
       return pdf_scene_error(ErrorCode::invalid_presentation,
@@ -1130,7 +1141,7 @@ PdfSceneExporter::write(const PreparedScene &scene,
                            -points_per_millimetre, 0.0, page_height_pt);
       emit_page_bands(stream, scene, snapshot, page_index, page_count,
                       window.window_top_mm, window.window_bottom_mm,
-                      text_engine);
+                      text_engine, searchable_text);
       stream.restore_state();
 
       auto objects_opt = materialize_objects(scene, resources);

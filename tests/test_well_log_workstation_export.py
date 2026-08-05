@@ -359,9 +359,12 @@ def test_engine_pdf_disclosure_contract() -> None:
 
 
 def test_pdf_text_mode_resolves_backend_adr_0053() -> None:
-    """ADR 0053 dual mode: searchable forces Qt; outline prefers engine."""
+    """ADR 0053 dual mode: searchable prefers engine; outline prefers engine."""
     assert prefer_engine_for_single_well(
         "pdf", engine_available=True, pdf_text_mode="searchable"
+    ) == "engine"
+    assert prefer_engine_for_single_well(
+        "pdf", engine_available=False, pdf_text_mode="searchable"
     ) == "qt"
     assert prefer_engine_for_single_well(
         "pdf", engine_available=True, pdf_text_mode="outline"
@@ -374,13 +377,13 @@ def test_pdf_text_mode_resolves_backend_adr_0053() -> None:
         "pdf",
         engine_available=True,
         pdf_text_mode="searchable",
-        force_backend="engine",
-    ) == "engine"
+        force_backend="qt",
+    ) == "qt"
 
     b, note = resolve_single_well_pdf_export(
         engine_available=True, pdf_text_mode="searchable"
     )
-    assert b == "qt"
+    assert b == "engine"
     assert "可搜索" in note
 
     b2, note2 = resolve_single_well_pdf_export(
@@ -413,8 +416,11 @@ def test_searchable_pdf_export_is_qt_and_nonempty(
     )
     assert out.is_file() and out.stat().st_size >= 50
     assert out.read_bytes()[:5] == b"%PDF-"
-    # Routing: searchable mode must not pick engine when engine is "available"
-    # in the resolver (we only assert the resolver + that Qt export works).
+    # Routing: searchable prefers engine when available (B1.PDF.2); Qt path
+    # remains valid fallback (this test exercises Qt paint export).
     assert prefer_engine_for_single_well(
         "pdf", engine_available=True, pdf_text_mode="searchable"
+    ) == "engine"
+    assert prefer_engine_for_single_well(
+        "pdf", engine_available=False, pdf_text_mode="searchable"
     ) == "qt"
