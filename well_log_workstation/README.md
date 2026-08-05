@@ -24,6 +24,14 @@ python -m well_log_workstation
 
 Window title and **帮助 → 关于…** show **WellPlot Desktop**.
 
+## Extensions / plugins (T17 / #305)
+
+First-ship extension surface is **declarative Custom Layer + engine embed**
+(ADR 0018 / 0046). Full plugin Runtime is **out of first ship** — see
+**[docs/plugin-runtime-status.md](../docs/plugin-runtime-status.md)** and
+ADR 0055. Host helpers: `extension_points.list_extension_points()`,
+`command_audit` (in-memory ring only).
+
 ## Installers (T15 / #303)
 
 Independent Windows / Linux install packages (PyInstaller onedir + install/uninstall scripts).
