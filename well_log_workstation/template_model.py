@@ -48,6 +48,70 @@ class BoundTrack:
 
 
 @dataclass
+class PlotHeaderSpec:
+    """Minimal single-well plot header/footer (#293 / T5).
+
+    Built from template JSON ``header`` / ``footer`` and resolved at apply time
+    with well name, depth unit, and scale summary.
+    """
+
+    title: str = ""
+    show_well_name: bool = True
+    show_depth_scale: bool = True
+    show_template_name: bool = True
+    extra_lines: list[str] = field(default_factory=list)
+    # Footer
+    show_depth_range: bool = True
+    footer_text: str = ""
+
+    def header_lines(
+        self,
+        *,
+        well_name: str,
+        template_name: str,
+        depth_unit: str,
+        scale_summary: str,
+    ) -> list[str]:
+        """Resolved display lines for the header band (non-empty)."""
+        lines: list[str] = []
+        title = (self.title or "").strip() or template_name
+        if title:
+            lines.append(title)
+        meta: list[str] = []
+        if self.show_well_name and well_name:
+            meta.append(f"井: {well_name}")
+        if self.show_depth_scale:
+            unit = depth_unit or "m"
+            meta.append(f"深度: {unit}")
+            if scale_summary:
+                meta.append(scale_summary)
+        if self.show_template_name and template_name:
+            meta.append(f"图版: {template_name}")
+        if meta:
+            lines.append(" · ".join(meta))
+        for raw in self.extra_lines:
+            s = str(raw).strip()
+            if s:
+                lines.append(s)
+        return lines or [template_name or "单井图"]
+
+    def footer_line(
+        self,
+        *,
+        depth_range: tuple[float, float] | None,
+        depth_unit: str,
+    ) -> str:
+        parts: list[str] = []
+        if self.footer_text.strip():
+            parts.append(self.footer_text.strip())
+        if self.show_depth_range and depth_range is not None:
+            d0, d1 = depth_range
+            unit = depth_unit or "m"
+            parts.append(f"视窗 {d0:.2f}–{d1:.2f} {unit}")
+        return " · ".join(parts)
+
+
+@dataclass
 class HostPresentation:
     """Compiled multi-track layout for one well (single layout owner for UI)."""
 
@@ -58,6 +122,7 @@ class HostPresentation:
     depth: Any
     depth_unit: str
     tracks: list[BoundTrack]
+    header: PlotHeaderSpec = field(default_factory=PlotHeaderSpec)
 
     @property
     def track_count(self) -> int:
@@ -71,6 +136,21 @@ class HostPresentation:
     def curve_track_count(self) -> int:
         return sum(1 for t in self.tracks if t.role == "curve")
 
+    def scale_summary(self) -> str:
+        """Short curve-scale summary for header (e.g. GR 0–150 GAPI)."""
+        bits: list[str] = []
+        for t in self.tracks:
+            if t.role != "curve" or not t.visible or t.scale is None:
+                continue
+            unit = t.scale.unit or ""
+            bits.append(
+                f"{t.title} {t.scale.min:g}–{t.scale.max:g}"
+                + (f" {unit}" if unit else "")
+            )
+            if len(bits) >= 3:
+                break
+        return " · ".join(bits)
+
 
 @dataclass
 class PlotTemplate:
@@ -78,6 +158,8 @@ class PlotTemplate:
     name: str
     tracks: list[dict[str, Any]]
     schema_version: int = 1
+    header: dict[str, Any] = field(default_factory=dict)
+    footer: dict[str, Any] = field(default_factory=dict)
 
 
 def _templates_package_dir() -> Path:
@@ -91,6 +173,26 @@ def load_template_file(path: Path | str) -> PlotTemplate:
         name=str(data.get("name") or data["id"]),
         tracks=list(data.get("tracks") or []),
         schema_version=int(data.get("schemaVersion", 1)),
+        header=dict(data.get("header") or {}),
+        footer=dict(data.get("footer") or {}),
+    )
+
+
+def header_spec_from_template(template: PlotTemplate) -> PlotHeaderSpec:
+    """Parse template header/footer dicts into PlotHeaderSpec."""
+    h = template.header or {}
+    f = template.footer or {}
+    extra = h.get("lines") or h.get("extra_lines") or []
+    if not isinstance(extra, list):
+        extra = []
+    return PlotHeaderSpec(
+        title=str(h.get("title") or ""),
+        show_well_name=bool(h.get("show_well_name", True)),
+        show_depth_scale=bool(h.get("show_depth_scale", True)),
+        show_template_name=bool(h.get("show_template_name", True)),
+        extra_lines=[str(x) for x in extra],
+        show_depth_range=bool(f.get("show_depth_range", True)),
+        footer_text=str(f.get("text") or f.get("footer_text") or ""),
     )
 
 
@@ -200,6 +302,7 @@ def apply_template(
         depth=document.depth,
         depth_unit=document.depth_unit,
         tracks=bound_tracks,
+        header=header_spec_from_template(template),
     )
 
 

@@ -44,8 +44,30 @@ def _paint_presentation(
     if not math.isfinite(d0) or not math.isfinite(d1) or d1 <= d0:
         d0, d1 = 0.0, 1.0
 
-    header_h = 36.0
-    top = y_origin + 12 + header_h
+    # Plot header (#293) — same fields as on-screen canvas
+    hdr = getattr(pres, "header", None)
+    if hdr is not None:
+        header_lines = hdr.header_lines(
+            well_name=pres.well_name,
+            template_name=pres.template_name,
+            depth_unit=pres.depth_unit or "m",
+            scale_summary=pres.scale_summary(),
+        )
+    else:
+        header_lines = [pres.template_name or "单井图"]
+    title_band = 8.0 + max(1, len(header_lines)) * 16.0
+    y_text = y_origin + 14.0
+    for i, line in enumerate(header_lines):
+        font = painter.font()
+        font.setBold(i == 0)
+        font.setPointSize(10 if i == 0 else 8)
+        painter.setFont(font)
+        painter.setPen(QColor("#222"))
+        painter.drawText(int(x_origin + 16), int(y_text), line[:120])
+        y_text += 16.0 if i == 0 else 14.0
+
+    track_hdr_h = 28.0
+    top = y_origin + title_band + track_hdr_h
     bottom = y_origin + h - 28
     left = x_origin + 16
     usable_w = max(40.0, w - 32)
@@ -57,12 +79,13 @@ def _paint_presentation(
     total_frac = sum(max(0.05, t.width_fraction) for t in paint_tracks) or 1.0
 
     x = left
+    track_hdr_y = top - track_hdr_h
     for track in paint_tracks:
         tw = max(28.0, usable_w * (max(0.05, track.width_fraction) / total_frac))
         painter.setPen(QPen(QColor("#333"), 1))
-        painter.drawRect(QRectF(x, y_origin + 10, tw - 6, header_h - 6))
+        painter.drawRect(QRectF(x, track_hdr_y, tw - 6, track_hdr_h - 6))
         painter.drawText(
-            QRectF(x + 4, y_origin + 12, tw - 12, header_h - 10),
+            QRectF(x + 4, track_hdr_y + 2, tw - 12, track_hdr_h - 10),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             track.title[:16],
         )
@@ -97,12 +120,22 @@ def _paint_presentation(
         x += tw
 
     painter.setPen(QColor("#444"))
-    painter.drawText(
-        int(x_origin + 16),
-        int(y_origin + h - 10),
-        f"{pres.well_name} · {pres.template_name} · "
-        f"{pres.track_count} tracks · {pres.depth_unit}",
-    )
+    font = painter.font()
+    font.setBold(False)
+    font.setPointSize(8)
+    painter.setFont(font)
+    footer = ""
+    if hdr is not None:
+        footer = hdr.footer_line(
+            depth_range=(d0, d1),
+            depth_unit=pres.depth_unit or "m",
+        )
+    if not footer:
+        footer = (
+            f"{pres.well_name} · {pres.template_name} · "
+            f"{pres.track_count} tracks · {pres.depth_unit}"
+        )
+    painter.drawText(int(x_origin + 16), int(y_origin + h - 10), footer[:160])
 
 
 def _paint_curve(
