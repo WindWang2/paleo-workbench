@@ -72,6 +72,11 @@ from well_log_workstation.export_dispatch import (
     export_plot,
     prefer_engine_for_single_well,
 )
+from well_log_workstation.print_preview import (
+    PrintPreviewDialog,
+    compute_print_preview,
+    depth_range_from_presentation,
+)
 from well_log_workstation.export_plot import (
     ExportError,
     export_presentation_pdf,
@@ -285,6 +290,11 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_png.setObjectName("Action_ExportPng")
         self._act_export_png.triggered.connect(self._on_export_png)
         self._act_export_png.setEnabled(False)
+        export_menu.addSeparator()
+        self._act_print_preview = export_menu.addAction("打印预览…")
+        self._act_print_preview.setObjectName("Action_PrintPreview")
+        self._act_print_preview.triggered.connect(self._on_print_preview)
+        self._act_print_preview.setEnabled(False)
 
         tops_menu = bar.addMenu("层位")
         tops_menu.setObjectName("Menu_层位")
@@ -713,6 +723,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self._act_export_pdf.setEnabled(can_export)
         if hasattr(self, "_act_export_png"):
             self._act_export_png.setEnabled(can_export)
+        if hasattr(self, "_act_print_preview"):
+            # Preview primarily for single-well export stream (T13); correlation OK too
+            self._act_print_preview.setEnabled(can_export)
 
         can_tops = (
             self._workspace is not None
@@ -3145,6 +3158,79 @@ class WellLogWorkstationWindow(QMainWindow):
 
     def _on_export_png(self) -> None:
         self._export_active_plot("png")
+
+    def open_print_preview(self, *, show: bool = True):
+        """Open print-preview skeleton for active single-well or correlation (T13).
+
+        Returns PrintPreviewInfo for tests, or None if nothing to preview.
+        ``show=False`` builds info (and optionally dialog) without modal exec.
+        """
+        if self._presentation is not None and self._presentation.track_count > 0:
+            d0, d1 = depth_range_from_presentation(self._presentation)
+            vr = self.multi_track_canvas.depth_range()
+            if vr is not None:
+                d0, d1 = vr
+            span = max(d1 - d0, 1e-9)
+            # Skeleton multi-page plan: two pages by default for long spans
+            page_spec = PageSpec(depth_per_page_mm=max(span / 2.0, 1.0))
+            info = compute_print_preview(
+                plot_name=(
+                    self._presentation.well_name
+                    or self._presentation.template_name
+                    or "单井图"
+                ),
+                depth_top=d0,
+                depth_bottom=d1,
+                depth_unit=self._presentation.depth_unit or "m",
+                page_spec=page_spec,
+            )
+            if show:
+                dlg = PrintPreviewDialog(
+                    info,
+                    paint_fn=self._paint_active_plot,
+                    page_spec=page_spec,
+                    parent=self,
+                )
+                dlg.exec()
+            return info
+
+        if len(self._correlation_presentations) >= 2:
+            d0s: list[float] = []
+            d1s: list[float] = []
+            unit = "m"
+            for pres in self._correlation_presentations:
+                a, b = depth_range_from_presentation(pres)
+                d0s.append(a)
+                d1s.append(b)
+                unit = pres.depth_unit or unit
+            page_spec = PageSpec()
+            info = compute_print_preview(
+                plot_name="地层对比图",
+                depth_top=min(d0s),
+                depth_bottom=max(d1s),
+                depth_unit=unit,
+                page_spec=page_spec,
+            )
+            if show:
+                dlg = PrintPreviewDialog(
+                    info,
+                    paint_fn=self._paint_active_plot,
+                    page_spec=page_spec,
+                    parent=self,
+                )
+                dlg.exec()
+            return info
+        return None
+
+    def _on_print_preview(self) -> None:
+        info = self.open_print_preview()
+        if info is None:
+            QMessageBox.information(
+                self,
+                "打印预览",
+                "请先打开单井分析图或地层对比图。",
+            )
+
     def _on_import_tops(self) -> None:
         if self._selected_well_id is None or self._workspace is None:
             QMessageBox.information(self, "导入层位", "请先选择一口井。")
