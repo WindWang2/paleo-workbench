@@ -290,13 +290,35 @@ def load_presentation_into_view(
     *,
     tops: list[FormationTop] | None = None,
 ) -> dict[str, object]:
-    """Submit multi-track presentation; fall back to single-curve if needed."""
+    """Submit multi-track presentation to the engine.
+
+    Prefer ``submit_multi_track`` so all bound curves (GR/RT/DEN, …) appear.
+    Do **not** silently fall back to single-curve ``submit_curve`` (that only
+    shows the first layer, usually GR, and hides other tracks). If multi-track
+    is unavailable or fails, raise ``EngineSubmitError`` so the host canvas
+    (full multi-track paint) is used instead.
+    """
+    n_curve_tracks = sum(
+        1
+        for t in presentation.tracks
+        if t.visible and t.role == "curve" and t.layers
+    )
     if hasattr(view, "submit_multi_track"):
         try:
             return submit_multi_track_presentation(view, presentation, tops=tops)
-        except EngineSubmitError:
-            # Older builds or empty track map — try single curve
+        except EngineSubmitError as exc:
+            # Multi-track preferred: re-raise so shell falls back to host canvas
+            # rather than a single-GR engine view.
+            if n_curve_tracks > 1:
+                raise EngineSubmitError(
+                    f"多图道引擎提交失败（已保留主机多图道画布）: {exc}"
+                ) from exc
+            # Single bound curve — legacy single-curve path is acceptable.
             pass
+    elif n_curve_tracks > 1:
+        raise EngineSubmitError(
+            "WellLogView 不支持 submit_multi_track；使用主机多图道画布"
+        )
     primary = primary_curve_from_presentation(presentation)
     if primary is None:
         raise EngineSubmitError("图版未绑定可提交的曲线")
@@ -311,7 +333,6 @@ def load_presentation_into_view(
         value_unit=value_unit,
         document_id=doc_id if _is_uuid(doc_id) else None,
     )
-
 
 def presentation_to_multi_track_payload(
     presentation: HostPresentation,

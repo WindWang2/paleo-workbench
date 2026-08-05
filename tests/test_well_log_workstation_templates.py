@@ -74,6 +74,64 @@ def test_apply_template_binds_multiple_tracks(tmp_path: Path) -> None:
     assert bound_layers >= 1
 
 
+def test_default_template_is_std_multi_track(qtbot) -> None:
+    """UI must default to GR-RT-DEN, not alphabetically first gr-only."""
+    win = WellLogWorkstationWindow()
+    qtbot.addWidget(win)
+    tid = win._current_template_id()
+    assert tid == "std-gr-rt-den", (
+        f"default template should be std-gr-rt-den, got {tid!r} "
+        "(gr-only only shows GR and confuses multi-curve LAS users)"
+    )
+
+
+def test_apply_std_template_binds_gr_rt_den_from_rich_las(tmp_path: Path) -> None:
+    """Realistic multi-curve LAS (like data/井曲线) binds three tracks."""
+    las = tmp_path / "A2like.las"
+    las.write_text(
+        """~VERSION INFORMATION
+VERS. 2.0
+WRAP. NO
+~WELL INFORMATION
+STRT.M 1000.0
+STOP.M 1004.0
+STEP.M 1.0
+NULL. -999.25
+WELL. A2
+~CURVE INFORMATION
+DEPT.M
+AC.
+GR.GAPI
+RT.OHMM
+DEN.G/C3
+CNL.
+~ASCII
+1000 200 30 5 2.2 20
+1001 210 40 10 2.3 22
+1002 220 50 20 2.4 24
+1003 230 60 50 2.5 26
+1004 240 70 100 2.6 28
+""",
+        encoding="utf-8",
+    )
+    from well_log_workstation.las_import import parse_las_file
+
+    doc = parse_las_file(las)
+    assert len(doc.curves) >= 4
+    template = get_builtin_template("std-gr-rt-den")
+    assert template is not None
+    pres = apply_template(template, doc)
+    bound = {
+        tr.id: [ly.mnemonic for ly in tr.layers]
+        for tr in pres.tracks
+        if tr.role == "curve"
+    }
+    assert bound.get("gr") == ["GR"]
+    assert bound.get("rt") == ["RT"]
+    assert bound.get("den") == ["DEN"]
+    assert pres.curve_track_count >= 3
+
+
 def test_shell_apply_shows_multi_track_canvas(qtbot, tmp_path: Path) -> None:
     ws = create_workspace(tmp_path / "ui", name="Tpl")
     las = _write_las(tmp_path / "u.las")

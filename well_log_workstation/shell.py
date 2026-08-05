@@ -690,11 +690,23 @@ class WellLogWorkstationWindow(QMainWindow):
         if not self._templates:
             self.template_list.addItem("（无内置图版）")
             return
-        for t in self._templates:
+        # Prefer multi-track standard template first (not alphabetically
+        # gr-only). Users importing multi-curve LAS (e.g. data/井曲线) otherwise
+        # only see GR when the list defaulted to "简化 GR-only".
+        preferred_id = "std-gr-rt-den"
+        ordered = sorted(
+            self._templates,
+            key=lambda t: (0 if t.id == preferred_id else 1, t.name),
+        )
+        preferred_row = 0
+        for i, t in enumerate(ordered):
             item = QListWidgetItem(t.name)
             item.setData(Qt.ItemDataRole.UserRole, t.id)
             self.template_list.addItem(item)
-        self.template_list.setCurrentRow(0)
+            if t.id == preferred_id:
+                preferred_row = i
+        self.template_list.setCurrentRow(preferred_row)
+        self._templates = ordered
 
     def _sync_apply_enabled(self) -> None:
         has_well = self._workspace is not None and self._selected_well_id is not None
@@ -1447,10 +1459,19 @@ class WellLogWorkstationWindow(QMainWindow):
         self.multi_track_canvas.set_tops(tops)
         self._refresh_tops_list_items(tops, diags)
         self._refresh_track_list()
+        bound = [
+            ly.mnemonic
+            for tr in presentation.tracks
+            if tr.role == "curve" and tr.visible
+            for ly in tr.layers
+        ]
+        bound_s = "、".join(bound[:8]) if bound else "（无曲线）"
+        if len(bound) > 8:
+            bound_s += f"…(+{len(bound) - 8})"
         self.plot_caption.setText(
             f"单井分析图 · {presentation.well_name} · "
             f"{presentation.template_name} · "
-            f"{presentation.track_count} 图道"
+            f"{presentation.track_count} 图道 · 绑定 {bound_s}"
         )
         tab = f"单井·多图道 · {presentation.well_name}"
         if self._active_plot_id:
