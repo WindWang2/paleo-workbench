@@ -1,12 +1,18 @@
 # Paleo Workbench
 
-Paleogeographic map compilation desktop workbench (PySide6) with the
-`geo-viz-engine` visualization submodule.
+Paleogeographic map compilation desktop workbench (PySide6) with visualization
+and well-log engine **submodules**:
+
+| Submodule | Role | Public repo |
+|-----------|------|-------------|
+| `geo-viz-engine` | Map / geologic visualization packages | [WindWang2/geo-viz-engine](https://github.com/WindWang2/geo-viz-engine) |
+| `well-log-engine` | C++20 well-log rendering SDK (OpenGL + Qt/Python adapters) | [WindWang2/well-log-engine](https://github.com/WindWang2/well-log-engine) |
 
 ## Setup
 
 ```bash
 # From the repository root
+git submodule update --init --recursive
 python -m pip install -e .
 python -m pip install -r requirements-geoviz.txt   # editable geoviz_* packages
 python -m pip install -e ".[dev]"                  # pytest / pytest-qt

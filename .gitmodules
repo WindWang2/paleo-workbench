@@ -1,3 +1,6 @@
 [submodule "geo-viz-engine"]
 	path = geo-viz-engine
 	url = https://github.com/WindWang2/geo-viz-engine.git
+[submodule "well-log-engine"]
+	path = well-log-engine
+	url = https://github.com/WindWang2/well-log-engine.git
