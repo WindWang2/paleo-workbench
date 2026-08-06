@@ -42,9 +42,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-# WellPlot Desktop lives in the well-log-engine submodule:
-#   well-log-engine/apps/wellplot-desktop
-# Install/run from there: pip install -e well-log-engine/apps/wellplot-desktop
+# WellPlot Desktop: well-log-engine/apps/wellplot-desktop
+# (example and/or product as it matures — not packaged from this tree)
+# pip install -e well-log-engine/apps/wellplot-desktop
 
 [tool.setuptools.packages.find]
 include = ["paleo_workbench*"]
