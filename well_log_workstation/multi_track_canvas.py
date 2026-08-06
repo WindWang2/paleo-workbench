@@ -24,6 +24,8 @@ class MultiTrackCanvas(QWidget):
     depth_range_changed = Signal(float, float)
     # Emitted when user picks a depth for a new formation top (#226)
     top_pick_requested = Signal(float)
+    # Semantic sample pick (Reference Depth) for graph↔table selection (T5)
+    sample_selected = Signal(float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -42,6 +44,8 @@ class MultiTrackCanvas(QWidget):
         self._press_y: int | None = None
         self._press_x: int | None = None
         self._did_drag = False
+        # Semantic selection marker (Reference Depth, not screen Y)
+        self._selection_depth: float | None = None
         self.setStyleSheet("background: #ffffff;")
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
         self.setMouseTracking(True)
@@ -85,6 +89,17 @@ class MultiTrackCanvas(QWidget):
 
     def presentation(self) -> HostPresentation | None:
         return self._presentation
+
+    def set_selection_depth(self, depth: float | None) -> None:
+        """Highlight a Reference Depth (semantic selection marker)."""
+        if depth is None or not math.isfinite(float(depth)):
+            self._selection_depth = None
+        else:
+            self._selection_depth = float(depth)
+        self.update()
+
+    def selection_depth(self) -> float | None:
+        return self._selection_depth
 
     def track_count(self) -> int:
         return 0 if self._presentation is None else self._presentation.track_count
@@ -202,6 +217,20 @@ class MultiTrackCanvas(QWidget):
                 depth = self.depth_at_y(y)
                 if depth is not None:
                     self.top_pick_requested.emit(depth)
+                    event.accept()
+                    self._drag_y = None
+                    self._press_y = None
+                    return
+            # Plain click (not tops pick): semantic sample selection (T5)
+            if (
+                not self._did_drag
+                and not self._pick_mode
+                and not shift_held
+                and self._presentation is not None
+            ):
+                depth = self.depth_at_y(y)
+                if depth is not None:
+                    self.sample_selected.emit(depth)
                     event.accept()
                     self._drag_y = None
                     self._press_y = None
@@ -367,6 +396,23 @@ class MultiTrackCanvas(QWidget):
                 p.drawLine(track_left, yy, track_right, yy)
                 p.setPen(QColor(ft.color))
                 p.drawText(track_left + 4, yy - 2, ft.name[:16])
+
+        # Semantic selection marker (Reference Depth — T5)
+        if (
+            self._selection_depth is not None
+            and math.isfinite(self._selection_depth)
+            and d0 <= self._selection_depth <= d1
+        ):
+            th = max(1, bottom - top)
+            yy = top + int(((self._selection_depth - d0) / (d1 - d0)) * th)
+            pen = QPen(QColor("#e74c3c"), 1.5, Qt.PenStyle.SolidLine)
+            p.setPen(pen)
+            p.drawLine(track_left, yy, track_right, yy)
+            p.drawText(
+                track_left + 4,
+                yy - 2,
+                f"选中 {self._selection_depth:.2f}",
+            )
 
         # Footer (#293) — template footer + interaction hint
         p.setPen(QColor("#666"))

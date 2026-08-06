@@ -117,8 +117,14 @@ from well_log_workstation.section_geometry import (
 from well_log_workstation.session_store import HostSessionStore
 from well_log_workstation.display_set import (
     default_checks,
+    leaf_id_for_curve,
     leaves_from_document,
     presentation_from_display_set,
+)
+from well_log_workstation.semantic_selection import (
+    SemanticSelection,
+    selection_from_depth,
+    selection_from_row,
 )
 from well_log_workstation.table_projection import (
     LogTableModel,
@@ -182,6 +188,9 @@ class WellLogWorkstationWindow(QMainWindow):
         # Per-well view mode: "graphic" | "table" (T4 #344); default graphic.
         self._view_modes: dict[str, str] = {}
         self._view_mode: str = "graphic"
+        # Semantic selection (T5 #345 / ADR 0024) — not screen coordinates
+        self._semantic_selection: SemanticSelection | None = None
+        self._selection_guard = False
         self._content_tree_guard = False
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
@@ -498,6 +507,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self.single_well_stack.setObjectName("SingleWellStack")
         self.multi_track_canvas = MultiTrackCanvas()
         self.multi_track_canvas.top_pick_requested.connect(self._on_canvas_top_pick)
+        self.multi_track_canvas.sample_selected.connect(
+            self._on_canvas_sample_selected
+        )
         self.single_well_stack.addWidget(self.multi_track_canvas)  # index 0 host
 
         self._engine_page = QWidget()
@@ -537,7 +549,13 @@ class WellLogWorkstationWindow(QMainWindow):
         primary_view.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
+        primary_view.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
         primary_view.verticalHeader().setDefaultSectionSize(20)
+        primary_view.selectionModel().selectionChanged.connect(
+            self._on_table_selection_changed
+        )
         self._primary_table_view = primary_view
         self.table_axis_tabs.addTab(primary_view, "主表")
         tl.addWidget(self.table_axis_tabs, 1)
@@ -1543,7 +1561,10 @@ class WellLogWorkstationWindow(QMainWindow):
         return self._view_modes.get(well_id, "graphic")
 
     def set_view_mode(self, mode: str) -> None:
-        """Switch single-well Graphic | Table without changing Display Set."""
+        """Switch single-well Graphic | Table without changing Display Set.
+
+        Semantic Selection is preserved across mode switches (T5).
+        """
         mode = "table" if mode == "table" else "graphic"
         self._view_mode = mode
         if self._selected_well_id:
@@ -1555,9 +1576,137 @@ class WellLogWorkstationWindow(QMainWindow):
             self.view_mode_stack.setCurrentIndex(1 if mode == "table" else 0)
         if mode == "table":
             self._refresh_table_projection()
+            self._apply_selection_to_table()
         # Table mode always uses host surface; engine stays for graphic path.
         if mode == "graphic":
             self._sync_primary_single_well_surface()
+            self._apply_selection_to_canvas()
+
+    @property
+    def semantic_selection(self) -> SemanticSelection | None:
+        """Current shared Semantic Selection (graph↔table); not screen coords."""
+        return self._semantic_selection
+
+    def apply_semantic_selection(self, selection: SemanticSelection | None) -> None:
+        """Set shared semantic selection and sync graphic + table highlights."""
+        self._semantic_selection = selection
+        self._apply_selection_to_canvas()
+        self._apply_selection_to_table()
+
+    def _primary_curve_hint(self) -> tuple[str | None, str | None]:
+        """Optional curve/leaf identity from current presentation / track list."""
+        if self._presentation is None:
+            return None, None
+        for tr in self._presentation.tracks:
+            if tr.role != "curve" or not tr.visible or not tr.layers:
+                continue
+            mnemo = tr.layers[0].mnemonic
+            leaf = None
+            if self._selected_well_id and self._workspace is not None:
+                try:
+                    doc = self.session.get(self._presentation.well_document_id)
+                    if doc is None:
+                        doc = self.session.ensure_well_loaded(
+                            self._workspace, self._selected_well_id
+                        )
+                    leaf = leaf_id_for_curve(doc.document_id, mnemo)
+                except Exception:  # noqa: BLE001
+                    leaf = None
+            return mnemo, leaf
+        return None, None
+
+    def _on_canvas_sample_selected(self, depth: float) -> None:
+        if self._selected_well_id is None or self._presentation is None:
+            return
+        mnemo, leaf = self._primary_curve_hint()
+        sel = selection_from_depth(
+            well_id=self._selected_well_id,
+            depth=np.asarray(self._presentation.depth, dtype=np.float64),
+            reference_depth=float(depth),
+            curve_mnemonic=mnemo,
+            leaf_id=leaf,
+        )
+        self.apply_semantic_selection(sel)
+
+    def _on_table_selection_changed(self, *_args) -> None:
+        if self._selection_guard or self._selected_well_id is None:
+            return
+        if not hasattr(self, "_primary_table_view"):
+            return
+        indexes = self._primary_table_view.selectionModel().selectedRows()
+        if not indexes:
+            return
+        row = indexes[0].row()
+        proj = self._primary_table_model.projection()
+        if proj is None:
+            return
+        mnemo, leaf = self._primary_curve_hint()
+        if proj.columns:
+            mnemo = proj.columns[0].mnemonic
+            leaf = proj.columns[0].leaf_id
+        sel = selection_from_row(
+            well_id=self._selected_well_id,
+            depth=proj.depth,
+            sample_index=row,
+            curve_mnemonic=mnemo,
+            leaf_id=leaf,
+        )
+        self.apply_semantic_selection(sel)
+
+    def _apply_selection_to_canvas(self) -> None:
+        if not hasattr(self, "multi_track_canvas"):
+            return
+        sel = self._semantic_selection
+        if sel is None:
+            self.multi_track_canvas.set_selection_depth(None)
+            return
+        if (
+            self._selected_well_id is not None
+            and sel.well_id != self._selected_well_id
+        ):
+            self.multi_track_canvas.set_selection_depth(None)
+            return
+        self.multi_track_canvas.set_selection_depth(sel.reference_depth)
+
+    def _apply_selection_to_table(self) -> None:
+        if not hasattr(self, "_primary_table_view"):
+            return
+        sel = self._semantic_selection
+        model = self._primary_table_model
+        proj = model.projection()
+        if sel is None or proj is None:
+            self._selection_guard = True
+            try:
+                self._primary_table_view.clearSelection()
+            finally:
+                self._selection_guard = False
+            return
+        if (
+            self._selected_well_id is not None
+            and sel.well_id != self._selected_well_id
+        ):
+            return
+        # Prefer sample_index when it lands on this projection's axis
+        row = sel.sample_index
+        if row < 0 or row >= proj.row_count:
+            # Map by reference depth
+            from well_log_workstation.semantic_selection import (  # local avoid cycle noise
+                nearest_sample_index,
+            )
+
+            mapped = nearest_sample_index(proj.depth, sel.reference_depth)
+            if mapped is None:
+                return
+            row = mapped
+        if row >= model.rowCount():
+            return
+        self._selection_guard = True
+        try:
+            index = model.index(row, 0)
+            self._primary_table_view.selectRow(row)
+            self._primary_table_view.scrollTo(index)
+        finally:
+            self._selection_guard = False
 
     def _refresh_table_projection(self) -> None:
         """Rebuild virtualized table model(s) from current Display Set."""
@@ -1638,9 +1787,14 @@ class WellLogWorkstationWindow(QMainWindow):
             view.setSelectionBehavior(
                 QAbstractItemView.SelectionBehavior.SelectRows
             )
+            view.setSelectionMode(
+                QAbstractItemView.SelectionMode.SingleSelection
+            )
             view.verticalHeader().setDefaultSectionSize(20)
+            # Only primary table drives selection set for first-ship
             self.table_axis_tabs.addTab(view, f"轴 {proj.axis_id}")
             self._table_models.append(model)
+        self._apply_selection_to_table()
 
     def set_display_set(
         self,
@@ -1736,6 +1890,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._refresh_well_content_tree()
         if self._view_mode == "table":
             self._refresh_table_projection()
+        self._apply_selection_to_canvas()
         self._update_status()
         return presentation
 
