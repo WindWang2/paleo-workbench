@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTableView,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -119,6 +120,11 @@ from well_log_workstation.display_set import (
     leaves_from_document,
     presentation_from_display_set,
 )
+from well_log_workstation.table_projection import (
+    LogTableModel,
+    SOFT_COLUMN_TIP_THRESHOLD,
+    build_table_projections,
+)
 from well_log_workstation.template_model import (
     HostPresentation,
     PlotTemplate,
@@ -173,6 +179,9 @@ class WellLogWorkstationWindow(QMainWindow):
         # Per-well Display Set (session memory; T2 #342). Missing key → default
         # to template matches on first compose for that well.
         self._display_sets: dict[str, frozenset[str]] = {}
+        # Per-well view mode: "graphic" | "table" (T4 #344); default graphic.
+        self._view_modes: dict[str, str] = {}
+        self._view_mode: str = "graphic"
         self._content_tree_guard = False
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
@@ -457,6 +466,33 @@ class WellLogWorkstationWindow(QMainWindow):
         self.plot_caption.setObjectName("PlotCaption")
         hl.addWidget(self.plot_caption)
 
+        # Graphic | Table mode switch (T4 #344)
+        mode_row = QHBoxLayout()
+        self.btn_mode_graphic = QPushButton("图形")
+        self.btn_mode_graphic.setObjectName("Button_ViewModeGraphic")
+        self.btn_mode_graphic.setCheckable(True)
+        self.btn_mode_graphic.setChecked(True)
+        self.btn_mode_table = QPushButton("表格")
+        self.btn_mode_table.setObjectName("Button_ViewModeTable")
+        self.btn_mode_table.setCheckable(True)
+        self.btn_mode_graphic.clicked.connect(lambda: self.set_view_mode("graphic"))
+        self.btn_mode_table.clicked.connect(lambda: self.set_view_mode("table"))
+        mode_row.addWidget(self.btn_mode_graphic)
+        mode_row.addWidget(self.btn_mode_table)
+        mode_row.addStretch(1)
+        hl.addLayout(mode_row)
+
+        self.table_column_tip = QLabel("")
+        self.table_column_tip.setObjectName("TableColumnSoftTip")
+        self.table_column_tip.setWordWrap(True)
+        self.table_column_tip.setStyleSheet("color: #8a6d00; background: #fff8e1;")
+        self.table_column_tip.hide()
+        hl.addWidget(self.table_column_tip)
+
+        # Outer stack: 0 = graphic (host/engine), 1 = table
+        self.view_mode_stack = QStackedWidget()
+        self.view_mode_stack.setObjectName("ViewModeStack")
+
         # Host vs engine primary surface (#227)
         self.single_well_stack = QStackedWidget()
         self.single_well_stack.setObjectName("SingleWellStack")
@@ -482,7 +518,37 @@ class WellLogWorkstationWindow(QMainWindow):
         self._engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ep.addWidget(self._engine_placeholder, 1)
         self.single_well_stack.addWidget(self._engine_page)  # index 1 engine page
-        hl.addWidget(self.single_well_stack, 1)
+        self.view_mode_stack.addWidget(self.single_well_stack)  # 0 graphic
+
+        # Table mode page (virtualized QTableView; multi-axis via tabs)
+        table_page = QWidget()
+        table_page.setObjectName("SingleWellTablePage")
+        tl = QVBoxLayout(table_page)
+        tl.setContentsMargins(0, 0, 0, 0)
+        self.table_axis_tabs = QTabWidget()
+        self.table_axis_tabs.setObjectName("TableAxisTabs")
+        self.table_axis_tabs.setDocumentMode(True)
+        self._table_models: list[LogTableModel] = []
+        self._primary_table_model = LogTableModel()
+        primary_view = QTableView()
+        primary_view.setObjectName("LogTableView")
+        primary_view.setModel(self._primary_table_model)
+        primary_view.setAlternatingRowColors(True)
+        primary_view.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        primary_view.verticalHeader().setDefaultSectionSize(20)
+        self._primary_table_view = primary_view
+        self.table_axis_tabs.addTab(primary_view, "主表")
+        tl.addWidget(self.table_axis_tabs, 1)
+        self.table_empty_label = QLabel("显示集为空 · 勾选井道以显示表格")
+        self.table_empty_label.setObjectName("TableEmptyLabel")
+        self.table_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table_empty_label.hide()
+        tl.addWidget(self.table_empty_label)
+        self.view_mode_stack.addWidget(table_page)  # 1 table
+
+        hl.addWidget(self.view_mode_stack, 1)
 
         corr_host = QWidget()
         corr_host.setObjectName("CorrelationPlotHost")
@@ -1472,6 +1538,110 @@ class WellLogWorkstationWindow(QMainWindow):
         """Session Display Set for a well, or None if not yet initialized."""
         return self._display_sets.get(well_id)
 
+    def view_mode_for(self, well_id: str) -> str:
+        """Session view mode for a well (default graphic)."""
+        return self._view_modes.get(well_id, "graphic")
+
+    def set_view_mode(self, mode: str) -> None:
+        """Switch single-well Graphic | Table without changing Display Set."""
+        mode = "table" if mode == "table" else "graphic"
+        self._view_mode = mode
+        if self._selected_well_id:
+            self._view_modes[self._selected_well_id] = mode
+        if hasattr(self, "btn_mode_graphic"):
+            self.btn_mode_graphic.setChecked(mode == "graphic")
+            self.btn_mode_table.setChecked(mode == "table")
+        if hasattr(self, "view_mode_stack"):
+            self.view_mode_stack.setCurrentIndex(1 if mode == "table" else 0)
+        if mode == "table":
+            self._refresh_table_projection()
+        # Table mode always uses host surface; engine stays for graphic path.
+        if mode == "graphic":
+            self._sync_primary_single_well_surface()
+
+    def _refresh_table_projection(self) -> None:
+        """Rebuild virtualized table model(s) from current Display Set."""
+        if not hasattr(self, "_primary_table_model"):
+            return
+        if (
+            self._workspace is None
+            or self._selected_well_id is None
+            or self._presentation is None
+        ):
+            self._primary_table_model.set_projection(None)
+            self.table_column_tip.hide()
+            if hasattr(self, "table_empty_label"):
+                self.table_empty_label.show()
+            return
+
+        try:
+            doc = self.session.ensure_well_loaded(
+                self._workspace, self._selected_well_id
+            )
+        except Exception:  # noqa: BLE001
+            self._primary_table_model.set_projection(None)
+            return
+
+        tid = self._presentation.template_id or self._current_template_id()
+        template = get_builtin_template(tid or "std-gr-rt-den")
+        if template is None:
+            self._primary_table_model.set_projection(None)
+            return
+
+        display_set = self._display_sets.get(self._selected_well_id, frozenset())
+        projections = build_table_projections(doc, display_set, template)
+
+        # Soft tip for many columns (never auto-uncheck)
+        max_cols = max((p.column_count for p in projections), default=0)
+        if max_cols >= SOFT_COLUMN_TIP_THRESHOLD:
+            self.table_column_tip.setText(
+                f"列较多（{max_cols}，含 Depth）· 请横向滚动查看；"
+                f"不会自动取消勾选（阈值 ≥{SOFT_COLUMN_TIP_THRESHOLD}）"
+            )
+            self.table_column_tip.show()
+        else:
+            self.table_column_tip.hide()
+
+        # Reset axis tabs: first projection on primary view; extras as new tabs
+        while self.table_axis_tabs.count() > 1:
+            w = self.table_axis_tabs.widget(1)
+            self.table_axis_tabs.removeTab(1)
+            if w is not None:
+                w.deleteLater()
+        self._table_models = [self._primary_table_model]
+
+        if not projections or (
+            len(projections) == 1 and len(projections[0].columns) == 0
+        ):
+            self._primary_table_model.set_projection(
+                projections[0] if projections else None
+            )
+            self.table_axis_tabs.setTabText(0, "主表")
+            self.table_empty_label.show()
+            return
+
+        self.table_empty_label.hide()
+        self._primary_table_model.set_projection(projections[0])
+        label0 = (
+            f"轴 {projections[0].axis_id}"
+            if len(projections) > 1
+            else "主表"
+        )
+        self.table_axis_tabs.setTabText(0, label0)
+
+        for proj in projections[1:]:
+            model = LogTableModel()
+            model.set_projection(proj)
+            view = QTableView()
+            view.setModel(model)
+            view.setAlternatingRowColors(True)
+            view.setSelectionBehavior(
+                QAbstractItemView.SelectionBehavior.SelectRows
+            )
+            view.verticalHeader().setDefaultSectionSize(20)
+            self.table_axis_tabs.addTab(view, f"轴 {proj.axis_id}")
+            self._table_models.append(model)
+
     def set_display_set(
         self,
         well_id: str,
@@ -1564,6 +1734,8 @@ class WellLogWorkstationWindow(QMainWindow):
         self._sync_apply_enabled()
         self._refresh_correlation_well_list(None)
         self._refresh_well_content_tree()
+        if self._view_mode == "table":
+            self._refresh_table_projection()
         self._update_status()
         return presentation
 
@@ -2577,6 +2749,8 @@ class WellLogWorkstationWindow(QMainWindow):
         data = cur.data(0, Qt.ItemDataRole.UserRole) or {}
         if data.get("kind") == "well":
             self._selected_well_id = str(data.get("id"))
+            # Restore per-well view mode (session memory; default graphic)
+            self.set_view_mode(self.view_mode_for(self._selected_well_id))
             self._refresh_tops_list()
             self._refresh_well_content_tree()
             self._sync_apply_enabled()
