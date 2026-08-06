@@ -51,6 +51,9 @@ def test_shell_has_l_chrome(qtbot) -> None:
     assert win.objectName() == "WellLogWorkstationWindow"
     assert win.windowTitle() == PRODUCT_NAME
     assert win.workspace_tree.objectName() == "WorkspaceTree"
+    assert win.left_tabs.objectName() == "LeftPaneTabs"
+    assert win.left_tabs.count() == 2
+    assert win.well_content_tree.objectName() == "WellContentTree"
     assert win.document_tabs.objectName() == "DocumentTabs"
     assert win.template_list.objectName() == "TemplateList"
     assert win.tops_list.objectName() == "TopsList"

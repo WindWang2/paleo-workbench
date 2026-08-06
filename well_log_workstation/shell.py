@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import AbstractSet, Any, Iterable
 
 import numpy as np
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -173,6 +173,7 @@ class WellLogWorkstationWindow(QMainWindow):
         # Per-well Display Set (session memory; T2 #342). Missing key → default
         # to template matches on first compose for that well.
         self._display_sets: dict[str, frozenset[str]] = {}
+        self._content_tree_guard = False
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
         self._prefer_engine_canvas = self._default_prefer_engine()
@@ -395,16 +396,48 @@ class WellLogWorkstationWindow(QMainWindow):
         pane = QWidget()
         pane.setObjectName("LeftPane")
         layout = QVBoxLayout(pane)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.left_tabs = QTabWidget()
+        self.left_tabs.setObjectName("LeftPaneTabs")
+        self.left_tabs.setDocumentMode(True)
+
+        # Tab 0 — workspace catalog (wells / plots only)
+        catalog = QWidget()
+        catalog.setObjectName("CatalogTab")
+        cat_layout = QVBoxLayout(catalog)
         self.left_title = QLabel("工区")
         self.left_title.setObjectName("LeftPaneTitle")
-        layout.addWidget(self.left_title)
+        cat_layout.addWidget(self.left_title)
 
         self.workspace_tree = QTreeWidget()
         self.workspace_tree.setObjectName("WorkspaceTree")
         self.workspace_tree.setHeaderLabels(["名称"])
         self.workspace_tree.currentItemChanged.connect(self._on_tree_selection)
         self.workspace_tree.itemDoubleClicked.connect(self._on_tree_double_click)
-        layout.addWidget(self.workspace_tree, 1)
+        cat_layout.addWidget(self.workspace_tree, 1)
+        self.left_tabs.addTab(catalog, "工区")
+
+        # Tab 1 — Well Content Tree (import source → track leaves)
+        content = QWidget()
+        content.setObjectName("WellContentTab")
+        content_layout = QVBoxLayout(content)
+        self.well_content_hint = QLabel("选中井后显示导入源与可勾选井道")
+        self.well_content_hint.setObjectName("WellContentHint")
+        self.well_content_hint.setWordWrap(True)
+        content_layout.addWidget(self.well_content_hint)
+
+        self.well_content_tree = QTreeWidget()
+        self.well_content_tree.setObjectName("WellContentTree")
+        self.well_content_tree.setHeaderLabels(["井内容"])
+        self.well_content_tree.setRootIsDecorated(True)
+        self.well_content_tree.itemChanged.connect(self._on_well_content_item_changed)
+        content_layout.addWidget(self.well_content_tree, 1)
+        self.left_tabs.addTab(content, "井内容")
+
+        self._content_tree_guard = False
+        self._content_apply_pending = False
+        layout.addWidget(self.left_tabs, 1)
         return pane
 
     def _build_center(self) -> QWidget:
@@ -563,7 +596,9 @@ class WellLogWorkstationWindow(QMainWindow):
         btn_row.addWidget(self.apply_btn)
         layout.addLayout(btn_row)
 
-        layout.addWidget(QLabel("图道（当前单井）"))
+        self.track_list_label = QLabel("当前显示图道（派生 · 勾选在左栏井内容）")
+        self.track_list_label.setObjectName("TrackListLabel")
+        layout.addWidget(self.track_list_label)
         self.track_list = QListWidget()
         self.track_list.setObjectName("TrackList")
         self.track_list.currentItemChanged.connect(self._on_track_list_selection)
@@ -1062,6 +1097,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._selected_well_id = result.catalog_well_id
         self._refresh_tree()
         self._select_well_in_tree(result.catalog_well_id)
+        self._refresh_well_content_tree()
         self._refresh_tops_list()
         self._sync_apply_enabled()
         self._update_status()
@@ -1527,6 +1563,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._sync_primary_single_well_surface()
         self._sync_apply_enabled()
         self._refresh_correlation_well_list(None)
+        self._refresh_well_content_tree()
         self._update_status()
         return presentation
 
@@ -2541,6 +2578,7 @@ class WellLogWorkstationWindow(QMainWindow):
         if data.get("kind") == "well":
             self._selected_well_id = str(data.get("id"))
             self._refresh_tops_list()
+            self._refresh_well_content_tree()
             self._sync_apply_enabled()
             self._update_status()
 
@@ -2623,6 +2661,184 @@ class WellLogWorkstationWindow(QMainWindow):
         tree.expandAll()
         if self._selected_well_id:
             self._select_well_in_tree(self._selected_well_id)
+        self._refresh_well_content_tree()
+
+    def _visual_display_set_for_well(self, well_id: str) -> frozenset[str]:
+        """Display Set for tree checkboxes (session or template defaults)."""
+        existing = self._display_sets.get(well_id)
+        if existing is not None:
+            return existing
+        if self._workspace is None:
+            return frozenset()
+        try:
+            doc = self.session.ensure_well_loaded(self._workspace, well_id)
+        except Exception:  # noqa: BLE001
+            return frozenset()
+        tid = self._current_template_id() or "std-gr-rt-den"
+        template = get_builtin_template(tid)
+        if template is None:
+            return frozenset()
+        return default_checks(leaves_from_document(doc), template)
+
+    def _refresh_well_content_tree(self) -> None:
+        """Rebuild 井内容 tree: import source → scalar leaves (T3)."""
+        if not hasattr(self, "well_content_tree"):
+            return
+        tree = self.well_content_tree
+        self._content_tree_guard = True
+        try:
+            tree.clear()
+            well_id = self._selected_well_id
+            if self._workspace is None or not well_id:
+                self.well_content_hint.setText("选中井后显示导入源与可勾选井道")
+                empty = QTreeWidgetItem(["（未选井）"])
+                empty.setDisabled(True)
+                tree.addTopLevelItem(empty)
+                return
+
+            try:
+                doc = self.session.ensure_well_loaded(self._workspace, well_id)
+            except Exception as exc:  # noqa: BLE001
+                self.well_content_hint.setText(f"无法加载井数据：{exc}")
+                err = QTreeWidgetItem(["（加载失败）"])
+                err.setDisabled(True)
+                tree.addTopLevelItem(err)
+                return
+
+            leaves = leaves_from_document(doc)
+            checked = self._visual_display_set_for_well(well_id)
+            source_label = Path(doc.source_path).name if doc.source_path else "导入源"
+            # Always two levels even for a single curve
+            source_item = QTreeWidgetItem([f"{source_label} · {doc.well_name}"])
+            source_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "kind": "source",
+                    "source_id": doc.source_path or doc.document_id,
+                    "well_id": well_id,
+                },
+            )
+            source_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            source_item.setToolTip(
+                0,
+                f"导入源 · 深度 {doc.depth_unit or 'm'} · "
+                f"{int(doc.depth.size)} 样点 · {len(leaves)} 曲线",
+            )
+
+            n_checked = 0
+            for leaf in leaves:
+                child = QTreeWidgetItem([leaf.label or leaf.mnemonic])
+                child.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {
+                        "kind": "leaf",
+                        "id": leaf.id,
+                        "mnemonic": leaf.mnemonic,
+                        "well_id": well_id,
+                    },
+                )
+                child.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                )
+                on = leaf.id in checked
+                child.setCheckState(
+                    0,
+                    Qt.CheckState.Checked if on else Qt.CheckState.Unchecked,
+                )
+                if on:
+                    n_checked += 1
+                child.setToolTip(0, f"{leaf.mnemonic} · {leaf.id}")
+                source_item.addChild(child)
+
+            if not leaves:
+                none = QTreeWidgetItem(["（无标量曲线）"])
+                none.setDisabled(True)
+                source_item.addChild(none)
+
+            # Parent tri-state from children
+            if leaves:
+                if n_checked == 0:
+                    source_item.setCheckState(0, Qt.CheckState.Unchecked)
+                elif n_checked == len(leaves):
+                    source_item.setCheckState(0, Qt.CheckState.Checked)
+                else:
+                    source_item.setCheckState(0, Qt.CheckState.PartiallyChecked)
+
+            tree.addTopLevelItem(source_item)
+            tree.expandAll()
+            self.well_content_hint.setText(
+                f"井 {doc.well_name} · 显示集 {n_checked}/{len(leaves)} · "
+                f"勾选即时更新图形"
+            )
+        finally:
+            self._content_tree_guard = False
+
+    def _collect_content_tree_checked_leaves(self) -> frozenset[str]:
+        ids: set[str] = set()
+        tree = self.well_content_tree
+        for i in range(tree.topLevelItemCount()):
+            src = tree.topLevelItem(i)
+            if src is None:
+                continue
+            for j in range(src.childCount()):
+                child = src.child(j)
+                data = child.data(0, Qt.ItemDataRole.UserRole) or {}
+                if data.get("kind") != "leaf":
+                    continue
+                if child.checkState(0) == Qt.CheckState.Checked:
+                    ids.add(str(data["id"]))
+        return frozenset(ids)
+
+    def _on_well_content_item_changed(
+        self, item: QTreeWidgetItem, _column: int
+    ) -> None:
+        """Checkbox toggles — defer Display Set apply so we never rebuild the
+        tree while Qt still holds the changed item (avoids crash)."""
+        if self._content_tree_guard or self._selected_well_id is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        kind = data.get("kind")
+        if kind not in ("leaf", "source"):
+            return
+
+        if kind == "source":
+            state = item.checkState(0)
+            if state == Qt.CheckState.PartiallyChecked:
+                return
+            # Manually batch-toggle children (no AutoTristate).
+            self._content_tree_guard = True
+            try:
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    cdata = child.data(0, Qt.ItemDataRole.UserRole) or {}
+                    if cdata.get("kind") == "leaf":
+                        child.setCheckState(0, state)
+            finally:
+                self._content_tree_guard = False
+
+        if not self._content_apply_pending:
+            self._content_apply_pending = True
+            QTimer.singleShot(0, self._flush_content_tree_checks)
+
+    def _flush_content_tree_checks(self) -> None:
+        self._content_apply_pending = False
+        if self._selected_well_id is None or self._workspace is None:
+            return
+        checked = self._collect_content_tree_checked_leaves()
+        well_id = self._selected_well_id
+        try:
+            self.set_display_set(well_id, checked)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "更新显示集失败", str(exc))
+            self._refresh_well_content_tree()
 
     def _on_new_workspace(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "选择空目录作为新工区")
