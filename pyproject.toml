@@ -42,18 +42,12 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-well-log-workstation = "well_log_workstation.main:main"
-wellplot-desktop = "well_log_workstation.main:main"
+# WellPlot Desktop lives in the well-log-engine submodule:
+#   well-log-engine/apps/wellplot-desktop
+# Install/run from there: pip install -e well-log-engine/apps/wellplot-desktop
 
 [tool.setuptools.packages.find]
-include = ["paleo_workbench*", "well_log_workstation*"]
-
-[tool.setuptools.package-data]
-well_log_workstation = [
-    "templates/*.json",
-    "testdata/geometry_golden/*",
-    "packaging/**/*",
-]
+include = ["paleo_workbench*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

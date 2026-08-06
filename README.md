@@ -6,7 +6,11 @@ and well-log engine **submodules**:
 | Submodule | Role | Public repo |
 |-----------|------|-------------|
 | `geo-viz-engine` | Map / geologic visualization packages | [WindWang2/geo-viz-engine](https://github.com/WindWang2/geo-viz-engine) |
-| `well-log-engine` | C++20 well-log rendering SDK (OpenGL + Qt/Python adapters) | [WindWang2/well-log-engine](https://github.com/WindWang2/well-log-engine) |
+| `well-log-engine` | C++20 well-log SDK + **WellPlot Desktop** sample host | [WindWang2/well-log-engine](https://github.com/WindWang2/well-log-engine) |
+
+**WellPlot Desktop** (log-first desktop product / engine sample) is no longer packaged here. It lives at:
+
+`well-log-engine/apps/wellplot-desktop/` — run with `pip install -e well-log-engine/apps/wellplot-desktop && wellplot-desktop`
 
 ## Setup
 
