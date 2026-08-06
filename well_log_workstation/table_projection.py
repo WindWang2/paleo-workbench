@@ -2,6 +2,25 @@
 
 On-demand cell access only — never materializes a full-length wide float grid
 for the screen path. Columns = Depth + checked curve leaves (shared depth axis).
+
+## Performance budgets (design §8 / T6 #346)
+
+Reference workstation (ADR 0014 spirit):
+
+| Path | Target |
+|------|--------|
+| Steady scroll | P95 ≤ 16.7 ms |
+| Check / Graphic↔Table | P95 ≤ 100 ms |
+| First enter table | P95 ≤ 300 ms first paint; ≤1 s visible feedback |
+
+Acceptance anchors: A2-scale (~1.5×10⁴ rows × ≥20 cols) and stress ≥1×10⁵ rows × 20 cols.
+
+**Hot path:** ``LogTableModel.data()`` / ``TableProjection.cell()`` only.
+**Not on hot path:** full-table export, clipboard of non-selection, PDF/XLSX writers.
+
+Export is a separate job API (``export_projection_rows`` below or host export menus);
+failures there must not clear an open table view. Clipboard materializes **selected
+rows only** (``selection_tsv`` / ``selection_html``).
 """
 
 from __future__ import annotations
@@ -223,3 +242,104 @@ class LogTableModel(QAbstractTableModel):
                 if v is not None:
                     grid[i, j] = v
         return grid
+
+
+def selection_tsv(projection: TableProjection, rows: Sequence[int]) -> str:
+    """Materialize **selected rows only** as TSV (clipboard path)."""
+    if not rows:
+        return ""
+    headers = [projection.header(c) for c in range(projection.column_count)]
+    lines = ["\t".join(headers)]
+    for r in rows:
+        if r < 0 or r >= projection.row_count:
+            continue
+        cells: list[str] = []
+        for c in range(projection.column_count):
+            v = projection.cell(r, c)
+            cells.append("" if v is None else f"{v:.6g}")
+        lines.append("\t".join(cells))
+    return "\n".join(lines) + ("\n" if len(lines) > 1 else "")
+
+
+def selection_html(projection: TableProjection, rows: Sequence[int]) -> str:
+    """Materialize **selected rows only** as a simple HTML table."""
+    if not rows:
+        return ""
+    parts = ["<table border='1'><thead><tr>"]
+    for c in range(projection.column_count):
+        parts.append(f"<th>{projection.header(c)}</th>")
+    parts.append("</tr></thead><tbody>")
+    for r in rows:
+        if r < 0 or r >= projection.row_count:
+            continue
+        parts.append("<tr>")
+        for c in range(projection.column_count):
+            v = projection.cell(r, c)
+            parts.append(f"<td>{'' if v is None else f'{v:.6g}'}</td>")
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return "".join(parts)
+
+
+def export_projection_rows(
+    projection: TableProjection,
+    *,
+    row_start: int = 0,
+    row_end: int | None = None,
+    cancel_flag: list[bool] | None = None,
+) -> list[list[float | None]]:
+    """Separate **export job** path — not for scroll/data() hot path.
+
+    Materializes a row range into Python lists for writers (CSV/XLSX).
+    ``cancel_flag`` is a single-element list ``[False]``; set ``[True]`` to abort.
+    Does not touch UI state; callers handle progress.
+    """
+    end = projection.row_count if row_end is None else min(row_end, projection.row_count)
+    start = max(0, row_start)
+    out: list[list[float | None]] = []
+    for r in range(start, end):
+        if cancel_flag is not None and cancel_flag and cancel_flag[0]:
+            break
+        out.append(
+            [projection.cell(r, c) for c in range(projection.column_count)]
+        )
+    return out
+
+
+# Test hook: projection build may consult this for injected latency/failure.
+# Production always uses defaults (no delay, no force-fail).
+class ProjectionBuildHooks:
+    """Injectable hooks for T6 cancel/failure tests (not for production UI)."""
+
+    delay_steps: int = 0
+    force_fail: bool = False
+    cancel_flag: list[bool] | None = None
+
+    def reset(self) -> None:
+        self.delay_steps = 0
+        self.force_fail = False
+        self.cancel_flag = None
+
+
+PROJECTION_BUILD_HOOKS = ProjectionBuildHooks()
+
+
+def build_table_projections_guarded(
+    document: ImportedWellDocument,
+    display_set: set[str] | frozenset[str],
+    template: PlotTemplate,
+    *,
+    hooks: ProjectionBuildHooks | None = None,
+    on_progress: Any | None = None,
+) -> list[TableProjection]:
+    """Like ``build_table_projections`` with cancel/progress/failure hooks (T6)."""
+    h = hooks if hooks is not None else PROJECTION_BUILD_HOOKS
+    if h.force_fail:
+        raise RuntimeError("表格投影构建失败（注入/错误）")
+    steps = max(0, int(h.delay_steps))
+    for i in range(steps):
+        if h.cancel_flag is not None and h.cancel_flag and h.cancel_flag[0]:
+            raise InterruptedError("表格投影构建已取消")
+        if on_progress is not None:
+            on_progress(i + 1, steps)
+    return build_table_projections(document, display_set, template)

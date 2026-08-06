@@ -9,6 +9,7 @@ from typing import AbstractSet, Any, Iterable
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -128,8 +130,12 @@ from well_log_workstation.semantic_selection import (
 )
 from well_log_workstation.table_projection import (
     LogTableModel,
+    PROJECTION_BUILD_HOOKS,
     SOFT_COLUMN_TIP_THRESHOLD,
-    build_table_projections,
+    build_table_projections_guarded,
+    export_projection_rows,
+    selection_html,
+    selection_tsv,
 )
 from well_log_workstation.template_model import (
     HostPresentation,
@@ -192,6 +198,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._semantic_selection: SemanticSelection | None = None
         self._selection_guard = False
         self._content_tree_guard = False
+        # Table UX (T6 #346)
+        self._table_build_cancel: list[bool] = [False]
+        self._table_performance_mode = False
+        self._table_last_error: str | None = None
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
         self._prefer_engine_canvas = self._default_prefer_engine()
@@ -559,6 +569,58 @@ class WellLogWorkstationWindow(QMainWindow):
         self._primary_table_view = primary_view
         self.table_axis_tabs.addTab(primary_view, "主表")
         tl.addWidget(self.table_axis_tabs, 1)
+
+        # Progress / cancel / error / performance (T6)
+        prog_row = QHBoxLayout()
+        self.table_progress = QProgressBar()
+        self.table_progress.setObjectName("TableBuildProgress")
+        self.table_progress.setRange(0, 0)  # indeterminate until stepped
+        self.table_progress.hide()
+        self.table_cancel_btn = QPushButton("取消")
+        self.table_cancel_btn.setObjectName("Button_TableBuildCancel")
+        self.table_cancel_btn.clicked.connect(self._on_cancel_table_build)
+        self.table_cancel_btn.hide()
+        prog_row.addWidget(self.table_progress, 1)
+        prog_row.addWidget(self.table_cancel_btn)
+        tl.addLayout(prog_row)
+
+        self.table_error_banner = QLabel("")
+        self.table_error_banner.setObjectName("TableErrorBanner")
+        self.table_error_banner.setWordWrap(True)
+        self.table_error_banner.setStyleSheet(
+            "color: #7a1f1f; background: #fdecea; padding: 6px;"
+        )
+        self.table_error_banner.hide()
+        tl.addWidget(self.table_error_banner)
+
+        err_btn_row = QHBoxLayout()
+        self.table_retry_btn = QPushButton("重试表格")
+        self.table_retry_btn.setObjectName("Button_TableRetry")
+        self.table_retry_btn.clicked.connect(self._on_retry_table_build)
+        self.table_retry_btn.hide()
+        self.table_back_graphic_btn = QPushButton("返回图形")
+        self.table_back_graphic_btn.setObjectName("Button_TableBackGraphic")
+        self.table_back_graphic_btn.clicked.connect(
+            lambda: self.set_view_mode("graphic")
+        )
+        self.table_back_graphic_btn.hide()
+        err_btn_row.addWidget(self.table_retry_btn)
+        err_btn_row.addWidget(self.table_back_graphic_btn)
+        err_btn_row.addStretch(1)
+        tl.addLayout(err_btn_row)
+
+        perf_row = QHBoxLayout()
+        self.table_perf_check = QCheckBox("性能模式（关闭装饰）")
+        self.table_perf_check.setObjectName("Check_TablePerformanceMode")
+        self.table_perf_check.toggled.connect(self._on_table_performance_mode)
+        self.table_copy_btn = QPushButton("复制选区")
+        self.table_copy_btn.setObjectName("Button_TableCopySelection")
+        self.table_copy_btn.clicked.connect(self.copy_table_selection_to_clipboard)
+        perf_row.addWidget(self.table_perf_check)
+        perf_row.addWidget(self.table_copy_btn)
+        perf_row.addStretch(1)
+        tl.addLayout(perf_row)
+
         self.table_empty_label = QLabel("显示集为空 · 勾选井道以显示表格")
         self.table_empty_label.setObjectName("TableEmptyLabel")
         self.table_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1708,93 +1770,232 @@ class WellLogWorkstationWindow(QMainWindow):
         finally:
             self._selection_guard = False
 
+    def _show_table_progress(self, message: str = "正在构建表格投影…") -> None:
+        if not hasattr(self, "table_progress"):
+            return
+        self.table_progress.setFormat(message + " %p%")
+        self.table_progress.setRange(0, 0)
+        self.table_progress.show()
+        self.table_cancel_btn.show()
+        self.table_cancel_btn.setEnabled(True)
+
+    def _hide_table_progress(self) -> None:
+        if not hasattr(self, "table_progress"):
+            return
+        self.table_progress.hide()
+        self.table_cancel_btn.hide()
+
+    def _show_table_error(self, message: str) -> None:
+        self._table_last_error = message
+        if not hasattr(self, "table_error_banner"):
+            return
+        self.table_error_banner.setText(
+            f"表格不可用：{message}\n图形模式仍可使用；可重试或返回图形。"
+        )
+        self.table_error_banner.show()
+        self.table_retry_btn.show()
+        self.table_back_graphic_btn.show()
+
+    def _hide_table_error(self) -> None:
+        self._table_last_error = None
+        if not hasattr(self, "table_error_banner"):
+            return
+        self.table_error_banner.hide()
+        self.table_retry_btn.hide()
+        self.table_back_graphic_btn.hide()
+
+    def _on_cancel_table_build(self) -> None:
+        self._table_build_cancel[0] = True
+        PROJECTION_BUILD_HOOKS.cancel_flag = self._table_build_cancel
+
+    def _on_retry_table_build(self) -> None:
+        self._hide_table_error()
+        self._refresh_table_projection()
+
+    def _on_table_performance_mode(self, on: bool) -> None:
+        """Performance mode: drop nonessential decorations; never truncates data."""
+        self._table_performance_mode = bool(on)
+        alt = not self._table_performance_mode
+        if hasattr(self, "_primary_table_view"):
+            self._primary_table_view.setAlternatingRowColors(alt)
+        for i in range(1, self.table_axis_tabs.count()):
+            w = self.table_axis_tabs.widget(i)
+            if isinstance(w, QTableView):
+                w.setAlternatingRowColors(alt)
+        if self._table_performance_mode:
+            self.statusBar().showMessage("性能模式：已关闭表格装饰（数据未截断）", 4000)
+
+    def copy_table_selection_to_clipboard(self) -> str:
+        """Copy **selected rows only** as TSV (+ HTML) — not the whole table."""
+        proj = self._primary_table_model.projection()
+        if proj is None:
+            return ""
+        indexes = self._primary_table_view.selectionModel().selectedRows()
+        rows = sorted({ix.row() for ix in indexes})
+        tsv = selection_tsv(proj, rows)
+        html = selection_html(proj, rows)
+        if not tsv:
+            return ""
+        cb = QGuiApplication.clipboard()
+        if cb is not None:
+            from PySide6.QtCore import QMimeData
+
+            mime = QMimeData()
+            mime.setText(tsv)
+            if html:
+                mime.setHtml(html)
+            cb.setMimeData(mime)
+        return tsv
+
+    def export_table_rows_job(
+        self,
+        *,
+        row_start: int = 0,
+        row_end: int | None = None,
+    ) -> list[list[float | None]]:
+        """Separate export job — never call from LogTableModel.data()."""
+        proj = self._primary_table_model.projection()
+        if proj is None:
+            return []
+        cancel = [False]
+        return export_projection_rows(
+            proj, row_start=row_start, row_end=row_end, cancel_flag=cancel
+        )
+
     def _refresh_table_projection(self) -> None:
-        """Rebuild virtualized table model(s) from current Display Set."""
+        """Rebuild virtualized table model(s) from current Display Set.
+
+        Shows immediate progress shell; supports cancel and error recovery (T6).
+        Never silently truncates Display Set rows/columns.
+        """
         if not hasattr(self, "_primary_table_model"):
             return
-        if (
-            self._workspace is None
-            or self._selected_well_id is None
-            or self._presentation is None
-        ):
-            self._primary_table_model.set_projection(None)
-            self.table_column_tip.hide()
-            if hasattr(self, "table_empty_label"):
-                self.table_empty_label.show()
-            return
+        # Immediate feedback (≤1s without feedback is a bug)
+        self._show_table_progress("正在构建表格投影…")
+        self._table_build_cancel = [False]
+        PROJECTION_BUILD_HOOKS.cancel_flag = self._table_build_cancel
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.processEvents()
 
         try:
-            doc = self.session.ensure_well_loaded(
-                self._workspace, self._selected_well_id
+            if (
+                self._workspace is None
+                or self._selected_well_id is None
+                or self._presentation is None
+            ):
+                self._primary_table_model.set_projection(None)
+                self.table_column_tip.hide()
+                if hasattr(self, "table_empty_label"):
+                    self.table_empty_label.show()
+                self._hide_table_error()
+                return
+
+            try:
+                doc = self.session.ensure_well_loaded(
+                    self._workspace, self._selected_well_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._primary_table_model.set_projection(None)
+                self._show_table_error(str(exc))
+                return
+
+            tid = self._presentation.template_id or self._current_template_id()
+            template = get_builtin_template(tid or "std-gr-rt-den")
+            if template is None:
+                self._primary_table_model.set_projection(None)
+                self._show_table_error("未知图版，无法构建表格")
+                return
+
+            display_set = self._display_sets.get(
+                self._selected_well_id, frozenset()
             )
-        except Exception:  # noqa: BLE001
-            self._primary_table_model.set_projection(None)
-            return
 
-        tid = self._presentation.template_id or self._current_template_id()
-        template = get_builtin_template(tid or "std-gr-rt-den")
-        if template is None:
-            self._primary_table_model.set_projection(None)
-            return
+            def _progress(step: int, total: int) -> None:
+                if total > 0 and hasattr(self, "table_progress"):
+                    self.table_progress.setRange(0, total)
+                    self.table_progress.setValue(step)
+                    QApplication.processEvents()
 
-        display_set = self._display_sets.get(self._selected_well_id, frozenset())
-        projections = build_table_projections(doc, display_set, template)
+            try:
+                projections = build_table_projections_guarded(
+                    doc,
+                    display_set,
+                    template,
+                    hooks=PROJECTION_BUILD_HOOKS,
+                    on_progress=_progress,
+                )
+            except InterruptedError:
+                self._hide_table_progress()
+                # Cancel → return to graphic; Display Set unchanged
+                self.set_view_mode("graphic")
+                self.statusBar().showMessage("已取消表格构建 · 显示集未改动", 4000)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._primary_table_model.set_projection(None)
+                self._show_table_error(str(exc))
+                return
 
-        # Soft tip for many columns (never auto-uncheck)
-        max_cols = max((p.column_count for p in projections), default=0)
-        if max_cols >= SOFT_COLUMN_TIP_THRESHOLD:
-            self.table_column_tip.setText(
-                f"列较多（{max_cols}，含 Depth）· 请横向滚动查看；"
-                f"不会自动取消勾选（阈值 ≥{SOFT_COLUMN_TIP_THRESHOLD}）"
+            self._hide_table_error()
+
+            # Soft tip for many columns (never auto-uncheck)
+            max_cols = max((p.column_count for p in projections), default=0)
+            if max_cols >= SOFT_COLUMN_TIP_THRESHOLD:
+                self.table_column_tip.setText(
+                    f"列较多（{max_cols}，含 Depth）· 请横向滚动查看；"
+                    f"不会自动取消勾选（阈值 ≥{SOFT_COLUMN_TIP_THRESHOLD}）"
+                )
+                self.table_column_tip.show()
+            else:
+                self.table_column_tip.hide()
+
+            # Reset axis tabs: first projection on primary view; extras as new tabs
+            while self.table_axis_tabs.count() > 1:
+                w = self.table_axis_tabs.widget(1)
+                self.table_axis_tabs.removeTab(1)
+                if w is not None:
+                    w.deleteLater()
+            self._table_models = [self._primary_table_model]
+
+            if not projections or (
+                len(projections) == 1 and len(projections[0].columns) == 0
+            ):
+                self._primary_table_model.set_projection(
+                    projections[0] if projections else None
+                )
+                self.table_axis_tabs.setTabText(0, "主表")
+                self.table_empty_label.show()
+                return
+
+            self.table_empty_label.hide()
+            # Full logical rows/cols — no silent truncation under load
+            self._primary_table_model.set_projection(projections[0])
+            label0 = (
+                f"轴 {projections[0].axis_id}"
+                if len(projections) > 1
+                else "主表"
             )
-            self.table_column_tip.show()
-        else:
-            self.table_column_tip.hide()
+            self.table_axis_tabs.setTabText(0, label0)
 
-        # Reset axis tabs: first projection on primary view; extras as new tabs
-        while self.table_axis_tabs.count() > 1:
-            w = self.table_axis_tabs.widget(1)
-            self.table_axis_tabs.removeTab(1)
-            if w is not None:
-                w.deleteLater()
-        self._table_models = [self._primary_table_model]
-
-        if not projections or (
-            len(projections) == 1 and len(projections[0].columns) == 0
-        ):
-            self._primary_table_model.set_projection(
-                projections[0] if projections else None
-            )
-            self.table_axis_tabs.setTabText(0, "主表")
-            self.table_empty_label.show()
-            return
-
-        self.table_empty_label.hide()
-        self._primary_table_model.set_projection(projections[0])
-        label0 = (
-            f"轴 {projections[0].axis_id}"
-            if len(projections) > 1
-            else "主表"
-        )
-        self.table_axis_tabs.setTabText(0, label0)
-
-        for proj in projections[1:]:
-            model = LogTableModel()
-            model.set_projection(proj)
-            view = QTableView()
-            view.setModel(model)
-            view.setAlternatingRowColors(True)
-            view.setSelectionBehavior(
-                QAbstractItemView.SelectionBehavior.SelectRows
-            )
-            view.setSelectionMode(
-                QAbstractItemView.SelectionMode.SingleSelection
-            )
-            view.verticalHeader().setDefaultSectionSize(20)
-            # Only primary table drives selection set for first-ship
-            self.table_axis_tabs.addTab(view, f"轴 {proj.axis_id}")
-            self._table_models.append(model)
-        self._apply_selection_to_table()
+            for proj in projections[1:]:
+                model = LogTableModel()
+                model.set_projection(proj)
+                view = QTableView()
+                view.setModel(model)
+                view.setAlternatingRowColors(not self._table_performance_mode)
+                view.setSelectionBehavior(
+                    QAbstractItemView.SelectionBehavior.SelectRows
+                )
+                view.setSelectionMode(
+                    QAbstractItemView.SelectionMode.SingleSelection
+                )
+                view.verticalHeader().setDefaultSectionSize(20)
+                self.table_axis_tabs.addTab(view, f"轴 {proj.axis_id}")
+                self._table_models.append(model)
+            self._apply_selection_to_table()
+        finally:
+            self._hide_table_progress()
+            PROJECTION_BUILD_HOOKS.cancel_flag = None
 
     def set_display_set(
         self,
