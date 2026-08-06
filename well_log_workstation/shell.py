@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import AbstractSet, Any, Iterable
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt
@@ -114,6 +114,11 @@ from well_log_workstation.section_geometry import (
     tie_quads,
 )
 from well_log_workstation.session_store import HostSessionStore
+from well_log_workstation.display_set import (
+    default_checks,
+    leaves_from_document,
+    presentation_from_display_set,
+)
 from well_log_workstation.template_model import (
     HostPresentation,
     PlotTemplate,
@@ -165,6 +170,9 @@ class WellLogWorkstationWindow(QMainWindow):
         self._tops_diagnostics: list[str] = []
         self._tops_history = TopsHistoryBook()
         self._templates: list[PlotTemplate] = list_builtin_templates()
+        # Per-well Display Set (session memory; T2 #342). Missing key → default
+        # to template matches on first compose for that well.
+        self._display_sets: dict[str, frozenset[str]] = {}
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
         self._prefer_engine_canvas = self._default_prefer_engine()
@@ -1424,21 +1432,52 @@ class WellLogWorkstationWindow(QMainWindow):
         plot.track_overrides = track_overrides_snapshot(self._presentation)
         save_plot_document(self._workspace, plot)
 
+    def display_set_for(self, well_id: str) -> frozenset[str] | None:
+        """Session Display Set for a well, or None if not yet initialized."""
+        return self._display_sets.get(well_id)
+
+    def set_display_set(
+        self,
+        well_id: str,
+        leaf_ids: AbstractSet[str] | Iterable[str],
+        *,
+        template_id: str | None = None,
+        plot_id: str | None = None,
+    ) -> HostPresentation:
+        """Set session Display Set and rebuild the single-well plot (live)."""
+        self._display_sets[well_id] = frozenset(str(x) for x in leaf_ids)
+        tid = template_id or self._current_template_id()
+        if not tid:
+            tid = "std-gr-rt-den"
+        return self.apply_template_to_well(
+            well_id,
+            tid,
+            plot_id=plot_id if plot_id is not None else self._active_plot_id,
+        )
+
     def apply_template_to_well(
         self, well_id: str, template_id: str, *, plot_id: str | None = None
     ) -> HostPresentation:
-        """Apply builtin template to a session well; show multi-track plot."""
+        """Apply builtin template to a session well; show multi-track plot.
+
+        Presentation is rebuilt from **session Display Set × template** (T2).
+        First open for a well defaults checks to template matches; later
+        template switches **keep** the Display Set and only restyle.
+        Empty Display Set is allowed (guidance on canvas; not an error).
+        """
         if self._workspace is None:
             raise WorkspaceError("请先打开工区")
         doc = self.session.ensure_well_loaded(self._workspace, well_id)
         template = get_builtin_template(template_id)
         if template is None:
             raise WorkspaceError(f"未知图版: {template_id}")
-        presentation = apply_template(template, doc)
-        if presentation.curve_track_count < 1:
-            raise WorkspaceError(
-                "图版未能绑定任何曲线（检查 LAS 助记符与图版 mnemonics）"
-            )
+
+        leaves = leaves_from_document(doc)
+        if well_id not in self._display_sets:
+            self._display_sets[well_id] = default_checks(leaves, template)
+        display_set = self._display_sets[well_id]
+
+        presentation = presentation_from_display_set(template, doc, display_set)
         # Restore layout edits from plot document when reopening (#292).
         effective_plot_id = plot_id if plot_id is not None else self._active_plot_id
         if effective_plot_id is not None:
@@ -1465,14 +1504,21 @@ class WellLogWorkstationWindow(QMainWindow):
             if tr.role == "curve" and tr.visible
             for ly in tr.layers
         ]
-        bound_s = "、".join(bound[:8]) if bound else "（无曲线）"
-        if len(bound) > 8:
-            bound_s += f"…(+{len(bound) - 8})"
-        self.plot_caption.setText(
-            f"单井分析图 · {presentation.well_name} · "
-            f"{presentation.template_name} · "
-            f"{presentation.track_count} 图道 · 绑定 {bound_s}"
-        )
+        if presentation.curve_track_count < 1:
+            self.plot_caption.setText(
+                f"单井分析图 · {presentation.well_name} · "
+                f"{presentation.template_name} · "
+                f"显示集为空 · 勾选井道以显示"
+            )
+        else:
+            bound_s = "、".join(bound[:8]) if bound else "（无曲线）"
+            if len(bound) > 8:
+                bound_s += f"…(+{len(bound) - 8})"
+            self.plot_caption.setText(
+                f"单井分析图 · {presentation.well_name} · "
+                f"{presentation.template_name} · "
+                f"{presentation.track_count} 图道 · 绑定 {bound_s}"
+            )
         tab = f"单井·多图道 · {presentation.well_name}"
         if self._active_plot_id:
             tab = f"{tab} · {self._active_plot_id[:8]}"
@@ -2689,12 +2735,18 @@ class WellLogWorkstationWindow(QMainWindow):
                 template_id,
                 plot_id=self._active_plot_id,
             )
+            if pres.curve_track_count < 1:
+                detail = "显示集为空 · 勾选井道以显示"
+            else:
+                detail = (
+                    f"图道数 {pres.track_count}（曲线道 {pres.curve_track_count}）"
+                )
             QMessageBox.information(
                 self,
                 "图版已应用",
                 f"井 {pres.well_name}\n"
                 f"图版 {pres.template_name}\n"
-                f"图道数 {pres.track_count}（曲线道 {pres.curve_track_count}）",
+                f"{detail}",
             )
         except WorkspaceError as exc:
             QMessageBox.warning(self, "应用图版失败", str(exc))

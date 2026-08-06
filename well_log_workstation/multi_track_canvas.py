@@ -261,6 +261,17 @@ class MultiTrackCanvas(QWidget):
             return
 
         pres = self._presentation
+        # Empty Display Set: depth track only (or no visible curve layers)
+        if pres.curve_track_count < 1:
+            p.setPen(QColor("#666"))
+            p.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                "显示集为空\n勾选井道以显示图形",
+            )
+            p.end()
+            return
+
         depth = np.asarray(pres.depth, dtype=np.float64)
         if depth.size < 2:
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "深度数据不足")

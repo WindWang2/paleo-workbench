@@ -17,7 +17,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import AbstractSet, Iterable, Sequence
 
-from well_log_workstation.template_model import PlotTemplate, ScaleSpec
+from well_log_workstation.las_import import ImportedWellDocument
+from well_log_workstation.template_model import (
+    BoundCurveLayer,
+    BoundTrack,
+    HostPresentation,
+    PlotTemplate,
+    ScaleSpec,
+    header_spec_from_template,
+)
 
 
 class StyleSource(str, Enum):
@@ -197,3 +205,89 @@ def compose(
 def display_set_from_ids(ids: Iterable[str]) -> frozenset[str]:
     """Normalize an iterable of leaf ids into a Display Set."""
     return frozenset(str(i) for i in ids if str(i))
+
+
+def leaf_id_for_curve(document_id: str, mnemonic: str) -> str:
+    """Stable Displayable Track Leaf id for a scalar curve on a document."""
+    return f"{document_id}:{mnemonic}"
+
+
+def leaves_from_document(document: ImportedWellDocument) -> list[DisplayableTrackLeaf]:
+    """Build first-ship scalar leaves for an imported well document (one source)."""
+    source_id = document.source_path or document.document_id
+    return [
+        DisplayableTrackLeaf(
+            id=leaf_id_for_curve(document.document_id, curve.mnemonic),
+            mnemonic=curve.mnemonic,
+            source_id=source_id,
+            label=curve.mnemonic,
+        )
+        for curve in document.curves
+    ]
+
+
+def presentation_from_display_set(
+    template: PlotTemplate,
+    document: ImportedWellDocument,
+    display_set: AbstractSet[str],
+) -> HostPresentation:
+    """Compile HostPresentation from Display Set × template (dual-layer).
+
+    Always includes a depth track. Empty Display Set yields depth-only
+    presentation (no curve tracks) — empty canvas guidance is a UI concern.
+    """
+    leaves = leaves_from_document(document)
+    styled = compose(leaves, display_set, template)
+
+    bound_tracks: list[BoundTrack] = [
+        BoundTrack(
+            id="depth",
+            role="depth",
+            title="深度",
+            width_fraction=0.12,
+            scale=None,
+            layers=[],
+        )
+    ]
+
+    for desc in styled:
+        curve = document.curve_by_mnemonic(desc.mnemonic)
+        if curve is None:
+            continue
+        scale = desc.scale
+        if scale is not None and not scale.unit and curve.unit:
+            scale = ScaleSpec(
+                mode=scale.mode,
+                min=scale.min,
+                max=scale.max,
+                unit=curve.unit,
+            )
+        bound_tracks.append(
+            BoundTrack(
+                id=desc.template_slot_id or f"leaf-{desc.leaf_id}",
+                role="curve",
+                title=desc.title,
+                width_fraction=desc.width_fraction,
+                scale=scale,
+                layers=[
+                    BoundCurveLayer(
+                        mnemonic=curve.mnemonic,
+                        color=desc.color,
+                        unit=curve.unit,
+                        values=curve.values,
+                        null_mask=curve.null_mask,
+                    )
+                ],
+            )
+        )
+
+    return HostPresentation(
+        template_id=template.id,
+        template_name=template.name,
+        well_document_id=document.document_id,
+        well_name=document.well_name,
+        depth=document.depth,
+        depth_unit=document.depth_unit,
+        tracks=bound_tracks,
+        header=header_spec_from_template(template),
+    )
