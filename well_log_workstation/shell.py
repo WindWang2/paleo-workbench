@@ -5,10 +5,11 @@ from __future__ import annotations
 import math
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import AbstractSet, Any, Iterable
 
 import numpy as np
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -26,11 +27,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTableView,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -114,6 +117,26 @@ from well_log_workstation.section_geometry import (
     tie_quads,
 )
 from well_log_workstation.session_store import HostSessionStore
+from well_log_workstation.display_set import (
+    default_checks,
+    leaf_id_for_curve,
+    leaves_from_document,
+    presentation_from_display_set,
+)
+from well_log_workstation.semantic_selection import (
+    SemanticSelection,
+    selection_from_depth,
+    selection_from_row,
+)
+from well_log_workstation.table_projection import (
+    LogTableModel,
+    PROJECTION_BUILD_HOOKS,
+    SOFT_COLUMN_TIP_THRESHOLD,
+    build_table_projections_guarded,
+    export_projection_rows,
+    selection_html,
+    selection_tsv,
+)
 from well_log_workstation.template_model import (
     HostPresentation,
     PlotTemplate,
@@ -165,6 +188,20 @@ class WellLogWorkstationWindow(QMainWindow):
         self._tops_diagnostics: list[str] = []
         self._tops_history = TopsHistoryBook()
         self._templates: list[PlotTemplate] = list_builtin_templates()
+        # Per-well Display Set (session memory; T2 #342). Missing key → default
+        # to template matches on first compose for that well.
+        self._display_sets: dict[str, frozenset[str]] = {}
+        # Per-well view mode: "graphic" | "table" (T4 #344); default graphic.
+        self._view_modes: dict[str, str] = {}
+        self._view_mode: str = "graphic"
+        # Semantic selection (T5 #345 / ADR 0024) — not screen coordinates
+        self._semantic_selection: SemanticSelection | None = None
+        self._selection_guard = False
+        self._content_tree_guard = False
+        # Table UX (T6 #346)
+        self._table_build_cancel: list[bool] = [False]
+        self._table_performance_mode = False
+        self._table_last_error: str | None = None
         # #227: prefer native WellLogView as primary single-well surface when
         # welllog is available. Host MultiTrackCanvas is always the fallback.
         self._prefer_engine_canvas = self._default_prefer_engine()
@@ -387,16 +424,48 @@ class WellLogWorkstationWindow(QMainWindow):
         pane = QWidget()
         pane.setObjectName("LeftPane")
         layout = QVBoxLayout(pane)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.left_tabs = QTabWidget()
+        self.left_tabs.setObjectName("LeftPaneTabs")
+        self.left_tabs.setDocumentMode(True)
+
+        # Tab 0 — workspace catalog (wells / plots only)
+        catalog = QWidget()
+        catalog.setObjectName("CatalogTab")
+        cat_layout = QVBoxLayout(catalog)
         self.left_title = QLabel("工区")
         self.left_title.setObjectName("LeftPaneTitle")
-        layout.addWidget(self.left_title)
+        cat_layout.addWidget(self.left_title)
 
         self.workspace_tree = QTreeWidget()
         self.workspace_tree.setObjectName("WorkspaceTree")
         self.workspace_tree.setHeaderLabels(["名称"])
         self.workspace_tree.currentItemChanged.connect(self._on_tree_selection)
         self.workspace_tree.itemDoubleClicked.connect(self._on_tree_double_click)
-        layout.addWidget(self.workspace_tree, 1)
+        cat_layout.addWidget(self.workspace_tree, 1)
+        self.left_tabs.addTab(catalog, "工区")
+
+        # Tab 1 — Well Content Tree (import source → track leaves)
+        content = QWidget()
+        content.setObjectName("WellContentTab")
+        content_layout = QVBoxLayout(content)
+        self.well_content_hint = QLabel("选中井后显示导入源与可勾选井道")
+        self.well_content_hint.setObjectName("WellContentHint")
+        self.well_content_hint.setWordWrap(True)
+        content_layout.addWidget(self.well_content_hint)
+
+        self.well_content_tree = QTreeWidget()
+        self.well_content_tree.setObjectName("WellContentTree")
+        self.well_content_tree.setHeaderLabels(["井内容"])
+        self.well_content_tree.setRootIsDecorated(True)
+        self.well_content_tree.itemChanged.connect(self._on_well_content_item_changed)
+        content_layout.addWidget(self.well_content_tree, 1)
+        self.left_tabs.addTab(content, "井内容")
+
+        self._content_tree_guard = False
+        self._content_apply_pending = False
+        layout.addWidget(self.left_tabs, 1)
         return pane
 
     def _build_center(self) -> QWidget:
@@ -416,11 +485,41 @@ class WellLogWorkstationWindow(QMainWindow):
         self.plot_caption.setObjectName("PlotCaption")
         hl.addWidget(self.plot_caption)
 
+        # Graphic | Table mode switch (T4 #344)
+        mode_row = QHBoxLayout()
+        self.btn_mode_graphic = QPushButton("图形")
+        self.btn_mode_graphic.setObjectName("Button_ViewModeGraphic")
+        self.btn_mode_graphic.setCheckable(True)
+        self.btn_mode_graphic.setChecked(True)
+        self.btn_mode_table = QPushButton("表格")
+        self.btn_mode_table.setObjectName("Button_ViewModeTable")
+        self.btn_mode_table.setCheckable(True)
+        self.btn_mode_graphic.clicked.connect(lambda: self.set_view_mode("graphic"))
+        self.btn_mode_table.clicked.connect(lambda: self.set_view_mode("table"))
+        mode_row.addWidget(self.btn_mode_graphic)
+        mode_row.addWidget(self.btn_mode_table)
+        mode_row.addStretch(1)
+        hl.addLayout(mode_row)
+
+        self.table_column_tip = QLabel("")
+        self.table_column_tip.setObjectName("TableColumnSoftTip")
+        self.table_column_tip.setWordWrap(True)
+        self.table_column_tip.setStyleSheet("color: #8a6d00; background: #fff8e1;")
+        self.table_column_tip.hide()
+        hl.addWidget(self.table_column_tip)
+
+        # Outer stack: 0 = graphic (host/engine), 1 = table
+        self.view_mode_stack = QStackedWidget()
+        self.view_mode_stack.setObjectName("ViewModeStack")
+
         # Host vs engine primary surface (#227)
         self.single_well_stack = QStackedWidget()
         self.single_well_stack.setObjectName("SingleWellStack")
         self.multi_track_canvas = MultiTrackCanvas()
         self.multi_track_canvas.top_pick_requested.connect(self._on_canvas_top_pick)
+        self.multi_track_canvas.sample_selected.connect(
+            self._on_canvas_sample_selected
+        )
         self.single_well_stack.addWidget(self.multi_track_canvas)  # index 0 host
 
         self._engine_page = QWidget()
@@ -441,7 +540,95 @@ class WellLogWorkstationWindow(QMainWindow):
         self._engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ep.addWidget(self._engine_placeholder, 1)
         self.single_well_stack.addWidget(self._engine_page)  # index 1 engine page
-        hl.addWidget(self.single_well_stack, 1)
+        self.view_mode_stack.addWidget(self.single_well_stack)  # 0 graphic
+
+        # Table mode page (virtualized QTableView; multi-axis via tabs)
+        table_page = QWidget()
+        table_page.setObjectName("SingleWellTablePage")
+        tl = QVBoxLayout(table_page)
+        tl.setContentsMargins(0, 0, 0, 0)
+        self.table_axis_tabs = QTabWidget()
+        self.table_axis_tabs.setObjectName("TableAxisTabs")
+        self.table_axis_tabs.setDocumentMode(True)
+        self._table_models: list[LogTableModel] = []
+        self._primary_table_model = LogTableModel()
+        primary_view = QTableView()
+        primary_view.setObjectName("LogTableView")
+        primary_view.setModel(self._primary_table_model)
+        primary_view.setAlternatingRowColors(True)
+        primary_view.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        primary_view.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        primary_view.verticalHeader().setDefaultSectionSize(20)
+        primary_view.selectionModel().selectionChanged.connect(
+            self._on_table_selection_changed
+        )
+        self._primary_table_view = primary_view
+        self.table_axis_tabs.addTab(primary_view, "主表")
+        tl.addWidget(self.table_axis_tabs, 1)
+
+        # Progress / cancel / error / performance (T6)
+        prog_row = QHBoxLayout()
+        self.table_progress = QProgressBar()
+        self.table_progress.setObjectName("TableBuildProgress")
+        self.table_progress.setRange(0, 0)  # indeterminate until stepped
+        self.table_progress.hide()
+        self.table_cancel_btn = QPushButton("取消")
+        self.table_cancel_btn.setObjectName("Button_TableBuildCancel")
+        self.table_cancel_btn.clicked.connect(self._on_cancel_table_build)
+        self.table_cancel_btn.hide()
+        prog_row.addWidget(self.table_progress, 1)
+        prog_row.addWidget(self.table_cancel_btn)
+        tl.addLayout(prog_row)
+
+        self.table_error_banner = QLabel("")
+        self.table_error_banner.setObjectName("TableErrorBanner")
+        self.table_error_banner.setWordWrap(True)
+        self.table_error_banner.setStyleSheet(
+            "color: #7a1f1f; background: #fdecea; padding: 6px;"
+        )
+        self.table_error_banner.hide()
+        tl.addWidget(self.table_error_banner)
+
+        err_btn_row = QHBoxLayout()
+        self.table_retry_btn = QPushButton("重试表格")
+        self.table_retry_btn.setObjectName("Button_TableRetry")
+        self.table_retry_btn.clicked.connect(self._on_retry_table_build)
+        self.table_retry_btn.hide()
+        self.table_back_graphic_btn = QPushButton("返回图形")
+        self.table_back_graphic_btn.setObjectName("Button_TableBackGraphic")
+        self.table_back_graphic_btn.clicked.connect(
+            lambda: self.set_view_mode("graphic")
+        )
+        self.table_back_graphic_btn.hide()
+        err_btn_row.addWidget(self.table_retry_btn)
+        err_btn_row.addWidget(self.table_back_graphic_btn)
+        err_btn_row.addStretch(1)
+        tl.addLayout(err_btn_row)
+
+        perf_row = QHBoxLayout()
+        self.table_perf_check = QCheckBox("性能模式（关闭装饰）")
+        self.table_perf_check.setObjectName("Check_TablePerformanceMode")
+        self.table_perf_check.toggled.connect(self._on_table_performance_mode)
+        self.table_copy_btn = QPushButton("复制选区")
+        self.table_copy_btn.setObjectName("Button_TableCopySelection")
+        self.table_copy_btn.clicked.connect(self.copy_table_selection_to_clipboard)
+        perf_row.addWidget(self.table_perf_check)
+        perf_row.addWidget(self.table_copy_btn)
+        perf_row.addStretch(1)
+        tl.addLayout(perf_row)
+
+        self.table_empty_label = QLabel("显示集为空 · 勾选井道以显示表格")
+        self.table_empty_label.setObjectName("TableEmptyLabel")
+        self.table_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table_empty_label.hide()
+        tl.addWidget(self.table_empty_label)
+        self.view_mode_stack.addWidget(table_page)  # 1 table
+
+        hl.addWidget(self.view_mode_stack, 1)
 
         corr_host = QWidget()
         corr_host.setObjectName("CorrelationPlotHost")
@@ -555,7 +742,9 @@ class WellLogWorkstationWindow(QMainWindow):
         btn_row.addWidget(self.apply_btn)
         layout.addLayout(btn_row)
 
-        layout.addWidget(QLabel("图道（当前单井）"))
+        self.track_list_label = QLabel("当前显示图道（派生 · 勾选在左栏井内容）")
+        self.track_list_label.setObjectName("TrackListLabel")
+        layout.addWidget(self.track_list_label)
         self.track_list = QListWidget()
         self.track_list.setObjectName("TrackList")
         self.track_list.currentItemChanged.connect(self._on_track_list_selection)
@@ -1054,6 +1243,7 @@ class WellLogWorkstationWindow(QMainWindow):
         self._selected_well_id = result.catalog_well_id
         self._refresh_tree()
         self._select_well_in_tree(result.catalog_well_id)
+        self._refresh_well_content_tree()
         self._refresh_tops_list()
         self._sync_apply_enabled()
         self._update_status()
@@ -1424,21 +1614,431 @@ class WellLogWorkstationWindow(QMainWindow):
         plot.track_overrides = track_overrides_snapshot(self._presentation)
         save_plot_document(self._workspace, plot)
 
+    def display_set_for(self, well_id: str) -> frozenset[str] | None:
+        """Session Display Set for a well, or None if not yet initialized."""
+        return self._display_sets.get(well_id)
+
+    def view_mode_for(self, well_id: str) -> str:
+        """Session view mode for a well (default graphic)."""
+        return self._view_modes.get(well_id, "graphic")
+
+    def set_view_mode(self, mode: str) -> None:
+        """Switch single-well Graphic | Table without changing Display Set.
+
+        Semantic Selection is preserved across mode switches (T5).
+        """
+        mode = "table" if mode == "table" else "graphic"
+        self._view_mode = mode
+        if self._selected_well_id:
+            self._view_modes[self._selected_well_id] = mode
+        if hasattr(self, "btn_mode_graphic"):
+            self.btn_mode_graphic.setChecked(mode == "graphic")
+            self.btn_mode_table.setChecked(mode == "table")
+        if hasattr(self, "view_mode_stack"):
+            self.view_mode_stack.setCurrentIndex(1 if mode == "table" else 0)
+        if mode == "table":
+            self._refresh_table_projection()
+            self._apply_selection_to_table()
+        # Table mode always uses host surface; engine stays for graphic path.
+        if mode == "graphic":
+            self._sync_primary_single_well_surface()
+            self._apply_selection_to_canvas()
+
+    @property
+    def semantic_selection(self) -> SemanticSelection | None:
+        """Current shared Semantic Selection (graph↔table); not screen coords."""
+        return self._semantic_selection
+
+    def apply_semantic_selection(self, selection: SemanticSelection | None) -> None:
+        """Set shared semantic selection and sync graphic + table highlights."""
+        self._semantic_selection = selection
+        self._apply_selection_to_canvas()
+        self._apply_selection_to_table()
+
+    def _primary_curve_hint(self) -> tuple[str | None, str | None]:
+        """Optional curve/leaf identity from current presentation / track list."""
+        if self._presentation is None:
+            return None, None
+        for tr in self._presentation.tracks:
+            if tr.role != "curve" or not tr.visible or not tr.layers:
+                continue
+            mnemo = tr.layers[0].mnemonic
+            leaf = None
+            if self._selected_well_id and self._workspace is not None:
+                try:
+                    doc = self.session.get(self._presentation.well_document_id)
+                    if doc is None:
+                        doc = self.session.ensure_well_loaded(
+                            self._workspace, self._selected_well_id
+                        )
+                    leaf = leaf_id_for_curve(doc.document_id, mnemo)
+                except Exception:  # noqa: BLE001
+                    leaf = None
+            return mnemo, leaf
+        return None, None
+
+    def _on_canvas_sample_selected(self, depth: float) -> None:
+        if self._selected_well_id is None or self._presentation is None:
+            return
+        mnemo, leaf = self._primary_curve_hint()
+        sel = selection_from_depth(
+            well_id=self._selected_well_id,
+            depth=np.asarray(self._presentation.depth, dtype=np.float64),
+            reference_depth=float(depth),
+            curve_mnemonic=mnemo,
+            leaf_id=leaf,
+        )
+        self.apply_semantic_selection(sel)
+
+    def _on_table_selection_changed(self, *_args) -> None:
+        if self._selection_guard or self._selected_well_id is None:
+            return
+        if not hasattr(self, "_primary_table_view"):
+            return
+        indexes = self._primary_table_view.selectionModel().selectedRows()
+        if not indexes:
+            return
+        row = indexes[0].row()
+        proj = self._primary_table_model.projection()
+        if proj is None:
+            return
+        mnemo, leaf = self._primary_curve_hint()
+        if proj.columns:
+            mnemo = proj.columns[0].mnemonic
+            leaf = proj.columns[0].leaf_id
+        sel = selection_from_row(
+            well_id=self._selected_well_id,
+            depth=proj.depth,
+            sample_index=row,
+            curve_mnemonic=mnemo,
+            leaf_id=leaf,
+        )
+        self.apply_semantic_selection(sel)
+
+    def _apply_selection_to_canvas(self) -> None:
+        if not hasattr(self, "multi_track_canvas"):
+            return
+        sel = self._semantic_selection
+        if sel is None:
+            self.multi_track_canvas.set_selection_depth(None)
+            return
+        if (
+            self._selected_well_id is not None
+            and sel.well_id != self._selected_well_id
+        ):
+            self.multi_track_canvas.set_selection_depth(None)
+            return
+        self.multi_track_canvas.set_selection_depth(sel.reference_depth)
+
+    def _apply_selection_to_table(self) -> None:
+        if not hasattr(self, "_primary_table_view"):
+            return
+        sel = self._semantic_selection
+        model = self._primary_table_model
+        proj = model.projection()
+        if sel is None or proj is None:
+            self._selection_guard = True
+            try:
+                self._primary_table_view.clearSelection()
+            finally:
+                self._selection_guard = False
+            return
+        if (
+            self._selected_well_id is not None
+            and sel.well_id != self._selected_well_id
+        ):
+            return
+        # Prefer sample_index when it lands on this projection's axis
+        row = sel.sample_index
+        if row < 0 or row >= proj.row_count:
+            # Map by reference depth
+            from well_log_workstation.semantic_selection import (  # local avoid cycle noise
+                nearest_sample_index,
+            )
+
+            mapped = nearest_sample_index(proj.depth, sel.reference_depth)
+            if mapped is None:
+                return
+            row = mapped
+        if row >= model.rowCount():
+            return
+        self._selection_guard = True
+        try:
+            index = model.index(row, 0)
+            self._primary_table_view.selectRow(row)
+            self._primary_table_view.scrollTo(index)
+        finally:
+            self._selection_guard = False
+
+    def _show_table_progress(self, message: str = "正在构建表格投影…") -> None:
+        if not hasattr(self, "table_progress"):
+            return
+        self.table_progress.setFormat(message + " %p%")
+        self.table_progress.setRange(0, 0)
+        self.table_progress.show()
+        self.table_cancel_btn.show()
+        self.table_cancel_btn.setEnabled(True)
+
+    def _hide_table_progress(self) -> None:
+        if not hasattr(self, "table_progress"):
+            return
+        self.table_progress.hide()
+        self.table_cancel_btn.hide()
+
+    def _show_table_error(self, message: str) -> None:
+        self._table_last_error = message
+        if not hasattr(self, "table_error_banner"):
+            return
+        self.table_error_banner.setText(
+            f"表格不可用：{message}\n图形模式仍可使用；可重试或返回图形。"
+        )
+        self.table_error_banner.show()
+        self.table_retry_btn.show()
+        self.table_back_graphic_btn.show()
+
+    def _hide_table_error(self) -> None:
+        self._table_last_error = None
+        if not hasattr(self, "table_error_banner"):
+            return
+        self.table_error_banner.hide()
+        self.table_retry_btn.hide()
+        self.table_back_graphic_btn.hide()
+
+    def _on_cancel_table_build(self) -> None:
+        self._table_build_cancel[0] = True
+        PROJECTION_BUILD_HOOKS.cancel_flag = self._table_build_cancel
+
+    def _on_retry_table_build(self) -> None:
+        self._hide_table_error()
+        self._refresh_table_projection()
+
+    def _on_table_performance_mode(self, on: bool) -> None:
+        """Performance mode: drop nonessential decorations; never truncates data."""
+        self._table_performance_mode = bool(on)
+        alt = not self._table_performance_mode
+        if hasattr(self, "_primary_table_view"):
+            self._primary_table_view.setAlternatingRowColors(alt)
+        for i in range(1, self.table_axis_tabs.count()):
+            w = self.table_axis_tabs.widget(i)
+            if isinstance(w, QTableView):
+                w.setAlternatingRowColors(alt)
+        if self._table_performance_mode:
+            self.statusBar().showMessage("性能模式：已关闭表格装饰（数据未截断）", 4000)
+
+    def copy_table_selection_to_clipboard(self) -> str:
+        """Copy **selected rows only** as TSV (+ HTML) — not the whole table."""
+        proj = self._primary_table_model.projection()
+        if proj is None:
+            return ""
+        indexes = self._primary_table_view.selectionModel().selectedRows()
+        rows = sorted({ix.row() for ix in indexes})
+        tsv = selection_tsv(proj, rows)
+        html = selection_html(proj, rows)
+        if not tsv:
+            return ""
+        cb = QGuiApplication.clipboard()
+        if cb is not None:
+            from PySide6.QtCore import QMimeData
+
+            mime = QMimeData()
+            mime.setText(tsv)
+            if html:
+                mime.setHtml(html)
+            cb.setMimeData(mime)
+        return tsv
+
+    def export_table_rows_job(
+        self,
+        *,
+        row_start: int = 0,
+        row_end: int | None = None,
+    ) -> list[list[float | None]]:
+        """Separate export job — never call from LogTableModel.data()."""
+        proj = self._primary_table_model.projection()
+        if proj is None:
+            return []
+        cancel = [False]
+        return export_projection_rows(
+            proj, row_start=row_start, row_end=row_end, cancel_flag=cancel
+        )
+
+    def _refresh_table_projection(self) -> None:
+        """Rebuild virtualized table model(s) from current Display Set.
+
+        Shows immediate progress shell; supports cancel and error recovery (T6).
+        Never silently truncates Display Set rows/columns.
+        """
+        if not hasattr(self, "_primary_table_model"):
+            return
+        # Immediate feedback (≤1s without feedback is a bug)
+        self._show_table_progress("正在构建表格投影…")
+        self._table_build_cancel = [False]
+        PROJECTION_BUILD_HOOKS.cancel_flag = self._table_build_cancel
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.processEvents()
+
+        try:
+            if (
+                self._workspace is None
+                or self._selected_well_id is None
+                or self._presentation is None
+            ):
+                self._primary_table_model.set_projection(None)
+                self.table_column_tip.hide()
+                if hasattr(self, "table_empty_label"):
+                    self.table_empty_label.show()
+                self._hide_table_error()
+                return
+
+            try:
+                doc = self.session.ensure_well_loaded(
+                    self._workspace, self._selected_well_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._primary_table_model.set_projection(None)
+                self._show_table_error(str(exc))
+                return
+
+            tid = self._presentation.template_id or self._current_template_id()
+            template = get_builtin_template(tid or "std-gr-rt-den")
+            if template is None:
+                self._primary_table_model.set_projection(None)
+                self._show_table_error("未知图版，无法构建表格")
+                return
+
+            display_set = self._display_sets.get(
+                self._selected_well_id, frozenset()
+            )
+
+            def _progress(step: int, total: int) -> None:
+                if total > 0 and hasattr(self, "table_progress"):
+                    self.table_progress.setRange(0, total)
+                    self.table_progress.setValue(step)
+                    QApplication.processEvents()
+
+            try:
+                projections = build_table_projections_guarded(
+                    doc,
+                    display_set,
+                    template,
+                    hooks=PROJECTION_BUILD_HOOKS,
+                    on_progress=_progress,
+                )
+            except InterruptedError:
+                self._hide_table_progress()
+                # Cancel → return to graphic; Display Set unchanged
+                self.set_view_mode("graphic")
+                self.statusBar().showMessage("已取消表格构建 · 显示集未改动", 4000)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._primary_table_model.set_projection(None)
+                self._show_table_error(str(exc))
+                return
+
+            self._hide_table_error()
+
+            # Soft tip for many columns (never auto-uncheck)
+            max_cols = max((p.column_count for p in projections), default=0)
+            if max_cols >= SOFT_COLUMN_TIP_THRESHOLD:
+                self.table_column_tip.setText(
+                    f"列较多（{max_cols}，含 Depth）· 请横向滚动查看；"
+                    f"不会自动取消勾选（阈值 ≥{SOFT_COLUMN_TIP_THRESHOLD}）"
+                )
+                self.table_column_tip.show()
+            else:
+                self.table_column_tip.hide()
+
+            # Reset axis tabs: first projection on primary view; extras as new tabs
+            while self.table_axis_tabs.count() > 1:
+                w = self.table_axis_tabs.widget(1)
+                self.table_axis_tabs.removeTab(1)
+                if w is not None:
+                    w.deleteLater()
+            self._table_models = [self._primary_table_model]
+
+            if not projections or (
+                len(projections) == 1 and len(projections[0].columns) == 0
+            ):
+                self._primary_table_model.set_projection(
+                    projections[0] if projections else None
+                )
+                self.table_axis_tabs.setTabText(0, "主表")
+                self.table_empty_label.show()
+                return
+
+            self.table_empty_label.hide()
+            # Full logical rows/cols — no silent truncation under load
+            self._primary_table_model.set_projection(projections[0])
+            label0 = (
+                f"轴 {projections[0].axis_id}"
+                if len(projections) > 1
+                else "主表"
+            )
+            self.table_axis_tabs.setTabText(0, label0)
+
+            for proj in projections[1:]:
+                model = LogTableModel()
+                model.set_projection(proj)
+                view = QTableView()
+                view.setModel(model)
+                view.setAlternatingRowColors(not self._table_performance_mode)
+                view.setSelectionBehavior(
+                    QAbstractItemView.SelectionBehavior.SelectRows
+                )
+                view.setSelectionMode(
+                    QAbstractItemView.SelectionMode.SingleSelection
+                )
+                view.verticalHeader().setDefaultSectionSize(20)
+                self.table_axis_tabs.addTab(view, f"轴 {proj.axis_id}")
+                self._table_models.append(model)
+            self._apply_selection_to_table()
+        finally:
+            self._hide_table_progress()
+            PROJECTION_BUILD_HOOKS.cancel_flag = None
+
+    def set_display_set(
+        self,
+        well_id: str,
+        leaf_ids: AbstractSet[str] | Iterable[str],
+        *,
+        template_id: str | None = None,
+        plot_id: str | None = None,
+    ) -> HostPresentation:
+        """Set session Display Set and rebuild the single-well plot (live)."""
+        self._display_sets[well_id] = frozenset(str(x) for x in leaf_ids)
+        tid = template_id or self._current_template_id()
+        if not tid:
+            tid = "std-gr-rt-den"
+        return self.apply_template_to_well(
+            well_id,
+            tid,
+            plot_id=plot_id if plot_id is not None else self._active_plot_id,
+        )
+
     def apply_template_to_well(
         self, well_id: str, template_id: str, *, plot_id: str | None = None
     ) -> HostPresentation:
-        """Apply builtin template to a session well; show multi-track plot."""
+        """Apply builtin template to a session well; show multi-track plot.
+
+        Presentation is rebuilt from **session Display Set × template** (T2).
+        First open for a well defaults checks to template matches; later
+        template switches **keep** the Display Set and only restyle.
+        Empty Display Set is allowed (guidance on canvas; not an error).
+        """
         if self._workspace is None:
             raise WorkspaceError("请先打开工区")
         doc = self.session.ensure_well_loaded(self._workspace, well_id)
         template = get_builtin_template(template_id)
         if template is None:
             raise WorkspaceError(f"未知图版: {template_id}")
-        presentation = apply_template(template, doc)
-        if presentation.curve_track_count < 1:
-            raise WorkspaceError(
-                "图版未能绑定任何曲线（检查 LAS 助记符与图版 mnemonics）"
-            )
+
+        leaves = leaves_from_document(doc)
+        if well_id not in self._display_sets:
+            self._display_sets[well_id] = default_checks(leaves, template)
+        display_set = self._display_sets[well_id]
+
+        presentation = presentation_from_display_set(template, doc, display_set)
         # Restore layout edits from plot document when reopening (#292).
         effective_plot_id = plot_id if plot_id is not None else self._active_plot_id
         if effective_plot_id is not None:
@@ -1465,14 +2065,21 @@ class WellLogWorkstationWindow(QMainWindow):
             if tr.role == "curve" and tr.visible
             for ly in tr.layers
         ]
-        bound_s = "、".join(bound[:8]) if bound else "（无曲线）"
-        if len(bound) > 8:
-            bound_s += f"…(+{len(bound) - 8})"
-        self.plot_caption.setText(
-            f"单井分析图 · {presentation.well_name} · "
-            f"{presentation.template_name} · "
-            f"{presentation.track_count} 图道 · 绑定 {bound_s}"
-        )
+        if presentation.curve_track_count < 1:
+            self.plot_caption.setText(
+                f"单井分析图 · {presentation.well_name} · "
+                f"{presentation.template_name} · "
+                f"显示集为空 · 勾选井道以显示"
+            )
+        else:
+            bound_s = "、".join(bound[:8]) if bound else "（无曲线）"
+            if len(bound) > 8:
+                bound_s += f"…(+{len(bound) - 8})"
+            self.plot_caption.setText(
+                f"单井分析图 · {presentation.well_name} · "
+                f"{presentation.template_name} · "
+                f"{presentation.track_count} 图道 · 绑定 {bound_s}"
+            )
         tab = f"单井·多图道 · {presentation.well_name}"
         if self._active_plot_id:
             tab = f"{tab} · {self._active_plot_id[:8]}"
@@ -1481,6 +2088,10 @@ class WellLogWorkstationWindow(QMainWindow):
         self._sync_primary_single_well_surface()
         self._sync_apply_enabled()
         self._refresh_correlation_well_list(None)
+        self._refresh_well_content_tree()
+        if self._view_mode == "table":
+            self._refresh_table_projection()
+        self._apply_selection_to_canvas()
         self._update_status()
         return presentation
 
@@ -2494,7 +3105,10 @@ class WellLogWorkstationWindow(QMainWindow):
         data = cur.data(0, Qt.ItemDataRole.UserRole) or {}
         if data.get("kind") == "well":
             self._selected_well_id = str(data.get("id"))
+            # Restore per-well view mode (session memory; default graphic)
+            self.set_view_mode(self.view_mode_for(self._selected_well_id))
             self._refresh_tops_list()
+            self._refresh_well_content_tree()
             self._sync_apply_enabled()
             self._update_status()
 
@@ -2577,6 +3191,184 @@ class WellLogWorkstationWindow(QMainWindow):
         tree.expandAll()
         if self._selected_well_id:
             self._select_well_in_tree(self._selected_well_id)
+        self._refresh_well_content_tree()
+
+    def _visual_display_set_for_well(self, well_id: str) -> frozenset[str]:
+        """Display Set for tree checkboxes (session or template defaults)."""
+        existing = self._display_sets.get(well_id)
+        if existing is not None:
+            return existing
+        if self._workspace is None:
+            return frozenset()
+        try:
+            doc = self.session.ensure_well_loaded(self._workspace, well_id)
+        except Exception:  # noqa: BLE001
+            return frozenset()
+        tid = self._current_template_id() or "std-gr-rt-den"
+        template = get_builtin_template(tid)
+        if template is None:
+            return frozenset()
+        return default_checks(leaves_from_document(doc), template)
+
+    def _refresh_well_content_tree(self) -> None:
+        """Rebuild 井内容 tree: import source → scalar leaves (T3)."""
+        if not hasattr(self, "well_content_tree"):
+            return
+        tree = self.well_content_tree
+        self._content_tree_guard = True
+        try:
+            tree.clear()
+            well_id = self._selected_well_id
+            if self._workspace is None or not well_id:
+                self.well_content_hint.setText("选中井后显示导入源与可勾选井道")
+                empty = QTreeWidgetItem(["（未选井）"])
+                empty.setDisabled(True)
+                tree.addTopLevelItem(empty)
+                return
+
+            try:
+                doc = self.session.ensure_well_loaded(self._workspace, well_id)
+            except Exception as exc:  # noqa: BLE001
+                self.well_content_hint.setText(f"无法加载井数据：{exc}")
+                err = QTreeWidgetItem(["（加载失败）"])
+                err.setDisabled(True)
+                tree.addTopLevelItem(err)
+                return
+
+            leaves = leaves_from_document(doc)
+            checked = self._visual_display_set_for_well(well_id)
+            source_label = Path(doc.source_path).name if doc.source_path else "导入源"
+            # Always two levels even for a single curve
+            source_item = QTreeWidgetItem([f"{source_label} · {doc.well_name}"])
+            source_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "kind": "source",
+                    "source_id": doc.source_path or doc.document_id,
+                    "well_id": well_id,
+                },
+            )
+            source_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            source_item.setToolTip(
+                0,
+                f"导入源 · 深度 {doc.depth_unit or 'm'} · "
+                f"{int(doc.depth.size)} 样点 · {len(leaves)} 曲线",
+            )
+
+            n_checked = 0
+            for leaf in leaves:
+                child = QTreeWidgetItem([leaf.label or leaf.mnemonic])
+                child.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    {
+                        "kind": "leaf",
+                        "id": leaf.id,
+                        "mnemonic": leaf.mnemonic,
+                        "well_id": well_id,
+                    },
+                )
+                child.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                )
+                on = leaf.id in checked
+                child.setCheckState(
+                    0,
+                    Qt.CheckState.Checked if on else Qt.CheckState.Unchecked,
+                )
+                if on:
+                    n_checked += 1
+                child.setToolTip(0, f"{leaf.mnemonic} · {leaf.id}")
+                source_item.addChild(child)
+
+            if not leaves:
+                none = QTreeWidgetItem(["（无标量曲线）"])
+                none.setDisabled(True)
+                source_item.addChild(none)
+
+            # Parent tri-state from children
+            if leaves:
+                if n_checked == 0:
+                    source_item.setCheckState(0, Qt.CheckState.Unchecked)
+                elif n_checked == len(leaves):
+                    source_item.setCheckState(0, Qt.CheckState.Checked)
+                else:
+                    source_item.setCheckState(0, Qt.CheckState.PartiallyChecked)
+
+            tree.addTopLevelItem(source_item)
+            tree.expandAll()
+            self.well_content_hint.setText(
+                f"井 {doc.well_name} · 显示集 {n_checked}/{len(leaves)} · "
+                f"勾选即时更新图形"
+            )
+        finally:
+            self._content_tree_guard = False
+
+    def _collect_content_tree_checked_leaves(self) -> frozenset[str]:
+        ids: set[str] = set()
+        tree = self.well_content_tree
+        for i in range(tree.topLevelItemCount()):
+            src = tree.topLevelItem(i)
+            if src is None:
+                continue
+            for j in range(src.childCount()):
+                child = src.child(j)
+                data = child.data(0, Qt.ItemDataRole.UserRole) or {}
+                if data.get("kind") != "leaf":
+                    continue
+                if child.checkState(0) == Qt.CheckState.Checked:
+                    ids.add(str(data["id"]))
+        return frozenset(ids)
+
+    def _on_well_content_item_changed(
+        self, item: QTreeWidgetItem, _column: int
+    ) -> None:
+        """Checkbox toggles — defer Display Set apply so we never rebuild the
+        tree while Qt still holds the changed item (avoids crash)."""
+        if self._content_tree_guard or self._selected_well_id is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole) or {}
+        kind = data.get("kind")
+        if kind not in ("leaf", "source"):
+            return
+
+        if kind == "source":
+            state = item.checkState(0)
+            if state == Qt.CheckState.PartiallyChecked:
+                return
+            # Manually batch-toggle children (no AutoTristate).
+            self._content_tree_guard = True
+            try:
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    cdata = child.data(0, Qt.ItemDataRole.UserRole) or {}
+                    if cdata.get("kind") == "leaf":
+                        child.setCheckState(0, state)
+            finally:
+                self._content_tree_guard = False
+
+        if not self._content_apply_pending:
+            self._content_apply_pending = True
+            QTimer.singleShot(0, self._flush_content_tree_checks)
+
+    def _flush_content_tree_checks(self) -> None:
+        self._content_apply_pending = False
+        if self._selected_well_id is None or self._workspace is None:
+            return
+        checked = self._collect_content_tree_checked_leaves()
+        well_id = self._selected_well_id
+        try:
+            self.set_display_set(well_id, checked)
+        except WorkspaceError as exc:
+            QMessageBox.warning(self, "更新显示集失败", str(exc))
+            self._refresh_well_content_tree()
 
     def _on_new_workspace(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "选择空目录作为新工区")
@@ -2689,12 +3481,18 @@ class WellLogWorkstationWindow(QMainWindow):
                 template_id,
                 plot_id=self._active_plot_id,
             )
+            if pres.curve_track_count < 1:
+                detail = "显示集为空 · 勾选井道以显示"
+            else:
+                detail = (
+                    f"图道数 {pres.track_count}（曲线道 {pres.curve_track_count}）"
+                )
             QMessageBox.information(
                 self,
                 "图版已应用",
                 f"井 {pres.well_name}\n"
                 f"图版 {pres.template_name}\n"
-                f"图道数 {pres.track_count}（曲线道 {pres.curve_track_count}）",
+                f"{detail}",
             )
         except WorkspaceError as exc:
             QMessageBox.warning(self, "应用图版失败", str(exc))

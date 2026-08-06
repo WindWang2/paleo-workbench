@@ -44,6 +44,11 @@ A deep workflow state machine orchestrator module (`paleo_workbench/workflow/orc
 - **SourceCRS（源坐标系）**: 对 SourceXY 坐标域的明确坐标参考系声明，只能来自井位文件自身或 `well_head` 资产的显式元数据。项目默认 CRS、显示 CRS、survey CRS 与数值范围都不能替代缺失的 SourceCRS，也不能用于推断 SourceXY 的含义。
 
 ### Well Log Visualization
+- **Well Content Tree（井内容树）**: 选中井后的井内数据树：按 **导入源 / 逻辑数据集 → 可显示井道叶子** 两层组织（单井道源也保持两层），与工区 catalog 树分离；父节点三态复选框；深度尺标不在树上。首期叶子仅为标量曲线实例（含 AT10–AT90 等独立叶子）。规格见 `docs/superpowers/specs/2026-08-06-well-content-tree-and-table-mode-design.md`。
+- **Display Set（显示集）**: 井内容树中已勾选的可显示井道叶子身份集合；图形模式与表格模式共享同一显示集，切换视图模式不改变勾选。
+- **Displayable Track Leaf（可显示井道叶子）**: 源侧可单独开关显示的井道实例（稳定身份）；不是图版 BoundTrack 槽位。首期 = 标量曲线实例。
+- **Dual-layer composition（双层合成）**: 显示集决定「显示哪些井道」；图版决定匹配槽位的布局/样式；未匹配的已勾选叶子使用默认样式。换图版不改显示集。默认勾选 = 当前图版可匹配项。
+- **View Mode（视图模式）**: 单井主区 `graphic`（图形）或 `table`（表格）；默认图形；会话内按井记住；首期不跨会话持久化。
 - **ResForm Compatibility Model（ResForm 兼容模型）**: 以商业软件 ResForm 的用户可见测井工作流为参照：导入后的深度、曲线、单位、空值和可视化语义应符合解释人员的预期；它不替代底层文件格式规范，也不要求复制其私有实现或文件识别规则。
 - **Whole-File Log Import（整文件测井导入）**: 用户打开一个测井文件时，所有可用曲线数据集都被导入；不同采样轴各自保留，不因曲线名或相邻深度而被隐式合并或重采样。
 - **Canonical Curve Mnemonic（标准曲线名）**: 由已知源道名别名归一出的测井曲线语义名称；原始道名仍作为显示名称保留。无法识别的道名不被改写，并作为需核对的导入诊断。
