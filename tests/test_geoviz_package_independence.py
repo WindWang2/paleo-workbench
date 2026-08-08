@@ -125,6 +125,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "analyze_lithology_crossplot",
         "blend_rgba",
         "build_proportional_surfaces",
+        "build_synthetic_seismogram_overlay",
         "correlate_synthetic_to_trace",
         "extract_stratal_slice",
         "generate_cylinder_geometry",
