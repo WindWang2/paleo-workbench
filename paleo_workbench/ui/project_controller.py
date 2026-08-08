@@ -31,6 +31,13 @@ class ProjectController:
         """Replace the in-memory project (no confirm — callers that need one ask first)."""
         self.window.project = ProjectDocument.new(name)
         self.window.project_path = None
+        # The catalog is project-scoped; an unsaved project has none.
+        try:
+            from paleo_workbench.catalog import reset_catalog
+
+            reset_catalog()
+        except Exception:
+            pass
         self.window._refresh_shell()
 
     def open_project_path(self, path: str | Path) -> bool:
@@ -59,8 +66,32 @@ class ProjectController:
         self.window.project = loaded
         self.window.project.meta.project_root = str(target.resolve().parent)
         self.window.project_path = target
+        self._open_catalog(target, loaded)
         self.window._refresh_shell()
         return True
+
+    @staticmethod
+    def _open_catalog(target: Path, loaded: ProjectDocument) -> None:
+        """Wire the Core Data Catalog for the opened project.
+
+        Installs the Core-backed CatalogPort adapter as the active runtime
+        backend (replacing any previous project's), then projects legacy
+        ResourceItems into the catalog (deterministic, idempotent, no file
+        copies or re-hashing). Best-effort: a catalog failure never blocks
+        project open.
+        """
+        try:
+            from paleo_workbench.catalog import (
+                CoreCatalogAdapter,
+                DataCatalogService,
+                set_catalog,
+            )
+
+            service = DataCatalogService.open(target)
+            set_catalog(CoreCatalogAdapter(service))
+            service.migrate_legacy_resources(loaded.resources)
+        except Exception:
+            pass
 
     def save_project(self) -> Path | None:
         if not self.window._flush_mapping_draft():

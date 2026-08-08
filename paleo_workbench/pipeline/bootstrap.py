@@ -101,6 +101,20 @@ def bootstrap_sample_project(
 
     doc.resources = resources
 
+    # Register scanned resources as catalog INPUT versions (RAW) with the legacy
+    # bridge. Best-effort: the catalog seam must never block project bootstrap.
+    # Each resource is registered independently so one failure doesn't skip the rest.
+    try:
+        from paleo_workbench.catalog.lifecycle import register_resource_input
+
+        for resource in resources:
+            try:
+                register_resource_input(resource)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     horizons = sorted(Path(r.name).stem for r in resources if r.type == "horizon")
     wells = sorted(Path(r.name).stem for r in resources if r.type == "well_log")
     seismic_names = sorted(r.name for r in resources if r.type == "seismic")

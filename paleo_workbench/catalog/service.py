@@ -593,6 +593,25 @@ class DataCatalogService:
             raise
         return run
 
+    def update_run_status(
+        self,
+        run_id: str,
+        status: str,
+        *,
+        extra_parameters: dict[str, Any] | None = None,
+    ) -> DataRun:
+        """Update a run's status (e.g. running → complete/failed) and persist.
+
+        ``extra_parameters`` are merged into the run's parameters (used by the
+        CatalogPort adapter to record finish timestamps).
+        """
+        run = self.get_run(run_id)
+        run.status = status
+        if extra_parameters:
+            run.parameters.update(extra_parameters)
+        self._save()
+        return run
+
     # -- lineage ---------------------------------------------------------------
 
     def get_lineage(self, version_id: str) -> dict[str, Any]:

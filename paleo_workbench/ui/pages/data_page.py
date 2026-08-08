@@ -899,6 +899,20 @@ class DataPage(QWidget):
 
     def _apply_import_report(self, report: ImportReport) -> None:
         self.project.resources.extend(report.added)
+        # Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
+        # with the legacy bridge so downstream runs can resolve them. Best-effort:
+        # the catalog seam must never break the import path. Each resource is
+        # registered independently so one failure doesn't skip the rest.
+        try:
+            from paleo_workbench.catalog.lifecycle import register_resource_input
+
+            for resource in report.added:
+                try:
+                    register_resource_input(resource)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         self._refresh()
         self._set_import_status(report)
 

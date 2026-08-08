@@ -140,6 +140,16 @@ def apply_interpolation_to_task(
         "grid_n": grid_n,
     }
     task.input_snapshot_hash = _snapshot_hash(snapshot)
+    # Register a factor-map DataRun (data-provenance layer). The interpolation
+    # grid lives in task.parameters (domain state), so by default no file
+    # INTERMEDIATE version is registered — the run records inputs + generator +
+    # snapshot hash so lineage is queryable. Best-effort: never blocks compute.
+    try:
+        from paleo_workbench.catalog.lifecycle import register_factor_map_run
+
+        register_factor_map_run(task)
+    except Exception:
+        pass
     return task
 
 

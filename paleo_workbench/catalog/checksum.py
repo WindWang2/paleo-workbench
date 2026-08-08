@@ -24,3 +24,11 @@ def sha256_file(path: Path, *, chunk_size: int = CHUNK_SIZE) -> str:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def sha256_file_or_none(path: str | Path) -> str | None:
+    """Like :func:`sha256_file` but return None when unreadable (missing/permissions)."""
+    try:
+        return sha256_file(Path(path))
+    except OSError:
+        return None
