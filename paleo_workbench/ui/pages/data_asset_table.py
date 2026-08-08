@@ -120,6 +120,20 @@ class DataAssetTable(QWidget):
             column_keys=self._visible_column_keys,
         )
         self._visible_assets = [assets[i] for i in filtered]
+        # Auto-fit column widths to content on data refresh.
+        # Temporarily disable stretch-last-section so resizeColumnsToContents
+        # measures actual content, not the previously-stretched width.
+        header = self.table.horizontalHeader()
+        prev_stretch = header.stretchLastSection()
+        header.setStretchLastSection(False)
+        for col in range(header.count()):
+            header.resizeSection(col, 50)
+        self.table.resizeColumnsToContents()
+        for col in range(header.count()):
+            w = header.sectionSize(col)
+            if w > 300:
+                header.resizeSection(col, 300)
+        header.setStretchLastSection(prev_stretch)
         if not self._sync_selection() and self._selected_asset is not None:
             self._selected_asset = None
             self._selected_assets = []

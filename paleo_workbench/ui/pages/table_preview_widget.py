@@ -102,7 +102,15 @@ class TablePreviewWidget(QTableWidget):
                 self.setItem(row_index, column_index, item)
 
         if self.auto_fit_columns:
+            hdr = self.horizontalHeader()
+            n_cols = self.columnCount()
+            # Always use Interactive mode: fit columns to content, then let the
+            # user resize. When the widget is narrower than the total column
+            # width, a horizontal scrollbar appears naturally.
+            hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            hdr.setStretchLastSection(False)
             self.resizeColumnsToContents()
-            for col in range(self.columnCount()):
+            for col in range(n_cols):
                 width = max(self.columnWidth(col) + 16, 75)
                 self.setColumnWidth(col, width)
+            hdr.setStretchLastSection(True)

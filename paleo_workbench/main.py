@@ -8,6 +8,20 @@ from paleo_workbench.qt_platform import configure_qt_platform_for_session
 
 configure_qt_platform_for_session()
 
+# Force desktop OpenGL before QApplication is created. Without this, PySide6's
+# Qt on Wayland + NVIDIA selects a GLES 2.0 EGL config, and any embedded
+# QOpenGLWidget (e.g. WellLogView) gets a black screen because its desktop GL
+# context cannot share with the GLES main context.
+from PySide6.QtGui import QSurfaceFormat
+
+_fmt = QSurfaceFormat()
+_fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+_fmt.setVersion(3, 3)
+_fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+_fmt.setDepthBufferSize(24)
+_fmt.setStencilBufferSize(8)
+QSurfaceFormat.setDefaultFormat(_fmt)
+
 # Bootstrap geoviz paths before other workbench imports (ISS-ENV-01).
 from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
