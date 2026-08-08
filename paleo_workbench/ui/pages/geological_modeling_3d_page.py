@@ -1,7 +1,7 @@
 """GeologicalModeling3DPage — premium 3D geological modeling workbench page.
 
 Refactored to import Workers and Dialog from their own modules,
-wire WellCurve3DGenerator and WellSeismicTieCalibration into the
+wire the geoviz well-tie / 3D-curve engine APIs into the
 3D viewport rendering, and replace the hardcoded auto-tie stub
 with a real cross-correlation implementation.
 """
@@ -10,12 +10,13 @@ from __future__ import annotations
 import logging
 import numpy as np
 
-from PySide6.QtCore import QRectF, Qt, QObject, QEvent
+from PySide6.QtCore import QRectF, Qt, QObject, QEvent, Signal
 from PySide6.QtGui import QBrush, QColor, QIcon, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QComboBox, QSlider, QSplitter, QProgressBar,
     QCheckBox, QSpinBox, QDoubleSpinBox, QScrollArea, QFileDialog, QMessageBox,
+    QTabWidget, QGroupBox,
 )
 import pyqtgraph.opengl as gl
 
@@ -28,14 +29,16 @@ from paleo_workbench.viz.joint_well_pick import (
     build_well_screen_geoms,
     pick_well_name,
 )
-from geoviz import generate_fence_mesh
-from paleo_workbench.viz.geomodel import (
+from geoviz import (
     ClippedGLMeshItem,
     ClippedGLVolumeItem,
-    WellSeismicTieCalibration,
-    WellCurve3DGenerator,
-    RGBAttributeFusion,
-    LithologyCrossplotEngine,
+    analyze_lithology_crossplot,
+    blend_rgba,
+    correlate_synthetic_to_trace,
+    generate_fence_mesh,
+    offset_curve_along_trajectory,
+    shift_depths,
+    synthetic_from_logs,
 )
 from paleo_workbench.viz.geomodel.models import GridSpec
 from paleo_workbench.ui.pages.geological_modeling_workers import (
@@ -61,6 +64,10 @@ class GeologicalModeling3DPage(QWidget):
     - Center: single joint 3D host + toolbar/status + collapsible fence 2D strip.
     - No right rail (modeling/export/AI chrome removed from this page).
     """
+
+    # Cross-page linkage: a well picked in the 3D view is announced by name so
+    # other pages (WellLog / Seismic) can sync their selection to it.
+    well_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -226,6 +233,15 @@ class GeologicalModeling3DPage(QWidget):
             "设置 Inline、Crossline 与多张 Time 切片"
         )
         f_layout.addWidget(self._joint_slice_card_btn)
+        # Professional analysis tab panel (stratal slices / well-tie / facies / export).
+        self._joint_analysis_btn = QPushButton("分析")
+        self._joint_analysis_btn.setCheckable(True)
+        self._joint_analysis_btn.setChecked(False)
+        self._joint_analysis_btn.setObjectName("JointAnalysisBtn")
+        self._joint_analysis_btn.setToolTip(
+            "等时/比例地层切片、井震标定、沉积相、导出与诊断"
+        )
+        f_layout.addWidget(self._joint_analysis_btn)
         # Interaction mode: pick (default) vs draw-snap (#124)
         f_layout.addWidget(QLabel("交互"))
         self._joint_pick_mode = QComboBox()
@@ -264,6 +280,11 @@ class GeologicalModeling3DPage(QWidget):
         view_layout.addWidget(self.floating_bar)
         self._joint_slice_card = self._build_joint_slice_card()
         view_layout.addWidget(self._joint_slice_card)
+        # Professional analysis panel — tabbed, toggled by the "分析" button.
+        # The tabs reference legacy right-rail controls, so the card is created
+        # empty here and populated once the right rail exists (deferred below).
+        self._joint_analysis_card = self._build_joint_analysis_card()
+        view_layout.addWidget(self._joint_analysis_card)
 
         # Status row under toolbar — light chrome, not canvas black
         self._joint_status.setWordWrap(True)
@@ -718,6 +739,10 @@ class GeologicalModeling3DPage(QWidget):
         right_scroll.hide()
         self._right_rail = right_scroll
 
+        # Now that the legacy right-rail controls exist, populate the analysis
+        # tabs (well-tie / facies / export proxy to those controls).
+        self._populate_joint_analysis_tabs()
+
         # Constrain left tree; center takes remaining width
         left_widget.setMinimumWidth(220)
         left_widget.setMaximumWidth(320)
@@ -798,6 +823,9 @@ class GeologicalModeling3DPage(QWidget):
             root_joint, "联合井轨迹 (geoviz)"
         )
         self._add_checkable_child(root_joint, "井间剖面 fence (geoviz)")
+        self._stratal_tree_item = self._add_checkable_child(
+            root_joint, "地层切片体 (geoviz)"
+        )
         self._add_checkable_child(root_joint, "井震 3D 视口")
         self._add_checkable_child(root_joint, "井震 2D 剖面条")
 
@@ -1007,6 +1035,340 @@ class GeologicalModeling3DPage(QWidget):
         )
         card.setVisible(True)
         return card
+
+    # ------------------------------------------------------------------
+    # Professional analysis card (tabbed: stratal / well-tie / facies / export)
+    # ------------------------------------------------------------------
+
+    def _build_joint_analysis_card(self) -> QFrame:
+        """Tabbed professional analysis panel, toggled by the "分析" button.
+
+        Groups the stage-2 stratal/proportional-slice feature plus the existing
+        well-tie, facies and export/diagnostics flows into one labeled surface,
+        without disturbing the deliberately two-column well-seismic workbench
+        layout (the legacy right rail stays hidden).
+        """
+        card = QFrame()
+        card.setObjectName("JointAnalysisCard")
+        card.setStyleSheet(
+            "QFrame#JointAnalysisCard {"
+            " background: %s; border: 1px solid %s; border-radius: %dpx; }"
+            % (tokens.BG_SIDEBAR, tokens.BORDER, tokens.RADIUS_CARD)
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(
+            tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1
+        )
+        layout.setSpacing(tokens.SPACE_1)
+
+        self._joint_analysis_tabs = QTabWidget()
+        self._joint_analysis_tabs.setObjectName("JointAnalysisTabs")
+        layout.addWidget(self._joint_analysis_tabs)
+
+        # Tabs are populated lazily (_populate_joint_analysis_tabs) because they
+        # reference legacy right-rail controls that are built later in __init__.
+        self._stratal_status: QLabel | None = None
+
+        # Hidden until the "分析" button is toggled on.
+        card.setVisible(False)
+        self._joint_analysis_btn.toggled.connect(card.setVisible)
+        return card
+
+    def _populate_joint_analysis_tabs(self) -> None:
+        """Add the four analysis tabs. Called after the legacy right rail exists."""
+        if self._joint_analysis_tabs.count() > 0:
+            return  # already populated
+        self._joint_analysis_tabs.addTab(
+            self._build_stratal_tab(), "等时切片与属性"
+        )
+        self._joint_analysis_tabs.addTab(
+            self._build_welltie_tab(), "井震标定"
+        )
+        self._joint_analysis_tabs.addTab(
+            self._build_facies_tab(), "沉积相解释"
+        )
+        self._joint_analysis_tabs.addTab(
+            self._build_export_diag_tab(), "导出与诊断"
+        )
+
+    def _build_stratal_tab(self) -> QWidget:
+        """Stratal / proportional slice controls — the stage-2 demo entry."""
+        from paleo_workbench.viz.stratal_adapter import build_stratal_grids
+
+        tab = QWidget()
+        form = QGridLayout(tab)
+        form.setContentsMargins(
+            tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
+        )
+        form.setHorizontalSpacing(tokens.SPACE_2)
+        form.setVerticalSpacing(tokens.SPACE_1)
+
+        hint = QLabel(
+            "在两个 horizon 之间生成比例地层切片，沿地层格架揭示沉积相。"
+            "无 SEGY 时可用合成演示体预览。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        form.addWidget(hint, 0, 0, 1, 3)
+
+        form.addWidget(QLabel("顶部 horizon"), 1, 0)
+        self._stratal_top_combo = QComboBox()
+        self._stratal_top_combo.setObjectName("StratalTopCombo")
+        self._stratal_top_combo.addItem("（未选择）", None)
+        form.addWidget(self._stratal_top_combo, 1, 1)
+        self._stratal_top_browse = QPushButton("浏览…")
+        self._stratal_top_browse.clicked.connect(
+            lambda: self._pick_stratal_horizon(self._stratal_top_combo, "顶部 horizon")
+        )
+        form.addWidget(self._stratal_top_browse, 1, 2)
+
+        form.addWidget(QLabel("底部 horizon"), 2, 0)
+        self._stratal_bot_combo = QComboBox()
+        self._stratal_bot_combo.setObjectName("StratalBotCombo")
+        self._stratal_bot_combo.addItem("（未选择）", None)
+        form.addWidget(self._stratal_bot_combo, 2, 1)
+        self._stratal_bot_browse = QPushButton("浏览…")
+        self._stratal_bot_browse.clicked.connect(
+            lambda: self._pick_stratal_horizon(self._stratal_bot_combo, "底部 horizon")
+        )
+        form.addWidget(self._stratal_bot_browse, 2, 2)
+
+        form.addWidget(QLabel("比例切片"), 3, 0)
+        self._stratal_fractions = QComboBox()
+        self._stratal_fractions.setObjectName("StratalFractions")
+        self._stratal_fractions.addItem("1/4, 1/2, 3/4", (0.25, 0.50, 0.75))
+        self._stratal_fractions.addItem("1/3, 2/3", (1 / 3, 2 / 3))
+        self._stratal_fractions.addItem("仅 1/2", (0.50,))
+        self._stratal_fractions.addItem("顶 + 底", (0.0, 1.0))
+        form.addWidget(self._stratal_fractions, 3, 1, 1, 2)
+
+        self._stratal_demo_check = QCheckBox("用合成演示体（无 SEGY 时预览）")
+        self._stratal_demo_check.setChecked(False)
+        self._stratal_demo_check.setObjectName("StratalDemoCheck")
+        form.addWidget(self._stratal_demo_check, 4, 0, 1, 3)
+
+        btn_row = QHBoxLayout()
+        self.btn_stratal_generate = QPushButton("生成地层切片")
+        self.btn_stratal_generate.setObjectName("StratalGenerateBtn")
+        self.btn_stratal_generate.setToolTip(
+            "在两个 horizon 之间按比例生成地层切片并叠加到 3D 视口"
+        )
+        self.btn_stratal_generate.clicked.connect(self._on_generate_stratal_slices)
+        btn_row.addWidget(self.btn_stratal_generate)
+        self.btn_stratal_clear = QPushButton("清除")
+        self.btn_stratal_clear.setObjectName("StratalClearBtn")
+        self.btn_stratal_clear.clicked.connect(self._on_clear_stratal_slices)
+        btn_row.addWidget(self.btn_stratal_clear)
+        form.addLayout(btn_row, 5, 0, 1, 3)
+
+        self._stratal_status = QLabel("尚未生成地层切片")
+        self._stratal_status.setWordWrap(True)
+        self._stratal_status.setStyleSheet(
+            "color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY
+        )
+        form.addWidget(self._stratal_status, 6, 0, 1, 3)
+        form.addWidget(QLabel(""), 7, 0)  # spacer
+        form.setRowStretch(7, 1)
+        return tab
+
+    def _pick_stratal_horizon(self, combo: QComboBox, title: str) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, title, "", "Horizon (*.dat);;All files (*)"
+        )
+        if path:
+            # Replace any previously chosen path; keep one entry.
+            combo.clear()
+            combo.addItem(path, path)
+
+    def _on_generate_stratal_slices(self) -> None:
+        """Generate stratal/proportional slices and overlay them in the 3D view.
+
+        Real-data path: parse the two chosen horizon .dat files against the
+        loaded survey/volume. Demo path (checkbox or no volume/horizons): load a
+        synthetic volume + horizons so the feature is visible even without SEGY.
+        """
+        from geoviz import build_proportional_surfaces, validate_horizon_pair
+        from paleo_workbench.viz.stratal_adapter import (
+            build_stratal_grids,
+            build_stratal_surfaces,
+            make_demo_stratal_grids,
+        )
+
+        renderer = getattr(self._joint_widget, "renderer", None) \
+            if self._joint_widget is not None else None
+        demo = self._stratal_demo_check.isChecked()
+
+        fractions = self._stratal_fractions.currentData() or (0.25, 0.50, 0.75)
+
+        if demo or renderer is None or not getattr(renderer, "_loaded", False) \
+                or renderer.volume_data() is None:
+            # Demo fallback — load a synthetic volume directly on the renderer.
+            if renderer is None:
+                self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
+                return
+            vol, top_sidx, bot_sidx = make_demo_stratal_grids((16, 20, 32))
+            renderer.load_volume(vol)
+            surfaces = list(
+                np.asarray(
+                    build_proportional_surfaces(
+                        top_sidx, bot_sidx, list(fractions)
+                    )
+                )
+            )
+            renderer.set_stratal_slices(
+                surfaces,
+                labels=[f"k={f:.2f}" for f in fractions],
+                active=max(0, len(surfaces) // 2),
+                opacity=0.8,
+            )
+            self._stratal_status.setText(
+                "已用合成演示体生成 %d 张比例切片（无 SEGY 预览模式）。"
+                % len(surfaces)
+            )
+            return
+
+        # Real-data path.
+        top_path = self._stratal_top_combo.currentData()
+        bot_path = self._stratal_bot_combo.currentData()
+        scene = self._joint_host.scene
+        if not top_path or not bot_path:
+            self._stratal_status.setText("请先选择顶部与底部 horizon 文件。")
+            return
+        vol = renderer.volume_data()
+        grids = build_stratal_grids(scene, vol, top_path, bot_path)
+        if grids is None:
+            self._stratal_status.setText(
+                "survey/registration 不可用或体数据未就绪，无法对齐 horizon。"
+            )
+            return
+        top_sidx, bot_sidx = grids
+        out = build_stratal_surfaces(
+            top_sidx, bot_sidx, vol.shape, fractions=fractions
+        )
+        if out is None:
+            self._stratal_status.setText("horizon 对全部倒转或无效，未生成切片。")
+            return
+        surfaces, _ = out
+        renderer.set_stratal_slices(
+            surfaces,
+            labels=[f"k={f:.2f}" for f in fractions],
+            active=max(0, len(surfaces) // 2),
+            opacity=0.8,
+        )
+        snap = renderer.get_stratal_slices()
+        self._stratal_status.setText(
+            "已生成 %d 张比例地层切片（active=%s）。"
+            % (len(snap), snap[0][0] if snap else "?")
+        )
+
+    def _on_clear_stratal_slices(self) -> None:
+        renderer = getattr(self._joint_widget, "renderer", None) \
+            if self._joint_widget is not None else None
+        if renderer is not None:
+            renderer.clear_stratal_slices()
+        self._stratal_status.setText("已清除地层切片。")
+
+    def _build_welltie_tab(self) -> QWidget:
+        """Re-surface the existing well-tie controls under a labeled tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(
+            tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
+        )
+        hint = QLabel(
+            "井震标定：Ricker 合成记录、互相关自动对齐（Auto-Tie）、时深偏移。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        layout.addWidget(hint)
+        # Reference the existing controls (built in the legacy right rail) so a
+        # single source of truth drives both surfaces. The legacy rail stays
+        # hidden; we show lightweight proxies that forward to the same handlers.
+        row = QHBoxLayout()
+        layout.addLayout(row)
+        self._wtie_freq_proxy = QSlider(Qt.Horizontal)
+        self._wtie_freq_proxy.setMinimum(self.slider_wavelet_freq.minimum())
+        self._wtie_freq_proxy.setMaximum(self.slider_wavelet_freq.maximum())
+        self._wtie_freq_proxy.setValue(self.slider_wavelet_freq.value())
+        self._wtie_freq_proxy.valueChanged.connect(
+            self.slider_wavelet_freq.setValue
+        )
+        self.slider_wavelet_freq.valueChanged.connect(
+            self._wtie_freq_proxy.setValue
+        )
+        row.addWidget(QLabel("子波频率"))
+        row.addWidget(self._wtie_freq_proxy)
+        self._wtie_shift_proxy = QSlider(Qt.Horizontal)
+        self._wtie_shift_proxy.setMinimum(self.slider_td_shift.minimum())
+        self._wtie_shift_proxy.setMaximum(self.slider_td_shift.maximum())
+        self._wtie_shift_proxy.setValue(self.slider_td_shift.value())
+        self._wtie_shift_proxy.valueChanged.connect(
+            self.slider_td_shift.setValue
+        )
+        self.slider_td_shift.valueChanged.connect(
+            self._wtie_shift_proxy.setValue
+        )
+        row2 = QHBoxLayout()
+        layout.addLayout(row2)
+        row2.addWidget(QLabel("时深偏移"))
+        row2.addWidget(self._wtie_shift_proxy)
+        self._wtie_auto_proxy = QPushButton("自动互相关对齐 (Auto-Tie)")
+        self._wtie_auto_proxy.clicked.connect(self.btn_auto_tie.click)
+        row2.addWidget(self._wtie_auto_proxy)
+        self._wtie_corr_label = self.label_correlation
+        layout.addWidget(self._wtie_corr_label)
+        layout.addStretch(1)
+        return tab
+
+    def _build_facies_tab(self) -> QWidget:
+        """Depositional facies interpretation entry (RGB blend + crossplot)."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(
+            tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
+        )
+        hint = QLabel(
+            "沉积相解释：RGB 多属性混色、岩性交会图统计。"
+            "（高级分析入口在「高级地震与井震综合分析」卡片中）"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        layout.addWidget(hint)
+        row = QHBoxLayout()
+        layout.addLayout(row)
+        self._facies_rgb_proxy = QPushButton("RGB 多属性混色")
+        self._facies_rgb_proxy.setToolTip("混合多地震属性以辅助沉积相边界识别")
+        self._facies_rgb_proxy.clicked.connect(self.btn_rgb_fusion.click)
+        row.addWidget(self._facies_rgb_proxy)
+        self._facies_crossplot_proxy = QPushButton("岩性交会图")
+        self._facies_crossplot_proxy.clicked.connect(self.btn_crossplot.click)
+        row.addWidget(self._facies_crossplot_proxy)
+        layout.addStretch(1)
+        return tab
+
+    def _build_export_diag_tab(self) -> QWidget:
+        """Numerical-simulation export + AI diagnostics under one tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(
+            tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
+        )
+        hint = QLabel(
+            "导出与诊断：FLAC3D / Abaqus 数值模拟网格导出，AI 一致性诊断顾问。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
+        layout.addWidget(hint)
+        row = QHBoxLayout()
+        layout.addLayout(row)
+        self._diag_export_proxy = QPushButton("导出数值模拟模型")
+        self._diag_export_proxy.clicked.connect(self.btn_export.click)
+        row.addWidget(self._diag_export_proxy)
+        self._diag_ai_proxy = QPushButton("开启 AI 一致性诊断")
+        self._diag_ai_proxy.clicked.connect(self.btn_ai_advisor.click)
+        row.addWidget(self._diag_ai_proxy)
+        layout.addStretch(1)
+        return tab
 
     def _restore_joint_slice_settings(self) -> None:
         from geoviz import OrthogonalSliceState, TimeSliceState
@@ -1672,6 +2034,9 @@ class GeologicalModeling3DPage(QWidget):
         status, pair = self._well_pick.on_well_click(name)
         if status:
             self._on_joint_status(status)
+        # Announce the freshly picked well name for cross-page sync.
+        if name:
+            self.well_selected.emit(name)
         if pair is None:
             return
         a, b = pair
@@ -1999,8 +2364,8 @@ class GeologicalModeling3DPage(QWidget):
             # Add realistic noise
             gr_values += np.random.default_rng(42).normal(0, 8.0, n_samples).astype(np.float32)
 
-            # Generate 3D curve mesh using WellCurve3DGenerator
-            curve_pts = WellCurve3DGenerator.generate_curve_mesh(well_path, gr_values, scale=0.15)
+            # Offset the GR log sideways off the trajectory (engine: geoviz_well_seismic_3d)
+            curve_pts = offset_curve_along_trajectory(well_path, gr_values, scale=0.15)
             line_item = gl.GLLinePlotItem(
                 pos=curve_pts, color=(0.2, 1.0, 0.4, 0.9), width=2.0, antialias=True
             )
@@ -2023,20 +2388,20 @@ class GeologicalModeling3DPage(QWidget):
                 sonic[mask] = _litho_sonic.get(layer["lithology"], 180.0)
                 density[mask] = _litho_density.get(layer["lithology"], 2.4)
 
-            synthetic = WellSeismicTieCalibration.compute_synthetic(sonic, density, wavelet_freq=freq)
+            synthetic = synthetic_from_logs(sonic, density, wavelet_freq=freq)
             if len(synthetic) > 0:
                 # Align synthetic length to well path subset
                 syn_len = min(len(synthetic), n_samples - 1)
                 syn_path = well_path[1:syn_len + 1].copy()
 
                 # Apply T-D shift
-                aligned_depths = WellSeismicTieCalibration.align_twt_depth(
+                aligned_depths = shift_depths(
                     -syn_path[:, 2], td_shift
                 )
                 syn_path[:, 2] = -aligned_depths
 
                 # Offset synthetic trace in the opposite direction from GR
-                syn_curve_pts = WellCurve3DGenerator.generate_curve_mesh(
+                syn_curve_pts = offset_curve_along_trajectory(
                     syn_path, synthetic[:syn_len], scale=5.0
                 )
                 syn_item = gl.GLLinePlotItem(
@@ -2187,6 +2552,12 @@ class GeologicalModeling3DPage(QWidget):
             or wells_parent.checkState(0) != Qt.Unchecked
         )
         show_fence = self._tree_item_checked("井间剖面 fence (geoviz)")
+        show_stratal = self._tree_item_checked("地层切片体 (geoviz)")
+        # Sync stratal-plane visibility on the joint renderer.
+        renderer = getattr(self._joint_widget, "renderer", None) \
+            if self._joint_widget is not None else None
+        if renderer is not None and getattr(renderer, "_stratal_surfaces", None):
+            renderer.set_stratal_visible(bool(show_stratal))
         if hasattr(self, "joint_3d_host"):
             self.joint_3d_host.setVisible(show_3d or show_vol)
         if hasattr(self, "_joint_2d_panel"):
@@ -2333,7 +2704,7 @@ class GeologicalModeling3DPage(QWidget):
         self.gl_widget.update()
 
     def _run_auto_tie(self) -> None:
-        """Run real cross-correlation auto-tie using WellSeismicTieCalibration.auto_correlate."""
+        """Run real cross-correlation auto-tie via geoviz.correlate_synthetic_to_trace."""
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
             return
@@ -2357,7 +2728,7 @@ class GeologicalModeling3DPage(QWidget):
             sonic[mask] = _litho_sonic.get(layer["lithology"], 180.0)
             density[mask] = _litho_density.get(layer["lithology"], 2.4)
 
-        synthetic = WellSeismicTieCalibration.compute_synthetic(sonic, density, wavelet_freq=freq)
+        synthetic = synthetic_from_logs(sonic, density, wavelet_freq=freq)
 
         # Generate a synthetic "field seismic trace" (shifted version of synthetic + noise)
         if len(synthetic) > 0:
@@ -2365,7 +2736,7 @@ class GeologicalModeling3DPage(QWidget):
             true_shift = 12  # samples
             seismic_trace = np.roll(synthetic, true_shift) + rng.normal(0, 0.05, len(synthetic))
 
-            shift_samples, cc = WellSeismicTieCalibration.auto_correlate(synthetic, seismic_trace)
+            shift_samples, cc = correlate_synthetic_to_trace(synthetic, seismic_trace)
 
             self.slider_td_shift.setValue(shift_samples)
             self.label_correlation.setText(f"互相关系数 (Cross-Correlation CC): {cc:.3f}")
@@ -2396,7 +2767,7 @@ class GeologicalModeling3DPage(QWidget):
         ch_g = np.cos(xx / 8.0) * np.sin(yy / 8.0) + 1.0   # Mid frequency (35Hz)
         ch_b = np.sin(xx / 5.0 + yy / 5.0) + 1.0          # High frequency (55Hz)
 
-        rgba_grid = RGBAttributeFusion.blend_rgb(ch_r, ch_g, ch_b, alpha=0.85)
+        rgba_grid = blend_rgba(ch_r, ch_g, ch_b, alpha=0.85)
 
         verts = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()]).astype(np.float32)
 
@@ -2453,7 +2824,7 @@ class GeologicalModeling3DPage(QWidget):
         QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(wells)} 口钻孔的三维剖面幕墙！")
 
     def _run_lithology_crossplot(self) -> None:
-        """Run LithologyCrossplotEngine and display crossplot statistical dialog."""
+        """Run geoviz.analyze_lithology_crossplot and show the crossplot statistics dialog."""
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
             return
@@ -2478,7 +2849,7 @@ class GeologicalModeling3DPage(QWidget):
                     ai_list.append(base_a + float(rng.normal(0, 400.0)))
                     lith_list.append(lith)
 
-        analysis_result = LithologyCrossplotEngine.analyze(
+        analysis_result = analyze_lithology_crossplot(
             np.array(gr_list, dtype=np.float32),
             np.array(ai_list, dtype=np.float32),
             lith_list

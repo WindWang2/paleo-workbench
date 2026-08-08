@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from paleo_workbench.viz.geomodel.well_seismic import (
+from paleo_workbench.viz.geomodel import (
     RGBAttributeFusion,
     LithologyCrossplotEngine,
     CrossWellFenceGenerator,

@@ -216,6 +216,7 @@ class PaleoWorkbenchWindow(QWidget):
         self.workflow_controller.wire_sequence_page()
         self.workflow_controller.wire_seismic_page()
         self.workflow_controller.wire_well_log_page()
+        self.workflow_controller.wire_geomodel_page()
         self.workflow_controller.wire_review_page()
 
     # --- view / help / search handlers ---

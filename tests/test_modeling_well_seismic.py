@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from paleo_workbench.viz.geomodel.well_seismic import WellSeismicTieCalibration
+from paleo_workbench.viz.geomodel import WellSeismicTieCalibration
 
 
 def test_compute_synthetic_seismogram():

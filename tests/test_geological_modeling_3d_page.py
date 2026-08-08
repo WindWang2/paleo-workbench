@@ -34,10 +34,10 @@ from paleo_workbench.ui.pages.geological_modeling_workers import (
     ExportWorker,
     AdvisorWorker,
 )
-from paleo_workbench.viz.geomodel.engine import (
+from geoviz import (
     generate_cylinder_geometry,
     generate_tube_geometry,
-    generate_fault_geometry
+    generate_fault_geometry,
 )
 from paleo_workbench.viz.geomodel.exporters import (
     export_to_flac3d,

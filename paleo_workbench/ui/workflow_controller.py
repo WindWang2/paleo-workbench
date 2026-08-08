@@ -7,6 +7,7 @@ from paleo_workbench.pipeline.compile_map import compile_map_draft
 from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
 from paleo_workbench.ui.navigation import (
+    PAGE_INDEX_GEOMODEL,
     PAGE_INDEX_MAPPING,
     PAGE_INDEX_PREPARATION,
     PAGE_INDEX_VISUALIZATION,
@@ -107,6 +108,25 @@ class WorkflowController:
             page.prediction_updated.connect(self._on_well_log_prediction_updated)
         if hasattr(page, "send_to_preparation_requested"):
             page.send_to_preparation_requested.connect(self._on_well_log_send_to_prep)
+
+    def wire_geomodel_page(self) -> None:
+        """Wire the 3D well-seismic joint page (project + cross-page well sync)."""
+        page = self.window.app_shell.page_stack.widget(PAGE_INDEX_GEOMODEL)
+        if page is None:
+            return
+        if hasattr(page, "set_project"):
+            page.set_project(self.window.project)
+        if hasattr(page, "well_selected"):
+            page.well_selected.connect(self._on_geomodel_well_selected)
+
+    def _on_geomodel_well_selected(self, well_name: str) -> None:
+        """Sync a well picked on the 3D page into the WellLog page selection."""
+        page = self.window.app_shell.well_log_prediction_page_widget()
+        if page is None:
+            return
+        setter = getattr(page, "set_selected_well", None)
+        if callable(setter):
+            setter(well_name)
 
     def wire_review_page(self) -> None:
         page = self.window.app_shell.review_export_page_widget()

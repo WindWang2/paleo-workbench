@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from paleo_workbench.viz.geomodel.well_seismic import WellCurve3DGenerator
+from paleo_workbench.viz.geomodel import WellCurve3DGenerator
 
 
 def test_generate_well_curve_3d_mesh():

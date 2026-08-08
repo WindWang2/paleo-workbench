@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from paleo_workbench.viz.geomodel.borehole_tunnel import BoreholeTraceGenerator, get_seam_boundaries
+from geoviz import BoreholeTraceGenerator, get_seam_boundaries
 
 def test_get_seam_boundaries_flat():
     data = {

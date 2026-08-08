@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from paleo_workbench.viz.geomodel.borehole_tunnel import TunnelMeshGenerator
+from geoviz import TunnelMeshGenerator
 
 def test_tunnel_straight_line():
     trajectory = np.array([
