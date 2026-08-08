@@ -25,7 +25,13 @@ def test_tree_has_type_leaves(qtbot):
     tree = NavigationTree()
     qtbot.addWidget(tree)
     tree.update_counts([], [])
-    labels = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+    labels = []
+    def collect(item):
+        labels.append(item.text(0))
+        for i in range(item.childCount()):
+            collect(item.child(i))
+    for i in range(tree.topLevelItemCount()):
+        collect(tree.topLevelItem(i))
     joined = " ".join(labels)
     assert "测井" in joined
     assert "地震" in joined
