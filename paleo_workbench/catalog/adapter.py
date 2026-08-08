@@ -123,6 +123,19 @@ class CoreCatalogAdapter:
                 return asset
         return None
 
+    def _bridge_legacy_id(self, version: DataVersion, legacy_resource_id: str | None) -> None:
+        """Record the legacy bridge on an idempotent hit when it is missing.
+
+        First wins: an asset that already carries a (different) legacy id is
+        left alone, matching the fake's external-dedup semantics.
+        """
+        if legacy_resource_id is None:
+            return
+        asset = self._asset_for(version)
+        if asset is not None and asset.legacy_resource_id is None:
+            asset.legacy_resource_id = legacy_resource_id
+            self._service._save()
+
     # ------------------------------------------------------------------ inputs
     def register_input(
         self,
@@ -150,6 +163,7 @@ class CoreCatalogAdapter:
             # Idempotence 2: same external path already linked.
             for version in service.document.versions:
                 if not version.managed and version.path == resolved:
+                    self._bridge_legacy_id(version, legacy_resource_id)
                     return self._version_ref(version)
             version = service.link_external(
                 resolved, name=name, type=kind or None, format=format or None
@@ -169,6 +183,7 @@ class CoreCatalogAdapter:
                     and version.source_uri == resolved
                     and version.sha256 == checksum
                 ):
+                    self._bridge_legacy_id(version, legacy_resource_id)
                     return self._version_ref(version)
             version = service.import_raw(
                 resolved, name=name, type=kind or None, format=format or None
@@ -230,6 +245,7 @@ class CoreCatalogAdapter:
         asset = service._new_asset(name, kind or None, format or None, None)
         service.document.assets.append(asset)
         try:
+            # register_version links the run's output in the same atomic save.
             version = service.register_version(
                 asset.id,
                 path,
@@ -241,9 +257,6 @@ class CoreCatalogAdapter:
             if asset in service.document.assets:
                 service.document.assets.remove(asset)
             raise
-        if version.id not in run.output_version_ids:
-            run.output_version_ids.append(version.id)
-            service._save()
         for tag in tags or []:
             if tag:
                 service.add_tag(tag, version_id=version.id)
@@ -302,6 +315,17 @@ class CoreCatalogAdapter:
         target_version_id: str,
         run_id: str | None = None,
     ) -> LineageEdge:
+        """Record a lineage edge source → target.
+
+        Appending to ``parent_version_ids`` is a lineage-metadata addition,
+        not a payload/version mutation — committed version payloads stay
+        immutable. Self-loops are rejected: a version can never be its own
+        ancestor.
+        """
+        if source_version_id == target_version_id:
+            raise CatalogError(
+                f"Cannot attach lineage from a version to itself: {source_version_id}"
+            )
         service = self._service
         target = service.get_version(target_version_id)
         service.get_version(source_version_id)  # raises if unknown
@@ -326,7 +350,9 @@ class CoreCatalogAdapter:
     ) -> list[DataVersionRef]:
         service = self._service
         by_id = {v.id: v for v in service.document.versions}
-        visited: set[str] = set()
+        # Seed with the start node so a cycle can never list a version as its
+        # own ancestor/descendant.
+        visited: set[str] = {version_id}
         ordered: list[DataVersionRef] = []
         frontier = [version_id]
         while frontier:

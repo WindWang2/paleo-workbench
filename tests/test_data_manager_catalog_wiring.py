@@ -154,13 +154,17 @@ def test_derived_copy_goes_through_core(qtbot, tmp_path, catalog):
     assert runs[0].input_version_ids == [raw_version.id]
     assert runs[0].output_version_ids == [derived_version.id]
 
-    # Legacy ResourceItem companion points at the Core-managed payload.
+    # Legacy ResourceItem companion points at the Core-managed payload, stored
+    # project-relative (the managed payload lives inside the project dir, so
+    # .paleo.json stays relocatable).
     assert len(page.project.resources) == 2
     companion = page.project.resources[1]
     assert companion.name == f"{resource.name}_derived"
     assert companion.artifact_role == "derived"
     assert "派生" in companion.tags
-    assert companion.path == catalog.resolve_path(derived_version).as_posix()
+    assert not Path(companion.path).is_absolute()
+    assert companion.path == derived_version.path
+    assert _project_dir(tmp_path) / companion.path == catalog.resolve_path(derived_version)
     assert companion.checksum == derived_version.sha256
     assert companion.external is False
     assert companion.parsed_summary["catalog_version_id"] == derived_version.id
@@ -275,9 +279,12 @@ def test_materialize_external_via_service(qtbot, tmp_path, catalog):
     assert managed_version.parent_version_ids == [external_version.id]
     assert catalog.resolve_path(managed_version).is_file()
 
-    # Legacy ResourceItem updated to the managed payload.
+    # Legacy ResourceItem updated to the managed payload (project-relative:
+    # the managed snapshot lives inside the project dir).
     assert resource.external is False
-    assert resource.path == catalog.resolve_path(managed_version).as_posix()
+    assert not Path(resource.path).is_absolute()
+    assert resource.path == managed_version.path
+    assert _project_dir(tmp_path) / resource.path == catalog.resolve_path(managed_version)
     assert resource.checksum == managed_version.sha256
 
 

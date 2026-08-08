@@ -88,9 +88,11 @@ def _register_catalog_output(
             linked_id=artifact.linked_id,
             catalog=get_catalog(),
         )
-        # Store the absolute path on the version so integrity resolves on disk;
-        # the ExportArtifact keeps its (possibly relative) path for portability.
-        version.path = catalog_output_path
+        if version is None:
+            # No catalog backend active (no project open) — the domain
+            # ExportArtifact still records the export.
+            artifact.catalog_version_id = None
+            return
         artifact.catalog_version_id = version.version_id
     except Exception:
         # Provenance is best-effort; the domain ExportArtifact is the source of

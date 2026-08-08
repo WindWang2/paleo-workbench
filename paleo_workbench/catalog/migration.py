@@ -12,10 +12,12 @@ The migration is a pure metadata projection: it never mutates ``ResourceItem``,
 never touches ``.paleo.json``, never copies files, and never re-hashes payloads
 (file materialization and integrity work belong to the service layer).
 
-Idempotence: re-running with the same document skips resources whose asset id
-already exists (counted in ``skipped_count``). Determinism: version ids are
-derived from the resource id and timestamps come from an injectable clock, so
-migrating the same resources into fresh documents yields identical documents.
+Idempotence: re-running with the same document skips resources already
+represented in it — either as a projected asset (id == resource id) or as an
+adapter-registered asset bridged via ``legacy_resource_id`` (counted in
+``skipped_count``). Determinism: version ids are derived from the resource id
+and timestamps come from an injectable clock, so migrating the same resources
+into fresh documents yields identical documents.
 """
 
 from __future__ import annotations
@@ -115,6 +117,22 @@ def _legacy_metadata(resource: ResourceItem) -> dict[str, Any]:
     return metadata
 
 
+def _existing_resource_ids(document: CatalogDocument) -> set[str]:
+    """Legacy resource ids already represented in the catalog.
+
+    Includes both projected assets (id == legacy resource id) and assets
+    registered through the adapter/UI import path, which carry a generated id
+    but record the bridge via ``legacy_resource_id``. Without the latter,
+    migration would project a second phantom asset for the same resource.
+    """
+    ids: set[str] = set()
+    for asset in document.assets:
+        ids.add(asset.id)
+        if asset.legacy_resource_id is not None:
+            ids.add(asset.legacy_resource_id)
+    return ids
+
+
 def migrate_resources(
     resources: list[ResourceItem],
     project_path: Path,
@@ -136,7 +154,7 @@ def migrate_resources(
     """
     now_fn = now or _now_iso
     project_dir = project_dir_for(project_path)
-    existing_ids = {asset.id for asset in document.assets}
+    existing_ids = _existing_resource_ids(document)
     report = MigrationReport()
 
     for resource in resources:
@@ -189,5 +207,5 @@ def needs_migration(
     resources: list[ResourceItem], document: CatalogDocument
 ) -> list[ResourceItem]:
     """Return the subset of *resources* not yet projected into *document*."""
-    existing_ids = {asset.id for asset in document.assets}
+    existing_ids = _existing_resource_ids(document)
     return [r for r in resources if r.id not in existing_ids]

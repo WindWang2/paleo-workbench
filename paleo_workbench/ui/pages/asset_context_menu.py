@@ -65,14 +65,21 @@ class AssetContextMenu(QMenu):
             edit_raw.setToolTip("原始数据已锁定，不能直接编辑。请创建派生副本。")
 
         elif view.stage == DataStage.DERIVED:
+            # Reserved for a future version-workflow backend; disabled until
+            # wired (like ctx_edit_original) so clicking never confuses.
             new_ver = self._add_action("ctx_new_version", "新建版本 / 工作副本 (New Version)")
-            new_ver.setToolTip("创建新工作副本，保存时生成新版本")
+            new_ver.setEnabled(False)
+            new_ver.setToolTip("版本工作流后端尚未接入 (reserved)")
 
         elif view.stage == DataStage.INTERMEDIATE:
             promote = self._add_action("ctx_promote", "提升为正式数据 (Promote)")
+            promote.setEnabled(False)
+            promote.setToolTip("提升工作流后端尚未接入 (reserved)")
 
         elif view.stage == DataStage.OUTPUT:
             export_open = self._add_action("ctx_export_open", "导出 / 交付")
+            export_open.setEnabled(False)
+            export_open.setToolTip("交付工作流后端尚未接入 (reserved)")
 
         # External item action (enabled by DataPage when bridged to an
         # unmanaged catalog version; disabled otherwise).

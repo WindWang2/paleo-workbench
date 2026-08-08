@@ -22,6 +22,7 @@ worker thread (all state lives in this object, no globals).
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -79,6 +80,10 @@ class DataCatalogService:
         self.document = document
         self._store = store
         self._index = index
+        # Guards document mutation vs. concurrent readers: the UI hashes
+        # payloads (verify_integrity) on a worker thread while the UI thread
+        # may be saving. Re-entrant so public methods can nest under _save.
+        self._lock = threading.RLock()
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -111,13 +116,14 @@ class DataCatalogService:
         The revision only advances if the canonical save succeeds, so a
         failed save leaves no half-bumped state.
         """
-        self.document.catalog_revision += 1
-        try:
-            self._store.save(self.document)
-        except Exception:
-            self.document.catalog_revision -= 1
-            raise
-        self._sync_index_best_effort()
+        with self._lock:
+            self.document.catalog_revision += 1
+            try:
+                self._store.save(self.document)
+            except Exception:
+                self.document.catalog_revision -= 1
+                raise
+            self._sync_index_best_effort()
 
     def _sync_index_best_effort(self) -> None:
         try:
@@ -295,11 +301,19 @@ class DataCatalogService:
         move: bool = False,
         _restore_payload_to: Path | None = None,
     ) -> DataVersion:
-        """Place *source_path* under managed storage and commit a new version."""
+        """Place *source_path* under managed storage and commit a new version.
+
+        When *run_id* is given, the run's ``output_version_ids`` is updated in
+        the SAME save as the version commit (atomic run-output linkage), and
+        restored on rollback.
+        """
         asset = self._asset_or_raise(asset_id)
         source_path = Path(source_path)
         if not source_path.is_file():
             raise CatalogError(f"Source file not found: {source_path}")
+        run: DataRun | None = None
+        if run_id is not None:
+            run = self.get_run(run_id)  # raises before any payload is placed
         previous_current = asset.current_version_id
         version, payload = self._build_version(
             asset, source_path, stage,
@@ -309,9 +323,15 @@ class DataCatalogService:
         )
         self.document.versions.append(version)
         asset.current_version_id = version.id
+        run_output_added = False
+        if run is not None and version.id not in run.output_version_ids:
+            run.output_version_ids.append(version.id)
+            run_output_added = True
         try:
             self._save()
         except Exception:
+            if run is not None and run_output_added:
+                run.output_version_ids.remove(version.id)
             self._rollback(
                 versions=[version], payload=payload,
                 restore_current=(asset, previous_current),
@@ -605,12 +625,13 @@ class DataCatalogService:
         ``extra_parameters`` are merged into the run's parameters (used by the
         CatalogPort adapter to record finish timestamps).
         """
-        run = self.get_run(run_id)
-        run.status = status
-        if extra_parameters:
-            run.parameters.update(extra_parameters)
-        self._save()
-        return run
+        with self._lock:
+            run = self.get_run(run_id)
+            run.status = status
+            if extra_parameters:
+                run.parameters.update(extra_parameters)
+            self._save()
+            return run
 
     # -- lineage ---------------------------------------------------------------
 
@@ -641,10 +662,11 @@ class DataCatalogService:
         Reports only; a mismatch never updates the catalog. Hashing streams in
         chunks; wrap in a worker thread for large batches in UI contexts.
         """
-        if version_id is not None:
-            versions = [self._version_or_raise(version_id)]
-        else:
-            versions = list(self.document.versions)
+        with self._lock:
+            if version_id is not None:
+                versions = [self._version_or_raise(version_id)]
+            else:
+                versions = list(self.document.versions)
         report = IntegrityReport()
         for version in versions:
             payload = self.resolve_path(version)

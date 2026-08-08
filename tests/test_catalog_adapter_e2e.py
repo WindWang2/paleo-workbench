@@ -464,3 +464,124 @@ def test_get_catalog_none_after_reset_and_lifecycle_degrades(
     src = tmp_path / "orphan.las"
     resource = _make_resource(src, content=b"orphan")
     assert register_resource_input(resource) is None
+
+
+# ==================================== idempotent-hit legacy bridge (Review)
+
+
+def test_idempotent_external_hit_refreshes_legacy_bridge(tmp_path: Path, catalog):
+    """An external dedup hit must record legacy_resource_id when the caller
+    provides one and the asset lacks it (protocol semantics, matches the fake)."""
+    ext_path = tmp_path / "external" / "ext.las"
+    ext_path.parent.mkdir(parents=True)
+    ext_path.write_bytes(b"external")
+
+    # First registration without a legacy id.
+    ref1 = catalog.register_input(
+        name="ext.las", path=str(ext_path), checksum=None, external=True
+    )
+    assert catalog.resolve_legacy_resource("res_late") is None
+
+    # Re-register the same external path WITH a legacy id → same version, and
+    # the bridge is now recorded.
+    ref2 = catalog.register_input(
+        name="ext.las",
+        path=str(ext_path),
+        checksum=None,
+        external=True,
+        legacy_resource_id="res_late",
+    )
+    assert ref2.version_id == ref1.version_id
+    bridged = catalog.resolve_legacy_resource("res_late")
+    assert bridged is not None
+    assert bridged.version_id == ref1.version_id
+
+
+def test_idempotent_managed_hit_refreshes_legacy_bridge(tmp_path: Path, catalog):
+    """Same for the managed (source_uri + sha256) dedup path."""
+    import hashlib
+
+    src = tmp_path / "incoming" / "managed.las"
+    src.parent.mkdir(parents=True)
+    content = b"managed bytes"
+    src.write_bytes(content)
+    checksum = hashlib.sha256(content).hexdigest()
+
+    ref1 = catalog.register_input(
+        name="managed.las", path=str(src), checksum=checksum, external=False
+    )
+    ref2 = catalog.register_input(
+        name="managed.las",
+        path=str(src),
+        checksum=checksum,
+        external=False,
+        legacy_resource_id="res_managed",
+    )
+    assert ref2.version_id == ref1.version_id
+    bridged = catalog.resolve_legacy_resource("res_managed")
+    assert bridged is not None
+    assert bridged.version_id == ref1.version_id
+
+
+def test_idempotent_hit_never_overwrites_existing_bridge(tmp_path: Path, catalog):
+    """First wins: an asset that already carries a legacy id keeps it."""
+    ext_path = tmp_path / "external" / "kept.las"
+    ext_path.parent.mkdir(parents=True)
+    ext_path.write_bytes(b"external")
+
+    ref1 = catalog.register_input(
+        name="kept.las",
+        path=str(ext_path),
+        checksum=None,
+        external=True,
+        legacy_resource_id="res_first",
+    )
+    ref2 = catalog.register_input(
+        name="kept.las",
+        path=str(ext_path),
+        checksum=None,
+        external=True,
+        legacy_resource_id="res_second",
+    )
+    assert ref2.version_id == ref1.version_id
+    assert catalog.resolve_legacy_resource("res_first") is not None
+    assert catalog.resolve_legacy_resource("res_second") is None
+
+
+# ============================================ lineage guard regressions (Review)
+
+
+def test_attach_lineage_rejects_self_loop(tmp_path: Path, catalog):
+    from paleo_workbench.catalog.models import CatalogError
+
+    raw = register_resource_input(
+        _make_resource(tmp_path / "incoming" / "self.las", content=b"self")
+    )
+    with pytest.raises(CatalogError):
+        catalog.attach_lineage(
+            source_version_id=raw.version_id, target_version_id=raw.version_id
+        )
+
+
+def test_query_lineage_cycle_never_lists_start_as_own_ancestor(
+    tmp_path: Path, catalog
+):
+    """Even with a manual cyclic edge, a version is never its own ancestor."""
+    r1 = register_resource_input(
+        _make_resource(tmp_path / "incoming" / "a.las", name="a.las", content=b"a")
+    )
+    r2 = register_resource_input(
+        _make_resource(tmp_path / "incoming" / "b.las", name="b.las", content=b"b")
+    )
+    catalog.attach_lineage(source_version_id=r2.version_id, target_version_id=r1.version_id)
+    catalog.attach_lineage(source_version_id=r1.version_id, target_version_id=r2.version_id)
+
+    ancestors = catalog.query_lineage(r1.version_id, direction="ancestors")
+    ancestor_ids = {a.version_id for a in ancestors}
+    assert r2.version_id in ancestor_ids
+    assert r1.version_id not in ancestor_ids
+
+    descendants = catalog.query_lineage(r1.version_id, direction="descendants")
+    descendant_ids = {d.version_id for d in descendants}
+    assert r2.version_id in descendant_ids
+    assert r1.version_id not in descendant_ids

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
-from paleo_workbench.project.paths import resolve_project_path
+from paleo_workbench.project.paths import relativize_path, resolve_project_path
 from paleo_workbench.resources.export_service import (
     default_export_dir,
     export_asset_to_path,
@@ -559,9 +559,14 @@ class DataPage(QWidget):
                 generator="data_manager",
             )
             managed_path = service.resolve_path(version)
+            # Store project-relative when the payload is inside the project
+            # dir (managed storage always is) so .paleo.json stays relocatable.
+            stored_path, _outside = relativize_path(
+                managed_path.as_posix(), service.project_path
+            )
             return ResourceItem(
                 name=f"{asset.name}_derived",
-                path=managed_path.as_posix(),
+                path=stored_path,
                 type=asset.type,
                 format=asset.format,
                 crs=asset.crs,
@@ -604,8 +609,12 @@ class DataPage(QWidget):
             self._set_action_status(f"纳管失败: {exc}")
             return
         # Keep the legacy ResourceItem in sync with the new managed version.
+        # Project-relative storage keeps .paleo.json relocatable.
+        stored_path, _outside = relativize_path(
+            managed_path.as_posix(), service.project_path
+        )
         asset.external = False
-        asset.path = managed_path.as_posix()
+        asset.path = stored_path
         asset.checksum = version.sha256
         self._refresh()
         self._set_action_status(f"已纳管至项目: {asset.name}")
@@ -763,15 +772,23 @@ class DataPage(QWidget):
             self._refresh()
 
     def _classify_selected_asset(self, new_type: str) -> None:
-        asset = self._selected_asset
+        asset = self._unwrap_asset(self._selected_asset)
         if not isinstance(asset, ResourceItem):
             return
         old_type = asset.type
+        old_tags = list(asset.tags or [])
         asset.type = new_type
         role = ROLE_BY_TYPE.get(new_type)
         asset.artifact_role = role
         other = [t for t in (asset.tags or []) if t not in ROLE_BY_TYPE.values()]
         asset.tags = ([role] if role else []) + other
+        # Mirror the role-tag rewrite into the catalog (best-effort).
+        for tag in old_tags:
+            if tag not in asset.tags:
+                self._mirror_tag_to_catalog(asset, tag, add=False)
+        for tag in asset.tags:
+            if tag not in old_tags:
+                self._mirror_tag_to_catalog(asset, tag, add=True)
         self._refresh()
         old_label = RESOURCE_TYPE_LABELS.get(old_type, old_type)
         new_label = RESOURCE_TYPE_LABELS.get(new_type, new_type)
@@ -977,6 +994,11 @@ class DataPage(QWidget):
     def verify_assets(self, items: list[object]) -> None:
         if not items:
             self._set_action_status("没有可校验的数据资产")
+            return
+        if self._verify_job.is_running:
+            # Re-clicking 校验 while a verify job is finishing must not raise
+            # (OwnedWorkerJob owns one thread at a time).
+            self._set_action_status("正在校验，请稍候")
             return
 
         # Catalog-bridged assets are verified via the Core service (the

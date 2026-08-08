@@ -315,3 +315,32 @@ def test_migration_never_mutates_resource_items(tmp_path: Path):
     migrate_resources([resource], project, document)
 
     assert resource.model_dump() == before
+
+
+def test_migration_skips_assets_bridged_by_legacy_resource_id(tmp_path: Path):
+    """Regression: an asset registered via the adapter/UI import path has a
+    generated id but ``legacy_resource_id == resource.id``. Migration must not
+    project a second phantom asset for the same resource on reopen."""
+    from paleo_workbench.catalog.models import DataAsset
+
+    project = tmp_path / "proj.paleo.json"
+    document = CatalogDocument()
+    # Pre-registered through the import path: generated id, bridge set.
+    document.assets.append(
+        DataAsset(
+            id="asset_generated_1",
+            name="well.las",
+            type="well_log",
+            legacy_resource_id="res_x",
+        )
+    )
+
+    resource = _resource(id_="res_x")
+    report = migrate_resources([resource], project, document)
+
+    assert report.migrated_count == 0
+    assert report.skipped_count == 1
+    assert len(document.assets) == 1
+    assert document.versions == []
+    # needs_migration agrees.
+    assert needs_migration([resource], document) == []
