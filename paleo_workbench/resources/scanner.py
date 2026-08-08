@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.project.models import ResourceItem
 from paleo_workbench.project.paths import relativize_path
 from paleo_workbench.resources.classifier import classify_path
 
 
 def _checksum(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    # Unified implementation lives in paleo_workbench.catalog.checksum so
+    # scanner/import/catalog hashing can never diverge (ADR 0056).
+    return sha256_file(path)
 
 
 def _process_file(
