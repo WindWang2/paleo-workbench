@@ -92,6 +92,33 @@ class WellLogPredictionPage(QWidget):
             task, bound_las=self.canvas_panel.has_bound_las()
         )
 
+    def set_selected_well(self, well_name: str) -> bool:
+        """Cross-page seam: select the prediction task whose name matches *well_name*.
+
+        Returns True when a matching task was found and selected. Used by the
+        workflow controller to sync a well picked on the 3D page into this page.
+        """
+        if not well_name:
+            return False
+        for index, task in enumerate(self._tasks):
+            if getattr(task, "name", None) == well_name:
+                # Set the list selection synchronously: reset to -1 first so the
+                # target row change always fires (QListWidget won't emit
+                # currentRowChanged for a no-op set), then select the item.
+                lst = self.task_panel.task_list
+                item = lst.item(index)
+                lst.setCurrentRow(-1)
+                if item is not None:
+                    lst.setCurrentItem(item)
+                self._selected_index = index
+                task = self._current_task()
+                self.canvas_panel.update_state(task, project=self._project)
+                self.evidence_panel.update_state(
+                    task, bound_las=self.canvas_panel.has_bound_las()
+                )
+                return True
+        return False
+
     def _on_run(self) -> None:
         if self._project is None:
             QMessageBox.warning(self, "测井预测", "未绑定工程，无法运行")

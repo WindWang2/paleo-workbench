@@ -11,10 +11,10 @@ import numpy as np
 
 from PySide6.QtCore import QObject, Signal
 
-from paleo_workbench.viz.geomodel import (
+from geoviz import (
     generate_cylinder_geometry,
-    generate_tube_geometry,
     generate_fault_geometry,
+    generate_tube_geometry,
 )
 from paleo_workbench.viz.geomodel.models import GridSpec
 
