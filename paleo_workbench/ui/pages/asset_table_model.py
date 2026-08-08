@@ -16,6 +16,8 @@ from paleo_workbench.ui.pages.data_view_models import (
     IntegrityState,
     RESOURCE_TYPE_DISPLAY_LABELS,
     asset_view_from_object,
+    stage_icon,
+    stage_label,
 )
 from paleo_workbench.ui.tokens import format_size
 
@@ -153,7 +155,7 @@ class AssetTableModel(QAbstractTableModel):
         if key == "type":
             return view.type_label
         if key == "stage":
-            return f"{view.stage.icon_symbol} {view.stage.label}"
+            return f"{stage_icon(view.stage)} {stage_label(view.stage)}"
         if key == "version":
             return view.current_version
         if key == "tags":
@@ -172,7 +174,7 @@ class AssetTableModel(QAbstractTableModel):
             if isinstance(view.raw_asset, ResourceItem):
                 role = view.raw_asset.artifact_role or "input"
                 return {"input": "输入", "derived": "成果", "export": "成果"}.get(role, role)
-            return view.stage.label
+            return stage_label(view.stage)
         if key == "size":
             return view.size_formatted
         if key == "modified":
@@ -185,7 +187,7 @@ class AssetTableModel(QAbstractTableModel):
 
     def _format_cell_tooltip(self, view: AssetView, key: str) -> str:
         if key == "stage":
-            return f"生命周期: {view.stage.label} ({view.stage.value})"
+            return f"生命周期: {stage_label(view.stage)} ({view.stage.value})"
         if key == "integrity":
             return f"完整性: {view.integrity_state.label}\n校验和: {view.checksum_display}"
         if key == "path":

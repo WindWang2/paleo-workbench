@@ -24,13 +24,14 @@ def test_ui2_lifecycle_navigation(qtbot):
     page.project.resources.extend([res_raw, res_derived])
     page._refresh()
 
-    # Filter by stage RAW
-    page.navigation_tree.filter_query_changed.emit(FilterQuery(node_type="stage", node_value="RAW"))
+    # Filter by stage RAW (Core enum values are lowercase since the DataStage
+    # unification — node_value must match DataStage.RAW.value == "raw")
+    page.navigation_tree.filter_query_changed.emit(FilterQuery(node_type="stage", node_value=DataStage.RAW.value))
     assert page.asset_table.visible_asset_count() == 1
     assert page.asset_table.asset_at(0).name == "raw1.las"
 
     # Filter by stage DERIVED
-    page.navigation_tree.filter_query_changed.emit(FilterQuery(node_type="stage", node_value="DERIVED"))
+    page.navigation_tree.filter_query_changed.emit(FilterQuery(node_type="stage", node_value=DataStage.DERIVED.value))
     assert page.asset_table.visible_asset_count() == 1
     assert page.asset_table.asset_at(0).name == "der1.las"
 
@@ -65,8 +66,8 @@ def test_ui2_combined_filtering(qtbot):
     page.project.resources.extend([res1, res2])
     page._refresh()
 
-    # Combined stage=RAW and tag=重点
-    query = FilterQuery(node_type="stage", node_value="RAW", tag="重点")
+    # Combined stage=RAW and tag=重点 (lowercase Core enum value)
+    query = FilterQuery(node_type="stage", node_value=DataStage.RAW.value, tag="重点")
     page.asset_table.set_filter_query(query)
     assert page.asset_table.visible_asset_count() == 1
     assert page.asset_table.asset_at(0).name == "Target1.las"

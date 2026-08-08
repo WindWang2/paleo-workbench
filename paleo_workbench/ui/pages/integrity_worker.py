@@ -1,4 +1,8 @@
 """Integrity Verification Worker: Non-blocking background checksum & file integrity verification.
+
+Catalog-bridged assets are verified through the Core ``DataCatalogService``
+(the lifecycle authority) — the UI never recomputes or overwrites their
+recorded checksums. Un-bridged assets keep the legacy self-hashing path.
 """
 from __future__ import annotations
 
@@ -11,6 +15,14 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.data_view_models import IntegrityState, asset_view_from_object
+
+# Core verify status → presentation state.
+_CATALOG_STATUS_TO_STATE = {
+    "verified": IntegrityState.VERIFIED,
+    "modified": IntegrityState.MODIFIED,
+    "missing": IntegrityState.MISSING,
+    "unknown": IntegrityState.UNKNOWN,
+}
 
 
 @dataclass
@@ -66,10 +78,38 @@ class IntegrityWorker(QObject):
         assets: Sequence[object],
         project_root: Path | None = None,
         parent=None,
+        *,
+        catalog_service=None,
+        bridged_versions: dict[str, str] | None = None,
     ):
         super().__init__(parent)
         self._assets = list(assets)
         self._project_root = project_root
+        # Optional Core catalog wiring: asset id -> catalog version id for
+        # assets whose integrity is owned by the DataCatalogService.
+        self._catalog_service = catalog_service
+        self._bridged_versions = dict(bridged_versions or {})
+
+    def _verify_via_catalog(self, version_id: str, view_name: str, report: IntegrityCheckReport) -> IntegrityState:
+        """Verify a catalog-managed version via the Core service.
+
+        Reports only — a mismatch never updates the recorded checksum, and the
+        UI never proposes a checksum update for catalog-managed versions.
+        """
+        core_report = self._catalog_service.verify_integrity(version_id)
+        status = core_report.status_for(version_id)
+        state = _CATALOG_STATUS_TO_STATE.get(status, IntegrityState.UNKNOWN)
+        if state == IntegrityState.VERIFIED:
+            report.verified_count += 1
+        elif state == IntegrityState.MODIFIED:
+            report.modified_count += 1
+            report.details.append(f"{view_name}: 校验和不匹配 (目录记录保持不变)")
+        elif state == IntegrityState.MISSING:
+            report.missing_count += 1
+            report.details.append(f"{view_name}: 文件不存在 (catalog version {version_id})")
+        else:
+            report.unknown_count += 1
+        return state
 
     @Slot()
     def run(self) -> None:
@@ -79,6 +119,12 @@ class IntegrityWorker(QObject):
             for idx, asset in enumerate(self._assets):
                 view = asset_view_from_object(asset, project_root=self._project_root)
                 self.progress.emit(idx + 1, len(self._assets), view.name)
+
+                catalog_version_id = self._bridged_versions.get(view.id)
+                if catalog_version_id is not None and self._catalog_service is not None:
+                    state = self._verify_via_catalog(catalog_version_id, view.name, report)
+                    report.results[view.id] = state
+                    continue
 
                 path_obj = Path(view.path)
                 if not path_obj.is_absolute() and self._project_root:

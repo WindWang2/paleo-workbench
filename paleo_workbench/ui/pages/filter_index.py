@@ -12,6 +12,7 @@ from paleo_workbench.ui.pages.data_view_models import (
     DataStage,
     IntegrityState,
     asset_view_from_object,
+    stage_label,
 )
 
 ISSUE_STATUSES = {"missing", "warning", "failed", "error"}
@@ -140,13 +141,16 @@ class FilterIndex:
     def _parse_legacy_category(self, category: str, search_text: str) -> FilterQuery:
         if category in (None, "", "全部"):
             return FilterQuery(node_type="all", search_text=search_text)
-        if category in (DataStage.RAW.value, DataStage.RAW.label, "原始输入"):
+        # Match the Core enum value (lowercase), the zh label, and the legacy
+        # uppercase name so old saved filters keep resolving after the DataStage
+        # unification (ADR 0056: values are now "raw"/"derived"/...).
+        if category in (DataStage.RAW.value, stage_label(DataStage.RAW), "原始输入", "RAW"):
             return FilterQuery(node_type="stage", node_value=DataStage.RAW.value, search_text=search_text)
-        if category in (DataStage.DERIVED.value, DataStage.DERIVED.label, "派生数据"):
+        if category in (DataStage.DERIVED.value, stage_label(DataStage.DERIVED), "派生数据", "DERIVED"):
             return FilterQuery(node_type="stage", node_value=DataStage.DERIVED.value, search_text=search_text)
-        if category in (DataStage.INTERMEDIATE.value, DataStage.INTERMEDIATE.label, "中间结果"):
+        if category in (DataStage.INTERMEDIATE.value, stage_label(DataStage.INTERMEDIATE), "中间结果", "INTERMEDIATE"):
             return FilterQuery(node_type="stage", node_value=DataStage.INTERMEDIATE.value, search_text=search_text)
-        if category in (DataStage.OUTPUT.value, DataStage.OUTPUT.label, "输出成果"):
+        if category in (DataStage.OUTPUT.value, stage_label(DataStage.OUTPUT), "输出成果", "OUTPUT"):
             return FilterQuery(node_type="stage", node_value=DataStage.OUTPUT.value, search_text=search_text)
         if category.startswith("tag:") or category.startswith("#"):
             tag_name = category.split(":", 1)[-1].lstrip("#")
@@ -159,7 +163,7 @@ class FilterIndex:
 
     def _haystack(self, view: AssetView) -> str:
         status_zh = _STATUS_LABELS.get(view.status, view.status)
-        stage_zh = view.stage.label
+        stage_zh = stage_label(view.stage)
         integrity_zh = view.integrity_state.label
         res_type_zh = RESOURCE_TYPE_LABELS.get(view.type, view.type)
 

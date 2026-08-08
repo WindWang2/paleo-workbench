@@ -31,6 +31,8 @@ from paleo_workbench.ui.pages.data_view_models import (
     AssetView,
     IntegrityState,
     asset_view_from_object,
+    stage_icon,
+    stage_label,
 )
 from paleo_workbench.ui.pages.preview_widgets import TablePreviewWidget
 from paleo_workbench.ui.pages.tag_widgets import TagContainerWidget
@@ -162,7 +164,7 @@ class InspectorPanel(QFrame):
 
         view = asset_view_from_object(asset)
         self._current_view = view
-        self.title_label.setText(f"{view.stage.icon_symbol} {view.name}")
+        self.title_label.setText(f"{stage_icon(view.stage)} {view.name}")
 
         self._populate_overview(view)
         self._populate_metadata(view)
@@ -176,7 +178,7 @@ class InspectorPanel(QFrame):
             ("逻辑名称", view.name),
             ("类型", view.type_label),
             ("格式", view.format),
-            ("生命阶段", f"{view.stage.icon_symbol} {view.stage.label}"),
+            ("生命阶段", f"{stage_icon(view.stage)} {stage_label(view.stage)}"),
             ("当前版本", view.current_version),
             ("管理方式", "受管 (Managed)" if view.managed else "外部 (External)"),
             ("完整性状态", f"{view.integrity_state.icon_symbol} {view.integrity_state.label}"),
@@ -206,7 +208,7 @@ class InspectorPanel(QFrame):
         for r, ver in enumerate(view.versions):
             curr_str = f"★ {ver.version_id}" if ver.is_current else ver.version_id
             self.versions_table.setItem(r, 0, QTableWidgetItem(curr_str))
-            self.versions_table.setItem(r, 1, QTableWidgetItem(ver.stage.label))
+            self.versions_table.setItem(r, 1, QTableWidgetItem(stage_label(ver.stage)))
             self.versions_table.setItem(r, 2, QTableWidgetItem(ver.checksum_display))
             self.versions_table.setItem(r, 3, QTableWidgetItem(ver.created_at))
 

@@ -16,42 +16,44 @@ from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.tokens import format_size
 
+# The single authoritative lifecycle enum lives in the Data Catalog Core
+# (ADR 0056, lowercase values "raw"/"derived"/"intermediate"/"output").
+# Re-exported here so existing UI imports keep working.
+from paleo_workbench.catalog import DataStage  # noqa: F401
 
-class DataStage(str, Enum):
-    RAW = "RAW"
-    DERIVED = "DERIVED"
-    INTERMEDIATE = "INTERMEDIATE"
-    OUTPUT = "OUTPUT"
+# Presentation data for the Core DataStage — UI-only, keyed on the Core enum.
+STAGE_LABELS = {
+    DataStage.RAW: "原始输入",
+    DataStage.DERIVED: "派生数据",
+    DataStage.INTERMEDIATE: "中间结果",
+    DataStage.OUTPUT: "输出成果",
+}
 
-    @property
-    def label(self) -> str:
-        labels = {
-            DataStage.RAW: "原始输入",
-            DataStage.DERIVED: "派生数据",
-            DataStage.INTERMEDIATE: "中间结果",
-            DataStage.OUTPUT: "输出成果",
-        }
-        return labels.get(self, self.value)
+STAGE_ICONS = {
+    DataStage.RAW: "🔒",
+    DataStage.DERIVED: "🌿",
+    DataStage.INTERMEDIATE: "⚡",
+    DataStage.OUTPUT: "📦",
+}
 
-    @property
-    def icon_symbol(self) -> str:
-        symbols = {
-            DataStage.RAW: "🔒",
-            DataStage.DERIVED: "🌿",
-            DataStage.INTERMEDIATE: "⚡",
-            DataStage.OUTPUT: "📦",
-        }
-        return symbols.get(self, "📄")
+STAGE_COLORS = {
+    DataStage.RAW: tokens.PRIMARY,
+    DataStage.DERIVED: tokens.SUCCESS,
+    DataStage.INTERMEDIATE: "#E6A23C",  # Warm Amber
+    DataStage.OUTPUT: "#409EFF",       # Bright Cyan-Blue
+}
 
-    @property
-    def color_token(self) -> str:
-        colors = {
-            DataStage.RAW: tokens.PRIMARY,
-            DataStage.DERIVED: tokens.SUCCESS,
-            DataStage.INTERMEDIATE: "#E6A23C",  # Warm Amber
-            DataStage.OUTPUT: "#409EFF",       # Bright Cyan-Blue
-        }
-        return colors.get(self, tokens.TEXT_SECONDARY)
+
+def stage_label(stage: DataStage) -> str:
+    return STAGE_LABELS.get(stage, str(stage.value))
+
+
+def stage_icon(stage: DataStage) -> str:
+    return STAGE_ICONS.get(stage, "📄")
+
+
+def stage_color(stage: DataStage) -> str:
+    return STAGE_COLORS.get(stage, tokens.TEXT_SECONDARY)
 
 
 class IntegrityState(str, Enum):
@@ -194,7 +196,7 @@ class AssetView:
 
     @property
     def stage_label(self) -> str:
-        return self.stage.label
+        return stage_label(self.stage)
 
     @property
     def integrity_label(self) -> str:
@@ -422,3 +424,89 @@ def asset_view_from_object(asset: Any, project_root: Path | None = None) -> Asse
         lineage=LineageView(),
         raw_asset=asset,
     )
+
+
+def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> AssetView:
+    """Enrich a presentation ``AssetView`` with authoritative catalog data.
+
+    ``service`` is the Core ``DataCatalogService``; ``asset_id`` is the catalog
+    asset bridged to the legacy resource behind *view*. Enriches versions,
+    tags, checksum, stage, and lineage in place and returns the same view.
+    Any catalog failure leaves the (legacy) view untouched — presentation
+    must never break because the catalog is unavailable.
+    """
+    try:
+        asset = service.get_asset(asset_id)
+    except Exception:
+        return view
+
+    # --- versions ---------------------------------------------------------
+    try:
+        versions = service.list_versions(asset_id)
+    except Exception:
+        versions = []
+    current_version = None
+    if versions:
+        view.versions = [
+            VersionView(
+                version_id=v.id,
+                is_current=(v.id == asset.current_version_id),
+                stage=v.stage,
+                created_at=v.created_at or "—",
+                checksum=v.sha256,
+                parent_version_id=v.parent_version_ids[0] if v.parent_version_ids else None,
+                managed=v.managed,
+                source_note=f"catalog v{v.version_number}",
+            )
+            for v in versions
+        ]
+        if asset.current_version_id:
+            view.current_version = asset.current_version_id
+        current_version = next(
+            (v for v in versions if v.id == asset.current_version_id), None
+        )
+        if current_version is not None:
+            view.stage = current_version.stage
+            if current_version.sha256:
+                view.checksum = current_version.sha256
+
+    # --- tags -------------------------------------------------------------
+    try:
+        tag_ids = service.document.asset_tags.get(asset_id, [])
+        by_id = {t.id: t for t in service.document.tags}
+        catalog_tags = [
+            by_id[tid].display_name or by_id[tid].name
+            for tid in tag_ids
+            if tid in by_id
+        ]
+    except Exception:
+        catalog_tags = []
+    if catalog_tags:
+        view.tags = catalog_tags
+        view.normalized_tags = {t.strip().lower() for t in catalog_tags if t}
+
+    # --- lineage ----------------------------------------------------------
+    if asset.current_version_id:
+        try:
+            lineage = service.get_lineage(asset.current_version_id)
+        except Exception:
+            lineage = None
+        if lineage is not None:
+
+            def _version_name(v: Any) -> str:
+                try:
+                    return service.get_asset(v.asset_id).name
+                except Exception:
+                    return v.id
+
+            run = lineage.get("run")
+            view.lineage = LineageView(
+                parent_ids=[v.id for v in lineage.get("parents", [])],
+                parent_names=[_version_name(v) for v in lineage.get("parents", [])],
+                run_id=run.id if run is not None else None,
+                workflow_step=run.operation if run is not None else None,
+                child_ids=[v.id for v in lineage.get("children", [])],
+                child_names=[_version_name(v) for v in lineage.get("children", [])],
+            )
+
+    return view

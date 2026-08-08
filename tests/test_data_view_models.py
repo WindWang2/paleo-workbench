@@ -3,6 +3,9 @@ from pathlib import Path
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.data_view_models import (
+    STAGE_COLORS,
+    STAGE_ICONS,
+    STAGE_LABELS,
     AssetView,
     DataStage,
     IntegrityState,
@@ -15,13 +18,22 @@ from paleo_workbench.ui.pages.data_view_models import (
 
 
 def test_data_stage_and_integrity_enums():
-    assert DataStage.RAW.label == "原始输入"
-    assert DataStage.DERIVED.label == "派生数据"
-    assert DataStage.INTERMEDIATE.label == "中间结果"
-    assert DataStage.OUTPUT.label == "输出成果"
+    # DataStage is now the single Core enum (paleo_workbench.catalog.models,
+    # ADR 0056) with lowercase values; presentation data lives in the
+    # STAGE_* mappings instead of enum properties.
+    assert DataStage.RAW.value == "raw"
+    assert DataStage.DERIVED.value == "derived"
+    assert DataStage.INTERMEDIATE.value == "intermediate"
+    assert DataStage.OUTPUT.value == "output"
 
-    assert DataStage.RAW.icon_symbol == "🔒"
-    assert DataStage.DERIVED.icon_symbol == "🌿"
+    assert STAGE_LABELS[DataStage.RAW] == "原始输入"
+    assert STAGE_LABELS[DataStage.DERIVED] == "派生数据"
+    assert STAGE_LABELS[DataStage.INTERMEDIATE] == "中间结果"
+    assert STAGE_LABELS[DataStage.OUTPUT] == "输出成果"
+
+    assert STAGE_ICONS[DataStage.RAW] == "🔒"
+    assert STAGE_ICONS[DataStage.DERIVED] == "🌿"
+    assert set(STAGE_COLORS) == set(DataStage)
 
     assert IntegrityState.VERIFIED.label == "已校验"
     assert IntegrityState.MODIFIED.label == "已修改"

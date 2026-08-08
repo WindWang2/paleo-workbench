@@ -74,11 +74,12 @@ class AssetContextMenu(QMenu):
         elif view.stage == DataStage.OUTPUT:
             export_open = self._add_action("ctx_export_open", "导出 / 交付")
 
-        # External item action
+        # External item action (enabled by DataPage when bridged to an
+        # unmanaged catalog version; disabled otherwise).
         if not view.managed:
             materialize = self._add_action("ctx_materialize", "纳管至项目 (Import into Project)")
             materialize.setEnabled(False)
-            materialize.setToolTip("当前分支后端为 external 链接模式")
+            materialize.setToolTip("需连接数据目录后端以纳管外部数据")
 
         # 3. 校验完整性 (Verify Integrity)
         verify = self._add_action("ctx_verify", "校验完整性 (Verify Integrity)")
