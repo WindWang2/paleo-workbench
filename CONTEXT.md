@@ -17,7 +17,18 @@ An architectural invariant requiring that every native C++ algorithm has an iden
 A context-manager seam (`with native_backend.disabled_acceleration():`) allowing tests and diagnostic code to temporarily bypass C++ native extensions and execute pure-Python fallback paths cleanly without monkey-patching private module variables.
 
 ### DataAssetRegistry
-A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_registry.py`) that encapsulates asset classification, directory scanning, format provider registration (`FormatSpec`), preview widget parsing, and export formatting behind a small 4-method interface (`inspect`, `scan_directory`, `parse_preview`, `export`).
+A deep, unified asset pipeline module (`paleo_workbench/resources/data_asset_registry.py`) that encapsulates asset classification, directory scanning, format provider registration (`FormatSpec`), preview widget parsing, and export formatting behind a small 4-method interface (`inspect`, `scan_directory`, `parse_preview`, `export`). It is a format/IO registry — NOT the data lifecycle catalog.
+
+### DataCatalogService
+The single write entry point for the Data Catalog / Data Lifecycle Core (`paleo_workbench/catalog/service.py`, ADR 0056). Manages `DataAsset` + immutable `DataVersion` + `DataRun` (provenance) + `Tag` behind a small stable API (`import_raw`, `link_external`, `materialize_external`, `create_derived`, `create_working_copy`, `commit_working_copy`, `register_intermediate/output/run`, tag CRUD, `get_lineage`, `verify_integrity`, `rebuild_index`, `migrate_legacy_resources`). Invariants: managed RAW versions immutable (SHA-256 is truth; read-only bit is only an accident guard); every committed version immutable — change produces a new version; lifecycle `DataStage` (RAW/DERIVED/INTERMEDIATE/OUTPUT) is a formal enum, never a tag. UI/business code must not bypass it for cataloged data.
+_Avoid_: 直接 `project.resources.append(...)` 或自写 artifact 文件代替 Catalog 写入
+
+### Canonical Catalog Store vs SQLite Index
+Single-source-of-truth split (ADR 0056): `<project>.artifacts/metadata/catalog.json` (atomic write, `catalog_revision`) is the portable canonical master for assets/versions/runs/tags; `<project>.artifacts/metadata/catalog.sqlite` is a rebuildable local query index only — missing/stale/corrupt → safe rebuild, never blocks project open. `.paleo.json` `resources[]` remains the master for legacy `ResourceItem`; migration projects them deterministically/idempotently with asset id = legacy resource id.
+_Avoid_: 双主结构（.paleo.json 与 SQLite 各自为 master）
+
+### Managed Storage Layout
+`<project>.artifacts/{raw,derived,intermediate,outputs,working,metadata,trash}` (ADR 0056); managed payloads at `{stage}/{asset_id}/{version_id}/{filename}`, stored project-relative. Legacy `factor_maps/predictions/paleomaps/qc/exports` are not relocated; mapping is incremental. Managed import = hash-while-copy single pass + atomic placement; working copies are real copies, never hardlinks.
 
 ### VisualizationWorkspace
 A deep composite visualization module (`paleo_workbench/ui/pages/composite_visualization_panel.py`) that encapsulates multi-tab widget instantiation, dataset payload routing, synchronized cross-canvas viewports, and snapshot vector/raster exports behind a 2-method interface (`load`, `export_snapshot`), replacing shallow host adapters.

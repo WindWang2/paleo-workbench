@@ -9,12 +9,12 @@ from dataclasses import replace
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
+    QApplication, QDialog, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
     QWidget,
 )
 
 from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
-from paleo_workbench.project.paths import resolve_project_path
+from paleo_workbench.project.paths import relativize_path, resolve_project_path
 from paleo_workbench.resources.export_service import (
     default_export_dir,
     export_asset_to_path,
@@ -29,15 +29,22 @@ from paleo_workbench.resources.import_service import (
 from paleo_workbench.resources.io_registry import ROLE_BY_TYPE
 from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
 from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.data_toolbar import DataToolbar
+from paleo_workbench.ui.pages.data_view_models import (
+    AssetView,
+    asset_view_from_object,
+    enrich_view_from_catalog,
+)
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.filter_index import CATEGORIES
+from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport, IntegrityWorker
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
-from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
+from paleo_workbench.ui.pages.tag_widgets import TagInputDialog
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
 
@@ -76,13 +83,14 @@ class DataPage(QWidget):
         super().__init__(parent)
         self.setObjectName("DataPage")
         self.project = project or ProjectDocument.new("Untitled Project")
-        # Absolute path to the open ``*.paleo.json`` (None when unsaved).
         self.project_path: Path | None = None
         self._resources = self.project.resources
         self._artifacts = self.project.export_artifacts
         self._selected_asset: object | None = None
+        self._selected_assets: list[object] = []
         self._import_job = OwnedWorkerJob(self)
         self._import_job.released.connect(self._finish_import_job)
+        self._verify_job = OwnedWorkerJob(self)
         self._import_in_progress = False
         self._viz_adapter = VizAdapter()
 
@@ -115,9 +123,6 @@ class DataPage(QWidget):
         self.reset_columns_action = self.asset_table.reset_columns_action
         self.data_toolbar.set_column_settings_button(self.column_settings_btn)
 
-        # Action buttons now live on the toolbar. Keep page-level aliases so
-        # existing call sites (and tests) referencing page.import_btn keep
-        # working, but they ARE the toolbar buttons — wire each signal once.
         self.import_btn = self.data_toolbar.import_btn
         self.import_folder_btn = self.data_toolbar.import_folder_btn
         self.rescan_btn = self.data_toolbar.rescan_btn
@@ -136,6 +141,7 @@ class DataPage(QWidget):
         )
         self._preview_controller.result_ready.connect(self.reader_panel.render)
         self._preview_controller.failed.connect(self._handle_preview_failed)
+
         self._visualization_controller = PreviewRequestController(
             self.reader_panel.provider,
             self,
@@ -155,14 +161,19 @@ class DataPage(QWidget):
             self.reader_panel.show_visualization_error
         )
 
+        # Wire tree & table navigation
         self.navigation_tree.category_changed.connect(self.asset_table.set_category)
+        self.navigation_tree.filter_query_changed.connect(self.asset_table.set_filter_query)
+
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
-        self.asset_table.selected_asset_changed.connect(self.inspector_panel.update_asset)
+        self.asset_table.selected_assets_changed.connect(self._set_selected_assets)
+        self.asset_table.selected_asset_changed.connect(self._update_inspector)
         self.asset_table.context_menu_requested.connect(self._show_context_menu)
+
+        # Wire toolbar buttons
         self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
-        self.data_toolbar.import_folder_requested.connect(
-            self.begin_import_folder_from_dialog
-        )
+        self.data_toolbar.import_folder_requested.connect(self.begin_import_folder_from_dialog)
+        self.data_toolbar.verify_requested.connect(self._verify_current_or_all_assets)
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
         self.data_toolbar.remove_requested.connect(self.remove_selected_asset)
         self.data_toolbar.open_folder_requested.connect(self.open_selected_folder)
@@ -171,19 +182,19 @@ class DataPage(QWidget):
         self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
         self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
         self._sync_toolbar_toggle_state()
+
+        # Wire inspector panel interactive signals
+        self.inspector_panel.tag_added.connect(self._handle_tag_added)
+        self.inspector_panel.tag_removed.connect(self._handle_tag_removed)
+        self.inspector_panel.verify_requested.connect(self._verify_single_asset)
+        self.inspector_panel.create_derived_requested.connect(self._create_derived_copy)
+
         self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
-        self.reader_panel.preview_settings_changed.connect(
-            self._handle_preview_settings_changed
-        )
-        self.reader_panel.visualization_requested.connect(
-            self._request_selected_visualization
-        )
+        self.reader_panel.preview_settings_changed.connect(self._handle_preview_settings_changed)
+        self.reader_panel.visualization_requested.connect(self._request_selected_visualization)
 
         self._refresh()
 
-        # Delete removes the selected asset. Widget-scoped (parent=self) so it
-        # only fires when the DataPage or a child has focus; guarded against
-        # text-entry widgets so Delete-in-search isn't intercepted.
         QShortcut(
             QKeySequence("Delete"),
             self,
@@ -202,21 +213,19 @@ class DataPage(QWidget):
         super().closeEvent(event)
 
     def event(self, event: QEvent) -> bool:  # type: ignore[override]
-        # Shell rebuild uses deleteLater; closeEvent may not run for nested pages.
         if event.type() == QEvent.Type.DeferredDelete:
             self._shutdown_workers()
         return super().event(event)
 
     def _shutdown_workers(self) -> None:
-        """Stop preview + import threads before the page is destroyed."""
         wait_ms = 5000 if "pytest" in sys.modules else 100
         self._preview_controller.shutdown(wait_ms)
         self._visualization_controller.shutdown(wait_ms)
         self.reader_panel.release_engine_widgets()
         self._shutdown_import_jobs(wait_ms)
+        self._verify_job.shutdown(wait_ms)
 
     def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> None:
-        """Quit and wait for in-flight import QThreads (safe for deleteLater)."""
         self._import_job.shutdown(wait_ms)
         self._set_import_running(False)
 
@@ -239,29 +248,22 @@ class DataPage(QWidget):
         self._emit_data_context()
 
     def _refresh(self) -> None:
-        """Re-push the current project state into the page after a mutation.
-
-        Shortcut for the dashboard_state + resources + artifacts incantation
-        that follows every local edit (remove/rescan/import/export/classify).
-        """
         self.update_state(
             dashboard_state(self.project),
             self.project.resources,
             self.project.export_artifacts,
         )
 
-    def _preview_disk_project_root(self) -> str | Path | None:
-        """Resolve a real project root for disk cache; treat placeholders as unknown."""
+    def _preview_disk_project_root(self) -> Path | None:
         raw = getattr(self.project.meta, "project_root", None)
         if raw is None:
             return None
         text = str(raw).strip()
         if not text or text == ".":
             return None
-        return text
+        return Path(text)
 
     def clear_preview_cache(self) -> None:
-        """Clear the project-scoped disk preview cache and in-memory LRU."""
         self._preview_controller.clear_disk_cache()
         self._visualization_controller.clear_disk_cache()
         self._set_action_status("已清除预览缓存")
@@ -277,11 +279,11 @@ class DataPage(QWidget):
         return report
 
     def _choose_import_files(self) -> list[Path]:
-        paths, _selected_filter = QFileDialog.getOpenFileNames(self, "导入文件")
+        paths, _selected_filter = QFileDialog.getOpenFileNames(self, "导入受管文件")
         return [Path(path) for path in paths]
 
     def _choose_import_folder(self) -> Path | None:
-        path = QFileDialog.getExistingDirectory(self, "导入目录")
+        path = QFileDialog.getExistingDirectory(self, "导入受管目录")
         return Path(path) if path else None
 
     def import_files_from_dialog(self) -> ImportReport:
@@ -309,7 +311,6 @@ class DataPage(QWidget):
         return self.begin_import_folder_path(folder)
 
     def set_project_path(self, path: Path | str | None) -> None:
-        """Bind the on-disk project file for relative path I/O."""
         if path is None or str(path).strip() in {"", ".", ".."}:
             self.project_path = None
         else:
@@ -319,7 +320,6 @@ class DataPage(QWidget):
         return self.project_path
 
     def _resolve_resource_path(self, resource: ResourceItem) -> Path:
-        """Resolve a resource path relative to the open project file when needed."""
         raw = Path(resource.path)
         if raw.is_absolute() or self.project_path is None:
             return raw.expanduser()
@@ -373,20 +373,14 @@ class DataPage(QWidget):
             return
         self._handle_import_failed(message)
 
-    def _handle_import_finished(
-        self,
-        report: ImportReport,
-    ) -> None:
+    def _handle_import_finished(self, report: ImportReport) -> None:
         if report is None:
             self._set_action_status("导入未返回有效报告")
             return
         self._apply_import_report(report)
         self.import_finished.emit(report)
 
-    def _handle_import_failed(
-        self,
-        message: str,
-    ) -> None:
+    def _handle_import_failed(self, message: str) -> None:
         self._set_action_status(f"导入失败: {message}")
         self.import_failed.emit(message)
 
@@ -395,39 +389,43 @@ class DataPage(QWidget):
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
-        # The toolbar import buttons are the single source of truth; the page
-        # aliases (self.import_btn / self.import_folder_btn) point at them.
         self.data_toolbar.import_btn.setEnabled(not running)
         self.data_toolbar.import_folder_btn.setEnabled(not running)
 
     def remove_selected_asset(self) -> bool:
-        if self._selected_asset is None:
-            self._set_action_status("请选择一个数据项")
-            return False
-        selected_id = self._selected_asset.id
-        removed = False
-        if isinstance(self._selected_asset, ResourceItem):
-            before = len(self.project.resources)
-            self.project.resources[:] = [
-                resource
-                for resource in self.project.resources
-                if resource.id != selected_id
-            ]
-            removed = len(self.project.resources) != before
-        elif isinstance(self._selected_asset, ExportArtifact):
-            before = len(self.project.export_artifacts)
-            self.project.export_artifacts[:] = [
-                artifact
-                for artifact in self.project.export_artifacts
-                if artifact.id != selected_id
-            ]
-            removed = len(self.project.export_artifacts) != before
+        if not self._selected_assets and self._selected_asset is not None:
+            items = [self._selected_asset]
+        else:
+            items = self._selected_assets
 
-        if removed:
+        if not items:
+            self._set_action_status("请选择一个或多个数据项")
+            return False
+
+        return self.remove_assets(items)
+
+    def remove_assets(self, items: list[object]) -> bool:
+        removed_count = 0
+        target_ids = {getattr(it, "id", None) for it in items if getattr(it, "id", None)}
+
+        before_res = len(self.project.resources)
+        self.project.resources[:] = [
+            r for r in self.project.resources if r.id not in target_ids
+        ]
+        removed_count += before_res - len(self.project.resources)
+
+        before_art = len(self.project.export_artifacts)
+        self.project.export_artifacts[:] = [
+            a for a in self.project.export_artifacts if a.id not in target_ids
+        ]
+        removed_count += before_art - len(self.project.export_artifacts)
+
+        if removed_count > 0:
             self._set_selected_asset(None)
             self._refresh()
-            self._set_action_status("已移出项目")
-        return removed
+            self._set_action_status(f"已移出项目 ({removed_count} 项)")
+            return True
+        return False
 
     def rescan_selected_asset(self) -> bool:
         if not isinstance(self._selected_asset, ResourceItem):
@@ -441,7 +439,6 @@ class DataPage(QWidget):
                 resource.parsed_summary = {}
             resource.parsed_summary["preview_warning"] = "文件不存在"
             self._refresh()
-            # Participate in generation invalidation so in-flight previews cannot win.
             self._request_summary(resource)
             self._set_action_status("文件不存在")
             return True
@@ -463,7 +460,7 @@ class DataPage(QWidget):
         if updated is None:
             self._set_action_status("重新扫描未找到文件")
             return False
-        # Preserve manual reclassification when the file is still the same.
+
         keep_type = resource.type
         keep_role = resource.artifact_role
         keep_tags = list(resource.tags or [])
@@ -475,7 +472,7 @@ class DataPage(QWidget):
         resource.parsed_summary = updated.parsed_summary
         resource.checksum = updated.checksum
         resource.external = updated.external
-        # Only adopt scanner type when user had not customized away from default.
+
         if keep_type == updated.type or not keep_type:
             resource.type = updated.type
             resource.artifact_role = updated.artifact_role or keep_role
@@ -483,8 +480,8 @@ class DataPage(QWidget):
             resource.type = keep_type
             resource.artifact_role = keep_role
             resource.tags = keep_tags
+
         self._refresh()
-        # Participate in generation invalidation so in-flight previews cannot win.
         self._request_summary(resource)
         self._set_action_status("已重新扫描")
         return True
@@ -495,8 +492,11 @@ class DataPage(QWidget):
             return None
         if isinstance(self._selected_asset, ResourceItem):
             path = Path(self._selected_asset.path)
-        else:
+        elif isinstance(self._selected_asset, ExportArtifact):
             path = Path(self._selected_asset.output_path)
+        else:
+            path = Path(getattr(self._selected_asset, "path", ""))
+
         folder = path if path.is_dir() else path.parent
         if not folder.exists():
             self._set_action_status("目录不存在")
@@ -505,20 +505,154 @@ class DataPage(QWidget):
         self._set_action_status(f"目录: {folder.as_posix()}")
         return folder
 
-    def _show_context_menu(self, global_pos, asset) -> None:
-        """Build and exec the right-click context menu for an asset.
+    def _create_derived_copy(self, asset: object) -> None:
+        """Create a derived data copy from a locked RAW asset."""
+        asset = self._unwrap_asset(asset)
+        if not isinstance(asset, ResourceItem):
+            self._set_action_status("仅支持为 ResourceItem 数据创建派生副本")
+            return
 
-        Wired to ``DataAssetTable.context_menu_requested``. Each menu action's
-        ``triggered`` signal is connected to the matching existing handler on
-        this page; export sub-actions route through ``_export_selected_asset``.
+        # When the source is bridged to the catalog, route through Core first:
+        # an immutable DERIVED DataVersion with lineage, never touching RAW.
+        derived_item = self._create_derived_via_catalog(asset)
+        if derived_item is None:
+            # Legacy fallback (no catalog wired or Core path failed).
+            derived_item = ResourceItem(
+                name=f"{asset.name}_derived",
+                path=asset.path,
+                type=asset.type,
+                format=asset.format,
+                crs=asset.crs,
+                status=asset.status,
+                tags=["派生", *asset.tags],
+                source=f"derived from {asset.name}",
+                parsed_summary={"derived_from_id": asset.id, "derived_from_name": asset.name, **asset.parsed_summary},
+                checksum=asset.checksum,
+                external=asset.external,
+                artifact_role="derived",
+            )
+
+        self.project.resources.append(derived_item)
+        self._refresh()
+        self._set_selected_asset(derived_item)
+        self._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
+
+    def _create_derived_via_catalog(self, asset: ResourceItem) -> ResourceItem | None:
+        """Create the DERIVED version through Core; None when not bridged/failed.
+
+        The returned legacy ResourceItem is a companion pointing at the
+        Core-managed payload so legacy workflows still see the data.
         """
-        viz_supported = isinstance(asset, ResourceItem) and self._viz_adapter.supports_resource(asset)
+        service, ref = self._catalog_bridge(asset)
+        if service is None or ref is None:
+            return None
+        try:
+            source_version = service.get_version(ref.version_id)
+            source_payload = service.resolve_path(source_version)
+            if not source_payload.is_file():
+                return None
+            version = service.create_derived(
+                source_path=source_payload,
+                parent_version_ids=[source_version.id],
+                name=f"{asset.name}_derived",
+                operation="derived_copy",
+                generator="data_manager",
+            )
+            managed_path = service.resolve_path(version)
+            # Store project-relative when the payload is inside the project
+            # dir (managed storage always is) so .paleo.json stays relocatable.
+            stored_path, _outside = relativize_path(
+                managed_path.as_posix(), service.project_path
+            )
+            return ResourceItem(
+                name=f"{asset.name}_derived",
+                path=stored_path,
+                type=asset.type,
+                format=asset.format,
+                crs=asset.crs,
+                status=asset.status,
+                tags=["派生", *asset.tags],
+                source=f"derived from {asset.name}",
+                parsed_summary={
+                    "derived_from_id": asset.id,
+                    "derived_from_name": asset.name,
+                    "catalog_asset_id": version.asset_id,
+                    "catalog_version_id": version.id,
+                    **asset.parsed_summary,
+                },
+                checksum=version.sha256,
+                external=False,
+                artifact_role="derived",
+            )
+        except Exception:
+            # Catalog failures must never break the UI action; legacy path applies.
+            return None
+
+    def _materialize_asset(self, asset: object) -> None:
+        """纳管至项目: promote an external (unmanaged) catalog version to a
+        managed immutable RAW snapshot via the Core service."""
+        asset = self._unwrap_asset(asset)
+        if not isinstance(asset, ResourceItem):
+            self._set_action_status("仅支持纳管 ResourceItem 数据")
+            return
+        service, ref = self._catalog_bridge(asset)
+        if service is None or ref is None:
+            self._set_action_status("未连接数据目录，无法纳管")
+            return
+        if not ref.external:
+            self._set_action_status("该数据已是受管数据")
+            return
+        try:
+            version = service.materialize_external(ref.version_id)
+            managed_path = service.resolve_path(version)
+        except Exception as exc:
+            self._set_action_status(f"纳管失败: {exc}")
+            return
+        # Keep the legacy ResourceItem in sync with the new managed version.
+        # Project-relative storage keeps .paleo.json relocatable.
+        stored_path, _outside = relativize_path(
+            managed_path.as_posix(), service.project_path
+        )
+        asset.external = False
+        asset.path = stored_path
+        asset.checksum = version.sha256
+        self._refresh()
+        self._set_action_status(f"已纳管至项目: {asset.name}")
+
+    def _show_context_menu(self, global_pos, target) -> None:
+        viz_supported = False
+        first = target[0] if isinstance(target, (list, tuple)) and target else target
+        if isinstance(first, ResourceItem):
+            viz_supported = self._viz_adapter.supports_resource(first)
+
         menu = AssetContextMenu(self)
-        menu.build(asset, viz_supported)
+        menu.build(target, viz_supported)
 
         preview_act = menu.find_action("ctx_preview")
         if preview_act:
-            preview_act.triggered.connect(lambda: self._request_summary(asset))
+            preview_act.triggered.connect(lambda: self._request_summary(first))
+
+        create_derived_act = menu.find_action("ctx_create_derived")
+        if create_derived_act:
+            create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+
+        verify_act = menu.find_action("ctx_verify")
+        if verify_act:
+            verify_act.triggered.connect(lambda: self._verify_single_asset(first))
+
+        add_tag_act = menu.find_action("ctx_add_tag")
+        if add_tag_act:
+            add_tag_act.triggered.connect(lambda: self._prompt_add_tag_to_assets([first]))
+
+        # 纳管至项目: only actionable when the asset is bridged to an unmanaged
+        # (external) catalog version; otherwise it stays disabled.
+        materialize_act = menu.find_action("ctx_materialize")
+        if materialize_act and isinstance(first, ResourceItem):
+            _svc, mat_ref = self._catalog_bridge(first)
+            if mat_ref is not None and mat_ref.external:
+                materialize_act.setEnabled(True)
+                materialize_act.setToolTip("将外部文件复制为受管 RAW 快照 (不可变)")
+                materialize_act.triggered.connect(lambda: self._materialize_asset(first))
 
         rescan_act = menu.find_action("ctx_rescan")
         if rescan_act:
@@ -536,38 +670,53 @@ class DataPage(QWidget):
         if remove_act:
             remove_act.triggered.connect(self.remove_selected_asset)
 
-        # Wire export sub-actions (converters + project inventory).
-        for label, _fn in get_available_formats(asset):
-            sub_act = menu.find_export_action(label)
-            if sub_act:
-                sub_act.triggered.connect(
-                    lambda checked=False, fmt=label: self._export_selected_asset(fmt)
-                )
-        inv_act = menu.find_export_action("INVENTORY")
-        if inv_act:
-            inv_act.triggered.connect(
-                lambda checked=False: self._export_selected_asset("INVENTORY")
-            )
+        # Multi selection context actions
+        items = list(target) if isinstance(target, (list, tuple)) else [target]
+        bulk_add_tag_act = menu.find_action("ctx_bulk_add_tag")
+        if bulk_add_tag_act:
+            bulk_add_tag_act.triggered.connect(lambda: self._prompt_add_tag_to_assets(items))
 
-        # Wire classify sub-actions (one per available type).
-        if isinstance(asset, ResourceItem):
-            for label, rtype in CATEGORIES.items():
-                if rtype is None or rtype == asset.type:
-                    continue
-                sub_act = menu.find_export_action(f"classify_{rtype}")
+        bulk_remove_tag_act = menu.find_action("ctx_bulk_remove_tag")
+        if bulk_remove_tag_act:
+            bulk_remove_tag_act.triggered.connect(lambda: self._prompt_remove_tag_from_assets(items))
+
+        bulk_verify_act = menu.find_action("ctx_bulk_verify")
+        if bulk_verify_act:
+            bulk_verify_act.triggered.connect(lambda: self.verify_assets(items))
+
+        bulk_remove_act = menu.find_action("ctx_bulk_remove")
+        if bulk_remove_act:
+            bulk_remove_act.triggered.connect(lambda: self.remove_assets(items))
+
+        # Wire export sub-actions
+        if first:
+            for label, _fn in get_available_formats(first):
+                sub_act = menu.find_export_action(label)
                 if sub_act:
                     sub_act.triggered.connect(
-                        lambda checked=False, t=rtype: self._classify_selected_asset(t)
+                        lambda checked=False, fmt=label: self._export_selected_asset(fmt)
                     )
+            inv_act = menu.find_export_action("INVENTORY")
+            if inv_act:
+                inv_act.triggered.connect(
+                    lambda checked=False: self._export_selected_asset("INVENTORY")
+                )
+
+            if isinstance(first, ResourceItem):
+                for label, rtype in CATEGORIES.items():
+                    if rtype is None or rtype == first.type:
+                        continue
+                    sub_act = menu.find_export_action(f"classify_{rtype}")
+                    if sub_act:
+                        sub_act.triggered.connect(
+                            lambda checked=False, t=rtype: self._classify_selected_asset(t)
+                        )
 
         menu.exec(global_pos)
 
     def _export_selected_asset(self, format_label: str) -> None:
-        """Convert the selected resource to ``format_label`` via a save dialog."""
         asset = self._selected_asset
-        if asset is None:
-            return
-        if isinstance(asset, ExportArtifact):
+        if asset is None or isinstance(asset, ExportArtifact):
             return
         project_file = self._project_file_for_io()
         if format_label == "INVENTORY":
@@ -623,17 +772,23 @@ class DataPage(QWidget):
             self._refresh()
 
     def _classify_selected_asset(self, new_type: str) -> None:
-        """Change the selected resource's type (manual reclassification)."""
-        asset = self._selected_asset
+        asset = self._unwrap_asset(self._selected_asset)
         if not isinstance(asset, ResourceItem):
             return
         old_type = asset.type
+        old_tags = list(asset.tags or [])
         asset.type = new_type
         role = ROLE_BY_TYPE.get(new_type)
         asset.artifact_role = role
-        # Keep a single role tag if present; preserve other free-form tags.
         other = [t for t in (asset.tags or []) if t not in ROLE_BY_TYPE.values()]
         asset.tags = ([role] if role else []) + other
+        # Mirror the role-tag rewrite into the catalog (best-effort).
+        for tag in old_tags:
+            if tag not in asset.tags:
+                self._mirror_tag_to_catalog(asset, tag, add=False)
+        for tag in asset.tags:
+            if tag not in old_tags:
+                self._mirror_tag_to_catalog(asset, tag, add=True)
         self._refresh()
         old_label = RESOURCE_TYPE_LABELS.get(old_type, old_type)
         new_label = RESOURCE_TYPE_LABELS.get(new_type, new_type)
@@ -641,14 +796,246 @@ class DataPage(QWidget):
 
     def _set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
+        self._selected_assets = [asset] if asset is not None else []
         self.asset_table.set_selected_asset(asset)
         self._request_summary(asset)
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
 
+    def _set_selected_assets(self, assets: list[object]) -> None:
+        self._selected_assets = list(assets)
+        first = self._selected_assets[0] if self._selected_assets else None
+        if first != self._selected_asset:
+            self._selected_asset = first
+            self._update_inspector(first)
+            self._request_summary(first)
+            self._update_selection_action_state()
+            self._sync_visualization_button()
+            self._emit_data_context()
+
+    def _update_inspector(self, asset: object | None) -> None:
+        """Build the inspector AssetView, enriched from the catalog when the
+        asset is bridged (legacy plain view otherwise)."""
+        if asset is None:
+            self.inspector_panel.update_asset(None)
+            return
+        view = asset_view_from_object(asset)
+        view = self._enrich_view_from_catalog(view)
+        self.inspector_panel.update_asset(view)
+
+    def _enrich_view_from_catalog(self, view: AssetView) -> AssetView:
+        resource = view.raw_asset
+        service, ref = self._catalog_bridge(resource)
+        if service is None or ref is None:
+            return view
+        try:
+            return enrich_view_from_catalog(view, service, ref.asset_id)
+        except Exception:
+            # Enrichment is best-effort; the plain legacy view still renders.
+            return view
+
+    # --- Catalog bridge (Core DataCatalogService wiring) ---
+
+    @staticmethod
+    def _unwrap_asset(asset: object) -> object:
+        """Unwrap an enriched ``AssetView`` back to its underlying asset."""
+        if isinstance(asset, AssetView) and asset.raw_asset is not None:
+            return asset.raw_asset
+        return asset
+
+    def _catalog_service(self):
+        """The active Core DataCatalogService, or None (no project catalog)."""
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog_service
+
+            return get_catalog_service()
+        except Exception:
+            return None
+
+    def _catalog_bridge(self, resource: object):
+        """Resolve a legacy ResourceItem to ``(service, DataVersionRef)``.
+
+        Returns ``(None, None)`` when no catalog is wired or the resource is
+        not bridged (migrated projections have asset id == resource id).
+        """
+        if not isinstance(resource, ResourceItem):
+            return None, None
+        try:
+            from paleo_workbench.catalog.runtime import get_catalog
+
+            catalog = get_catalog()
+            if catalog is None:
+                return None, None
+            ref = catalog.resolve_legacy_resource(resource.id)
+        except Exception:
+            return None, None
+        if ref is None:
+            return None, None
+        service = self._catalog_service()
+        if service is None:
+            return None, None
+        return service, ref
+
+    def _mirror_tag_to_catalog(self, resource: object, tag_name: str, *, add: bool) -> None:
+        """Mirror a legacy tag change into the catalog. Best-effort: catalog
+        failures never break the UI tag action."""
+        service, ref = self._catalog_bridge(self._unwrap_asset(resource))
+        if service is None or ref is None:
+            return
+        try:
+            if add:
+                service.add_tag(tag_name, asset_id=ref.asset_id)
+            else:
+                service.remove_tag(tag_name, asset_id=ref.asset_id)
+        except Exception:
+            pass
+
+    # --- Tag Operations ---
+
+    def _handle_tag_added(self, asset: object, tag_name: str) -> None:
+        asset = self._unwrap_asset(asset)
+        if isinstance(asset, ResourceItem):
+            if tag_name not in asset.tags:
+                asset.tags.append(tag_name)
+                self._mirror_tag_to_catalog(asset, tag_name, add=True)
+                self._refresh()
+                self._set_action_status(f"已添加标签 #{tag_name}")
+
+    def _handle_tag_removed(self, asset: object, tag_name: str) -> None:
+        asset = self._unwrap_asset(asset)
+        if isinstance(asset, ResourceItem):
+            if tag_name in asset.tags:
+                asset.tags.remove(tag_name)
+                self._mirror_tag_to_catalog(asset, tag_name, add=False)
+                self._refresh()
+                self._set_action_status(f"已移除标签 #{tag_name}")
+
+    def _prompt_add_tag_to_assets(self, items: list[object]) -> None:
+        dlg = TagInputDialog(parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            new_tag = dlg.get_tag_name()
+            if not new_tag:
+                return
+            count = 0
+            for it in items:
+                it = self._unwrap_asset(it)
+                if isinstance(it, ResourceItem):
+                    if new_tag not in it.tags:
+                        it.tags.append(new_tag)
+                        self._mirror_tag_to_catalog(it, new_tag, add=True)
+                        count += 1
+            if count > 0:
+                self._refresh()
+                self._set_action_status(f"已为 {count} 项数据添加标签 #{new_tag}")
+
+    def _prompt_remove_tag_from_assets(self, items: list[object]) -> None:
+        all_tags = set()
+        for it in items:
+            it = self._unwrap_asset(it)
+            if isinstance(it, ResourceItem):
+                all_tags.update(it.tags)
+
+        if not all_tags:
+            self._set_action_status("选中数据无可用标签")
+            return
+
+        dlg = TagInputDialog(parent=self)
+        dlg.setWindowTitle("批量移除标签")
+        dlg.label.setText("请输入要移除的标签名称:")
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            tag_to_remove = dlg.get_tag_name()
+            if not tag_to_remove:
+                return
+            count = 0
+            for it in items:
+                it = self._unwrap_asset(it)
+                if isinstance(it, ResourceItem):
+                    if tag_to_remove in it.tags:
+                        it.tags.remove(tag_to_remove)
+                        self._mirror_tag_to_catalog(it, tag_to_remove, add=False)
+                        count += 1
+            if count > 0:
+                self._refresh()
+                self._set_action_status(f"已从 {count} 项数据移除标签 #{tag_to_remove}")
+
+    # --- Integrity Verification ---
+
+    def _verify_single_asset(self, asset: object) -> None:
+        self.verify_assets([asset])
+
+    def _verify_current_or_all_assets(self) -> None:
+        if self._selected_assets:
+            self.verify_assets(self._selected_assets)
+        else:
+            all_assets = [*self._resources, *self._artifacts]
+            self.verify_assets(all_assets)
+
+    def _bridged_version_map(self, items: list[object]) -> tuple[object, dict[str, str]]:
+        """Resolve catalog-bridged assets to ``(service, {asset_id: version_id})``.
+
+        Cheap metadata lookup on the UI thread; hashing itself stays in the
+        IntegrityWorker thread. ``(None, {})`` when no catalog is wired.
+        """
+        service = self._catalog_service()
+        if service is None:
+            return None, {}
+        bridged: dict[str, str] = {}
+        for item in items:
+            resource = self._unwrap_asset(item)
+            _svc, ref = self._catalog_bridge(resource)
+            if ref is not None and isinstance(resource, ResourceItem):
+                # Keyed by legacy resource id — the worker resolves views by it.
+                bridged[resource.id] = ref.version_id
+        if not bridged:
+            return None, {}
+        return service, bridged
+
+    def verify_assets(self, items: list[object]) -> None:
+        if not items:
+            self._set_action_status("没有可校验的数据资产")
+            return
+        if self._verify_job.is_running:
+            # Re-clicking 校验 while a verify job is finishing must not raise
+            # (OwnedWorkerJob owns one thread at a time).
+            self._set_action_status("正在校验，请稍候")
+            return
+
+        # Catalog-bridged assets are verified via the Core service (the
+        # lifecycle authority); un-bridged assets keep the legacy path.
+        service, bridged = self._bridged_version_map(items)
+        worker = IntegrityWorker(
+            items,
+            project_root=self._preview_disk_project_root(),
+            catalog_service=service,
+            bridged_versions=bridged,
+        )
+        self._verify_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_verify_finished),
+                (worker.failed, self._on_verify_failed),
+            ),
+        )
+        self._set_action_status(f"正在后台校验 {len(items)} 项数据资产完整性...")
+
+    @Slot(object)
+    def _on_verify_finished(self, report: IntegrityCheckReport) -> None:
+        if report.checksum_updates:
+            for res in self._resources:
+                if res.id in report.checksum_updates:
+                    res.checksum = report.checksum_updates[res.id]
+        self._refresh()
+        self._set_action_status(f"完整性校验完成: {report.summary_text}")
+
+    @Slot(str)
+    def _on_verify_failed(self, message: str) -> None:
+        self._set_action_status(f"完整性校验失败: {message}")
+
+    # --- Preview & Workspace ---
+
     def _handle_preview_settings_changed(self, settings) -> None:
-        """Apply one settings generation and rebuild the selected preview."""
         summary_changed = self._preview_controller.set_settings(settings)
         visualization_changed = self._visualization_controller.set_settings(settings)
         if not summary_changed and not visualization_changed:
@@ -658,12 +1045,10 @@ class DataPage(QWidget):
         self._set_action_status("预览设置已应用")
 
     def _request_summary(self, asset: object | None) -> None:
-        """Invalidate any old professional view before loading a new list."""
         self._visualization_controller.invalidate()
         self._preview_controller.request(asset)
 
     def _request_selected_visualization(self) -> None:
-        """Start professional preparation only after the visual tab is opened."""
         asset = self._selected_asset
         if not isinstance(asset, ResourceItem):
             self.reader_panel.show_visualization_error("当前数据不支持可视化预览")
@@ -693,10 +1078,6 @@ class DataPage(QWidget):
         return self.reader_panel.current_mode
 
     def _toggle_reader_from_toolbar(self) -> None:
-        # The reader toggle shows/hides the right column (reader + inspector).
-        # Use isHidden() (intent) rather than isVisible() (render state) so the
-        # toggle works before the page has been shown, and so it correctly
-        # detects an explicitly-hidden right_splitter.
         make_visible = self.right_splitter.isHidden()
         self.workspace.set_right_visible(make_visible)
         self.data_toolbar.reader_btn.setChecked(make_visible)
@@ -745,13 +1126,21 @@ class DataPage(QWidget):
         )
 
     def _apply_import_report(self, report: ImportReport) -> None:
-        """Single batch UI refresh after import (sync or async completion).
-
-        Extends project resources once, then routes through update_state so the
-        asset table performs one model reset via set_assets_filtered. Does not
-        rebuild the reader; selection may keep prior preview content.
-        """
         self.project.resources.extend(report.added)
+        # Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
+        # with the legacy bridge so downstream runs can resolve them. Best-effort:
+        # the catalog seam must never break the import path. Each resource is
+        # registered independently so one failure doesn't skip the rest.
+        try:
+            from paleo_workbench.catalog.lifecycle import register_resource_input
+
+            for resource in report.added:
+                try:
+                    register_resource_input(resource)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         self._refresh()
         self._set_import_status(report)
 
@@ -759,14 +1148,8 @@ class DataPage(QWidget):
         self.data_toolbar.operation_status_label.setText(text)
 
     def _update_selection_action_state(self) -> None:
-        """Mirror the legacy ActionPanel.update_selection_state enable rules.
-
-        Manages enable state for rescan / remove / open-folder buttons (all on
-        the toolbar now) based on the current selection. The toolbar has no
-        selection-status label, so only button enable state is synchronized.
-        """
         has_resource = isinstance(self._selected_asset, ResourceItem)
-        has_asset = self._selected_asset is not None
+        has_asset = self._selected_asset is not None or bool(self._selected_assets)
         self.rescan_btn.setEnabled(has_resource and not self._import_in_progress)
         self.remove_btn.setEnabled(has_asset)
         self.open_folder_btn.setEnabled(has_asset)

@@ -31,6 +31,14 @@ class ProjectController:
         """Replace the in-memory project (no confirm — callers that need one ask first)."""
         self.window.project = ProjectDocument.new(name)
         self.window.project_path = None
+        # The catalog is project-scoped; an unsaved project has none.
+        self._close_catalog()
+        try:
+            from paleo_workbench.catalog import reset_catalog
+
+            reset_catalog()
+        except Exception:
+            pass
         self.window._refresh_shell()
 
     def open_project_path(self, path: str | Path) -> bool:
@@ -59,8 +67,49 @@ class ProjectController:
         self.window.project = loaded
         self.window.project.meta.project_root = str(target.resolve().parent)
         self.window.project_path = target
+        self._open_catalog(target, loaded)
         self.window._refresh_shell()
         return True
+
+    @staticmethod
+    def _close_catalog() -> None:
+        """Close the active catalog service's SQLite handle, if any.
+
+        Called before replacing/resetting the catalog so the previous
+        project's handle never leaks. Best-effort, never raises.
+        """
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+
+            service = get_catalog_service()
+            if service is not None:
+                service.close()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _open_catalog(target: Path, loaded: ProjectDocument) -> None:
+        """Wire the Core Data Catalog for the opened project.
+
+        Installs the Core-backed CatalogPort adapter as the active runtime
+        backend (replacing any previous project's), then projects legacy
+        ResourceItems into the catalog (deterministic, idempotent, no file
+        copies or re-hashing). Best-effort: a catalog failure never blocks
+        project open.
+        """
+        try:
+            from paleo_workbench.catalog import (
+                CoreCatalogAdapter,
+                DataCatalogService,
+                set_catalog,
+            )
+
+            ProjectController._close_catalog()
+            service = DataCatalogService.open(target)
+            set_catalog(CoreCatalogAdapter(service))
+            service.migrate_legacy_resources(loaded.resources)
+        except Exception:
+            pass
 
     def save_project(self) -> Path | None:
         if not self.window._flush_mapping_draft():
@@ -102,6 +151,9 @@ class ProjectController:
             self.window._show_project_error("保存工程失败", str(e))
             return None
         self.window.project_path = target
+        # The catalog is bound to the project path: rebind to the new location
+        # (best-effort — a catalog failure never blocks saving).
+        self._open_catalog(target, self.window.project)
         return target
 
     def _flush_joint_analysis_state(self) -> None:
@@ -129,6 +181,16 @@ class ProjectController:
         """Bootstrap sample data into the current window (no auto-save)."""
         if not self.window._confirm_replace_project():
             return False
+        # The sample project is unsaved/in-memory → no catalog. Reset BEFORE
+        # bootstrapping so sample imports never write into the previous
+        # project's catalog (cross-project pollution).
+        self._close_catalog()
+        try:
+            from paleo_workbench.catalog import reset_catalog
+
+            reset_catalog()
+        except Exception:
+            pass
         try:
             root = resolve_sample_data_root(data_root)
             result = bootstrap_sample_project(root)

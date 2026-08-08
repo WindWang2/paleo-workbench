@@ -16,8 +16,9 @@ def test_inspector_resource_rows(qtbot):
         status="parsed", crs="EPSG:32649", tags=["ZJ-2", "sand"],
     )
     panel.update_asset(res)
-    texts = [panel.metadata_table.item(r, 0).text() for r in range(panel.metadata_table.rowCount())]
-    assert "名称" in texts
+    # Data Manager UI 2.0: identity/location fields live on the 概要 tab.
+    texts = [panel.overview_table.item(r, 0).text() for r in range(panel.overview_table.rowCount())]
+    assert "逻辑名称" in texts
     assert "路径" in texts
     assert "CRS" in texts
 
@@ -27,12 +28,8 @@ def test_inspector_tags_joined(qtbot):
     qtbot.addWidget(panel)
     res = ResourceItem(name="x", path="/x", type="well_log", format="LAS", status="ok", tags=["a", "b"])
     panel.update_asset(res)
-    # find the 标签 row value
-    for r in range(panel.metadata_table.rowCount()):
-        if panel.metadata_table.item(r, 0).text() == "标签":
-            assert "a, b" == panel.metadata_table.item(r, 1).text()
-            return
-    assert False, "标签 row not found"
+    # Data Manager UI 2.0: tags render in the dedicated 标签 tab.
+    assert panel.tag_container.tags() == ["a", "b"]
 
 
 def test_inspector_empty_state(qtbot):
@@ -47,9 +44,10 @@ def test_inspector_artifact_rows(qtbot):
     qtbot.addWidget(panel)
     art = ExportArtifact(linked_id="m1", format="GeoTIFF", output_path="/out/map.tif")
     panel.update_asset(art)
-    texts = [panel.metadata_table.item(r, 0).text() for r in range(panel.metadata_table.rowCount())]
+    # Data Manager UI 2.0: format/output path live on the 概要 tab.
+    texts = [panel.overview_table.item(r, 0).text() for r in range(panel.overview_table.rowCount())]
     assert "格式" in texts
-    assert "输出路径" in texts
+    assert "路径" in texts
 
 
 def test_format_size():

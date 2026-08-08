@@ -338,6 +338,9 @@ class ExportArtifact(BaseModel):
     included_map_elements: list[str] = Field(default_factory=list)
     generated_at: str = Field(default_factory=_now_iso)
     source_task_ids: list[str] = Field(default_factory=list)
+    # Data Catalog bridge: the OUTPUT DataVersion registered for this export.
+    # None for legacy/externally-created artifacts (graceful degradation).
+    catalog_version_id: str | None = None
 
 
 class JointTimeSliceState(BaseModel):

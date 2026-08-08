@@ -25,13 +25,14 @@ from paleo_workbench.ui.pages.data_table_columns import (
     DEFAULT_COLUMN_KEYS,
     HEADERS,
 )
+from paleo_workbench.ui.pages.data_view_models import AssetView
 from paleo_workbench.ui.pages.filter_index import (
     ISSUE_STATUSES,
     REFERENCE_TYPES,
     FilterIndex,
+    FilterQuery,
 )
 
-# Re-export for existing importers (e.g. tests, detail panel).
 __all__ = [
     "COLUMN_BY_KEY",
     "COLUMN_DEFINITIONS",
@@ -46,16 +47,18 @@ __all__ = [
 
 class DataAssetTable(QWidget):
     selected_asset_changed = Signal(object)
-    context_menu_requested = Signal(QPoint, object)
+    selected_assets_changed = Signal(list)
+    context_menu_requested = Signal(QPoint, object)  # (global_pos, asset or list of assets)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DataAssetTable")
         self._resources: list[ResourceItem] = []
         self._artifacts: list[ExportArtifact] = []
-        self._visible_assets: list[ResourceItem | ExportArtifact] = []
-        self._selected_asset: ResourceItem | ExportArtifact | None = None
-        self._category = "全部"
+        self._visible_assets: list[object] = []
+        self._selected_asset: object | None = None
+        self._selected_assets: list[object] = []
+        self._filter_query = FilterQuery(node_type="all")
         self._search_text = ""
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
         self.column_actions: dict[str, QAction] = {}
@@ -83,10 +86,12 @@ class DataAssetTable(QWidget):
         self.table.setObjectName("DataAssetGrid")
         self.table.setModel(self.model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSortingEnabled(True)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setAlternatingRowColors(True)
         self.table.setStyleSheet(
             f"QTableView#DataAssetGrid {{ background: {tokens.BG_SIDEBAR};"
@@ -94,10 +99,6 @@ class DataAssetTable(QWidget):
             f" border-radius: {tokens.RADIUS_CARD}px; gridline-color: {tokens.BORDER}; }}"
         )
         self.table.selectionModel().selectionChanged.connect(self._emit_selection)
-        # Right-click context menu: the table emits customContextMenuRequested
-        # with a viewport-local QPoint; we map it to a row + asset and re-emit
-        # context_menu_requested(global_pos, asset) for the page to build the
-        # menu.
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.table)
@@ -109,13 +110,10 @@ class DataAssetTable(QWidget):
     ) -> None:
         self._resources = list(resources)
         self._artifacts = list(artifacts)
-        assets: list[ResourceItem | ExportArtifact] = [
-            *self._resources,
-            *self._artifacts,
-        ]
-        # Rebuild haystacks only when the asset list changes.
+        assets: list[object] = [*self._resources, *self._artifacts]
         self._index.rebuild(assets)
-        filtered = self._index.filter(self._category, self._search_text)
+        self._filter_query.search_text = self._search_text
+        filtered = self._index.filter_query(self._filter_query)
         self.model.set_assets_filtered(
             assets,
             filtered,
@@ -124,22 +122,35 @@ class DataAssetTable(QWidget):
         self._visible_assets = [assets[i] for i in filtered]
         if not self._sync_selection() and self._selected_asset is not None:
             self._selected_asset = None
+            self._selected_assets = []
             self.selected_asset_changed.emit(None)
+            self.selected_assets_changed.emit([])
 
     def set_category(self, category: str) -> None:
-        self._category = category
+        query = self._index._parse_legacy_category(category, self._search_text)
+        self.set_filter_query(query)
+
+    def set_filter_query(self, query: FilterQuery) -> None:
+        self._filter_query = query
+        self._filter_query.search_text = self._search_text
         self._apply_filter()
 
     def set_search_text(self, text: str) -> None:
         self._search_text = text.strip().lower()
+        self._filter_query.search_text = self._search_text
         self._apply_filter()
 
     def visible_asset_count(self) -> int:
         return len(self._visible_assets)
 
-    def asset_at(self, view_row: int) -> ResourceItem | ExportArtifact | None:
-        """Return the asset at a view row, or None if out of range."""
+    def asset_at(self, view_row: int) -> object | None:
         return self.model.asset_at(view_row)
+
+    def view_at(self, view_row: int) -> AssetView | None:
+        return self.model.view_at(view_row)
+
+    def selected_assets(self) -> list[object]:
+        return list(self._selected_assets)
 
     def visible_column_keys(self) -> list[str]:
         return list(self._visible_column_keys)
@@ -154,9 +165,7 @@ class DataAssetTable(QWidget):
         if not ordered:
             ordered = ["name"]
         self._visible_column_keys = ordered
-        # Column visibility only — do not rebuild the search index.
         self.model.set_column_keys(self._visible_column_keys)
-        # Model reset clears the view selection; restore by asset id.
         self._sync_selection()
         self._sync_column_actions()
 
@@ -166,24 +175,25 @@ class DataAssetTable(QWidget):
         self._sync_selection()
         self._sync_column_actions()
 
-    def set_selected_asset(self, asset: ResourceItem | ExportArtifact | None) -> None:
+    def set_selected_asset(self, asset: object | None) -> None:
         self._selected_asset = asset
+        self._selected_assets = [asset] if asset is not None else []
         self._sync_selection()
 
     def _apply_filter(self) -> None:
-        """Filter-only path: reuse existing index + model assets (no haystack rebuild)."""
         assets = self.model.assets()
         if not assets and (self._resources or self._artifacts):
-            # Model not seeded yet — fall back to full update path.
             self.update_assets(self._resources, self._artifacts)
             return
-        filtered = self._index.filter(self._category, self._search_text)
+        filtered = self._index.filter_query(self._filter_query)
         self.model.set_filtered_rows(filtered)
         source = assets if assets else [*self._resources, *self._artifacts]
         self._visible_assets = [source[i] for i in filtered if 0 <= i < len(source)]
         if not self._sync_selection() and self._selected_asset is not None:
             self._selected_asset = None
+            self._selected_assets = []
             self.selected_asset_changed.emit(None)
+            self.selected_assets_changed.emit([])
 
     def _build_column_settings_menu(self) -> None:
         for column in COLUMN_DEFINITIONS:
@@ -226,37 +236,42 @@ class DataAssetTable(QWidget):
         rows = self.table.selectionModel().selectedRows()
         if not rows:
             self._selected_asset = None
+            self._selected_assets = []
             self.selected_asset_changed.emit(None)
+            self.selected_assets_changed.emit([])
             return
-        row = rows[0].row()
-        asset = self.model.asset_at(row)
-        self._selected_asset = asset
-        self.selected_asset_changed.emit(asset)
+
+        selected_items = [self.model.asset_at(r.row()) for r in rows if self.model.asset_at(r.row()) is not None]
+        self._selected_assets = selected_items
+        first = selected_items[0] if selected_items else None
+        self._selected_asset = first
+        self.selected_asset_changed.emit(first)
+        self.selected_assets_changed.emit(selected_items)
 
     def _on_context_menu(self, pos: QPoint) -> None:
-        """Handle the table's customContextMenuRequested signal.
-
-        Maps the viewport-local ``pos`` to a view row, selects the row under
-        the cursor, resolves the asset, and re-emits ``context_menu_requested``
-        with a global position so the page can build and exec the menu.
-        """
         view_row = self.table.rowAt(pos.y())
         if view_row < 0:
             return
-        # Select the row under the cursor so the page's _selected_asset and the
-        # highlighted row agree before the menu acts on them.
-        self.table.selectRow(view_row)
-        asset = self.asset_at(view_row)
-        if asset is None:
-            return
-        global_pos = self.table.viewport().mapToGlobal(pos)
-        self.context_menu_requested.emit(global_pos, asset)
 
-    def _asset_key(self, asset: ResourceItem | ExportArtifact | None) -> tuple[str, str] | None:
+        selected_rows = [r.row() for r in self.table.selectionModel().selectedRows()]
+        if view_row not in selected_rows:
+            self.table.selectRow(view_row)
+            selected_rows = [view_row]
+
+        selected_items = [self.model.asset_at(r) for r in selected_rows if self.model.asset_at(r) is not None]
+        if not selected_items:
+            return
+
+        global_pos = self.table.viewport().mapToGlobal(pos)
+        target = selected_items[0] if len(selected_items) == 1 else selected_items
+        self.context_menu_requested.emit(global_pos, target)
+
+    def _asset_key(self, asset: object | None) -> tuple[str, str] | None:
         if asset is None:
             return None
         kind = "artifact" if isinstance(asset, ExportArtifact) else "resource"
-        return (kind, asset.id)
+        asset_id = getattr(asset, "id", str(id(asset)))
+        return (kind, asset_id)
 
     def _sync_selection(self) -> bool:
         selected_key = self._asset_key(self._selected_asset)

@@ -90,6 +90,13 @@ class MockPredictionAdapter:
             seed=seed,
         )
         project.prediction_tasks.append(task)
+        # Register a prediction DataRun (data-provenance layer). Best-effort.
+        try:
+            from paleo_workbench.catalog.lifecycle import register_prediction_run
+
+            register_prediction_run(task, factor_task_ids=factor_map_ids)
+        except Exception:
+            pass
         return task
 
 
@@ -214,6 +221,13 @@ class LocalAssetPredictionAdapter:
             seed=seed,
         )
         project.prediction_tasks.append(task)
+        # Register a prediction DataRun (data-provenance layer). Best-effort.
+        try:
+            from paleo_workbench.catalog.lifecycle import register_prediction_run
+
+            register_prediction_run(task, factor_task_ids=factor_map_ids)
+        except Exception:
+            pass
         return task
 
 
