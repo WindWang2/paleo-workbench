@@ -138,8 +138,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Workstation tests do not need geo-viz-engine
+          # Workstation tests live in the well-log-engine submodule; only that
+          # submodule is fetched below. geo-viz-engine stays unchecked out.
           submodules: false
+
+      - name: Fetch well-log-engine submodule (workstation tests live there)
+        run: git submodule update --init well-log-engine
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -175,12 +179,12 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           WLWS_DISABLE_ENGINE: "1"
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}/well-log-engine/apps/wellplot-desktop:${{ github.workspace }}
         run: |
           python -m pytest -q --tb=short \
             --timeout=60 \
             --timeout-method=thread \
-            tests/test_well_log_workstation_*.py
+            well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_*.py
 
   # Explicit product merge gate. See docs/ci-merge-policy.md.
   # Cross-workflow: WellLogEngine C++ must also be green (separate workflow).
