@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from paleo_workbench.viz.geomodel.fault_dislocation import FaultCuttingEngine
+from geoviz import FaultCuttingEngine
 
 
 def test_basic_rigid_dislocation_point_normal():
