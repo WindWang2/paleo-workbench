@@ -129,8 +129,13 @@ def export_asset_to_path(
     project: ProjectDocument | None = None,
     project_path: Path | None = None,
     register: bool = True,
+    source_task_ids: list[str] | None = None,
 ) -> ExportJobResult:
-    """Run a registered converter and optionally record ExportArtifact."""
+    """Run a registered converter and optionally record ExportArtifact.
+
+    ``source_task_ids`` propagates real lineage (the tasks that produced the
+    source asset) into the ExportArtifact and the catalog OUTPUT DataVersion.
+    """
     formats = get_available_formats(asset)
     convert_fn = next((fn for lbl, fn in formats if lbl == format_label), None)
     if convert_fn is None:
@@ -171,7 +176,9 @@ def export_asset_to_path(
             linked_id=asset.id,
             output_path=stored,
             fmt=format_label.lower(),
-            source_task_ids=[],
+            source_task_ids=list(source_task_ids or []),
+            source_resource_ids=[asset.id],
+            catalog_output_path=str(output_path),
         )
         artifact.included_map_elements = []
         # stash source name in a free-form way via included list for UI
@@ -268,8 +275,14 @@ def export_widget_snapshot(
     project_path: Path | None = None,
     linked_id: str = "viz_view",
     register: bool = True,
+    source_task_ids: list[str] | None = None,
 ) -> ExportJobResult:
-    """Export a QWidget (or engine canvas) to PNG/SVG/PDF when possible."""
+    """Export a QWidget (or engine canvas) to PNG/SVG/PDF when possible.
+
+    ``source_task_ids`` lets callers attach real lineage (e.g. the active
+    PaleoMapDocument / PredictionTask id) so the OUTPUT DataVersion's lineage
+    is non-empty instead of the legacy ``[]``.
+    """
     label = format_label.upper()
     fmt = label.lower()
     caps = view_export_capabilities(widget)
@@ -305,7 +318,8 @@ def export_widget_snapshot(
             linked_id=linked_id,
             output_path=stored,
             fmt=fmt,
-            source_task_ids=[],
+            source_task_ids=list(source_task_ids or []),
+            catalog_output_path=str(output_path),
         )
         surface = _export_surface_kind(_resolve_export_target(widget))
         artifact.included_map_elements = ["visualization_view", surface]

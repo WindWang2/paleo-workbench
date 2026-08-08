@@ -191,8 +191,18 @@ def export_well_canvas(
     canvas: Any,
     output_path: Path | str,
     format_label: str = "PNG",
+    *,
+    project=None,
+    source_task_ids: list[str] | None = None,
+    linked_id: str = "well_log_canvas",
 ) -> Path:
-    """Export WellLogCanvas via engine helpers (PNG/SVG/PDF)."""
+    """Export WellLogCanvas via engine helpers (PNG/SVG/PDF).
+
+    When ``project`` is given, the export is registered as an ExportArtifact +
+    catalog OUTPUT DataVersion (closing the previous tracking gap where this
+    path wrote a file with zero registration). ``source_task_ids`` should carry
+    the active PredictionTask id for lineage.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     label = (format_label or "PNG").upper()
@@ -210,4 +220,15 @@ def export_well_canvas(
         export_pdf(canvas, str(path))
     else:
         raise ValueError(f"不支持的测井导出格式: {label}")
+
+    if project is not None:
+        from paleo_workbench.project.artifacts import record_export
+
+        record_export(
+            project,
+            linked_id=linked_id,
+            output_path=str(path),
+            fmt=label.lower(),
+            source_task_ids=list(source_task_ids or []),
+        )
     return path

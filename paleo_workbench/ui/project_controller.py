@@ -59,6 +59,15 @@ class ProjectController:
         self.window.project = loaded
         self.window.project.meta.project_root = str(target.resolve().parent)
         self.window.project_path = target
+        # Migrate legacy ResourceItems into catalog INPUT versions (RAW/EXTERNAL)
+        # with the legacy bridge, so downstream runs can resolve resource_id →
+        # version_id. Best-effort: a catalog failure never blocks project open.
+        try:
+            from paleo_workbench.catalog.lifecycle import migrate_project_resources
+
+            migrate_project_resources(loaded)
+        except Exception:
+            pass
         self.window._refresh_shell()
         return True
 

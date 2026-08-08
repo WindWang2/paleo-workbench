@@ -27,6 +27,9 @@ def export_quality_report_json(
             linked_id=report.linked_map_document_id or report.id,
             output_path=str(path),
             fmt="qc_json",
-            source_task_ids=[],
+            source_task_ids=[report.id],
+            source_resource_ids=(
+                [report.linked_map_document_id] if report.linked_map_document_id else None
+            ),
         )
     return path
