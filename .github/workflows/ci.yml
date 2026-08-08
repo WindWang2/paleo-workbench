@@ -181,10 +181,17 @@ jobs:
           WLWS_DISABLE_ENGINE: "1"
           PYTHONPATH: ${{ github.workspace }}/well-log-engine/apps/wellplot-desktop:${{ github.workspace }}
         run: |
-          python -m pytest -q --tb=short \
-            --timeout=60 \
-            --timeout-method=thread \
-            well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_*.py
+          # Host-only job: the engine bindings are not installed, so skip the
+          # binding-contract test (hard module-level `import welllog`). All
+          # other engine-optional tests self-skip via _native_importable().
+          # (--ignore would not apply here: the shell expands the glob into
+          # explicit file args, which bypass --ignore.)
+          find well-log-engine/apps/wellplot-desktop/tests \
+            -name "test_well_log_workstation_*.py" \
+            ! -name "test_well_log_workstation_engine_bindings.py" \
+            -exec python -m pytest -q --tb=short \
+              --timeout=60 \
+              --timeout-method=thread {} +
 
   # Explicit product merge gate. See docs/ci-merge-policy.md.
   # Cross-workflow: WellLogEngine C++ must also be green (separate workflow).
