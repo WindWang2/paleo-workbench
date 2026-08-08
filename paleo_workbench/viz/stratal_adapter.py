@@ -110,11 +110,14 @@ def build_stratal_grids(
         ms = map_coordinates(
             grid_ms.astype(float), coords, order=1, mode="nearest", cval=np.nan
         )
-        # ms -> preview sample index (registration-aware scaling).
-        s_idx = np.array(
-            [reg.time_ms_to_sample_idx(float(v)) for v in ms.ravel()]
-        ).reshape(ms.shape)
-        return s_idx
+        # Vectorize the registration's ms -> preview-sample-index transform
+        # (registration.time_ms_to_sample_idx) instead of a per-pixel Python
+        # loop: (twt - t0)/dt * (n_sample_prev-1)/(n_samples_full-1).
+        dt = survey.dt_ms if survey.dt_ms and survey.dt_ms > 0 else 1.0
+        full_t = (ms - survey.t0_ms) / dt
+        full_nt = max(survey.n_samples - 1, 1)
+        s_idx = full_t / full_nt * max(reg.n_sample - 1, 0)
+        return np.asarray(s_idx, dtype=float)
 
     return _to_preview_sample_index(top_ms), _to_preview_sample_index(bot_ms)
 

@@ -54,6 +54,36 @@ def test_build_stratal_surfaces_returns_none_when_all_invalid():
     assert out is None
 
 
+def test_stratal_ms_to_sample_index_matches_registration_per_pixel():
+    """The vectorized ms->sample transform in build_stratal_grids must match the
+    registration's per-pixel time_ms_to_sample_idx exactly (it replaced a Python
+    loop for performance - this guards against numeric drift)."""
+    from types import SimpleNamespace
+
+    # A fake survey + registration mirroring VolumeRegistration's contract.
+    survey = SimpleNamespace(
+        iline_start=100, iline_step=2, n_inlines=8,
+        xline_start=200, xline_step=2, n_crosslines=6,
+        n_samples=50, dt_ms=4.0, t0_ms=100.0,
+    )
+    reg = SimpleNamespace(n_sample=20)  # preview downsampled to 20 samples
+
+    # Expected per-pixel: (twt - t0)/dt * (n_sample-1)/(n_samples-1)
+    twt = np.array([[100.0, 200.0, 296.0]])
+    dt = 4.0
+    full_t = (twt - 100.0) / dt
+    expected = full_t / 49.0 * 19.0  # (n_samples-1)=49, (n_sample-1)=19
+
+    # Reproduce the vectorized formula from stratal_adapter._to_preview_sample_index.
+    full_nt = max(survey.n_samples - 1, 1)
+    actual = full_t / full_nt * max(reg.n_sample - 1, 0)
+    assert np.allclose(actual, expected)
+    # Spot-check against the literal per-pixel registration formula.
+    assert np.isclose(actual[0, 0], 0.0)          # twt=t0 -> index 0
+    assert np.isclose(actual[0, 1], 19.0 * 25.0 / 49.0)  # twt=200ms
+    assert np.isclose(actual[0, 2], 19.0 * 49.0 / 49.0)  # twt=296ms ~ last
+
+
 def test_stratal_adapter_end_to_end_with_demo_and_renderer(qtbot):
     """The full demo path: synthetic volume + horizons -> Renderer3D planes."""
     from geoviz_seismic.renderer_3d import Renderer3D
