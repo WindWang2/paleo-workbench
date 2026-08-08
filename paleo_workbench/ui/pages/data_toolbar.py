@@ -14,6 +14,7 @@ class DataToolbar(QWidget):
     open_folder_requested = Signal()
     visualize_requested = Signal()
     clear_preview_cache_requested = Signal()
+    verify_requested = Signal()
     reader_toggled = Signal()
     search_changed = Signal(str)
 
@@ -28,7 +29,7 @@ class DataToolbar(QWidget):
         self.import_btn = QPushButton("导入文件")
         self.import_btn.setObjectName("PrimaryButton")
         self.import_btn.setMinimumHeight(tokens.CONTROL_HEIGHT_LG)
-        self.import_btn.setToolTip("导入数据文件")
+        self.import_btn.setToolTip("导入文件并创建项目受管的不可变 RAW 副本")
         self.import_btn.clicked.connect(self.import_files_requested.emit)
         layout.addWidget(self.import_btn)
 
@@ -38,6 +39,13 @@ class DataToolbar(QWidget):
         self.import_folder_btn.setToolTip("导入整个目录")
         self.import_folder_btn.clicked.connect(self.import_folder_requested.emit)
         layout.addWidget(self.import_folder_btn)
+
+        self.verify_btn = QPushButton("完整性校验")
+        self.verify_btn.setObjectName("SecondaryButton")
+        self.verify_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.verify_btn.setToolTip("后台校验数据资产完整性与 SHA-256")
+        self.verify_btn.clicked.connect(self.verify_requested.emit)
+        layout.addWidget(self.verify_btn)
 
         self.rescan_btn = QPushButton("重新扫描")
         self.rescan_btn.setObjectName("SecondaryButton")
@@ -88,8 +96,8 @@ class DataToolbar(QWidget):
 
         self.search_box = QLineEdit()
         self.search_box.setObjectName("SearchBox")
-        self.search_box.setPlaceholderText("搜索文件名 / 类型 / 格式 / 路径...")
-        self.search_box.setToolTip("搜索文件名/类型/格式/路径")
+        self.search_box.setPlaceholderText("搜索文件名 / 类型 / 阶段 / 标签 / 路径...")
+        self.search_box.setToolTip("搜索文件名/类型/阶段/标签/路径")
         self.search_box.setMinimumHeight(tokens.CONTROL_HEIGHT)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         layout.addWidget(self.search_box, 1)

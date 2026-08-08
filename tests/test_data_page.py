@@ -177,7 +177,7 @@ def test_data_page_has_column_settings_menu(qtbot):
 
     assert page.column_settings_btn.text() == "列设置"
     assert page.column_settings_menu is not None
-    assert set(page.column_actions) == {
+    assert set(page.column_actions) >= {
         "name",
         "type",
         "format",

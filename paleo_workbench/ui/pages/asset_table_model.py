@@ -10,6 +10,13 @@ from paleo_workbench.ui.pages.data_table_columns import (
     COLUMN_BY_KEY,
     COLUMN_TOOLTIPS,
 )
+from paleo_workbench.ui.pages.data_view_models import (
+    AssetView,
+    DataStage,
+    IntegrityState,
+    RESOURCE_TYPE_DISPLAY_LABELS,
+    asset_view_from_object,
+)
 from paleo_workbench.ui.tokens import format_size
 
 RESOURCE_TYPE_LABELS = {
@@ -30,20 +37,31 @@ RESOURCE_TYPE_LABELS = {
 class AssetTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._assets: list[ResourceItem | ExportArtifact] = []
+        self._raw_assets: list[object] = []
+        self._views: list[AssetView] = []
         self._filtered_rows: list[int] = []
         self._column_keys: list[str] = []
+        self._project_root: Path | None = None
+
+    def set_project_root(self, root: Path | str | None) -> None:
+        if root:
+            self._project_root = Path(root)
+        else:
+            self._project_root = None
 
     def set_column_keys(self, keys: list[str]) -> None:
         self.beginResetModel()
         self._column_keys = list(keys)
         self.endResetModel()
 
-    def set_assets(self, assets: list[ResourceItem | ExportArtifact]) -> None:
+    def set_assets(self, assets: list[object]) -> None:
         self.beginResetModel()
-        self._assets = list(assets)
-        # Default: all rows visible until filter applied
-        self._filtered_rows = list(range(len(self._assets)))
+        self._raw_assets = list(assets)
+        self._views = [
+            asset_view_from_object(a, project_root=self._project_root)
+            for a in self._raw_assets
+        ]
+        self._filtered_rows = list(range(len(self._raw_assets)))
         self.endResetModel()
 
     def set_filtered_rows(self, rows: list[int]) -> None:
@@ -53,25 +71,39 @@ class AssetTableModel(QAbstractTableModel):
 
     def set_assets_filtered(
         self,
-        assets: list[ResourceItem | ExportArtifact],
+        assets: list[object],
         rows: list[int],
         column_keys: list[str] | None = None,
     ) -> None:
-        """Apply assets, filtered rows, and optional columns in one model reset."""
         self.beginResetModel()
         if column_keys is not None:
             self._column_keys = list(column_keys)
-        self._assets = list(assets)
+        self._raw_assets = list(assets)
+        self._views = [
+            asset_view_from_object(a, project_root=self._project_root)
+            for a in self._raw_assets
+        ]
         self._filtered_rows = list(rows)
         self.endResetModel()
 
-    def asset_at(self, view_row: int) -> ResourceItem | ExportArtifact | None:
+    def asset_at(self, view_row: int) -> object | None:
         if view_row < 0 or view_row >= len(self._filtered_rows):
             return None
-        return self._assets[self._filtered_rows[view_row]]
+        idx = self._filtered_rows[view_row]
+        if idx < 0 or idx >= len(self._raw_assets):
+            return None
+        return self._raw_assets[idx]
 
-    def assets(self) -> list[ResourceItem | ExportArtifact]:
-        return list(self._assets)
+    def view_at(self, view_row: int) -> AssetView | None:
+        if view_row < 0 or view_row >= len(self._filtered_rows):
+            return None
+        idx = self._filtered_rows[view_row]
+        if idx < 0 or idx >= len(self._views):
+            return None
+        return self._views[idx]
+
+    def assets(self) -> list[object]:
+        return list(self._raw_assets)
 
     def rowCount(self, parent=QModelIndex()) -> int:
         if parent.isValid():
@@ -95,40 +127,89 @@ class AssetTableModel(QAbstractTableModel):
         return None
 
     def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+        if not index.isValid():
             return None
-        asset = self.asset_at(index.row())
-        if asset is None:
+        view = self.view_at(index.row())
+        if view is None:
             return None
+
         key = self._column_keys[index.column()]
-        return self._row_values(asset).get(key, "")
 
-    def _row_values(self, asset: ResourceItem | ExportArtifact) -> dict[str, str]:
-        if isinstance(asset, ExportArtifact):
-            return {
-                "name": Path(asset.output_path).name,
-                "type": "成果",
-                "format": asset.format,
-                "status": "generated",
-                "role": "成果",
-                "size": "—",
-                "source": "export",
-                "path": asset.output_path,
-            }
-        size = asset.parsed_summary.get("size_bytes")
-        role = asset.artifact_role or "input"
-        return {
-            "name": asset.name,
-            "type": RESOURCE_TYPE_LABELS.get(asset.type, asset.type),
-            "format": asset.format,
-            "status": asset.status,
-            "role": self._role_label(role),
-            "size": format_size(size),
-            "source": asset.source,
-            "path": asset.path,
-        }
+        if role == Qt.ItemDataRole.DisplayRole:
+            return self._format_cell_display(view, key)
 
-    @staticmethod
-    def _role_label(role: str) -> str:
-        labels = {"input": "输入", "derived": "成果", "export": "成果"}
-        return labels.get(role, role)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return self._format_cell_tooltip(view, key)
+
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if key in ("size", "version"):
+                return int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+
+        return None
+
+    def _format_cell_display(self, view: AssetView, key: str) -> str:
+        if key == "name":
+            return view.name
+        if key == "type":
+            return view.type_label
+        if key == "stage":
+            return f"{view.stage.icon_symbol} {view.stage.label}"
+        if key == "version":
+            return view.current_version
+        if key == "tags":
+            return ", ".join(view.tags) if view.tags else "—"
+        if key == "managed":
+            return "受管" if view.managed else "外部"
+        if key == "integrity":
+            return f"{view.integrity_state.icon_symbol} {view.integrity_state.label}"
+        if key == "format":
+            return view.format
+        if key == "status":
+            return view.status
+        if key == "role":
+            if isinstance(view.raw_asset, ExportArtifact):
+                return "成果"
+            if isinstance(view.raw_asset, ResourceItem):
+                role = view.raw_asset.artifact_role or "input"
+                return {"input": "输入", "derived": "成果", "export": "成果"}.get(role, role)
+            return view.stage.label
+        if key == "size":
+            return view.size_formatted
+        if key == "modified":
+            return view.modified_at
+        if key == "source":
+            return view.source
+        if key == "path":
+            return view.path
+        return ""
+
+    def _format_cell_tooltip(self, view: AssetView, key: str) -> str:
+        if key == "stage":
+            return f"生命周期: {view.stage.label} ({view.stage.value})"
+        if key == "integrity":
+            return f"完整性: {view.integrity_state.label}\n校验和: {view.checksum_display}"
+        if key == "path":
+            return view.path
+        if key == "tags":
+            return "标签: " + (", ".join(view.tags) if view.tags else "无")
+        return self._format_cell_display(view, key)
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
+        if column < 0 or column >= len(self._column_keys):
+            return
+        key = self._column_keys[column]
+        reverse = (order == Qt.SortOrder.DescendingOrder)
+
+        self.beginResetModel()
+
+        def sort_key(row_idx: int) -> tuple:
+            view = self._views[row_idx]
+            val = getattr(view, key, self._format_cell_display(view, key))
+            if isinstance(val, (DataStage, IntegrityState)):
+                val = val.value
+            if val is None:
+                val = ""
+            return (val,)
+
+        self._filtered_rows.sort(key=sort_key, reverse=reverse)
+        self.endResetModel()
