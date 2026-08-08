@@ -137,6 +137,18 @@ class LineageView:
         return bool(self.parent_ids or self.child_ids or self.run_id)
 
 
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class DataAssetProtocol(Protocol):
+    """Protocol defining the expected presentation interface for future DataCatalogCore entities."""
+    name: str
+    type: str
+    format: str
+    path: str
+
+
 @dataclass
 class AssetView:
     id: str
@@ -162,6 +174,11 @@ class AssetView:
     status: str = "indexed"
     parsed_summary: dict[str, Any] = field(default_factory=dict)
     raw_asset: ResourceItem | ExportArtifact | Any = None
+    normalized_tags: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        if not self.normalized_tags and self.tags:
+            self.normalized_tags = {t.strip().lower() for t in self.tags if t}
 
     @property
     def is_raw(self) -> bool:

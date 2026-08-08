@@ -794,6 +794,10 @@ class DataPage(QWidget):
 
     @Slot(object)
     def _on_verify_finished(self, report: IntegrityCheckReport) -> None:
+        if report.checksum_updates:
+            for res in self._resources:
+                if res.id in report.checksum_updates:
+                    res.checksum = report.checksum_updates[res.id]
         self._refresh()
         self._set_action_status(f"完整性校验完成: {report.summary_text}")
 

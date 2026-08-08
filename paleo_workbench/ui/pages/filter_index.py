@@ -130,7 +130,7 @@ class FilterIndex:
             return False
         if query.tag:
             target_tag = query.tag.strip().lower()
-            if not any(t.strip().lower() == target_tag for t in view.tags):
+            if target_tag not in view.normalized_tags:
                 return False
         if query.integrity and view.integrity_state.value != query.integrity:
             return False

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.data_view_models import IntegrityState, asset_view_from_object
@@ -23,6 +23,7 @@ class IntegrityCheckReport:
     unknown_count: int = 0
     results: dict[str, IntegrityState] = field(default_factory=dict)
     details: list[str] = field(default_factory=list)
+    checksum_updates: dict[str, str] = field(default_factory=dict)  # asset_id -> new_checksum
 
     @property
     def summary_text(self) -> str:
@@ -47,6 +48,7 @@ def compute_sha256(path: Path, max_bytes: int | None = None) -> str | None:
                     break
                 h.update(chunk)
                 bytes_read += len(chunk)
+                QThread.yieldCurrentThread()
                 if max_bytes and bytes_read >= max_bytes:
                     break
         return h.hexdigest()
@@ -100,11 +102,10 @@ class IntegrityWorker(QObject):
                         report.modified_count += 1
                         report.details.append(f"{view.name}: 校验和不匹配 (预期 {view.checksum[:8]}, 实际 {actual_hash[:8] if actual_hash else 'N/A'})")
                 else:
-                    # Compute new checksum and record verified
+                    # Compute new checksum and record for main-thread assignment
                     new_hash = compute_sha256(path_obj)
                     if new_hash:
-                        if isinstance(asset, ResourceItem):
-                            asset.checksum = new_hash
+                        report.checksum_updates[view.id] = new_hash
                         state = IntegrityState.VERIFIED
                         report.verified_count += 1
                     else:
