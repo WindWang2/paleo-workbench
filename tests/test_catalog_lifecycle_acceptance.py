@@ -847,8 +847,10 @@ def test_purge_trashed_removes_only_trashed(catalog, tmp_path: Path):
 
 def test_reimport_after_trash_never_collides_on_legacy_bridge(catalog, tmp_path: Path):
     """A re-import carrying a legacy id that a TRASHED asset already holds must
-    never steal the bridge: the bridge id is set once, so at most one asset can
-    resolve through it (no phantom collision)."""
+    take over the bridge so the legacy id resolves to LIVE data (review
+    finding I2: import after trash must not dead-bridge to a trashed asset).
+    Two LIVE assets can never collide on one bridge key — that guarantee
+    still holds."""
     src = _make_source(tmp_path, payload=b"first import")
     ref1 = catalog.register_input(
         name="well.las",
@@ -867,15 +869,19 @@ def test_reimport_after_trash_never_collides_on_legacy_bridge(catalog, tmp_path:
         legacy_resource_id="res_shared",
     )
 
-    # Exactly ONE asset resolves the legacy id (the original trashed one) —
-    # the new asset never claimed the already-taken bridge key.
+    # The legacy id now resolves to the LIVE re-imported asset (the trashed
+    # holder released the bridge) — never to the trashed version.
     resolver = CoreCatalogAdapter(catalog.service)
     bridged = resolver._find_asset_by_legacy_id("res_shared")
-    assert bridged is not None and bridged.id == ref1.asset_id
+    assert bridged is not None and bridged.id == ref2.asset_id
+    assert bridged.trashed is False
+    resolved = resolver.resolve_legacy_resource("res_shared")
+    assert resolved is not None and resolved.version_id == ref2.version_id
+    # Only ONE live asset claims the bridge (the trashed one no longer does).
     assets_claiming = [
         a
         for a in catalog.service.document.assets
-        if a.id == "res_shared" or a.legacy_resource_id == "res_shared"
+        if a.legacy_resource_id == "res_shared" and not a.trashed
     ]
     assert len(assets_claiming) == 1
     # The new asset is active and independent.

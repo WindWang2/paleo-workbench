@@ -175,10 +175,15 @@ class CoreCatalogAdapter:
                 checksum = sha256_file_or_none(resolved_path)
 
         # Stable legacy-bridge asset: once a resource id maps to an asset it
-        # always maps to that SAME asset (never a phantom duplicate).
+        # always maps to that SAME asset (never a phantom duplicate). A
+        # TRASHED bridged asset is treated as unbridged so re-importing the
+        # file re-registers it fresh (review finding I2: import after trash
+        # must not silently dead-bridge).
         bridged_asset = None
         if legacy_resource_id is not None:
-            bridged_asset = self._find_asset_by_legacy_id(legacy_resource_id)
+            candidate = self._find_asset_by_legacy_id(legacy_resource_id)
+            if candidate is not None and not candidate.trashed:
+                bridged_asset = candidate
 
         if external:
             # Idempotence: same external path already linked (index-backed
@@ -268,6 +273,7 @@ class CoreCatalogAdapter:
             if (
                 version.managed
                 and version.stage == DataStage.RAW
+                and not version.trashed
                 and version.source_uri == source_uri
                 and version.sha256 == checksum
             ):
@@ -275,7 +281,11 @@ class CoreCatalogAdapter:
         return None
 
     def _find_external_by_path(self, resolved: str) -> DataVersion | None:
-        """Existing unmanaged version linked at *resolved*, or None."""
+        """Existing unmanaged version linked at *resolved*, or None.
+
+        Trashed versions are never dedup targets: re-importing a file after
+        trashing it must not silently resolve to the trashed version (review
+        finding I2)."""
         service = self._service
         try:
             if service.index_revision() == service.document.catalog_revision:
@@ -283,14 +293,14 @@ class CoreCatalogAdapter:
                 if found is not None:
                     try:
                         version = service.get_version(found)
-                        if not version.managed:
+                        if not version.managed and not version.trashed:
                             return version
                     except CatalogError:
                         pass
         except Exception:
             pass
         for version in service.document.versions:
-            if not version.managed and version.path == resolved:
+            if not version.managed and not version.trashed and version.path == resolved:
                 return version
         return None
 
@@ -512,7 +522,11 @@ class CoreCatalogAdapter:
 
     def resolve_legacy_resource(self, resource_id: str) -> DataVersionRef | None:
         asset = self._find_asset_by_legacy_id(resource_id)
-        if asset is None or asset.current_version_id is None:
+        if (
+            asset is None
+            or asset.trashed
+            or asset.current_version_id is None
+        ):
             return None
         return self._version_ref(self._service.get_version(asset.current_version_id))
 

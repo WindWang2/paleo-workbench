@@ -600,7 +600,25 @@ class DataLifecycleController:
                 except Exception:
                     source_path = None
         elif isinstance(asset, ExportArtifact):
-            source_path = Path(asset.output_path)
+            # record_export stores project-RELATIVE output paths; resolve
+            # against the project dir (never process CWD — review finding I1),
+            # then fall back to the managed OUTPUT payload when available.
+            rel = Path(asset.output_path)
+            if not rel.is_absolute():
+                try:
+                    from paleo_workbench.project.paths import resolve_project_path
+                    source_path = Path(
+                        resolve_project_path(str(rel), self._project_file_for_io())
+                    )
+                except Exception:
+                    source_path = rel
+            else:
+                source_path = rel
+            if not source_path.is_file() and service is not None and ref is not None:
+                try:
+                    source_path = service.resolve_path(service.get_version(ref.version_id))
+                except Exception:
+                    source_path = None
         if source_path is None or not source_path.is_file():
             page._set_action_status("导出 / 交付失败: 源文件不存在")
             return

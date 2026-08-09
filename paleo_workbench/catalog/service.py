@@ -158,9 +158,18 @@ class DataCatalogService:
             if self._assets_by_legacy_id is not None:
                 self._assets_by_legacy_id[asset.id] = asset
                 if asset.legacy_resource_id is not None:
-                    self._assets_by_legacy_id.setdefault(
-                        asset.legacy_resource_id, asset
+                    holder = self._assets_by_legacy_id.get(
+                        asset.legacy_resource_id
                     )
+                    # A trashed asset still holds its legacy id; a fresh
+                    # (live) re-import takes over the bridge so the legacy id
+                    # resolves to live data (review finding I2).
+                    if holder is None or holder.trashed:
+                        self._assets_by_legacy_id[asset.legacy_resource_id] = asset
+                    else:
+                        self._assets_by_legacy_id.setdefault(
+                            asset.legacy_resource_id, asset
+                        )
 
     def _remove_asset(self, asset: DataAsset) -> None:
         if asset in self.document.assets:
@@ -169,11 +178,14 @@ class DataCatalogService:
             self._asset_by_id.pop(asset.id, None)
         if self._assets_by_legacy_id is not None:
             # Removing the (first-wins) claimant must reveal the next claimant;
-            # rebuild this small index from the remaining assets.
+            # rebuild this small index from the remaining assets. A live
+            # asset takes the bridge over a trashed one (I2).
             legacy: dict[str, DataAsset] = {}
             for a in self.document.assets:
                 legacy[a.id] = a
-            for a in self.document.assets:
+            for a in sorted(
+                self.document.assets, key=lambda x: int(bool(x.trashed))
+            ):
                 if a.legacy_resource_id is not None:
                     legacy.setdefault(a.legacy_resource_id, a)
             self._assets_by_legacy_id = legacy
@@ -375,6 +387,19 @@ class DataCatalogService:
         """Stable legacy-bridge resolution (id match wins, then first bridge)."""
         self._ensure_maps()
         return self._assets_by_legacy_id.get(legacy_resource_id)
+
+    def _live_asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
+        """Like :meth:`_asset_by_legacy_id` but ignores trashed assets.
+
+        A trashed asset still holds its legacy id; import-after-trash must be
+        able to re-bridge a fresh asset instead of dead-ending on the trashed
+        one (review finding I2).
+        """
+        self._ensure_maps()
+        asset = self._assets_by_legacy_id.get(legacy_resource_id)
+        if asset is not None and asset.trashed:
+            return None
+        return asset
 
     def _set_legacy_bridge(self, asset: DataAsset, legacy_resource_id: str) -> None:
         """Record a legacy bridge on *asset*, keeping the legacy index current.
@@ -689,7 +714,7 @@ class DataCatalogService:
             if (
                 _legacy_resource_id is not None
                 and target.legacy_resource_id is None
-                and self._asset_by_legacy_id(_legacy_resource_id) is None
+                and self._live_asset_by_legacy_id(_legacy_resource_id) is None
             ):
                 target.legacy_resource_id = _legacy_resource_id
             asset = target
