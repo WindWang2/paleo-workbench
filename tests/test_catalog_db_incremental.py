@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from paleo_workbench.catalog.db import CatalogIndex
 from paleo_workbench.catalog.models import (

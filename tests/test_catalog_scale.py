@@ -23,7 +23,6 @@ import os
 import time
 from pathlib import Path
 
-import pytest
 
 from paleo_workbench.catalog.adapter import CoreCatalogAdapter
 from paleo_workbench.catalog.db import CatalogIndex

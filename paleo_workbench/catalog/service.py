@@ -31,6 +31,7 @@ from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.db import CatalogIndex
 from paleo_workbench.catalog.gc import (
+    GcReport,
     cleanup_working_copies as _gc_cleanup_working_copies,
     plan_gc as _gc_plan,
     sweep_gc as _gc_sweep,
@@ -306,7 +307,7 @@ class DataCatalogService:
 
     # -- garbage collection (P4, conservative) --------------------------------
 
-    def plan_gc(self) -> "GcReport":
+    def plan_gc(self) -> GcReport:
         """Classify orphaned files in the artifacts tree (deletes nothing).
 
         Orphan classes: stage payloads without a version record, abandoned
@@ -316,7 +317,7 @@ class DataCatalogService:
         """
         return _gc_plan(self)
 
-    def sweep_gc(self, *, dry_run: bool = True, explicit: bool = False) -> "GcReport":
+    def sweep_gc(self, *, dry_run: bool = True, explicit: bool = False) -> GcReport:
         """Sweep orphans; ``dry_run=True`` (default) only reports.
 
         With ``explicit=False`` (the conservative sweep, also run on open)
@@ -328,7 +329,7 @@ class DataCatalogService:
         """
         return _gc_sweep(self, dry_run=dry_run, explicit=explicit)
 
-    def cleanup_working_copies(self) -> "GcReport":
+    def cleanup_working_copies(self) -> GcReport:
         """Remove abandoned working copies (explicit user action).
 
         Only working-copy dirs whose version id does not exist in the catalog

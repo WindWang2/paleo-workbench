@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from paleo_workbench.catalog.service import DataCatalogService
 from paleo_workbench.project.paths import artifact_dir_for, relocate_artifacts

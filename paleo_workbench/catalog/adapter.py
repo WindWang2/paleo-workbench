@@ -441,7 +441,6 @@ class CoreCatalogAdapter:
     def query_lineage(
         self, version_id: str, *, direction: str = "ancestors"
     ) -> list[DataVersionRef]:
-        service = self._service
         by_id, children = self._lineage_maps()
         # Seed with the start node so a cycle can never list a version as its
         # own ancestor/descendant.

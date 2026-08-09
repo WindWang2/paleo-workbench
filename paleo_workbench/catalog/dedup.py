@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import stat
 import tempfile
 from pathlib import Path

@@ -18,7 +18,7 @@ import pytest
 from paleo_workbench.catalog import dedup
 from paleo_workbench.catalog.models import CatalogDocument, CatalogError
 from paleo_workbench.catalog.service import DataCatalogService
-from paleo_workbench.catalog.storage import blob_dir_for, blob_path, place_blob
+from paleo_workbench.catalog.storage import blob_path, place_blob
 
 
 def _digest(payload: bytes) -> str:
