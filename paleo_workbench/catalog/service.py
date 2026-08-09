@@ -72,6 +72,142 @@ class DataCatalogService:
         # payloads (verify_integrity) on a worker thread while the UI thread
         # may be saving. Re-entrant so public methods can nest under _save.
         self._lock = threading.RLock()
+        # Maintained id→object indexes (P4): every document list mutation goes
+        # through ``_add_*`` / ``_remove_*`` so lookups stay O(1) instead of
+        # linear scans. ``None`` = not yet built (built lazily from the
+        # document on first use). A lookup miss rebuilds the maps from the
+        # document as a self-healing safety net, so a missed maintenance site
+        # can never return a wrong *negative* answer (only rebuild cost).
+        self._asset_by_id: dict[str, DataAsset] | None = None
+        self._version_by_id: dict[str, DataVersion] | None = None
+        self._run_by_id: dict[str, DataRun] | None = None
+        self._versions_by_asset: dict[str, list[DataVersion]] | None = None
+        self._children_by_parent: dict[str, list[DataVersion]] | None = None
+        self._assets_by_legacy_id: dict[str, DataAsset] | None = None
+
+    # -- maintained indexes -------------------------------------------------
+
+    def _invalidate_maps(self) -> None:
+        """Drop the cached indexes; they rebuild lazily on next use."""
+        self._asset_by_id = None
+        self._version_by_id = None
+        self._run_by_id = None
+        self._versions_by_asset = None
+        self._children_by_parent = None
+        self._assets_by_legacy_id = None
+
+    def _ensure_maps(self) -> None:
+        """Build the id→object indexes from the document (idempotent)."""
+        if self._asset_by_id is not None:
+            return
+        self._asset_by_id = {a.id: a for a in self.document.assets}
+        self._version_by_id = {v.id: v for v in self.document.versions}
+        self._run_by_id = {r.id: r for r in self.document.runs}
+        versions_by_asset: dict[str, list[DataVersion]] = {}
+        children: dict[str, list[DataVersion]] = {}
+        for version in self.document.versions:
+            versions_by_asset.setdefault(version.asset_id, []).append(version)
+            for pid in version.parent_version_ids:
+                children.setdefault(pid, []).append(version)
+        self._versions_by_asset = versions_by_asset
+        self._children_by_parent = children
+        # Legacy-bridge resolution order mirrors ``_find_asset_by_legacy_id``:
+        # an asset whose *id* equals the legacy id wins; otherwise the first
+        # asset bridged via ``legacy_resource_id`` (first-wins via setdefault).
+        legacy: dict[str, DataAsset] = {}
+        for asset in self.document.assets:
+            legacy[asset.id] = asset
+        for asset in self.document.assets:
+            if asset.legacy_resource_id is not None:
+                legacy.setdefault(asset.legacy_resource_id, asset)
+        self._assets_by_legacy_id = legacy
+
+    def _maps_consistent(self) -> bool:
+        """Debug/self-check: cached indexes match the document exactly."""
+        if self._asset_by_id is None:
+            self._ensure_maps()
+        if len(self._asset_by_id) != len(self.document.assets):
+            return False
+        if len(self._version_by_id) != len(self.document.versions):
+            return False
+        if len(self._run_by_id) != len(self.document.runs):
+            return False
+        for asset in self.document.assets:
+            if self._asset_by_id.get(asset.id) is not asset:
+                return False
+        for version in self.document.versions:
+            if self._version_by_id.get(version.id) is not version:
+                return False
+            if self._versions_by_asset.get(version.asset_id) is None:
+                return False
+        return True
+
+    def _add_asset(self, asset: DataAsset) -> None:
+        self.document.assets.append(asset)
+        if self._asset_by_id is not None:
+            self._asset_by_id[asset.id] = asset
+            if self._assets_by_legacy_id is not None:
+                self._assets_by_legacy_id[asset.id] = asset
+                if asset.legacy_resource_id is not None:
+                    self._assets_by_legacy_id.setdefault(
+                        asset.legacy_resource_id, asset
+                    )
+
+    def _remove_asset(self, asset: DataAsset) -> None:
+        if asset in self.document.assets:
+            self.document.assets.remove(asset)
+        if self._asset_by_id is not None:
+            self._asset_by_id.pop(asset.id, None)
+        if self._assets_by_legacy_id is not None:
+            # Removing the (first-wins) claimant must reveal the next claimant;
+            # rebuild this small index from the remaining assets.
+            legacy: dict[str, DataAsset] = {}
+            for a in self.document.assets:
+                legacy[a.id] = a
+            for a in self.document.assets:
+                if a.legacy_resource_id is not None:
+                    legacy.setdefault(a.legacy_resource_id, a)
+            self._assets_by_legacy_id = legacy
+
+    def _add_version(self, version: DataVersion) -> None:
+        self.document.versions.append(version)
+        if self._version_by_id is not None:
+            self._version_by_id[version.id] = version
+            self._versions_by_asset.setdefault(version.asset_id, []).append(version)
+            for pid in version.parent_version_ids:
+                self._children_by_parent.setdefault(pid, []).append(version)
+
+    def _remove_version(self, version: DataVersion) -> None:
+        if version in self.document.versions:
+            self.document.versions.remove(version)
+        if self._version_by_id is not None:
+            self._version_by_id.pop(version.id, None)
+            bucket = self._versions_by_asset.get(version.asset_id)
+            if bucket is not None and version in bucket:
+                bucket.remove(version)
+            for pid in version.parent_version_ids:
+                children = self._children_by_parent.get(pid)
+                if children is not None and version in children:
+                    children.remove(version)
+
+    def _add_run(self, run: DataRun) -> None:
+        self.document.runs.append(run)
+        if self._run_by_id is not None:
+            self._run_by_id[run.id] = run
+
+    def _remove_run(self, run: DataRun) -> None:
+        if run in self.document.runs:
+            self.document.runs.remove(run)
+        if self._run_by_id is not None:
+            self._run_by_id.pop(run.id, None)
+
+    def _append_parent(self, version_id: str, parent_id: str) -> None:
+        """Record a lineage parent on an existing version (attach_lineage)."""
+        version = self._version_or_raise(version_id)
+        if parent_id not in version.parent_version_ids:
+            version.parent_version_ids.append(parent_id)
+            if self._children_by_parent is not None:
+                self._children_by_parent.setdefault(parent_id, []).append(version)
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -127,6 +263,9 @@ class DataCatalogService:
     def _ensure_index_fresh(self) -> None:
         try:
             if self._index.is_fresh(self.document):
+                # Record the row snapshot so the first save of this process
+                # syncs incrementally instead of a full rebuild.
+                self._index.prime(self.document)
                 return
             self._index.rebuild(self.document)
         except Exception:
@@ -147,16 +286,45 @@ class DataCatalogService:
     # -- lookups ------------------------------------------------------------
 
     def _asset_or_raise(self, asset_id: str) -> DataAsset:
-        for asset in self.document.assets:
-            if asset.id == asset_id:
-                return asset
-        raise CatalogError(f"Unknown asset: {asset_id}")
+        self._ensure_maps()
+        asset = self._asset_by_id.get(asset_id)
+        if asset is not None:
+            return asset
+        # Safety net: a missed maintenance site (or a stale map) rebuilds from
+        # the document, so an unknown id is genuinely unknown before raising.
+        self._invalidate_maps()
+        self._ensure_maps()
+        asset = self._asset_by_id.get(asset_id)
+        if asset is None:
+            raise CatalogError(f"Unknown asset: {asset_id}")
+        return asset
 
     def _version_or_raise(self, version_id: str) -> DataVersion:
-        for version in self.document.versions:
-            if version.id == version_id:
-                return version
-        raise CatalogError(f"Unknown version: {version_id}")
+        self._ensure_maps()
+        version = self._version_by_id.get(version_id)
+        if version is not None:
+            return version
+        self._invalidate_maps()
+        self._ensure_maps()
+        version = self._version_by_id.get(version_id)
+        if version is None:
+            raise CatalogError(f"Unknown version: {version_id}")
+        return version
+
+    def _asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
+        """Stable legacy-bridge resolution (id match wins, then first bridge)."""
+        self._ensure_maps()
+        return self._assets_by_legacy_id.get(legacy_resource_id)
+
+    def _set_legacy_bridge(self, asset: DataAsset, legacy_resource_id: str) -> None:
+        """Record a legacy bridge on *asset*, keeping the legacy index current.
+
+        Used by the adapter's bridge path (a metadata-only update that does
+        not go through ``_add_asset``/``_remove_asset``).
+        """
+        asset.legacy_resource_id = legacy_resource_id
+        if self._assets_by_legacy_id is not None:
+            self._assets_by_legacy_id.setdefault(legacy_resource_id, asset)
 
     def get_asset(self, asset_id: str) -> DataAsset:
         return self._asset_or_raise(asset_id)
@@ -165,10 +333,16 @@ class DataCatalogService:
         return self._version_or_raise(version_id)
 
     def get_run(self, run_id: str) -> DataRun:
-        for run in self.document.runs:
-            if run.id == run_id:
-                return run
-        raise CatalogError(f"Unknown run: {run_id}")
+        self._ensure_maps()
+        run = self._run_by_id.get(run_id)
+        if run is not None:
+            return run
+        self._invalidate_maps()
+        self._ensure_maps()
+        run = self._run_by_id.get(run_id)
+        if run is None:
+            raise CatalogError(f"Unknown run: {run_id}")
+        return run
 
     def list_assets(self, include_trashed: bool = False) -> list[DataAsset]:
         """List assets; trashed (soft-deleted) assets are hidden by default."""
@@ -184,7 +358,8 @@ class DataCatalogService:
         return list(self.document.runs)
 
     def list_versions(self, asset_id: str) -> list[DataVersion]:
-        versions = [v for v in self.document.versions if v.asset_id == asset_id]
+        self._ensure_maps()
+        versions = list(self._versions_by_asset.get(asset_id, ()))
         return sorted(versions, key=lambda v: v.version_number)
 
     def resolve_path(self, version: DataVersion) -> Path:
@@ -207,14 +382,11 @@ class DataCatalogService:
         restore_payload_to: Path | None = None,
     ) -> None:
         for asset in assets:
-            if asset in self.document.assets:
-                self.document.assets.remove(asset)
+            self._remove_asset(asset)
         for version in versions:
-            if version in self.document.versions:
-                self.document.versions.remove(version)
+            self._remove_version(version)
         for run in runs:
-            if run in self.document.runs:
-                self.document.runs.remove(run)
+            self._remove_run(run)
         if restore_current is not None:
             asset, previous = restore_current
             asset.current_version_id = previous
@@ -241,7 +413,8 @@ class DataCatalogService:
     # -- version registration ------------------------------------------------
 
     def _next_version_number(self, asset_id: str) -> int:
-        numbers = [v.version_number for v in self.document.versions if v.asset_id == asset_id]
+        self._ensure_maps()
+        numbers = [v.version_number for v in self._versions_by_asset.get(asset_id, ())]
         return max(numbers, default=0) + 1
 
     def _build_version(
@@ -316,7 +489,7 @@ class DataCatalogService:
             parent_version_ids=list(parent_version_ids),
             run_id=run_id, metadata=metadata, move=move,
         )
-        self.document.versions.append(version)
+        self._add_version(version)
         asset.current_version_id = version.id
         run_output_added = False
         if run is not None and version.id not in run.output_version_ids:
@@ -374,12 +547,17 @@ class DataCatalogService:
         format: str | None = None,
         metadata: dict[str, Any] | None = None,
         asset_id: str | None = None,
+        _legacy_resource_id: str | None = None,
     ) -> DataVersion:
         """Import *source_path* as an immutable managed RAW snapshot.
 
         Copies (never references) the file into project-managed storage,
         hashing in a single streaming pass. Later edits to the source file
         cannot affect the snapshot.
+
+        ``_legacy_resource_id`` (private; adapter-only) records the legacy
+        bridge on the asset in the SAME registering save, so the adapter's
+        ``register_input`` needs no second ``_save`` per import.
         """
         source_path = Path(source_path)
         if not source_path.is_file():
@@ -391,15 +569,21 @@ class DataCatalogService:
             target = self._new_asset(
                 name or source_path.name, type, format, metadata
             )
+            if (
+                _legacy_resource_id is not None
+                and target.legacy_resource_id is None
+                and self._asset_by_legacy_id(_legacy_resource_id) is None
+            ):
+                target.legacy_resource_id = _legacy_resource_id
             asset = target
-            self.document.assets.append(target)
+            self._add_asset(target)
         try:
             return self.register_version(
                 target.id, source_path, DataStage.RAW, metadata=metadata
             )
         except Exception:
             if asset is not None and asset in self.document.assets:
-                self.document.assets.remove(asset)
+                self._remove_asset(asset)
             raise
 
     def link_external(
@@ -410,18 +594,27 @@ class DataCatalogService:
         type: str | None = None,
         format: str | None = None,
         metadata: dict[str, Any] | None = None,
+        _legacy_resource_id: str | None = None,
     ) -> DataVersion:
         """Register an unmanaged external reference (explicitly not managed).
 
         No copy, no hash: the project records where the file lives without
         pretending integrity guarantees. Use :meth:`materialize_external` to
         promote it to a managed RAW snapshot.
+
+        ``_legacy_resource_id`` (private; adapter-only) records the legacy
+        bridge in the same registering save (no second ``_save`` per import).
         """
         path = Path(path)
         if not path.is_file():
             raise CatalogError(f"External file not found: {path}")
         asset = self._new_asset(name or path.name, type, format, metadata)
         asset.metadata["external"] = True
+        if (
+            _legacy_resource_id is not None
+            and self._asset_by_legacy_id(_legacy_resource_id) is None
+        ):
+            asset.legacy_resource_id = _legacy_resource_id
         version = DataVersion(
             asset_id=asset.id,
             version_number=1,
@@ -433,8 +626,8 @@ class DataCatalogService:
             size_bytes=path.stat().st_size,
         )
         asset.current_version_id = version.id
-        self.document.assets.append(asset)
-        self.document.versions.append(version)
+        self._add_asset(asset)
+        self._add_version(version)
         try:
             self._save()
         except Exception:
@@ -497,7 +690,7 @@ class DataCatalogService:
             )
         if asset_id is None:
             asset = self._new_asset(name or working_path.stem, None, None, metadata)
-            self.document.assets.append(asset)
+            self._add_asset(asset)
             try:
                 return self.register_version(
                     asset.id, working_path, stage,
@@ -507,7 +700,7 @@ class DataCatalogService:
                 )
             except Exception:
                 if asset in self.document.assets:
-                    self.document.assets.remove(asset)
+                    self._remove_asset(asset)
                 raise
         return self.register_version(
             asset_id, working_path, stage,
@@ -567,11 +760,11 @@ class DataCatalogService:
         )
         if run is not None:
             run.output_version_ids = [version.id]
-        self.document.assets.append(asset)
-        self.document.versions.append(version)
+        self._add_asset(asset)
+        self._add_version(version)
         asset.current_version_id = version.id
         if run is not None:
-            self.document.runs.append(run)
+            self._add_run(run)
         try:
             self._save()
         except Exception:
@@ -602,7 +795,7 @@ class DataCatalogService:
             status=status,
             model_ref=dict(model_ref) if model_ref else None,
         )
-        self.document.runs.append(run)
+        self._add_run(run)
         try:
             self._save()
         except Exception:
@@ -806,14 +999,13 @@ class DataCatalogService:
     def get_lineage(self, version_id: str) -> dict[str, Any]:
         """Parents, children, and the producing run for a version."""
         version = self._version_or_raise(version_id)
+        self._ensure_maps()
         parents = [
-            self._version_or_raise(pid)
+            self._version_by_id[pid]
             for pid in version.parent_version_ids
-            if any(v.id == pid for v in self.document.versions)
+            if pid in self._version_by_id
         ]
-        children = [
-            v for v in self.document.versions if version_id in v.parent_version_ids
-        ]
+        children = list(self._children_by_parent.get(version_id, ()))
         run = None
         if version.run_id is not None:
             try:
@@ -876,10 +1068,11 @@ class DataCatalogService:
 
     def _active_current_candidate(self, asset: DataAsset, exclude_id: str) -> str | None:
         """Newest non-trashed version of *asset* (excluding *exclude_id*)."""
+        self._ensure_maps()
         active = [
             v
-            for v in self.document.versions
-            if v.asset_id == asset.id and not v.trashed and v.id != exclude_id
+            for v in self._versions_by_asset.get(asset.id, ())
+            if not v.trashed and v.id != exclude_id
         ]
         return active[-1].id if active else None
 
@@ -1038,9 +1231,9 @@ class DataCatalogService:
             for version in trashed_versions:
                 if version.managed:
                     purge_trashed_payload(self.project_path, self.resolve_path(version))
-                self.document.versions.remove(version)
+                self._remove_version(version)
             for asset in trashed_assets:
-                self.document.assets.remove(asset)
+                self._remove_asset(asset)
             for vid in removed_version_tags:
                 self.document.version_tags.pop(vid, None)
             for aid in removed_asset_tags:
@@ -1048,8 +1241,10 @@ class DataCatalogService:
             try:
                 self._save()
             except Exception:
-                self.document.versions.extend(trashed_versions)
-                self.document.assets.extend(trashed_assets)
+                for version in trashed_versions:
+                    self._add_version(version)
+                for asset in trashed_assets:
+                    self._add_asset(asset)
                 self.document.version_tags.update(removed_version_tags)
                 self.document.asset_tags.update(removed_asset_tags)
                 raise
@@ -1106,8 +1301,8 @@ class DataCatalogService:
             move=False,
         )
         run.output_version_ids = [version.id]
-        self.document.versions.append(version)
-        self.document.runs.append(run)
+        self._add_version(version)
+        self._add_run(run)
         asset.current_version_id = version.id
         try:
             self._save()
@@ -1237,5 +1432,8 @@ class DataCatalogService:
 
         report = migrate_resources(list(resources), self.project_path, self.document)
         if report.migrated_count:
+            # Migration mutates the document lists directly (it is a pure
+            # document projection), so drop the maintained indexes.
+            self._invalidate_maps()
             self._save()
         return report
