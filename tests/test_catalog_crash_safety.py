@@ -296,3 +296,81 @@ def test_committed_version_never_claims_missing_payload(service):
     assert service.verify_integrity(version.id).status_for(version.id) == "missing"
     # The canonical document is untouched (report-only).
     assert service.get_version(version.id).sha256 is not None
+
+
+# ------------------------------------------------------------------ trash crash window (finding #3)
+
+
+def test_trash_crash_before_payload_move_restores_in_place(service, tmp_path):
+    """Crash between tombstone save and payload move: the canonical record is
+    tombstoned but the payload never moved. Restore must succeed and leave the
+    payload at its original location (no probe needed, nothing lost)."""
+    src = _source(tmp_path, "a.bin", b"precious")
+    version = service.import_raw(src)
+    version_id = version.id
+    original_rel = version.path
+    payload = service.resolve_path(version)
+    assert payload.is_file()
+
+    # Simulate the crash window: tombstone persisted, payload NOT moved yet.
+    service._tombstone_version(version, "crash-window")
+    service._save()
+    service.close()
+
+    svc = DataCatalogService.open(service.project_path)
+    try:
+        restored = svc.restore_version(version_id)
+        assert restored.trashed is False
+        assert restored.path == original_rel
+        assert svc.resolve_path(restored).is_file()
+        assert svc.resolve_path(restored).read_bytes() == b"precious"
+    finally:
+        svc.close()
+
+
+def test_trash_crash_after_payload_move_restores_from_trash(service, tmp_path):
+    """Crash between payload move and path-update save: the canonical record is
+    tombstoned with the ORIGINAL path, but the payload physically sits in
+    trash/{version_id}/. Restore must probe the trash dir and recover the
+    payload (no ghost missing state, no orphaned trash payload)."""
+    src = _source(tmp_path, "a.bin", b"precious")
+    version = service.import_raw(src)
+    version_id = version.id
+    original_rel = version.path
+    payload = service.resolve_path(version)
+    assert payload.is_file()
+
+    # Simulate the crash window: tombstone saved, payload moved, path-update
+    # save never happened (process died between the two saves).
+    service._tombstone_version(version, "crash-window")
+    service._save()
+    moved = service._move_payload_to_trash(version)
+    assert moved is True
+    trash_payload = service.resolve_path(version)
+    assert "trash" in trash_payload.as_posix()
+    assert not payload.exists()
+    # The canonical document still records the ORIGINAL path (path-update save
+    # was skipped) — close() does not save, mirroring a process crash.
+    version.path = original_rel
+    service.close()
+
+    svc = DataCatalogService.open(service.project_path)
+    try:
+        # Canonical record: trashed, path = original (missing payload).
+        assert svc.get_version(version_id).trashed is True
+        assert svc.get_version(version_id).path == original_rel
+        assert not svc.resolve_path(svc.get_version(version_id)).is_file()
+        # plan_gc must NOT classify the recoverable trash payload as orphan
+        # (the version record still exists).
+        assert svc.plan_gc().count("trash_orphan") == 0
+        # Restore probes trash/{version_id}/ and recovers the payload.
+        restored = svc.restore_version(version_id)
+        assert restored.trashed is False
+        assert restored.path == original_rel
+        assert svc.resolve_path(restored).is_file()
+        assert svc.resolve_path(restored).read_bytes() == b"precious"
+        # Trash dir is empty again after restore.
+        trash_root = catalog_dir_for(service.project_path).parent / "trash"
+        assert not any(trash_root.rglob("*.bin")) if trash_root.exists() else True
+    finally:
+        svc.close()

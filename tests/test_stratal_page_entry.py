@@ -86,10 +86,15 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
     if renderer is None:
         pytest.skip("Renderer3D could not initialize in this offscreen environment")
 
-    # Switch to the demo path and generate.
+    # Switch to the demo path and generate (computation runs on a worker
+    # thread; wait for the completed signal before asserting the viewport).
     page._stratal_demo_check.setChecked(True)
     page._stratal_fractions.setCurrentIndex(0)  # 1/4, 1/2, 3/4
-    page._on_generate_stratal_slices()
+    with qtbot.waitSignal(
+        page._stratal_job.worker.completed, timeout=5000
+    ) as blocker:
+        page._on_generate_stratal_slices()
+    assert blocker.args is not None and blocker.args[0]["demo"] is True
 
     snap = renderer.get_stratal_slices()
     assert len(snap) == 3  # three proportional slices

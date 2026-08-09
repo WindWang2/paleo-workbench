@@ -41,6 +41,7 @@ from paleo_workbench.ui.pages.geological_modeling_workers import (
     GeologicalModelingWorker,
     ExportWorker,
     AdvisorWorker,
+    StratalWorker,
 )
 from paleo_workbench.ui.pages.ai_check_advisor_dialog import AICheckAdvisorDialog
 from paleo_workbench.ui.pages.lithology_crossplot_dialog import LithologyCrossplotDialog
@@ -90,6 +91,7 @@ class GeologicalModeling3DPage(QWidget):
         self._modeling_job = OwnedWorkerJob(self)
         self._export_job = OwnedWorkerJob(self)
         self._advisor_job = OwnedWorkerJob(self)
+        self._stratal_job = OwnedWorkerJob(self)
         self.active_items: list[gl.GLGraphicsItem] = []
         self.mesh_items_map: dict[str, list[gl.GLMeshItem]] = {}
         self.bh_raw_data: list[dict] = []
@@ -1200,23 +1202,20 @@ class GeologicalModeling3DPage(QWidget):
             combo.addItem(path, path)
 
     def _on_generate_stratal_slices(self) -> None:
-        """Generate stratal/proportional slices and overlay them in the 3D view.
+        """Generate stratal/proportional slices in a background worker and
+        overlay them in the 3D view.
 
         Real-data path: parse the two chosen horizon .dat files against the
         loaded survey/volume. Demo path (checkbox or no volume/horizons): load a
         synthetic volume + horizons so the feature is visible even without SEGY.
+        Computation runs off the UI thread (StratalWorker); only the renderer
+        updates happen here (review finding #8).
         """
-        from geoviz import build_proportional_surfaces, validate_horizon_pair
-        from paleo_workbench.viz.stratal_adapter import (
-            build_stratal_grids,
-            build_stratal_surfaces,
-            make_demo_stratal_grids,
-        )
-
+        if self._stratal_job.is_running:
+            return
         renderer = getattr(self._joint_widget, "renderer", None) \
             if self._joint_widget is not None else None
         demo = self._stratal_demo_check.isChecked()
-
         fractions = self._stratal_fractions.currentData() or (0.25, 0.50, 0.75)
 
         if demo:
@@ -1225,24 +1224,17 @@ class GeologicalModeling3DPage(QWidget):
             if renderer is None:
                 self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
                 return
-            vol, top_sidx, bot_sidx = make_demo_stratal_grids((16, 20, 32))
-            renderer.load_volume(vol)
-            surfaces = list(
-                np.asarray(
-                    build_proportional_surfaces(
-                        top_sidx, bot_sidx, list(fractions)
-                    )
-                )
+            self._stratal_status.setText("正在生成演示地层切片…")
+            worker = StratalWorker(
+                demo=True, fractions=tuple(fractions), parent=self
             )
-            renderer.set_stratal_slices(
-                surfaces,
-                labels=[f"k={f:.2f}" for f in fractions],
-                active=max(0, len(surfaces) // 2),
-                opacity=0.8,
-            )
-            self._stratal_status.setText(
-                "已用合成演示体生成 %d 张比例切片（演示预览模式）。"
-                % len(surfaces)
+            self._stratal_job.start(
+                worker,
+                terminal_signals=(worker.terminal,),
+                result_connections=(
+                    (worker.completed, self._on_stratal_completed),
+                    (worker.failed, self._on_stratal_failed),
+                ),
             )
             return
 
@@ -1260,36 +1252,61 @@ class GeologicalModeling3DPage(QWidget):
         # Real-data path.
         top_path = self._stratal_top_combo.currentData()
         bot_path = self._stratal_bot_combo.currentData()
-        scene = self._joint_host.scene
         if not top_path or not bot_path:
             self._stratal_status.setText("请先选择顶部与底部 horizon 文件。")
             return
         vol = renderer.volume_data()
-        grids = build_stratal_grids(scene, vol, top_path, bot_path)
-        if grids is None:
-            self._stratal_status.setText(
-                "survey/registration 不可用或体数据未就绪，无法对齐 horizon。"
-            )
-            return
-        top_sidx, bot_sidx = grids
-        out = build_stratal_surfaces(
-            top_sidx, bot_sidx, vol.shape, fractions=fractions
+        scene = self._joint_host.scene
+        self._stratal_status.setText("正在计算比例地层切片…")
+        worker = StratalWorker(
+            demo=False,
+            fractions=tuple(fractions),
+            scene=scene,
+            volume=vol,
+            top_path=top_path,
+            bottom_path=bot_path,
+            parent=self,
         )
-        if out is None:
-            self._stratal_status.setText("horizon 对全部倒转或无效，未生成切片。")
+        self._stratal_job.start(
+            worker,
+            terminal_signals=(worker.terminal,),
+            result_connections=(
+                (worker.completed, self._on_stratal_completed),
+                (worker.failed, self._on_stratal_failed),
+            ),
+        )
+
+    def _on_stratal_completed(self, result: dict) -> None:
+        """Apply computed stratal surfaces to the renderer (UI thread)."""
+        renderer = getattr(self._joint_widget, "renderer", None) \
+            if self._joint_widget is not None else None
+        if renderer is None:
+            self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
             return
-        surfaces, _ = out
+        surfaces = result["surfaces"]
+        labels = result["labels"]
+        if result.get("demo"):
+            renderer.load_volume(result["volume"])
         renderer.set_stratal_slices(
             surfaces,
-            labels=[f"k={f:.2f}" for f in fractions],
+            labels=labels,
             active=max(0, len(surfaces) // 2),
             opacity=0.8,
         )
+        if result.get("demo"):
+            self._stratal_status.setText(
+                "已用合成演示体生成 %d 张比例切片（演示预览模式）。"
+                % len(surfaces)
+            )
+            return
         snap = renderer.get_stratal_slices()
         self._stratal_status.setText(
             "已生成 %d 张比例地层切片（active=%s）。"
             % (len(snap), snap[0][0] if snap else "?")
         )
+
+    def _on_stratal_failed(self, err: str) -> None:
+        self._stratal_status.setText(str(err))
 
     def _on_clear_stratal_slices(self) -> None:
         renderer = getattr(self._joint_widget, "renderer", None) \
@@ -2657,11 +2674,34 @@ class GeologicalModeling3DPage(QWidget):
 
     def _on_export_completed(self, filepath: str) -> None:
         self.btn_export.setEnabled(True)
+        self._register_mesh_export(filepath)
         QMessageBox.information(self, "导出成功", f"数值模拟网格模型已成功导出:\n{filepath}")
 
     def _on_export_failed(self, err: str) -> None:
         self.btn_export.setEnabled(True)
         QMessageBox.critical(self, "导出失败", f"网格模型导出失败:\n{err}")
+
+    def _register_mesh_export(self, filepath: str) -> None:
+        """Best-effort OUTPUT DataVersion registration for FLAC3D/Abaqus mesh
+        exports. The modeling run id (when recorded) links lineage back to the
+        synthetic/real source; no catalog → no-op."""
+        if self._project is None:
+            return
+        try:
+            from paleo_workbench.catalog.lifecycle import register_export_output
+
+            sim_type = self.combo_export_type.currentText()
+            fmt = "f3grid" if "FLAC3D" in sim_type else "inp"
+            register_export_output(
+                name="数值模拟网格模型 export",
+                output_path=str(filepath),
+                fmt=fmt,
+                linked_id="geological_modeling_3d",
+                catalog=None,
+            )
+        except Exception:
+            # Provenance is best-effort; never break the export flow.
+            pass
 
     # ------------------------------------------------------------------ #
     # AI Advisor
@@ -2822,5 +2862,9 @@ class GeologicalModeling3DPage(QWidget):
             pass
         try:
             self._advisor_job.shutdown()
+        except Exception:
+            pass
+        try:
+            self._stratal_job.shutdown()
         except Exception:
             pass

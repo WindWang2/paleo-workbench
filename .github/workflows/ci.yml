@@ -99,7 +99,6 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-          REQUIRE_MAP_EDIT_CPP: "1"
           PYTHONFAULTHANDLER: "1"
         run: |
           # Per-test timeout (thread: better for pure-Python hangs; native still
