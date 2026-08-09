@@ -26,6 +26,59 @@ def artifact_dir_for(project_path: Path) -> Path:
     return project_path.with_name(f"{project_name}.artifacts")
 
 
+def relocate_artifacts(old_project_path: Path, new_project_path: Path) -> bool:
+    """Re-home ``<old>.artifacts/`` to the save-as location; True when moved.
+
+    Fixes the orphan-on-save-as hazard: previously ``save_project_as`` wrote
+    the project file to the new path and opened a FRESH catalog there, leaving
+    the old ``.artifacts/`` (payloads + catalog + index + working copies +
+    trash) stranded and forcing a full re-import at the new location.
+
+    Rules (conservative, never destroys data):
+
+    - Same artifacts location (or no source artifacts) → no-op.
+    - Target artifacts dir absent → rename the whole tree (same filesystem);
+      cross-device falls back to a recursive copy then removes the source.
+    - Target artifacts dir already present → merge only the subdirectories the
+      target lacks; conflicting subdirectories are left untouched (both sides
+      hold data that must not be overwritten).
+
+    Returns True when anything was moved/merged, False otherwise. Raises on
+    unrecoverable IO errors (callers decide whether saving may still proceed).
+    """
+    old = Path(old_project_path)
+    new = Path(new_project_path)
+    source = artifact_dir_for(old)
+    target = artifact_dir_for(new)
+    if source == target or not source.is_dir():
+        return False
+    moved = False
+    if not target.exists():
+        try:
+            source.rename(target)
+            return True
+        except OSError:
+            pass
+        # Cross-device: copy the tree, then remove the source.
+        import shutil
+
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        shutil.rmtree(source, ignore_errors=True)
+        return True
+    # Target exists: merge only missing subdirectories (never overwrite).
+    for child in source.iterdir():
+        dest = target / child.name
+        if not dest.exists():
+            child.rename(dest)
+            moved = True
+    if moved:
+        try:
+            source.rmdir()
+        except OSError:
+            pass
+    return moved
+
+
 def ensure_artifact_layout(project_path: Path) -> Path:
     root = artifact_dir_for(project_path)
     for name in [

@@ -145,6 +145,18 @@ class ProjectController:
         self._flush_joint_analysis_state()
         target = self._normalize_project_path(Path(path))
         try:
+            # Re-home <old>.artifacts/ BEFORE writing the project file (whose
+            # layout creation would otherwise pre-create the target artifacts
+            # dir and defeat the move): payloads + catalog travel with the
+            # project — no orphan-on-save-as, no forced re-import. Best-effort:
+            # a relocation failure must not block saving.
+            try:
+                from paleo_workbench.project.paths import relocate_artifacts
+
+                if self.window.project_path is not None:
+                    relocate_artifacts(self.window.project_path, target)
+            except Exception:
+                pass
             self.window.project.meta.project_root = str(target.resolve().parent)
             ProjectManager(target).save(self.window.project)
         except OSError as e:
@@ -154,6 +166,16 @@ class ProjectController:
         # The catalog is bound to the project path: rebind to the new location
         # (best-effort — a catalog failure never blocks saving).
         self._open_catalog(target, self.window.project)
+        try:
+            # Version paths embed the OLD artifacts-dir name; rebase them to
+            # the new location so relocated payloads keep resolving.
+            from paleo_workbench.catalog import get_catalog_service
+
+            service = get_catalog_service()
+            if service is not None:
+                service._rebase_artifact_paths()
+        except Exception:
+            pass
         return target
 
     def _flush_joint_analysis_state(self) -> None:
