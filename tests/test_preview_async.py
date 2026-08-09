@@ -893,7 +893,7 @@ def test_rescan_invalidates_inflight_preview(qtbot, tmp_path, monkeypatch):
     gen_before_rescan = page._preview_controller.generation
 
     monkeypatch.setattr(
-        "paleo_workbench.ui.pages.data_page.scan_resources",
+        "paleo_workbench.ui.data_lifecycle_controller.scan_resources",
         lambda _folder, project_path=None: [
             ResourceItem(
                 id=resource.id,

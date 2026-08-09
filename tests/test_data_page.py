@@ -999,7 +999,7 @@ def test_data_page_rescan_emits_updated_context_after_reader_mode_changes(
         status="indexed",
     )
     monkeypatch.setattr(
-        "paleo_workbench.ui.pages.data_page.scan_resources",
+        "paleo_workbench.ui.data_lifecycle_controller.scan_resources",
         lambda _folder, project_path=None: [replacement],
     )
 
