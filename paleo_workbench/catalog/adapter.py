@@ -157,7 +157,22 @@ class CoreCatalogAdapter:
         legacy_resource_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
-        resolved = Path(path).expanduser().resolve().as_posix()
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            # Resource paths are project-relative by contract (import_service
+            # relativizes files inside the project dir). Resolve against the
+            # PROJECT dir — never the process CWD — so in-project imports
+            # register correctly regardless of how the app was launched.
+            candidate = service.project_path.expanduser().resolve().parent / candidate
+        resolved = candidate.resolve().as_posix()
+        if checksum is None and not external:
+            # Managed RAW needs a checksum for dedup/idempotence + integrity.
+            # A caller passing a project-relative path cannot hash it against
+            # the CWD, so hash the correctly-resolved file once here (matches
+            # the lifecycle helper's behavior for absolute paths).
+            resolved_path = Path(resolved)
+            if resolved_path.is_file():
+                checksum = sha256_file_or_none(resolved_path)
 
         # Stable legacy-bridge asset: once a resource id maps to an asset it
         # always maps to that SAME asset (never a phantom duplicate).

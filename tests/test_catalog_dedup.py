@@ -144,6 +144,31 @@ def test_size_guard_prevents_blob_mismatch(service, tmp_path):
         service.import_raw(other, known_sha256=digest)
 
 
+def test_same_size_different_content_never_adopts_existing_blob(service, tmp_path):
+    """A stale digest whose SIZE matches an existing blob but whose CONTENT
+    differs must be rejected, never silently linked to the wrong payload.
+    Regression: the O(1) fast path trusted (digest + size) without verifying
+    content, so a stale caller checksum could register a version whose payload
+    is NOT the source file's bytes (undetectable by integrity re-hash)."""
+    seed = b"seed-content-that-registers-a-blob"
+    digest = _digest(seed)
+    first = _make_source(tmp_path, "seed.bin", seed)
+    service.import_raw(first)
+    assert dedup.has_blob(service.project_path, digest)
+
+    # Same SIZE as the blob, different CONTENT, stale digest of the blob.
+    stale = _make_source(tmp_path, "stale.bin", b"x" * len(seed))
+    assert len(stale.read_bytes()) == len(seed)
+    with pytest.raises(CatalogError):
+        service.import_raw(stale, known_sha256=digest)
+
+    # Nothing NEW was committed (only the seed asset remains) and the shared
+    # blob is untouched.
+    assert len(service.document.assets) == 1
+    assert len(service.document.versions) == 1
+    assert dedup.has_blob(service.project_path, digest)
+
+
 # ---------------------------------------------------- lifecycle / refcounts
 
 

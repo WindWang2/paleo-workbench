@@ -344,7 +344,13 @@ def place_managed_file(
     project = Path(project_path)
     if known_sha256 is not None and has_blob(project, known_sha256):
         try:
-            if source.stat().st_size == blob_size(project, known_sha256):
+            if source.stat().st_size == blob_size(project, known_sha256) \
+                    and _digest_of(source) == known_sha256:
+                # The caller's digest names an existing blob AND the source
+                # content actually matches it: share the read-only blob, O(1)
+                # (hash-only verification — never trust a size+digest pair
+                # without content proof, or a stale digest could silently link
+                # a version to content that differs from the source file).
                 blob = blob_path(project, known_sha256)
                 project_dir = _project_dir(project)
                 return blob.relative_to(project_dir).as_posix(), blob.stat().st_size, known_sha256
