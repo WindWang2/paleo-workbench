@@ -545,6 +545,7 @@ class StratigraphyCorrelationPage(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "导出失败", f"{exc.__class__.__name__}: {exc}")
             return
+        self._register_export(path, fmt="csv", label="分层顶 CSV")
         QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
 
     def _select_bound_wells(self) -> None:
@@ -745,6 +746,7 @@ class StratigraphyCorrelationPage(QWidget):
             except Exception as exc:
                 QMessageBox.warning(self, "导出失败", f"{exc.__class__.__name__}: {exc}")
                 return
+            self._register_export(path, fmt="png", label="连井剖面 (Engine PNG)")
             QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
             return
 
@@ -781,4 +783,30 @@ class StratigraphyCorrelationPage(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "导出失败", f"{exc.__class__.__name__}: {exc}")
             return
+        self._register_export(path, fmt=fmt, label="连井剖面")
         QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
+
+    def _register_export(
+        self, path: str, *, fmt: str, label: str
+    ) -> None:
+        """Best-effort OUTPUT DataVersion registration for this page's exports.
+
+        The catalog may be absent (no project open) — registration then
+        no-ops. Lineage links to the loaded well resources so the exported
+        file traces back to the source RAW data.
+        """
+        if self._project is None:
+            return
+        try:
+            from paleo_workbench.catalog.lifecycle import register_export_output
+
+            register_export_output(
+                name=f"{label} export",
+                output_path=str(path),
+                fmt=fmt,
+                source_task_ids=list(self._loaded_resource_ids),
+                catalog=None,
+            )
+        except Exception:
+            # Provenance is best-effort; never break the export flow.
+            pass

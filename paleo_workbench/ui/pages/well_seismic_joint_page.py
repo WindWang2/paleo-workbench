@@ -29,6 +29,7 @@ class WellSeismicJointPage(QWidget):
         super().__init__(parent)
         self.setObjectName("WellSeismicJointPage")
         self._loaded_once = False
+        self._project: ProjectDocument | None = project
         self._host = WellSeismicJointHost(self)
         self._host.set_project(project)
         self._host.status_changed.connect(self._on_status)
@@ -97,6 +98,7 @@ class WellSeismicJointPage(QWidget):
             )
 
     def set_project(self, project: ProjectDocument | None) -> None:
+        self._project = project
         self._host.set_project(project)
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -147,6 +149,25 @@ class WellSeismicJointPage(QWidget):
         ok = self.grab().save(str(target))
         if ok:
             self._status.setText(f"已导出快照: {Path(target).name}")
+            self._register_snapshot_export(target)
             return str(target)
         self._status.setText("快照导出失败")
         return None
+
+    def _register_snapshot_export(self, path: str) -> None:
+        """Best-effort OUTPUT DataVersion registration (no catalog → no-op)."""
+        if self._project is None:
+            return
+        try:
+            from paleo_workbench.catalog.lifecycle import register_export_output
+
+            register_export_output(
+                name="井震联合快照 export",
+                output_path=str(path),
+                fmt="png",
+                linked_id="well_seismic_joint",
+                catalog=None,
+            )
+        except Exception:
+            # Provenance is best-effort; never break the export flow.
+            pass

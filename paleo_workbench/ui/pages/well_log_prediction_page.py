@@ -306,7 +306,14 @@ class WellLogPredictionPage(QWidget):
                 if not pixmap.save(path, "PNG"):
                     raise RuntimeError("PNG 写入失败")
             else:
-                export_well_canvas(self.canvas_panel.canvas, path, label)
+                task = self._current_task()
+                export_well_canvas(
+                    self.canvas_panel.canvas,
+                    path,
+                    label,
+                    project=self._project,
+                    source_task_ids=[task.id] if task is not None else None,
+                )
         except Exception as exc:
             QMessageBox.warning(
                 self,

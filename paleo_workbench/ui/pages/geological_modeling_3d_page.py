@@ -2657,11 +2657,34 @@ class GeologicalModeling3DPage(QWidget):
 
     def _on_export_completed(self, filepath: str) -> None:
         self.btn_export.setEnabled(True)
+        self._register_mesh_export(filepath)
         QMessageBox.information(self, "导出成功", f"数值模拟网格模型已成功导出:\n{filepath}")
 
     def _on_export_failed(self, err: str) -> None:
         self.btn_export.setEnabled(True)
         QMessageBox.critical(self, "导出失败", f"网格模型导出失败:\n{err}")
+
+    def _register_mesh_export(self, filepath: str) -> None:
+        """Best-effort OUTPUT DataVersion registration for FLAC3D/Abaqus mesh
+        exports. The modeling run id (when recorded) links lineage back to the
+        synthetic/real source; no catalog → no-op."""
+        if self._project is None:
+            return
+        try:
+            from paleo_workbench.catalog.lifecycle import register_export_output
+
+            sim_type = self.combo_export_type.currentText()
+            fmt = "f3grid" if "FLAC3D" in sim_type else "inp"
+            register_export_output(
+                name="数值模拟网格模型 export",
+                output_path=str(filepath),
+                fmt=fmt,
+                linked_id="geological_modeling_3d",
+                catalog=None,
+            )
+        except Exception:
+            # Provenance is best-effort; never break the export flow.
+            pass
 
     # ------------------------------------------------------------------ #
     # AI Advisor
