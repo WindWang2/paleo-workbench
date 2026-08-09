@@ -307,13 +307,17 @@ class DataCatalogService:
 
     # -- garbage collection (P4, conservative) --------------------------------
 
-    def plan_gc(self) -> GcReport:
+    def plan_gc(self, dry_run: bool = True) -> GcReport:
         """Classify orphaned files in the artifacts tree (deletes nothing).
 
         Orphan classes: stage payloads without a version record, abandoned
         working copies, stale temp/placement files, unreferenced trash
         payloads, and unreferenced content-store blobs. See
         :func:`paleo_workbench.catalog.gc.plan_gc`.
+
+        ``dry_run`` is accepted for interface compatibility (the spec's
+        ``plan_gc(dry_run=True)`` contract) but planning is ALWAYS
+        non-destructive — use :meth:`sweep_gc` to actually remove orphans.
         """
         return _gc_plan(self)
 
