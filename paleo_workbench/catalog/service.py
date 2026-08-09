@@ -37,6 +37,8 @@ from paleo_workbench.catalog.models import (
     DataVersion,
     ImmutableVersionError,
     CatalogError,
+    Model,
+    ModelVersion,
     Tag,
     normalize_tag_name,
 )
@@ -607,6 +609,7 @@ class DataCatalogService:
         parameters: dict[str, Any] | None = None,
         generator: str = "",
         status: str = "completed",
+        model_ref: dict[str, Any] | None = None,
     ) -> DataRun:
         run = DataRun(
             operation=operation,
@@ -615,6 +618,7 @@ class DataCatalogService:
             parameters=dict(parameters or {}),
             generator=generator,
             status=status,
+            model_ref=dict(model_ref) if model_ref else None,
         )
         self.document.runs.append(run)
         try:
@@ -643,6 +647,177 @@ class DataCatalogService:
                 run.parameters.update(extra_parameters)
             self._save()
             return run
+
+    # -- model registry --------------------------------------------------------
+
+    def _model_or_raise(self, model_id: str) -> Model:
+        for model in self.document.models:
+            if model.model_id == model_id:
+                return model
+        raise CatalogError(f"Unknown model: {model_id}")
+
+    def register_model(
+        self,
+        *,
+        model_id: str,
+        model_name: str,
+        model_type: str = "unknown",
+        capability: str = "",
+        provider: str = "",
+        status: str = "demo",
+        metadata: dict[str, Any] | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> Model:
+        """Register (or update) a logical model. Idempotent on ``model_id``:
+        re-registering refreshes name/capability/provider/status/metadata so
+        defaults can be repaired without duplicating entries."""
+        if not model_id or not model_name:
+            raise CatalogError("register_model requires model_id and model_name")
+        existing = None
+        for model in self.document.models:
+            if model.model_id == model_id:
+                existing = model
+                break
+        if existing is not None:
+            existing.model_name = model_name
+            existing.model_type = model_type or existing.model_type
+            existing.capability = capability
+            existing.provider = provider or existing.provider
+            existing.status = status
+            existing.metadata = dict(metadata or {})
+            if provenance:
+                existing.provenance.update(provenance)
+            self._save()
+            return existing
+        model = Model(
+            model_id=model_id,
+            model_name=model_name,
+            model_type=model_type or "unknown",
+            capability=capability,
+            provider=provider,
+            status=status,
+            metadata=dict(metadata or {}),
+            provenance=dict(provenance or {}),
+        )
+        self.document.models.append(model)
+        try:
+            self._save()
+        except Exception:
+            if model in self.document.models:
+                self.document.models.remove(model)
+            raise
+        return model
+
+    def register_model_version(
+        self,
+        model_id: str,
+        *,
+        model_version: str = "1",
+        artifact_uri: str = "",
+        checksum: str | None = None,
+        input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
+        preprocessing_version: str = "",
+        runtime: str = "",
+        deterministic: bool = True,
+        demo_only: bool = False,
+        status: str = "production",
+        metadata: dict[str, Any] | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> ModelVersion:
+        """Register a concrete model version for an existing :class:`Model`.
+
+        When ``checksum`` is omitted and ``artifact_uri`` points at a readable
+        file, the checksum is computed from it (streaming). A duplicate
+        ``(model_id, model_version)`` pair raises :class:`CatalogError`.
+        """
+        self._model_or_raise(model_id)  # validate the model exists
+        if any(
+            v.model_id == model_id and v.model_version == str(model_version)
+            for v in self.document.model_versions
+        ):
+            raise CatalogError(
+                f"ModelVersion {model_id}@{model_version} already registered"
+            )
+        if checksum is None and artifact_uri:
+            candidate = Path(artifact_uri).expanduser()
+            if candidate.is_file():
+                try:
+                    checksum = sha256_file(candidate)
+                except OSError:
+                    checksum = None
+        version = ModelVersion(
+            model_id=model_id,
+            model_version=str(model_version),
+            artifact_uri=artifact_uri,
+            checksum=checksum,
+            input_schema=dict(input_schema or {}),
+            output_schema=dict(output_schema or {}),
+            preprocessing_version=preprocessing_version,
+            runtime=runtime,
+            deterministic=deterministic,
+            demo_only=demo_only,
+            status=status,
+            metadata=dict(metadata or {}),
+            provenance=dict(provenance or {}),
+        )
+        self.document.model_versions.append(version)
+        try:
+            self._save()
+        except Exception:
+            if version in self.document.model_versions:
+                self.document.model_versions.remove(version)
+            raise
+        return version
+
+    def get_model(self, model_id: str) -> Model:
+        return self._model_or_raise(model_id)
+
+    def get_model_version(self, model_id: str, model_version: str) -> ModelVersion:
+        key = str(model_version)
+        for version in self.document.model_versions:
+            if version.model_id == model_id and version.model_version == key:
+                return version
+        raise CatalogError(f"Unknown model version: {model_id}@{model_version}")
+
+    def get_model_version_by_id(self, model_version_id: str) -> ModelVersion:
+        for version in self.document.model_versions:
+            if version.id == model_version_id:
+                return version
+        raise CatalogError(f"Unknown model version: {model_version_id}")
+
+    def list_models(self) -> list[Model]:
+        return list(self.document.models)
+
+    def list_model_versions(self, model_id: str | None = None) -> list[ModelVersion]:
+        versions = [
+            v
+            for v in self.document.model_versions
+            if model_id is None or v.model_id == model_id
+        ]
+        return sorted(versions, key=lambda v: v.created_at)
+
+    def find_production_model(self, capability: str) -> ModelVersion | None:
+        """Return the newest production :class:`ModelVersion` for *capability*.
+
+        A version qualifies only when BOTH its model and the version are
+        ``status == "production"`` and the version is not ``demo_only``.
+        Returns None when no production model exists — callers must surface an
+        honest "no production model" state instead of running a mock.
+        """
+        best: ModelVersion | None = None
+        for version in self.document.model_versions:
+            if version.demo_only or version.status != "production":
+                continue
+            try:
+                model = self._model_or_raise(version.model_id)
+            except CatalogError:
+                continue
+            if model.status != "production" or model.capability != capability:
+                continue
+            if best is None or version.created_at > best.created_at:
+                best = version
+        return best
 
     # -- lineage ---------------------------------------------------------------
 
