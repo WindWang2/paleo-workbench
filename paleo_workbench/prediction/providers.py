@@ -259,9 +259,13 @@ def ensure_default_models(service) -> tuple[Model, Model, ModelVersion, ModelVer
 
     The repo ships NO production model: both entries are ``status="demo"`` so
     ``find_production_model`` returns None and the UI shows the honest
-    "未配置生产模型" state. Promoting a model to production is an explicit act
-    (``register_model_version(..., status="production")``).
-    """
+    "未配置生产模型" state. Promoting a model to production is an explicit act:
+    ``DataCatalogService.promote_model(model_id, model_version)`` sets BOTH
+    the model and version status and clears ``demo_only`` atomically.
+
+    Existing models are never downgraded here: if a model was explicitly
+    promoted to ``status="production"``, this seed call preserves that state
+    (``register_model(..., force_status=False)``)."""
     demo_model = service.register_model(
         model_id=MODEL_ID_DEMO,
         model_name="演示相带预测（Demo）",

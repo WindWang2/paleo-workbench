@@ -219,3 +219,44 @@ def test_open_runs_conservative_sweep_but_keeps_payloads(tmp_path):
         assert svc2.verify_integrity(version.id).status_for(version.id) == "verified"
     finally:
         svc2.close()
+
+
+def test_open_sweep_keeps_referenced_temp_named_payload(tmp_path):
+    """A managed payload whose NAME matches the temp pattern (e.g. an imported
+    ``well_data.tmp``) must survive the on-open conservative sweep: it is
+    referenced by a version record, so it is never a TEMP_ORPHAN. The real
+    (unreferenced) temp leftover is still swept. Regression for the review
+    finding where the auto-sweep deleted referenced payloads on open."""
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True)
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    for name in ("well_data.tmp", ".blob-notes", ".place-notes"):
+        version = svc.import_raw(_make_source(tmp_path, name, payload=f"keep {name}".encode()))
+        assert svc.verify_integrity(version.id).status_for(version.id) == "verified"
+    svc.close()
+
+    root = _stage_root(project_path)
+    stale = root / "raw" / ".place-stale"
+    stale.write_bytes(b"stale")
+
+    svc2 = DataCatalogService.open(project_path)
+    try:
+        assert not stale.exists()  # the REAL leftover is still swept
+        for name in ("well_data.tmp", ".blob-notes", ".place-notes"):
+            version = next(
+                v for v in svc2.document.versions
+                if Path(v.path).name == name
+            )
+            assert svc2.verify_integrity(version.id).status_for(version.id) == "verified"
+            assert svc2.resolve_path(version).read_bytes() == f"keep {name}".encode()
+    finally:
+        svc2.close()
+
+
+def test_plan_gc_does_not_classify_referenced_temp_named_payload(service, tmp_path):
+    version = service.import_raw(_make_source(tmp_path, "data.tmp"))
+    report = service.plan_gc()
+    temp_items = [i for i in report.items if i.kind == TEMP_ORPHAN]
+    assert not any(Path(i.path).name == "data.tmp" for i in temp_items)
+    assert service.verify_integrity(version.id).status_for(version.id) == "verified"

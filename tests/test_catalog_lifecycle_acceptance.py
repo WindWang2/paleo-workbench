@@ -919,3 +919,54 @@ def test_modeling_run_records_honest_demo_source(catalog, tmp_path: Path):
     assert version2.stage is DataStage.DERIVED
     assert version2.producing_run_id == run2.run_id
     assert version2.checksum == sha256_file(payload)
+
+
+# =============================== C3: purge must not orphan live versions
+
+
+def test_purge_keeps_asset_when_version_restored_after_trash(catalog, tmp_path: Path):
+    """trash_asset(A) → restore_version(v) leaves A trashed with a live
+    version. purge_trashed must NOT delete the asset (that would orphan the
+    live version's asset_id); it un-trashes A instead (review finding C3)."""
+    src = _make_source(tmp_path, "w.las", payload=b"v1")
+    v1 = catalog.service.import_raw(src)
+    src.write_bytes(b"v2")
+    v2 = catalog.service.import_raw(src, asset_id=v1.asset_id)
+    aid = v1.asset_id
+
+    catalog.service.trash_asset(aid)
+    catalog.service.restore_version(v2.id)
+    assert catalog.service.get_asset(aid).trashed is True
+    assert catalog.service.get_version(v2.id).trashed is False
+
+    n = catalog.service.purge_trashed()
+
+    # v1 (still trashed) was purged; the asset survived and is un-trashed
+    # because v2 is live.
+    assert catalog.service.get_asset(aid).trashed is False
+    assert catalog.service.get_version(v2.id).asset_id == aid
+    assert catalog.service.get_version(v2.id).trashed is False
+    # Exactly one version remains (v2); the purged count covers v1's entry.
+    assert len(catalog.service.document.versions) == 1
+    assert n >= 1
+    # Lineage/integrity still resolve for the surviving version.
+    assert catalog.service.resolve_path(
+        catalog.service.get_version(v2.id)
+    ).is_file()
+
+
+def test_purge_removes_asset_when_no_live_versions(catalog, tmp_path: Path):
+    """trash_asset(A) with all versions trashed → purge removes asset + all
+    versions (normal case unchanged)."""
+    src = _make_source(tmp_path, "w.las", payload=b"only")
+    v = catalog.service.import_raw(src)
+    aid = v.asset_id
+    catalog.service.trash_asset(aid)
+
+    n = catalog.service.purge_trashed()
+
+    # Both the trashed version and the trashed asset were removed (2 entries).
+    assert n == 2
+    with pytest.raises(CatalogError):
+        catalog.service.get_asset(aid)
+    assert catalog.service.document.versions == []
