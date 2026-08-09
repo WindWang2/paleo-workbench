@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-06  
 **Status:** Implementable (wayfinder complete)  
-**Product:** WellPlot Desktop (`well_log_workstation`) — single-well path first  
+**Product:** WellPlot Desktop (`well-log-engine/apps/wellplot-desktop/well_log_workstation`) — single-well path first  
 **Map:** [Wayfinder: 单井井道数据树与图/表双视图规格](https://github.com/WindWang2/paleo-workbench/issues/331)  
-**Prototype (throwaway):** `well_log_workstation/prototypes/well-content-tree-shell.html`
+**Prototype (throwaway):** `well-log-engine/apps/wellplot-desktop/well_log_workstation/prototypes/well-content-tree-shell.html`
 
 This document is the **canonical product + acceptance spec** for first-ship. Implementation tickets should be split from it via `/to-tickets`. It does **not** restate full ticket resolutions; each locked decision links to its issue.
 
@@ -147,7 +147,7 @@ A2.Las
 
 Note: Early tree-IA text mentioned a right-hand panel; **shell decision is left dual tabs** (go A). Implement Qt against A; do not promote the HTML prototype.
 
-**Asset:** `well_log_workstation/prototypes/well-content-tree-shell.html`
+**Asset:** `well-log-engine/apps/wellplot-desktop/well_log_workstation/prototypes/well-content-tree-shell.html`
 
 ---
 
@@ -273,7 +273,7 @@ Prefer **few high seams**, external behavior only:
 
 3. **Shell wiring (thin Qt)**  
    Left tabs catalog vs content; mode switch; empty guidance; checks drive both modes.  
-   Prior art: `tests/test_well_log_workstation_shell.py`, `tests/test_well_log_workstation_templates.py`.
+   Prior art: `well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_shell.py`, `well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_templates.py`.
 
 Avoid: asserting QPainter/GL pixels as primary acceptance; testing private widget trees without behavior.
 

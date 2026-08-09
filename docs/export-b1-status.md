@@ -58,6 +58,6 @@ Do **not** advertise these as delivered B1:
 
 ## Related docs
 
-- Host export UI table: [`well_log_workstation/README.md`](../well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md)
-- Geometry golden notes: [`well_log_workstation/testdata/geometry_golden/README.md`](../well-log-engine/apps/wellplot-desktop/well_log_workstation/testdata/geometry_golden/README.md)
+- Host export UI table: [`well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md`](../well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md)
+- Geometry golden notes: [`well-log-engine/apps/wellplot-desktop/well_log_workstation/testdata/geometry_golden/README.md`](../well-log-engine/apps/wellplot-desktop/well_log_workstation/testdata/geometry_golden/README.md)
 - Domain vocabulary: [`CONTEXT.md`](../CONTEXT.md) — Export B0 / B1

@@ -4,7 +4,7 @@
 
 **Goal:** 在油藏综合图纸面上提供 9 种自由图形(文本/箭头/矩形/椭圆/多边形/手绘/图片/指北针/比例尺)的放置、移动、手柄缩放、删除与属性编辑,随 `plots/<id>.json` 持久化(schema v4),并顺带修复面板布局(`rect_mm`)不保存的缺口。
 
-**Architecture:** 规格文档(已逐节批准,跨仓契约冻结于 §3.5):`docs/superpowers/specs/2026-08-04-composite-free-graphics-design.md`。geoviz cartography 包承载全部图形机制(方案 A);宿主 `well_log_workstation` 只做持久化与窗口接线。
+**Architecture:** 规格文档(已逐节批准,跨仓契约冻结于 §3.5):`docs/superpowers/specs/2026-08-04-composite-free-graphics-design.md`。geoviz cartography 包承载全部图形机制(方案 A);宿主 `well-log-engine/apps/wellplot-desktop/well_log_workstation` 只做持久化与窗口接线。
 
 **Tech Stack:** PySide6 / QGraphicsScene(1 scene unit = 1 mm 纸面坐标);pytest + pytest-qt(CI);引擎仓 `geo-viz-engine/`(独立 git 仓,父仓以 gitlink 引用);宿主仓 pytest 套件在 `tests/`。
 
@@ -2836,8 +2836,8 @@ cd geo-viz-engine && gh pr list --head feat/cartography-free-graphics --json num
 `PlotDocument` 新增 `free_graphics: list[dict]`;`PLOT_SCHEMA_VERSION = 4`;升级链追加 `version == 3` 分支。**先不切分支** —— Task 11-13 在父仓 `main` 上新建分支 `feat/composite-free-graphics-host`。
 
 **Files:**
-- Modify: `well_log_workstation/plot_document.py`
-- Test: `tests/test_well_log_workstation_plot_free_graphics.py`
+- Modify: `well-log-engine/apps/wellplot-desktop/well_log_workstation/plot_document.py`
+- Test: `well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_plot_free_graphics.py`
 
 - [ ] **Step 1: 确认当前分支 + 建分支**
 
@@ -2850,10 +2850,10 @@ git checkout -b feat/composite-free-graphics-host
 - [ ] **Step 2: 写失败测试**
 
 ```python
-# tests/test_well_log_workstation_plot_free_graphics.py
+# well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_plot_free_graphics.py
 """Schema v4 free_graphics persistence (spec §4.1).
 
-Mirrors the pattern of ``test_well_log_workstation_plot_revision.py``:
+Mirrors the pattern of ``well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_plot_revision.py``:
 ``_from_json``/``_to_json`` are pure Python and verifiable without PySide6
 (events.py is lazily imported by save/load, so the pure branches stay
 importable for ``/usr/bin/python3``).
@@ -2957,7 +2957,7 @@ def test_save_persists_free_graphics_schema_v4(tmp_path: Path):
 - [ ] **Step 3: 验证失败**
 
 ```bash
-/usr/bin/python3 -m py_compile tests/test_well_log_workstation_plot_free_graphics.py
+/usr/bin/python3 -m py_compile well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_plot_free_graphics.py
 /usr/bin/python3 -c "from well_log_workstation.plot_document import PLOT_SCHEMA_VERSION; print(PLOT_SCHEMA_VERSION)"
 # 预期输出 3(红:应为 4)
 ```
@@ -3008,7 +3008,7 @@ def test_save_persists_free_graphics_schema_v4(tmp_path: Path):
 - [ ] **Step 5: 验证通过**
 
 ```bash
-/usr/bin/python3 -m py_compile well_log_workstation/plot_document.py
+/usr/bin/python3 -m py_compile well-log-engine/apps/wellplot-desktop/well_log_workstation/plot_document.py
 /usr/bin/python3 -c "
 from well_log_workstation.plot_document import PLOT_SCHEMA_VERSION, _from_json, _to_json, PlotDocument
 assert PLOT_SCHEMA_VERSION == 4
@@ -3029,7 +3029,7 @@ print('schema v4 OK')
 - [ ] **Step 6: 提交**
 
 ```bash
-git add well_log_workstation/plot_document.py tests/test_well_log_workstation_plot_free_graphics.py
+git add well-log-engine/apps/wellplot-desktop/well_log_workstation/plot_document.py well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_plot_free_graphics.py
 git commit -m "feat(workstation): schema v4 free_graphics field + v3 upgrade chain (spec §4.1)"
 ```
 
@@ -3040,8 +3040,8 @@ git commit -m "feat(workstation): schema v4 free_graphics field + v3 upgrade cha
 CompositeView 新增"保存布局"入口:回写 panels `rect_mm` + free_graphics + 图片复制到工区资产目录;恢复路径在 `_show_composite` 中按 `doc.free_graphics` 逐条 `add_free_graphic`;工具条新增按钮。
 
 **Files:**
-- Modify: `well_log_workstation/composite_view.py`
-- Modify: `well_log_workstation/shell.py`(`_show_composite` 追加 free_graphics 恢复)
+- Modify: `well-log-engine/apps/wellplot-desktop/well_log_workstation/composite_view.py`
+- Modify: `well-log-engine/apps/wellplot-desktop/well_log_workstation/shell.py`(`_show_composite` 追加 free_graphics 恢复)
 - Test: `tests/test_composite_free_graphics_save_restore.py`
 
 - [ ] **Step 1: 写失败测试**
@@ -3308,8 +3308,8 @@ def rewrite_image_paths(
 
 ```bash
 /usr/bin/python3 -m py_compile \
-  well_log_workstation/composite_view.py \
-  well_log_workstation/shell.py \
+  well-log-engine/apps/wellplot-desktop/well_log_workstation/composite_view.py \
+  well-log-engine/apps/wellplot-desktop/well_log_workstation/shell.py \
   tests/test_composite_free_graphics_save_restore.py
 /usr/bin/python3 -c "
 from pathlib import Path
@@ -3336,7 +3336,7 @@ print('composite save/restore pure helpers OK')
 - [ ] **Step 6: 提交**
 
 ```bash
-git add well_log_workstation/composite_view.py well_log_workstation/shell.py tests/test_composite_free_graphics_save_restore.py
+git add well-log-engine/apps/wellplot-desktop/well_log_workstation/composite_view.py well-log-engine/apps/wellplot-desktop/well_log_workstation/shell.py tests/test_composite_free_graphics_save_restore.py
 git commit -m "feat(workstation): CompositeView save/restore layout + free_graphics + image assets (spec §4.2–4.4)"
 ```
 
@@ -3375,7 +3375,7 @@ git diff --cached --stat  # 确认只有 geo-viz-engine 一行变更
 
 ```bash
 # 读当前代码,确认精确 old_string
-grep -n "_scene" well_log_workstation/export_dispatch.py
+grep -n "_scene" well-log-engine/apps/wellplot-desktop/well_log_workstation/export_dispatch.py
 ```
 
 如果引擎 PR-A 已添加了公开的 `scene()` 方法(window.py Task 9 未显式加,若没有则在此补):
@@ -3400,14 +3400,14 @@ grep -n "_scene" well_log_workstation/export_dispatch.py
 
 ```bash
 /usr/bin/python3 -m py_compile \
-  well_log_workstation/composite_view.py \
-  well_log_workstation/export_dispatch.py \
-  well_log_workstation/shell.py \
-  well_log_workstation/plot_document.py
+  well-log-engine/apps/wellplot-desktop/well_log_workstation/composite_view.py \
+  well-log-engine/apps/wellplot-desktop/well_log_workstation/export_dispatch.py \
+  well-log-engine/apps/wellplot-desktop/well_log_workstation/shell.py \
+  well-log-engine/apps/wellplot-desktop/well_log_workstation/plot_document.py
 /usr/bin/python3 -c "
 # 确认宿主不再依赖私有 _scene / _view
 import ast, pathlib
-for f in ['well_log_workstation/composite_view.py', 'well_log_workstation/export_dispatch.py']:
+for f in ['well-log-engine/apps/wellplot-desktop/well_log_workstation/composite_view.py', 'well-log-engine/apps/wellplot-desktop/well_log_workstation/export_dispatch.py']:
     src = pathlib.Path(f).read_text()
     assert 'win._scene' not in src and 'window._scene' not in src, f'{f} still uses _scene'
     assert 'win._view' not in src, f'{f} still uses win._view'
@@ -3419,7 +3419,7 @@ print('private-attribute migration OK')
 
 ```bash
 cd /home/kevin/projects/paleo_project
-git add geo-viz-engine well_log_workstation/composite_view.py well_log_workstation/export_dispatch.py
+git add geo-viz-engine well-log-engine/apps/wellplot-desktop/well_log_workstation/composite_view.py well-log-engine/apps/wellplot-desktop/well_log_workstation/export_dispatch.py
 git diff --cached --stat  # 确认: geo-viz-engine gitlink + 两个 .py
 git commit -m "feat(workstation): composite free-graphics host integration (gitlink bump + save/restore + public API migration)"
 git push -u origin feat/composite-free-graphics-host

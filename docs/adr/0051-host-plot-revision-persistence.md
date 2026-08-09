@@ -8,7 +8,7 @@ per-plot 的 revision 计数器不再只存在于内存：作为 `plots/<id>.jso
 
 ## 背景
 
-T7 引入 `well_log_workstation/events.py` 的 `_revisions` 时，revision 被刻意设计为纯内存态：当时为 composite 面板（油藏综合图）引入 panels 已导致一次 T9 schema bump，为避免再对 `plots/<id>.json` 做一次 schema 升级，revision 暂不落盘，`workspace.json` 的 catalog 亦不存储 revision 字段。
+T7 引入 `well-log-engine/apps/wellplot-desktop/well_log_workstation/events.py` 的 `_revisions` 时，revision 被刻意设计为纯内存态：当时为 composite 面板（油藏综合图）引入 panels 已导致一次 T9 schema bump，为避免再对 `plots/<id>.json` 做一次 schema 升级，revision 暂不落盘，`workspace.json` 的 catalog 亦不存储 revision 字段。
 
 ADR 0025 明确宿主负责持久化，并把"未提交修改、Document Revision 与项目保存状态"区分为三套概念；本 ADR 落实其中与图件保存状态相关的一环：revision 必须跨会话存活。
 

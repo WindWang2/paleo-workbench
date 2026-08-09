@@ -47,7 +47,7 @@ until wrappers are listed in `WELLLOG_PYTHON_GENERATED_SOURCES`.
 | G2 Well metadata on document | Still host-side |
 | G3 Interactive tops pick | Markers display via payload only; no pick API |
 | G4 Session undo for layout/overlays | Unchanged |
-| G5 Workspace catalog | Host (`well_log_workstation`) |
+| G5 Workspace catalog | Host (`well-log-engine/apps/wellplot-desktop/well_log_workstation`) |
 | Full multi-track **per well** in multi-well section | **#232**: `curves`+`tracks` per well in `submit_multi_well_section` (legacy single-curve retained) |
 | Grid layer / professional headers | Track header height set; no grid layer |
 | Session/command surface in Python | Still convenience bridges, not full Session binding |
@@ -55,7 +55,7 @@ until wrappers are listed in `WELLLOG_PYTHON_GENERATED_SOURCES`.
 ## How to exercise
 
 ```bash
-export PYTHONPATH="build/well-log-engine-python/python:well-log-engine/python${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="well-log-engine/apps/wellplot-desktop:build/well-log-engine-python/python:well-log-engine/python${PYTHONPATH:+:$PYTHONPATH}"
 # Rebuild if needed:
 # cmake --build build/well-log-engine-python --target _QtWidgets -j
 python -m well_log_workstation
