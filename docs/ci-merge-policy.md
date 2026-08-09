@@ -1,7 +1,7 @@
 # CI merge policy
 
-Last updated with the production-readiness quality convergence (advisory suite
-promoted to a required gate).
+Last updated 2026-08-09 with the production-readiness quality convergence
+(advisory suite promoted to a required gate).
 
 ## Product merge gates (required)
 
@@ -14,7 +14,7 @@ A PR is merge-ready when these are green on the head SHA:
 | **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (3.12 + 3.13) |
 | **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix and the workstation host matrix |
 
-Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate.
+Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate. The `WellLogEngine C++` workflow (`well-log-engine.yml`) is triggered on well-log-engine submodule **gitlink bumps** (paths cover the bare `well-log-engine` entry and `well-log-engine/**`), so any engine-pointer change re-runs it.
 
 The full monorepo suite runs with `-m "not slow"` and must be green **without
 quarantine**: there is no `continue-on-error`, no advisory xfail registry
