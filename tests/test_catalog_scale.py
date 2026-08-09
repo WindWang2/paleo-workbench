@@ -38,11 +38,13 @@ from paleo_workbench.catalog.store import CatalogStore
 
 BASE_N = int(os.environ.get("CATALOG_SCALE_N", "64"))
 LEVELS = [BASE_N, BASE_N * 2, BASE_N * 4]
-# The trash test saves once per version and the canonical store re-serializes
-# the whole document per save (inherent O(N²) in total save bytes), so its
-# levels are capped to keep the big-N run tractable while still exercising
+# The trash test saves TWICE per version — the tombstone first, then the
+# path update after the payload move (save-then-move crash safety) — and the
+# canonical store re-serializes the whole document per save (inherent O(N²)
+# in total save bytes), so its levels are capped tighter than the others to
+# keep the big-N run inside the CI per-test timeout while still exercising
 # the 4x ratio.
-TRASH_LEVELS = [min(BASE_N, 128), min(BASE_N * 2, 256), min(BASE_N * 4, 512)]
+TRASH_LEVELS = [max(BASE_N // 2, 16), min(BASE_N, 128), min(BASE_N * 2, 256)]
 CHAIN_DEPTH = max(8, BASE_N // 4)
 REPS = 3
 # Generous ratio ceilings over a 4x data increase (linear ⇒ ~4x, quadratic ⇒
