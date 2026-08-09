@@ -4,12 +4,26 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.viz.prediction_helpers import active_prediction_task
 from paleo_workbench.ui.pages.seismic_attribute_panel import SeismicAttributePanel
 from paleo_workbench.ui.pages.seismic_control_panel import SeismicControlPanel
 from paleo_workbench.ui.pages.seismic_context_toolbar import SeismicContextToolbar
 from paleo_workbench.ui.pages.seismic_view_panel import SeismicViewPanel
-from paleo_workbench.workflow.seismic_prediction import run_seismic_facies_prediction
+from paleo_workbench.workflow.stratigraphy import active_target_horizon
+from paleo_workbench.catalog import get_catalog_service
+from paleo_workbench.prediction.inference_service import (
+    link_run_to_domain_task,
+    materialize_prediction_task,
+    resolve_prediction_inputs,
+    start_inference,
+)
+from paleo_workbench.prediction.inference_worker import InferenceWorker
+from paleo_workbench.prediction.providers import (
+    CAPABILITY_FACIES,
+    MODEL_ID_DEMO,
+    ensure_default_models,
+)
 
 
 class SeismicPredictionPage(QWidget):
@@ -23,6 +37,8 @@ class SeismicPredictionPage(QWidget):
         self.setObjectName("SeismicPredictionPage")
         self._project = None
         self._tasks: list = []
+        self._inference_service = None
+        self._inference_job = OwnedWorkerJob(self)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -51,6 +67,7 @@ class SeismicPredictionPage(QWidget):
         outer.addLayout(content, 1)
 
         self.context_toolbar.run_requested.connect(self._on_run)
+        self.context_toolbar.demo_requested.connect(self._on_demo)
         self.control_panel.send_requested.connect(self.send_to_mapping_requested.emit)
         self.control_panel.display_mode_changed.connect(self.view_panel.set_display_mode)
         self.attribute_panel.attribute_changed.connect(self._on_attribute)
@@ -96,19 +113,132 @@ class SeismicPredictionPage(QWidget):
         )
 
     def _on_run(self) -> None:
+        """Production inference: resolve a production model, never auto-run mock.
+
+        No production model in the ModelRegistry → explicit 「未配置生产模型」
+        unavailable state (spec P2 §3d). Demo requires explicit demo mode.
+        """
         if self._project is None:
             QMessageBox.warning(self, "地震预测", "未绑定工程，无法运行")
             return
-        try:
-            task = run_seismic_facies_prediction(self._project, seed=len(self._tasks))
-        except Exception as exc:
+        service = get_catalog_service()
+        if service is None:
+            QMessageBox.warning(self, "地震预测", "未连接数据目录，无法运行推断")
+            return
+        ensure_default_models(service)
+        model_version = service.find_production_model(CAPABILITY_FACIES)
+        if model_version is None:
             QMessageBox.warning(
                 self,
-                "地震预测失败",
-                f"{exc.__class__.__name__}: {exc}",
+                "地震预测",
+                "未配置生产模型，无法运行科学预测。\n"
+                "请先注册生产模型（ModelRegistry），或通过「运行演示预测」查看演示结果。",
             )
             return
+        self._start_inference(
+            service,
+            model_version.id,
+            workflow="seismic_facies",
+            name_prefix="地震相预测",
+            demo=False,
+        )
+
+    def _on_demo(self) -> None:
+        """Explicit demo mode: run the registered DemoModelProvider."""
+        if self._project is None:
+            QMessageBox.warning(self, "地震预测", "未绑定工程，无法运行")
+            return
+        service = get_catalog_service()
+        if service is None:
+            QMessageBox.warning(self, "地震预测", "未连接数据目录，无法运行推断")
+            return
+        ensure_default_models(service)
+        try:
+            demo_version = service.get_model_version(MODEL_ID_DEMO, "1")
+        except Exception as exc:
+            QMessageBox.warning(self, "地震预测", f"演示模型未注册: {exc}")
+            return
+        self._start_inference(
+            service,
+            demo_version.id,
+            workflow="seismic_facies",
+            name_prefix="地震相预测(Demo)",
+            demo=True,
+        )
+
+    def _start_inference(
+        self,
+        service,
+        model_version_id: str,
+        *,
+        workflow: str,
+        name_prefix: str,
+        demo: bool,
+    ) -> None:
+        if self._inference_job.is_running:
+            return
+        self._inference_service = service
+        input_ids = (
+            [] if demo else resolve_prediction_inputs(self._project, service)
+        )
+        run = start_inference(
+            service,
+            model_version_id=model_version_id,
+            input_version_ids=input_ids,
+            parameters={
+                "seed": len(self._tasks),
+                "workflow": workflow,
+                "name_prefix": name_prefix,
+                "demo": demo,
+            },
+        )
+        worker = InferenceWorker(service, run.id)
+        worker.completed.connect(self._on_inference_completed)
+        worker.failed.connect(self._on_inference_failed)
+        self._inference_job.start(
+            worker,
+            terminal_signals=(worker.terminal,),
+            target=name_prefix,
+        )
+
+    def _on_inference_completed(self, payload: dict) -> None:
+        run = payload.get("run")
+        if run is None or getattr(run, "status", "") == "failed":
+            error = "未知错误"
+            if run is not None:
+                error = (run.parameters or {}).get("error", "未知错误")
+            QMessageBox.warning(self, "地震预测失败", f"推断失败: {error}")
+            return
+        result = payload.get("result")
+        if not result:
+            return
+        params = result.get("parameters") or {}
+        factor_ids = [
+            task.id
+            for task in self._project.factor_map_tasks
+            if getattr(task, "status", "") == "complete"
+        ]
+        task = materialize_prediction_task(
+            self._project,
+            result,
+            name_prefix=params.get("name_prefix", "地震相预测"),
+            workflow=params.get("workflow", "seismic_facies"),
+            target_horizon=(
+                active_target_horizon(self._project)
+                or self._project.stratigraphy.target_horizon
+                or ""
+            ),
+            factor_map_ids=factor_ids,
+        )
+        self._project.prediction_tasks.append(task)
+        if self._inference_service is not None:
+            try:
+                link_run_to_domain_task(self._inference_service, run.id, task.id)
+            except Exception:
+                pass
         self._tasks = list(self._project.prediction_tasks)
         self.update_state(self._tasks, project=self._project)
         self.prediction_updated.emit()
-        _ = task  # used for side effects on project
+
+    def _on_inference_failed(self, text: str) -> None:
+        QMessageBox.critical(self, "地震预测失败", f"推断失败: {text}")
