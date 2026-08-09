@@ -167,6 +167,8 @@ class AssetTableModel(QAbstractTableModel):
         if key == "format":
             return view.format
         if key == "status":
+            if view.trashed:
+                return f"🗑 {view.trashed_label}"
             return view.status
         if key == "role":
             if isinstance(view.raw_asset, ExportArtifact):

@@ -50,6 +50,15 @@ class AssetContextMenu(QMenu):
         asset = items[0]
         view = asset_view_from_object(asset)
 
+        # 0. Trashed assets get a restore action instead of the destructive
+        #    remove action (they are recoverable until purged).
+        if view.is_trashed:
+            restore = self._add_action("ctx_restore", "还原 (Restore)")
+            restore.setToolTip("从回收站恢复该数据资产及其版本")
+            self.addSeparator()
+            open_folder = self._add_action("ctx_open_folder", "打开目录")
+            return
+
         # 1. 预览 (Preview)
         preview = self._add_action("ctx_preview", "预览")
 
@@ -65,21 +74,22 @@ class AssetContextMenu(QMenu):
             edit_raw.setToolTip("原始数据已锁定，不能直接编辑。请创建派生副本。")
 
         elif view.stage == DataStage.DERIVED:
-            # Reserved for a future version-workflow backend; disabled until
-            # wired (like ctx_edit_original) so clicking never confuses.
+            # 新建版本 / 工作副本: create a mutable working copy of the current
+            # version, reveal it for editing, then commit it as a new immutable
+            # version. Wired by DataPage when the asset is catalog-bridged.
             new_ver = self._add_action("ctx_new_version", "新建版本 / 工作副本 (New Version)")
-            new_ver.setEnabled(False)
-            new_ver.setToolTip("版本工作流后端尚未接入 (reserved)")
+            new_ver.setEnabled(True)
+            new_ver.setToolTip("创建工作副本并提交为新版本 (需数据目录)")
 
         elif view.stage == DataStage.INTERMEDIATE:
             promote = self._add_action("ctx_promote", "提升为正式数据 (Promote)")
-            promote.setEnabled(False)
-            promote.setToolTip("提升工作流后端尚未接入 (reserved)")
+            promote.setEnabled(True)
+            promote.setToolTip("将当前版本复制为新的不可变 OUTPUT 版本")
 
         elif view.stage == DataStage.OUTPUT:
             export_open = self._add_action("ctx_export_open", "导出 / 交付")
-            export_open.setEnabled(False)
-            export_open.setToolTip("交付工作流后端尚未接入 (reserved)")
+            export_open.setEnabled(True)
+            export_open.setToolTip("导出 / 交付成果文件并记录交付元数据")
 
         # External item action (enabled by DataPage when bridged to an
         # unmanaged catalog version; disabled otherwise).

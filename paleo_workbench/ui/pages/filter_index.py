@@ -96,6 +96,14 @@ class FilterIndex:
         return rows
 
     def _matches_query(self, view: AssetView, query: FilterQuery) -> bool:
+        # Trashed (recoverable) items live in the 回收站 filter; every other
+        # filter excludes them so the active view never mixes them in.
+        if query.node_type == "trash":
+            if not view.trashed:
+                return False
+        elif view.trashed:
+            return False
+
         # 1. Primary tree node filter
         if query.node_type == "stage":
             if query.node_value and view.stage.value != query.node_value:
@@ -141,6 +149,8 @@ class FilterIndex:
     def _parse_legacy_category(self, category: str, search_text: str) -> FilterQuery:
         if category in (None, "", "全部"):
             return FilterQuery(node_type="all", search_text=search_text)
+        if category in ("回收站", "trash", "Trash"):
+            return FilterQuery(node_type="trash", search_text=search_text)
         # Match the Core enum value (lowercase), the zh label, and the legacy
         # uppercase name so old saved filters keep resolving after the DataStage
         # unification (ADR 0056: values are now "raw"/"derived"/...).

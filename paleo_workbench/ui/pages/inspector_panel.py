@@ -187,6 +187,8 @@ class InspectorPanel(QFrame):
             ("修改时间", view.modified_at),
             ("数据源", view.source),
         ]
+        if view.trashed:
+            rows.insert(1, ("回收站状态", view.trashed_label))
         if view.crs:
             rows.append(("CRS", view.crs))
         self.overview_table.load_table(("属性", "值"), tuple(rows))

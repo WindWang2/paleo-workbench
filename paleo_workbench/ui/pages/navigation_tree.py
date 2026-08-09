@@ -79,6 +79,16 @@ class NavigationTree(QTreeWidget):
         all_item.setData(0, Qt.ItemDataRole.UserRole, FilterQuery(node_type="all", node_value="全部"))
         all_item.setData(0, Qt.ItemDataRole.UserRole + 1, "全部")
 
+        # 1b. 回收站 (trashed catalog assets — recoverable)
+        trash_item = QTreeWidgetItem(self, ["回收站 0"])
+        trash_item.setData(
+            0,
+            Qt.ItemDataRole.UserRole,
+            FilterQuery(node_type="trash", node_value="trash"),
+        )
+        trash_item.setData(0, Qt.ItemDataRole.UserRole + 1, "回收站")
+        self._trash_item = trash_item
+
         # 2. 生命阶段 (Group)
         stage_group = QTreeWidgetItem(self, ["生命阶段"])
         stage_group.setFlags(stage_group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
@@ -116,6 +126,11 @@ class NavigationTree(QTreeWidget):
     def update_counts(self, resources: list, artifacts: list) -> None:
         counts = compute_catalog_counts(resources, artifacts)
         self._update_tree_counts(counts)
+
+    def set_trash_count(self, count: int) -> None:
+        """Update the 回收站 leaf count (trashed catalog assets)."""
+        if self._trash_item is not None:
+            self._trash_item.setText(0, f"回收站 {count}")
 
     def _update_tree_counts(self, counts: CatalogCounts) -> None:
         for i in range(self.topLevelItemCount()):

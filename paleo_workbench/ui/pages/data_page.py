@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -9,11 +10,17 @@ from dataclasses import replace
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
-    QWidget,
+    QApplication, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.catalog.checksum import sha256_file
+from paleo_workbench.project.models import (
+    ExportArtifact,
+    ProjectDocument,
+    ResourceItem,
+    _now_iso,
+)
 from paleo_workbench.project.paths import relativize_path, resolve_project_path
 from paleo_workbench.resources.export_service import (
     default_export_dir,
@@ -65,6 +72,146 @@ class _ImportWorker(QObject):
             self.failed.emit(str(exc))
             return
         self.finished.emit(report)
+
+
+class _NewVersionDialog(QDialog):
+    """提交新版本 dialog: stage select + version name for a working copy."""
+
+    def __init__(self, parent=None, *, asset_name: str = "", default_stage: str = "derived"):
+        super().__init__(parent)
+        self.setWindowTitle(f"提交新版本 — {asset_name}")
+        self.setMinimumWidth(360)
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("目标阶段 (Stage):"))
+        self.stage_combo = QComboBox(self)
+        for label, value in (
+            ("派生数据 (DERIVED)", "derived"),
+            ("中间结果 (INTERMEDIATE)", "intermediate"),
+            ("输出成果 (OUTPUT)", "output"),
+        ):
+            self.stage_combo.addItem(label, value)
+        if default_stage == "intermediate":
+            self.stage_combo.setCurrentIndex(1)
+        elif default_stage == "output":
+            self.stage_combo.setCurrentIndex(2)
+        layout.addWidget(self.stage_combo)
+
+        layout.addWidget(QLabel("版本名称 (可选):"))
+        self.name_edit = QLineEdit(self)
+        self.name_edit.setPlaceholderText("例如: 去毛刺滤波版")
+        layout.addWidget(self.name_edit)
+
+        buttons = QHBoxLayout()
+        cancel = QPushButton("取消", self)
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("提交", self)
+        ok.setObjectName("PrimaryButton")
+        ok.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        layout.addLayout(buttons)
+
+    def stage(self):
+        from paleo_workbench.catalog import DataStage
+
+        return DataStage(self.stage_combo.currentData())
+
+    def version_name(self) -> str:
+        return self.name_edit.text().strip() or None
+
+
+class _PromoteDialog(QDialog):
+    """提升为正式数据 dialog: target stage, reviewer, and note."""
+
+    def __init__(self, parent=None, *, asset_name: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle(f"提升为正式数据 — {asset_name}")
+        self.setMinimumWidth(380)
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("目标阶段:"))
+        self.stage_combo = QComboBox(self)
+        self.stage_combo.addItem("输出成果 (OUTPUT)", "output")
+        self.stage_combo.addItem("派生数据 (DERIVED)", "derived")
+        self.stage_combo.addItem("中间结果 (INTERMEDIATE)", "intermediate")
+        layout.addWidget(self.stage_combo)
+
+        layout.addWidget(QLabel("审核人 (reviewed_by, 可选):"))
+        self.reviewed_edit = QLineEdit(self)
+        self.reviewed_edit.setPlaceholderText("例如: QC 工程师")
+        layout.addWidget(self.reviewed_edit)
+
+        layout.addWidget(QLabel("备注 (note, 可选):"))
+        self.note_edit = QLineEdit(self)
+        self.note_edit.setPlaceholderText("提升说明")
+        layout.addWidget(self.note_edit)
+
+        buttons = QHBoxLayout()
+        cancel = QPushButton("取消", self)
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("提升", self)
+        ok.setObjectName("PrimaryButton")
+        ok.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        layout.addLayout(buttons)
+
+    def stage(self):
+        from paleo_workbench.catalog import DataStage
+
+        return DataStage(self.stage_combo.currentData())
+
+    def reviewed_by(self) -> str | None:
+        return self.reviewed_edit.text().strip() or None
+
+    def note(self) -> str | None:
+        return self.note_edit.text().strip() or None
+
+
+class _DeliveryDialog(QDialog):
+    """导出 / 交付 dialog: destination path + delivery note."""
+
+    def __init__(self, parent=None, *, asset_name: str = "", suggested_path: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle(f"导出 / 交付 — {asset_name}")
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("交付文件路径:"))
+        path_row = QHBoxLayout()
+        self.path_edit = QLineEdit(suggested_path, self)
+        path_row.addWidget(self.path_edit, 1)
+        browse = QPushButton("浏览...", self)
+        browse.clicked.connect(self._browse)
+        path_row.addWidget(browse)
+        layout.addLayout(path_row)
+
+        layout.addWidget(QLabel("交付说明 (可选):"))
+        self.note_edit = QLineEdit(self)
+        self.note_edit.setPlaceholderText("交付给谁 / 用途")
+        layout.addWidget(self.note_edit)
+
+        buttons = QHBoxLayout()
+        cancel = QPushButton("取消", self)
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("导出", self)
+        ok.setObjectName("PrimaryButton")
+        ok.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        layout.addLayout(buttons)
+
+    def _browse(self) -> None:
+        path, _selected = QFileDialog.getSaveFileName(self, "选择交付位置", self.path_edit.text())
+        if path:
+            self.path_edit.setText(path)
+
+    def output_path(self) -> Path:
+        return Path(self.path_edit.text().strip())
+
+    def note(self) -> str | None:
+        return self.note_edit.text().strip() or None
 
 
 class DataPage(QWidget):
@@ -162,7 +309,7 @@ class DataPage(QWidget):
         )
 
         # Wire tree & table navigation
-        self.navigation_tree.category_changed.connect(self.asset_table.set_category)
+        self.navigation_tree.category_changed.connect(self._on_navigation_category_changed)
         self.navigation_tree.filter_query_changed.connect(self.asset_table.set_filter_query)
 
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
@@ -242,7 +389,11 @@ class DataPage(QWidget):
         self._visualization_controller.set_project_root(preview_root)
         self.summary_bar.update_state(state)
         self.navigation_tree.update_counts(self._resources, self._artifacts)
-        self.asset_table.update_assets(self._resources, self._artifacts)
+        self.navigation_tree.set_trash_count(len(self._trashed_companions()))
+        display_resources = list(self._resources)
+        if self._trash_view_active():
+            display_resources.extend(self._trashed_companions())
+        self.asset_table.update_assets(display_resources, self._artifacts)
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
@@ -253,6 +404,91 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+
+    def _trash_view_active(self) -> bool:
+        """True when the navigation tree's 回收站 filter is active."""
+        try:
+            query = self.navigation_tree.current_filter_query()
+        except Exception:
+            return False
+        return getattr(query, "node_type", "") == "trash"
+
+    def _on_navigation_category_changed(self, category: str) -> None:
+        self.asset_table.set_category(category)
+        if category in ("回收站", "trash"):
+            # Entering the trash view must surface trashed catalog assets
+            # (they are not part of project.resources).
+            self._refresh()
+
+    def _trashed_companions(self) -> list[ResourceItem]:
+        """Reconstruct legacy ResourceItem companions for trashed catalog
+        assets so the 回收站 view can list and restore them."""
+        service = self._catalog_service()
+        if service is None:
+            return []
+        try:
+            assets = service.get_trashed_assets()
+        except Exception:
+            return []
+        companions = []
+        for asset in assets:
+            item = self._resource_from_catalog_asset(service, asset, trashed=True)
+            if item is not None:
+                companions.append(item)
+        return companions
+
+    def _resource_from_catalog_asset(
+        self, service, asset, *, trashed: bool = False
+    ) -> ResourceItem | None:
+        """Build a legacy ResourceItem companion for a catalog asset (used to
+        re-surface restored assets and to list trashed ones)."""
+        try:
+            version = (
+                service.get_version(asset.current_version_id)
+                if asset.current_version_id is not None
+                else None
+            )
+            payload = service.resolve_path(version) if version is not None else None
+            stored_path = asset.id
+            if payload is not None:
+                stored_path, _outside = relativize_path(
+                    payload.as_posix(), service.project_path
+                )
+            summary = dict(asset.metadata or {})
+            if trashed:
+                summary["catalog_trashed"] = True
+            summary["catalog_asset_id"] = asset.id
+            if version is not None:
+                summary["catalog_version_id"] = version.id
+            tags = list((asset.metadata or {}).get("legacy_tags", []))
+            if not tags:
+                try:
+                    tag_ids = service.document.asset_tags.get(asset.id, [])
+                    by_id = {t.id: t for t in service.document.tags}
+                    tags = [
+                        by_id[tid].display_name or by_id[tid].name
+                        for tid in tag_ids
+                        if tid in by_id
+                    ]
+                except Exception:
+                    tags = []
+            return ResourceItem(
+                id=asset.legacy_resource_id or asset.id,
+                name=asset.name,
+                path=stored_path,
+                type=asset.type,
+                format=version.format if version else "",
+                checksum=version.sha256 if version else None,
+                external=bool(version and not version.managed),
+                artifact_role=(asset.metadata or {}).get("artifact_role")
+                or ("output" if version and version.stage.value == "output" else "input"),
+                tags=tags,
+                status="indexed" if payload is not None and payload.is_file() else "missing",
+                source=(asset.metadata or {}).get("source", "catalog"),
+                parsed_summary=summary,
+            )
+        except Exception:
+            return None
 
     def _preview_disk_project_root(self) -> Path | None:
         raw = getattr(self.project.meta, "project_root", None)
@@ -405,8 +641,33 @@ class DataPage(QWidget):
         return self.remove_assets(items)
 
     def remove_assets(self, items: list[object]) -> bool:
+        """移出项目.
+
+        Catalog-bridged managed assets are TRASHED in the catalog first
+        (tombstone + payload moved to ``trash/``), so the asset disappears from
+        the active view WITHOUT leaving a ghost catalog asset behind. Pure
+        legacy (unbridged) items keep the legacy slice behavior. A catalog
+        trash failure aborts the removal (never a ghost).
+        """
         removed_count = 0
+        trashed_count = 0
         target_ids = {getattr(it, "id", None) for it in items if getattr(it, "id", None)}
+
+        for item in items:
+            resource = self._unwrap_asset(item)
+            if not isinstance(resource, ResourceItem):
+                continue
+            service, ref = self._catalog_bridge(resource)
+            if service is None or ref is None:
+                continue
+            try:
+                service.trash_asset(ref.asset_id, reason="移出项目")
+                trashed_count += 1
+            except Exception as exc:
+                # Never leave a ghost: abort the whole removal visibly.
+                self._set_action_status(f"移入回收站失败，未移除: {exc}")
+                self._refresh()
+                return False
 
         before_res = len(self.project.resources)
         self.project.resources[:] = [
@@ -420,12 +681,51 @@ class DataPage(QWidget):
         ]
         removed_count += before_art - len(self.project.export_artifacts)
 
-        if removed_count > 0:
+        if removed_count > 0 or trashed_count > 0:
             self._set_selected_asset(None)
             self._refresh()
-            self._set_action_status(f"已移出项目 ({removed_count} 项)")
+            if trashed_count:
+                self._set_action_status(f"已移至回收站 ({trashed_count} 项)")
+            else:
+                self._set_action_status(f"已移出项目 ({removed_count} 项)")
             return True
         return False
+
+    def restore_selected_asset(self) -> bool:
+        """还原: restore a trashed catalog asset (payload back to its stage
+        location) and re-surface its legacy ResourceItem companion."""
+        item = self._selected_asset
+        resource = self._unwrap_asset(item)
+        if not isinstance(resource, ResourceItem):
+            self._set_action_status("请选择回收站中的数据项")
+            return False
+        service = self._catalog_service()
+        if service is None:
+            self._set_action_status("该回收站项目无目录关联，无法还原")
+            return False
+        # Trashed assets have no current version, so the legacy bridge cannot
+        # resolve them; the companion records the catalog asset id directly.
+        asset_id = (resource.parsed_summary or {}).get("catalog_asset_id")
+        if asset_id is None:
+            _svc, ref = self._catalog_bridge(resource)
+            if ref is None:
+                self._set_action_status("该回收站项目无目录关联，无法还原")
+                return False
+            asset_id = ref.asset_id
+        try:
+            asset = service.restore_asset(asset_id)
+        except Exception as exc:
+            self._set_action_status(f"还原失败: {exc}")
+            return False
+        restored = self._resource_from_catalog_asset(service, asset)
+        if restored is not None:
+            existing = {r.id for r in self.project.resources}
+            if restored.id not in existing:
+                self.project.resources.append(restored)
+        self._set_selected_asset(None)
+        self._refresh()
+        self._set_action_status("已从回收站还原")
+        return True
 
     def rescan_selected_asset(self) -> bool:
         if not isinstance(self._selected_asset, ResourceItem):
@@ -506,87 +806,90 @@ class DataPage(QWidget):
         return folder
 
     def _create_derived_copy(self, asset: object) -> None:
-        """Create a derived data copy from a locked RAW asset."""
+        """Create a derived data copy from a locked RAW asset.
+
+        Requires an active catalog: the derived result is an immutable DERIVED
+        DataVersion with lineage — never a RAW-path alias. Without a catalog the
+        action fails visibly; catalog failures surface as errors, never a
+        half-state.
+        """
         asset = self._unwrap_asset(asset)
         if not isinstance(asset, ResourceItem):
             self._set_action_status("仅支持为 ResourceItem 数据创建派生副本")
             return
 
-        # When the source is bridged to the catalog, route through Core first:
-        # an immutable DERIVED DataVersion with lineage, never touching RAW.
-        derived_item = self._create_derived_via_catalog(asset)
+        service, ref = self._catalog_bridge(asset)
+        if service is None or ref is None:
+            self._set_action_status("创建派生副本需要活动数据目录（数据未桥接）")
+            return
+        try:
+            derived_item = self._create_derived_via_catalog(asset, service=service, ref=ref)
+        except Exception as exc:
+            self._set_action_status(f"创建派生副本失败: {exc}")
+            return
         if derived_item is None:
-            # Legacy fallback (no catalog wired or Core path failed).
-            derived_item = ResourceItem(
-                name=f"{asset.name}_derived",
-                path=asset.path,
-                type=asset.type,
-                format=asset.format,
-                crs=asset.crs,
-                status=asset.status,
-                tags=["派生", *asset.tags],
-                source=f"derived from {asset.name}",
-                parsed_summary={"derived_from_id": asset.id, "derived_from_name": asset.name, **asset.parsed_summary},
-                checksum=asset.checksum,
-                external=asset.external,
-                artifact_role="derived",
-            )
+            self._set_action_status("创建派生副本失败: 无法解析源版本")
+            return
 
         self.project.resources.append(derived_item)
         self._refresh()
         self._set_selected_asset(derived_item)
         self._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
 
-    def _create_derived_via_catalog(self, asset: ResourceItem) -> ResourceItem | None:
-        """Create the DERIVED version through Core; None when not bridged/failed.
+    def _create_derived_via_catalog(
+        self,
+        asset: ResourceItem,
+        *,
+        service=None,
+        ref=None,
+    ) -> ResourceItem | None:
+        """Create the DERIVED version through Core; None when the source payload
+        is not resolvable. Catalog failures RAISE (the caller surfaces them).
 
         The returned legacy ResourceItem is a companion pointing at the
         Core-managed payload so legacy workflows still see the data.
         """
-        service, ref = self._catalog_bridge(asset)
+        if service is None or ref is None:
+            service, ref = self._catalog_bridge(asset)
         if service is None or ref is None:
             return None
-        try:
-            source_version = service.get_version(ref.version_id)
-            source_payload = service.resolve_path(source_version)
-            if not source_payload.is_file():
-                return None
-            version = service.create_derived(
-                source_path=source_payload,
-                parent_version_ids=[source_version.id],
-                name=f"{asset.name}_derived",
-                operation="derived_copy",
-                generator="data_manager",
-            )
-            managed_path = service.resolve_path(version)
-            # Store project-relative when the payload is inside the project
-            # dir (managed storage always is) so .paleo.json stays relocatable.
-            stored_path, _outside = relativize_path(
-                managed_path.as_posix(), service.project_path
-            )
-            return ResourceItem(
-                name=f"{asset.name}_derived",
-                path=stored_path,
-                type=asset.type,
-                format=asset.format,
-                crs=asset.crs,
-                status=asset.status,
-                tags=["派生", *asset.tags],
-                source=f"derived from {asset.name}",
-                parsed_summary={
-                    "derived_from_id": asset.id,
-                    "derived_from_name": asset.name,
-                    "catalog_asset_id": version.asset_id,
-                    "catalog_version_id": version.id,
-                    **asset.parsed_summary,
-                },
-                checksum=version.sha256,
-                external=False,
-                artifact_role="derived",
-            )
-        except Exception:
-            # Catalog failures must never break the UI action; legacy path applies.
+        source_version = service.get_version(ref.version_id)
+        source_payload = service.resolve_path(source_version)
+        if not source_payload.is_file():
             return None
+        version = service.create_derived(
+            source_path=source_payload,
+            parent_version_ids=[source_version.id],
+            name=f"{asset.name}_derived",
+            operation="derived_copy",
+            generator="data_manager",
+        )
+        managed_path = service.resolve_path(version)
+        # Store project-relative when the payload is inside the project
+        # dir (managed storage always is) so .paleo.json stays relocatable.
+        stored_path, _outside = relativize_path(
+            managed_path.as_posix(), service.project_path
+        )
+        return ResourceItem(
+            name=f"{asset.name}_derived",
+            path=stored_path,
+            type=asset.type,
+            format=asset.format,
+            crs=asset.crs,
+            status=asset.status,
+            tags=["派生", *asset.tags],
+            source=f"derived from {asset.name}",
+            parsed_summary={
+                "derived_from_id": asset.id,
+                "derived_from_name": asset.name,
+                "catalog_asset_id": version.asset_id,
+                "catalog_version_id": version.id,
+                **asset.parsed_summary,
+            },
+            checksum=version.sha256,
+            external=False,
+            artifact_role="derived",
+        )
 
     def _materialize_asset(self, asset: object) -> None:
         """纳管至项目: promote an external (unmanaged) catalog version to a
@@ -619,6 +922,134 @@ class DataPage(QWidget):
         self._refresh()
         self._set_action_status(f"已纳管至项目: {asset.name}")
 
+    # --- working copies / new versions ---------------------------------------
+
+    def _new_version_from_asset(self, asset: object) -> None:
+        """新建版本 / 工作副本: create a mutable working copy of the current
+        catalog version, reveal it for editing, then commit it as a new
+        immutable version of the SAME asset."""
+        asset = self._unwrap_asset(asset)
+        if not isinstance(asset, ResourceItem):
+            self._set_action_status("仅支持为资源数据创建新版本")
+            return
+        service, ref = self._catalog_bridge(asset)
+        if service is None or ref is None:
+            self._set_action_status("新建版本需要活动数据目录（数据未桥接）")
+            return
+        try:
+            working_path = service.create_working_copy(ref.version_id)
+        except Exception as exc:
+            self._set_action_status(f"创建工作副本失败: {exc}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(working_path.as_posix()))
+        dlg = _NewVersionDialog(self, asset_name=asset.name)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            self._set_action_status(f"已创建可编辑工作副本（未提交）: {working_path}")
+            return
+        try:
+            version = service.commit_working_copy(
+                working_path,
+                asset_id=ref.asset_id,
+                name=dlg.version_name(),
+                stage=dlg.stage(),
+            )
+        except Exception as exc:
+            self._set_action_status(f"提交新版本失败: {exc}")
+            return
+        self._refresh()
+        self._set_action_status(
+            f"已提交新版本: {version.id} (v{version.version_number}, {version.stage.value})"
+        )
+
+    # --- promote --------------------------------------------------------------
+
+    def _promote_asset(self, asset: object) -> None:
+        """提升为正式数据: copy the current version to a new immutable OUTPUT
+        version (promote DataRun + current_version_id advance)."""
+        asset = self._unwrap_asset(asset)
+        if not isinstance(asset, ResourceItem):
+            self._set_action_status("仅支持为资源数据提升版本")
+            return
+        service, ref = self._catalog_bridge(asset)
+        if service is None or ref is None:
+            self._set_action_status("提升为正式数据需要活动数据目录（数据未桥接）")
+            return
+        dlg = _PromoteDialog(self, asset_name=asset.name)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            version = service.promote_version(
+                ref.version_id,
+                to_stage=dlg.stage(),
+                reviewed_by=dlg.reviewed_by(),
+                note=dlg.note(),
+            )
+        except Exception as exc:
+            self._set_action_status(f"提升失败: {exc}")
+            return
+        self._refresh()
+        self._set_action_status(f"已提升为正式数据: {version.id} (v{version.version_number})")
+
+    # --- export / delivery ----------------------------------------------------
+
+    def _deliver_asset(self, asset: object) -> None:
+        """导出 / 交付: copy the OUTPUT payload to a user-chosen destination and
+        record delivery metadata as a ``delivery`` DataRun (source version,
+        exported path, checksum, timestamp, format, delivery status)."""
+        asset = self._unwrap_asset(asset)
+        service, ref = self._catalog_bridge(asset)
+        source_path: Path | None = None
+        if isinstance(asset, ResourceItem):
+            source_path = self._resolve_resource_path(asset)
+            if not source_path.is_file() and service is not None and ref is not None:
+                try:
+                    source_path = service.resolve_path(service.get_version(ref.version_id))
+                except Exception:
+                    source_path = None
+        elif isinstance(asset, ExportArtifact):
+            source_path = Path(asset.output_path)
+        if source_path is None or not source_path.is_file():
+            self._set_action_status("导出 / 交付失败: 源文件不存在")
+            return
+        suggested = str(default_export_dir(self._project_file_for_io()) / source_path.name)
+        dlg = _DeliveryDialog(self, asset_name=getattr(asset, "name", source_path.name), suggested_path=suggested)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        destination = dlg.output_path()
+        if not str(destination).strip():
+            self._set_action_status("导出 / 交付已取消")
+            return
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination)
+            checksum = sha256_file(destination)
+        except Exception as exc:
+            self._set_action_status(f"导出 / 交付失败: {exc}")
+            return
+        # Delivery provenance: a run records the handoff WITHOUT mutating the
+        # immutable OUTPUT version.
+        recorded = False
+        try:
+            if service is not None and ref is not None:
+                service.register_run(
+                    "delivery",
+                    input_version_ids=[ref.version_id],
+                    parameters={
+                        "source_version_id": ref.version_id,
+                        "exported_path": destination.as_posix(),
+                        "checksum": checksum,
+                        "timestamp": _now_iso(),
+                        "format": source_path.suffix.lstrip("."),
+                        "delivery_status": "exported",
+                    },
+                )
+                recorded = True
+        except Exception:
+            recorded = False
+        self._set_action_status(
+            f"已导出 / 交付: {destination.name} ({'已记录交付元数据' if recorded else '未记录交付元数据'})"
+        )
+
     def _show_context_menu(self, global_pos, target) -> None:
         viz_supported = False
         first = target[0] if isinstance(target, (list, tuple)) and target else target
@@ -634,7 +1065,40 @@ class DataPage(QWidget):
 
         create_derived_act = menu.find_action("ctx_create_derived")
         if create_derived_act:
-            create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+            # §8.2: derived requires an active catalog; without a bridge the
+            # action is disabled with a clear tooltip (never a RAW-path alias).
+            _svc, derived_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
+            if derived_ref is None:
+                create_derived_act.setEnabled(False)
+                create_derived_act.setToolTip("创建派生副本需要活动数据目录")
+            else:
+                create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+
+        new_version_act = menu.find_action("ctx_new_version")
+        if new_version_act:
+            _svc, nv_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
+            if nv_ref is None:
+                new_version_act.setEnabled(False)
+                new_version_act.setToolTip("新建版本需要活动数据目录（数据未桥接）")
+            else:
+                new_version_act.triggered.connect(lambda: self._new_version_from_asset(first))
+
+        promote_act = menu.find_action("ctx_promote")
+        if promote_act:
+            _svc, prom_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
+            if prom_ref is None:
+                promote_act.setEnabled(False)
+                promote_act.setToolTip("提升为正式数据需要活动数据目录（数据未桥接）")
+            else:
+                promote_act.triggered.connect(lambda: self._promote_asset(first))
+
+        export_open_act = menu.find_action("ctx_export_open")
+        if export_open_act:
+            export_open_act.triggered.connect(lambda: self._deliver_asset(first))
+
+        restore_act = menu.find_action("ctx_restore")
+        if restore_act:
+            restore_act.triggered.connect(self.restore_selected_asset)
 
         verify_act = menu.find_action("ctx_verify")
         if verify_act:
@@ -1150,6 +1614,13 @@ class DataPage(QWidget):
     def _update_selection_action_state(self) -> None:
         has_resource = isinstance(self._selected_asset, ResourceItem)
         has_asset = self._selected_asset is not None or bool(self._selected_assets)
-        self.rescan_btn.setEnabled(has_resource and not self._import_in_progress)
-        self.remove_btn.setEnabled(has_asset)
+        selected_trashed = False
+        if isinstance(self._selected_asset, ResourceItem):
+            selected_trashed = bool(
+                (self._selected_asset.parsed_summary or {}).get("catalog_trashed")
+            )
+        self.rescan_btn.setEnabled(
+            has_resource and not selected_trashed and not self._import_in_progress
+        )
+        self.remove_btn.setEnabled(has_asset and not selected_trashed)
         self.open_folder_btn.setEnabled(has_asset)
