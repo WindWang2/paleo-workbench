@@ -174,6 +174,95 @@ class GeologicalModelingWorker(QObject):
             self.terminal.emit()
 
 
+class StratalWorker(QObject):
+    """Asynchronous worker for stratal/proportional slice computation.
+
+    Horizon parsing (``.dat`` → ms grids), resampling and surface building run
+    off the UI thread so large surveys do not block the page (review finding
+    #8: stratal computation used to live directly in the UI handler). The
+    worker returns ready-made surfaces/labels; the caller applies them to the
+    renderer on the UI thread.
+    """
+    completed = Signal(dict)
+    failed = Signal(str)
+    terminal = Signal()
+
+    def __init__(
+        self,
+        *,
+        demo: bool,
+        fractions: tuple[float, ...],
+        scene=None,
+        volume=None,
+        top_path: str | None = None,
+        bottom_path: str | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.demo = demo
+        self.fractions = fractions
+        self.scene = scene
+        self.volume = volume
+        self.top_path = top_path
+        self.bottom_path = bottom_path
+
+    def run(self) -> None:
+        try:
+            if self.demo:
+                from geoviz import build_proportional_surfaces
+                from paleo_workbench.viz.stratal_adapter import make_demo_stratal_grids
+
+                vol, top_sidx, bot_sidx = make_demo_stratal_grids((16, 20, 32))
+                surfaces = list(
+                    np.asarray(
+                        build_proportional_surfaces(
+                            top_sidx, bot_sidx, list(self.fractions)
+                        )
+                    )
+                )
+                self.completed.emit(
+                    {
+                        "demo": True,
+                        "volume": vol,
+                        "surfaces": surfaces,
+                        "labels": [f"k={f:.2f}" for f in self.fractions],
+                    }
+                )
+                return
+
+            from paleo_workbench.viz.stratal_adapter import (
+                build_stratal_grids,
+                build_stratal_surfaces,
+            )
+
+            grids = build_stratal_grids(
+                self.scene, self.volume, self.top_path, self.bottom_path
+            )
+            if grids is None:
+                self.failed.emit("survey/registration 不可用或体数据未就绪，无法对齐 horizon。")
+                return
+            top_sidx, bot_sidx = grids
+            out = build_stratal_surfaces(
+                top_sidx, bot_sidx, self.volume.shape, fractions=self.fractions
+            )
+            if out is None:
+                self.failed.emit("horizon 对全部倒转或无效，未生成切片。")
+                return
+            surfaces, _ = out
+            self.completed.emit(
+                {
+                    "demo": False,
+                    "volume": None,
+                    "surfaces": surfaces,
+                    "labels": [f"k={f:.2f}" for f in self.fractions],
+                }
+            )
+        except Exception as e:  # noqa: BLE001 — surface to UI
+            self.failed.emit(str(e))
+        finally:
+            self.terminal.emit()
+
+
 class ExportWorker(QObject):
     """Asynchronous worker for grid exporting to avoid UI freezing."""
     completed = Signal(str)
