@@ -263,30 +263,24 @@ def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any
     try:
         with open(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
-        asset = service._new_asset(
-            f"{model.model_name} 结果",
-            "prediction_result",
-            "json",
-            {"kind": "prediction_result"},
+        # Single locked atomic operation: asset creation + version registration
+        # + rollback on failure (worker-thread safe; never mutate
+        # service.document.assets directly — review finding #4).
+        output = service.register_result_asset(
+            name=f"{model.model_name} 结果",
+            type="prediction_result",
+            format="json",
+            asset_metadata={"kind": "prediction_result"},
+            source_path=tmp_path,
+            stage=DataStage.DERIVED,
+            run_id=run_id,
+            version_metadata={
+                "source": payload.get("source", "inference"),
+                "demo": bool(payload.get("demo", False)),
+                "kind": "prediction_result",
+                "format": "json",
+            },
         )
-        service.document.assets.append(asset)
-        try:
-            output = service.register_version(
-                asset.id,
-                tmp_path,
-                DataStage.DERIVED,
-                run_id=run_id,
-                metadata={
-                    "source": payload.get("source", "inference"),
-                    "demo": bool(payload.get("demo", False)),
-                    "kind": "prediction_result",
-                    "format": "json",
-                },
-            )
-        except Exception:
-            if asset in service.document.assets:
-                service.document.assets.remove(asset)
-            raise
     finally:
         try:
             Path(tmp_path).unlink()

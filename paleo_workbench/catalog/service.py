@@ -596,6 +596,40 @@ class DataCatalogService:
     ) -> DataVersion:
         return self.register_version(asset_id, source_path, DataStage.OUTPUT, **kwargs)
 
+    def register_result_asset(
+        self,
+        *,
+        name: str,
+        type: str | None,
+        format: str | None,
+        asset_metadata: dict[str, Any] | None,
+        source_path: str | Path,
+        stage: DataStage,
+        run_id: str | None = None,
+        version_metadata: dict[str, Any] | None = None,
+    ) -> DataVersion:
+        """Create a result asset and register its version in ONE locked,
+        atomic operation (thread-safe: workers must not mutate
+        ``document.assets`` directly — this is the only sanctioned path).
+
+        On failure the newly-created asset is rolled back from the document,
+        so no half-registered asset survives. Returns the committed version.
+        """
+        with self._lock:
+            asset = self._new_asset(name, type, format, asset_metadata)
+            self._add_asset(asset)
+            try:
+                return self.register_version(
+                    asset.id,
+                    source_path,
+                    stage,
+                    run_id=run_id,
+                    metadata=version_metadata,
+                )
+            except Exception:
+                self._remove_asset(asset)
+                raise
+
     # -- import / link / materialize -----------------------------------------
 
     def _new_asset(

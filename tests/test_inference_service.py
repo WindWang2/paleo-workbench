@@ -223,3 +223,60 @@ def test_link_run_to_domain_task(service):
     run = start_inference(service, model_version_id=demo_v.id)
     linked = link_run_to_domain_task(service, run.id, "pred_abc")
     assert linked.parameters["_domain_task_id"] == "pred_abc"
+
+
+# ------------------------------------------------------ thread-safe result asset (finding #4)
+
+
+def test_register_result_asset_creates_asset_and_version_atomically(service, tmp_path):
+    """Worker-facing result registration goes through ONE locked operation:
+    asset + version committed together, run output linkage set."""
+    src = tmp_path / "result.json"
+    src.write_text(json.dumps({"source": "inference", "demo": True}), encoding="utf-8")
+
+    run = service.register_run(
+        operation="prediction",
+        input_version_ids=[],
+        parameters={"adapter_kind": "demo"},
+    )
+    run_id = run.id
+    version = service.register_result_asset(
+        name="Demo 模型 结果",
+        type="prediction_result",
+        format="json",
+        asset_metadata={"kind": "prediction_result"},
+        source_path=src,
+        stage=DataStage.DERIVED,
+        run_id=run_id,
+        version_metadata={"demo": True, "kind": "prediction_result"},
+    )
+
+    assert version.stage == DataStage.DERIVED
+    assert service.get_asset(version.asset_id).name == "Demo 模型 结果"
+    # Run output linkage updated in the same save.
+    run = service.get_run(run_id)
+    assert version.id in run.output_version_ids
+    # Payload managed & readable.
+    payload = service.resolve_path(version)
+    assert payload.is_file()
+    assert json.loads(payload.read_text(encoding="utf-8"))["demo"] is True
+
+
+def test_register_result_asset_failure_leaves_no_half_asset(service, tmp_path):
+    """A failing registration (missing source) rolls back the freshly created
+    asset — no orphan asset, no stray document entries (worker crash safety)."""
+    before_assets = len(service.document.assets)
+    missing = tmp_path / "does_not_exist.json"
+
+    with pytest.raises(Exception):
+        service.register_result_asset(
+            name="失败 结果",
+            type="prediction_result",
+            format="json",
+            asset_metadata={"kind": "prediction_result"},
+            source_path=missing,
+            stage=DataStage.DERIVED,
+        )
+
+    assert len(service.document.assets) == before_assets
+    assert len(service.document.versions) == 0
