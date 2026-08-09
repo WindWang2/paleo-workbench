@@ -2,7 +2,7 @@
 
 **Issue:** [#332](https://github.com/WindWang2/paleo-workbench/issues/332) (wayfinder research; map [#331](https://github.com/WindWang2/paleo-workbench/issues/331))  
 **Date:** 2026-08-05  
-**Scope:** Primary sources only — `well-log-engine/apps/wellplot-desktop/well_log_workstation/`, `docs/adr/0022*`, `docs/adr/0024*`, related ADRs 0014/0015, `CONTEXT.md` Well Log sections, `well-log-engine` table/selection public surface.  
+**Scope:** Primary sources only — `well-log-engine/apps/wellplot-desktop/well_log_workstation/`, `docs/adr/0022*`, `docs/adr/0024*`, related ADRs 0014/0015, `CONTEXT.md` Well Log sections, `well-log-engine` table/selection public surface.
 **Status:** Research complete (findings only; no product code).
 
 ## Question

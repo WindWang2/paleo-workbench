@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06  
 **Status:** Implementable (wayfinder complete)  
-**Product:** WellPlot Desktop (`well-log-engine/apps/wellplot-desktop/well_log_workstation`) — single-well path first  
+**Product:** WellPlot Desktop (`well-log-engine/apps/wellplot-desktop/well_log_workstation`) — single-well path first
 **Map:** [Wayfinder: 单井井道数据树与图/表双视图规格](https://github.com/WindWang2/paleo-workbench/issues/331)  
 **Prototype (throwaway):** `well-log-engine/apps/wellplot-desktop/well_log_workstation/prototypes/well-content-tree-shell.html`
 
