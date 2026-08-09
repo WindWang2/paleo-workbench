@@ -71,6 +71,10 @@ def _scaled_document(n: int, *, chain: bool = False) -> CatalogDocument:
     With ``chain=True``, the first ``CHAIN_DEPTH`` versions form a parent
     chain and the remaining versions are unrelated (so descendants BFS on the
     chain head visits only ``CHAIN_DEPTH`` nodes regardless of *n*).
+
+    The first 16 assets carry the constant-selectivity type ``needle_type``
+    (used by the sub-linear search test: the filter always matches 16 rows no
+    matter how large the catalog grows); everything else gets a bulk type.
     """
     assets: list[DataAsset] = []
     versions: list[DataVersion] = []
@@ -78,7 +82,7 @@ def _scaled_document(n: int, *, chain: bool = False) -> CatalogDocument:
         asset = DataAsset(
             id=f"asset_{i:05d}",
             name=f"asset {i}",
-            type=f"type_{i % 8}",
+            type="needle_type" if i <= 16 else f"bulk_{i % 8}",
         )
         parent_ids: list[str] = []
         if chain and 1 < i <= CHAIN_DEPTH:
@@ -173,8 +177,9 @@ def index_revision_is(doc, project) -> bool:
 
 
 def test_search_sublinear_after_index_build(tmp_path: Path):
-    """Type-filtered search on an indexed catalog: per-query cost must not
-    grow linearly with N (index-backed lookups vs a full scan)."""
+    """A filter with CONSTANT selectivity (16 of N assets) must stay ~flat as
+    the catalog grows 4x: the index answers in O(result) ≈ O(1), while a full
+    table scan would cost O(N) ⇒ ~4x (and the sub-linear bound would fail)."""
     queries = 30
 
     def _search_time(n: int) -> float:
@@ -182,8 +187,8 @@ def test_search_sublinear_after_index_build(tmp_path: Path):
         try:
             def _run():
                 for _ in range(queries):
-                    results = svc.search_assets(type="type_3")
-                    assert results  # correctness: filter always matches ~N/8
+                    results = svc.search_assets(type="needle_type")
+                    assert len(results) == 16  # correctness: constant selectivity
 
             return _measure(_run)
         finally:
@@ -329,19 +334,22 @@ def test_project_open_linear_in_n(tmp_path: Path):
 
 def test_inmemory_fallback_paths_linear_and_correct(tmp_path: Path):
     """Delete the SQLite index: queries fall back to the in-memory document
-    scans and must stay correct and O(N) (never O(N²))."""
+    scans and must stay correct and O(N) (never O(N²)). The fallback scans
+    every asset per query, so 4x data ⇒ ≤~8x (cache effects, fixed overhead);
+    a quadratic scan would be ~16x and blows past this ceiling."""
 
     def _fallback_search_time(n: int) -> float:
         project, svc = _open_scaled(tmp_path / str(n), n)
         try:
             _db_path(project).unlink()  # force the fallback path
             assert svc.index_revision() is None
-            results = svc.search_assets(type="type_3")
-            assert len(results) == n // 8  # correctness on the fallback path
+            results = svc.search_assets(type="bulk_3")
+            # 16 assets are the needle type; the rest are bulk_{i%8}.
+            assert len(results) == max(0, (n - 16) // 8)  # correctness on fallback
 
             def _run():
                 for _ in range(20):
-                    svc.search_assets(type="type_3")
+                    svc.search_assets(type="bulk_3")
 
             return _measure(_run)
         finally:
@@ -349,8 +357,8 @@ def test_inmemory_fallback_paths_linear_and_correct(tmp_path: Path):
 
     t_small = _fallback_search_time(LEVELS[0])
     t_big = _fallback_search_time(LEVELS[-1])
-    # O(N) fallback over a 4x catalog ⇒ ≤ ~4x; quadratic would be ~16x.
-    assert t_big < LINEAR_CEILING * t_small + FLOOR_MS, (t_small, t_big)
+    # O(N) fallback over a 4x catalog ⇒ ≤ ~8x; quadratic would be ~16x.
+    assert t_big < 8.0 * t_small + FLOOR_MS, (t_small, t_big)
 
 
 def test_rebuild_self_heals_deleted_index_with_scale(tmp_path: Path):

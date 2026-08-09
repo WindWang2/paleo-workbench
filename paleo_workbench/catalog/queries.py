@@ -96,7 +96,10 @@ def search_assets(
             tag=normalize_tag_name(tag) if tag else None,
             type=type,
         )
-        by_id = {a.id: a for a in service.document.assets}
+        # Use the service's maintained id→asset map (O(1) per row) instead of
+        # rebuilding it per query, so a filtered search is O(result), not O(N).
+        service._ensure_maps()
+        by_id = service._asset_by_id
         return [
             by_id[r["id"]]
             for r in rows
