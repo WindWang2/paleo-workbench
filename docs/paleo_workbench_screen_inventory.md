@@ -16,7 +16,7 @@ The standalone prototype has 11 icon-rail navigation items (updated from initial
 8. 制备: cartographic data preparation (factor maps)
 9. 编图: paleogeographic map composition workbench — balanced layout with left layer tree (editable + reference layers), center edit canvas (with LOD navigation), right reference map dock (CRS-aligned, opacity/visibility), collapsible bottom work area (properties/topology issues/single-factor shelf), canvas-priority mode, structured topology save gate, and indexed snapping
 10. 成图审核: QC and export
-11. **三维地质建模**: 3D geological modeling workbench — borehole/tunnel/fault 3D rendering with GPU clipping, well-seismic tie calibration, seismic slice overlay, AI consistency advisor, and FLAC3D/Abaqus numerical simulation export
+11. **三维地质建模**: 3D geological modeling workbench — borehole/tunnel/fault 3D rendering with GPU clipping, well-seismic tie calibration, seismic slice overlay, rule-based consistency advisor, and FLAC3D/Abaqus numerical simulation export
 
 ## Design Tokens
 
