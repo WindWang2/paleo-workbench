@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
 from paleo_workbench.workflow.factor_interpolation import (
@@ -47,19 +48,95 @@ def test_interpolate_factor_grid_idw_shape_and_stats():
     assert result["r_squared"] is None or 0.0 <= result["r_squared"] <= 1.0
 
 
-def test_kriging_mvp_maps_to_scipy_linear_and_notes():
-    """ISS-KRIG-01: UI 克里金 is labelled MVP and uses SciPy linear."""
+def test_kriging_routes_to_real_variogram_backend():
+    """ISS-KRIG-01 resolved: UI 克里金 routes to real ordinary kriging.
+
+    The parent-side workflow maps the label to the engine method "kriging"
+    (variogram fit + OK solve) BEFORE calling interpolate_factor_grid; the
+    engine returns grid_var + variance_min/max. Backend math tests live in
+    the geo-viz-engine child; here we cover the routing + passthrough.
+    """
+    from paleo_workbench.workflow.factor_interpolation import METHOD_LABEL_TO_ENGINE
+
+    assert METHOD_LABEL_TO_ENGINE["克里金"] == "kriging"
+    assert METHOD_LABEL_TO_ENGINE["克里金(MVP·线性)"] == "kriging"  # legacy alias
     points = [
         {"x": 0.0, "y": 0.0, "value": 1.0},
         {"x": 1.0, "y": 0.0, "value": 2.0},
         {"x": 0.0, "y": 1.0, "value": 3.0},
         {"x": 1.0, "y": 1.0, "value": 4.0},
     ]
-    for label in ("克里金", "克里金(MVP·线性)"):
-        result = interpolate_factor_grid(points, method=label, grid_n=6)
-        assert result["backend"] == "linear"
-        assert "mvp_note" in result
-        assert "克里金" in result["mvp_note"] or "MVP" in result["mvp_note"]
+    result = interpolate_factor_grid(points, method="kriging", grid_n=8)
+    assert result["backend"] == "kriging"
+    assert "mvp_note" not in result
+    assert result["grid_var"] is not None
+    assert len(result["grid_var"]) == 8
+    assert result["variance_min"] is not None
+    assert result["variance_max"] is not None
+
+
+def test_kriging_output_finite_deterministic_and_variance_nonnegative():
+    points = [
+        {"x": 0.0, "y": 0.0, "value": 1.0},
+        {"x": 1.0, "y": 0.0, "value": 2.0},
+        {"x": 0.0, "y": 1.0, "value": 3.0},
+        {"x": 1.0, "y": 1.0, "value": 4.0},
+        {"x": 0.5, "y": 0.5, "value": 5.0},
+    ]
+    first = interpolate_factor_grid(points, method="kriging", grid_n=12)
+    second = interpolate_factor_grid(points, method="kriging", grid_n=12)
+    assert first["grid_z"] == second["grid_z"]
+    assert first["grid_var"] == second["grid_var"]
+    finite_z = [v for row in first["grid_z"] for v in row if v is not None]
+    assert all(np.isfinite(v) for v in finite_z)
+    finite_v = [v for row in first["grid_var"] for v in row if v is not None]
+    assert all(v >= 0.0 for v in finite_v)
+
+
+def test_kriging_is_exact_at_sample_grid_node():
+    # Samples laid out so (2,2) lands exactly on a grid node (grid_n=5 axes:
+    # [-0.2, 0.9, 2.0, 3.1, 4.2]) → ordinary kriging reproduces the value.
+    samples = [(0, 0, 1.0), (4, 0, 2.0), (0, 4, 3.0), (4, 4, 4.0), (2, 2, 5.0)]
+    points = [{"x": x, "y": y, "value": v} for x, y, v in samples]
+    result = interpolate_factor_grid(points, method="kriging", grid_n=5)
+    gx, gy, gz = result["grid_x"], result["grid_y"], result["grid_z"]
+    ix = gx.index(2.0)
+    iy = gy.index(2.0)
+    assert gz[iy][ix] == pytest.approx(5.0, abs=1e-6)
+
+
+def test_kriging_handles_duplicate_locations():
+    points = [
+        {"x": 0.0, "y": 0.0, "value": 1.0},
+        {"x": 1.0, "y": 0.0, "value": 2.0},
+        {"x": 0.0, "y": 1.0, "value": 3.0},
+        {"x": 1.0, "y": 1.0, "value": 4.0},
+        {"x": 0.0, "y": 0.0, "value": 1.5},  # exact duplicate location
+    ]
+    result = interpolate_factor_grid(points, method="kriging", grid_n=8)
+    assert result["backend"] == "kriging"
+    assert result["n_points"] == 5
+    assert result["min"] <= result["max"]
+    finite = [v for row in result["grid_z"] for v in row if v is not None]
+    assert all(np.isfinite(v) for v in finite)
+
+
+def test_apply_interpolation_to_task_routes_kriging_label():
+    task = FactorMapTask(
+        name="厚度",
+        target_horizon="H1",
+        factor_type="地层厚度",
+        method="克里金",
+        parameters={"sample_points": synthetic_sample_points(seed=1, factor_type="厚度")},
+        status="pending",
+        source_kind="mixed",
+    )
+    apply_interpolation_to_task(task, method="克里金", grid_n=10)
+    assert task.status == "complete"
+    assert task.parameters["interp_backend"] == "kriging"
+    assert "grid_var" in task.parameters
+    assert task.quality_metrics.get("variance_min") is not None
+    assert task.quality_metrics.get("variance_max") is not None
 
 
 def test_apply_interpolation_to_task_fills_grid_and_metrics():

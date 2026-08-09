@@ -68,12 +68,13 @@ Page 11 adds a full 3D geological modeling workbench with:
 
 See [`docs/geomodel-architecture.md`](docs/geomodel-architecture.md) for the full module architecture.
 
-## Interpolation note (ISS-KRIG-01)
+## Interpolation note (ISS-KRIG-01 resolved)
 
-The preparation combobox option **克里金(MVP·线性)** is an explicit MVP stand-in:
-it maps to SciPy **linear** triangulation, not full variogram kriging. Prefer
-**IDW** (with optional fault barriers) or **方向趋势** for production-style
-workflows until a true kriging backend is added.
+The preparation combobox option **克里金** runs REAL variogram ordinary
+kriging: empirical-variogram fitting plus an ordinary-kriging solve, with the
+kriging variance grid exposed alongside the prediction (geo-viz-engine
+`geoviz_plots.factor.kriging`). The earlier MVP linear placeholder is gone.
+**IDW** (with optional fault barriers) and **方向趋势** remain available.
 
 ## Well Log Workstation
 

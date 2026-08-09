@@ -97,7 +97,7 @@ class FactorTaskPanel(QFrame):
         default_tip = tooltips.get(tokens.INTERPOLATION_METHODS[0], "")
         self.method_combo.setToolTip(
             default_tip
-            or "插值方法（克里金项为 MVP 线性占位，非真实变差函数克里金）"
+            or "插值方法（克里金为真实变差函数普通克里金，含克里金方差）"
         )
         self.method_combo.currentTextChanged.connect(self._sync_method_tooltip)
         header.addWidget(self.method_combo)
@@ -139,7 +139,7 @@ class FactorTaskPanel(QFrame):
         tooltips = getattr(tokens, "INTERPOLATION_METHOD_TOOLTIPS", {}) or {}
         self.method_combo.setToolTip(
             tooltips.get(text)
-            or "插值方法（克里金项为 MVP 线性占位，非真实变差函数克里金）"
+            or "插值方法（克里金为真实变差函数普通克里金，含克里金方差）"
         )
 
     def _emit_generate(self) -> None:
