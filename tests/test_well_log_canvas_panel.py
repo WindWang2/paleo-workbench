@@ -17,7 +17,11 @@ def test_well_log_canvas_panel_empty_state(qtbot):
     assert panel.canvas.tracks == []
 
 
-def test_well_log_canvas_panel_loads_tracks(qtbot):
+def test_well_log_canvas_panel_loads_tracks(qtbot, monkeypatch):
+    # Legacy QPainter canvas is the target of this test; the default engine
+    # backend would hand the data to WellLogEngine instead (when the binding is
+    # installed), leaving the canvas empty. Opt out explicitly for determinism.
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     project = ProjectDocument.new("Test")
     task = MockPredictionAdapter().run(project, [], seed=1)
     panel = WellLogCanvasPanel()
@@ -30,7 +34,8 @@ def test_well_log_canvas_panel_loads_tracks(qtbot):
     assert len(panel.canvas.tracks) > 0
 
 
-def test_well_log_canvas_unbound_uses_mock(qtbot):
+def test_well_log_canvas_unbound_uses_mock(qtbot, monkeypatch):
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     task = PredictionTask(
         name="m",
         status="complete",
@@ -42,7 +47,7 @@ def test_well_log_canvas_unbound_uses_mock(qtbot):
     panel.update_state(task, project=None)
 
     assert panel.well_log_data is not None
-    assert panel.stack.currentWidget() is panel.canvas
+    assert panel.stack.currentWidget() is panel.canvas_scroll
     assert panel.well_log_data.well_name == "m"
 
 
@@ -78,6 +83,7 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
     from paleo_workbench.viz.adapter import VizAdapter
 
     monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
 
     panel = WellLogCanvasPanel()
     qtbot.addWidget(panel)
@@ -88,7 +94,7 @@ def test_well_log_canvas_uses_bound_las(qtbot, monkeypatch):
     assert panel.well_log_data.well_name == "from-adapter"
     assert panel.has_bound_las() is True
     assert len(panel.well_log_data.lithology) >= 1
-    assert panel.stack.currentWidget() is panel.canvas
+    assert panel.stack.currentWidget() is panel.canvas_scroll
     assert panel.empty_label.isHidden()
 
 
@@ -154,7 +160,7 @@ def test_canvas_panel_explicit_backend_switch_keeps_legacy(qtbot, monkeypatch):
     panel.update_state(task)
     assert panel.backend() == "legacy"
     assert panel.is_canvas_ready()
-    assert panel.stack.currentWidget() is panel.canvas
+    assert panel.stack.currentWidget() is panel.canvas_scroll
 
     # Engine without binding → diagnostic host, Legacy still available.
     panel.set_backend("engine")
@@ -162,10 +168,10 @@ def test_canvas_panel_explicit_backend_switch_keeps_legacy(qtbot, monkeypatch):
     # Either engine view ready (binding present) or placeholder/fallback.
     if panel.engine_load_report() is None:
         # Fallback paints legacy tracks so the page remains usable.
-        assert panel.stack.currentWidget() in (panel.engine_host, panel.canvas)
+        assert panel.stack.currentWidget() in (panel.engine_host, panel.canvas_scroll)
     panel.set_backend("legacy")
     assert panel.backend() == "legacy"
-    assert panel.stack.currentWidget() is panel.canvas
+    assert panel.stack.currentWidget() is panel.canvas_scroll
     assert panel.is_canvas_ready()
 
 

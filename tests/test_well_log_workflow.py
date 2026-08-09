@@ -68,10 +68,13 @@ def test_merge_prediction_adds_lithology_and_facies_tracks():
     assert merged.well_name == "from-las"
 
 
-def test_canvas_builds_lithology_track_for_synthetic(qtbot):
+def test_canvas_builds_lithology_track_for_synthetic(qtbot, monkeypatch):
     from paleo_workbench.prediction.adapters import MockPredictionAdapter
     from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 
+    # Legacy QPainter canvas is the target; keep the engine backend out so the
+    # track kinds come from the legacy canvas regardless of binding presence.
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     project = ProjectDocument.new("Tracks")
     task = MockPredictionAdapter().run(project, [], seed=1)
     panel = WellLogCanvasPanel()
@@ -117,6 +120,8 @@ def test_canvas_merges_facies_onto_bound_las(qtbot, monkeypatch):
         return VizPayload(kind="well_log", label="from-adapter", well_log=known)
 
     monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
+    # Legacy QPainter canvas is the target (see test above for rationale).
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     panel = WellLogCanvasPanel()
     qtbot.addWidget(panel)
     panel.update_state(task, project=project)
@@ -153,6 +158,12 @@ def test_page_run_and_export_png(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(
         wlp_mod.QMessageBox,
         "information",
+        lambda *a, **k: None,
+    )
+    # Avoid modal warning dialog hanging tests (export failure path)
+    monkeypatch.setattr(
+        wlp_mod.QMessageBox,
+        "warning",
         lambda *a, **k: None,
     )
     page.evidence_panel.export_btn.click()
