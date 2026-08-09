@@ -484,7 +484,7 @@ def test_data_page_clear_cache_does_not_strand_visualization_loading(
     release.set()
     _wait_controller_idle(qtbot, page._visualization_controller)
 
-    assert tabs.visual_stack.currentWidget() is tabs.message_label
+    assert tabs.visual_stack.currentWidget() is tabs.message_panel
     assert tabs.message_label.text() == "visual complete"
 
 

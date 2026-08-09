@@ -53,6 +53,9 @@ def _project(tmp_path: Path) -> ProjectDocument:
 def _load_page(qtbot, tmp_path, monkeypatch) -> StratigraphyCorrelationPage:
     import paleo_workbench.ui.pages.stratigraphy_correlation_page as mod
 
+    # These tests exercise the Legacy (CrossWell) host; opt out of the engine
+    # backend so behavior is identical with and without the welllog binding.
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     monkeypatch.setattr(
         mod,
         "load_correlation_wells",
