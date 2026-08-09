@@ -109,6 +109,33 @@ def test_run_seismic_records_seismic_meta(tmp_path: Path):
         assert meta.get("path_readable") is True
 
 
+def test_seismic_only_random_fallback_is_honestly_mocked(tmp_path: Path):
+    """P2 honesty: the seismic-only random template must NEVER display as 真实.
+
+    No readable LAS → the seeded random template is used; it must carry
+    is_mock=True + final_scientific_prediction=False (+ model_type=heuristic
+    + probabilities_uncalibrated) so the UI shows Mock, not 真实.
+    """
+    segy = tmp_path / "vol.sgy"
+    segy.write_bytes(b"\x00" * 64)  # exists but unreadable as a volume
+    project = ProjectDocument.new("S")
+    project.stratigraphy.target_horizon = "H1"
+    project.meta.project_root = str(tmp_path)
+    project.resources.append(
+        ResourceItem(name="vol.sgy", path=str(segy), type="seismic", format="segy")
+    )
+    task = LocalAssetPredictionAdapter().run(project, [], seed=0)
+    assert task.adapter_kind == "local"
+    summary = task.result_summary
+    assert summary.get("source_kind") == "seismic_path"
+    # The critical honesty contract:
+    assert summary.get("is_mock") is True
+    assert summary.get("final_scientific_prediction") is False
+    assert summary.get("model_type") == "heuristic"
+    assert summary.get("probabilities_uncalibrated") is True
+    assert summary.get("demo") is True  # template output is demo-grade
+
+
 def test_regions_to_depth_intervals_prefers_explicit_tops():
     regions = [
         {"facies": "砂", "probability": 0.9, "top": 1000, "bottom": 1030},

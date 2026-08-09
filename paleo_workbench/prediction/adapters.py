@@ -35,6 +35,143 @@ def _resolve_resource_path(resource: ResourceItem, project: ProjectDocument) -> 
     return candidate if candidate.exists() else None
 
 
+def _resource_inputs(
+    project: ProjectDocument,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Project well-log / seismic resources → plain input dicts.
+
+    The heuristic core (:func:`run_heuristic_facies`) consumes these dicts so
+    both the legacy :class:`LocalAssetPredictionAdapter` (from the project) and
+    the ModelRegistry-backed provider (from catalog input versions) share ONE
+    implementation.
+    """
+    wells: list[dict[str, Any]] = []
+    for resource in project.resources:
+        if resource.type != "well_log":
+            continue
+        path = _resolve_resource_path(resource, project)
+        wells.append(
+            {
+                "name": resource.name,
+                "path": str(path) if path is not None else "",
+                "readable": bool(path is not None and path.is_file()),
+                "format": resource.format,
+            }
+        )
+    seismics: list[dict[str, Any]] = []
+    for resource in project.resources:
+        if resource.type != "seismic":
+            continue
+        path = _resolve_resource_path(resource, project)
+        seismics.append(
+            {
+                "name": resource.name,
+                "path": str(path) if path is not None else resource.path,
+                "readable": bool(path is not None and path.is_file()),
+                "format": resource.format,
+                "parsed_summary": getattr(resource, "parsed_summary", None) or {},
+            }
+        )
+    return wells, seismics
+
+
+def run_heuristic_facies(
+    well_inputs: list[dict[str, Any]],
+    seismic_inputs: list[dict[str, Any]],
+    *,
+    seed: int,
+    factor_map_ids: list[str],
+) -> dict[str, Any]:
+    """Deterministic GR-median / window facies heuristic (honest, uncalibrated).
+
+    This is the shared computational core for the local-asset heuristic. It
+    NEVER fabricates "scientific" output:
+
+    - readable well LAS with GR (or first curve) → real depth-annotated zones
+    - otherwise, when ANY input exists → a seeded random TEMPLATE clearly
+      marked ``template=True`` (the caller must reflect this as
+      ``is_mock=True`` — random output must never display as 真实)
+    - no inputs at all → ``source_kind="mock"`` with empty regions; the caller
+      decides (legacy adapter falls back to MockPredictionAdapter; the
+      registry-backed provider raises an honest no-input error).
+
+    Probabilities are heuristic estimates, NOT calibrated posterior
+    probabilities — callers must label them as such.
+    """
+    regions: list[dict[str, Any]] = []
+    well_meta: dict[str, Any] = {}
+    source_kind = "mock"
+
+    for well in well_inputs[:3]:
+        path = well.get("path") or ""
+        if not path or not well.get("readable"):
+            continue
+        derived = _regions_from_las(Path(path), seed=seed)
+        if derived:
+            regions = derived["regions"]
+            well_meta = {
+                "source_well": well.get("name", ""),
+                "source_path": path,
+                "curve": derived.get("curve"),
+                "top_depth": derived.get("top"),
+                "bottom_depth": derived.get("bottom"),
+            }
+            source_kind = "las_curve"
+            break
+
+    seismic_meta: dict[str, Any] = {}
+    for seismic in seismic_inputs[:1]:
+        path = seismic.get("path") or ""
+        summary = seismic.get("parsed_summary") or {}
+        seismic_meta = {
+            "source_seismic": seismic.get("name", ""),
+            "source_path": path,
+            "format": seismic.get("format", ""),
+            "summary": summary if isinstance(summary, dict) else {},
+            "path_readable": bool(seismic.get("readable")),
+        }
+        if source_kind == "mock":
+            source_kind = "seismic_path"
+        else:
+            source_kind = "las_and_seismic"
+        break
+
+    if source_kind == "mock" and not regions:
+        # No usable inputs — caller decides (mock fallback vs honest error).
+        return {
+            "regions": [],
+            "well_meta": {},
+            "seismic_meta": seismic_meta,
+            "source_kind": "mock",
+            "template": False,
+            "factor_map_ids": list(factor_map_ids),
+        }
+
+    template = False
+    if not regions:
+        # Seismic-only (or unreadable wells): deterministic seeded template,
+        # HONESTLY marked — this output must never display as 真实.
+        rng = random.Random(seed + 17)
+        facies = list(_FACIES_SAND) + list(_FACIES_MUD)
+        regions = [
+            {
+                "region_id": f"seis_region_{i + 1}",
+                "facies": facies[i % len(facies)],
+                "probability": round(0.6 + rng.random() * 0.3, 3),
+            }
+            for i in range(4)
+        ]
+        template = True
+    return {
+        "regions": regions,
+        "well_meta": well_meta,
+        "seismic_meta": seismic_meta,
+        "source_kind": source_kind,
+        "template": template,
+        "factor_map_ids": list(factor_map_ids),
+    }
+
+
 class MockPredictionAdapter:
     adapter_kind = "mock"
     schema_version = "1.0"
@@ -70,6 +207,9 @@ class MockPredictionAdapter:
                 "is_mock": True,
                 "is_replaceable": True,
                 "final_scientific_prediction": False,
+                "demo": True,
+                "source": "synthetic/demo",
+                "model_type": "demo",
             },
             probability_summary={
                 "mean_probability": round(
@@ -90,13 +230,12 @@ class MockPredictionAdapter:
             seed=seed,
         )
         project.prediction_tasks.append(task)
-        # Register a prediction DataRun (data-provenance layer). Best-effort.
-        try:
-            from paleo_workbench.catalog.lifecycle import register_prediction_run
+        # Register a prediction DataRun (data-provenance layer). Errors are NOT
+        # swallowed: a catalog failure must surface instead of silently losing
+        # the provenance record.
+        from paleo_workbench.catalog.lifecycle import register_prediction_run
 
-            register_prediction_run(task, factor_task_ids=factor_map_ids)
-        except Exception:
-            pass
+        register_prediction_run(task, factor_task_ids=factor_map_ids)
         return task
 
 
@@ -105,7 +244,12 @@ class LocalAssetPredictionAdapter:
 
     - LAS with GR (or first curve): windowed mean → sand/mud facies along depth
     - SEGY path present: record volume path/meta for seismic host
-    Falls back to :class:`MockPredictionAdapter` when no usable assets exist.
+    - Falls back to :class:`MockPredictionAdapter` when no usable assets exist.
+
+    Honest labeling (P2): the GR median/window rule is a HEURISTIC — output is
+    ``final_scientific_prediction=False``, ``model_type="heuristic"`` and the
+    probabilities are uncalibrated. The seismic-only random template is marked
+    ``is_mock=True`` (random output must never display as 真实).
     """
 
     adapter_kind = "local"
@@ -117,62 +261,18 @@ class LocalAssetPredictionAdapter:
         factor_map_ids: list[str],
         seed: int,
     ) -> PredictionTask:
-        wells = [r for r in project.resources if r.type == "well_log"]
-        seismics = [r for r in project.resources if r.type == "seismic"]
-
-        regions: list[dict[str, Any]] = []
-        well_meta: dict[str, Any] = {}
-        source_kind = "mock"
-
-        for resource in wells[:3]:
-            path = _resolve_resource_path(resource, project)
-            if path is None:
-                continue
-            derived = _regions_from_las(path, seed=seed)
-            if derived:
-                regions = derived["regions"]
-                well_meta = {
-                    "source_well": resource.name,
-                    "source_path": str(path),
-                    "curve": derived.get("curve"),
-                    "top_depth": derived.get("top"),
-                    "bottom_depth": derived.get("bottom"),
-                }
-                source_kind = "las_curve"
-                break
-
-        seismic_meta: dict[str, Any] = {}
-        for resource in seismics[:1]:
-            path = _resolve_resource_path(resource, project)
-            summary = getattr(resource, "parsed_summary", None) or {}
-            seismic_meta = {
-                "source_seismic": resource.name,
-                "source_path": str(path) if path is not None else resource.path,
-                "format": resource.format,
-                "summary": summary if isinstance(summary, dict) else {},
-                "path_readable": bool(path is not None and path.is_file()),
-            }
-            if source_kind == "mock":
-                source_kind = "seismic_path"
-            else:
-                source_kind = "las_and_seismic"
-            break
-
-        if source_kind == "mock" and not regions:
+        wells, seismics = _resource_inputs(project)
+        core = run_heuristic_facies(
+            wells, seismics, seed=seed, factor_map_ids=factor_map_ids
+        )
+        if core["source_kind"] == "mock" and not core["regions"]:
             return MockPredictionAdapter().run(project, factor_map_ids, seed=seed)
 
-        if not regions:
-            # Seismic-only: keep deterministic facies template but mark non-mock volume
-            rng = random.Random(seed + 17)
-            facies = list(_FACIES_SAND) + list(_FACIES_MUD)
-            regions = [
-                {
-                    "region_id": f"seis_region_{i + 1}",
-                    "facies": facies[i % len(facies)],
-                    "probability": round(0.6 + rng.random() * 0.3, 3),
-                }
-                for i in range(4)
-            ]
+        regions = core["regions"]
+        well_meta = core["well_meta"]
+        seismic_meta = core["seismic_meta"]
+        source_kind = core["source_kind"]
+        template = core["template"]
 
         mean_p = round(
             sum(float(r.get("probability", 0) or 0) for r in regions) / max(len(regions), 1),
@@ -197,7 +297,8 @@ class LocalAssetPredictionAdapter:
         for e in evidence:
             e["weight"] = round(e["weight"] / total_w, 3)
 
-        is_mock = source_kind == "mock"
+        # Random template output must never display as 真实.
+        is_mock = source_kind == "mock" or template
         task = PredictionTask(
             name="Local asset sedimentary facies prediction",
             adapter_kind=self.adapter_kind,
@@ -207,9 +308,13 @@ class LocalAssetPredictionAdapter:
                 "is_mock": is_mock,
                 "is_replaceable": True,
                 "final_scientific_prediction": False,
+                "model_type": "heuristic",
+                "probabilities_uncalibrated": True,
                 "source_kind": source_kind,
                 "well_meta": well_meta,
                 "seismic_meta": seismic_meta,
+                "demo": template,
+                "source": "synthetic/demo" if template else "bound_assets",
             },
             probability_summary={"mean_probability": mean_p},
             evidence_contribution=evidence,
@@ -221,13 +326,12 @@ class LocalAssetPredictionAdapter:
             seed=seed,
         )
         project.prediction_tasks.append(task)
-        # Register a prediction DataRun (data-provenance layer). Best-effort.
-        try:
-            from paleo_workbench.catalog.lifecycle import register_prediction_run
+        # Register a prediction DataRun (data-provenance layer). Errors are NOT
+        # swallowed: a catalog failure must surface instead of silently losing
+        # the provenance record.
+        from paleo_workbench.catalog.lifecycle import register_prediction_run
 
-            register_prediction_run(task, factor_task_ids=factor_map_ids)
-        except Exception:
-            pass
+        register_prediction_run(task, factor_task_ids=factor_map_ids)
         return task
 
 
