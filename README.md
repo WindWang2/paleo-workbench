@@ -77,8 +77,9 @@ workflows until a true kriging backend is added.
 
 ## Well Log Workstation
 
-Standalone log-first app (not the paleogeography workbench). See
-[`well_log_workstation/README.md`](well_log_workstation/README.md).
+Standalone log-first app (not the paleogeography workbench), living in the
+`well-log-engine` submodule. See
+[`well_log_workstation/README.md`](well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md).
 
 ```bash
 unset QT_QPA_PLATFORM   # Wayland session default
