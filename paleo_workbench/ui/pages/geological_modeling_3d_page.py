@@ -491,10 +491,16 @@ class GeologicalModeling3DPage(QWidget):
         self.combo_density.setCurrentIndex(1)
         cfg_layout.addWidget(self.combo_density)
 
-        cfg_layout.addWidget(QLabel("属性插值算法"))
-        self.combo_algo = QComboBox()
-        self.combo_algo.addItems(["克里金插值 (Kriging)", "顺序高斯模拟 (SGS)", "逆距离加权 (IDW)"])
-        cfg_layout.addWidget(self.combo_algo)
+        cfg_layout.addWidget(QLabel("数据来源"))
+        # The 属性插值算法 selector (克里金/SGS/IDW) advertised algorithms that
+        # were never executed — removed in the P2 scientific-honesty wave. The
+        # current volume/borehole/tunnel/fault data is synthetic demo data.
+        self.demo_source_label = QLabel("合成演示数据 (Demo)")
+        self.demo_source_label.setObjectName("DemoSourceLabel")
+        self.demo_source_label.setStyleSheet(
+            "color: #b58900; font-weight: 600;"
+        )
+        cfg_layout.addWidget(self.demo_source_label)
 
         cfg_layout.addWidget(QLabel("地层模型不透明度 (Volume Opacity)"))
         self.slider_opacity = QSlider(Qt.Horizontal)
@@ -2262,9 +2268,11 @@ class GeologicalModeling3DPage(QWidget):
         self.progress_bar.setValue(0)
 
         density = self.combo_density.currentText()
-        algo = self.combo_algo.currentText()
+        # algorithm is a constant label — the synthetic demo volume does not
+        # implement 克里金/SGS/IDW interpolation (the dead selector was removed).
+        algo = "synthetic_demo"
 
-        worker = GeologicalModelingWorker(density, algo)
+        worker = GeologicalModelingWorker(density, algo, demo=True)
         worker.progress.connect(self.progress_bar.setValue)
 
         self._modeling_job.start(
@@ -2280,6 +2288,14 @@ class GeologicalModeling3DPage(QWidget):
     def _on_modeling_completed(self, result: dict) -> None:
         self.bh_raw_data = result["bh_raw"]
         self.faults_raw_data = result["faults_raw"]
+
+        # Honest demo marking (P2): synthetic output is badged in the UI and
+        # the modeling action is recorded as a catalog DataRun with an
+        # explicit synthetic source — never implied to be real data.
+        is_demo = bool(result.get("demo", True))
+        if is_demo:
+            self.demo_source_label.setText("合成演示数据 (Demo)")
+        self._register_modeling_run(result, is_demo=is_demo)
 
         # Clear existing active GL elements
         for item in self.active_items:
@@ -2340,6 +2356,37 @@ class GeologicalModeling3DPage(QWidget):
         self.btn_ai_advisor.setEnabled(True)
 
         logger.info("3D geological modeling successfully updated in viewport.")
+
+    def _register_modeling_run(self, result: dict, *, is_demo: bool) -> None:
+        """Registration seam (P2): record the modeling action as a DataRun.
+
+        The synthetic demo output is in-memory (no payload file yet), so the
+        run carries the honest ``source``/``demo`` marking with no version. A
+        real-data worker (P3 structural split) passes ``output_path`` so the
+        modeled result is also registered as a DERIVED DataVersion. Catalog
+        failures never block rendering.
+        """
+        try:
+            from paleo_workbench.catalog import get_catalog
+
+            catalog = get_catalog()
+            if catalog is None:
+                return
+            from paleo_workbench.catalog.lifecycle import register_modeling_run
+
+            register_modeling_run(
+                name="三维地质建模（合成演示）" if is_demo else "三维地质建模",
+                source="synthetic/demo" if is_demo else "real_data",
+                demo=is_demo,
+                parameters={
+                    "density": self.combo_density.currentText(),
+                    "algorithm": result.get("algorithm", "synthetic_demo"),
+                    "source": "synthetic/demo" if is_demo else "real_data",
+                },
+                catalog=catalog,
+            )
+        except Exception:  # noqa: BLE001 — provenance must never block 3D render
+            logger.exception("register_modeling_run failed (best-effort)")
 
     def _on_modeling_failed(self, err: str) -> None:
         self.btn_run.setEnabled(True)

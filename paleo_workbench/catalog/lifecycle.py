@@ -391,3 +391,52 @@ def register_export_output(
     )
     cat.complete_run(run.run_id)
     return version
+
+
+# -------------------------------------------------------------------- modeling
+def register_modeling_run(
+    *,
+    name: str,
+    source: str = "synthetic/demo",
+    demo: bool | None = None,
+    parameters: dict[str, Any] | None = None,
+    input_version_ids: list[str] | None = None,
+    output_path: str | None = None,
+    output_format: str = "",
+    catalog: CatalogPort | None = None,
+) -> tuple[Any, DataVersionRef | None]:
+    """Register a 3D geological-modeling DataRun (and optional DERIVED version).
+
+    Honesty contract (P2): the run's parameters always record ``source`` and
+    ``demo``. Synthetic/demo modeling is registered as a run WITHOUT an output
+    version (the demo result is in-memory); a real-data worker may attach a
+    payload file via *output_path* (registered as DERIVED, P3 seam).
+
+    Returns ``(run, version_or_None)``; ``(None, None)`` when no catalog
+    backend is active.
+    """
+    cat = catalog or get_catalog()
+    if cat is None:
+        return None, None
+    is_demo = source == "synthetic/demo" if demo is None else bool(demo)
+    params = dict(parameters or {})
+    params["source"] = source
+    params["demo"] = is_demo
+    run = cat.begin_run(
+        operation="modeling",
+        input_version_ids=list(input_version_ids or []),
+        parameters=params,
+        generator_version=None,
+    )
+    version: DataVersionRef | None = None
+    if output_path:
+        version = cat.register_derived(
+            run_id=run.run_id,
+            name=name,
+            path=output_path,
+            checksum=sha256_file_or_none(output_path),
+            kind="geomodel",
+            format=output_format,
+        )
+    cat.complete_run(run.run_id)
+    return run, version

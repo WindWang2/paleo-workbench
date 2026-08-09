@@ -882,3 +882,40 @@ def test_reimport_after_trash_never_collides_on_legacy_bridge(catalog, tmp_path:
     new_asset = catalog.service.get_asset(ref2.asset_id)
     assert new_asset.id != ref1.asset_id
     assert new_asset.trashed is False
+
+
+def test_modeling_run_records_honest_demo_source(catalog, tmp_path: Path):
+    """P2: 3D modeling registration seam — synthetic demo run is honest.
+
+    The in-memory synthetic demo result registers a ``modeling`` DataRun with
+    explicit ``source="synthetic/demo"`` / ``demo=True`` and NO output version;
+    a real payload file can be attached as DERIVED (P3 seam).
+    """
+    from paleo_workbench.catalog.lifecycle import register_modeling_run
+
+    run, version = register_modeling_run(
+        name="三维地质建模（合成演示）",
+        source="synthetic/demo",
+        demo=True,
+        parameters={"density": "中精度 (80x80x80)", "algorithm": "synthetic_demo"},
+        catalog=catalog,
+    )
+    assert run is not None
+    assert run.parameters["source"] == "synthetic/demo"
+    assert run.parameters["demo"] is True
+    assert version is None  # no payload file for the in-memory demo result
+
+    # Real-data seam: attach a payload file → DERIVED version with run linkage.
+    payload = tmp_path / "geomodel.json"
+    payload.write_text("{}", encoding="utf-8")
+    run2, version2 = register_modeling_run(
+        name="三维地质建模",
+        source="real_data",
+        output_path=str(payload),
+        output_format="json",
+        catalog=catalog,
+    )
+    assert version2 is not None
+    assert version2.stage is DataStage.DERIVED
+    assert version2.producing_run_id == run2.run_id
+    assert version2.checksum == sha256_file(payload)
