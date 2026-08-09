@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 from paleo_workbench.catalog.checksum import CHUNK_SIZE
-from paleo_workbench.catalog.models import DataStage
+from paleo_workbench.catalog.models import CatalogError, DataStage
 from paleo_workbench.project.paths import artifact_dir_for
 
 STAGE_DIRS = {
@@ -48,6 +48,87 @@ def ensure_catalog_layout(project_path: Path) -> Path:
 
 def working_dir_for(project_path: Path) -> Path:
     return artifact_dir_for(Path(project_path)) / "working"
+
+
+def trash_dir_for(project_path: Path) -> Path:
+    """Return ``<project>.artifacts/trash`` (recoverable payloads live here)."""
+    return artifact_dir_for(Path(project_path)) / "trash"
+
+
+def _project_dir(project_path: Path) -> Path:
+    """The directory that project-relative version paths resolve against."""
+    return Path(project_path).expanduser().resolve().parent
+
+
+def _prune_empty_ancestors(directory: Path, levels: int) -> None:
+    """Best-effort removal of now-empty version/asset/stage directories."""
+    target = directory
+    for _ in range(levels):
+        try:
+            target.rmdir()
+        except OSError:
+            return
+        target = target.parent
+
+
+def trash_payload(project_path: Path, version_path: Path, version_id: str) -> str:
+    """Move a managed payload into ``trash/{version_id}/``; returns the new
+    project-relative path. Atomic same-filesystem move with directory fsyncs;
+    raises ``CatalogError`` when the payload is missing (callers decide whether
+    a metadata-only tombstone is acceptable).
+    """
+    source = Path(version_path)
+    if not source.is_file():
+        raise CatalogError(f"Managed payload not found: {source}")
+    root = ensure_catalog_layout(Path(project_path))
+    trash_dir = root / "trash" / version_id
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    target = trash_dir / source.name
+    os.replace(source, target)
+    fsync_dir(trash_dir)
+    fsync_dir(source.parent)
+    _prune_empty_ancestors(source.parent, 2)
+    return target.relative_to(_project_dir(Path(project_path))).as_posix()
+
+
+def restore_payload(
+    project_path: Path,
+    version_path: Path,
+    original_rel_path: str,
+) -> str:
+    """Move a trashed payload back to its original managed location.
+
+    ``version_path`` is the current (trash) payload location, ``original_rel_path``
+    the project-relative path recorded before trashing. Re-marks the payload
+    read-only (managed immutability restored). Returns the restored
+    project-relative path.
+    """
+    source = Path(version_path)
+    if not source.is_file():
+        raise CatalogError(f"Trashed payload not found: {source}")
+    target = _project_dir(Path(project_path)) / original_rel_path
+    if target.exists():
+        raise CatalogError(f"Restore target already exists: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source, target)
+    _make_readonly(target)
+    fsync_dir(target.parent)
+    _prune_empty_ancestors(source.parent, 1)
+    return target.relative_to(_project_dir(Path(project_path))).as_posix()
+
+
+def purge_trashed_payload(project_path: Path, version_path: Path) -> None:
+    """Permanently delete a trashed payload (purge only ever runs on trashed
+    versions). Best-effort; missing payloads are treated as already gone."""
+    source = Path(version_path)
+    try:
+        source.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+    fsync_dir(source.parent)
+    _prune_empty_ancestors(source.parent, 1)
 
 
 def fsync_dir(directory: Path) -> None:

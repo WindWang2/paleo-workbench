@@ -57,6 +57,12 @@ class DataAsset(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
+    # Tombstone (soft delete): trashed assets are hidden from active listings
+    # but fully recoverable (payload moved to ``trash/``, lineage retained).
+    # Optional-with-default so pre-trash catalog.json documents still load
+    # (CATALOG_SCHEMA_VERSION stays 1).
+    trashed: bool = False
+    trashed_at: str | None = None
 
 
 class DataVersion(BaseModel):
@@ -81,6 +87,10 @@ class DataVersion(BaseModel):
     run_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now_iso)
+    # Tombstone (soft delete): see ``DataAsset.trashed``. ``metadata["trash"]``
+    # records ``{reason, original_stage, original_path, trashed_at}``.
+    trashed: bool = False
+    trashed_at: str | None = None
 
 
 class DataRun(BaseModel):

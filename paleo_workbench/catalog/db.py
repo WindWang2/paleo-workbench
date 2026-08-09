@@ -26,6 +26,12 @@ from paleo_workbench.catalog.storage import catalog_dir_for
 
 DB_FILENAME = "catalog.sqlite"
 
+# Version of the index table layout itself (distinct from the canonical
+# document's CATALOG_SCHEMA_VERSION). Bump whenever the index schema changes so
+# stale databases are rebuilt from the canonical store instead of being queried
+# with a missing column.
+INDEX_SCHEMA_VERSION = 2
+
 # Table/DDL definitions. The index is deliberately FK-free: it is a disposable
 # projection of the canonical document, and delete order must never matter.
 _SCHEMA_DDL = [
@@ -38,10 +44,13 @@ _SCHEMA_DDL = [
         legacy_resource_id TEXT,
         metadata TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL DEFAULT '',
-        updated_at TEXT NOT NULL DEFAULT ''
+        updated_at TEXT NOT NULL DEFAULT '',
+        trashed INTEGER NOT NULL DEFAULT 0,
+        trashed_at TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name)",
     "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)",
+    "CREATE INDEX IF NOT EXISTS idx_assets_trashed ON assets(trashed)",
     """CREATE TABLE IF NOT EXISTS versions (
         id TEXT PRIMARY KEY,
         asset_id TEXT NOT NULL,
@@ -55,10 +64,13 @@ _SCHEMA_DDL = [
         sha256 TEXT,
         run_id TEXT,
         metadata TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL DEFAULT ''
+        created_at TEXT NOT NULL DEFAULT '',
+        trashed INTEGER NOT NULL DEFAULT 0,
+        trashed_at TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_versions_asset_id ON versions(asset_id)",
     "CREATE INDEX IF NOT EXISTS idx_versions_stage ON versions(stage)",
+    "CREATE INDEX IF NOT EXISTS idx_versions_trashed ON versions(trashed)",
     """CREATE TABLE IF NOT EXISTS tags (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
@@ -214,7 +226,17 @@ class CatalogIndex:
         if raw is None:
             return False
         try:
-            return int(raw) == document.schema_version
+            if int(raw) != document.schema_version:
+                return False
+        except ValueError:
+            return False
+        # Index-layout version: an older DB without the ``trashed`` columns is
+        # not fresh and gets rebuilt from the canonical store.
+        index_raw = self._read_sync_state("index_schema_version")
+        if index_raw is None:
+            return False
+        try:
+            return int(index_raw) == INDEX_SCHEMA_VERSION
         except ValueError:
             return False
 
@@ -253,8 +275,8 @@ class CatalogIndex:
 
             conn.executemany(
                 "INSERT INTO assets (id, name, type, description, current_version_id,"
-                " legacy_resource_id, metadata, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                " legacy_resource_id, metadata, created_at, updated_at, trashed, trashed_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         asset.id,
@@ -266,6 +288,8 @@ class CatalogIndex:
                         json.dumps(asset.metadata, ensure_ascii=False),
                         asset.created_at,
                         asset.updated_at,
+                        int(asset.trashed),
+                        asset.trashed_at,
                     )
                     for asset in document.assets
                 ],
@@ -273,7 +297,7 @@ class CatalogIndex:
             conn.executemany(
                 "INSERT INTO versions (id, asset_id, version_number, stage, managed,"
                 " path, source_uri, format, size_bytes, sha256, run_id, metadata,"
-                " created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " created_at, trashed, trashed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         version.id,
@@ -289,6 +313,8 @@ class CatalogIndex:
                         version.run_id,
                         json.dumps(version.metadata, ensure_ascii=False),
                         version.created_at,
+                        int(version.trashed),
+                        version.trashed_at,
                     )
                     for version in document.versions
                 ],
@@ -383,6 +409,7 @@ class CatalogIndex:
                 [
                     ("schema_version", str(document.schema_version)),
                     ("catalog_revision", str(document.catalog_revision)),
+                    ("index_schema_version", str(INDEX_SCHEMA_VERSION)),
                 ],
             )
 

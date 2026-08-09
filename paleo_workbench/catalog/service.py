@@ -43,8 +43,12 @@ from paleo_workbench.catalog.models import (
 from paleo_workbench.catalog.storage import (
     create_working_copy as _place_working_copy,
     place_managed_file,
+    purge_trashed_payload,
+    restore_payload as _restore_trashed_payload,
+    trash_payload as _move_to_trash,
 )
 from paleo_workbench.catalog.store import CatalogStore
+from paleo_workbench.project.models import _now_iso
 
 
 @dataclass
@@ -182,8 +186,15 @@ class DataCatalogService:
                 return run
         raise CatalogError(f"Unknown run: {run_id}")
 
-    def list_assets(self) -> list[DataAsset]:
-        return list(self.document.assets)
+    def list_assets(self, include_trashed: bool = False) -> list[DataAsset]:
+        """List assets; trashed (soft-deleted) assets are hidden by default."""
+        if include_trashed:
+            return list(self.document.assets)
+        return [asset for asset in self.document.assets if not asset.trashed]
+
+    def get_trashed_assets(self) -> list[DataAsset]:
+        """Assets currently in the trash (tombstoned, recoverable)."""
+        return [asset for asset in self.document.assets if asset.trashed]
 
     def list_runs(self) -> list[DataRun]:
         return list(self.document.runs)
@@ -654,6 +665,322 @@ class DataCatalogService:
                 run = None
         return {"version": version, "parents": parents, "children": children, "run": run}
 
+    # -- trash / restore / purge ----------------------------------------------
+
+    def _tombstone_version(
+        self, version: DataVersion, reason: str | None
+    ) -> tuple[str, bool]:
+        """Apply the trashed tombstone in memory; returns ``(original_path,
+        payload_moved)`` for rollback. Managed payloads move to ``trash/``;
+        external versions are metadata-only (the external file is NEVER
+        touched)."""
+        original_path = version.path
+        payload_moved = False
+        if version.managed:
+            try:
+                new_rel = _move_to_trash(
+                    self.project_path, self.resolve_path(version), version.id
+                )
+                version.path = new_rel
+                payload_moved = True
+            except CatalogError:
+                # Payload already missing → metadata-only tombstone.
+                payload_moved = False
+        version.trashed = True
+        version.trashed_at = _now_iso()
+        version.metadata["trash"] = {
+            "reason": reason,
+            "original_stage": version.stage.value,
+            "original_path": original_path,
+            "trashed_at": version.trashed_at,
+        }
+        return original_path, payload_moved
+
+    def _untombstone_version(self, version: DataVersion) -> str:
+        """Reverse a tombstone in memory; returns the restored path (best-effort
+        payload move back to the recorded original location)."""
+        meta = version.metadata.get("trash") or {}
+        original_path = meta.get("original_path") or version.path
+        if version.managed:
+            try:
+                version.path = _restore_trashed_payload(
+                    self.project_path, self.resolve_path(version), original_path
+                )
+            except CatalogError:
+                # No payload in trash (metadata-only trash or payload lost) —
+                # keep the original location; integrity will report missing.
+                version.path = original_path
+        else:
+            version.path = original_path
+        version.trashed = False
+        version.trashed_at = None
+        version.metadata.pop("trash", None)
+        return original_path
+
+    def _active_current_candidate(self, asset: DataAsset, exclude_id: str) -> str | None:
+        """Newest non-trashed version of *asset* (excluding *exclude_id*)."""
+        active = [
+            v
+            for v in self.document.versions
+            if v.asset_id == asset.id and not v.trashed and v.id != exclude_id
+        ]
+        return active[-1].id if active else None
+
+    def trash_version(self, version_id: str, *, reason: str | None = None) -> DataVersion:
+        """Soft-delete a version: tombstone + managed payload moved to ``trash/``.
+
+        External (unmanaged) versions are metadata-only — the external source
+        file is NEVER touched. Lineage and runs keep pointing at the trashed
+        version (``get_lineage`` still includes it, marked trashed);
+        :meth:`verify_integrity` skips trashed versions. Recoverable via
+        :meth:`restore_version`.
+        """
+        with self._lock:
+            version = self._version_or_raise(version_id)
+            if version.trashed:
+                return version
+            asset = self._asset_or_raise(version.asset_id)
+            previous_current = asset.current_version_id
+            original_path, _moved = self._tombstone_version(version, reason)
+            if asset.current_version_id == version.id:
+                asset.current_version_id = self._active_current_candidate(asset, version.id)
+            try:
+                self._save()
+            except Exception:
+                self._rollback_tombstone(version, asset, previous_current)
+                raise
+            return version
+
+    def trash_asset(self, asset_id: str, *, reason: str | None = None) -> DataAsset:
+        """Soft-delete an asset and every one of its versions (payloads to
+        ``trash/``); the asset disappears from active listings. Recoverable via
+        :meth:`restore_asset`."""
+        with self._lock:
+            asset = self._asset_or_raise(asset_id)
+            if asset.trashed:
+                return asset
+            versions = [
+                v for v in self.document.versions
+                if v.asset_id == asset_id and not v.trashed
+            ]
+            rollback_items = [
+                (v, self._tombstone_version(v, reason)[0]) for v in versions
+            ]
+            previous_current = asset.current_version_id
+            asset.trashed = True
+            asset.trashed_at = _now_iso()
+            asset.current_version_id = None
+            try:
+                self._save()
+            except Exception:
+                for version, original_path in rollback_items:
+                    self._rollback_tombstone(version, asset, previous_current)
+                    asset.trashed = False
+                    asset.trashed_at = None
+                raise
+            return asset
+
+    def _rollback_tombstone(
+        self, version: DataVersion, asset: DataAsset, previous_current: str | None
+    ) -> None:
+        """Undo an in-memory tombstone after a failed save (payload moved back
+        to its original managed location when the move already happened)."""
+        meta = version.metadata.get("trash") or {}
+        original_path = meta.get("original_path")
+        if version.managed and original_path and version.path != original_path:
+            try:
+                _restore_trashed_payload(
+                    self.project_path, self.resolve_path(version), original_path
+                )
+                version.path = original_path
+            except CatalogError:
+                pass
+        version.trashed = False
+        version.trashed_at = None
+        version.metadata.pop("trash", None)
+        asset.current_version_id = previous_current
+
+    def restore_version(self, version_id: str) -> DataVersion:
+        """Restore a trashed version: tombstone cleared and managed payload
+        moved back to its original stage location."""
+        with self._lock:
+            version = self._version_or_raise(version_id)
+            if not version.trashed:
+                return version
+            asset = self._asset_or_raise(version.asset_id)
+            previous_current = asset.current_version_id
+            self._untombstone_version(version)
+            if asset.current_version_id is None or not any(
+                v.id == asset.current_version_id and not v.trashed
+                for v in self.document.versions
+            ):
+                asset.current_version_id = version.id
+            try:
+                self._save()
+            except Exception:
+                self._rollback_untombstone(version, asset, previous_current)
+                raise
+            return version
+
+    def restore_asset(self, asset_id: str) -> DataAsset:
+        """Restore a trashed asset and every one of its trashed versions."""
+        with self._lock:
+            asset = self._asset_or_raise(asset_id)
+            versions = [v for v in self.document.versions if v.asset_id == asset_id]
+            previous_current = asset.current_version_id
+            previous_trashed = asset.trashed
+            previous_trashed_at = asset.trashed_at
+            for version in versions:
+                if version.trashed:
+                    self._untombstone_version(version)
+            asset.trashed = False
+            asset.trashed_at = None
+            if asset.current_version_id is None and versions:
+                active = [v for v in versions if not v.trashed]
+                asset.current_version_id = active[-1].id if active else None
+            try:
+                self._save()
+            except Exception:
+                asset.trashed = previous_trashed
+                asset.trashed_at = previous_trashed_at
+                for version in versions:
+                    self._rollback_untombstone(version, asset, previous_current)
+                raise
+            return asset
+
+    def _rollback_untombstone(
+        self, version: DataVersion, asset: DataAsset, previous_current: str | None
+    ) -> None:
+        """Re-apply a tombstone after a failed restore save (payload moved back
+        into ``trash/``)."""
+        reason = None
+        if version.metadata.get("trash"):
+            reason = version.metadata["trash"].get("reason")
+        self._tombstone_version(version, reason)
+        asset.current_version_id = previous_current
+
+    def purge_trashed(self) -> int:
+        """Permanently delete every trashed version (payload removed from
+        ``trash/``) and every trashed asset. Only trashed items are touched;
+        active assets are never removed. Runs are retained as historical
+        provenance. Returns the number of trashed entries removed."""
+        with self._lock:
+            trashed_versions = [v for v in self.document.versions if v.trashed]
+            trashed_assets = [a for a in self.document.assets if a.trashed]
+            purged_ids = {v.id for v in trashed_versions} | {a.id for a in trashed_assets}
+            removed_version_tags = {
+                vid: tags
+                for vid, tags in list(self.document.version_tags.items())
+                if vid in purged_ids
+            }
+            removed_asset_tags = {
+                aid: tags
+                for aid, tags in list(self.document.asset_tags.items())
+                if aid in purged_ids
+            }
+            for version in trashed_versions:
+                if version.managed:
+                    purge_trashed_payload(self.project_path, self.resolve_path(version))
+                self.document.versions.remove(version)
+            for asset in trashed_assets:
+                self.document.assets.remove(asset)
+            for vid in removed_version_tags:
+                self.document.version_tags.pop(vid, None)
+            for aid in removed_asset_tags:
+                self.document.asset_tags.pop(aid, None)
+            try:
+                self._save()
+            except Exception:
+                self.document.versions.extend(trashed_versions)
+                self.document.assets.extend(trashed_assets)
+                self.document.version_tags.update(removed_version_tags)
+                self.document.asset_tags.update(removed_asset_tags)
+                raise
+            return len(trashed_versions) + len(trashed_assets)
+
+    # -- promote ---------------------------------------------------------------
+
+    def promote_version(
+        self,
+        version_id: str,
+        *,
+        to_stage: DataStage = DataStage.OUTPUT,
+        reviewed_by: str | None = None,
+        note: str | None = None,
+    ) -> DataVersion:
+        """Promote a committed version to *to_stage* as a NEW immutable version.
+
+        Honors "committed versions are immutable; change produces a new
+        version": the payload is copied (never moved) into the target stage,
+        the new version records ``parent_version_ids=[source]``, a ``promote``
+        DataRun links source → promoted version, and the asset's
+        ``current_version_id`` advances to the promoted version. The source
+        version stays as-is (provenance preserved).
+        """
+        source = self._version_or_raise(version_id)
+        if source.trashed:
+            raise CatalogError(f"Cannot promote a trashed version: {version_id}")
+        if not isinstance(to_stage, DataStage):
+            to_stage = DataStage(to_stage)
+        source_payload = self.resolve_path(source)
+        if not source_payload.is_file():
+            raise CatalogError(f"Source payload not available: {source_payload}")
+        asset = self._asset_or_raise(source.asset_id)
+        previous_current = asset.current_version_id
+        run = DataRun(
+            operation="promote",
+            input_version_ids=[source.id],
+            parameters={
+                "to_stage": to_stage.value,
+                "reviewed_by": reviewed_by,
+                "note": note,
+            },
+        )
+        version, payload = self._build_version(
+            asset, source_payload, to_stage,
+            version_id=None,
+            parent_version_ids=[source.id],
+            run_id=run.id,
+            metadata={
+                "promoted_from": source.id,
+                "reviewed_by": reviewed_by,
+                "note": note,
+            },
+            move=False,
+        )
+        run.output_version_ids = [version.id]
+        self.document.versions.append(version)
+        self.document.runs.append(run)
+        asset.current_version_id = version.id
+        try:
+            self._save()
+        except Exception:
+            self._rollback(
+                versions=[version], runs=[run], payload=payload,
+                restore_current=(asset, previous_current),
+            )
+            raise
+        return version
+
+    def promote_asset(
+        self,
+        asset_id: str,
+        to_stage: DataStage = DataStage.OUTPUT,
+        *,
+        reviewed_by: str | None = None,
+        note: str | None = None,
+    ) -> DataVersion:
+        """Promote an asset's current version (convenience)."""
+        asset = self._asset_or_raise(asset_id)
+        if asset.current_version_id is None:
+            raise CatalogError(f"Asset has no current version: {asset_id}")
+        return self.promote_version(
+            asset.current_version_id,
+            to_stage=to_stage,
+            reviewed_by=reviewed_by,
+            note=note,
+        )
+
     # -- integrity -------------------------------------------------------------
 
     def verify_integrity(self, version_id: str | None = None) -> IntegrityReport:
@@ -661,14 +988,19 @@ class DataCatalogService:
 
         Reports only; a mismatch never updates the catalog. Hashing streams in
         chunks; wrap in a worker thread for large batches in UI contexts.
+        Trashed versions are skipped (their payloads live in ``trash/``).
         """
         with self._lock:
             if version_id is not None:
-                versions = [self._version_or_raise(version_id)]
+                versions = [
+                    self._version_or_raise(version_id)
+                ]
             else:
                 versions = list(self.document.versions)
         report = IntegrityReport()
         for version in versions:
+            if version.trashed:
+                continue
             payload = self.resolve_path(version)
             if not payload.is_file():
                 report.statuses[version.id] = "missing"
@@ -837,8 +1169,12 @@ class DataCatalogService:
         stage: DataStage | None = None,
         tag: str | None = None,
         type: str | None = None,
+        include_trashed: bool = False,
     ) -> list[DataAsset]:
-        """Filter assets by name substring, stage, tag, and/or type."""
+        """Filter assets by name substring, stage, tag, and/or type.
+
+        Trashed (soft-deleted) assets are excluded unless ``include_trashed``.
+        """
         try:
             rows = self._index.search_assets(
                 text=text,
@@ -847,10 +1183,16 @@ class DataCatalogService:
                 type=type,
             )
             by_id = {a.id: a for a in self.document.assets}
-            return [by_id[r["id"]] for r in rows if r["id"] in by_id]
+            return [
+                by_id[r["id"]]
+                for r in rows
+                if r["id"] in by_id and (include_trashed or not by_id[r["id"]].trashed)
+            ]
         except Exception:
             pass
         results = list(self.document.assets)
+        if not include_trashed:
+            results = [a for a in results if not a.trashed]
         if text:
             needle = text.casefold()
             results = [a for a in results if needle in a.name.casefold()]

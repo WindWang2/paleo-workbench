@@ -25,6 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from paleo_workbench.catalog.checksum import sha256_file_or_none
 from paleo_workbench.catalog.models import (
     CatalogError,
     DataAsset,
@@ -118,23 +119,35 @@ class CoreCatalogAdapter:
         )
 
     def _find_asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
+        """Stable legacy-bridge resolution: an asset whose *id* equals the
+        legacy id (a migration projection) wins; otherwise the first asset
+        explicitly bridged via ``legacy_resource_id``. The bridge is set once
+        (first wins), so a resource always resolves to the same asset."""
         for asset in self._service.document.assets:
-            if asset.id == legacy_resource_id or asset.legacy_resource_id == legacy_resource_id:
+            if asset.id == legacy_resource_id:
+                return asset
+        for asset in self._service.document.assets:
+            if asset.legacy_resource_id == legacy_resource_id:
                 return asset
         return None
 
     def _bridge_legacy_id(self, version: DataVersion, legacy_resource_id: str | None) -> None:
         """Record the legacy bridge on an idempotent hit when it is missing.
 
-        First wins: an asset that already carries a (different) legacy id is
-        left alone, matching the fake's external-dedup semantics.
+        The bridge id is set ONCE: an asset that already carries a (different)
+        legacy id is left alone, and a legacy id already claimed by another
+        asset is never re-assigned — so no two assets can ever collide on the
+        same bridge key (ghost prevention).
         """
         if legacy_resource_id is None:
             return
         asset = self._asset_for(version)
-        if asset is not None and asset.legacy_resource_id is None:
-            asset.legacy_resource_id = legacy_resource_id
-            self._service._save()
+        if asset is None or asset.legacy_resource_id is not None:
+            return
+        if self._find_asset_by_legacy_id(legacy_resource_id) is not None:
+            return
+        asset.legacy_resource_id = legacy_resource_id
+        self._service._save()
 
     # ------------------------------------------------------------------ inputs
     def register_input(
@@ -150,31 +163,32 @@ class CoreCatalogAdapter:
         legacy_resource_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
-        # Idempotence 1: the legacy bridge — a resource already migrated or
-        # registered returns its current version instead of duplicating.
-        if legacy_resource_id is not None:
-            asset = self._find_asset_by_legacy_id(legacy_resource_id)
-            if asset is not None and asset.current_version_id is not None:
-                return self._version_ref(service.get_version(asset.current_version_id))
-
         resolved = Path(path).expanduser().resolve().as_posix()
 
+        # Stable legacy-bridge asset: once a resource id maps to an asset it
+        # always maps to that SAME asset (never a phantom duplicate).
+        bridged_asset = None
+        if legacy_resource_id is not None:
+            bridged_asset = self._find_asset_by_legacy_id(legacy_resource_id)
+
         if external:
-            # Idempotence 2: same external path already linked.
+            # Idempotence: same external path already linked.
             for version in service.document.versions:
                 if not version.managed and version.path == resolved:
                     self._bridge_legacy_id(version, legacy_resource_id)
                     return self._version_ref(version)
+            # Same legacy asset, same external link → return its current version
+            # (reopening a project must not accumulate duplicate links).
+            if bridged_asset is not None and bridged_asset.current_version_id is not None:
+                current = service.get_version(bridged_asset.current_version_id)
+                if not current.managed and current.path == resolved:
+                    return self._version_ref(current)
             version = service.link_external(
                 resolved, name=name, type=kind or None, format=format or None
             )
-            if legacy_resource_id is not None:
-                asset = self._asset_for(version)
-                if asset is not None:
-                    asset.legacy_resource_id = legacy_resource_id
-                    service._save()
+            self._bridge_legacy_id(version, legacy_resource_id)
         else:
-            # Idempotence 3: same managed source (path + checksum) already
+            # Idempotence: same managed source (path + checksum) already
             # imported returns the existing immutable RAW version.
             for version in service.document.versions:
                 if (
@@ -185,14 +199,33 @@ class CoreCatalogAdapter:
                 ):
                     self._bridge_legacy_id(version, legacy_resource_id)
                     return self._version_ref(version)
+            if bridged_asset is not None and bridged_asset.current_version_id is not None:
+                current = service.get_version(bridged_asset.current_version_id)
+                # Decide "unchanged" without a caller-supplied checksum by
+                # hashing the file once (cheap when it matches the record).
+                effective = checksum
+                if effective is None:
+                    effective = sha256_file_or_none(resolved)
+                if effective is not None and effective == current.sha256:
+                    self._bridge_legacy_id(current, legacy_resource_id)
+                    return self._version_ref(current)
+                # The SAME asset's source changed: register V2 of this asset
+                # (parent lineage), never a phantom asset.
+                version = service.register_version(
+                    bridged_asset.id,
+                    resolved,
+                    DataStage.RAW,
+                    parent_version_ids=[current.id],
+                )
+                self._bridge_legacy_id(version, legacy_resource_id)
+                for tag in tags or []:
+                    if tag:
+                        service.add_tag(tag, version_id=version.id)
+                return self._version_ref(version)
             version = service.import_raw(
                 resolved, name=name, type=kind or None, format=format or None
             )
-            if legacy_resource_id is not None:
-                asset = self._asset_for(version)
-                if asset is not None:
-                    asset.legacy_resource_id = legacy_resource_id
-                    service._save()
+            self._bridge_legacy_id(version, legacy_resource_id)
         for tag in tags or []:
             if tag:
                 service.add_tag(tag, version_id=version.id)
