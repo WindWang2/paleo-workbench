@@ -134,6 +134,8 @@ def find_assets_by_tag(service, name: str) -> list[str]:
     if tag is None:
         return []
     try:
+        if service.index_revision() is None:
+            raise RuntimeError("index unavailable — falling back to scan")
         return sorted(service._index.assets_for_tag(tag.name))
     except Exception:
         return sorted(
@@ -148,6 +150,8 @@ def find_versions_by_tag(service, name: str) -> list[str]:
     if tag is None:
         return []
     try:
+        if service.index_revision() is None:
+            raise RuntimeError("index unavailable — falling back to scan")
         return sorted(service._index.versions_for_tag(tag.name))
     except Exception:
         return sorted(

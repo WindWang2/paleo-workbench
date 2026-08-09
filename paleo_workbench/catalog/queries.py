@@ -84,8 +84,12 @@ def search_assets(
     """Filter assets by name substring, stage, tag, and/or type.
 
     Trashed (soft-deleted) assets are excluded unless ``include_trashed``.
+    When the SQLite index is missing/unavailable the in-memory document scan
+    below is used, so search always reflects the canonical document.
     """
     try:
+        if service.index_revision() is None:
+            raise RuntimeError("index unavailable — falling back to scan")
         rows = service._index.search_assets(
             text=text,
             stage=stage.value if stage else None,

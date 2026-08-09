@@ -222,6 +222,7 @@ class CoreCatalogAdapter:
                 type=kind or None,
                 format=format or None,
                 _legacy_resource_id=legacy_resource_id,
+                known_sha256=checksum,
             )
         for tag in tags or []:
             if tag:

@@ -30,6 +30,11 @@ from paleo_workbench.catalog import queries as _queries
 from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
 from paleo_workbench.catalog.db import CatalogIndex
+from paleo_workbench.catalog.gc import (
+    cleanup_working_copies as _gc_cleanup_working_copies,
+    plan_gc as _gc_plan,
+    sweep_gc as _gc_sweep,
+)
 from paleo_workbench.catalog.models import (
     CatalogDocument,
     DataAsset,
@@ -45,6 +50,7 @@ from paleo_workbench.catalog.models import (
 from paleo_workbench.catalog.queries import IntegrityReport
 from paleo_workbench.catalog.storage import (
     create_working_copy as _place_working_copy,
+    is_cas_path,
     place_managed_file,
     purge_trashed_payload,
     restore_payload as _restore_trashed_payload,
@@ -52,6 +58,7 @@ from paleo_workbench.catalog.storage import (
 )
 from paleo_workbench.catalog.store import CatalogStore
 from paleo_workbench.project.models import _now_iso
+from paleo_workbench.project.paths import artifact_dir_for
 
 
 class DataCatalogService:
@@ -224,7 +231,21 @@ class DataCatalogService:
         index = CatalogIndex(project_path)
         service = cls(project_path, document, store, index)
         service._ensure_index_fresh()
+        service._sweep_temp_on_open()
         return service
+
+    def _sweep_temp_on_open(self) -> None:
+        """Conservative cleanup on open: stale temp files and empty dirs.
+
+        Only files that can NEVER be referenced by a version record are
+        removed (temp/placement leftovers from crashed saves); payloads,
+        working copies and trash are never touched here. Best-effort and
+        silent: a failure must never block project open.
+        """
+        try:
+            _gc_sweep(self, dry_run=False, explicit=False)
+        except Exception:
+            pass
 
     def close(self) -> None:
         try:
@@ -282,6 +303,39 @@ class DataCatalogService:
 
     def index_revision(self) -> int | None:
         return self._index.revision()
+
+    # -- garbage collection (P4, conservative) --------------------------------
+
+    def plan_gc(self) -> "GcReport":
+        """Classify orphaned files in the artifacts tree (deletes nothing).
+
+        Orphan classes: stage payloads without a version record, abandoned
+        working copies, stale temp/placement files, unreferenced trash
+        payloads, and unreferenced content-store blobs. See
+        :func:`paleo_workbench.catalog.gc.plan_gc`.
+        """
+        return _gc_plan(self)
+
+    def sweep_gc(self, *, dry_run: bool = True, explicit: bool = False) -> "GcReport":
+        """Sweep orphans; ``dry_run=True`` (default) only reports.
+
+        With ``explicit=False`` (the conservative sweep, also run on open)
+        only stale temp files and empty dirs are removed. With
+        ``explicit=True`` the full safe set is swept: unreferenced stage and
+        trash payloads plus unreferenced blobs. Reachable committed
+        DataVersions and external source files are never touched; working
+        copies require :meth:`cleanup_working_copies`.
+        """
+        return _gc_sweep(self, dry_run=dry_run, explicit=explicit)
+
+    def cleanup_working_copies(self) -> "GcReport":
+        """Remove abandoned working copies (explicit user action).
+
+        Only working-copy dirs whose version id does not exist in the catalog
+        at all are removed; live versions' working copies may hold uncommitted
+        edits and are never touched.
+        """
+        return _gc_cleanup_working_copies(self)
 
     # -- lookups ------------------------------------------------------------
 
@@ -391,7 +445,12 @@ class DataCatalogService:
             asset, previous = restore_current
             asset.current_version_id = previous
         if payload is not None:
-            if restore_payload_to is not None and payload.exists():
+            if is_cas_path(self.project_path, payload.as_posix()):
+                # Blob-backed payloads are shared, content-addressed and
+                # immutable: a failed save must never unlink them (other
+                # versions may reference the same blob).
+                pass
+            elif restore_payload_to is not None and payload.exists():
                 # A moved (consumed) working copy goes back where it came
                 # from — a failed commit must not destroy the user's data.
                 try:
@@ -403,12 +462,12 @@ class DataCatalogService:
                     payload.unlink()
                 except OSError:
                     pass
-            # Prune the now-empty version/asset directories.
-            for directory in (payload.parent, payload.parent.parent):
-                try:
-                    directory.rmdir()
-                except OSError:
-                    pass
+                # Prune the now-empty version/asset directories.
+                for directory in (payload.parent, payload.parent.parent):
+                    try:
+                        directory.rmdir()
+                    except OSError:
+                        pass
 
     # -- version registration ------------------------------------------------
 
@@ -428,6 +487,8 @@ class DataCatalogService:
         run_id: str | None,
         metadata: dict[str, Any] | None,
         move: bool,
+        known_sha256: str | None = None,
+        register_blob: bool = False,
     ) -> tuple[DataVersion, Path]:
         """Place the payload and build the (not yet appended) DataVersion."""
         version = DataVersion(
@@ -450,6 +511,8 @@ class DataCatalogService:
         rel_path, size, digest = place_managed_file(
             source_path, self.project_path, stage, asset.id, version.id,
             keep_source=not move,
+            known_sha256=known_sha256,
+            register_blob=register_blob,
         )
         version.path = rel_path
         version.size_bytes = size
@@ -468,12 +531,17 @@ class DataCatalogService:
         version_id: str | None = None,
         move: bool = False,
         _restore_payload_to: Path | None = None,
+        known_sha256: str | None = None,
+        _register_blob: bool = False,
     ) -> DataVersion:
         """Place *source_path* under managed storage and commit a new version.
 
         When *run_id* is given, the run's ``output_version_ids`` is updated in
         the SAME save as the version commit (atomic run-output linkage), and
         restored on rollback.
+
+        ``known_sha256`` / ``_register_blob`` (private; adapter import path):
+        see :func:`paleo_workbench.catalog.storage.place_managed_file`.
         """
         asset = self._asset_or_raise(asset_id)
         source_path = Path(source_path)
@@ -488,6 +556,8 @@ class DataCatalogService:
             version_id=version_id,
             parent_version_ids=list(parent_version_ids),
             run_id=run_id, metadata=metadata, move=move,
+            known_sha256=known_sha256,
+            register_blob=_register_blob,
         )
         self._add_version(version)
         asset.current_version_id = version.id
@@ -548,6 +618,7 @@ class DataCatalogService:
         metadata: dict[str, Any] | None = None,
         asset_id: str | None = None,
         _legacy_resource_id: str | None = None,
+        known_sha256: str | None = None,
     ) -> DataVersion:
         """Import *source_path* as an immutable managed RAW snapshot.
 
@@ -558,6 +629,12 @@ class DataCatalogService:
         ``_legacy_resource_id`` (private; adapter-only) records the legacy
         bridge on the asset in the SAME registering save, so the adapter's
         ``register_input`` needs no second ``_save`` per import.
+
+        ``known_sha256`` (private; adapter-only) enables the content-store
+        dedup fast path: when the digest is already present and the source is
+        the same size, no copy happens and the version references the shared
+        blob (O(1)). Every managed RAW import also registers its payload in
+        the content store so later imports of the same content dedup to it.
         """
         source_path = Path(source_path)
         if not source_path.is_file():
@@ -579,7 +656,8 @@ class DataCatalogService:
             self._add_asset(target)
         try:
             return self.register_version(
-                target.id, source_path, DataStage.RAW, metadata=metadata
+                target.id, source_path, DataStage.RAW, metadata=metadata,
+                known_sha256=known_sha256, _register_blob=True,
             )
         except Exception:
             if asset is not None and asset in self.document.assets:
@@ -1228,9 +1306,22 @@ class DataCatalogService:
                 for aid, tags in list(self.document.asset_tags.items())
                 if aid in purged_ids
             }
+            # Digests still referenced by versions that SURVIVE the purge:
+            # a blob backed by them must not be unlinked (shared refcount).
+            surviving_digests = {
+                v.sha256
+                for v in self.document.versions
+                if not v.trashed and v.sha256
+            }
             for version in trashed_versions:
                 if version.managed:
-                    purge_trashed_payload(self.project_path, self.resolve_path(version))
+                    shared = (
+                        version.sha256 is not None
+                        and version.sha256 in surviving_digests
+                    )
+                    purge_trashed_payload(
+                        self.project_path, self.resolve_path(version), shared=shared
+                    )
                 self._remove_version(version)
             for asset in trashed_assets:
                 self._remove_asset(asset)
@@ -1418,6 +1509,30 @@ class DataCatalogService:
             type=type,
             include_trashed=include_trashed,
         )
+
+    def _rebase_artifact_paths(self) -> bool:
+        """Rewrite managed version paths after a save-as relocation.
+
+        Version paths are stored relative to the project dir and include the
+        ``<name>.artifacts/`` prefix, which changes when the project file is
+        saved under a different name (the artifacts dir derives its name from
+        it). Rewrites the prefix to the CURRENT artifacts dir name and
+        persists; returns True when anything changed. Only the first path
+        segment is touched — payload file names and stage/asset/version
+        nesting are preserved.
+        """
+        current = artifact_dir_for(self.project_path).name
+        changed = False
+        for version in self.document.versions:
+            if not version.managed:
+                continue
+            head, sep, rest = version.path.partition("/")
+            if sep and head.endswith(".artifacts") and head != current:
+                version.path = f"{current}/{rest}"
+                changed = True
+        if changed:
+            self._save()
+        return changed
 
     # -- legacy migration ---------------------------------------------------------
 
