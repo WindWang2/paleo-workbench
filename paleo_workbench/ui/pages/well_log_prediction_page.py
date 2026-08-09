@@ -160,7 +160,10 @@ class WellLogPredictionPage(QWidget):
         if not path:
             return
         try:
-            if self.canvas_panel.backend() == "engine":
+            if (
+                self.canvas_panel.backend() == "engine"
+                and self.canvas_panel._engine_view is not None
+            ):
                 # Engine binding currently exposes curve submit + OpenGL view;
                 # vector export stays on the Legacy canvas path. PNG uses a
                 # widget grab so Feature Flag users still get a graphic export.
