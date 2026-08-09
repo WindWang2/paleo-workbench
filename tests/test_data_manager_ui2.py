@@ -85,13 +85,12 @@ def test_ui2_raw_safety_and_create_derived(qtbot):
     assert view.is_raw is True
     assert view.stage == DataStage.RAW
 
-    # Execute create derived copy
+    # Execute create derived copy — §8.2: derived requires an active catalog.
+    # Without one the action fails visibly and NEVER creates a RAW-path alias.
     page._create_derived_copy(raw_res)
-    assert len(page.project.resources) == 2
-    derived_res = page.project.resources[1]
-    assert derived_res.name == "locked_raw.las_derived"
-    assert derived_res.artifact_role == "derived"
-    assert "派生" in derived_res.tags
+    assert len(page.project.resources) == 1
+    status = page.data_toolbar.operation_status_label.text()
+    assert "数据目录" in status
 
 
 def test_ui2_inspector_sections_and_tags(qtbot):

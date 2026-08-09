@@ -17,7 +17,21 @@ from __future__ import annotations
 
 import ast
 import shutil
+import sys
 from pathlib import Path
+
+# Well Log Workstation moved out of this tree into the well-log-engine
+# submodule (apps/wellplot-desktop). Put that app on sys.path so the real
+# module is imported; the source-extraction fallback below covers checkouts
+# where the submodule app is not importable (no PySide6 / partial checkout).
+_WORKSTATION_APP = (
+    Path(__file__).resolve().parents[1]
+    / "well-log-engine"
+    / "apps"
+    / "wellplot-desktop"
+)
+if _WORKSTATION_APP.is_dir():
+    sys.path.insert(0, str(_WORKSTATION_APP))
 
 try:
     from well_log_workstation.composite_view import (
@@ -28,11 +42,12 @@ except ImportError:
     # PySide6 not installed: pull the two pure functions out of the module
     # source (module-level imports of Qt never run in this path).
     def _extract_helpers() -> tuple:
-        module_path = (
-            Path(__file__).resolve().parents[1]
-            / "well_log_workstation"
-            / "composite_view.py"
-        )
+        module_path = _WORKSTATION_APP / "well_log_workstation" / "composite_view.py"
+        if not module_path.is_file():
+            raise RuntimeError(
+                f"composite_view.py not found under well-log-engine submodule "
+                f"(expected {module_path}); run `git submodule update --init`"
+            )
         tree = ast.parse(module_path.read_text(encoding="utf-8"))
         names = {"reconcile_panels", "rewrite_image_paths"}
         body = [

@@ -42,8 +42,8 @@ come from glyph paths. Full embedded-font **ToUnicode / CJK subset** is
 | CGM track-left (export-path proxy) | **0.5 mm** entry (ADR 0054) |
 | Fixed pagination page count | exact |
 
-Fixture and matrix: `well_log_workstation/testdata/geometry_golden/`,
-`well_log_workstation/geometry_golden.py`, and related tests.
+Fixture and matrix: `well-log-engine/apps/wellplot-desktop/well_log_workstation/testdata/geometry_golden/`,
+`well-log-engine/apps/wellplot-desktop/well_log_workstation/geometry_golden.py`, and related tests.
 
 ## Not claimed
 
@@ -58,6 +58,6 @@ Do **not** advertise these as delivered B1:
 
 ## Related docs
 
-- Host export UI table: [`well_log_workstation/README.md`](../well_log_workstation/README.md)
-- Geometry golden notes: [`well_log_workstation/testdata/geometry_golden/README.md`](../well_log_workstation/testdata/geometry_golden/README.md)
+- Host export UI table: [`well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md`](../well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md)
+- Geometry golden notes: [`well-log-engine/apps/wellplot-desktop/well_log_workstation/testdata/geometry_golden/README.md`](../well-log-engine/apps/wellplot-desktop/well_log_workstation/testdata/geometry_golden/README.md)
 - Domain vocabulary: [`CONTEXT.md`](../CONTEXT.md) — Export B0 / B1

@@ -11,6 +11,7 @@ class SeismicContextToolbar(QFrame):
     """Compact active-task context and primary prediction action."""
 
     run_requested = Signal()
+    demo_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,8 +38,20 @@ class SeismicContextToolbar(QFrame):
 
         self.run_btn = QPushButton("运行预测")
         self.run_btn.setObjectName("PrimaryButton")
+        self.run_btn.setToolTip(
+            "通过 ModelRegistry 解析生产模型后运行科学预测；"
+            "未配置生产模型时不会自动运行 mock"
+        )
         self.run_btn.clicked.connect(self.run_requested.emit)
         layout.addWidget(self.run_btn)
+
+        self.demo_btn = QPushButton("运行演示预测")
+        self.demo_btn.setObjectName("SecondaryButton")
+        self.demo_btn.setToolTip(
+            "显式演示模式：运行 DemoModelProvider（合成数据，非科学预测）"
+        )
+        self.demo_btn.clicked.connect(self.demo_requested.emit)
+        layout.addWidget(self.demo_btn)
 
     @staticmethod
     def _add_context_value(layout: QHBoxLayout, label_text: str, value_text: str) -> QLabel:

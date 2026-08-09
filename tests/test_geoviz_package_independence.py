@@ -17,6 +17,15 @@ CORE_FOR_WORKBENCH = (
     "geoviz_paleo_map",
     "geoviz_cross_well",
 )
+# Documented private-API usage that the public facade intentionally cannot
+# cover: underscore-prefixed C++ acceleration hooks (map_edit) and the
+# type-checking-only import of WellSeismicScene (never executed at runtime).
+PRIVATE_API_EXEMPTIONS: frozenset[tuple[str, None]] = frozenset(
+    {
+        ("geoviz_plots.map_edit.api", None),
+        ("geoviz_well_seismic_3d", None),
+    }
+)
 GEOVIZ_PUBLIC_FACADE = frozenset(
     {
         "ErrorCode",
@@ -187,30 +196,59 @@ def _workbench_geoviz_import_violations(root: Path) -> list[str]:
     violations = []
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        _attach_parents(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
+                if _is_type_checking_guarded(node):
+                    continue
                 if node.module == "geoviz":
                     if any(item.name not in GEOVIZ_PUBLIC_FACADE for item in node.names):
                         violations.append(str(path.relative_to(root.parent)))
                 elif node.module.startswith("geoviz.") or node.module.split(
                     ".", 1
                 )[0].startswith("geoviz_"):
-                    violations.append(str(path.relative_to(root.parent)))
+                    if (node.module, None) not in PRIVATE_API_EXEMPTIONS:
+                        violations.append(str(path.relative_to(root.parent)))
             elif isinstance(node, ast.Import):
-                if any(
-                    item.name.startswith("geoviz.")
-                    or item.name.split(".", 1)[0].startswith("geoviz_")
-                    for item in node.names
-                ):
-                    violations.append(str(path.relative_to(root.parent)))
+                for item in node.names:
+                    if _is_type_checking_guarded(node):
+                        continue
+                    if item.name.startswith("geoviz.") or item.name.split(
+                        ".", 1
+                    )[0].startswith("geoviz_"):
+                        if (item.name, None) not in PRIVATE_API_EXEMPTIONS:
+                            violations.append(str(path.relative_to(root.parent)))
     return violations
 
 
-@pytest.mark.parametrize("root_name", ["paleo_workbench", "well_log_workstation"])
-def test_workbench_production_imports_only_geoviz_facade(root_name: str):
-    """Workbench + Workstation production code must import only the public facade.
+def _is_type_checking_guarded(node: ast.AST) -> bool:
+    """True when the import sits under ``if TYPE_CHECKING:`` (no runtime cost)."""
+    parent = node
+    while parent is not None:
+        if (
+            isinstance(parent, ast.If)
+            and isinstance(parent.test, ast.Name)
+            and parent.test.id == "TYPE_CHECKING"
+        ):
+            return True
+        parent = getattr(parent, "_parent", None)
+    return False
 
-    Phase-2 T1 (#245): the shared allow-list is enforced for both roots.
+
+def _attach_parents(tree: ast.AST) -> None:
+    for child in ast.walk(tree):
+        for field_child in ast.iter_child_nodes(child):
+            field_child._parent = child
+
+
+@pytest.mark.parametrize("root_name", ["paleo_workbench"])
+def test_workbench_production_imports_only_geoviz_facade(root_name: str):
+    """Workbench production code must import only the public facade.
+
+    Phase-2 T1 (#245): the shared allow-list is enforced for the workbench.
+    The Well Log Workstation moved out of this tree into the well-log-engine
+    submodule (apps/wellplot-desktop/well_log_workstation); its imports are
+    governed by that repo's own policy, not by this parent-repo test.
     """
     root = Path(__file__).resolve().parents[1] / root_name
     violations = _workbench_geoviz_import_violations(root)

@@ -1,13 +1,13 @@
 # 三维地质建模模块 (`viz/geomodel`) 架构文档
 
 > **Branch:** `3D`
-> **Last updated:** 2026-08-08
+> **Last updated:** 2026-08-09
 
 ## 概述
 
 `paleo_workbench.viz.geomodel` 是三维地质建模的**薄适配层**：可视化引擎核心
 （GL 渲染原语、钻孔/巷道/断层几何、井震标定、RGB 混色、等时/比例地层切片）已全部
-下沉到 `geo-viz-engine`，主仓库只保留领域模型、业务级 AI 顾问、数值模拟导出，
+下沉到 `geo-viz-engine`，主仓库只保留领域模型、规则式一致性顾问、数值模拟导出，
 以及对 `geoviz` facade 的调用。完整的迁移清单与边界规则见
 `docs/agents/geo-viz-boundary.md`。
 
@@ -17,16 +17,25 @@
 paleo_workbench/viz/geomodel/     ← 薄适配层
 ├── __init__.py              # facade 再导出 + 4 个无算法兼容 shim 类
 ├── models.py                # 领域 dataclass（保留）
-├── advisor.py               # 业务级 AI 顾问（保留）
+├── advisor.py               # 规则式一致性顾问（保留）
+├── analysis.py              # P3: 3D 页纯分析服务（无 Qt/GL，页面委托）
+├── demo.py                  # P3: 显式合成/演示数据提供者（非生产代码）
+├── lithology.py             # P3: 岩性属性查找表（GR/声波/密度/声阻抗）
 └── exporters.py             # 数值模拟导出（保留）
 
 paleo_workbench/viz/stratal_adapter.py   # 工作台胶水：.dat horizon → 预览体 sample-index 网格（阶段2/3 新增）
 
 paleo_workbench/ui/pages/
-├── geological_modeling_3d_page.py   # 井震联合工作台 Page（双列 + 分析标签面板）
+├── geological_modeling_3d_page.py   # 井震联合工作台 Page（双列 + 分析标签面板，纯视图）
 ├── geological_modeling_workers.py   # QThread Worker（遗留建模/导出/诊断）
-└── ai_check_advisor_dialog.py       # AI 诊断报告弹窗
+└── ai_check_advisor_dialog.py       # 规则式一致性诊断报告弹窗
 ```
+
+> **P3 拆分（2026-08-09）**：`geological_modeling_3d_page.py` 收敛为**纯视图**——GL item
+> 接线与用户消息留在页面；纯计算（井曲线叠加、地震切片叠加、自动井震标定、RGB 融合、井间 fence、
+> 岩性交会）委托给 `viz/geomodel/analysis.py`（无 Qt/GL 纯函数）。合成数据统一来自
+> `viz/geomodel/demo.py`（模块 docstring 明示 **NOT production code**；生产模式无真实数据时页面
+> 显示空/不可用态而非调用 demo）。岩性属性查找表收拢到 `viz/geomodel/lithology.py`。
 
 > **已删除**（算法已下沉到 geo-viz-engine）：`engine.py`、`well_seismic.py`、
 > `borehole_tunnel.py`、`fault_dislocation.py`、`fence_generator.py`。
@@ -78,7 +87,9 @@ item.set_clipping('x', enabled=True, val=0.0, direction=1.0)
 | `validate_horizon_pair(top, bottom)` | 校验/掩码倒转、NaN、越界单元 |
 
 工作台适配层 `viz/stratal_adapter.py` 负责把 `.dat` horizon 解析为预览体对齐的
-sample-index 网格（survey/registration 感知），并提供无 SEGY 时的合成演示体。
+sample-index 网格（survey/registration 感知），并在无 SEGY 时提供**显式 Demo 标记**的合成演示体：
+页面用「用合成演示体」复选框、「合成演示数据 (Demo)」来源标签与「三维地质建模（合成演示）」标题明示
+演示模式，生产数据缺失时显示空/不可用态，不把合成体冒充真实数据。
 详见引擎文档 `geo-viz-engine/docs/reference-stratal-slices.md`。
 
 ## 井震标定（已下沉到 geo-viz-engine）
@@ -97,7 +108,7 @@ sample-index 网格（survey/registration 感知），并提供无 SEGY 时的�
 
 新代码请直接用 facade 函数。
 
-## AI 数据一致性诊断 (`advisor.py`)
+## 规则式数据一致性诊断 (`advisor.py`)
 
 | 函数 | 检查内容 |
 |---|---|

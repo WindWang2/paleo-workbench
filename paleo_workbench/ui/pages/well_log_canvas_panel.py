@@ -99,7 +99,21 @@ class WellLogCanvasPanel(QFrame):
         self.stack.addWidget(self.empty_label)  # 0
 
         self.canvas = WellLogCanvas()
-        self.stack.addWidget(self.canvas)  # 1 legacy
+        # Wrap canvas in a scroll area so it scrolls horizontally when the
+        # track content is wider than the available space.
+        from PySide6.QtWidgets import QScrollArea
+
+        self.canvas_scroll = QScrollArea()
+        self.canvas_scroll.setWidget(self.canvas)
+        self.canvas_scroll.setWidgetResizable(False)
+        self.canvas_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.canvas_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.canvas_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.stack.addWidget(self.canvas_scroll)  # 1 legacy
 
         self.engine_host = QFrame()
         self.engine_host.setObjectName("WellLogEngineHost")
@@ -143,13 +157,16 @@ class WellLogCanvasPanel(QFrame):
         self.backend_changed.emit(self._backend)
 
     def is_canvas_ready(self) -> bool:
-        if self._backend == "engine":
-            return (
-                self.stack.currentWidget() is self.engine_host
-                and self._engine_view is not None
-                and self._engine_load is not None
-            )
-        return self.stack.currentWidget() is self.canvas and bool(self.canvas.tracks)
+        # Engine backend with a live load → ready.
+        if (
+            self._backend == "engine"
+            and self._engine_view is not None
+            and self._engine_load is not None
+        ):
+            return True
+        # Legacy fallback: engine selected but unavailable falls back to the
+        # legacy QPainter canvas (AC "Legacy 回退"), which is equally ready.
+        return self.stack.currentWidget() is self.canvas_scroll and bool(self.canvas.tracks)
 
     def has_bound_las(self) -> bool:
         return self._bound_las
@@ -261,7 +278,7 @@ class WellLogCanvasPanel(QFrame):
         tracks = build_qpainter_tracks(self.well_log_data)
         self.canvas.set_tracks(tracks)
         self.empty_label.setHidden(True)
-        self.stack.setCurrentWidget(self.canvas)
+        self.stack.setCurrentWidget(self.canvas_scroll)
         track_names = [t.label for t in tracks if getattr(t, "label", None)]
         t_str = f"  [{' | '.join(track_names)}]" if track_names else ""
         suffix = ""

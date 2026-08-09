@@ -1,6 +1,7 @@
 # CI merge policy
 
-Last updated with issue **#236** (re-enable Windows WellLogEngine CI matrix).
+Last updated 2026-08-09 with the production-readiness quality convergence
+(advisory suite promoted to a required gate).
 
 ## Product merge gates (required)
 
@@ -9,18 +10,17 @@ A PR is merge-ready when these are green on the head SHA:
 | Gate | Workflow / job |
 |------|----------------|
 | **WellLogEngine C++ (Ubuntu)** | `WellLogEngine C++` — shared ON/OFF, ASan, Qt Mesa, wheels, vcpkg, benchmark as configured |
+| **Full monorepo Tests (Python 3.12 + 3.13)** | `CI` → `Tests (Python *)` matrix |
 | **Well Log Workstation (host)** | `CI` → `Well Log Workstation (host)` (3.12 + 3.13) |
-| **Merge gate (workstation host)** | `CI` → `Merge gate (workstation host)` (aggregates host matrix) |
+| **Merge gate** | `CI` → `Merge gate (full monorepo + workstation)` — `needs:` the full Tests matrix and the workstation host matrix |
 
-Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate.
+Cross-workflow: GitHub does not `needs:` across workflows; reviewers confirm **WellLogEngine C++** on the same commit as the CI host gate. The `WellLogEngine C++` workflow (`well-log-engine.yml`) is triggered on well-log-engine submodule **gitlink bumps** (paths cover the bare `well-log-engine` entry and `well-log-engine/**`), so any engine-pointer change re-runs it.
 
-## Advisory (not a merge blocker)
-
-| Job | Notes |
-|-----|--------|
-| **Tests (Python *) [advisory]** | Full monorepo suite. `continue-on-error: true`. Completes after hang fix; remaining known failures are `xfail` via `tests/advisory_xfail.py` (#234). |
-
-Do **not** block merge solely on advisory red. Prefer fixing or adding an entry in `tests/advisory_xfail.py` with a reason pointing at #234 or a dedicated ticket.
+The full monorepo suite runs with `-m "not slow"` and must be green **without
+quarantine**: there is no `continue-on-error`, no advisory xfail registry
+(`tests/advisory_xfail.py` is empty by design — do not grow it back), and no
+"exit 124 is advisory" ceiling. A test that fails is a bug to fix, not a
+reason to loosen the gate.
 
 ## Windows WellLogEngine
 
@@ -39,7 +39,8 @@ Code staged in #234 that makes the Windows build clean:
 
 - Prefer stubbing **all** `QMessageBox` / modal dialogs in headless tests.
 - Per-test: `--timeout-method=thread` on monorepo and workstation jobs.
-- Outer suite ceiling remains as a backstop for native hangs.
+- Job-level timeouts (`Tests`: 60m; workstation: 20m) act as the backstop for
+  native hangs; a green suite fits well inside them.
 
 ## Related
 

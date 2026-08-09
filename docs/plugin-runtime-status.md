@@ -14,9 +14,9 @@
 | 能力 | 说明 |
 |------|------|
 | Custom Layer 数据原语 | 由引擎分解进 GL/SVG/PDF/拾取；扩展不直接渲染 |
-| Python 宿主嵌入 | `well_log_workstation` 调 WellLogEngine / 本机模块 |
-| 扩展点目录（只读） | `well_log_workstation.extension_points` 列出**内建**能力，不加载第三方包 |
-| Command 审计环（可选） | `well_log_workstation.command_audit` 进程内 append-only 记录，默认不落盘、不加载插件 |
+| Python 宿主嵌入 | `well-log-engine/apps/wellplot-desktop/well_log_workstation` 调 WellLogEngine / 本机模块 |
+| 扩展点目录（只读） | `well-log-engine/apps/wellplot-desktop/well_log_workstation/extension_points.py` 列出**内建**能力，不加载第三方包 |
+| Command 审计环（可选） | `well-log-engine/apps/wellplot-desktop/well_log_workstation/command_audit.py` 进程内 append-only 记录，默认不落盘、不加载插件 |
 
 ## 实现切片（待拆 GitHub 子单）
 

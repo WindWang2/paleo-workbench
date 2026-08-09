@@ -133,6 +133,50 @@ def test_story1_import_managed_raw_snapshot_immune_to_source_mutation(
     assert catalog.verify_integrity(raw.version_id) is IntegrityStatus.VERIFIED
 
 
+def test_in_project_relative_path_registers_with_cwd_elsewhere(
+    tmp_path: Path, catalog, project_path: Path, monkeypatch
+):
+    """import_service stores in-project files as PROJECT-RELATIVE paths; the
+    adapter must resolve them against the project dir, never the process CWD.
+    Regression: registration silently failed (CatalogError swallowed) whenever
+    CWD != project dir, leaving the resource legacy-only and unmanaged."""
+    # CWD deliberately elsewhere (the app never chdir()s to the project).
+    monkeypatch.chdir(tmp_path)
+    data_dir = project_path.parent / "wells"
+    data_dir.mkdir(parents=True)
+    las = data_dir / "inproj.las"
+    content = b"in-project log"
+    las.write_bytes(content)
+
+    # Exactly what import_service._collect_resource stores for in-project files.
+    resource = ResourceItem(
+        name="inproj.las",
+        path="wells/inproj.las",  # project-relative, NOT absolute
+        type="well_log",
+        format="las",
+        status="parsed",
+        checksum=None,
+        external=False,
+    )
+
+    raw = register_resource_input(resource)
+    assert raw is not None, "in-project import must register (relative path)"
+    version = catalog.service.get_version(raw.version_id)
+    assert version.managed is True
+    managed = catalog.service.resolve_path(version)
+    assert managed.is_file() and ".artifacts" in str(managed)
+    assert version.sha256 == hashlib.sha256(content).hexdigest()
+    assert catalog.verify_integrity(raw.version_id) is IntegrityStatus.VERIFIED
+
+    # Idempotence: re-registering the same (relative) path + checksum dedups.
+    again = register_resource_input(resource)
+    assert again is not None and again.version_id == raw.version_id
+
+    # The legacy bridge resolves the relative-path resource to the version.
+    bridged = catalog.resolve_legacy_resource(resource.id)
+    assert bridged is not None and bridged.version_id == raw.version_id
+
+
 # ===================================================================== Story 2
 
 

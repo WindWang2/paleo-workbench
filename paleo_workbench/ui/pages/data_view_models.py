@@ -177,6 +177,9 @@ class AssetView:
     parsed_summary: dict[str, Any] = field(default_factory=dict)
     raw_asset: ResourceItem | ExportArtifact | Any = None
     normalized_tags: set[str] = field(default_factory=set)
+    # Tombstone display: True when the bridged catalog asset is in the trash.
+    trashed: bool = False
+    trashed_at: str | None = None
 
     def __post_init__(self) -> None:
         if not self.normalized_tags and self.tags:
@@ -193,6 +196,14 @@ class AssetView:
     @property
     def is_output(self) -> bool:
         return self.stage == DataStage.OUTPUT
+
+    @property
+    def is_trashed(self) -> bool:
+        return self.trashed
+
+    @property
+    def trashed_label(self) -> str:
+        return "🗑 已移至回收站"
 
     @property
     def stage_label(self) -> str:
@@ -325,6 +336,8 @@ def asset_view_from_resource(resource: ResourceItem, project_root: Path | None =
         status=resource.status,
         parsed_summary=dict(resource.parsed_summary or {}),
         raw_asset=resource,
+        trashed=bool((resource.parsed_summary or {}).get("catalog_trashed")),
+        trashed_at=(resource.parsed_summary or {}).get("catalog_trashed_at"),
     )
 
 
@@ -426,6 +439,28 @@ def asset_view_from_object(asset: Any, project_root: Path | None = None) -> Asse
     )
 
 
+def _integrity_from_version(service: Any, version: Any) -> IntegrityState:
+    """Map the catalog's authoritative integrity verdict for *version* to the
+    UI enum. Trashed versions and external links do not re-hash managed
+    payloads: trashed → UNKNOWN, unmanaged → UNMANAGED. Managed versions are
+    re-hashed against the recorded SHA-256 (best-effort; any catalog failure
+    falls back to UNKNOWN so presentation never breaks)."""
+    try:
+        if version.trashed:
+            return IntegrityState.UNKNOWN
+        if not version.managed:
+            return IntegrityState.UNMANAGED
+        report = service.verify_integrity(version.id)
+        status = report.status_for(version.id)
+    except Exception:
+        return IntegrityState.UNKNOWN
+    return {
+        "verified": IntegrityState.VERIFIED,
+        "modified": IntegrityState.MODIFIED,
+        "missing": IntegrityState.MISSING,
+    }.get(status, IntegrityState.UNKNOWN)
+
+
 def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> AssetView:
     """Enrich a presentation ``AssetView`` with authoritative catalog data.
 
@@ -439,6 +474,10 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
         asset = service.get_asset(asset_id)
     except Exception:
         return view
+
+    # --- tombstone state ---------------------------------------------------
+    view.trashed = bool(getattr(asset, "trashed", False))
+    view.trashed_at = getattr(asset, "trashed_at", None)
 
     # --- versions ---------------------------------------------------------
     try:
@@ -469,6 +508,13 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
             view.stage = current_version.stage
             if current_version.sha256:
                 view.checksum = current_version.sha256
+
+    # --- integrity ---------------------------------------------------------
+    # The catalog is the lifecycle authority: report the CURRENT version's
+    # recorded integrity instead of the legacy inference. A trashed version
+    # reports UNKNOWN (its payload moved out of its stage location).
+    if current_version is not None:
+        view.integrity_state = _integrity_from_version(service, current_version)
 
     # --- tags -------------------------------------------------------------
     try:

@@ -1,0 +1,298 @@
+"""Transaction / crash-safety tests for the catalog (P4).
+
+Pins the guarantee that a crash or failure at ANY point of a save never leaves
+a half-written canonical store, a metadata claim without a payload, or an
+unrecoverable project:
+
+- ``catalog.json.bak`` keeps the previous revision before the atomic replace;
+- ``load()`` recovers the backup when the canonical file is missing;
+- a subprocess SIGKILL mid-save reopens consistent (document + index +
+  payload tree);
+- rename/fsync failures leave no half-written ``catalog.json``;
+- failed copy / metadata / sqlite / rename / checksum each roll back cleanly.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from paleo_workbench.catalog.models import CatalogError
+from paleo_workbench.catalog.service import DataCatalogService
+from paleo_workbench.catalog.storage import catalog_dir_for
+from paleo_workbench.catalog.store import (
+    CatalogStore,
+    catalog_bak_file_for,
+    catalog_file_for,
+)
+from paleo_workbench.catalog import store as store_module
+
+_HELPER = Path(__file__).parent / "crash_kill_helper.py"
+_PYTHON = Path(sys.executable)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _make_project(tmp_path: Path) -> Path:
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    return project_path
+
+
+@pytest.fixture
+def service(tmp_path):
+    svc = DataCatalogService.open(_make_project(tmp_path))
+    yield svc
+    svc.close()
+
+
+def _source(tmp_path: Path, name: str, payload: bytes) -> Path:
+    src = tmp_path / "incoming" / name
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(payload)
+    return src
+
+
+# ------------------------------------------------------------------ .bak + load
+
+
+def test_save_keeps_previous_revision_as_bak(service):
+    service.import_raw(_source(service.project_path.parent, "a.bin", b"v1"))
+    path = catalog_file_for(service.project_path)
+    first_rev = json.loads(path.read_text(encoding="utf-8"))["catalog_revision"]
+
+    service.import_raw(_source(service.project_path.parent, "b.bin", b"v2"))
+    second_rev = json.loads(path.read_text(encoding="utf-8"))["catalog_revision"]
+    assert second_rev == first_rev + 1
+
+    bak = catalog_bak_file_for(service.project_path)
+    assert bak.is_file()
+    bak_rev = json.loads(bak.read_text(encoding="utf-8"))["catalog_revision"]
+    assert bak_rev == first_rev  # backup holds the PREVIOUS revision
+
+
+def test_load_falls_back_to_bak_when_canonical_missing(tmp_path):
+    project = _make_project(tmp_path)
+    svc = DataCatalogService.open(project)
+    svc.import_raw(_source(tmp_path, "a.bin", b"precious"))
+    svc.import_raw(_source(tmp_path, "b.bin", b"also precious"))
+    svc.close()
+
+    path = catalog_file_for(project)
+    bak = catalog_bak_file_for(project)
+    assert bak.is_file()
+    # Simulate a crash between the two renames: canonical gone, backup intact.
+    path.unlink()
+
+    reopened = CatalogStore(project).load()
+    assert len(reopened.versions) == 1
+    assert reopened.versions[0].path.endswith("a.bin")
+    # The backup is re-promoted so the project keeps working.
+    assert path.is_file()
+
+
+def test_load_returns_empty_when_both_missing(tmp_path):
+    project = _make_project(tmp_path)
+    assert CatalogStore(project).load().catalog_revision == 0
+
+
+# ------------------------------------------------------------- SIGKILL mid-save
+
+
+@pytest.mark.parametrize("mode", ["replace", "bak"])
+def test_sigkill_mid_save_reopens_consistent(tmp_path: Path, mode: str):
+    project = _make_project(tmp_path)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(_PROJECT_ROOT)
+    proc = subprocess.run(
+        [_PYTHON, str(_HELPER), mode, str(project)],
+        capture_output=True,
+        cwd=str(_PROJECT_ROOT),
+        env=env,
+        timeout=120,
+    )
+    assert proc.returncode == -9, proc.stderr.decode()  # killed by SIGKILL
+
+    path = catalog_file_for(project)
+    if path.is_file():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(data["catalog_revision"], int)  # never half-written
+    # The previous revision is recoverable (either as canonical or backup).
+    assert path.is_file() or catalog_bak_file_for(project).is_file()
+
+    # Reopen: the catalog must be consistent and functional.
+    svc = DataCatalogService.open(project)
+    try:
+        assert svc.document.catalog_revision >= 1
+        if mode == "replace":
+            # The killer struck after catalog.json moved aside but before the
+            # new file landed → backup recovery, first import present.
+            assert len(svc.document.versions) == 1
+        assert svc.document.versions[0].path.endswith("x.bin")
+        for version in svc.document.versions:
+            assert svc.resolve_path(version).is_file()
+            status = svc.verify_integrity(version.id).status_for(version.id)
+            assert status in ("verified", "unknown")
+        # The index rebuilt/primed from the recovered document.
+        assert svc.index_revision() == svc.document.catalog_revision
+        # The project is writable again (self-healing).
+        extra = svc.import_raw(_source(tmp_path, "c.bin", b"post-crash"))
+        assert svc.get_version(extra.id) is not None
+    finally:
+        svc.close()
+
+
+# ---------------------------------------------------------- failure injection
+
+
+def test_fsync_failure_leaves_catalog_unchanged(service):
+    service.import_raw(_source(service.project_path.parent, "a.bin", b"v1"))
+    path = catalog_file_for(service.project_path)
+    before = path.read_bytes()
+
+    real_fsync = store_module.os.fsync
+
+    def _boom(fd):
+        raise OSError("injected fsync failure")
+
+    store_module.os.fsync = _boom  # type: ignore[assignment]
+    try:
+        with pytest.raises(OSError):
+            CatalogStore(service.project_path).save(service.document)
+    finally:
+        store_module.os.fsync = real_fsync  # type: ignore[assignment]
+
+    assert path.read_bytes() == before  # no half-written file observed
+    # No temp leftovers.
+    leftovers = [p for p in catalog_dir_for(service.project_path).iterdir()
+                 if p.name.endswith(".tmp")]
+    assert leftovers == []
+
+
+def test_rename_failure_restores_previous_revision(service):
+    service.import_raw(_source(service.project_path.parent, "a.bin", b"v1"))
+    path = catalog_file_for(service.project_path)
+    first = json.loads(path.read_text(encoding="utf-8"))["catalog_revision"]
+
+    real_replace = store_module.os.replace
+    state = {"failures": 0}
+
+    def _boom(src, dst):
+        # Fail ONLY the first rename onto catalog.json; the store's rollback
+        # (bak → catalog.json) must succeed to restore the previous revision.
+        if str(dst).endswith("catalog.json"):
+            state["failures"] += 1
+            if state["failures"] == 1:
+                raise OSError("injected rename failure")
+        return real_replace(src, dst)
+
+    store_module.os.replace = _boom  # type: ignore[assignment]
+    try:
+        with pytest.raises(OSError):
+            CatalogStore(service.project_path).save(service.document)
+    finally:
+        store_module.os.replace = real_replace  # type: ignore[assignment]
+
+    # The previous revision is back in place (renamed back from .bak).
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["catalog_revision"] == first
+    assert path.is_file()
+    # No temp leftovers.
+    leftovers = [p for p in catalog_dir_for(service.project_path).iterdir()
+                 if p.name.endswith(".tmp")]
+    assert leftovers == []
+
+
+def test_failed_metadata_save_rolls_back_version_and_payload(service):
+    src = _source(service.project_path.parent, "a.bin", b"v1")
+    real_save = service._store.save
+
+    def _boom(document):
+        raise OSError("injected metadata failure")
+
+    service._store.save = _boom  # type: ignore[method-assign]
+    try:
+        with pytest.raises(OSError):
+            service.import_raw(src)
+    finally:
+        service._store.save = real_save  # type: ignore[method-assign]
+
+    # Nothing committed: no version, no asset, no payload.
+    assert len(service.document.versions) == 0
+    assert len(service.document.assets) == 0
+    assert not any(service.resolve_path(v).exists() for v in [])
+    assert service.plan_gc().count("stage_orphan") == 0
+
+
+def test_failed_copy_rolls_back_cleanly(service, tmp_path):
+    src = _source(tmp_path, "a.bin", b"v1")
+    import paleo_workbench.catalog.storage as storage_module
+
+    real_replace = storage_module.os.replace
+
+    def _boom(src_path, dst_path):
+        if ".place-" in str(src_path):
+            raise OSError("injected copy failure")
+        return real_replace(src_path, dst_path)
+
+    storage_module.os.replace = _boom  # type: ignore[assignment]
+    try:
+        with pytest.raises(OSError):
+            service.import_raw(src)
+    finally:
+        storage_module.os.replace = real_replace  # type: ignore[assignment]
+
+    assert len(service.document.versions) == 0
+    assert len(service.document.assets) == 0
+    # No .place- leftovers, no orphan payloads.
+    assert service.plan_gc().count("stage_orphan") == 0
+    assert service.plan_gc().count("temp_orphan") == 0
+
+
+def test_failed_sqlite_sync_self_heals(service, tmp_path):
+    src = _source(tmp_path, "a.bin", b"v1")
+    index = service._index
+    original_sync = index.sync
+
+    def _boom(document):
+        raise RuntimeError("injected sqlite failure")
+
+    index.sync = _boom  # type: ignore[method-assign]
+    try:
+        version = service.import_raw(src)
+        assert version is not None  # canonical save still succeeded
+    finally:
+        index.sync = original_sync  # type: ignore[method-assign]
+
+    # The index was reset+rebuilt by the best-effort fallback.
+    assert service.index_revision() == service.document.catalog_revision
+    assert len(index.search_assets()) == 1
+
+
+def test_failed_checksum_rolls_back_cleanly(service, tmp_path):
+    src = _source(tmp_path, "a.bin", b"real content")
+    with pytest.raises(CatalogError):
+        service.import_raw(src, known_sha256="f" * 64)
+    assert len(service.document.versions) == 0
+    assert len(service.document.assets) == 0
+    assert service.plan_gc().count("stage_orphan") == 0
+
+
+def test_committed_version_never_claims_missing_payload(service):
+    """Payload placement precedes metadata commit, so a committed record's
+    payload always exists (a missing one is a tamper, reported as missing)."""
+    src = _source(service.project_path.parent, "a.bin", b"v1")
+    version = service.import_raw(src)
+    payload = service.resolve_path(version)
+    assert payload.is_file()
+
+    # Simulate post-commit loss: integrity reports missing, never fabricates.
+    payload.unlink()
+    assert service.verify_integrity(version.id).status_for(version.id) == "missing"
+    # The canonical document is untouched (report-only).
+    assert service.get_version(version.id).sha256 is not None

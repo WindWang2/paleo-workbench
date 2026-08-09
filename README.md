@@ -63,24 +63,28 @@ Page 11 adds a full 3D geological modeling workbench with:
 - **GPU 3-way interactive clipping** (X / Y / Z axis real-time cut)
 - **Well-seismic tie calibration** — Ricker synthetic seismograms, cross-correlation auto-tie, 3D GR log curve overlay
 - **Seismic amplitude slice** overlay in the 3D viewport
-- **AI consistency advisor** — borehole layer overlap detection, coplanar fault warning
+- **Rule-based consistency advisor** — borehole layer overlap detection, coplanar fault warning
 - **Numerical simulation export** — FLAC3D (`.f3grid`) and Abaqus (`.inp`) structured hex grids
 
 See [`docs/geomodel-architecture.md`](docs/geomodel-architecture.md) for the full module architecture.
 
-## Interpolation note (ISS-KRIG-01)
+## Interpolation note (ISS-KRIG-01 resolved)
 
-The preparation combobox option **克里金(MVP·线性)** is an explicit MVP stand-in:
-it maps to SciPy **linear** triangulation, not full variogram kriging. Prefer
-**IDW** (with optional fault barriers) or **方向趋势** for production-style
-workflows until a true kriging backend is added.
+The preparation combobox option **克里金** runs REAL variogram ordinary
+kriging: empirical-variogram fitting plus an ordinary-kriging solve, with the
+kriging variance grid exposed alongside the prediction (geo-viz-engine
+`geoviz_plots.factor.kriging`). The earlier MVP linear placeholder is gone.
+**IDW** (with optional fault barriers) and **方向趋势** remain available.
 
 ## Well Log Workstation
 
-Standalone log-first app (not the paleogeography workbench). See
-[`well_log_workstation/README.md`](well_log_workstation/README.md).
+Standalone log-first app (not the paleogeography workbench), living in the
+`well-log-engine` submodule. See
+[`well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md`](well-log-engine/apps/wellplot-desktop/well_log_workstation/README.md).
 
 ```bash
+# From the repository root: install the app, then run it
+pip install -e well-log-engine/apps/wellplot-desktop
 unset QT_QPA_PLATFORM   # Wayland session default
-python -m well_log_workstation
+wellplot-desktop        # or: python -m well_log_workstation (from the app dir)
 ```

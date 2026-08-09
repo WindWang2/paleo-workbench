@@ -96,8 +96,8 @@ class LithologyCrossplotDialog(QDialog):
         <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>💡 储层识别与推断结论</h3>
         <div style='background: {tokens.BG_SEARCH}; border-left: 4px solid {tokens.PRIMARY}; padding: 12px; border-radius: 6px; margin-top: 8px;'>
             <ul style='margin: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY}; line-height: 1.6;'>
-                <li><b>砂岩储层门限</b>: GR < 50 API, AI 处于 7,000–9,500 范围，在交会图左上方呈现清晰聚类，储层辨识度达 94.5%。</li>
-                <li><b>泥岩盖层辨识</b>: GR > 100 API, AI 集中在 4,000–5,500，位于交会图右下方，具有良好的隔挡封堵特性。</li>
+                <li><b>砂岩储层门限</b>: GR < 50 API, AI 处于 7,000–9,500 范围，在交会图左上方呈现清晰聚类。</li>
+                <li><b>泥岩盖层辨识</b>: GR > 100 API, AI 集中在 4,000–5,500，位于交会图右下方。</li>
                 <li><b>流体替代敏感性</b>: 建议结合 RGB 频率融合切片进一步区分高气饱含水砂岩与致密泥岩。</li>
             </ul>
         </div>

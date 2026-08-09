@@ -25,6 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from paleo_workbench.catalog.checksum import sha256_file_or_none
 from paleo_workbench.catalog.models import (
     CatalogError,
     DataAsset,
@@ -75,10 +76,9 @@ class CoreCatalogAdapter:
         ]
 
     def _asset_for(self, version: DataVersion) -> DataAsset | None:
-        for asset in self._service.document.assets:
-            if asset.id == version.asset_id:
-                return asset
-        return None
+        service = self._service
+        service._ensure_maps()
+        return service._asset_by_id.get(version.asset_id)
 
     def _version_ref(self, version: DataVersion) -> DataVersionRef:
         asset = self._asset_for(version)
@@ -118,23 +118,30 @@ class CoreCatalogAdapter:
         )
 
     def _find_asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
-        for asset in self._service.document.assets:
-            if asset.id == legacy_resource_id or asset.legacy_resource_id == legacy_resource_id:
-                return asset
-        return None
+        """Stable legacy-bridge resolution: an asset whose *id* equals the
+        legacy id (a migration projection) wins; otherwise the first asset
+        explicitly bridged via ``legacy_resource_id``. The bridge is set once
+        (first wins), so a resource always resolves to the same asset.
+        Uses the service's maintained legacy index (O(1), no scan)."""
+        return self._service._asset_by_legacy_id(legacy_resource_id)
 
     def _bridge_legacy_id(self, version: DataVersion, legacy_resource_id: str | None) -> None:
         """Record the legacy bridge on an idempotent hit when it is missing.
 
-        First wins: an asset that already carries a (different) legacy id is
-        left alone, matching the fake's external-dedup semantics.
+        The bridge id is set ONCE: an asset that already carries a (different)
+        legacy id is left alone, and a legacy id already claimed by another
+        asset is never re-assigned — so no two assets can ever collide on the
+        same bridge key (ghost prevention).
         """
         if legacy_resource_id is None:
             return
         asset = self._asset_for(version)
-        if asset is not None and asset.legacy_resource_id is None:
-            asset.legacy_resource_id = legacy_resource_id
-            self._service._save()
+        if asset is None or asset.legacy_resource_id is not None:
+            return
+        if self._find_asset_by_legacy_id(legacy_resource_id) is not None:
+            return
+        self._service._set_legacy_bridge(asset, legacy_resource_id)
+        self._service._save()
 
     # ------------------------------------------------------------------ inputs
     def register_input(
@@ -150,53 +157,142 @@ class CoreCatalogAdapter:
         legacy_resource_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
-        # Idempotence 1: the legacy bridge — a resource already migrated or
-        # registered returns its current version instead of duplicating.
-        if legacy_resource_id is not None:
-            asset = self._find_asset_by_legacy_id(legacy_resource_id)
-            if asset is not None and asset.current_version_id is not None:
-                return self._version_ref(service.get_version(asset.current_version_id))
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            # Resource paths are project-relative by contract (import_service
+            # relativizes files inside the project dir). Resolve against the
+            # PROJECT dir — never the process CWD — so in-project imports
+            # register correctly regardless of how the app was launched.
+            candidate = service.project_path.expanduser().resolve().parent / candidate
+        resolved = candidate.resolve().as_posix()
+        if checksum is None and not external:
+            # Managed RAW needs a checksum for dedup/idempotence + integrity.
+            # A caller passing a project-relative path cannot hash it against
+            # the CWD, so hash the correctly-resolved file once here (matches
+            # the lifecycle helper's behavior for absolute paths).
+            resolved_path = Path(resolved)
+            if resolved_path.is_file():
+                checksum = sha256_file_or_none(resolved_path)
 
-        resolved = Path(path).expanduser().resolve().as_posix()
+        # Stable legacy-bridge asset: once a resource id maps to an asset it
+        # always maps to that SAME asset (never a phantom duplicate).
+        bridged_asset = None
+        if legacy_resource_id is not None:
+            bridged_asset = self._find_asset_by_legacy_id(legacy_resource_id)
 
         if external:
-            # Idempotence 2: same external path already linked.
-            for version in service.document.versions:
-                if not version.managed and version.path == resolved:
-                    self._bridge_legacy_id(version, legacy_resource_id)
-                    return self._version_ref(version)
+            # Idempotence: same external path already linked (index-backed
+            # when the SQLite index is healthy, scan fallback otherwise).
+            existing = self._find_external_by_path(resolved)
+            if existing is not None:
+                self._bridge_legacy_id(existing, legacy_resource_id)
+                return self._version_ref(existing)
+            # Same legacy asset, same external link → return its current version
+            # (reopening a project must not accumulate duplicate links).
+            if bridged_asset is not None and bridged_asset.current_version_id is not None:
+                current = service.get_version(bridged_asset.current_version_id)
+                if not current.managed and current.path == resolved:
+                    return self._version_ref(current)
             version = service.link_external(
-                resolved, name=name, type=kind or None, format=format or None
+                resolved,
+                name=name,
+                type=kind or None,
+                format=format or None,
+                _legacy_resource_id=legacy_resource_id,
             )
-            if legacy_resource_id is not None:
-                asset = self._asset_for(version)
-                if asset is not None:
-                    asset.legacy_resource_id = legacy_resource_id
-                    service._save()
         else:
-            # Idempotence 3: same managed source (path + checksum) already
-            # imported returns the existing immutable RAW version.
-            for version in service.document.versions:
-                if (
-                    version.managed
-                    and version.stage == DataStage.RAW
-                    and version.source_uri == resolved
-                    and version.sha256 == checksum
-                ):
-                    self._bridge_legacy_id(version, legacy_resource_id)
-                    return self._version_ref(version)
+            # Idempotence: same managed source (path + checksum) already
+            # imported returns the existing immutable RAW version. Index-backed
+            # dedup (O(log N)) when the index is fresh; linear scan fallback.
+            existing = self._find_managed_raw(resolved, checksum)
+            if existing is not None:
+                self._bridge_legacy_id(existing, legacy_resource_id)
+                return self._version_ref(existing)
+            if bridged_asset is not None and bridged_asset.current_version_id is not None:
+                current = service.get_version(bridged_asset.current_version_id)
+                # Decide "unchanged" without a caller-supplied checksum by
+                # hashing the file once (cheap when it matches the record).
+                effective = checksum
+                if effective is None:
+                    effective = sha256_file_or_none(resolved)
+                if effective is not None and effective == current.sha256:
+                    self._bridge_legacy_id(current, legacy_resource_id)
+                    return self._version_ref(current)
+                # The SAME asset's source changed: register V2 of this asset
+                # (parent lineage), never a phantom asset.
+                version = service.register_version(
+                    bridged_asset.id,
+                    resolved,
+                    DataStage.RAW,
+                    parent_version_ids=[current.id],
+                )
+                self._bridge_legacy_id(version, legacy_resource_id)
+                for tag in tags or []:
+                    if tag:
+                        service.add_tag(tag, version_id=version.id)
+                return self._version_ref(version)
             version = service.import_raw(
-                resolved, name=name, type=kind or None, format=format or None
+                resolved,
+                name=name,
+                type=kind or None,
+                format=format or None,
+                _legacy_resource_id=legacy_resource_id,
+                known_sha256=checksum,
             )
-            if legacy_resource_id is not None:
-                asset = self._asset_for(version)
-                if asset is not None:
-                    asset.legacy_resource_id = legacy_resource_id
-                    service._save()
         for tag in tags or []:
             if tag:
                 service.add_tag(tag, version_id=version.id)
         return self._version_ref(version)
+
+    # ------------------------------------------------------------ dedup helpers
+    def _find_managed_raw(self, source_uri: str, checksum: str | None) -> DataVersion | None:
+        """Existing managed RAW version for (path, checksum), or None.
+
+        Uses the SQLite index when it is fresh (O(log N)); a missing/stale
+        index falls back to the document scan so idempotence never depends on
+        the rebuildable cache being healthy.
+        """
+        service = self._service
+        if checksum is not None:
+            try:
+                if service.index_revision() == service.document.catalog_revision:
+                    found = service._index.find_managed_raw(source_uri, checksum)
+                    if found is not None:
+                        try:
+                            return service.get_version(found)
+                        except CatalogError:
+                            pass
+            except Exception:
+                pass
+        for version in service.document.versions:
+            if (
+                version.managed
+                and version.stage == DataStage.RAW
+                and version.source_uri == source_uri
+                and version.sha256 == checksum
+            ):
+                return version
+        return None
+
+    def _find_external_by_path(self, resolved: str) -> DataVersion | None:
+        """Existing unmanaged version linked at *resolved*, or None."""
+        service = self._service
+        try:
+            if service.index_revision() == service.document.catalog_revision:
+                found = service._index.find_external_by_path(resolved)
+                if found is not None:
+                    try:
+                        version = service.get_version(found)
+                        if not version.managed:
+                            return version
+                    except CatalogError:
+                        pass
+        except Exception:
+            pass
+        for version in service.document.versions:
+            if not version.managed and version.path == resolved:
+                return version
+        return None
 
     # ------------------------------------------------------------------- runs
     def begin_run(
@@ -243,7 +339,7 @@ class CoreCatalogAdapter:
         service = self._service
         run = service.get_run(run_id)
         asset = service._new_asset(name, kind or None, format or None, None)
-        service.document.assets.append(asset)
+        service._add_asset(asset)
         try:
             # register_version links the run's output in the same atomic save.
             version = service.register_version(
@@ -255,7 +351,7 @@ class CoreCatalogAdapter:
             )
         except Exception:
             if asset in service.document.assets:
-                service.document.assets.remove(asset)
+                service._remove_asset(asset)
             raise
         for tag in tags or []:
             if tag:
@@ -330,7 +426,7 @@ class CoreCatalogAdapter:
         target = service.get_version(target_version_id)
         service.get_version(source_version_id)  # raises if unknown
         if source_version_id not in target.parent_version_ids:
-            target.parent_version_ids.append(source_version_id)
+            service._append_parent(target_version_id, source_version_id)
             service._save()
         return LineageEdge(
             source_version_id=source_version_id,
@@ -339,17 +435,28 @@ class CoreCatalogAdapter:
         )
 
     def _children_of(self, version_id: str) -> list[DataVersion]:
-        return [
-            v
-            for v in self._service.document.versions
-            if version_id in v.parent_version_ids
-        ]
+        service = self._service
+        service._ensure_maps()
+        return list(service._children_by_parent.get(version_id, ()))
+
+    def _lineage_maps(self) -> tuple[dict[str, DataVersion], dict[str, list[str]]]:
+        """Prebuilt ``(by_id, children_by_parent)`` for lineage BFS (P4).
+
+        Building the child map ONCE per walk turns descendants BFS from
+        O(V²) (scanning every version per frontier node) into O(V + E).
+        """
+        service = self._service
+        service._ensure_maps()
+        by_id = service._version_by_id
+        children: dict[str, list[str]] = {}
+        for parent_id, children_list in service._children_by_parent.items():
+            children[parent_id] = [c.id for c in children_list]
+        return by_id, children
 
     def query_lineage(
         self, version_id: str, *, direction: str = "ancestors"
     ) -> list[DataVersionRef]:
-        service = self._service
-        by_id = {v.id: v for v in service.document.versions}
+        by_id, children = self._lineage_maps()
         # Seed with the start node so a cycle can never list a version as its
         # own ancestor/descendant.
         visited: set[str] = {version_id}
@@ -362,7 +469,7 @@ class CoreCatalogAdapter:
                     version = by_id.get(vid)
                     neighbors = version.parent_version_ids if version else []
                 elif direction == "descendants":
-                    neighbors = [c.id for c in self._children_of(vid)]
+                    neighbors = children.get(vid, [])
                 else:
                     raise ValueError(f"unknown lineage direction: {direction!r}")
                 for nid in neighbors:
@@ -376,7 +483,8 @@ class CoreCatalogAdapter:
 
     def direct_ancestors(self, version_id: str) -> list[DataVersionRef]:
         service = self._service
-        by_id = {v.id: v for v in service.document.versions}
+        service._ensure_maps()
+        by_id = service._version_by_id
         version = by_id.get(version_id)
         if version is None:
             return []

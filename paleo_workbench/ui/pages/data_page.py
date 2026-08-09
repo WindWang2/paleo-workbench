@@ -9,12 +9,15 @@ from dataclasses import replace
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout,
-    QWidget,
+    QApplication, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
-from paleo_workbench.project.paths import relativize_path, resolve_project_path
+from paleo_workbench.project.models import (
+    ExportArtifact,
+    ProjectDocument,
+    ResourceItem,
+)
+from paleo_workbench.project.paths import resolve_project_path
 from paleo_workbench.resources.export_service import (
     default_export_dir,
     export_asset_to_path,
@@ -27,8 +30,8 @@ from paleo_workbench.resources.import_service import (
     import_folder,
 )
 from paleo_workbench.resources.io_registry import ROLE_BY_TYPE
-from paleo_workbench.resources.scanner import scan_resources
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.data_lifecycle_controller import DataLifecycleController
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
 from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
@@ -40,11 +43,10 @@ from paleo_workbench.ui.pages.data_view_models import (
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.filter_index import CATEGORIES
-from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport, IntegrityWorker
+from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
-from paleo_workbench.ui.pages.tag_widgets import TagInputDialog
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
 
@@ -93,6 +95,10 @@ class DataPage(QWidget):
         self._verify_job = OwnedWorkerJob(self)
         self._import_in_progress = False
         self._viz_adapter = VizAdapter()
+        # Business orchestration (catalog-aware lifecycle actions) lives in the
+        # controller; the page keeps thin delegating methods for every name
+        # callers (tests, context menu) invoke directly.
+        self._lifecycle = DataLifecycleController(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN, tokens.PAGE_MARGIN)
@@ -162,7 +168,7 @@ class DataPage(QWidget):
         )
 
         # Wire tree & table navigation
-        self.navigation_tree.category_changed.connect(self.asset_table.set_category)
+        self.navigation_tree.category_changed.connect(self._on_navigation_category_changed)
         self.navigation_tree.filter_query_changed.connect(self.asset_table.set_filter_query)
 
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
@@ -242,7 +248,11 @@ class DataPage(QWidget):
         self._visualization_controller.set_project_root(preview_root)
         self.summary_bar.update_state(state)
         self.navigation_tree.update_counts(self._resources, self._artifacts)
-        self.asset_table.update_assets(self._resources, self._artifacts)
+        self.navigation_tree.set_trash_count(len(self._trashed_companions()))
+        display_resources = list(self._resources)
+        if self._trash_view_active():
+            display_resources.extend(self._trashed_companions())
+        self.asset_table.update_assets(display_resources, self._artifacts)
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
@@ -253,6 +263,26 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+
+    def _trash_view_active(self) -> bool:
+        """True when the navigation tree's 回收站 filter is active."""
+        try:
+            query = self.navigation_tree.current_filter_query()
+        except Exception:
+            return False
+        return getattr(query, "node_type", "") == "trash"
+
+    def _on_navigation_category_changed(self, category: str) -> None:
+        self.asset_table.set_category(category)
+        if category in ("回收站", "trash"):
+            # Entering the trash view must surface trashed catalog assets
+            # (they are not part of project.resources).
+            self._refresh()
+
+    def _trashed_companions(self) -> list[ResourceItem]:
+        """Reconstruct legacy ResourceItem companions for trashed catalog
+        assets so the 回收站 view can list and restore them."""
+        return self._lifecycle.trashed_companions()
 
     def _preview_disk_project_root(self) -> Path | None:
         raw = getattr(self.project.meta, "project_root", None)
@@ -405,86 +435,15 @@ class DataPage(QWidget):
         return self.remove_assets(items)
 
     def remove_assets(self, items: list[object]) -> bool:
-        removed_count = 0
-        target_ids = {getattr(it, "id", None) for it in items if getattr(it, "id", None)}
+        """移出项目 (orchestration in DataLifecycleController)."""
+        return self._lifecycle.remove_assets(items)
 
-        before_res = len(self.project.resources)
-        self.project.resources[:] = [
-            r for r in self.project.resources if r.id not in target_ids
-        ]
-        removed_count += before_res - len(self.project.resources)
-
-        before_art = len(self.project.export_artifacts)
-        self.project.export_artifacts[:] = [
-            a for a in self.project.export_artifacts if a.id not in target_ids
-        ]
-        removed_count += before_art - len(self.project.export_artifacts)
-
-        if removed_count > 0:
-            self._set_selected_asset(None)
-            self._refresh()
-            self._set_action_status(f"已移出项目 ({removed_count} 项)")
-            return True
-        return False
+    def restore_selected_asset(self) -> bool:
+        """还原: restore a trashed catalog asset (orchestration in controller)."""
+        return self._lifecycle.restore_selected_asset()
 
     def rescan_selected_asset(self) -> bool:
-        if not isinstance(self._selected_asset, ResourceItem):
-            self._set_action_status("请选择一个项目资源")
-            return False
-        resource = self._selected_asset
-        path = self._resolve_resource_path(resource)
-        if not path.exists():
-            resource.status = "missing"
-            if resource.parsed_summary is None:
-                resource.parsed_summary = {}
-            resource.parsed_summary["preview_warning"] = "文件不存在"
-            self._refresh()
-            self._request_summary(resource)
-            self._set_action_status("文件不存在")
-            return True
-
-        project_path = self._project_file_for_io()
-        scanned = scan_resources(path.parent, project_path=project_path)
-        path_resolved = path.resolve()
-        updated = None
-        for item in scanned:
-            try:
-                item_path = Path(item.path)
-                if not item_path.is_absolute() and project_path is not None:
-                    item_path = Path(resolve_project_path(str(item.path), project_path))
-                if item_path.resolve() == path_resolved:
-                    updated = item
-                    break
-            except OSError:
-                continue
-        if updated is None:
-            self._set_action_status("重新扫描未找到文件")
-            return False
-
-        keep_type = resource.type
-        keep_role = resource.artifact_role
-        keep_tags = list(resource.tags or [])
-        resource.name = updated.name
-        resource.path = updated.path
-        resource.format = updated.format
-        resource.status = updated.status
-        resource.source = updated.source
-        resource.parsed_summary = updated.parsed_summary
-        resource.checksum = updated.checksum
-        resource.external = updated.external
-
-        if keep_type == updated.type or not keep_type:
-            resource.type = updated.type
-            resource.artifact_role = updated.artifact_role or keep_role
-        else:
-            resource.type = keep_type
-            resource.artifact_role = keep_role
-            resource.tags = keep_tags
-
-        self._refresh()
-        self._request_summary(resource)
-        self._set_action_status("已重新扫描")
-        return True
+        return self._lifecycle.rescan_selected_asset()
 
     def open_selected_folder(self) -> Path | None:
         if self._selected_asset is None:
@@ -506,118 +465,44 @@ class DataPage(QWidget):
         return folder
 
     def _create_derived_copy(self, asset: object) -> None:
-        """Create a derived data copy from a locked RAW asset."""
-        asset = self._unwrap_asset(asset)
-        if not isinstance(asset, ResourceItem):
-            self._set_action_status("仅支持为 ResourceItem 数据创建派生副本")
-            return
+        """Create a derived data copy from a locked RAW asset (controller)."""
+        self._lifecycle.create_derived_copy(asset)
 
-        # When the source is bridged to the catalog, route through Core first:
-        # an immutable DERIVED DataVersion with lineage, never touching RAW.
-        derived_item = self._create_derived_via_catalog(asset)
-        if derived_item is None:
-            # Legacy fallback (no catalog wired or Core path failed).
-            derived_item = ResourceItem(
-                name=f"{asset.name}_derived",
-                path=asset.path,
-                type=asset.type,
-                format=asset.format,
-                crs=asset.crs,
-                status=asset.status,
-                tags=["派生", *asset.tags],
-                source=f"derived from {asset.name}",
-                parsed_summary={"derived_from_id": asset.id, "derived_from_name": asset.name, **asset.parsed_summary},
-                checksum=asset.checksum,
-                external=asset.external,
-                artifact_role="derived",
-            )
+    def _create_derived_via_catalog(
+        self,
+        asset: ResourceItem,
+        *,
+        service=None,
+        ref=None,
+    ) -> ResourceItem | None:
+        """Create the DERIVED version through Core; None when not resolvable.
 
-        self.project.resources.append(derived_item)
-        self._refresh()
-        self._set_selected_asset(derived_item)
-        self._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
-
-    def _create_derived_via_catalog(self, asset: ResourceItem) -> ResourceItem | None:
-        """Create the DERIVED version through Core; None when not bridged/failed.
-
-        The returned legacy ResourceItem is a companion pointing at the
-        Core-managed payload so legacy workflows still see the data.
+        Thin delegator — the orchestration lives in the lifecycle controller
+        (tests pin this method name on the page).
         """
-        service, ref = self._catalog_bridge(asset)
-        if service is None or ref is None:
-            return None
-        try:
-            source_version = service.get_version(ref.version_id)
-            source_payload = service.resolve_path(source_version)
-            if not source_payload.is_file():
-                return None
-            version = service.create_derived(
-                source_path=source_payload,
-                parent_version_ids=[source_version.id],
-                name=f"{asset.name}_derived",
-                operation="derived_copy",
-                generator="data_manager",
-            )
-            managed_path = service.resolve_path(version)
-            # Store project-relative when the payload is inside the project
-            # dir (managed storage always is) so .paleo.json stays relocatable.
-            stored_path, _outside = relativize_path(
-                managed_path.as_posix(), service.project_path
-            )
-            return ResourceItem(
-                name=f"{asset.name}_derived",
-                path=stored_path,
-                type=asset.type,
-                format=asset.format,
-                crs=asset.crs,
-                status=asset.status,
-                tags=["派生", *asset.tags],
-                source=f"derived from {asset.name}",
-                parsed_summary={
-                    "derived_from_id": asset.id,
-                    "derived_from_name": asset.name,
-                    "catalog_asset_id": version.asset_id,
-                    "catalog_version_id": version.id,
-                    **asset.parsed_summary,
-                },
-                checksum=version.sha256,
-                external=False,
-                artifact_role="derived",
-            )
-        except Exception:
-            # Catalog failures must never break the UI action; legacy path applies.
-            return None
+        return self._lifecycle.create_derived_via_catalog(asset, service=service, ref=ref)
 
     def _materialize_asset(self, asset: object) -> None:
-        """纳管至项目: promote an external (unmanaged) catalog version to a
-        managed immutable RAW snapshot via the Core service."""
-        asset = self._unwrap_asset(asset)
-        if not isinstance(asset, ResourceItem):
-            self._set_action_status("仅支持纳管 ResourceItem 数据")
-            return
-        service, ref = self._catalog_bridge(asset)
-        if service is None or ref is None:
-            self._set_action_status("未连接数据目录，无法纳管")
-            return
-        if not ref.external:
-            self._set_action_status("该数据已是受管数据")
-            return
-        try:
-            version = service.materialize_external(ref.version_id)
-            managed_path = service.resolve_path(version)
-        except Exception as exc:
-            self._set_action_status(f"纳管失败: {exc}")
-            return
-        # Keep the legacy ResourceItem in sync with the new managed version.
-        # Project-relative storage keeps .paleo.json relocatable.
-        stored_path, _outside = relativize_path(
-            managed_path.as_posix(), service.project_path
-        )
-        asset.external = False
-        asset.path = stored_path
-        asset.checksum = version.sha256
-        self._refresh()
-        self._set_action_status(f"已纳管至项目: {asset.name}")
+        """纳管至项目 (orchestration in DataLifecycleController)."""
+        self._lifecycle.materialize_asset(asset)
+
+    # --- working copies / new versions ---------------------------------------
+
+    def _new_version_from_asset(self, asset: object) -> None:
+        """新建版本 / 工作副本 (orchestration in DataLifecycleController)."""
+        self._lifecycle.new_version_from_asset(asset)
+
+    # --- promote --------------------------------------------------------------
+
+    def _promote_asset(self, asset: object) -> None:
+        """提升为正式数据 (orchestration in DataLifecycleController)."""
+        self._lifecycle.promote_asset(asset)
+
+    # --- export / delivery ----------------------------------------------------
+
+    def _deliver_asset(self, asset: object) -> None:
+        """导出 / 交付 (orchestration in DataLifecycleController)."""
+        self._lifecycle.deliver_asset(asset)
 
     def _show_context_menu(self, global_pos, target) -> None:
         viz_supported = False
@@ -634,7 +519,40 @@ class DataPage(QWidget):
 
         create_derived_act = menu.find_action("ctx_create_derived")
         if create_derived_act:
-            create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+            # §8.2: derived requires an active catalog; without a bridge the
+            # action is disabled with a clear tooltip (never a RAW-path alias).
+            _svc, derived_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
+            if derived_ref is None:
+                create_derived_act.setEnabled(False)
+                create_derived_act.setToolTip("创建派生副本需要活动数据目录")
+            else:
+                create_derived_act.triggered.connect(lambda: self._create_derived_copy(first))
+
+        new_version_act = menu.find_action("ctx_new_version")
+        if new_version_act:
+            _svc, nv_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
+            if nv_ref is None:
+                new_version_act.setEnabled(False)
+                new_version_act.setToolTip("新建版本需要活动数据目录（数据未桥接）")
+            else:
+                new_version_act.triggered.connect(lambda: self._new_version_from_asset(first))
+
+        promote_act = menu.find_action("ctx_promote")
+        if promote_act:
+            _svc, prom_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
+            if prom_ref is None:
+                promote_act.setEnabled(False)
+                promote_act.setToolTip("提升为正式数据需要活动数据目录（数据未桥接）")
+            else:
+                promote_act.triggered.connect(lambda: self._promote_asset(first))
+
+        export_open_act = menu.find_action("ctx_export_open")
+        if export_open_act:
+            export_open_act.triggered.connect(lambda: self._deliver_asset(first))
+
+        restore_act = menu.find_action("ctx_restore")
+        if restore_act:
+            restore_act.triggered.connect(self.restore_selected_asset)
 
         verify_act = menu.find_action("ctx_verify")
         if verify_act:
@@ -846,12 +764,7 @@ class DataPage(QWidget):
 
     def _catalog_service(self):
         """The active Core DataCatalogService, or None (no project catalog)."""
-        try:
-            from paleo_workbench.catalog.runtime import get_catalog_service
-
-            return get_catalog_service()
-        except Exception:
-            return None
+        return self._lifecycle.catalog_service()
 
     def _catalog_bridge(self, resource: object):
         """Resolve a legacy ResourceItem to ``(service, DataVersionRef)``.
@@ -859,105 +772,26 @@ class DataPage(QWidget):
         Returns ``(None, None)`` when no catalog is wired or the resource is
         not bridged (migrated projections have asset id == resource id).
         """
-        if not isinstance(resource, ResourceItem):
-            return None, None
-        try:
-            from paleo_workbench.catalog.runtime import get_catalog
-
-            catalog = get_catalog()
-            if catalog is None:
-                return None, None
-            ref = catalog.resolve_legacy_resource(resource.id)
-        except Exception:
-            return None, None
-        if ref is None:
-            return None, None
-        service = self._catalog_service()
-        if service is None:
-            return None, None
-        return service, ref
+        return self._lifecycle.catalog_bridge(resource)
 
     def _mirror_tag_to_catalog(self, resource: object, tag_name: str, *, add: bool) -> None:
         """Mirror a legacy tag change into the catalog. Best-effort: catalog
         failures never break the UI tag action."""
-        service, ref = self._catalog_bridge(self._unwrap_asset(resource))
-        if service is None or ref is None:
-            return
-        try:
-            if add:
-                service.add_tag(tag_name, asset_id=ref.asset_id)
-            else:
-                service.remove_tag(tag_name, asset_id=ref.asset_id)
-        except Exception:
-            pass
+        self._lifecycle.mirror_tag_to_catalog(resource, tag_name, add=add)
 
     # --- Tag Operations ---
 
     def _handle_tag_added(self, asset: object, tag_name: str) -> None:
-        asset = self._unwrap_asset(asset)
-        if isinstance(asset, ResourceItem):
-            if tag_name not in asset.tags:
-                asset.tags.append(tag_name)
-                self._mirror_tag_to_catalog(asset, tag_name, add=True)
-                self._refresh()
-                self._set_action_status(f"已添加标签 #{tag_name}")
+        self._lifecycle.handle_tag_added(asset, tag_name)
 
     def _handle_tag_removed(self, asset: object, tag_name: str) -> None:
-        asset = self._unwrap_asset(asset)
-        if isinstance(asset, ResourceItem):
-            if tag_name in asset.tags:
-                asset.tags.remove(tag_name)
-                self._mirror_tag_to_catalog(asset, tag_name, add=False)
-                self._refresh()
-                self._set_action_status(f"已移除标签 #{tag_name}")
+        self._lifecycle.handle_tag_removed(asset, tag_name)
 
     def _prompt_add_tag_to_assets(self, items: list[object]) -> None:
-        dlg = TagInputDialog(parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            new_tag = dlg.get_tag_name()
-            if not new_tag:
-                return
-            count = 0
-            for it in items:
-                it = self._unwrap_asset(it)
-                if isinstance(it, ResourceItem):
-                    if new_tag not in it.tags:
-                        it.tags.append(new_tag)
-                        self._mirror_tag_to_catalog(it, new_tag, add=True)
-                        count += 1
-            if count > 0:
-                self._refresh()
-                self._set_action_status(f"已为 {count} 项数据添加标签 #{new_tag}")
+        self._lifecycle.prompt_add_tag_to_assets(items)
 
     def _prompt_remove_tag_from_assets(self, items: list[object]) -> None:
-        all_tags = set()
-        for it in items:
-            it = self._unwrap_asset(it)
-            if isinstance(it, ResourceItem):
-                all_tags.update(it.tags)
-
-        if not all_tags:
-            self._set_action_status("选中数据无可用标签")
-            return
-
-        dlg = TagInputDialog(parent=self)
-        dlg.setWindowTitle("批量移除标签")
-        dlg.label.setText("请输入要移除的标签名称:")
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            tag_to_remove = dlg.get_tag_name()
-            if not tag_to_remove:
-                return
-            count = 0
-            for it in items:
-                it = self._unwrap_asset(it)
-                if isinstance(it, ResourceItem):
-                    if tag_to_remove in it.tags:
-                        it.tags.remove(tag_to_remove)
-                        self._mirror_tag_to_catalog(it, tag_to_remove, add=False)
-                        count += 1
-            if count > 0:
-                self._refresh()
-                self._set_action_status(f"已从 {count} 项数据移除标签 #{tag_to_remove}")
+        self._lifecycle.prompt_remove_tag_from_assets(items)
 
     # --- Integrity Verification ---
 
@@ -977,48 +811,10 @@ class DataPage(QWidget):
         Cheap metadata lookup on the UI thread; hashing itself stays in the
         IntegrityWorker thread. ``(None, {})`` when no catalog is wired.
         """
-        service = self._catalog_service()
-        if service is None:
-            return None, {}
-        bridged: dict[str, str] = {}
-        for item in items:
-            resource = self._unwrap_asset(item)
-            _svc, ref = self._catalog_bridge(resource)
-            if ref is not None and isinstance(resource, ResourceItem):
-                # Keyed by legacy resource id — the worker resolves views by it.
-                bridged[resource.id] = ref.version_id
-        if not bridged:
-            return None, {}
-        return service, bridged
+        return self._lifecycle.bridged_version_map(items)
 
     def verify_assets(self, items: list[object]) -> None:
-        if not items:
-            self._set_action_status("没有可校验的数据资产")
-            return
-        if self._verify_job.is_running:
-            # Re-clicking 校验 while a verify job is finishing must not raise
-            # (OwnedWorkerJob owns one thread at a time).
-            self._set_action_status("正在校验，请稍候")
-            return
-
-        # Catalog-bridged assets are verified via the Core service (the
-        # lifecycle authority); un-bridged assets keep the legacy path.
-        service, bridged = self._bridged_version_map(items)
-        worker = IntegrityWorker(
-            items,
-            project_root=self._preview_disk_project_root(),
-            catalog_service=service,
-            bridged_versions=bridged,
-        )
-        self._verify_job.start(
-            worker,
-            terminal_signals=(worker.finished, worker.failed),
-            result_connections=(
-                (worker.finished, self._on_verify_finished),
-                (worker.failed, self._on_verify_failed),
-            ),
-        )
-        self._set_action_status(f"正在后台校验 {len(items)} 项数据资产完整性...")
+        self._lifecycle.verify_assets(items)
 
     @Slot(object)
     def _on_verify_finished(self, report: IntegrityCheckReport) -> None:
@@ -1129,18 +925,8 @@ class DataPage(QWidget):
         self.project.resources.extend(report.added)
         # Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
         # with the legacy bridge so downstream runs can resolve them. Best-effort:
-        # the catalog seam must never break the import path. Each resource is
-        # registered independently so one failure doesn't skip the rest.
-        try:
-            from paleo_workbench.catalog.lifecycle import register_resource_input
-
-            for resource in report.added:
-                try:
-                    register_resource_input(resource)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        # the catalog seam must never break the import path.
+        self._lifecycle.register_imported_resources(report.added)
         self._refresh()
         self._set_import_status(report)
 
@@ -1150,6 +936,13 @@ class DataPage(QWidget):
     def _update_selection_action_state(self) -> None:
         has_resource = isinstance(self._selected_asset, ResourceItem)
         has_asset = self._selected_asset is not None or bool(self._selected_assets)
-        self.rescan_btn.setEnabled(has_resource and not self._import_in_progress)
-        self.remove_btn.setEnabled(has_asset)
+        selected_trashed = False
+        if isinstance(self._selected_asset, ResourceItem):
+            selected_trashed = bool(
+                (self._selected_asset.parsed_summary or {}).get("catalog_trashed")
+            )
+        self.rescan_btn.setEnabled(
+            has_resource and not selected_trashed and not self._import_in_progress
+        )
+        self.remove_btn.setEnabled(has_asset and not selected_trashed)
         self.open_folder_btn.setEnabled(has_asset)

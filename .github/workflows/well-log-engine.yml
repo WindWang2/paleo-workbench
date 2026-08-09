@@ -4,11 +4,16 @@ on:
   push:
     branches: [main, master]
     paths:
+      # A submodule gitlink bump is recorded as a change to the bare path
+      # "well-log-engine" itself; "well-log-engine/**" does NOT reliably match
+      # it, so list both.
+      - "well-log-engine"
       - "well-log-engine/**"
       - ".github/workflows/well-log-engine.yml"
   pull_request:
     branches: [main, master]
     paths:
+      - "well-log-engine"
       - "well-log-engine/**"
       - ".github/workflows/well-log-engine.yml"
   workflow_dispatch:
@@ -45,6 +50,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # well-log-engine is a git submodule; every job below builds it, so
+      # materialize it up front and fail fast if it is missing. Explicit init
+      # of only well-log-engine (not submodules:recursive): the sibling
+      # geo-viz-engine submodule contains a file whose name is invalid on
+      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
+      # aborts a recursive checkout on windows-latest. Same pattern as
+      # ci.yml's well-log-workstation job.
+      - name: Init well-log-engine submodule
+        shell: bash
+        run: git submodule update --init well-log-engine
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         if: runner.os == 'Linux'
@@ -154,6 +180,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # well-log-engine is a git submodule; every job below builds it, so
+      # materialize it up front and fail fast if it is missing. Explicit init
+      # of only well-log-engine (not submodules:recursive): the sibling
+      # geo-viz-engine submodule contains a file whose name is invalid on
+      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
+      # aborts a recursive checkout on windows-latest. Same pattern as
+      # ci.yml's well-log-workstation job.
+      - name: Init well-log-engine submodule
+        shell: bash
+        run: git submodule update --init well-log-engine
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Run: git submodule update --init well-log-engine"; exit 1;
+          fi
+
       - name: Install Ubuntu deps
         run: |
           sudo apt-get update
@@ -190,6 +237,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # well-log-engine is a git submodule; every job below builds it, so
+      # materialize it up front and fail fast if it is missing. Explicit init
+      # of only well-log-engine (not submodules:recursive): the sibling
+      # geo-viz-engine submodule contains a file whose name is invalid on
+      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
+      # aborts a recursive checkout on windows-latest. Same pattern as
+      # ci.yml's well-log-workstation job.
+      - name: Init well-log-engine submodule
+        shell: bash
+        run: git submodule update --init well-log-engine
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |
@@ -236,6 +304,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # well-log-engine is a git submodule; every job below builds it, so
+      # materialize it up front and fail fast if it is missing. Explicit init
+      # of only well-log-engine (not submodules:recursive): the sibling
+      # geo-viz-engine submodule contains a file whose name is invalid on
+      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
+      # aborts a recursive checkout on windows-latest. Same pattern as
+      # ci.yml's well-log-workstation job.
+      - name: Init well-log-engine submodule
+        shell: bash
+        run: git submodule update --init well-log-engine
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |
@@ -294,6 +383,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # well-log-engine is a git submodule; every job below builds it, so
+      # materialize it up front and fail fast if it is missing. Explicit init
+      # of only well-log-engine (not submodules:recursive): the sibling
+      # geo-viz-engine submodule contains a file whose name is invalid on
+      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
+      # aborts a recursive checkout on windows-latest. Same pattern as
+      # ci.yml's well-log-workstation job.
+      - name: Init well-log-engine submodule
+        shell: bash
+        run: git submodule update --init well-log-engine
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         if: runner.os == 'Linux'
@@ -401,6 +511,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # well-log-engine is a git submodule; every job below builds it, so
+      # materialize it up front and fail fast if it is missing. Explicit init
+      # of only well-log-engine (not submodules:recursive): the sibling
+      # geo-viz-engine submodule contains a file whose name is invalid on
+      # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
+      # aborts a recursive checkout on windows-latest. Same pattern as
+      # ci.yml's well-log-workstation job.
+      - name: Init well-log-engine submodule
+        shell: bash
+        run: git submodule update --init well-log-engine
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |

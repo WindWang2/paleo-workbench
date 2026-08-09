@@ -218,3 +218,68 @@ def test_schema_version_mismatch_means_not_fresh(tmp_path: Path):
     assert index.sync(future) is True
     assert index.is_fresh(future) is True
     assert index.revision() == 7
+
+
+def test_index_schema_bump_rebuilds_stale_db_with_trashed_columns(tmp_path: Path):
+    """An index built by an older schema (no ``trashed`` columns / no
+    ``index_schema_version``) is detected as not fresh and rebuilt with the new
+    columns carrying the tombstone state."""
+    index = CatalogIndex(tmp_path)
+    doc = make_document()
+    # Simulate an OLD index: write the pre-trashed schema without the columns.
+    index._connect().executescript(
+        """
+        CREATE TABLE assets (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'unknown',
+            description TEXT NOT NULL DEFAULT '', current_version_id TEXT,
+            legacy_resource_id TEXT, metadata TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        """
+    )
+    conn = index._connect()
+    conn.execute("INSERT INTO sync_state (key, value) VALUES ('schema_version', '1')")
+    conn.execute("INSERT INTO sync_state (key, value) VALUES ('catalog_revision', '7')")
+    conn.commit()
+    assert index.is_fresh(doc) is False  # missing index_schema_version
+
+    index.sync(doc)
+
+    assert index.is_fresh(doc) is True
+    # The rebuilt table carries trashed state.
+    row = index._connect().execute(
+        "SELECT trashed FROM versions WHERE id = 'ver_1'"
+    ).fetchone()
+    assert row is not None and row[0] == 0
+    row = index._connect().execute(
+        "SELECT trashed FROM assets WHERE id = 'asset_1'"
+    ).fetchone()
+    assert row is not None and row[0] == 0
+
+
+def test_trashed_flags_round_trip_through_index(tmp_path: Path):
+    doc = make_document()
+    doc.assets[0].trashed = True
+    doc.assets[0].trashed_at = "2026-01-01T00:00:00+00:00"
+    doc.versions[1].trashed = True
+    doc.versions[1].trashed_at = "2026-01-01T00:00:00+00:00"
+
+    index = CatalogIndex(tmp_path)
+    index.rebuild(doc)
+
+    row = index._connect().execute(
+        "SELECT trashed, trashed_at FROM assets WHERE id = 'asset_1'"
+    ).fetchone()
+    assert row[0] == 1
+    assert row[1] == "2026-01-01T00:00:00+00:00"
+    row = index._connect().execute(
+        "SELECT trashed, trashed_at FROM versions WHERE id = 'ver_2'"
+    ).fetchone()
+    assert row[0] == 1
+    assert row[1] == "2026-01-01T00:00:00+00:00"
+    # Active items remain untrashed.
+    row = index._connect().execute(
+        "SELECT trashed FROM versions WHERE id = 'ver_1'"
+    ).fetchone()
+    assert row[0] == 0

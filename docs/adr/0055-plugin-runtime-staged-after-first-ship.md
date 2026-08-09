@@ -22,7 +22,7 @@ Desktop **首发**（epic #288）仅交付 **声明式 Custom Layer + 同源/同
 | 能力 | 状态 |
 |------|------|
 | 声明式 Custom Layer 原语（折线/三角/矩形/符号/裁切等） | 引擎 + ADR 0018/0046 |
-| 同源/同工具链内嵌（Python 宿主调引擎 API） | `well_log_workstation` + bindings |
+| 同源/同工具链内嵌（Python 宿主调引擎 API） | `well-log-engine/apps/wellplot-desktop/well_log_workstation` + bindings |
 | 不可信资产校验策略 | ADR 0042 |
 
 首发 **没有**：entry-point 自动加载第三方插件、隔离进程、签名校验、完整 Command 总线审计 UI。
@@ -56,4 +56,4 @@ Desktop **首发**（epic #288）仅交付 **声明式 Custom Layer + 同源/同
 
 - T17 门禁闭合：规格存在，可拆 P.\* 实现单。
 - 产品话术：首发 = Custom Layer + SDK 嵌入；「插件市场 / 任意 .so 热插拔」属后续。
-- 宿主可先落地 **无动态加载** 的扩展点目录与 **可选** Command 审计环（见 `well_log_workstation/extension_points.py`、`command_audit.py`），不构成完整 Runtime。
+- 宿主可先落地 **无动态加载** 的扩展点目录与 **可选** Command 审计环（见 `well-log-engine/apps/wellplot-desktop/well_log_workstation/extension_points.py`、`well-log-engine/apps/wellplot-desktop/well_log_workstation/command_audit.py`），不构成完整 Runtime。

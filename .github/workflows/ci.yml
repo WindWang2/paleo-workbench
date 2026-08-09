@@ -7,14 +7,12 @@ on:
     branches: [main, master]
 
 jobs:
-  # Full monorepo suite — advisory (see docs/ci-merge-policy.md, issue #234).
-  # Known failures: tests/advisory_xfail.py. continue-on-error until suite is
-  # fully green without quarantine.
+  # Full monorepo suite — required product gate (see docs/ci-merge-policy.md).
+  # The suite must be green without quarantine; no continue-on-error.
   test:
-    name: Tests (Python ${{ matrix.python-version }}) [advisory]
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    continue-on-error: true
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -105,26 +103,18 @@ jobs:
           PYTHONFAULTHANDLER: "1"
         run: |
           # Per-test timeout (thread: better for pure-Python hangs; native still
-          # may need the outer ceiling). -v prints the last started test when
-          # the suite dies so the hung case is identifiable in CI logs.
-          # Outer 12m ceiling (was 8m) for install-heavy runners; exit 124 =
-          # advisory red, not a product merge blocker (see merge-gate job).
-          set +e
-          timeout --signal=TERM --kill-after=30s 12m \
-            python -m pytest -v --tb=line \
-              --timeout=45 \
-              --timeout-method=thread \
-              -m "not slow" \
-              --durations=25
-          code=$?
-          if [ "$code" -eq 124 ]; then
-            echo "::warning::Full monorepo suite hit the 12m ceiling (hang or too slow). Advisory only — merge-gate does not require this job."
-          fi
-          exit "$code"
+          # may need the job-level ceiling). -v prints the last started test
+          # when the suite dies so the hung case is identifiable in CI logs.
+          # A green suite fits well inside the 60m job timeout (locally ~2m).
+          python -m pytest -v --tb=line \
+            --timeout=45 \
+            --timeout-method=thread \
+            -m "not slow" \
+            --durations=25
 
   # Focused job for Well Log Workstation (#207 / PR #233): no geo-viz submodule,
-  # no map_edit_core. Host-only (engine optional) so CI stays green when the
-  # monorepo full suite hits the hang ceiling.
+  # no map_edit_core. Host-only (engine optional) so the workstation suite is
+  # isolated from the monorepo install (see docs/ci-merge-policy.md).
   well-log-workstation:
     name: Well Log Workstation (host)
     runs-on: ubuntu-latest
@@ -194,15 +184,17 @@ jobs:
               --timeout-method=thread {} +
 
   # Explicit product merge gate. See docs/ci-merge-policy.md.
-  # Cross-workflow: WellLogEngine C++ must also be green (separate workflow).
+  # Requires the FULL monorepo Tests matrix (3.12 + 3.13) plus the Well Log
+  # Workstation host matrix. Cross-workflow: WellLogEngine C++ must also be
+  # green (separate workflow well-log-engine.yml — required, not edited here).
   merge-gate:
-    name: Merge gate (workstation host)
-    needs: [well-log-workstation]
+    name: Merge gate (full monorepo + workstation)
+    needs: [test, well-log-workstation]
     runs-on: ubuntu-latest
     steps:
       - name: Confirm product gates
         run: |
+          echo "Full monorepo Tests (Python 3.12 + 3.13) matrix is green."
           echo "Well Log Workstation (host) matrix is green."
           echo "Also require workflow 'WellLogEngine C++' on the same SHA."
-          echo "Full monorepo Tests (Python) [advisory] is not a merge blocker."
-          echo "Policy: docs/ci-merge-policy.md (#234)."
+          echo "Policy: docs/ci-merge-policy.md."

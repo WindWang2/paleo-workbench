@@ -47,3 +47,8 @@ native/**/*.egg-info/
 .cursor/
 .claude/
 .gstack/
+
+# Local build / diagnostic artifacts (never tracked)
+build/
+CMakeFiles/
+.zcode/

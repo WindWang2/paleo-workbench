@@ -69,6 +69,9 @@ def test_load_correlation_wells_merges_prediction(qtbot, monkeypatch):
 
 
 def test_page_lists_wells_and_loads_section(qtbot, monkeypatch):
+    # Legacy CrossWell host is the target; the engine backend (default when the
+    # welllog binding is present) would not mount legacy canvases.
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     project = ProjectDocument.new("Page")
     project.stratigraphy.target_horizon = "H1"
     project.resources.append(

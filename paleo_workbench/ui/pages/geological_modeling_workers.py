@@ -22,16 +22,24 @@ logger = logging.getLogger(__name__)
 
 
 class GeologicalModelingWorker(QObject):
-    """Asynchronous worker for CPU-heavy 3D geological modeling geometry generation."""
+    """Asynchronous worker for CPU-heavy 3D geological modeling geometry generation.
+
+    The volume / borehole / tunnel / fault geometry is SYNTHETIC DEMO data
+    (formula volume + hardcoded records), so the result is explicitly marked
+    ``demo=True`` / ``source="synthetic/demo"`` and the page shows a Demo
+    badge. A future real-data worker must pass ``demo=False`` and provide a
+    real input provenance (P3 structural split).
+    """
     completed = Signal(dict)
     failed = Signal(str)
     progress = Signal(int)
     terminal = Signal()
 
-    def __init__(self, density: str, algorithm: str, parent=None):
+    def __init__(self, density: str, algorithm: str, parent=None, *, demo: bool = True):
         super().__init__(parent)
         self.density = density
         self.algorithm = algorithm
+        self.demo = demo
 
     def run(self) -> None:
         try:
@@ -155,7 +163,10 @@ class GeologicalModelingWorker(QObject):
                 "tunnels": t_geom,
                 "faults": f_geom,
                 "bh_raw": bh_raw,
-                "faults_raw": faults_raw
+                "faults_raw": faults_raw,
+                "demo": self.demo,
+                "source": "synthetic/demo" if self.demo else "real_data",
+                "algorithm": self.algorithm,
             })
         except Exception as e:
             self.failed.emit(str(e))
@@ -192,7 +203,7 @@ class ExportWorker(QObject):
 
 
 class AdvisorWorker(QObject):
-    """Asynchronous worker for AI consistency analysis."""
+    """Asynchronous worker for rule-based data consistency analysis."""
     completed = Signal(dict, dict)
     failed = Signal(str)
     terminal = Signal()
@@ -205,7 +216,7 @@ class AdvisorWorker(QObject):
     def run(self) -> None:
         from paleo_workbench.viz.geomodel.advisor import check_boreholes, check_coplanar_faults
         try:
-            time.sleep(0.5)  # Simulated AI analysis latency
+            time.sleep(0.5)  # Simulated analysis latency (UI affordance)
             bh_report = check_boreholes(self.bh_data)
             fault_report = check_coplanar_faults(self.faults_data)
             self.completed.emit(bh_report, fault_report)

@@ -70,20 +70,41 @@ def test_view_panel_bridges_mode_and_attribute(qtbot):
     assert panel.attribute_label()
 
 
-def test_page_run_creates_task_and_updates_view(qtbot):
+def test_page_run_creates_task_and_updates_view(qtbot, tmp_path):
+    from paleo_workbench.catalog import (
+        CoreCatalogAdapter,
+        DataCatalogService,
+        reset_catalog,
+        set_catalog,
+    )
+    from paleo_workbench.prediction.providers import ensure_default_models
+
     project = ProjectDocument.new("Run")
     project.stratigraphy.target_horizon = "H9"
-    page = SeismicPredictionPage()
-    qtbot.addWidget(page)
-    page.set_project(project)
-    page.update_state([], project=project)
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project_path)
+    set_catalog(CoreCatalogAdapter(service))
+    ensure_default_models(service)
+    try:
+        page = SeismicPredictionPage()
+        qtbot.addWidget(page)
+        page.set_project(project)
+        page.update_state([], project=project)
 
-    page.context_toolbar.run_btn.click()
+        # Production path needs a registered production model; the demo path is
+        # the explicit, honestly-marked run available out of the box.
+        with qtbot.waitSignal(page.prediction_updated, timeout=5000):
+            page.context_toolbar.demo_btn.click()
 
-    assert len(project.prediction_tasks) == 1
-    assert page.view_panel.volume_shape == (8, 10, 12)
-    assert page.control_panel.horizon_value.text() == "H9"
-    assert "H9" in page.context_toolbar.task_value.text()
+        assert len(project.prediction_tasks) == 1
+        assert page.view_panel.volume_shape == (8, 10, 12)
+        assert page.control_panel.horizon_value.text() == "H9"
+        assert "H9" in page.context_toolbar.task_value.text()
+    finally:
+        reset_catalog()
+        service.close()
 
 
 def test_app_send_to_mapping_compiles_draft(qtbot):

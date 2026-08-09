@@ -8,6 +8,8 @@ with a real cross-correlation implementation.
 from __future__ import annotations
 
 import logging
+import os
+
 import numpy as np
 
 from PySide6.QtCore import QRectF, Qt, QObject, QEvent, Signal
@@ -32,14 +34,8 @@ from paleo_workbench.viz.joint_well_pick import (
 from geoviz import (
     ClippedGLMeshItem,
     ClippedGLVolumeItem,
-    analyze_lithology_crossplot,
-    blend_rgba,
-    correlate_synthetic_to_trace,
-    generate_fence_mesh,
-    offset_curve_along_trajectory,
-    shift_depths,
-    synthetic_from_logs,
 )
+from paleo_workbench.viz.geomodel import analysis
 from paleo_workbench.viz.geomodel.models import GridSpec
 from paleo_workbench.ui.pages.geological_modeling_workers import (
     GeologicalModelingWorker,
@@ -50,6 +46,23 @@ from paleo_workbench.ui.pages.ai_check_advisor_dialog import AICheckAdvisorDialo
 from paleo_workbench.ui.pages.lithology_crossplot_dialog import LithologyCrossplotDialog
 
 logger = logging.getLogger(__name__)
+
+
+def _opengl_widget_supported() -> bool:
+    """True when QOpenGLWidget can be shown on the current Qt platform.
+
+    On the ``offscreen`` platform (headless CI / tests) Qt itself prints
+    "QOpenGLWidget is not supported on this platform".  Showing a pyqtgraph
+    GLViewWidget there makes Qt deliver paint events with no GL context, and
+    pyqtgraph's ``initializeGL`` then crashes on ``self.context()`` returning
+    None — which can segfault the process during event processing or teardown.
+    ``QOpenGLContext.create()``/``makeCurrent()`` both lie here, so the
+    platform chosen via ``QT_QPA_PLATFORM`` is the only reliable signal (the
+    same check the 3D tests use, see
+    tests/test_geological_modeling_3d_page.py::_opengl_widget_supported).
+    """
+    return os.environ.get("QT_QPA_PLATFORM", "") != "offscreen"
+
 
 # ---- Camera Presets (eliminates duplicated lambdas) ----
 _CAMERA_PERSPECTIVE = dict(distance=250, elevation=30, azimuth=45)
@@ -472,10 +485,16 @@ class GeologicalModeling3DPage(QWidget):
         self.combo_density.setCurrentIndex(1)
         cfg_layout.addWidget(self.combo_density)
 
-        cfg_layout.addWidget(QLabel("属性插值算法"))
-        self.combo_algo = QComboBox()
-        self.combo_algo.addItems(["克里金插值 (Kriging)", "顺序高斯模拟 (SGS)", "逆距离加权 (IDW)"])
-        cfg_layout.addWidget(self.combo_algo)
+        cfg_layout.addWidget(QLabel("数据来源"))
+        # The 属性插值算法 selector (克里金/SGS/IDW) advertised algorithms that
+        # were never executed — removed in the P2 scientific-honesty wave. The
+        # current volume/borehole/tunnel/fault data is synthetic demo data.
+        self.demo_source_label = QLabel("合成演示数据 (Demo)")
+        self.demo_source_label.setObjectName("DemoSourceLabel")
+        self.demo_source_label.setStyleSheet(
+            "color: #b58900; font-weight: 600;"
+        )
+        cfg_layout.addWidget(self.demo_source_label)
 
         cfg_layout.addWidget(QLabel("地层模型不透明度 (Volume Opacity)"))
         self.slider_opacity = QSlider(Qt.Horizontal)
@@ -641,7 +660,7 @@ class GeologicalModeling3DPage(QWidget):
 
         right_layout.addWidget(card_export)
 
-        # CARD 4: AI Check Advisor Side Dialog
+        # CARD 4: Rule-based Consistency Advisor Side Dialog
         card_ai = QFrame()
         card_ai.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
             tokens.BG_SEARCH, tokens.RADIUS_CARD, tokens.BORDER
@@ -649,16 +668,16 @@ class GeologicalModeling3DPage(QWidget):
         ai_layout = QVBoxLayout(card_ai)
         ai_layout.setSpacing(tokens.SPACE_2)
 
-        title_ai = QLabel("AI 专家复核与诊断顾问")
+        title_ai = QLabel("地质数据一致性核复顾问")
         title_ai.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
         ai_layout.addWidget(title_ai)
 
-        desc_ai = QLabel("通过 AI 自动分析当前项目下所有钻孔的深度分层完整性，并校验平行断层共面问题。")
+        desc_ai = QLabel("基于规则自动分析当前项目下所有钻孔的深度分层完整性，并校验平行断层共面问题。")
         desc_ai.setWordWrap(True)
         desc_ai.setStyleSheet("font-size: 11px; color: %s;" % tokens.TEXT_SECONDARY)
         ai_layout.addWidget(desc_ai)
 
-        self.btn_ai_advisor = QPushButton("开启 AI 一致性诊断")
+        self.btn_ai_advisor = QPushButton("开启一致性诊断")
         self.btn_ai_advisor.setObjectName("PrimaryButton")
         self.btn_ai_advisor.setEnabled(False)  # Enable only after data is loaded
         self.btn_ai_advisor.clicked.connect(self._run_ai_advisor)
@@ -1200,9 +1219,9 @@ class GeologicalModeling3DPage(QWidget):
 
         fractions = self._stratal_fractions.currentData() or (0.25, 0.50, 0.75)
 
-        if demo or renderer is None or not getattr(renderer, "_loaded", False) \
-                or renderer.volume_data() is None:
-            # Demo fallback — load a synthetic volume directly on the renderer.
+        if demo:
+            # EXPLICIT demo path (checkbox checked): synthetic volume so the
+            # feature is visible without SEGY; the status line marks it Demo.
             if renderer is None:
                 self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
                 return
@@ -1222,8 +1241,19 @@ class GeologicalModeling3DPage(QWidget):
                 opacity=0.8,
             )
             self._stratal_status.setText(
-                "已用合成演示体生成 %d 张比例切片（无 SEGY 预览模式）。"
+                "已用合成演示体生成 %d 张比例切片（演示预览模式）。"
                 % len(surfaces)
+            )
+            return
+
+        # Real-data path: no volume available and demo NOT requested → show the
+        # unavailable state instead of silently injecting synthetic data
+        # (honesty contract: synthetic output only on explicit demo request).
+        if renderer is None or not getattr(renderer, "_loaded", False) \
+                or renderer.volume_data() is None:
+            self._stratal_status.setText(
+                "未加载体数据：无法生成地层切片。"
+                "可勾选“用合成演示体（无 SEGY 时预览）”查看演示效果。"
             )
             return
 
@@ -1354,7 +1384,7 @@ class GeologicalModeling3DPage(QWidget):
             tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
         )
         hint = QLabel(
-            "导出与诊断：FLAC3D / Abaqus 数值模拟网格导出，AI 一致性诊断顾问。"
+            "导出与诊断：FLAC3D / Abaqus 数值模拟网格导出，一致性诊断顾问。"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
@@ -1364,7 +1394,7 @@ class GeologicalModeling3DPage(QWidget):
         self._diag_export_proxy = QPushButton("导出数值模拟模型")
         self._diag_export_proxy.clicked.connect(self.btn_export.click)
         row.addWidget(self._diag_export_proxy)
-        self._diag_ai_proxy = QPushButton("开启 AI 一致性诊断")
+        self._diag_ai_proxy = QPushButton("开启一致性诊断")
         self._diag_ai_proxy.clicked.connect(self.btn_ai_advisor.click)
         row.addWidget(self._diag_ai_proxy)
         layout.addStretch(1)
@@ -1842,6 +1872,14 @@ class GeologicalModeling3DPage(QWidget):
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
         if self._joint_widget is not None:
             return
+        if not _opengl_widget_supported():
+            # The joint renderer is a GLViewWidget; mounting it on a platform
+            # without OpenGL segfaults as soon as Qt paints it. Degrade to the
+            # placeholder instead of crashing the whole app.
+            self._joint_3d_placeholder.setText(
+                "3D 渲染不可用：当前平台不支持 OpenGL（offscreen）"
+            )
+            return
         if self._joint_host.scene is None:
             self._joint_3d_placeholder.setText(
                 f"联合引擎不可用: {self._joint_host.engine_error or 'unknown'}"
@@ -2235,9 +2273,11 @@ class GeologicalModeling3DPage(QWidget):
         self.progress_bar.setValue(0)
 
         density = self.combo_density.currentText()
-        algo = self.combo_algo.currentText()
+        # algorithm is a constant label — the synthetic demo volume does not
+        # implement 克里金/SGS/IDW interpolation (the dead selector was removed).
+        algo = "synthetic_demo"
 
-        worker = GeologicalModelingWorker(density, algo)
+        worker = GeologicalModelingWorker(density, algo, demo=True)
         worker.progress.connect(self.progress_bar.setValue)
 
         self._modeling_job.start(
@@ -2253,6 +2293,14 @@ class GeologicalModeling3DPage(QWidget):
     def _on_modeling_completed(self, result: dict) -> None:
         self.bh_raw_data = result["bh_raw"]
         self.faults_raw_data = result["faults_raw"]
+
+        # Honest demo marking (P2): synthetic output is badged in the UI and
+        # the modeling action is recorded as a catalog DataRun with an
+        # explicit synthetic source — never implied to be real data.
+        is_demo = bool(result.get("demo", True))
+        if is_demo:
+            self.demo_source_label.setText("合成演示数据 (Demo)")
+        self._register_modeling_run(result, is_demo=is_demo)
 
         # Clear existing active GL elements
         for item in self.active_items:
@@ -2314,6 +2362,37 @@ class GeologicalModeling3DPage(QWidget):
 
         logger.info("3D geological modeling successfully updated in viewport.")
 
+    def _register_modeling_run(self, result: dict, *, is_demo: bool) -> None:
+        """Registration seam (P2): record the modeling action as a DataRun.
+
+        The synthetic demo output is in-memory (no payload file yet), so the
+        run carries the honest ``source``/``demo`` marking with no version. A
+        real-data worker (P3 structural split) passes ``output_path`` so the
+        modeled result is also registered as a DERIVED DataVersion. Catalog
+        failures never block rendering.
+        """
+        try:
+            from paleo_workbench.catalog import get_catalog
+
+            catalog = get_catalog()
+            if catalog is None:
+                return
+            from paleo_workbench.catalog.lifecycle import register_modeling_run
+
+            register_modeling_run(
+                name="三维地质建模（合成演示）" if is_demo else "三维地质建模",
+                source="synthetic/demo" if is_demo else "real_data",
+                demo=is_demo,
+                parameters={
+                    "density": self.combo_density.currentText(),
+                    "algorithm": result.get("algorithm", "synthetic_demo"),
+                    "source": "synthetic/demo" if is_demo else "real_data",
+                },
+                catalog=catalog,
+            )
+        except Exception:  # noqa: BLE001 — provenance must never block 3D render
+            logger.exception("register_modeling_run failed (best-effort)")
+
     def _on_modeling_failed(self, err: str) -> None:
         self.btn_run.setEnabled(True)
         self.progress_bar.setVisible(False)
@@ -2335,39 +2414,18 @@ class GeologicalModeling3DPage(QWidget):
         self._seismic_slice_items.clear()
 
     def _generate_well_curve_overlays(self) -> None:
-        """Generate 3D GR log curves and synthetic seismogram traces for all boreholes."""
+        """Generate 3D GR log curves and synthetic seismogram traces for all boreholes.
+
+        Pure computation lives in :func:`paleo_workbench.viz.geomodel.analysis.generate_well_curve_overlays`;
+        this method only wires the returned data into GL items.
+        """
         freq = float(self.slider_wavelet_freq.value())
         td_shift = float(self.slider_td_shift.value())
 
-        for bh in self.bh_raw_data:
-            bx, by = bh["x"], bh["y"]
-            layers = bh["layers"]
-            if not layers:
-                continue
-
-            # Build a vertical well path from surface to total depth
-            max_depth = max(l["bottom"] for l in layers)
-            n_samples = max(int(max_depth), 50)
-            depths = np.linspace(0, max_depth, n_samples, dtype=np.float32)
-            well_path = np.column_stack([
-                np.full(n_samples, bx, dtype=np.float32),
-                np.full(n_samples, by, dtype=np.float32),
-                -depths,  # Z is upward, depth is downward
-            ])
-
-            # Synthesize GR-like curve (assign value per lithology)
-            gr_values = np.zeros(n_samples, dtype=np.float32)
-            _litho_gr = {"砂岩": 40.0, "泥岩": 120.0, "石灰岩": 25.0, "花岗岩": 80.0}
-            for layer in layers:
-                mask = (depths >= layer["top"]) & (depths < layer["bottom"])
-                gr_values[mask] = _litho_gr.get(layer["lithology"], 60.0)
-            # Add realistic noise
-            gr_values += np.random.default_rng(42).normal(0, 8.0, n_samples).astype(np.float32)
-
-            # Offset the GR log sideways off the trajectory (engine: geoviz_well_seismic_3d)
-            curve_pts = offset_curve_along_trajectory(well_path, gr_values, scale=0.15)
+        for overlay in analysis.generate_well_curve_overlays(self.bh_raw_data, freq, td_shift):
+            # GR log offset sideways off the trajectory
             line_item = gl.GLLinePlotItem(
-                pos=curve_pts, color=(0.2, 1.0, 0.4, 0.9), width=2.0, antialias=True
+                pos=overlay["curve_pts"], color=(0.2, 1.0, 0.4, 0.9), width=2.0, antialias=True
             )
             self.gl_widget.addItem(line_item)
             self._well_curve_items.append(line_item)
@@ -2378,34 +2436,10 @@ class GeologicalModeling3DPage(QWidget):
                 self.mesh_items_map[key] = []
             self.mesh_items_map[key].append(line_item)
 
-            # Synthesize sonic and density logs for synthetic seismogram
-            sonic = np.zeros(n_samples, dtype=np.float32)
-            density = np.zeros(n_samples, dtype=np.float32)
-            _litho_sonic = {"砂岩": 180.0, "泥岩": 250.0, "石灰岩": 150.0, "花岗岩": 120.0}
-            _litho_density = {"砂岩": 2.2, "泥岩": 2.4, "石灰岩": 2.65, "花岗岩": 2.7}
-            for layer in layers:
-                mask = (depths >= layer["top"]) & (depths < layer["bottom"])
-                sonic[mask] = _litho_sonic.get(layer["lithology"], 180.0)
-                density[mask] = _litho_density.get(layer["lithology"], 2.4)
-
-            synthetic = synthetic_from_logs(sonic, density, wavelet_freq=freq)
-            if len(synthetic) > 0:
-                # Align synthetic length to well path subset
-                syn_len = min(len(synthetic), n_samples - 1)
-                syn_path = well_path[1:syn_len + 1].copy()
-
-                # Apply T-D shift
-                aligned_depths = shift_depths(
-                    -syn_path[:, 2], td_shift
-                )
-                syn_path[:, 2] = -aligned_depths
-
-                # Offset synthetic trace in the opposite direction from GR
-                syn_curve_pts = offset_curve_along_trajectory(
-                    syn_path, synthetic[:syn_len], scale=5.0
-                )
+            # Synthetic seismogram trace (offset opposite to the GR curve)
+            if overlay["syn_curve_pts"] is not None:
                 syn_item = gl.GLLinePlotItem(
-                    pos=syn_curve_pts, color=(1.0, 0.4, 0.2, 0.9), width=2.0, antialias=True
+                    pos=overlay["syn_curve_pts"], color=(1.0, 0.4, 0.2, 0.9), width=2.0, antialias=True
                 )
                 self.gl_widget.addItem(syn_item)
                 self._synthetic_items.append(syn_item)
@@ -2416,37 +2450,11 @@ class GeologicalModeling3DPage(QWidget):
                 self.mesh_items_map[syn_key].append(syn_item)
 
     def _generate_seismic_slice_overlay(self) -> None:
-        """Generate a synthetic horizontal seismic amplitude slice in the 3D viewport."""
-        # Create a planar mesh representing a seismic inline slice at z=-60
-        nx_pts, ny_pts = 30, 30
-        x = np.linspace(-80, 80, nx_pts)
-        y = np.linspace(-80, 80, ny_pts)
-        xx, yy = np.meshgrid(x, y)
-        # Synthetic seismic amplitude pattern
-        zz = -60.0 + 3.0 * np.sin(xx / 15.0) * np.cos(yy / 15.0)
+        """Generate a synthetic horizontal seismic amplitude slice in the 3D viewport.
 
-        verts = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()]).astype(np.float32)
-
-        # Build face indices for grid quads (as triangles)
-        faces = []
-        for j in range(ny_pts - 1):
-            for i in range(nx_pts - 1):
-                idx = j * nx_pts + i
-                faces.append([idx, idx + 1, idx + nx_pts])
-                faces.append([idx + 1, idx + nx_pts + 1, idx + nx_pts])
-        faces = np.array(faces, dtype=np.int32)
-
-        # Color by amplitude
-        amp = (zz.ravel() + 63.0) / 6.0  # normalize 0-1
-        amp = np.clip(amp, 0, 1)
-        colors = np.zeros((len(faces), 4), dtype=np.float32)
-        for fi, face in enumerate(faces):
-            a = float(np.mean(amp[face]))
-            # Blue-white-red colormap
-            if a < 0.5:
-                colors[fi] = [0.2, 0.2 + 0.6 * (a * 2), 0.9, 0.55]
-            else:
-                colors[fi] = [0.9, 0.2 + 0.6 * (2 - a * 2), 0.2, 0.55]
+        Geometry comes from :func:`paleo_workbench.viz.geomodel.analysis.generate_seismic_slice_overlay`.
+        """
+        verts, faces, colors = analysis.generate_seismic_slice_overlay()
 
         slice_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=False)
         self.gl_widget.addItem(slice_item)
@@ -2684,7 +2692,7 @@ class GeologicalModeling3DPage(QWidget):
 
     def _on_advisor_failed(self, err: str) -> None:
         self.btn_ai_advisor.setEnabled(True)
-        QMessageBox.warning(self, "诊断分析失败", f"AI 一致性复核诊断遇到错误:\n{err}")
+        QMessageBox.warning(self, "诊断分析失败", f"一致性复核诊断遇到错误:\n{err}")
 
     # ------------------------------------------------------------------ #
     # Well-Seismic Tie Calibration
@@ -2704,87 +2712,47 @@ class GeologicalModeling3DPage(QWidget):
         self.gl_widget.update()
 
     def _run_auto_tie(self) -> None:
-        """Run real cross-correlation auto-tie via geoviz.correlate_synthetic_to_trace."""
+        """Run real cross-correlation auto-tie via ``geoviz.correlate_synthetic_to_trace``.
+
+        The computation lives in
+        :func:`paleo_workbench.viz.geomodel.analysis.run_auto_tie`; this method
+        only applies the result to the calibration controls.
+        """
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
             return
 
         freq = float(self.slider_wavelet_freq.value())
+        result = analysis.run_auto_tie(self.bh_raw_data, freq)
 
-        # Use first borehole for calibration
-        bh = self.bh_raw_data[0]
-        layers = bh["layers"]
-        max_depth = max(l["bottom"] for l in layers)
-        n_samples = max(int(max_depth), 50)
-        depths = np.linspace(0, max_depth, n_samples, dtype=np.float32)
-
-        _litho_sonic = {"砂岩": 180.0, "泥岩": 250.0, "石灰岩": 150.0, "花岗岩": 120.0}
-        _litho_density = {"砂岩": 2.2, "泥岩": 2.4, "石灰岩": 2.65, "花岗岩": 2.7}
-
-        sonic = np.zeros(n_samples, dtype=np.float32)
-        density = np.zeros(n_samples, dtype=np.float32)
-        for layer in layers:
-            mask = (depths >= layer["top"]) & (depths < layer["bottom"])
-            sonic[mask] = _litho_sonic.get(layer["lithology"], 180.0)
-            density[mask] = _litho_density.get(layer["lithology"], 2.4)
-
-        synthetic = synthetic_from_logs(sonic, density, wavelet_freq=freq)
-
-        # Generate a synthetic "field seismic trace" (shifted version of synthetic + noise)
-        if len(synthetic) > 0:
-            rng = np.random.default_rng(123)
-            true_shift = 12  # samples
-            seismic_trace = np.roll(synthetic, true_shift) + rng.normal(0, 0.05, len(synthetic))
-
-            shift_samples, cc = correlate_synthetic_to_trace(synthetic, seismic_trace)
-
-            self.slider_td_shift.setValue(shift_samples)
-            self.label_correlation.setText(f"互相关系数 (Cross-Correlation CC): {cc:.3f}")
-
-            QMessageBox.information(
-                self, "自动标定完成",
-                f"已完成互相关自动井震标定对齐。\n"
-                f"最优时深度转换时移量: {shift_samples:+d} samples\n"
-                f"最大互相关系数 CC: {cc:.3f}"
-            )
-        else:
+        if result is None:
             QMessageBox.warning(self, "标定失败", "无法生成合成地震记录，请检查数据。")
+            return
+
+        shift_samples = result["shift_samples"]
+        cc = result["cc"]
+
+        self.slider_td_shift.setValue(shift_samples)
+        self.label_correlation.setText(f"互相关系数 (Cross-Correlation CC): {cc:.3f}")
+
+        QMessageBox.information(
+            self, "自动标定完成",
+            f"已完成互相关自动井震标定对齐。\n"
+            f"最优时深度转换时移量: {shift_samples:+d} samples\n"
+            f"最大互相关系数 CC: {cc:.3f}"
+        )
 
     # ------------------------------------------------------------------ #
     # Advanced Multi-Attribute & Crossplot Analysis
     # ------------------------------------------------------------------ #
 
     def _generate_rgb_fusion_slice(self) -> None:
-        """Generate RGB frequency attribute fusion horizontal slice in 3D viewport."""
-        nx_pts, ny_pts = 40, 40
-        x = np.linspace(-80, 80, nx_pts)
-        y = np.linspace(-80, 80, ny_pts)
-        xx, yy = np.meshgrid(x, y)
-        zz = -40.0 + 2.0 * np.sin(xx / 10.0) * np.cos(yy / 10.0)
+        """Generate RGB frequency attribute fusion horizontal slice in 3D viewport.
 
-        # Synthetic frequency channels
-        ch_r = np.sin(xx / 12.0) * np.cos(yy / 12.0) + 1.0  # Low frequency (15Hz)
-        ch_g = np.cos(xx / 8.0) * np.sin(yy / 8.0) + 1.0   # Mid frequency (35Hz)
-        ch_b = np.sin(xx / 5.0 + yy / 5.0) + 1.0          # High frequency (55Hz)
-
-        rgba_grid = blend_rgba(ch_r, ch_g, ch_b, alpha=0.85)
-
-        verts = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()]).astype(np.float32)
-
-        faces = []
-        face_colors = []
-        for j in range(ny_pts - 1):
-            for i in range(nx_pts - 1):
-                idx = j * nx_pts + i
-                faces.append([idx, idx + 1, idx + nx_pts])
-                faces.append([idx + 1, idx + nx_pts + 1, idx + nx_pts])
-
-                c = rgba_grid[j, i]
-                face_colors.append(c)
-                face_colors.append(c)
-
-        faces = np.array(faces, dtype=np.int32)
-        face_colors = np.array(face_colors, dtype=np.float32)
+        Geometry comes from
+        :func:`paleo_workbench.viz.geomodel.analysis.generate_rgb_fusion_slice`.
+        """
+        verts, faces, face_colors = analysis.generate_rgb_fusion_slice()
 
         rgb_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=face_colors, smooth=True)
         self.gl_widget.addItem(rgb_item)
@@ -2798,19 +2766,19 @@ class GeologicalModeling3DPage(QWidget):
         QMessageBox.information(self, "RGB 融合切片", "RGB 三频率（15Hz/35Hz/55Hz）属性融合三维切片已成功生成并叠加至三维视口！")
 
     def _generate_cross_well_fence(self) -> None:
-        """Generate 3D curtain/fence slice connecting all loaded boreholes."""
+        """Generate 3D curtain/fence slice connecting all loaded boreholes.
+
+        Mesh computation lives in
+        :func:`paleo_workbench.viz.geomodel.analysis.generate_cross_well_fence`.
+        """
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载钻孔数据。")
             return
 
-        wells = [
-            {"name": bh["name"], "x": bh["x"], "y": bh["y"], "depth": bh["total_depth"]}
-            for bh in self.bh_raw_data
-        ]
-
-        verts, faces, colors = generate_fence_mesh(wells, nz_samples=25)
-        if len(verts) == 0:
+        mesh = analysis.generate_cross_well_fence(self.bh_raw_data, nz_samples=25)
+        if mesh is None:
             return
+        verts, faces, colors = mesh
 
         fence_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=True)
         self.gl_widget.addItem(fence_item)
@@ -2821,39 +2789,19 @@ class GeologicalModeling3DPage(QWidget):
         self._sync_visibility_from_tree()
         self.gl_widget.update()
 
-        QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(wells)} 口钻孔的三维剖面幕墙！")
+        QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(self.bh_raw_data)} 口钻孔的三维剖面幕墙！")
 
     def _run_lithology_crossplot(self) -> None:
-        """Run geoviz.analyze_lithology_crossplot and show the crossplot statistics dialog."""
+        """Run geoviz.analyze_lithology_crossplot and show the crossplot statistics dialog.
+
+        The sampling + statistics live in
+        :func:`paleo_workbench.viz.geomodel.analysis.run_lithology_crossplot`.
+        """
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
             return
 
-        gr_list = []
-        ai_list = []
-        lith_list = []
-
-        _litho_gr = {"砂岩": 40.0, "泥岩": 120.0, "石灰岩": 25.0, "花岗岩": 80.0}
-        _litho_ai = {"砂岩": 8200.0, "泥岩": 4800.0, "石灰岩": 14500.0, "花岗岩": 18000.0}
-
-        rng = np.random.default_rng(42)
-        for bh in self.bh_raw_data:
-            for layer in bh["layers"]:
-                lith = layer["lithology"]
-                base_g = _litho_gr.get(lith, 60.0)
-                base_a = _litho_ai.get(lith, 6000.0)
-
-                # Sample 10 points per layer
-                for _ in range(10):
-                    gr_list.append(base_g + float(rng.normal(0, 6.0)))
-                    ai_list.append(base_a + float(rng.normal(0, 400.0)))
-                    lith_list.append(lith)
-
-        analysis_result = analyze_lithology_crossplot(
-            np.array(gr_list, dtype=np.float32),
-            np.array(ai_list, dtype=np.float32),
-            lith_list
-        )
+        analysis_result = analysis.run_lithology_crossplot(self.bh_raw_data)
 
         dialog = LithologyCrossplotDialog(analysis_result, self)
         dialog.exec()

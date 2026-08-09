@@ -7,7 +7,7 @@
 1. **元素范围(全集)**:文本、箭头/折线、矩形、椭圆、多边形、自由手绘线、图片/logo、指北针、比例尺,共 9 种纸面注释 item。
 2. **编辑交互**:放置 / 移动 / 手柄缩放 / 删除 + 属性编辑(描边色、填充色、线宽 mm、字号 mm、文本内容、比例尺分母)。
 3. **持久化**:自由图形随 `plots/<id>.json` 持久化(schema v4);**一并修复面板布局不保存的缺口**(交互添加/拖动面板的 `rect_mm` 目前不落盘,拖完即丢)。
-4. **架构归属**:geoviz cartography 包承载全部图形机制;宿主 `well_log_workstation` 只做持久化与窗口接线(方案 A,已批准)。
+4. **架构归属**:geoviz cartography 包承载全部图形机制;宿主 `well-log-engine/apps/wellplot-desktop/well_log_workstation` 只做持久化与窗口接线(方案 A,已批准)。
 
 ## 2. 架构总览
 
@@ -19,7 +19,7 @@ geo-viz-engine (packages/geoviz_paleo_map/geoviz_paleo_map/cartography/)
 ├── sidebar(并入 window.py)         # 选中项属性面板
 └── window.py              # CartographyLayoutWindow 新增公开 API
 
-paleo-workbench (well_log_workstation/)
+paleo-workbench (well-log-engine/apps/wellplot-desktop/well_log_workstation/)
 ├── plot_document.py       # schema v4: free_graphics 字段
 ├── composite_view.py      # 保存布局入口 + 恢复接线 + 工具条
 └── shell.py               # Ctrl+S 快捷键(可选挂载点)
@@ -100,7 +100,7 @@ paleo-workbench (well_log_workstation/)
 
 ## 4. 宿主侧与持久化设计
 
-### 4.1 schema v4(`well_log_workstation/plot_document.py`)
+### 4.1 schema v4(`well-log-engine/apps/wellplot-desktop/well_log_workstation/plot_document.py`)
 
 - `PlotDocument` 新增 `free_graphics: list[dict] = field(default_factory=list)` —— kind 判别式 dict,**不**为 9 种各建 typed dataclass(校验/兜底在 geoviz `from_record` 边界,与 PanelRef 宽松解析先例一致)。
 - `PLOT_SCHEMA_VERSION = 4`;升级链追加 `version == 3` 分支 `setdefault("free_graphics", [])`(照抄 :104-113 模式);仅 `type == "composite" or doc.free_graphics` 时写入(与 panels 同款条件)。
@@ -138,8 +138,8 @@ CompositeView 工具条新增"保存布局"按钮(+Ctrl+S):
 
 ## 6. 测试
 
-- **geoviz**(其 pytest infra;父仓 advisory 套件亦覆盖):每种 item `to_record`/`from_record` round-trip(几何+样式无损);未知 kind 容错;resize 手柄映射单测;放置工具 QTest 冒烟(offscreen)。
-- **宿主**:schema v4 round-trip + v3 旧文件兼容(镜像 `tests/test_well_log_workstation_plot_revision.py` 模式);保存布局写回 rect_mm + free_graphics;按记录恢复重建(offscreen Qt);图片 asset 写盘/读回/缺失容错。
+- **geoviz**(其 pytest infra;父仓 required 套件亦覆盖):每种 item `to_record`/`from_record` round-trip(几何+样式无损);未知 kind 容错;resize 手柄映射单测;放置工具 QTest 冒烟(offscreen)。
+- **宿主**:schema v4 round-trip + v3 旧文件兼容(镜像 `well-log-engine/apps/wellplot-desktop/tests/test_well_log_workstation_plot_revision.py` 模式);保存布局写回 rect_mm + free_graphics;按记录恢复重建(offscreen Qt);图片 asset 写盘/读回/缺失容错。
 - 本地无 PySide6:`py_compile` + 纯 Python 序列化逻辑本地跑,Qt 行为以 CI 为准(本会话既定验证模式)。
 
 ## 7. PR 切分(顺序依赖)

@@ -68,10 +68,13 @@ def test_merge_prediction_adds_lithology_and_facies_tracks():
     assert merged.well_name == "from-las"
 
 
-def test_canvas_builds_lithology_track_for_synthetic(qtbot):
+def test_canvas_builds_lithology_track_for_synthetic(qtbot, monkeypatch):
     from paleo_workbench.prediction.adapters import MockPredictionAdapter
     from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 
+    # Legacy QPainter canvas is the target; keep the engine backend out so the
+    # track kinds come from the legacy canvas regardless of binding presence.
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     project = ProjectDocument.new("Tracks")
     task = MockPredictionAdapter().run(project, [], seed=1)
     panel = WellLogCanvasPanel()
@@ -117,6 +120,8 @@ def test_canvas_merges_facies_onto_bound_las(qtbot, monkeypatch):
         return VizPayload(kind="well_log", label="from-adapter", well_log=known)
 
     monkeypatch.setattr(VizAdapter, "resolve", _fake_resolve)
+    # Legacy QPainter canvas is the target (see test above for rationale).
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
     panel = WellLogCanvasPanel()
     qtbot.addWidget(panel)
     panel.update_state(task, project=project)
@@ -128,36 +133,63 @@ def test_canvas_merges_facies_onto_bound_las(qtbot, monkeypatch):
 
 
 def test_page_run_and_export_png(qtbot, tmp_path, monkeypatch):
+    from paleo_workbench.catalog import (
+        CoreCatalogAdapter,
+        DataCatalogService,
+        reset_catalog,
+        set_catalog,
+    )
+    from paleo_workbench.prediction.providers import ensure_default_models
+
     project = ProjectDocument.new("RunExport")
     project.stratigraphy.target_horizon = "H1"
-    page = WellLogPredictionPage()
-    qtbot.addWidget(page)
-    page.set_project(project)
-    page.update_state([], project=project)
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    service = DataCatalogService.open(project_path)
+    set_catalog(CoreCatalogAdapter(service))
+    ensure_default_models(service)
+    try:
+        page = WellLogPredictionPage()
+        qtbot.addWidget(page)
+        page.set_project(project)
+        page.update_state([], project=project)
 
-    page.evidence_panel.run_btn.click()
-    assert len(project.prediction_tasks) == 1
-    assert page.canvas_panel.is_canvas_ready()
-    assert page.evidence_panel.horizon_value.text() == "H1"
+        # Explicit demo mode — the honest run available without a production
+        # model. The inference runs on a worker thread.
+        with qtbot.waitSignal(page.prediction_updated, timeout=5000):
+            page.evidence_panel.demo_btn.click()
+        assert len(project.prediction_tasks) == 1
+        assert page.canvas_panel.is_canvas_ready()
+        assert page.evidence_panel.horizon_value.text() == "H1"
 
-    out = tmp_path / "well.png"
-    # Patch on the page module's imported symbols (not nested dotted class attrs).
-    import paleo_workbench.ui.pages.well_log_prediction_page as wlp_mod
+        out = tmp_path / "well.png"
+        # Patch on the page module's imported symbols (not nested dotted class attrs).
+        import paleo_workbench.ui.pages.well_log_prediction_page as wlp_mod
 
-    monkeypatch.setattr(
-        wlp_mod.QFileDialog,
-        "getSaveFileName",
-        lambda *a, **k: (str(out), "PNG (*.png)"),
-    )
-    # Avoid modal information dialog hanging tests
-    monkeypatch.setattr(
-        wlp_mod.QMessageBox,
-        "information",
-        lambda *a, **k: None,
-    )
-    page.evidence_panel.export_btn.click()
-    assert out.exists()
-    assert out.stat().st_size > 0
+        monkeypatch.setattr(
+            wlp_mod.QFileDialog,
+            "getSaveFileName",
+            lambda *a, **k: (str(out), "PNG (*.png)"),
+        )
+        # Avoid modal information dialog hanging tests
+        monkeypatch.setattr(
+            wlp_mod.QMessageBox,
+            "information",
+            lambda *a, **k: None,
+        )
+        # Avoid modal warning dialog hanging tests (export failure path)
+        monkeypatch.setattr(
+            wlp_mod.QMessageBox,
+            "warning",
+            lambda *a, **k: None,
+        )
+        page.evidence_panel.export_btn.click()
+        assert out.exists()
+        assert out.stat().st_size > 0
+    finally:
+        reset_catalog()
+        service.close()
 
 
 def test_app_send_to_preparation_builds_factor_maps(qtbot):

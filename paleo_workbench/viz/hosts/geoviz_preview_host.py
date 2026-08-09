@@ -69,18 +69,33 @@ class GeoVizPreviewHost(QWidget):
         well_state_store: WellLocationPreviewStateStore | None = None,
     ) -> None:
         super().__init__(parent)
-        self.engine = engine or GeoVizEngine.default()
+        self._well_state_store = well_state_store or WellLocationPreviewStateStore()
+        self.engine = engine  # property setter wires lifecycles
         self.stack = QStackedWidget(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.stack)
         self.widgets: dict[PreviewKind, QWidget] = {}
         self._active_kind: PreviewKind | None = None
-        self._well_state_store = well_state_store or WellLocationPreviewStateStore()
-        self._default_lifecycle = _EnginePreviewLifecycle(self.engine)
+
+    @property
+    def engine(self) -> GeoVizEngine:
+        """Engine backing every preview lifecycle.
+
+        Assigning a new engine after construction rebuilds the lifecycle
+        wrappers so the replacement is actually used by future renders
+        (a plain attribute assignment would leave the lifecycles bound to
+        the original engine).
+        """
+        return self._engine
+
+    @engine.setter
+    def engine(self, engine: GeoVizEngine | None) -> None:
+        self._engine = engine or GeoVizEngine.default()
+        self._default_lifecycle = _EnginePreviewLifecycle(self._engine)
         self._lifecycles = {
             PreviewKind.XY_SCATTER: _WellLocationLifecycle(
-                self.engine,
+                self._engine,
                 self._well_state_store,
             )
         }

@@ -11,6 +11,7 @@ class PredictionEvidencePanel(QFrame):
     """Right-hand evidence and action summary for prediction output."""
 
     run_requested = Signal()
+    demo_requested = Signal()
     send_requested = Signal()
     export_requested = Signal(str)  # PNG | SVG | PDF
 
@@ -61,8 +62,19 @@ class PredictionEvidencePanel(QFrame):
 
         self.run_btn = QPushButton("运行测井预测")
         self.run_btn.setObjectName("SecondaryButton")
+        self.run_btn.setToolTip(
+            "通过 ModelRegistry 解析生产模型后运行科学预测；"
+            "未配置生产模型时不会自动运行 mock"
+        )
         self.run_btn.clicked.connect(self.run_requested.emit)
         layout.addWidget(self.run_btn)
+        self.demo_btn = QPushButton("运行演示预测")
+        self.demo_btn.setObjectName("SecondaryButton")
+        self.demo_btn.setToolTip(
+            "显式演示模式：运行 DemoModelProvider（合成数据，非科学预测）"
+        )
+        self.demo_btn.clicked.connect(self.demo_requested.emit)
+        layout.addWidget(self.demo_btn)
         self.send_btn = QPushButton("发送制备")
         self.send_btn.setObjectName("PrimaryButton")
         self.send_btn.clicked.connect(self.send_requested.emit)
@@ -81,6 +93,7 @@ class PredictionEvidencePanel(QFrame):
         self.export_btn.setEnabled(can_export)
         self.send_btn.setEnabled(can_send)
         self.run_btn.setEnabled(True)
+        self.demo_btn.setEnabled(True)
 
     def update_state(self, task, *, bound_las: bool = False) -> None:
         summary = field_value(task, "result_summary", {}) or {}
@@ -94,10 +107,24 @@ class PredictionEvidencePanel(QFrame):
             self.set_actions_enabled(can_export=False, can_send=False)
             return
 
-        mock_text = "Mock" if summary.get("is_mock") else "真实"
+        # Honest output labeling (P2): random/mock output must never display
+        # as 真实, and heuristic output is not a scientific prediction.
+        if summary.get("is_mock"):
+            nature = "Mock"
+        elif not summary.get("final_scientific_prediction", True):
+            nature = "启发式"
+        else:
+            nature = "科学预测"
+        if summary.get("demo"):
+            nature = f"Demo · {nature}"
         replaceable = "可替换" if summary.get("is_replaceable", False) else "固定"
-        self.mock_value.setText(f"{mock_text} · {replaceable}")
-        self.source_value.setText("绑定 LAS" if bound_las else "合成曲线")
+        self.mock_value.setText(f"{nature} · {replaceable}")
+        if summary.get("demo") or summary.get("source") == "synthetic/demo":
+            self.source_value.setText("合成演示数据")
+        elif bound_las:
+            self.source_value.setText("绑定 LAS")
+        else:
+            self.source_value.setText("合成曲线")
         horizon = ""
         if isinstance(meta, dict):
             horizon = str(meta.get("target_horizon") or "")

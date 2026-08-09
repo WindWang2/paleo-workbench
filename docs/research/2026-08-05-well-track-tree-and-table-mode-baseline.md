@@ -2,7 +2,7 @@
 
 **Issue:** [#332](https://github.com/WindWang2/paleo-workbench/issues/332) (wayfinder research; map [#331](https://github.com/WindWang2/paleo-workbench/issues/331))  
 **Date:** 2026-08-05  
-**Scope:** Primary sources only — `well_log_workstation/`, `docs/adr/0022*`, `docs/adr/0024*`, related ADRs 0014/0015, `CONTEXT.md` Well Log sections, `well-log-engine` table/selection public surface.  
+**Scope:** Primary sources only — `well-log-engine/apps/wellplot-desktop/well_log_workstation/`, `docs/adr/0022*`, `docs/adr/0024*`, related ADRs 0014/0015, `CONTEXT.md` Well Log sections, `well-log-engine` table/selection public surface.
 **Status:** Research complete (findings only; no product code).
 
 ## Question
@@ -17,7 +17,7 @@
 
 | 项 | 现状 |
 |---|---|
-| 位置 | `well_log_workstation/shell.py` · `_refresh_tree` |
+| 位置 | `well-log-engine/apps/wellplot-desktop/well_log_workstation/shell.py` · `_refresh_tree` |
 | 节点 kind | `workspace` → `wells_folder` / `plots_folder` → leaf `well` / `plot` |
 | 井节点载荷 | `{kind, id, path}` — 仅目录 id 与相对 LAS 路径 |
 | **不展示** | 曲线助记符、采样轴、数据源、图道可见性、样点规模 |
@@ -249,14 +249,14 @@ ADR 0052 已记录：宿主 Qt paint 曲线抽稀 **无 LOD 包络**，是已知
 
 | 主题 | 路径 |
 |---|---|
-| 工区树 / 图道列表 / apply | `well_log_workstation/shell.py` |
-| 模板编译 | `well_log_workstation/template_model.py` |
-| 工区 catalog | `well_log_workstation/workspace.py` |
-| LAS 导入 | `well_log_workstation/las_import.py` |
-| 会话文档 | `well_log_workstation/session_store.py` |
-| 图件持久化 / track_overrides | `well_log_workstation/plot_document.py` |
-| 主机画布 | `well_log_workstation/multi_track_canvas.py` |
-| 引擎桥 | `well_log_workstation/engine_bridge.py` |
+| 工区树 / 图道列表 / apply | `well-log-engine/apps/wellplot-desktop/well_log_workstation/shell.py` |
+| 模板编译 | `well-log-engine/apps/wellplot-desktop/well_log_workstation/template_model.py` |
+| 工区 catalog | `well-log-engine/apps/wellplot-desktop/well_log_workstation/workspace.py` |
+| LAS 导入 | `well-log-engine/apps/wellplot-desktop/well_log_workstation/las_import.py` |
+| 会话文档 | `well-log-engine/apps/wellplot-desktop/well_log_workstation/session_store.py` |
+| 图件持久化 / track_overrides | `well-log-engine/apps/wellplot-desktop/well_log_workstation/plot_document.py` |
+| 主机画布 | `well-log-engine/apps/wellplot-desktop/well_log_workstation/multi_track_canvas.py` |
+| 引擎桥 | `well-log-engine/apps/wellplot-desktop/well_log_workstation/engine_bridge.py` |
 | 领域词 | `CONTEXT.md` § Well Log Visualization |
 | 表格 ADR | `docs/adr/0022-virtualized-table-projections.md` |
 | 选区 ADR | `docs/adr/0024-shared-semantic-selection.md` |

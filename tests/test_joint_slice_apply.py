@@ -12,6 +12,7 @@ def test_set_slice_indices_uses_apply_slice_positions():
     r = MagicMock()
     r.apply_slice_positions = MagicMock()
     w._renderer = r
+    w._scene = None  # no scene → fall through to renderer apply path
     WellSeismicJointWidget.set_slice_indices(w, 10, 20, 30)
     r.apply_slice_positions.assert_called_once_with(10, 20, 30, rebuild=True)
 

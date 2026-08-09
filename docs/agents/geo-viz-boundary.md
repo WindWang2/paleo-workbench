@@ -9,7 +9,7 @@
 | 归属 | 允许内容 |
 |---|---|
 | `geo-viz-engine` | **全部可视化引擎核心**：SEGY 加载与缓存、体渲染、切片（含等时/比例切片）、RGB 多属性混色、GLSL、井震标定核心算法（合成记录、互相关、时深、3D 曲线生成）、`geoviz_well_seismic_3d` 联合场景逻辑、以及一切纯 numpy 几何/网格生成与 GL 渲染原语 |
-| `paleo_workbench` | 页面编排、UI 控件、工作流胶水代码、对 geo-viz-engine **公共 facade API** 的调用、**业务级 AI 顾问**、**数值模拟导出** |
+| `paleo_workbench` | 页面编排、UI 控件、工作流胶水代码、对 geo-viz-engine **公共 facade API** 的调用、**规则式一致性顾问**、**数值模拟导出** |
 
 补充约束（既有工程约定，本次继续遵守）：
 
@@ -30,7 +30,7 @@
 | `fault_dislocation.py` | 160 | `FaultCuttingEngine.apply_dislocation` 断层错断（linear/exponential/gaussian 衰减） | ❌ 引擎核心（纯 numpy 几何） |
 | `fence_generator.py` | 62 | `CrossWellFenceGenerator.extract_seismic_slice` | ❌ **与 `geoviz_plots.fence.fence_generator` 逐字重复** |
 | `models.py` | 56 | `Layer` / `BoreholeRecord` / `FaultRecord` / `TunnelRecord` / `GridSpec` 领域 dataclass | ✅ 留主仓库（advisor + exporters 的输入模型） |
-| `advisor.py` | 159 | `check_boreholes` / `check_coplanar_faults` 业务级数据一致性诊断 | ✅ 留主仓库（业务级 AI 顾问） |
+| `advisor.py` | 159 | `check_boreholes` / `check_coplanar_faults` 规则式数据一致性诊断 | ✅ 留主仓库（规则式一致性顾问） |
 | `exporters.py` | 102 | FLAC3D / Abaqus 结构网格导出 | ✅ 留主仓库（数值模拟导出） |
 | `__init__.py` | 57 | 22 个符号再导出 | ✅ 改为薄适配层 |
 
@@ -71,7 +71,7 @@
 | 模块 | 理由 |
 |---|---|
 | `models.py` | `advisor.py` / `exporters.py` 的领域输入模型；随这两个模块一起留下 |
-| `advisor.py` | 规则来自煤田地质业务约定（层位反转、共面断层 5°/15m 阈值），属「业务级 AI 顾问」 |
+| `advisor.py` | 规则来自煤田地质业务约定（层位反转、共面断层 5°/15m 阈值），属「规则式一致性顾问」 |
 | `exporters.py` | FLAC3D / Abaqus 属「数值模拟导出」 |
 
 ## 4. 影响面分析
@@ -145,7 +145,7 @@ geo-viz-engine/packages/
 paleo_workbench/viz/geomodel/     ← 薄适配层
 ├── __init__.py                   facade 再导出 + 本地 advisor/exporters/models
 ├── models.py                     领域 dataclass（保留）
-├── advisor.py                    业务级 AI 顾问（保留）
+├── advisor.py                    规则式一致性顾问（保留）
 └── exporters.py                  数值模拟导出（保留）
 ```
 

@@ -175,11 +175,13 @@ RESOURCE_UNITS = {
 
 TASK_STATUS_COLORS = {"complete": SUCCESS, "pending": TEXT_SECONDARY, "running": PRIMARY, "failed": ERROR_RED}
 TASK_STATUS_LABELS = {"complete": "已生成", "pending": "待生成", "running": "进行中", "failed": "失败"}
-# 「克里金(MVP·线性)」is intentionally labelled: backend is SciPy linear, not
-# full variogram kriging (ISS-KRIG-01). Keep alias "克里金" in factor_interpolation.
-INTERPOLATION_METHODS = ["克里金(MVP·线性)", "IDW", "样条", "方向趋势"]
+# 「克里金」is REAL variogram ordinary kriging (geoviz_plots.factor.kriging):
+# empirical variogram fit + OK solve with kriging variance output (ISS-KRIG-01
+# resolved — the MVP linear placeholder is gone). The workflow routes the UI
+# label to the engine method via METHOD_LABEL_TO_ENGINE.
+INTERPOLATION_METHODS = ["克里金", "IDW", "样条", "方向趋势"]
 INTERPOLATION_METHOD_TOOLTIPS = {
-    "克里金(MVP·线性)": "MVP 占位：SciPy linear 三角剖分插值，非变差函数克里金",
+    "克里金": "真实普通克里金：经验变差函数拟合 + 克里金求解（含克里金方差）",
     "IDW": "反距离加权；支持断层屏障 fault_polylines",
     "样条": "SciPy cubic 样条插值",
     "方向趋势": "各向异性方向加权趋势面（ISS-ALG-02）",

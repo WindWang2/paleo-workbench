@@ -36,6 +36,17 @@ DEFAULT_FACTOR_TYPES = ("地层厚度", "砂岩含量", "砂地比", "泥岩含�
 DEFAULT_GRID_N = 50
 MAX_LOO_SAMPLES = 64
 
+# UI label → geo-viz engine method name. 「克里金」now routes to the REAL
+# variogram ordinary-kriging backend (geoviz_plots.factor.kriging); the legacy
+# MVP label is kept as an alias so old task parameters keep working.
+METHOD_LABEL_TO_ENGINE = {
+    "克里金": "kriging",
+    "克里金(MVP·线性)": "kriging",
+    "IDW": "IDW",
+    "样条": "样条",
+    "方向趋势": "方向趋势",
+}
+
 
 def _snapshot_hash(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -90,7 +101,7 @@ def apply_interpolation_to_task(
 
     result = interpolate_factor_grid(
         points,
-        method=method,
+        method=METHOD_LABEL_TO_ENGINE.get(method, method),
         grid_n=grid_n,
         power=power,
         fault_polylines=breaks,
@@ -108,6 +119,12 @@ def apply_interpolation_to_task(
     params["interp_backend"] = result["backend"]
     params["power"] = power
     params["n_break_lines"] = result.get("n_break_lines", 0)
+    # Real kriging backend additionally returns the kriging variance grid —
+    # pass it through so downstream consumers (and the UI) can show it.
+    if result.get("grid_var") is not None:
+        params["grid_var"] = result["grid_var"]
+        params["variance_min"] = result.get("variance_min")
+        params["variance_max"] = result.get("variance_max")
     if result.get("backend") == "directional":
         params["azimuth_deg"] = result.get("azimuth_deg")
         params["semi_major"] = result.get("semi_major")
@@ -131,6 +148,9 @@ def apply_interpolation_to_task(
         "backend": result["backend"],
         "mean": round(result["mean"], 4),
     }
+    if result.get("variance_min") is not None:
+        task.quality_metrics["variance_min"] = round(result["variance_min"], 4)
+        task.quality_metrics["variance_max"] = round(result["variance_max"], 4)
     snapshot = {
         "target_horizon": task.target_horizon,
         "factor_type": task.factor_type,
