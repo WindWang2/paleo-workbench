@@ -1,6 +1,8 @@
-"""AI-powered data consistency analysis for borehole and fault datasets.
+"""Rule-based data consistency analysis for borehole and fault datasets.
 
-Uses BoreholeRecord / FaultRecord dataclasses from models.py instead
+Deterministic geometry rules (layer overlap, non-finite coordinates, inverted
+depths, coplanar faults) — no trained model is involved. Uses
+BoreholeRecord / FaultRecord dataclasses from models.py instead
 of raw dicts, eliminating Primitive Obsession smell.
 """
 from __future__ import annotations

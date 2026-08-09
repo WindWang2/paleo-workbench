@@ -660,7 +660,7 @@ class GeologicalModeling3DPage(QWidget):
 
         right_layout.addWidget(card_export)
 
-        # CARD 4: AI Check Advisor Side Dialog
+        # CARD 4: Rule-based Consistency Advisor Side Dialog
         card_ai = QFrame()
         card_ai.setStyleSheet("QFrame { background: %s; border-radius: %dpx; border: 1px solid %s; }" % (
             tokens.BG_SEARCH, tokens.RADIUS_CARD, tokens.BORDER
@@ -668,16 +668,16 @@ class GeologicalModeling3DPage(QWidget):
         ai_layout = QVBoxLayout(card_ai)
         ai_layout.setSpacing(tokens.SPACE_2)
 
-        title_ai = QLabel("AI 专家复核与诊断顾问")
+        title_ai = QLabel("地质数据一致性核复顾问")
         title_ai.setStyleSheet("font-weight: bold; font-size: 13px; color: %s;" % tokens.TEXT_PRIMARY)
         ai_layout.addWidget(title_ai)
 
-        desc_ai = QLabel("通过 AI 自动分析当前项目下所有钻孔的深度分层完整性，并校验平行断层共面问题。")
+        desc_ai = QLabel("基于规则自动分析当前项目下所有钻孔的深度分层完整性，并校验平行断层共面问题。")
         desc_ai.setWordWrap(True)
         desc_ai.setStyleSheet("font-size: 11px; color: %s;" % tokens.TEXT_SECONDARY)
         ai_layout.addWidget(desc_ai)
 
-        self.btn_ai_advisor = QPushButton("开启 AI 一致性诊断")
+        self.btn_ai_advisor = QPushButton("开启一致性诊断")
         self.btn_ai_advisor.setObjectName("PrimaryButton")
         self.btn_ai_advisor.setEnabled(False)  # Enable only after data is loaded
         self.btn_ai_advisor.clicked.connect(self._run_ai_advisor)
@@ -1219,9 +1219,9 @@ class GeologicalModeling3DPage(QWidget):
 
         fractions = self._stratal_fractions.currentData() or (0.25, 0.50, 0.75)
 
-        if demo or renderer is None or not getattr(renderer, "_loaded", False) \
-                or renderer.volume_data() is None:
-            # Demo fallback — load a synthetic volume directly on the renderer.
+        if demo:
+            # EXPLICIT demo path (checkbox checked): synthetic volume so the
+            # feature is visible without SEGY; the status line marks it Demo.
             if renderer is None:
                 self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
                 return
@@ -1241,8 +1241,19 @@ class GeologicalModeling3DPage(QWidget):
                 opacity=0.8,
             )
             self._stratal_status.setText(
-                "已用合成演示体生成 %d 张比例切片（无 SEGY 预览模式）。"
+                "已用合成演示体生成 %d 张比例切片（演示预览模式）。"
                 % len(surfaces)
+            )
+            return
+
+        # Real-data path: no volume available and demo NOT requested → show the
+        # unavailable state instead of silently injecting synthetic data
+        # (honesty contract: synthetic output only on explicit demo request).
+        if renderer is None or not getattr(renderer, "_loaded", False) \
+                or renderer.volume_data() is None:
+            self._stratal_status.setText(
+                "未加载体数据：无法生成地层切片。"
+                "可勾选“用合成演示体（无 SEGY 时预览）”查看演示效果。"
             )
             return
 
@@ -1373,7 +1384,7 @@ class GeologicalModeling3DPage(QWidget):
             tokens.SPACE_2, tokens.SPACE_1, tokens.SPACE_2, tokens.SPACE_1
         )
         hint = QLabel(
-            "导出与诊断：FLAC3D / Abaqus 数值模拟网格导出，AI 一致性诊断顾问。"
+            "导出与诊断：FLAC3D / Abaqus 数值模拟网格导出，一致性诊断顾问。"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: %s; font-size: 11px;" % tokens.TEXT_SECONDARY)
@@ -1383,7 +1394,7 @@ class GeologicalModeling3DPage(QWidget):
         self._diag_export_proxy = QPushButton("导出数值模拟模型")
         self._diag_export_proxy.clicked.connect(self.btn_export.click)
         row.addWidget(self._diag_export_proxy)
-        self._diag_ai_proxy = QPushButton("开启 AI 一致性诊断")
+        self._diag_ai_proxy = QPushButton("开启一致性诊断")
         self._diag_ai_proxy.clicked.connect(self.btn_ai_advisor.click)
         row.addWidget(self._diag_ai_proxy)
         layout.addStretch(1)
@@ -2681,7 +2692,7 @@ class GeologicalModeling3DPage(QWidget):
 
     def _on_advisor_failed(self, err: str) -> None:
         self.btn_ai_advisor.setEnabled(True)
-        QMessageBox.warning(self, "诊断分析失败", f"AI 一致性复核诊断遇到错误:\n{err}")
+        QMessageBox.warning(self, "诊断分析失败", f"一致性复核诊断遇到错误:\n{err}")
 
     # ------------------------------------------------------------------ #
     # Well-Seismic Tie Calibration

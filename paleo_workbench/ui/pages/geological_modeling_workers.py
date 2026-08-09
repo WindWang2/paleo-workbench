@@ -203,7 +203,7 @@ class ExportWorker(QObject):
 
 
 class AdvisorWorker(QObject):
-    """Asynchronous worker for AI consistency analysis."""
+    """Asynchronous worker for rule-based data consistency analysis."""
     completed = Signal(dict, dict)
     failed = Signal(str)
     terminal = Signal()
@@ -216,7 +216,7 @@ class AdvisorWorker(QObject):
     def run(self) -> None:
         from paleo_workbench.viz.geomodel.advisor import check_boreholes, check_coplanar_faults
         try:
-            time.sleep(0.5)  # Simulated AI analysis latency
+            time.sleep(0.5)  # Simulated analysis latency (UI affordance)
             bh_report = check_boreholes(self.bh_data)
             fault_report = check_coplanar_faults(self.faults_data)
             self.completed.emit(bh_report, fault_report)

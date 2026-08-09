@@ -1,5 +1,7 @@
-"""AI Check Advisor Dialog — premium glassmorphism styled consistency report.
+"""Rule-based data consistency advisor dialog — deterministic consistency report.
 
+The checks (borehole layer overlap, coplanar faults) are explicit geometry
+rules, not an AI model; labels avoid "AI expert" overclaims.
 Extracted from geological_modeling_3d_page.py to avoid Divergent Change smell.
 """
 from __future__ import annotations
@@ -14,7 +16,7 @@ class AICheckAdvisorDialog(QDialog):
     """Premium glassmorphism styled non-modal side dialog showing consistency checking reports."""
     def __init__(self, bh_report: dict, fault_report: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AI 地质数据一致性核复顾问")
+        self.setWindowTitle("地质数据一致性核复顾问（规则检查）")
         self.resize(550, 650)
         self.setStyleSheet(f"""
             QDialog {{
@@ -48,7 +50,7 @@ class AICheckAdvisorDialog(QDialog):
         layout.setContentsMargins(tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2, tokens.SPACE_2)
         layout.setSpacing(tokens.SPACE_2)
 
-        header = QLabel("AI 专家诊断与数据复核报告")
+        header = QLabel("地质数据一致性核复报告（规则检查）")
         header.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {tokens.PRIMARY};")
         layout.addWidget(header)
 
@@ -104,9 +106,9 @@ class AICheckAdvisorDialog(QDialog):
             html += "<li>✅ 未检测到重叠或共面冲突的断层面。</li>"
         html += "</ul>"
 
-        # AI Suggestions section
+        # Rule-based suggestions section
         html += f"""
-        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>🤖 AI 推荐优化方案 (Optimization Tips)</h3>
+        <h3 style='color: {tokens.PRIMARY}; border-bottom: 1px solid {tokens.BORDER}; padding-bottom: 4px;'>💡 基于规则检查的优化建议 (Suggestions)</h3>
         <div style='background: {tokens.BG_SEARCH}; border-left: 4px solid {tokens.PRIMARY}; padding: 12px; border-radius: 6px; margin-top: 8px;'>
             <p style='color: {tokens.TEXT_PRIMARY}; font-weight: bold; margin: 0 0 8px 0;'>💡 建模优化建议：</p>
             <ol style='margin: 0; padding-left: 20px; color: {tokens.TEXT_SECONDARY}; line-height: 1.6;'>

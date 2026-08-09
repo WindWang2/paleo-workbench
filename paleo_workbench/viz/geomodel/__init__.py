@@ -124,7 +124,7 @@ __all__ = [
     "FaultRecord",
     "TunnelRecord",
     "GridSpec",
-    # Workbench-owned: business AI advisor
+    # Workbench-owned: business rule-based consistency advisor
     "check_boreholes",
     "check_coplanar_faults",
     # Workbench-owned: numerical-simulation export
