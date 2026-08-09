@@ -27,3 +27,26 @@
 - UI/业务未来统一经 `DataCatalogService` 写入；直接 `project.resources.append` 与自写 artifact 文件的模式逐步淘汰（集成属 Gemini/zcode 分支）。
 - catalog.json 会随版本历史增长，但独立于 .paleo.json save/load 路径，不拖慢项目开关。
 - 大文件 import/verify 是 IO 密集同步操作；checksum/copy 为独立可调用单元，QThread 异步包装边界留给 UI 集成层。
+
+## P1 落地补充（2026-08-09 · catalog-native 生命周期）
+
+P1 实现了 Decision 声明的受管生命周期语义，落点 `paleo_workbench/catalog/service.py` 与
+`storage.py`（UI 入口 `ui/data_lifecycle_controller.py`）。以下为 as-built 语义：
+
+- **Trash / Restore（软删除，可恢复）**：`trash_version` / `trash_asset` 将受管 payload
+  **原子移动到** `<project>.artifacts/trash/{version_id}/`，并在版本元数据写入 tombstone
+  （`reason`、`original_stage`、`original_path`、`trashed_at`）；外部（unmanaged）版本仅记
+  元数据，**绝不触碰外部源文件**。lineage 与 DataRun 仍指向已回收版本（`get_lineage` 保留
+  trashed 标记）；`verify_integrity` 跳过 trashed 版本；`current_version_id` 回退到最新未回收
+  版本。`restore_version` / `restore_asset` 把 payload 移回原 stage 位置并清除 tombstone；
+  `purge_trashed` 仅永久删除 trashed 条目，DataRun 保留为历史 provenance。
+- **Promote（提升为正式数据）**：`promote_version` 生成**新的不可变版本**——payload 复制（绝不
+  移动）到目标 stage（默认 `OUTPUT`），记录 `parent_version_ids=[source]`，以 `promote`
+  DataRun 链接 source → 提升版本，asset 的 `current_version_id` 前移；源版本原样保留。
+  trashed 版本不可提升。
+- **Working Copy（可编辑工作副本）**：`create_working_copy` 总是**真实复制（绝不 hardlink）**，
+  编辑不会影响受管原版；`commit_working_copy` 以 move 语义提交为新不可变版本，未显式给
+  parent 时从工作副本目录名推断源版本 id。
+- **Export / Delivery（导出交付记录）**：`deliver_asset` 将 OUTPUT payload 复制到用户指定目标，
+  并注册 `delivery` DataRun（源版本、导出路径、checksum、时间戳、format、delivery_status），
+  **不修改不可变的 OUTPUT 版本**；legacy `ExportArtifact` 路径继续可用。
