@@ -55,6 +55,7 @@ from paleo_workbench.catalog.storage import (
     place_managed_file,
     purge_trashed_payload,
     restore_payload as _restore_trashed_payload,
+    trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
 from paleo_workbench.catalog.store import CatalogStore
@@ -1099,25 +1100,15 @@ class DataCatalogService:
 
     # -- trash / restore / purge ----------------------------------------------
 
-    def _tombstone_version(
-        self, version: DataVersion, reason: str | None
-    ) -> tuple[str, bool]:
-        """Apply the trashed tombstone in memory; returns ``(original_path,
-        payload_moved)`` for rollback. Managed payloads move to ``trash/``;
-        external versions are metadata-only (the external file is NEVER
-        touched)."""
+    def _tombstone_version(self, version: DataVersion, reason: str | None) -> str:
+        """Apply the trashed tombstone in memory ONLY — the payload is NOT
+        moved here. Callers must persist the tombstone first, then move the
+        payload (:meth:`_move_payload_to_trash`) and persist the path update,
+        so a crash between the steps never leaves a tombstoned version whose
+        recorded path points at a moved-away payload. Returns the original
+        project-relative path (recorded in metadata for rollback/restore).
+        """
         original_path = version.path
-        payload_moved = False
-        if version.managed:
-            try:
-                new_rel = _move_to_trash(
-                    self.project_path, self.resolve_path(version), version.id
-                )
-                version.path = new_rel
-                payload_moved = True
-            except CatalogError:
-                # Payload already missing → metadata-only tombstone.
-                payload_moved = False
         version.trashed = True
         version.trashed_at = _now_iso()
         version.metadata["trash"] = {
@@ -1126,7 +1117,55 @@ class DataCatalogService:
             "original_path": original_path,
             "trashed_at": version.trashed_at,
         }
-        return original_path, payload_moved
+        return original_path
+
+    def _move_payload_to_trash(self, version: DataVersion) -> bool:
+        """Move a managed payload into ``trash/{version_id}/`` and update
+        ``version.path``. Returns True when the payload actually moved; False
+        for external versions, blob-backed payloads (already shared), or a
+        payload that is already missing (metadata-only tombstone)."""
+        if not version.managed:
+            return False
+        try:
+            new_rel = _move_to_trash(
+                self.project_path, self.resolve_path(version), version.id
+            )
+        except CatalogError:
+            # Payload already missing → metadata-only tombstone.
+            return False
+        version.path = new_rel
+        return True
+
+    def _rollback_trash_move(self, version: DataVersion) -> None:
+        """Undo a payload move after the post-move save failed: move the
+        payload back to its recorded original location and restore the path.
+        The persisted tombstone (saved before the move) is kept — the version
+        stays trashed with its payload at the original path, which restore
+        handles correctly."""
+        meta = version.metadata.get("trash") or {}
+        original_path = meta.get("original_path")
+        if version.managed and original_path and version.path != original_path:
+            try:
+                _restore_trashed_payload(
+                    self.project_path, self.resolve_path(version), original_path
+                )
+                version.path = original_path
+            except CatalogError:
+                pass
+
+    def _probe_trash_payload(self, version_id: str) -> str | None:
+        """Crash-window recovery: return the project-relative path of a
+        payload sitting under ``trash/{version_id}/`` whose path was never
+        re-recorded (tombstone persisted, move happened, path-update save did
+        not), else None."""
+        root = _trash_dir_for(self.project_path) / version_id
+        if not root.is_dir():
+            return None
+        files = sorted(p for p in root.iterdir() if p.is_file())
+        if not files:
+            return None
+        project_dir = self.project_path.expanduser().resolve().parent
+        return files[0].relative_to(project_dir).as_posix()
 
     def _untombstone_version(self, version: DataVersion) -> str:
         """Reverse a tombstone in memory; returns the restored path (best-effort
@@ -1139,9 +1178,26 @@ class DataCatalogService:
                     self.project_path, self.resolve_path(version), original_path
                 )
             except CatalogError:
-                # No payload in trash (metadata-only trash or payload lost) —
-                # keep the original location; integrity will report missing.
-                version.path = original_path
+                # Crash-window recovery: the recorded path may still be the
+                # original location while the payload actually sits under
+                # trash/{version_id}/ (tombstone persisted before the path
+                # update was saved). Probe for it before declaring the payload
+                # lost (integrity will report missing otherwise).
+                probed = self._probe_trash_payload(version.id)
+                if probed is not None:
+                    version.path = probed
+                    try:
+                        version.path = _restore_trashed_payload(
+                            self.project_path,
+                            self.resolve_path(version),
+                            original_path,
+                        )
+                    except CatalogError:
+                        version.path = original_path
+                else:
+                    # No payload in trash (metadata-only trash or payload lost)
+                    # — keep the original location; integrity will report missing.
+                    version.path = original_path
         else:
             version.path = original_path
         version.trashed = False
@@ -1167,6 +1223,12 @@ class DataCatalogService:
         version (``get_lineage`` still includes it, marked trashed);
         :meth:`verify_integrity` skips trashed versions. Recoverable via
         :meth:`restore_version`.
+
+        Crash-safe ordering: the tombstone is persisted BEFORE the payload
+        moves, so a process crash in between leaves a tombstoned version whose
+        recorded path still points at an existing payload (consistent state);
+        a crash after the move but before the path-update save is recovered by
+        :meth:`_probe_trash_payload` on restore.
         """
         with self._lock:
             version = self._version_or_raise(version_id)
@@ -1174,7 +1236,7 @@ class DataCatalogService:
                 return version
             asset = self._asset_or_raise(version.asset_id)
             previous_current = asset.current_version_id
-            original_path, _moved = self._tombstone_version(version, reason)
+            self._tombstone_version(version, reason)
             if asset.current_version_id == version.id:
                 asset.current_version_id = self._active_current_candidate(asset, version.id)
             try:
@@ -1182,6 +1244,12 @@ class DataCatalogService:
             except Exception:
                 self._rollback_tombstone(version, asset, previous_current)
                 raise
+            if self._move_payload_to_trash(version):
+                try:
+                    self._save()
+                except Exception:
+                    self._rollback_trash_move(version)
+                    raise
             return version
 
     def trash_asset(self, asset_id: str, *, reason: str | None = None) -> DataAsset:
@@ -1196,38 +1264,36 @@ class DataCatalogService:
                 v for v in self.document.versions
                 if v.asset_id == asset_id and not v.trashed
             ]
-            rollback_items = [
-                (v, self._tombstone_version(v, reason)[0]) for v in versions
-            ]
             previous_current = asset.current_version_id
+            for version in versions:
+                self._tombstone_version(version, reason)
             asset.trashed = True
             asset.trashed_at = _now_iso()
             asset.current_version_id = None
             try:
                 self._save()
             except Exception:
-                for version, original_path in rollback_items:
+                for version in versions:
                     self._rollback_tombstone(version, asset, previous_current)
-                    asset.trashed = False
-                    asset.trashed_at = None
+                asset.trashed = False
+                asset.trashed_at = None
                 raise
+            moved = [v for v in versions if self._move_payload_to_trash(v)]
+            if moved:
+                try:
+                    self._save()
+                except Exception:
+                    for version in moved:
+                        self._rollback_trash_move(version)
+                    raise
             return asset
 
     def _rollback_tombstone(
         self, version: DataVersion, asset: DataAsset, previous_current: str | None
     ) -> None:
-        """Undo an in-memory tombstone after a failed save (payload moved back
-        to its original managed location when the move already happened)."""
-        meta = version.metadata.get("trash") or {}
-        original_path = meta.get("original_path")
-        if version.managed and original_path and version.path != original_path:
-            try:
-                _restore_trashed_payload(
-                    self.project_path, self.resolve_path(version), original_path
-                )
-                version.path = original_path
-            except CatalogError:
-                pass
+        """Undo an in-memory tombstone after a failed tombstone save. The
+        payload has NOT moved yet (save-then-move order), so only the
+        in-memory flags/metadata are cleared."""
         version.trashed = False
         version.trashed_at = None
         version.metadata.pop("trash", None)
@@ -1290,6 +1356,8 @@ class DataCatalogService:
         if version.metadata.get("trash"):
             reason = version.metadata["trash"].get("reason")
         self._tombstone_version(version, reason)
+        if version.managed:
+            self._move_payload_to_trash(version)
         asset.current_version_id = previous_current
 
     def purge_trashed(self) -> int:
