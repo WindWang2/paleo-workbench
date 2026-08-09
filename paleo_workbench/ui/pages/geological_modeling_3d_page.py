@@ -34,14 +34,8 @@ from paleo_workbench.viz.joint_well_pick import (
 from geoviz import (
     ClippedGLMeshItem,
     ClippedGLVolumeItem,
-    analyze_lithology_crossplot,
-    blend_rgba,
-    correlate_synthetic_to_trace,
-    generate_fence_mesh,
-    offset_curve_along_trajectory,
-    shift_depths,
-    synthetic_from_logs,
 )
+from paleo_workbench.viz.geomodel import analysis
 from paleo_workbench.viz.geomodel.models import GridSpec
 from paleo_workbench.ui.pages.geological_modeling_workers import (
     GeologicalModelingWorker,
@@ -2409,39 +2403,18 @@ class GeologicalModeling3DPage(QWidget):
         self._seismic_slice_items.clear()
 
     def _generate_well_curve_overlays(self) -> None:
-        """Generate 3D GR log curves and synthetic seismogram traces for all boreholes."""
+        """Generate 3D GR log curves and synthetic seismogram traces for all boreholes.
+
+        Pure computation lives in :func:`paleo_workbench.viz.geomodel.analysis.generate_well_curve_overlays`;
+        this method only wires the returned data into GL items.
+        """
         freq = float(self.slider_wavelet_freq.value())
         td_shift = float(self.slider_td_shift.value())
 
-        for bh in self.bh_raw_data:
-            bx, by = bh["x"], bh["y"]
-            layers = bh["layers"]
-            if not layers:
-                continue
-
-            # Build a vertical well path from surface to total depth
-            max_depth = max(l["bottom"] for l in layers)
-            n_samples = max(int(max_depth), 50)
-            depths = np.linspace(0, max_depth, n_samples, dtype=np.float32)
-            well_path = np.column_stack([
-                np.full(n_samples, bx, dtype=np.float32),
-                np.full(n_samples, by, dtype=np.float32),
-                -depths,  # Z is upward, depth is downward
-            ])
-
-            # Synthesize GR-like curve (assign value per lithology)
-            gr_values = np.zeros(n_samples, dtype=np.float32)
-            _litho_gr = {"砂岩": 40.0, "泥岩": 120.0, "石灰岩": 25.0, "花岗岩": 80.0}
-            for layer in layers:
-                mask = (depths >= layer["top"]) & (depths < layer["bottom"])
-                gr_values[mask] = _litho_gr.get(layer["lithology"], 60.0)
-            # Add realistic noise
-            gr_values += np.random.default_rng(42).normal(0, 8.0, n_samples).astype(np.float32)
-
-            # Offset the GR log sideways off the trajectory (engine: geoviz_well_seismic_3d)
-            curve_pts = offset_curve_along_trajectory(well_path, gr_values, scale=0.15)
+        for overlay in analysis.generate_well_curve_overlays(self.bh_raw_data, freq, td_shift):
+            # GR log offset sideways off the trajectory
             line_item = gl.GLLinePlotItem(
-                pos=curve_pts, color=(0.2, 1.0, 0.4, 0.9), width=2.0, antialias=True
+                pos=overlay["curve_pts"], color=(0.2, 1.0, 0.4, 0.9), width=2.0, antialias=True
             )
             self.gl_widget.addItem(line_item)
             self._well_curve_items.append(line_item)
@@ -2452,34 +2425,10 @@ class GeologicalModeling3DPage(QWidget):
                 self.mesh_items_map[key] = []
             self.mesh_items_map[key].append(line_item)
 
-            # Synthesize sonic and density logs for synthetic seismogram
-            sonic = np.zeros(n_samples, dtype=np.float32)
-            density = np.zeros(n_samples, dtype=np.float32)
-            _litho_sonic = {"砂岩": 180.0, "泥岩": 250.0, "石灰岩": 150.0, "花岗岩": 120.0}
-            _litho_density = {"砂岩": 2.2, "泥岩": 2.4, "石灰岩": 2.65, "花岗岩": 2.7}
-            for layer in layers:
-                mask = (depths >= layer["top"]) & (depths < layer["bottom"])
-                sonic[mask] = _litho_sonic.get(layer["lithology"], 180.0)
-                density[mask] = _litho_density.get(layer["lithology"], 2.4)
-
-            synthetic = synthetic_from_logs(sonic, density, wavelet_freq=freq)
-            if len(synthetic) > 0:
-                # Align synthetic length to well path subset
-                syn_len = min(len(synthetic), n_samples - 1)
-                syn_path = well_path[1:syn_len + 1].copy()
-
-                # Apply T-D shift
-                aligned_depths = shift_depths(
-                    -syn_path[:, 2], td_shift
-                )
-                syn_path[:, 2] = -aligned_depths
-
-                # Offset synthetic trace in the opposite direction from GR
-                syn_curve_pts = offset_curve_along_trajectory(
-                    syn_path, synthetic[:syn_len], scale=5.0
-                )
+            # Synthetic seismogram trace (offset opposite to the GR curve)
+            if overlay["syn_curve_pts"] is not None:
                 syn_item = gl.GLLinePlotItem(
-                    pos=syn_curve_pts, color=(1.0, 0.4, 0.2, 0.9), width=2.0, antialias=True
+                    pos=overlay["syn_curve_pts"], color=(1.0, 0.4, 0.2, 0.9), width=2.0, antialias=True
                 )
                 self.gl_widget.addItem(syn_item)
                 self._synthetic_items.append(syn_item)
@@ -2490,37 +2439,11 @@ class GeologicalModeling3DPage(QWidget):
                 self.mesh_items_map[syn_key].append(syn_item)
 
     def _generate_seismic_slice_overlay(self) -> None:
-        """Generate a synthetic horizontal seismic amplitude slice in the 3D viewport."""
-        # Create a planar mesh representing a seismic inline slice at z=-60
-        nx_pts, ny_pts = 30, 30
-        x = np.linspace(-80, 80, nx_pts)
-        y = np.linspace(-80, 80, ny_pts)
-        xx, yy = np.meshgrid(x, y)
-        # Synthetic seismic amplitude pattern
-        zz = -60.0 + 3.0 * np.sin(xx / 15.0) * np.cos(yy / 15.0)
+        """Generate a synthetic horizontal seismic amplitude slice in the 3D viewport.
 
-        verts = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()]).astype(np.float32)
-
-        # Build face indices for grid quads (as triangles)
-        faces = []
-        for j in range(ny_pts - 1):
-            for i in range(nx_pts - 1):
-                idx = j * nx_pts + i
-                faces.append([idx, idx + 1, idx + nx_pts])
-                faces.append([idx + 1, idx + nx_pts + 1, idx + nx_pts])
-        faces = np.array(faces, dtype=np.int32)
-
-        # Color by amplitude
-        amp = (zz.ravel() + 63.0) / 6.0  # normalize 0-1
-        amp = np.clip(amp, 0, 1)
-        colors = np.zeros((len(faces), 4), dtype=np.float32)
-        for fi, face in enumerate(faces):
-            a = float(np.mean(amp[face]))
-            # Blue-white-red colormap
-            if a < 0.5:
-                colors[fi] = [0.2, 0.2 + 0.6 * (a * 2), 0.9, 0.55]
-            else:
-                colors[fi] = [0.9, 0.2 + 0.6 * (2 - a * 2), 0.2, 0.55]
+        Geometry comes from :func:`paleo_workbench.viz.geomodel.analysis.generate_seismic_slice_overlay`.
+        """
+        verts, faces, colors = analysis.generate_seismic_slice_overlay()
 
         slice_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=False)
         self.gl_widget.addItem(slice_item)
@@ -2778,87 +2701,47 @@ class GeologicalModeling3DPage(QWidget):
         self.gl_widget.update()
 
     def _run_auto_tie(self) -> None:
-        """Run real cross-correlation auto-tie via geoviz.correlate_synthetic_to_trace."""
+        """Run real cross-correlation auto-tie via ``geoviz.correlate_synthetic_to_trace``.
+
+        The computation lives in
+        :func:`paleo_workbench.viz.geomodel.analysis.run_auto_tie`; this method
+        only applies the result to the calibration controls.
+        """
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
             return
 
         freq = float(self.slider_wavelet_freq.value())
+        result = analysis.run_auto_tie(self.bh_raw_data, freq)
 
-        # Use first borehole for calibration
-        bh = self.bh_raw_data[0]
-        layers = bh["layers"]
-        max_depth = max(l["bottom"] for l in layers)
-        n_samples = max(int(max_depth), 50)
-        depths = np.linspace(0, max_depth, n_samples, dtype=np.float32)
-
-        _litho_sonic = {"砂岩": 180.0, "泥岩": 250.0, "石灰岩": 150.0, "花岗岩": 120.0}
-        _litho_density = {"砂岩": 2.2, "泥岩": 2.4, "石灰岩": 2.65, "花岗岩": 2.7}
-
-        sonic = np.zeros(n_samples, dtype=np.float32)
-        density = np.zeros(n_samples, dtype=np.float32)
-        for layer in layers:
-            mask = (depths >= layer["top"]) & (depths < layer["bottom"])
-            sonic[mask] = _litho_sonic.get(layer["lithology"], 180.0)
-            density[mask] = _litho_density.get(layer["lithology"], 2.4)
-
-        synthetic = synthetic_from_logs(sonic, density, wavelet_freq=freq)
-
-        # Generate a synthetic "field seismic trace" (shifted version of synthetic + noise)
-        if len(synthetic) > 0:
-            rng = np.random.default_rng(123)
-            true_shift = 12  # samples
-            seismic_trace = np.roll(synthetic, true_shift) + rng.normal(0, 0.05, len(synthetic))
-
-            shift_samples, cc = correlate_synthetic_to_trace(synthetic, seismic_trace)
-
-            self.slider_td_shift.setValue(shift_samples)
-            self.label_correlation.setText(f"互相关系数 (Cross-Correlation CC): {cc:.3f}")
-
-            QMessageBox.information(
-                self, "自动标定完成",
-                f"已完成互相关自动井震标定对齐。\n"
-                f"最优时深度转换时移量: {shift_samples:+d} samples\n"
-                f"最大互相关系数 CC: {cc:.3f}"
-            )
-        else:
+        if result is None:
             QMessageBox.warning(self, "标定失败", "无法生成合成地震记录，请检查数据。")
+            return
+
+        shift_samples = result["shift_samples"]
+        cc = result["cc"]
+
+        self.slider_td_shift.setValue(shift_samples)
+        self.label_correlation.setText(f"互相关系数 (Cross-Correlation CC): {cc:.3f}")
+
+        QMessageBox.information(
+            self, "自动标定完成",
+            f"已完成互相关自动井震标定对齐。\n"
+            f"最优时深度转换时移量: {shift_samples:+d} samples\n"
+            f"最大互相关系数 CC: {cc:.3f}"
+        )
 
     # ------------------------------------------------------------------ #
     # Advanced Multi-Attribute & Crossplot Analysis
     # ------------------------------------------------------------------ #
 
     def _generate_rgb_fusion_slice(self) -> None:
-        """Generate RGB frequency attribute fusion horizontal slice in 3D viewport."""
-        nx_pts, ny_pts = 40, 40
-        x = np.linspace(-80, 80, nx_pts)
-        y = np.linspace(-80, 80, ny_pts)
-        xx, yy = np.meshgrid(x, y)
-        zz = -40.0 + 2.0 * np.sin(xx / 10.0) * np.cos(yy / 10.0)
+        """Generate RGB frequency attribute fusion horizontal slice in 3D viewport.
 
-        # Synthetic frequency channels
-        ch_r = np.sin(xx / 12.0) * np.cos(yy / 12.0) + 1.0  # Low frequency (15Hz)
-        ch_g = np.cos(xx / 8.0) * np.sin(yy / 8.0) + 1.0   # Mid frequency (35Hz)
-        ch_b = np.sin(xx / 5.0 + yy / 5.0) + 1.0          # High frequency (55Hz)
-
-        rgba_grid = blend_rgba(ch_r, ch_g, ch_b, alpha=0.85)
-
-        verts = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()]).astype(np.float32)
-
-        faces = []
-        face_colors = []
-        for j in range(ny_pts - 1):
-            for i in range(nx_pts - 1):
-                idx = j * nx_pts + i
-                faces.append([idx, idx + 1, idx + nx_pts])
-                faces.append([idx + 1, idx + nx_pts + 1, idx + nx_pts])
-
-                c = rgba_grid[j, i]
-                face_colors.append(c)
-                face_colors.append(c)
-
-        faces = np.array(faces, dtype=np.int32)
-        face_colors = np.array(face_colors, dtype=np.float32)
+        Geometry comes from
+        :func:`paleo_workbench.viz.geomodel.analysis.generate_rgb_fusion_slice`.
+        """
+        verts, faces, face_colors = analysis.generate_rgb_fusion_slice()
 
         rgb_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=face_colors, smooth=True)
         self.gl_widget.addItem(rgb_item)
@@ -2872,19 +2755,19 @@ class GeologicalModeling3DPage(QWidget):
         QMessageBox.information(self, "RGB 融合切片", "RGB 三频率（15Hz/35Hz/55Hz）属性融合三维切片已成功生成并叠加至三维视口！")
 
     def _generate_cross_well_fence(self) -> None:
-        """Generate 3D curtain/fence slice connecting all loaded boreholes."""
+        """Generate 3D curtain/fence slice connecting all loaded boreholes.
+
+        Mesh computation lives in
+        :func:`paleo_workbench.viz.geomodel.analysis.generate_cross_well_fence`.
+        """
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载钻孔数据。")
             return
 
-        wells = [
-            {"name": bh["name"], "x": bh["x"], "y": bh["y"], "depth": bh["total_depth"]}
-            for bh in self.bh_raw_data
-        ]
-
-        verts, faces, colors = generate_fence_mesh(wells, nz_samples=25)
-        if len(verts) == 0:
+        mesh = analysis.generate_cross_well_fence(self.bh_raw_data, nz_samples=25)
+        if mesh is None:
             return
+        verts, faces, colors = mesh
 
         fence_item = ClippedGLMeshItem(vertexes=verts, faces=faces, faceColors=colors, smooth=True)
         self.gl_widget.addItem(fence_item)
@@ -2895,39 +2778,19 @@ class GeologicalModeling3DPage(QWidget):
         self._sync_visibility_from_tree()
         self.gl_widget.update()
 
-        QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(wells)} 口钻孔的三维剖面幕墙！")
+        QMessageBox.information(self, "连井剖面幕墙", f"已成功生成连接 {len(self.bh_raw_data)} 口钻孔的三维剖面幕墙！")
 
     def _run_lithology_crossplot(self) -> None:
-        """Run geoviz.analyze_lithology_crossplot and show the crossplot statistics dialog."""
+        """Run geoviz.analyze_lithology_crossplot and show the crossplot statistics dialog.
+
+        The sampling + statistics live in
+        :func:`paleo_workbench.viz.geomodel.analysis.run_lithology_crossplot`.
+        """
         if not self.bh_raw_data:
             QMessageBox.information(self, "提示", "请先运行三维建模以加载数据。")
             return
 
-        gr_list = []
-        ai_list = []
-        lith_list = []
-
-        _litho_gr = {"砂岩": 40.0, "泥岩": 120.0, "石灰岩": 25.0, "花岗岩": 80.0}
-        _litho_ai = {"砂岩": 8200.0, "泥岩": 4800.0, "石灰岩": 14500.0, "花岗岩": 18000.0}
-
-        rng = np.random.default_rng(42)
-        for bh in self.bh_raw_data:
-            for layer in bh["layers"]:
-                lith = layer["lithology"]
-                base_g = _litho_gr.get(lith, 60.0)
-                base_a = _litho_ai.get(lith, 6000.0)
-
-                # Sample 10 points per layer
-                for _ in range(10):
-                    gr_list.append(base_g + float(rng.normal(0, 6.0)))
-                    ai_list.append(base_a + float(rng.normal(0, 400.0)))
-                    lith_list.append(lith)
-
-        analysis_result = analyze_lithology_crossplot(
-            np.array(gr_list, dtype=np.float32),
-            np.array(ai_list, dtype=np.float32),
-            lith_list
-        )
+        analysis_result = analysis.run_lithology_crossplot(self.bh_raw_data)
 
         dialog = LithologyCrossplotDialog(analysis_result, self)
         dialog.exec()
