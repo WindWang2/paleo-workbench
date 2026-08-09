@@ -60,3 +60,62 @@ def test_menu_remove_always_present(qtbot):
     menu = AssetContextMenu()
     menu.build(_res(), viz_supported=False)
     assert any(a.text() == "移出项目" for a in menu.actions())
+
+
+def _res_with_role(role: str):
+    return ResourceItem(
+        name="x",
+        path="/x.las",
+        type="well_log",
+        format="las",
+        status="parsed",
+        artifact_role=role,
+    )
+
+
+def test_menu_new_version_enabled_for_derived(qtbot):
+    """ctx_new_version (新建版本/工作副本) is enabled for DERIVED assets now
+    that the working-copy workflow is wired."""
+    menu = AssetContextMenu()
+    menu.build(_res_with_role("derived"), viz_supported=False)
+    act = menu.find_action("ctx_new_version")
+    assert act is not None
+    assert act.isEnabled() is True
+    assert "工作副本" in act.toolTip()
+
+
+def test_menu_promote_enabled_for_intermediate(qtbot):
+    """ctx_promote (提升为正式数据) is enabled for INTERMEDIATE assets now that
+    the promote workflow is wired."""
+    menu = AssetContextMenu()
+    menu.build(_res_with_role("intermediate"), viz_supported=False)
+    act = menu.find_action("ctx_promote")
+    assert act is not None
+    assert act.isEnabled() is True
+
+
+def test_menu_export_open_enabled_for_output(qtbot):
+    """ctx_export_open (导出/交付) is enabled for OUTPUT assets now that the
+    delivery workflow is wired."""
+    menu = AssetContextMenu()
+    menu.build(_res_with_role("export"), viz_supported=False)
+    act = menu.find_action("ctx_export_open")
+    assert act is not None
+    assert act.isEnabled() is True
+
+
+def test_menu_trashed_asset_shows_restore_not_remove(qtbot):
+    """A trashed (回收站) asset gets a 还原 action instead of the destructive
+    移出项目 action."""
+    trashed = ResourceItem(
+        name="t.las",
+        path="/t.las",
+        type="well_log",
+        format="las",
+        status="parsed",
+        parsed_summary={"catalog_trashed": True},
+    )
+    menu = AssetContextMenu()
+    menu.build(trashed, viz_supported=False)
+    assert menu.find_action("ctx_restore") is not None
+    assert menu.find_action("ctx_remove") is None

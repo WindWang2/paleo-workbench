@@ -173,17 +173,21 @@ def test_derived_copy_goes_through_core(qtbot, tmp_path, catalog):
     assert [p.id for p in lineage["parents"]] == [raw_version.id]
 
 
-def test_derived_copy_legacy_fallback_without_catalog(qtbot, tmp_path):
+def test_derived_copy_without_catalog_fails_visibly_no_raw_alias(qtbot, tmp_path):
+    """§8.2: derived requires an active catalog. Without one the action fails
+    visibly and NEVER creates a RAW-path alias (a 'derived' item pointing at
+    the RAW source file)."""
     page = _make_page(qtbot)
     resource = _make_managed_resource(page, tmp_path)
 
     page._create_derived_copy(resource)
 
-    assert len(page.project.resources) == 2
-    companion = page.project.resources[1]
-    assert companion.artifact_role == "derived"
-    assert companion.path == resource.path  # legacy companion shares the path
-    assert companion.checksum == resource.checksum
+    # No phantom derived companion is appended, and nothing aliases the RAW path.
+    assert len(page.project.resources) == 1
+    assert page.project.resources[0].id == resource.id
+    status = page.data_toolbar.operation_status_label.text()
+    assert "数据目录" in status
+    assert "失败" in status or "需要" in status
 
 
 # --- integrity via the service ----------------------------------------------
@@ -375,3 +379,104 @@ def test_inspector_falls_back_to_plain_view_without_catalog(qtbot, tmp_path):
     assert view is not None
     assert [v.version_id for v in view.versions] == ["v1"]  # legacy default
     assert view.lineage.has_lineage is False
+
+
+# --- trash / restore (移出项目 → 回收站 for catalog-managed assets) -----------
+
+
+def test_remove_managed_bridged_asset_trashes_catalog_no_ghost(
+    qtbot, tmp_path, catalog
+):
+    """移出项目 on a catalog-managed asset must trash the catalog asset (payload
+    to trash/, tombstone) so it disappears WITHOUT leaving a ghost catalog
+    asset behind."""
+    page = _make_page(qtbot)
+    resource = _make_managed_resource(page, tmp_path)
+    catalog.migrate_legacy_resources(page.project.resources)
+    asset_id = resource.id
+    version = catalog.get_version(f"ver_{resource.id}")
+    payload = catalog.resolve_path(version)
+    assert payload.is_file()
+
+    removed = page.remove_assets([resource])
+
+    assert removed is True
+    assert resource not in page.project.resources
+    asset = catalog.get_asset(asset_id)
+    assert asset.trashed is True
+    trashed_version = catalog.get_version(version.id)
+    assert trashed_version.trashed is True
+    # Payload moved out of its stage location into trash/.
+    assert not payload.exists()
+    assert "trash" in catalog.resolve_path(trashed_version).as_posix()
+    assert catalog.resolve_path(trashed_version).is_file()
+    # No ghost: the asset is excluded from active listings and search.
+    assert catalog.list_assets() == []
+    assert catalog.get_trashed_assets() == [asset]
+    assert catalog.search_assets(text=resource.name) == []
+    assert "已移至回收站" in page.data_toolbar.operation_status_label.text()
+
+
+def test_remove_external_bridged_asset_trashes_metadata_only_keeps_file(
+    qtbot, tmp_path, catalog
+):
+    """Trashing an external (unmanaged) version is metadata-only: the external
+    source file is NEVER touched."""
+    page = _make_page(qtbot)
+    resource = _make_external_resource(page, tmp_path)
+    catalog.migrate_legacy_resources(page.project.resources)
+    external_path = Path(resource.path)
+    assert external_path.is_file()
+
+    removed = page.remove_assets([resource])
+
+    assert removed is True
+    asset = catalog.get_asset(resource.id)
+    assert asset.trashed is True
+    version = catalog.get_version(f"ver_{resource.id}")
+    assert version.trashed is True
+    assert external_path.is_file()  # external file untouched
+
+
+def test_restore_trashed_asset_restores_payload_and_resource(qtbot, tmp_path, catalog):
+    page = _make_page(qtbot)
+    resource = _make_managed_resource(page, tmp_path)
+    catalog.migrate_legacy_resources(page.project.resources)
+    original_version = catalog.get_version(f"ver_{resource.id}")
+    original_payload = catalog.resolve_path(original_version)
+
+    page.remove_assets([resource])
+    assert original_payload.exists() is False
+
+    # Trash view: reconstruct the companion and restore it.
+    page._set_selected_asset(page._trashed_companions()[0])
+    restored = page.restore_selected_asset()
+
+    assert restored is True
+    asset = catalog.get_asset(resource.id)
+    assert asset.trashed is False
+    version = catalog.get_version(f"ver_{resource.id}")
+    assert version.trashed is False
+    assert catalog.resolve_path(version).read_bytes() == b"well.las-bytes"
+    # The legacy ResourceItem companion is re-surfaced in the active project.
+    assert any(r.id == resource.id for r in page.project.resources)
+    assert "已从回收站还原" in page.data_toolbar.operation_status_label.text()
+
+
+def test_remove_failure_aborts_without_ghost(qtbot, tmp_path, catalog, monkeypatch):
+    """If trashing the catalog asset fails, the resource must NOT be removed
+    (no ghost catalog asset left active while the ResourceItem vanishes)."""
+    page = _make_page(qtbot)
+    resource = _make_managed_resource(page, tmp_path)
+    catalog.migrate_legacy_resources(page.project.resources)
+
+    def boom_trash(asset_id, **kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(catalog, "trash_asset", boom_trash)
+
+    removed = page.remove_assets([resource])
+
+    assert removed is False
+    assert resource in page.project.resources
+    assert "失败" in page.data_toolbar.operation_status_label.text()
