@@ -8,6 +8,8 @@ with a real cross-correlation implementation.
 from __future__ import annotations
 
 import logging
+import os
+
 import numpy as np
 
 from PySide6.QtCore import QRectF, Qt, QObject, QEvent, Signal
@@ -50,6 +52,23 @@ from paleo_workbench.ui.pages.ai_check_advisor_dialog import AICheckAdvisorDialo
 from paleo_workbench.ui.pages.lithology_crossplot_dialog import LithologyCrossplotDialog
 
 logger = logging.getLogger(__name__)
+
+
+def _opengl_widget_supported() -> bool:
+    """True when QOpenGLWidget can be shown on the current Qt platform.
+
+    On the ``offscreen`` platform (headless CI / tests) Qt itself prints
+    "QOpenGLWidget is not supported on this platform".  Showing a pyqtgraph
+    GLViewWidget there makes Qt deliver paint events with no GL context, and
+    pyqtgraph's ``initializeGL`` then crashes on ``self.context()`` returning
+    None — which can segfault the process during event processing or teardown.
+    ``QOpenGLContext.create()``/``makeCurrent()`` both lie here, so the
+    platform chosen via ``QT_QPA_PLATFORM`` is the only reliable signal (the
+    same check the 3D tests use, see
+    tests/test_geological_modeling_3d_page.py::_opengl_widget_supported).
+    """
+    return os.environ.get("QT_QPA_PLATFORM", "") != "offscreen"
+
 
 # ---- Camera Presets (eliminates duplicated lambdas) ----
 _CAMERA_PERSPECTIVE = dict(distance=250, elevation=30, azimuth=45)
@@ -1841,6 +1860,14 @@ class GeologicalModeling3DPage(QWidget):
     def _ensure_joint_widget(self) -> None:
         """Mount WellSeismicJointWidget into joint 3D host (profile may sit in 2D host)."""
         if self._joint_widget is not None:
+            return
+        if not _opengl_widget_supported():
+            # The joint renderer is a GLViewWidget; mounting it on a platform
+            # without OpenGL segfaults as soon as Qt paints it. Degrade to the
+            # placeholder instead of crashing the whole app.
+            self._joint_3d_placeholder.setText(
+                "3D 渲染不可用：当前平台不支持 OpenGL（offscreen）"
+            )
             return
         if self._joint_host.scene is None:
             self._joint_3d_placeholder.setText(
