@@ -23,12 +23,13 @@ from __future__ import annotations
 
 import os
 import threading
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from paleo_workbench.catalog.db import CatalogIndex
+from paleo_workbench.catalog import queries as _queries
+from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
+from paleo_workbench.catalog.db import CatalogIndex
 from paleo_workbench.catalog.models import (
     CatalogDocument,
     DataAsset,
@@ -40,8 +41,8 @@ from paleo_workbench.catalog.models import (
     Model,
     ModelVersion,
     Tag,
-    normalize_tag_name,
 )
+from paleo_workbench.catalog.queries import IntegrityReport
 from paleo_workbench.catalog.storage import (
     create_working_copy as _place_working_copy,
     place_managed_file,
@@ -51,25 +52,6 @@ from paleo_workbench.catalog.storage import (
 )
 from paleo_workbench.catalog.store import CatalogStore
 from paleo_workbench.project.models import _now_iso
-
-
-@dataclass
-class IntegrityReport:
-    """Result of :meth:`DataCatalogService.verify_integrity`.
-
-    Statuses: ``verified`` (hash matches), ``modified`` (hash mismatch — the
-    catalog record is NOT updated), ``missing`` (payload gone), ``unknown``
-    (no recorded hash to verify against, e.g. an unhashed external link).
-    """
-
-    statuses: dict[str, str] = field(default_factory=dict)
-
-    def status_for(self, version_id: str) -> str:
-        return self.statuses.get(version_id, "unknown")
-
-    @property
-    def ok(self) -> bool:
-        return all(s in ("verified", "unknown") for s in self.statuses.values())
 
 
 class DataCatalogService:
@@ -1164,43 +1146,15 @@ class DataCatalogService:
         Reports only; a mismatch never updates the catalog. Hashing streams in
         chunks; wrap in a worker thread for large batches in UI contexts.
         Trashed versions are skipped (their payloads live in ``trash/``).
+
+        Delegates to :func:`paleo_workbench.catalog.queries.verify_integrity`.
         """
-        with self._lock:
-            if version_id is not None:
-                versions = [
-                    self._version_or_raise(version_id)
-                ]
-            else:
-                versions = list(self.document.versions)
-        report = IntegrityReport()
-        for version in versions:
-            if version.trashed:
-                continue
-            payload = self.resolve_path(version)
-            if not payload.is_file():
-                report.statuses[version.id] = "missing"
-                continue
-            if not version.sha256:
-                report.statuses[version.id] = "unknown"
-                continue
-            try:
-                actual = sha256_file(payload)
-            except OSError:
-                report.statuses[version.id] = "missing"
-                continue
-            report.statuses[version.id] = (
-                "verified" if actual == version.sha256 else "modified"
-            )
-        return report
+        return _queries.verify_integrity(self, version_id=version_id)
 
     # -- tags ------------------------------------------------------------------
 
     def _tag_by_name(self, name: str) -> Tag | None:
-        normalized = normalize_tag_name(name)
-        for tag in self.document.tags:
-            if tag.name == normalized:
-                return tag
-        return None
+        return _tags._tag_by_name(self, name)
 
     def add_tag(
         self,
@@ -1209,49 +1163,11 @@ class DataCatalogService:
         asset_id: str | None = None,
         version_id: str | None = None,
     ) -> Tag:
-        """Get-or-create a normalized tag and associate it. Idempotent."""
-        if asset_id is None and version_id is None:
-            raise CatalogError("add_tag requires asset_id or version_id")
-        normalized = normalize_tag_name(name)
-        if not normalized:
-            raise CatalogError("Empty tag name")
-        if asset_id is not None:
-            self._asset_or_raise(asset_id)
-        if version_id is not None:
-            self._version_or_raise(version_id)
-        tag = self._tag_by_name(normalized)
-        created = False
-        if tag is None:
-            tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
-            self.document.tags.append(tag)
-            created = True
-        changed = False
-        if asset_id is not None:
-            ids = self.document.asset_tags.setdefault(asset_id, [])
-            if tag.id not in ids:
-                ids.append(tag.id)
-                changed = True
-        if version_id is not None:
-            ids = self.document.version_tags.setdefault(version_id, [])
-            if tag.id not in ids:
-                ids.append(tag.id)
-                changed = True
-        if created or changed:
-            try:
-                self._save()
-            except Exception:
-                if created and tag in self.document.tags:
-                    self.document.tags.remove(tag)
-                if asset_id is not None:
-                    self.document.asset_tags[asset_id] = [
-                        t for t in self.document.asset_tags.get(asset_id, []) if t != tag.id
-                    ]
-                if version_id is not None:
-                    self.document.version_tags[version_id] = [
-                        t for t in self.document.version_tags.get(version_id, []) if t != tag.id
-                    ]
-                raise
-        return tag
+        """Get-or-create a normalized tag and associate it. Idempotent.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.add_tag`.
+        """
+        return _tags.add_tag(self, name, asset_id=asset_id, version_id=version_id)
 
     def remove_tag(
         self,
@@ -1260,80 +1176,27 @@ class DataCatalogService:
         asset_id: str | None = None,
         version_id: str | None = None,
     ) -> None:
-        tag = self._tag_by_name(name)
-        if tag is None:
-            return
-        changed = False
-        if asset_id is not None and tag.id in self.document.asset_tags.get(asset_id, []):
-            self.document.asset_tags[asset_id].remove(tag.id)
-            changed = True
-        if version_id is not None and tag.id in self.document.version_tags.get(version_id, []):
-            self.document.version_tags[version_id].remove(tag.id)
-            changed = True
-        if changed:
-            self._save()
+        """Delegates to :func:`paleo_workbench.catalog.tags.remove_tag`."""
+        return _tags.remove_tag(self, name, asset_id=asset_id, version_id=version_id)
 
     def rename_tag(self, old_name: str, new_name: str) -> Tag:
-        """Rename a tag; merges into an existing tag on normalized collision."""
-        tag = self._tag_by_name(old_name)
-        if tag is None:
-            raise CatalogError(f"Unknown tag: {old_name}")
-        normalized_new = normalize_tag_name(new_name)
-        if not normalized_new:
-            raise CatalogError("Empty tag name")
-        existing = self._tag_by_name(normalized_new)
-        if existing is not None and existing.id == tag.id:
-            tag.display_name = " ".join(str(new_name).split())
-            self._save()
-            return tag
-        if existing is not None:
-            # Merge: point all associations at the existing tag, drop the old.
-            for ids in list(self.document.asset_tags.values()):
-                while tag.id in ids:
-                    ids.remove(tag.id)
-                    if existing.id not in ids:
-                        ids.append(existing.id)
-            for ids in list(self.document.version_tags.values()):
-                while tag.id in ids:
-                    ids.remove(tag.id)
-                    if existing.id not in ids:
-                        ids.append(existing.id)
-            self.document.tags.remove(tag)
-            self._save()
-            return existing
-        tag.name = normalized_new
-        tag.display_name = " ".join(str(new_name).split())
-        self._save()
-        return tag
+        """Rename a tag; merges into an existing tag on normalized collision.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.rename_tag`.
+        """
+        return _tags.rename_tag(self, old_name, new_name)
 
     def list_tags(self) -> list[Tag]:
-        return list(self.document.tags)
+        """Delegates to :func:`paleo_workbench.catalog.tags.list_tags`."""
+        return _tags.list_tags(self)
 
     def find_assets_by_tag(self, name: str) -> list[str]:
-        tag = self._tag_by_name(name)
-        if tag is None:
-            return []
-        try:
-            return sorted(self._index.assets_for_tag(tag.name))
-        except Exception:
-            return sorted(
-                aid
-                for aid, ids in self.document.asset_tags.items()
-                if tag.id in ids
-            )
+        """Delegates to :func:`paleo_workbench.catalog.tags.find_assets_by_tag`."""
+        return _tags.find_assets_by_tag(self, name)
 
     def find_versions_by_tag(self, name: str) -> list[str]:
-        tag = self._tag_by_name(name)
-        if tag is None:
-            return []
-        try:
-            return sorted(self._index.versions_for_tag(tag.name))
-        except Exception:
-            return sorted(
-                vid
-                for vid, ids in self.document.version_tags.items()
-                if tag.id in ids
-            )
+        """Delegates to :func:`paleo_workbench.catalog.tags.find_versions_by_tag`."""
+        return _tags.find_versions_by_tag(self, name)
 
     # -- search ------------------------------------------------------------------
 
@@ -1349,37 +1212,17 @@ class DataCatalogService:
         """Filter assets by name substring, stage, tag, and/or type.
 
         Trashed (soft-deleted) assets are excluded unless ``include_trashed``.
+
+        Delegates to :func:`paleo_workbench.catalog.queries.search_assets`.
         """
-        try:
-            rows = self._index.search_assets(
-                text=text,
-                stage=stage.value if stage else None,
-                tag=normalize_tag_name(tag) if tag else None,
-                type=type,
-            )
-            by_id = {a.id: a for a in self.document.assets}
-            return [
-                by_id[r["id"]]
-                for r in rows
-                if r["id"] in by_id and (include_trashed or not by_id[r["id"]].trashed)
-            ]
-        except Exception:
-            pass
-        results = list(self.document.assets)
-        if not include_trashed:
-            results = [a for a in results if not a.trashed]
-        if text:
-            needle = text.casefold()
-            results = [a for a in results if needle in a.name.casefold()]
-        if type:
-            results = [a for a in results if a.type == type]
-        if stage is not None:
-            with_stage = {v.asset_id for v in self.document.versions if v.stage == stage}
-            results = [a for a in results if a.id in with_stage]
-        if tag:
-            tagged = set(self.find_assets_by_tag(tag))
-            results = [a for a in results if a.id in tagged]
-        return results
+        return _queries.search_assets(
+            self,
+            text=text,
+            stage=stage,
+            tag=tag,
+            type=type,
+            include_trashed=include_trashed,
+        )
 
     # -- legacy migration ---------------------------------------------------------
 
