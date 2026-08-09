@@ -4,11 +4,16 @@ on:
   push:
     branches: [main, master]
     paths:
+      # A submodule gitlink bump is recorded as a change to the bare path
+      # "well-log-engine" itself; "well-log-engine/**" does NOT reliably match
+      # it, so list both.
+      - "well-log-engine"
       - "well-log-engine/**"
       - ".github/workflows/well-log-engine.yml"
   pull_request:
     branches: [main, master]
     paths:
+      - "well-log-engine"
       - "well-log-engine/**"
       - ".github/workflows/well-log-engine.yml"
   workflow_dispatch:
@@ -45,6 +50,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # well-log-engine is a git submodule; every job below builds it, so
+          # materialize submodules up front and fail fast if they are missing.
+          submodules: recursive
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Re-checkout with submodules:recursive or run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         if: runner.os == 'Linux'
@@ -153,6 +172,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # well-log-engine is a git submodule; every job below builds it, so
+          # materialize submodules up front and fail fast if they are missing.
+          submodules: recursive
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Re-checkout with submodules:recursive or run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |
@@ -190,6 +223,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # well-log-engine is a git submodule; every job below builds it, so
+          # materialize submodules up front and fail fast if they are missing.
+          submodules: recursive
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Re-checkout with submodules:recursive or run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |
@@ -236,6 +283,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # well-log-engine is a git submodule; every job below builds it, so
+          # materialize submodules up front and fail fast if they are missing.
+          submodules: recursive
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Re-checkout with submodules:recursive or run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |
@@ -294,6 +355,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # well-log-engine is a git submodule; every job below builds it, so
+          # materialize submodules up front and fail fast if they are missing.
+          submodules: recursive
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Re-checkout with submodules:recursive or run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         if: runner.os == 'Linux'
@@ -401,6 +476,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # well-log-engine is a git submodule; every job below builds it, so
+          # materialize submodules up front and fail fast if they are missing.
+          submodules: recursive
+
+      # Fail fast: the job cannot produce meaningful results without the
+      # engine sources. Catches a checkout that skipped submodules (fresh
+      # shallow clone without recursive init, partial mirror, etc.).
+      - name: Assert well-log-engine submodule present
+        shell: bash
+        run: |
+          if [[ ! -f well-log-engine/CMakeLists.txt || ! -d well-log-engine/src || ! -d well-log-engine/include ]]; then
+            echo "::error::well-log-engine submodule is missing or incomplete (expected well-log-engine/CMakeLists.txt, src/, include/). Re-checkout with submodules:recursive or run: git submodule update --init well-log-engine"; exit 1;
+          fi
 
       - name: Install Ubuntu deps
         run: |
