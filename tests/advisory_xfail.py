@@ -5,9 +5,10 @@ no known failures are quarantined under xfail anymore. Every entry that used
 to live here either passes (entries removed) or was fixed (root causes closed
 during the production-readiness quality convergence).
 
-Keep this module so the import path in tests/conftest.py stays stable, but the
-registry is intentionally empty: do NOT grow it back without a linked issue —
-the goal forbids leaving failures under xfail.
+The registry is intentionally empty and is guarded by
+``tests/test_advisory_xfail_registry.py`` (asserts it never grows back): do
+NOT add entries without a linked issue — the goal forbids leaving failures
+under xfail.
 """
 
 from __future__ import annotations

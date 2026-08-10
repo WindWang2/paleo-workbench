@@ -2683,8 +2683,9 @@ class GeologicalModeling3DPage(QWidget):
 
     def _register_mesh_export(self, filepath: str) -> None:
         """Best-effort OUTPUT DataVersion registration for FLAC3D/Abaqus mesh
-        exports. The modeling run id (when recorded) links lineage back to the
-        synthetic/real source; no catalog → no-op."""
+        exports. The OUTPUT is registered with provenance metadata but no
+        source lineage (the synthetic grid has no source task); no catalog →
+        no-op."""
         if self._project is None:
             return
         try:
