@@ -107,7 +107,17 @@ class SeismicControlPanel(QFrame):
             self.set_controls_enabled(False)
             return
 
-        mock_text = "Mock" if summary.get("is_mock") else "真实"
+        # Honest output labeling (P2): random/mock output must never display
+        # as 真实, and heuristic output is not a scientific prediction.
+        # Mirrors prediction_evidence_panel.py (review finding I3).
+        if summary.get("is_mock"):
+            nature = "Mock"
+        elif not summary.get("final_scientific_prediction", True):
+            nature = "启发式"
+        else:
+            nature = "科学预测"
+        if summary.get("demo") or summary.get("source") == "synthetic/demo":
+            nature = f"Demo · {nature}"
         replaceable = "可替换" if summary.get("is_replaceable", False) else "固定"
-        self.mock_value.setText(f"{mock_text} · {replaceable}")
+        self.mock_value.setText(f"{nature} · {replaceable}")
         self.set_controls_enabled(True)
