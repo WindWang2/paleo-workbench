@@ -305,6 +305,10 @@ class WellLogPredictionPage(QWidget):
                     raise RuntimeError("WellLogEngine 抓屏失败")
                 if not pixmap.save(path, "PNG"):
                     raise RuntimeError("PNG 写入失败")
+                # Best-effort provenance for the engine-branch export (the
+                # legacy branch registers via export_well_canvas; this branch
+                # writes directly, so register here — review finding I5).
+                self._register_canvas_export(path, "png")
             else:
                 task = self._current_task()
                 export_well_canvas(
@@ -322,3 +326,24 @@ class WellLogPredictionPage(QWidget):
             )
             return
         QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
+
+    def _register_canvas_export(self, path: str, fmt: str) -> None:
+        """Best-effort OUTPUT DataVersion registration for the engine-branch
+        canvas export (no catalog open → no-op; lineage links the active
+        prediction task when available)."""
+        if self._project is None:
+            return
+        try:
+            from paleo_workbench.catalog.lifecycle import register_export_output
+
+            task = self._current_task()
+            register_export_output(
+                name="测井剖面 canvas export",
+                output_path=str(path),
+                fmt=fmt,
+                source_task_ids=[task.id] if task is not None else None,
+                catalog=None,
+            )
+        except Exception:
+            # Provenance is best-effort; never break the export flow.
+            pass

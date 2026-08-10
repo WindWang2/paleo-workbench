@@ -135,9 +135,21 @@ def plan_gc(service) -> GcReport:
                     GcItem(TRASH_ORPHAN, path, _safe_size(path))
                 )
 
-    # 4. Stale temp files anywhere in the artifacts tree.
+    # 4. Stale temp files anywhere in the artifacts tree. A file whose name
+    #    matches the temp pattern is only an orphan when NO managed version
+    #    references it — an imported payload may legitimately be named
+    #    ``data.tmp`` / ``.blob-x`` (review finding: auto-sweep deleted
+    #    referenced payloads on open). Referenced files are NEVER classified
+    #    here (same referenced set as step 1).
+    referenced = {v.path for v in document.versions if v.managed}
     for path in _walk_files(stage_root):
-        if _is_temp_name(path.name):
+        if not _is_temp_name(path.name):
+            continue
+        try:
+            rel = path.relative_to(stage_root.parent).as_posix()
+        except ValueError:
+            rel = ""
+        if rel not in referenced:
             report.items.append(GcItem(TEMP_ORPHAN, path, _safe_size(path)))
 
     # 5. Unreferenced blobs (reachability GC on the content store).

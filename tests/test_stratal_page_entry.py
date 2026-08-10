@@ -87,13 +87,16 @@ def test_stratal_generate_demo_produces_visible_slices(qtbot):
         pytest.skip("Renderer3D could not initialize in this offscreen environment")
 
     # Switch to the demo path and generate (computation runs on a worker
-    # thread; wait for the completed signal before asserting the viewport).
+    # thread). Start the job FIRST, then wait on the worker's completed
+    # signal (the worker is created by start(), so it must exist before
+    # waitSignal dereferences it).
     page._stratal_demo_check.setChecked(True)
     page._stratal_fractions.setCurrentIndex(0)  # 1/4, 1/2, 3/4
+    page._on_generate_stratal_slices()
     with qtbot.waitSignal(
         page._stratal_job.worker.completed, timeout=5000
     ) as blocker:
-        page._on_generate_stratal_slices()
+        pass
     assert blocker.args is not None and blocker.args[0]["demo"] is True
 
     snap = renderer.get_stratal_slices()
@@ -120,6 +123,12 @@ def test_stratal_clear_removes_all_slices(qtbot):
 
     page._stratal_demo_check.setChecked(True)
     page._on_generate_stratal_slices()
+    # Wait for the async worker to finish applying slices before asserting.
+    with qtbot.waitSignal(
+        page._stratal_job.worker.completed, timeout=5000
+    ) as blocker:
+        pass
+    assert blocker.args is not None and blocker.args[0]["demo"] is True
     assert renderer._stratal_plane_items
     page._on_clear_stratal_slices()
     assert renderer._stratal_plane_items == {}
@@ -153,3 +162,36 @@ def test_stratal_horizon_browse_populates_combo(qtbot, tmp_path):
     page._stratal_top_combo.clear()
     page._stratal_top_combo.addItem(str(fake), str(fake))
     assert page._stratal_top_combo.currentData() == str(fake)
+
+
+def test_stratal_worker_demo_produces_surfaces(qtbot):
+    """StratalWorker demo path emits the expected surfaces/labels without any
+    GL renderer — verifies the worker itself (the part the UI test cannot
+    reach on the offscreen platform)."""
+    from paleo_workbench.ui.pages.geological_modeling_workers import StratalWorker
+
+    worker = StratalWorker(demo=True, fractions=(0.25, 0.50, 0.75))
+    with qtbot.waitSignal(worker.completed, timeout=5000) as blocker:
+        worker.run()
+    result = blocker.args[0]
+    assert result["demo"] is True
+    assert len(result["surfaces"]) == 3
+    assert result["labels"] == ["k=0.25", "k=0.50", "k=0.75"]
+
+
+def test_stratal_worker_real_path_without_survey_fails_cleanly(qtbot):
+    """StratalWorker real-data path with no usable scene/volume fails with a
+    message (never crashes, never silently fabricates)."""
+    from paleo_workbench.ui.pages.geological_modeling_workers import StratalWorker
+
+    worker = StratalWorker(
+        demo=False,
+        fractions=(0.5,),
+        scene=None,
+        volume=None,
+        top_path="missing.dat",
+        bottom_path="missing.dat",
+    )
+    with qtbot.waitSignal(worker.failed, timeout=5000) as blocker:
+        worker.run()
+    assert "survey/registration" in blocker.args[0] or "不可用" in blocker.args[0]

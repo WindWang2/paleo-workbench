@@ -280,3 +280,70 @@ def test_register_result_asset_failure_leaves_no_half_asset(service, tmp_path):
 
     assert len(service.document.assets) == before_assets
     assert len(service.document.versions) == 0
+
+
+# ------------------------------------------- production promotion durability (C2)
+
+
+def test_promote_model_survives_ensure_default_models(service):
+    """An explicitly promoted production model must NOT be silently reset to
+    demo by ensure_default_models on the next run (review finding C2)."""
+    from paleo_workbench.prediction.providers import (
+        CAPABILITY_FACIES,
+        MODEL_ID_HEURISTIC,
+        ensure_default_models,
+    )
+
+    ensure_default_models(service)
+    # No production model initially (honest unavailable state).
+    assert service.find_production_model(CAPABILITY_FACIES) is None
+
+    # Explicit promotion (the sanctioned act).
+    promoted = service.promote_model(MODEL_ID_HEURISTIC, "1")
+    assert promoted.status == "production"
+    assert service.find_production_model(CAPABILITY_FACIES) is not None
+
+    # ensure_default_models runs again (as on every run click) — must preserve.
+    ensure_default_models(service)
+    found = service.find_production_model(CAPABILITY_FACIES)
+    assert found is not None
+    assert found.model_id == MODEL_ID_HEURISTIC
+    assert found.status == "production"
+    assert service.get_model(MODEL_ID_HEURISTIC).status == "production"
+
+
+def test_register_model_force_status_controls_existing_model(service):
+    """register_model with force_status=False preserves an existing model's
+    status/metadata; force_status=True deliberately changes them."""
+    from paleo_workbench.prediction.providers import (
+        MODEL_ID_DEMO,
+        ensure_default_models,
+    )
+
+    ensure_default_models(service)
+    service.promote_model(MODEL_ID_DEMO, "1")
+
+    # Seed-style re-registration (force_status=False) does not downgrade.
+    service.register_model(
+        model_id=MODEL_ID_DEMO,
+        model_name="演示相带预测（Demo）",
+        model_type="demo",
+        capability="facies",
+        provider="demo",
+        status="demo",
+        metadata={"source": "synthetic/demo"},
+    )
+    assert service.get_model(MODEL_ID_DEMO).status == "production"
+
+    # Explicit force_status=True updates it.
+    service.register_model(
+        model_id=MODEL_ID_DEMO,
+        model_name="演示相带预测（Demo）",
+        model_type="demo",
+        capability="facies",
+        provider="demo",
+        status="demo",
+        metadata={"source": "synthetic/demo"},
+        force_status=True,
+    )
+    assert service.get_model(MODEL_ID_DEMO).status == "demo"

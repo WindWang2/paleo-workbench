@@ -629,3 +629,40 @@ def test_query_lineage_cycle_never_lists_start_as_own_ancestor(
     descendant_ids = {d.version_id for d in descendants}
     assert r2.version_id in descendant_ids
     assert r1.version_id not in descendant_ids
+
+
+# ================================================= I2: re-import after trash
+
+
+def test_reimport_after_trash_rebridges_freshly(catalog, tmp_path):
+    """Import → trash → re-import the same file must register a NEW live
+    version and re-bridge the legacy id (no silent dead bridge to the
+    trashed version). Review finding I2."""
+    src = tmp_path / "incoming" / "well.las"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"log v1")
+    legacy_id = "res_reimport"
+
+    v1 = catalog.register_input(
+        name="well.las", path=str(src), checksum=None,
+        kind="well_log", format="las", legacy_resource_id=legacy_id,
+    )
+    assert catalog.resolve_legacy_resource(legacy_id).version_id == v1.version_id
+
+    # Trash the whole asset.
+    svc = catalog._service
+    asset = svc.get_asset(v1.asset_id)
+    svc.trash_asset(asset.id)
+    assert svc.get_asset(v1.asset_id).trashed is True
+
+    # Re-import the same file: must NOT resolve to the trashed version.
+    v2 = catalog.register_input(
+        name="well.las", path=str(src), checksum=None,
+        kind="well_log", format="las", legacy_resource_id=legacy_id,
+    )
+    assert v2.version_id != v1.version_id
+    assert svc.get_version(v2.version_id).trashed is False
+    # The legacy id now bridges to the fresh version.
+    resolved = catalog.resolve_legacy_resource(legacy_id)
+    assert resolved is not None
+    assert resolved.version_id == v2.version_id

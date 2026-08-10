@@ -27,7 +27,9 @@ def test_seismic_control_panel_update_state(qtbot):
     panel.update_state(task, volume_shape=(8, 10, 12))
 
     assert panel.shape_value.text() == "8 × 10 × 12"
-    assert panel.mock_value.text() == "Mock · 可替换"
+    # Mock adapter output is honestly labeled Demo (synthetic source),
+    # matching PredictionEvidencePanel's labeling (I3 parity).
+    assert panel.mock_value.text() == "Demo · Mock · 可替换"
     assert panel.status_value.text() == "complete"
 
 
@@ -38,3 +40,60 @@ def test_seismic_control_panel_reflects_selected_attribute(qtbot):
     panel.set_attribute_label("包络")
 
     assert panel.attribute_value.text() == "包络"
+
+
+def test_seismic_control_panel_heuristic_label_not_real(qtbot):
+    """Heuristic output (is_mock=False, final_scientific_prediction=False)
+    must display as 启发式, never 真实 (review finding I3)."""
+    from paleo_workbench.project.models import ProjectDocument
+
+    project = ProjectDocument.new("Test")
+    task = MockPredictionAdapter().run(project, [], seed=3)
+    # The Mock adapter is is_mock=True; force heuristic semantics.
+    task.result_summary = {
+        "is_mock": False,
+        "final_scientific_prediction": False,
+        "probabilities_uncalibrated": True,
+        "is_replaceable": True,
+    }
+    panel = SeismicControlPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(task, volume_shape=(8, 10, 12))
+    assert "真实" not in panel.mock_value.text()
+    assert "启发式" in panel.mock_value.text()
+
+
+def test_seismic_control_panel_scientific_label(qtbot):
+    """A genuine scientific prediction (final_scientific_prediction=True,
+    not mock) displays as 科学预测."""
+    from paleo_workbench.project.models import ProjectDocument
+
+    project = ProjectDocument.new("Test")
+    task = MockPredictionAdapter().run(project, [], seed=3)
+    task.result_summary = {
+        "is_mock": False,
+        "final_scientific_prediction": True,
+        "is_replaceable": False,
+    }
+    panel = SeismicControlPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(task, volume_shape=(8, 10, 12))
+    assert "科学预测" in panel.mock_value.text()
+
+
+def test_seismic_control_panel_demo_source_labeled(qtbot):
+    """Synthetic/demo source output must carry the Demo marker even when
+    is_mock is absent (parity with PredictionEvidencePanel)."""
+    from paleo_workbench.project.models import ProjectDocument
+
+    project = ProjectDocument.new("Test")
+    task = MockPredictionAdapter().run(project, [], seed=3)
+    task.result_summary = {
+        "is_mock": False,
+        "final_scientific_prediction": True,
+        "source": "synthetic/demo",
+    }
+    panel = SeismicControlPanel()
+    qtbot.addWidget(panel)
+    panel.update_state(task, volume_shape=(8, 10, 12))
+    assert "Demo" in panel.mock_value.text()

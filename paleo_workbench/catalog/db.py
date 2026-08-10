@@ -920,7 +920,7 @@ class CatalogIndex:
     def _find_managed_raw(self, source_uri: str, sha256_value: str) -> str | None:
         row = self._connect().execute(
             "SELECT id FROM versions WHERE managed = 1 AND stage = 'raw'"
-            " AND source_uri = ? AND sha256 = ? LIMIT 1",
+            " AND trashed = 0 AND source_uri = ? AND sha256 = ? LIMIT 1",
             (source_uri, sha256_value),
         ).fetchone()
         return row[0] if row is not None else None
@@ -931,7 +931,8 @@ class CatalogIndex:
 
     def _find_external_by_path(self, path: str) -> str | None:
         row = self._connect().execute(
-            "SELECT id FROM versions WHERE managed = 0 AND path = ? LIMIT 1",
+            "SELECT id FROM versions WHERE managed = 0 AND trashed = 0"
+            " AND path = ? LIMIT 1",
             (path,),
         ).fetchone()
         return row[0] if row is not None else None

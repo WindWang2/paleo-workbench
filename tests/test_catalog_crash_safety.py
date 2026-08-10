@@ -374,3 +374,32 @@ def test_trash_crash_after_payload_move_restores_from_trash(service, tmp_path):
         assert not any(trash_root.rglob("*.bin")) if trash_root.exists() else True
     finally:
         svc.close()
+
+
+def test_load_falls_back_to_bak_when_canonical_corrupt(tmp_path):
+    """A corrupt-but-present catalog.json (torn write / manual edit) must not
+    block project open: the previous revision is recovered from .bak (review
+    finding M3)."""
+    project_path = _make_project(tmp_path)
+    svc = DataCatalogService.open(project_path)
+    src = _source(tmp_path, "a.bin", b"precious")
+    svc.import_raw(src)
+    svc.import_raw(_source(tmp_path, "b.bin", b"also precious"))
+    svc.close()
+
+    # Corrupt the canonical file but keep the .bak intact.
+    canonical = catalog_file_for(project_path)
+    bak = catalog_bak_file_for(project_path)
+    assert bak.is_file()
+    canonical.write_text("{ this is not valid json !!!", encoding="utf-8")
+
+    svc2 = DataCatalogService.open(project_path)
+    try:
+        # The project opens with the backup revision (assets preserved).
+        assert len(svc2.document.assets) == 1
+        assert svc2.document.versions
+        # The canonical file was re-promoted from the backup.
+        import json as _json
+        _json.loads(canonical.read_text(encoding="utf-8"))
+    finally:
+        svc2.close()

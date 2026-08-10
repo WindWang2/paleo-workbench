@@ -158,9 +158,18 @@ class DataCatalogService:
             if self._assets_by_legacy_id is not None:
                 self._assets_by_legacy_id[asset.id] = asset
                 if asset.legacy_resource_id is not None:
-                    self._assets_by_legacy_id.setdefault(
-                        asset.legacy_resource_id, asset
+                    holder = self._assets_by_legacy_id.get(
+                        asset.legacy_resource_id
                     )
+                    # A trashed asset still holds its legacy id; a fresh
+                    # (live) re-import takes over the bridge so the legacy id
+                    # resolves to live data (review finding I2).
+                    if holder is None or holder.trashed:
+                        self._assets_by_legacy_id[asset.legacy_resource_id] = asset
+                    else:
+                        self._assets_by_legacy_id.setdefault(
+                            asset.legacy_resource_id, asset
+                        )
 
     def _remove_asset(self, asset: DataAsset) -> None:
         if asset in self.document.assets:
@@ -169,11 +178,14 @@ class DataCatalogService:
             self._asset_by_id.pop(asset.id, None)
         if self._assets_by_legacy_id is not None:
             # Removing the (first-wins) claimant must reveal the next claimant;
-            # rebuild this small index from the remaining assets.
+            # rebuild this small index from the remaining assets. A live
+            # asset takes the bridge over a trashed one (I2).
             legacy: dict[str, DataAsset] = {}
             for a in self.document.assets:
                 legacy[a.id] = a
-            for a in self.document.assets:
+            for a in sorted(
+                self.document.assets, key=lambda x: int(bool(x.trashed))
+            ):
                 if a.legacy_resource_id is not None:
                     legacy.setdefault(a.legacy_resource_id, a)
             self._assets_by_legacy_id = legacy
@@ -375,6 +387,19 @@ class DataCatalogService:
         """Stable legacy-bridge resolution (id match wins, then first bridge)."""
         self._ensure_maps()
         return self._assets_by_legacy_id.get(legacy_resource_id)
+
+    def _live_asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
+        """Like :meth:`_asset_by_legacy_id` but ignores trashed assets.
+
+        A trashed asset still holds its legacy id; import-after-trash must be
+        able to re-bridge a fresh asset instead of dead-ending on the trashed
+        one (review finding I2).
+        """
+        self._ensure_maps()
+        asset = self._assets_by_legacy_id.get(legacy_resource_id)
+        if asset is not None and asset.trashed:
+            return None
+        return asset
 
     def _set_legacy_bridge(self, asset: DataAsset, legacy_resource_id: str) -> None:
         """Record a legacy bridge on *asset*, keeping the legacy index current.
@@ -689,7 +714,7 @@ class DataCatalogService:
             if (
                 _legacy_resource_id is not None
                 and target.legacy_resource_id is None
-                and self._asset_by_legacy_id(_legacy_resource_id) is None
+                and self._live_asset_by_legacy_id(_legacy_resource_id) is None
             ):
                 target.legacy_resource_id = _legacy_resource_id
             asset = target
@@ -960,10 +985,18 @@ class DataCatalogService:
         status: str = "demo",
         metadata: dict[str, Any] | None = None,
         provenance: dict[str, Any] | None = None,
+        force_status: bool = False,
     ) -> Model:
         """Register (or update) a logical model. Idempotent on ``model_id``:
         re-registering refreshes name/capability/provider/status/metadata so
-        defaults can be repaired without duplicating entries."""
+        defaults can be repaired without duplicating entries.
+
+        ``force_status`` (default False) protects an existing model from being
+        silently downgraded by a seed/defaults call: when the model already
+        exists and ``force_status`` is False, its ``status`` and ``metadata``
+        are preserved (an explicit promote must never be clobbered by
+        ``ensure_default_models`` — review finding C2). Pass True only when
+        the caller deliberately changes status (e.g. promote/demote)."""
         if not model_id or not model_name:
             raise CatalogError("register_model requires model_id and model_name")
         existing = None
@@ -976,8 +1009,9 @@ class DataCatalogService:
             existing.model_type = model_type or existing.model_type
             existing.capability = capability
             existing.provider = provider or existing.provider
-            existing.status = status
-            existing.metadata = dict(metadata or {})
+            if force_status:
+                existing.status = status
+                existing.metadata = dict(metadata or {})
             if provenance:
                 existing.provenance.update(provenance)
             self._save()
@@ -1089,6 +1123,34 @@ class DataCatalogService:
             if model_id is None or v.model_id == model_id
         ]
         return sorted(versions, key=lambda v: v.created_at)
+
+    def promote_model(self, model_id: str, model_version: str) -> ModelVersion:
+        """Promote a model version to production in ONE atomic save.
+
+        Sets BOTH the logical ``Model.status`` and the concrete
+        ``ModelVersion.status`` to ``"production"`` and clears
+        ``demo_only``, so ``find_production_model`` starts returning it.
+        This is the sanctioned production-promotion act: nothing else
+        (including ``ensure_default_models`` seeds) may silently downgrade
+        it afterwards (review finding C2).
+        """
+        with self._lock:
+            model = self._model_or_raise(model_id)
+            key = str(model_version)
+            version = None
+            for v in self.document.model_versions:
+                if v.model_id == model_id and v.model_version == key:
+                    version = v
+                    break
+            if version is None:
+                raise CatalogError(
+                    f"ModelVersion {model_id}@{model_version} not registered"
+                )
+            model.status = "production"
+            version.status = "production"
+            version.demo_only = False
+            self._save()
+            return version
 
     def find_production_model(self, capability: str) -> ModelVersion | None:
         """Return the newest production :class:`ModelVersion` for *capability*.
@@ -1430,7 +1492,20 @@ class DataCatalogService:
                         self.project_path, self.resolve_path(version), shared=shared
                     )
                 self._remove_version(version)
+            # An asset is removed only when NONE of its versions survives the
+            # purge. restore_version() can untrash a single version of a
+            # trashed asset; deleting the asset then would orphan that live
+            # version (ghost version whose asset_id no longer exists — review
+            # finding C3). Such assets are kept and un-trashed.
+            surviving_asset_ids = {
+                v.asset_id for v in self.document.versions if not v.trashed
+            }
             for asset in trashed_assets:
+                if asset.id in surviving_asset_ids:
+                    asset.trashed = False
+                    asset.trashed_at = None
+                    asset.metadata.pop("trash", None)
+                    continue
                 self._remove_asset(asset)
             for vid in removed_version_tags:
                 self.document.version_tags.pop(vid, None)
@@ -1442,7 +1517,10 @@ class DataCatalogService:
                 for version in trashed_versions:
                     self._add_version(version)
                 for asset in trashed_assets:
-                    self._add_asset(asset)
+                    # Only re-add assets actually removed (un-trashed assets
+                    # stayed in the document the whole time).
+                    if asset not in self.document.assets:
+                        self._add_asset(asset)
                 self.document.version_tags.update(removed_version_tags)
                 self.document.asset_tags.update(removed_asset_tags)
                 raise

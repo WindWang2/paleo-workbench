@@ -42,27 +42,32 @@ class CatalogStore:
     def load(self) -> CatalogDocument:
         """Load the canonical document; an absent catalog means an empty one.
 
-        When ``catalog.json`` is missing but ``catalog.json.bak`` exists (a
-        crash between the two renames of a save), the previous revision is
-        recovered so reopening never observes a half-written or empty catalog.
+        When ``catalog.json`` is missing OR corrupt but ``catalog.json.bak``
+        exists (a crash between the two renames of a save, or a torn/partial
+        write), the previous revision is recovered so reopening never
+        observes a half-written or unreadable catalog (review finding M3).
         """
         path = catalog_file_for(self.project_path)
-        if not path.is_file():
-            bak = catalog_bak_file_for(self.project_path)
-            if bak.is_file():
-                data = json.loads(bak.read_text(encoding="utf-8"))
-                document = CatalogDocument.model_validate(data)
-                # Re-promote the backup to the canonical path so subsequent
-                # saves start from a clean state.
-                try:
-                    os.replace(bak, path)
-                    fsync_dir(path.parent)
-                except OSError:
-                    pass
-                return document
-            return CatalogDocument()
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return CatalogDocument.model_validate(data)
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return CatalogDocument.model_validate(data)
+            except (OSError, ValueError, TypeError):
+                # Corrupt canonical file — fall through to the backup below.
+                pass
+        bak = catalog_bak_file_for(self.project_path)
+        if bak.is_file():
+            data = json.loads(bak.read_text(encoding="utf-8"))
+            document = CatalogDocument.model_validate(data)
+            # Re-promote the backup to the canonical path so subsequent
+            # saves start from a clean state.
+            try:
+                os.replace(bak, path)
+                fsync_dir(path.parent)
+            except OSError:
+                pass
+            return document
+        return CatalogDocument()
 
     def save(self, document: CatalogDocument) -> None:
         """Atomically persist the canonical document.

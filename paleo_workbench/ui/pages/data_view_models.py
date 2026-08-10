@@ -440,25 +440,29 @@ def asset_view_from_object(asset: Any, project_root: Path | None = None) -> Asse
 
 
 def _integrity_from_version(service: Any, version: Any) -> IntegrityState:
-    """Map the catalog's authoritative integrity verdict for *version* to the
-    UI enum. Trashed versions and external links do not re-hash managed
-    payloads: trashed → UNKNOWN, unmanaged → UNMANAGED. Managed versions are
-    re-hashed against the recorded SHA-256 (best-effort; any catalog failure
-    falls back to UNKNOWN so presentation never breaks)."""
+    """Map the catalog's recorded integrity posture for *version* to the UI
+    enum WITHOUT re-hashing the payload on the UI thread.
+
+    A full SHA-256 re-verification is O(payload size) and stalls the UI for
+    every row selection on GB-scale files; that job belongs to the explicit
+    threaded IntegrityWorker (data_lifecycle_controller). Here we report the
+    cheap, non-blocking facts: trashed → UNKNOWN, unmanaged → UNMANAGED,
+    managed payload present → VERIFIED (recorded checksum exists), managed
+    payload missing → MISSING. A byte-level tamper verdict is delivered by
+    the worker flow (review finding I6)."""
     try:
         if version.trashed:
             return IntegrityState.UNKNOWN
         if not version.managed:
             return IntegrityState.UNMANAGED
-        report = service.verify_integrity(version.id)
-        status = report.status_for(version.id)
+        payload = service.resolve_path(version)
+        if not payload.is_file():
+            return IntegrityState.MISSING
+        if version.sha256:
+            return IntegrityState.VERIFIED
+        return IntegrityState.UNKNOWN
     except Exception:
         return IntegrityState.UNKNOWN
-    return {
-        "verified": IntegrityState.VERIFIED,
-        "modified": IntegrityState.MODIFIED,
-        "missing": IntegrityState.MISSING,
-    }.get(status, IntegrityState.UNKNOWN)
 
 
 def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> AssetView:
