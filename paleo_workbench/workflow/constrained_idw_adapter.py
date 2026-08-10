@@ -1,17 +1,19 @@
 """Haiyou constrained-IDW bridge — host owns the integration boundary.
 
-This is the ONLY place in the workbench that imports ``haiyou-visualization``
-algorithm code. It keeps the two engine submodules independent:
-``geo-viz-engine`` (kriging / IDW / directional / spline) and
-``haiyou-visualization`` (constrained-IDW) never import each other; the host
-adapts between the host data model and each engine's input model.
+This is the ONLY place in the workbench that imports the haiyou constrained-IDW
+algorithm. It keeps the two engines independent: ``geo-viz-engine`` (kriging /
+IDW / directional / spline) and the haiyou constrained-IDW algorithm never
+import each other; the host adapts between the host data model and each
+engine's input model.
 
-The haiyou single-factor algorithm modules are pure NumPy (+ optional SciPy)
-and contain no Qt. However haiyou's ``drawing`` / ``drawing.single_factor``
-package ``__init__`` files import PyQt6 — which a PySide6 host must not pull
-into the process. We therefore register lightweight Qt-free *stub packages*
-in :data:`sys.modules` so only the pure algorithm submodules load and the
-PyQt6-coupled package init never executes.
+The algorithm is *selectively vendored* under
+``paleo_workbench/_vendored/haiyou_constrained_idw/`` (the pure-NumPy + optional
+SciPy modules only; no Qt app shell). Vendoring — rather than a submodule — is
+used because the upstream ``WWX9/haiyou-visualization`` is a private repo the
+workbench build/release must not depend on (goal §14: the published artifact
+runs without private-repo access). See ``ATTRIBUTION.md`` there for provenance.
+The vendored package ``__init__`` files are Qt-free, so the bridge simply puts
+the vendored root on :data:`sys.path` and imports the algorithm normally.
 
 Public surface (host contract):
 
@@ -25,7 +27,6 @@ from __future__ import annotations
 
 import math
 import sys
-import types
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -47,50 +48,37 @@ CONSTRAINED_IDW_ENGINE_LABEL = "constrained_idw"
 _MAX_GRID_RESOLUTION = 200
 _MIN_GRID_RESOLUTION = 20
 
-# Repository layout: <repo>/haiyou-visualization/Drawing/drawing is the package
-# root whose algorithm submodules we bridge.
-_DRAWING_PKG = (
-    Path(__file__).resolve().parents[2]
-    / "haiyou-visualization"
-    / "Drawing"
-    / "drawing"
+# Repository layout: the pure algorithm is vendored under
+# paleo_workbench/_vendored/haiyou_constrained_idw/ (Qt-free package roots).
+# Adding this dir to sys.path makes the vendored top-level ``drawing`` package
+# importable; the algorithm modules use absolute ``drawing.*`` imports.
+_VENDOR_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "_vendored"
+    / "haiyou_constrained_idw"
 )
-_SINGLE_FACTOR_DIR = _DRAWING_PKG / "single_factor"
 
 _haiyou_cache: dict[str, Any] | None = None
 
 
 def _ensure_haiyou_engine() -> dict[str, Any]:
-    """Import haiyou's constrained-IDW algorithm (Qt-free), cached.
+    """Import the vendored constrained-IDW algorithm (Qt-free), cached.
 
-    Registers stub ``drawing`` / ``drawing.single_factor`` packages so the
-    PyQt6-coupled package init files are bypassed and only the pure-Numpy
-    algorithm submodules are loaded. The stubs persist in :data:`sys.modules`
-    because haiyou's internal lazy imports use the absolute ``drawing.*`` name.
+    Puts the vendored package root on :data:`sys.path` (idempotent) so the
+    algorithm's absolute ``drawing.*`` imports resolve. The vendored package
+    ``__init__`` files are Qt-free, so no PyQt6 is pulled into the host.
     """
     global _haiyou_cache
     if _haiyou_cache is not None:
         return _haiyou_cache
 
-    if not _SINGLE_FACTOR_DIR.is_dir():
+    root = str(_VENDOR_ROOT)
+    if not _VENDOR_ROOT.is_dir():
         raise RuntimeError(
-            "haiyou-visualization submodule is not checked out at "
-            f"{_DRAWING_PKG}. Run `git submodule update --init "
-            "haiyou-visualization`."
+            f"vendored haiyou algorithm not found at {_VENDOR_ROOT}"
         )
-
-    pkg = str(_DRAWING_PKG)
-    sf = str(_SINGLE_FACTOR_DIR)
-    for fullname, path in (("drawing", pkg), ("drawing.single_factor", sf)):
-        existing = sys.modules.get(fullname)
-        # Only install the stub when no real module is present. A real module
-        # would only exist if the host itself imported haiyou's package — which
-        # it deliberately does not.
-        if existing is None:
-            mod = types.ModuleType(fullname)
-            mod.__path__ = [path]
-            mod.__package__ = fullname
-            sys.modules[fullname] = mod
+    if root not in sys.path:
+        sys.path.insert(0, root)
 
     from drawing.single_factor.constrained_engine import (  # type: ignore[import-not-found]
         BarrierLine,
