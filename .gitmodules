@@ -4,3 +4,6 @@
 [submodule "well-log-engine"]
 	path = well-log-engine
 	url = https://github.com/WindWang2/well-log-engine.git
+[submodule "haiyou-visualization"]
+	path = haiyou-visualization
+	url = https://github.com/WWX9/haiyou-visualization.git
