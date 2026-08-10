@@ -37,6 +37,63 @@ except ImportError:  # pragma: no cover
     map_edit_core = None  # type: ignore
     _HAS_MAP_EDIT_CPP = False
 
+try:
+    import grid_render_core
+    _HAS_GRID_RENDER_CPP = True
+except ImportError:  # pragma: no cover
+    grid_render_core = None  # type: ignore
+    _HAS_GRID_RENDER_CPP = False
+
+
+def _py_render_grid_rgba(
+    grid_z: np.ndarray,
+    mask: "np.ndarray | None",
+    lut: np.ndarray,
+    lo: float,
+    hi: float,
+    gamma: float,
+    opacity: int,
+) -> np.ndarray:
+    """Pure-Python parity fallback for ``grid_render_core.render_grid_rgba``.
+
+    Byte-identical contract to the C++ hot path (see
+    ``native/grid_render_core/src/grid_render_core.cpp``): non-finite cells and masked
+    cells become fully-transparent black; values clamp to the ramp endpoints; the LUT
+    index is selected by truncation toward zero; alpha is ``lut_alpha * opacity / 255``.
+    """
+    gz = np.ascontiguousarray(grid_z, dtype=np.float32)
+    height, width = gz.shape
+    lut_buf = np.ascontiguousarray(lut, dtype=np.uint8)
+    out = np.zeros((height, width, 4), dtype=np.uint8)
+    if lut_buf.shape[0] < 1 or lut_buf.shape[1] != 4:
+        return out
+    if not (gamma > 0.0):
+        gamma = 1.0
+    have_range = (hi - lo) > 0.0
+    inv_denom = (1.0 / (hi - lo)) if have_range else 0.0
+    max_idx = lut_buf.shape[0] - 1
+
+    finite = np.isfinite(gz)
+    valid = finite
+    if mask is not None:
+        valid = valid & (np.ascontiguousarray(mask, dtype=np.uint8) != 0)
+
+    with np.errstate(invalid="ignore", over="ignore"):
+        if have_range:
+            t = (gz - np.float32(lo)) * np.float32(inv_denom)
+        else:
+            t = np.zeros_like(gz, dtype=np.float32)
+        t = np.clip(t, np.float32(0.0), np.float32(1.0))
+        if gamma != 1.0:
+            t = np.power(t, np.float32(gamma))
+        idx = (t * np.float32(max_idx)).astype(np.int32)  # truncation toward zero
+    idx = np.clip(idx, 0, max_idx)
+    colors = lut_buf[idx]  # (H, W, 4)
+    out[..., 0:3] = colors[..., 0:3]
+    out[..., 3] = ((colors[..., 3].astype(np.int32) * int(opacity)) // 255).astype(np.uint8)
+    out[~valid] = 0
+    return out
+
 
 # ---------------------------------------------------------------------------
 # Pure-Python Fallback Implementations
@@ -294,6 +351,7 @@ class NativeEngineBackend:
         "seismic_3d": ("_HAS_SEISMIC_3D_CPP", seismic_3d_core),
         "well_log": ("_HAS_WELL_LOG_CPP", well_log_core),
         "map_edit": ("_HAS_MAP_EDIT_CPP", map_edit_core),
+        "grid_render": ("_HAS_GRID_RENDER_CPP", grid_render_core),
     }
 
     _FALLBACK_TABLE: dict[str, Callable] = {
@@ -307,6 +365,7 @@ class NativeEngineBackend:
         "hit_test": _py_hit_test,
         "snap_point": _py_snap_point,
         "validate_ring": _py_validate_ring,
+        "render_grid_rgba": _py_render_grid_rgba,
     }
 
     _FUNCTION_MODULE_MAP = {
@@ -320,6 +379,7 @@ class NativeEngineBackend:
         "hit_test": ("map_edit", map_edit_core),
         "snap_point": ("map_edit", map_edit_core),
         "validate_ring": ("map_edit", map_edit_core),
+        "render_grid_rgba": ("grid_render", grid_render_core),
     }
 
     def __init__(self) -> None:
@@ -332,6 +392,7 @@ class NativeEngineBackend:
             "seismic_3d": _HAS_SEISMIC_3D_CPP,
             "well_log": _HAS_WELL_LOG_CPP,
             "map_edit": _HAS_MAP_EDIT_CPP,
+            "grid_render": _HAS_GRID_RENDER_CPP,
         }
         return feature_map.get(feature, False)
 
