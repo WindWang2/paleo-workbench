@@ -25,6 +25,10 @@ from geoviz import (
     synthetic_sample_points,
 )
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
+from paleo_workbench.workflow.constrained_idw_adapter import (
+    CONSTRAINED_IDW_ENGINE_LABEL,
+    run_constrained_idw,
+)
 from paleo_workbench.workflow.constraints import (
     break_polylines_for_idw,
     constraint_layers_for_project,
@@ -45,6 +49,10 @@ METHOD_LABEL_TO_ENGINE = {
     "IDW": "IDW",
     "样条": "样条",
     "方向趋势": "方向趋势",
+    # Haiyou constrained-IDW (region barriers + direction corridors + well
+    # re-anchoring) is dispatched host-side via run_constrained_idw; the engine
+    # method id CONSTRAINED_IDW_ENGINE_LABEL keeps it distinct from plain IDW.
+    "约束IDW": CONSTRAINED_IDW_ENGINE_LABEL,
 }
 
 
@@ -73,6 +81,7 @@ def apply_interpolation_to_task(
     points = params.get("sample_points") or []
     breaks = fault_polylines
     az, a_axis, b_axis = 0.0, 1.0, 0.4
+    layers = None
     if project is not None:
         layers = constraint_layers_for_project(
             project, target_horizon=task.target_horizon
@@ -99,17 +108,33 @@ def apply_interpolation_to_task(
         except (TypeError, ValueError):
             pass
 
-    result = interpolate_factor_grid(
-        points,
-        method=METHOD_LABEL_TO_ENGINE.get(method, method),
-        grid_n=grid_n,
-        power=power,
-        fault_polylines=breaks,
-        azimuth_deg=az,
-        semi_major=a_axis,
-        semi_minor=b_axis,
-        cancellation_token=cancellation_token,
-    )
+    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
+        # Host-side dispatch to the haiyou constrained-IDW algorithm. The host
+        # owns this integration boundary so geo-viz-engine and haiyou stay
+        # independent; the result dict matches interpolate_factor_grid's
+        # contract so all downstream plumbing is method-agnostic.
+        result = run_constrained_idw(
+            points,
+            grid_n=grid_n,
+            power=power,
+            layers=layers,
+            target_horizon=task.target_horizon,
+            break_polylines=breaks,
+            cancellation_token=cancellation_token,
+        )
+    else:
+        result = interpolate_factor_grid(
+            points,
+            method=engine_method,
+            grid_n=grid_n,
+            power=power,
+            fault_polylines=breaks,
+            azimuth_deg=az,
+            semi_major=a_axis,
+            semi_minor=b_axis,
+            cancellation_token=cancellation_token,
+        )
 
     params["sample_points"] = list(points)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
@@ -129,7 +154,7 @@ def apply_interpolation_to_task(
         params["azimuth_deg"] = result.get("azimuth_deg")
         params["semi_major"] = result.get("semi_major")
         params["semi_minor"] = result.get("semi_minor")
-    if breaks and result.get("backend") == "idw":
+    if breaks and result.get("backend") in ("idw", CONSTRAINED_IDW_ENGINE_LABEL):
         params["break_polylines"] = [
             [[float(x), float(y)] for x, y in poly] for poly in breaks
         ]
