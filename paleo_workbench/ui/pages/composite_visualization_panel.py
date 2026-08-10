@@ -3,9 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QTabWidget, QVBoxLayout
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.viz.facies_hierarchy_service import AUTO_LEVEL, level_choices
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
 from paleo_workbench.viz.hosts.engine_preview_host import EnginePreviewHost
@@ -45,6 +56,26 @@ class VisualizationWorkspace(QFrame):
         self.status_label.setObjectName("WorkFieldLabel")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+
+        # Multiscale (相/亚相/微相) level selector for the 古地理 map tab.
+        # Hidden unless the current map payload is a facies hierarchy; populated
+        # from the levels actually present + an "auto (scale-driven)" entry.
+        self.level_bar = QWidget()
+        level_layout = QHBoxLayout(self.level_bar)
+        level_layout.setContentsMargins(0, 0, 0, 0)
+        level_layout.setSpacing(tokens.SPACE_2)
+        level_label = QLabel("古地理层级")
+        self.level_combo = QComboBox()
+        self.level_combo.setMinimumWidth(180)
+        self.level_combo.setToolTip(
+            "多尺度相带显示：自动按比例尺切换，或锁定到某一相级（来自 geo-viz-engine）"
+        )
+        level_layout.addWidget(level_label)
+        level_layout.addWidget(self.level_combo)
+        level_layout.addStretch(1)
+        self.level_bar.setVisible(False)
+        layout.addWidget(self.level_bar)
+        self.level_combo.currentIndexChanged.connect(self._on_level_changed)
 
         self.tabs = QTabWidget()
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -98,6 +129,27 @@ class VisualizationWorkspace(QFrame):
             if self.tabs.tabText(index) == title:
                 return index
         return 0
+
+    def _refresh_level_selector(self) -> None:
+        """Show/populate the multiscale level combo when the map is hierarchical."""
+        choices = level_choices(self.map_host._current_features)  # noqa: SLF001
+        # Block signals while rebuilding so we don't fire set_level mid-rebuild.
+        self.level_combo.blockSignals(True)
+        self.level_combo.clear()
+        if not self.map_host.hierarchy_active or not choices:
+            self.level_combo.blockSignals(False)
+            self.level_bar.setVisible(False)
+            return
+        for value, label in choices:
+            self.level_combo.addItem(label, value)
+        self.level_combo.setCurrentIndex(0)  # "auto" by default
+        self.level_combo.blockSignals(False)
+        self.level_bar.setVisible(True)
+
+    def _on_level_changed(self, _index: int) -> None:
+        value = self.level_combo.currentData()
+        # Empty map → auto; otherwise lock to the chosen facies level.
+        self.map_host.set_level(value or AUTO_LEVEL)
 
     def update_state(self, prediction_tasks: list | tuple | None) -> None:
         """Legacy mock fallback when no explicit VizRef is open."""
@@ -202,6 +254,9 @@ class VisualizationWorkspace(QFrame):
         else:
             parts.insert(0, f"未能加载: {payload.label}")
         self.status_label.setText(" · ".join(p for p in parts if p))
+        # Refresh the multiscale level selector after the map host has applied
+        # the payload (it knows whether the map is hierarchical).
+        self._refresh_level_selector()
 
     def _clear_all(self) -> None:
         self.well_host.clear()
@@ -209,6 +264,10 @@ class VisualizationWorkspace(QFrame):
         self.seismic_host.clear()
         self.cross_well_host.clear()
         self.map_host.clear()
+        self.level_combo.blockSignals(True)
+        self.level_combo.clear()
+        self.level_combo.blockSignals(False)
+        self.level_bar.setVisible(False)
         self.well_tie_host.clear()
         self.engine_host.clear()
 

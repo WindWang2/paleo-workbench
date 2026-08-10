@@ -60,6 +60,7 @@ GEOVIZ_PUBLIC_FACADE = frozenset(
         "ProfileWidget",
         "SeismicLoader",
         "PaleoMapCanvas",
+        "FaciesHierarchy",
         "export_professional_figure",
         "CrossWellCanvas",
         "WellTieCanvas",
