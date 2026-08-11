@@ -286,20 +286,46 @@ def _idw_row_block(
             region_ok = (well_lbl < 0) | (cell_lbl < 0) | (cell_lbl == well_lbl)
             work = xp.where(region_ok, work, inf_v)
 
-        try:
-            order = xp.argsort(work, axis=2, kind="stable")
-        except TypeError:
-            order = xp.argsort(work, axis=2)
-        sorted_dist = xp.take_along_axis(work, order, axis=2)
-        sorted_z = xp.take_along_axis(wz_tile, order, axis=2)
-        sorted_decl = xp.take_along_axis(decl_tile, order, axis=2)
-        sorted_dir_w = xp.take_along_axis(direction_weights, order, axis=2)
-
         k = min(max_pts, n_wells)
-        d_k = sorted_dist[:, :, :k]
-        z_k = sorted_z[:, :, :k]
-        decl_k = sorted_decl[:, :, :k]
-        dir_k = sorted_dir_w[:, :, :k]
+        # Top-k neighbour selection.
+        # Prefer argpartition when k << n_wells.  To match stable full-sort
+        # neighbour sets under distance ties, partition a composite key that
+        # encodes (distance, well_index): larger index is infinitesimally larger
+        # so equal distances break by ascending original observation index.
+        use_partition = (not is_cupy) and n_wells > max(k * 2, 16) and k < n_wells
+        if use_partition:
+            well_ids = np.arange(n_wells, dtype=np.float64).reshape(1, 1, n_wells)
+            # Scale secondary key below any realistic positive distance gap while
+            # preserving total order for equal primary distances.
+            finite_span = np.nanmax(np.where(np.isfinite(work), work, np.nan))
+            if not np.isfinite(finite_span) or finite_span <= 0:
+                finite_span = 1.0
+            secondary = well_ids * (finite_span * 1e-15 + 1e-30)
+            composite = np.where(np.isfinite(work), work + secondary, work)
+            part = np.argpartition(composite, kth=k - 1, axis=2)[:, :, :k]
+            d_top = np.take_along_axis(work, part, axis=2)
+            cells = rows_b * cols
+            d_flat = np.asarray(d_top, dtype=np.float64).reshape(cells, k)
+            i_flat = np.asarray(part, dtype=np.int64).reshape(cells, k)
+            order_flat = np.lexsort((i_flat, d_flat), axis=1)
+            d_k = np.take_along_axis(d_flat, order_flat, axis=1).reshape(rows_b, cols, k)
+            idx_k = np.take_along_axis(i_flat, order_flat, axis=1).reshape(rows_b, cols, k)
+            z_k = np.take_along_axis(wz_tile, idx_k, axis=2)
+            decl_k = np.take_along_axis(decl_tile, idx_k, axis=2)
+            dir_k = np.take_along_axis(direction_weights, idx_k, axis=2)
+        else:
+            try:
+                order = xp.argsort(work, axis=2, kind="stable")
+            except TypeError:
+                order = xp.argsort(work, axis=2)
+            sorted_dist = xp.take_along_axis(work, order, axis=2)
+            sorted_z = xp.take_along_axis(wz_tile, order, axis=2)
+            sorted_decl = xp.take_along_axis(decl_tile, order, axis=2)
+            sorted_dir_w = xp.take_along_axis(direction_weights, order, axis=2)
+            d_k = sorted_dist[:, :, :k]
+            z_k = sorted_z[:, :, :k]
+            decl_k = sorted_decl[:, :, :k]
+            dir_k = sorted_dir_w[:, :, :k]
 
         valid = xp.isfinite(d_k)
         count = valid.sum(axis=2)

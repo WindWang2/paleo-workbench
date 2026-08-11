@@ -111,11 +111,20 @@ def _to_float32_grid(
     Accepts both legacy encodings: the engine's ``None`` sentinel and the adapter's raw
     ``NaN``. ``None``, ``math.nan`` and non-finite floats all become ``NaN``.
 
-    When *raw* is already a contiguous float32 array of the right shape, this is a
-    zero-copy path aside from in-place non-finite normalisation (which may write).
+    Sealed read-only float32 buffers (live-cache shared storage) are returned as-is so
+    multi-consumer shells can share one allocation without O(grid) defensive copies.
+    Writable inputs are always owned before nodata normalisation.
     """
-    # Always own the buffer so FactorGridResult never aliases a caller ndarray
-    # (artifact re-wrap, live-cache shells, or upstream float32 producers).
+    if (
+        isinstance(raw, np.ndarray)
+        and raw.dtype == np.float32
+        and raw.shape == (height, width)
+        and raw.flags["C_CONTIGUOUS"]
+        and not raw.flags["WRITEABLE"]
+    ):
+        # Immutable sealed buffer from the live cache / geometry pool.
+        return raw
+
     if (
         isinstance(raw, np.ndarray)
         and raw.dtype == np.float32
@@ -177,6 +186,18 @@ def _to_float32_grid(
 
 def _coerce_xy(values: Sequence[float], *, name: str) -> np.ndarray:
     """Coerce axis coordinates to contiguous float64 without forced list materialisation."""
+    if (
+        isinstance(values, np.ndarray)
+        and values.dtype == np.float64
+        and values.ndim == 1
+        and values.flags["C_CONTIGUOUS"]
+        and not values.flags["WRITEABLE"]
+    ):
+        if values.size == 0:
+            raise ValueError(f"{name} must not be empty")
+        if not np.isfinite(values).all():
+            raise ValueError(f"{name} must contain only finite coordinates")
+        return values
     if isinstance(values, np.ndarray) and values.dtype != object:
         arr = np.ascontiguousarray(values, dtype=np.float64)
     else:
@@ -303,6 +324,8 @@ class FactorGridResult:
                 f"grid_y length {self.grid_y.shape} must match grid_z height {h}"
             )
         self.grid_z = _to_float32_grid(self.grid_z, height=h, width=w)
+        self.grid_x = _coerce_xy(self.grid_x, name="grid_x")
+        self.grid_y = _coerce_xy(self.grid_y, name="grid_y")
         if self.variance_grid is not None:
             self.variance_grid = _to_float32_grid(
                 self.variance_grid, height=h, width=w
@@ -313,6 +336,29 @@ class FactorGridResult:
                 raise ValueError("boundary must contain only finite coordinates")
             self.boundary = boundary
         self.statistics = GridStatistics.from_grid(self.grid_z)
+
+    def copied(self) -> "FactorGridResult":
+        """Return a deep copy with writable private buffers (for mutation)."""
+        return FactorGridResult(
+            grid_z=np.array(self.grid_z, copy=True, order="C"),
+            grid_x=np.array(self.grid_x, copy=True, order="C"),
+            grid_y=np.array(self.grid_y, copy=True, order="C"),
+            factor_name=self.factor_name,
+            algorithm_id=self.algorithm_id,
+            algorithm_parameters=dict(self.algorithm_parameters),
+            crs=self.crs,
+            unit=self.unit,
+            generator_version=self.generator_version,
+            source_refs=list(self.source_refs),
+            run_ref=self.run_ref,
+            created_at=self.created_at,
+            variance_grid=(
+                None
+                if self.variance_grid is None
+                else np.array(self.variance_grid, copy=True, order="C")
+            ),
+            boundary=list(self.boundary) if self.boundary is not None else None,
+        )
 
     # ----- public constructors -------------------------------------------------
     @classmethod

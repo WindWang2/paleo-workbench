@@ -6,12 +6,18 @@ Phase-2 promote-down (map #244 / PR-A #256): the pure interpolation core
 ``geoviz_plots.factor`` and is consumed here through the ``geoviz`` facade.
 This module keeps only the ``FactorMapTask`` / ``ProjectDocument``-coupled
 adapters (T10: ``project/models.py`` is NOT promoted).
+
+Stage-2 multi-factor path: when several tasks share source XY + grid config +
+plain IDW, a single :class:`~paleo_workbench.workflow.interpolation_plan.InterpolationPlan`
+is built and values are applied per factor (geometry reuse).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
+from collections import defaultdict
 from typing import Any
 
 import numpy as np
@@ -24,6 +30,7 @@ from geoviz import (  # re-exported for tests / callers — facade only
 )
 from paleo_workbench.project.factor_grid_artifacts import (
     clear_live_factor_grid,
+    intern_grid_axes,
     store_live_factor_grid,
 )
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
@@ -40,6 +47,14 @@ from paleo_workbench.workflow.factor_grid_result import (
     FactorGridResult,
     encode_legacy_axis_list,
     encode_legacy_grid_lists,
+)
+from paleo_workbench.workflow.interpolation_plan import (
+    InterpolationPlan,
+    apply_idw_plan,
+    apply_idw_plan_multi,
+    build_idw_plan,
+    extract_values_aligned,
+    plan_key_from_arrays,
 )
 
 GENERATOR_VERSION = "factor-interp-v1"
@@ -73,15 +88,7 @@ def _legacy_params_from_grid_result(
     *,
     use_nan_nodata: bool,
 ) -> dict[str, Any]:
-    """Build JSON-friendly inline grid fields from the canonical FactorGridResult.
-
-    Contour draft and e2e tests still expect nested lists on ``task.parameters`` until
-    a project save externalises the NPZ artifact.  Encoding happens once here.
-
-    Nodata encoding preserves historical producer conventions:
-    * constrained-IDW → raw float ``NaN`` (adapter historically used ``tolist()``)
-    * all other methods → JSON-safe ``None`` (engine convention)
-    """
+    """Build JSON-friendly inline grid fields from the canonical FactorGridResult."""
     if use_nan_nodata:
         grid_z_lists = [
             [float(v) for v in row]
@@ -103,111 +110,46 @@ def _legacy_params_from_grid_result(
     return params
 
 
-def apply_interpolation_to_task(
+def _none_encode_grid(grid_z: np.ndarray) -> list[list[float | None]]:
+    return [
+        [None if not math.isfinite(float(v)) else float(v) for v in row]
+        for row in np.asarray(grid_z)
+    ]
+
+
+def _attach_result_to_task(
     task: FactorMapTask,
     *,
-    method: str = "IDW",
-    grid_n: int = DEFAULT_GRID_N,
-    power: float = 2.0,
-    project: ProjectDocument | None = None,
-    fault_polylines: list[list[tuple[float, float]]] | None = None,
-    cancellation_token=None,
+    result: dict[str, Any],
+    grid_result: FactorGridResult,
+    method: str,
+    power: float,
+    points: list,
+    grid_n: int,
+    breaks: list | None,
+    engine_method: str,
 ) -> FactorMapTask:
-    """Mutate a FactorMapTask with a real interpolation grid and quality metrics.
+    """Write live cache + legacy params + quality metrics onto *task*."""
+    # Stamp geometry_id for axis interning across multi-factor batches.
+    if result.get("geometry_id"):
+        grid_result.algorithm_parameters["geometry_id"] = result["geometry_id"]
+        # Share frozen axes when already present on result.
+        if isinstance(result.get("grid_x"), np.ndarray):
+            gx, gy = intern_grid_axes(
+                result["grid_x"],
+                result["grid_y"],
+                geometry_id=str(result["geometry_id"]),
+            )
+            grid_result.grid_x = gx
+            grid_result.grid_y = gy
 
-    When *project* is provided:
-      - active break lines → IDW fault barriers (unless *fault_polylines* given)
-      - active direction lines → anisotropy for method 「方向趋势」
-    """
-    params = dict(task.parameters or {})
-    points = params.get("sample_points") or []
-    breaks = fault_polylines
-    az, a_axis, b_axis = 0.0, 1.0, 0.4
-    layers = None
-    if project is not None:
-        layers = constraint_layers_for_project(
-            project, target_horizon=task.target_horizon
-        )
-        if breaks is None:
-            breaks = break_polylines_for_idw(layers, target_horizon=task.target_horizon)
-        az, a_axis, b_axis = resolve_anisotropy_params(
-            direction_line_params(layers, target_horizon=task.target_horizon)
-        )
-    # Allow task parameters to override direction if set.
-    if params.get("azimuth_deg") is not None:
-        try:
-            az = float(params["azimuth_deg"])
-        except (TypeError, ValueError):
-            pass
-    if params.get("semi_major") is not None:
-        try:
-            a_axis = float(params["semi_major"])
-        except (TypeError, ValueError):
-            pass
-    if params.get("semi_minor") is not None:
-        try:
-            b_axis = float(params["semi_minor"])
-        except (TypeError, ValueError):
-            pass
-
-    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
-    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
-        # Host-side dispatch to the haiyou constrained-IDW algorithm. The host
-        # owns this integration boundary so geo-viz-engine and haiyou stay
-        # independent; the result dict matches interpolate_factor_grid's
-        # contract so all downstream plumbing is method-agnostic.
-        # Hot-path grids are contiguous ndarrays (no list round-trip).
-        result = run_constrained_idw(
-            points,
-            grid_n=grid_n,
-            power=power,
-            layers=layers,
-            target_horizon=task.target_horizon,
-            break_polylines=breaks,
-            cancellation_token=cancellation_token,
-        )
-    else:
-        # Public geoviz facade only — never import private geoviz_plots symbols.
-        result = interpolate_factor_grid(
-            points,
-            method=engine_method,
-            grid_n=grid_n,
-            power=power,
-            fault_polylines=breaks,
-            azimuth_deg=az,
-            semi_major=a_axis,
-            semi_minor=b_axis,
-            cancellation_token=cancellation_token,
-        )
-
-    crs = project.coordinate.project_crs if project is not None else None
-    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
-        grid_result = FactorGridResult.from_constrained_idw_dict(
-            result,
-            factor_name=task.factor_type or task.name,
-            crs=crs,
-            generator_version=GENERATOR_VERSION,
-            source_refs=task.input_resource_ids,
-        )
-    else:
-        grid_result = FactorGridResult.from_engine_dict(
-            result,
-            factor_name=task.factor_type or task.name,
-            crs=crs,
-            generator_version=GENERATOR_VERSION,
-            source_refs=task.input_resource_ids,
-        )
-
-    # Single source of truth for pre-save consumers (contour, native scene).
     clear_live_factor_grid(task.id)
     store_live_factor_grid(task.id, grid_result)
 
+    params = dict(task.parameters or {})
     params["sample_points"] = list(points)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
 
-    # Inline lists: constrained encodes once from FactorGridResult (ndarray SSoT).
-    # Engine path already returned JSON-safe lists — reuse them to avoid a second
-    # full-grid materialisation (list→float32→list).
     if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
         legacy = _legacy_params_from_grid_result(grid_result, use_nan_nodata=True)
         params["grid_x"] = legacy["grid_x"]
@@ -218,6 +160,16 @@ def apply_interpolation_to_task(
         else:
             params.pop("grid_boundary", None)
         params.pop("grid_var", None)
+    elif isinstance(result.get("grid_z"), np.ndarray):
+        # Plan path: encode lists once from ndarray.
+        params["grid_x"] = encode_legacy_axis_list(grid_result.grid_x)
+        params["grid_y"] = encode_legacy_axis_list(grid_result.grid_y)
+        params["grid_z"] = _none_encode_grid(result["grid_z"])
+        if result.get("grid_var") is not None:
+            params["grid_var"] = _none_encode_grid(result["grid_var"])
+        else:
+            params.pop("grid_var", None)
+        params.pop("grid_boundary", None)
     else:
         params["grid_x"] = result["grid_x"]
         params["grid_y"] = result["grid_y"]
@@ -229,10 +181,11 @@ def apply_interpolation_to_task(
         params.pop("grid_boundary", None)
 
     params["interp_backend"] = result["backend"]
-    params["power"] = power
+    # Prefer the values that actually produced the surface (plan-backed path).
+    params["power"] = float(result["power"]) if result.get("power") is not None else power
+    if result.get("grid_n") is not None:
+        params["grid_n"] = int(result["grid_n"])
     params["n_break_lines"] = result.get("n_break_lines", 0)
-    # Real kriging backend additionally returns the kriging variance grid —
-    # pass it through so downstream consumers (and the UI) can show it.
     if result.get("grid_var") is not None:
         params["variance_min"] = result.get("variance_min")
         params["variance_max"] = result.get("variance_max")
@@ -252,8 +205,6 @@ def apply_interpolation_to_task(
         task.source_kind = "mixed"
     task.generator_version = GENERATOR_VERSION
     task.grid_metadata = grid_result.to_descriptor()
-    # A scientific input change invalidates only this task's former grid artifact.
-    # The next project save will atomically externalize and catalog the new result.
     task.grid_artifact_path = None
     task.grid_artifact_version_id = None
     task.quality_metrics = {
@@ -276,11 +227,173 @@ def apply_interpolation_to_task(
         "grid_n": grid_n,
     }
     task.input_snapshot_hash = _snapshot_hash(snapshot)
-    # Project save externalizes this transient inline grid into the managed NPZ
-    # artifact and registers the single catalog INTERMEDIATE version.  Do not create
-    # an in-memory-only run here: it would duplicate the persisted run and make the
-    # catalog incorrectly suggest that two scientific interpolations occurred.
     return task
+
+
+def apply_interpolation_to_task(
+    task: FactorMapTask,
+    *,
+    method: str = "IDW",
+    grid_n: int = DEFAULT_GRID_N,
+    power: float = 2.0,
+    project: ProjectDocument | None = None,
+    fault_polylines: list[list[tuple[float, float]]] | None = None,
+    cancellation_token=None,
+    plan: InterpolationPlan | None = None,
+) -> FactorMapTask:
+    """Mutate a FactorMapTask with a real interpolation grid and quality metrics.
+
+    When *project* is provided:
+      - active break lines → IDW fault barriers (unless *fault_polylines* given)
+      - active direction lines → anisotropy for method 「方向趋势」
+
+    Optional *plan* reuses a pre-built plain-IDW spatial plan (batch multi-factor).
+    Single-task calls leave *plan* as ``None`` and keep the original simple path.
+    """
+    params = dict(task.parameters or {})
+    points = params.get("sample_points") or []
+    breaks = fault_polylines
+    az, a_axis, b_axis = 0.0, 1.0, 0.4
+    layers = None
+    if project is not None:
+        layers = constraint_layers_for_project(
+            project, target_horizon=task.target_horizon
+        )
+        if breaks is None:
+            breaks = break_polylines_for_idw(layers, target_horizon=task.target_horizon)
+        az, a_axis, b_axis = resolve_anisotropy_params(
+            direction_line_params(layers, target_horizon=task.target_horizon)
+        )
+    if params.get("azimuth_deg") is not None:
+        try:
+            az = float(params["azimuth_deg"])
+        except (TypeError, ValueError):
+            pass
+    if params.get("semi_major") is not None:
+        try:
+            a_axis = float(params["semi_major"])
+        except (TypeError, ValueError):
+            pass
+    if params.get("semi_minor") is not None:
+        try:
+            b_axis = float(params["semi_minor"])
+        except (TypeError, ValueError):
+            pass
+
+    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    crs = project.coordinate.project_crs if project is not None else None
+
+    # --- plan-backed plain IDW (geometry shared across factors) ---------------
+    if plan is not None and engine_method in ("IDW", "idw", "mock"):
+        values = extract_values_aligned(points, plan)
+        # Plan path prioritises multi-factor throughput; LOO R² is omitted
+        # (None), matching the documented InterpolationPlan contract.
+        result = apply_idw_plan(plan, values, cancellation_token=cancellation_token)
+        grid_result = FactorGridResult.from_engine_dict(
+            {
+                **result,
+                "grid_x": np.asarray(result["grid_x"]),
+                "grid_y": np.asarray(result["grid_y"]),
+                "grid_z": result["grid_z"],
+            },
+            factor_name=task.factor_type or task.name,
+            crs=crs,
+            generator_version=GENERATOR_VERSION,
+            source_refs=task.input_resource_ids,
+        )
+        return _attach_result_to_task(
+            task,
+            result=result,
+            grid_result=grid_result,
+            method=method,
+            power=power,
+            points=points,
+            grid_n=grid_n,
+            breaks=breaks,
+            engine_method="IDW",
+        )
+
+    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
+        result = run_constrained_idw(
+            points,
+            grid_n=grid_n,
+            power=power,
+            layers=layers,
+            target_horizon=task.target_horizon,
+            break_polylines=breaks,
+            cancellation_token=cancellation_token,
+        )
+        grid_result = FactorGridResult.from_constrained_idw_dict(
+            result,
+            factor_name=task.factor_type or task.name,
+            crs=crs,
+            generator_version=GENERATOR_VERSION,
+            source_refs=task.input_resource_ids,
+        )
+    else:
+        result = interpolate_factor_grid(
+            points,
+            method=engine_method,
+            grid_n=grid_n,
+            power=power,
+            fault_polylines=breaks,
+            azimuth_deg=az,
+            semi_major=a_axis,
+            semi_minor=b_axis,
+            cancellation_token=cancellation_token,
+        )
+        grid_result = FactorGridResult.from_engine_dict(
+            result,
+            factor_name=task.factor_type or task.name,
+            crs=crs,
+            generator_version=GENERATOR_VERSION,
+            source_refs=task.input_resource_ids,
+        )
+
+    return _attach_result_to_task(
+        task,
+        result=result,
+        grid_result=grid_result,
+        method=method,
+        power=power,
+        points=points,
+        grid_n=grid_n,
+        breaks=breaks,
+        engine_method=engine_method,
+    )
+
+
+def _task_plan_group_key(
+    task: FactorMapTask,
+    *,
+    method: str,
+    grid_n: int,
+    power: float,
+    project: ProjectDocument | None,
+) -> str | None:
+    """Return a plan digest for plain-IDW tasks that can share geometry, else None."""
+    engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
+    if engine_method not in ("IDW", "idw", "mock"):
+        return None
+    points = (task.parameters or {}).get("sample_points") or []
+    x, y, z = extract_xy_values(points)
+    if len(z) < 2:
+        return None
+    breaks = None
+    if project is not None:
+        layers = constraint_layers_for_project(
+            project, target_horizon=task.target_horizon
+        )
+        breaks = break_polylines_for_idw(layers, target_horizon=task.target_horizon)
+    key = plan_key_from_arrays(
+        method="idw",
+        x=x,
+        y=y,
+        grid_n=grid_n,
+        power=power,
+        fault_polylines=breaks,
+    )
+    return key.digest()
 
 
 def batch_prepare_factor_maps(
@@ -291,6 +404,7 @@ def batch_prepare_factor_maps(
     factor_types: list[str] | tuple[str, ...] | None = None,
     grid_n: int = DEFAULT_GRID_N,
     seed: int = 0,
+    power: float = 2.0,
     cancellation_token=None,
 ) -> list[FactorMapTask]:
     """Run real interpolation for existing tasks or create default factor maps.
@@ -298,6 +412,8 @@ def batch_prepare_factor_maps(
     - Existing tasks with sample_points are re-interpolated with the chosen method.
     - When the project has no factor tasks, creates DEFAULT_FACTOR_TYPES entries
       (or ``factor_types``) with synthetic samples, then interpolates.
+    - Plain-IDW tasks that share source XY + grid config build one
+      :class:`InterpolationPlan` and apply values per factor.
     - Returns the list of tasks that were prepared in this call.
     """
     horizon = (
@@ -329,34 +445,132 @@ def batch_prepare_factor_maps(
                 source_kind="mixed",
                 seed=seed + index,
             )
+            project.factor_map_tasks.append(task)
+            prepared.append(task)
+        # Fall through to group-based prepare below
+    else:
+        for task in project.factor_map_tasks:
+            params = task.parameters or {}
+            points = params.get("sample_points") or []
+            if not points:
+                points = synthetic_sample_points(
+                    seed=(task.seed if task.seed is not None else seed),
+                    factor_type=task.factor_type or task.name,
+                )
+                task.parameters = {**params, "sample_points": points}
+            prepared.append(task)
+
+    # Group plain-IDW tasks that share geometry; others run independently.
+    groups: dict[str | None, list[FactorMapTask]] = defaultdict(list)
+    for task in prepared:
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        gkey = _task_plan_group_key(
+            task, method=method, grid_n=grid_n, power=power, project=project
+        )
+        groups[gkey].append(task)
+
+    for gkey, tasks in groups.items():
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        plan: InterpolationPlan | None = None
+        if gkey is not None and len(tasks) >= 1:
+            # Build plan from the first task's samples + project breaks.
+            first = tasks[0]
+            pts = (first.parameters or {}).get("sample_points") or []
+            breaks = None
+            if project is not None:
+                layers = constraint_layers_for_project(
+                    project, target_horizon=first.target_horizon
+                )
+                breaks = break_polylines_for_idw(
+                    layers, target_horizon=first.target_horizon
+                )
+            try:
+                plan = build_idw_plan(pts, grid_n=grid_n, power=power, fault_polylines=breaks)
+            except ValueError:
+                plan = None
+
+        # Multi-factor vectorised path: one distance/weight pass for the group.
+        if (
+            plan is not None
+            and len(tasks) >= 2
+            and METHOD_LABEL_TO_ENGINE.get(method, method) in ("IDW", "idw", "mock")
+        ):
+            stack_rows: list[np.ndarray] = []
+            aligned_tasks: list[FactorMapTask] = []
+            for task in tasks:
+                try:
+                    vals = extract_values_aligned(
+                        (task.parameters or {}).get("sample_points") or [], plan
+                    )
+                except ValueError:
+                    apply_interpolation_to_task(
+                        task,
+                        method=method,
+                        grid_n=grid_n,
+                        power=power,
+                        project=project,
+                        cancellation_token=cancellation_token,
+                    )
+                    continue
+                stack_rows.append(vals)
+                aligned_tasks.append(task)
+            if aligned_tasks:
+                results = apply_idw_plan_multi(
+                    plan,
+                    np.stack(stack_rows, axis=0),
+                    cancellation_token=cancellation_token,
+                )
+                crs = project.coordinate.project_crs
+                for task, result in zip(aligned_tasks, results):
+                    if cancellation_token is not None:
+                        cancellation_token.raise_if_cancelled()
+                    grid_result = FactorGridResult.from_engine_dict(
+                        {
+                            **result,
+                            "grid_x": np.asarray(result["grid_x"]),
+                            "grid_y": np.asarray(result["grid_y"]),
+                            "grid_z": result["grid_z"],
+                        },
+                        factor_name=task.factor_type or task.name,
+                        crs=crs,
+                        generator_version=GENERATOR_VERSION,
+                        source_refs=task.input_resource_ids,
+                    )
+                    _attach_result_to_task(
+                        task,
+                        result=result,
+                        grid_result=grid_result,
+                        method=method,
+                        power=power,
+                        points=(task.parameters or {}).get("sample_points") or [],
+                        grid_n=grid_n,
+                        breaks=plan.fault_polylines,
+                        engine_method="IDW",
+                    )
+            continue
+
+        for task in tasks:
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
+            use_plan = plan
+            if use_plan is not None:
+                try:
+                    extract_values_aligned(
+                        (task.parameters or {}).get("sample_points") or [], use_plan
+                    )
+                except ValueError:
+                    use_plan = None
             apply_interpolation_to_task(
                 task,
                 method=method,
                 grid_n=grid_n,
+                power=power,
                 project=project,
                 cancellation_token=cancellation_token,
+                plan=use_plan if METHOD_LABEL_TO_ENGINE.get(method, method) in (
+                    "IDW", "idw", "mock"
+                ) else None,
             )
-            project.factor_map_tasks.append(task)
-            prepared.append(task)
-        return prepared
-
-    for task in project.factor_map_tasks:
-        if cancellation_token is not None:
-            cancellation_token.raise_if_cancelled()
-        params = task.parameters or {}
-        points = params.get("sample_points") or []
-        if not points:
-            points = synthetic_sample_points(
-                seed=(task.seed if task.seed is not None else seed),
-                factor_type=task.factor_type or task.name,
-            )
-            task.parameters = {**params, "sample_points": points}
-        apply_interpolation_to_task(
-            task,
-            method=method,
-            grid_n=grid_n,
-            project=project,
-            cancellation_token=cancellation_token,
-        )
-        prepared.append(task)
     return prepared
