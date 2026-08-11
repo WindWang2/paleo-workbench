@@ -35,11 +35,39 @@ DEFAULT_N_LEVELS = 8
 def _grid_from_task(
     task: FactorMapTask,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load grid axes/values for contouring.
+
+    Prefers the canonical FactorGridResult path (live in-session grid or managed
+    NPZ artifact) so contouring does not depend on nested-list re-parsing. Falls
+    back to legacy inline ``parameters`` for old fixtures.
+    """
+    try:
+        from paleo_workbench.project.factor_grid_artifacts import (
+            factor_grid_result_for_task,
+        )
+
+        result = factor_grid_result_for_task(task)
+        return (
+            np.asarray(result.grid_x, dtype=np.float64),
+            np.asarray(result.grid_y, dtype=np.float64),
+            np.asarray(result.grid_z, dtype=np.float64),
+        )
+    except (FileNotFoundError, ValueError, KeyError, TypeError, OSError):
+        # Expected fallbacks: missing artifact, incomplete legacy params, bad shape.
+        # Unexpected errors (e.g. ImportError of native deps) propagate.
+        pass
+
     params = task.parameters or {}
     gx = params.get("grid_x")
     gy = params.get("grid_y")
     gz = params.get("grid_z")
-    if not gx or not gy or not gz:
+    # Truthiness checks are only safe for sequences (legacy lists).  ndarray
+    # presence is handled via ``is None`` so contour remains list-compatible.
+    if gx is None or gy is None or gz is None:
+        raise ValueError("FactorMapTask 缺少 grid_x/grid_y/grid_z，请先完成插值")
+    if isinstance(gx, (list, tuple)) and not gx:
+        raise ValueError("FactorMapTask 缺少 grid_x/grid_y/grid_z，请先完成插值")
+    if isinstance(gz, (list, tuple)) and not gz:
         raise ValueError("FactorMapTask 缺少 grid_x/grid_y/grid_z，请先完成插值")
     grid_x = np.asarray(gx, dtype=np.float64)
     grid_y = np.asarray(gy, dtype=np.float64)
@@ -302,9 +330,8 @@ def compile_contour_drafts_for_project(
             continue
         if only_complete and getattr(task, "status", "") != "complete":
             continue
-        params = task.parameters or {}
-        if not params.get("grid_z"):
-            continue
+        # Grid may live in parameters, a managed NPZ artifact, or the live cache.
+        # Missing grids raise ValueError and are skipped.
         try:
             draft = compile_contour_draft_from_task(
                 project,

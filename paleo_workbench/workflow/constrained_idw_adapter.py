@@ -287,6 +287,56 @@ def _leave_one_out_grid_fidelity(
     return float(max(0.0, min(1.0, 1.0 - ss_res / ss_tot)))
 
 
+def _value_range_from_wells(wells: Sequence[Any]) -> tuple[float | None, float | None]:
+    """Derive clamp bounds from sample values (disable when empty/degenerate).
+
+    Haiyou defaults ``value_min=0`` / ``value_max=1``, which silently clamps
+    real factor fields (thickness, sand %, etc.). Host-owned integration must
+    set the range from data so numerical results match the observed samples.
+    """
+    values = np.asarray([w.value for w in wells], dtype=np.float64)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None, None
+    lo = float(finite.min())
+    hi = float(finite.max())
+    if not math.isfinite(lo) or not math.isfinite(hi):
+        return None, None
+    if hi < lo:
+        lo, hi = hi, lo
+    # Tiny pad so exact sample extremes survive floating-point anchor/smooth.
+    if hi == lo:
+        pad = max(abs(lo) * 1e-6, 1e-9)
+        return lo - pad, hi + pad
+    pad = max((hi - lo) * 1e-9, 1e-12)
+    return lo - pad, hi + pad
+
+
+def _search_radii_from_wells(
+    wells: Sequence[Any],
+) -> tuple[float, float]:
+    """Scale search/decluster radii to sample extent (not fixed metre defaults).
+
+    Synthetic degree-scale and unit-box fixtures as well as projected metres
+    all need radii proportional to the map.  Returns ``(search_radius,
+    decluster_radius)``.
+    """
+    xs = np.asarray([w.x for w in wells], dtype=np.float64)
+    ys = np.asarray([w.y for w in wells], dtype=np.float64)
+    span_x = float(xs.max() - xs.min()) if xs.size else 0.0
+    span_y = float(ys.max() - ys.min()) if ys.size else 0.0
+    span = max(span_x, span_y, 0.0)
+    if not math.isfinite(span) or span <= 0.0:
+        span = 1.0
+    # Cover the domain generously so sparse wells still fill the hull; cap is
+    # the diagonal of the sample bbox (with a small pad).
+    diagonal = math.hypot(span_x, span_y) if (span_x > 0 or span_y > 0) else span
+    search_radius = max(diagonal * 1.05, span * 0.75, 1e-6)
+    # Decluster over a fraction of the domain so dense clusters down-weight.
+    decluster_radius = max(search_radius * 0.15, span * 0.05, 1e-6)
+    return float(search_radius), float(decluster_radius)
+
+
 def run_constrained_idw(
     points: Sequence[dict[str, Any]],
     *,
@@ -304,6 +354,10 @@ def run_constrained_idw(
     result dict matches what :func:`geoviz.interpolate_factor_grid` returns so
     the rest of the single-factor pipeline (task params, preview cards, contour
     draft, catalog run, serialization) consumes it unchanged.
+
+    Hot-path arrays (``grid_x`` / ``grid_y`` / ``grid_z``) are contiguous
+    ``ndarray`` values.  Legacy nested-list encoding is deferred to
+    :class:`FactorGridResult` / task-parameter serialisation boundaries.
     """
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
@@ -332,9 +386,16 @@ def run_constrained_idw(
     resolution = int(round(grid_n))
     resolution = max(_MIN_GRID_RESOLUTION, min(_MAX_GRID_RESOLUTION, resolution))
 
+    value_min, value_max = _value_range_from_wells(wells)
+    search_radius, decluster_radius = _search_radii_from_wells(wells)
+
     config = Config(
         grid_resolution=resolution,
         power=float(power),
+        search_radius=search_radius,
+        decluster_radius=decluster_radius,
+        value_min=value_min,
+        value_max=value_max,
         # We only need the interpolated surface (host re-derives contours via
         # its own marching-squares contour-draft pipeline, consistent with the
         # other methods). Skip haiyou's contour extraction to keep the import
@@ -357,9 +418,11 @@ def run_constrained_idw(
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
 
-    grid_z = np.asarray(result.grid_z, dtype=float)
-    grid_x = np.asarray(result.grid_x, dtype=float)
-    grid_y = np.asarray(result.grid_y, dtype=float)
+    # Contiguous float64 axes / float64 grid (canonical nodata = NaN).  Keep as
+    # ndarray through FactorGridResult; do not .tolist() on the hot path.
+    grid_z = np.ascontiguousarray(result.grid_z, dtype=np.float64)
+    grid_x = np.ascontiguousarray(result.grid_x, dtype=np.float64)
+    grid_y = np.ascontiguousarray(result.grid_y, dtype=np.float64)
     finite = grid_z[np.isfinite(grid_z)]
     if finite.size == 0:
         raise ValueError("约束IDW 未产生任何有效格网单元。")
@@ -369,9 +432,9 @@ def run_constrained_idw(
     r_squared = _leave_one_out_grid_fidelity(grid_z, grid_x, grid_y, wells)
 
     return {
-        "grid_x": grid_x.tolist(),
-        "grid_y": grid_y.tolist(),
-        "grid_z": grid_z.tolist(),
+        "grid_x": grid_x,
+        "grid_y": grid_y,
+        "grid_z": grid_z,
         "backend": CONSTRAINED_IDW_ENGINE_LABEL,
         "method": CONSTRAINED_IDW_ENGINE_LABEL,
         "grid_n": resolution,
@@ -385,4 +448,6 @@ def run_constrained_idw(
         # the constrained interpolation extent (e.g. as a reference outline).
         "boundary": [[float(x), float(y)] for x, y in boundary_xy],
         "n_direction_lines": len(directions),
+        "search_radius": search_radius,
+        "decluster_radius": decluster_radius,
     }

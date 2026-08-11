@@ -36,7 +36,12 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
-__all__ = ["FactorGridResult", "GridStatistics"]
+__all__ = [
+    "FactorGridResult",
+    "GridStatistics",
+    "encode_legacy_axis_list",
+    "encode_legacy_grid_lists",
+]
 
 # Sentinel: the canonical nodata value stored inside ``grid_z`` / ``variance_grid``.
 NODATA = float("nan")
@@ -105,8 +110,56 @@ def _to_float32_grid(
 
     Accepts both legacy encodings: the engine's ``None`` sentinel and the adapter's raw
     ``NaN``. ``None``, ``math.nan`` and non-finite floats all become ``NaN``.
+
+    When *raw* is already a contiguous float32 array of the right shape, this is a
+    zero-copy path aside from in-place non-finite normalisation (which may write).
     """
-    arr = np.asarray(raw, dtype=np.float32)
+    # Always own the buffer so FactorGridResult never aliases a caller ndarray
+    # (artifact re-wrap, live-cache shells, or upstream float32 producers).
+    if (
+        isinstance(raw, np.ndarray)
+        and raw.dtype == np.float32
+        and raw.shape == (height, width)
+    ):
+        arr = np.array(raw, dtype=np.float32, copy=True, order="C")
+        arr[~np.isfinite(arr)] = NODATA
+        return arr
+
+    # Object arrays / nested lists with None need an explicit numeric conversion.
+    if isinstance(raw, np.ndarray) and raw.dtype == object:
+        arr = np.empty((height, width), dtype=np.float32)
+        flat_src = raw.reshape(-1)
+        flat_dst = arr.reshape(-1)
+        for i, value in enumerate(flat_src):
+            if value is None:
+                flat_dst[i] = NODATA
+            else:
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    number = NODATA
+                flat_dst[i] = number if math.isfinite(number) else NODATA
+        return arr
+
+    try:
+        # Own the buffer before in-place nodata normalisation so caller arrays
+        # (e.g. engine float64 grids) are never mutated.
+        arr = np.array(np.asarray(raw, dtype=np.float32), copy=True, order="C")
+    except (TypeError, ValueError):
+        # Nested Python lists containing None are not float-castable in one shot.
+        arr = np.array(
+            [
+                [
+                    NODATA
+                    if v is None
+                    else (float(v) if math.isfinite(float(v)) else NODATA)
+                    for v in row
+                ]
+                for row in raw
+            ],
+            dtype=np.float32,
+            order="C",
+        )
     if arr.shape != (height, width):
         # Tolerate a flat list that reshapes cleanly (defensive; both producers emit 2-D).
         try:
@@ -115,7 +168,6 @@ def _to_float32_grid(
             raise ValueError(
                 f"grid_z shape {arr.shape} does not match expected ({height}, {width})"
             ) from err
-    if not arr.flags["C_CONTIGUOUS"]:
         arr = np.ascontiguousarray(arr)
     # Normalise any non-finite value (inf/-inf from upstream included) to NaN, the
     # canonical nodata marker consumed by the native rasteriser.
@@ -124,7 +176,11 @@ def _to_float32_grid(
 
 
 def _coerce_xy(values: Sequence[float], *, name: str) -> np.ndarray:
-    arr = np.asarray(list(values), dtype=np.float64)
+    """Coerce axis coordinates to contiguous float64 without forced list materialisation."""
+    if isinstance(values, np.ndarray) and values.dtype != object:
+        arr = np.ascontiguousarray(values, dtype=np.float64)
+    else:
+        arr = np.asarray(list(values), dtype=np.float64)
     if arr.ndim != 1:
         raise ValueError(f"{name} must be a 1-D coordinate vector, got shape {arr.shape}")
     if arr.size == 0:
@@ -132,6 +188,18 @@ def _coerce_xy(values: Sequence[float], *, name: str) -> np.ndarray:
     if not np.isfinite(arr).all():
         raise ValueError(f"{name} must contain only finite coordinates")
     return arr
+
+
+def encode_legacy_grid_lists(grid_z: np.ndarray) -> list[list[float | None]]:
+    """JSON-safe nested lists: non-finite cells become ``None`` (engine encoding)."""
+    return [
+        [None if not math.isfinite(float(v)) else float(v) for v in row]
+        for row in np.asarray(grid_z)
+    ]
+
+
+def encode_legacy_axis_list(axis: np.ndarray) -> list[float]:
+    return [float(v) for v in np.asarray(axis, dtype=np.float64).tolist()]
 
 
 def _json_safe(value: Any) -> Any:
@@ -461,14 +529,10 @@ class FactorGridResult:
         engine's JSON-safe encoding) so downstream code and old tests keep working.
         """
         stats = self.statistics.to_dict()
-        none_encoded = [
-            [None if not math.isfinite(float(v)) else float(v) for v in row]
-            for row in self.grid_z.tolist()
-        ]
         out: dict[str, Any] = {
-            "grid_x": [float(v) for v in self.grid_x.tolist()],
-            "grid_y": [float(v) for v in self.grid_y.tolist()],
-            "grid_z": none_encoded,
+            "grid_x": encode_legacy_axis_list(self.grid_x),
+            "grid_y": encode_legacy_axis_list(self.grid_y),
+            "grid_z": encode_legacy_grid_lists(self.grid_z),
             "backend": self.algorithm_id,
             "min": stats["min"],
             "max": stats["max"],
@@ -476,10 +540,7 @@ class FactorGridResult:
             "r_squared": self.algorithm_parameters.get("r_squared"),
         }
         if self.variance_grid is not None:
-            out["grid_var"] = [
-                [None if not math.isfinite(float(v)) else float(v) for v in row]
-                for row in self.variance_grid.tolist()
-            ]
+            out["grid_var"] = encode_legacy_grid_lists(self.variance_grid)
             out["variance_min"] = self.algorithm_parameters.get("variance_min")
             out["variance_max"] = self.algorithm_parameters.get("variance_max")
         if self.boundary is not None:

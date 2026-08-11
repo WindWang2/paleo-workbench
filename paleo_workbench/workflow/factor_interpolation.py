@@ -12,28 +12,34 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from typing import Any
 
 import numpy as np
 
-from geoviz import (
+from geoviz import (  # re-exported for tests / callers — facade only
     extract_xy_values,
-    extract_xy_z_weights,
     interpolate_factor_grid,
     resolve_anisotropy_params,
     synthetic_sample_points,
+)
+from paleo_workbench.project.factor_grid_artifacts import (
+    clear_live_factor_grid,
+    store_live_factor_grid,
 )
 from paleo_workbench.project.models import FactorMapTask, ProjectDocument
 from paleo_workbench.workflow.constrained_idw_adapter import (
     CONSTRAINED_IDW_ENGINE_LABEL,
     run_constrained_idw,
 )
-from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from paleo_workbench.workflow.constraints import (
     break_polylines_for_idw,
     constraint_layers_for_project,
     direction_line_params,
+)
+from paleo_workbench.workflow.factor_grid_result import (
+    FactorGridResult,
+    encode_legacy_axis_list,
+    encode_legacy_grid_lists,
 )
 
 GENERATOR_VERSION = "factor-interp-v1"
@@ -60,6 +66,41 @@ METHOD_LABEL_TO_ENGINE = {
 def _snapshot_hash(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _legacy_params_from_grid_result(
+    grid_result: FactorGridResult,
+    *,
+    use_nan_nodata: bool,
+) -> dict[str, Any]:
+    """Build JSON-friendly inline grid fields from the canonical FactorGridResult.
+
+    Contour draft and e2e tests still expect nested lists on ``task.parameters`` until
+    a project save externalises the NPZ artifact.  Encoding happens once here.
+
+    Nodata encoding preserves historical producer conventions:
+    * constrained-IDW → raw float ``NaN`` (adapter historically used ``tolist()``)
+    * all other methods → JSON-safe ``None`` (engine convention)
+    """
+    if use_nan_nodata:
+        grid_z_lists = [
+            [float(v) for v in row]
+            for row in np.asarray(grid_result.grid_z, dtype=np.float64)
+        ]
+    else:
+        grid_z_lists = encode_legacy_grid_lists(grid_result.grid_z)
+    params: dict[str, Any] = {
+        "grid_x": encode_legacy_axis_list(grid_result.grid_x),
+        "grid_y": encode_legacy_axis_list(grid_result.grid_y),
+        "grid_z": grid_z_lists,
+    }
+    if grid_result.variance_grid is not None:
+        params["grid_var"] = encode_legacy_grid_lists(grid_result.variance_grid)
+    if grid_result.boundary is not None:
+        params["grid_boundary"] = [
+            [float(x), float(y)] for x, y in grid_result.boundary
+        ]
+    return params
 
 
 def apply_interpolation_to_task(
@@ -115,6 +156,7 @@ def apply_interpolation_to_task(
         # owns this integration boundary so geo-viz-engine and haiyou stay
         # independent; the result dict matches interpolate_factor_grid's
         # contract so all downstream plumbing is method-agnostic.
+        # Hot-path grids are contiguous ndarrays (no list round-trip).
         result = run_constrained_idw(
             points,
             grid_n=grid_n,
@@ -125,6 +167,7 @@ def apply_interpolation_to_task(
             cancellation_token=cancellation_token,
         )
     else:
+        # Public geoviz facade only — never import private geoviz_plots symbols.
         result = interpolate_factor_grid(
             points,
             method=engine_method,
@@ -154,30 +197,43 @@ def apply_interpolation_to_task(
             generator_version=GENERATOR_VERSION,
             source_refs=task.input_resource_ids,
         )
+
+    # Single source of truth for pre-save consumers (contour, native scene).
+    clear_live_factor_grid(task.id)
+    store_live_factor_grid(task.id, grid_result)
+
     params["sample_points"] = list(points)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
-    # Keep the established inline representation until ProjectManager persists the
-    # artifact. In particular, constrained-IDW historically exposes float NaNs to
-    # callers, while the engine uses JSON-safe None; FactorGridResult normalizes both
-    # when it becomes the persisted/native payload.
-    params["grid_x"] = result["grid_x"]
-    params["grid_y"] = result["grid_y"]
-    params["grid_z"] = result["grid_z"]
-    if result.get("grid_var") is not None:
-        params["grid_var"] = result["grid_var"]
-    else:
+
+    # Inline lists: constrained encodes once from FactorGridResult (ndarray SSoT).
+    # Engine path already returned JSON-safe lists — reuse them to avoid a second
+    # full-grid materialisation (list→float32→list).
+    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
+        legacy = _legacy_params_from_grid_result(grid_result, use_nan_nodata=True)
+        params["grid_x"] = legacy["grid_x"]
+        params["grid_y"] = legacy["grid_y"]
+        params["grid_z"] = legacy["grid_z"]
+        if "grid_boundary" in legacy:
+            params["grid_boundary"] = legacy["grid_boundary"]
+        else:
+            params.pop("grid_boundary", None)
         params.pop("grid_var", None)
-    if result.get("boundary"):
-        params["grid_boundary"] = result["boundary"]
     else:
+        params["grid_x"] = result["grid_x"]
+        params["grid_y"] = result["grid_y"]
+        params["grid_z"] = result["grid_z"]
+        if result.get("grid_var") is not None:
+            params["grid_var"] = result["grid_var"]
+        else:
+            params.pop("grid_var", None)
         params.pop("grid_boundary", None)
+
     params["interp_backend"] = result["backend"]
     params["power"] = power
     params["n_break_lines"] = result.get("n_break_lines", 0)
     # Real kriging backend additionally returns the kriging variance grid —
     # pass it through so downstream consumers (and the UI) can show it.
     if result.get("grid_var") is not None:
-        params["grid_var"] = result["grid_var"]
         params["variance_min"] = result.get("variance_min")
         params["variance_max"] = result.get("variance_max")
     if result.get("backend") == "directional":
