@@ -57,10 +57,10 @@ public:
 
     // display
     const std::string& name() const noexcept { return name_; }
-    void set_name(std::string name) { name_ = std::move(name); ++style_revision_; }
+    void set_name(std::string name);
 
     bool visible() const noexcept { return visible_; }
-    void set_visible(bool v) { visible_ = v; ++style_revision_; }
+    void set_visible(bool v);
 
     // opacity 0..1, clamped.
     float opacity() const noexcept { return opacity_; }
@@ -68,12 +68,12 @@ public:
 
     // spatial
     const std::string& crs() const noexcept { return crs_; }
-    void set_crs(std::string crs) { crs_ = std::move(crs); ++data_revision_; }
+    void set_crs(std::string crs);
     Extent extent() const noexcept { return extent_; }
-    void set_extent(Extent e) { extent_ = e; ++data_revision_; }
+    void set_extent(Extent e);
 
     const ScaleRange& scale_range() const noexcept { return scale_range_; }
-    void set_scale_range(ScaleRange s) { scale_range_ = s; ++style_revision_; }
+    void set_scale_range(ScaleRange s);
 
     // True if this layer should draw at the given scale (ignores the on/off toggle).
     bool visible_at_scale(double scale_denominator) const noexcept {
@@ -82,7 +82,7 @@ public:
 
     // payload reference (external data) — changing it is a DATA change.
     const std::string& source_ref() const noexcept { return source_ref_; }
-    void set_source_ref(std::string ref) { source_ref_ = std::move(ref); ++data_revision_; }
+    void set_source_ref(std::string ref);
 
     // revisions (the render-cache key components)
     std::uint64_t data_revision() const noexcept { return data_revision_; }
@@ -133,11 +133,14 @@ public:
     bool remove_layer(const std::string& id);
 
     MapLayer* get(const std::string& id) const;
+    // Shared ownership is exposed only for safe Python binding handles. The C++ API
+    // continues to use raw observer pointers because the registry owns layer lifetime.
+    std::shared_ptr<MapLayer> get_shared(const std::string& id) const;
     std::size_t size() const noexcept { return layers_.size(); }
     bool empty() const noexcept { return layers_.empty(); }
 
     // z-order: index 0 = bottom.
-    const std::vector<std::unique_ptr<MapLayer>>& layers() const noexcept { return layers_; }
+    const std::vector<std::shared_ptr<MapLayer>>& layers() const noexcept { return layers_; }
     std::size_t index_of(const std::string& id) const;
 
     // Move ``id`` to absolute z-position ``new_index`` (clamped). Returns false if not found.
@@ -155,8 +158,12 @@ public:
     // Children of a group, in z-order.
     std::vector<const MapLayer*> children_of(const std::string& group_id) const;
 
+    // Empty string means a root layer (or an unknown id). Exposed to the Qt tree model;
+    // it is derived from the authoritative registry, never maintained in Python.
+    std::string parent_id(const std::string& id) const;
+
 private:
-    std::vector<std::unique_ptr<MapLayer>> layers_;
+    std::vector<std::shared_ptr<MapLayer>> layers_;
     std::map<std::string, std::string> parent_of_;  // layer id -> parent group id
 };
 

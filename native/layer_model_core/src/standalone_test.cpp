@@ -85,7 +85,15 @@ void test_opacity_clamp_and_revisions() {
     const auto data0 = l.data_revision();
     l.set_extent({0.0, 0.0, 10.0, 10.0});
     CHECK(l.data_revision() > data0, "extent bumps data revision");
-    CHECK(l.style_revision() == style0 + 2, "extent does NOT bump style revision");
+    CHECK(l.style_revision() == style0 + 1, "extent does NOT bump style revision");
+
+    // Idempotent setters must not invalidate a render/cache entry.
+    const auto same_data = l.data_revision();
+    const auto same_style = l.style_revision();
+    l.set_extent({0.0, 0.0, 10.0, 10.0});
+    l.set_opacity(0.0f);
+    CHECK_EQ(l.data_revision(), same_data, "unchanged data does not bump revision");
+    CHECK_EQ(l.style_revision(), same_style, "unchanged style does not bump revision");
 }
 
 void test_scale_visibility() {
@@ -115,6 +123,12 @@ void test_groups_and_effective_visibility() {
     // Off-scale group hides child.
     r.get("group")->set_scale_range({0.0, 500.0});
     CHECK(!r.is_effectively_visible("surface", 5000.0), "off-scale group hides child");
+
+    r.add_layer(make("not-a-group", lm::LayerType::Point));
+    bool threw = false;
+    try { r.add_layer(make("invalid-child", lm::LayerType::Point), "not-a-group"); }
+    catch (const std::invalid_argument&) { threw = true; }
+    CHECK(threw, "non-group parent rejected");
 }
 
 void test_remove_orphans_children() {

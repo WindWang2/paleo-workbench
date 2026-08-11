@@ -6,11 +6,50 @@
 
 namespace pwb::layer_model {
 
+void MapLayer::set_name(std::string name) {
+    if (name_ == name) return;
+    name_ = std::move(name);
+    ++style_revision_;
+}
+
+void MapLayer::set_visible(bool v) {
+    if (visible_ == v) return;
+    visible_ = v;
+    ++style_revision_;
+}
+
 void MapLayer::set_opacity(float o) {
     if (o < 0.0f) o = 0.0f;
     else if (o > 1.0f) o = 1.0f;
+    if (opacity_ == o) return;
     opacity_ = o;
     ++style_revision_;
+}
+
+void MapLayer::set_crs(std::string crs) {
+    if (crs_ == crs) return;
+    crs_ = std::move(crs);
+    ++data_revision_;
+}
+
+void MapLayer::set_extent(Extent e) {
+    if (extent_ == e) return;
+    extent_ = e;
+    ++data_revision_;
+}
+
+void MapLayer::set_scale_range(ScaleRange s) {
+    if (scale_range_.min_scale == s.min_scale && scale_range_.max_scale == s.max_scale) {
+        return;
+    }
+    scale_range_ = s;
+    ++style_revision_;
+}
+
+void MapLayer::set_source_ref(std::string ref) {
+    if (source_ref_ == ref) return;
+    source_ref_ = std::move(ref);
+    ++data_revision_;
 }
 
 // --- LayerRegistry -----------------------------------------------------------
@@ -22,9 +61,17 @@ MapLayer* LayerRegistry::add_layer(std::unique_ptr<MapLayer> layer,
         throw std::invalid_argument("layer cannot be its own parent");
     }
     MapLayer* raw = layer.get();
-    // Detect simple cycles: parent must already exist (groups are created first).
-    if (!parent_id.empty() && get(parent_id) == nullptr) {
-        throw std::invalid_argument("parent group does not exist: " + parent_id);
+    // Parents are created before children, which makes cycles impossible. A layer may
+    // be nested only below a group; accepting any layer here would make the tree's
+    // hierarchy disagree with its type metadata.
+    if (!parent_id.empty()) {
+        const MapLayer* parent = get(parent_id);
+        if (parent == nullptr) {
+            throw std::invalid_argument("parent group does not exist: " + parent_id);
+        }
+        if (parent->type() != LayerType::Group) {
+            throw std::invalid_argument("parent is not a group: " + parent_id);
+        }
     }
     if (get(raw->id()) != nullptr) {
         throw std::invalid_argument("duplicate layer id: " + raw->id());
@@ -32,13 +79,13 @@ MapLayer* LayerRegistry::add_layer(std::unique_ptr<MapLayer> layer,
     if (!parent_id.empty()) {
         parent_of_[raw->id()] = parent_id;
     }
-    layers_.push_back(std::move(layer));
+    layers_.emplace_back(std::move(layer));
     return raw;
 }
 
 bool LayerRegistry::remove_layer(const std::string& id) {
     auto it = std::find_if(layers_.begin(), layers_.end(),
-                           [&](const std::unique_ptr<MapLayer>& l) { return l->id() == id; });
+                           [&](const std::shared_ptr<MapLayer>& l) { return l->id() == id; });
     if (it == layers_.end()) return false;
     layers_.erase(it);
     parent_of_.erase(id);
@@ -52,6 +99,13 @@ bool LayerRegistry::remove_layer(const std::string& id) {
 MapLayer* LayerRegistry::get(const std::string& id) const {
     for (const auto& l : layers_) {
         if (l->id() == id) return l.get();
+    }
+    return nullptr;
+}
+
+std::shared_ptr<MapLayer> LayerRegistry::get_shared(const std::string& id) const {
+    for (const auto& l : layers_) {
+        if (l->id() == id) return l;
     }
     return nullptr;
 }
@@ -129,6 +183,11 @@ std::vector<const MapLayer*> LayerRegistry::children_of(const std::string& group
         }
     }
     return out;
+}
+
+std::string LayerRegistry::parent_id(const std::string& id) const {
+    const auto it = parent_of_.find(id);
+    return it == parent_of_.end() ? std::string{} : it->second;
 }
 
 }  // namespace pwb::layer_model

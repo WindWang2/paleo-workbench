@@ -6,9 +6,10 @@ scale-dependent visibility, groups, and the data/style revision counters that ke
 render cache.
 
 **Why C++ / why pure:** the goal requires the C++ layer model to be authoritative and
-Python to be a control/display surface only. Keeping this module Qt-free (pure C++) lets
-the data-model behaviour be verified with a bare compiler; the pybind11 binding (and the
-`QAbstractItemModel` adapter) land in Phase C2 alongside the first Python consumer.
+Python to be a control/display surface only. Keeping the data model Qt-free lets the
+behaviour be verified with a bare compiler. The C2 pybind11 binding exposes the same
+registry to Python; `paleo_workbench.ui.native_layer_tree.NativeLayerModel` adapts it to
+a Qt `QAbstractItemModel` without storing a second layer-state copy.
 
 ## Field set (from goal §7)
 
@@ -38,9 +39,24 @@ g++ -std=c++17 -O2 -Wall -Wextra src/layer_model.cpp src/standalone_test.cpp \
 
 CI runs the same selftest (see `.github/workflows/ci.yml` “Native C++ selftests”).
 
-## Next (Phase C2)
+## Python + Qt control surface (C2)
 
-- pybind11 binding exposing `LayerRegistry` + `MapLayer` ops.
-- A Python `QAbstractItemModel` adapter that reads/writes the C++ registry (the
-  `LayerTreeView` stays a thin Qt view).
-- Composition with `grid_render_core` to draw `ScalarGridLayer`s.
+Build the extension locally, then run the binding and offscreen Qt contracts:
+
+```
+python -m pip install -e native/layer_model_core
+QT_QPA_PLATFORM=offscreen python -m pytest -q \
+  tests/test_layer_model_core_cpp.py tests/test_native_layer_tree.py
+```
+
+The binding keeps safe shared Python handles while the registry remains the authority for
+membership and render order. The Qt model has only selection-local state; name,
+visibility, opacity, hierarchy, order, extent, and revision values resolve directly from
+the native registry. Double-clicking a layer emits its id and extent for the canvas to
+apply as a zoom request.
+
+## Next composition slice
+
+Compose managed `FactorGridResult` artifacts as `ScalarGridLayer`s with
+`grid_render_core`, then connect the native tree's changes and zoom requests to the host
+canvas.
