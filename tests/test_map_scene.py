@@ -91,3 +91,25 @@ def test_map_scene_snapshot_references_the_existing_native_scalar_payload() -> N
 
     assert snapshot.layers[0].layer_type == "scalar_grid"
     assert snapshot.layers[0].renderer_payload is scene.scalar_layer("porosity")
+
+
+def test_map_scene_can_describe_an_immutable_external_raster_without_copying_samples() -> None:
+    scene = MapScene()
+    layer = scene.add_raster_source(
+        "reference-raster",
+        "/tmp/reference.tif",
+        name="Reference raster",
+        extent=(1.0, 2.0, 3.0, 4.0),
+        crs="EPSG:3857",
+        source_ref="reference:ref-1",
+        source_revision="revision-1",
+    )
+    before = layer.data_revision
+
+    snapshot = scene.render_snapshot(project_crs="EPSG:3857")
+
+    assert layer.type == layer_model_core.LayerType.Raster
+    assert snapshot.layers[0].layer_type == "raster_source"
+    assert snapshot.layers[0].renderer_payload == "/tmp/reference.tif"
+    assert scene.set_raster_source("reference-raster", "/tmp/reference.tif", source_revision="revision-2")
+    assert layer.data_revision > before

@@ -75,7 +75,11 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
         layer.opacity = py::cast<double>(data["opacity"]);
         for (const py::handle feature_item : py::reinterpret_borrow<py::iterable>(data["features"])) {
             const py::dict feature = py::reinterpret_borrow<py::dict>(feature_item);
-            FeatureSpec parsed{py::cast<std::string>(feature["id"]), py::cast<std::string>(feature["wkt"])};
+            FeatureSpec parsed{
+                py::cast<std::string>(feature["id"]),
+                py::cast<std::string>(feature["wkt"]),
+                {},
+            };
             if (feature.contains("attributes")) {
                 const py::dict attributes = py::reinterpret_borrow<py::dict>(feature["attributes"]);
                 for (const auto attribute : attributes) {

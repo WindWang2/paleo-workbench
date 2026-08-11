@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QGraphicsItem,
     QGraphicsView,
     QHBoxLayout,
@@ -703,6 +704,7 @@ class MappingPage(QWidget):
             records=records,
             excluded_layer_ids=self._suppressed_layer_ids,
         )
+        self._sync_reference_render_layers(document)
         if self._authoring_document is not None:
             for kind in ("facies", "well", "line", "label"):
                 vector_layer = self._authoring_document.layer(kind)
@@ -746,6 +748,7 @@ class MappingPage(QWidget):
         tree.model.layer_changed.connect(self._on_native_layer_registry_changed)
         tree.properties_requested.connect(self._open_layer_properties)
         tree.active_layer_changed.connect(self._on_native_active_layer)
+        tree.add_layer_requested.connect(self._on_native_add_layer_requested)
         self._native_layer_tree = tree
         self.layer_tree_stack.addWidget(tree)
         self.layer_tree_stack.setCurrentWidget(tree)
@@ -766,9 +769,124 @@ class MappingPage(QWidget):
             self._suppressed_layer_ids.add(str(layer_id))
         if self._active_document is not None:
             self._presentation_dirty = True
+        self._stage_composition_state()
         self._refresh_unified_composition()
         self._sync_save_enabled()
         self._emit_mapping_context()
+
+    def _on_native_add_layer_requested(self) -> None:
+        """Import an immutable GDAL reference into the unified composition."""
+        document = self._active_document
+        if document is None:
+            return
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "添加参考图层",
+            "",
+            "GIS 文件 (*.tif *.tiff *.gpkg *.geojson *.json *.shp);;所有文件 (*)",
+        )
+        if not path:
+            return
+        try:
+            layer = self._reference_service.import_layer(
+                path, str(self._project_crs or getattr(document, "map_crs", "") or "")
+            )
+        except ReferenceLayerError as exc:
+            QMessageBox.warning(self, "添加参考图层", str(exc))
+            return
+        document.reference_layers.append(layer)
+        self._presentation_dirty = True
+        self._publish_reference_layers(document)
+        self._refresh_unified_composition()
+        self._install_native_layer_tree(self.unified_scene)
+        if self._native_layer_tree is not None:
+            self._native_layer_tree.set_active_layer(self._reference_scene_layer_id(layer.id))
+        self._sync_save_enabled()
+        self._emit_mapping_context()
+
+    def _reference_scene_layer_id(self, reference_id: str) -> str:
+        document_id = str(getattr(self._active_document, "id", "") or "map")
+        return f"{document_id}:reference:{reference_id}"
+
+    def _sync_reference_render_layers(self, document) -> None:
+        """Mirror ready external sources into MapScene without owning their data."""
+        if document is None:
+            return
+        # Keep the established snapping seam substitutable in headless/legacy
+        # callers.  A minimal snap-only service has no render-payload API and
+        # must not prevent the document/editor from opening.
+        if not hasattr(self._reference_service, "vector_render_payload") or not hasattr(
+            self._reference_service, "raster_render_extent"
+        ):
+            return
+        prefix = f"{getattr(document, 'id', '') or 'map'}:reference:"
+        references = list(getattr(document, "reference_layers", []) or [])
+        for reference in references:
+            ReferenceLayerService.refresh_status(reference)
+        wanted = {
+            self._reference_scene_layer_id(layer.id)
+            for layer in references
+            if layer.status == "ready"
+            and self._reference_scene_layer_id(layer.id) not in self._suppressed_layer_ids
+        }
+        for existing in tuple(self.unified_scene.registry.layers()):
+            if str(existing.id).startswith(prefix) and str(existing.id) not in wanted:
+                self.unified_scene.remove_layer(str(existing.id))
+        for reference in references:
+            layer_id = self._reference_scene_layer_id(reference.id)
+            if layer_id not in wanted or reference.status != "ready":
+                continue
+            existing = self.unified_scene.registry.get(layer_id)
+            if reference.source_kind == "raster":
+                try:
+                    extent = self._reference_service.raster_render_extent(reference)
+                except ReferenceLayerError:
+                    if existing is not None:
+                        self.unified_scene.remove_layer(layer_id)
+                    continue
+                if existing is None:
+                    self.unified_scene.add_raster_source(
+                        layer_id,
+                        reference.source_path,
+                        name=reference.name,
+                        extent=extent,
+                        crs=reference.source_crs,
+                        source_ref=f"reference:{reference.id}",
+                        source_revision=reference.cache_key,
+                    )
+                else:
+                    self.unified_scene.set_raster_source(
+                        layer_id, reference.source_path, source_revision=reference.cache_key, extent=extent
+                    )
+                    existing.name = reference.name
+                    existing.crs = reference.source_crs
+                existing = self.unified_scene.registry.get(layer_id)
+                if existing is not None:
+                    existing.visible = bool(reference.visible)
+                    existing.opacity = float(reference.opacity)
+                continue
+            try:
+                features, extent = self._reference_service.vector_render_payload(reference)
+            except ReferenceLayerError:
+                if existing is not None:
+                    self.unified_scene.remove_layer(layer_id)
+                continue
+            if existing is None:
+                existing = self.unified_scene.add_vector_layer(
+                    layer_id,
+                    features,
+                    name=reference.name,
+                    extent=extent,
+                    crs=reference.project_crs,
+                    source_ref=f"reference:{reference.id}",
+                    style={"fill": "#9c6644", "stroke": "#4d3322", "stroke_width": 1.0},
+                )
+            else:
+                self.unified_scene.set_vector_features(layer_id, features, extent=extent)
+                existing.name = reference.name
+                existing.crs = reference.project_crs
+            existing.visible = bool(reference.visible)
+            existing.opacity = float(reference.opacity)
 
     def _show_legacy_layer_tree(self) -> None:
         self.layer_tree_stack.setCurrentWidget(self.layer_tree)
@@ -951,6 +1069,7 @@ class MappingPage(QWidget):
                 nodata=str(requested_scalar.get("nodata") or "transparent"),
             )
             self._presentation_dirty = True
+            self._stage_composition_state()
             self._refresh_unified_composition()
             self._sync_save_enabled()
             self._emit_mapping_context()
@@ -976,6 +1095,7 @@ class MappingPage(QWidget):
                         authoring.layer(kind).labels = dict(style.get("labels") or {})
                         break
         self._presentation_dirty = True
+        self._stage_composition_state()
         self._refresh_unified_composition()
         self._sync_save_enabled()
         self._emit_mapping_context()
@@ -1105,6 +1225,7 @@ class MappingPage(QWidget):
         if self._active_document is not None:
             self._presentation_dirty = True
         self._refresh_unified_composition()
+        self._stage_composition_state()
         self._sync_save_enabled()
 
     def _on_document_selected(self, document) -> None:
@@ -1191,6 +1312,16 @@ class MappingPage(QWidget):
         state["removed_layer_ids"] = sorted(self._suppressed_layer_ids)
         doc.layer_state = state
 
+    def _stage_composition_state(self) -> None:
+        """Keep unsaved presentation edits stable across legacy-adapter refreshes."""
+        doc = self._active_document
+        if doc is None:
+            return
+        state = dict(getattr(doc, "layer_state", None) or {})
+        state["composition"] = self._layer_registry_state()
+        state["removed_layer_ids"] = sorted(self._suppressed_layer_ids)
+        doc.layer_state = state
+
     def _layer_registry_state(self) -> list[dict[str, object]]:
         """Serialize LayerRegistry composition without making it a second authority."""
         state: list[dict[str, object]] = []
@@ -1234,6 +1365,10 @@ class MappingPage(QWidget):
             layer = self.unified_scene.registry.get(str(entry.get("id") or ""))
             if layer is None:
                 continue
+            if "name" in entry and str(entry["name"]):
+                layer.name = str(entry["name"])
+            if "crs" in entry:
+                layer.crs = str(entry["crs"] or "")
             if "visible" in entry:
                 layer.visible = bool(entry["visible"])
             if "opacity" in entry:
@@ -1256,6 +1391,13 @@ class MappingPage(QWidget):
                     )
                 elif self.unified_scene.vector_features(str(layer.id)):
                     self.unified_scene.set_vector_style(str(layer.id), persisted_style)
+        # Reapply hierarchy before flat order. The C++ registry validates group
+        # parents/cycles, so stale legacy parent references remain harmless.
+        for entry in entries:
+            layer_id = str(entry.get("id") or "")
+            parent_id = str(entry.get("parent_id") or "")
+            if self.unified_scene.registry.get(layer_id) is not None:
+                self.unified_scene.registry.set_parent(layer_id, parent_id)
         # Move one entry at a time to its persisted flat registry position.  Invalid
         # legacy references are ignored, leaving current authoritative layers intact.
         for entry in sorted(entries, key=lambda item: int(item.get("order", 0))):
@@ -1290,6 +1432,8 @@ class MappingPage(QWidget):
         if layer is not None:
             layer.visible = bool(visible)
             self._presentation_dirty = True
+            self._refresh_unified_composition()
+            self._stage_composition_state()
             self._sync_save_enabled()
             self._emit_mapping_context()
 
@@ -1298,6 +1442,8 @@ class MappingPage(QWidget):
         if layer is not None:
             layer.opacity = max(0.0, min(1.0, float(opacity)))
             self._presentation_dirty = True
+            self._refresh_unified_composition()
+            self._stage_composition_state()
             self._sync_save_enabled()
             self._emit_mapping_context()
 

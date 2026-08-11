@@ -470,6 +470,25 @@ def _qgis_snapshot(
                 }
             )
             continue
+        if layer.layer_type == "raster_source":
+            source_path = str(layer.renderer_payload or "")
+            if not source_path:
+                continue
+            layers.append(
+                {
+                    "id": layer.id,
+                    "name": layer.name,
+                    "crs": layer.crs or snapshot.project_crs,
+                    "kind": "raster",
+                    "source_path": source_path,
+                    "data_revision": int(layer.data_revision),
+                    "style_revision": int(layer.style_revision),
+                    "visible": bool(layer.visible),
+                    "opacity": float(layer.opacity),
+                    "features": [],
+                }
+            )
+            continue
         if layer.layer_type != "vector":
             continue
         features = []

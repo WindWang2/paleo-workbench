@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PySide6.QtGui import QImage
@@ -109,7 +111,24 @@ def _geometry_points(geometry) -> list[tuple[float, float]]:
 
 
 class ReferenceLayerService:
-    """Reads GDAL sources and exposes normalized vector snap candidates."""
+    """Reads immutable GDAL sources for reference rendering and snapping.
+
+    Vector source decoding is cached by the external source revision.  It is an
+    import-time/changed-source operation, never part of navigation or mouse-move
+    rendering, and its result is only a renderer mirror of ``MapReferenceLayer``.
+    """
+
+    def __init__(self) -> None:
+        self._vector_render_cache: dict[
+            str, tuple[str, tuple[dict[str, Any], ...], tuple[float, float, float, float]]
+        ] = {}
+        self._raster_extent_cache: dict[str, tuple[str, tuple[float, float, float, float]]] = {}
+
+    @staticmethod
+    def _source_revision(layer: MapReferenceLayer) -> str:
+        return _cache_key(
+            Path(layer.source_path), layer.source_crs, layer.project_crs, layer.source_kind
+        )
 
     def import_layer(self, path: str | Path, project_crs: str) -> MapReferenceLayer:
         source_path = Path(path)
@@ -194,6 +213,149 @@ class ReferenceLayerService:
                     continue
                 points.extend(_geometry_points(normalized))
             return points
+        finally:
+            dataset = None
+
+    def vector_render_payload(
+        self, layer: MapReferenceLayer
+    ) -> tuple[tuple[dict[str, Any], ...], tuple[float, float, float, float]]:
+        """Return project-CRS GeoJSON-compatible features for one vector mirror.
+
+        The raw file remains external and untouched.  Feature materialization is
+        keyed by its mtime-based source revision so viewport redraws only consume
+        the cached tuple.
+        """
+        if layer.source_kind != "vector":
+            raise ReferenceLayerError("只有矢量参考图可以生成渲染要素")
+        self.refresh_status(layer)
+        if layer.status != "ready":
+            raise ReferenceLayerError(layer.error_message or "参考图不可用")
+        path = Path(layer.source_path)
+        try:
+            cache_key = self._source_revision(layer)
+        except OSError as exc:
+            layer.status = "offline"
+            layer.error_message = "参考图源文件不可用"
+            raise ReferenceLayerError(layer.error_message) from exc
+        cached = self._vector_render_cache.get(layer.id)
+        if cached is not None and cached[0] == cache_key:
+            return cached[1], cached[2]
+
+        dataset = gdal.OpenEx(layer.source_path, gdal.OF_VECTOR)
+        if dataset is None:
+            layer.status = "failed"
+            layer.error_message = "无法打开矢量参考图"
+            raise ReferenceLayerError(layer.error_message)
+        try:
+            source = dataset.GetLayer(0)
+            if source is None or source.GetSpatialRef() is None:
+                layer.status = "failed"
+                layer.error_message = "矢量参考图缺少坐标系"
+                raise ReferenceLayerError(layer.error_message)
+            transform = osr.CoordinateTransformation(source.GetSpatialRef(), _spatial_reference(layer.project_crs))
+            definition = source.GetLayerDefn()
+            field_names = [
+                definition.GetFieldDefn(index).GetName()
+                for index in range(definition.GetFieldCount())
+            ]
+            features: list[dict[str, Any]] = []
+            xmin = ymin = float("inf")
+            xmax = ymax = float("-inf")
+            source.ResetReading()
+            for ordinal, feature in enumerate(source):
+                geometry = feature.GetGeometryRef()
+                if geometry is None:
+                    continue
+                normalized = geometry.Clone()
+                if normalized.Transform(transform) != 0:
+                    continue
+                try:
+                    geojson = json.loads(normalized.ExportToJson())
+                except (TypeError, ValueError):
+                    continue
+                properties: dict[str, Any] = {}
+                for index, name in enumerate(field_names):
+                    value = feature.GetField(index)
+                    if value is None:
+                        continue
+                    properties[str(name)] = value if isinstance(value, (str, int, float, bool)) else str(value)
+                envelope = normalized.GetEnvelope()
+                if envelope:
+                    xmin = min(xmin, float(envelope[0]))
+                    xmax = max(xmax, float(envelope[1]))
+                    ymin = min(ymin, float(envelope[2]))
+                    ymax = max(ymax, float(envelope[3]))
+                fid = feature.GetFID()
+                features.append(
+                    {
+                        "id": f"{layer.id}:{fid if fid is not None and fid >= 0 else ordinal}",
+                        "geometry": geojson,
+                        "properties": properties,
+                    }
+                )
+            extent = (
+                (xmin, ymin, xmax, ymax)
+                if xmin < xmax and ymin < ymax
+                else (0.0, 0.0, 1.0, 1.0)
+            )
+            payload = tuple(features)
+            # Record the observed source revision; this is metadata on the
+            # reference descriptor, not a mutation of the source file.
+            layer.cache_key = cache_key
+            self._vector_render_cache[layer.id] = (cache_key, payload, extent)
+            return payload, extent
+        finally:
+            dataset = None
+
+    def raster_render_extent(self, layer: MapReferenceLayer) -> tuple[float, float, float, float]:
+        """Return the source raster's project-CRS footprint for map navigation."""
+        if layer.source_kind != "raster":
+            raise ReferenceLayerError("只有栅格参考图具有栅格范围")
+        self.refresh_status(layer)
+        if layer.status != "ready":
+            raise ReferenceLayerError(layer.error_message or "参考图不可用")
+        try:
+            cache_key = self._source_revision(layer)
+        except OSError as exc:
+            layer.status = "offline"
+            layer.error_message = "参考图源文件不可用"
+            raise ReferenceLayerError(layer.error_message) from exc
+        cached = self._raster_extent_cache.get(layer.id)
+        if cached is not None and cached[0] == cache_key:
+            return cached[1]
+        dataset = gdal.OpenEx(layer.source_path, gdal.OF_RASTER)
+        if dataset is None or dataset.RasterXSize < 1 or dataset.RasterYSize < 1:
+            layer.status = "failed"
+            layer.error_message = "无法读取栅格参考图"
+            raise ReferenceLayerError(layer.error_message)
+        try:
+            try:
+                transform = dataset.GetGeoTransform(can_return_null=True)
+            except TypeError:  # Older GDAL Python bindings lack the keyword.
+                transform = dataset.GetGeoTransform()
+            if transform is None:
+                raise ReferenceLayerError("栅格参考图缺少地理变换")
+            source_srs = dataset.GetSpatialRef()
+            if source_srs is None:
+                raise ReferenceLayerError("栅格参考图缺少坐标系")
+            coordinate_transform = osr.CoordinateTransformation(source_srs, _spatial_reference(layer.project_crs))
+            corners = []
+            for px, py in (
+                (0.0, 0.0), (float(dataset.RasterXSize), 0.0),
+                (0.0, float(dataset.RasterYSize)),
+                (float(dataset.RasterXSize), float(dataset.RasterYSize)),
+            ):
+                x = transform[0] + px * transform[1] + py * transform[2]
+                y = transform[3] + px * transform[4] + py * transform[5]
+                tx, ty, *_ = coordinate_transform.TransformPoint(x, y)
+                corners.append((float(tx), float(ty)))
+            xs, ys = zip(*corners)
+            extent = (min(xs), min(ys), max(xs), max(ys))
+            if not extent[0] < extent[2] or not extent[1] < extent[3]:
+                raise ReferenceLayerError("栅格参考图范围无效")
+            layer.cache_key = cache_key
+            self._raster_extent_cache[layer.id] = (cache_key, extent)
+            return extent
         finally:
             dataset = None
 

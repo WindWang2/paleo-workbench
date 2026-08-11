@@ -95,6 +95,7 @@ class MapScene:
         self._contours: dict[str, ContourGeometry] = {}
         self._points: dict[str, PointGeometry] = {}
         self._vectors: dict[str, tuple[dict, ...]] = {}
+        self._raster_sources: dict[str, tuple[str, str]] = {}
         self._vector_styles: dict[str, dict] = {}
         self._scalar_styles: dict[str, dict] = {}
         self._change_listeners: list[Callable[[], None]] = []
@@ -193,6 +194,56 @@ class MapScene:
         self._vector_styles[layer_id] = dict(style or {})
         self._emit_changed()
         return layer
+
+    def add_raster_source(
+        self,
+        layer_id: str,
+        source_path: Path | str,
+        *,
+        name: str = "Raster",
+        extent: tuple[float, float, float, float],
+        crs: str = "",
+        source_ref: str = "",
+        source_revision: str = "",
+        parent_id: str = "",
+    ):
+        """Add an external raster descriptor without copying or owning its samples.
+
+        QGIS opens this immutable source as a renderer mirror.  The fallback
+        adapter remains deliberately minimal and reports itself as such.
+        """
+        layer = self.registry.add_layer(
+            layer_id, name, layer_model_core.LayerType.Raster, parent_id
+        )
+        layer.extent = extent
+        layer.crs = crs
+        layer.source_ref = source_ref or str(source_path)
+        self._raster_sources[layer_id] = (str(source_path), str(source_revision))
+        self._emit_changed()
+        return layer
+
+    def set_raster_source(
+        self,
+        layer_id: str,
+        source_path: Path | str,
+        *,
+        source_revision: str = "",
+        extent: tuple[float, float, float, float] | None = None,
+    ) -> bool:
+        layer = self.registry.get(layer_id)
+        if layer is None or layer_id not in self._raster_sources:
+            return False
+        next_source = (str(source_path), str(source_revision))
+        changed = next_source != self._raster_sources[layer_id]
+        if changed:
+            self._raster_sources[layer_id] = next_source
+            layer.bump_data_revision()
+        if extent is not None and tuple(layer.extent) != tuple(extent):
+            layer.extent = extent
+            changed = True
+        if changed:
+            self._emit_changed()
+        return changed
 
     def vector_features(self, layer_id: str) -> tuple[dict, ...]:
         return self._vectors.get(layer_id, ())
@@ -444,8 +495,12 @@ class MapScene:
             features: tuple[dict, ...] = ()
             style: dict = {}
             layer_type = "scalar_grid" if layer_id in self._scalars else "vector"
+            renderer_payload = self._scalars.get(layer_id)
             if layer_id in self._scalars:
                 style = self.scalar_style(layer_id)
+            elif layer_id in self._raster_sources:
+                layer_type = "raster_source"
+                renderer_payload = self._raster_sources[layer_id][0]
             elif layer_id in self._vectors:
                 features = self._vectors[layer_id]
                 style = self._vector_styles.get(layer_id, {})
@@ -495,7 +550,7 @@ class MapScene:
                     style=style,
                     visible=map_layer.visible,
                     opacity=map_layer.opacity,
-                    renderer_payload=self._scalars.get(layer_id),
+                    renderer_payload=renderer_payload,
                 )
             )
         return MapRenderSnapshot(project_crs=project_crs, layers=tuple(layers))
@@ -507,6 +562,7 @@ class MapScene:
             self._contours.pop(layer_id, None)
             self._points.pop(layer_id, None)
             self._vectors.pop(layer_id, None)
+            self._raster_sources.pop(layer_id, None)
             self._vector_styles.pop(layer_id, None)
             self._scalar_styles.pop(layer_id, None)
             self._emit_changed()

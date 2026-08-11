@@ -78,6 +78,22 @@ def test_vector_reference_is_normalized_to_project_crs(tmp_path):
     assert service.vector_snap_points(layer)[0][0] > 13_000_000
 
 
+def test_vector_reference_render_payload_is_cached_and_uses_project_crs(tmp_path):
+    source = tmp_path / "faults.geojson"
+    _write_geojson(source, include_crs=True)
+    service = ReferenceLayerService()
+    layer = service.import_layer(source, "EPSG:3857")
+
+    features, extent = service.vector_render_payload(layer)
+    cached_features, cached_extent = service.vector_render_payload(layer)
+
+    assert features is cached_features
+    assert extent == cached_extent
+    assert features[0]["properties"]["name"] == "Fault A"
+    assert features[0]["geometry"]["coordinates"][0][0] > 13_000_000
+    assert extent[0] < extent[2] and extent[1] < extent[3]
+
+
 def test_reference_without_crs_is_rejected(tmp_path):
     source = tmp_path / "unreferenced.shp"
     _write_unreferenced_shapefile(source)
@@ -121,6 +137,17 @@ def test_raster_reference_has_bounded_preview(tmp_path):
     assert preview.width() == 4
     assert preview.height() == 2
     assert not preview.isNull()
+
+
+def test_raster_reference_extent_is_transformed_for_unified_map_navigation(tmp_path):
+    source = tmp_path / "reference.tif"
+    _write_geotiff(source)
+    layer = ReferenceLayerService().import_layer(source, "EPSG:3857")
+
+    extent = ReferenceLayerService().raster_render_extent(layer)
+
+    assert extent[0] > 13_000_000
+    assert extent[0] < extent[2] and extent[1] < extent[3]
 
 
 def test_refresh_status_marks_missing_source_offline(tmp_path):

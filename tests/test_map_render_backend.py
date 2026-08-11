@@ -241,6 +241,47 @@ def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qt
     assert scalar.rasterize_count == 1
 
 
+def test_qgis_backend_renders_an_external_raster_reference_mirror(tmp_path, qtbot) -> None:
+    backend = QgisMapRenderBackend()
+    if not backend.is_available:
+        pytest.skip("optional qgis_render_bridge is not built")
+    from osgeo import gdal, osr
+
+    source = tmp_path / "reference.tif"
+    dataset = gdal.GetDriverByName("GTiff").Create(str(source), 4, 4, 1, gdal.GDT_Byte)
+    dataset.GetRasterBand(1).WriteRaster(0, 0, 4, 4, bytes(range(16)))
+    spatial_ref = osr.SpatialReference()
+    spatial_ref.ImportFromEPSG(3857)
+    dataset.SetProjection(spatial_ref.ExportToWkt())
+    dataset.SetGeoTransform((0.0, 1.0, 0.0, 4.0, 0.0, -1.0))
+    dataset = None
+    snapshot = MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(
+            MapLayerSnapshot(
+                id="reference",
+                name="Reference",
+                layer_type="raster_source",
+                extent=(0.0, 0.0, 4.0, 4.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                renderer_payload=str(source),
+            ),
+        ),
+    )
+    backend.initialize()
+    try:
+        backend.set_layer_snapshot(snapshot)
+        backend.set_extent((0.0, 0.0, 4.0, 4.0))
+        backend.set_output_size(64, 64)
+        frame = backend.render_sync()
+    finally:
+        backend.shutdown()
+
+    assert any(frame.rgba)
+
+
 def test_qgis_display_operations_never_reinvoke_factor_interpolation(monkeypatch, qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:

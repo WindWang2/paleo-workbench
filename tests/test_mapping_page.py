@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from PySide6.QtCore import QPoint, QPointF, Qt
@@ -64,6 +66,54 @@ def test_mapping_page_syncs_the_active_document_into_the_unified_scene(qtbot):
     assert layer is not None
     assert layer.crs == "EPSG:3857"
     assert page.unified_scene.vector_features("map-1:facies")[0]["id"] == "f1"
+
+
+def test_native_layer_tree_add_layer_imports_an_immutable_reference_into_unified_composition(
+    tmp_path, monkeypatch, qtbot
+):
+    source = tmp_path / "faults.geojson"
+    source.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"name": "Fault A"},
+                        "geometry": {"type": "LineString", "coordinates": [[120.0, 30.0], [120.1, 30.1]]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-ref", name="Map", linked_target_horizon="H1")
+    page.update_state([document], project_crs="EPSG:3857")
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.mapping_page.QFileDialog.getOpenFileName",
+        lambda *_args, **_kwargs: (str(source), ""),
+    )
+
+    assert page._native_layer_tree is not None
+    page._native_layer_tree.add_layer_action.trigger()
+
+    assert len(document.reference_layers) == 1
+    reference = document.reference_layers[0]
+    layer_id = f"map-ref:reference:{reference.id}"
+    rendered = page.unified_scene.registry.get(layer_id)
+    assert rendered is not None
+    assert rendered.source_ref == f"reference:{reference.id}"
+    assert page.unified_scene.vector_features(layer_id)[0]["properties"]["name"] == "Fault A"
+    # Import stores a source descriptor only; it never rewrites the raw file.
+    assert source.is_file()
+
+    page._on_reference_visibility_changed(reference.id, False)
+    hidden = page.unified_scene.registry.get(layer_id)
+    assert hidden is not None
+    assert hidden.visible is False
 
 
 def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(qtbot):
