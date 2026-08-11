@@ -191,6 +191,12 @@ class MappingPage(QWidget):
         if self._canvas_priority == enabled:
             return
         self._canvas_priority = enabled
+        # Preserve the established explicit-widget visibility contract for the
+        # legacy tree (tests and accessibility consumers query it directly), while
+        # applying the same state to the optional native replacement.
+        self.layer_tree.setVisible(not enabled)
+        if self._native_layer_tree is not None:
+            self._native_layer_tree.setVisible(not enabled)
         self.layer_tree_stack.setVisible(not enabled)
         self.reference_panel.setVisible(not enabled)
         if not self._preview_mode:
