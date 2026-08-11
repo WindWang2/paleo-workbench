@@ -99,7 +99,22 @@ class ScalarRasterMirrorCache:
             colors = (gdal.GCI_RedBand, gdal.GCI_GreenBand, gdal.GCI_BlueBand, gdal.GCI_AlphaBand)
             for index, color in enumerate(colors, start=1):
                 band = dataset.GetRasterBand(index)
-                band.WriteArray(rgba[:, :, index - 1])
+                # Do not use ``WriteArray`` here: a valid GDAL Python binding
+                # may not ship its optional ``_gdal_array`` NumPy bridge (as on
+                # the supported CI images). ``WriteRaster`` accepts raw bytes
+                # and keeps this QGIS mirror path independent of that extension.
+                status = band.WriteRaster(
+                    0,
+                    0,
+                    width,
+                    height,
+                    rgba[:, :, index - 1].tobytes(),
+                    buf_xsize=width,
+                    buf_ysize=height,
+                    buf_type=gdal.GDT_Byte,
+                )
+                if status not in (None, gdal.CE_None):  # pragma: no cover - I/O defect
+                    raise RuntimeError(f"could not write QGIS scalar mirror band {index}")
                 band.SetColorInterpretation(color)
             dataset.FlushCache()
         finally:

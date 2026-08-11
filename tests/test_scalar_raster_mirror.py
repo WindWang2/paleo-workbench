@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import builtins
+
 import pytest
 
 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
@@ -50,3 +52,23 @@ def test_scalar_raster_mirror_reuses_native_raster_until_a_revision_changes(tmp_
     assert cache.ensure(styled) != first
     assert scalar.rasterize_count == 2
     cache.clear()
+
+
+def test_scalar_raster_mirror_does_not_require_optional_gdal_array(tmp_path, monkeypatch) -> None:
+    """CI's GDAL wheel lacks ``_gdal_array`` but still supports raw band bytes."""
+    scene, layer = _scalar_snapshot()
+    scalar = scene.scalar_layer("porosity")
+    cache = ScalarRasterMirrorCache(tmp_path)
+    original_import = builtins.__import__
+
+    def reject_gdal_array(name, *args, **kwargs):
+        if name in {"osgeo.gdal_array", "_gdal_array"}:
+            raise ImportError("simulated missing optional GDAL NumPy bridge")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_gdal_array)
+
+    path = cache.ensure(layer)
+
+    assert path.endswith(".tif")
+    assert scalar.rasterize_count == 1
