@@ -15,12 +15,14 @@ import layer_model_core
 import numpy as np
 
 from paleo_workbench.catalog.grid_artifact import read_grid_artifact
+from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
 from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
 from paleo_workbench.viz.grid_render import default_rgba_lut
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 __all__ = [
     "ContourGeometry",
+    "MapScene",
     "NativeMapScene",
     "PointGeometry",
     "scene_from_factor_task",
@@ -59,8 +61,8 @@ class PointGeometry:
     radius: float = 3.0
 
 
-class NativeMapScene:
-    """Composition state backed by C++ registry and C++ scalar-grid payloads.
+class MapScene:
+    """Generic composition state backed by C++ registry and native grid payloads.
 
     ``LayerRegistry`` owns membership, hierarchy, ordering, visibility, opacity and
     metadata. Each native ``ScalarGridLayer`` owns the transferred float32 payload,
@@ -73,6 +75,8 @@ class NativeMapScene:
         self._scalars: dict[str, grid_render_core.ScalarGridLayer] = {}
         self._contours: dict[str, ContourGeometry] = {}
         self._points: dict[str, PointGeometry] = {}
+        self._vectors: dict[str, tuple[dict, ...]] = {}
+        self._vector_styles: dict[str, dict] = {}
         self._change_listeners: list[Callable[[], None]] = []
 
     def add_change_listener(self, listener: Callable[[], None]) -> None:
@@ -134,6 +138,73 @@ class NativeMapScene:
         self._scalars[layer_id] = native_layer
         self._emit_changed()
         return map_layer
+
+    def add_vector_layer(
+        self,
+        layer_id: str,
+        features: Iterable[dict],
+        *,
+        name: str = "Vector",
+        extent: tuple[float, float, float, float],
+        crs: str = "",
+        source_ref: str = "",
+        parent_id: str = "",
+        style: dict | None = None,
+    ):
+        """Add host-owned vector features while keeping hierarchy in LayerRegistry.
+
+        The feature payload is deliberately separate from the registry metadata just
+        like scalar-grid data. It is a short-lived render mirror until Phase 3's
+        authoritative VectorLayer/EditSession replaces legacy document records.
+        """
+        layer = self.registry.add_layer(
+            layer_id, name, layer_model_core.LayerType.Vector, parent_id
+        )
+        layer.extent = extent
+        layer.crs = crs
+        layer.source_ref = source_ref
+        self._vectors[layer_id] = tuple(dict(feature) for feature in features)
+        self._vector_styles[layer_id] = dict(style or {})
+        self._emit_changed()
+        return layer
+
+    def vector_features(self, layer_id: str) -> tuple[dict, ...]:
+        return self._vectors.get(layer_id, ())
+
+    def vector_style(self, layer_id: str) -> dict:
+        return dict(self._vector_styles.get(layer_id, {}))
+
+    def set_vector_features(
+        self,
+        layer_id: str,
+        features: Iterable[dict],
+        *,
+        extent: tuple[float, float, float, float] | None = None,
+    ) -> bool:
+        layer = self.registry.get(layer_id)
+        if layer is None or layer_id not in self._vectors:
+            return False
+        next_features = tuple(dict(feature) for feature in features)
+        if next_features == self._vectors[layer_id] and extent is None:
+            return False
+        self._vectors[layer_id] = next_features
+        if extent is not None:
+            layer.extent = extent
+        layer.bump_data_revision()
+        self._emit_changed()
+        return True
+
+    def set_vector_style(self, layer_id: str, style: dict) -> bool:
+        layer = self.registry.get(layer_id)
+        if layer is None or layer_id not in self._vectors:
+            return False
+        next_style = dict(style)
+        if next_style == self._vector_styles.get(layer_id, {}):
+            return False
+        self._vector_styles[layer_id] = next_style
+        layer.bump_style_revision()
+        self._emit_changed()
+        return True
 
     def add_factor_grid_artifact(
         self,
@@ -319,12 +390,77 @@ class NativeMapScene:
     def point_geometry(self, layer_id: str) -> PointGeometry | None:
         return self._points.get(layer_id)
 
+    def render_snapshot(self, *, project_crs: str = "") -> MapRenderSnapshot:
+        """Export the authoritative composition order as an immutable render input."""
+        layers: list[MapLayerSnapshot] = []
+        for map_layer in self.registry.layers():
+            layer_id = map_layer.id
+            if map_layer.type == layer_model_core.LayerType.Group:
+                continue
+            features: tuple[dict, ...] = ()
+            style: dict = {}
+            layer_type = "scalar_grid" if layer_id in self._scalars else "vector"
+            if layer_id in self._vectors:
+                features = self._vectors[layer_id]
+                style = self._vector_styles.get(layer_id, {})
+            elif layer_id in self._contours:
+                contour = self._contours[layer_id]
+                features = tuple(
+                    {
+                        "id": f"{layer_id}:{index}",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [list(point) for point in path],
+                        },
+                        "properties": {},
+                    }
+                    for index, path in enumerate(contour.paths)
+                    if len(path) >= 2
+                )
+                style = {
+                    "fill": "transparent",
+                    "stroke": "#%02x%02x%02x" % contour.color[:3],
+                    "stroke_width": contour.width,
+                }
+            elif layer_id in self._points:
+                points = self._points[layer_id]
+                features = tuple(
+                    {
+                        "id": f"{layer_id}:{index}",
+                        "geometry": {"type": "Point", "coordinates": list(point)},
+                        "properties": {},
+                    }
+                    for index, point in enumerate(points.points)
+                )
+                style = {
+                    "fill": "#%02x%02x%02x" % points.color[:3],
+                    "marker_size": points.radius * 2.0,
+                }
+            layers.append(
+                MapLayerSnapshot(
+                    id=layer_id,
+                    name=map_layer.name,
+                    layer_type=layer_type,
+                    extent=tuple(map_layer.extent),
+                    crs=map_layer.crs,
+                    data_revision=map_layer.data_revision,
+                    style_revision=map_layer.style_revision,
+                    features=features,
+                    style=style,
+                    visible=map_layer.visible,
+                    opacity=map_layer.opacity,
+                )
+            )
+        return MapRenderSnapshot(project_crs=project_crs, layers=tuple(layers))
+
     def remove_layer(self, layer_id: str) -> bool:
         removed = self.registry.remove_layer(layer_id)
         if removed:
             self._scalars.pop(layer_id, None)
             self._contours.pop(layer_id, None)
             self._points.pop(layer_id, None)
+            self._vectors.pop(layer_id, None)
+            self._vector_styles.pop(layer_id, None)
             self._emit_changed()
         return removed
 
@@ -395,3 +531,8 @@ def scene_from_factor_task(
         if getattr(draft, "linked_factor_task_id", None) == task_id:
             scene.add_contour_draft(draft, source_layer_id=task_id, parent_id=group_id)
     return scene
+
+
+# Backward-compatible import name from PR #357.  The former name described only its
+# first producer; MapScene is now the generic composition boundary.
+NativeMapScene = MapScene

@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.mapping.document_io import apply_features_to_document
+from paleo_workbench.mapping.map_document_snapshot import extent_for_snapshot
+from paleo_workbench.mapping.map_scene_adapter import LegacyDocumentSceneAdapter
 from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
@@ -23,6 +25,7 @@ from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
+from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.viz.mapping_helpers import (
     active_map_document,
     field_value,
@@ -54,6 +57,8 @@ class MappingPage(QWidget):
         self._project_crs: str | None = None
         self._factor_tasks_by_overlay_id: dict[str, object] = {}
         self._native_factor_scene = None
+        self._unified_scene_adapter = LegacyDocumentSceneAdapter()
+        self._unified_document_id: str | None = None
         self._preview_mode = False
         self._canvas_priority = False
         self._reference_service = ReferenceLayerService()
@@ -92,9 +97,13 @@ class MappingPage(QWidget):
         preview_layout = QHBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(tokens.SPACE_2)
+        self.preview_canvas_stack = QStackedWidget()
         self.canvas_panel = MapCanvasPanel()
+        self.unified_canvas = UnifiedMapCanvas()
+        self.preview_canvas_stack.addWidget(self.canvas_panel)
+        self.preview_canvas_stack.addWidget(self.unified_canvas)
         self.chrome_panel = MapChromePanel()
-        preview_layout.addWidget(self.canvas_panel, 1)
+        preview_layout.addWidget(self.preview_canvas_stack, 1)
         preview_layout.addWidget(self.chrome_panel, 0)
         self.center_stack.addWidget(preview_host)
 
@@ -154,6 +163,7 @@ class MappingPage(QWidget):
             scene.topology_issues_changed.connect(
                 self.bottom_workbench.topology_panel.set_issues
             )
+            scene.command_stack_changed.connect(self._refresh_unified_composition)
 
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
@@ -265,6 +275,7 @@ class MappingPage(QWidget):
             self._sync_reference_snap_points(scene, document)
         self.attribute_table.set_feature(None)
         self._publish_reference_layers(document)
+        self._refresh_unified_composition()
         self.bottom_workbench.factor_shelf.update_state(tasks)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
@@ -464,7 +475,9 @@ class MappingPage(QWidget):
             self.bottom_workbench.setVisible(not self._preview_mode)
 
     def _refresh_preview(self) -> None:
+        self._refresh_unified_composition()
         if self._native_factor_scene is not None:
+            self.preview_canvas_stack.setCurrentWidget(self.canvas_panel)
             self.canvas_panel.load_native_scene(self._native_factor_scene)
             self.chrome_panel.update_state(self._active_document)
             return
@@ -484,8 +497,44 @@ class MappingPage(QWidget):
             features, wells, period = preview_payload_from_document(doc)
         else:
             features, wells, period = [], [], ""
+        # A built QGIS bridge makes this the primary preview composition. The
+        # legacy preview remains as an explicit compatibility fallback until the
+        # editor migration is complete; it is never reported as QGIS rendering.
+        # Continue loading the compatibility preview payload even while QGIS is
+        # the visible renderer: existing export/accessibility callers consume it
+        # during the migration, but the user sees the unified QGIS frame.
         self.canvas_panel.load_preview(features, wells=wells, period_name=period)
+        if self.unified_canvas.backend.backend_name == "qgis":
+            self.preview_canvas_stack.setCurrentWidget(self.unified_canvas)
+        else:
+            self.preview_canvas_stack.setCurrentWidget(self.canvas_panel)
         self.chrome_panel.update_state(doc)
+
+    @property
+    def unified_scene(self):
+        """Registry-backed composition used by the unified renderer during migration."""
+        return self._unified_scene_adapter.scene
+
+    def _refresh_unified_composition(self) -> None:
+        """Project current live editor records into the unified renderer seam."""
+        document = self._active_document
+        scene = self._edit_scene()
+        records = scene.export_features() if scene is not None and document is not None else None
+        visibility = {
+            key: self.layer_tree.layer_is_visible(key)
+            for key in ("facies", "well", "line", "label")
+        }
+        snapshot = self._unified_scene_adapter.sync(
+            document,
+            project_crs=self._project_crs,
+            visibility=visibility,
+            records=records,
+        )
+        document_id = str(getattr(document, "id", "") or "") if document is not None else None
+        self.unified_canvas.set_layer_snapshot(snapshot)
+        if document_id != self._unified_document_id:
+            self._unified_document_id = document_id
+            self.unified_canvas.set_extent(extent_for_snapshot(snapshot))
 
     def _install_native_layer_tree(self, scene) -> None:
         """Swap the left dock to the C++ registry-backed tree for native overlays."""
@@ -523,6 +572,7 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if scene is not None:
             scene.set_layer_visible(kind, visible)
+        self._refresh_unified_composition()
 
     def _on_document_selected(self, document) -> None:
         scene = self._edit_scene()
@@ -561,6 +611,7 @@ class MappingPage(QWidget):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
         self.attribute_table.set_feature(None)
         self._publish_reference_layers(document)
+        self._refresh_unified_composition()
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:

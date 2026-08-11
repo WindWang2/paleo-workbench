@@ -10,6 +10,7 @@ from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.mapping_page import MappingPage
+from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 
 
 def test_mapping_page_assembles_gis_shell(qtbot):
@@ -21,6 +22,7 @@ def test_mapping_page_assembles_gis_shell(qtbot):
     assert isinstance(page.layer_tree, MapLayerTree)
     assert isinstance(page.reference_panel, MapReferencePanel)
     assert isinstance(page.edit_view, MapEditView)
+    assert isinstance(page.unified_canvas, UnifiedMapCanvas)
     assert isinstance(page.attribute_table, MapAttributeTable)
     assert page.attribute_table.maximumHeight() == 220
 
@@ -41,6 +43,49 @@ def test_mapping_page_update_state_sets_layer_tree(qtbot):
     assert root.child(1).text(0) == "Map B"
     # Active is last document — layers under Map B
     assert root.child(1).childCount() == 4
+
+
+def test_mapping_page_syncs_the_active_document_into_the_unified_scene(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(
+        id="map-1",
+        name="Map",
+        linked_target_horizon="H1",
+        facies_polygons=[
+            {"id": "f1", "name": "delta", "coordinates": [[0, 0], [4, 0], [0, 4]]}
+        ],
+    )
+
+    page.update_state([document], project_crs="EPSG:3857")
+
+    layer = page.unified_scene.registry.get("map-1:facies")
+    assert layer is not None
+    assert layer.crs == "EPSG:3857"
+    assert page.unified_scene.vector_features("map-1:facies")[0]["id"] == "f1"
+
+
+def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    if page.unified_canvas.backend.backend_name != "qgis":
+        pytest.skip("optional qgis_render_bridge is not built")
+    document = PaleoMapDocument(
+        id="map-1",
+        name="Map",
+        linked_target_horizon="H1",
+        facies_polygons=[
+            {"id": "f1", "name": "delta", "coordinates": [[0, 0], [4, 0], [0, 4]]}
+        ],
+    )
+    page.resize(900, 600)
+    page.show()
+    page.update_state([document], project_crs="EPSG:3857")
+    page.set_preview_mode(True)
+
+    qtbot.waitUntil(lambda: page.unified_canvas.last_frame is not None, timeout=5_000)
+    assert page.preview_canvas_stack.currentWidget() is page.unified_canvas
+    assert page.unified_canvas.last_frame is not None
 
 
 def test_mapping_page_context_snapshot(qtbot):
