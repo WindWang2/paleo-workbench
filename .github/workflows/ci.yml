@@ -101,6 +101,18 @@ jobs:
           python -m pip install -e native/grid_render_core
           python -c "import grid_render_core; assert hasattr(grid_render_core, 'render_grid_rgba'), 'grid_render_core.render_grid_rgba missing in CI'"
 
+      - name: Native C++ selftests (algorithm verification)
+        run: |
+          set -e
+          g++ -std=c++17 -O2 -Wall -Wextra \
+            native/grid_render_core/src/grid_render_core.cpp \
+            native/grid_render_core/src/standalone_test.cpp \
+            -o /tmp/grid_render_selftest && /tmp/grid_render_selftest
+          g++ -std=c++17 -O2 -Wall -Wextra \
+            native/layer_model_core/src/layer_model.cpp \
+            native/layer_model_core/src/standalone_test.cpp \
+            -o /tmp/layer_model_selftest && /tmp/layer_model_selftest
+
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
