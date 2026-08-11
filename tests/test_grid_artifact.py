@@ -66,7 +66,7 @@ def _kriging_result() -> FactorGridResult:
 def test_round_trip_preserves_grid_and_metadata(tmp_path: Path):
     original = _constrained_result()
     path = write_grid_artifact(original, tmp_path, "pora-孔隙度")
-    assert path.suffix == ".factor_grid.npz"
+    assert path.name.endswith(".factor_grid.npz")
     assert path.exists()
 
     loaded = read_grid_artifact(path)

@@ -16,7 +16,7 @@ import numpy as np
 
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
-__all__ = ["render_grid_rgba", "render_factor_grid", "rgba_lut_from_colormap"]
+__all__ = ["render_grid_rgba", "render_factor_grid", "default_rgba_lut"]
 
 
 def _lut_as_rgba(lut: np.ndarray) -> np.ndarray:
@@ -35,25 +35,15 @@ def _lut_as_rgba(lut: np.ndarray) -> np.ndarray:
     raise ValueError(f"lut must be (N,4) RGBA or (N,3) RGB uint8, got shape {arr.shape}")
 
 
-def rgba_lut_from_colormap(name: str = "viridis", size: int = 256) -> np.ndarray:
-    """Build an ``(size, 4)`` uint8 RGBA LUT from a registered colormap.
+def default_rgba_lut(size: int = 256) -> np.ndarray:
+    """A deterministic ``(size, 4)`` uint8 RGBA ramp for offline/test use.
 
-    Defers to the engine colormap helper; kept here so callers (and tests) can build a
-    ramp without depending on the C++ side. Returns a ``viridis``-style fallback ramp if
-    the engine colormap registry is unavailable.
+    Workbench production code may import only the public ``geoviz`` facade, which does not
+    expose a colormap builder; for a real named colormap, obtain a LUT through the
+    ``geoviz`` facade (e.g. via ``SurfaceWidget``) and pass it to :func:`render_grid_rgba`.
+    This helper returns a simple purple→teal→yellow ramp so callers always have a usable
+    default without depending on engine internals.
     """
-    try:
-        from geoviz_plots.surface.colormaps import sample_colormap  # type: ignore
-    except Exception:  # pragma: no cover - engine optional in restricted envs
-        return _fallback_ramp(size)
-    try:
-        return np.ascontiguousarray(sample_colormap(name, size), dtype=np.uint8)
-    except Exception:  # pragma: no cover
-        return _fallback_ramp(size)
-
-
-def _fallback_ramp(size: int) -> np.ndarray:
-    # Simple viridis-like purple→teal→yellow ramp; deterministic, for offline use only.
     t = np.linspace(0.0, 1.0, size, dtype=np.float32)
     ramp = np.empty((size, 4), dtype=np.uint8)
     ramp[:, 0] = (np.clip(0.267 + 0.5 * t, 0, 1) * 255).astype(np.uint8)

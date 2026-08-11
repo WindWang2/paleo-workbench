@@ -22,8 +22,8 @@ using FloatArray = py::array_t<float, py::array::c_style | py::array::forcecast>
 using U8Array = py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>;
 
 py::array_t<std::uint8_t> render_grid_rgba_py(
-    FloatArray grid_z, U8Array lut, float lo, float hi,
-    py::object mask_obj, float gamma, std::uint8_t opacity) {
+    FloatArray grid_z, py::object mask_obj, U8Array lut, float lo, float hi,
+    float gamma, std::uint8_t opacity) {
     auto gz = grid_z.request();
     if (gz.ndim != 2) {
         throw std::invalid_argument("grid_z must be a 2-D (height, width) float32 array");
@@ -74,10 +74,10 @@ PYBIND11_MODULE(grid_render_core, m) {
         "render_grid_rgba",
         &render_grid_rgba_py,
         py::arg("grid_z"),
+        py::arg("mask") = py::none(),
         py::arg("lut"),
         py::arg("lo"),
         py::arg("hi"),
-        py::arg("mask") = py::none(),
         py::arg("gamma") = 1.0f,
         py::arg("opacity") = 255);
 }
