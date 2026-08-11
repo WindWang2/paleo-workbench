@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 
+import numpy as np
 import pytest
 
 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
@@ -45,6 +46,18 @@ def test_scalar_raster_mirror_reuses_native_raster_until_a_revision_changes(tmp_
     assert dataset.RasterCount == 4
     assert dataset.GetGeoTransform() == pytest.approx((100.0, 10.0, 0.0, 50.0, 0.0, -10.0))
     assert "3857" in dataset.GetProjection()
+    raw = dataset.ReadRaster(
+        0, 0, dataset.RasterXSize, dataset.RasterYSize,
+        buf_xsize=dataset.RasterXSize,
+        buf_ysize=dataset.RasterYSize,
+        buf_type=gdal.GDT_Byte,
+        band_list=[1, 2, 3, 4],
+        buf_pixel_space=4,
+        buf_line_space=dataset.RasterXSize * 4,
+        buf_band_space=1,
+    )
+    actual = np.frombuffer(raw, dtype=np.uint8).reshape(dataset.RasterYSize, dataset.RasterXSize, 4)
+    np.testing.assert_array_equal(actual, scalar.rasterize())
     dataset = None
 
     scene.set_scalar_style("porosity", gamma=1.2)

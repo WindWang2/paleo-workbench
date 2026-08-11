@@ -96,25 +96,29 @@ class ScalarRasterMirrorCache:
                 if reference.SetFromUserInput(layer.crs) != 0:
                     raise ValueError(f"invalid scalar layer CRS {layer.crs!r}")
                 dataset.SetProjection(reference.ExportToWkt())
+            # Do not use ``WriteArray`` here: a valid GDAL Python binding may not
+            # ship its optional ``_gdal_array`` bridge. A single interleaved buffer
+            # submission accepts the native C-contiguous RGBA array directly, avoiding
+            # four channel slices and four full-frame ``tobytes`` temporaries.
+            status = dataset.WriteRaster(
+                0,
+                0,
+                width,
+                height,
+                memoryview(rgba),
+                buf_xsize=width,
+                buf_ysize=height,
+                buf_type=gdal.GDT_Byte,
+                band_list=[1, 2, 3, 4],
+                buf_pixel_space=4,
+                buf_line_space=width * 4,
+                buf_band_space=1,
+            )
+            if status not in (None, gdal.CE_None):  # pragma: no cover - I/O defect
+                raise RuntimeError("could not write QGIS scalar mirror RGBA bands")
             colors = (gdal.GCI_RedBand, gdal.GCI_GreenBand, gdal.GCI_BlueBand, gdal.GCI_AlphaBand)
             for index, color in enumerate(colors, start=1):
                 band = dataset.GetRasterBand(index)
-                # Do not use ``WriteArray`` here: a valid GDAL Python binding
-                # may not ship its optional ``_gdal_array`` NumPy bridge (as on
-                # the supported CI images). ``WriteRaster`` accepts raw bytes
-                # and keeps this QGIS mirror path independent of that extension.
-                status = band.WriteRaster(
-                    0,
-                    0,
-                    width,
-                    height,
-                    rgba[:, :, index - 1].tobytes(),
-                    buf_xsize=width,
-                    buf_ysize=height,
-                    buf_type=gdal.GDT_Byte,
-                )
-                if status not in (None, gdal.CE_None):  # pragma: no cover - I/O defect
-                    raise RuntimeError(f"could not write QGIS scalar mirror band {index}")
                 band.SetColorInterpretation(color)
             dataset.FlushCache()
         finally:

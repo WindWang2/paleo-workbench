@@ -1,5 +1,6 @@
 #include "scalar_grid_layer.hpp"
 
+#include <cstring>
 #include <stdexcept>
 #include <utility>
 
@@ -112,13 +113,12 @@ std::uint64_t ScalarGridLayer::rasterize_count() const {
     return rasterize_count_;
 }
 
-std::vector<std::uint8_t> ScalarGridLayer::rasterize() {
-    std::lock_guard<std::mutex> lock(mutex_);
+void ScalarGridLayer::ensure_rasterized_locked() {
     if (color_ramp_.empty()) {
         throw std::logic_error("a color ramp must be set before rasterizing a scalar grid");
     }
     if (cached_data_revision_ == data_revision_ && cached_style_revision_ == style_revision_) {
-        return cached_rgba_;
+        return;
     }
     cached_rgba_.resize(cell_count(width_, height_) * 4);
     render_grid_rgba(
@@ -128,7 +128,25 @@ std::vector<std::uint8_t> ScalarGridLayer::rasterize() {
     cached_data_revision_ = data_revision_;
     cached_style_revision_ = style_revision_;
     ++rasterize_count_;
+}
+
+std::vector<std::uint8_t> ScalarGridLayer::rasterize() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ensure_rasterized_locked();
     return cached_rgba_;
+}
+
+void ScalarGridLayer::rasterize_into(std::uint8_t* destination,
+                                     const std::size_t destination_size) {
+    if (destination == nullptr) {
+        throw std::invalid_argument("scalar raster destination must not be null");
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    ensure_rasterized_locked();
+    if (destination_size != cached_rgba_.size()) {
+        throw std::invalid_argument("scalar raster destination size must match RGBA cache");
+    }
+    std::memcpy(destination, cached_rgba_.data(), cached_rgba_.size());
 }
 
 }  // namespace pwb::grid_render

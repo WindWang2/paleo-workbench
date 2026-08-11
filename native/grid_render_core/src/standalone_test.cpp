@@ -152,6 +152,11 @@ void test_scalar_grid_layer_cache_and_revisions() {
     const auto& first = layer.rasterize();
     CHECK_EQ(first.size(), 8u, "scalar layer produces RGBA bytes");
     CHECK_EQ(layer.rasterize_count(), 1u, "first scalar rasterization runs once");
+    std::vector<std::uint8_t> copied(first.size());
+    layer.rasterize_into(copied.data(), copied.size());
+    CHECK_EQ(std::memcmp(first.data(), copied.data(), first.size()), 0,
+             "scalar layer copies its cached RGBA snapshot");
+    CHECK_EQ(layer.rasterize_count(), 1u, "copying cached scalar bytes does not rerasterize");
     layer.rasterize();
     CHECK_EQ(layer.rasterize_count(), 1u, "unchanged scalar layer uses cache");
 

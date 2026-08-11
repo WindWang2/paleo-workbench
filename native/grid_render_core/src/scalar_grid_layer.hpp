@@ -5,6 +5,7 @@
 // separate prevents UI style changes from invoking scientific interpolation.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <vector>
@@ -40,10 +41,14 @@ public:
     // The copy is required at the Python boundary: callers must never retain a view
     // into cached bytes while another thread changes grid/style state.
     std::vector<std::uint8_t> rasterize();
+    // Copy an owned snapshot directly into caller-owned storage. This avoids an
+    // intermediate vector copy at bindings which already allocate their output.
+    void rasterize_into(std::uint8_t* destination, std::size_t destination_size);
 
 private:
     void invalidate_data() noexcept { ++data_revision_; }
     void invalidate_style() noexcept { ++style_revision_; }
+    void ensure_rasterized_locked();
     void validate_grid_size(const std::vector<float>& grid_z) const;
     void validate_mask_size(const std::vector<std::uint8_t>& mask) const;
 
