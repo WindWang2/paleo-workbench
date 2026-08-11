@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import layer_model_core
+import numpy as np
 
 from paleo_workbench.viz.native_factor_map import MapScene, NativeMapScene
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
 def test_map_scene_is_the_generic_registry_backed_composition_surface() -> None:
@@ -68,3 +70,24 @@ def test_map_scene_keeps_vector_data_and_style_revisions_independent() -> None:
         extent=(0.0, 0.0, 1.0, 1.0),
     )
     assert layer.data_revision > before_data
+
+
+def test_map_scene_snapshot_references_the_existing_native_scalar_payload() -> None:
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 1.0],
+            "grid_y": [0.0, 1.0],
+            "grid_z": np.array([[0.0, 1.0], [0.5, 0.25]], dtype=np.float32),
+            "backend": "idw",
+            "n_points": 4,
+        },
+        factor_name="Porosity",
+        crs="EPSG:3857",
+    )
+    scene = MapScene()
+    scene.add_factor_grid(result, layer_id="porosity")
+
+    snapshot = scene.render_snapshot(project_crs="EPSG:3857")
+
+    assert snapshot.layers[0].layer_type == "scalar_grid"
+    assert snapshot.layers[0].renderer_payload is scene.scalar_layer("porosity")

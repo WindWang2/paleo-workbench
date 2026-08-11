@@ -88,3 +88,32 @@ def test_native_layer_tree_wires_qtreeview_selection_and_zoom(qtbot):
     with qtbot.waitSignal(tree.zoom_to_layer_requested, timeout=1000) as signal:
         tree.model.request_zoom_to_layer("surface")
     assert signal.args == ["surface", (100.0, 200.0, 300.0, 400.0)]
+
+
+def test_native_layer_model_drag_drop_reparents_through_cpp_registry(qtbot):
+    registry = _registry()
+    registry.add_layer("second", "Second Group", layer_model_core.LayerType.Group)
+    model = NativeLayerModel(registry)
+    source_group = model.index(0, 0)
+    surface = model.index(0, 0, source_group)
+    target_group = model.index(1, 0)
+
+    mime = model.mimeData([surface])
+    assert model.dropMimeData(mime, Qt.DropAction.MoveAction, -1, 0, target_group)
+
+    assert registry.parent_id("surface") == "second"
+    assert model.parent(model._index_for_id("surface")) == target_group
+
+
+def test_native_layer_panel_exposes_real_actions_for_layer_management(qtbot):
+    tree = NativeLayerTree(_registry())
+    qtbot.addWidget(tree)
+    tree.show()
+    before = tree.model.registry.size
+    tree.add_group_action.trigger()
+
+    assert tree.model.registry.size == before + 1
+    group = tree.model.index(0, 0)
+    tree.tree.setCurrentIndex(group)
+    assert tree.zoom_action.isEnabled()
+    assert tree.properties_action.isEnabled()

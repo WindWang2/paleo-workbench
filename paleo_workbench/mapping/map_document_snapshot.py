@@ -28,6 +28,20 @@ _DEFAULT_STYLES: dict[str, Mapping[str, Any]] = {
 }
 
 
+def _authoring_style(document, kind: str) -> dict[str, Any]:
+    """Merge persisted unified-canvas style without changing legacy geometry data."""
+    state = dict(getattr(document, "layer_state", None) or {})
+    for entry in list(state.get("vector_layers") or []):
+        if not isinstance(entry, Mapping) or str(entry.get("kind") or "") != kind:
+            continue
+        style = dict(entry.get("style") or {})
+        labels = dict(entry.get("labels") or {})
+        if labels:
+            style["labels"] = labels
+        return style
+    return {}
+
+
 def _stable_revision(value: object) -> int:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return int.from_bytes(blake2b(encoded.encode("utf-8"), digest_size=8).digest(), "big")
@@ -101,7 +115,8 @@ def document_render_snapshot(
     layers: list[MapLayerSnapshot] = []
     for kind in ("facies", "well", "line", "label"):
         features = _features_for_kind(source_records, kind)
-        style = facies_style if kind == "facies" else dict(_DEFAULT_STYLES[kind])
+        style = dict(facies_style if kind == "facies" else _DEFAULT_STYLES[kind])
+        style.update(_authoring_style(document, kind))
         layers.append(
             MapLayerSnapshot(
                 id=f"{document_id}:{kind}",

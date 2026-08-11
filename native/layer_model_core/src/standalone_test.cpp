@@ -143,6 +143,20 @@ void test_remove_orphans_children() {
     CHECK(r.is_effectively_visible("c1", 1.0), "orphan visible (no parent)");
 }
 
+void test_reparent_rejects_cycles_and_non_groups() {
+    lm::LayerRegistry r;
+    r.add_layer(make("root", lm::LayerType::Group));
+    r.add_layer(make("nested", lm::LayerType::Group), "root");
+    r.add_layer(make("vector", lm::LayerType::Vector));
+    r.add_layer(make("point", lm::LayerType::Point));
+    CHECK(r.set_parent("vector", "nested"), "reparent below group");
+    CHECK(r.parent_id("vector") == "nested", "parent changed");
+    CHECK(!r.set_parent("root", "nested"), "cycle rejected");
+    CHECK(!r.set_parent("point", "vector"), "non-group parent rejected on reparent");
+    CHECK(r.set_parent("vector", ""), "detach to root");
+    CHECK(r.parent_id("vector").empty(), "detached parent empty");
+}
+
 }  // namespace
 
 int main() {
@@ -152,6 +166,7 @@ int main() {
     test_scale_visibility();
     test_groups_and_effective_visibility();
     test_remove_orphans_children();
+    test_reparent_rejects_cycles_and_non_groups();
     if (g_failures == 0) {
         std::printf("ALL LAYER_MODEL SELFTESTS PASSED\n");
         return 0;

@@ -150,6 +150,10 @@ public:
     bool move_above(const std::string& id, const std::string& other);
     bool move_below(const std::string& id, const std::string& other);
 
+    // Reparent a layer below a group (or detach it with an empty parent). The
+    // registry validates group type and cycles; the Qt tree never owns hierarchy.
+    bool set_parent(const std::string& id, const std::string& parent_id);
+
     // Resolve the effective visibility of a layer at a scale, honouring group visibility
     // propagation (a layer is effectively visible only if it AND all ancestor groups are
     // visible and within scale range).

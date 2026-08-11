@@ -11,7 +11,9 @@
 
 namespace py = pybind11;
 using pwb::qgis_render::FeatureSpec;
+using pwb::qgis_render::CategorySpec;
 using pwb::qgis_render::QgisRenderBridge;
+using pwb::qgis_render::RangeSpec;
 using pwb::qgis_render::VectorLayerSpec;
 
 namespace {
@@ -24,16 +26,66 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
         layer.id = py::cast<std::string>(data["id"]);
         layer.name = py::cast<std::string>(data["name"]);
         layer.crs = py::cast<std::string>(data["crs"]);
+        if (data.contains("kind") && py::cast<std::string>(data["kind"]) == "raster") {
+            layer.kind = VectorLayerSpec::Kind::Raster;
+            layer.source_path = py::cast<std::string>(data["source_path"]);
+        }
+        if (data.contains("style")) {
+            const py::dict style = py::reinterpret_borrow<py::dict>(data["style"]);
+            if (style.contains("fill")) layer.fill = py::cast<std::string>(style["fill"]);
+            if (style.contains("stroke")) layer.stroke = py::cast<std::string>(style["stroke"]);
+            if (style.contains("stroke_width")) layer.stroke_width = py::cast<double>(style["stroke_width"]);
+            if (style.contains("marker_size")) layer.marker_size = py::cast<double>(style["marker_size"]);
+            if (style.contains("renderer")) layer.renderer_kind = py::cast<std::string>(style["renderer"]);
+            if (style.contains("field")) layer.classification_field = py::cast<std::string>(style["field"]);
+            if (style.contains("categories")) {
+                const py::dict categories = py::reinterpret_borrow<py::dict>(style["categories"]);
+                for (const auto item : categories) {
+                    layer.categories.push_back({
+                        py::cast<std::string>(py::str(item.first)),
+                        py::cast<std::string>(py::str(item.second)),
+                        py::cast<std::string>(py::str(item.first)),
+                    });
+                }
+            }
+            if (style.contains("ranges")) {
+                for (const py::handle range_item : py::reinterpret_borrow<py::iterable>(style["ranges"])) {
+                    const py::dict range = py::reinterpret_borrow<py::dict>(range_item);
+                    layer.ranges.push_back({
+                        py::cast<double>(range["lower"]),
+                        py::cast<double>(range["upper"]),
+                        py::cast<std::string>(range["color"]),
+                        range.contains("label") ? py::cast<std::string>(range["label"]) : "",
+                    });
+                }
+            }
+            if (style.contains("labels")) {
+                const py::dict labels = py::reinterpret_borrow<py::dict>(style["labels"]);
+                layer.labels_enabled = labels.contains("field") && !py::cast<std::string>(labels["field"]).empty();
+                if (labels.contains("field")) layer.label_field = py::cast<std::string>(labels["field"]);
+                if (labels.contains("font_family")) layer.label_font_family = py::cast<std::string>(labels["font_family"]);
+                if (labels.contains("size")) layer.label_size = py::cast<double>(labels["size"]);
+                if (labels.contains("color")) layer.label_color = py::cast<std::string>(labels["color"]);
+                if (labels.contains("buffer")) layer.label_buffer_size = py::cast<double>(labels["buffer"]);
+            }
+        }
         layer.data_revision = py::cast<std::uint64_t>(data["data_revision"]);
         layer.style_revision = py::cast<std::uint64_t>(data["style_revision"]);
         layer.visible = py::cast<bool>(data["visible"]);
         layer.opacity = py::cast<double>(data["opacity"]);
         for (const py::handle feature_item : py::reinterpret_borrow<py::iterable>(data["features"])) {
             const py::dict feature = py::reinterpret_borrow<py::dict>(feature_item);
-            layer.features.push_back({
-                py::cast<std::string>(feature["id"]),
-                py::cast<std::string>(feature["wkt"]),
-            });
+            FeatureSpec parsed{py::cast<std::string>(feature["id"]), py::cast<std::string>(feature["wkt"])};
+            if (feature.contains("attributes")) {
+                const py::dict attributes = py::reinterpret_borrow<py::dict>(feature["attributes"]);
+                for (const auto attribute : attributes) {
+                    parsed.attributes.emplace_back(
+                        py::cast<std::string>(py::str(attribute.first)),
+                        py::cast<std::string>(py::str(attribute.second))
+                    );
+                }
+            }
+            layer.features.push_back(std::move(parsed));
         }
         layers.push_back(std::move(layer));
     }

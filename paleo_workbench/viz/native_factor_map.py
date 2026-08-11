@@ -449,6 +449,7 @@ class MapScene:
                     style=style,
                     visible=map_layer.visible,
                     opacity=map_layer.opacity,
+                    renderer_payload=self._scalars.get(layer_id),
                 )
             )
         return MapRenderSnapshot(project_crs=project_crs, layers=tuple(layers))
@@ -485,6 +486,7 @@ def scene_from_factor_task(
     *,
     crs: str | None = None,
     contour_drafts: Iterable[object] = (),
+    scene: MapScene | None = None,
 ) -> NativeMapScene:
     """Create a native scene from a completed task without rerunning interpolation.
 
@@ -493,8 +495,12 @@ def scene_from_factor_task(
     """
     params = dict(getattr(task, "parameters", None) or {})
     result = factor_grid_result_for_task(task, crs=crs)
-    scene = NativeMapScene()
+    scene = scene or NativeMapScene()
     task_id = str(getattr(task, "id", "") or "factor_grid")
+    # Re-requesting an already integrated task only changes visibility/order at
+    # the caller; it must not recreate the finished scalar payload.
+    if scene.registry.get(task_id) is not None:
+        return scene
     outputs = list(getattr(task, "output_resource_ids", None) or [])
     group_id = f"{task_id}:group"
     scene.registry.add_layer(

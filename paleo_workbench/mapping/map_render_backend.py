@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import math
 from typing import Any, Mapping
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
 
 __all__ = [
@@ -48,6 +48,9 @@ class MapLayerSnapshot:
     style: Mapping[str, Any] = field(default_factory=dict)
     visible: bool = True
     opacity: float = 1.0
+    # Renderer-only payload (for example an existing native ScalarGridLayer).
+    # It is never serialized into project state or treated as scientific data.
+    renderer_payload: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +264,31 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for polygon in coordinates:
                 painter.drawPath(self._path(polygon))
 
+    def _draw_scalar_grid(self, painter: QPainter, layer: MapLayerSnapshot) -> None:
+        """Composite the existing native scalar-raster cache without interpolation."""
+        scalar = layer.renderer_payload
+        if scalar is None or not hasattr(scalar, "rasterize"):
+            return
+        rgba = scalar.rasterize()
+        try:
+            height, width = int(rgba.shape[0]), int(rgba.shape[1])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return
+        if height < 1 or width < 1:
+            return
+        image = QImage(
+            rgba.data,
+            width,
+            height,
+            width * 4,
+            QImage.Format.Format_RGBA8888,
+        ).copy()
+        xmin, ymin, xmax, ymax = layer.extent
+        top_left = self._screen_point((xmin, ymax))
+        bottom_right = self._screen_point((xmax, ymin))
+        if top_left is not None and bottom_right is not None:
+            painter.drawImage(QRectF(top_left, bottom_right).normalized(), image)
+
     def render_sync(self) -> RenderFrame:
         if not self._initialized:
             self.initialize()
@@ -275,6 +303,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 continue
             painter.save()
             painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
+            if layer.layer_type == "scalar_grid":
+                self._draw_scalar_grid(painter, layer)
             for feature in layer.features:
                 self._draw_geometry(painter, feature.get("geometry"), layer.style)
             painter.restore()
@@ -303,6 +333,7 @@ class QgisMapRenderBackend(MapRenderBackend):
             native_bridge = None
         self._native_module = native_bridge
         self._bridge = None
+        self._scalar_raster_cache = None
 
     @property
     def is_available(self) -> bool:
@@ -328,7 +359,15 @@ class QgisMapRenderBackend(MapRenderBackend):
     def set_layer_snapshot(self, snapshot: MapRenderSnapshot) -> None:
         super().set_layer_snapshot(snapshot)
         if self._bridge is not None:
-            self._bridge.set_layer_snapshot(_qgis_snapshot(snapshot), snapshot.project_crs)
+            self._bridge.set_layer_snapshot(self._native_snapshot(snapshot), snapshot.project_crs)
+
+    def _native_snapshot(self, snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
+        if any(layer.layer_type == "scalar_grid" for layer in snapshot.layers):
+            if self._scalar_raster_cache is None:
+                from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
+
+                self._scalar_raster_cache = ScalarRasterMirrorCache()
+        return _qgis_snapshot(snapshot, scalar_raster_cache=self._scalar_raster_cache)
 
     def request_render(self) -> int:
         """Request native parallel rendering; native code coalesces stale frames."""
@@ -380,7 +419,7 @@ class QgisMapRenderBackend(MapRenderBackend):
             self.initialize()
         assert self._bridge is not None
         self._bridge.set_layer_snapshot(
-            _qgis_snapshot(self._snapshot), self._snapshot.project_crs
+            self._native_snapshot(self._snapshot), self._snapshot.project_crs
         )
         generation = self._next_generation()
         payload = self._bridge.render_sync(
@@ -399,13 +438,38 @@ class QgisMapRenderBackend(MapRenderBackend):
         if self._bridge is not None:
             self._bridge.shutdown()
             self._bridge = None
+        if self._scalar_raster_cache is not None:
+            self._scalar_raster_cache.clear()
+            self._scalar_raster_cache = None
         super().shutdown()
 
 
-def _qgis_snapshot(snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
+def _qgis_snapshot(
+    snapshot: MapRenderSnapshot,
+    *,
+    scalar_raster_cache=None,
+) -> list[dict[str, object]]:
     """Encode host snapshots into the small native bridge payload."""
     layers: list[dict[str, object]] = []
     for layer in snapshot.layers:
+        if layer.layer_type == "scalar_grid":
+            if scalar_raster_cache is None:
+                raise RuntimeError("QGIS scalar-grid rendering requires a raster mirror cache")
+            layers.append(
+                {
+                    "id": layer.id,
+                    "name": layer.name,
+                    "crs": layer.crs or snapshot.project_crs,
+                    "kind": "raster",
+                    "source_path": scalar_raster_cache.ensure(layer),
+                    "data_revision": int(layer.data_revision),
+                    "style_revision": int(layer.style_revision),
+                    "visible": bool(layer.visible),
+                    "opacity": float(layer.opacity),
+                    "features": [],
+                }
+            )
+            continue
         if layer.layer_type != "vector":
             continue
         features = []
@@ -413,7 +477,15 @@ def _qgis_snapshot(snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
             geometry = feature.get("geometry")
             wkt = _geometry_to_wkt(geometry)
             if wkt:
-                features.append({"id": str(feature.get("id") or ""), "wkt": wkt})
+                attributes = dict(feature.get("properties") or {})
+                attributes["__pwb_id"] = str(feature.get("id") or "")
+                features.append(
+                    {
+                        "id": str(feature.get("id") or ""),
+                        "wkt": wkt,
+                        "attributes": attributes,
+                    }
+                )
         # QGIS' memory provider has no valid geometry URI for an empty generic
         # layer. Empty host categories still remain in LayerRegistry/the tree;
         # they simply need no render mirror until their first feature arrives.
@@ -428,6 +500,7 @@ def _qgis_snapshot(snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
                 "style_revision": int(layer.style_revision),
                 "visible": bool(layer.visible),
                 "opacity": float(layer.opacity),
+                "style": dict(layer.style),
                 "features": features,
             }
         )

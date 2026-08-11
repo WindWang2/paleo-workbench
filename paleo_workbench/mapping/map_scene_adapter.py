@@ -22,10 +22,12 @@ class LegacyDocumentSceneAdapter:
     def __init__(self) -> None:
         self.scene = MapScene()
         self._document_id: str | None = None
+        self._legacy_layer_ids: set[str] = set()
 
     def clear(self) -> None:
         self.scene = MapScene()
         self._document_id = None
+        self._legacy_layer_ids.clear()
 
     def sync(
         self,
@@ -43,6 +45,7 @@ class LegacyDocumentSceneAdapter:
         if document_id != self._document_id:
             self.scene = MapScene()
             self._document_id = document_id
+            self._legacy_layer_ids.clear()
 
         source = document_render_snapshot(
             document,
@@ -51,9 +54,8 @@ class LegacyDocumentSceneAdapter:
             records=records,
         )
         wanted_ids = {layer.id for layer in source.layers}
-        for existing in tuple(self.scene.registry.layers()):
-            if existing.id not in wanted_ids:
-                self.scene.remove_layer(existing.id)
+        for layer_id in self._legacy_layer_ids - wanted_ids:
+            self.scene.remove_layer(layer_id)
         for layer in source.layers:
             existing = self.scene.registry.get(layer.id)
             if existing is None:
@@ -82,4 +84,5 @@ class LegacyDocumentSceneAdapter:
                 existing.extent = layer.extent
             if existing.crs != layer.crs:
                 existing.crs = layer.crs
+        self._legacy_layer_ids = wanted_ids
         return self.scene.render_snapshot(project_crs=str(project_crs or ""))

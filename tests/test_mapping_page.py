@@ -1,6 +1,6 @@
 import pytest
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPoint, QPointF, Qt
 
 from paleo_workbench.project.models import FactorMapTask, MapReferenceLayer, PaleoMapDocument
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
@@ -11,6 +11,7 @@ from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
 def test_mapping_page_assembles_gis_shell(qtbot):
@@ -86,6 +87,112 @@ def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(
     qtbot.waitUntil(lambda: page.unified_canvas.last_frame is not None, timeout=5_000)
     assert page.preview_canvas_stack.currentWidget() is page.unified_canvas
     assert page.unified_canvas.last_frame is not None
+
+
+def test_mapping_page_composes_factor_grid_with_document_layers_in_unified_scene(qtbot):
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 10.0],
+            "grid_y": [0.0, 10.0],
+            "grid_z": [[0.0, 1.0], [0.5, None]],
+            "backend": "idw",
+            "n_points": 4,
+        },
+        factor_name="Porosity",
+        crs="EPSG:3857",
+    )
+    task = FactorMapTask(
+        id="porosity-task",
+        name="Porosity",
+        target_horizon="H1",
+        factor_type="Porosity",
+        method="IDW",
+        status="complete",
+        parameters=result.to_legacy_dict(),
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state(
+        [
+            PaleoMapDocument(
+                id="map-1",
+                name="Map",
+                linked_target_horizon="H1",
+                facies_polygons=[
+                    {"id": "f1", "name": "delta", "coordinates": [[0, 0], [10, 0], [0, 10]]}
+                ],
+            )
+        ],
+        factor_tasks=[task],
+        project_crs="EPSG:3857",
+    )
+
+    page.bottom_workbench.factor_shelf.factor_overlay_requested.emit(task.id)
+
+    assert page.unified_scene.scalar_layer(task.id) is not None
+    assert page.unified_scene.registry.index_of(task.id) == 0
+    assert page.unified_scene.registry.get("map-1:facies") is not None
+    assert page.preview_canvas_stack.currentWidget() is page.unified_canvas
+
+
+def test_unified_canvas_actions_drive_host_edit_session_and_undo_redo(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.resize(900, 640)
+    page.show()
+    document = PaleoMapDocument(
+        id="map-actions",
+        name="Map",
+        linked_target_horizon="H1",
+        facies_polygons=[
+            {"id": "f1", "name": "delta", "coordinates": [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]}
+        ],
+    )
+    page.update_state([document], project_crs="EPSG:3857")
+    canvas = page.unified_canvas
+    qtbot.waitUntil(lambda: canvas.width() > 100 and canvas.height() > 100)
+    center = canvas.map_to_screen((5.0, 5.0)).toPoint()
+
+    page.action_controller.actions["select"].trigger()
+    qtbot.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=center)
+    assert page._authoring_document.active_layer.selection == {"f1"}
+
+    page.action_controller.actions["toggle_editing"].trigger()
+    page.action_controller.actions["move_feature"].trigger()
+    target = canvas.map_to_screen((7.0, 5.0)).toPoint()
+    qtbot.mousePress(canvas, Qt.MouseButton.LeftButton, pos=center)
+    qtbot.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=target)
+    session = page._authoring_document.active_session
+    assert session is not None
+    assert session.feature("f1").geometry["coordinates"][0][0][0] == pytest.approx(2.0)
+
+    page.action_controller.actions["undo"].trigger()
+    assert session.feature("f1").geometry["coordinates"][0][0][0] == pytest.approx(0.0)
+    page.action_controller.actions["redo"].trigger()
+    assert session.feature("f1").geometry["coordinates"][0][0][0] == pytest.approx(2.0)
+
+
+def test_unified_canvas_polygon_capture_and_escape_keep_the_edit_buffer(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.resize(900, 640)
+    page.show()
+    page.update_state([PaleoMapDocument(id="map-capture", name="Map", linked_target_horizon="H1")])
+    canvas = page.unified_canvas
+    qtbot.waitUntil(lambda: canvas.width() > 100 and canvas.height() > 100)
+
+    page.action_controller.actions["toggle_editing"].trigger()
+    page.action_controller.actions["add_polygon"].trigger()
+    points = [canvas.map_to_screen(point).toPoint() for point in ((0.1, 0.1), (0.8, 0.1), (0.5, 0.8))]
+    for point in points:
+        qtbot.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=point)
+    qtbot.mouseClick(canvas, Qt.MouseButton.RightButton, pos=points[-1])
+
+    session = page._authoring_document.active_session
+    assert session is not None
+    assert len(session.features()) == 1
+    qtbot.keyClick(canvas, Qt.Key.Key_Escape)
+    assert len(session.features()) == 1
 
 
 def test_mapping_page_context_snapshot(qtbot):
@@ -260,7 +367,7 @@ def test_canvas_priority_mode_collapses_side_panels(qtbot):
     assert page.layer_tree.isHidden()
     assert page.reference_panel.isHidden()
     assert page.bottom_workbench.isHidden()
-    assert not page.edit_view.isHidden()
+    assert not page.unified_canvas.isHidden()
     assert page.is_canvas_priority()
 
 

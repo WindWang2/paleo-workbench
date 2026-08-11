@@ -8,6 +8,8 @@ from paleo_workbench.mapping.map_render_backend import (
     MapRenderSnapshot,
 )
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.viz.native_factor_map import MapScene
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
 def _snapshot() -> MapRenderSnapshot:
@@ -50,7 +52,38 @@ def test_unified_canvas_displays_latest_backend_frame_and_keeps_navigation_exten
 
     assert canvas.backend_status.startswith("fallback")
     assert canvas.last_frame is not None
-    assert canvas.grab().toImage().size().width() == 300
+    # ``grab`` returns device pixels on HiDPI displays; the widget's logical size
+    # is the rendering contract.
+    assert canvas.width() == 300
     assert canvas.view_extent != initial
     assert canvas.view_extent[2] > canvas.view_extent[0]
     assert canvas.view_extent[3] > canvas.view_extent[1]
+
+
+def test_unified_fallback_canvas_composites_native_scalar_cache_without_recomputation(qtbot) -> None:
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 10.0],
+            "grid_y": [0.0, 10.0],
+            "grid_z": [[0.0, 1.0], [0.5, None]],
+            "backend": "idw",
+            "n_points": 4,
+        },
+        factor_name="Porosity",
+        crs="EPSG:3857",
+    )
+    scene = MapScene()
+    scene.add_factor_grid(result, layer_id="porosity")
+    scalar = scene.scalar_layer("porosity")
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(240, 180)
+    canvas.show()
+    canvas.set_layer_snapshot(scene.render_snapshot(project_crs="EPSG:3857"))
+    canvas.set_extent(result.extent)
+
+    qtbot.waitUntil(lambda: canvas.last_frame is not None, timeout=2_000)
+    assert scalar.rasterize_count == 1
+    canvas.zoom_by(0.8)
+    canvas.pan_by_pixels(6.0, 4.0)
+    assert scalar.rasterize_count == 1

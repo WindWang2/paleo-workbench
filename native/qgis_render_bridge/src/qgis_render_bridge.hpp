@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pwb::qgis_render {
@@ -12,12 +13,44 @@ namespace pwb::qgis_render {
 struct FeatureSpec {
     std::string id;
     std::string wkt;
+    std::vector<std::pair<std::string, std::string>> attributes;
+};
+
+struct CategorySpec {
+    std::string value;
+    std::string color;
+    std::string label;
+};
+
+struct RangeSpec {
+    double lower = 0.0;
+    double upper = 0.0;
+    std::string color;
+    std::string label;
 };
 
 struct VectorLayerSpec {
+    enum class Kind : std::uint8_t { Vector, Raster };
+
     std::string id;
     std::string name;
     std::string crs;
+    Kind kind = Kind::Vector;
+    std::string source_path;
+    std::string fill = "#6c8ebf";
+    std::string stroke = "#26364d";
+    double stroke_width = 1.0;
+    double marker_size = 6.0;
+    std::string renderer_kind = "single";
+    std::string classification_field;
+    std::vector<CategorySpec> categories;
+    std::vector<RangeSpec> ranges;
+    bool labels_enabled = false;
+    std::string label_field;
+    std::string label_font_family;
+    double label_size = 10.0;
+    std::string label_color = "#ffffff";
+    double label_buffer_size = 0.0;
     std::uint64_t data_revision = 0;
     std::uint64_t style_revision = 0;
     bool visible = true;

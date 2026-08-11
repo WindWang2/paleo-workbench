@@ -152,7 +152,10 @@ def test_mapping_page_preview_mode_switch(qtbot):
     page.update_state([doc])
 
     assert page.is_preview_mode() is False
-    assert page.center_stack.currentIndex() == 0
+    # The unified QGIS/fallback canvas is now the normal authoring surface;
+    # preview mode changes decorations/workbench state rather than swapping back
+    # to the legacy QGraphics editor.
+    assert page.center_stack.currentIndex() == 1
     assert page.bottom_workbench.isHidden() is False
     assert isinstance(page.canvas_panel, MapCanvasPanel)
     assert isinstance(page.chrome_panel, MapChromePanel)
@@ -180,7 +183,7 @@ def test_mapping_page_preview_mode_switch(qtbot):
     assert ctx["map_name"] == "Delta"
 
     page.set_preview_mode(False)
-    assert page.center_stack.currentIndex() == 0
+    assert page.center_stack.currentIndex() == 1
     assert page.bottom_workbench.isHidden() is False
     assert page.toolbar.select_btn.isEnabled() is True
 

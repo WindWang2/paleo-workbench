@@ -10,21 +10,38 @@
 #include <utility>
 
 #include <QCoreApplication>
+#include <QFont>
 #include <QImage>
 #include <QList>
+#include <QSet>
 #include <QSize>
 #include <QString>
+#include <QVariantMap>
 
 #include <qgsapplication.h>
+#include <qgscategorizedsymbolrenderer.h>
 #include <qgscoordinatereferencesystem.h>
+#include <qgsfield.h>
 #include <qgsfeature.h>
+#include <qgsfillsymbol.h>
+#include <qgsgraduatedsymbolrenderer.h>
 #include <qgsgeometry.h>
+#include <qgslinesymbol.h>
 #include <qgsmaplayer.h>
 #include <qgsmaprendererparalleljob.h>
 #include <qgsmapsettings.h>
 #include <qgsrectangle.h>
+#include <qgsrasterlayer.h>
+#include <qgsmarkersymbol.h>
+#include <qgspallabeling.h>
+#include <qgsrendererrange.h>
+#include <qgssinglesymbolrenderer.h>
+#include <qgssymbol.h>
+#include <qgstextbuffersettings.h>
+#include <qgstextformat.h>
 #include <qgsvectordataprovider.h>
 #include <qgsvectorlayer.h>
+#include <qgsvectorlayerlabeling.h>
 
 namespace pwb::qgis_render {
 namespace {
@@ -74,6 +91,106 @@ void validate_request(const int width, const int height, const double dpi) {
     }
 }
 
+std::unique_ptr<QgsSymbol> symbol_for(const Qgis::GeometryType geometry_type,
+                                      const VectorLayerSpec& spec,
+                                      const QString& requested_fill = {}) {
+    const QString fill = requested_fill.isEmpty() ? QString::fromStdString(spec.fill) : requested_fill;
+    const QString stroke = QString::fromStdString(spec.stroke);
+    const QString width = QString::number(std::max(0.0, spec.stroke_width), 'g', 12);
+    const QString marker_size = QString::number(std::max(0.1, spec.marker_size), 'g', 12);
+    QVariantMap properties;
+    switch (geometry_type) {
+        case Qgis::GeometryType::Polygon: {
+            properties.insert(QStringLiteral("color"), fill);
+            properties.insert(QStringLiteral("outline_color"), stroke);
+            properties.insert(QStringLiteral("outline_width"), width);
+            return QgsFillSymbol::createSimple(properties);
+        }
+        case Qgis::GeometryType::Line: {
+            properties.insert(QStringLiteral("line_color"), stroke);
+            properties.insert(QStringLiteral("color"), stroke);
+            properties.insert(QStringLiteral("line_width"), width);
+            properties.insert(QStringLiteral("width"), width);
+            return QgsLineSymbol::createSimple(properties);
+        }
+        case Qgis::GeometryType::Point: {
+            properties.insert(QStringLiteral("color"), fill);
+            properties.insert(QStringLiteral("outline_color"), stroke);
+            properties.insert(QStringLiteral("size"), marker_size);
+            return QgsMarkerSymbol::createSimple(properties);
+        }
+        default:
+            return {};
+    }
+}
+
+void apply_renderer_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
+    const Qgis::GeometryType geometry_type = layer.geometryType();
+    if (geometry_type == Qgis::GeometryType::Null) return;
+    if (spec.renderer_kind == "categorized" && !spec.classification_field.empty()
+        && !spec.categories.empty()) {
+        QgsCategoryList categories;
+        for (const CategorySpec& category : spec.categories) {
+            auto symbol = symbol_for(geometry_type, spec, QString::fromStdString(category.color));
+            if (symbol) {
+                categories.emplace_back(
+                    QVariant(QString::fromStdString(category.value)), symbol.release(),
+                    QString::fromStdString(category.label)
+                );
+            }
+        }
+        layer.setRenderer(new QgsCategorizedSymbolRenderer(
+            QString::fromStdString(spec.classification_field), categories
+        ));
+        return;
+    }
+    if (spec.renderer_kind == "graduated" && !spec.classification_field.empty()
+        && !spec.ranges.empty()) {
+        QgsRangeList ranges;
+        for (const RangeSpec& range : spec.ranges) {
+            auto symbol = symbol_for(geometry_type, spec, QString::fromStdString(range.color));
+            if (symbol) {
+                ranges.emplace_back(
+                    range.lower, range.upper, symbol.release(),
+                    QString::fromStdString(range.label)
+                );
+            }
+        }
+        layer.setRenderer(new QgsGraduatedSymbolRenderer(
+            QString::fromStdString(spec.classification_field), ranges
+        ));
+        return;
+    }
+    auto symbol = symbol_for(geometry_type, spec);
+    if (symbol) layer.setRenderer(new QgsSingleSymbolRenderer(symbol.release()));
+}
+
+void apply_label_style(QgsVectorLayer& layer, const VectorLayerSpec& spec) {
+    if (!spec.labels_enabled || spec.label_field.empty()) {
+        layer.setLabelsEnabled(false);
+        return;
+    }
+    QgsPalLayerSettings settings;
+    settings.fieldName = QString::fromStdString(spec.label_field);
+    settings.isExpression = false;
+    QgsTextFormat format;
+    QFont font;
+    if (!spec.label_font_family.empty()) font.setFamily(QString::fromStdString(spec.label_font_family));
+    format.setFont(font);
+    format.setSize(std::max(0.1, spec.label_size));
+    format.setColor(QColor(QString::fromStdString(spec.label_color)));
+    if (spec.label_buffer_size > 0.0) {
+        QgsTextBufferSettings buffer;
+        buffer.setEnabled(true);
+        buffer.setSize(spec.label_buffer_size);
+        buffer.setColor(Qt::white);
+        format.setBuffer(buffer);
+    }
+    settings.setFormat(format);
+    layer.setLabeling(new QgsVectorLayerSimpleLabeling(settings));
+    layer.setLabelsEnabled(true);
+}
+
 }  // namespace
 
 class QgisRenderBridge::Impl {
@@ -81,8 +198,10 @@ class QgisRenderBridge::Impl {
     struct Mirror {
         std::uint64_t data_revision = 0;
         std::uint64_t style_revision = 0;
+        VectorLayerSpec::Kind kind = VectorLayerSpec::Kind::Vector;
+        std::string source_path;
         bool visible = true;
-        std::unique_ptr<QgsVectorLayer> layer;
+        std::unique_ptr<QgsMapLayer> layer;
     };
 
     struct SnapshotInput {
@@ -118,38 +237,78 @@ class QgisRenderBridge::Impl {
             auto existing = mirrors.find(spec.id);
             const bool rebuild = existing == mirrors.end()
                 || existing->second.data_revision != spec.data_revision
-                || existing->second.style_revision != spec.style_revision;
+                || existing->second.style_revision != spec.style_revision
+                || existing->second.kind != spec.kind
+                || existing->second.source_path != spec.source_path;
 
             Mirror mirror;
             if (!rebuild) {
                 mirror = std::move(existing->second);
             } else {
-                const QString geometry_uri = geometry_uri_for(spec);
-                const QString uri = QStringLiteral("%1?crs=%2")
-                                        .arg(geometry_uri, QString::fromStdString(spec.crs));
-                mirror.layer = std::make_unique<QgsVectorLayer>(
-                    uri, QString::fromStdString(spec.name), QStringLiteral("memory")
-                );
-                if (!mirror.layer->isValid()) {
-                    throw std::runtime_error("QGIS could not create memory layer " + spec.id);
-                }
-                QgsFeatureList features;
-                for (const FeatureSpec& feature_spec : spec.features) {
-                    QgsGeometry geometry = QgsGeometry::fromWkt(QString::fromStdString(feature_spec.wkt));
-                    if (geometry.isNull()) {
-                        throw std::invalid_argument("invalid WKT for QGIS layer " + spec.id);
+                if (spec.kind == VectorLayerSpec::Kind::Raster) {
+                    mirror.layer = std::make_unique<QgsRasterLayer>(
+                        QString::fromStdString(spec.source_path),
+                        QString::fromStdString(spec.name),
+                        QStringLiteral("gdal")
+                    );
+                    if (!mirror.layer->isValid()) {
+                        throw std::runtime_error("QGIS could not open raster layer " + spec.id);
                     }
-                    QgsFeature feature(mirror.layer->fields());
-                    feature.setGeometry(std::move(geometry));
-                    features.push_back(std::move(feature));
+                } else {
+                    const QString geometry_uri = geometry_uri_for(spec);
+                    const QString uri = QStringLiteral("%1?crs=%2")
+                                            .arg(geometry_uri, QString::fromStdString(spec.crs));
+                    auto vector_layer = std::make_unique<QgsVectorLayer>(
+                        uri, QString::fromStdString(spec.name), QStringLiteral("memory")
+                    );
+                    if (!vector_layer->isValid()) {
+                        throw std::runtime_error("QGIS could not create memory layer " + spec.id);
+                    }
+                    QSet<QString> attribute_names;
+                    attribute_names.insert(QStringLiteral("__pwb_id"));
+                    for (const FeatureSpec& feature_spec : spec.features) {
+                        for (const auto& attribute : feature_spec.attributes) {
+                            attribute_names.insert(QString::fromStdString(attribute.first));
+                        }
+                    }
+                    QList<QgsField> fields;
+                    for (const QString& attribute_name : attribute_names) {
+                        fields.append(QgsField(attribute_name, QMetaType::Type::QString));
+                    }
+                    if (!fields.empty() && !vector_layer->dataProvider()->addAttributes(fields)) {
+                        throw std::runtime_error("QGIS could not create fields for layer " + spec.id);
+                    }
+                    vector_layer->updateFields();
+                    QgsFeatureList features;
+                    for (const FeatureSpec& feature_spec : spec.features) {
+                        QgsGeometry geometry = QgsGeometry::fromWkt(QString::fromStdString(feature_spec.wkt));
+                        if (geometry.isNull()) {
+                            throw std::invalid_argument("invalid WKT for QGIS layer " + spec.id);
+                        }
+                        QgsFeature feature(vector_layer->fields());
+                        feature.setGeometry(std::move(geometry));
+                        feature.setAttribute(QStringLiteral("__pwb_id"), QString::fromStdString(feature_spec.id));
+                        for (const auto& attribute : feature_spec.attributes) {
+                            feature.setAttribute(
+                                QString::fromStdString(attribute.first),
+                                QString::fromStdString(attribute.second)
+                            );
+                        }
+                        features.push_back(std::move(feature));
+                    }
+                    if (!features.empty() && !vector_layer->dataProvider()->addFeatures(features)) {
+                        throw std::runtime_error("QGIS could not add features for layer " + spec.id);
+                    }
+                    vector_layer->updateExtents();
+                    apply_renderer_style(*vector_layer, spec);
+                    apply_label_style(*vector_layer, spec);
+                    mirror.layer = std::move(vector_layer);
                 }
-                if (!features.empty() && !mirror.layer->dataProvider()->addFeatures(features)) {
-                    throw std::runtime_error("QGIS could not add features for layer " + spec.id);
-                }
-                mirror.layer->updateExtents();
             }
             mirror.data_revision = spec.data_revision;
             mirror.style_revision = spec.style_revision;
+            mirror.kind = spec.kind;
+            mirror.source_path = spec.source_path;
             mirror.visible = spec.visible;
             mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
             order.push_back(spec.id);
@@ -319,7 +478,10 @@ void QgisRenderBridge::cancel_render() {
     impl_->pending_request.reset();
     if (impl_->active_job) {
         impl_->discard_active_result = true;
-        impl_->active_job->cancelWithoutBlocking();
+        // Explicit cancellation is used by deterministic export/shutdown paths,
+        // where it is safer to wait than to let a stale QGIS job race a sync job.
+        impl_->wait_for_active_job();
+        return;
     }
     impl_->finish_active_if_done();
 }
