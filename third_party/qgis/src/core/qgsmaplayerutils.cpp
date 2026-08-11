@@ -1,0 +1,292 @@
+/***************************************************************************
+                             qgsmaplayerutils.cpp
+                             -------------------
+    begin                : May 2021
+    copyright            : (C) 2021 Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaplayerutils.h"
+
+#include "qgsabstractdatabaseproviderconnection.h"
+#include "qgscoordinatereferencesystem.h"
+#include "qgscoordinatetransform.h"
+#include "qgscoordinatetransformcontext.h"
+#include "qgslogger.h"
+#include "qgsmaplayer.h"
+#include "qgsprovidermetadata.h"
+#include "qgsproviderregistry.h"
+#include "qgsrectangle.h"
+#include "qgssettingsentryimpl.h"
+#include "qgssettingsregistrycore.h"
+#include "qgsvectorlayer.h"
+
+#include <QRegularExpression>
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+QgsRectangle QgsMapLayerUtils::combinedExtent( const QList<QgsMapLayer *> &layers, const QgsCoordinateReferenceSystem &crs, const QgsCoordinateTransformContext &transformContext )
+{
+  // We can't use a constructor since QgsRectangle normalizes the rectangle upon construction
+  QgsRectangle fullExtent;
+  fullExtent.setNull();
+
+  // iterate through the map layers and test each layers extent
+  // against the current min and max values
+  QgsDebugMsgLevel( u"Layer count: %1"_s.arg( layers.count() ), 5 );
+  for ( const QgsMapLayer *layer : layers )
+  {
+    QgsDebugMsgLevel( "Updating extent using " + layer->name(), 5 );
+    QgsDebugMsgLevel( "Input extent: " + layer->extent().toString(), 5 );
+
+    if ( layer->extent().isNull() )
+      continue;
+
+    // Layer extents are stored in the coordinate system (CS) of the
+    // layer. The extent must be projected to the canvas CS
+    QgsCoordinateTransform ct( layer->crs(), crs, transformContext );
+    ct.setBallparkTransformsAreAppropriate( true );
+    try
+    {
+      const QgsRectangle extent = ct.transformBoundingBox( layer->extent() );
+
+      QgsDebugMsgLevel( "Output extent: " + extent.toString(), 5 );
+      fullExtent.combineExtentWith( extent );
+    }
+    catch ( QgsCsException & )
+    {
+      QgsDebugError( u"Could not reproject layer extent"_s );
+    }
+  }
+
+  if ( fullExtent.width() == 0.0 || fullExtent.height() == 0.0 )
+  {
+    // If all of the features are at the one point, buffer the
+    // rectangle a bit. If they are all at zero, do something a bit
+    // more crude.
+
+    if ( fullExtent.xMinimum() == 0.0 && fullExtent.xMaximum() == 0.0 && fullExtent.yMinimum() == 0.0 && fullExtent.yMaximum() == 0.0 )
+    {
+      fullExtent.set( -1.0, -1.0, 1.0, 1.0 );
+    }
+    else
+    {
+      const double padFactor = 1e-8;
+      const double widthPad = fullExtent.xMinimum() * padFactor;
+      const double heightPad = fullExtent.yMinimum() * padFactor;
+      const double xmin = fullExtent.xMinimum() - widthPad;
+      const double xmax = fullExtent.xMaximum() + widthPad;
+      const double ymin = fullExtent.yMinimum() - heightPad;
+      const double ymax = fullExtent.yMaximum() + heightPad;
+      fullExtent.set( xmin, ymin, xmax, ymax );
+    }
+  }
+
+  QgsDebugMsgLevel( "Full extent: " + fullExtent.toString(), 5 );
+  return fullExtent;
+}
+
+QgsAbstractDatabaseProviderConnection *QgsMapLayerUtils::databaseConnection( const QgsMapLayer *layer )
+{
+  if ( !layer )
+  {
+    return nullptr;
+  }
+
+  try
+  {
+    QgsProviderMetadata *providerMetadata = QgsProviderRegistry::instance()->providerMetadata( layer->providerType() );
+    if ( !providerMetadata )
+    {
+      return nullptr;
+    }
+
+    std::unique_ptr< QgsAbstractDatabaseProviderConnection > conn { static_cast<QgsAbstractDatabaseProviderConnection *>( providerMetadata->createConnection( layer->source(), {} ) ) };
+    return conn.release();
+  }
+  catch ( const QgsProviderConnectionException &ex )
+  {
+    if ( !ex.what().contains( "createConnection"_L1 ) )
+    {
+      QgsDebugError( u"Error retrieving database connection for layer %1: %2"_s.arg( layer->name(), ex.what() ) );
+    }
+    return nullptr;
+  }
+}
+
+bool QgsMapLayerUtils::layerSourceMatchesPath( const QgsMapLayer *layer, const QString &path )
+{
+  if ( !layer || path.isEmpty() )
+    return false;
+
+  const QVariantMap parts = QgsProviderRegistry::instance()->decodeUri( layer->providerType(), layer->source() );
+  return parts.value( u"path"_s ).toString() == path;
+}
+
+bool QgsMapLayerUtils::layerRefersToUri( const QgsMapLayer *layer, const QString &uri, Qgis::SourceHierarchyLevel level )
+{
+  if ( !layer )
+    return false;
+
+  const QgsProviderMetadata *metadata = QgsProviderRegistry::instance()->providerMetadata( layer->providerType() );
+  if ( !metadata )
+  {
+    throw QgsNotSupportedException( u"Could not retrieve metadata for %1 provider"_s.arg( layer->providerType() ) );
+  }
+
+  if ( !metadata->capabilities().testFlag( QgsProviderMetadata::ProviderMetadataCapability::UrisReferToSame ) )
+  {
+    throw QgsNotSupportedException( u"%1 provider does not support UrisReferToSame capability"_s.arg( layer->providerType() ) );
+  }
+
+  return metadata->urisReferToSame( layer->source(), uri, level );
+}
+
+bool QgsMapLayerUtils::updateLayerSourcePath( QgsMapLayer *layer, const QString &newPath )
+{
+  if ( !layer || newPath.isEmpty() )
+    return false;
+
+  QVariantMap parts = QgsProviderRegistry::instance()->decodeUri( layer->providerType(), layer->source() );
+  if ( !parts.contains( u"path"_s ) )
+    return false;
+
+  parts.insert( u"path"_s, newPath );
+  const QString newUri = QgsProviderRegistry::instance()->encodeUri( layer->providerType(), parts );
+  layer->setDataSource( newUri, layer->name(), layer->providerType() );
+  return true;
+}
+
+QList<QgsMapLayer *> QgsMapLayerUtils::sortLayersByType( const QList<QgsMapLayer *> &layers, const QList<Qgis::LayerType> &order )
+{
+  QList< QgsMapLayer * > res = layers;
+  std::sort( res.begin(), res.end(), [&order]( const QgsMapLayer *a, const QgsMapLayer *b ) -> bool {
+    for ( Qgis::LayerType type : order )
+    {
+      if ( a->type() == type && b->type() != type )
+        return true;
+      else if ( b->type() == type )
+        return false;
+    }
+    return false;
+  } );
+  return res;
+}
+
+QString QgsMapLayerUtils::launderLayerName( const QString &name )
+{
+  QString laundered = name.toLower();
+  const thread_local QRegularExpression sRxSwapChars( u"\\s"_s );
+  laundered.replace( sRxSwapChars, u"_"_s );
+
+  const thread_local QRegularExpression sRxRemoveChars( u"[^a-zA-Z0-9_]"_s );
+  laundered.replace( sRxRemoveChars, QString() );
+
+  return laundered;
+}
+
+bool QgsMapLayerUtils::isOpenStreetMapLayer( QgsMapLayer *layer )
+{
+  if ( !layer )
+  {
+    return false;
+  }
+
+  return QgsMapLayerUtils::isOpenStreetMapUri( layer->source(), layer->providerType() );
+}
+
+bool QgsMapLayerUtils::isOpenStreetMapUri( const QString &uri, const QString &providerType )
+{
+  QUrl url;
+  if ( providerType == "wms"_L1 )
+  {
+    if ( const QgsProviderMetadata *metadata = QgsProviderRegistry::instance()->providerMetadata( providerType ) )
+    {
+      QVariantMap details = metadata->decodeUri( uri );
+      url = QUrl( details.value( u"url"_s ).toString() );
+    }
+  }
+  else if ( providerType == "xyzvectortiles"_L1 )
+  {
+    if ( const QgsProviderMetadata *metadata = QgsProviderRegistry::instance()->providerMetadata( providerType ) )
+    {
+      QVariantMap details = metadata->decodeUri( uri );
+      url = QUrl( details.value( u"url"_s ).toString() );
+    }
+  }
+  return !url.isEmpty() && ( url.host().endsWith( ".openstreetmap.org"_L1 ) || url.host().endsWith( ".osm.org"_L1 ) );
+}
+
+QString QgsMapLayerUtils::layerTypeToString( Qgis::LayerType type )
+{
+  switch ( type )
+  {
+    case Qgis::LayerType::Vector:
+      return QObject::tr( "Vector" );
+    case Qgis::LayerType::Raster:
+      return QObject::tr( "Raster" );
+    case Qgis::LayerType::Mesh:
+      return QObject::tr( "Mesh" );
+    case Qgis::LayerType::PointCloud:
+      return QObject::tr( "Point Cloud" );
+    case Qgis::LayerType::Annotation:
+      return QObject::tr( "Annotation" );
+    case Qgis::LayerType::VectorTile:
+      return QObject::tr( "Vector Tile" );
+    case Qgis::LayerType::Plugin:
+      return QObject::tr( "Plugin" );
+    case Qgis::LayerType::Group:
+      return QObject::tr( "Group" );
+    case Qgis::LayerType::TiledScene:
+      return QObject::tr( "Tiled Scene" );
+  }
+  Q_ASSERT( false );
+  return QString();
+}
+
+QString QgsMapLayerUtils::layerToolTip( const QgsMapLayer *layer )
+{
+  if ( layer )
+  {
+    QStringList parts;
+    QString title = !layer->metadata().title().isEmpty() ? layer->metadata().title()
+                                                         : ( layer->serverProperties()->title().isEmpty() ? layer->serverProperties()->shortName() : layer->serverProperties()->title() );
+    if ( title.isEmpty() )
+      title = layer->name();
+    title = "<b>" + title + "</b>";
+    if ( layer->isSpatial() && layer->crs().isValid() )
+    {
+      QString layerCrs = layer->crs().authid();
+      if ( !std::isnan( layer->crs().coordinateEpoch() ) )
+      {
+        layerCrs += u" @ %1"_s.arg( qgsDoubleToString( layer->crs().coordinateEpoch(), 3 ) );
+      }
+      if ( const QgsVectorLayer *vl = qobject_cast<const QgsVectorLayer *>( layer ) )
+        title = QObject::tr( "%1 (%2 - %3)" ).arg( title, QgsWkbTypes::displayString( vl->wkbType() ), layerCrs );
+      else
+        title = QObject::tr( "%1 (%2)" ).arg( title, layerCrs );
+    }
+    parts << title;
+
+    QString abstract = !layer->metadata().abstract().isEmpty() ? layer->metadata().abstract() : layer->serverProperties()->abstract();
+    if ( !abstract.isEmpty() )
+      parts << "<br/>" + abstract.replace( "\n"_L1, "<br/>"_L1 );
+    parts << "<i>" + layer->publicSource() + "</i>";
+    if ( QgsSettingsRegistryCore::settingsLayerTreeShowIdInLayerTooltips->value() )
+    {
+      parts << QObject::tr( "ID: %1" ).arg( layer->id() );
+    }
+    return parts.join( "<br/>"_L1 );
+  }
+  return QString();
+}

@@ -1,0 +1,679 @@
+/***************************************************************************
+  qgsmaplayerlegend.cpp
+  --------------------------------------
+  Date                 : July 2014
+  Copyright            : (C) 2014 by Martin Dobias
+  Email                : wonder dot sk at gmail dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaplayerlegend.h"
+
+#include "qgscolorramplegendnode.h"
+#include "qgsdiagramrenderer.h"
+#include "qgsiconutils.h"
+#include "qgsimagecache.h"
+#include "qgslayertree.h"
+#include "qgslayertreemodellegendnode.h"
+#include "qgsmeshlayer.h"
+#include "qgspluginlayer.h"
+#include "qgspointcloudlayer.h"
+#include "qgspointcloudrenderer.h"
+#include "qgsrasterlayer.h"
+#include "qgsrasterrenderer.h"
+#include "qgsrenderer.h"
+#include "qgsrulebasedlabeling.h"
+#include "qgssettingsentryimpl.h"
+#include "qgssettingsregistrycore.h"
+#include "qgssymbollayerutils.h"
+#include "qgsvectorlayer.h"
+#include "qgsvectorlayerlabeling.h"
+
+#include <QString>
+
+#include "moc_qgsmaplayerlegend.cpp"
+
+using namespace Qt::StringLiterals;
+
+QgsMapLayerLegend::QgsMapLayerLegend( QObject *parent )
+  : QObject( parent )
+{}
+
+void QgsMapLayerLegend::readXml( const QDomElement &elem, const QgsReadWriteContext & )
+{
+  mFlags = Qgis::MapLayerLegendFlags();
+  mFlags.setFlag( Qgis::MapLayerLegendFlag::ExcludeByDefault, elem.attribute( u"excludeByDefault"_s, u"0"_s ).toInt() == 1 );
+}
+
+QDomElement QgsMapLayerLegend::writeXml( QDomDocument &doc, const QgsReadWriteContext & ) const
+{
+  QDomElement elem = doc.createElement( u"legend"_s );
+  if ( mFlags.testFlag( Qgis::MapLayerLegendFlag::ExcludeByDefault ) )
+  {
+    elem.setAttribute( u"excludeByDefault"_s, u"1"_s );
+  }
+  return elem;
+}
+
+QgsMapLayerLegend *QgsMapLayerLegend::defaultVectorLegend( QgsVectorLayer *vl )
+{
+  return new QgsDefaultVectorLayerLegend( vl );
+}
+
+QgsMapLayerLegend *QgsMapLayerLegend::defaultRasterLegend( QgsRasterLayer *rl )
+{
+  return new QgsDefaultRasterLayerLegend( rl );
+}
+
+QgsMapLayerLegend *QgsMapLayerLegend::defaultMeshLegend( QgsMeshLayer *ml )
+{
+  return new QgsDefaultMeshLayerLegend( ml );
+}
+
+QgsMapLayerLegend *QgsMapLayerLegend::defaultPointCloudLegend( QgsPointCloudLayer *layer )
+{
+  return new QgsDefaultPointCloudLayerLegend( layer );
+}
+
+// -------------------------------------------------------------------------
+
+
+void QgsMapLayerLegendUtils::setLegendNodeOrder( QgsLayerTreeLayer *nodeLayer, const QList<int> &order )
+{
+  QStringList orderStr;
+  const auto constOrder = order;
+  for ( const int id : constOrder )
+    orderStr << QString::number( id );
+  const QString str = orderStr.isEmpty() ? u"empty"_s : orderStr.join( ','_L1 );
+
+  nodeLayer->setCustomProperty( u"legend/node-order"_s, str );
+}
+
+static int _originalLegendNodeCount( QgsLayerTreeLayer *nodeLayer )
+{
+  // this is not particularly efficient way of finding out number of legend nodes
+  const QList<QgsLayerTreeModelLegendNode *> lst = nodeLayer->layer()->legend()->createLayerTreeModelLegendNodes( nodeLayer );
+  const int numNodes = lst.count();
+  qDeleteAll( lst );
+  return numNodes;
+}
+
+static QList<int> _makeNodeOrder( QgsLayerTreeLayer *nodeLayer )
+{
+  if ( !nodeLayer->layer() || !nodeLayer->layer()->legend() )
+  {
+    QgsDebugError( u"Legend node order manipulation is invalid without existing legend"_s );
+    return QList<int>();
+  }
+
+  const int numNodes = _originalLegendNodeCount( nodeLayer );
+
+  QList<int> order;
+  order.reserve( numNodes );
+  for ( int i = 0; i < numNodes; ++i )
+    order << i;
+  return order;
+}
+
+QList<int> QgsMapLayerLegendUtils::legendNodeOrder( QgsLayerTreeLayer *nodeLayer )
+{
+  const QString orderStr = nodeLayer->customProperty( u"legend/node-order"_s ).toString();
+
+  if ( orderStr.isEmpty() )
+    return _makeNodeOrder( nodeLayer );
+
+  if ( orderStr == "empty"_L1 )
+    return QList<int>();
+
+  const int numNodes = _originalLegendNodeCount( nodeLayer );
+
+  QList<int> lst;
+  const auto constSplit = orderStr.split( ',' );
+  for ( const QString &item : constSplit )
+  {
+    bool ok;
+    const int id = item.toInt( &ok );
+    if ( !ok || id < 0 || id >= numNodes )
+      return _makeNodeOrder( nodeLayer );
+
+    lst << id;
+  }
+
+  return lst;
+}
+
+bool QgsMapLayerLegendUtils::hasLegendNodeOrder( QgsLayerTreeLayer *nodeLayer )
+{
+  return nodeLayer->customProperties().contains( u"legend/node-order"_s );
+}
+
+void QgsMapLayerLegendUtils::setLegendNodeUserLabel( QgsLayerTreeLayer *nodeLayer, int originalIndex, const QString &newLabel )
+{
+  nodeLayer->setCustomProperty( "legend/label-" + QString::number( originalIndex ), newLabel );
+}
+
+QString QgsMapLayerLegendUtils::legendNodeUserLabel( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  return nodeLayer->customProperty( "legend/label-" + QString::number( originalIndex ) ).toString();
+}
+
+bool QgsMapLayerLegendUtils::hasLegendNodeUserLabel( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  return nodeLayer->customProperties().contains( "legend/label-" + QString::number( originalIndex ) );
+}
+
+void QgsMapLayerLegendUtils::setLegendNodePatchShape( QgsLayerTreeLayer *nodeLayer, int originalIndex, const QgsLegendPatchShape &shape )
+{
+  QDomDocument patchDoc;
+  QDomElement patchElem = patchDoc.createElement( u"patch"_s );
+  shape.writeXml( patchElem, patchDoc, QgsReadWriteContext() );
+  patchDoc.appendChild( patchElem );
+  nodeLayer->setCustomProperty( "legend/patch-shape-" + QString::number( originalIndex ), patchDoc.toString() );
+}
+
+QgsLegendPatchShape QgsMapLayerLegendUtils::legendNodePatchShape( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  const QString patchDef = nodeLayer->customProperty( "legend/patch-shape-" + QString::number( originalIndex ) ).toString();
+  if ( patchDef.isEmpty() )
+    return QgsLegendPatchShape();
+
+  QDomDocument doc( u"patch"_s );
+  doc.setContent( patchDef );
+  QgsLegendPatchShape shape;
+  shape.readXml( doc.documentElement(), QgsReadWriteContext() );
+  return shape;
+}
+
+void QgsMapLayerLegendUtils::setLegendNodeSymbolSize( QgsLayerTreeLayer *nodeLayer, int originalIndex, QSizeF size )
+{
+  if ( size.isValid() )
+    nodeLayer->setCustomProperty( "legend/symbol-size-" + QString::number( originalIndex ), QgsSymbolLayerUtils::encodeSize( size ) );
+  else
+    nodeLayer->removeCustomProperty( "legend/symbol-size-" + QString::number( originalIndex ) );
+}
+
+QSizeF QgsMapLayerLegendUtils::legendNodeSymbolSize( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  const QString size = nodeLayer->customProperty( "legend/symbol-size-" + QString::number( originalIndex ) ).toString();
+  if ( size.isEmpty() )
+    return QSizeF();
+  else
+    return QgsSymbolLayerUtils::decodeSize( size );
+}
+
+void QgsMapLayerLegendUtils::setLegendNodeCustomSymbol( QgsLayerTreeLayer *nodeLayer, int originalIndex, const QgsSymbol *symbol )
+{
+  if ( symbol )
+  {
+    QDomDocument doc;
+    QgsReadWriteContext rwContext;
+    rwContext.setPathResolver( QgsProject::instance()->pathResolver() ); // skip-keyword-check
+    const QDomElement elem = QgsSymbolLayerUtils::saveSymbol( u"custom symbol"_s, symbol, doc, rwContext );
+    doc.appendChild( elem );
+    nodeLayer->setCustomProperty( "legend/custom-symbol-" + QString::number( originalIndex ), doc.toString() );
+  }
+  else
+    nodeLayer->removeCustomProperty( "legend/custom-symbol-" + QString::number( originalIndex ) );
+}
+
+std::unique_ptr< QgsSymbol > QgsMapLayerLegendUtils::legendNodeCustomSymbol( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  const QString symbolDef = nodeLayer->customProperty( "legend/custom-symbol-" + QString::number( originalIndex ) ).toString();
+  if ( symbolDef.isEmpty() )
+    return nullptr;
+
+  QDomDocument doc;
+  doc.setContent( symbolDef );
+  const QDomElement elem = doc.documentElement();
+
+  QgsReadWriteContext rwContext;
+  rwContext.setPathResolver( QgsProject::instance()->pathResolver() ); // skip-keyword-check
+
+  return QgsSymbolLayerUtils::loadSymbol( elem, rwContext );
+}
+
+void QgsMapLayerLegendUtils::setLegendNodeColorRampSettings( QgsLayerTreeLayer *nodeLayer, int originalIndex, const QgsColorRampLegendNodeSettings *settings )
+{
+  if ( settings )
+  {
+    QDomDocument doc;
+    QgsReadWriteContext rwContext;
+    rwContext.setPathResolver( QgsProject::instance()->pathResolver() ); // skip-keyword-check
+    QDomElement elem = doc.createElement( u"rampSettings"_s );
+    settings->writeXml( doc, elem, rwContext );
+    doc.appendChild( elem );
+    nodeLayer->setCustomProperty( "legend/custom-ramp-settings-" + QString::number( originalIndex ), doc.toString() );
+  }
+  else
+    nodeLayer->removeCustomProperty( "legend/custom-ramp-settings-" + QString::number( originalIndex ) );
+}
+
+QgsColorRampLegendNodeSettings *QgsMapLayerLegendUtils::legendNodeColorRampSettings( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  const QString settingsDef = nodeLayer->customProperty( "legend/custom-ramp-settings-" + QString::number( originalIndex ) ).toString();
+  if ( settingsDef.isEmpty() )
+    return nullptr;
+
+  QDomDocument doc;
+  doc.setContent( settingsDef );
+  const QDomElement elem = doc.documentElement();
+
+  QgsReadWriteContext rwContext;
+  rwContext.setPathResolver( QgsProject::instance()->pathResolver() ); // skip-keyword-check
+
+  QgsColorRampLegendNodeSettings settings;
+  settings.readXml( elem, rwContext );
+  return new QgsColorRampLegendNodeSettings( std::move( settings ) );
+}
+
+void QgsMapLayerLegendUtils::setLegendNodeColumnBreak( QgsLayerTreeLayer *nodeLayer, int originalIndex, bool columnBreakBeforeNode )
+{
+  if ( columnBreakBeforeNode )
+    nodeLayer->setCustomProperty( "legend/column-break-" + QString::number( originalIndex ), u"1"_s );
+  else
+    nodeLayer->removeCustomProperty( "legend/column-break-" + QString::number( originalIndex ) );
+}
+
+bool QgsMapLayerLegendUtils::legendNodeColumnBreak( QgsLayerTreeLayer *nodeLayer, int originalIndex )
+{
+  return nodeLayer->customProperty( "legend/column-break-" + QString::number( originalIndex ) ).toInt();
+}
+
+void QgsMapLayerLegendUtils::applyLayerNodeProperties( QgsLayerTreeLayer *nodeLayer, QList<QgsLayerTreeModelLegendNode *> &nodes )
+{
+  // handle user labels
+  int i = 0;
+  const auto constNodes = nodes;
+  for ( QgsLayerTreeModelLegendNode *legendNode : constNodes )
+  {
+    const QString userLabel = QgsMapLayerLegendUtils::legendNodeUserLabel( nodeLayer, i );
+    if ( !userLabel.isNull() )
+      legendNode->setUserLabel( userLabel );
+
+    if ( QgsSymbolLegendNode *symbolNode = dynamic_cast< QgsSymbolLegendNode * >( legendNode ) )
+    {
+      const QgsLegendPatchShape shape = QgsMapLayerLegendUtils::legendNodePatchShape( nodeLayer, i );
+      symbolNode->setPatchShape( shape );
+
+      symbolNode->setCustomSymbol( QgsMapLayerLegendUtils::legendNodeCustomSymbol( nodeLayer, i ).release() );
+    }
+    else if ( QgsColorRampLegendNode *colorRampNode = dynamic_cast< QgsColorRampLegendNode * >( legendNode ) )
+    {
+      const std::unique_ptr< QgsColorRampLegendNodeSettings > settings( QgsMapLayerLegendUtils::legendNodeColorRampSettings( nodeLayer, i ) );
+      if ( settings )
+      {
+        colorRampNode->setSettings( *settings );
+      }
+    }
+
+    const QSizeF userSize = QgsMapLayerLegendUtils::legendNodeSymbolSize( nodeLayer, i );
+    if ( userSize.isValid() )
+    {
+      legendNode->setUserPatchSize( userSize );
+    }
+
+    if ( legendNodeColumnBreak( nodeLayer, i ) )
+      legendNode->setColumnBreak( true );
+
+    i++;
+  }
+
+  // handle user order of nodes
+  if ( QgsMapLayerLegendUtils::hasLegendNodeOrder( nodeLayer ) )
+  {
+    const QList<int> order = QgsMapLayerLegendUtils::legendNodeOrder( nodeLayer );
+
+    QList<QgsLayerTreeModelLegendNode *> newOrder;
+    QSet<int> usedIndices;
+    const auto constOrder = order;
+    for ( const int idx : constOrder )
+    {
+      if ( usedIndices.contains( idx ) )
+      {
+        QgsDebugError( u"invalid node order. ignoring."_s );
+        return;
+      }
+
+      newOrder << nodes[idx];
+      usedIndices << idx;
+    }
+
+    // delete unused nodes
+    for ( int i = 0; i < nodes.count(); ++i )
+    {
+      if ( !usedIndices.contains( i ) )
+        delete nodes[i];
+    }
+
+    nodes = newOrder;
+  }
+}
+
+// -------------------------------------------------------------------------
+
+
+QgsDefaultVectorLayerLegend::QgsDefaultVectorLayerLegend( QgsVectorLayer *vl )
+  : mLayer( vl )
+{
+  connect( mLayer, &QgsMapLayer::rendererChanged, this, &QgsMapLayerLegend::itemsChanged );
+  connect( mLayer, &QgsMapLayer::nameChanged, this, &QgsMapLayerLegend::itemsChanged );
+  mTextOnSymbolTextFormat = QgsStyle::defaultStyle()->defaultTextFormat();
+}
+
+QList<QgsLayerTreeModelLegendNode *> QgsDefaultVectorLayerLegend::createLayerTreeModelLegendNodes( QgsLayerTreeLayer *nodeLayer )
+{
+  QList<QgsLayerTreeModelLegendNode *> nodes;
+  if ( !mLayer )
+    return nodes;
+
+  const QString placeholderImage = mLayer->legendPlaceholderImage();
+  if ( !placeholderImage.isEmpty() )
+  {
+    bool fitsInCache;
+    const QImage img = QgsApplication::imageCache()->pathAsImage( placeholderImage, QSize(), false, 1.0, fitsInCache );
+    nodes << new QgsImageLegendNode( nodeLayer, img );
+    return nodes;
+  }
+
+  QgsFeatureRenderer *r = mLayer->renderer();
+  if ( !r )
+    return nodes;
+
+  if ( nodeLayer->customProperty( u"showFeatureCount"_s, 0 ).toBool() )
+    mLayer->countSymbolFeatures();
+
+  if ( QgsSettingsRegistryCore::settingsLayerTreeShowLegendClassifiers->value() && !r->legendClassificationAttribute().isEmpty() )
+  {
+    nodes.append( new QgsSimpleLegendNode( nodeLayer, r->legendClassificationAttribute() ) );
+  }
+
+  const QList<QgsLayerTreeModelLegendNode *> rendererNodes = r->createLegendNodes( nodeLayer );
+  for ( QgsLayerTreeModelLegendNode *node : rendererNodes )
+  {
+    if ( QgsSymbolLegendNode *legendNode = qobject_cast< QgsSymbolLegendNode *>( node ) )
+    {
+      const QString ruleKey = legendNode->data( static_cast< int >( QgsLayerTreeModelLegendNode::CustomRole::RuleKey ) ).toString();
+      if ( mTextOnSymbolEnabled && mTextOnSymbolContent.contains( ruleKey ) )
+      {
+        legendNode->setTextOnSymbolLabel( mTextOnSymbolContent.value( ruleKey ) );
+        legendNode->setTextOnSymbolTextFormat( mTextOnSymbolTextFormat );
+      }
+    }
+    nodes << node;
+  }
+
+  if ( nodes.count() == 1 && nodes[0]->data( Qt::EditRole ).toString().isEmpty() && qobject_cast< QgsSymbolLegendNode * >( nodes[0] ) )
+    nodes[0]->setEmbeddedInParent( true );
+
+  if ( mLayer->diagramsEnabled() )
+  {
+    const auto constLegendItems = mLayer->diagramRenderer()->legendItems( nodeLayer );
+    for ( QgsLayerTreeModelLegendNode *i : constLegendItems )
+    {
+      nodes.append( i );
+    }
+  }
+
+  if ( mLayer->labelsEnabled() && mShowLabelLegend )
+  {
+    const QgsAbstractVectorLayerLabeling *labeling = mLayer->labeling();
+    if ( labeling )
+    {
+      const QStringList pList = labeling->subProviders();
+      for ( int i = 0; i < pList.size(); ++i )
+      {
+        const QgsPalLayerSettings s = labeling->settings( pList.at( i ) );
+        QString description;
+        const QgsRuleBasedLabeling *ruleBasedLabeling = dynamic_cast<const QgsRuleBasedLabeling *>( labeling );
+        if ( ruleBasedLabeling && ruleBasedLabeling->rootRule() )
+        {
+          const QgsRuleBasedLabeling::Rule *rule = ruleBasedLabeling->rootRule()->findRuleByKey( pList.at( i ) );
+          if ( rule )
+          {
+            description = rule->description();
+          }
+        }
+        QgsVectorLabelLegendNode *node = new QgsVectorLabelLegendNode( nodeLayer, s );
+        node->setUserLabel( description );
+        nodes.append( node );
+      }
+    }
+  }
+
+  return nodes;
+}
+
+void QgsDefaultVectorLayerLegend::readXml( const QDomElement &elem, const QgsReadWriteContext &context )
+{
+  QgsMapLayerLegend::readXml( elem, context );
+
+  mTextOnSymbolEnabled = false;
+  mTextOnSymbolTextFormat = QgsTextFormat();
+  mTextOnSymbolContent.clear();
+
+  mShowLabelLegend = elem.attribute( u"showLabelLegend"_s, u"0"_s ).compare( u"1"_s, Qt::CaseInsensitive ) == 0;
+
+  const QDomElement tosElem = elem.firstChildElement( u"text-on-symbol"_s );
+  if ( !tosElem.isNull() )
+  {
+    mTextOnSymbolEnabled = true;
+    const QDomElement tosFormatElem = tosElem.firstChildElement( u"text-style"_s );
+    mTextOnSymbolTextFormat.readXml( tosFormatElem, context );
+    const QDomElement tosContentElem = tosElem.firstChildElement( u"content"_s );
+    QDomElement tosContentItemElem = tosContentElem.firstChildElement( u"item"_s );
+    while ( !tosContentItemElem.isNull() )
+    {
+      mTextOnSymbolContent.insert( tosContentItemElem.attribute( u"key"_s ), tosContentItemElem.attribute( u"value"_s ) );
+      tosContentItemElem = tosContentItemElem.nextSiblingElement( u"item"_s );
+    }
+  }
+}
+
+QDomElement QgsDefaultVectorLayerLegend::writeXml( QDomDocument &doc, const QgsReadWriteContext &context ) const
+{
+  QDomElement elem = QgsMapLayerLegend::writeXml( doc, context );
+  elem.setAttribute( u"type"_s, u"default-vector"_s );
+  elem.setAttribute( u"showLabelLegend"_s, mShowLabelLegend );
+
+  if ( mTextOnSymbolEnabled )
+  {
+    QDomElement tosElem = doc.createElement( u"text-on-symbol"_s );
+    const QDomElement tosFormatElem = mTextOnSymbolTextFormat.writeXml( doc, context );
+    tosElem.appendChild( tosFormatElem );
+    QDomElement tosContentElem = doc.createElement( u"content"_s );
+    for ( auto it = mTextOnSymbolContent.constBegin(); it != mTextOnSymbolContent.constEnd(); ++it )
+    {
+      QDomElement tosContentItemElem = doc.createElement( u"item"_s );
+      tosContentItemElem.setAttribute( u"key"_s, it.key() );
+      tosContentItemElem.setAttribute( u"value"_s, it.value() );
+      tosContentElem.appendChild( tosContentItemElem );
+    }
+    tosElem.appendChild( tosContentElem );
+    elem.appendChild( tosElem );
+  }
+
+  return elem;
+}
+
+
+// -------------------------------------------------------------------------
+
+
+QgsDefaultRasterLayerLegend::QgsDefaultRasterLayerLegend( QgsRasterLayer *rl )
+  : mLayer( rl )
+{
+  connect( mLayer, &QgsMapLayer::rendererChanged, this, &QgsMapLayerLegend::itemsChanged );
+}
+
+QList<QgsLayerTreeModelLegendNode *> QgsDefaultRasterLayerLegend::createLayerTreeModelLegendNodes( QgsLayerTreeLayer *nodeLayer )
+{
+  QList<QgsLayerTreeModelLegendNode *> nodes;
+
+  // temporary solution for WMS. Ideally should be done with a delegate.
+  if ( mLayer->dataProvider() && mLayer->dataProvider()->supportsLegendGraphic() )
+  {
+    nodes << new QgsWmsLegendNode( nodeLayer );
+  }
+
+  const QString placeholderImage = mLayer->legendPlaceholderImage();
+  if ( !placeholderImage.isEmpty() )
+  {
+    bool fitsInCache;
+    const QImage img = QgsApplication::imageCache()->pathAsImage( placeholderImage, QSize(), false, 1.0, fitsInCache );
+    nodes << new QgsImageLegendNode( nodeLayer, img );
+  }
+  else if ( mLayer->renderer() )
+    nodes.append( mLayer->renderer()->createLegendNodes( nodeLayer ) );
+  return nodes;
+}
+
+// -------------------------------------------------------------------------
+
+QgsDefaultMeshLayerLegend::QgsDefaultMeshLayerLegend( QgsMeshLayer *ml )
+  : mLayer( ml )
+{
+  connect( mLayer, &QgsMapLayer::rendererChanged, this, &QgsMapLayerLegend::itemsChanged );
+}
+
+QList<QgsLayerTreeModelLegendNode *> QgsDefaultMeshLayerLegend::createLayerTreeModelLegendNodes( QgsLayerTreeLayer *nodeLayer )
+{
+  QList<QgsLayerTreeModelLegendNode *> nodes;
+
+  const QgsMeshRendererSettings rendererSettings = mLayer->rendererSettings();
+
+  const int indexScalar = rendererSettings.activeScalarDatasetGroup();
+  const int indexVector = rendererSettings.activeVectorDatasetGroup();
+
+  QString name;
+  if ( indexScalar > -1 && indexVector > -1 && indexScalar != indexVector )
+    name = QString( "%1 / %2" ).arg( mLayer->datasetGroupMetadata( indexScalar ).name(), mLayer->datasetGroupMetadata( indexVector ).name() );
+  else if ( indexScalar > -1 )
+    name = mLayer->datasetGroupMetadata( indexScalar ).name();
+  else if ( indexVector > -1 )
+    name = mLayer->datasetGroupMetadata( indexVector ).name();
+  else
+  {
+    // neither contours nor vectors get rendered - no legend needed
+    return nodes;
+  }
+
+  if ( indexScalar > -1 )
+  {
+    const QString scalarNameKey = u"scalarName"_s;
+    nodes << new QgsSimpleLegendNode( nodeLayer, mLayer->datasetGroupMetadata( indexScalar ).name(), QIcon(), nullptr, scalarNameKey );
+    const QgsMeshRendererScalarSettings settings = rendererSettings.scalarSettings( indexScalar );
+    const QgsColorRampShader shader = settings.colorRampShader();
+    switch ( shader.colorRampType() )
+    {
+      case Qgis::ShaderInterpolationMethod::Linear:
+        if ( !shader.legendSettings() || shader.legendSettings()->useContinuousLegend() )
+        {
+          // for interpolated shaders we use a ramp legend node
+          if ( !shader.colorRampItemList().isEmpty() )
+          {
+            nodes
+              << new QgsColorRampLegendNode( nodeLayer, shader.createColorRamp(), shader.legendSettings() ? *shader.legendSettings() : QgsColorRampLegendNodeSettings(), shader.minimumValue(), shader.maximumValue(), nullptr, u"scalarLegend"_s, scalarNameKey );
+          }
+          break;
+        }
+        [[fallthrough]];
+      case Qgis::ShaderInterpolationMethod::Discrete:
+      case Qgis::ShaderInterpolationMethod::Exact:
+      {
+        // for all others we use itemised lists
+        QgsLegendColorList items;
+        settings.colorRampShader().legendSymbologyItems( items );
+        for ( const QPair< QString, QColor > &item : items )
+        {
+          nodes << new QgsRasterSymbolLegendNode( nodeLayer, item.second, item.first, nullptr, false, u"scalarLegend"_s + QUuid::createUuid().toString(), scalarNameKey );
+        }
+        break;
+      }
+    }
+  }
+
+  if ( indexVector > -1 )
+  {
+    const QgsMeshRendererVectorSettings settings = rendererSettings.vectorSettings( indexVector );
+    const QString vectorNameKey = u"vectorName"_s;
+    switch ( settings.coloringMethod() )
+    {
+      case QgsInterpolatedLineColor::ColoringMethod::SingleColor:
+      {
+        const QColor arrowColor = settings.color();
+        const QIcon vectorIcon = QgsApplication::getThemeIcon( u"/propertyicons/meshvectors.svg"_s, arrowColor, arrowColor );
+        nodes << new QgsSimpleLegendNode( nodeLayer, mLayer->datasetGroupMetadata( indexVector ).name(), vectorIcon, nullptr, vectorNameKey );
+        break;
+      }
+      case QgsInterpolatedLineColor::ColoringMethod::ColorRamp:
+      {
+        const QIcon vectorIcon = QgsApplication::getThemeIcon( u"/propertyicons/meshvectors.svg"_s );
+        nodes << new QgsSimpleLegendNode( nodeLayer, mLayer->datasetGroupMetadata( indexVector ).name(), vectorIcon, nullptr, vectorNameKey );
+        const QgsColorRampShader shader = settings.colorRampShader();
+        switch ( shader.colorRampType() )
+        {
+          case Qgis::ShaderInterpolationMethod::Linear:
+            if ( !shader.legendSettings() || shader.legendSettings()->useContinuousLegend() )
+            {
+              // for interpolated shaders we use a ramp legend node
+              if ( !shader.colorRampItemList().isEmpty() )
+              {
+                nodes << new QgsColorRampLegendNode(
+                  nodeLayer,
+                  shader.createColorRamp(),
+                  shader.legendSettings() ? *shader.legendSettings() : QgsColorRampLegendNodeSettings(),
+                  shader.minimumValue(),
+                  shader.maximumValue(),
+                  nullptr,
+                  u"vectorLegend"_s,
+                  vectorNameKey
+                );
+              }
+              break;
+            }
+            [[fallthrough]];
+          case Qgis::ShaderInterpolationMethod::Discrete:
+          case Qgis::ShaderInterpolationMethod::Exact:
+          {
+            // for all others we use itemised lists
+            QgsLegendColorList items;
+            settings.colorRampShader().legendSymbologyItems( items );
+            for ( const QPair< QString, QColor > &item : items )
+            {
+              nodes << new QgsRasterSymbolLegendNode( nodeLayer, item.second, item.first, nullptr, false, u"vectorLegend"_s + QUuid::createUuid().toString(), vectorNameKey );
+            }
+            break;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return nodes;
+}
+
+//
+// QgsDefaultPointCloudLayerLegend
+//
+
+QgsDefaultPointCloudLayerLegend::QgsDefaultPointCloudLayerLegend( QgsPointCloudLayer *layer )
+  : mLayer( layer )
+{
+  connect( mLayer, &QgsMapLayer::rendererChanged, this, &QgsMapLayerLegend::itemsChanged );
+}
+
+QList<QgsLayerTreeModelLegendNode *> QgsDefaultPointCloudLayerLegend::createLayerTreeModelLegendNodes( QgsLayerTreeLayer *nodeLayer )
+{
+  QgsPointCloudRenderer *renderer = mLayer->renderer();
+  if ( !renderer )
+    return QList<QgsLayerTreeModelLegendNode *>();
+
+  return renderer->createLegendNodes( nodeLayer );
+}

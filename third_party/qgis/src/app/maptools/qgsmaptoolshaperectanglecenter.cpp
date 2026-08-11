@@ -1,0 +1,118 @@
+/***************************************************************************
+    qgsmaptoolshaperectanglecenter.cpp  -  map tool for adding rectangle
+    from center and a point
+    ---------------------
+    begin                : July 2017
+    copyright            : (C) 2017 by Loïc Bartoletti
+    email                : lituus at free dot fr
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaptoolshaperectanglecenter.h"
+
+#include <memory>
+
+#include "qgsapplication.h"
+#include "qgsgeometryrubberband.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptoolcapture.h"
+#include "qgspoint.h"
+#include "qgsquadrilateral.h"
+
+#include <QString>
+
+#include "moc_qgsmaptoolshaperectanglecenter.cpp"
+
+using namespace Qt::StringLiterals;
+
+const QString QgsMapToolShapeRectangleCenterMetadata::TOOL_ID = u"rectangle-from-center-and-a-point"_s;
+
+QString QgsMapToolShapeRectangleCenterMetadata::id() const
+{
+  return QgsMapToolShapeRectangleCenterMetadata::TOOL_ID;
+}
+
+QString QgsMapToolShapeRectangleCenterMetadata::name() const
+{
+  return QObject::tr( "Rectangle from center and a point" );
+}
+
+QIcon QgsMapToolShapeRectangleCenterMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"/mActionRectangleCenter.svg"_s );
+}
+
+QgsMapToolShapeAbstract::ShapeCategory QgsMapToolShapeRectangleCenterMetadata::category() const
+{
+  return QgsMapToolShapeAbstract::ShapeCategory::Rectangle;
+}
+
+QgsMapToolShapeAbstract *QgsMapToolShapeRectangleCenterMetadata::factory( QgsMapToolCapture *parentTool ) const
+{
+  return new QgsMapToolShapeRectangleCenter( parentTool );
+}
+
+bool QgsMapToolShapeRectangleCenter::cadCanvasReleaseEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( e->button() == Qt::LeftButton )
+  {
+    if ( mPoints.empty() )
+      mPoints.append( point );
+
+    if ( !mTempRubberBand )
+    {
+      Qgis::GeometryType type = mode == QgsMapToolCapture::CapturePolygon ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line;
+      mTempRubberBand = mParentTool->createGeometryRubberBand( type, true );
+      mTempRubberBand->show();
+    }
+  }
+  else if ( e->button() == Qt::RightButton )
+  {
+    if ( !mRectangle.isValid() )
+      return false;
+
+    mPoints.append( point );
+    addRectangleToParentTool();
+    return true;
+  }
+
+  return false;
+}
+
+void QgsMapToolShapeRectangleCenter::cadCanvasMoveEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  Q_UNUSED( mode )
+
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( mTempRubberBand )
+  {
+    switch ( mPoints.size() )
+    {
+      case 1:
+      {
+        const double dist = mPoints.at( 0 ).distance( point );
+        const double angle = mPoints.at( 0 ).azimuth( point );
+
+        mRectangle = QgsQuadrilateral::rectangleFromExtent( mPoints.at( 0 ).project( -dist, angle ), mPoints.at( 0 ).project( dist, angle ) );
+        const QgsGeometry newGeometry( mRectangle.toPolygon() );
+        if ( !newGeometry.isEmpty() )
+        {
+          mTempRubberBand->setGeometry( newGeometry.constGet()->clone() );
+          setTransientGeometry( newGeometry );
+        }
+      }
+      break;
+      default:
+        break;
+    }
+  }
+}

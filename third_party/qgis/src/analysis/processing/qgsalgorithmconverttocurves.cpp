@@ -1,0 +1,162 @@
+/***************************************************************************
+                         qgsalgorithmconverttocurves.cpp
+                         ---------------------
+    begin                : March 2018
+    copyright            : (C) 2018 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmconverttocurves.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsConvertToCurvesAlgorithm::name() const
+{
+  return u"converttocurves"_s;
+}
+
+QString QgsConvertToCurvesAlgorithm::displayName() const
+{
+  return QObject::tr( "Convert to curved geometries" );
+}
+
+QStringList QgsConvertToCurvesAlgorithm::tags() const
+{
+  return QObject::tr( "straight,segmentize,curves,curved,circular" ).split( ',' );
+}
+
+QString QgsConvertToCurvesAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsConvertToCurvesAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsConvertToCurvesAlgorithm::outputName() const
+{
+  return QObject::tr( "Curves" );
+}
+
+QString QgsConvertToCurvesAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm converts a geometry into its curved geometry equivalent.\n\n"
+    "Already curved geometries will be retained without change."
+  );
+}
+
+QString QgsConvertToCurvesAlgorithm::shortDescription() const
+{
+  return QObject::tr( "Converts a geometry into its curved geometry equivalent." );
+}
+
+QgsConvertToCurvesAlgorithm *QgsConvertToCurvesAlgorithm::createInstance() const
+{
+  return new QgsConvertToCurvesAlgorithm();
+}
+
+QList<int> QgsConvertToCurvesAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorLine ) << static_cast<int>( Qgis::ProcessingSourceType::VectorPolygon );
+}
+
+void QgsConvertToCurvesAlgorithm::initParameters( const QVariantMap & )
+{
+  auto tolerance = std::make_unique<QgsProcessingParameterNumber>( u"DISTANCE"_s, QObject::tr( "Maximum distance tolerance" ), Qgis::ProcessingNumberParameterType::Double, 0.000001, false, 0, 10000000.0 );
+  tolerance->setIsDynamic( true );
+  tolerance->setDynamicPropertyDefinition( QgsPropertyDefinition( u"DISTANCE"_s, QObject::tr( "Maximum distance tolerance" ), QgsPropertyDefinition::DoublePositive ) );
+  tolerance->setDynamicLayerParameterName( u"INPUT"_s );
+  addParameter( tolerance.release() );
+
+  auto angleTolerance = std::make_unique<QgsProcessingParameterNumber>( u"ANGLE"_s, QObject::tr( "Maximum angle tolerance" ), Qgis::ProcessingNumberParameterType::Double, 0.000001, false, 0, 45.0 );
+  angleTolerance->setIsDynamic( true );
+  angleTolerance->setDynamicPropertyDefinition( QgsPropertyDefinition( u"ANGLE"_s, QObject::tr( "Maximum angle tolerance" ), QgsPropertyDefinition::DoublePositive ) );
+  angleTolerance->setDynamicLayerParameterName( u"INPUT"_s );
+  addParameter( angleTolerance.release() );
+}
+
+bool QgsConvertToCurvesAlgorithm::prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  mTolerance = parameterAsDouble( parameters, u"DISTANCE"_s, context );
+  mDynamicTolerance = QgsProcessingParameters::isDynamic( parameters, u"DISTANCE"_s );
+  if ( mDynamicTolerance )
+    mToleranceProperty = parameters.value( u"DISTANCE"_s ).value<QgsProperty>();
+
+  mAngleTolerance = parameterAsDouble( parameters, u"ANGLE"_s, context );
+  mDynamicAngleTolerance = QgsProcessingParameters::isDynamic( parameters, u"ANGLE"_s );
+  if ( mDynamicAngleTolerance )
+    mAngleToleranceProperty = parameters.value( u"ANGLE"_s ).value<QgsProperty>();
+
+  return true;
+}
+
+QgsFeatureList QgsConvertToCurvesAlgorithm::processFeature( const QgsFeature &feature, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  QgsFeature f = feature;
+  if ( f.hasGeometry() )
+  {
+    const QgsGeometry geometry = f.geometry();
+    double tolerance = mTolerance;
+    if ( mDynamicTolerance )
+      tolerance = mToleranceProperty.valueAsDouble( context.expressionContext(), tolerance );
+    double angleTolerance = mAngleTolerance;
+    if ( mDynamicAngleTolerance )
+      angleTolerance = mAngleToleranceProperty.valueAsDouble( context.expressionContext(), angleTolerance );
+
+    f.setGeometry( geometry.convertToCurves( tolerance, angleTolerance * M_PI / 180.0 ) );
+  }
+  return QgsFeatureList() << f;
+}
+
+Qgis::WkbType QgsConvertToCurvesAlgorithm::outputWkbType( Qgis::WkbType inputWkbType ) const
+{
+  if ( QgsWkbTypes::isCurvedType( inputWkbType ) )
+    return inputWkbType;
+
+  Qgis::WkbType outType = Qgis::WkbType::Unknown;
+  switch ( QgsWkbTypes::geometryType( inputWkbType ) )
+  {
+    case Qgis::GeometryType::Point:
+    case Qgis::GeometryType::Null:
+    case Qgis::GeometryType::Unknown:
+      return inputWkbType;
+
+    case Qgis::GeometryType::Line:
+      outType = Qgis::WkbType::CompoundCurve;
+      break;
+
+    case Qgis::GeometryType::Polygon:
+      outType = Qgis::WkbType::CurvePolygon;
+      break;
+  }
+
+  if ( QgsWkbTypes::isMultiType( inputWkbType ) )
+    outType = QgsWkbTypes::multiType( outType );
+
+  if ( QgsWkbTypes::hasZ( inputWkbType ) )
+    outType = QgsWkbTypes::addZ( outType );
+
+  if ( QgsWkbTypes::hasM( inputWkbType ) )
+    outType = QgsWkbTypes::addM( outType );
+
+  return outType;
+}
+
+
+///@endcond

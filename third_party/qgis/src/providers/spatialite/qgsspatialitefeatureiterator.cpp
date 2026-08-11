@@ -1,0 +1,711 @@
+/***************************************************************************
+    qgsspatialitefeatureiterator.cpp
+    ---------------------
+    begin                : Juli 2012
+    copyright            : (C) 2012 by Martin Dobias
+    email                : wonder dot sk at gmail dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+#include "qgsspatialitefeatureiterator.h"
+
+#include "qgsdbquerylog_p.h"
+#include "qgsexception.h"
+#include "qgsgeometry.h"
+#include "qgsgeometryengine.h"
+#include "qgsjsonutils.h"
+#include "qgslogger.h"
+#include "qgsmessagelog.h"
+#include "qgsspatialiteconnection.h"
+#include "qgsspatialiteconnpool.h"
+#include "qgsspatialiteexpressioncompiler.h"
+#include "qgsspatialiteprovider.h"
+#include "qgssqliteexpressioncompiler.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+QgsSpatiaLiteFeatureIterator::QgsSpatiaLiteFeatureIterator( QgsSpatiaLiteFeatureSource *source, bool ownSource, const QgsFeatureRequest &request )
+  : QgsAbstractFeatureIteratorFromSource<QgsSpatiaLiteFeatureSource>( source, ownSource, request )
+{
+  mSqliteHandle = source->transactionHandle();
+  if ( !mSqliteHandle )
+  {
+    mHandle = QgsSpatiaLiteConnPool::instance()->acquireConnection( mSource->mSqlitePath, request.timeout(), request.requestMayBeNested() );
+    if ( mHandle )
+    {
+      mSqliteHandle = mHandle->handle();
+    }
+  }
+
+  mFetchGeometry = !mSource->mGeometryColumn.isNull() && !( mRequest.flags() & Qgis::FeatureRequestFlag::NoGeometry );
+  mHasPrimaryKey = !mSource->mPrimaryKey.isEmpty();
+  mRowNumber = 0;
+
+  QStringList whereClauses;
+  bool useFallbackWhereClause = false;
+  QString fallbackWhereClause;
+  QString whereClause;
+
+  mTransform = mRequest.calculateTransform( mSource->mCrs );
+  try
+  {
+    mFilterRect = filterRectToSourceCrs( mTransform );
+  }
+  catch ( QgsCsException & )
+  {
+    // can't reproject mFilterRect
+    close();
+    return;
+  }
+
+  // prepare spatial filter geometries for optimal speed
+  switch ( mRequest.spatialFilterType() )
+  {
+    case Qgis::SpatialFilterType::NoFilter:
+    case Qgis::SpatialFilterType::BoundingBox:
+      break;
+
+    case Qgis::SpatialFilterType::DistanceWithin:
+      if ( !mRequest.referenceGeometry().isEmpty() )
+      {
+        mDistanceWithinGeom = mRequest.referenceGeometry();
+        mDistanceWithinEngine.reset( QgsGeometry::createGeometryEngine( mDistanceWithinGeom.constGet() ) );
+        mDistanceWithinEngine->prepareGeometry();
+        mFetchGeometry = true;
+      }
+      break;
+  }
+
+  //beware - limitAtProvider needs to be set to false if the request cannot be completely handled
+  //by the provider (e.g., utilising QGIS expression filters)
+  bool limitAtProvider = ( mRequest.limit() >= 0 ) && mRequest.spatialFilterType() != Qgis::SpatialFilterType::DistanceWithin;
+
+  if ( !mFilterRect.isNull() && !mSource->mGeometryColumn.isNull() )
+  {
+    // some kind of MBR spatial filtering is required
+    whereClause = whereClauseRect();
+    if ( !whereClause.isEmpty() )
+    {
+      whereClauses.append( whereClause );
+    }
+  }
+
+  if ( !mSource->mSubsetString.isEmpty() )
+  {
+    whereClause = "( " + mSource->mSubsetString + ')';
+    if ( !whereClause.isEmpty() )
+    {
+      whereClauses.append( whereClause );
+    }
+  }
+
+  if ( request.filterType() == Qgis::FeatureRequestFilterType::Fid )
+  {
+    whereClause = whereClauseFid();
+    if ( !whereClause.isEmpty() )
+    {
+      whereClauses.append( whereClause );
+    }
+  }
+  else if ( request.filterType() == Qgis::FeatureRequestFilterType::Fids )
+  {
+    if ( request.filterFids().isEmpty() )
+    {
+      close();
+    }
+    else
+    {
+      whereClauses.append( whereClauseFids() );
+    }
+  }
+  //IMPORTANT - this MUST be the last clause added!
+  else if ( request.filterType() == Qgis::FeatureRequestFilterType::Expression )
+  {
+    // ensure that all attributes required for expression filter are being fetched
+    if ( mRequest.flags() & Qgis::FeatureRequestFlag::SubsetOfAttributes && request.filterType() == Qgis::FeatureRequestFilterType::Expression )
+    {
+      QgsAttributeList attrs = request.subsetOfAttributes();
+      //ensure that all fields required for filter expressions are prepared
+      QSet<int> attributeIndexes = request.filterExpression()->referencedAttributeIndexes( mSource->mFields );
+      attributeIndexes += qgis::listToSet( attrs );
+      mRequest.setSubsetOfAttributes( qgis::setToList( attributeIndexes ) );
+    }
+    if ( request.filterExpression()->needsGeometry() )
+    {
+      mFetchGeometry = true;
+    }
+
+    QgsSpatialiteExpressionCompiler compiler = QgsSpatialiteExpressionCompiler( source->mFields, request.flags() & Qgis::FeatureRequestFlag::IgnoreStaticNodesDuringExpressionCompilation );
+    QgsSqlExpressionCompiler::Result result = compiler.compile( request.filterExpression() );
+    if ( result == QgsSqlExpressionCompiler::Complete || result == QgsSqlExpressionCompiler::Partial )
+    {
+      whereClause = compiler.result();
+      if ( !whereClause.isEmpty() )
+      {
+        useFallbackWhereClause = true;
+        fallbackWhereClause = whereClauses.join( " AND "_L1 );
+        whereClauses.append( whereClause );
+        //if only partial success when compiling expression, we need to double-check results using QGIS' expressions
+        mExpressionCompiled = ( result == QgsSqlExpressionCompiler::Complete );
+        mCompileStatus = ( mExpressionCompiled ? Compiled : PartiallyCompiled );
+      }
+    }
+    if ( result != QgsSqlExpressionCompiler::Complete )
+    {
+      //can't apply limit at provider side as we need to check all results using QGIS expressions
+      limitAtProvider = false;
+    }
+  }
+
+  if ( !mClosed )
+  {
+    whereClause = whereClauses.join( " AND "_L1 );
+
+    // Setup the order by
+    QStringList orderByParts;
+
+    mOrderByCompiled = true;
+
+    const auto constOrderBy = request.orderBy();
+    for ( const QgsFeatureRequest::OrderByClause &clause : constOrderBy )
+    {
+      QgsSQLiteExpressionCompiler compiler = QgsSQLiteExpressionCompiler( source->mFields, request.flags() & Qgis::FeatureRequestFlag::IgnoreStaticNodesDuringExpressionCompilation );
+      QgsExpression expression = clause.expression();
+      if ( compiler.compile( &expression ) == QgsSqlExpressionCompiler::Complete )
+      {
+        QString part;
+        part = compiler.result();
+
+        if ( clause.nullsFirst() )
+          orderByParts << u"%1 IS NOT NULL"_s.arg( part );
+        else
+          orderByParts << u"%1 IS NULL"_s.arg( part );
+
+        part += clause.ascending() ? " COLLATE NOCASE ASC" : " COLLATE NOCASE DESC";
+        orderByParts << part;
+      }
+      else
+      {
+        // Bail out on first non-complete compilation.
+        // Most important clauses at the beginning of the list
+        // will still be sent and used to pre-sort so the local
+        // CPU can use its cycles for fine-tuning.
+        mOrderByCompiled = false;
+        break;
+      }
+    }
+
+    if ( !mOrderByCompiled )
+      limitAtProvider = false;
+
+    // also need attributes required by order by
+    if ( !mOrderByCompiled && mRequest.flags() & Qgis::FeatureRequestFlag::SubsetOfAttributes && !mRequest.orderBy().isEmpty() )
+    {
+      QSet<int> attributeIndexes;
+      const auto usedAttributeIndices = mRequest.orderBy().usedAttributeIndices( mSource->mFields );
+      for ( int attrIdx : usedAttributeIndices )
+      {
+        attributeIndexes << attrIdx;
+      }
+      attributeIndexes += qgis::listToSet( mRequest.subsetOfAttributes() );
+      mRequest.setSubsetOfAttributes( qgis::setToList( attributeIndexes ) );
+    }
+
+    // preparing the SQL statement
+    bool success = prepareStatement( whereClause, limitAtProvider ? mRequest.limit() : -1, orderByParts.join( ','_L1 ) );
+    if ( !success && useFallbackWhereClause )
+    {
+      //try with the fallback where clause, e.g., for cases when using compiled expression failed to prepare
+      mExpressionCompiled = false;
+      success = prepareStatement( fallbackWhereClause, -1, orderByParts.join( ','_L1 ) );
+      mCompileFailed = true;
+    }
+
+    if ( !success )
+    {
+      // some error occurred
+      sqliteStatement = nullptr;
+      close();
+    }
+    else
+    {
+      mQueryLogWrapper = std::make_unique<QgsDatabaseQueryLogWrapper>( mLastSql, mSource->mSqlitePath, u"spatialite"_s, u"QgsSpatiaLiteFeatureIterator"_s, QGS_QUERY_LOG_ORIGIN );
+    }
+  }
+}
+
+QgsSpatiaLiteFeatureIterator::~QgsSpatiaLiteFeatureIterator()
+{
+  close();
+}
+
+
+bool QgsSpatiaLiteFeatureIterator::fetchFeature( QgsFeature &feature )
+{
+  feature.setValid( false );
+
+  if ( mClosed )
+    return false;
+
+  if ( !sqliteStatement )
+  {
+    QgsDebugError( u"Invalid current SQLite statement"_s );
+    close();
+    return false;
+  }
+
+  bool foundMatchingFeature = false;
+  while ( !foundMatchingFeature )
+  {
+    if ( !getFeature( sqliteStatement, feature ) )
+    {
+      sqlite3_finalize( sqliteStatement );
+      sqliteStatement = nullptr;
+      close();
+      return false;
+    }
+
+    foundMatchingFeature = true;
+    feature.setValid( true );
+    geometryToDestinationCrs( feature, mTransform );
+
+    if ( mDistanceWithinEngine && mDistanceWithinEngine->distance( feature.geometry().constGet() ) > mRequest.distanceWithin() )
+    {
+      foundMatchingFeature = false;
+      feature.setValid( false );
+    }
+  }
+  return true;
+}
+
+bool QgsSpatiaLiteFeatureIterator::nextFeatureFilterExpression( QgsFeature &f )
+{
+  if ( !mExpressionCompiled )
+    return QgsAbstractFeatureIterator::nextFeatureFilterExpression( f );
+  else
+    return fetchFeature( f );
+}
+
+
+bool QgsSpatiaLiteFeatureIterator::rewind()
+{
+  if ( mClosed )
+    return false;
+
+  if ( sqlite3_reset( sqliteStatement ) == SQLITE_OK )
+  {
+    mRowNumber = 0;
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+bool QgsSpatiaLiteFeatureIterator::close()
+{
+  if ( mClosed )
+    return false;
+
+  iteratorClosed();
+
+  mClosed = true;
+
+  if ( !mSqliteHandle )
+  {
+    return false;
+  }
+
+  if ( sqliteStatement )
+  {
+    sqlite3_finalize( sqliteStatement );
+    sqliteStatement = nullptr;
+  }
+
+  if ( mHandle )
+  {
+    QgsSpatiaLiteConnPool::instance()->releaseConnection( mHandle );
+    mHandle = nullptr;
+  }
+
+  mSqliteHandle = nullptr;
+  mClosed = true;
+  return true;
+}
+
+
+////
+
+
+bool QgsSpatiaLiteFeatureIterator::prepareStatement( const QString &whereClause, long limit, const QString &orderBy )
+{
+  if ( !mSqliteHandle )
+    return false;
+
+  try
+  {
+    QString sql = u"SELECT %1"_s.arg( mHasPrimaryKey ? quotedPrimaryKey() : u"0"_s );
+    int colIdx = 1; // column 0 is primary key
+
+    if ( mRequest.flags() & Qgis::FeatureRequestFlag::SubsetOfAttributes )
+    {
+      QgsAttributeList fetchAttributes = mRequest.subsetOfAttributes();
+      for ( QgsAttributeList::const_iterator it = fetchAttributes.constBegin(); it != fetchAttributes.constEnd(); ++it )
+      {
+        sql += ',' + fieldName( mSource->mFields.field( *it ) );
+        colIdx++;
+      }
+    }
+    else
+    {
+      // fetch all attributes
+      for ( int idx = 0; idx < mSource->mFields.count(); ++idx )
+      {
+        sql += ',' + fieldName( mSource->mFields.at( idx ) );
+        colIdx++;
+      }
+    }
+
+    if ( mFetchGeometry )
+    {
+      sql += u", AsBinary(%1)"_s.arg( QgsSqliteUtils::quotedIdentifier( mSource->mGeometryColumn ) );
+      mGeomColIdx = colIdx;
+    }
+    sql += u" FROM %1"_s.arg( mSource->mQuery );
+
+    if ( !whereClause.isEmpty() )
+      sql += u" WHERE %1"_s.arg( whereClause );
+
+    if ( !orderBy.isEmpty() )
+      sql += u" ORDER BY %1"_s.arg( orderBy );
+
+    if ( limit >= 0 )
+      sql += u" LIMIT %1"_s.arg( limit );
+
+    QgsDebugMsgLevel( sql, 4 );
+
+    if ( sqlite3_prepare_v2( mSqliteHandle, sql.toUtf8().constData(), -1, &sqliteStatement, nullptr ) != SQLITE_OK )
+    {
+      // some error occurred
+      QgsMessageLog::logMessage( QObject::tr( "SQLite error: %2\nSQL: %1" ).arg( sql, sqlite3_errmsg( mSqliteHandle ) ), QObject::tr( "SpatiaLite" ) );
+      return false;
+    }
+    mLastSql = sql;
+  }
+  catch ( QgsSpatiaLiteProvider::SLFieldNotFound )
+  {
+    rewind();
+    return false;
+  }
+
+  return true;
+}
+
+QString QgsSpatiaLiteFeatureIterator::quotedPrimaryKey()
+{
+  return mSource->mPrimaryKey.isEmpty() ? u"ROWID"_s : QgsSqliteUtils::quotedIdentifier( mSource->mPrimaryKey );
+}
+
+QString QgsSpatiaLiteFeatureIterator::whereClauseFid()
+{
+  return u"%1=%2"_s.arg( quotedPrimaryKey() ).arg( mRequest.filterFid() );
+}
+
+QString QgsSpatiaLiteFeatureIterator::whereClauseFids()
+{
+  if ( mRequest.filterFids().isEmpty() )
+    return QString();
+
+  QString expr = u"%1 IN ("_s.arg( quotedPrimaryKey() ), delim;
+  const auto constFilterFids = mRequest.filterFids();
+  for ( const QgsFeatureId featureId : constFilterFids )
+  {
+    expr += delim + QString::number( featureId );
+    delim = ',';
+  }
+  expr += ')';
+  return expr;
+}
+
+QString QgsSpatiaLiteFeatureIterator::whereClauseRect()
+{
+  QString whereClause;
+
+  bool requiresGeom = false;
+  if ( mRequest.flags() & Qgis::FeatureRequestFlag::ExactIntersect )
+  {
+    // we are requested to evaluate a true INTERSECT relationship
+    whereClause += u"Intersects(%1, BuildMbr(%2)) AND "_s.arg( QgsSqliteUtils::quotedIdentifier( mSource->mGeometryColumn ), mbr( mFilterRect ) );
+    requiresGeom = true;
+  }
+  if ( mSource->mVShapeBased )
+  {
+    // handling a VirtualShape layer
+    whereClause += u"%MbrIntersects(%1, BuildMbr(%2))"_s.arg( QgsSqliteUtils::quotedIdentifier( mSource->mGeometryColumn ), mbr( mFilterRect ) );
+    requiresGeom = true;
+  }
+  else if ( mFilterRect.isFinite() )
+  {
+    if ( mSource->mSpatialIndexRTree )
+    {
+      // using the RTree spatial index
+      QString mbrFilter = u"xmin <= %1 AND "_s.arg( qgsDoubleToString( mFilterRect.xMaximum() ) );
+      mbrFilter += u"xmax >= %1 AND "_s.arg( qgsDoubleToString( mFilterRect.xMinimum() ) );
+      mbrFilter += u"ymin <= %1 AND "_s.arg( qgsDoubleToString( mFilterRect.yMaximum() ) );
+      mbrFilter += u"ymax >= %1"_s.arg( qgsDoubleToString( mFilterRect.yMinimum() ) );
+      QString idxName = u"idx_%1_%2"_s.arg( mSource->mIndexTable, mSource->mIndexGeometry );
+      whereClause += u"%1 IN (SELECT pkid FROM %2 WHERE %3)"_s.arg( mSource->mViewBased ? quotedPrimaryKey() : u"ROWID"_s, QgsSqliteUtils::quotedIdentifier( idxName ), mbrFilter );
+    }
+    else if ( mSource->mSpatialIndexMbrCache )
+    {
+      // using the MbrCache spatial index
+      QString idxName = u"cache_%1_%2"_s.arg( mSource->mIndexTable, mSource->mIndexGeometry );
+      whereClause
+        += u"%1 IN (SELECT rowid FROM %2 WHERE mbr = FilterMbrIntersects(%3))"_s.arg( mSource->mViewBased ? quotedPrimaryKey() : u"ROWID"_s, QgsSqliteUtils::quotedIdentifier( idxName ), mbr( mFilterRect ) );
+    }
+    else
+    {
+      // using simple MBR filtering
+      whereClause += u"MbrIntersects(%1, BuildMbr(%2))"_s.arg( QgsSqliteUtils::quotedIdentifier( mSource->mGeometryColumn ), mbr( mFilterRect ) );
+    }
+    requiresGeom = true;
+  }
+  else
+  {
+    whereClause = '1';
+  }
+
+  if ( requiresGeom )
+    whereClause += u" AND %1 IS NOT NULL"_s.arg( QgsSqliteUtils::quotedIdentifier( mSource->mGeometryColumn ) );
+  return whereClause;
+}
+
+
+QString QgsSpatiaLiteFeatureIterator::mbr( const QgsRectangle &rect )
+{
+  return u"%1, %2, %3, %4"_s.arg( qgsDoubleToString( rect.xMinimum() ), qgsDoubleToString( rect.yMinimum() ), qgsDoubleToString( rect.xMaximum() ), qgsDoubleToString( rect.yMaximum() ) );
+}
+
+
+QString QgsSpatiaLiteFeatureIterator::fieldName( const QgsField &fld )
+{
+  QString fieldname = QgsSqliteUtils::quotedIdentifier( fld.name() );
+  const QString type = fld.typeName().toLower();
+  if ( type.contains( "geometry"_L1 ) || type.contains( "point"_L1 ) || type.contains( "line"_L1 ) || type.contains( "polygon"_L1 ) )
+  {
+    fieldname = u"AsText(%1)"_s.arg( fieldname );
+  }
+  return fieldname;
+}
+
+
+bool QgsSpatiaLiteFeatureIterator::getFeature( sqlite3_stmt *stmt, QgsFeature &feature )
+{
+  bool subsetAttributes = mRequest.flags() & Qgis::FeatureRequestFlag::SubsetOfAttributes;
+
+  int ret = sqlite3_step( stmt );
+  if ( ret == SQLITE_DONE )
+  {
+    // there are no more rows to fetch
+    return false;
+  }
+  if ( ret != SQLITE_ROW )
+  {
+    // some unexpected error occurred
+    QgsMessageLog::logMessage( QObject::tr( "SQLite error getting feature: %1" ).arg( QString::fromUtf8( sqlite3_errmsg( mSqliteHandle ) ) ), QObject::tr( "SpatiaLite" ) );
+    return false;
+  }
+
+  // one valid row has been fetched from the result set
+  if ( !mFetchGeometry )
+  {
+    // no geometry was required
+    feature.clearGeometry();
+  }
+
+  feature.initAttributes( mSource->mFields.count() );
+  feature.setFields( mSource->mFields ); // allow name-based attribute lookups
+
+  int ic;
+  int n_columns = sqlite3_column_count( stmt );
+  for ( ic = 0; ic < n_columns; ic++ )
+  {
+    if ( ic == 0 )
+    {
+      if ( mHasPrimaryKey && sqlite3_column_type( stmt, ic ) == SQLITE_INTEGER )
+      {
+        // first column always contains the ROWID (or the primary key)
+        QgsFeatureId fid = sqlite3_column_int64( stmt, ic );
+        QgsDebugMsgLevel( u"fid=%1"_s.arg( fid ), 3 );
+        feature.setId( fid );
+      }
+      else
+      {
+        QgsDebugMsgLevel( u"Primary key is not an integer field: setting autoincrement fid"_s, 3 );
+        // autoincrement a row number
+        mRowNumber++;
+        feature.setId( mRowNumber );
+      }
+    }
+    else if ( mFetchGeometry && ic == mGeomColIdx )
+    {
+      getFeatureGeometry( stmt, ic, feature );
+    }
+    else
+    {
+      if ( subsetAttributes )
+      {
+        if ( ic <= mRequest.subsetOfAttributes().size() )
+        {
+          const int attrIndex = mRequest.subsetOfAttributes().at( ic - 1 );
+          const QgsField field = mSource->mFields.at( attrIndex );
+          feature.setAttribute( attrIndex, getFeatureAttribute( stmt, ic, field.type(), field.subType() ) );
+        }
+      }
+      else
+      {
+        const int attrIndex = ic - 1;
+        const QgsField field = mSource->mFields.at( attrIndex );
+        feature.setAttribute( attrIndex, getFeatureAttribute( stmt, ic, field.type(), field.subType() ) );
+      }
+    }
+  }
+
+  return true;
+}
+
+QVariant QgsSpatiaLiteFeatureIterator::getFeatureAttribute( sqlite3_stmt *stmt, int ic, QMetaType::Type type, QMetaType::Type subType )
+{
+  if ( sqlite3_column_type( stmt, ic ) == SQLITE_INTEGER )
+  {
+    if ( type == QMetaType::Type::Int )
+    {
+      // INTEGER value
+      return sqlite3_column_int( stmt, ic );
+    }
+    else
+    {
+      // INTEGER value
+      return ( qint64 ) sqlite3_column_int64( stmt, ic );
+    }
+  }
+
+  if ( sqlite3_column_type( stmt, ic ) == SQLITE_FLOAT )
+  {
+    // DOUBLE value
+    return sqlite3_column_double( stmt, ic );
+  }
+
+  if ( sqlite3_column_type( stmt, ic ) == SQLITE_BLOB )
+  {
+    // BLOB value
+    int blob_size = sqlite3_column_bytes( stmt, ic );
+    const char *blob = static_cast<const char *>( sqlite3_column_blob( stmt, ic ) );
+    return QByteArray( blob, blob_size );
+  }
+
+  if ( sqlite3_column_type( stmt, ic ) == SQLITE_TEXT )
+  {
+    // TEXT value
+    const QString txt = QString::fromUtf8( ( const char * ) sqlite3_column_text( stmt, ic ) );
+    if ( type == QMetaType::Type::QVariantList || type == QMetaType::Type::QStringList )
+    {
+      // assume arrays are stored as JSON
+      QVariant result = QVariant( QgsJsonUtils::parseArray( txt, subType ) );
+      if ( !result.convert( static_cast<int>( type ) ) )
+      {
+        QgsDebugMsgLevel( u"Could not convert JSON value to requested QVariant type"_s.arg( txt ), 3 );
+      }
+      return result;
+    }
+    else if ( type == QMetaType::Type::QDateTime )
+    {
+      // first use the GDAL date format
+      QDateTime dt = QDateTime::fromString( txt, Qt::ISODate );
+      if ( !dt.isValid() )
+      {
+        // if that fails, try SQLite's default date format
+        dt = QDateTime::fromString( txt, u"yyyy-MM-dd hh:mm:ss"_s );
+      }
+
+      return dt;
+    }
+    else if ( type == QMetaType::Type::QDate )
+    {
+      return QDate::fromString( txt, u"yyyy-MM-dd"_s );
+    }
+    return txt;
+  }
+
+  // assuming NULL
+  return QgsVariantUtils::createNullVariant( type );
+}
+
+void QgsSpatiaLiteFeatureIterator::getFeatureGeometry( sqlite3_stmt *stmt, int ic, QgsFeature &feature )
+{
+  if ( sqlite3_column_type( stmt, ic ) == SQLITE_BLOB )
+  {
+    unsigned char *featureGeom = nullptr;
+    int geom_size = 0;
+    const void *blob = sqlite3_column_blob( stmt, ic );
+    int blob_size = sqlite3_column_bytes( stmt, ic );
+    QgsSpatiaLiteProvider::convertToGeosWKB( ( const unsigned char * ) blob, blob_size, &featureGeom, &geom_size );
+    if ( featureGeom )
+    {
+      QgsGeometry g;
+      g.fromWkb( featureGeom, geom_size );
+      feature.setGeometry( g );
+    }
+    else
+      feature.clearGeometry();
+  }
+  else
+  {
+    // NULL geometry
+    feature.clearGeometry();
+  }
+}
+
+bool QgsSpatiaLiteFeatureIterator::prepareOrderBy( const QList<QgsFeatureRequest::OrderByClause> &orderBys )
+{
+  Q_UNUSED( orderBys )
+  // Preparation has already been done in the constructor, so we just communicate the result
+  return mOrderByCompiled;
+}
+
+
+QgsSpatiaLiteFeatureSource::QgsSpatiaLiteFeatureSource( const QgsSpatiaLiteProvider *p )
+  : mGeometryColumn( p->mGeometryColumn )
+  , mSubsetString( p->mSubsetString )
+  , mFields( p->mAttributeFields )
+  , mQuery( p->mQuery )
+  , mIsQuery( p->mIsQuery )
+  , mViewBased( p->mViewBased )
+  , mVShapeBased( p->mVShapeBased )
+  , mIndexTable( p->mIndexTable )
+  , mIndexGeometry( p->mIndexGeometry )
+  , mPrimaryKey( p->mPrimaryKey )
+  , mSpatialIndexRTree( p->mSpatialIndexRTree )
+  , mSpatialIndexMbrCache( p->mSpatialIndexMbrCache )
+  , mSqlitePath( p->mSqlitePath )
+  , mCrs( p->crs() )
+  , mTransactionHandle( p->transaction() ? p->sqliteHandle() : nullptr )
+{}
+
+QgsFeatureIterator QgsSpatiaLiteFeatureSource::getFeatures( const QgsFeatureRequest &request )
+{
+  return QgsFeatureIterator( new QgsSpatiaLiteFeatureIterator( this, false, request ) );
+}
+
+sqlite3 *QgsSpatiaLiteFeatureSource::transactionHandle()
+{
+  return mTransactionHandle;
+}

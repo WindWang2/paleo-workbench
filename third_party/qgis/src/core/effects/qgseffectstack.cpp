@@ -1,0 +1,305 @@
+/***************************************************************************
+                            qgseffectstack.cpp
+                             -------------------
+    begin                : December 2014
+    copyright            : (C) 2014 Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgseffectstack.h"
+
+#include "qgsapplication.h"
+#include "qgspainteffectregistry.h"
+#include "qgspainting.h"
+#include "qgsrendercontext.h"
+
+#include <QPicture>
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+QgsEffectStack::QgsEffectStack( const QgsEffectStack &other )
+  : QgsPaintEffect( other )
+{
+  //deep copy
+  for ( int i = 0; i < other.count(); ++i )
+  {
+    appendEffect( other.effect( i )->clone() );
+  }
+}
+
+QgsEffectStack::QgsEffectStack( QgsEffectStack &&other )
+  : QgsPaintEffect( other )
+{
+  std::swap( mEffectList, other.mEffectList );
+}
+
+QgsEffectStack::QgsEffectStack( const QgsPaintEffect &effect )
+{
+  appendEffect( effect.clone() );
+}
+
+QgsEffectStack::~QgsEffectStack()
+{
+  clearStack();
+}
+
+Qgis::PaintEffectFlags QgsEffectStack::flags() const
+{
+  Qgis::PaintEffectFlags res;
+  for ( const QgsPaintEffect *effect : mEffectList )
+  {
+    if ( effect->flags().testFlag( Qgis::PaintEffectFlag::RequiresRasterization ) )
+    {
+      res.setFlag( Qgis::PaintEffectFlag::RequiresRasterization );
+    }
+  }
+  return res;
+}
+
+QgsEffectStack &QgsEffectStack::operator=( const QgsEffectStack &rhs )
+{
+  if ( &rhs == this )
+    return *this;
+
+  //deep copy
+  clearStack();
+  for ( int i = 0; i < rhs.count(); ++i )
+  {
+    appendEffect( rhs.effect( i )->clone() );
+  }
+  mEnabled = rhs.enabled();
+  return *this;
+}
+
+QgsEffectStack &QgsEffectStack::operator=( QgsEffectStack &&other )
+{
+  if ( &other == this )
+    return *this;
+
+  std::swap( mEffectList, other.mEffectList );
+  mEnabled = other.enabled();
+  return *this;
+}
+
+QgsPaintEffect *QgsEffectStack::create( const QVariantMap &map )
+{
+  QgsEffectStack *effect = new QgsEffectStack();
+  effect->readProperties( map );
+  return effect;
+}
+
+void QgsEffectStack::draw( QgsRenderContext &context )
+{
+  QPainter *destPainter = context.painter();
+
+  if ( context.rasterizedRenderingPolicy() == Qgis::RasterizedRenderingPolicy::ForceVector )
+  {
+    // can we render this stack if we're forcing vectors?
+    bool requiresRasterization = false;
+    for ( const QgsPaintEffect *effect : std::as_const( mEffectList ) )
+    {
+      if ( effect->enabled() && effect->flags().testFlag( Qgis::PaintEffectFlag::RequiresRasterization ) )
+      {
+        requiresRasterization = true;
+        break;
+      }
+    }
+
+    if ( requiresRasterization )
+    {
+      //just draw unmodified source, we can't render this effect stack when forcing vectors
+      drawSource( *context.painter() );
+    }
+    return;
+  }
+
+  //first, we build up a list of rendered effects
+  //we do this moving backwards through the stack, so that each effect's results
+  //becomes the source of the previous effect
+  const QPicture sourcePic = source();
+  const QPicture *currentPic = &sourcePic;
+  std::vector< QPicture > results;
+  results.reserve( mEffectList.count() );
+  for ( int i = mEffectList.count() - 1; i >= 0; --i )
+  {
+    QgsPaintEffect *effect = mEffectList.at( i );
+    if ( !effect->enabled() )
+    {
+      continue;
+    }
+
+    const QPicture *pic = nullptr;
+    if ( effect->type() == "drawSource"_L1 )
+    {
+      //draw source is always the original source, regardless of previous effect results
+      pic = &sourcePic;
+    }
+    else
+    {
+      pic = currentPic;
+    }
+
+    QPicture resultPic;
+    QPainter p( &resultPic );
+    context.setPainter( &p );
+    //effect stack has it's own handling of the QPicture DPI issue, so
+    //we disable QgsPaintEffect's internal workaround
+    effect->requiresQPainterDpiFix = false;
+    effect->render( *pic, context );
+    effect->requiresQPainterDpiFix = true;
+    p.end();
+
+    results.emplace_back( std::move( resultPic ) );
+    if ( mEffectList.at( i )->drawMode() != QgsPaintEffect::Render )
+    {
+      currentPic = &results.back();
+    }
+  }
+
+  context.setPainter( destPainter );
+  //then, we render all the results in the opposite order
+  for ( int i = 0; i < mEffectList.count(); ++i )
+  {
+    if ( !mEffectList[i]->enabled() )
+    {
+      continue;
+    }
+
+    if ( mEffectList.at( i )->drawMode() != QgsPaintEffect::Modifier )
+    {
+      QgsPainting::drawPicture( context.painter(), QPointF( 0, 0 ), results.back() );
+    }
+    results.pop_back();
+  }
+}
+
+QgsEffectStack *QgsEffectStack::clone() const
+{
+  return new QgsEffectStack( *this );
+}
+
+bool QgsEffectStack::saveProperties( QDomDocument &doc, QDomElement &element ) const
+{
+  //effect stack needs to save all child effects
+  if ( element.isNull() )
+  {
+    return false;
+  }
+
+  QDomElement effectElement = doc.createElement( u"effect"_s );
+  effectElement.setAttribute( u"type"_s, type() );
+  effectElement.setAttribute( u"enabled"_s, mEnabled );
+
+  bool ok = true;
+  for ( QgsPaintEffect *effect : mEffectList )
+  {
+    if ( effect )
+      ok = ok && effect->saveProperties( doc, effectElement );
+  }
+
+  element.appendChild( effectElement );
+  return ok;
+}
+
+bool QgsEffectStack::readProperties( const QDomElement &element )
+{
+  if ( element.isNull() )
+  {
+    return false;
+  }
+
+  mEnabled = ( element.attribute( u"enabled"_s, u"0"_s ) != "0"_L1 );
+
+  clearStack();
+
+  //restore all child effects
+  const QDomNodeList childNodes = element.childNodes();
+  for ( int i = 0; i < childNodes.size(); ++i )
+  {
+    const QDomElement childElement = childNodes.at( i ).toElement();
+    QgsPaintEffect *effect = QgsApplication::paintEffectRegistry()->createEffect( childElement );
+    if ( effect )
+      mEffectList << effect;
+  }
+  return true;
+}
+
+QVariantMap QgsEffectStack::properties() const
+{
+  QVariantMap props;
+  return props;
+}
+
+void QgsEffectStack::readProperties( const QVariantMap &props )
+{
+  Q_UNUSED( props )
+}
+
+void QgsEffectStack::clearStack()
+{
+  qDeleteAll( mEffectList );
+  mEffectList.clear();
+}
+
+void QgsEffectStack::appendEffect( QgsPaintEffect *effect )
+{
+  mEffectList.append( effect );
+}
+
+bool QgsEffectStack::insertEffect( const int index, QgsPaintEffect *effect )
+{
+  if ( index < 0 || index > mEffectList.count() )
+    return false;
+  if ( !effect )
+    return false;
+
+  mEffectList.insert( index, effect );
+  return true;
+}
+
+bool QgsEffectStack::changeEffect( const int index, QgsPaintEffect *effect )
+{
+  if ( index < 0 || index >= mEffectList.count() )
+    return false;
+  if ( !effect )
+    return false;
+
+  delete mEffectList.at( index );
+  mEffectList[index] = effect;
+  return true;
+}
+
+QgsPaintEffect *QgsEffectStack::takeEffect( const int index )
+{
+  if ( index < 0 || index >= mEffectList.count() )
+    return nullptr;
+
+  return mEffectList.takeAt( index );
+}
+
+QList<QgsPaintEffect *> *QgsEffectStack::effectList()
+{
+  return &mEffectList;
+}
+
+QgsPaintEffect *QgsEffectStack::effect( int index ) const
+{
+  if ( index >= 0 && index < mEffectList.count() )
+  {
+    return mEffectList.at( index );
+  }
+  else
+  {
+    return nullptr;
+  }
+}

@@ -1,0 +1,256 @@
+/***************************************************************************
+                        qgsmulticurve.cpp
+  -------------------------------------------------------------------
+Date                 : 28 Oct 2014
+Copyright            : (C) 2014 by Marco Hugentobler
+email                : marco.hugentobler at sourcepole dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmulticurve.h"
+
+#include <memory>
+#include <nlohmann/json.hpp>
+
+#include "qgsapplication.h"
+#include "qgscircularstring.h"
+#include "qgscompoundcurve.h"
+#include "qgscurve.h"
+#include "qgsgeometryutils.h"
+#include "qgslinestring.h"
+#include "qgsmultipoint.h"
+
+#include <QJsonObject>
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+QgsMultiCurve::QgsMultiCurve()
+{
+  mWkbType = Qgis::WkbType::MultiCurve;
+}
+
+QgsCurve *QgsMultiCurve::curveN( int index )
+{
+  return qgsgeometry_cast< QgsCurve * >( geometryN( index ) );
+}
+
+const QgsCurve *QgsMultiCurve::curveN( int index ) const
+{
+  return qgsgeometry_cast< const QgsCurve * >( geometryN( index ) );
+}
+
+QString QgsMultiCurve::geometryType() const
+{
+  return u"MultiCurve"_s;
+}
+
+QgsMultiCurve *QgsMultiCurve::createEmptyWithSameType() const
+{
+  auto result = std::make_unique< QgsMultiCurve >();
+  result->mWkbType = mWkbType;
+  return result.release();
+}
+
+QgsMultiCurve *QgsMultiCurve::clone() const
+{
+  return new QgsMultiCurve( *this );
+}
+
+void QgsMultiCurve::clear()
+{
+  QgsGeometryCollection::clear();
+  mWkbType = Qgis::WkbType::MultiCurve;
+}
+
+QgsMultiCurve *QgsMultiCurve::toCurveType() const
+{
+  return clone();
+}
+
+bool QgsMultiCurve::fromWkt( const QString &wkt )
+{
+  return fromCollectionWkt( wkt, { Qgis::WkbType::LineString, Qgis::WkbType::CircularString, Qgis::WkbType::CompoundCurve }, u"LineString"_s );
+}
+
+QDomElement QgsMultiCurve::asGml2( QDomDocument &doc, int precision, const QString &ns, const AxisOrder axisOrder ) const
+{
+  // GML2 does not support curves
+  QDomElement elemMultiLineString = doc.createElementNS( ns, u"MultiLineString"_s );
+
+  if ( isEmpty() )
+    return elemMultiLineString;
+
+  for ( const QgsAbstractGeometry *geom : mGeometries )
+  {
+    if ( qgsgeometry_cast<const QgsCurve *>( geom ) )
+    {
+      std::unique_ptr< QgsLineString > lineString( static_cast<const QgsCurve *>( geom )->curveToLine() );
+
+      QDomElement elemLineStringMember = doc.createElementNS( ns, u"lineStringMember"_s );
+      elemLineStringMember.appendChild( lineString->asGml2( doc, precision, ns, axisOrder ) );
+      elemMultiLineString.appendChild( elemLineStringMember );
+    }
+  }
+
+  return elemMultiLineString;
+}
+
+QDomElement QgsMultiCurve::asGml3( QDomDocument &doc, int precision, const QString &ns, const AxisOrder axisOrder ) const
+{
+  QDomElement elemMultiCurve = doc.createElementNS( ns, u"MultiCurve"_s );
+
+  if ( isEmpty() )
+    return elemMultiCurve;
+
+  for ( const QgsAbstractGeometry *geom : mGeometries )
+  {
+    if ( qgsgeometry_cast<const QgsCurve *>( geom ) )
+    {
+      const QgsCurve *curve = static_cast<const QgsCurve *>( geom );
+
+      QDomElement elemCurveMember = doc.createElementNS( ns, u"curveMember"_s );
+      elemCurveMember.appendChild( curve->asGml3( doc, precision, ns, axisOrder ) );
+      elemMultiCurve.appendChild( elemCurveMember );
+    }
+  }
+
+  return elemMultiCurve;
+}
+
+json QgsMultiCurve::asJsonObject( int precision ) const
+{
+  json coordinates( json::array() );
+  for ( const QgsAbstractGeometry *geom : std::as_const( mGeometries ) )
+  {
+    if ( qgsgeometry_cast<const QgsCurve *>( geom ) )
+    {
+      std::unique_ptr< QgsLineString > lineString( static_cast<const QgsCurve *>( geom )->curveToLine() );
+      QgsPointSequence pts;
+      lineString->points( pts );
+      coordinates.push_back( QgsGeometryUtils::pointsToJson( pts, precision ) );
+    }
+  }
+  return { { "type", "MultiLineString" }, { "coordinates", coordinates } };
+}
+
+bool QgsMultiCurve::addGeometry( QgsAbstractGeometry *g )
+{
+  if ( !qgsgeometry_cast<QgsCurve *>( g ) )
+  {
+    delete g;
+    return false;
+  }
+
+  if ( mGeometries.empty() )
+  {
+    setZMTypeFromSubGeometry( g, Qgis::WkbType::MultiCurve );
+  }
+  if ( is3D() && !g->is3D() )
+    g->addZValue();
+  else if ( !is3D() && g->is3D() )
+    g->dropZValue();
+  if ( isMeasure() && !g->isMeasure() )
+    g->addMValue();
+  else if ( !isMeasure() && g->isMeasure() )
+    g->dropMValue();
+
+  return QgsGeometryCollection::addGeometry( g );
+}
+
+bool QgsMultiCurve::addGeometries( const QVector<QgsAbstractGeometry *> &geometries )
+{
+  for ( QgsAbstractGeometry *g : geometries )
+  {
+    if ( !qgsgeometry_cast<QgsCurve *>( g ) )
+    {
+      qDeleteAll( geometries );
+      return false;
+    }
+  }
+
+  if ( mGeometries.empty() && !geometries.empty() )
+  {
+    setZMTypeFromSubGeometry( geometries.at( 0 ), Qgis::WkbType::MultiCurve );
+  }
+  mGeometries.reserve( mGeometries.size() + geometries.size() );
+  for ( QgsAbstractGeometry *g : geometries )
+  {
+    if ( is3D() && !g->is3D() )
+      g->addZValue();
+    else if ( !is3D() && g->is3D() )
+      g->dropZValue();
+    if ( isMeasure() && !g->isMeasure() )
+      g->addMValue();
+    else if ( !isMeasure() && g->isMeasure() )
+      g->dropMValue();
+    mGeometries.append( g );
+  }
+
+  clearCache();
+  return true;
+}
+
+bool QgsMultiCurve::insertGeometry( QgsAbstractGeometry *g, int index )
+{
+  if ( !g || !qgsgeometry_cast<QgsCurve *>( g ) )
+  {
+    delete g;
+    return false;
+  }
+
+  return QgsGeometryCollection::insertGeometry( g, index );
+}
+
+QgsMultiCurve *QgsMultiCurve::simplifyByDistance( double tolerance ) const
+{
+  auto res = std::make_unique< QgsMultiCurve >();
+  res->reserve( mGeometries.size() );
+  for ( int i = 0; i < mGeometries.size(); ++i )
+  {
+    res->addGeometry( mGeometries.at( i )->simplifyByDistance( tolerance ) );
+  }
+  return res.release();
+}
+
+QgsMultiCurve *QgsMultiCurve::reversed() const
+{
+  QgsMultiCurve *reversedMultiCurve = new QgsMultiCurve();
+  reversedMultiCurve->reserve( mGeometries.size() );
+  for ( const QgsAbstractGeometry *geom : mGeometries )
+  {
+    if ( qgsgeometry_cast<const QgsCurve *>( geom ) )
+    {
+      reversedMultiCurve->addGeometry( static_cast<const QgsCurve *>( geom )->reversed() );
+    }
+  }
+  return reversedMultiCurve;
+}
+
+QgsAbstractGeometry *QgsMultiCurve::boundary() const
+{
+  auto multiPoint = std::make_unique<QgsMultiPoint>();
+  multiPoint->reserve( mGeometries.size() * 2 );
+  for ( int i = 0; i < mGeometries.size(); ++i )
+  {
+    if ( QgsCurve *curve = qgsgeometry_cast<QgsCurve *>( mGeometries.at( i ) ) )
+    {
+      if ( !curve->isClosed() )
+      {
+        multiPoint->addGeometry( new QgsPoint( curve->startPoint() ) );
+        multiPoint->addGeometry( new QgsPoint( curve->endPoint() ) );
+      }
+    }
+  }
+  if ( multiPoint->numGeometries() == 0 )
+  {
+    return nullptr;
+  }
+  return multiPoint.release();
+}

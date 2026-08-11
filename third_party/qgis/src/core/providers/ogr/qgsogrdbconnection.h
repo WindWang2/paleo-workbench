@@ -1,0 +1,82 @@
+/***************************************************************************
+    qgsogrdbconnection.h  -  QgsOgrDbConnection
+                             -------------------
+    begin                : August 2017
+    copyright            : (C) 2017 by Alessandro Pasotti
+    email                : apasotti at boundlessgeo dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSGOGRDBSCONNECTION_H
+#define QGSGOGRDBSCONNECTION_H
+
+#include "qgis_sip.h"
+#include "qgsdatasourceuri.h"
+#include "qgssettingsentryimpl.h"
+#include "qgssettingstree.h"
+#include "qgssettingstreenode.h"
+
+#include <QString>
+#include <QStringList>
+
+#define SIP_NO_FILE
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+/*!
+ * \brief  Generic OGR DB Connections management
+ */
+class CORE_EXPORT QgsOgrDbConnection : public QObject
+{
+    Q_OBJECT
+
+  public:
+    static inline QgsSettingsTreeNode *sTreeOgrConnections = QgsSettingsTree::sTreeConnections->createChildNode( u"ogr"_s );
+    static inline QgsSettingsTreeNamedListNode *sTreeOgrDriverConnections = sTreeOgrConnections->createNamedListNode( u"driver"_s );
+    static inline QgsSettingsTreeNamedListNode *sTreeOgrConnectionItems = sTreeOgrDriverConnections->createNamedListNode( u"connection"_s, Qgis::SettingsTreeNodeOption::NamedListSelectedItemSetting );
+
+    static const QgsSettingsEntryString *settingsOgrConnectionPath;
+
+    //! Constructor
+    explicit QgsOgrDbConnection( const QString &connName, const QString &settingsKey );
+
+    static const QStringList connectionList( const QString &driverName = u"GPKG"_s );
+    static void deleteConnection( const QString &connName );
+    static QString selectedConnection( const QString &driverName );
+    static void setSelectedConnection( const QString &connName, const QString &settingsKey );
+
+  public:
+    /**
+     * Returns the uri
+     * \see QgsDataSourceUri
+     */
+    QgsDataSourceUri uri();
+    //! Returns the path
+    QString path() const { return mPath; }
+    //! Returns the connection name
+    QString name() const { return mConnName; }
+    //! Sets the \a path for the connection
+    void setPath( const QString &path );
+    //! Store the connection data in the settings
+    void save();
+    //! Returns true if the DB supports QGIS project storage
+    bool allowProjectsInDatabase();
+
+  private:
+    QString mConnName;
+    QString mPath;
+    QString mSettingsKey;
+};
+
+///@endcond
+#endif // QGSGOGRDBSCONNECTION_H

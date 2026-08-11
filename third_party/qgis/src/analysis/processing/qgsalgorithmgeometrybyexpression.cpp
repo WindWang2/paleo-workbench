@@ -1,0 +1,179 @@
+/***************************************************************************
+                         qgsalgorithmgeometrybyexpression.cpp
+                         ------------------------
+    begin                : November 2019
+    copyright            : (C) 2019 by Alexander Bruy
+    email                : alexander dot bruy at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmgeometrybyexpression.h"
+
+#include "qgsvariantutils.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsGeometryByExpressionAlgorithm::name() const
+{
+  return u"geometrybyexpression"_s;
+}
+
+QString QgsGeometryByExpressionAlgorithm::displayName() const
+{
+  return QObject::tr( "Geometry by expression" );
+}
+
+QStringList QgsGeometryByExpressionAlgorithm::tags() const
+{
+  return QObject::tr( "geometry,expression,create,modify,update" ).split( ',' );
+}
+
+QString QgsGeometryByExpressionAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsGeometryByExpressionAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsGeometryByExpressionAlgorithm::outputName() const
+{
+  return QObject::tr( "Modified geometry" );
+}
+
+QString QgsGeometryByExpressionAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm updates existing geometries (or creates new geometries) for input "
+    "features by use of a QGIS expression. This allows complex geometry modifications "
+    "which can utilize all the flexibility of the QGIS expression engine to manipulate "
+    "and create geometries for output features.\n\n"
+    "For help with QGIS expression functions, see the inbuilt help for specific functions "
+    "which is available in the expression builder."
+  );
+}
+
+QString QgsGeometryByExpressionAlgorithm::shortDescription() const
+{
+  return QObject::tr(
+    "Updates existing geometries (or creates new geometries) for input "
+    "features by use of a QGIS expression."
+  );
+}
+
+QgsGeometryByExpressionAlgorithm *QgsGeometryByExpressionAlgorithm::createInstance() const
+{
+  return new QgsGeometryByExpressionAlgorithm();
+}
+
+QList<int> QgsGeometryByExpressionAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::Vector );
+}
+
+Qgis::WkbType QgsGeometryByExpressionAlgorithm::outputWkbType( Qgis::WkbType ) const
+{
+  return mWkbType;
+}
+
+Qgis::ProcessingFeatureSourceFlags QgsGeometryByExpressionAlgorithm::sourceFlags() const
+{
+  return Qgis::ProcessingFeatureSourceFlag::SkipGeometryValidityChecks;
+}
+
+void QgsGeometryByExpressionAlgorithm::initParameters( const QVariantMap & )
+{
+  addParameter(
+    new QgsProcessingParameterEnum( u"OUTPUT_GEOMETRY"_s, QObject::tr( "Output geometry type" ), QStringList() << QObject::tr( "Polygon" ) << QObject::tr( "Line" ) << QObject::tr( "Point" ), false, 0 )
+  );
+  addParameter( new QgsProcessingParameterBoolean( u"WITH_Z"_s, QObject::tr( "Output geometry has z dimension" ), false ) );
+  addParameter( new QgsProcessingParameterBoolean( u"WITH_M"_s, QObject::tr( "Output geometry has m values" ), false ) );
+  addParameter( new QgsProcessingParameterExpression( u"EXPRESSION"_s, QObject::tr( "Geometry expression" ), u"@geometry"_s, u"INPUT"_s ) );
+}
+
+bool QgsGeometryByExpressionAlgorithm::prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback )
+{
+  const int geometryType = parameterAsInt( parameters, u"OUTPUT_GEOMETRY"_s, context );
+  switch ( geometryType )
+  {
+    case 0:
+      mWkbType = Qgis::WkbType::Polygon;
+      break;
+    case 1:
+      mWkbType = Qgis::WkbType::LineString;
+      break;
+    case 2:
+      mWkbType = Qgis::WkbType::Point;
+      break;
+  }
+
+  if ( parameterAsBoolean( parameters, u"WITH_Z"_s, context ) )
+  {
+    mWkbType = QgsWkbTypes::addZ( mWkbType );
+  }
+  if ( parameterAsBoolean( parameters, u"WITH_M"_s, context ) )
+  {
+    mWkbType = QgsWkbTypes::addM( mWkbType );
+  }
+
+  mExpression = QgsExpression( parameterAsString( parameters, u"EXPRESSION"_s, context ) );
+  if ( mExpression.hasParserError() )
+  {
+    feedback->reportError( mExpression.parserErrorString() );
+    return false;
+  }
+
+  return true;
+}
+
+QgsFeatureList QgsGeometryByExpressionAlgorithm::processFeature( const QgsFeature &f, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  if ( !mExpressionPrepared )
+  {
+    mExpression.prepare( &context.expressionContext() );
+    mExpressionPrepared = true;
+  }
+
+  QgsFeature feature = f;
+  const QVariant value = mExpression.evaluate( &context.expressionContext() );
+
+  if ( mExpression.hasEvalError() )
+  {
+    throw QgsProcessingException( QObject::tr( "Evaluation error: %1" ).arg( mExpression.evalErrorString() ) );
+  }
+
+  if ( QgsVariantUtils::isNull( value ) )
+  {
+    feature.setGeometry( QgsGeometry() );
+  }
+  else
+  {
+    if ( value.userType() == qMetaTypeId<QgsGeometry>() )
+    {
+      const QgsGeometry geom = value.value<QgsGeometry>();
+      feature.setGeometry( geom );
+    }
+    else
+    {
+      throw QgsProcessingException( QObject::tr( "%1 is not a geometry" ).arg( value.toString() ) );
+    }
+  }
+
+  return QgsFeatureList() << feature;
+}
+
+///@endcond

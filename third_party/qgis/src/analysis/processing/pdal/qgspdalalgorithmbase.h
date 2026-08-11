@@ -1,0 +1,148 @@
+/***************************************************************************
+                         qgspdalalgorithmbase.h
+                         ---------------------
+    begin                : February 2023
+    copyright            : (C) 2023 by Alexander Bruy
+    email                : alexander dot bruy at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSPDALALGORITHMBASE_H
+#define QGSPDALALGORITHMBASE_H
+
+
+#include "qgis_sip.h"
+#include "qgsprocessingalgorithm.h"
+
+#define SIP_NO_FILE
+
+///@cond PRIVATE
+
+/**
+ * Base class for PDAL algorithms.
+ */
+class QgsPdalAlgorithmBase : public QgsProcessingAlgorithm
+{
+  public:
+    /**
+     * Builds a command line string to run required pdal_wrench tool.
+     */
+    virtual QStringList createArgumentLists( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback );
+
+  protected:
+    void setOutputValue( const QString &name, const QVariant &value );
+
+    void enableElevationPropertiesPostProcessor( bool enable );
+
+    /**
+     * Creates common advanced parameters, such as expression and rectangle filters
+     */
+    void createCommonParameters();
+
+    /**
+     * Creates VPC output format advanced parameter.
+     *
+     * \since QGIS 4.0
+     */
+    void createVpcOutputFormatParameter();
+
+    /**
+     * Evaluates common advanced parameters and adds them to the pdal_wrench
+     * command line.
+     */
+    void applyCommonParameters( QStringList &arguments, QgsCoordinateReferenceSystem crs, const QVariantMap &parameters, QgsProcessingContext &context );
+
+    /**
+     * Adds "--threads"parameter to the pdal_wrench command line.
+     */
+    void applyThreadsParameter( QStringList &arguments, QgsProcessingContext &context );
+
+    /**
+     * Adds "--vpc-output-format" parameter to the pdal_wrench command line if the \a outputFilename is a VPC file.
+     * \since QGIS 4.0
+     */
+    void applyVpcOutputFormatParameter( const QString &outputFilename, QStringList &arguments, const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback );
+
+    /**
+     * "Fixes" output file name by changing suffix to .vpc if input file
+     * is a VPC and output is a temporary output.
+     *
+     * This is necessary as pdal_wrench at the moment can create only VPC
+     * output if input file is a VPC. We automatically adjust output file
+     * extension for temporary outputs to provide better UX. For normal outputs
+     * user will see a error if output file is not a VPC.
+     */
+    QString fixOutputFileName( const QString &inputFileName, const QString &outputFileName, QgsProcessingContext &context );
+
+    /**
+     * Checks that output file has correct format (LAS/LAZ) throws an exception
+     * if this is not the case.
+     *
+     * This check is needed because most of the pdal_wrench tools don't support
+     * writing COPC as they are being run in the streaming mode.
+     *
+     * Also checks that output file is not a VPC file when input is not a VPC.
+     */
+    void checkOutputFormat( const QString &inputFileName, const QString &outputFileName );
+
+    /**
+     * Returns path to the pdal_wrench executable binary.
+     */
+    QString wrenchExecutableBinary() const;
+
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+
+    /**
+     * Returns name of index copc file for given \a filename of point cloud.
+     *
+     * \param filename name of the original dataset
+     *
+     * \since QGIS 3.44
+     */
+    static QString copcIndexFile( const QString &filename );
+
+    /**
+     * Override that prefers copc.laz index file as datasource for faster processing (if the index file exists) otherwise uses original layer.
+     *
+     * \since QGIS 3.44
+     */
+    QgsPointCloudLayer *parameterAsPointCloudLayer( const QVariantMap &parameters, const QString &name, QgsProcessingContext &context, QgsProcessing::LayerOptionsFlags flags ) const;
+
+    /**
+     * Returns whether a file \a name has a virtual point cloud extension
+     *
+     * \since QGIS 4.2
+     */
+    static bool isVpcFileName( const QString &name );
+
+  protected:
+    /**
+     * Runs pdal_wrench process with given \a processArgs command line arguments. Can communicate using \a feedback.
+     *
+     * \since QGIS 4.0
+     */
+    void runWrenchProcess( const QStringList &processArgs, QgsProcessingFeedback *feedback );
+
+    /**
+     * Builds QVariantMap of outputs from algorithm.
+     *
+     * \since QGIS 4.0
+     */
+    QVariantMap getOutputs( const QVariantMap &parameters, QgsProcessingContext &context );
+
+  private:
+    QMap<QString, QVariant> mOutputValues;
+    bool mEnableElevationProperties = false;
+};
+
+///@endcond PRIVATE
+
+#endif // QGSPDALALGORITHMBASE_H

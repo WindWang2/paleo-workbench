@@ -1,0 +1,50 @@
+/***************************************************************************
+      qgsogritemguiprovider.h
+      -------------------
+    begin                : June, 2019
+    copyright            : (C) 2019 by Peter Petrik
+    email                : zilolv at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSOGRITEMGUIPROVIDER_H
+#define QGSOGRITEMGUIPROVIDER_H
+
+#include "qgis_sip.h"
+#include "qgsdataitemguiprovider.h"
+
+#include <QObject>
+#include <QString>
+
+#define SIP_NO_FILE
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+class QgsOgrItemGuiProvider : public QObject, public QgsDataItemGuiProvider
+{
+    Q_OBJECT
+
+  public:
+    QgsOgrItemGuiProvider() = default;
+
+    QString name() override { return u"ogr_items"_s; }
+
+    void populateContextMenu( QgsDataItem *item, QMenu *menu, const QList<QgsDataItem *> &selectedItems, QgsDataItemGuiContext context ) override;
+
+  protected slots:
+    void onDeleteLayer( QgsDataItemGuiContext context );
+    void deleteCollection( QgsDataItemGuiContext context );
+};
+
+///@endcond
+#endif // QGSOGRITEMGUIPROVIDER_H

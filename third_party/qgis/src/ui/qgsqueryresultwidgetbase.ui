@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>QgsQueryResultWidgetBase</class>
+ <widget class="QWidget" name="QgsQueryResultWidgetBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>662</width>
+    <height>471</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string notr="true">Dialog</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <layout class="QVBoxLayout" name="verticalLayout_2">
+     <property name="spacing">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QToolBar" name="mToolBar">
+       <addaction name="mActionOpenQuery"/>
+       <addaction name="mActionSaveQuery"/>
+       <addaction name="mActionSaveQueryAs"/>
+       <addaction name="separator"/>
+       <addaction name="mActionCut"/>
+       <addaction name="mActionCopy"/>
+       <addaction name="mActionPaste"/>
+       <addaction name="separator"/>
+       <addaction name="mActionUndo"/>
+       <addaction name="mActionRedo"/>
+       <addaction name="separator"/>
+       <addaction name="mActionFindReplace"/>
+       <addaction name="separator"/>
+       <addaction name="mActionClear"/>
+       <addaction name="mActionShowHistory"/>
+      </widget>
+     </item>
+     <item>
+      <widget class="QgsPanelWidgetStack" name="mPanelStack" native="true"/>
+     </item>
+    </layout>
+   </item>
+  </layout>
+  <action name="mActionCut">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionEditCut.svg</normaloff>:/images/themes/default/mActionEditCut.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Cut</string>
+   </property>
+   <property name="toolTip">
+    <string>Cut</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+X</string>
+   </property>
+  </action>
+  <action name="mActionCopy">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionEditCopy.svg</normaloff>:/images/themes/default/mActionEditCopy.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Copy</string>
+   </property>
+   <property name="toolTip">
+    <string>Copy</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+C</string>
+   </property>
+  </action>
+  <action name="mActionPaste">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionEditPaste.svg</normaloff>:/images/themes/default/mActionEditPaste.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Paste</string>
+   </property>
+   <property name="toolTip">
+    <string>Paste</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+V</string>
+   </property>
+  </action>
+  <action name="mActionUndo">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionUndo.svg</normaloff>:/images/themes/default/mActionUndo.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Undo</string>
+   </property>
+   <property name="toolTip">
+    <string>Undo</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Z</string>
+   </property>
+  </action>
+  <action name="mActionRedo">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionRedo.svg</normaloff>:/images/themes/default/mActionRedo.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Redo</string>
+   </property>
+   <property name="toolTip">
+    <string>Redo</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+Z</string>
+   </property>
+  </action>
+  <action name="mActionFindReplace">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionFindReplace.svg</normaloff>:/images/themes/default/mActionFindReplace.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Find &amp;&amp; &amp;Replace</string>
+   </property>
+  </action>
+  <action name="mActionClear">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/console/iconClearConsole.svg</normaloff>:/images/themes/default/console/iconClearConsole.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Clear SQL Editor</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::NoRole</enum>
+   </property>
+  </action>
+  <action name="mActionOpenQuery">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionFileOpen.svg</normaloff>:/images/themes/default/mActionFileOpen.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Open Query…</string>
+   </property>
+   <property name="toolTip">
+    <string>Open Query</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+O</string>
+   </property>
+  </action>
+  <action name="mActionSaveQuery">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionFileSave.svg</normaloff>:/images/themes/default/mActionFileSave.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Save Query…</string>
+   </property>
+   <property name="toolTip">
+    <string>Save Query</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+S</string>
+   </property>
+  </action>
+  <action name="mActionSaveQueryAs">
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mActionFileSaveAs.svg</normaloff>:/images/themes/default/mActionFileSaveAs.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Save Query as…</string>
+   </property>
+   <property name="toolTip">
+    <string>Save Query as</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+S</string>
+   </property>
+  </action>
+  <action name="mActionShowHistory">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="../../images/images.qrc">
+     <normaloff>:/images/themes/default/mIconQueryHistory.svg</normaloff>:/images/themes/default/mIconQueryHistory.svg</iconset>
+   </property>
+   <property name="text">
+    <string>History</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::NoRole</enum>
+   </property>
+  </action>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsPanelWidgetStack</class>
+   <extends>QWidget</extends>
+   <header>qgspanelwidgetstack.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources>
+  <include location="../../images/images.qrc"/>
+ </resources>
+ <connections/>
+</ui>

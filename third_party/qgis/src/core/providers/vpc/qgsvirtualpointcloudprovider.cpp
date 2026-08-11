@@ -1,0 +1,862 @@
+/***************************************************************************
+                         qgsvirtualpointcloudprovider.cpp
+                         ------------------
+    begin                : March 2023
+    copyright            : (C) 2023 by Stefanos Natsis
+    email                : uclaros at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsvirtualpointcloudprovider.h"
+
+#include <algorithm>
+#include <memory>
+#include <nlohmann/json.hpp>
+
+#include "qgis.h"
+#include "qgsapplication.h"
+#include "qgscoordinatetransform.h"
+#include "qgscopcpointcloudindex.h"
+#include "qgseptpointcloudindex.h"
+#include "qgsgeometry.h"
+#include "qgslogger.h"
+#include "qgsmultipolygon.h"
+#include "qgsnetworkaccessmanager.h"
+#include "qgspointcloudclassifiedrenderer.h"
+#include "qgspointcloudextentrenderer.h"
+#include "qgspointcloudrgbrenderer.h"
+#include "qgspointcloudsubindex.h"
+#include "qgspointcloudsubindexloader.h"
+#include "qgsproviderregistry.h"
+#include "qgsprovidersublayerdetails.h"
+#include "qgsproviderutils.h"
+#include "qgsruntimeprofiler.h"
+#include "qgsthreadingutils.h"
+#include "qgsziputils.h"
+
+#include <QIcon>
+#include <QString>
+#include <QTemporaryDir>
+#include <QTimer>
+
+#include "moc_qgsvirtualpointcloudprovider.cpp"
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+#define PROVIDER_KEY u"vpc"_s
+#define PROVIDER_DESCRIPTION u"Virtual point cloud data provider"_s
+
+
+QgsVirtualPointCloudProvider::QgsVirtualPointCloudProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options, Qgis::DataProviderReadFlags flags )
+  : QgsPointCloudDataProvider( uri, options, flags )
+  , mSubIndexLoadedRefreshTimer( new QTimer( this ) )
+{
+  std::unique_ptr< QgsScopedRuntimeProfile > profile;
+  if ( QgsApplication::profiler()->groupIsActive( u"projectload"_s ) )
+    profile = std::make_unique< QgsScopedRuntimeProfile >( tr( "Open data source" ), u"projectload"_s );
+
+  mPolygonBounds = std::make_unique<QgsGeometry>( new QgsMultiPolygon() );
+
+  mSubIndexLoadedRefreshTimer->setSingleShot( true );
+  connect( mSubIndexLoadedRefreshTimer, &QTimer::timeout, this, &QgsDataProvider::dataChanged );
+
+  parseFile();
+}
+
+Qgis::DataProviderFlags QgsVirtualPointCloudProvider::flags() const
+{
+  return Qgis::DataProviderFlag::FastExtent2D;
+}
+
+QgsVirtualPointCloudProvider::~QgsVirtualPointCloudProvider() = default;
+
+QgsPointCloudDataProvider::Capabilities QgsVirtualPointCloudProvider::capabilities() const
+{
+  QgsPointCloudDataProvider::Capabilities c;
+  c.setFlag( QgsPointCloudDataProvider::Capability::ContainSubIndexes );
+  c.setFlag( QgsPointCloudDataProvider::Capability::CreateRenderer );
+  if ( mAllEditableFiles && mAllLocalFiles )
+  {
+    c.setFlag( QgsPointCloudDataProvider::Capability::ChangeAttributeValues );
+  }
+  return c;
+}
+
+QgsCoordinateReferenceSystem QgsVirtualPointCloudProvider::crs() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return mCrs;
+}
+
+QgsRectangle QgsVirtualPointCloudProvider::extent() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return mExtent;
+}
+
+QgsPointCloudAttributeCollection QgsVirtualPointCloudProvider::attributes() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return mAttributes;
+}
+
+bool QgsVirtualPointCloudProvider::isValid() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return !mSubLayers.isEmpty();
+}
+
+QString QgsVirtualPointCloudProvider::name() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return PROVIDER_KEY;
+}
+
+QString QgsVirtualPointCloudProvider::description() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return PROVIDER_DESCRIPTION;
+}
+
+QgsPointCloudIndex QgsVirtualPointCloudProvider::index() const
+{
+  // non fatal for now -- 2d rendering of point clouds is not thread safe and calls this
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS_NON_FATAL
+
+  return QgsPointCloudIndex( nullptr );
+}
+
+qint64 QgsVirtualPointCloudProvider::pointCount() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return static_cast<qint64>( mPointCount );
+}
+
+void QgsVirtualPointCloudProvider::loadIndex() {
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  //no-op, there is no index
+}
+
+QVariantMap QgsVirtualPointCloudProvider::originalMetadata() const
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  return QVariantMap();
+}
+
+void QgsVirtualPointCloudProvider::generateIndex()
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  //no-op, index is always generated
+}
+
+void QgsVirtualPointCloudProvider::parseFile()
+{
+  QgsProviderMetadata *metadata = QgsProviderRegistry::instance()->providerMetadata( PROVIDER_KEY );
+  const QVariantMap decodedUri = metadata->decodeUri( dataSourceUri() );
+  const QString authcfg = decodedUri.value( u"authcfg"_s ).toString();
+  const QString path = decodedUri.value( u"path"_s ).toString();
+
+  QUrl url;
+  nlohmann::json data;
+  QByteArray jsonData;
+  if ( path.startsWith( "http"_L1 ) )
+  {
+    url.setUrl( path );
+    QNetworkRequest request( url );
+    const QgsNetworkReplyContent reply = QgsNetworkAccessManager::instance()->blockingGet( request, authcfg );
+    if ( reply.error() != QNetworkReply::NoError )
+    {
+      appendError( QgsErrorMessage( tr( "Could not download file: %1" ).arg( reply.errorString() ) ) );
+      return;
+    }
+
+    QTemporaryDir tmpDir;
+    QFile file( tmpDir.filePath( url.fileName() ) );
+    if ( !file.open( QFile::WriteOnly ) )
+    {
+      appendError( QgsErrorMessage( tr( "Could not create temporary file: %1" ).arg( file.fileName() ) ) );
+      return;
+    }
+
+    file.write( reply.content() );
+    file.close();
+
+    mAllLocalFiles = false;
+
+    jsonData = readFileContents( file.fileName() );
+  }
+  else
+  {
+    url = QUrl::fromLocalFile( path );
+    jsonData = readFileContents( url.toLocalFile() );
+  }
+
+  if ( jsonData.isEmpty() )
+  {
+    appendError( QgsErrorMessage( tr( "Could not read file %1" ).arg( path ) ) );
+    return;
+  }
+
+  try
+  {
+    data = json::parse( jsonData.toStdString() );
+  }
+  catch ( const json::parse_error &e )
+  {
+    appendError( QgsErrorMessage( tr( "JSON parsing error: %1" ).arg( QString::fromStdString( e.what() ) ), QString() ) );
+    return;
+  }
+
+  if ( data["type"] != "FeatureCollection" || !data.contains( "features" ) )
+  {
+    appendError( QgsErrorMessage( tr( "Invalid VPC file" ) ) );
+    return;
+  }
+
+  QSet<QString> attributeNames;
+  QSet<QString> overviewUris;
+  double subIndexesWidth = 0.0;
+  double subIndexesHeight = 0.0;
+
+  for ( const auto &f : data["features"] )
+  {
+    if ( !f.contains( "type" )
+         || f["type"] != "Feature"
+         || !f.contains( "stac_version" )
+         || !f.contains( "assets" )
+         || !f["assets"].is_object()
+         || !f.contains( "properties" )
+         || !f["properties"].is_object()
+         || !f.contains( "geometry" )
+         || !f["geometry"].is_object() )
+    {
+      QgsDebugError( u"Malformed STAC item: %1"_s.arg( QString::fromStdString( f ) ) );
+      continue;
+    }
+
+    if ( f["stac_version"] != "1.0.0" )
+    {
+      QgsDebugError( u"Unsupported STAC version: %1"_s.arg( QString::fromStdString( f["stac_version"] ) ) );
+      continue;
+    }
+
+    QString uri;
+    qint64 count = 0;
+    QgsRectangle extent;
+    QgsGeometry geometry;
+    QgsDoubleRange zRange;
+
+    // look directly for link to data file
+    if ( f["assets"].contains( "data" ) && f["assets"]["data"].contains( "href" ) )
+    {
+      uri = QString::fromStdString( f["assets"]["data"]["href"] );
+    }
+
+    if ( uri.startsWith( "http"_L1 ) )
+    {
+      mAllLocalFiles = false;
+    }
+
+    for ( const nlohmann::json &ass : f["assets"] )
+    {
+      if ( ass.contains( "roles" ) && ass.contains( "href" ) )
+      {
+        nlohmann::json roles = ass["roles"];
+        if ( std::find( roles.cbegin(), roles.cend(), "overview" ) != roles.cend() )
+          overviewUris.insert( QString::fromStdString( ass["href"] ) );
+      }
+    }
+
+    // Only COPC and EPT formats are currently supported. Other files will only have their bounds rendered
+    if ( !uri.endsWith( u"ept.json"_s, Qt::CaseSensitivity::CaseInsensitive ) && !uri.endsWith( u"copc.laz"_s, Qt::CaseSensitivity::CaseInsensitive ) )
+    {
+      mContainsUnsupportedFiles = true;
+      QgsDebugError( u"Unsupported point cloud uri: %1"_s.arg( uri ) );
+    }
+
+    if ( !uri.endsWith( u"copc.laz"_s, Qt::CaseSensitivity::CaseInsensitive ) )
+    {
+      mAllEditableFiles = false;
+    }
+
+    if ( f["properties"].contains( "pc:count" ) )
+      count = f["properties"]["pc:count"];
+
+    if ( !mCrs.isValid() )
+    {
+      if ( f["properties"].contains( "proj:epsg" ) )
+        mCrs = QgsCoordinateReferenceSystem( u"EPSG:%1"_s.arg( f["properties"]["proj:epsg"].get<long>() ) );
+      else if ( f["properties"].contains( "proj:wkt2" ) )
+        mCrs.createFromString( QString::fromStdString( f["properties"]["proj:wkt2"] ) );
+    }
+    QgsCoordinateTransform transform( QgsCoordinateReferenceSystem::fromEpsgId( 4326 ), mCrs, QgsCoordinateTransformContext() );
+
+    if ( f["properties"].contains( "proj:bbox" ) )
+    {
+      nlohmann::json nativeBbox = f["properties"]["proj:bbox"];
+      if ( nativeBbox.size() == 6 )
+      {
+        extent = QgsRectangle( nativeBbox[0].get<double>(), nativeBbox[1].get<double>(), nativeBbox[3].get<double>(), nativeBbox[4].get<double>() );
+        zRange = QgsDoubleRange( nativeBbox[2], nativeBbox[5] );
+      }
+      else if ( nativeBbox.size() == 4 )
+      {
+        extent = QgsRectangle( nativeBbox[0].get<double>(), nativeBbox[1].get<double>(), nativeBbox[2].get<double>(), nativeBbox[3].get<double>() );
+      }
+      else
+      {
+        QgsDebugError( u"Malformed bounding box, skipping item."_s );
+        continue;
+      }
+    }
+    else if ( f.contains( "bbox" ) && mCrs.isValid() )
+    {
+      nlohmann::json bboxWgs = f["bbox"];
+      QgsRectangle bbox;
+      bbox.setXMinimum( bboxWgs[0].get<double>() );
+      bbox.setYMinimum( bboxWgs[1].get<double>() );
+      if ( bboxWgs.size() == 6 )
+      {
+        bbox.setXMaximum( bboxWgs[3].get<double>() );
+        bbox.setYMaximum( bboxWgs[4].get<double>() );
+        zRange = QgsDoubleRange( bboxWgs[2], bboxWgs[5] );
+      }
+      else if ( bboxWgs.size() == 4 )
+      {
+        bbox.setXMaximum( bboxWgs[2].get<double>() );
+        bbox.setYMaximum( bboxWgs[3].get<double>() );
+      }
+      else
+      {
+        QgsDebugError( u"Malformed bounding box, skipping item."_s );
+        continue;
+      }
+
+      try
+      {
+        extent = transform.transformBoundingBox( bbox );
+      }
+      catch ( QgsCsException & )
+      {
+        QgsDebugError( u"Cannot transform bbox to layer crs, skipping item."_s );
+        continue;
+      }
+    }
+    else
+    {
+      QgsDebugError( u"Missing extent information, skipping item."_s );
+      continue;
+    }
+
+    const auto geom = f["geometry"];
+    try
+    {
+      QgsMultiPolygonXY multiPolygon;
+      if ( geom.at( "type" ) == "Polygon" )
+      {
+        QgsPolygonXY polygon;
+        for ( auto &geomRing : geom.at( "coordinates" ) )
+        {
+          QgsPolylineXY ring;
+          for ( auto &coords : geomRing )
+          {
+            ring.append( QgsPointXY( coords.at( 0 ), coords.at( 1 ) ) );
+          }
+          polygon.append( ring );
+        }
+        multiPolygon.append( polygon );
+      }
+      else if ( geom.at( "type" ) == "MultiPolygon" )
+      {
+        for ( auto &geomPart : geom.at( "coordinates" ) )
+        {
+          QgsPolygonXY part;
+          for ( auto &geomRing : geomPart )
+          {
+            QgsPolylineXY ring;
+            for ( auto &coords : geomRing )
+            {
+              ring.append( QgsPointXY( coords.at( 0 ), coords.at( 1 ) ) );
+            }
+            part.append( ring );
+          }
+          multiPolygon.append( part );
+        }
+      }
+      else
+      {
+        QgsDebugError( u"Unexpected geometry type: %1, skipping item."_s.arg( QString::fromStdString( geom.at( "type" ) ) ) );
+        continue;
+      }
+      geometry = QgsGeometry::fromMultiPolygonXY( multiPolygon );
+    }
+    catch ( std::exception &e )
+    {
+      QgsDebugError( u"Malformed geometry item: %1, skipping item."_s.arg( QString::fromStdString( e.what() ) ) );
+      continue;
+    }
+
+    if ( uri.startsWith( "./"_L1 ) )
+    {
+      // resolve relative path
+      const QUrl resolvedUrl = url.resolved( QUrl( uri ) );
+      uri = resolvedUrl.isLocalFile() ? resolvedUrl.toLocalFile() : resolvedUrl.toString();
+    }
+
+    if ( f["properties"].contains( "pc:schemas" ) )
+    {
+      for ( auto &schemaItem : f["properties"]["pc:schemas"] )
+      {
+        attributeNames.insert( QString::fromStdString( schemaItem["name"] ) );
+      }
+    }
+
+    if ( f["properties"].contains( "pc:statistics" ) )
+    {
+      nlohmann::json pcStats = f["properties"]["pc:statistics"];
+
+      for ( auto pcStat : pcStats )
+      {
+        if ( pcStat["name"] == "Red" )
+          mRedMax = std::max( mRedMax, pcStat["maximum"].get<double>() );
+        if ( pcStat["name"] == "Green" )
+          mGreenMax = std::max( mRedMax, pcStat["maximum"].get<double>() );
+        if ( pcStat["name"] == "Blue" )
+          mBlueMax = std::max( mRedMax, pcStat["maximum"].get<double>() );
+      }
+    }
+
+    if ( transform.isValid() && !transform.isShortCircuited() )
+    {
+      try
+      {
+        geometry.transform( transform );
+      }
+      catch ( QgsCsException & )
+      {
+        QgsDebugError( u"Cannot transform geometry to layer crs, skipping item."_s );
+        continue;
+      }
+    }
+
+    subIndexesWidth += extent.width();
+    subIndexesHeight += extent.height();
+    mPolygonBounds->addPart( geometry );
+    mPointCount += count;
+    QgsPointCloudSubIndex si( uri, geometry, extent, zRange, count );
+    mSubLayers.push_back( si );
+  }
+
+  // Load gathered overviews
+  for ( const QString &uri : std::as_const( overviewUris ) )
+  {
+    const QUrl overviewUrl = url.resolved( QUrl( uri ) );
+
+    QgsPointCloudIndex ovIdx( new QgsCopcPointCloudIndex() );
+    ovIdx.load( overviewUrl.isLocalFile() ? overviewUrl.toLocalFile() : overviewUrl.toString(), authcfg );
+    if ( ovIdx.isValid() )
+      mOverviews.append( std::move( ovIdx ) );
+  }
+
+  // if no overviews found, look for a file in the same directory
+  if ( mOverviews.isEmpty() )
+  {
+    const QString baseName = QFileInfo( url.fileName() ).baseName();
+    const QUrl overviewUrl = url.resolved( QUrl( baseName + u"-overview.copc.laz"_s ) );
+    QgsPointCloudIndex ovIdx( new QgsCopcPointCloudIndex() );
+    ovIdx.load( overviewUrl.isLocalFile() ? overviewUrl.toLocalFile() : overviewUrl.toString(), authcfg );
+    if ( ovIdx.isValid() )
+      mOverviews.append( std::move( ovIdx ) );
+  }
+
+  mExtent = mPolygonBounds->boundingBox();
+  mAverageSubIndexWidth = subIndexesWidth / mSubLayers.size();
+  mAverageSubIndexHeight = subIndexesHeight / mSubLayers.size();
+  populateAttributeCollection( attributeNames );
+}
+
+QByteArray QgsVirtualPointCloudProvider::readFileContents( const QString &path )
+{
+  std::unique_ptr<QTemporaryDir> tmpDir;
+  QString readFromFilename;
+  if ( path.endsWith( ".vpz"_L1, Qt::CaseInsensitive ) )
+  {
+    tmpDir = std::make_unique<QTemporaryDir>();
+    if ( !tmpDir->isValid() )
+    {
+      appendError( QgsErrorMessage( tr( "Could not create temporary folder" ) ) );
+      return {};
+    }
+    QStringList fileList;
+    if ( !QgsZipUtils::unzip( path, tmpDir->path(), fileList ) )
+    {
+      appendError( QgsErrorMessage( tr( "Could not open VPZ file" ) ) );
+      return {};
+    }
+
+    const QDir dir( tmpDir->path() );
+    const QStringList vpcFiles = dir.entryList( QStringList( u"*.vpc"_s ), QDir::Files );
+    if ( vpcFiles.isEmpty() )
+    {
+      appendError( QgsErrorMessage( tr( "VPZ file does not contain any VPCs" ) ) );
+      return {};
+    }
+    else if ( vpcFiles.size() > 1 )
+    {
+      appendError( QgsErrorMessage( tr( "VPZ file contains multiple VPCs" ) ) );
+      return {};
+    }
+
+    readFromFilename = dir.filePath( vpcFiles.first() );
+  }
+  else
+  {
+    readFromFilename = path;
+  }
+
+  QFile file( readFromFilename );
+  if ( !file.open( QFile::ReadOnly ) )
+  {
+    appendError( QgsErrorMessage( tr( "Could not open VPC file" ) ) );
+    return {};
+  }
+  return file.readAll();
+}
+
+QgsGeometry QgsVirtualPointCloudProvider::polygonBounds() const
+{
+  return *mPolygonBounds;
+}
+
+void QgsVirtualPointCloudProvider::loadSubIndex( int i, bool emitDataChanged )
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  if ( i >= mSubLayers.size() || i < 0 )
+    return;
+
+  QgsPointCloudSubIndex &sl = mSubLayers[i];
+  // Index already loaded -> no need to load
+  if ( sl.index() || mSubLayersBeingLoaded.contains( i ) )
+    return;
+
+  // loader is deleted when it finishes
+  QgsPointCloudSubIndexLoader *loader = new QgsPointCloudSubIndexLoader( sl.uri(), i, emitDataChanged, this );
+  connect( loader, &QgsPointCloudSubIndexLoader::finished, this, &QgsVirtualPointCloudProvider::onFinishedLoadingSubIndex );
+  mSubLayersBeingLoaded.insert( i );
+  loader->start();
+}
+
+void QgsVirtualPointCloudProvider::populateAttributeCollection( QSet<QString> names )
+{
+  mAttributes.push_back( QgsPointCloudAttribute( u"X"_s, QgsPointCloudAttribute::Int32 ) );
+  mAttributes.push_back( QgsPointCloudAttribute( u"Y"_s, QgsPointCloudAttribute::Int32 ) );
+  mAttributes.push_back( QgsPointCloudAttribute( u"Z"_s, QgsPointCloudAttribute::Int32 ) );
+
+  if ( names.contains( "Intensity"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Intensity"_s, QgsPointCloudAttribute::UShort ) );
+  if ( names.contains( "ReturnNumber"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"ReturnNumber"_s, QgsPointCloudAttribute::Char ) );
+  if ( names.contains( "NumberOfReturns"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"NumberOfReturns"_s, QgsPointCloudAttribute::Char ) );
+  if ( names.contains( "ScanDirectionFlag"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"ScanDirectionFlag"_s, QgsPointCloudAttribute::Char ) );
+  if ( names.contains( "EdgeOfFlightLine"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"EdgeOfFlightLine"_s, QgsPointCloudAttribute::Char ) );
+  if ( names.contains( "Classification"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Classification"_s, QgsPointCloudAttribute::UChar ) );
+  if ( names.contains( "ScanAngleRank"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"ScanAngleRank"_s, QgsPointCloudAttribute::Float ) );
+  if ( names.contains( "UserData"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"UserData"_s, QgsPointCloudAttribute::Char ) );
+  if ( names.contains( "PointSourceId"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"PointSourceId"_s, QgsPointCloudAttribute::UShort ) );
+  if ( names.contains( "ScannerChannel"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"ScannerChannel"_s, QgsPointCloudAttribute::Char ) );
+  if ( names.contains( "Synthetic"_L1 ) || names.contains( "ClassFlags"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Synthetic"_s, QgsPointCloudAttribute::UChar ) );
+  if ( names.contains( "KeyPoint"_L1 ) || names.contains( "ClassFlags"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"KeyPoint"_s, QgsPointCloudAttribute::UChar ) );
+  if ( names.contains( "Withheld"_L1 ) || names.contains( "ClassFlags"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Withheld"_s, QgsPointCloudAttribute::UChar ) );
+  if ( names.contains( "Overlap"_L1 ) || names.contains( "ClassFlags"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Overlap"_s, QgsPointCloudAttribute::UChar ) );
+  if ( names.contains( "GpsTime"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"GpsTime"_s, QgsPointCloudAttribute::Double ) );
+  if ( names.contains( "Red"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Red"_s, QgsPointCloudAttribute::UShort ) );
+  if ( names.contains( "Green"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Green"_s, QgsPointCloudAttribute::UShort ) );
+  if ( names.contains( "Blue"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Blue"_s, QgsPointCloudAttribute::UShort ) );
+  if ( names.contains( "Infrared"_L1 ) )
+    mAttributes.push_back( QgsPointCloudAttribute( u"Infrared"_s, QgsPointCloudAttribute::UShort ) );
+  names.subtract(
+    { "X"_L1,
+      "Y"_L1,
+      "Z"_L1,
+      "Intensity"_L1,
+      "ReturnNumber"_L1,
+      "NumberOfReturns"_L1,
+      "ScanDirectionFlag"_L1,
+      "EdgeOfFlightLine"_L1,
+      "Classification"_L1,
+      "ScanAngleRank"_L1,
+      "UserData"_L1,
+      "PointSourceId"_L1,
+      "ScannerChannel"_L1,
+      "ClassFlags"_L1,
+      "Synthetic"_L1,
+      "KeyPoint"_L1,
+      "Withheld"_L1,
+      "Overlap"_L1,
+      "GpsTime"_L1,
+      "Red"_L1,
+      "Green"_L1,
+      "Blue"_L1,
+      "Infrared"_L1 }
+  );
+  for ( const auto &name : names )
+    mAttributes.push_back( QgsPointCloudAttribute( name, QgsPointCloudAttribute::Double ) );
+}
+
+bool QgsVirtualPointCloudProvider::setSubsetString( const QString &subset, bool updateFeatureCount )
+{
+  QGIS_PROTECT_QOBJECT_THREAD_ACCESS
+
+  Q_UNUSED( updateFeatureCount )
+
+  for ( const auto &i : std::as_const( mSubLayers ) )
+  {
+    if ( !i.index() )
+      continue;
+
+    // if expression is broken or index is missing a required field, set to "false" so it returns no points
+    if ( !i.index().setSubsetString( subset ) )
+      i.index().setSubsetString( u"false"_s );
+  }
+
+  mSubsetString = subset;
+  emit dataChanged();
+  return true;
+}
+
+QgsPointCloudRenderer *QgsVirtualPointCloudProvider::createRenderer( const QVariantMap &configuration ) const
+{
+  Q_UNUSED( configuration )
+
+  if ( mRedMax != std::numeric_limits<double>::lowest() && mGreenMax != std::numeric_limits<double>::lowest() && mBlueMax != std::numeric_limits<double>::lowest() )
+  {
+    auto renderer = std::make_unique< QgsPointCloudRgbRenderer >();
+    const int maxValue = std::max( mBlueMax, std::max( mRedMax, mGreenMax ) );
+
+    if ( maxValue == 0 )
+    {
+      renderer.reset();
+    }
+    else
+    {
+      const int rangeGuess = maxValue > 255 ? 65535 : 255;
+
+      if ( rangeGuess > 255 )
+      {
+        QgsContrastEnhancement contrast( Qgis::DataType::UnknownDataType );
+        contrast.setMinimumValue( 0 );
+        contrast.setMaximumValue( rangeGuess );
+        contrast.setContrastEnhancementAlgorithm( QgsContrastEnhancement::StretchToMinimumMaximum );
+        renderer->setRedContrastEnhancement( new QgsContrastEnhancement( contrast ) );
+        renderer->setGreenContrastEnhancement( new QgsContrastEnhancement( contrast ) );
+        renderer->setBlueContrastEnhancement( new QgsContrastEnhancement( contrast ) );
+      }
+    }
+
+    if ( renderer )
+      return renderer.release();
+  }
+
+  if ( mAttributes.indexOf( "Classification"_L1 ) >= 0 )
+  {
+    QgsPointCloudClassifiedRenderer *newRenderer = new QgsPointCloudClassifiedRenderer( u"Classification"_s, QgsPointCloudClassifiedRenderer::defaultCategories() );
+    if ( !mOverviews.isEmpty() )
+    {
+      newRenderer->setZoomOutBehavior( Qgis::PointCloudZoomOutRenderBehavior::RenderOverview );
+    }
+    return newRenderer;
+  }
+
+  return new QgsPointCloudExtentRenderer();
+}
+
+void QgsVirtualPointCloudProvider::onFinishedLoadingSubIndex( int i )
+{
+  bool emitDataChanged = false;
+  QgsPointCloudSubIndex &sl = mSubLayers[i];
+  mSubLayersBeingLoaded.remove( i );
+
+  if ( QgsPointCloudSubIndexLoader *loader = qobject_cast<QgsPointCloudSubIndexLoader *>( sender() ) )
+  {
+    sl.setIndex( loader->index() );
+    emitDataChanged = loader->emitDataChangedWhenLoaded();
+    loader->deleteLater();
+  }
+
+  if ( !sl.index().isValid() )
+    return;
+
+  // if expression is broken or index is missing a required field, set to "false" so it returns no points
+  if ( !mSubsetString.isEmpty() && !sl.index().setSubsetString( mSubsetString ) )
+    sl.index().setSubsetString( u"false"_s );
+
+  emit subIndexLoaded( i );
+
+  if ( emitDataChanged )
+  {
+    // We only emit once per second, but don't wait if it was the last sub index being loaded
+    const int waitInterval = mSubLayersBeingLoaded.isEmpty() ? 10 : 1000;
+    mSubIndexLoadedRefreshTimer->start( waitInterval );
+  }
+}
+
+QgsVirtualPointCloudProviderMetadata::QgsVirtualPointCloudProviderMetadata()
+  : QgsProviderMetadata( PROVIDER_KEY, PROVIDER_DESCRIPTION )
+{}
+
+QIcon QgsVirtualPointCloudProviderMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"mIconPointCloudLayer.svg"_s );
+}
+
+QgsVirtualPointCloudProvider *QgsVirtualPointCloudProviderMetadata::createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options, Qgis::DataProviderReadFlags flags )
+{
+  return new QgsVirtualPointCloudProvider( uri, options, flags );
+}
+
+QList<QgsProviderSublayerDetails> QgsVirtualPointCloudProviderMetadata::querySublayers( const QString &uri, Qgis::SublayerQueryFlags, QgsFeedback * ) const
+{
+  const QVariantMap parts = decodeUri( uri );
+  if ( isVpcFileName( parts.value( u"file-name"_s ).toString() ) )
+  {
+    QgsProviderSublayerDetails details;
+    details.setUri( uri );
+    details.setProviderKey( u"vpc"_s );
+    details.setType( Qgis::LayerType::PointCloud );
+    details.setName( QgsProviderUtils::suggestLayerNameFromFilePath( uri ) );
+    return { details };
+  }
+  else
+  {
+    return {};
+  }
+}
+
+int QgsVirtualPointCloudProviderMetadata::priorityForUri( const QString &uri ) const
+{
+  const QVariantMap parts = decodeUri( uri );
+  if ( isVpcFileName( parts.value( u"file-name"_s ).toString() ) )
+    return 100;
+
+  return 0;
+}
+
+QList<Qgis::LayerType> QgsVirtualPointCloudProviderMetadata::validLayerTypesForUri( const QString &uri ) const
+{
+  const QVariantMap parts = decodeUri( uri );
+  if ( isVpcFileName( parts.value( u"file-name"_s ).toString() ) )
+    return QList< Qgis::LayerType>() << Qgis::LayerType::PointCloud;
+
+  return QList< Qgis::LayerType>();
+}
+
+QVariantMap QgsVirtualPointCloudProviderMetadata::decodeUri( const QString &uri ) const
+{
+  QVariantMap uriComponents;
+
+  const thread_local QRegularExpression rx( u" authcfg='([^']*)'"_s );
+  const QRegularExpressionMatch match = rx.match( uri );
+  if ( match.hasMatch() )
+    uriComponents.insert( u"authcfg"_s, match.captured( 1 ) );
+
+  QString path = uri;
+  path.remove( rx );
+  path = path.trimmed();
+  const QUrl url = QUrl::fromUserInput( path );
+
+  uriComponents.insert( u"path"_s, path );
+  uriComponents.insert( u"file-name"_s, url.fileName() );
+
+  return uriComponents;
+}
+
+QString QgsVirtualPointCloudProviderMetadata::filters( Qgis::FileFilterType type )
+{
+  switch ( type )
+  {
+    case Qgis::FileFilterType::Vector:
+    case Qgis::FileFilterType::Raster:
+    case Qgis::FileFilterType::Mesh:
+    case Qgis::FileFilterType::MeshDataset:
+    case Qgis::FileFilterType::VectorTile:
+    case Qgis::FileFilterType::TiledScene:
+      return QString();
+
+    case Qgis::FileFilterType::PointCloud:
+      return QObject::tr( "Virtual Point Clouds" ) + u" (*.vpc *.VPC *.vpz *.VPZ)"_s;
+  }
+  return QString();
+}
+
+QgsProviderMetadata::ProviderCapabilities QgsVirtualPointCloudProviderMetadata::providerCapabilities() const
+{
+  return FileBasedUris;
+}
+
+QList<Qgis::LayerType> QgsVirtualPointCloudProviderMetadata::supportedLayerTypes() const
+{
+  return { Qgis::LayerType::PointCloud };
+}
+
+bool QgsVirtualPointCloudProviderMetadata::isVpcFileName( const QString &name )
+{
+  return name.endsWith( ".vpc"_L1, Qt::CaseInsensitive ) || name.endsWith( ".vpz"_L1, Qt::CaseInsensitive );
+}
+
+QString QgsVirtualPointCloudProviderMetadata::encodeUri( const QVariantMap &parts ) const
+{
+  QString uri = parts.value( u"path"_s ).toString();
+
+  const QString authcfg = parts.value( u"authcfg"_s ).toString();
+  if ( !authcfg.isEmpty() )
+    uri += u" authcfg='%1'"_s.arg( authcfg );
+
+  return uri;
+}
+
+QgsProviderMetadata::ProviderMetadataCapabilities QgsVirtualPointCloudProviderMetadata::capabilities() const
+{
+  return ProviderMetadataCapability::LayerTypesForUri | ProviderMetadataCapability::PriorityForUri | ProviderMetadataCapability::QuerySublayers;
+}
+
+#undef PROVIDER_KEY
+#undef PROVIDER_DESCRIPTION
+
+///@endcond

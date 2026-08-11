@@ -1,0 +1,114 @@
+/***************************************************************************
+    qgsmaptoolshaperegularpolygon2points.cpp  -  map tool for adding regular
+    polygon from 2 points
+    ---------------------
+    begin                : July 2017
+    copyright            : (C) 2017 by Loïc Bartoletti
+    email                : lituus at free dot fr
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaptoolshaperegularpolygon2points.h"
+
+#include "qgsapplication.h"
+#include "qgsgeometryrubberband.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptoolcapture.h"
+#include "qgspoint.h"
+
+#include <QString>
+
+#include "moc_qgsmaptoolshaperegularpolygon2points.cpp"
+
+using namespace Qt::StringLiterals;
+
+const QString QgsMapToolShapeRegularPolygon2PointsMetadata::TOOL_ID = u"regular-polygon-from-2-points"_s;
+
+QString QgsMapToolShapeRegularPolygon2PointsMetadata::id() const
+{
+  return QgsMapToolShapeRegularPolygon2PointsMetadata::TOOL_ID;
+}
+
+QString QgsMapToolShapeRegularPolygon2PointsMetadata::name() const
+{
+  return QObject::tr( "Regular polygon from 2 points" );
+}
+
+QIcon QgsMapToolShapeRegularPolygon2PointsMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"/mActionRegularPolygon2Points.svg"_s );
+}
+
+QgsMapToolShapeAbstract::ShapeCategory QgsMapToolShapeRegularPolygon2PointsMetadata::category() const
+{
+  return QgsMapToolShapeAbstract::ShapeCategory::RegularPolygon;
+}
+
+QgsMapToolShapeAbstract *QgsMapToolShapeRegularPolygon2PointsMetadata::factory( QgsMapToolCapture *parentTool ) const
+{
+  return new QgsMapToolShapeRegularPolygon2Points( parentTool );
+}
+
+
+QgsMapToolShapeRegularPolygon2Points::~QgsMapToolShapeRegularPolygon2Points()
+{
+  if ( mNumberSidesSpinBox )
+  {
+    deleteNumberSidesSpinBox();
+  }
+}
+
+bool QgsMapToolShapeRegularPolygon2Points::cadCanvasReleaseEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( e->button() == Qt::LeftButton )
+  {
+    if ( mPoints.empty() )
+      mPoints.append( point );
+
+    if ( !mTempRubberBand )
+    {
+      Qgis::GeometryType type = mode == QgsMapToolCapture::CapturePolygon ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line;
+      mTempRubberBand = mParentTool->createGeometryRubberBand( type, true );
+      mTempRubberBand->show();
+
+      createNumberSidesSpinBox();
+    }
+  }
+  else if ( e->button() == Qt::RightButton )
+  {
+    if ( mRegularPolygon.isEmpty() )
+      return false;
+
+    mPoints.append( point );
+    addRegularPolygonToParentTool();
+    return true;
+  }
+
+  return false;
+}
+
+void QgsMapToolShapeRegularPolygon2Points::cadCanvasMoveEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  Q_UNUSED( mode )
+
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( mTempRubberBand && !mPoints.isEmpty() )
+  {
+    mRegularPolygon = QgsRegularPolygon( mPoints.at( 0 ), point, mNumberSidesSpinBox->value() );
+    const QgsGeometry newGeometry( mRegularPolygon.toPolygon() );
+    if ( !newGeometry.isEmpty() )
+    {
+      mTempRubberBand->setGeometry( newGeometry.constGet()->clone() );
+      setTransientGeometry( newGeometry );
+    }
+  }
+}

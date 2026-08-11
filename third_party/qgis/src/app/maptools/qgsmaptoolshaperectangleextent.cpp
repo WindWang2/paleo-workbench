@@ -1,0 +1,117 @@
+/***************************************************************************
+    qgsmaptoolshaperectangleextent.cpp  -  map tool for adding rectangle
+    from extent
+    ---------------------
+    begin                : July 2017
+    copyright            : (C) 2017 by Loïc Bartoletti
+    email                : lituus at free dot fr
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaptoolshaperectangleextent.h"
+
+#include <memory>
+
+#include "qgsapplication.h"
+#include "qgsgeometryrubberband.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptoolcapture.h"
+#include "qgspoint.h"
+
+#include <QString>
+
+#include "moc_qgsmaptoolshaperectangleextent.cpp"
+
+using namespace Qt::StringLiterals;
+
+const QString QgsMapToolShapeRectangleExtentMetadata::TOOL_ID = u"rectangle-from-extent"_s;
+
+QString QgsMapToolShapeRectangleExtentMetadata::id() const
+{
+  return QgsMapToolShapeRectangleExtentMetadata::TOOL_ID;
+}
+
+QString QgsMapToolShapeRectangleExtentMetadata::name() const
+{
+  return QObject::tr( "Rectangle from extent" );
+}
+
+QIcon QgsMapToolShapeRectangleExtentMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"/mActionRectangleExtent.svg"_s );
+}
+
+QgsMapToolShapeAbstract::ShapeCategory QgsMapToolShapeRectangleExtentMetadata::category() const
+{
+  return QgsMapToolShapeAbstract::ShapeCategory::Rectangle;
+}
+
+QgsMapToolShapeAbstract *QgsMapToolShapeRectangleExtentMetadata::factory( QgsMapToolCapture *parentTool ) const
+{
+  return new QgsMapToolShapeRectangleExtent( parentTool );
+}
+
+bool QgsMapToolShapeRectangleExtent::cadCanvasReleaseEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( e->button() == Qt::LeftButton )
+  {
+    if ( mPoints.empty() )
+      mPoints.append( point );
+
+    if ( !mTempRubberBand )
+    {
+      Qgis::GeometryType type = mode == QgsMapToolCapture::CapturePolygon ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line;
+      mTempRubberBand = mParentTool->createGeometryRubberBand( type, true );
+      mTempRubberBand->show();
+    }
+  }
+  else if ( e->button() == Qt::RightButton )
+  {
+    if ( !mRectangle.isValid() )
+      return false;
+
+    mPoints.append( point );
+    addRectangleToParentTool();
+    return true;
+  }
+
+  return false;
+}
+
+void QgsMapToolShapeRectangleExtent::cadCanvasMoveEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  Q_UNUSED( mode )
+
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( mTempRubberBand )
+  {
+    switch ( mPoints.size() )
+    {
+      case 1:
+      {
+        const double dist = mPoints.at( 0 ).distance( point );
+        const double angle = mPoints.at( 0 ).azimuth( point );
+
+        mRectangle = QgsQuadrilateral::rectangleFromExtent( mPoints.at( 0 ), mPoints.at( 0 ).project( dist, angle ) );
+        const QgsGeometry newGeometry( mRectangle.toPolygon() );
+        if ( !newGeometry.isEmpty() )
+        {
+          mTempRubberBand->setGeometry( newGeometry.constGet()->clone() );
+          setTransientGeometry( newGeometry );
+        }
+      }
+      break;
+      default:
+        break;
+    }
+  }
+}

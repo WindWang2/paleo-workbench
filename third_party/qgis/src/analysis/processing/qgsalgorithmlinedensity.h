@@ -1,0 +1,80 @@
+/***************************************************************************
+                         qgsalgorithmlinedensity.h
+                         ---------------------
+    begin                : December 2019
+    copyright            : (C) 2019 by Clemens Raffler
+    email                : clemens dot raffler at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSALGORITHMLINEDENSITY_H
+#define QGSALGORITHMLINEDENSITY_H
+
+
+#include "qgis_sip.h"
+#include "qgsapplication.h"
+#include "qgsdistancearea.h"
+#include "qgsprocessingalgorithm.h"
+#include "qgsspatialindex.h"
+
+#include <QString>
+
+#define SIP_NO_FILE
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+/**
+ * Line Density Algorithm as implemented in ESRI ArcGIS Spatial Analyst
+ *
+ * Literature:
+ * Silverman, B.w. Density Estimation for Statistics and Data Analsis.
+ * New York: Chapman and Hall, 1986
+ *
+ */
+class QgsLineDensityAlgorithm : public QgsProcessingAlgorithm
+{
+  public:
+    QgsLineDensityAlgorithm() = default;
+    void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+    QIcon icon() const override { return QgsApplication::getThemeIcon( u"/algorithms/mAlgorithmLineDensity.svg"_s ); }
+    QString svgIconPath() const override { return QgsApplication::iconPath( u"/algorithms/mAlgorithmLineDensity.svg"_s ); }
+    QString name() const override;
+    QString displayName() const override;
+    QStringList tags() const override;
+    QString group() const override;
+    QString groupId() const override;
+    QString shortDescription() const override;
+    QString shortHelpString() const override;
+    Qgis::ProcessingAlgorithmDocumentationFlags documentationFlags() const override;
+    QgsLineDensityAlgorithm *createInstance() const override SIP_FACTORY;
+
+  protected:
+    bool prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+
+  private:
+    std::unique_ptr<QgsFeatureSource> mSource;
+    QString mWeightField;
+    double mSearchRadius = 0;
+    double mPixelSize = 0;
+    QgsGeometry mSearchGeometry;
+    QgsRectangle mExtent;
+    QgsCoordinateReferenceSystem mCrs;
+    QgsDistanceArea mDa;
+    QgsSpatialIndex mIndex;
+    QHash<QgsFeatureId, double> mFeatureWeights;
+};
+
+///@endcond PRIVATE
+
+#endif // QGSALGORITHMLINEDENSITY_H

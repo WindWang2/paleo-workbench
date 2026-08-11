@@ -1,0 +1,195 @@
+/***************************************************************************
+                         qgsmeshlayerinterpolator.cpp
+                         ----------------------------
+    begin                : April 2018
+    copyright            : (C) 2018 by Peter Petrik
+    email                : zilolv at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+///@cond PRIVATE
+
+#include "qgsmeshlayerinterpolator.h"
+
+#include <limits>
+#include <memory>
+
+#include "qgis.h"
+#include "qgscoordinatetransform.h"
+#include "qgselevationmap.h"
+#include "qgsmaptopixel.h"
+#include "qgsmeshdataprovider.h"
+#include "qgsmeshlayer.h"
+#include "qgsmeshlayerutils.h"
+#include "qgspointxy.h"
+#include "qgsrasterinterface.h"
+#include "qgsrendercontext.h"
+
+QgsMeshLayerInterpolator::QgsMeshLayerInterpolator(
+  const QgsTriangularMesh &m,
+  const QVector<double> &datasetValues,
+  const QgsMeshDataBlock &activeFaceFlagValues,
+  QgsMeshDatasetGroupMetadata::DataType dataType,
+  const QgsRenderContext &context,
+  const QSize &size
+)
+  : mTriangularMesh( m )
+  , mDatasetValues( datasetValues )
+  , mActiveFaceFlagValues( activeFaceFlagValues )
+  , mContext( context )
+  , mDataType( dataType )
+  , mOutputSize( size )
+{}
+
+QgsMeshLayerInterpolator::~QgsMeshLayerInterpolator() = default;
+
+QgsRasterInterface *QgsMeshLayerInterpolator::clone() const
+{
+  assert( false ); // we should not need this (hopefully)
+  return nullptr;
+}
+
+Qgis::DataType QgsMeshLayerInterpolator::dataType( int ) const
+{
+  return Qgis::DataType::Float64;
+}
+
+int QgsMeshLayerInterpolator::bandCount() const
+{
+  return 1;
+}
+
+QgsRasterBlock *QgsMeshLayerInterpolator::block( int, const QgsRectangle &extent, int width, int height, QgsRasterBlockFeedback *feedback )
+{
+  auto outputBlock = std::make_unique<QgsRasterBlock>( Qgis::DataType::Float64, width, height );
+  const double noDataValue = std::numeric_limits<double>::quiet_NaN();
+  outputBlock->setNoDataValue( noDataValue );
+  outputBlock->setIsNoData(); // assume initially that all values are unset
+  double *data = reinterpret_cast<double *>( outputBlock->bits() );
+
+  QList<int> spatialIndexTriangles;
+  int indexCount;
+  if ( mSpatialIndexActive )
+  {
+    spatialIndexTriangles = mTriangularMesh.faceIndexesForRectangle( extent );
+    indexCount = spatialIndexTriangles.count();
+  }
+  else
+  {
+    indexCount = mTriangularMesh.triangles().count();
+  }
+
+  if ( mTriangularMesh.contains( QgsMesh::ElementType::Edge ) )
+  {
+    return outputBlock.release();
+  }
+
+  const QVector<QgsMeshVertex> &vertices = mTriangularMesh.vertices();
+
+  // currently expecting that triangulation does not add any new extra vertices on the way
+  if ( mDataType == QgsMeshDatasetGroupMetadata::DataType::DataOnVertices )
+    Q_ASSERT( mDatasetValues.count() == mTriangularMesh.vertices().count() );
+
+  double pixelRatio = mContext.devicePixelRatio();
+
+  for ( int i = 0; i < indexCount; ++i )
+  {
+    if ( feedback && feedback->isCanceled() )
+      break;
+
+    if ( mContext.renderingStopped() )
+      break;
+
+    int triangleIndex;
+    if ( mSpatialIndexActive )
+      triangleIndex = spatialIndexTriangles[i];
+    else
+      triangleIndex = i;
+
+    const QgsMeshFace &face = mTriangularMesh.triangles()[triangleIndex];
+
+    if ( face.isEmpty() )
+      continue;
+
+    const int v1 = face[0], v2 = face[1], v3 = face[2];
+    const QgsPointXY &p1 = vertices[v1], &p2 = vertices[v2], &p3 = vertices[v3];
+
+    const int nativeFaceIndex = mTriangularMesh.trianglesToNativeFaces()[triangleIndex];
+    const bool isActive = mActiveFaceFlagValues.active( nativeFaceIndex );
+    if ( !isActive )
+      continue;
+
+    const QgsRectangle bbox = QgsMeshLayerUtils::triangleBoundingBox( p1, p2, p3 );
+    if ( !extent.intersects( bbox ) )
+      continue;
+
+    // Get the BBox of the element in pixels
+    int topLim, bottomLim, leftLim, rightLim;
+    QgsMeshLayerUtils::boundingBoxToScreenRectangle( mContext.mapToPixel(), mOutputSize, bbox, leftLim, rightLim, topLim, bottomLim, pixelRatio );
+
+    double value( 0 ), value1( 0 ), value2( 0 ), value3( 0 );
+    const int faceIdx = mTriangularMesh.trianglesToNativeFaces()[triangleIndex];
+
+    if ( mDataType == QgsMeshDatasetGroupMetadata::DataType::DataOnVertices )
+    {
+      value1 = mDatasetValues[v1];
+      value2 = mDatasetValues[v2];
+      value3 = mDatasetValues[v3];
+    }
+    else
+      value = mDatasetValues[faceIdx];
+
+    // interpolate in the bounding box of the face
+    for ( int j = topLim; j <= bottomLim; j++ )
+    {
+      double *line = data + ( j * width );
+      for ( int k = leftLim; k <= rightLim; k++ )
+      {
+        double val;
+        const QgsPointXY p = mContext.mapToPixel().toMapCoordinates( k / pixelRatio, j / pixelRatio );
+        if ( mDataType == QgsMeshDatasetGroupMetadata::DataType::DataOnVertices )
+          val = QgsMeshLayerUtils::interpolateFromVerticesData( p1, p2, p3, value1, value2, value3, p );
+        else
+        {
+          val = QgsMeshLayerUtils::interpolateFromFacesData( p1, p2, p3, value, p );
+        }
+        if ( !std::isnan( val ) )
+        {
+          line[k] = val;
+          outputBlock->setIsData( j, k );
+        }
+      }
+    }
+  }
+
+  if ( mRenderElevation )
+  {
+    QgsElevationMap *elevationMap = mContext.elevationMap();
+    if ( elevationMap && elevationMap->isValid() )
+      elevationMap->fillWithRasterBlock( outputBlock.get(), 0, 0, mElevationScale, mElevationOffset );
+  }
+
+  return outputBlock.release();
+}
+
+void QgsMeshLayerInterpolator::setSpatialIndexActive( bool active )
+{
+  mSpatialIndexActive = active;
+}
+
+void QgsMeshLayerInterpolator::setElevationMapSettings( bool renderElevationMap, double elevationScale, double elevationOffset )
+{
+  mRenderElevation = renderElevationMap;
+  mElevationScale = elevationScale;
+  mElevationOffset = elevationOffset;
+}
+
+///@endcond

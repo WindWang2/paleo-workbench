@@ -1,0 +1,393 @@
+/***************************************************************************
+                         qgsprocessingfeedback.h
+                         -----------------------
+    begin                : December 2016
+    copyright            : (C) 2016 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSPROCESSINGFEEDBACK_H
+#define QGSPROCESSINGFEEDBACK_H
+
+#include "qgis_core.h"
+#include "qgsfeedback.h"
+
+#include <QMap>
+
+class QgsProcessingProvider;
+class QgsProcessingAlgorithm;
+class QgsProcessingContext;
+
+/**
+ * \class QgsProcessingFeedback
+ * \ingroup core
+ * \brief Base class for providing feedback from a processing algorithm.
+ *
+ * This base class implementation silently ignores all feedback reported by algorithms.
+ * Subclasses of QgsProcessingFeedback can be used to log this feedback or report
+ * it to users via the GUI.
+ */
+class CORE_EXPORT QgsProcessingFeedback : public QgsFeedback
+{
+    Q_OBJECT
+
+  public:
+    /**
+     * Constructor for QgsProcessingFeedback.
+     *
+     * If \a logFeedback is TRUE, then all feedback received will be directed
+     * to QgsMessageLog.
+     */
+    QgsProcessingFeedback( bool logFeedback = true );
+
+    /**
+     * Sets a progress report text string. This can be used in conjunction with
+     * setProgress() to provide detailed progress reports, such as "Transformed
+     * 4 of 5 layers".
+     * \see setProgress()
+     * \see progressTextChanged()
+     */
+    virtual void setProgressText( const QString &text );
+
+    /**
+     * Reports that the algorithm encountered an \a error while executing.
+     *
+     * If \a fatalError is TRUE then the error prevented the algorithm from executing.
+     *
+     * \see errorReported()
+     */
+    virtual void reportError( const QString &error, bool fatalError = false );
+
+    /**
+     * Pushes a warning informational message from the algorithm. This
+     * should only be used sparsely as to maintain the importance of visual
+     * queues associated to this type of message.
+     *
+     * \see warningPushed()
+     * \see pushInfo()
+     * \see pushCommandInfo()
+     * \see pushDebugInfo()
+     * \see pushConsoleInfo()
+     * \since QGIS 3.16.2
+     */
+    virtual void pushWarning( const QString &warning );
+
+    /**
+     * Pushes a general informational message from the algorithm. This can
+     * be used to report feedback which is neither a status report or an
+     * error, such as "Found 47 matching features".
+     *
+     * \see infoPushed()
+     * \see pushFormattedMessage()
+     * \see pushWarning()
+     * \see pushCommandInfo()
+     * \see pushDebugInfo()
+     * \see pushConsoleInfo()
+     */
+    virtual void pushInfo( const QString &info );
+
+    /**
+     * Pushes a pre-formatted message from the algorithm.
+     *
+     * This can be used to push formatted HTML messages to the feedback object.
+     * A plain \a text version of the message must also be specified.
+     *
+     * \see formattedMessagePushed()
+     * \see pushInfo()
+     * \see pushWarning()
+     * \see pushCommandInfo()
+     * \see pushDebugInfo()
+     * \see pushConsoleInfo()
+     *
+     * \since QGIS 3.36
+     */
+    virtual void pushFormattedMessage( const QString &html, const QString &text );
+
+    /**
+     * Pushes an informational message containing a command from the algorithm.
+     * This is usually used to report commands which are executed in an external
+     * application or as subprocesses.
+     *
+     * \see commandInfoPushed()
+     * \see pushWarning()
+     * \see pushInfo()
+     * \see pushDebugInfo()
+     * \see pushConsoleInfo()
+     */
+    virtual void pushCommandInfo( const QString &info );
+
+    /**
+     * Pushes an informational message containing debugging helpers from
+     * the algorithm.
+     *
+     * \see debugInfoPushed()
+     * \see pushWarning()
+     * \see pushInfo()
+     * \see pushCommandInfo()
+     * \see pushConsoleInfo()
+     */
+    virtual void pushDebugInfo( const QString &info );
+
+    /**
+     * Pushes a console feedback message from the algorithm. This is used to
+     * report the output from executing an external command or subprocess.
+     *
+     * \see consoleInfoPushed()
+     * \see pushWarning()
+     * \see pushInfo()
+     * \see pushDebugInfo()
+     * \see pushCommandInfo()
+     */
+    virtual void pushConsoleInfo( const QString &info );
+
+    /**
+     * Pushes a summary of the QGIS (and underlying library) version information to the log.
+     * \since QGIS 3.4.7
+     */
+    void pushVersionInfo( const QgsProcessingProvider *provider = nullptr );
+
+    /**
+     * Pushes a summary of the execution \a results to the log
+     *
+     * \since QGIS 3.36
+     */
+    void pushFormattedResults( const QgsProcessingAlgorithm *algorithm, QgsProcessingContext &context, const QVariantMap &results );
+
+    /**
+     * Returns the HTML formatted contents of the log, which contains all messages pushed to the feedback object.
+     *
+     * \see textLog()
+     * \since QGIS 3.14
+     */
+    virtual QString htmlLog() const;
+
+    /**
+     * Returns the plain text contents of the log, which contains all messages pushed to the feedback object.
+     *
+     * \see htmlLog()
+     * \since QGIS 3.14
+     */
+    virtual QString textLog() const;
+
+    /**
+     * Reports that a feature source was retrieved for the specified algorithm input parameter.
+     *
+     * \see sourceLoaded()
+     * \since QGIS 4.2
+     */
+    void reportSourceLoaded( const QString &parameterName, long long featureCount );
+
+    /**
+     * Reports that a feature was added to the the sink associated with the specified algorithm \a output.
+     *
+     * \see sinkFeatureCountChanged()
+     * \see featureSinkFinalized()
+     * \since QGIS 4.2
+     */
+    void featureAddedToSink( const QString &output );
+
+    /**
+     * Reports that a feature sink has been finalized.
+     *
+     * The \a output argument specifies the associated algorithm output name.
+     *
+     * This will cause an immediate emission of sinkFeatureCountChanged() signal with the final sink size,
+     * even if it is zero.
+     *
+     * \see featureAddedToSink()
+     * \see sinkFeatureCountChanged()
+     * \since QGIS 4.2
+     */
+    void featureSinkFinalized( const QString &output );
+
+    /**
+     * Resets all stored feature sink counts.
+     *
+     * \since QGIS 4.2
+     */
+    void resetFeatureSinkCounts();
+
+  signals:
+
+    /**
+     * Emitted when the progress \a text is changed.
+     *
+     * \see setProgressText()
+     * \since QGIS 4.2
+     */
+    void progressTextChanged( const QString &text );
+
+    /**
+     * Emitted when an error is reported.
+     *
+     * \see reportError()
+     * \since QGIS 4.2
+     */
+    void errorReported( const QString &text, bool fatalError );
+
+    /**
+     * Emitted when an warning is pushed.
+     *
+     * \see pushWarning()
+     * \since QGIS 4.2
+     */
+    void warningPushed( const QString &text );
+
+    /**
+     * Emitted when information \a text is pushed.
+     *
+     * \see pushInfo()
+     * \since QGIS 4.2
+     */
+    void infoPushed( const QString &text );
+
+    /**
+     * Emitted when command information \a text is pushed.
+     *
+     * \see pushCommandInfo()
+     * \since QGIS 4.2
+     */
+    void commandInfoPushed( const QString &text );
+
+    /**
+     * Emitted when debug information \a text is pushed.
+     *
+     * \see pushDebugInfo()
+     * \since QGIS 4.2
+     */
+    void debugInfoPushed( const QString &text );
+
+    /**
+     * Emitted when console information \a text is pushed.
+     *
+     * \see pushConsoleInfo()
+     * \since QGIS 4.2
+     */
+    void consoleInfoPushed( const QString &text );
+
+    /**
+     * Emitted when a formatted \a html message is pushed.
+     *
+     * \see pushFormattedMessage()
+     * \since QGIS 4.2
+     */
+    void formattedMessagePushed( const QString &html );
+
+    /**
+     * Emitted when the count of features pushed to a sink has changed.
+     *
+     * The \a output argument specifies the associated algorithm output name.
+     *
+     * \note For performance, this signal is not emitted for every individual feature
+     * added to the sink. It is instead emitted only once for every 100 features added.
+     *
+     * \see featureAddedToSink()
+     * \see featureSinkFinalized()
+     * \since QGIS 4.2
+     */
+    void sinkFeatureCountChanged( const QString &output, long long featureCount );
+
+    /**
+     * Emitted when a feature source was retrieved for the specified algorithm input parameter.
+     *
+     * \see reportSourceLoaded()
+     * \since QGIS 4.2
+     */
+    void sourceLoaded( const QString &parameterName, long long featureCount );
+
+  private:
+    void log( const QString &htmlMessage, const QString &textMessage );
+
+    bool mLogFeedback = true;
+    QString mHtmlLog;
+    QString mTextLog;
+    int mMessageLoggedCount = 0;
+
+    struct SinkStats
+    {
+        long long featureCount = 0;
+        long long countAtLastSignal = 0;
+    };
+
+    QMap< QString, SinkStats > mSinkFeatureCounts;
+};
+
+
+/**
+ * \class QgsProcessingMultiStepFeedback
+ * \ingroup core
+ *
+ * \brief Processing feedback object for multi-step operations.
+ *
+ * A processing feedback object which proxies its calls to an underlying
+ * feedback object, but scales overall progress reports to account
+ * for a number of child steps which each report their own feedback.
+ *
+ */
+class CORE_EXPORT QgsProcessingMultiStepFeedback : public QgsProcessingFeedback
+{
+    Q_OBJECT
+
+  public:
+    /**
+     * Constructor for QgsProcessingMultiStepFeedback, for a process with the specified
+     * number of \a steps. This feedback object will proxy calls
+     * to the specified \a feedback object.
+     */
+    QgsProcessingMultiStepFeedback( int steps, QgsProcessingFeedback *feedback );
+
+    /**
+     * Sets the \a step which is being executed. This is used
+     * to scale the current progress to account for progress through the overall process.
+     */
+    void setCurrentStep( int step );
+
+    /**
+     * Sets the relative \a weights for each step.
+     *
+     * The \a weights list size must match the number of steps
+     * defined in the constructor. Weights are normalized internally,
+     * so they do not need to sum to 1.0 or 100.0.
+     *
+     * If this is not called, all steps are assumed to have equal weight.
+     *
+     * \warning step weights must be set in advance before the feedback is used to report any progress
+     *
+     * \since QGIS 4.0
+     */
+    void setStepWeights( const QList<double> &weights );
+
+    void setProgressText( const QString &text ) override;
+    void reportError( const QString &error, bool fatalError = false ) override;
+    void pushWarning( const QString &warning ) override;
+    void pushInfo( const QString &info ) override;
+    void pushCommandInfo( const QString &info ) override;
+    void pushDebugInfo( const QString &info ) override;
+    void pushConsoleInfo( const QString &info ) override;
+    void pushFormattedMessage( const QString &html, const QString &text ) override;
+
+    QString htmlLog() const override;
+    QString textLog() const override;
+
+  private slots:
+
+    void updateOverallProgress( double progress );
+
+  private:
+    int mChildSteps = 0;
+    int mCurrentStep = 0;
+    QList< double > mStepWeights;
+    double mCurrentStepBaseProgress = 0.0;
+    QgsProcessingFeedback *mFeedback = nullptr;
+};
+
+#endif // QGSPROCESSINGFEEDBACK_H

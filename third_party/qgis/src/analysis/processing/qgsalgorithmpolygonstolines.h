@@ -1,0 +1,66 @@
+/***************************************************************************
+                         qgsalgorithmpolygontolines.h
+                         ---------------------
+    begin                : January 2019
+    copyright            : (C) 2019 by Matthias Kuhn
+    email                : matthias@opengis.ch
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSALGORITHMPOLYGONSTOLINES_H
+#define QGSALGORITHMPOLYGONSTOLINES_H
+
+
+#include "qgis_sip.h"
+#include "qgsapplication.h"
+#include "qgsprocessingalgorithm.h"
+
+#include <QString>
+
+#define SIP_NO_FILE
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+/**
+ * Native convert polygons to lines algorithm
+ */
+class QgsPolygonsToLinesAlgorithm : public QgsProcessingFeatureBasedAlgorithm
+{
+  public:
+    QgsPolygonsToLinesAlgorithm() = default;
+    QIcon icon() const override { return QgsApplication::getThemeIcon( u"/algorithms/mAlgorithmPolygonToLine.svg"_s ); }
+    QString svgIconPath() const override { return QgsApplication::iconPath( u"/algorithms/mAlgorithmPolygonToLine.svg"_s ); }
+    QString name() const override;
+    QString displayName() const override;
+    QStringList tags() const override;
+    QString group() const override;
+    QString groupId() const override;
+    QString shortHelpString() const override;
+    QString shortDescription() const override;
+    QgsPolygonsToLinesAlgorithm *createInstance() const override SIP_FACTORY;
+    QList<int> inputLayerTypes() const override;
+
+  protected:
+    QString outputName() const override;
+    Qgis::ProcessingSourceType outputLayerType() const override;
+    Qgis::WkbType outputWkbType( Qgis::WkbType inputWkbType ) const override;
+    QgsFeatureList processFeature( const QgsFeature &feature, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+
+  private:
+    QgsGeometry convertToLines( const QgsGeometry &geometry ) const;
+    QList<QgsCurve *> extractRings( const QgsAbstractGeometry *geom ) const;
+};
+
+///@endcond PRIVATE
+
+#endif // QGSALGORITHMPOLYGONSTOLINES_H

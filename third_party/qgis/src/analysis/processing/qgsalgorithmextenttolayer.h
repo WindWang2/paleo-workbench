@@ -1,0 +1,56 @@
+/***************************************************************************
+                         qgsalgorithmextenttolayer.h
+                         ---------------------
+    begin                : April 2017
+    copyright            : (C) 2017 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSALGORITHMEXTENTTOLAYER_H
+#define QGSALGORITHMEXTENTTOLAYER_H
+
+
+#include "qgis_sip.h"
+#include "qgsprocessingalgorithm.h"
+
+#include <QString>
+
+#define SIP_NO_FILE
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+/**
+ * Native extent to layer algorithm.
+ */
+class QgsExtentToLayerAlgorithm : public QgsProcessingAlgorithm
+{
+  public:
+    QgsExtentToLayerAlgorithm() = default;
+    void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+    QString name() const override;
+    QString displayName() const override { return QObject::tr( "Create layer from extent" ); }
+    QStringList tags() const override { return QObject::tr( "extent,layer,polygon,create,new" ).split( ',' ); }
+    QString group() const override { return QObject::tr( "Vector creation" ); }
+    QString groupId() const override { return u"vectorcreation"_s; }
+    QString shortHelpString() const override;
+    QString shortDescription() const override;
+    QgsExtentToLayerAlgorithm *createInstance() const override SIP_FACTORY;
+
+  protected:
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+};
+
+///@endcond PRIVATE
+
+#endif // QGSALGORITHMEXTENTTOLAYER_H

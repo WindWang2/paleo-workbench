@@ -1,0 +1,275 @@
+/***************************************************************************
+    qgsexpressionpreviewwidget.cpp
+     --------------------------------------
+    Date                 : march 2020 - quarantine day 12
+    Copyright            : (C) 2020 by Denis Rouzaud
+    Email                : denis@opengis.ch
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+
+#include "qgsexpressionpreviewwidget.h"
+
+#include "qgsapplication.h"
+#include "qgsfeaturepickerwidget.h"
+#include "qgsmessageviewer.h"
+#include "qgsvectorlayer.h"
+
+#include <QString>
+#include <qaction.h>
+#include <qclipboard.h>
+
+#include "moc_qgsexpressionpreviewwidget.cpp"
+
+using namespace Qt::StringLiterals;
+
+QgsExpressionPreviewWidget::QgsExpressionPreviewWidget( QWidget *parent )
+  : QWidget( parent )
+{
+  setupUi( this );
+  mPreviewLabel->clear();
+  mPreviewLabel->setContextMenuPolicy( Qt::ActionsContextMenu );
+  mCopyPreviewAction = new QAction( QgsApplication::getThemeIcon( u"/mActionEditCopy.svg"_s ), tr( "Copy Expression Value" ), this );
+  mPreviewLabel->addAction( mCopyPreviewAction );
+  mFeaturePickerWidget->setShowBrowserButtons( true );
+  mStackedWidget->setSizeMode( QgsStackedWidget::SizeMode::CurrentPageOnly );
+  mStackedWidget->setCurrentWidget( mPageFeaturePicker );
+
+  mCustomButtonNext->setEnabled( false );
+  mCustomButtonPrev->setEnabled( false );
+  connect( mFeaturePickerWidget, &QgsFeaturePickerWidget::featureChanged, this, &QgsExpressionPreviewWidget::setCurrentFeature );
+  connect( mCustomComboBox, qOverload<int>( &QComboBox::currentIndexChanged ), this, &QgsExpressionPreviewWidget::setCustomChoice );
+  connect( mPreviewLabel, &QLabel::linkActivated, this, &QgsExpressionPreviewWidget::linkActivated );
+  connect( mCopyPreviewAction, &QAction::triggered, this, &QgsExpressionPreviewWidget::copyFullExpressionValue );
+  connect( mCustomButtonPrev, &QToolButton::clicked, this, [this] { mCustomComboBox->setCurrentIndex( std::max( 0, mCustomComboBox->currentIndex() - 1 ) ); } );
+  connect( mCustomButtonNext, &QToolButton::clicked, this, [this] { mCustomComboBox->setCurrentIndex( std::min( mCustomComboBox->count() - 1, mCustomComboBox->currentIndex() + 1 ) ); } );
+}
+
+void QgsExpressionPreviewWidget::setLayer( QgsVectorLayer *layer )
+{
+  if ( layer != mLayer )
+  {
+    mLayer = layer;
+    mFeaturePickerWidget->setLayer( layer );
+  }
+}
+
+void QgsExpressionPreviewWidget::setCustomPreviewGenerator(
+  const QString &label, const QList<QPair<QString, QVariant>> &choices, const std::function<QgsExpressionContext( const QVariant & )> &previewContextGenerator
+)
+{
+  mCustomPreviewGeneratorFunction = previewContextGenerator;
+  mStackedWidget->setCurrentWidget( mPageCustomPicker );
+  mCustomLabel->setText( label );
+  mCustomComboBox->blockSignals( true );
+  mCustomComboBox->clear();
+  for ( const auto &choice : choices )
+  {
+    mCustomComboBox->addItem( choice.first, choice.second );
+  }
+  mCustomComboBox->blockSignals( false );
+  setCustomChoice( 0 );
+}
+
+void QgsExpressionPreviewWidget::setExpressionText( const QString &expression )
+{
+  if ( expression != mExpressionText )
+  {
+    mExpressionText = expression;
+    refreshPreview();
+  }
+}
+
+void QgsExpressionPreviewWidget::setCurrentFeature( const QgsFeature &feature )
+{
+  // todo: update the combo box if it has been set externally?
+  if ( feature != mExpressionContext.feature() )
+  {
+    mExpressionContext.setFeature( feature );
+    refreshPreview();
+  }
+}
+
+void QgsExpressionPreviewWidget::setGeomCalculator( const QgsDistanceArea &da )
+{
+  mDa = da;
+  mUseGeomCalculator = true;
+}
+
+void QgsExpressionPreviewWidget::setExpressionContext( const QgsExpressionContext &context )
+{
+  mExpressionContext = context;
+}
+
+void QgsExpressionPreviewWidget::refreshPreview()
+{
+  // If the string is empty the expression will still "fail" although
+  // we don't show the user an error as it will be confusing.
+  if ( mExpressionText.isEmpty() )
+  {
+    mPreviewLabel->clear();
+    mPreviewLabel->setStyleSheet( QString() );
+    mCopyPreviewAction->setEnabled( false );
+    setExpressionToolTip( QString() );
+    emit expressionParsed( false );
+    mExpression = QgsExpression();
+  }
+  else
+  {
+    mExpression = QgsExpression( mExpressionText );
+
+    if ( mUseGeomCalculator )
+    {
+      // only set an explicit geometry calculator if a call to setGeomCalculator was made. If not,
+      // let the expression context handle this correctly
+      mExpression.setGeomCalculator( &mDa );
+    }
+    const QVariant value = mExpression.evaluate( &mExpressionContext );
+    const QString preview = QgsExpression::formatPreviewString( value );
+    if ( !mExpression.hasEvalError() )
+    {
+      mPreviewLabel->setText( preview );
+      mCopyPreviewAction->setEnabled( true );
+    }
+
+    if ( mExpression.hasParserError() || mExpression.hasEvalError() )
+    {
+      // if parser error was a result of missing feature, then skip the misleading parser error message
+      // and instead show a friendly message, and allow the user to accept the expression anyway
+      // refs https://github.com/qgis/QGIS/issues/42884
+      if ( !mExpressionContext.feature().isValid() )
+      {
+        if ( !mExpression.referencedColumns().isEmpty() || mExpression.needsGeometry() )
+        {
+          mPreviewLabel->setText( tr( "No feature was found on this layer to evaluate the expression." ) );
+          mPreviewLabel->setStyleSheet( u"color: rgba(220, 125, 0, 255);"_s );
+          emit expressionParsed( true );
+          setParserError( false );
+          setEvalError( false );
+          return;
+        }
+      }
+
+      const QString errorString = mExpression.parserErrorString().replace( "\n"_L1, "<br>"_L1 );
+      QString tooltip;
+      if ( mExpression.hasParserError() )
+        tooltip = QStringLiteral(
+                    "<b>%1:</b>"
+                    "%2"
+        )
+                    .arg( tr( "Parser Errors" ), errorString );
+      // Only show the eval error if there is no parser error.
+      if ( !mExpression.hasParserError() && mExpression.hasEvalError() )
+        tooltip += u"<b>%1:</b> %2"_s.arg( tr( "Eval Error" ), mExpression.evalErrorString() );
+
+      mPreviewLabel->setText( tr(
+        "Expression is invalid <a href="
+        "more"
+        ">(more info)</a>"
+      ) );
+      mPreviewLabel->setStyleSheet( u"color: rgba(255, 6, 10, 255);"_s );
+      setExpressionToolTip( tooltip );
+      emit expressionParsed( false );
+      setParserError( mExpression.hasParserError() );
+      setEvalError( mExpression.hasEvalError() );
+      mCopyPreviewAction->setEnabled( false );
+    }
+    else
+    {
+      mPreviewLabel->setStyleSheet( QString() );
+      const QString longerPreview = QgsExpression::formatPreviewString( value, true, 255 );
+      if ( longerPreview != preview )
+        setExpressionToolTip( longerPreview );
+      else
+        setExpressionToolTip( QString() );
+      emit expressionParsed( true );
+      setParserError( false );
+      setEvalError( false );
+      mCopyPreviewAction->setEnabled( true );
+    }
+  }
+}
+
+void QgsExpressionPreviewWidget::linkActivated( const QString & )
+{
+  QgsMessageViewer mv( this, QgsGuiUtils::ModalDialogFlags, false );
+  mv.setWindowTitle( tr( "More Info on Expression Error" ) );
+  mv.setMessageAsHtml( mToolTip );
+  mv.exec();
+}
+
+void QgsExpressionPreviewWidget::setExpressionToolTip( const QString &toolTip )
+{
+  if ( toolTip == mToolTip )
+    return;
+
+  mToolTip = toolTip;
+  if ( toolTip.isEmpty() )
+  {
+    mPreviewLabel->setToolTip( tr( "Right-click to copy" ) );
+  }
+  else
+  {
+    mPreviewLabel->setToolTip( tr( "%1 (right-click to copy)" ).arg( mToolTip ) );
+  }
+  emit toolTipChanged( mToolTip );
+}
+
+void QgsExpressionPreviewWidget::setParserError( bool parserError )
+{
+  if ( parserError != mParserError )
+  {
+    mParserError = parserError;
+    emit parserErrorChanged();
+  }
+}
+bool QgsExpressionPreviewWidget::parserError() const
+{
+  return mParserError;
+}
+
+QString QgsExpressionPreviewWidget::currentPreviewText() const
+{
+  return mPreviewLabel->text();
+}
+
+void QgsExpressionPreviewWidget::setEvalError( bool evalError )
+{
+  if ( evalError == mEvalError )
+    return;
+
+  mEvalError = evalError;
+  emit evalErrorChanged();
+}
+
+bool QgsExpressionPreviewWidget::evalError() const
+{
+  return mEvalError;
+}
+
+void QgsExpressionPreviewWidget::copyFullExpressionValue()
+{
+  QClipboard *clipboard = QApplication::clipboard();
+  const QVariant value = mExpression.evaluate( &mExpressionContext );
+  const QString copiedValue = QgsExpression::formatPreviewString( value, false, 100000 );
+  QgsDebugMsgLevel( u"set clipboard: %1"_s.arg( copiedValue ), 4 );
+  clipboard->setText( copiedValue );
+}
+
+void QgsExpressionPreviewWidget::setCustomChoice( int )
+{
+  const QVariant selectedValue = mCustomComboBox->currentData();
+
+  mCustomButtonPrev->setEnabled( mCustomComboBox->currentIndex() > 0 && mCustomComboBox->count() > 0 );
+  mCustomButtonNext->setEnabled( mCustomComboBox->currentIndex() < ( mCustomComboBox->count() - 1 ) && mCustomComboBox->count() > 0 );
+
+  mExpressionContext = mCustomPreviewGeneratorFunction( selectedValue );
+
+  refreshPreview();
+}

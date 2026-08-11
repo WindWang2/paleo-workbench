@@ -1,0 +1,170 @@
+/***************************************************************************
+    qgsoapifcollection.h
+    ---------------------
+    begin                : October 2019
+    copyright            : (C) 2019 by Even Rouault
+    email                : even.rouault at spatialys.com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSOAPIFCOLLECTION_H
+#define QGSOAPIFCOLLECTION_H
+
+#include <nlohmann/json.hpp>
+
+#include "qgsbasenetworkrequest.h"
+#include "qgsdatasourceuri.h"
+#include "qgslayermetadata.h"
+#include "qgsrectangle.h"
+
+#include <QObject>
+
+using namespace nlohmann;
+#include <vector>
+
+//! Describes a collection
+struct QgsOapifCollection
+{
+    //! Identifier
+    QString mId;
+
+    //! Title
+    QString mTitle;
+
+    //! Description
+    QString mDescription;
+
+    //! Bounding box
+    QgsRectangle mBbox;
+
+    //! Bounding box Crs
+    QgsCoordinateReferenceSystem mBboxCrs;
+
+    //! List of available CRS
+    QList<QString> mCrsList;
+
+    //! Layer metadata
+    QgsLayerMetadata mLayerMetadata;
+
+    //! Feature count when advertised (currently only through ldproxy's itemCount)
+    int64_t mFeatureCount = -1;
+
+    //! Set of media type for feature formats
+    QSet<QString> mFeatureFormats;
+
+    //! Map of media type to /items url
+    QMap<QString, QString> mMapFeatureFormatToUrl;
+
+    //! Map of media type to url for rel=enclosure
+    // Cf https://geonovum.github.io/ogc-api-features-guideline
+    QMap<QString, QString> mMapFeatureFormatToBulkDownloadUrl;
+
+    //! URL to XML Schema describing the items (optional)
+    QString mXmlSchemaUrl;
+
+    //! Fills a collection from its JSON serialization
+    bool deserialize( const json &j, const json &jCollections );
+};
+
+//! Manages the /collections request
+class QgsOapifCollectionsRequest : public QgsBaseNetworkRequest
+{
+    Q_OBJECT
+  public:
+    explicit QgsOapifCollectionsRequest( const QgsDataSourceUri &baseUri, const QString &url );
+
+    //! Issue the request
+    bool request( bool synchronous, bool forceRefresh );
+
+    //! Application level error
+    enum class ApplicationLevelError
+    {
+      NoError,
+      JsonError,
+      IncompleteInformation
+    };
+
+    //! Returns application level error
+    ApplicationLevelError applicationLevelError() const { return mAppLevelError; }
+
+    //! Returns collections description.
+    const std::vector<QgsOapifCollection> &collections() const { return mCollections; }
+
+    //! Return the url of the next page (extension to the spec)
+    const QString &nextUrl() const { return mNextUrl; }
+
+    //! Return the set of media type for feature formats
+    const QSet<QString> &featureFormats() const { return mFeatureFormats; }
+
+  signals:
+    //! emitted when the capabilities have been fully parsed, or an error occurred
+    void gotResponse();
+
+  private slots:
+    void processReply();
+
+  protected:
+    QString errorMessageWithReason( const QString &reason ) override;
+
+  private:
+    QString mUrl;
+
+    std::vector<QgsOapifCollection> mCollections;
+
+    QString mNextUrl;
+
+    ApplicationLevelError mAppLevelError = ApplicationLevelError::NoError;
+
+    //! Set of media type for feature formats
+    QSet<QString> mFeatureFormats;
+};
+
+//! Manages the /collection/{collectionId} request
+class QgsOapifCollectionRequest : public QgsBaseNetworkRequest
+{
+    Q_OBJECT
+  public:
+    explicit QgsOapifCollectionRequest( const QgsDataSourceUri &baseUri, const QString &url );
+
+    //! Issue the request
+    bool request( bool synchronous, bool forceRefresh );
+
+    //! Application level error
+    enum class ApplicationLevelError
+    {
+      NoError,
+      JsonError,
+      IncompleteInformation
+    };
+
+    //! Returns application level error
+    ApplicationLevelError applicationLevelError() const { return mAppLevelError; }
+
+    //! Returns collection description.
+    const QgsOapifCollection &collection() const { return mCollection; }
+
+  signals:
+    //! emitted when the capabilities have been fully parsed, or an error occurred */
+    void gotResponse();
+
+  private slots:
+    void processReply();
+
+  protected:
+    QString errorMessageWithReason( const QString &reason ) override;
+
+  private:
+    QString mUrl;
+
+    QgsOapifCollection mCollection;
+
+    ApplicationLevelError mAppLevelError = ApplicationLevelError::NoError;
+};
+
+#endif // QGSOAPIFCOLLECTION_H

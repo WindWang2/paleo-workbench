@@ -1,0 +1,134 @@
+########################################################
+# Files
+
+set (HANA_SRCS
+  qgshanacolumntypethread.cpp
+  qgshanaconnection.cpp
+  qgshanaconnectionpool.cpp
+  qgshanaconnectionstringbuilder.cpp
+  qgshanadataitems.cpp
+  qgshanadatatypes.cpp
+  qgshanadriver.cpp
+  qgshanaexpressioncompiler.cpp
+  qgshanafeatureiterator.cpp
+  qgshanaprimarykeys.cpp
+  qgshanaprovider.cpp
+  qgshanaproviderconnection.cpp
+  qgshanaresultset.cpp
+  qgshanasettings.cpp
+  qgshanatablemodel.cpp
+  qgshanacrsutils.cpp
+  qgshanautils.cpp
+)
+
+if (WITH_GUI)
+  set(HANA_SRCS ${HANA_SRCS}
+    qgshanadataitemguiprovider.cpp
+    qgshananewconnection.cpp
+    qgshanaprovidergui.cpp
+    qgshanasourceselect.cpp
+  )
+endif()
+
+set(HANA_HDRS
+  qgshanacolumntypethread.h
+  qgshanaconnection.h
+  qgshanaconnectionpool.h
+  qgshanaconnectionstringbuilder.h
+  qgshanadatatypes.h
+  qgshanadriver.h
+  qgshanaexception.h
+  qgshanaexpressioncompiler.h
+  qgshanafeatureiterator.h
+  qgshanaprimarykeys.h
+  qgshanaprovider.h
+  qgshanaproviderconnection.h
+  qgshanaresultset.h
+  qgshanasettings.h
+  qgshanatablemodel.h
+  qgshanacrsutils.h
+  qgshanautils.h
+)
+
+if (WITH_GUI)
+  set(HANA_HDRS ${HANA_HDRS}
+    qgshanadataitems.h
+    qgshanadataitemguiprovider.h
+    qgshananewconnection.h
+    qgshanasourceselect.h
+  )
+endif()
+
+########################################################
+# Build
+
+include_directories(
+  ${CMAKE_SOURCE_DIR}/external/odbccpp/src
+
+  ${CMAKE_BINARY_DIR}/src/ui
+)
+
+include_directories (SYSTEM
+  ${ODBC_INCLUDE_DIRS}
+  ${QCA_INCLUDE_DIR}
+  ${QTKEYCHAIN_INCLUDE_DIR}
+)
+
+add_library(provider_hana MODULE ${HANA_SRCS} ${HANA_HDRS})
+add_library(provider_hana_a STATIC ${HANA_SRCS} ${HANA_HDRS})
+
+set_target_properties(provider_hana PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILDS})
+set_target_properties(provider_hana_a PROPERTIES UNITY_BUILD ${ENABLE_UNITY_BUILDS})
+
+target_compile_definitions(provider_hana
+    PRIVATE
+        $<TARGET_PROPERTY:odbccpp_static,INTERFACE_COMPILE_DEFINITIONS>)
+target_compile_definitions(provider_hana_a
+    PRIVATE
+        $<TARGET_PROPERTY:odbccpp_static,INTERFACE_COMPILE_DEFINITIONS>)
+
+target_link_libraries(provider_hana
+  qgis_core
+  odbccpp_static
+  ${ODBC_LIBRARIES}
+)
+
+target_link_libraries(provider_hana_a
+  qgis_core
+  odbccpp_static
+  ${ODBC_LIBRARIES}
+)
+
+if (WITH_GUI)
+  target_link_libraries (provider_hana_a
+    qgis_gui
+  )
+
+  target_link_libraries (provider_hana
+    qgis_gui
+  )
+endif()
+
+if(HAVE_WFLAG_SUGGEST_OVERRIDE)
+  target_compile_options(provider_hana PRIVATE -Wno-suggest-override)
+  target_compile_options(provider_hana_a PRIVATE -Wno-suggest-override)
+endif()
+if(HAVE_WFLAG_SUGGEST_DESTRUCTOR_OVERRIDE)
+  target_compile_options(provider_hana PRIVATE -Wno-suggest-destructor-override)
+  target_compile_options(provider_hana_a PRIVATE -Wno-suggest-destructor-override)
+endif()
+
+# clang-tidy
+if(CLANG_TIDY_EXE)
+  set_target_properties(
+    provider_hana PROPERTIES
+    CXX_CLANG_TIDY "${DO_CLANG_TIDY}"
+  )
+endif()
+
+########################################################
+# Install
+
+install (TARGETS provider_hana
+  RUNTIME DESTINATION ${QGIS_PLUGIN_DIR}
+  LIBRARY DESTINATION ${QGIS_PLUGIN_DIR})

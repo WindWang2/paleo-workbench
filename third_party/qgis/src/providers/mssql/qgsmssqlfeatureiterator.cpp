@@ -1,0 +1,762 @@
+/***************************************************************************
+                    qgsmssqlfeatureiterator.cpp  -  description
+                             -------------------
+    begin                : 2011-10-08
+    copyright            : (C) 2011 by Tamas Szekeres
+    email                : szekerest at gmail.com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmssqlfeatureiterator.h"
+
+#include <memory>
+
+#include "qgsdbquerylog.h"
+#include "qgsdbquerylog_p.h"
+#include "qgsexception.h"
+#include "qgsgeometryengine.h"
+#include "qgslogger.h"
+#include "qgsmssqldatabase.h"
+#include "qgsmssqlexpressioncompiler.h"
+#include "qgsmssqlprovider.h"
+#include "qgsmssqltransaction.h"
+#include "qgsmssqlutils.h"
+
+#include <QObject>
+#include <QSqlRecord>
+#include <QString>
+#include <QTextStream>
+
+using namespace Qt::StringLiterals;
+
+QgsMssqlFeatureIterator::QgsMssqlFeatureIterator( QgsMssqlFeatureSource *source, bool ownSource, const QgsFeatureRequest &request )
+  : QgsAbstractFeatureIteratorFromSource<QgsMssqlFeatureSource>( source, ownSource, request )
+  , mDisableInvalidGeometryHandling( source->mDisableInvalidGeometryHandling )
+{
+  mParser.mIsGeography = mSource->mIsGeography;
+
+  mTransform = mRequest.calculateTransform( mSource->mCrs );
+  try
+  {
+    mFilterRect = filterRectToSourceCrs( mTransform );
+  }
+  catch ( QgsCsException & )
+  {
+    // can't reproject mFilterRect
+    close();
+    return;
+  }
+  // prepare spatial filter geometries for optimal speed
+  switch ( mRequest.spatialFilterType() )
+  {
+    case Qgis::SpatialFilterType::NoFilter:
+    case Qgis::SpatialFilterType::BoundingBox:
+      break;
+
+    case Qgis::SpatialFilterType::DistanceWithin:
+      if ( !mRequest.referenceGeometry().isEmpty() )
+      {
+        mDistanceWithinGeom = mRequest.referenceGeometry();
+        mDistanceWithinEngine.reset( QgsGeometry::createGeometryEngine( mDistanceWithinGeom.constGet() ) );
+        mDistanceWithinEngine->prepareGeometry();
+      }
+      break;
+  }
+
+  BuildStatement( request );
+
+  // WARNING - we can't obtain the database connection now, as this method should be
+  // run from the main thread, yet iteration can be done in a different thread.
+  // This would result in failure, because QSqlDatabase instances cannot be used
+  // from a different thread where they were created. Instead, we defer creation
+  // of the database until the first feature is fetched.
+}
+
+
+QgsMssqlFeatureIterator::~QgsMssqlFeatureIterator()
+{
+  close();
+}
+
+double QgsMssqlFeatureIterator::validLat( const double latitude ) const
+{
+  if ( latitude < -90.0 )
+    return -90.0;
+  if ( latitude > 90.0 )
+    return 90.0;
+  return latitude;
+}
+
+double QgsMssqlFeatureIterator::validLon( const double longitude ) const
+{
+  if ( longitude < -15069.0 )
+    return -15069.0;
+  if ( longitude > 15069.0 )
+    return 15069.0;
+  return longitude;
+}
+
+QString QgsMssqlFeatureIterator::whereClauseFid( QgsFeatureId featureId )
+{
+  QString whereClause;
+
+  switch ( mSource->mPrimaryKeyType )
+  {
+    case QgsMssqlDatabase::PrimaryKeyType::Int:
+      Q_ASSERT( mSource->mPrimaryKeyAttrs.size() == 1 );
+      whereClause = u"[%1]=%2"_s.arg( mSource->mFields.at( mSource->mPrimaryKeyAttrs[0] ).name(), FID_TO_STRING( featureId ) );
+      break;
+
+    case QgsMssqlDatabase::PrimaryKeyType::FidMap:
+    {
+      const QVariantList &pkVals = mSource->mShared->lookupKey( featureId );
+      if ( !pkVals.isEmpty() )
+      {
+        Q_ASSERT( pkVals.size() == mSource->mPrimaryKeyAttrs.size() );
+
+        whereClause = u"("_s;
+
+        QString delim;
+        for ( int i = 0; i < mSource->mPrimaryKeyAttrs.size(); ++i )
+        {
+          const QgsField &fld = mSource->mFields.at( mSource->mPrimaryKeyAttrs[i] );
+          whereClause += u"%1[%2]=%3"_s.arg( delim, fld.name(), QgsMssqlUtils::quotedValue( pkVals[i] ) );
+          delim = u" AND "_s;
+        }
+
+        whereClause += ')'_L1;
+      }
+      else
+      {
+        QgsDebugError( u"FAILURE: Key values for feature %1 not found."_s.arg( featureId ) );
+        whereClause = u"NULL IS NOT NULL"_s;
+      }
+    }
+    break;
+
+    case QgsMssqlDatabase::PrimaryKeyType::Unknown:
+      Q_ASSERT( !"FAILURE: Primary key unknown" );
+      whereClause = u"NULL IS NOT NULL"_s;
+      break;
+  }
+
+  return whereClause;
+}
+
+void QgsMssqlFeatureIterator::BuildStatement( const QgsFeatureRequest &request )
+{
+  mFallbackStatement.clear();
+  mStatement.clear();
+
+  bool limitAtProvider = mRequest.limit() >= 0 && mRequest.spatialFilterType() != Qgis::SpatialFilterType::DistanceWithin;
+
+  // build sql statement
+
+  // note: 'SELECT ' is added later, to account for 'SELECT TOP...' type queries
+  QStringList selectColumns;
+  for ( int idx : mSource->mPrimaryKeyAttrs )
+  {
+    selectColumns << QgsMssqlUtils::quotedIdentifier( mSource->mFields.at( idx ).name() );
+  }
+
+  mAttributesToFetch << mSource->mPrimaryKeyAttrs;
+
+  bool subsetOfAttributes = mRequest.flags() & Qgis::FeatureRequestFlag::SubsetOfAttributes;
+  QgsAttributeList attrs = subsetOfAttributes ? mRequest.subsetOfAttributes() : mSource->mFields.allAttributesList();
+
+  if ( subsetOfAttributes )
+  {
+    // ensure that all attributes required for expression filter are being fetched
+    if ( request.filterType() == Qgis::FeatureRequestFilterType::Expression )
+    {
+      //ensure that all fields required for filter expressions are prepared
+      QSet<int> attributeIndexes = request.filterExpression()->referencedAttributeIndexes( mSource->mFields );
+      attributeIndexes += qgis::listToSet( attrs );
+      attrs = qgis::setToList( attributeIndexes );
+    }
+
+    // ensure that all attributes required for order by are fetched
+    const auto usedAttributeIndices = mRequest.orderBy().usedAttributeIndices( mSource->mFields );
+    for ( int attrIndex : usedAttributeIndices )
+    {
+      if ( !attrs.contains( attrIndex ) )
+        attrs << attrIndex;
+    }
+  }
+
+  for ( int i : std::as_const( attrs ) )
+  {
+    if ( mSource->mPrimaryKeyAttrs.contains( i ) )
+      continue;
+
+    selectColumns << QgsMssqlUtils::quotedIdentifier( mSource->mFields.at( i ).name() );
+
+    mAttributesToFetch.append( i );
+  }
+
+  // get geometry col
+  if ( ( !( request.flags() & Qgis::FeatureRequestFlag::NoGeometry )
+         || ( request.spatialFilterType() == Qgis::SpatialFilterType::DistanceWithin )
+         || ( request.filterType() == Qgis::FeatureRequestFilterType::Expression && request.filterExpression()->needsGeometry() ) )
+       && mSource->isSpatial() )
+  {
+    selectColumns << QgsMssqlUtils::quotedIdentifier( mSource->mGeometryColName );
+  }
+
+  mStatement = selectColumns.join( ',' );
+
+  if ( !mSource->mQuery.isEmpty() )
+  {
+    mStatement += u" FROM (%1) _subquery"_s.arg( mSource->mQuery );
+  }
+  else
+  {
+    mStatement += u" FROM [%1].[%2]"_s.arg( mSource->mSchemaName, mSource->mTableName );
+  }
+
+  bool filterAdded = false;
+  // set spatial filter
+  if ( !mFilterRect.isNull() && mSource->isSpatial() && !mFilterRect.isEmpty() )
+  {
+    // polygons should be CCW for SqlGeography
+    QString r;
+    QTextStream stream( &r );
+
+    stream.setRealNumberPrecision( 8 );
+    stream.setRealNumberNotation( QTextStream::FixedNotation );
+
+    if ( mSource->mGeometryColType == "geometry"_L1 )
+    {
+      stream
+        << qgsDoubleToString( mFilterRect.xMinimum() )
+        << ' '
+        << qgsDoubleToString( mFilterRect.yMinimum() )
+        << ", "
+        << qgsDoubleToString( mFilterRect.xMaximum() )
+        << ' '
+        << qgsDoubleToString( mFilterRect.yMinimum() )
+        << ", "
+        << qgsDoubleToString( mFilterRect.xMaximum() )
+        << ' '
+        << qgsDoubleToString( mFilterRect.yMaximum() )
+        << ", "
+        << qgsDoubleToString( mFilterRect.xMinimum() )
+        << ' '
+        << qgsDoubleToString( mFilterRect.yMaximum() )
+        << ", "
+        << qgsDoubleToString( mFilterRect.xMinimum() )
+        << ' '
+        << qgsDoubleToString( mFilterRect.yMinimum() );
+    }
+    else
+    {
+      stream
+        << qgsDoubleToString( validLon( mFilterRect.xMinimum() ) )
+        << ' '
+        << qgsDoubleToString( validLat( mFilterRect.yMinimum() ) )
+        << ", "
+        << qgsDoubleToString( validLon( mFilterRect.xMaximum() ) )
+        << ' '
+        << qgsDoubleToString( validLat( mFilterRect.yMinimum() ) )
+        << ", "
+        << qgsDoubleToString( validLon( mFilterRect.xMaximum() ) )
+        << ' '
+        << qgsDoubleToString( validLat( mFilterRect.yMaximum() ) )
+        << ", "
+        << qgsDoubleToString( validLon( mFilterRect.xMinimum() ) )
+        << ' '
+        << qgsDoubleToString( validLat( mFilterRect.yMaximum() ) )
+        << ", "
+        << qgsDoubleToString( validLon( mFilterRect.xMinimum() ) )
+        << ' '
+        << qgsDoubleToString( validLat( mFilterRect.yMinimum() ) );
+    }
+
+    mStatement += " WHERE "_L1;
+    if ( !mDisableInvalidGeometryHandling )
+      mStatement += u"[%1].STIsValid() = 1 AND "_s.arg( mSource->mGeometryColName );
+
+    // use the faster filter method only when we don't need an exact intersect test -- filter doesn't give exact
+    // results when the layer has a spatial index
+    QString test = mRequest.flags() & Qgis::FeatureRequestFlag::ExactIntersect ? u"STIntersects"_s : u"Filter"_s;
+    mStatement += u"[%1].%2([%3]::STGeomFromText('POLYGON((%4))',%5)) = 1"_s.arg( mSource->mGeometryColName, test, mSource->mGeometryColType, r, QString::number( mSource->mSRId ) );
+    filterAdded = true;
+  }
+
+  // set fid filter
+  if ( request.filterType() == Qgis::FeatureRequestFilterType::Fid && !mSource->mPrimaryKeyAttrs.isEmpty() )
+  {
+    if ( !filterAdded )
+      mStatement += " WHERE "_L1;
+    else
+      mStatement += " AND "_L1;
+
+    if ( mSource->mPrimaryKeyType == QgsMssqlDatabase::PrimaryKeyType::Int )
+    {
+      mStatement += u"[%1]=%2"_s.arg( mSource->mFields[mSource->mPrimaryKeyAttrs[0]].name(), FID_TO_STRING( request.filterFid() ) );
+    }
+    else if ( mSource->mPrimaryKeyType == QgsMssqlDatabase::PrimaryKeyType::FidMap )
+    {
+      QVariantList key = mSource->mShared->lookupKey( request.filterFid() );
+      if ( !key.isEmpty() )
+      {
+        mStatement += "(";
+
+        QString delim;
+        for ( int i = 0; i < mSource->mPrimaryKeyAttrs.size(); i++ )
+        {
+          QString colName = mSource->mFields[mSource->mPrimaryKeyAttrs[i]].name();
+          QString expr;
+          if ( QgsVariantUtils::isNull( key[i] ) )
+            expr = QString( "[%1] IS NULL" ).arg( colName );
+          else
+            expr = QString( "[%1]=%2" ).arg( colName, QgsMssqlUtils::quotedValue( key[i] ) );
+
+          mStatement += u"%1%2"_s.arg( delim, expr );
+          delim = " AND ";
+        }
+
+        mStatement += ")";
+      }
+    }
+
+    filterAdded = true;
+  }
+  else if ( request.filterType() == Qgis::FeatureRequestFilterType::Fids && !mSource->mPrimaryKeyAttrs.isEmpty() && !mRequest.filterFids().isEmpty() )
+  {
+    if ( !filterAdded )
+      mStatement += " WHERE "_L1;
+    else
+      mStatement += " AND "_L1;
+
+    if ( mSource->mPrimaryKeyType == QgsMssqlDatabase::PrimaryKeyType::Int )
+    {
+      QString delim;
+      QString colName = mSource->mFields[mSource->mPrimaryKeyAttrs[0]].name();
+      QString inClause = u"[%1] IN ("_s.arg( colName );
+      const auto constFilterFids = mRequest.filterFids();
+      for ( QgsFeatureId featureId : constFilterFids )
+      {
+        inClause += delim + FID_TO_STRING( featureId );
+        delim = ',';
+      }
+      inClause.append( ')' );
+
+      mStatement += inClause;
+    }
+    else
+    {
+      const auto constFilterFids = mRequest.filterFids();
+
+      if ( !constFilterFids.isEmpty() )
+      {
+        QString delim( "(" );
+        for ( QgsFeatureId featureId : constFilterFids )
+        {
+          mStatement += delim + whereClauseFid( featureId ) + ")";
+          delim = " OR (";
+        }
+
+        mStatement += ")";
+      }
+    }
+
+    filterAdded = true;
+  }
+
+  if ( !mSource->mSqlWhereClause.isEmpty() )
+  {
+    if ( !filterAdded )
+      mStatement += " WHERE (" + mSource->mSqlWhereClause + ')';
+    else
+      mStatement += " AND (" + mSource->mSqlWhereClause + ')';
+    filterAdded = true;
+  }
+
+  //NOTE - must be last added!
+  mExpressionCompiled = false;
+  mCompileStatus = NoCompilation;
+  if ( request.filterType() == Qgis::FeatureRequestFilterType::Expression )
+  {
+    QgsMssqlExpressionCompiler compiler = QgsMssqlExpressionCompiler( mSource, request.flags() & Qgis::FeatureRequestFlag::IgnoreStaticNodesDuringExpressionCompilation );
+    QgsSqlExpressionCompiler::Result result = compiler.compile( request.filterExpression() );
+    if ( result == QgsSqlExpressionCompiler::Complete || result == QgsSqlExpressionCompiler::Partial )
+    {
+      mFallbackStatement = mStatement;
+      if ( !filterAdded )
+        mStatement += " WHERE (" + compiler.result() + ')';
+      else
+        mStatement += " AND (" + compiler.result() + ')';
+
+      //if only partial success when compiling expression, we need to double-check results using QGIS' expressions
+      mExpressionCompiled = ( result == QgsSqlExpressionCompiler::Complete );
+      mCompileStatus = ( mExpressionCompiled ? Compiled : PartiallyCompiled );
+      limitAtProvider = mExpressionCompiled;
+    }
+    else
+    {
+      limitAtProvider = false;
+    }
+  }
+
+  QStringList orderByParts;
+  mOrderByCompiled = true;
+
+  const auto constOrderBy = request.orderBy();
+  for ( const QgsFeatureRequest::OrderByClause &clause : constOrderBy )
+  {
+    if ( ( clause.ascending() && !clause.nullsFirst() ) || ( !clause.ascending() && clause.nullsFirst() ) )
+    {
+      //not supported by SQL Server
+      mOrderByCompiled = false;
+      break;
+    }
+
+    QgsMssqlExpressionCompiler compiler = QgsMssqlExpressionCompiler( mSource, request.flags() & Qgis::FeatureRequestFlag::IgnoreStaticNodesDuringExpressionCompilation );
+    QgsExpression expression = clause.expression();
+    if ( compiler.compile( &expression ) == QgsSqlExpressionCompiler::Complete )
+    {
+      QString part;
+      part = compiler.result();
+      part += clause.ascending() ? u" ASC"_s : u" DESC"_s;
+      orderByParts << part;
+    }
+    else
+    {
+      // Bail out on first non-complete compilation.
+      // Most important clauses at the beginning of the list
+      // will still be sent and used to pre-sort so the local
+      // CPU can use its cycles for fine-tuning.
+      mOrderByCompiled = false;
+      break;
+    }
+  }
+
+  if ( !mOrderByCompiled && !request.orderBy().isEmpty() )
+    limitAtProvider = false;
+
+  if ( request.limit() >= 0 && limitAtProvider )
+  {
+    mStatement.prepend( u"SELECT TOP %1 "_s.arg( mRequest.limit() ) );
+    if ( !mFallbackStatement.isEmpty() )
+      mFallbackStatement.prepend( u"SELECT TOP %1 "_s.arg( mRequest.limit() ) );
+  }
+  else
+  {
+    mStatement.prepend( "SELECT " );
+    if ( !mFallbackStatement.isEmpty() )
+      mFallbackStatement.prepend( "SELECT " );
+  }
+
+  if ( !orderByParts.isEmpty() )
+  {
+    mOrderByClause = u" ORDER BY %1"_s.arg( orderByParts.join( ','_L1 ) );
+  }
+
+  QgsDebugMsgLevel( mStatement + " " + mOrderByClause, 2 );
+#if 0
+  if ( fieldCount == 0 )
+  {
+    QgsDebugError( u"QgsMssqlProvider::select no fields have been requested"_s );
+    mStatement.clear();
+  }
+#endif
+}
+
+bool QgsMssqlFeatureIterator::fetchFeature( QgsFeature &feature )
+{
+  feature.setValid( false );
+
+  if ( !mDatabase )
+  {
+    if ( mSource->mTransactionConn )
+    {
+      // Using shared connection for the transaction, but that's fine because we use
+      // a mutex to prevent concurrent access to it from multiple threads.
+      mDatabase = mSource->mTransactionConn;
+    }
+    else
+    {
+      // No existing connection, so set it up now. It's safe to do here as we're now in
+      // the thread were iteration is actually occurring.
+      mDatabase = QgsMssqlDatabase::connectDb( mSource->mUri );
+    }
+
+    if ( !mDatabase->isValid() )
+    {
+      QgsDebugError( u"Failed to open database"_s );
+      QgsDebugError( mDatabase->errorText() );
+      return false;
+    }
+
+    // create sql query
+    mQuery = std::make_unique<QgsMssqlQuery>( mDatabase );
+
+    // start selection
+    if ( !rewind() )
+      return false;
+  }
+
+  if ( !mQuery )
+    return false;
+
+  if ( !mQuery->isActive() )
+  {
+    QgsDebugError( u"Read attempt on inactive query"_s );
+    return false;
+  }
+
+  while ( mQuery->next() )
+  {
+    feature.initAttributes( mSource->mFields.count() );
+    feature.setFields( mSource->mFields ); // allow name-based attribute lookups
+
+    for ( int i = 0; i < mAttributesToFetch.count(); i++ )
+    {
+      const QVariant originalValue = mQuery->value( i );
+      QgsField fld = mSource->mFields.at( mAttributesToFetch.at( i ) );
+      QVariant v = originalValue;
+      if ( fld.type() == QMetaType::Type::QTime )
+        v = QgsMssqlProvider::convertTimeValue( v );
+      if ( v.userType() != fld.type() )
+        v = QgsVectorDataProvider::convertValue( fld.type(), originalValue.toString() );
+
+      // second chance for time fields -- time fields are not correctly handled by sql server driver on linux (maybe win too?)
+      if ( QgsVariantUtils::isNull( v ) && fld.type() == QMetaType::Type::QTime && originalValue.isValid() && originalValue.userType() == QMetaType::Type::QByteArray )
+      {
+        // time fields can be returned as byte arrays... woot
+        const QByteArray ba = originalValue.toByteArray();
+        if ( ba.length() >= 5 )
+        {
+          const int hours = ba.at( 0 );
+          const int mins = ba.at( 2 );
+          const int seconds = ba.at( 4 );
+          v = QTime( hours, mins, seconds );
+          if ( !v.isValid() ) // can't handle it
+            v = QgsVariantUtils::createNullVariant( QMetaType::Type::QTime );
+        }
+      }
+
+      feature.setAttribute( mAttributesToFetch.at( i ), v );
+    }
+
+    QgsFeatureId fid = 0;
+
+    switch ( mSource->mPrimaryKeyType )
+    {
+      case QgsMssqlDatabase::PrimaryKeyType::Int:
+        // get 64bit integer from result
+        fid = mQuery->record().value( mSource->mFields.at( mSource->mPrimaryKeyAttrs.value( 0 ) ).name() ).toLongLong();
+        if ( mAttributesToFetch.contains( mSource->mPrimaryKeyAttrs.value( 0 ) ) )
+          feature.setAttribute( mSource->mPrimaryKeyAttrs.value( 0 ), fid );
+        break;
+
+      case QgsMssqlDatabase::PrimaryKeyType::FidMap:
+      {
+        QVariantList primaryKeyVals;
+        for ( int idx : std::as_const( mSource->mPrimaryKeyAttrs ) )
+        {
+          QgsField fld = mSource->mFields.at( idx );
+
+          QVariant v = mQuery->record().value( fld.name() );
+          if ( fld.type() == QMetaType::Type::QTime )
+            v = QgsMssqlProvider::convertTimeValue( v );
+          if ( v.userType() != fld.type() )
+            v = QgsVectorDataProvider::convertValue( fld.type(), v.toString() );
+          primaryKeyVals << v;
+
+          if ( mAttributesToFetch.contains( idx ) )
+            feature.setAttribute( idx, v );
+        }
+
+        fid = mSource->mShared->lookupFid( primaryKeyVals );
+      }
+      break;
+
+      case QgsMssqlDatabase::PrimaryKeyType::Unknown:
+        Q_ASSERT( !"FAILURE: cannot get feature with unknown primary key" );
+        return false;
+    }
+
+    feature.setId( fid );
+
+    feature.clearGeometry();
+    if ( mSource->isSpatial() )
+    {
+      QByteArray ar = mQuery->record().value( mSource->mGeometryColName ).toByteArray();
+      if ( !ar.isEmpty() )
+      {
+        std::unique_ptr<QgsAbstractGeometry> geom = mParser.parseSqlGeometry( reinterpret_cast<unsigned char *>( ar.data() ), ar.size() );
+        if ( geom )
+          feature.setGeometry( QgsGeometry( std::move( geom ) ) );
+      }
+    }
+
+    geometryToDestinationCrs( feature, mTransform );
+    if ( mDistanceWithinEngine && mDistanceWithinEngine->distance( feature.geometry().constGet() ) > mRequest.distanceWithin() )
+    {
+      continue;
+    }
+
+    feature.setValid( true );
+    return true;
+  }
+  return false;
+}
+
+bool QgsMssqlFeatureIterator::nextFeatureFilterExpression( QgsFeature &f )
+{
+  if ( !mExpressionCompiled )
+    return QgsAbstractFeatureIterator::nextFeatureFilterExpression( f );
+  else
+    return fetchFeature( f );
+}
+
+bool QgsMssqlFeatureIterator::prepareOrderBy( const QList<QgsFeatureRequest::OrderByClause> &orderBys )
+{
+  Q_UNUSED( orderBys )
+  // Preparation has already been done in the constructor, so we just communicate the result
+  return mOrderByCompiled;
+}
+
+bool QgsMssqlFeatureIterator::rewind()
+{
+  if ( mClosed )
+    return false;
+
+  if ( mStatement.isEmpty() )
+  {
+    QgsDebugError( u"QgsMssqlFeatureIterator::rewind on empty statement"_s );
+    return false;
+  }
+
+  if ( !mQuery )
+    return false;
+
+  mQuery->clear();
+  mQuery->setForwardOnly( true );
+
+  QString sql { mOrderByClause.isEmpty() ? mStatement : mStatement + mOrderByClause };
+  auto logWrapper = std::make_unique<QgsDatabaseQueryLogWrapper>( sql, mSource->connInfo(), u"mssql"_s, u"QgsMssqlFeatureIterator"_s, QGS_QUERY_LOG_ORIGIN );
+
+  bool result = mQuery->exec( sql );
+  if ( !result )
+  {
+    logWrapper->setError( mQuery->lastError().text() );
+    if ( !mFallbackStatement.isEmpty() )
+    {
+      //try with fallback statement
+      sql = mOrderByClause.isEmpty() ? mFallbackStatement : mFallbackStatement + mOrderByClause;
+      logWrapper = std::make_unique<QgsDatabaseQueryLogWrapper>( sql, mSource->connInfo(), u"mssql"_s, u"QgsMssqlFeatureIterator"_s, QGS_QUERY_LOG_ORIGIN );
+      result = mQuery->exec( sql );
+      if ( result )
+      {
+        mExpressionCompiled = false;
+        mCompileStatus = NoCompilation;
+      }
+      else
+      {
+        logWrapper->setError( mQuery->lastError().text() );
+      }
+    }
+  }
+
+  if ( !result && !mOrderByClause.isEmpty() )
+  {
+    //try without order by clause
+    logWrapper = std::make_unique<QgsDatabaseQueryLogWrapper>( mStatement, mSource->connInfo(), u"mssql"_s, u"QgsMssqlFeatureIterator"_s, QGS_QUERY_LOG_ORIGIN );
+    result = mQuery->exec( mStatement );
+    if ( result )
+    {
+      mOrderByCompiled = false;
+    }
+    else
+    {
+      logWrapper->setError( mQuery->lastError().text() );
+    }
+  }
+
+  if ( !result && !mFallbackStatement.isEmpty() && !mOrderByClause.isEmpty() )
+  {
+    //try with fallback statement and without order by clause
+    logWrapper = std::make_unique<QgsDatabaseQueryLogWrapper>( mFallbackStatement, mSource->connInfo(), u"mssql"_s, u"QgsMssqlFeatureIterator"_s, QGS_QUERY_LOG_ORIGIN );
+    result = mQuery->exec( mFallbackStatement );
+    if ( result )
+    {
+      mExpressionCompiled = false;
+      mOrderByCompiled = false;
+      mCompileStatus = NoCompilation;
+    }
+    else
+    {
+      logWrapper->setError( mQuery->lastError().text() );
+    }
+  }
+
+  if ( !result )
+  {
+    QgsDebugError( u"SQL:%1\n  Error:%2"_s.arg( mQuery->lastQuery(), mQuery->lastError().text() ) );
+    close();
+    return false;
+  }
+
+  return true;
+}
+
+bool QgsMssqlFeatureIterator::close()
+{
+  if ( mClosed )
+    return false;
+
+  if ( mQuery && mQuery->isActive() )
+  {
+    mQuery->finish();
+  }
+
+  mQuery.reset();
+
+  iteratorClosed();
+
+  mClosed = true;
+  return true;
+}
+
+///////////////
+
+QgsMssqlFeatureSource::QgsMssqlFeatureSource( const QgsMssqlProvider *p )
+  : mFields( p->mAttributeFields )
+  , mPrimaryKeyType( p->mPrimaryKeyType )
+  , mPrimaryKeyAttrs( p->mPrimaryKeyAttrs )
+  , mShared( p->mShared )
+  , mSRId( p->mSRId )
+  , mIsGeography( p->mParser.mIsGeography )
+  , mGeometryColName( p->mGeometryColName )
+  , mGeometryColType( p->mGeometryColType )
+  , mSchemaName( p->mSchemaName )
+  , mTableName( p->mTableName )
+  , mQuery( p->mQuery )
+  , mUri( p->mUri )
+  , mSqlWhereClause( p->mSqlWhereClause )
+  , mDisableInvalidGeometryHandling( p->mDisableInvalidGeometryHandling )
+  , mCrs( p->crs() )
+  , mTransactionConn( p->transaction() ? static_cast<QgsMssqlTransaction *>( p->transaction() )->conn() : std::shared_ptr<QgsMssqlDatabase>() )
+  , mConnInfo( p->uri().uri() )
+{}
+
+QgsFeatureIterator QgsMssqlFeatureSource::getFeatures( const QgsFeatureRequest &request )
+{
+  return QgsFeatureIterator( new QgsMssqlFeatureIterator( this, false, request ) );
+}
+
+const QString &QgsMssqlFeatureSource::connInfo() const
+{
+  return mConnInfo;
+}

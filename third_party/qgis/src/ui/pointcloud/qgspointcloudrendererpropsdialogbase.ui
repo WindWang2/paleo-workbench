@@ -1,0 +1,573 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>QgsPointCloudRendererPropsDialogBase</class>
+ <widget class="QgsPanelWidget" name="QgsPointCloudRendererPropsDialogBase">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>569</width>
+    <height>618</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Renderer Settings</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_2">
+   <item>
+    <widget class="QStackedWidget" name="mainStack">
+     <widget class="QWidget" name="page">
+      <layout class="QVBoxLayout" name="verticalLayout_3">
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout">
+         <item>
+          <widget class="QComboBox" name="cboRenderers"/>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QStackedWidget" name="stackedWidget">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+           <horstretch>4</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <widget class="QWidget" name="pageNoWidget">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="QLabel" name="label">
+             <property name="text">
+              <string>This renderer doesn't implement a graphical interface.</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="mLayerRenderingGroupBox_2">
+         <property name="title">
+          <string>Point Symbol</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+         <property name="checkable">
+          <bool>false</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_2">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>3</number>
+          </property>
+          <item row="0" column="1" colspan="2">
+           <widget class="QgsDoubleSpinBox" name="mPointSizeSpinBox">
+            <property name="decimals">
+             <number>6</number>
+            </property>
+            <property name="maximum">
+             <double>99999999999.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_2">
+            <property name="text">
+             <string>Style</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="3">
+           <widget class="QgsUnitSelectionWidget" name="mPointSizeUnitWidget" native="true">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="focusPolicy">
+             <enum>Qt::FocusPolicy::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1" colspan="3">
+           <widget class="QComboBox" name="mPointStyleComboBox"/>
+          </item>
+          <item row="0" column="0">
+           <widget class="QLabel" name="lblTransparency_4">
+            <property name="text">
+             <string>Point size</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QgsCollapsibleGroupBox" name="mEyeDomeLightingGroupBox">
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="title">
+          <string>Eye-Dome Lighting</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_6">
+          <property name="sizeConstraint">
+           <enum>QLayout::SizeConstraint::SetMinimumSize</enum>
+          </property>
+          <item row="3" column="1">
+           <widget class="QgsDoubleSpinBox" name="mEdlStrengthSpinBox">
+            <property name="toolTip">
+             <string>Adjusts how strong the added shading will be. Greater values mean stronger effect.</string>
+            </property>
+            <property name="decimals">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <double>999999999999.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>100.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>1000.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="label_5">
+            <property name="text">
+             <string>Distance</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QgsDoubleSpinBox" name="mEdlDistanceSpinBox">
+            <property name="toolTip">
+             <string>Distance away from the original pixel to sample neighbors.</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_6">
+            <property name="text">
+             <string>Strength</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="2">
+           <widget class="QgsUnitSelectionWidget" name="mEdlDistanceUnit" native="true"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QgsCollapsibleGroupBox" name="mHillshadeGroupBox">
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="title">
+          <string>Hillshade</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_7">
+          <property name="sizeConstraint">
+           <enum>QLayout::SizeConstraint::SetMinimumSize</enum>
+          </property>
+          <item row="0" column="1">
+           <widget class="QgsDoubleSpinBox" name="mHillshadingZFactorSpinBox">
+            <property name="toolTip">
+             <string>Vertical exageration for hillshading</string>
+            </property>
+            <property name="decimals">
+             <number>6</number>
+            </property>
+            <property name="maximum">
+             <double>9999999999999999455752309870428160.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>1.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="0">
+           <widget class="QLabel" name="mHillshadingZFactorLabel">
+            <property name="text">
+             <string>Z Factor</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="mHillshadingMultidirLabel">
+            <property name="text">
+             <string>Multidirectional</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QCheckBox" name="mHillshadingMultidirCheckBox">
+            <property name="toolTip">
+             <string>Use multidirectional lights instead of the specified azimuth for hillshading.</string>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+            <property name="tristate">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <widget class="QgsDirectionalLightWidget" name="mDirectionalLightWidget" native="true"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QgsCollapsibleGroupBox" name="mTriangulateGroupBox">
+         <property name="title">
+          <string>Render as a Surface (Triangulate)</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_8">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>3</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="mHorizontalTriangleCheckBox">
+            <property name="text">
+             <string>Skip triangles longer than</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QgsDoubleSpinBox" name="mHorizontalTriangleThresholdSpinBox">
+            <property name="toolTip">
+             <string>Maximum Triangle Side Size in Horizontal Plan</string>
+            </property>
+            <property name="decimals">
+             <number>6</number>
+            </property>
+            <property name="maximum">
+             <double>99999999999.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <widget class="QgsUnitSelectionWidget" name="mHorizontalTriangleUnitWidget" native="true"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+        <item>
+          <widget class="QgsCollapsibleGroupBox" name="groupBox_2">
+          <property name="title">
+            <string>Color Modification</string>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_4" columnstretch="1,2">
+            <item row="0" column="0">
+            <widget class="QLabel" name="label1">
+              <property name="text">
+              <string>Base color accessible as @value</string>
+              </property>
+            </widget>
+            </item>
+            <item row="0" column="1">
+            <widget class="QgsFieldExpressionWidget" name="mColorExpressionWidget" native="true">
+              <property name="focusPolicy">
+              <enum>Qt::FocusPolicy::StrongFocus</enum>
+              </property>
+            </widget>
+            </item>
+          </layout>
+          </widget>
+        </item>
+       <item>
+        <widget class="QgsCollapsibleGroupBox" name="mVpcGroupBox">
+         <property name="title">
+          <string>Virtual Point Cloud Options</string>
+         </property>
+         <property name="checkable">
+          <bool>false</bool>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_3">
+          <item row="1" column="0">
+           <widget class="QCheckBox" name="mLabels">
+            <property name="text">
+             <string>Show tile labels</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <spacer name="horizontalSpacer">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>301</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_3">
+            <property name="text">
+             <string>When zoomed out</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1" colspan="2">
+           <widget class="QComboBox" name="mZoomOutOptions"/>
+          </item>
+          <item row="1" column="2">
+           <widget class="QgsFontButton" name="mLabelOptions">
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_4">
+            <property name="text">
+             <string>Overview switching scale</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1" colspan="2">
+           <widget class="QComboBox" name="mOverviewSwitchingScale">
+            <property name="toolTip">
+             <string>Sets the zoom level at which the individual point cloud files will get rendered instead of the overview or their extents.
+
+Normal means roughly when the point cloud extent no longer fits the map extent.
+
+Select Earlier to switch at a smaller scale (zoomed out) or Later to switch at a larger scale (zoomed in). </string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="mLayerRenderingGroupBox">
+         <property name="title">
+          <string>Layer Rendering</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+         <property name="checkable">
+          <bool>false</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayout">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>3</number>
+          </property>
+          <item row="1" column="0">
+           <widget class="QLabel" name="lblTransparency_2">
+            <property name="text">
+             <string>Maximum error</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="lblBlend">
+            <property name="text">
+             <string>Blending mode</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="3">
+           <widget class="QgsUnitSelectionWidget" name="mMaxErrorUnitWidget" native="true">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="focusPolicy">
+             <enum>Qt::FocusPolicy::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1" colspan="3">
+           <widget class="QgsBlendModeComboBox" name="mBlendModeComboBox">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>4</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1" colspan="3">
+           <widget class="QgsOpacityWidget" name="mOpacityWidget" native="true">
+            <property name="focusPolicy">
+             <enum>Qt::FocusPolicy::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1" colspan="3">
+           <widget class="QComboBox" name="mDrawOrderComboBox">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>4</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1" colspan="2">
+           <widget class="QgsDoubleSpinBox" name="mMaxErrorSpinBox">
+            <property name="decimals">
+             <number>6</number>
+            </property>
+            <property name="maximum">
+             <double>99999999999.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.300000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="lblTransparency">
+            <property name="text">
+             <string>Opacity</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="0">
+           <widget class="QLabel" name="lblDrawOrder">
+            <property name="text">
+             <string>Draw order</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="labelLayout">
+         <property name="leftMargin">
+          <number>6</number>
+         </property>
+         <property name="rightMargin">
+          <number>6</number>
+         </property>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsDoubleSpinBox</class>
+   <extends>QDoubleSpinBox</extends>
+   <header>qgsdoublespinbox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>QgsUnitSelectionWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsunitselectionwidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QgsBlendModeComboBox</class>
+   <extends>QComboBox</extends>
+   <header>qgsblendmodecombobox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>QgsOpacityWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsopacitywidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QgsPanelWidget</class>
+   <extends>QWidget</extends>
+   <header>qgspanelwidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QgsCollapsibleGroupBox</class>
+   <extends>QGroupBox</extends>
+   <header>qgscollapsiblegroupbox.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>QgsFontButton</class>
+   <extends>QToolButton</extends>
+   <header>qgsfontbutton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>QgsDirectionalLightWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsdirectionallightwidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>cboRenderers</tabstop>
+  <tabstop>mPointSizeSpinBox</tabstop>
+  <tabstop>mPointSizeUnitWidget</tabstop>
+  <tabstop>mPointStyleComboBox</tabstop>
+  <tabstop>mDrawOrderComboBox</tabstop>
+  <tabstop>mMaxErrorSpinBox</tabstop>
+  <tabstop>mMaxErrorUnitWidget</tabstop>
+  <tabstop>mOpacityWidget</tabstop>
+  <tabstop>mBlendModeComboBox</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

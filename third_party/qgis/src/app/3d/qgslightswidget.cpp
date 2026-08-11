@@ -1,0 +1,694 @@
+/***************************************************************************
+  qgslightswidget.cpp
+  --------------------------------------
+  Date                 : November 2018
+  Copyright            : (C) 2018 by Martin Dobias
+  Email                : wonder dot sk at gmail dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgslightswidget.h"
+
+#include "qgs3dmapsettings.h"
+#include "qgsapplication.h"
+
+#include <QMenu>
+#include <QMessageBox>
+#include <QString>
+
+#include "moc_qgslightswidget.cpp"
+
+using namespace Qt::StringLiterals;
+
+QgsLightsWidget::QgsLightsWidget( QWidget *parent )
+  : QWidget( parent )
+{
+  setupUi( this );
+
+  spinPositionX->setClearValue( 0.0 );
+  spinPositionY->setClearValue( 0.0 );
+  spinPositionZ->setClearValue( 0.0 );
+  spinIntensity->setClearValue( 1.0 );
+  spinA0->setClearValue( 0.0 );
+  spinA1->setClearValue( 0.0 );
+  spinA2->setClearValue( 0.0 );
+  spinDirectionalIntensity->setClearValue( 1.0 );
+
+  mSunIntensitySpin->setClearValue( 1.0 );
+  mSunElevationSpin->setClearValue( 0.0 );
+  mSunPressureSpin->setClearValue( 1013.25 );
+  mSunTemperatureSpin->setClearValue( 15.0 );
+
+  mSunTimeWidget->setDisplayFormat( u"yyyy-MM-dd HH:mm:ss"_s );
+  mSunTimeWidget->setDateTimeRange( QDateTime( QDate( 1, 1, 1 ), QTime( 0, 0, 0 ) ), mSunTimeWidget->maximumDateTime() );
+  mSunTimeWidget->setCalendarPopup( true );
+  mSunTimeWidget->setDateTime( QDateTime::currentDateTime().toLocalTime() );
+  mSunTimeWidget->setAllowNull( false );
+
+  mLightsModel = new QgsLightsModel( this );
+  mLightsListView->setModel( mLightsModel );
+
+  connect( mLightsListView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &QgsLightsWidget::selectedLightChanged );
+
+  btnAddLight->setIcon( QIcon( QgsApplication::iconPath( "symbologyAdd.svg" ) ) );
+  btnRemoveLight->setIcon( QIcon( QgsApplication::iconPath( "symbologyRemove.svg" ) ) );
+
+  dialAzimuth->setMaximum( 359 );
+
+  QMenu *addLightMenu = new QMenu( this );
+  QAction *addPointLight = new QAction( tr( "Point Light" ), addLightMenu );
+  connect( addPointLight, &QAction::triggered, this, &QgsLightsWidget::onAddLight );
+  addLightMenu->addAction( addPointLight );
+
+  QAction *addDirectionalLight = new QAction( tr( "Directional Light" ), addLightMenu );
+  connect( addDirectionalLight, &QAction::triggered, this, &QgsLightsWidget::onAddDirectionalLight );
+  addLightMenu->addAction( addDirectionalLight );
+
+  QAction *addSunLight = new QAction( tr( "Sun Light" ), addLightMenu );
+  connect( addSunLight, &QAction::triggered, this, &QgsLightsWidget::onAddSunLight );
+  addLightMenu->addAction( addSunLight );
+
+  btnAddLight->setMenu( addLightMenu );
+
+  connect( btnRemoveLight, &QToolButton::clicked, this, &QgsLightsWidget::onRemoveLight );
+
+  connect( spinPositionX, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( spinPositionY, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( spinPositionZ, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( spinIntensity, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( btnColor, &QgsColorButton::colorChanged, this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( spinA0, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( spinA1, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+  connect( spinA2, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentLightParameters );
+
+  connect( spinDirectionalIntensity, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentDirectionalLightParameters );
+  connect( btnDirectionalColor, &QgsColorButton::colorChanged, this, &QgsLightsWidget::updateCurrentDirectionalLightParameters );
+
+  connect( dialAzimuth, &QSlider::valueChanged, this, [this]( int value ) { spinBoxAzimuth->setValue( ( value + 180 ) % 360 ); } );
+  connect( sliderAltitude, &QSlider::valueChanged, spinBoxAltitude, &QgsDoubleSpinBox::setValue );
+  connect( spinBoxAzimuth, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::onDirectionChange );
+  connect( spinBoxAltitude, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::onDirectionChange );
+
+  connect( mSunIntensitySpin, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentSunLightParameters );
+  connect( mSunColorButton, &QgsColorButton::colorChanged, this, &QgsLightsWidget::updateCurrentSunLightParameters );
+  connect( mSunTimeWidget, &QDateTimeEdit::dateTimeChanged, this, &QgsLightsWidget::updateCurrentSunLightParameters );
+  connect( mSunElevationSpin, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentSunLightParameters );
+  connect( mSunPressureSpin, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentSunLightParameters );
+  connect( mSunTemperatureSpin, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, &QgsLightsWidget::updateCurrentSunLightParameters );
+
+  mLightsListView->selectionModel()->select( mLightsModel->index( 0, 0 ), QItemSelectionModel::ClearAndSelect );
+  selectedLightChanged( mLightsListView->selectionModel()->selection(), QItemSelection() );
+}
+
+void QgsLightsWidget::setSceneMode( Qgis::SceneMode mode )
+{
+  mSceneMode = mode;
+}
+
+void QgsLightsWidget::setLights( const QList<QgsLightSource *> sources )
+{
+  QList<QgsPointLightSettings> pointLights;
+  QList<QgsDirectionalLightSettings> directionalLights;
+  QList<QgsSunLightSettings> sunLights;
+  for ( const QgsLightSource *source : sources )
+  {
+    switch ( source->type() )
+    {
+      case Qgis::LightSourceType::Point:
+        pointLights.append( *qgis::down_cast<const QgsPointLightSettings *>( source ) );
+        break;
+      case Qgis::LightSourceType::Directional:
+        directionalLights.append( *qgis::down_cast<const QgsDirectionalLightSettings *>( source ) );
+        break;
+      case Qgis::LightSourceType::Sun:
+        sunLights.append( *qgis::down_cast<const QgsSunLightSettings *>( source ) );
+        break;
+    }
+  }
+
+  mLightsModel->setPointLights( pointLights );
+  mLightsModel->setDirectionalLights( directionalLights );
+  mLightsModel->setSunLights( sunLights );
+  mLightsListView->selectionModel()->select( mLightsModel->index( 0, 0 ), QItemSelectionModel::ClearAndSelect );
+  selectedLightChanged( mLightsListView->selectionModel()->selection(), QItemSelection() );
+}
+
+QList<QgsLightSource *> QgsLightsWidget::lightSources()
+{
+  QList<QgsLightSource *> res;
+  const QList<QgsPointLightSettings> pointLights = mLightsModel->pointLights();
+  const QList<QgsDirectionalLightSettings> directionalLights = mLightsModel->directionalLights();
+  const QList<QgsSunLightSettings> sunLights = mLightsModel->sunLights();
+  for ( const QgsPointLightSettings &light : pointLights )
+  {
+    res.append( light.clone() );
+  }
+  for ( const QgsDirectionalLightSettings &light : directionalLights )
+  {
+    res.append( light.clone() );
+  }
+  for ( const QgsSunLightSettings &light : sunLights )
+  {
+    res.append( light.clone() );
+  }
+  return res;
+}
+
+int QgsLightsWidget::directionalLightCount() const
+{
+  return mLightsModel->directionalLights().count();
+}
+
+int QgsLightsWidget::lightSourceCount() const
+{
+  return mLightsModel->rowCount( QModelIndex() );
+}
+
+void QgsLightsWidget::setPointLightCrs( const QgsCoordinateReferenceSystem &crs )
+{
+  labelPointLightCrs->setText( tr( "Coordinates in 3D map CRS" ) + u" (%1)"_s.arg( crs.userFriendlyIdentifier( Qgis::CrsIdentifierType::ShortString ) ) );
+  labelPointLightCrs->setToolTip( crs.userFriendlyIdentifier( Qgis::CrsIdentifierType::MediumString ) );
+}
+
+void QgsLightsWidget::setMapExtent( const QgsRectangle &extent )
+{
+  mMapExtent = extent;
+}
+
+void QgsLightsWidget::selectedLightChanged( const QItemSelection &selected, const QItemSelection & )
+{
+  if ( selected.empty() )
+  {
+    mStackedWidget->setCurrentIndex( 0 );
+    return;
+  }
+
+  const Qgis::LightSourceType lightType = static_cast<Qgis::LightSourceType>( mLightsModel->data( selected.indexes().at( 0 ), QgsLightsModel::LightTypeRole ).toInt() );
+  const int listIndex = mLightsModel->data( selected.indexes().at( 0 ), QgsLightsModel::LightListIndex ).toInt();
+
+  switch ( lightType )
+  {
+    case Qgis::LightSourceType::Point:
+      mStackedWidget->setCurrentIndex( 1 );
+      showSettingsForPointLight( mLightsModel->pointLights().at( listIndex ) );
+      break;
+
+    case Qgis::LightSourceType::Directional:
+      mStackedWidget->setCurrentIndex( 2 );
+      showSettingsForDirectionalLight( mLightsModel->directionalLights().at( listIndex ) );
+      break;
+
+    case Qgis::LightSourceType::Sun:
+      mStackedWidget->setCurrentWidget( mPageSunLight );
+      showSettingsForSunLight( mLightsModel->sunLights().at( listIndex ) );
+      break;
+  }
+}
+
+void QgsLightsWidget::showSettingsForPointLight( const QgsPointLightSettings &light )
+{
+  whileBlocking( spinPositionX )->setValue( light.position().x() );
+  whileBlocking( spinPositionY )->setValue( light.position().y() );
+  whileBlocking( spinPositionZ )->setValue( light.position().z() );
+  whileBlocking( btnColor )->setColor( light.color() );
+  whileBlocking( spinIntensity )->setValue( light.intensity() );
+  whileBlocking( spinA0 )->setValue( light.constantAttenuation() );
+  whileBlocking( spinA1 )->setValue( light.linearAttenuation() );
+  whileBlocking( spinA2 )->setValue( light.quadraticAttenuation() );
+}
+
+void QgsLightsWidget::showSettingsForDirectionalLight( const QgsDirectionalLightSettings &light )
+{
+  mDirectionX = light.direction().x();
+  mDirectionY = light.direction().y();
+  mDirectionZ = light.direction().z();
+  whileBlocking( btnDirectionalColor )->setColor( light.color() );
+  whileBlocking( spinDirectionalIntensity )->setValue( light.intensity() );
+  setAzimuthAltitude();
+}
+
+void QgsLightsWidget::showSettingsForSunLight( const QgsSunLightSettings &light )
+{
+  whileBlocking( mSunColorButton )->setColor( light.color() );
+  whileBlocking( mSunIntensitySpin )->setValue( light.intensity() );
+  whileBlocking( mSunElevationSpin )->setValue( light.referenceElevation() );
+  whileBlocking( mSunTimeWidget )->setDateTime( light.sunTime().toLocalTime() );
+  mLabelSunTime->setText( tr( "Reference time (%1)" ).arg( QTimeZone::systemTimeZone().abbreviation( light.sunTime().toLocalTime() ) ) );
+  whileBlocking( mSunPressureSpin )->setValue( light.atmosphericPressure() );
+  whileBlocking( mSunTemperatureSpin )->setValue( light.temperature() );
+}
+
+void QgsLightsWidget::updateCurrentLightParameters()
+{
+  const int listIndex = mLightsModel->data( mLightsListView->selectionModel()->selection().indexes().at( 0 ), QgsLightsModel::LightListIndex ).toInt();
+
+  QgsPointLightSettings light;
+  light.setPosition( QgsVector3D( spinPositionX->value(), spinPositionY->value(), spinPositionZ->value() ) );
+  light.setColor( btnColor->color() );
+  light.setIntensity( spinIntensity->value() );
+  light.setConstantAttenuation( spinA0->value() );
+  light.setLinearAttenuation( spinA1->value() );
+  light.setQuadraticAttenuation( spinA2->value() );
+
+  mLightsModel->setPointLightSettings( listIndex, light );
+}
+
+void QgsLightsWidget::updateCurrentDirectionalLightParameters()
+{
+  labelX->setText( QString::number( mDirectionX, 'f', 2 ) );
+  labelY->setText( QString::number( mDirectionY, 'f', 2 ) );
+  labelZ->setText( QString::number( mDirectionZ, 'f', 2 ) );
+
+  const int listIndex = mLightsModel->data( mLightsListView->selectionModel()->selection().indexes().at( 0 ), QgsLightsModel::LightListIndex ).toInt();
+
+  QgsDirectionalLightSettings light;
+  light.setDirection( QgsVector3D( mDirectionX, mDirectionY, mDirectionZ ) );
+  light.setColor( btnDirectionalColor->color() );
+  light.setIntensity( spinDirectionalIntensity->value() );
+
+  mLightsModel->setDirectionalLightSettings( listIndex, light );
+}
+
+void QgsLightsWidget::onAddLight()
+{
+  if ( mLightsModel->pointLights().size() >= 8 )
+  {
+    QMessageBox::warning( this, tr( "Add Light" ), tr( "It is not possible to add more than 8 lights to the scene." ) );
+    return;
+  }
+
+  QgsPointLightSettings settings;
+  if ( !mMapExtent.isEmpty() )
+  {
+    // default to placing a new light at the center of the map
+    settings.setPosition( QgsVector3D( mMapExtent.center().x(), mMapExtent.center().y(), 250 ) );
+  }
+
+  const QModelIndex newIndex = mLightsModel->addPointLight( settings );
+  mLightsListView->selectionModel()->select( newIndex, QItemSelectionModel::ClearAndSelect );
+  emit lightsAdded();
+}
+
+void QgsLightsWidget::onAddDirectionalLight()
+{
+  if ( mLightsModel->directionalLights().size() + mLightsModel->sunLights().size() >= 4 )
+  {
+    QMessageBox::warning( this, tr( "Add Directional Light" ), tr( "It is not possible to add more than 4 directional lights to the scene." ) );
+    return;
+  }
+
+  const QModelIndex newIndex = mLightsModel->addDirectionalLight( QgsDirectionalLightSettings() );
+  mLightsListView->selectionModel()->select( newIndex, QItemSelectionModel::ClearAndSelect );
+  emit lightsAdded();
+}
+
+void QgsLightsWidget::onRemoveLight()
+{
+  const QItemSelection selected = mLightsListView->selectionModel()->selection();
+  if ( selected.empty() )
+  {
+    return;
+  }
+
+  const int directionalCount = mLightsModel->directionalLights().size();
+  const int pointCount = mLightsModel->pointLights().size();
+  const int sunLightCount = mLightsModel->sunLights().size();
+
+  mLightsModel->removeRows( selected.indexes().at( 0 ).row(), 1 );
+
+  if ( mLightsModel->rowCount( QModelIndex() ) != directionalCount + pointCount + sunLightCount )
+    emit lightsRemoved();
+
+  selectedLightChanged( mLightsListView->selectionModel()->selection(), QItemSelection() );
+}
+
+void QgsLightsWidget::setAzimuthAltitude()
+{
+  double azimuthAngle;
+  double altitudeAngle;
+
+  const double horizontalVectorMagnitude = sqrt( mDirectionX * mDirectionX + mDirectionY * mDirectionY );
+
+  if ( horizontalVectorMagnitude == 0 )
+    azimuthAngle = 0;
+  else
+  {
+    azimuthAngle = ( asin( -mDirectionX / horizontalVectorMagnitude ) ) / M_PI * 180;
+    if ( mDirectionY > 0 )
+      azimuthAngle = 180 - azimuthAngle;
+    azimuthAngle = std::fmod( azimuthAngle + 360.0, 360.0 );
+  }
+
+  whileBlocking( dialAzimuth )->setValue( int( azimuthAngle + 180 ) % 360 );
+  whileBlocking( spinBoxAzimuth )->setValue( azimuthAngle );
+
+  if ( horizontalVectorMagnitude == 0 )
+    altitudeAngle = 90;
+  else
+    altitudeAngle = -atan( mDirectionZ / horizontalVectorMagnitude ) / M_PI * 180;
+
+  whileBlocking( spinBoxAltitude )->setValue( altitudeAngle );
+  whileBlocking( sliderAltitude )->setValue( altitudeAngle );
+
+  updateCurrentDirectionalLightParameters();
+}
+
+void QgsLightsWidget::onDirectionChange()
+{
+  const double altitudeValue = spinBoxAltitude->value();
+  const double azimuthValue = spinBoxAzimuth->value();
+
+  const double horizontalVectorMagnitude = cos( altitudeValue / 180 * M_PI );
+  mDirectionX = -horizontalVectorMagnitude * sin( azimuthValue / 180 * M_PI );
+  mDirectionY = -horizontalVectorMagnitude * cos( azimuthValue / 180 * M_PI );
+  mDirectionZ = -sin( altitudeValue / 180 * M_PI );
+
+  whileBlocking( sliderAltitude )->setValue( altitudeValue );
+  updateCurrentDirectionalLightParameters();
+}
+
+void QgsLightsWidget::updateCurrentSunLightParameters()
+{
+  const int listIndex = mLightsModel->data( mLightsListView->selectionModel()->selection().indexes().at( 0 ), QgsLightsModel::LightListIndex ).toInt();
+
+  QgsSunLightSettings light;
+  light.setColor( mSunColorButton->color() );
+  light.setIntensity( mSunIntensitySpin->value() );
+  light.setReferenceElevation( mSunElevationSpin->value() );
+  light.setSunTime( mSunTimeWidget->dateTime().toUTC() );
+  light.setAtmosphericPressure( mSunPressureSpin->value() );
+  light.setTemperature( mSunTemperatureSpin->value() );
+
+  mLightsModel->setSunLightSettings( listIndex, light );
+}
+
+void QgsLightsWidget::onAddSunLight()
+{
+  switch ( mSceneMode )
+  {
+    case Qgis::SceneMode::Globe:
+      QMessageBox::warning( this, tr( "Add Sun Light" ), tr( "It is not currently possible to add sun lights in 3D globes." ) );
+      return;
+    case Qgis::SceneMode::Local:
+      break;
+  }
+
+  if ( mLightsModel->directionalLights().size() + mLightsModel->sunLights().size() >= 4 )
+  {
+    QMessageBox::warning( this, tr( "Add Sun Light" ), tr( "It is not possible to add more than 4 directional lights to the scene." ) );
+    return;
+  }
+
+  const QModelIndex newIndex = mLightsModel->addSunLight( QgsSunLightSettings() );
+  mLightsListView->selectionModel()->select( newIndex, QItemSelectionModel::ClearAndSelect );
+  emit lightsAdded();
+}
+
+
+//
+// QgsLightsModel
+//
+QgsLightsModel::QgsLightsModel( QObject *parent )
+  : QAbstractListModel( parent )
+{}
+
+int QgsLightsModel::rowCount( const QModelIndex &parent ) const
+{
+  Q_UNUSED( parent )
+  return mPointLights.size() + mDirectionalLights.size() + mSunLights.size();
+}
+
+QVariant QgsLightsModel::data( const QModelIndex &index, int role ) const
+{
+  if ( index.row() < 0 || index.row() >= rowCount( QModelIndex() ) )
+    return QVariant();
+
+  const Qgis::LightSourceType lightType = index.row() < mPointLights.size()                                   ? Qgis::LightSourceType::Point
+                                          : index.row() < ( mPointLights.size() + mDirectionalLights.size() ) ? Qgis::LightSourceType::Directional
+                                                                                                              : Qgis::LightSourceType::Sun;
+  int lightListRow = 0;
+  switch ( lightType )
+  {
+    case Qgis::LightSourceType::Point:
+      lightListRow = index.row();
+      break;
+    case Qgis::LightSourceType::Directional:
+      lightListRow = index.row() - mPointLights.size();
+      break;
+    case Qgis::LightSourceType::Sun:
+      lightListRow = index.row() - mPointLights.size() - mDirectionalLights.size();
+      break;
+  }
+
+  switch ( role )
+  {
+    case Qt::DisplayRole:
+    case Qt::ToolTipRole:
+    case Qt::EditRole:
+      switch ( lightType )
+      {
+        case Qgis::LightSourceType::Point:
+          return tr( "Point light %1" ).arg( lightListRow + 1 );
+
+        case Qgis::LightSourceType::Directional:
+          return tr( "Directional light %1" ).arg( lightListRow + 1 );
+
+        case Qgis::LightSourceType::Sun:
+          return tr( "Sun light %1" ).arg( lightListRow + 1 );
+      }
+      break;
+
+    case LightTypeRole:
+      return static_cast< int >( lightType );
+
+    case LightListIndex:
+      return lightListRow;
+
+    case LightId:
+      switch ( lightType )
+      {
+        case Qgis::LightSourceType::Point:
+          return mPointLights.at( lightListRow ).id();
+        case Qgis::LightSourceType::Directional:
+          return mDirectionalLights.at( lightListRow ).id();
+        case Qgis::LightSourceType::Sun:
+          return mSunLights.at( lightListRow ).id();
+      }
+      break;
+
+    case Qt::DecorationRole:
+      return QgsApplication::getThemeIcon( u"/mActionHighlightFeature.svg"_s );
+
+    default:
+      break;
+  }
+  return QVariant();
+}
+
+bool QgsLightsModel::removeRows( int row, int count, const QModelIndex &parent )
+{
+  beginRemoveRows( parent, row, row + count - 1 );
+  for ( int i = row + count - 1; i >= row; --i )
+  {
+    const Qgis::LightSourceType lightType = i < mPointLights.size()                                   ? Qgis::LightSourceType::Point
+                                            : i < ( mPointLights.size() + mDirectionalLights.size() ) ? Qgis::LightSourceType::Directional
+                                                                                                      : Qgis::LightSourceType::Sun;
+    int lightListRow = 0;
+    switch ( lightType )
+    {
+      case Qgis::LightSourceType::Point:
+        lightListRow = i;
+        break;
+      case Qgis::LightSourceType::Directional:
+        lightListRow = i - mPointLights.size();
+        break;
+      case Qgis::LightSourceType::Sun:
+        lightListRow = i - mPointLights.size() - mDirectionalLights.size();
+        break;
+    }
+    switch ( lightType )
+    {
+      case Qgis::LightSourceType::Point:
+        mPointLights.removeAt( lightListRow );
+        break;
+
+      case Qgis::LightSourceType::Directional:
+        mDirectionalLights.removeAt( lightListRow );
+        break;
+
+      case Qgis::LightSourceType::Sun:
+        mSunLights.removeAt( lightListRow );
+        break;
+    }
+  }
+  endRemoveRows();
+  return true;
+}
+
+void QgsLightsModel::setPointLights( const QList<QgsPointLightSettings> &lights )
+{
+  if ( !mPointLights.empty() )
+  {
+    beginRemoveRows( QModelIndex(), 0, mPointLights.size() - 1 );
+    mPointLights.clear();
+    endRemoveRows();
+  }
+
+  if ( !lights.empty() )
+  {
+    beginInsertRows( QModelIndex(), 0, lights.size() - 1 );
+    mPointLights = lights;
+    endInsertRows();
+  }
+}
+
+void QgsLightsModel::setDirectionalLights( const QList<QgsDirectionalLightSettings> &lights )
+{
+  if ( !mDirectionalLights.empty() )
+  {
+    beginRemoveRows( QModelIndex(), mPointLights.size(), mPointLights.size() + mDirectionalLights.size() - 1 );
+    mDirectionalLights.clear();
+    endRemoveRows();
+  }
+
+  if ( !lights.empty() )
+  {
+    beginInsertRows( QModelIndex(), mPointLights.size(), mPointLights.size() + lights.size() - 1 );
+    mDirectionalLights = lights;
+    endInsertRows();
+  }
+}
+
+void QgsLightsModel::setSunLights( const QList<QgsSunLightSettings> &lights )
+{
+  if ( !mSunLights.empty() )
+  {
+    beginRemoveRows( QModelIndex(), mPointLights.size() + mDirectionalLights.size(), mPointLights.size() + mDirectionalLights.size() + mSunLights.size() - 1 );
+    mSunLights.clear();
+    endRemoveRows();
+  }
+
+  if ( !lights.empty() )
+  {
+    beginInsertRows( QModelIndex(), mPointLights.size() + mDirectionalLights.size(), mPointLights.size() + mDirectionalLights.size() + lights.size() - 1 );
+    mSunLights = lights;
+    endInsertRows();
+  }
+}
+
+QList<QgsPointLightSettings> QgsLightsModel::pointLights() const
+{
+  return mPointLights;
+}
+
+QList<QgsDirectionalLightSettings> QgsLightsModel::directionalLights() const
+{
+  return mDirectionalLights;
+}
+
+QList<QgsSunLightSettings> QgsLightsModel::sunLights() const
+{
+  return mSunLights;
+}
+
+void QgsLightsModel::setPointLightSettings( int index, const QgsPointLightSettings &light )
+{
+  mPointLights[index] = light;
+}
+
+void QgsLightsModel::setDirectionalLightSettings( int index, const QgsDirectionalLightSettings &light )
+{
+  mDirectionalLights[index] = light;
+}
+
+void QgsLightsModel::setSunLightSettings( int index, const QgsSunLightSettings &light )
+{
+  mSunLights[index] = light;
+}
+
+QModelIndex QgsLightsModel::addPointLight( const QgsPointLightSettings &light )
+{
+  beginInsertRows( QModelIndex(), mPointLights.size(), mPointLights.size() );
+  mPointLights.append( light );
+  endInsertRows();
+
+  return index( mPointLights.size() - 1 );
+}
+
+QModelIndex QgsLightsModel::addDirectionalLight( const QgsDirectionalLightSettings &light )
+{
+  beginInsertRows( QModelIndex(), mPointLights.size() + mDirectionalLights.size(), mPointLights.size() + mDirectionalLights.size() );
+  mDirectionalLights.append( light );
+  endInsertRows();
+
+  return index( mPointLights.size() + mDirectionalLights.size() - 1 );
+}
+
+QModelIndex QgsLightsModel::addSunLight( const QgsSunLightSettings &light )
+{
+  beginInsertRows( QModelIndex(), mPointLights.size() + mDirectionalLights.size() + mSunLights.size(), mPointLights.size() + mDirectionalLights.size() + mSunLights.size() );
+  mSunLights.append( light );
+  endInsertRows();
+
+  return index( mPointLights.size() + mDirectionalLights.size() + mSunLights.size() - 1 );
+}
+
+QModelIndex QgsLightsModel::indexFromLightId( const QString &id ) const
+{
+  int row = 0;
+  for ( const QgsPointLightSettings &light : mPointLights )
+  {
+    if ( light.id() == id )
+      return index( row );
+    row++;
+  }
+  for ( const QgsDirectionalLightSettings &light : mDirectionalLights )
+  {
+    if ( light.id() == id )
+      return index( row );
+    row++;
+  }
+  for ( const QgsSunLightSettings &light : mSunLights )
+  {
+    if ( light.id() == id )
+      return index( row );
+    row++;
+  }
+  return QModelIndex();
+}
+
+//
+// QgsLightsProxyModel
+//
+
+QgsLightsProxyModel::QgsLightsProxyModel( QObject *parent )
+  : QSortFilterProxyModel( parent )
+{
+  setDynamicSortFilter( true );
+}
+
+void QgsLightsProxyModel::setAllowedLightTypes( const QList<Qgis::LightSourceType> &types )
+{
+  mAllowedTypes = QSet<Qgis::LightSourceType>( types.begin(), types.end() );
+  invalidateFilter();
+}
+
+bool QgsLightsProxyModel::filterAcceptsRow( int source_row, const QModelIndex &source_parent ) const
+{
+  if ( !sourceModel() )
+    return false;
+
+  if ( mAllowedTypes.empty() )
+    return true;
+
+  const QModelIndex sourceIndex = sourceModel()->index( source_row, 0, source_parent );
+  const Qgis::LightSourceType lightType = static_cast<Qgis::LightSourceType>( sourceModel()->data( sourceIndex, QgsLightsModel::LightTypeRole ).toInt() );
+
+  return mAllowedTypes.contains( lightType );
+}

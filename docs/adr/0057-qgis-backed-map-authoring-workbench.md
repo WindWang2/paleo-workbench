@@ -11,12 +11,11 @@ immutable `MapRenderSnapshot` through `MapRenderBackend`; `MappingPage` does not
 second feature painter or a renderer-specific QGIS API surface.
 
 When `PALEO_WITH_QGIS_RENDERER` is built and the runtime bridge is available, the
-canvas uses `QgisMapRenderBackend` and the independently written
-`native/qgis_render_bridge` C++ extension.  The bridge owns QGIS process
-initialization, memory vector/raster render mirrors, render jobs, cancellation,
-generation rejection, and synchronous export frames.  The PySide6 host receives only
-owned RGBA frames and a narrow status/metrics API.  It never imports QGIS Python or
-PyQt GUI objects.
+canvas uses `QgisMapRenderBackend` and `native/qgis_render_bridge`. The bridge builds
+the fixed in-tree QGIS source snapshot, owns QGIS process initialization, memory
+vector/raster render mirrors, render jobs, cancellation, generation rejection, and
+synchronous export frames. The PySide6 host receives only owned RGBA frames and a
+narrow status/metrics API. It never imports QGIS Python or PyQt GUI objects.
 
 `FallbackMapRenderBackend` remains an explicit test/minimal-runtime option.  Its status
 is visibly `fallback`; it is never reported as QGIS rendering.
@@ -39,11 +38,13 @@ Raw imported resources are not opened for in-place edit.  Map authoring layers u
 
 ## Licensing and provenance
 
-QGIS is an optional external runtime dependency.  This repository does not vendor or
-copy QGIS source files or QGIS artwork.  The bridge is independently implemented
-against public QGIS C++ APIs and isolates the dependency in `native/qgis_render_bridge`.
-Any future direct QGIS source reuse requires a separate licensing/provenance review,
-copyright notices, and an explicit repository licensing decision.
+QGIS 4.2.0 vector/edit/render source is an owned, fixed source dependency under
+`third_party/qgis`. Its immutable upstream tag, commit, archive checksum, component
+closure and the four build-only CMake omissions are recorded in
+`third_party/qgis/UPSTREAM.md`; upstream copyright notices and `COPYING` are retained.
+The combined work is distributed under GPL-2.0-or-later, recorded by the repository
+root `LICENSE`. The bridge never discovers or uses an externally installed QGIS
+prefix/library.
 
 ## Consequences
 

@@ -1,0 +1,185 @@
+/***************************************************************************
+                         qgsalgorithmconcavehullbyfeature.cpp
+                         ---------------------
+    begin                : May 2025
+    copyright            : (C) 2025 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmconcavehullbyfeature.h"
+
+#include "qgsgeometrycollection.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsConcaveHullByFeatureAlgorithm::name() const
+{
+  return u"concavehullbyfeature"_s;
+}
+
+QString QgsConcaveHullByFeatureAlgorithm::displayName() const
+{
+  return QObject::tr( "Concave hull (by feature)" );
+}
+
+QStringList QgsConcaveHullByFeatureAlgorithm::tags() const
+{
+  return QObject::tr( "concave,hull,bounds,bounding,convex" ).split( ',' );
+}
+
+QString QgsConcaveHullByFeatureAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsConcaveHullByFeatureAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsConcaveHullByFeatureAlgorithm::outputName() const
+{
+  return QObject::tr( "Concave hulls" );
+}
+
+QString QgsConcaveHullByFeatureAlgorithm::shortHelpString() const
+{
+  return QObject::tr( "This algorithm calculates the concave hull for each feature in an input layer." )
+         + u"\n\n"_s
+         + QObject::tr( "For point and line layers, a concave hull is a polygon which contains all the vertices of the input geometries, but is a better approximation than the convex hull to the area occupied by the input." )
+         + u"\n\n"_s
+         + QObject::tr(
+           "When the input is a polygon layer, the algorithm operates differently: it computes a concave hull that respects the interior of the input polygons. The concave hull does not intersect "
+           "the polygon interiors. The computed hull also fills the empty space between the polygons within a multi-polygon feature."
+         )
+         + u"\n\n"_s
+         + QObject::tr( "See the 'Concave hull (by layer)' algorithm for a concave hull calculation which covers the whole layer or grouped subsets of features." );
+}
+
+QString QgsConcaveHullByFeatureAlgorithm::shortDescription() const
+{
+  return QObject::tr( "Calculates the concave hull for each feature in an input layer." );
+}
+
+QgsConcaveHullByFeatureAlgorithm *QgsConcaveHullByFeatureAlgorithm::createInstance() const
+{
+  return new QgsConcaveHullByFeatureAlgorithm();
+}
+
+void QgsConcaveHullByFeatureAlgorithm::initParameters( const QVariantMap & )
+{
+  auto alphaParam
+    = std::make_unique<QgsProcessingParameterNumber>( u"ALPHA"_s, QObject::tr( "Threshold (0-1, where 1 is equivalent with Convex Hull)" ), Qgis::ProcessingNumberParameterType::Double, 0.3, false, 0, 1 );
+  alphaParam->setHelp(
+    QObject::tr(
+      "Controls the concaveness of the computed hull. A value of 1 produces the convex hull, while a value closer to 0 produces a highly concave hull. For point and line layers, this value "
+      "represents the target percentage of the convex hull area. For polygon layers, it specifies the maximum edge length as a fraction of the difference between the longest and shortest edge "
+      "lengths in the empty space between polygons."
+    )
+  );
+  addParameter( alphaParam.release() );
+
+  auto holesParam = std::make_unique<QgsProcessingParameterBoolean>( u"HOLES"_s, QObject::tr( "Allow holes" ), true );
+  holesParam->setHelp( QObject::tr( "Controls whether the computed concave hull is allowed to contain holes." ) );
+  addParameter( holesParam.release() );
+}
+
+QList<int> QgsConcaveHullByFeatureAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorPoint ) << static_cast<int>( Qgis::ProcessingSourceType::VectorLine ) << static_cast<int>( Qgis::ProcessingSourceType::VectorPolygon );
+}
+
+QgsFields QgsConcaveHullByFeatureAlgorithm::outputFields( const QgsFields &inputFields ) const
+{
+  QgsFields newFields;
+  newFields.append( QgsField( u"area"_s, QMetaType::Type::Double, QString(), 20, 6 ) );
+  newFields.append( QgsField( u"perimeter"_s, QMetaType::Type::Double, QString(), 20, 6 ) );
+  return QgsProcessingUtils::combineFields( inputFields, newFields );
+}
+
+bool QgsConcaveHullByFeatureAlgorithm::prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+#if GEOS_VERSION_MAJOR == 3 && GEOS_VERSION_MINOR < 11
+  throw QgsProcessingException( QObject::tr( "This algorithm requires a QGIS build based on GEOS 3.11 or later" ) );
+#endif
+  mPercentage = parameterAsDouble( parameters, u"ALPHA"_s, context );
+  mAllowHoles = parameterAsBool( parameters, u"HOLES"_s, context );
+  return true;
+}
+
+QgsFeatureList QgsConcaveHullByFeatureAlgorithm::processFeature( const QgsFeature &feature, QgsProcessingContext &, QgsProcessingFeedback *feedback )
+{
+  QgsFeature f = feature;
+  if ( f.hasGeometry() )
+  {
+    QgsGeometry outputGeometry;
+    if ( f.geometry().type() == Qgis::GeometryType::Point )
+    {
+      const QgsAbstractGeometry *inputGeometry = f.geometry().constGet();
+      const QgsGeometryCollection *collection = qgsgeometry_cast< const QgsGeometryCollection * >( inputGeometry );
+      if ( !collection || collection->numGeometries() == 1 )
+      {
+        feedback->reportError( QObject::tr( "Cannot calculate concave hull for a single point feature (%1) (try 'Concave hull (by layer)' algorithm instead)." ).arg( f.id() ) );
+        f.clearGeometry();
+      }
+      else
+      {
+        outputGeometry = f.geometry().concaveHull( mPercentage, mAllowHoles );
+        if ( outputGeometry.isNull() && !outputGeometry.lastError().isEmpty() )
+          feedback->reportError( outputGeometry.lastError() );
+        f.setGeometry( outputGeometry );
+      }
+    }
+    else if ( f.geometry().type() == Qgis::GeometryType::Line )
+    {
+      outputGeometry = f.geometry().concaveHull( mPercentage, mAllowHoles );
+      if ( outputGeometry.isNull() && !outputGeometry.lastError().isEmpty() )
+        feedback->reportError( outputGeometry.lastError() );
+      f.setGeometry( outputGeometry );
+    }
+    else if ( f.geometry().type() == Qgis::GeometryType::Polygon )
+    {
+      outputGeometry = f.geometry().concaveHullOfPolygons( mPercentage, mAllowHoles );
+      if ( outputGeometry.isNull() && !outputGeometry.lastError().isEmpty() )
+        feedback->reportError( outputGeometry.lastError() );
+      f.setGeometry( outputGeometry );
+    }
+
+    if ( outputGeometry.type() == Qgis::GeometryType::Polygon )
+    {
+      QgsAttributes attrs = f.attributes();
+      attrs << outputGeometry.constGet()->area() << outputGeometry.constGet()->perimeter();
+      f.setAttributes( attrs );
+    }
+    else
+    {
+      if ( outputGeometry.type() == Qgis::GeometryType::Line )
+      {
+        feedback->pushWarning( QObject::tr( "Concave hull for feature %1 resulted in a linestring, ignoring" ).arg( f.id() ) );
+      }
+      else if ( outputGeometry.type() == Qgis::GeometryType::Point )
+      {
+        feedback->pushWarning( QObject::tr( "Concave hull for feature %1 resulted in a point, ignoring" ).arg( f.id() ) );
+      }
+      QgsAttributes attrs = f.attributes();
+      attrs << QVariant() << QVariant();
+      f.setAttributes( attrs );
+    }
+  }
+  return QgsFeatureList() << f;
+}
+
+///@endcond

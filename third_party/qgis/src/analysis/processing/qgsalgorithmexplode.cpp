@@ -1,0 +1,226 @@
+/***************************************************************************
+                         qgsalgorithmexplode.cpp
+                         ---------------------
+    begin                : April 2018
+    copyright            : (C) 2018 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmexplode.h"
+
+#include "qgscircularstring.h"
+#include "qgscompoundcurve.h"
+#include "qgscurve.h"
+#include "qgsgeometrycollection.h"
+#include "qgslinestring.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsExplodeAlgorithm::name() const
+{
+  return u"explodelines"_s;
+}
+
+QString QgsExplodeAlgorithm::displayName() const
+{
+  return QObject::tr( "Explode lines" );
+}
+
+QStringList QgsExplodeAlgorithm::tags() const
+{
+  return QObject::tr( "segments,parts" ).split( ',' );
+}
+
+QString QgsExplodeAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsExplodeAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsExplodeAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm takes a lines layer and creates a new one in which each line is replaced by a set of "
+    "lines representing the segments in the original line. Each line in the resulting layer contains only a "
+    "start and an end point, with no intermediate nodes between them.\n\n"
+    "If the input layer consists of CircularStrings or CompoundCurves, the output layer will be of the "
+    "same type and contain only single curve segments."
+  );
+}
+
+QString QgsExplodeAlgorithm::shortDescription() const
+{
+  return QObject::tr( "Creates a line layer in which each feature represents a segment from an input line layer." );
+}
+
+Qgis::ProcessingAlgorithmDocumentationFlags QgsExplodeAlgorithm::documentationFlags() const
+{
+  return Qgis::ProcessingAlgorithmDocumentationFlag::RegeneratesPrimaryKey;
+}
+
+QList<int> QgsExplodeAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorLine );
+}
+
+Qgis::ProcessingSourceType QgsExplodeAlgorithm::outputLayerType() const
+{
+  return Qgis::ProcessingSourceType::VectorLine;
+}
+
+QgsExplodeAlgorithm *QgsExplodeAlgorithm::createInstance() const
+{
+  return new QgsExplodeAlgorithm();
+}
+
+QString QgsExplodeAlgorithm::outputName() const
+{
+  return QObject::tr( "Exploded" );
+}
+
+Qgis::WkbType QgsExplodeAlgorithm::outputWkbType( Qgis::WkbType inputWkbType ) const
+{
+  return QgsWkbTypes::singleType( inputWkbType );
+}
+
+QgsFeatureList QgsExplodeAlgorithm::processFeature( const QgsFeature &f, QgsProcessingContext &, QgsProcessingFeedback * )
+{
+  if ( !f.hasGeometry() )
+  {
+    return QgsFeatureList() << f;
+  }
+  else
+  {
+    const std::vector<QgsGeometry> parts = extractAsParts( f.geometry() );
+    QgsFeature outputFeature;
+    QgsFeatureList features;
+    features.reserve( parts.size() );
+    for ( const QgsGeometry &part : parts )
+    {
+      outputFeature.setAttributes( f.attributes() );
+      outputFeature.setGeometry( part );
+      features << outputFeature;
+    }
+    return features;
+  }
+}
+
+Qgis::ProcessingFeatureSourceFlags QgsExplodeAlgorithm::sourceFlags() const
+{
+  return Qgis::ProcessingFeatureSourceFlag::SkipGeometryValidityChecks;
+}
+
+QgsFeatureSink::SinkFlags QgsExplodeAlgorithm::sinkFlags() const
+{
+  return QgsFeatureSink::RegeneratePrimaryKey;
+}
+
+std::vector<QgsGeometry> QgsExplodeAlgorithm::extractAsParts( const QgsGeometry &geometry ) const
+{
+  if ( geometry.isMultipart() )
+  {
+    std::vector<QgsGeometry> parts;
+    const QgsGeometryCollection *collection = qgis::down_cast< const QgsGeometryCollection * >( geometry.constGet() );
+    for ( int part = 0; part < collection->numGeometries(); ++part )
+    {
+      std::vector<QgsGeometry> segments = curveAsSingleSegments( qgsgeometry_cast<const QgsCurve *>( collection->geometryN( part ) ) );
+      parts.reserve( parts.size() + segments.size() );
+      std::move( std::begin( segments ), std::end( segments ), std::back_inserter( parts ) );
+    }
+    return parts;
+  }
+  else
+  {
+    return curveAsSingleSegments( qgsgeometry_cast<const QgsCurve *>( geometry.constGet() ) );
+  }
+}
+
+std::vector<QgsGeometry> QgsExplodeAlgorithm::curveAsSingleSegments( const QgsCurve *curve, bool useCompoundCurves ) const
+{
+  std::vector<QgsGeometry> parts;
+  if ( !curve )
+    return parts;
+  switch ( QgsWkbTypes::flatType( curve->wkbType() ) )
+  {
+    case Qgis::WkbType::LineString:
+    {
+      const QgsLineString *line = qgsgeometry_cast<const QgsLineString *>( curve );
+      for ( int i = 0; i < line->numPoints() - 1; ++i )
+      {
+        const QgsPoint ptA = line->pointN( i );
+        const QgsPoint ptB = line->pointN( i + 1 );
+        auto ls = std::make_unique<QgsLineString>( QVector<QgsPoint>() << ptA << ptB );
+        if ( !useCompoundCurves )
+        {
+          parts.emplace_back( QgsGeometry( std::move( ls ) ) );
+        }
+        else
+        {
+          auto cc = std::make_unique<QgsCompoundCurve>();
+          cc->addCurve( ls.release() );
+          parts.emplace_back( QgsGeometry( std::move( cc ) ) );
+        }
+      }
+      break;
+    }
+
+    case Qgis::WkbType::CircularString:
+    {
+      const QgsCircularString *string = qgsgeometry_cast<const QgsCircularString *>( curve );
+      for ( int i = 0; i < string->numPoints() - 2; i += 2 )
+      {
+        const QgsPoint ptA = string->pointN( i );
+        const QgsPoint ptB = string->pointN( i + 1 );
+        const QgsPoint ptC = string->pointN( i + 2 );
+        auto cs = std::make_unique<QgsCircularString>();
+        cs->setPoints( QgsPointSequence() << ptA << ptB << ptC );
+        if ( !useCompoundCurves )
+        {
+          parts.emplace_back( QgsGeometry( std::move( cs ) ) );
+        }
+        else
+        {
+          auto cc = std::make_unique<QgsCompoundCurve>();
+          cc->addCurve( cs.release() );
+          parts.emplace_back( QgsGeometry( std::move( cc ) ) );
+        }
+      }
+      break;
+    }
+
+    case Qgis::WkbType::CompoundCurve:
+    {
+      const QgsCompoundCurve *compoundCurve = qgsgeometry_cast<const QgsCompoundCurve *>( curve );
+      for ( int i = 0; i < compoundCurve->nCurves(); ++i )
+      {
+        std::vector<QgsGeometry> segments = curveAsSingleSegments( compoundCurve->curveAt( i ), true );
+        parts.reserve( parts.size() + segments.size() );
+        std::move( std::begin( segments ), std::end( segments ), std::back_inserter( parts ) );
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+  return parts;
+}
+
+///@endcond

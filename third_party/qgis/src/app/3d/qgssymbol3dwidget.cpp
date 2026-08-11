@@ -1,0 +1,292 @@
+/***************************************************************************
+  qgssymbol3dwidget.cpp
+  --------------------------------------
+  Date                 : January 2019
+  Copyright            : (C) 2019 by Martin Dobias
+  Email                : wonder dot sk at gmail dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgssymbol3dwidget.h"
+
+#include "qgs3dsymbolregistry.h"
+#include "qgs3dsymbolwidget.h"
+#include "qgsabstract3dsymbol.h"
+#include "qgsabstractmaterialsettings.h"
+#include "qgsapplication.h"
+#include "qgsline3dsymbol.h"
+#include "qgspoint3dsymbol.h"
+#include "qgspolygon3dsymbol.h"
+#include "qgsproject.h"
+#include "qgsprojectstylesettings.h"
+#include "qgsstyleitemslistwidget.h"
+#include "qgsstylesavedialog.h"
+#include "qgsvectorlayer.h"
+
+#include <QMessageBox>
+#include <QStackedWidget>
+#include <QString>
+
+#include "moc_qgssymbol3dwidget.cpp"
+
+using namespace Qt::StringLiterals;
+
+QgsSymbol3DWidget::QgsSymbol3DWidget( QgsVectorLayer *layer, QWidget *parent )
+  : QgsPanelWidget( parent )
+  , mLayer( layer )
+{
+  // If layer is null, the widget cannot be created.
+  Q_ASSERT( mLayer );
+
+  widgetUnsupported = new QLabel( tr( "Sorry, this symbol is not supported." ), this );
+
+  widgetStack = new QStackedWidget( this );
+  widgetStack->addWidget( widgetUnsupported );
+
+  QVBoxLayout *layout = new QVBoxLayout( this );
+  layout->setContentsMargins( 0, 0, 0, 0 );
+  layout->addWidget( widgetStack );
+
+  mStyleWidget = new QgsStyleItemsListWidget( this );
+  mStyleWidget->setStyle( QgsStyle::defaultStyle() );
+  mStyleWidget->setEntityTypes( QList<QgsStyle::StyleEntity>() << QgsStyle::Symbol3DEntity << QgsStyle::MaterialSettingsEntity );
+  mStyleWidget->setLayerType( mLayer->geometryType() );
+
+  connect( mStyleWidget, &QgsStyleItemsListWidget::selectionChangedWithStylePath, this, &QgsSymbol3DWidget::setSymbolFromStyle );
+  connect( mStyleWidget, &QgsStyleItemsListWidget::saveEntity, this, &QgsSymbol3DWidget::saveSymbol );
+
+  layout->addWidget( mStyleWidget, 1 );
+}
+
+std::unique_ptr<QgsAbstract3DSymbol> QgsSymbol3DWidget::symbol()
+{
+  if ( Qgs3DSymbolWidget *w = qobject_cast<Qgs3DSymbolWidget *>( widgetStack->currentWidget() ) )
+  {
+    return std::unique_ptr<QgsAbstract3DSymbol>( w->symbol() );
+  }
+  return nullptr;
+}
+
+void QgsSymbol3DWidget::setSymbol( const QgsAbstract3DSymbol *symbol, QgsVectorLayer *vlayer )
+{
+  // If layer is null, the widget cannot be updated.
+  Q_ASSERT( vlayer );
+
+  mLayer = vlayer;
+  mStyleWidget->setLayerType( mLayer->geometryType() );
+
+  if ( Qgs3DSymbolWidget *w = qobject_cast<Qgs3DSymbolWidget *>( widgetStack->currentWidget() ) )
+  {
+    if ( w->symbolType() == symbol->type() )
+    {
+      // we can reuse the existing widget
+      w->setSymbol( symbol, mLayer );
+      return;
+    }
+  }
+
+  updateSymbolWidget( symbol );
+}
+
+void QgsSymbol3DWidget::setDockMode( bool dockMode )
+{
+  QgsPanelWidget::setDockMode( dockMode );
+  if ( Qgs3DSymbolWidget *w = qobject_cast<Qgs3DSymbolWidget *>( widgetStack->currentWidget() ) )
+  {
+    w->setDockMode( dockMode );
+  }
+}
+
+void QgsSymbol3DWidget::setSymbolFromStyle( const QString &name, QgsStyle::StyleEntity entity, const QString &stylePath )
+{
+  if ( name.isEmpty() )
+    return;
+
+  QgsStyle *style = nullptr;
+  style = QgsProject::instance()->styleSettings()->styleAtPath( stylePath );
+
+  if ( !style )
+    style = QgsStyle::defaultStyle();
+
+  switch ( entity )
+  {
+    case QgsStyle::SymbolEntity:
+    case QgsStyle::TagEntity:
+    case QgsStyle::ColorrampEntity:
+    case QgsStyle::SmartgroupEntity:
+    case QgsStyle::TextFormatEntity:
+    case QgsStyle::LabelSettingsEntity:
+    case QgsStyle::LegendPatchShapeEntity:
+      break;
+
+    case QgsStyle::Symbol3DEntity:
+    {
+      // get new instance of symbol from style
+      const std::unique_ptr<QgsAbstract3DSymbol> s( style->symbol3D( name ) );
+      if ( !s )
+        return;
+
+      setSymbol( s.get(), mLayer );
+      emit widgetChanged();
+      break;
+    }
+    case QgsStyle::MaterialSettingsEntity:
+    {
+      // get new instance of material from style
+      std::unique_ptr<QgsAbstractMaterialSettings> material( style->materialSettings( name ) );
+      if ( !material )
+        return;
+
+      std::unique_ptr< QgsAbstract3DSymbol > newSymbol = symbol();
+      if ( newSymbol && newSymbol->type() == "line"_L1 )
+      {
+        qgis::down_cast< QgsLine3DSymbol *>( newSymbol.get() )->setMaterialSettings( material.release() );
+      }
+      else if ( newSymbol && newSymbol->type() == "point"_L1 )
+      {
+        qgis::down_cast< QgsPoint3DSymbol *>( newSymbol.get() )->setMaterialSettings( material.release() );
+      }
+      else if ( newSymbol && newSymbol->type() == "polygon"_L1 )
+      {
+        qgis::down_cast< QgsPolygon3DSymbol *>( newSymbol.get() )->setMaterialSettings( material.release() );
+      }
+
+      setSymbol( newSymbol.get(), mLayer );
+      emit widgetChanged();
+      break;
+    }
+  }
+}
+
+void QgsSymbol3DWidget::saveSymbol()
+{
+  QgsStyleSaveDialog saveDlg( this, QgsStyle::Symbol3DEntity );
+  saveDlg.setDefaultTags( mStyleWidget->currentTagFilter() );
+  if ( !saveDlg.exec() )
+    return;
+
+  if ( saveDlg.name().isEmpty() )
+    return;
+
+  QgsStyle *destinationStyle = saveDlg.destinationStyle();
+
+  switch ( saveDlg.selectedType() )
+  {
+    case QgsStyle::SymbolEntity:
+    case QgsStyle::TagEntity:
+    case QgsStyle::ColorrampEntity:
+    case QgsStyle::SmartgroupEntity:
+    case QgsStyle::TextFormatEntity:
+    case QgsStyle::LabelSettingsEntity:
+    case QgsStyle::LegendPatchShapeEntity:
+      break;
+
+    case QgsStyle::Symbol3DEntity:
+    {
+      std::unique_ptr<QgsAbstract3DSymbol> newSymbol( symbol() );
+
+      // check if there is no symbol with same name
+      if ( destinationStyle->symbol3DNames().contains( saveDlg.name() ) )
+      {
+        const int res = QMessageBox::warning( this, tr( "Save 3D Symbol" ), tr( "A 3D symbol with the name '%1' already exists. Overwrite?" ).arg( saveDlg.name() ), QMessageBox::Yes | QMessageBox::No );
+        if ( res != QMessageBox::Yes )
+        {
+          return;
+        }
+        destinationStyle->removeEntityByName( QgsStyle::Symbol3DEntity, saveDlg.name() );
+      }
+
+      const QStringList symbolTags = saveDlg.tags().split( ',' );
+
+      // add new symbol to style and re-populate the list
+      QgsAbstract3DSymbol *s = newSymbol.get();
+      destinationStyle->addSymbol3D( saveDlg.name(), newSymbol.release() );
+
+      // make sure the symbol is stored
+      destinationStyle->saveSymbol3D( saveDlg.name(), s, saveDlg.isFavorite(), symbolTags );
+      break;
+    }
+
+    case QgsStyle::MaterialSettingsEntity:
+    {
+      std::unique_ptr<QgsAbstract3DSymbol> newSymbol( symbol() );
+      std::unique_ptr<QgsAbstractMaterialSettings> newMaterial;
+      if ( newSymbol && newSymbol->type() == "line"_L1 )
+      {
+        newMaterial.reset( qgis::down_cast< QgsLine3DSymbol *>( newSymbol.get() )->materialSettings()->clone() );
+      }
+      else if ( newSymbol && newSymbol->type() == "point"_L1 )
+      {
+        newMaterial.reset( qgis::down_cast< QgsPoint3DSymbol *>( newSymbol.get() )->materialSettings()->clone() );
+      }
+      else if ( newSymbol && newSymbol->type() == "polygon"_L1 )
+      {
+        newMaterial.reset( qgis::down_cast< QgsPolygon3DSymbol *>( newSymbol.get() )->materialSettings()->clone() );
+      }
+
+      // check if there is material with same name
+      if ( destinationStyle->materialSettingsNames().contains( saveDlg.name() ) )
+      {
+        const int res = QMessageBox::warning( this, tr( "Save Material" ), tr( "A material with the name '%1' already exists. Overwrite?" ).arg( saveDlg.name() ), QMessageBox::Yes | QMessageBox::No );
+        if ( res != QMessageBox::Yes )
+        {
+          return;
+        }
+        destinationStyle->removeEntityByName( QgsStyle::MaterialSettingsEntity, saveDlg.name() );
+      }
+
+      const QStringList symbolTags = saveDlg.tags().split( ',' );
+
+      // add new material to style and re-populate the list
+      QgsAbstractMaterialSettings *s = newMaterial.get();
+      destinationStyle->addMaterialSettings( saveDlg.name(), newMaterial.release() );
+
+      // make sure the material is stored
+      destinationStyle->saveMaterialSettings( saveDlg.name(), s, saveDlg.isFavorite(), symbolTags );
+      break;
+    }
+  }
+}
+
+void QgsSymbol3DWidget::updateSymbolWidget( const QgsAbstract3DSymbol *newSymbol )
+{
+  if ( widgetStack->currentWidget() != widgetUnsupported )
+  {
+    // stop updating from the original widget
+    if ( Qgs3DSymbolWidget *w = qobject_cast<Qgs3DSymbolWidget *>( widgetStack->currentWidget() ) )
+      disconnect( w, &Qgs3DSymbolWidget::changed, this, &QgsSymbol3DWidget::widgetChanged );
+    widgetStack->removeWidget( widgetStack->currentWidget() );
+  }
+
+  const QString symbolType = newSymbol->type();
+  if ( Qgs3DSymbolAbstractMetadata *am = QgsApplication::symbol3DRegistry()->symbolMetadata( symbolType ) )
+  {
+    if ( Qgs3DSymbolWidget *w = am->createSymbolWidget( mLayer ) )
+    {
+      w->setSymbol( newSymbol, mLayer );
+      widgetStack->addWidget( w );
+      widgetStack->setCurrentWidget( w );
+      w->setDockMode( dockMode() );
+      // start receiving updates from widget
+      connect( w, &Qgs3DSymbolWidget::changed, this, &QgsSymbol3DWidget::widgetChanged );
+      connect( w, &Qgs3DSymbolWidget::showPanel, this, &QgsSymbol3DWidget::openPanel );
+
+      connect( w, &Qgs3DSymbolWidget::renderingTechniqueChanged, this, [w, this] {
+        mStyleWidget->proxyModel()->setRenderingTechnique( w->renderingTechnique() );
+        mStyleWidget->proxyModel()->setRenderingTechniqueFilterEnabled( true );
+      } );
+
+      mStyleWidget->proxyModel()->setRenderingTechnique( w->renderingTechnique() );
+      mStyleWidget->proxyModel()->setRenderingTechniqueFilterEnabled( true );
+      return;
+    }
+  }
+  // When anything is not right
+  widgetStack->setCurrentWidget( widgetUnsupported );
+}

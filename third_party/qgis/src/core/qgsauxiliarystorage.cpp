@@ -1,0 +1,993 @@
+/***************************************************************************
+                          qgsauxiliarystorage.cpp  -  description
+                            -------------------
+    begin                : Aug 28, 2017
+    copyright            : (C) 2017 by Paul Blottiere
+    email                : paul.blottiere@oslandia.com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsauxiliarystorage.h"
+
+#include <sqlite3.h>
+
+#include "qgsdiagramrenderer.h"
+#include "qgslogger.h"
+#include "qgsmemoryproviderutils.h"
+#include "qgsproject.h"
+#include "qgssqliteutils.h"
+#include "qgssymbollayer.h"
+#include "qgsvectorlayerlabeling.h"
+
+#include <QFile>
+#include <QString>
+
+#include "moc_qgsauxiliarystorage.cpp"
+
+using namespace Qt::StringLiterals;
+
+#define AS_JOINFIELD u"ASPK"_s
+#define AS_EXTENSION u"qgd"_s
+#define AS_JOINPREFIX u"auxiliary_storage_"_s
+
+typedef QVector<int> PalPropertyList;
+typedef QVector<int> SymbolPropertyList;
+
+Q_GLOBAL_STATIC_WITH_ARGS(
+  PalPropertyList,
+  palHiddenProperties,
+  (
+    { static_cast< int >( QgsPalLayerSettings::Property::PositionX ),
+      static_cast< int >( QgsPalLayerSettings::Property::PositionY ),
+      static_cast< int >( QgsPalLayerSettings::Property::Show ),
+      static_cast< int >( QgsPalLayerSettings::Property::LabelRotation ),
+      static_cast< int >( QgsPalLayerSettings::Property::Family ),
+      static_cast< int >( QgsPalLayerSettings::Property::FontStyle ),
+      static_cast< int >( QgsPalLayerSettings::Property::Size ),
+      static_cast< int >( QgsPalLayerSettings::Property::Bold ),
+      static_cast< int >( QgsPalLayerSettings::Property::Italic ),
+      static_cast< int >( QgsPalLayerSettings::Property::Underline ),
+      static_cast< int >( QgsPalLayerSettings::Property::Color ),
+      static_cast< int >( QgsPalLayerSettings::Property::Strikeout ),
+      static_cast< int >( QgsPalLayerSettings::Property::MultiLineAlignment ),
+      static_cast< int >( QgsPalLayerSettings::Property::BufferSize ),
+      static_cast< int >( QgsPalLayerSettings::Property::BufferDraw ),
+      static_cast< int >( QgsPalLayerSettings::Property::BufferColor ),
+      static_cast< int >( QgsPalLayerSettings::Property::LabelDistance ),
+      static_cast< int >( QgsPalLayerSettings::Property::Hali ),
+      static_cast< int >( QgsPalLayerSettings::Property::Vali ),
+      static_cast< int >( QgsPalLayerSettings::Property::ScaleVisibility ),
+      static_cast< int >( QgsPalLayerSettings::Property::MinScale ),
+      static_cast< int >( QgsPalLayerSettings::Property::MaxScale ),
+      static_cast< int >( QgsPalLayerSettings::Property::AlwaysShow ),
+      static_cast< int >( QgsPalLayerSettings::Property::CalloutDraw ),
+      static_cast< int >( QgsPalLayerSettings::Property::LabelAllParts ) }
+  )
+)
+Q_GLOBAL_STATIC_WITH_ARGS( SymbolPropertyList, symbolHiddenProperties, ( { static_cast< int >( QgsSymbolLayer::Property::Angle ), static_cast< int >( QgsSymbolLayer::Property::Offset ) } ) )
+
+//
+// QgsAuxiliaryLayer
+//
+
+QgsAuxiliaryLayer::QgsAuxiliaryLayer( const QString &pkField, const QString &filename, const QString &table, QgsVectorLayer *vlayer )
+  : QgsVectorLayer( u"%1|layername=%2"_s.arg( filename, table ), u"%1_auxiliarystorage"_s.arg( table ), u"ogr"_s )
+  , mFileName( filename )
+  , mTable( table )
+  , mLayer( vlayer )
+{
+  // init join info
+  mJoinInfo.setPrefix( AS_JOINPREFIX );
+  mJoinInfo.setJoinLayer( this );
+  mJoinInfo.setJoinFieldName( AS_JOINFIELD );
+  mJoinInfo.setTargetFieldName( pkField );
+  mJoinInfo.setEditable( true );
+  mJoinInfo.setUpsertOnEdit( true );
+  mJoinInfo.setCascadedDelete( true );
+  mJoinInfo.setJoinFieldNamesBlockList( QStringList() << u"rowid"_s ); // introduced by ogr provider
+}
+
+QgsAuxiliaryLayer *QgsAuxiliaryLayer::clone( QgsVectorLayer *target ) const
+{
+  QgsAuxiliaryStorage::duplicateTable( source(), target->id() );
+  return new QgsAuxiliaryLayer( mJoinInfo.targetFieldName(), mFileName, target->id(), target );
+}
+
+bool QgsAuxiliaryLayer::clear()
+{
+  const bool rc = deleteFeatures( allFeatureIds() );
+  commitChanges();
+  startEditing();
+  return rc;
+}
+
+QgsVectorLayer *QgsAuxiliaryLayer::toSpatialLayer() const
+{
+  QgsVectorLayer *layer = QgsMemoryProviderUtils::createMemoryLayer( u"auxiliary_layer"_s, fields(), mLayer->wkbType(), mLayer->crs() );
+
+  const QString pkField = mJoinInfo.targetFieldName();
+  QgsFeature joinFeature;
+  QgsFeature targetFeature;
+  QgsFeatureIterator it = getFeatures();
+
+  layer->startEditing();
+  while ( it.nextFeature( joinFeature ) )
+  {
+    const QString filter = QgsExpression::createFieldEqualityExpression( pkField, joinFeature.attribute( AS_JOINFIELD ) );
+
+    QgsFeatureRequest request;
+    request.setFilterExpression( filter );
+
+    mLayer->getFeatures( request ).nextFeature( targetFeature );
+
+    if ( targetFeature.isValid() )
+    {
+      QgsFeature newFeature( joinFeature );
+      newFeature.setGeometry( targetFeature.geometry() );
+      layer->addFeature( newFeature );
+    }
+  }
+  layer->commitChanges();
+
+  return layer;
+}
+
+QgsVectorLayerJoinInfo QgsAuxiliaryLayer::joinInfo() const
+{
+  return mJoinInfo;
+}
+
+bool QgsAuxiliaryLayer::exists( const QgsPropertyDefinition &definition ) const
+{
+  return ( indexOfPropertyDefinition( definition ) >= 0 );
+}
+
+bool QgsAuxiliaryLayer::addAuxiliaryField( const QgsPropertyDefinition &definition )
+{
+  if ( ( definition.name().isEmpty() && definition.comment().isEmpty() ) || exists( definition ) )
+    return false;
+
+  const QgsField af = createAuxiliaryField( definition );
+  const bool rc = addAttribute( af );
+  updateFields();
+  mLayer->updateFields();
+
+  if ( rc )
+  {
+    const int auxIndex = indexOfPropertyDefinition( definition );
+    const int index = mLayer->fields().indexOf( nameFromProperty( definition, true ) );
+
+    if ( index >= 0 && auxIndex >= 0 )
+    {
+      if ( isHiddenProperty( auxIndex ) )
+      {
+        // update editor widget
+        const QgsEditorWidgetSetup setup = QgsEditorWidgetSetup( u"Hidden"_s, QVariantMap() );
+        setEditorWidgetSetup( auxIndex, setup );
+
+        // column is hidden
+        QgsAttributeTableConfig attrCfg = mLayer->attributeTableConfig();
+        attrCfg.update( mLayer->fields() );
+        QVector<QgsAttributeTableConfig::ColumnConfig> columns = attrCfg.columns();
+        QVector<QgsAttributeTableConfig::ColumnConfig>::iterator it;
+
+        for ( it = columns.begin(); it != columns.end(); ++it )
+        {
+          if ( it->name.compare( mLayer->fields().field( index ).name() ) == 0 )
+            it->hidden = true;
+        }
+
+        attrCfg.setColumns( columns );
+        mLayer->setAttributeTableConfig( attrCfg );
+      }
+      else if ( definition.standardTemplate() == QgsPropertyDefinition::ColorNoAlpha || definition.standardTemplate() == QgsPropertyDefinition::ColorWithAlpha )
+      {
+        const QgsEditorWidgetSetup setup = QgsEditorWidgetSetup( u"Color"_s, QVariantMap() );
+        setEditorWidgetSetup( auxIndex, setup );
+      }
+
+      mLayer->setEditorWidgetSetup( index, editorWidgetSetup( auxIndex ) );
+    }
+  }
+
+  return rc;
+}
+
+QgsFields QgsAuxiliaryLayer::auxiliaryFields() const
+{
+  QgsFields afields;
+
+  for ( int i = 2; i < fields().count(); i++ ) // ignore rowid and PK field
+    afields.append( createAuxiliaryField( fields().field( i ) ) );
+
+  return afields;
+}
+
+bool QgsAuxiliaryLayer::deleteAttribute( int attr )
+{
+  QgsVectorLayer::deleteAttribute( attr );
+  const bool rc = commitChanges();
+  startEditing();
+  return rc;
+}
+
+bool QgsAuxiliaryLayer::save()
+{
+  bool rc = false;
+
+  if ( isEditable() )
+  {
+    rc = commitChanges();
+  }
+
+  startEditing();
+
+  return rc;
+}
+
+int QgsAuxiliaryLayer::createProperty( QgsPalLayerSettings::Property property, QgsVectorLayer *layer, bool overwriteExisting )
+{
+  int index = -1;
+
+  if ( layer && layer->labeling() && layer->auxiliaryLayer() )
+  {
+    // property definition are identical whatever the provider id
+    const QgsPropertyDefinition def = QgsPalLayerSettings::propertyDefinitions()[static_cast< int >( property )];
+    const QString fieldName = nameFromProperty( def, true );
+
+    layer->auxiliaryLayer()->addAuxiliaryField( def );
+
+    if ( layer->auxiliaryLayer()->indexOfPropertyDefinition( def ) >= 0 )
+    {
+      const QStringList subProviderIds = layer->labeling()->subProviders();
+      for ( const QString &providerId : subProviderIds )
+      {
+        QgsPalLayerSettings *settings = new QgsPalLayerSettings( layer->labeling()->settings( providerId ) );
+
+        QgsPropertyCollection c = settings->dataDefinedProperties();
+
+        // is there an existing property?
+        const QgsProperty existingProperty = c.property( property );
+        if ( existingProperty.propertyType() == Qgis::PropertyType::Invalid
+             || ( existingProperty.propertyType() == Qgis::PropertyType::Field && existingProperty.field().isEmpty() )
+             || ( existingProperty.propertyType() == Qgis::PropertyType::Expression && existingProperty.expressionString().isEmpty() )
+             || overwriteExisting )
+        {
+          const QgsProperty prop = QgsProperty::fromField( fieldName );
+          c.setProperty( property, prop );
+        }
+        else
+        {
+          // build a new smart expression as coalesce("new aux field", 'the' || 'old' || 'expression')
+          const QgsProperty prop = QgsProperty::fromExpression( u"coalesce(%1,%2)"_s.arg( QgsExpression::quotedColumnRef( fieldName ), existingProperty.asExpression() ) );
+          c.setProperty( property, prop );
+        }
+        settings->setDataDefinedProperties( c );
+
+        layer->labeling()->setSettings( settings, providerId );
+      }
+    }
+
+    index = layer->fields().lookupField( fieldName );
+  }
+
+  return index;
+}
+
+int QgsAuxiliaryLayer::createProperty( QgsDiagramLayerSettings::Property property, QgsVectorLayer *layer, bool overwriteExisting )
+{
+  int index = -1;
+
+  if ( layer && layer->diagramLayerSettings() && layer->auxiliaryLayer() )
+  {
+    const QgsPropertyDefinition def = QgsDiagramLayerSettings::propertyDefinitions()[static_cast<int>( property )];
+
+    if ( layer->auxiliaryLayer()->addAuxiliaryField( def ) )
+    {
+      const QString fieldName = nameFromProperty( def, true );
+
+      QgsDiagramLayerSettings settings( *layer->diagramLayerSettings() );
+
+      QgsPropertyCollection c = settings.dataDefinedProperties();
+      // is there an existing property?
+      const QgsProperty existingProperty = c.property( property );
+      if ( existingProperty.propertyType() == Qgis::PropertyType::Invalid || overwriteExisting )
+      {
+        const QgsProperty prop = QgsProperty::fromField( fieldName );
+        c.setProperty( property, prop );
+      }
+      else
+      {
+        // build a new smart expression as coalesce("new aux field", 'the' || 'old' || 'expression')
+        const QgsProperty prop = QgsProperty::fromExpression( u"coalesce(%1,%2)"_s.arg( QgsExpression::quotedColumnRef( fieldName ), existingProperty.asExpression() ) );
+        c.setProperty( property, prop );
+      }
+      settings.setDataDefinedProperties( c );
+
+      layer->setDiagramLayerSettings( settings );
+      index = layer->fields().lookupField( fieldName );
+    }
+  }
+
+  return index;
+}
+
+int QgsAuxiliaryLayer::createProperty( QgsCallout::Property property, QgsVectorLayer *layer, bool overwriteExisting )
+{
+  int index = -1;
+
+  if ( layer && layer->labeling() && layer->labeling()->settings().callout() && layer->auxiliaryLayer() )
+  {
+    // property definition are identical whatever the provider id
+    const QgsPropertyDefinition def = QgsCallout::propertyDefinitions()[static_cast< int >( property )];
+    const QString fieldName = nameFromProperty( def, true );
+
+    layer->auxiliaryLayer()->addAuxiliaryField( def );
+
+    if ( layer->auxiliaryLayer()->indexOfPropertyDefinition( def ) >= 0 )
+    {
+      const QStringList subProviderIds = layer->labeling()->subProviders();
+      for ( const QString &providerId : subProviderIds )
+      {
+        QgsPalLayerSettings *settings = new QgsPalLayerSettings( layer->labeling()->settings( providerId ) );
+        if ( settings->callout() )
+        {
+          QgsPropertyCollection c = settings->callout()->dataDefinedProperties();
+          // is there an existing property?
+          const QgsProperty existingProperty = c.property( property );
+          if ( existingProperty.propertyType() == Qgis::PropertyType::Invalid || overwriteExisting )
+          {
+            const QgsProperty prop = QgsProperty::fromField( fieldName );
+            c.setProperty( property, prop );
+          }
+          else
+          {
+            // build a new smart expression as coalesce("new aux field", 'the' || 'old' || 'expression')
+            const QgsProperty prop = QgsProperty::fromExpression( u"coalesce(%1,%2)"_s.arg( QgsExpression::quotedColumnRef( fieldName ), existingProperty.asExpression() ) );
+            c.setProperty( property, prop );
+          }
+          settings->callout()->setDataDefinedProperties( c );
+        }
+        layer->labeling()->setSettings( settings, providerId );
+      }
+    }
+
+    index = layer->fields().lookupField( fieldName );
+  }
+
+  return index;
+}
+
+int QgsAuxiliaryLayer::createProperty( QgsSymbolLayer::Property propertyKey, QgsVectorLayer *layer, QgsSymbolLayer *symbolLayer, bool overwriteExisting )
+{
+  if ( !layer || !symbolLayer || !layer->auxiliaryLayer() )
+    return -1;
+
+  // compute a unique name for the new property
+  QgsPropertyDefinition def = QgsSymbolLayer::propertyDefinitions()[static_cast<int>( propertyKey )];
+  const QString baseName = def.name();
+  int iDef = 2; // first name doesn't have number suffix so the next one is 2
+  while ( layer->auxiliaryLayer()->exists( def ) )
+  {
+    def.setName( u"%1_%2"_s.arg( baseName ).arg( iDef++ ) );
+  }
+
+  const QString fieldName = QgsAuxiliaryLayer::nameFromProperty( def, true );
+  if ( !layer->auxiliaryLayer()->addAuxiliaryField( def ) )
+    return -1;
+
+  // is there an existing property?
+  QgsPropertyCollection c = symbolLayer->dataDefinedProperties();
+  QgsProperty property = c.property( propertyKey );
+  if ( property.propertyType() == Qgis::PropertyType::Invalid || overwriteExisting )
+  {
+    property = QgsProperty::fromField( fieldName );
+  }
+  else
+  {
+    // build a new smart expression as coalesce("new aux field", 'the' || 'old' || 'expression')
+    property = QgsProperty::fromExpression( u"coalesce(%1,%2)"_s.arg( QgsExpression::quotedColumnRef( fieldName ), property.asExpression() ) );
+  }
+
+  c.setProperty( propertyKey, property );
+  symbolLayer->setDataDefinedProperties( c );
+
+  return layer->fields().lookupField( fieldName );
+}
+
+bool QgsAuxiliaryLayer::isHiddenProperty( int index ) const
+{
+  bool hidden = false;
+  const QgsPropertyDefinition def = propertyDefinitionFromIndex( index );
+
+  if ( def.origin().compare( "labeling"_L1 ) == 0 )
+  {
+    const PalPropertyList &palProps = *palHiddenProperties();
+    for ( const int p : palProps )
+    {
+      const QString propName = QgsPalLayerSettings::propertyDefinitions()[p].name();
+      if ( propName.compare( def.name() ) == 0 )
+      {
+        hidden = true;
+        break;
+      }
+    }
+  }
+  else if ( def.origin().compare( "symbol"_L1 ) == 0 )
+  {
+    const SymbolPropertyList &symbolProps = *symbolHiddenProperties();
+    for ( int p : symbolProps )
+    {
+      const QString propName = QgsSymbolLayer::propertyDefinitions()[p].name();
+      if ( propName.compare( def.name() ) == 0 )
+      {
+        hidden = true;
+        break;
+      }
+    }
+  }
+
+  return hidden;
+}
+
+int QgsAuxiliaryLayer::propertyFromIndex( int index ) const
+{
+  int p = -1;
+  const QgsPropertyDefinition aDef = propertyDefinitionFromIndex( index );
+
+  if ( aDef.origin().compare( "labeling"_L1 ) == 0 )
+  {
+    const QgsPropertiesDefinition defs = QgsPalLayerSettings::propertyDefinitions();
+    QgsPropertiesDefinition::const_iterator it = defs.constBegin();
+    for ( ; it != defs.constEnd(); ++it )
+    {
+      if ( it->name().compare( aDef.name(), Qt::CaseInsensitive ) == 0 )
+      {
+        p = it.key();
+        break;
+      }
+    }
+  }
+  else if ( aDef.origin().compare( "symbol"_L1 ) == 0 )
+  {
+    const QgsPropertiesDefinition defs = QgsSymbolLayer::propertyDefinitions();
+    QgsPropertiesDefinition::const_iterator it = defs.constBegin();
+    for ( ; it != defs.constEnd(); ++it )
+    {
+      if ( it->name().compare( aDef.name(), Qt::CaseInsensitive ) == 0 )
+      {
+        p = it.key();
+        break;
+      }
+    }
+  }
+  else if ( aDef.origin().compare( "diagram"_L1 ) == 0 )
+  {
+    const QgsPropertiesDefinition defs = QgsDiagramLayerSettings::propertyDefinitions();
+    QgsPropertiesDefinition::const_iterator it = defs.constBegin();
+    for ( ; it != defs.constEnd(); ++it )
+    {
+      if ( it->name().compare( aDef.name(), Qt::CaseInsensitive ) == 0 )
+      {
+        p = it.key();
+        break;
+      }
+    }
+  }
+
+  return p;
+}
+
+QgsPropertyDefinition QgsAuxiliaryLayer::propertyDefinitionFromIndex( int index ) const
+{
+  return propertyDefinitionFromField( fields().field( index ) );
+}
+
+int QgsAuxiliaryLayer::indexOfPropertyDefinition( const QgsPropertyDefinition &def ) const
+{
+  return fields().indexOf( nameFromProperty( def ) );
+}
+
+QString QgsAuxiliaryLayer::nameFromProperty( const QgsPropertyDefinition &def, bool joined )
+{
+  QString fieldName = def.origin();
+
+  if ( !def.name().isEmpty() )
+    fieldName = u"%1_%2"_s.arg( fieldName, def.name().toLower() );
+
+  if ( !def.comment().isEmpty() )
+    fieldName = u"%1_%2"_s.arg( fieldName, def.comment() );
+
+  if ( joined )
+    fieldName = u"%1%2"_s.arg( AS_JOINPREFIX, fieldName );
+
+  return fieldName;
+}
+
+QgsField QgsAuxiliaryLayer::createAuxiliaryField( const QgsPropertyDefinition &def )
+{
+  QgsField afield;
+
+  if ( !def.name().isEmpty() || !def.comment().isEmpty() )
+  {
+    QMetaType::Type type = QMetaType::Type::UnknownType;
+    QString typeName;
+    int len( 0 ), precision( 0 );
+    switch ( def.dataType() )
+    {
+      case QgsPropertyDefinition::DataTypeString:
+        type = QMetaType::Type::QString;
+        len = 50;
+        typeName = u"String"_s;
+        break;
+      case QgsPropertyDefinition::DataTypeNumeric:
+        type = QMetaType::Type::Double;
+        len = 0;
+        precision = 0;
+        typeName = u"Real"_s;
+        break;
+      case QgsPropertyDefinition::DataTypeBoolean:
+        type = QMetaType::Type::Int; // sqlite does not have a bool type
+        typeName = u"Integer"_s;
+        break;
+    }
+
+    afield.setType( type );
+    afield.setName( nameFromProperty( def ) );
+    afield.setTypeName( typeName );
+    afield.setLength( len );
+    afield.setPrecision( precision );
+  }
+
+  return afield;
+}
+
+QgsPropertyDefinition QgsAuxiliaryLayer::propertyDefinitionFromField( const QgsField &f )
+{
+  QgsPropertyDefinition def;
+  const QStringList parts = f.name().split( '_' );
+
+  if ( parts.size() <= 1 )
+    return def;
+
+  const QString origin = parts[0];
+  const QString propertyName = parts[1];
+
+  if ( origin.compare( "labeling"_L1, Qt::CaseInsensitive ) == 0 )
+  {
+    const QgsPropertiesDefinition props = QgsPalLayerSettings::propertyDefinitions();
+    for ( auto it = props.constBegin(); it != props.constEnd(); ++it )
+    {
+      if ( it.value().name().compare( propertyName, Qt::CaseInsensitive ) == 0 )
+      {
+        def = it.value();
+        if ( parts.size() >= 3 )
+          def.setComment( parts.mid( 2 ).join( '_' ) );
+        break;
+      }
+    }
+  }
+  else if ( origin.compare( "symbol"_L1, Qt::CaseInsensitive ) == 0 )
+  {
+    const QgsPropertiesDefinition props = QgsSymbolLayer::propertyDefinitions();
+    for ( auto it = props.constBegin(); it != props.constEnd(); ++it )
+    {
+      if ( it.value().name().compare( propertyName, Qt::CaseInsensitive ) == 0 )
+      {
+        def = it.value();
+        if ( parts.size() >= 3 )
+          def.setComment( parts.mid( 2 ).join( '_' ) );
+        break;
+      }
+    }
+  }
+  else if ( origin.compare( "diagram"_L1, Qt::CaseInsensitive ) == 0 )
+  {
+    const QgsPropertiesDefinition props = QgsDiagramLayerSettings::propertyDefinitions();
+    for ( auto it = props.constBegin(); it != props.constEnd(); ++it )
+    {
+      if ( it.value().name().compare( propertyName, Qt::CaseInsensitive ) == 0 )
+      {
+        def = it.value();
+        if ( parts.size() >= 3 )
+          def.setComment( parts.mid( 2 ).join( '_' ) );
+        break;
+      }
+    }
+  }
+  else
+  {
+    def.setOrigin( origin );
+    def.setName( propertyName );
+    switch ( f.type() )
+    {
+      case QMetaType::Type::Double:
+        def.setDataType( QgsPropertyDefinition::DataTypeNumeric );
+        break;
+
+      case QMetaType::Type::Bool:
+        def.setDataType( QgsPropertyDefinition::DataTypeBoolean );
+        break;
+
+      case QMetaType::Type::QString:
+      default:
+        def.setDataType( QgsPropertyDefinition::DataTypeString );
+        break;
+    }
+
+    if ( parts.size() >= 3 )
+      def.setComment( parts.mid( 2 ).join( '_' ) );
+  }
+
+  return def;
+}
+
+QgsField QgsAuxiliaryLayer::createAuxiliaryField( const QgsField &field )
+{
+  const QgsPropertyDefinition def = propertyDefinitionFromField( field );
+  QgsField afield;
+
+  if ( !def.name().isEmpty() || !def.comment().isEmpty() )
+  {
+    afield = createAuxiliaryField( def );
+    afield.setTypeName( field.typeName() );
+  }
+
+  return afield;
+}
+
+//
+// QgsAuxiliaryStorage
+//
+
+QgsAuxiliaryStorage::QgsAuxiliaryStorage( const QgsProject &project, bool copy )
+  : mCopy( copy )
+{
+  initTmpFileName();
+
+  if ( !project.absoluteFilePath().isEmpty() )
+  {
+    mFileName = filenameForProject( project );
+  }
+
+  open( mFileName );
+}
+
+QgsAuxiliaryStorage::QgsAuxiliaryStorage( const QString &filename, bool copy )
+  : mFileName( filename )
+  , mCopy( copy )
+{
+  initTmpFileName();
+
+  open( filename );
+}
+
+QgsAuxiliaryStorage::~QgsAuxiliaryStorage()
+{
+  if ( QFile::exists( mTmpFileName ) )
+    QFile::remove( mTmpFileName );
+}
+
+bool QgsAuxiliaryStorage::isValid() const
+{
+  return mValid;
+}
+
+QString QgsAuxiliaryStorage::fileName() const
+{
+  return mFileName;
+}
+
+bool QgsAuxiliaryStorage::save() const
+{
+  if ( mFileName.isEmpty() )
+  {
+    // only a saveAs is available on a new database
+    return false;
+  }
+  else if ( mCopy )
+  {
+    if ( QFile::exists( mFileName ) )
+      QFile::remove( mFileName );
+
+    return QFile::copy( mTmpFileName, mFileName );
+  }
+  else
+  {
+    // if the file is not empty the copy mode is not activated, then we're
+    // directly working on the database since the beginning (no savepoints
+    // /rollback for now)
+    return true;
+  }
+}
+
+QgsAuxiliaryLayer *QgsAuxiliaryStorage::createAuxiliaryLayer( const QgsField &field, QgsVectorLayer *layer ) const
+{
+  QgsAuxiliaryLayer *alayer = nullptr;
+
+  if ( mValid && layer )
+  {
+    const QString table( layer->id() );
+    sqlite3_database_unique_ptr database;
+    database = openDB( currentFileName() );
+
+    if ( !tableExists( table, database.get() ) )
+    {
+      if ( !createTable( field.typeName(), table, database.get(), mErrorString ) )
+      {
+        return alayer;
+      }
+    }
+
+    alayer = new QgsAuxiliaryLayer( field.name(), currentFileName(), table, layer );
+    alayer->startEditing();
+  }
+
+  return alayer;
+}
+
+bool QgsAuxiliaryStorage::deleteTable( const QgsDataSourceUri &ogrUri )
+{
+  bool rc = false;
+  const QgsDataSourceUri uri = parseOgrUri( ogrUri );
+
+  if ( !uri.database().isEmpty() && !uri.table().isEmpty() )
+  {
+    sqlite3_database_unique_ptr database;
+    database = openDB( uri.database() );
+
+    if ( database )
+    {
+      QString sql = u"DROP TABLE %1"_s.arg( uri.table() );
+      rc = exec( sql, database.get() );
+
+      sql = u"VACUUM"_s;
+      rc = exec( sql, database.get() );
+    }
+  }
+
+  return rc;
+}
+
+bool QgsAuxiliaryStorage::duplicateTable( const QgsDataSourceUri &ogrUri, const QString &newTable )
+{
+  const QgsDataSourceUri uri = parseOgrUri( ogrUri );
+  bool rc = false;
+
+  if ( !uri.table().isEmpty() && !uri.database().isEmpty() )
+  {
+    sqlite3_database_unique_ptr database;
+    database = openDB( uri.database() );
+
+    if ( database )
+    {
+      const QString sql = u"CREATE TABLE %1 AS SELECT * FROM %2"_s.arg( newTable, uri.table() );
+      rc = exec( sql, database.get() );
+    }
+  }
+
+  return rc;
+}
+
+QString QgsAuxiliaryStorage::errorString() const
+{
+  return mErrorString;
+}
+
+bool QgsAuxiliaryStorage::saveAs( const QString &filename )
+{
+  mErrorString.clear();
+
+  QFile dest( filename );
+  if ( dest.exists() && !dest.remove() )
+  {
+    mErrorString = dest.errorString();
+    return false;
+  }
+
+  QFile origin( currentFileName() );
+  if ( !origin.copy( filename ) )
+  {
+    mErrorString = origin.errorString();
+    return false;
+  }
+
+  return true;
+}
+
+bool QgsAuxiliaryStorage::saveAs( const QgsProject &project )
+{
+  return saveAs( filenameForProject( project ) );
+}
+
+QString QgsAuxiliaryStorage::extension()
+{
+  return AS_EXTENSION;
+}
+
+bool QgsAuxiliaryStorage::exists( const QgsProject &project )
+{
+  const QFileInfo fileinfo( filenameForProject( project ) );
+  return fileinfo.exists() && fileinfo.isFile();
+}
+
+bool QgsAuxiliaryStorage::exec( const QString &sql, sqlite3 *handler )
+{
+  bool rc = false;
+
+  if ( handler )
+  {
+    const int err = sqlite3_exec( handler, sql.toStdString().c_str(), nullptr, nullptr, nullptr );
+
+    if ( err == SQLITE_OK )
+      rc = true;
+    else
+      debugMsg( sql, handler );
+  }
+
+  return rc;
+}
+
+QString QgsAuxiliaryStorage::debugMsg( const QString &sql, sqlite3 *handler )
+{
+  const QString err = QString::fromUtf8( sqlite3_errmsg( handler ) );
+  const QString msg = QObject::tr( "Unable to execute" );
+  const QString errMsg = QObject::tr( "%1 '%2': %3" ).arg( msg, sql, err );
+  QgsDebugError( errMsg );
+  return errMsg;
+}
+
+bool QgsAuxiliaryStorage::createTable( const QString &type, const QString &table, sqlite3 *handler, QString &errorMsg )
+{
+  const QString sql = u"CREATE TABLE IF NOT EXISTS '%1' ( '%2' %3  )"_s.arg( table, AS_JOINFIELD, type );
+
+  if ( !exec( sql, handler ) )
+  {
+    errorMsg = QgsAuxiliaryStorage::debugMsg( sql, handler );
+    return false;
+  }
+
+  return true;
+}
+
+sqlite3_database_unique_ptr QgsAuxiliaryStorage::createDB( const QString &filename )
+{
+  sqlite3_database_unique_ptr database;
+
+  int rc;
+  rc = database.open_v2( filename, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr );
+  if ( rc )
+  {
+    debugMsg( u"sqlite3_open_v2"_s, database.get() );
+  }
+  else
+    // activating Foreign Key constraints
+    exec( u"PRAGMA foreign_keys = 1"_s, database.get() );
+
+  return database;
+}
+
+sqlite3_database_unique_ptr QgsAuxiliaryStorage::openDB( const QString &filename )
+{
+  sqlite3_database_unique_ptr database;
+  const int rc = database.open_v2( filename, SQLITE_OPEN_READWRITE, nullptr );
+
+  if ( rc )
+  {
+    debugMsg( u"sqlite3_open_v2"_s, database.get() );
+  }
+
+  return database;
+}
+
+bool QgsAuxiliaryStorage::tableExists( const QString &table, sqlite3 *handler )
+{
+  const QString sql = u"SELECT 1 FROM sqlite_master WHERE type='table' AND name='%1'"_s.arg( table );
+  int rows = 0;
+  int columns = 0;
+  char **results = nullptr;
+  const int rc = sqlite3_get_table( handler, sql.toStdString().c_str(), &results, &rows, &columns, nullptr );
+  if ( rc != SQLITE_OK )
+  {
+    debugMsg( sql, handler );
+    return false;
+  }
+
+  sqlite3_free_table( results );
+  if ( rows >= 1 )
+    return true;
+
+  return false;
+}
+
+sqlite3_database_unique_ptr QgsAuxiliaryStorage::open( const QString &filename )
+{
+  sqlite3_database_unique_ptr database;
+
+  if ( filename.isEmpty() )
+  {
+    if ( ( database = createDB( currentFileName() ) ) )
+      mValid = true;
+  }
+  else if ( QFile::exists( filename ) )
+  {
+    if ( mCopy )
+      QFile::copy( filename, mTmpFileName );
+
+    if ( ( database = openDB( currentFileName() ) ) )
+      mValid = true;
+  }
+  else
+  {
+    if ( ( database = createDB( currentFileName() ) ) )
+      mValid = true;
+  }
+
+  return database;
+}
+
+sqlite3_database_unique_ptr QgsAuxiliaryStorage::open( const QgsProject &project )
+{
+  return open( filenameForProject( project ) );
+}
+
+QString QgsAuxiliaryStorage::filenameForProject( const QgsProject &project )
+{
+  const QFileInfo info( project.absoluteFilePath() );
+  const QString path = info.path() + QDir::separator() + info.baseName();
+  return path + '.' + QgsAuxiliaryStorage::extension();
+}
+
+void QgsAuxiliaryStorage::initTmpFileName()
+{
+  QTemporaryFile tmpFile;
+  if ( !tmpFile.open() )
+  {
+    QgsDebugError( u"Can't open temporary file"_s );
+    return;
+  }
+  tmpFile.close();
+  mTmpFileName = tmpFile.fileName();
+}
+
+QString QgsAuxiliaryStorage::currentFileName() const
+{
+  if ( mCopy || mFileName.isEmpty() )
+    return mTmpFileName;
+  else
+    return mFileName;
+}
+
+QgsDataSourceUri QgsAuxiliaryStorage::parseOgrUri( const QgsDataSourceUri &uri )
+{
+  QgsDataSourceUri newUri;
+
+  // parsing for ogr style uri :
+  // " filePath|layername='tableName' table="" sql="
+  QStringList uriParts = uri.uri().split( '|' );
+  if ( uriParts.count() < 2 )
+    return newUri;
+
+  const QString databasePath = uriParts[0].replace( ' ', QString() );
+
+  const QString table = uriParts[1];
+  QStringList tableParts = table.split( ' ' );
+
+  if ( tableParts.count() < 1 )
+    return newUri;
+
+  const QString tableName = tableParts[0].replace( "layername="_L1, QString() );
+
+  newUri.setDataSource( QString(), tableName, QString() );
+  newUri.setDatabase( databasePath );
+
+  return newUri;
+}

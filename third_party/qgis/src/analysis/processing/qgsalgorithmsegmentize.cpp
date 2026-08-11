@@ -1,0 +1,224 @@
+/***************************************************************************
+                         qgsalgorithmsegmentize.cpp
+                         ---------------------
+    begin                : March 2018
+    copyright            : (C) 2018 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmsegmentize.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::name() const
+{
+  return u"segmentizebymaxdistance"_s;
+}
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::displayName() const
+{
+  return QObject::tr( "Segmentize by maximum distance" );
+}
+
+QStringList QgsSegmentizeByMaximumDistanceAlgorithm::tags() const
+{
+  return QObject::tr( "straighten,linearize,densify,curves,curved,circular" ).split( ',' );
+}
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::outputName() const
+{
+  return QObject::tr( "Segmentized" );
+}
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm segmentizes a geometry by converting curved sections to linear sections.\n\n"
+    "The segmentization is performed by specifying the maximum allowed offset distance between the original "
+    "curve and the segmentized representation.\n\n"
+    "Non-curved geometries will be retained without change."
+  );
+}
+
+QString QgsSegmentizeByMaximumDistanceAlgorithm::shortDescription() const
+{
+  return QObject::tr(
+    "Segmentizes a geometry by converting curved sections to linear sections, "
+    "given the maximum allowed offset distance between the original curve and the segmentized representation."
+  );
+}
+
+QgsSegmentizeByMaximumDistanceAlgorithm *QgsSegmentizeByMaximumDistanceAlgorithm::createInstance() const
+{
+  return new QgsSegmentizeByMaximumDistanceAlgorithm();
+}
+
+QList<int> QgsSegmentizeByMaximumDistanceAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorLine ) << static_cast<int>( Qgis::ProcessingSourceType::VectorPolygon );
+}
+
+void QgsSegmentizeByMaximumDistanceAlgorithm::initParameters( const QVariantMap & )
+{
+  auto tolerance = std::make_unique<QgsProcessingParameterDistance>( u"DISTANCE"_s, QObject::tr( "Maximum offset distance" ), 1.0, u"INPUT"_s, false, 0, 10000000.0 );
+  tolerance->setIsDynamic( true );
+  tolerance->setDynamicPropertyDefinition( QgsPropertyDefinition( u"DISTANCE"_s, QObject::tr( "Maximum offset distance" ), QgsPropertyDefinition::DoublePositive ) );
+  tolerance->setDynamicLayerParameterName( u"INPUT"_s );
+  addParameter( tolerance.release() );
+}
+
+bool QgsSegmentizeByMaximumDistanceAlgorithm::supportInPlaceEdit( const QgsMapLayer *layer ) const
+{
+  Q_UNUSED( layer )
+  return false;
+}
+
+bool QgsSegmentizeByMaximumDistanceAlgorithm::prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  mTolerance = parameterAsDouble( parameters, u"DISTANCE"_s, context );
+  mDynamicTolerance = QgsProcessingParameters::isDynamic( parameters, u"DISTANCE"_s );
+  if ( mDynamicTolerance )
+    mToleranceProperty = parameters.value( u"DISTANCE"_s ).value<QgsProperty>();
+
+  return true;
+}
+
+QgsFeatureList QgsSegmentizeByMaximumDistanceAlgorithm::processFeature( const QgsFeature &feature, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  QgsFeature f = feature;
+  if ( f.hasGeometry() )
+  {
+    QgsGeometry geometry = f.geometry();
+    double tolerance = mTolerance;
+    if ( mDynamicTolerance )
+      tolerance = mToleranceProperty.valueAsDouble( context.expressionContext(), tolerance );
+    geometry.convertToStraightSegment( tolerance, QgsAbstractGeometry::MaximumDifference );
+    f.setGeometry( geometry );
+  }
+  return QgsFeatureList() << f;
+}
+
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::name() const
+{
+  return u"segmentizebymaxangle"_s;
+}
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::displayName() const
+{
+  return QObject::tr( "Segmentize by maximum angle" );
+}
+
+QStringList QgsSegmentizeByMaximumAngleAlgorithm::tags() const
+{
+  return QObject::tr( "straighten,linearize,densify,curves,curved,circular,angle" ).split( ',' );
+}
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::outputName() const
+{
+  return QObject::tr( "Segmentized" );
+}
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm segmentizes a geometry by converting curved sections to linear sections.\n\n"
+    "The segmentization is performed by specifying the maximum allowed radius angle between vertices "
+    "on the straightened geometry (e.g the angle of the arc created from the original arc center to consecutive "
+    "output vertices on the linearized geometry).\n\n"
+    "Non-curved geometries will be retained without change."
+  );
+}
+
+QString QgsSegmentizeByMaximumAngleAlgorithm::shortDescription() const
+{
+  return QObject::tr(
+    "Segmentizes a geometry by converting curved sections to linear sections, "
+    "given the maximum allowed radius angle between vertices on the straightened geometry."
+  );
+}
+
+QgsSegmentizeByMaximumAngleAlgorithm *QgsSegmentizeByMaximumAngleAlgorithm::createInstance() const
+{
+  return new QgsSegmentizeByMaximumAngleAlgorithm();
+}
+
+QList<int> QgsSegmentizeByMaximumAngleAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorLine ) << static_cast<int>( Qgis::ProcessingSourceType::VectorPolygon );
+}
+
+void QgsSegmentizeByMaximumAngleAlgorithm::initParameters( const QVariantMap & )
+{
+  auto tolerance = std::make_unique<QgsProcessingParameterNumber>( u"ANGLE"_s, QObject::tr( "Maximum angle between vertices (degrees)" ), Qgis::ProcessingNumberParameterType::Double, 5.0, false, 0, 360.0 );
+  tolerance->setIsDynamic( true );
+  tolerance->setDynamicPropertyDefinition( QgsPropertyDefinition( u"ANGLE"_s, QObject::tr( "Maximum angle between vertices (degrees)" ), QgsPropertyDefinition::DoublePositive ) );
+  tolerance->setDynamicLayerParameterName( u"INPUT"_s );
+  addParameter( tolerance.release() );
+}
+
+bool QgsSegmentizeByMaximumAngleAlgorithm::supportInPlaceEdit( const QgsMapLayer *layer ) const
+{
+  Q_UNUSED( layer )
+  return false;
+}
+
+bool QgsSegmentizeByMaximumAngleAlgorithm::prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  mTolerance = parameterAsDouble( parameters, u"ANGLE"_s, context );
+  mDynamicTolerance = QgsProcessingParameters::isDynamic( parameters, u"ANGLE"_s );
+  if ( mDynamicTolerance )
+    mToleranceProperty = parameters.value( u"ANGLE"_s ).value<QgsProperty>();
+
+  return true;
+}
+
+QgsFeatureList QgsSegmentizeByMaximumAngleAlgorithm::processFeature( const QgsFeature &feature, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  QgsFeature f = feature;
+  if ( f.hasGeometry() )
+  {
+    QgsGeometry geometry = f.geometry();
+    double tolerance = mTolerance;
+    if ( mDynamicTolerance )
+      tolerance = mToleranceProperty.valueAsDouble( context.expressionContext(), tolerance );
+    geometry.convertToStraightSegment( M_PI * tolerance / 180.0, QgsAbstractGeometry::MaximumAngle );
+    f.setGeometry( geometry );
+  }
+  return QgsFeatureList() << f;
+}
+
+///@endcond

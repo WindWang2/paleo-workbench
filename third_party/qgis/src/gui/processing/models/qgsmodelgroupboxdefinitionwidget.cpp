@@ -1,0 +1,113 @@
+/***************************************************************************
+                         qgsmodelgroupboxdefinitionwidget.cpp
+                         ------------------------------------------
+    begin                : March 2020
+    copyright            : (C) 2020 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+
+#include "qgsmodelgroupboxdefinitionwidget.h"
+
+#include "qgscolorbutton.h"
+#include "qgsgui.h"
+
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QString>
+#include <QTextEdit>
+#include <QVBoxLayout>
+
+#include "moc_qgsmodelgroupboxdefinitionwidget.cpp"
+
+using namespace Qt::StringLiterals;
+
+//
+// QgsModelGroupBoxDefinitionPanelWidget
+//
+
+QgsModelGroupBoxDefinitionPanelWidget::QgsModelGroupBoxDefinitionPanelWidget( const QgsProcessingModelGroupBox &box, QWidget *parent )
+  : QgsProcessingModelConfigWidget( parent )
+  , mBox( box )
+{
+  QVBoxLayout *commentLayout = new QVBoxLayout();
+  commentLayout->setContentsMargins( 0, 0, 0, 0 );
+  commentLayout->addWidget( new QLabel( tr( "Title" ) ) );
+  mCommentEdit = new QTextEdit();
+  mCommentEdit->setAcceptRichText( false );
+  mCommentEdit->setText( box.description() );
+  commentLayout->addWidget( mCommentEdit, 1 );
+
+  QHBoxLayout *hl = new QHBoxLayout();
+  hl->setContentsMargins( 0, 0, 0, 0 );
+  hl->addWidget( new QLabel( tr( "Color" ) ) );
+  mCommentColorButton = new QgsColorButton();
+  mCommentColorButton->setAllowOpacity( true );
+  mCommentColorButton->setWindowTitle( tr( "Comment Color" ) );
+  mCommentColorButton->setShowNull( true, tr( "Default" ) );
+
+  if ( box.color().isValid() )
+    mCommentColorButton->setColor( box.color() );
+  else
+    mCommentColorButton->setToNull();
+
+  hl->addWidget( mCommentColorButton );
+  commentLayout->addLayout( hl );
+
+  setLayout( commentLayout );
+
+  setPanelTitle( tr( "Group Box Properties" ) );
+  setObjectName( u"QgsModelGroupBoxDefinitionPanelWidget"_s );
+
+  mCommentEdit->setFocus();
+  mCommentEdit->selectAll();
+
+  connect( mCommentEdit, &QTextEdit::textChanged, this, &QgsPanelWidget::widgetChanged );
+  connect( mCommentColorButton, &QgsColorButton::colorChanged, this, &QgsPanelWidget::widgetChanged );
+}
+
+QgsProcessingModelGroupBox QgsModelGroupBoxDefinitionPanelWidget::groupBox() const
+{
+  QgsProcessingModelGroupBox box = mBox;
+  box.setColor( mCommentColorButton->isNull() ? QColor() : mCommentColorButton->color() );
+  box.setDescription( mCommentEdit->toPlainText() );
+  return box;
+}
+
+//
+// QgsModelGroupBoxDefinitionDialog
+//
+
+QgsModelGroupBoxDefinitionDialog::QgsModelGroupBoxDefinitionDialog( const QgsProcessingModelGroupBox &box, QWidget *parent )
+  : QDialog( parent )
+{
+  QVBoxLayout *commentLayout = new QVBoxLayout();
+  mWidget = new QgsModelGroupBoxDefinitionPanelWidget( box );
+  commentLayout->addWidget( mWidget, 1 );
+
+  QDialogButtonBox *bbox = new QDialogButtonBox( QDialogButtonBox::Cancel | QDialogButtonBox::Ok );
+  connect( bbox, &QDialogButtonBox::accepted, this, &QgsModelGroupBoxDefinitionDialog::accept );
+  connect( bbox, &QDialogButtonBox::rejected, this, &QgsModelGroupBoxDefinitionDialog::reject );
+
+  commentLayout->addWidget( bbox );
+  setLayout( commentLayout );
+  setWindowTitle( tr( "Group Box Properties" ) );
+  setObjectName( u"QgsModelGroupBoxDefinitionWidget"_s );
+  QgsGui::enableAutoGeometryRestore( this );
+
+  connect( mWidget, &QgsPanelWidget::panelAccepted, this, &QgsModelGroupBoxDefinitionDialog::reject );
+}
+
+QgsProcessingModelGroupBox QgsModelGroupBoxDefinitionDialog::groupBox() const
+{
+  return mWidget->groupBox();
+}
