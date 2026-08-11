@@ -111,6 +111,7 @@ jobs:
           set -e
           g++ -std=c++17 -O2 -Wall -Wextra \
             native/grid_render_core/src/grid_render_core.cpp \
+            native/grid_render_core/src/scalar_grid_layer.cpp \
             native/grid_render_core/src/standalone_test.cpp \
             -o /tmp/grid_render_selftest && /tmp/grid_render_selftest
           g++ -std=c++17 -O2 -Wall -Wextra \

@@ -8,6 +8,7 @@
 // nodata transparency, mask transparency, opacity alpha multiply, gamma, and the
 // hi<=lo / gamma<=0 defensive defaults. The pure-Python parity fallback must match.
 #include "grid_render_core.hpp"
+#include "scalar_grid_layer.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -138,6 +139,35 @@ void test_degenerate_range() {
     CHECK_EQ(out[3], 255, "hi==lo still opaque for valid pixel");
 }
 
+void test_scalar_grid_layer_cache_and_revisions() {
+    const std::vector<float> grid = {0.0f, 1.0f};
+    pwb::grid_render::ScalarGridLayer layer(2, 1, grid);
+    const std::vector<std::uint8_t> ramp = {
+        0, 0, 0, 255,
+        255, 255, 255, 255,
+    };
+    layer.set_color_ramp(ramp);
+    const auto data0 = layer.data_revision();
+    const auto style0 = layer.style_revision();
+    const auto& first = layer.rasterize();
+    CHECK_EQ(first.size(), 8u, "scalar layer produces RGBA bytes");
+    CHECK_EQ(layer.rasterize_count(), 1u, "first scalar rasterization runs once");
+    layer.rasterize();
+    CHECK_EQ(layer.rasterize_count(), 1u, "unchanged scalar layer uses cache");
+
+    layer.set_gamma(2.0f);
+    CHECK_EQ(layer.data_revision(), data0, "gamma is a style-only change");
+    CHECK_EQ(layer.style_revision() > style0, true, "gamma bumps style revision");
+    layer.rasterize();
+    CHECK_EQ(layer.rasterize_count(), 2u, "style change rerasterizes without data change");
+
+    layer.set_mask({1, 0});
+    CHECK_EQ(layer.data_revision() > data0, true, "mask is a data change");
+    const auto& masked = layer.rasterize();
+    CHECK_EQ(masked[7], 0u, "masked grid cell is transparent");
+    CHECK_EQ(layer.rasterize_count(), 3u, "data change rerasterizes once");
+}
+
 }  // namespace
 
 int main() {
@@ -146,6 +176,7 @@ int main() {
     test_opacity_alpha_multiply();
     test_gamma();
     test_degenerate_range();
+    test_scalar_grid_layer_cache_and_revisions();
     if (g_failures == 0) {
         std::printf("ALL GRID_RENDER_CORE SELFTESTS PASSED\n");
         return 0;

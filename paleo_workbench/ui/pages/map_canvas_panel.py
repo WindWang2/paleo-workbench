@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QStackedLayout, QVBoxLayout
 from geoviz import PaleoMapCanvas
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.native_map_canvas import NativeMapCanvas
 from paleo_workbench.viz.mapping_helpers import preview_payload_from_document
 
 
@@ -40,6 +41,8 @@ class MapCanvasPanel(QFrame):
 
         self.canvas = PaleoMapCanvas()
         self.stack.addWidget(self.canvas)
+        self.native_canvas = NativeMapCanvas()
+        self.stack.addWidget(self.native_canvas)
         outer.addWidget(host, 1)
 
     def load_preview(
@@ -61,6 +64,12 @@ class MapCanvasPanel(QFrame):
         self.canvas.load_features(feats, period_name=period_name, wells=well_list)
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.canvas)
+
+    def load_native_scene(self, scene) -> None:
+        """Show a native factor-map composition instead of the legacy document preview."""
+        self.native_canvas.set_scene(scene)
+        self.empty_label.setHidden(True)
+        self.stack.setCurrentWidget(self.native_canvas)
 
     def update_state(self, document) -> None:
         if document is None:

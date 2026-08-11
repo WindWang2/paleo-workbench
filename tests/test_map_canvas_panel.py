@@ -1,5 +1,7 @@
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_canvas_panel import MapCanvasPanel
+from paleo_workbench.viz.native_factor_map import NativeMapScene
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
 
 SAMPLE_FEATURE = {
@@ -57,3 +59,25 @@ def test_map_canvas_panel_load_preview_direct(qtbot):
     assert panel.canvas._loaded_features == [SAMPLE_FEATURE]
     assert panel.canvas._period_name == "P1"
     assert panel.canvas._wells_data == [{"name": "W", "lng": 1.0, "lat": 2.0}]
+
+
+def test_map_canvas_panel_can_host_native_factor_scene(qtbot):
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 1.0],
+            "grid_y": [0.0, 1.0],
+            "grid_z": [[0.0, 1.0], [1.0, 0.0]],
+            "backend": "idw",
+            "n_points": 4,
+            "r_squared": 1.0,
+        },
+        factor_name="孔隙度",
+    )
+    scene = NativeMapScene()
+    scene.add_factor_grid(result, layer_id="surface")
+    panel = MapCanvasPanel()
+    qtbot.addWidget(panel)
+
+    panel.load_native_scene(scene)
+    assert panel.stack.currentWidget() is panel.native_canvas
+    assert panel.native_canvas.scene is scene

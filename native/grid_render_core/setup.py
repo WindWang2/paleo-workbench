@@ -29,6 +29,7 @@ ext_modules = [
         "grid_render_core",
         [
             str(HERE / "src" / "grid_render_core.cpp"),
+            str(HERE / "src" / "scalar_grid_layer.cpp"),
             str(HERE / "src" / "bindings.cpp"),
         ],
         cxx_std=17,

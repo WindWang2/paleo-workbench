@@ -62,6 +62,8 @@ PYBIND11_MODULE(layer_model_core, m) {
              py::arg("value"))
         .def_property_readonly("data_revision", &lm::MapLayer::data_revision)
         .def_property_readonly("style_revision", &lm::MapLayer::style_revision)
+        .def("bump_data_revision", &lm::MapLayer::bump_data_revision)
+        .def("bump_style_revision", &lm::MapLayer::bump_style_revision)
         .def_property("dirty", &lm::MapLayer::dirty, &lm::MapLayer::set_dirty)
         .def("visible_at_scale", &lm::MapLayer::visible_at_scale,
              py::arg("scale_denominator"));
