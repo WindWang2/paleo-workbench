@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace pwb::grid_render {
@@ -23,20 +24,22 @@ public:
 
     // RGBA LUT bytes, one or more colours. The input must have a length divisible by 4.
     void set_color_ramp(std::vector<std::uint8_t> rgba_lut);
-    const std::vector<std::uint8_t>& color_ramp() const noexcept { return color_ramp_; }
+    std::vector<std::uint8_t> color_ramp() const;
 
     void set_color_range(float lo, float hi);
-    float color_lo() const noexcept { return color_lo_; }
-    float color_hi() const noexcept { return color_hi_; }
+    float color_lo() const;
+    float color_hi() const;
     void set_gamma(float gamma);
-    float gamma() const noexcept { return gamma_; }
+    float gamma() const;
 
-    std::uint64_t data_revision() const noexcept { return data_revision_; }
-    std::uint64_t style_revision() const noexcept { return style_revision_; }
-    std::uint64_t rasterize_count() const noexcept { return rasterize_count_; }
+    std::uint64_t data_revision() const;
+    std::uint64_t style_revision() const;
+    std::uint64_t rasterize_count() const;
 
-    // Lazily rasterize into a native cache and return the cached RGBA bytes.
-    const std::vector<std::uint8_t>& rasterize();
+    // Lazily rasterize into a native cache and return a thread-safe RGBA snapshot.
+    // The copy is required at the Python boundary: callers must never retain a view
+    // into cached bytes while another thread changes grid/style state.
+    std::vector<std::uint8_t> rasterize();
 
 private:
     void invalidate_data() noexcept { ++data_revision_; }
@@ -58,6 +61,7 @@ private:
     std::uint64_t cached_style_revision_ = 0;
     std::uint64_t rasterize_count_ = 0;
     std::vector<std::uint8_t> cached_rgba_;
+    mutable std::mutex mutex_;
 };
 
 }  // namespace pwb::grid_render

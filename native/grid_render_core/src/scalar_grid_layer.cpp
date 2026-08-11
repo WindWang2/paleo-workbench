@@ -37,6 +37,7 @@ void ScalarGridLayer::validate_mask_size(const std::vector<std::uint8_t>& mask) 
 }
 
 void ScalarGridLayer::set_grid(std::vector<float> grid_z) {
+    std::lock_guard<std::mutex> lock(mutex_);
     validate_grid_size(grid_z);
     if (grid_z_ == grid_z) return;
     grid_z_ = std::move(grid_z);
@@ -44,6 +45,7 @@ void ScalarGridLayer::set_grid(std::vector<float> grid_z) {
 }
 
 void ScalarGridLayer::set_mask(std::vector<std::uint8_t> mask) {
+    std::lock_guard<std::mutex> lock(mutex_);
     validate_mask_size(mask);
     if (mask_ == mask) return;
     mask_ = std::move(mask);
@@ -51,6 +53,7 @@ void ScalarGridLayer::set_mask(std::vector<std::uint8_t> mask) {
 }
 
 void ScalarGridLayer::set_color_ramp(std::vector<std::uint8_t> rgba_lut) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (rgba_lut.empty() || rgba_lut.size() % 4 != 0) {
         throw std::invalid_argument("color ramp must contain one or more RGBA colours");
     }
@@ -59,20 +62,58 @@ void ScalarGridLayer::set_color_ramp(std::vector<std::uint8_t> rgba_lut) {
     invalidate_style();
 }
 
+std::vector<std::uint8_t> ScalarGridLayer::color_ramp() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return color_ramp_;
+}
+
 void ScalarGridLayer::set_color_range(const float lo, const float hi) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (color_lo_ == lo && color_hi_ == hi) return;
     color_lo_ = lo;
     color_hi_ = hi;
     invalidate_style();
 }
 
+float ScalarGridLayer::color_lo() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return color_lo_;
+}
+
+float ScalarGridLayer::color_hi() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return color_hi_;
+}
+
 void ScalarGridLayer::set_gamma(const float gamma) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (gamma_ == gamma) return;
     gamma_ = gamma;
     invalidate_style();
 }
 
-const std::vector<std::uint8_t>& ScalarGridLayer::rasterize() {
+float ScalarGridLayer::gamma() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return gamma_;
+}
+
+std::uint64_t ScalarGridLayer::data_revision() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return data_revision_;
+}
+
+std::uint64_t ScalarGridLayer::style_revision() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return style_revision_;
+}
+
+std::uint64_t ScalarGridLayer::rasterize_count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return rasterize_count_;
+}
+
+std::vector<std::uint8_t> ScalarGridLayer::rasterize() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (color_ramp_.empty()) {
         throw std::logic_error("a color ramp must be set before rasterizing a scalar grid");
     }

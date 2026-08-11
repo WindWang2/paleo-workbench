@@ -11,6 +11,7 @@
 #include "scalar_grid_layer.hpp"
 
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -124,7 +125,7 @@ PYBIND11_MODULE(grid_render_core, m) {
                  int width = 0;
                  int height = 0;
                  auto values = grid_values(grid_z, &width, &height);
-                 return pwb::grid_render::ScalarGridLayer(
+                 return std::make_unique<pwb::grid_render::ScalarGridLayer>(
                      width, height, std::move(values), mask_values(mask_obj, width, height));
              }),
              py::arg("grid_z"), py::arg("mask") = py::none())
@@ -160,7 +161,7 @@ PYBIND11_MODULE(grid_render_core, m) {
             auto* destination = out.mutable_data();
             {
                 py::gil_scoped_release release;
-                const auto& rgba = layer.rasterize();
+                const auto rgba = layer.rasterize();
                 std::memcpy(destination, rgba.data(), rgba.size());
             }
             return out;

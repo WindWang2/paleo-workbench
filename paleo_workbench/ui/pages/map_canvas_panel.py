@@ -55,6 +55,7 @@ class MapCanvasPanel(QFrame):
         """Load pre-normalized GeoJSON facies + lng/lat wells for chrome preview."""
         feats = list(features or [])
         well_list = list(wells or [])
+        self.native_canvas.clear_scene()
         if not feats and not well_list:
             self.canvas.load_features([], period_name="", wells=[])
             self.empty_label.setText("未选择古地理图" if not period_name else "暂无图面要素")

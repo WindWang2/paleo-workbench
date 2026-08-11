@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QWheelEve
 from PySide6.QtWidgets import QWidget
 
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.native_render_worker import NativeRasterRequestController
 
 __all__ = ["NativeMapCanvas"]
 
@@ -21,10 +22,15 @@ class NativeMapCanvas(QWidget):
         self.setMinimumSize(240, 180)
         self.setMouseTracking(True)
         self._scene = None
+        self._scene_epoch = 0
         self._view_extent = (0.0, 0.0, 1.0, 1.0)
         self._image_cache: dict[str, tuple[tuple[int, int], QImage]] = {}
         self._last_drag_pos: QPointF | None = None
         self._scene_change_listener = self.update
+        self._raster_controller = NativeRasterRequestController(self)
+        self._raster_controller.raster_ready.connect(self._on_raster_ready)
+        self._raster_controller.raster_failed.connect(self._on_raster_failed)
+        self._last_raster_error = ""
         if scene is not None:
             self.set_scene(scene)
 
@@ -40,10 +46,16 @@ class NativeMapCanvas(QWidget):
         if self._scene is not None:
             self._scene.remove_change_listener(self._scene_change_listener)
         self._scene = scene
-        self._scene.add_change_listener(self._scene_change_listener)
+        self._scene_epoch += 1
+        self._raster_controller.invalidate()
+        if self._scene is not None:
+            self._scene.add_change_listener(self._scene_change_listener)
         self._image_cache.clear()
         self.fit_to_scene()
         self.update()
+
+    def clear_scene(self) -> None:
+        self.set_scene(None)
 
     def fit_to_scene(self) -> None:
         if self._scene is None:
@@ -115,7 +127,19 @@ class NativeMapCanvas(QWidget):
         cached = self._image_cache.get(layer_id)
         if cached is not None and cached[0] == key:
             return cached[1]
-        rgba = self._scene.raster_rgba(layer_id)
+        scalar = self._scene.scalar_layer(layer_id)
+        if scalar is None:
+            return QImage()
+        self._raster_controller.request(
+            scene_epoch=self._scene_epoch,
+            layer_id=layer_id,
+            raster_key=key,
+            scalar=scalar,
+        )
+        return QImage()
+
+    @staticmethod
+    def _image_from_rgba(rgba) -> QImage:
         image = QImage(
             rgba.data,
             rgba.shape[1],
@@ -123,8 +147,53 @@ class NativeMapCanvas(QWidget):
             rgba.shape[1] * 4,
             QImage.Format.Format_RGBA8888,
         ).copy()
-        self._image_cache[layer_id] = (key, image)
         return image
+
+    def _on_raster_ready(self, request, rgba) -> None:
+        if self._scene is None or request.scene_epoch != self._scene_epoch:
+            return
+        if self._scene.scalar_layer(request.layer_id) is not request.scalar:
+            return
+        try:
+            if self._scene.scalar_raster_key(request.layer_id) != request.raster_key:
+                return
+        except KeyError:
+            return
+        self._image_cache[request.layer_id] = (
+            request.raster_key,
+            self._image_from_rgba(rgba),
+        )
+        self._last_raster_error = ""
+        self.update()
+
+    def _on_raster_failed(self, request, message: str) -> None:
+        if self._scene is not None and request.scene_epoch == self._scene_epoch:
+            self._last_raster_error = message
+
+    def prepare_for_export(self) -> None:
+        """Synchronously populate any missing images before an explicit PNG export.
+
+        Interactive paints remain asynchronous. A user-initiated export instead needs
+        a complete deterministic frame and is allowed to wait for the native cache.
+        """
+        if self._scene is None:
+            return
+        for layer in self._scene.registry.layers():
+            scalar = self._scene.scalar_layer(layer.id)
+            if scalar is None:
+                continue
+            key = self._scene.scalar_raster_key(layer.id)
+            cached = self._image_cache.get(layer.id)
+            if cached is not None and cached[0] == key:
+                continue
+            self._image_cache[layer.id] = (
+                key,
+                self._image_from_rgba(self._scene.raster_rgba(layer.id)),
+            )
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._raster_controller.shutdown()
+        super().closeEvent(event)
 
     @staticmethod
     def _color(values: tuple[int, int, int, int]) -> QColor:

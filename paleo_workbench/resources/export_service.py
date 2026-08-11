@@ -363,6 +363,8 @@ def _export_widget_png(widget: Any, output_path: Path) -> None:
     if kind == "paleo_map":
         _export_paleo_map(target, output_path, "png")
         return
+    if kind == "native_factor_map" and hasattr(target, "prepare_for_export"):
+        target.prepare_for_export()
     if not hasattr(target, "grab"):
         raise ExportError("控件不支持截图导出")
     pixmap = target.grab()

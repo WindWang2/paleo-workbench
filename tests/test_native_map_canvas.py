@@ -27,6 +27,8 @@ def test_native_canvas_composes_layers_and_reuses_scalar_cache(qtbot):
     canvas.repaint()
 
     scalar = scene.scalar_layer("surface")
+    canvas.grab()
+    qtbot.waitUntil(lambda: scalar.rasterize_count == 1, timeout=3000)
     image = canvas.grab().toImage()
     assert scalar.rasterize_count == 1
     assert image.size().width() == 320
@@ -39,6 +41,7 @@ def test_native_canvas_composes_layers_and_reuses_scalar_cache(qtbot):
     scene.set_scalar_style("surface", gamma=2.0)
     canvas.repaint()
     canvas.grab()
+    qtbot.waitUntil(lambda: scalar.rasterize_count == 2, timeout=3000)
     assert scalar.rasterize_count == 2
 
 

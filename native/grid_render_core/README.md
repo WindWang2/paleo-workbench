@@ -54,8 +54,17 @@ without the GIL. Registry-level visibility and opacity remain in `layer_model_co
 are applied during Qt composition, so toggling/opacity changes neither rerasterize the
 grid nor rerun interpolation.
 
+The scalar layer serializes concurrent mutations/rasterization with a native mutex and
+returns an RGBA snapshot across the pybind boundary, so an async Qt worker never exposes
+the mutable native cache to another thread. `NativeMapCanvas` requests that snapshot off
+the GUI thread and accepts it only when both its scene epoch and scalar `(data, style)`
+revision still match. Stale work is cooperatively cancelled at delivery time; an explicit
+PNG export synchronously completes any missing image before capture.
+
 `paleo_workbench.viz.native_factor_map.NativeMapScene` transfers a finished
 `FactorGridResult` (or managed `.factor_grid.npz` artifact) into this native layer and
 `paleo_workbench.ui.native_map_canvas.NativeMapCanvas` composes it with contours and
 sample points. The vertical contract is covered by `tests/test_scalar_grid_layer_cpp.py`,
-`tests/test_native_factor_map.py`, and `tests/test_native_map_canvas.py`.
+`tests/test_native_factor_map.py`, `tests/test_native_map_canvas.py`, and
+`tests/test_native_render_async.py`; comparative 500²/1000²/2000² cache smoke coverage
+lives in `tests/test_native_render_performance.py`.
