@@ -439,9 +439,25 @@ def persist_factor_grid_artifacts(
         task_id = str(getattr(task, "id", "") or "")
         with _LIVE_FACTOR_GRIDS_LOCK:
             has_live = task_id in _LIVE_FACTOR_GRIDS
+            live_identity = _LIVE_ARTIFACT_IDENTITY.get(task_id)
         has_inline = parameters.get("grid_z") is not None
         if not has_inline and not has_live:
             continue
+        # Stage-4: if this live entry was already sealed from the current
+        # artifact file, do not rewrite NPZ (no new catalog churn).  Still strip
+        # any leftover inline arrays from the parameters dict.
+        existing_path = getattr(task, "grid_artifact_path", None)
+        if (
+            has_live
+            and existing_path
+            and not has_inline
+            and live_identity is not None
+        ):
+            try:
+                if artifact_file_identity(existing_path) == live_identity:
+                    continue
+            except OSError:
+                pass
         result = factor_grid_result_for_task(
             task, crs=project.coordinate.project_crs or None
         )
