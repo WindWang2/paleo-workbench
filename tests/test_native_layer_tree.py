@@ -41,6 +41,7 @@ def test_native_layer_model_reads_and_mutates_only_the_cpp_registry(qtbot):
     assert registry.get("surface").name == "孔隙度（重命名）"
     assert model.setData(opacity, 0.35)
     assert registry.get("surface").opacity == pytest.approx(0.35)
+    assert not model.setData(opacity, "nan")
 
 
 def test_native_layer_model_handles_order_removal_active_layer_and_zoom(qtbot):

@@ -126,3 +126,22 @@ def test_write_is_atomic_on_existing_file(tmp_path: Path):
 def test_read_missing_artifact_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         read_grid_artifact(tmp_path / "nope.factor_grid.npz")
+
+
+def test_all_nodata_artifact_descriptor_stays_strict_json(tmp_path: Path):
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 1.0],
+            "grid_y": [0.0, 1.0],
+            "grid_z": [[None, None], [None, None]],
+            "backend": "idw",
+        },
+        factor_name="empty",
+    )
+    path = write_grid_artifact(result, tmp_path, "empty")
+    with np.load(path, allow_pickle=False) as data:
+        import json
+
+        descriptor = json.loads(str(data["__descriptor__"]))
+    assert descriptor["statistics"]["valid_count"] == 0
+    assert descriptor["statistics"]["min"] is None

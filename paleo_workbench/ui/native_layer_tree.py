@@ -7,6 +7,7 @@ and remain responsible for applying a viewport transform.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import layer_model_core
@@ -170,6 +171,8 @@ class NativeLayerModel(QAbstractItemModel):
             try:
                 opacity = float(value)
             except (TypeError, ValueError):
+                return False
+            if not math.isfinite(opacity):
                 return False
             if layer.opacity != max(0.0, min(1.0, opacity)):
                 layer.opacity = opacity

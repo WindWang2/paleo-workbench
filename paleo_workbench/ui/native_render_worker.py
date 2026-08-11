@@ -160,18 +160,21 @@ class NativeRasterRequestController(QObject):
             target=request,
         )
 
+    @Slot(object, object)
     def _on_finished(self, request: _Request, rgba) -> None:
         if not self._shutdown and self._same_request(
             self._desired.get(request.layer_id), request
         ):
             self.raster_ready.emit(request, rgba)
 
+    @Slot(object, str)
     def _on_failed(self, request: _Request, message: str) -> None:
         if not self._shutdown and self._same_request(
             self._desired.get(request.layer_id), request
         ):
             self.raster_failed.emit(request, message)
 
+    @Slot()
     def _on_released(self) -> None:
         self._active = None
         if self._shutdown or not self._pending:

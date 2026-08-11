@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, Slot
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
@@ -149,6 +149,7 @@ class NativeMapCanvas(QWidget):
         ).copy()
         return image
 
+    @Slot(object, object)
     def _on_raster_ready(self, request, rgba) -> None:
         if self._scene is None or request.scene_epoch != self._scene_epoch:
             return
@@ -166,6 +167,7 @@ class NativeMapCanvas(QWidget):
         self._last_raster_error = ""
         self.update()
 
+    @Slot(object, str)
     def _on_raster_failed(self, request, message: str) -> None:
         if self._scene is not None and request.scene_epoch == self._scene_epoch:
             self._last_raster_error = message

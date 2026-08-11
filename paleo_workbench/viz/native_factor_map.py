@@ -109,7 +109,14 @@ class NativeMapScene:
         native_layer = grid_render_core.ScalarGridLayer(result.grid_z, result.mask)
         ramp = _rgba_lut(default_rgba_lut() if color_ramp is None else color_ramp)
         native_layer.set_color_ramp(ramp)
-        lo, hi = color_range or (result.statistics.min, result.statistics.max)
+        if color_range is None:
+            lo, hi = result.statistics.min, result.statistics.max
+            if not (np.isfinite(lo) and np.isfinite(hi) and hi >= lo):
+                # An all-nodata grid stays transparent, but the native style must
+                # still have a finite deterministic range for later data replacement.
+                lo, hi = 0.0, 1.0
+        else:
+            lo, hi = color_range
         native_layer.set_color_range(float(lo), float(hi))
         native_layer.set_gamma(float(gamma))
 

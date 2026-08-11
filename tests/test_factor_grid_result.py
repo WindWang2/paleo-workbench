@@ -136,6 +136,34 @@ def test_statistics_all_nodata_grid():
     assert math.isnan(r.statistics.min)
 
 
+def test_all_nodata_descriptor_is_strict_json_and_axes_must_be_finite():
+    import json
+
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 1.0],
+            "grid_y": [0.0, 1.0],
+            "grid_z": [[None, None], [None, None]],
+            "backend": "idw",
+        },
+        factor_name="empty",
+    )
+    assert math.isnan(result.statistics.min)
+    assert result.to_descriptor()["statistics"]["min"] is None
+    json.dumps(result.to_descriptor(), allow_nan=False)
+
+    with pytest.raises(ValueError, match="finite coordinates"):
+        FactorGridResult.from_engine_dict(
+            {
+                "grid_x": [0.0, float("nan")],
+                "grid_y": [0.0],
+                "grid_z": [[0.0, 1.0]],
+                "backend": "idw",
+            },
+            factor_name="invalid",
+        )
+
+
 def test_kriging_variance_grid_preserved():
     r = FactorGridResult.from_engine_dict(
         _kriging_engine_dict(), factor_name="porosity"

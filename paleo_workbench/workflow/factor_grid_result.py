@@ -82,11 +82,16 @@ class GridStatistics:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        def json_number(value: float) -> float | None:
+            return value if math.isfinite(value) else None
+
         return {
-            "min": self.min,
-            "max": self.max,
-            "mean": self.mean,
-            "std": self.std,
+            # Keep NaN in memory for an all-nodata result, while descriptors
+            # remain strict JSON (which has no NaN literal).
+            "min": json_number(self.min),
+            "max": json_number(self.max),
+            "mean": json_number(self.mean),
+            "std": json_number(self.std),
             "valid_count": self.valid_count,
             "total_count": self.total_count,
         }
@@ -122,7 +127,24 @@ def _coerce_xy(values: Sequence[float], *, name: str) -> np.ndarray:
     arr = np.asarray(list(values), dtype=np.float64)
     if arr.ndim != 1:
         raise ValueError(f"{name} must be a 1-D coordinate vector, got shape {arr.shape}")
+    if arr.size == 0:
+        raise ValueError(f"{name} must not be empty")
+    if not np.isfinite(arr).all():
+        raise ValueError(f"{name} must contain only finite coordinates")
     return arr
+
+
+def _json_safe(value: Any) -> Any:
+    """Return metadata free of non-standard JSON floats and NumPy scalar wrappers."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 @dataclass(slots=True)
@@ -212,13 +234,16 @@ class FactorGridResult:
             raise ValueError(
                 f"grid_y length {self.grid_y.shape} must match grid_z height {h}"
             )
-        if self.grid_z.dtype != np.float32:
-            self.grid_z = np.ascontiguousarray(self.grid_z, dtype=np.float32)
-        if self.variance_grid is not None and self.variance_grid.shape != (h, w):
-            raise ValueError(
-                f"variance_grid shape {self.variance_grid.shape} must match "
-                f"grid_z {(h, w)}"
+        self.grid_z = _to_float32_grid(self.grid_z, height=h, width=w)
+        if self.variance_grid is not None:
+            self.variance_grid = _to_float32_grid(
+                self.variance_grid, height=h, width=w
             )
+        if self.boundary is not None:
+            boundary = [(float(x), float(y)) for x, y in self.boundary]
+            if not all(math.isfinite(x) and math.isfinite(y) for x, y in boundary):
+                raise ValueError("boundary must contain only finite coordinates")
+            self.boundary = boundary
         self.statistics = GridStatistics.from_grid(self.grid_z)
 
     # ----- public constructors -------------------------------------------------
@@ -410,7 +435,7 @@ class FactorGridResult:
         artifact (catalog INTERMEDIATE/DERIVED version). Persisting huge grids inline in
         ``.paleo.json`` is what this contract replaces.
         """
-        return {
+        return _json_safe({
             "factor_name": self.factor_name,
             "algorithm_id": self.algorithm_id,
             "algorithm_parameters": self.algorithm_parameters,
@@ -427,14 +452,15 @@ class FactorGridResult:
             "has_variance_grid": self.variance_grid is not None,
             "has_boundary": self.boundary is not None,
             "statistics": self.statistics.to_dict(),
-        }
+        })
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Backward-compatible dict for any legacy consumer.
 
-        Non-finite cells are emitted as ``None`` (the engine's encoding, which is the
-        JSON-safe one) so downstream code and old tests keep working.
+        Non-finite cells and all-nodata summary values are emitted as ``None`` (the
+        engine's JSON-safe encoding) so downstream code and old tests keep working.
         """
+        stats = self.statistics.to_dict()
         none_encoded = [
             [None if not math.isfinite(float(v)) else float(v) for v in row]
             for row in self.grid_z.tolist()
@@ -444,9 +470,9 @@ class FactorGridResult:
             "grid_y": [float(v) for v in self.grid_y.tolist()],
             "grid_z": none_encoded,
             "backend": self.algorithm_id,
-            "min": self.statistics.min,
-            "max": self.statistics.max,
-            "mean": self.statistics.mean,
+            "min": stats["min"],
+            "max": stats["max"],
+            "mean": stats["mean"],
             "r_squared": self.algorithm_parameters.get("r_squared"),
         }
         if self.variance_grid is not None:

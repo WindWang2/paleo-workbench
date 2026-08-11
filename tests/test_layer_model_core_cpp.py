@@ -73,3 +73,11 @@ def test_binding_rejects_invalid_registry_operations_and_keeps_handles_safe():
     gc.collect()
     # The Python handle owns a shared reference, so inspection after removal is safe.
     assert layer.name == "网格"
+
+
+def test_binding_rejects_non_finite_opacity():
+    registry = LayerRegistry()
+    layer = registry.add_layer("surface", "Surface", LayerType.Raster)
+
+    with pytest.raises(ValueError, match="opacity must be finite"):
+        layer.opacity = float("nan")

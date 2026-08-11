@@ -66,7 +66,9 @@ def write_grid_artifact(
         "grid_x": np.ascontiguousarray(result.grid_x, dtype=np.float64),
         "grid_y": np.ascontiguousarray(result.grid_y, dtype=np.float64),
         "mask": result.mask,
-        "__descriptor__": np.array(json.dumps(descriptor, ensure_ascii=False)),
+        "__descriptor__": np.array(
+            json.dumps(descriptor, ensure_ascii=False, allow_nan=False)
+        ),
     }
     if result.variance_grid is not None:
         arrays["variance_grid"] = np.ascontiguousarray(

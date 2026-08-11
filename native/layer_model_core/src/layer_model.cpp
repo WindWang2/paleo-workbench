@@ -2,6 +2,7 @@
 #include "layer_model.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace pwb::layer_model {
@@ -19,6 +20,9 @@ void MapLayer::set_visible(bool v) {
 }
 
 void MapLayer::set_opacity(float o) {
+    if (!std::isfinite(o)) {
+        throw std::invalid_argument("opacity must be finite");
+    }
     if (o < 0.0f) o = 0.0f;
     else if (o > 1.0f) o = 1.0f;
     if (opacity_ == o) return;
