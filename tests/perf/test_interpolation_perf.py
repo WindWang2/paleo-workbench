@@ -114,6 +114,10 @@ def test_repeated_geometry_live_grid_no_extra_list_parse():
         t0 = time.perf_counter()
         apply_interpolation_to_task(task, method="IDW", grid_n=96)
         times.append(time.perf_counter() - t0)
-        assert task.parameters.get("grid_z") is not None
+        # Stage-3: payload is live FactorGrid cache, not nested parameters lists.
+        from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+        assert factor_grid_result_for_task(task).grid_z is not None
+        assert "grid_z" not in (task.parameters or {})
     # No runaway growth across repeats.
     assert max(times) < min(times) * 5 + 1.0
