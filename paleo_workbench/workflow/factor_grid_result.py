@@ -339,25 +339,33 @@ class FactorGridResult:
         factor_name: str,
         crs: str | None = None,
         unit: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> "FactorGridResult":
         """Adapter for legacy projects whose ``grid_x/grid_y/grid_z`` live inline in
         ``FactorMapTask.parameters``. Handles both ``None`` and ``NaN`` encodings so old
         projects keep opening without data loss.
         """
+        descriptor = dict(metadata or {})
         backend = str(parameters.get("interp_backend") or parameters.get("backend") or "")
-        algorithm_id = backend or "unknown"
+        algorithm_id = str(descriptor.get("algorithm_id") or backend or "unknown")
         grid_x = _coerce_xy(parameters["grid_x"], name="grid_x")
         grid_y = _coerce_xy(parameters["grid_y"], name="grid_y")
         grid_z = _to_float32_grid(
             parameters["grid_z"], height=int(grid_y.size), width=int(grid_x.size)
         )
-        params = {
-            "r_squared": None,
-            "grid_label": parameters.get("grid"),
-            "n_points": len(parameters.get("sample_points") or []),
-            "power": parameters.get("power"),
-            "n_break_lines": parameters.get("n_break_lines", 0),
-        }
+        params = dict(descriptor.get("algorithm_parameters") or {})
+        params.update(
+            {
+                "r_squared": params.get("r_squared"),
+                "grid_label": parameters.get("grid", params.get("grid_label")),
+                "n_points": len(parameters.get("sample_points") or [])
+                or params.get("n_points"),
+                "power": parameters.get("power", params.get("power")),
+                "n_break_lines": parameters.get(
+                    "n_break_lines", params.get("n_break_lines", 0)
+                ),
+            }
+        )
         variance_grid = None
         if parameters.get("grid_var") is not None:
             variance_grid = _to_float32_grid(
@@ -371,6 +379,12 @@ class FactorGridResult:
             params["azimuth_deg"] = parameters.get("azimuth_deg")
             params["semi_major"] = parameters.get("semi_major")
             params["semi_minor"] = parameters.get("semi_minor")
+        raw_boundary = parameters.get("grid_boundary")
+        boundary = (
+            [(float(x), float(y)) for x, y in raw_boundary]
+            if raw_boundary
+            else None
+        )
         return cls(
             grid_z=grid_z,
             grid_x=grid_x,
@@ -378,13 +392,14 @@ class FactorGridResult:
             factor_name=factor_name,
             algorithm_id=algorithm_id,
             algorithm_parameters=params,
-            crs=crs,
-            unit=unit,
-            generator_version=None,
-            source_refs=[],
-            run_ref=None,
-            created_at=None,
+            crs=crs if crs is not None else descriptor.get("crs"),
+            unit=unit if unit is not None else descriptor.get("unit"),
+            generator_version=descriptor.get("generator_version"),
+            source_refs=list(descriptor.get("source_refs") or []),
+            run_ref=descriptor.get("run_ref"),
+            created_at=descriptor.get("created_at"),
             variance_grid=variance_grid,
+            boundary=boundary,
         )
 
     # ----- serialisation -------------------------------------------------------

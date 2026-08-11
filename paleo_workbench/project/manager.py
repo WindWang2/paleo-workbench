@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from paleo_workbench.project.models import ProjectDocument, _now_iso
+from paleo_workbench.project.factor_grid_artifacts import persist_factor_grid_artifacts
 from paleo_workbench.project.paths import (
     ensure_artifact_layout,
     relativize_path,
@@ -42,12 +43,32 @@ def _resolve_reference_layers(data: dict, project_path: Path) -> None:
                     layer["error_message"] = ""
 
 
+def _relativize_factor_grid_artifacts(data: dict, project_path: Path) -> None:
+    for task in data.get("factor_map_tasks") or []:
+        artifact_path = task.get("grid_artifact_path")
+        if not artifact_path:
+            continue
+        stored, _ = relativize_path(artifact_path, project_path)
+        task["grid_artifact_path"] = stored
+
+
+def _resolve_factor_grid_artifacts(data: dict, project_path: Path) -> None:
+    for task in data.get("factor_map_tasks") or []:
+        artifact_path = task.get("grid_artifact_path")
+        if not artifact_path:
+            continue
+        task["grid_artifact_path"] = resolve_project_path(artifact_path, project_path)
+
+
 class ProjectManager:
     def __init__(self, project_path: str | Path):
         self.project_path = Path(project_path)
 
     def save(self, project: ProjectDocument) -> None:
         updated_at = _now_iso()
+        # Persist numerical grids before constructing the JSON payload, so no inline
+        # grid arrays leak back into a saved project.
+        persist_factor_grid_artifacts(project, self.project_path)
         data = project.model_dump()
         data["meta"]["updated_at"] = updated_at
         for resource in data["resources"]:
@@ -58,6 +79,7 @@ class ProjectManager:
             output_path, _ = relativize_path(artifact["output_path"], self.project_path)
             artifact["output_path"] = output_path
         _relativize_reference_layers(data, self.project_path)
+        _relativize_factor_grid_artifacts(data, self.project_path)
         self.project_path.parent.mkdir(parents=True, exist_ok=True)
         ensure_artifact_layout(self.project_path)
         # Atomic replace so a crash mid-write cannot leave a truncated project file.
@@ -93,4 +115,5 @@ class ProjectManager:
                 artifact["output_path"], self.project_path
             )
         _resolve_reference_layers(data, self.project_path)
+        _resolve_factor_grid_artifacts(data, self.project_path)
         return ProjectDocument.model_validate(data)

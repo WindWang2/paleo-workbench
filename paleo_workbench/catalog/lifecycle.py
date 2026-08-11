@@ -196,6 +196,46 @@ def register_factor_map_run(
     return run, version
 
 
+def register_persisted_factor_grids(
+    project: "ProjectDocument",
+    *,
+    catalog: CatalogPort | None = None,
+) -> list[DataVersionRef]:
+    """Register unversioned task-side grid artifacts as INTERMEDIATE outputs.
+
+    Project save owns artifact creation; this helper owns the catalog half of that
+    lifecycle.  It is idempotent for an existing live version id and intentionally
+    never falls back to recomputing a missing artifact.
+    """
+    cat = catalog or get_catalog()
+    if cat is None:
+        return []
+    registered: list[DataVersionRef] = []
+    for task in project.factor_map_tasks:
+        path = getattr(task, "grid_artifact_path", None)
+        if not path:
+            continue
+        existing = getattr(task, "grid_artifact_version_id", None)
+        if existing and cat.resolve_version(existing) is not None:
+            continue
+        artifact = Path(path)
+        if not artifact.is_file():
+            _log.warning("factor-grid artifact missing; cannot register: %s", artifact)
+            continue
+        run, version = register_factor_map_run(
+            task,
+            catalog=cat,
+            intermediate_path=artifact.as_posix(),
+            intermediate_checksum=sha256_file_or_none(artifact),
+        )
+        if version is None:
+            continue
+        task.grid_artifact_path = version.path
+        task.grid_artifact_version_id = version.version_id
+        registered.append(version)
+    return registered
+
+
 # --------------------------------------------------------------------- prediction
 def _versions_for_domain_tasks(
     task_ids: list[str],

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.project.paths import ProjectPathError
+from paleo_workbench.project.paths import ProjectPathError, artifact_dir_for
 from paleo_workbench.pipeline.assets import ensure_demo_prediction
 from paleo_workbench.pipeline.bootstrap import (
     bootstrap_sample_project,
@@ -125,6 +125,7 @@ class ProjectController:
                     self.window.project_path.resolve().parent
                 )
                 ProjectManager(self.window.project_path).save(self.window.project)
+                self._register_persisted_factor_grids(self.window.project_path)
             except OSError as e:
                 self.window._show_project_error("保存工程失败", str(e))
                 return None
@@ -154,7 +155,9 @@ class ProjectController:
                 from paleo_workbench.project.paths import relocate_artifacts
 
                 if self.window.project_path is not None:
+                    old_path = self.window.project_path
                     relocate_artifacts(self.window.project_path, target)
+                    self._rebase_factor_grid_artifact_paths(old_path, target)
             except Exception:
                 pass
             self.window.project.meta.project_root = str(target.resolve().parent)
@@ -176,7 +179,37 @@ class ProjectController:
                 service._rebase_artifact_paths()
         except Exception:
             pass
+        self._register_persisted_factor_grids(target)
         return target
+
+    def _register_persisted_factor_grids(self, project_path: Path) -> None:
+        """Attach newly persisted grid artifacts to the active project catalog."""
+        try:
+            from paleo_workbench.catalog.lifecycle import register_persisted_factor_grids
+
+            if register_persisted_factor_grids(self.window.project):
+                # Store returned version ids/managed paths in the portable project file.
+                ProjectManager(project_path).save(self.window.project)
+        except Exception:
+            # Catalog provenance is best-effort; the already-written project artifact
+            # remains usable and can be registered on a later save.
+            pass
+
+    def _rebase_factor_grid_artifact_paths(
+        self, old_project_path: Path, new_project_path: Path
+    ) -> None:
+        """Keep runtime artifact paths aligned after a successful save-as relocation."""
+        old_root = artifact_dir_for(old_project_path).resolve()
+        new_root = artifact_dir_for(new_project_path).resolve()
+        for task in self.window.project.factor_map_tasks:
+            raw = task.grid_artifact_path
+            if not raw:
+                continue
+            try:
+                relative = Path(raw).resolve().relative_to(old_root)
+            except ValueError:
+                continue
+            task.grid_artifact_path = (new_root / relative).as_posix()
 
     def _flush_joint_analysis_state(self) -> None:
         """Persist joint presentation from 井震联合 page before project write.

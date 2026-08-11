@@ -50,6 +50,7 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     - Well-log canvas (``paint_all``): PNG/SVG/PDF via geoviz_well_log
     - Cross-well composite (``export_composite``): PNG/SVG/PDF
     - Paleo map canvas: PNG/SVG/PDF via professional figure export
+    - Native factor-map canvas: PNG via its Qt/native composition path
     - Everything else (seismic GL, engine preview, empty): PNG grab only
     """
     if widget is None:
@@ -58,6 +59,8 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     kind = _export_surface_kind(target)
     if kind in {"well_log", "cross_well", "paleo_map"}:
         return frozenset({"PNG", "SVG", "PDF"})
+    if kind == "native_factor_map":
+        return frozenset({"PNG"})
     if hasattr(target, "grab"):
         return frozenset({"PNG"})
     return frozenset()
@@ -79,6 +82,7 @@ def _resolve_export_target(widget: Any) -> Any:
         hasattr(canvas, "export_composite")
         or hasattr(canvas, "paint_all")
         or _is_paleo_map_canvas(canvas)
+        or _is_native_factor_map_canvas(canvas)
     ):
         return canvas
     inner = getattr(widget, "widget", None)
@@ -101,6 +105,13 @@ def _is_paleo_map_canvas(widget: Any) -> bool:
     return hasattr(widget, "load_features") and hasattr(widget, "_layers")
 
 
+def _is_native_factor_map_canvas(widget: Any) -> bool:
+    """Recognize the host-owned native factor-map canvas without a hard Qt import."""
+    if widget is None:
+        return False
+    return type(widget).__name__ == "NativeMapCanvas" and hasattr(widget, "scene")
+
+
 def _export_surface_kind(widget: Any) -> str:
     if widget is None:
         return "none"
@@ -110,6 +121,8 @@ def _export_surface_kind(widget: Any) -> str:
         return "cross_well"
     if _is_paleo_map_canvas(widget):
         return "paleo_map"
+    if _is_native_factor_map_canvas(widget):
+        return "native_factor_map"
     return "generic"
 
 

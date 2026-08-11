@@ -15,6 +15,7 @@ import layer_model_core
 import numpy as np
 
 from paleo_workbench.catalog.grid_artifact import read_grid_artifact
+from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
 from paleo_workbench.viz.grid_render import default_rgba_lut
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
@@ -344,16 +345,11 @@ def scene_from_factor_task(
 ) -> NativeMapScene:
     """Create a native scene from a completed task without rerunning interpolation.
 
-    The legacy inline-grid adapter is deliberately confined here for migration support.
-    Once a task has a managed artifact reference, callers should use
-    :meth:`NativeMapScene.add_factor_grid_artifact` instead.
+    A task-side managed artifact reference is preferred automatically.  The inline-grid
+    adapter remains only for opening legacy projects before their next save migrates it.
     """
     params = dict(getattr(task, "parameters", None) or {})
-    result = FactorGridResult.from_legacy_task_parameters(
-        params,
-        factor_name=str(getattr(task, "factor_type", "") or getattr(task, "name", "")),
-        crs=crs,
-    )
+    result = factor_grid_result_for_task(task, crs=crs)
     scene = NativeMapScene()
     task_id = str(getattr(task, "id", "") or "factor_grid")
     outputs = list(getattr(task, "output_resource_ids", None) or [])
@@ -367,7 +363,11 @@ def scene_from_factor_task(
         result,
         layer_id=task_id,
         name=str(getattr(task, "name", "") or result.factor_name),
-        source_ref=str(outputs[0]) if outputs else task_id,
+        source_ref=(
+            str(getattr(task, "grid_artifact_version_id", "") or "")
+            or str(getattr(task, "grid_artifact_path", "") or "")
+            or (str(outputs[0]) if outputs else task_id)
+        ),
         parent_id=group_id,
     )
     points = []

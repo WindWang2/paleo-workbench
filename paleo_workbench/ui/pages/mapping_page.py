@@ -655,6 +655,34 @@ class MappingPage(QWidget):
             self._apply_mode_ui()
         self._emit_mapping_context()
 
+    def export_native_factor_map(self, output_path, *, register: bool = True):
+        """Export the active native factor composition through the shared OUTPUT path.
+
+        The scalar-layer ids are factor-task ids by construction, so they provide the
+        export lineage without consulting interpolation or legacy Matplotlib canvases.
+        """
+        if self._native_factor_scene is None:
+            return None
+        from paleo_workbench.resources.export_service import export_widget_snapshot
+
+        task_ids = [
+            layer.id
+            for layer in self._native_factor_scene.registry.layers()
+            if self._native_factor_scene.scalar_layer(layer.id) is not None
+        ]
+        return export_widget_snapshot(
+            self.canvas_panel.native_canvas,
+            output_path,
+            "PNG",
+            project=self._project,
+            # MappingPage is intentionally not coupled to a controller-owned
+            # project filename. ProjectManager will relativize this path on save.
+            project_path=None,
+            linked_id=task_ids[0] if task_ids else "factor_map",
+            register=register,
+            source_task_ids=task_ids,
+        )
+
     def _on_topology_locate_requested(self, feature_id: str) -> None:
         """Select the flagged feature and center the edit view on it."""
         scene = self._edit_scene()
