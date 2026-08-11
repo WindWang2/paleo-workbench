@@ -111,7 +111,8 @@ def test_single_task_still_works_without_plan():
     )
     apply_interpolation_to_task(task, method="IDW", grid_n=12)
     assert task.status == "complete"
-    assert len(task.parameters["grid_z"]) == 12
+    assert "grid_z" not in (task.parameters or {})
+    assert factor_grid_result_for_task(task).shape == (12, 12)
 
 
 def test_multi_factor_plan_matches_single_and_geoviz():

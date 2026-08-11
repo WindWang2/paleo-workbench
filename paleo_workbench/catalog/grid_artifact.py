@@ -7,35 +7,48 @@ catalog INTERMEDIATE/DERIVED version points at; the project stores only the desc
 reference.
 
 Format (versioned, backward-compatible by version bump):
-  ``{name}.factor_grid.npz`` — arrays: ``grid_z`` (float32 H×W), ``grid_x`` (float64 W),
-  ``grid_y`` (float64 H), optional ``variance_grid`` (float32 H×W), ``mask`` (bool H×W),
-  and a ``__descriptor__`` JSON string carrying every non-array field.
+
+* **V1** — ``np.savez_compressed`` with ``grid_z``, ``grid_x``, ``grid_y``,
+  optional ``variance_grid``, optional ``mask``, and ``__descriptor__``.
+* **V2** — ``np.savez`` (uncompressed; benchmarked faster for local interactive
+  save/reopen) with the same arrays **except** ``mask`` (derived as
+  ``np.isfinite(grid_z)``). Descriptor embeds statistics so loads can skip a
+  full-grid scan when trusted.
 
 Pure numpy + stdlib + the FactorGridResult contract, so it is unit-testable without
-PySide6. The catalog write entry point (``DataCatalogService.register_intermediate`` with
-``intermediate_path``) consumes the path returned by :func:`write_grid_artifact`.
+PySide6.
 """
 
 from __future__ import annotations
 
 import json
-import tempfile
+import math
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult, GridStatistics
 
 __all__ = [
     "FACTOR_GRID_ARTIFACT_VERSION",
     "GRID_ARTIFACT_SUFFIX",
     "write_grid_artifact",
     "read_grid_artifact",
+    "artifact_file_identity",
 ]
 
-FACTOR_GRID_ARTIFACT_VERSION = 1
+# Current writer version.  Readers accept V1 and V2.
+FACTOR_GRID_ARTIFACT_VERSION = 2
 GRID_ARTIFACT_SUFFIX = ".factor_grid.npz"
+
+
+def artifact_file_identity(path: Path | str) -> tuple[str, int, int]:
+    """Cheap identity for cache keys: (resolved path, mtime_ns, size)."""
+    p = Path(path).resolve()
+    st = p.stat()
+    mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+    return (str(p), int(mtime_ns), int(st.st_size))
 
 
 def write_grid_artifact(
@@ -45,9 +58,8 @@ def write_grid_artifact(
 ) -> Path:
     """Persist ``result`` as a managed ``.factor_grid.npz`` artifact in ``dest_dir``.
 
-    Returns the absolute artifact path. Atomic write (temp file + ``os.replace``). The
-    descriptor (CRS, extent, statistics, algorithm, provenance — no arrays) is embedded
-    so the artifact is fully self-describing.
+    Returns the absolute artifact path. Atomic write (temp file + ``os.replace``).
+    V2 uses uncompressed NPZ for interactive save latency (see module docstring).
     """
     if not isinstance(result, FactorGridResult):
         raise TypeError("result must be a FactorGridResult")
@@ -59,28 +71,41 @@ def write_grid_artifact(
     descriptor = result.to_descriptor()
     descriptor["artifact_version"] = FACTOR_GRID_ARTIFACT_VERSION
     if result.boundary is not None:
-        # Small domain ring; travels with the descriptor so the artifact is lossless.
         descriptor["boundary_ring"] = [[float(x), float(y)] for x, y in result.boundary]
+
+    # Prefer views of already-contiguous producer buffers; do not force a second
+    # full-grid allocation when the sealed result is already C-contiguous.
+    grid_z = result.grid_z
+    if grid_z.dtype != np.float32 or not grid_z.flags["C_CONTIGUOUS"]:
+        grid_z = np.ascontiguousarray(grid_z, dtype=np.float32)
+    grid_x = result.grid_x
+    if grid_x.dtype != np.float64 or not grid_x.flags["C_CONTIGUOUS"]:
+        grid_x = np.ascontiguousarray(grid_x, dtype=np.float64)
+    grid_y = result.grid_y
+    if grid_y.dtype != np.float64 or not grid_y.flags["C_CONTIGUOUS"]:
+        grid_y = np.ascontiguousarray(grid_y, dtype=np.float64)
+
     arrays: dict[str, np.ndarray] = {
-        "grid_z": np.ascontiguousarray(result.grid_z, dtype=np.float32),
-        "grid_x": np.ascontiguousarray(result.grid_x, dtype=np.float64),
-        "grid_y": np.ascontiguousarray(result.grid_y, dtype=np.float64),
-        "mask": result.mask,
+        "grid_z": grid_z,
+        "grid_x": grid_x,
+        "grid_y": grid_y,
+        # V2: no redundant mask member (derive from finite(grid_z)).
         "__descriptor__": np.array(
             json.dumps(descriptor, ensure_ascii=False, allow_nan=False)
         ),
     }
     if result.variance_grid is not None:
-        arrays["variance_grid"] = np.ascontiguousarray(
-            result.variance_grid, dtype=np.float32
-        )
+        var = result.variance_grid
+        if var.dtype != np.float32 or not var.flags["C_CONTIGUOUS"]:
+            var = np.ascontiguousarray(var, dtype=np.float32)
+        arrays["variance_grid"] = var
 
-    # Atomic placement so a partial write can never corrupt a project's canonical grid.
-    # Write through a file handle: np.savez* otherwise auto-appends ".npz" to the path.
     tmp = target.with_name(target.name + ".tmp")
     try:
         with open(tmp, "wb") as fh:
-            np.savez_compressed(fh, **arrays)
+            # Uncompressed: interactive save/reopen is CPU-bound on compress for
+            # smooth float32 grids; size trade-off measured in Stage-3 bench.
+            np.savez(fh, **arrays)
         tmp.replace(target)
     except Exception:
         if tmp.exists():
@@ -89,29 +114,68 @@ def write_grid_artifact(
     return target
 
 
+def _stats_from_descriptor(descriptor: dict[str, Any], grid_z: np.ndarray) -> GridStatistics | None:
+    """Reuse writer-embedded statistics when present and shape-consistent."""
+    raw = descriptor.get("statistics")
+    if not isinstance(raw, dict):
+        return None
+    total = int(grid_z.size)
+    try:
+        total_count = int(raw.get("total_count", total))
+        valid_count = int(raw["valid_count"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if total_count != total:
+        return None
+
+    def _num(key: str) -> float:
+        value = raw.get(key)
+        if value is None:
+            return math.nan
+        return float(value)
+
+    return GridStatistics(
+        min=_num("min"),
+        max=_num("max"),
+        mean=_num("mean"),
+        std=_num("std"),
+        valid_count=valid_count,
+        total_count=total_count,
+    )
+
+
 def read_grid_artifact(path: Path | str) -> FactorGridResult:
-    """Reconstruct a :class:`FactorGridResult` from a managed grid artifact."""
+    """Reconstruct a :class:`FactorGridResult` from a managed grid artifact (V1 or V2)."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"factor grid artifact not found: {p}")
     with np.load(p, allow_pickle=False) as data:
-        grid_z = np.ascontiguousarray(data["grid_z"], dtype=np.float32)
-        grid_x = np.ascontiguousarray(data["grid_x"], dtype=np.float64)
-        grid_y = np.ascontiguousarray(data["grid_y"], dtype=np.float64)
+        # Must copy out of the load context; one owned allocation per array.
+        grid_z = np.array(data["grid_z"], dtype=np.float32, copy=True, order="C")
+        grid_x = np.array(data["grid_x"], dtype=np.float64, copy=True, order="C")
+        grid_y = np.array(data["grid_y"], dtype=np.float64, copy=True, order="C")
         variance_grid = (
-            np.ascontiguousarray(data["variance_grid"], dtype=np.float32)
+            np.array(data["variance_grid"], dtype=np.float32, copy=True, order="C")
             if "variance_grid" in data.files
             else None
         )
+        # V1 may include mask; ignored (derived from grid_z).
         descriptor_raw = str(data["__descriptor__"])
     descriptor: dict[str, Any] = json.loads(descriptor_raw)
 
-    # Rebuild the optional boundary ring if it was embedded in the descriptor.
     raw_ring = descriptor.get("boundary_ring")
     boundary = (
         [(float(x), float(y)) for x, y in raw_ring] if raw_ring else None
     )
-    return FactorGridResult(
+
+    # Seal buffers before construction so _finalise can share them.
+    grid_z.setflags(write=False)
+    grid_x.setflags(write=False)
+    grid_y.setflags(write=False)
+    if variance_grid is not None:
+        variance_grid.setflags(write=False)
+
+    result = FactorGridResult(
         grid_z=grid_z,
         grid_x=grid_x,
         grid_y=grid_y,
@@ -127,3 +191,10 @@ def read_grid_artifact(path: Path | str) -> FactorGridResult:
         variance_grid=variance_grid,
         boundary=boundary,
     )
+    # Prefer writer-produced statistics for immutable artifacts (avoids O(grid) scan).
+    version = int(descriptor.get("artifact_version") or 1)
+    if version >= 2:
+        trusted = _stats_from_descriptor(descriptor, result.grid_z)
+        if trusted is not None:
+            result.statistics = trusted
+    return result

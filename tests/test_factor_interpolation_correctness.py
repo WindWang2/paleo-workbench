@@ -259,8 +259,8 @@ def test_apply_stores_live_factor_grid_and_legacy_lists():
         status="pending",
     )
     apply_interpolation_to_task(task, method="IDW", grid_n=10)
-    assert isinstance(task.parameters["grid_z"], list)
-    assert len(task.parameters["grid_z"]) == 10
+    # Stage-3: no eager nested-list grids on the task.
+    assert "grid_z" not in task.parameters
     live = factor_grid_result_for_task(task)
     assert isinstance(live, FactorGridResult)
     assert live.shape == (10, 10)

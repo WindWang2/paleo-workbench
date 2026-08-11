@@ -120,7 +120,7 @@ def test_write_is_atomic_on_existing_file(tmp_path: Path):
     write_grid_artifact(original, tmp_path, "p")
     assert path.exists()
     assert not (tmp_path / "p.factor_grid.npz.tmp").exists()
-    assert path.read_bytes() == first_bytes  # deterministic compressed payload
+    assert path.read_bytes() == first_bytes  # deterministic NPZ payload
 
 
 def test_read_missing_artifact_raises(tmp_path: Path):

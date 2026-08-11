@@ -134,7 +134,10 @@ def test_apply_interpolation_to_task_routes_kriging_label():
     apply_interpolation_to_task(task, method="克里金", grid_n=10)
     assert task.status == "complete"
     assert task.parameters["interp_backend"] == "kriging"
-    assert "grid_var" in task.parameters
+    assert "grid_var" not in task.parameters  # numerical arrays stay in FactorGrid cache
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert factor_grid_result_for_task(task).variance_grid is not None
     assert task.quality_metrics.get("variance_min") is not None
     assert task.quality_metrics.get("variance_max") is not None
 
@@ -154,8 +157,12 @@ def test_apply_interpolation_to_task_fills_grid_and_metrics():
     assert task.method == "IDW"
     assert task.source_kind == "mixed"
     assert task.generator_version == GENERATOR_VERSION
-    assert "grid_z" in task.parameters
-    assert len(task.parameters["grid_z"]) == 10
+    # Stage-3: numerical payload lives in live FactorGrid cache, not nested lists.
+    assert "grid_z" not in (task.parameters or {})
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    live = factor_grid_result_for_task(task)
+    assert live.shape == (10, 10)
     assert "range" in task.quality_metrics
     assert task.quality_metrics.get("grid") == "10×10"
 
@@ -166,10 +173,13 @@ def test_batch_prepare_creates_default_tasks_when_empty():
     prepared = batch_prepare_factor_maps(project, method="IDW", grid_n=12, seed=3)
     assert len(prepared) >= 3
     assert len(project.factor_map_tasks) == len(prepared)
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
     for task in prepared:
         assert task.status == "complete"
         assert task.target_horizon == "C6"
-        assert task.parameters.get("grid_z")
+        assert "grid_z" not in (task.parameters or {})
+        assert factor_grid_result_for_task(task).grid_z.size > 0
         assert task.quality_metrics.get("n_points", 0) >= 2
 
 
@@ -181,8 +191,11 @@ def test_batch_prepare_upgrades_mock_factor_maps():
 
     batch_prepare_factor_maps(project, method="IDW", grid_n=16)
     assert mock.method == "IDW"
-    assert "grid_z" in mock.parameters
+    assert "grid_z" not in (mock.parameters or {})
     assert mock.status == "complete"
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert factor_grid_result_for_task(mock).shape[0] == 16
     # Sample points preserved for mapping / compile_map well overlay
     assert len(mock.parameters["sample_points"]) == 8
 

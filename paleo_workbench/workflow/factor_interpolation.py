@@ -10,6 +10,13 @@ adapters (T10: ``project/models.py`` is NOT promoted).
 Stage-2 multi-factor path: when several tasks share source XY + grid config +
 plain IDW, a single :class:`~paleo_workbench.workflow.interpolation_plan.InterpolationPlan`
 is built and values are applied per factor (geometry reuse).
+
+Stage-3 artifact-first ownership:
+* ``FactorGridResult`` (live session cache) is the canonical numerical payload
+  after interpolation — **not** nested lists on ``task.parameters``.
+* Project save externalises the live grid to a managed NPZ artifact; reopen
+  uses a warm artifact-backed cache.
+* Legacy inline ``parameters[grid_*]`` remains a **read/migrate** path only.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from geoviz import (  # re-exported for tests / callers — facade only
     synthetic_sample_points,
 )
 from paleo_workbench.project.factor_grid_artifacts import (
+    GRID_ARRAY_PARAMETER_KEYS,
     clear_live_factor_grid,
     intern_grid_axes,
     store_live_factor_grid,
@@ -129,7 +137,15 @@ def _attach_result_to_task(
     breaks: list | None,
     engine_method: str,
 ) -> FactorMapTask:
-    """Write live cache + legacy params + quality metrics onto *task*."""
+    """Write live cache + small metadata onto *task* (no full-grid lists).
+
+    Stage-3 artifact-first contract:
+    * ``FactorGridResult`` in the live session cache is the canonical numerical
+      payload for unsaved tasks.
+    * ``task.parameters`` holds only algorithm/input/quality metadata.
+    * Full ``grid_x/y/z`` nested lists are *not* materialised on the hot path
+      (legacy projects remain readable via ``from_legacy_task_parameters``).
+    """
     # Stamp geometry_id for axis interning across multi-factor batches.
     if result.get("geometry_id"):
         grid_result.algorithm_parameters["geometry_id"] = result["geometry_id"]
@@ -147,45 +163,21 @@ def _attach_result_to_task(
     store_live_factor_grid(task.id, grid_result)
 
     params = dict(task.parameters or {})
+    # Drop any previous inline grid payload (re-interp or legacy residue).
+    for key in GRID_ARRAY_PARAMETER_KEYS:
+        params.pop(key, None)
+    params.pop("grid_boundary", None)
+
     params["sample_points"] = list(points)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
-
-    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
-        legacy = _legacy_params_from_grid_result(grid_result, use_nan_nodata=True)
-        params["grid_x"] = legacy["grid_x"]
-        params["grid_y"] = legacy["grid_y"]
-        params["grid_z"] = legacy["grid_z"]
-        if "grid_boundary" in legacy:
-            params["grid_boundary"] = legacy["grid_boundary"]
-        else:
-            params.pop("grid_boundary", None)
-        params.pop("grid_var", None)
-    elif isinstance(result.get("grid_z"), np.ndarray):
-        # Plan path: encode lists once from ndarray.
-        params["grid_x"] = encode_legacy_axis_list(grid_result.grid_x)
-        params["grid_y"] = encode_legacy_axis_list(grid_result.grid_y)
-        params["grid_z"] = _none_encode_grid(result["grid_z"])
-        if result.get("grid_var") is not None:
-            params["grid_var"] = _none_encode_grid(result["grid_var"])
-        else:
-            params.pop("grid_var", None)
-        params.pop("grid_boundary", None)
-    else:
-        params["grid_x"] = result["grid_x"]
-        params["grid_y"] = result["grid_y"]
-        params["grid_z"] = result["grid_z"]
-        if result.get("grid_var") is not None:
-            params["grid_var"] = result["grid_var"]
-        else:
-            params.pop("grid_var", None)
-        params.pop("grid_boundary", None)
-
     params["interp_backend"] = result["backend"]
     # Prefer the values that actually produced the surface (plan-backed path).
     params["power"] = float(result["power"]) if result.get("power") is not None else power
     if result.get("grid_n") is not None:
         params["grid_n"] = int(result["grid_n"])
     params["n_break_lines"] = result.get("n_break_lines", 0)
+    if result.get("n_direction_lines") is not None:
+        params["n_direction_lines"] = result.get("n_direction_lines")
     if result.get("grid_var") is not None:
         params["variance_min"] = result.get("variance_min")
         params["variance_max"] = result.get("variance_max")
@@ -197,6 +189,11 @@ def _attach_result_to_task(
         params["break_polylines"] = [
             [[float(x), float(y)] for x, y in poly] for poly in breaks
         ]
+    # Small domain ring only (not a full grid).
+    if grid_result.boundary is not None:
+        params["grid_boundary"] = [
+            [float(x), float(y)] for x, y in grid_result.boundary
+        ]
 
     task.parameters = params
     task.method = method if method != "mock" else "IDW"
@@ -205,6 +202,7 @@ def _attach_result_to_task(
         task.source_kind = "mixed"
     task.generator_version = GENERATOR_VERSION
     task.grid_metadata = grid_result.to_descriptor()
+    # Re-interp invalidates any previous artifact; next project save re-externalises.
     task.grid_artifact_path = None
     task.grid_artifact_version_id = None
     task.quality_metrics = {

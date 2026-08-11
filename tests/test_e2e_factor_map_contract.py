@@ -109,8 +109,10 @@ def test_e2e_factor_map_welltable_to_version_set():
     assert task.status == "complete"
     assert task.parameters.get("interp_backend") == "directional"
     assert task.parameters.get("azimuth_deg") == 0.0
-    assert task.parameters.get("grid_z")
-    assert len(task.parameters["grid_z"]) == 10
+    assert "grid_z" not in (task.parameters or {})
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert factor_grid_result_for_task(task).shape == (10, 10)
 
     # 4) ContourDraft from grids → map line_features
     drafts = compile_contour_drafts_for_project(project, n_levels=4, apply_to_map=True)
@@ -165,7 +167,13 @@ def test_e2e_factor_map_welltable_to_version_set():
     assert restored.contour_drafts
     assert restored.version_sets
     assert restored.version_sets[0].status == "final"
-    assert restored.factor_map_tasks[0].parameters.get("grid_z")
+    # After model_dump round-trip without save, live cache still holds the grid
+    # for the original task id; dump itself no longer embeds full grid arrays.
+    assert "grid_z" not in (restored.factor_map_tasks[0].parameters or {})
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    restored.factor_map_tasks[0].id = task.id
+    assert factor_grid_result_for_task(restored.factor_map_tasks[0]).grid_z.size > 0
 
 
 def test_e2e_idw_with_break_lines_and_batch_prepare():
@@ -188,8 +196,10 @@ def test_e2e_idw_with_break_lines_and_batch_prepare():
         project, method="IDW", grid_n=8, seed=1, factor_types=["地层厚度"]
     )
     assert prepared
-    assert prepared[0].parameters.get("n_break_lines", 0) >= 1 or prepared[0].parameters.get(
-        "grid_z"
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert prepared[0].parameters.get("n_break_lines", 0) >= 1 or (
+        factor_grid_result_for_task(prepared[0]).grid_z.size > 0
     )
 
     drafts = compile_contour_drafts_for_project(project, n_levels=3)

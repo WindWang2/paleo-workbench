@@ -254,7 +254,10 @@ def test_apply_interpolation_runs_constrained_idw_and_sets_provenance():
     assert task.input_snapshot_hash
     p = task.parameters
     assert p["interp_backend"] == CONSTRAINED_IDW_ENGINE_LABEL
-    assert np.isfinite(np.array(p["grid_z"])).sum() > 0
+    assert "grid_z" not in p  # Stage-3: live FactorGrid cache, not nested lists
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert np.isfinite(factor_grid_result_for_task(task).grid_z).sum() > 0
     qm = task.quality_metrics
     assert qm["backend"] == CONSTRAINED_IDW_ENGINE_LABEL
     assert "r_squared" in qm and 0.0 <= qm["r_squared"] <= 1.0
@@ -289,9 +292,11 @@ def test_constrained_idw_and_plain_idw_produce_different_grids():
     apply_interpolation_to_task(t_i, method="IDW", grid_n=30)
     assert t_c.parameters["interp_backend"] == CONSTRAINED_IDW_ENGINE_LABEL
     assert t_i.parameters["interp_backend"] == "idw"
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
     # NaN-aware: the methods must differ on at least one finite cell.
-    zc = np.array(t_c.parameters["grid_z"])
-    zi = np.array(t_i.parameters["grid_z"])
+    zc = factor_grid_result_for_task(t_c).grid_z
+    zi = factor_grid_result_for_task(t_i).grid_z
     both_finite = np.isfinite(zc) & np.isfinite(zi)
     assert both_finite.any()
     assert not np.allclose(zc[both_finite], zi[both_finite])
@@ -317,13 +322,18 @@ def test_factor_task_with_constrained_idw_serializes_round_trip():
         status="pending",
     )
     apply_interpolation_to_task(task, method="约束IDW", grid_n=26)
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    live_before = factor_grid_result_for_task(task).grid_z.copy()
     # Project save → reopen path uses pydantic model_dump / model_validate.
+    # Metadata round-trips; numerical payload is live-cache / artifact, not dump.
     dump = task.model_dump()
     restored = FactorMapTask.model_validate(dump)
     assert restored.method == "约束IDW"
     assert restored.parameters["interp_backend"] == CONSTRAINED_IDW_ENGINE_LABEL
-    assert np.array_equal(
-        np.array(restored.parameters["grid_z"]),
-        np.array(task.parameters["grid_z"]),
-        equal_nan=True,
+    assert "grid_z" not in restored.parameters
+    # Same task id still hits live cache in-process.
+    restored.id = task.id
+    np.testing.assert_array_equal(
+        factor_grid_result_for_task(restored).grid_z, live_before
     )

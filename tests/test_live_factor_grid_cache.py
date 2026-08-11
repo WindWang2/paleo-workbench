@@ -152,7 +152,8 @@ def test_clear_and_apply_roundtrip():
     apply_interpolation_to_task(task, method="IDW", grid_n=10)
     live = factor_grid_result_for_task(task)
     assert live.shape == (10, 10)
+    assert "grid_z" not in (task.parameters or {})
     clear_live_factor_grid(task.id)
-    # still have inline lists
-    again = factor_grid_result_for_task(task)
-    assert again.shape == (10, 10)
+    # Without live cache or artifact / inline payload, legacy path fails.
+    with pytest.raises((ValueError, KeyError, TypeError)):
+        factor_grid_result_for_task(task)

@@ -1,10 +1,17 @@
 """Project-lifecycle bridge for persisted single-factor grid artifacts.
 
-Interpolation deliberately leaves a completed grid on its ``FactorMapTask`` until the
-project has a concrete save location.  At that point this module atomically moves the
-large numerical payload into the project's managed artifact layout and leaves compact
-metadata on the task.  Keeping this transition outside the renderer and interpolation
-modules makes save/reopen, catalog registration, and legacy migration deterministic.
+Architecture (Stage-3 artifact-first):
+
+* **Unsaved:** ``FactorGridResult`` in the live byte-budget cache is the
+  canonical numerical payload; ``FactorMapTask.parameters`` holds only small
+  metadata (no full ``grid_x/y/z`` lists).
+* **Saved:** atomic managed ``.factor_grid.npz`` is the on-disk source of truth;
+  the task stores the artifact path + descriptor metadata.
+* **Reopen:** artifact → one load → seal into the same bounded cache → shared
+  read-only consumers.
+
+Legacy projects that still embed inline ``parameters[grid_*]`` remain readable
+and migrate to artifacts on the next project save (READ OLD / WRITE NEW).
 """
 
 from __future__ import annotations
@@ -17,7 +24,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from paleo_workbench.catalog.grid_artifact import read_grid_artifact, write_grid_artifact
+from paleo_workbench.catalog.grid_artifact import (
+    artifact_file_identity,
+    read_grid_artifact,
+    write_grid_artifact,
+)
 from paleo_workbench.project.paths import ensure_artifact_layout
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 
@@ -30,6 +41,7 @@ __all__ = [
     "factor_grid_result_for_task",
     "live_factor_grid_cache_stats",
     "persist_factor_grid_artifacts",
+    "reset_artifact_load_counter",
     "store_live_factor_grid",
 ]
 
@@ -39,15 +51,11 @@ __all__ = [
 GRID_ARRAY_PARAMETER_KEYS = frozenset({"grid_x", "grid_y", "grid_z", "grid_var"})
 
 # ---------------------------------------------------------------------------
-# Live FactorGrid cache — entry-count LRU *and* byte budget.
+# Unified session cache — LIVE (post-interp) and PERSISTED (artifact-backed)
 #
-# Env overrides (documented defaults):
+# Env overrides:
 #   PALEO_LIVE_FACTOR_GRIDS_MAX         max entries (default 64)
 #   PALEO_LIVE_FACTOR_GRIDS_MAX_BYTES   max payload bytes (default 256 MiB)
-#
-# Arrays are stored writeable=False.  Get returns a shell sharing those
-# immutable buffers (no full defensive copy).  Callers that need a mutable
-# buffer use FactorGridResult.copied().
 # ---------------------------------------------------------------------------
 
 
@@ -82,19 +90,29 @@ def _env_bytes(name: str, default: int) -> int:
 
 
 _LIVE_FACTOR_GRIDS_MAX = _env_int("PALEO_LIVE_FACTOR_GRIDS_MAX", 64)
-# 256 MiB default: ~16× 1024² float32 grids, or many smaller ones.
 _LIVE_FACTOR_GRIDS_MAX_BYTES = _env_bytes(
     "PALEO_LIVE_FACTOR_GRIDS_MAX_BYTES", 256 * 1024 * 1024
 )
 
 _LIVE_FACTOR_GRIDS: OrderedDict[str, FactorGridResult] = OrderedDict()
 _LIVE_FACTOR_GRID_BYTES: dict[str, int] = {}
+# task_id → artifact identity when the entry was loaded from disk (None for live-only)
+_LIVE_ARTIFACT_IDENTITY: dict[str, tuple[str, int, int] | None] = {}
 _LIVE_FACTOR_GRIDS_TOTAL_BYTES = 0
 _LIVE_FACTOR_GRIDS_LOCK = threading.RLock()
 
-# Geometry pool: shared frozen grid_x/grid_y for identical axes across factors.
 _GEOMETRY_POOL: OrderedDict[str, tuple[np.ndarray, np.ndarray]] = OrderedDict()
 _GEOMETRY_POOL_MAX = 32
+
+# Test instrumentation: physical artifact loads (not cache hits).
+_ARTIFACT_PHYSICAL_LOADS = 0
+
+
+def reset_artifact_load_counter() -> None:
+    """Reset the physical artifact-load counter (tests / benchmarks)."""
+    global _ARTIFACT_PHYSICAL_LOADS
+    with _LIVE_FACTOR_GRIDS_LOCK:
+        _ARTIFACT_PHYSICAL_LOADS = 0
 
 
 def _array_nbytes(arr: np.ndarray | None) -> int:
@@ -114,7 +132,25 @@ def factor_grid_payload_bytes(result: FactorGridResult) -> int:
 
 
 def _freeze_array(arr: np.ndarray) -> np.ndarray:
-    """Own a C-contiguous copy and mark read-only."""
+    """Seal a C-contiguous buffer as read-only with at most one ownership copy.
+
+    Already-frozen C-contiguous arrays are returned as-is (zero-copy).
+    Owned writable C-contiguous arrays of a numeric dtype are sealed in place.
+    """
+    if not isinstance(arr, np.ndarray):
+        arr = np.asarray(arr)
+    if (
+        arr.flags["C_CONTIGUOUS"]
+        and not arr.flags["WRITEABLE"]
+    ):
+        return arr
+    if arr.flags["C_CONTIGUOUS"] and arr.flags["OWNDATA"]:
+        # Transfer ownership: mark read-only without allocating a second buffer.
+        try:
+            arr.setflags(write=False)
+            return arr
+        except ValueError:
+            pass
     owned = np.array(arr, copy=True, order="C")
     owned.setflags(write=False)
     return owned
@@ -144,19 +180,24 @@ def intern_grid_axes(
 
 
 def _seal_result_arrays(result: FactorGridResult) -> FactorGridResult:
-    """Ensure the cached instance holds frozen contiguous arrays (possibly shared axes)."""
+    """Ensure the cached instance holds frozen contiguous arrays (minimal copies)."""
     geometry_id = None
     if isinstance(result.algorithm_parameters, dict):
         geometry_id = result.algorithm_parameters.get("geometry_id")
     gx, gy = intern_grid_axes(result.grid_x, result.grid_y, geometry_id=geometry_id)
-    gz = _freeze_array(np.ascontiguousarray(result.grid_z, dtype=np.float32))
+
+    gz_src = result.grid_z
+    if gz_src.dtype != np.float32 or not gz_src.flags["C_CONTIGUOUS"]:
+        gz_src = np.ascontiguousarray(gz_src, dtype=np.float32)
+    gz = _freeze_array(gz_src)
+
     var = None
     if result.variance_grid is not None:
-        var = _freeze_array(
-            np.ascontiguousarray(result.variance_grid, dtype=np.float32)
-        )
-    # Rebuild through constructor so statistics stay consistent; arrays already
-    # float32/float64 so _finalise owns via copy then we re-freeze below.
+        var_src = result.variance_grid
+        if var_src.dtype != np.float32 or not var_src.flags["C_CONTIGUOUS"]:
+            var_src = np.ascontiguousarray(var_src, dtype=np.float32)
+        var = _freeze_array(var_src)
+
     sealed = FactorGridResult(
         grid_z=gz,
         grid_x=gx,
@@ -173,12 +214,22 @@ def _seal_result_arrays(result: FactorGridResult) -> FactorGridResult:
         variance_grid=var,
         boundary=list(result.boundary) if result.boundary is not None else None,
     )
-    # _finalise may have re-copied; freeze again.
-    sealed.grid_z = _freeze_array(sealed.grid_z)
-    sealed.grid_x = gx  # keep shared geometry
+    # Preserve trusted statistics if the constructor re-scanned a sealed buffer
+    # that already had matching stats (artifact load path).
+    if (
+        hasattr(result, "statistics")
+        and result.statistics.total_count == sealed.statistics.total_count
+        and result.statistics.valid_count == sealed.statistics.valid_count
+    ):
+        sealed.statistics = result.statistics
+    # Re-point to shared frozen buffers in case _finalise re-wrapped.
+    sealed.grid_z = gz if sealed.grid_z is gz else _freeze_array(sealed.grid_z)
+    sealed.grid_x = gx
     sealed.grid_y = gy
-    if sealed.variance_grid is not None:
-        sealed.variance_grid = _freeze_array(sealed.variance_grid)
+    if sealed.variance_grid is not None and var is not None:
+        sealed.variance_grid = var if sealed.variance_grid is var else _freeze_array(
+            sealed.variance_grid
+        )
     return sealed
 
 
@@ -190,16 +241,7 @@ def _evict_until_fit(additional_bytes: int = 0) -> None:
         or _LIVE_FACTOR_GRIDS_TOTAL_BYTES + additional_bytes
         > _LIVE_FACTOR_GRIDS_MAX_BYTES
     ):
-        # If only one entry and it alone exceeds budget, still keep it (must store).
         if (
-            len(_LIVE_FACTOR_GRIDS) == 1
-            and additional_bytes > 0
-            and _LIVE_FACTOR_GRIDS_TOTAL_BYTES + additional_bytes
-            > _LIVE_FACTOR_GRIDS_MAX_BYTES
-        ):
-            # Drop the existing one to make room for the new insert.
-            pass
-        elif (
             len(_LIVE_FACTOR_GRIDS) <= _LIVE_FACTOR_GRIDS_MAX
             and _LIVE_FACTOR_GRIDS_TOTAL_BYTES + additional_bytes
             <= _LIVE_FACTOR_GRIDS_MAX_BYTES
@@ -207,12 +249,18 @@ def _evict_until_fit(additional_bytes: int = 0) -> None:
             break
         old_key, _old = _LIVE_FACTOR_GRIDS.popitem(last=False)
         old_bytes = _LIVE_FACTOR_GRID_BYTES.pop(old_key, 0)
+        _LIVE_ARTIFACT_IDENTITY.pop(old_key, None)
         _LIVE_FACTOR_GRIDS_TOTAL_BYTES = max(
             0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - old_bytes
         )
 
 
-def store_live_factor_grid(task_id: str, result: FactorGridResult) -> None:
+def store_live_factor_grid(
+    task_id: str,
+    result: FactorGridResult,
+    *,
+    artifact_identity: tuple[str, int, int] | None = None,
+) -> None:
     """Register the canonical ndarray grid for an in-memory task (byte-aware LRU)."""
     global _LIVE_FACTOR_GRIDS_TOTAL_BYTES
     if not task_id:
@@ -229,22 +277,24 @@ def store_live_factor_grid(task_id: str, result: FactorGridResult) -> None:
                 0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - prev
             )
             del _LIVE_FACTOR_GRIDS[key]
+            _LIVE_ARTIFACT_IDENTITY.pop(key, None)
         _evict_until_fit(nbytes)
         _LIVE_FACTOR_GRIDS[key] = sealed
         _LIVE_FACTOR_GRIDS.move_to_end(key)
         _LIVE_FACTOR_GRID_BYTES[key] = nbytes
+        _LIVE_ARTIFACT_IDENTITY[key] = artifact_identity
         _LIVE_FACTOR_GRIDS_TOTAL_BYTES += nbytes
-        # Hard entry cap after insert
         while len(_LIVE_FACTOR_GRIDS) > _LIVE_FACTOR_GRIDS_MAX:
             old_key, _ = _LIVE_FACTOR_GRIDS.popitem(last=False)
             old_bytes = _LIVE_FACTOR_GRID_BYTES.pop(old_key, 0)
+            _LIVE_ARTIFACT_IDENTITY.pop(old_key, None)
             _LIVE_FACTOR_GRIDS_TOTAL_BYTES = max(
                 0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - old_bytes
             )
 
 
 def clear_live_factor_grid(task_id: str | None) -> None:
-    """Drop a live grid (e.g. after externalisation or re-interpolation)."""
+    """Drop a live/persisted-cache entry (re-interpolation or after externalisation)."""
     global _LIVE_FACTOR_GRIDS_TOTAL_BYTES
     if not task_id:
         return
@@ -253,6 +303,7 @@ def clear_live_factor_grid(task_id: str | None) -> None:
         if key in _LIVE_FACTOR_GRIDS:
             del _LIVE_FACTOR_GRIDS[key]
             old_bytes = _LIVE_FACTOR_GRID_BYTES.pop(key, 0)
+            _LIVE_ARTIFACT_IDENTITY.pop(key, None)
             _LIVE_FACTOR_GRIDS_TOTAL_BYTES = max(
                 0, _LIVE_FACTOR_GRIDS_TOTAL_BYTES - old_bytes
             )
@@ -267,7 +318,42 @@ def live_factor_grid_cache_stats() -> dict[str, int | float]:
             "max_entries": int(_LIVE_FACTOR_GRIDS_MAX),
             "max_bytes": int(_LIVE_FACTOR_GRIDS_MAX_BYTES),
             "geometry_pool_entries": len(_GEOMETRY_POOL),
+            "artifact_physical_loads": int(_ARTIFACT_PHYSICAL_LOADS),
         }
+
+
+def _shell_from_live(
+    live: FactorGridResult, *, crs: str | None, copy: bool
+) -> FactorGridResult:
+    shell = FactorGridResult(
+        grid_z=live.grid_z,
+        grid_x=live.grid_x,
+        grid_y=live.grid_y,
+        factor_name=live.factor_name,
+        algorithm_id=live.algorithm_id,
+        algorithm_parameters=dict(live.algorithm_parameters),
+        crs=crs if crs is not None else live.crs,
+        unit=live.unit,
+        generator_version=live.generator_version,
+        source_refs=list(live.source_refs),
+        run_ref=live.run_ref,
+        created_at=live.created_at,
+        variance_grid=live.variance_grid,
+        boundary=list(live.boundary) if live.boundary is not None else None,
+    )
+    shell.grid_z = live.grid_z if shell.grid_z is live.grid_z else _freeze_array(shell.grid_z)
+    shell.grid_x = live.grid_x
+    shell.grid_y = live.grid_y
+    if live.variance_grid is not None:
+        shell.variance_grid = live.variance_grid
+    if (
+        hasattr(live, "statistics")
+        and live.statistics.total_count == shell.statistics.total_count
+    ):
+        shell.statistics = live.statistics
+    if copy:
+        return shell.copied()
+    return shell
 
 
 def factor_grid_result_for_task(
@@ -279,48 +365,54 @@ def factor_grid_result_for_task(
     """Return a task's grid without triggering interpolation.
 
     Resolution order:
-    1. Managed NPZ artifact (authoritative after project save)
+    1. Managed NPZ artifact (authoritative after project save), via warm cache
     2. In-session live FactorGridResult (post-interpolation, pre-save)
     3. Legacy inline ``parameters`` lists / arrays
 
-    By default live-cache hits return a lightweight shell that *shares* the
-    frozen ndarray buffers (no O(grid) defensive copy).  Pass ``copy=True``
-    or call ``.copied()`` when a mutable private buffer is required.
+    Repeated reads of the same immutable artifact hit the session cache (no
+    repeated decompress).  Pass ``copy=True`` or call ``.copied()`` for a
+    mutable private buffer.
     """
+    global _ARTIFACT_PHYSICAL_LOADS
     artifact_path = getattr(task, "grid_artifact_path", None)
-    if artifact_path:
-        return read_grid_artifact(artifact_path)
     key = str(getattr(task, "id", "") or "")
+
+    if artifact_path:
+        try:
+            identity = artifact_file_identity(artifact_path)
+        except FileNotFoundError:
+            raise
+        except OSError as err:
+            raise FileNotFoundError(
+                f"factor grid artifact not readable: {artifact_path}"
+            ) from err
+        with _LIVE_FACTOR_GRIDS_LOCK:
+            live = _LIVE_FACTOR_GRIDS.get(key)
+            if live is not None and _LIVE_ARTIFACT_IDENTITY.get(key) == identity:
+                _LIVE_FACTOR_GRIDS.move_to_end(key)
+                cached = live
+            else:
+                cached = None
+        if cached is not None:
+            return _shell_from_live(cached, crs=crs, copy=copy)
+        # Physical load (once per identity).
+        loaded = read_grid_artifact(artifact_path)
+        with _LIVE_FACTOR_GRIDS_LOCK:
+            _ARTIFACT_PHYSICAL_LOADS += 1
+        store_live_factor_grid(key, loaded, artifact_identity=identity)
+        with _LIVE_FACTOR_GRIDS_LOCK:
+            live = _LIVE_FACTOR_GRIDS.get(key)
+        if live is None:
+            return loaded if not copy else loaded.copied()
+        return _shell_from_live(live, crs=crs, copy=copy)
+
     with _LIVE_FACTOR_GRIDS_LOCK:
         live = _LIVE_FACTOR_GRIDS.get(key)
         if live is not None:
             _LIVE_FACTOR_GRIDS.move_to_end(key)
     if live is not None:
-        shell = FactorGridResult(
-            grid_z=live.grid_z,  # frozen shared
-            grid_x=live.grid_x,
-            grid_y=live.grid_y,
-            factor_name=live.factor_name,
-            algorithm_id=live.algorithm_id,
-            algorithm_parameters=dict(live.algorithm_parameters),
-            crs=crs if crs is not None else live.crs,
-            unit=live.unit,
-            generator_version=live.generator_version,
-            source_refs=list(live.source_refs),
-            run_ref=live.run_ref,
-            created_at=live.created_at,
-            variance_grid=live.variance_grid,
-            boundary=list(live.boundary) if live.boundary is not None else None,
-        )
-        # Re-freeze after _finalise (which may re-copy writable buffers).
-        shell.grid_z = live.grid_z if shell.grid_z is live.grid_z else _freeze_array(shell.grid_z)
-        shell.grid_x = live.grid_x
-        shell.grid_y = live.grid_y
-        if live.variance_grid is not None:
-            shell.variance_grid = live.variance_grid
-        if copy:
-            return shell.copied()
-        return shell
+        return _shell_from_live(live, crs=crs, copy=copy)
+
     return FactorGridResult.from_legacy_task_parameters(
         dict(task.parameters or {}),
         factor_name=task.factor_type or task.name,
@@ -333,13 +425,11 @@ def persist_factor_grid_artifacts(
     project: "ProjectDocument",
     project_path: Path | str,
 ) -> list["FactorMapTask"]:
-    """Externalize completed inline grids and return the tasks that changed.
+    """Externalize completed grids and return the tasks that changed.
 
     A task is rewritten when it has an inline ``grid_z`` payload *or* a live
-    in-session grid.  Thus a save after reopen does not rewrite immutable
-    catalog-backed data, while a new interpolation overwrites the deterministic
-    sidecar and deliberately clears the old catalog-version reference so the
-    controller registers a fresh intermediate.
+    in-session grid.  After write, the live entry is re-keyed as artifact-backed
+    (same sealed buffers; identity updated) so reopen-style reads stay warm.
     """
     path = Path(project_path)
     destination = ensure_artifact_layout(path) / "factor_maps"
@@ -358,11 +448,17 @@ def persist_factor_grid_artifacts(
         artifact = write_grid_artifact(result, destination, task.id)
         task.grid_artifact_path = artifact.resolve().as_posix()
         task.grid_artifact_version_id = None
+        # Strip any legacy inline arrays (READ OLD / WRITE NEW).
         task.parameters = {
             key: value
             for key, value in parameters.items()
             if key not in GRID_ARRAY_PARAMETER_KEYS
         }
-        clear_live_factor_grid(task_id)
+        # Keep sealed arrays warm under the new artifact identity.
+        try:
+            identity = artifact_file_identity(artifact)
+        except OSError:
+            identity = None
+        store_live_factor_grid(task_id, result, artifact_identity=identity)
         changed.append(task)
     return changed
