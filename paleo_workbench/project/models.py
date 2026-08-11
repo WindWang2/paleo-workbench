@@ -157,6 +157,14 @@ class FactorMapTask(BaseModel):
     input_snapshot_hash: str = ""
     generator_version: str | None = None
     seed: int | None = None
+    # Canonical payload for completed interpolation grids.  Stored project-relative
+    # on disk and resolved to an absolute path at runtime by ProjectManager.
+    # Inline grid arrays in ``parameters`` are legacy-only and migrate on save.
+    grid_artifact_path: str | None = None
+    grid_artifact_version_id: str | None = None
+    # Compact `FactorGridResult.to_descriptor()` metadata. It travels with the
+    # task while the numerical arrays live in the artifact (or legacy parameters).
+    grid_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PredictionTask(BaseModel):

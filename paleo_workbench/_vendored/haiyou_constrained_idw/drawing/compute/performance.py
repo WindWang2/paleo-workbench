@@ -454,26 +454,25 @@ def set_hardware_accel(enabled: bool) -> None:
 
 
 def _load_from_qsettings(settings: ComputeSettings) -> None:
-    try:
-        from PyQt6.QtCore import QSettings
+    """Apply an optional host environment override without importing any Qt binding.
 
-        qs = QSettings("PaleoDrawing", "Compute")
-        cpu = qs.value("cpu_percent", 60)
-        settings.set_cpu_percent(int(cpu))
-        # GPU 模式已下线
-        settings.hardware_accel = False
-        settings.gpu_percent = 0
-    except Exception:
-        pass
+    This selectively-vendored numerical engine is also used by the PySide host.  Its
+    former QSettings read pulled ``PyQt6`` into a scientific interpolation call, which
+    violates the host/engine isolation boundary.  The host can set this explicit
+    process-level knob when it needs a non-default worker budget; GUI preference
+    storage belongs in the host layer, not this pure compute package.
+    """
+    raw = os.environ.get("PALEO_HAIYOU_CPU_PERCENT")
+    if raw is not None:
+        try:
+            settings.set_cpu_percent(int(raw))
+        except (TypeError, ValueError):
+            pass
+    settings.hardware_accel = False
+    settings.gpu_percent = 0
 
 
 def _save_to_qsettings(settings: ComputeSettings) -> None:
-    try:
-        from PyQt6.QtCore import QSettings
-
-        qs = QSettings("PaleoDrawing", "Compute")
-        qs.setValue("cpu_percent", int(settings.cpu_percent))
-        qs.setValue("gpu_percent", 0)
-        qs.setValue("hardware_accel", False)
-    except Exception:
-        pass
+    # This Qt-free vendored engine intentionally owns no GUI preference storage.
+    # Callers that need persistence must save their own host-level setting.
+    del settings

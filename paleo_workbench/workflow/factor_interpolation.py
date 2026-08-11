@@ -29,6 +29,7 @@ from paleo_workbench.workflow.constrained_idw_adapter import (
     CONSTRAINED_IDW_ENGINE_LABEL,
     run_constrained_idw,
 )
+from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from paleo_workbench.workflow.constraints import (
     break_polylines_for_idw,
     constraint_layers_for_project,
@@ -136,11 +137,40 @@ def apply_interpolation_to_task(
             cancellation_token=cancellation_token,
         )
 
+    crs = project.coordinate.project_crs if project is not None else None
+    if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
+        grid_result = FactorGridResult.from_constrained_idw_dict(
+            result,
+            factor_name=task.factor_type or task.name,
+            crs=crs,
+            generator_version=GENERATOR_VERSION,
+            source_refs=task.input_resource_ids,
+        )
+    else:
+        grid_result = FactorGridResult.from_engine_dict(
+            result,
+            factor_name=task.factor_type or task.name,
+            crs=crs,
+            generator_version=GENERATOR_VERSION,
+            source_refs=task.input_resource_ids,
+        )
     params["sample_points"] = list(points)
     params["grid"] = f"{result['grid_n']}×{result['grid_n']}"
+    # Keep the established inline representation until ProjectManager persists the
+    # artifact. In particular, constrained-IDW historically exposes float NaNs to
+    # callers, while the engine uses JSON-safe None; FactorGridResult normalizes both
+    # when it becomes the persisted/native payload.
     params["grid_x"] = result["grid_x"]
     params["grid_y"] = result["grid_y"]
     params["grid_z"] = result["grid_z"]
+    if result.get("grid_var") is not None:
+        params["grid_var"] = result["grid_var"]
+    else:
+        params.pop("grid_var", None)
+    if result.get("boundary"):
+        params["grid_boundary"] = result["boundary"]
+    else:
+        params.pop("grid_boundary", None)
     params["interp_backend"] = result["backend"]
     params["power"] = power
     params["n_break_lines"] = result.get("n_break_lines", 0)
@@ -165,6 +195,11 @@ def apply_interpolation_to_task(
     if task.source_kind == "mock":
         task.source_kind = "mixed"
     task.generator_version = GENERATOR_VERSION
+    task.grid_metadata = grid_result.to_descriptor()
+    # A scientific input change invalidates only this task's former grid artifact.
+    # The next project save will atomically externalize and catalog the new result.
+    task.grid_artifact_path = None
+    task.grid_artifact_version_id = None
     task.quality_metrics = {
         "range": f"{result['min']:.2f} – {result['max']:.2f}",
         "r_squared": result["r_squared"],
@@ -185,16 +220,10 @@ def apply_interpolation_to_task(
         "grid_n": grid_n,
     }
     task.input_snapshot_hash = _snapshot_hash(snapshot)
-    # Register a factor-map DataRun (data-provenance layer). The interpolation
-    # grid lives in task.parameters (domain state), so by default no file
-    # INTERMEDIATE version is registered — the run records inputs + generator +
-    # snapshot hash so lineage is queryable. Best-effort: never blocks compute.
-    try:
-        from paleo_workbench.catalog.lifecycle import register_factor_map_run
-
-        register_factor_map_run(task)
-    except Exception:
-        pass
+    # Project save externalizes this transient inline grid into the managed NPZ
+    # artifact and registers the single catalog INTERMEDIATE version.  Do not create
+    # an in-memory-only run here: it would duplicate the persisted run and make the
+    # catalog incorrectly suggest that two scientific interpolations occurred.
     return task
 
 

@@ -51,6 +51,9 @@ class MappingPage(QWidget):
         self.setObjectName("MappingPage")
         self._active_document = None
         self._project = None
+        self._project_crs: str | None = None
+        self._factor_tasks_by_overlay_id: dict[str, object] = {}
+        self._native_factor_scene = None
         self._preview_mode = False
         self._canvas_priority = False
         self._reference_service = ReferenceLayerService()
@@ -72,8 +75,11 @@ class MappingPage(QWidget):
         mid = QHBoxLayout()
         mid.setSpacing(tokens.SPACE_2)
 
+        self.layer_tree_stack = QStackedWidget()
         self.layer_tree = MapLayerTree()
-        mid.addWidget(self.layer_tree, 0)
+        self.layer_tree_stack.addWidget(self.layer_tree)
+        self._native_layer_tree = None
+        mid.addWidget(self.layer_tree_stack, 0)
 
         self.center_stack = QStackedWidget()
         self.center_stack.setObjectName("MappingCenterStack")
@@ -185,7 +191,13 @@ class MappingPage(QWidget):
         if self._canvas_priority == enabled:
             return
         self._canvas_priority = enabled
+        # Preserve the established explicit-widget visibility contract for the
+        # legacy tree (tests and accessibility consumers query it directly), while
+        # applying the same state to the optional native replacement.
         self.layer_tree.setVisible(not enabled)
+        if self._native_layer_tree is not None:
+            self._native_layer_tree.setVisible(not enabled)
+        self.layer_tree_stack.setVisible(not enabled)
         self.reference_panel.setVisible(not enabled)
         if not self._preview_mode:
             self.bottom_workbench.setVisible(not enabled)
@@ -220,6 +232,15 @@ class MappingPage(QWidget):
         project_crs: str | None = None,
     ) -> None:
         documents = list(map_documents or [])
+        tasks = list(factor_tasks or [])
+        self._project_crs = project_crs
+        self._factor_tasks_by_overlay_id = {}
+        for task in tasks:
+            task_id = str(getattr(task, "id", "") or "")
+            if task_id:
+                self._factor_tasks_by_overlay_id[task_id] = task
+            for output_id in list(getattr(task, "output_resource_ids", None) or []):
+                self._factor_tasks_by_overlay_id[str(output_id)] = task
         prefer_id = getattr(self._active_document, "id", None)
         document = active_map_document(documents, prefer_id=prefer_id)
         previous = self._active_document
@@ -244,7 +265,7 @@ class MappingPage(QWidget):
             self._sync_reference_snap_points(scene, document)
         self.attribute_table.set_feature(None)
         self._publish_reference_layers(document)
-        self.bottom_workbench.factor_shelf.update_state(list(factor_tasks or []))
+        self.bottom_workbench.factor_shelf.update_state(tasks)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
         if self._preview_mode:
@@ -443,6 +464,10 @@ class MappingPage(QWidget):
             self.bottom_workbench.setVisible(not self._preview_mode)
 
     def _refresh_preview(self) -> None:
+        if self._native_factor_scene is not None:
+            self.canvas_panel.load_native_scene(self._native_factor_scene)
+            self.chrome_panel.update_state(self._active_document)
+            return
         doc = self._active_document
         scene = self._edit_scene()
         period = str(field_value(doc, "linked_target_horizon", "") or "") if doc else ""
@@ -461,6 +486,24 @@ class MappingPage(QWidget):
             features, wells, period = [], [], ""
         self.canvas_panel.load_preview(features, wells=wells, period_name=period)
         self.chrome_panel.update_state(doc)
+
+    def _install_native_layer_tree(self, scene) -> None:
+        """Swap the left dock to the C++ registry-backed tree for native overlays."""
+        if self._native_layer_tree is not None:
+            self.layer_tree_stack.removeWidget(self._native_layer_tree)
+            self._native_layer_tree.deleteLater()
+        from paleo_workbench.ui.native_layer_tree import NativeLayerTree
+
+        tree = NativeLayerTree(scene.registry, self.layer_tree_stack)
+        tree.zoom_to_layer_requested.connect(self.canvas_panel.native_canvas.zoom_to_extent)
+        tree.model.layer_changed.connect(self.canvas_panel.native_canvas.update)
+        self._native_layer_tree = tree
+        self.layer_tree_stack.addWidget(tree)
+        self.layer_tree_stack.setCurrentWidget(tree)
+        tree.expand_all()
+
+    def _show_legacy_layer_tree(self) -> None:
+        self.layer_tree_stack.setCurrentWidget(self.layer_tree)
 
     def _on_tool_changed(self, tool_id: str) -> None:
         scene = self._edit_scene()
@@ -509,6 +552,8 @@ class MappingPage(QWidget):
                     self.layer_tree.set_active_document(self._active_document)
                     return
         self._active_document = document
+        self._native_factor_scene = None
+        self._show_legacy_layer_tree()
         if scene is not None:
             scene.load_document(document)
             self._restore_view_state_from_document(document)
@@ -583,16 +628,66 @@ class MappingPage(QWidget):
     def _on_overlay_requested(self, resource_id: str) -> None:
         """Shared overlay path for the reference dock and the factor shelf.
 
-        Resolves the requested id against the active document's reference
-        layers and ensures the matching layer is visible. Ids without a
-        matching reference layer are ignored (no overlay renderer yet).
+        Resolves reference layers first. A completed factor-task id then follows the
+        native FactorGridResult → ScalarGridLayer path without rerunning interpolation.
         """
         layer = self._reference_layer(str(resource_id))
-        if layer is None:
+        if layer is not None:
+            layer.visible = True
+            self._publish_reference_layers(self._active_document)
+            self._emit_mapping_context()
             return
-        layer.visible = True
-        self._publish_reference_layers(self._active_document)
+        task = self._factor_tasks_by_overlay_id.get(str(resource_id))
+        if task is None:
+            return
+        try:
+            from paleo_workbench.viz.native_factor_map import scene_from_factor_task
+
+            drafts = [
+                draft
+                for draft in list(getattr(self._project, "contour_drafts", None) or [])
+                if getattr(draft, "linked_factor_task_id", None) == getattr(task, "id", None)
+            ]
+            self._native_factor_scene = scene_from_factor_task(
+                task, crs=self._project_crs, contour_drafts=drafts
+            )
+        except (KeyError, TypeError, ValueError):
+            return
+        self.canvas_panel.load_native_scene(self._native_factor_scene)
+        self._install_native_layer_tree(self._native_factor_scene)
+        if not self._preview_mode:
+            self._preview_mode = True
+            self.toolbar.set_preview_mode(True)
+            self._apply_mode_ui()
         self._emit_mapping_context()
+
+    def export_native_factor_map(self, output_path, *, register: bool = True):
+        """Export the active native factor composition through the shared OUTPUT path.
+
+        The scalar-layer ids are factor-task ids by construction, so they provide the
+        export lineage without consulting interpolation or legacy Matplotlib canvases.
+        """
+        if self._native_factor_scene is None:
+            return None
+        from paleo_workbench.resources.export_service import export_widget_snapshot
+
+        task_ids = [
+            layer.id
+            for layer in self._native_factor_scene.registry.layers()
+            if self._native_factor_scene.scalar_layer(layer.id) is not None
+        ]
+        return export_widget_snapshot(
+            self.canvas_panel.native_canvas,
+            output_path,
+            "PNG",
+            project=self._project,
+            # MappingPage is intentionally not coupled to a controller-owned
+            # project filename. ProjectManager will relativize this path on save.
+            project_path=None,
+            linked_id=task_ids[0] if task_ids else "factor_map",
+            register=register,
+            source_task_ids=task_ids,
+        )
 
     def _on_topology_locate_requested(self, feature_id: str) -> None:
         """Select the flagged feature and center the edit view on it."""

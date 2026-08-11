@@ -129,6 +129,20 @@ class OwnedWorkerJob(QObject):
         self._release_identity(thread, worker, delete_thread=joined)
         return joined
 
+    def cancel(self) -> None:
+        """Request cooperative cancellation without tearing down the worker thread.
+
+        Coordinators with a latest-only queue use this when a newer request makes an
+        active result stale.  The worker still owns its thread until it emits a terminal
+        signal, so this never force-kills native code or violates QObject affinity.
+        """
+        cancel = self._cancel
+        if cancel is not None:
+            try:
+                cancel()
+            except Exception:
+                pass
+
     def _disconnect_results(self) -> None:
         connections = self._result_connections
         self._result_connections = []
