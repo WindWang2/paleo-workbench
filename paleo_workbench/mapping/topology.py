@@ -96,15 +96,22 @@ class TopologyService:
             return TopologyEditResult()
         changed: list[tuple[str, str, tuple[int, ...]]] = []
         for layer in layers:
-            session = layer.edit_session or layer.start_editing()
             # Snapshot paths before mutation; it makes duplicate closing nodes and
             # adjacent polygons deterministic even as individual commands change data.
+            session = layer.edit_session
+            source = session.features() if session is not None else layer.features()
             candidates = [
                 (feature.feature_id, path)
-                for feature in session.features()
+                for feature in source
                 for point, path in _vertices(feature.geometry["coordinates"])
                 if math.dist(point, origin) <= self.tolerance
             ]
+            # Do not create dirty edit sessions for unrelated layers merely because
+            # topological editing is enabled. A working buffer appears only for a
+            # layer that actually owns a logically shared node.
+            if not candidates:
+                continue
+            session = session or layer.start_editing()
             for feature_id, path in candidates:
                 if skip == (layer.id, feature_id, path):
                     continue

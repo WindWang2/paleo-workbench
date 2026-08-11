@@ -43,6 +43,25 @@ def _rgba_lut(values: np.ndarray) -> np.ndarray:
     raise ValueError("color_ramp must be a non-empty (N, 3) or (N, 4) uint8 array")
 
 
+def _named_color_ramp(name: str) -> np.ndarray:
+    """Return an original small LUT for persisted scalar presentation names.
+
+    The LUT is presentation data only.  Naming the ramp, rather than serializing a
+    256×4 array into project state, keeps save/reopen compact and deterministic.
+    """
+    normalized = str(name or "default").strip().lower()
+    if normalized == "grayscale":
+        values = np.arange(256, dtype=np.uint8)
+        return np.column_stack((values, values, values, np.full(256, 255, dtype=np.uint8)))
+    if normalized == "warm_cool":
+        stops = np.asarray(((49, 54, 149), (69, 117, 180), (255, 255, 191), (215, 48, 39)), dtype=np.float32)
+        positions = np.linspace(0.0, 1.0, len(stops))
+        samples = np.linspace(0.0, 1.0, 256)
+        rgb = np.column_stack([np.interp(samples, positions, stops[:, channel]) for channel in range(3)])
+        return np.column_stack((rgb.astype(np.uint8), np.full(256, 255, dtype=np.uint8)))
+    return _rgba_lut(default_rgba_lut())
+
+
 @dataclass(frozen=True, slots=True)
 class ContourGeometry:
     """Display-only contour geometry in the grid's declared coordinate space."""
@@ -77,6 +96,7 @@ class MapScene:
         self._points: dict[str, PointGeometry] = {}
         self._vectors: dict[str, tuple[dict, ...]] = {}
         self._vector_styles: dict[str, dict] = {}
+        self._scalar_styles: dict[str, dict] = {}
         self._change_listeners: list[Callable[[], None]] = []
 
     def add_change_listener(self, listener: Callable[[], None]) -> None:
@@ -136,6 +156,12 @@ class MapScene:
         map_layer.set_provenance_ref(result.run_ref or "")
         map_layer.set_metadata("algorithm_id", result.algorithm_id)
         self._scalars[layer_id] = native_layer
+        self._scalar_styles[layer_id] = {
+            "color_ramp": "default",
+            "color_range": [float(lo), float(hi)],
+            "gamma": float(gamma),
+            "nodata": "transparent",
+        }
         self._emit_changed()
         return map_layer
 
@@ -246,13 +272,19 @@ class MapScene:
             raise KeyError(f"no scalar grid payload for layer {layer_id!r}")
         return (scalar.data_revision, scalar.style_revision)
 
+    def scalar_style(self, layer_id: str) -> dict:
+        """Return serializable scalar presentation state, never grid samples."""
+        return dict(self._scalar_styles.get(layer_id, {}))
+
     def set_scalar_style(
         self,
         layer_id: str,
         *,
         color_ramp: np.ndarray | None = None,
+        color_ramp_name: str | None = None,
         color_range: tuple[float, float] | None = None,
         gamma: float | None = None,
+        nodata: str | None = None,
     ) -> bool:
         """Apply native display style without changing any scientific input."""
         scalar = self._scalars.get(layer_id)
@@ -260,14 +292,26 @@ class MapScene:
         if scalar is None or map_layer is None:
             return False
         before = scalar.style_revision
+        next_style = self.scalar_style(layer_id)
         if color_ramp is not None:
             scalar.set_color_ramp(_rgba_lut(color_ramp))
+        if color_ramp_name is not None:
+            normalized_ramp = str(color_ramp_name).strip().lower() or "default"
+            scalar.set_color_ramp(_named_color_ramp(normalized_ramp))
+            next_style["color_ramp"] = normalized_ramp
         if color_range is not None:
             scalar.set_color_range(float(color_range[0]), float(color_range[1]))
+            next_style["color_range"] = [float(color_range[0]), float(color_range[1])]
         if gamma is not None:
             scalar.set_gamma(float(gamma))
-        if scalar.style_revision == before:
+            next_style["gamma"] = float(gamma)
+        if nodata is not None:
+            # Native scalar-grid masks always render no-data transparent.  Keep
+            # this explicit in the persisted style rather than altering samples.
+            next_style["nodata"] = str(nodata)
+        if scalar.style_revision == before and next_style == self._scalar_styles.get(layer_id, {}):
             return False
+        self._scalar_styles[layer_id] = next_style
         # Record a single metadata-layer style change for composition/cache clients.
         map_layer.bump_style_revision()
         self._emit_changed()
@@ -400,7 +444,9 @@ class MapScene:
             features: tuple[dict, ...] = ()
             style: dict = {}
             layer_type = "scalar_grid" if layer_id in self._scalars else "vector"
-            if layer_id in self._vectors:
+            if layer_id in self._scalars:
+                style = self.scalar_style(layer_id)
+            elif layer_id in self._vectors:
                 features = self._vectors[layer_id]
                 style = self._vector_styles.get(layer_id, {})
             elif layer_id in self._contours:
@@ -462,6 +508,7 @@ class MapScene:
             self._points.pop(layer_id, None)
             self._vectors.pop(layer_id, None)
             self._vector_styles.pop(layer_id, None)
+            self._scalar_styles.pop(layer_id, None)
             self._emit_changed()
         return removed
 

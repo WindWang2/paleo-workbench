@@ -87,3 +87,34 @@ def test_unified_fallback_canvas_composites_native_scalar_cache_without_recomput
     canvas.zoom_by(0.8)
     canvas.pan_by_pixels(6.0, 4.0)
     assert scalar.rasterize_count == 1
+
+
+def test_unified_canvas_keeps_bounded_back_forward_extent_history(qtbot) -> None:
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.set_layer_snapshot(_snapshot())
+    canvas.set_extent((0.0, 0.0, 10.0, 10.0))
+    initial = canvas.view_extent
+    canvas.zoom_by(0.5)
+    canvas.pan_by_pixels(10.0, 0.0)
+    panned = canvas.view_extent
+
+    assert canvas.can_previous_extent
+    assert canvas.previous_extent()
+    assert canvas.view_extent == initial
+    assert canvas.next_extent()
+    assert canvas.view_extent == panned
+
+
+def test_unified_canvas_temporarily_transforms_the_previous_frame_for_navigation(qtbot) -> None:
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(240, 180)
+    canvas.show()
+    canvas.set_layer_snapshot(_snapshot())
+    canvas.set_extent((0.0, 0.0, 10.0, 10.0))
+    qtbot.waitUntil(lambda: canvas.last_frame is not None, timeout=2_000)
+
+    canvas.pan_by_pixels(12.0, 0.0)
+    assert canvas.navigation_preview_active
+    qtbot.waitUntil(lambda: not canvas.navigation_preview_active, timeout=2_000)

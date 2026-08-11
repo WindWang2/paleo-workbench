@@ -6,6 +6,7 @@ from paleo_workbench.mapping.map_tools import (
     AddPointTool,
     AddPolygonTool,
     MapToolController,
+    MeasureDistanceTool,
     SelectTool,
 )
 from paleo_workbench.mapping.vector_layer import VectorFeature, VectorLayer
@@ -68,3 +69,15 @@ def test_escape_cancels_an_unfinished_capture_without_rolling_back_the_session()
     assert controller.key_press("escape") is True
     point.mouse_press((3.0, 4.0))
     assert session.feature("p2").geometry["coordinates"] == (3.0, 4.0)
+
+
+def test_measure_distance_tool_reports_map_space_distance_without_editing() -> None:
+    received: list[float] = []
+    tool = MeasureDistanceTool(measurement_ready=received.append)
+
+    tool.mouse_press((0.0, 0.0))
+    tool.mouse_move((3.0, 4.0))
+    tool.mouse_press((3.0, 4.0))
+
+    assert received == [5.0]
+    assert tool.points == [(3.0, 4.0), (3.0, 4.0)]

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF, QWheelEvent
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF, QTransform, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
 from paleo_workbench.mapping.map_render_backend import (
@@ -41,8 +41,11 @@ class UnifiedMapCanvas(QWidget):
         self._backend = backend or create_map_render_backend()
         self._backend.initialize()
         self._view_extent = (0.0, 0.0, 1.0, 1.0)
+        self._extent_history: list[tuple[float, float, float, float]] = [self._view_extent]
+        self._extent_history_index = 0
         self._last_frame: RenderFrame | None = None
         self._image = QImage()
+        self._navigation_transform = QTransform()
         self._drag_pos: QPointF | None = None
         self._space_pan = False
         self._tool_controller = None
@@ -68,6 +71,11 @@ class UnifiedMapCanvas(QWidget):
     @property
     def view_extent(self) -> tuple[float, float, float, float]:
         return self._view_extent
+
+    @property
+    def navigation_preview_active(self) -> bool:
+        """Whether the previous frame is being transformed pending a fresh render."""
+        return not self._navigation_transform.isIdentity()
 
     def set_layer_snapshot(self, snapshot: MapRenderSnapshot) -> None:
         self._backend.set_layer_snapshot(snapshot)
@@ -105,24 +113,47 @@ class UnifiedMapCanvas(QWidget):
             (ymax - float(point[1])) * self.height() / (ymax - ymin),
         )
 
-    def set_extent(self, extent: tuple[float, float, float, float]) -> None:
+    def set_extent(
+        self, extent: tuple[float, float, float, float], *, record_history: bool = True,
+        coalesce_history: bool = False,
+    ) -> None:
         self._backend.set_extent(extent)
         self._view_extent = tuple(float(value) for value in extent)
+        if record_history:
+            if self._extent_history_index < len(self._extent_history) - 1:
+                self._extent_history = self._extent_history[: self._extent_history_index + 1]
+            if coalesce_history and self._extent_history:
+                self._extent_history[-1] = self._view_extent
+            elif self._extent_history[-1] != self._view_extent:
+                self._extent_history.append(self._view_extent)
+                if len(self._extent_history) > 100:
+                    self._extent_history.pop(0)
+                self._extent_history_index = len(self._extent_history) - 1
         self.extent_changed.emit(self._view_extent)
         self._request_render()
 
-    def zoom_by(self, factor: float, center: tuple[float, float] | None = None) -> None:
+    def zoom_by(
+        self, factor: float, center: tuple[float, float] | None = None, *,
+        coalesce_history: bool = False,
+    ) -> None:
         if factor <= 0.0:
             raise ValueError("zoom factor must be positive")
         xmin, ymin, xmax, ymax = self._view_extent
         cx, cy = center or ((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
+        if not self._image.isNull():
+            screen = self.map_to_screen((cx, cy))
+            self._navigation_transform.translate(screen.x(), screen.y())
+            self._navigation_transform.scale(1.0 / factor, 1.0 / factor)
+            self._navigation_transform.translate(-screen.x(), -screen.y())
+            self.update()
         self.set_extent(
             (
                 cx + (xmin - cx) * factor,
                 cy + (ymin - cy) * factor,
                 cx + (xmax - cx) * factor,
                 cy + (ymax - cy) * factor,
-            )
+            ),
+            coalesce_history=coalesce_history,
         )
 
     def pan_by_pixels(self, dx: float, dy: float) -> None:
@@ -130,7 +161,35 @@ class UnifiedMapCanvas(QWidget):
         width, height = max(1, self.width()), max(1, self.height())
         world_dx = -float(dx) * (xmax - xmin) / width
         world_dy = float(dy) * (ymax - ymin) / height
-        self.set_extent((xmin + world_dx, ymin + world_dy, xmax + world_dx, ymax + world_dy))
+        if not self._image.isNull():
+            self._navigation_transform.translate(float(dx), float(dy))
+            self.update()
+        self.set_extent(
+            (xmin + world_dx, ymin + world_dy, xmax + world_dx, ymax + world_dy),
+            coalesce_history=True,
+        )
+
+    @property
+    def can_previous_extent(self) -> bool:
+        return self._extent_history_index > 0
+
+    @property
+    def can_next_extent(self) -> bool:
+        return self._extent_history_index + 1 < len(self._extent_history)
+
+    def previous_extent(self) -> bool:
+        if not self.can_previous_extent:
+            return False
+        self._extent_history_index -= 1
+        self.set_extent(self._extent_history[self._extent_history_index], record_history=False)
+        return True
+
+    def next_extent(self) -> bool:
+        if not self.can_next_extent:
+            return False
+        self._extent_history_index += 1
+        self.set_extent(self._extent_history[self._extent_history_index], record_history=False)
+        return True
 
     def _request_render(self) -> None:
         self._backend.set_output_size(max(1, self.width()), max(1, self.height()))
@@ -151,6 +210,7 @@ class UnifiedMapCanvas(QWidget):
             frame.stride,
             QImage.Format.Format_RGBA8888,
         ).copy()
+        self._navigation_transform = QTransform()
         self.frame_ready.emit(frame)
         self.update()
         self._poll.stop()
@@ -167,7 +227,10 @@ class UnifiedMapCanvas(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(tokens.BG_SEARCH))
         if not self._image.isNull():
+            painter.save()
+            painter.setTransform(self._navigation_transform)
             painter.drawImage(self.rect(), self._image)
+            painter.restore()
         self._paint_overlay(painter)
         painter.end()
 
@@ -340,7 +403,7 @@ class UnifiedMapCanvas(QWidget):
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         delta = event.angleDelta().y()
         if delta:
-            self.zoom_by(0.8 if delta > 0 else 1.25)
+            self.zoom_by(0.8 if delta > 0 else 1.25, coalesce_history=True)
             event.accept()
             return
         event.ignore()

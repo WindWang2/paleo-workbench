@@ -105,6 +105,17 @@ def test_vector_layer_selection_is_feature_id_state_not_ui_item_state() -> None:
     assert layer.invert_selection() == set()
 
 
+def test_working_feature_selection_includes_new_buffered_features() -> None:
+    layer = _layer()
+    session = layer.start_editing()
+    session.add_feature(VectorFeature("f2", {"type": "Point", "coordinates": [2, 2]}))
+
+    assert layer.set_selection(["f2"]) == {"f2"}
+    assert layer.select_all() == {"f1", "f2"}
+    session.rollback_changes()
+    assert layer.selection == {"f1"}
+
+
 def test_vector_session_ring_split_and_merge_commands_are_reversible() -> None:
     layer = _layer()
     session: VectorEditSession = layer.start_editing()

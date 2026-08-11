@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Callable, Iterable
 
 from paleo_workbench.mapping.geometry_schema import new_feature_id
@@ -13,6 +14,7 @@ __all__ = [
     "AddPolygonTool",
     "MapTool",
     "MapToolController",
+    "MeasureDistanceTool",
     "MoveFeatureTool",
     "PanTool",
     "RectangleSelectTool",
@@ -97,6 +99,48 @@ class ZoomTool(MapTool):
             return False
         self._zoom(self._factor, point)
         return True
+
+
+class MeasureDistanceTool(MapTool):
+    tool_id = "measure_distance"
+
+    def __init__(self, *, measurement_ready: Callable[[float], None] | None = None) -> None:
+        super().__init__()
+        self._measurement_ready = measurement_ready
+        self.start: Point | None = None
+        self.current: Point | None = None
+
+    @property
+    def points(self) -> list[Point]:
+        return [point for point in (self.start, self.current) if point is not None]
+
+    def mouse_press(self, point: Point, *, button: str = "left", modifiers: Iterable[str] = ()) -> bool:
+        if button == "right":
+            return self.cancel()
+        if button != "left":
+            return False
+        if self.start is None:
+            self.start = point
+            self.current = point
+            return True
+        distance = math.dist(self.start, point)
+        if self._measurement_ready is not None:
+            self._measurement_ready(distance)
+        self.start = point
+        self.current = point
+        return True
+
+    def mouse_move(self, point: Point, *, modifiers: Iterable[str] = ()) -> bool:
+        if self.start is None:
+            return False
+        self.current = point
+        return True
+
+    def cancel(self) -> bool:
+        had_measurement = self.start is not None
+        self.start = None
+        self.current = None
+        return had_measurement
 
 
 class SelectTool(MapTool):

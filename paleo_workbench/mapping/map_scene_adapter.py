@@ -36,6 +36,7 @@ class LegacyDocumentSceneAdapter:
         project_crs: str | None,
         visibility: Mapping[str, bool] | None = None,
         records: Iterable[Mapping[str, object]] | None = None,
+        excluded_layer_ids: Iterable[str] = (),
     ):
         """Synchronize revisions into the scene and return its render snapshot."""
         if document is None:
@@ -53,10 +54,12 @@ class LegacyDocumentSceneAdapter:
             visibility=visibility,
             records=records,
         )
-        wanted_ids = {layer.id for layer in source.layers}
+        excluded = {str(layer_id) for layer_id in excluded_layer_ids}
+        source_layers = tuple(layer for layer in source.layers if layer.id not in excluded)
+        wanted_ids = {layer.id for layer in source_layers}
         for layer_id in self._legacy_layer_ids - wanted_ids:
             self.scene.remove_layer(layer_id)
-        for layer in source.layers:
+        for layer in source_layers:
             existing = self.scene.registry.get(layer.id)
             if existing is None:
                 existing = self.scene.add_vector_layer(

@@ -255,17 +255,25 @@ class VectorLayer:
         except KeyError as exc:
             raise KeyError(f"unknown feature {feature_id!r}") from exc
 
+    def _selectable_feature_ids(self) -> set[str]:
+        session = self.edit_session
+        return {
+            feature.feature_id
+            for feature in (session.features() if session is not None else self.features())
+        }
+
     @property
     def selection(self) -> set[str]:
         return set(self._selection)
 
     def set_selection(self, feature_ids: Iterable[str]) -> set[str]:
-        self._selection = {str(feature_id) for feature_id in feature_ids if str(feature_id) in self._features}
+        selectable = self._selectable_feature_ids()
+        self._selection = {str(feature_id) for feature_id in feature_ids if str(feature_id) in selectable}
         return self.selection
 
     def toggle_selection(self, feature_id: str) -> set[str]:
         feature_id = str(feature_id)
-        if feature_id not in self._features:
+        if feature_id not in self._selectable_feature_ids():
             return self.selection
         if feature_id in self._selection:
             self._selection.remove(feature_id)
@@ -274,10 +282,12 @@ class VectorLayer:
         return self.selection
 
     def select_all(self) -> set[str]:
-        return self.set_selection(self._features)
+        return self.set_selection(self._selectable_feature_ids())
 
     def invert_selection(self) -> set[str]:
-        return self.set_selection(feature_id for feature_id in self._features if feature_id not in self._selection)
+        return self.set_selection(
+            feature_id for feature_id in self._selectable_feature_ids() if feature_id not in self._selection
+        )
 
     def start_editing(self) -> "VectorEditSession":
         if self.edit_session is None:
@@ -293,6 +303,7 @@ class VectorLayer:
     def _discard_session(self, session: "VectorEditSession") -> None:
         if self.edit_session is session:
             self.edit_session = None
+            self._selection.intersection_update(self._features)
 
 
 class VectorEditSession:

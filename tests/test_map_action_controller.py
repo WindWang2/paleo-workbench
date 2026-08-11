@@ -16,6 +16,7 @@ def test_action_controller_disables_editing_without_a_vector_layer(qtbot) -> Non
     assert controller.actions["toggle_editing"].isEnabled() is False
     assert controller.actions["add_polygon"].isEnabled() is False
     assert controller.actions["undo"].isEnabled() is False
+    assert controller.actions["select_all"].isEnabled() is False
 
 
 def test_action_controller_synchronizes_exclusive_tools_and_context_state(qtbot) -> None:
@@ -44,6 +45,7 @@ def test_action_controller_synchronizes_exclusive_tools_and_context_state(qtbot)
     assert controller.actions["merge"].isEnabled()
     assert controller.actions["undo"].shortcut() == QKeySequence("Ctrl+Z")
     assert controller.actions["cancel"].shortcut() == QKeySequence("Esc")
+    assert controller.actions["previous_extent"].isEnabled() is False
 
 
 def test_action_controller_creates_real_grouped_qtoolbars(qtbot) -> None:
@@ -53,3 +55,11 @@ def test_action_controller_creates_real_grouped_qtoolbars(qtbot) -> None:
 
     assert toolbar.actions()[0] is controller.actions["pan"]
     assert toolbar.actions()[-1] is controller.actions["full_extent"]
+
+
+def test_action_controller_tracks_bounded_extent_history_state() -> None:
+    controller = MapActionController()
+    controller.update_state(MapActionState(can_previous_extent=True, can_next_extent=False))
+
+    assert controller.actions["previous_extent"].isEnabled()
+    assert not controller.actions["next_extent"].isEnabled()

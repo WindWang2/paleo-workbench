@@ -20,6 +20,8 @@ class MapActionState:
     compatible_polygon_count: int = 0
     can_undo: bool = False
     can_redo: bool = False
+    can_previous_extent: bool = False
+    can_next_extent: bool = False
 
 
 class MapActionController(QObject):
@@ -30,13 +32,13 @@ class MapActionController(QObject):
 
     _TOOL_IDS = (
         "pan", "zoom_in", "zoom_out", "identify", "select", "select_rectangle",
-        "add_point", "add_line", "add_polygon", "move_feature", "vertex",
+        "measure_distance", "add_point", "add_line", "add_polygon", "move_feature", "vertex",
     )
 
     _LABELS = {
         "pan": "Pan", "zoom_in": "Zoom In", "zoom_out": "Zoom Out",
-        "full_extent": "Full Extent", "identify": "Identify", "select": "Select",
-        "select_rectangle": "Rectangle Select", "clear_selection": "Clear Selection",
+        "full_extent": "Full Extent", "previous_extent": "Previous Extent", "next_extent": "Next Extent", "refresh": "Refresh", "identify": "Identify", "select": "Select",
+        "select_rectangle": "Rectangle Select", "measure_distance": "Measure Distance", "clear_selection": "Clear Selection", "select_all": "Select All", "invert_selection": "Invert Selection",
         "toggle_editing": "Toggle Editing", "save_edits": "Save Edits", "rollback": "Rollback",
         "add_point": "Add Point", "add_line": "Add Line", "add_polygon": "Add Polygon",
         "move_feature": "Move Feature", "vertex": "Vertex Tool", "delete_selected": "Delete Selected",
@@ -70,7 +72,8 @@ class MapActionController(QObject):
             self._tool_group.addAction(action)
             action.triggered.connect(lambda checked=False, name=action_id: checked and self.tool_requested.emit(name))
         for action_id, shortcut in (
-            ("full_extent", ""), ("clear_selection", ""), ("toggle_editing", ""),
+            ("full_extent", ""), ("previous_extent", ""), ("next_extent", ""), ("refresh", ""),
+            ("clear_selection", ""), ("select_all", ""), ("invert_selection", ""), ("toggle_editing", ""),
             ("save_edits", "Ctrl+S"), ("rollback", ""), ("delete_selected", "Delete"),
             ("undo", "Ctrl+Z"), ("redo", "Ctrl+Shift+Z"), ("split", ""), ("merge", ""),
             ("snapping", ""), ("topology", ""), ("cancel", "Esc"),
@@ -83,7 +86,7 @@ class MapActionController(QObject):
         vector = state.has_active_vector_layer
         editable = vector and state.vector_layer_writable
         editing = editable and state.editing
-        for action_id in ("identify", "select", "select_rectangle", "clear_selection"):
+        for action_id in ("identify", "select", "select_rectangle", "clear_selection", "select_all", "invert_selection"):
             self.actions[action_id].setEnabled(vector)
         self.actions["toggle_editing"].setEnabled(editable)
         if self.actions["toggle_editing"].isChecked() != editing:
@@ -97,6 +100,8 @@ class MapActionController(QObject):
         self.actions["delete_selected"].setEnabled(editing and state.selected_count > 0)
         self.actions["split"].setEnabled(editing and state.selected_count > 0)
         self.actions["merge"].setEnabled(editing and state.compatible_polygon_count >= 2)
+        self.actions["previous_extent"].setEnabled(state.can_previous_extent)
+        self.actions["next_extent"].setEnabled(state.can_next_extent)
         self.actions["cancel"].setEnabled(True)
 
     def toolbar(self, title: str, action_ids: tuple[str, ...], parent: QWidget | None = None) -> QToolBar:

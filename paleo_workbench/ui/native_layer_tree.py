@@ -279,9 +279,11 @@ class NativeLayerModel(QAbstractItemModel):
     ):
         self.beginResetModel()
         try:
-            return self._registry.add_layer(layer_id, name, layer_type, parent_id)
+            layer = self._registry.add_layer(layer_id, name, layer_type, parent_id)
         finally:
             self.endResetModel()
+        self.layer_changed.emit(layer.id)
+        return layer
 
     def remove_layer(self, layer_id: str) -> bool:
         self.beginResetModel()
@@ -292,6 +294,8 @@ class NativeLayerModel(QAbstractItemModel):
         if removed and self._active_layer_id == layer_id:
             self._active_layer_id = None
             self.active_layer_changed.emit(None)
+        if removed:
+            self.layer_changed.emit(layer_id)
         return removed
 
     def move_layer(self, layer_id: str, new_index: int) -> bool:

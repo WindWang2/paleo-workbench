@@ -40,3 +40,31 @@ def test_snapping_service_reuses_index_and_refreshes_after_edit_revision() -> No
 
     assert snapping.snap((30.1, 0.1), tolerance=0.5, layers=[layer]) == (30.0, 0.0)
     assert snapping.index_for(layer) is first_index
+
+
+def test_snap_modes_cover_endpoint_intersection_grid_reference_and_layer_configuration() -> None:
+    layer = VectorLayer(
+        id="lines",
+        name="Lines",
+        features=[
+            VectorFeature("horizontal", {"type": "LineString", "coordinates": [[0, 5], [10, 5]]}),
+            VectorFeature("vertical", {"type": "LineString", "coordinates": [[5, 0], [5, 10]]}),
+        ],
+    )
+    snapping = SnappingService()
+    snapping.enabled = True
+    snapping.modes = {"endpoint"}
+    assert snapping.snap((0.1, 5.1), tolerance=0.5, layers=[layer]) == (0.0, 5.0)
+
+    snapping.modes = {"intersection"}
+    assert snapping.snap((5.1, 5.1), tolerance=0.5, layers=[layer]) == (5.0, 5.0)
+
+    snapping.modes = {"grid", "reference"}
+    snapping.set_grid((2.0, 2.0))
+    snapping.set_reference_points([(8.1, 8.1)])
+    assert snapping.snap((4.2, 6.1), tolerance=0.5, layers=[layer]) == (4.0, 6.0)
+    assert snapping.snap((8.2, 8.1), tolerance=0.5, layers=[layer]) == (8.1, 8.1)
+
+    snapping.modes = {"vertex"}
+    snapping.layer_enabled[layer.id] = False
+    assert snapping.snap((0.1, 5.1), tolerance=0.5, layers=[layer]) == (0.1, 5.1)

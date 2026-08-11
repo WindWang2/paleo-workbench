@@ -133,6 +133,7 @@ def test_mapping_page_composes_factor_grid_with_document_layers_in_unified_scene
     assert page.unified_scene.registry.index_of(task.id) == 0
     assert page.unified_scene.registry.get("map-1:facies") is not None
     assert page.preview_canvas_stack.currentWidget() is page.unified_canvas
+    assert page.is_preview_mode() is False
 
 
 def test_unified_canvas_actions_drive_host_edit_session_and_undo_redo(qtbot):
@@ -170,6 +171,8 @@ def test_unified_canvas_actions_drive_host_edit_session_and_undo_redo(qtbot):
     assert session.feature("f1").geometry["coordinates"][0][0][0] == pytest.approx(0.0)
     page.action_controller.actions["redo"].trigger()
     assert session.feature("f1").geometry["coordinates"][0][0][0] == pytest.approx(2.0)
+    assert page.save_draft()
+    assert document.facies_polygons[0]["coordinates"][0][0] == pytest.approx(2.0)
 
 
 def test_unified_canvas_polygon_capture_and_escape_keep_the_edit_buffer(qtbot):
@@ -193,6 +196,107 @@ def test_unified_canvas_polygon_capture_and_escape_keep_the_edit_buffer(qtbot):
     assert len(session.features()) == 1
     qtbot.keyClick(canvas, Qt.Key.Key_Escape)
     assert len(session.features()) == 1
+
+
+def test_unified_layer_properties_change_only_style_and_status_tracks_editing(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(
+        id="map-style",
+        name="Map",
+        linked_target_horizon="H1",
+        facies_polygons=[{"id": "f1", "name": "delta", "coordinates": [[0, 0], [4, 0], [0, 4]]}],
+    )
+    page.update_state([document], project_crs="EPSG:3857")
+    layer_id = "map-style:facies"
+    layer = page.unified_scene.registry.get(layer_id)
+    data_revision = layer.data_revision
+
+    page._apply_layer_properties(layer_id, {
+        "name": "Styled Facies", "crs": "EPSG:3857", "opacity": 0.6,
+        "style": {"fill": "#e03131", "stroke": "#ffffff", "stroke_width": 2.0, "labels": {"field": "name", "size": 9}},
+    })
+
+    assert layer.data_revision == data_revision
+    assert page.unified_scene.vector_style(layer_id)["fill"] == "#e03131"
+    assert page.is_dirty()
+    assert page.save_draft()
+    assert document.layer_state["vector_layers"][0]["style"]["fill"] == "#e03131"
+    page.action_controller.actions["toggle_editing"].trigger()
+    assert page.status_bar.edit.text() == "Editing"
+    assert "EPSG:3857" in page.status_bar.crs.text()
+
+
+def test_unified_map_and_attribute_feature_selector_share_selection_ids(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(
+        id="map-attribute-selection",
+        name="Map",
+        linked_target_horizon="H1",
+        facies_polygons=[
+            {"id": "f1", "name": "delta", "coordinates": [[0, 0], [4, 0], [0, 4]]},
+            {"id": "f2", "name": "slope", "coordinates": [[5, 0], [9, 0], [5, 4]]},
+        ],
+    )
+    page.update_state([document])
+    authoring = page._authoring_document
+    assert authoring is not None
+
+    authoring.active_layer.set_selection(("f1",))
+    page._on_unified_tool_operation()
+    selector = page.attribute_table.feature_combo
+    assert selector.currentData() == "f1"
+
+    selector.setCurrentIndex(selector.findData("f2"))
+    assert authoring.active_layer.selection == {"f2"}
+
+    page.action_controller.actions["select_all"].trigger()
+    assert authoring.active_layer.selection == {"f1", "f2"}
+    page.action_controller.actions["invert_selection"].trigger()
+    assert authoring.active_layer.selection == set()
+
+
+def test_native_layer_remove_persists_a_composition_exclusion_without_mutating_geometry(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(
+        id="map-remove-layer",
+        name="Map",
+        linked_target_horizon="H1",
+        facies_polygons=[{"id": "f1", "name": "delta", "coordinates": [[0, 0], [4, 0], [0, 4]]}],
+    )
+    page.update_state([document])
+    tree = page._native_layer_tree
+    assert tree is not None
+    tree.tree.setCurrentIndex(tree.model._index_for_id("map-remove-layer:facies"))
+    tree.remove_action.trigger()
+
+    assert page.unified_scene.registry.get("map-remove-layer:facies") is None
+    assert document.facies_polygons[0]["id"] == "f1"
+    assert page.is_dirty()
+    assert page.save_draft()
+    assert document.layer_state["removed_layer_ids"] == ["map-remove-layer:facies"]
+
+    page.update_state([document])
+    assert page.unified_scene.registry.get("map-remove-layer:facies") is None
+
+
+def test_map_chrome_controls_update_decorations_without_a_data_render_rebuild(qtbot):
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-chrome", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+    before = page.unified_canvas.last_frame
+
+    page.chrome_panel.title_edit.setText("Final Map")
+    page.chrome_panel.title_edit.editingFinished.emit()
+
+    assert document.map_chrome["title"] == "Final Map"
+    assert page.is_dirty()
+    # Map decorations are an overlay: changing them cannot call interpolation or
+    # force a new layer snapshot. The existing frame object remains valid.
+    assert page.unified_canvas.last_frame is before
 
 
 def test_mapping_page_context_snapshot(qtbot):

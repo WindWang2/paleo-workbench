@@ -30,6 +30,7 @@ def test_topological_editing_updates_only_shared_vertices_in_map_layers() -> Non
 
     assert right.edit_session.feature("b").geometry["coordinates"][0][0] == (1.5, 0.0)
     assert other.feature("c").geometry["coordinates"] == (9.0, 9.0)
+    assert other.edit_session is None
     assert {layer_id for layer_id, _feature_id, _path in result.changed} == {"right"}
 
 
