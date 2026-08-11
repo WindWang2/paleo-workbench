@@ -96,6 +96,11 @@ jobs:
           python -m pip install -e geo-viz-engine/native/map_edit_core
           python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
 
+      - name: Build grid_render_core (required)
+        run: |
+          python -m pip install -e native/grid_render_core
+          python -c "import grid_render_core; assert hasattr(grid_render_core, 'render_grid_rgba'), 'grid_render_core.render_grid_rgba missing in CI'"
+
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
