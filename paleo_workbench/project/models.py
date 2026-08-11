@@ -287,6 +287,11 @@ class PaleoMapDocument(BaseModel):
     label_features: list[dict[str, Any]] = Field(default_factory=list)
     reference_layers: list[MapReferenceLayer] = Field(default_factory=list)
     map_chrome: dict[str, Any] = Field(default_factory=dict)
+    # Semantic state for the unified GIS authoring canvas.  The legacy arrays
+    # above remain the interoperable geometry payload; this state records only
+    # composition/view/edit presentation and is migration-safe for old projects.
+    map_crs: str | None = None
+    layer_state: dict[str, Any] = Field(default_factory=dict)
     view_state: dict[str, Any] = Field(default_factory=dict)
     edit_history: list[dict[str, Any]] = Field(default_factory=list)
 

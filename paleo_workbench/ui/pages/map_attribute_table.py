@@ -5,6 +5,7 @@ from typing import Any
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHeaderView,
     QLabel,
@@ -23,6 +24,7 @@ class MapAttributeTable(QFrame):
     """Bottom property grid for the selected map feature."""
 
     property_changed = Signal(str, str, object)  # feature_id, key, value
+    feature_selection_requested = Signal(str)  # authoritative feature id, or "" to clear
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,6 +43,11 @@ class MapAttributeTable(QFrame):
         title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
+        self.feature_combo = QComboBox(self)
+        self.feature_combo.setObjectName("MapAttributeFeatureSelector")
+        self.feature_combo.setToolTip("Active-layer feature selection")
+        layout.addWidget(self.feature_combo)
+
         self.table = QTableWidget(0, 2)
         self.table.setObjectName("MapAttributeTableWidget")
         self.table.setHorizontalHeaderLabels(["属性", "值"])
@@ -57,13 +64,45 @@ class MapAttributeTable(QFrame):
 
         self._feature: dict[str, Any] | None = None
         self._feature_id: str = ""
+        self._layer_features: dict[str, dict[str, Any]] = {}
         self._suppress_item_changed = False
+        self._suppress_feature_selection = False
         self.table.itemChanged.connect(self._on_item_changed)
+        self.feature_combo.currentIndexChanged.connect(self._on_feature_selected)
 
     def set_feature(self, feature: dict[str, Any] | None) -> None:
         self._feature = dict(feature) if feature is not None else None
         self._feature_id = str((feature or {}).get("id") or "")
         self._rebuild()
+
+    def set_layer_features(
+        self, features: list[dict[str, Any]] | tuple[dict[str, Any], ...], *, selected_ids: set[str] | tuple[str, ...] = (),
+    ) -> None:
+        """Bind the property grid to one active vector layer without edit shadow state."""
+        self._layer_features = {
+            str(feature.get("id") or ""): dict(feature)
+            for feature in features
+            if isinstance(feature, dict) and str(feature.get("id") or "")
+        }
+        selected = next(iter(sorted(str(value) for value in selected_ids)), "")
+        if selected not in self._layer_features:
+            selected = ""
+        self._suppress_feature_selection = True
+        self.feature_combo.clear()
+        self.feature_combo.addItem("— no selection —", "")
+        for feature_id, feature in self._layer_features.items():
+            label = str(feature.get("name") or feature.get("text") or feature_id)
+            self.feature_combo.addItem(label, feature_id)
+        target = self.feature_combo.findData(selected)
+        self.feature_combo.setCurrentIndex(max(0, target))
+        self._suppress_feature_selection = False
+        self.set_feature(self._layer_features.get(selected))
+
+    def _on_feature_selected(self, _index: int) -> None:
+        if self._suppress_feature_selection:
+            return
+        feature_id = str(self.feature_combo.currentData() or "")
+        self.feature_selection_requested.emit(feature_id)
 
     def _rebuild(self) -> None:
         self._suppress_item_changed = True

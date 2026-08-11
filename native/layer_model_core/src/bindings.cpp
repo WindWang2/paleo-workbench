@@ -94,6 +94,8 @@ PYBIND11_MODULE(layer_model_core, m) {
              py::arg("other"))
         .def("move_below", &lm::LayerRegistry::move_below, py::arg("id"),
              py::arg("other"))
+        .def("set_parent", &lm::LayerRegistry::set_parent, py::arg("id"),
+             py::arg("parent_id"))
         .def("is_effectively_visible", &lm::LayerRegistry::is_effectively_visible,
              py::arg("id"), py::arg("scale_denominator"))
         .def("children_of", [](const lm::LayerRegistry& registry,

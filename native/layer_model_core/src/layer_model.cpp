@@ -159,6 +159,29 @@ bool LayerRegistry::move_below(const std::string& id, const std::string& other) 
     return true;
 }
 
+bool LayerRegistry::set_parent(const std::string& id, const std::string& parent_id) {
+    MapLayer* layer = get(id);
+    if (layer == nullptr || id == parent_id) return false;
+    if (!parent_id.empty()) {
+        const MapLayer* parent = get(parent_id);
+        if (parent == nullptr || parent->type() != LayerType::Group) return false;
+        // A group may not be attached below itself or any of its descendants.
+        std::string ancestor = parent_id;
+        std::size_t guard = 0;
+        while (!ancestor.empty() && guard++ < layers_.size()) {
+            if (ancestor == id) return false;
+            const auto parent_it = parent_of_.find(ancestor);
+            ancestor = parent_it == parent_of_.end() ? std::string{} : parent_it->second;
+        }
+    }
+    if (parent_id.empty()) {
+        parent_of_.erase(id);
+    } else {
+        parent_of_[id] = parent_id;
+    }
+    return true;
+}
+
 bool LayerRegistry::is_effectively_visible(const std::string& id,
                                            double scale_denominator) const {
     const MapLayer* l = get(id);

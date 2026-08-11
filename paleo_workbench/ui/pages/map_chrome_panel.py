@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.viz.mapping_helpers import field_value
@@ -11,6 +12,8 @@ DEFAULT_CHROME_ELEMENTS = ["图例", "指北针", "比例尺", "标题栏"]
 
 class MapChromePanel(QFrame):
     """Right-hand read-only summary of map chrome and downstream actions."""
+
+    chrome_changed = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,6 +30,17 @@ class MapChromePanel(QFrame):
 
         self.title_value = self._add_value(layout, "图名", "未设置")
         self.elements_value = self._add_value(layout, "已启用", "图例 / 指北针 / 比例尺 / 标题栏")
+        self.title_edit = QLineEdit(self)
+        self.title_edit.setPlaceholderText("地图标题")
+        layout.addWidget(self.title_edit)
+        self.element_checks: dict[str, QCheckBox] = {}
+        for element in DEFAULT_CHROME_ELEMENTS:
+            check = QCheckBox(element, self)
+            check.setChecked(True)
+            self.element_checks[element] = check
+            layout.addWidget(check)
+            check.toggled.connect(self._emit_changed)
+        self.title_edit.editingFinished.connect(self._emit_changed)
 
         layout.addStretch()
         self.save_btn = QPushButton("保存编图草稿")
@@ -60,3 +74,15 @@ class MapChromePanel(QFrame):
 
         self.title_value.setText(title)
         self.elements_value.setText(" / ".join(elements))
+        self.title_edit.blockSignals(True)
+        self.title_edit.setText(title)
+        self.title_edit.blockSignals(False)
+        enabled = {str(element) for element in elements}
+        for element, check in self.element_checks.items():
+            check.blockSignals(True)
+            check.setChecked(element in enabled)
+            check.blockSignals(False)
+
+    def _emit_changed(self) -> None:
+        elements = [element for element, check in self.element_checks.items() if check.isChecked()]
+        self.chrome_changed.emit({"title": self.title_edit.text().strip(), "elements": elements})

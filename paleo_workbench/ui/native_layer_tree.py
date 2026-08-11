@@ -7,12 +7,23 @@ and remain responsible for applying a viewport transform.
 """
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
 import layer_model_core
-from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt, Signal
-from PySide6.QtWidgets import QFrame, QHeaderView, QLabel, QTreeView, QVBoxLayout
+from PySide6.QtCore import QAbstractItemModel, QMimeData, QModelIndex, Qt, Signal
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMenu,
+    QToolButton,
+    QTreeView,
+    QVBoxLayout,
+)
 
 from paleo_workbench.ui import tokens
 
@@ -29,6 +40,7 @@ class NativeLayerModel(QAbstractItemModel):
     """
 
     LayerIdRole = int(Qt.ItemDataRole.UserRole) + 1
+    MimeType = "application/x-paleo-workbench-layer-id"
     active_layer_changed = Signal(object)
     layer_changed = Signal(str)
     zoom_to_layer_requested = Signal(str, object)
@@ -145,12 +157,81 @@ class NativeLayerModel(QAbstractItemModel):
         return None
 
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:  # noqa: N802
-        if not index.isValid() or self._layer(index) is None:
+        if not index.isValid():
+            return Qt.ItemFlag.ItemIsDropEnabled
+        layer = self._layer(index)
+        if layer is None:
             return Qt.ItemFlag.NoItemFlags
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         if index.column() == 0:
-            return flags | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable
+            flags |= (
+                Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsEditable
+                | Qt.ItemFlag.ItemIsDragEnabled
+            )
+            if layer.type == layer_model_core.LayerType.Group:
+                flags |= Qt.ItemFlag.ItemIsDropEnabled
+            return flags
         return flags | Qt.ItemFlag.ItemIsEditable
+
+    def mimeTypes(self) -> list[str]:  # noqa: N802
+        return [self.MimeType]
+
+    def mimeData(self, indexes) -> QMimeData:  # noqa: N802
+        layer_ids = []
+        for index in indexes:
+            if index.column() != 0:
+                continue
+            layer_id = self._id_from_index(index)
+            if layer_id and layer_id not in layer_ids:
+                layer_ids.append(layer_id)
+        mime = QMimeData()
+        mime.setData(self.MimeType, json.dumps(layer_ids).encode("utf-8"))
+        return mime
+
+    def supportedDropActions(self):  # noqa: N802
+        return Qt.DropAction.MoveAction
+
+    def dropMimeData(self, data, action, row, column, parent) -> bool:  # noqa: N802
+        if action == Qt.DropAction.IgnoreAction:
+            return True
+        if action != Qt.DropAction.MoveAction or not data.hasFormat(self.MimeType):
+            return False
+        try:
+            layer_ids = json.loads(bytes(data.data(self.MimeType)).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, TypeError):
+            return False
+        if not isinstance(layer_ids, list) or len(layer_ids) != 1:
+            return False
+        layer_id = str(layer_ids[0])
+        layer = self._registry.get(layer_id)
+        if layer is None:
+            return False
+        parent_id = self._id_from_index(parent) or ""
+        if parent_id and self._registry.get(parent_id).type != layer_model_core.LayerType.Group:
+            parent_id = self._registry.parent_id(parent_id)
+        siblings = self._children(parent_id)
+        if row < 0:
+            row = len(siblings)
+        row = max(0, min(int(row), len(siblings)))
+        self.beginResetModel()
+        try:
+            if not self._registry.set_parent(layer_id, parent_id):
+                return False
+            # The native registry stores authoritative flat z-order.  Convert a
+            # tree sibling insertion to the corresponding absolute position.
+            if siblings:
+                anchor = siblings[min(row, len(siblings) - 1)]
+                absolute = self._registry.index_of(anchor.id)
+                if row >= len(siblings):
+                    absolute += 1
+            else:
+                absolute = self._registry.size - 1
+            self._registry.move_layer(layer_id, max(0, int(absolute)))
+        finally:
+            self.endResetModel()
+        self.layer_changed.emit(layer_id)
+        return True
 
     def setData(self, index: QModelIndex, value, role: int = Qt.ItemDataRole.EditRole) -> bool:  # noqa: N802
         layer = self._layer(index)
@@ -198,9 +279,11 @@ class NativeLayerModel(QAbstractItemModel):
     ):
         self.beginResetModel()
         try:
-            return self._registry.add_layer(layer_id, name, layer_type, parent_id)
+            layer = self._registry.add_layer(layer_id, name, layer_type, parent_id)
         finally:
             self.endResetModel()
+        self.layer_changed.emit(layer.id)
+        return layer
 
     def remove_layer(self, layer_id: str) -> bool:
         self.beginResetModel()
@@ -211,6 +294,8 @@ class NativeLayerModel(QAbstractItemModel):
         if removed and self._active_layer_id == layer_id:
             self._active_layer_id = None
             self.active_layer_changed.emit(None)
+        if removed:
+            self.layer_changed.emit(layer_id)
         return removed
 
     def move_layer(self, layer_id: str, new_index: int) -> bool:
@@ -245,6 +330,9 @@ class NativeLayerTree(QFrame):
 
     active_layer_changed = Signal(object)
     zoom_to_layer_requested = Signal(str, object)
+    add_layer_requested = Signal()
+    properties_requested = Signal(str)
+    export_layer_requested = Signal(str)
 
     def __init__(self, registry: Any, parent=None):
         super().__init__(parent)
@@ -264,6 +352,25 @@ class NativeLayerTree(QFrame):
         title.setObjectName("MapDockTitle")
         layout.addWidget(title)
 
+        controls = QHBoxLayout()
+        controls.setSpacing(tokens.SPACE_1)
+        self.add_layer_action = QAction("Add Layer", self)
+        self.add_group_action = QAction("Add Group", self)
+        self.remove_action = QAction("Remove", self)
+        self.move_up_action = QAction("Move Up", self)
+        self.move_down_action = QAction("Move Down", self)
+        self.zoom_action = QAction("Zoom to Layer", self)
+        self.properties_action = QAction("Properties", self)
+        for action in (
+            self.add_layer_action, self.add_group_action, self.remove_action,
+            self.move_up_action, self.move_down_action, self.zoom_action, self.properties_action,
+        ):
+            button = QToolButton(self)
+            button.setDefaultAction(action)
+            controls.addWidget(button)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
         self.model = NativeLayerModel(registry, self)
         self.tree = QTreeView()
         self.tree.setObjectName("NativeLayerTreeView")
@@ -272,22 +379,95 @@ class NativeLayerTree(QFrame):
         self.tree.setEditTriggers(
             QTreeView.EditTrigger.EditKeyPressed | QTreeView.EditTrigger.SelectedClicked
         )
+        self.tree.setDragEnabled(True)
+        self.tree.setAcceptDrops(True)
+        self.tree.setDropIndicatorShown(True)
+        self.tree.setDragDropMode(QTreeView.DragDropMode.InternalMove)
+        self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.tree, 1)
 
         self.tree.selectionModel().currentChanged.connect(self._on_current_changed)
         self.tree.doubleClicked.connect(self._on_double_clicked)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.model.active_layer_changed.connect(self.active_layer_changed)
         self.model.zoom_to_layer_requested.connect(self.zoom_to_layer_requested)
+        self.add_layer_action.triggered.connect(self.add_layer_requested.emit)
+        self.add_group_action.triggered.connect(self._add_group)
+        self.remove_action.triggered.connect(self._remove_current)
+        self.move_up_action.triggered.connect(lambda: self._move_current(-1))
+        self.move_down_action.triggered.connect(lambda: self._move_current(1))
+        self.zoom_action.triggered.connect(self._zoom_current)
+        self.properties_action.triggered.connect(self._properties_current)
+        self._sync_action_state()
 
     def _on_current_changed(self, current: QModelIndex, _previous: QModelIndex) -> None:
         self.model.set_active_layer(self.model.data(current, NativeLayerModel.LayerIdRole))
+        self._sync_action_state()
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         layer_id = self.model.data(index, NativeLayerModel.LayerIdRole)
         if layer_id is not None:
             self.model.request_zoom_to_layer(layer_id)
+
+    def _current_layer_id(self) -> str | None:
+        return self.model.data(self.tree.currentIndex(), NativeLayerModel.LayerIdRole)
+
+    def _sync_action_state(self) -> None:
+        layer_id = self._current_layer_id()
+        layer = self.model.registry.get(layer_id) if layer_id else None
+        has_layer = layer is not None
+        self.remove_action.setEnabled(has_layer)
+        self.zoom_action.setEnabled(has_layer)
+        self.properties_action.setEnabled(has_layer)
+        self.move_up_action.setEnabled(has_layer and self.model.registry.index_of(layer_id) > 0)
+        self.move_down_action.setEnabled(
+            has_layer and self.model.registry.index_of(layer_id) + 1 < self.model.registry.size
+        )
+
+    def _add_group(self) -> None:
+        from uuid import uuid4
+
+        layer_id = f"group_{uuid4().hex[:12]}"
+        self.model.add_layer(layer_id, "Group", layer_model_core.LayerType.Group)
+        self.expand_all()
+
+    def _remove_current(self) -> None:
+        layer_id = self._current_layer_id()
+        if layer_id:
+            self.model.remove_layer(layer_id)
+        self._sync_action_state()
+
+    def _move_current(self, delta: int) -> None:
+        layer_id = self._current_layer_id()
+        if layer_id is None:
+            return
+        self.model.move_layer(layer_id, self.model.registry.index_of(layer_id) + delta)
+        self._sync_action_state()
+
+    def _zoom_current(self) -> None:
+        layer_id = self._current_layer_id()
+        if layer_id:
+            self.model.request_zoom_to_layer(layer_id)
+
+    def _properties_current(self) -> None:
+        layer_id = self._current_layer_id()
+        if layer_id:
+            self.properties_requested.emit(layer_id)
+
+    def _show_context_menu(self, position) -> None:
+        menu = QMenu(self)
+        for action in (
+            self.zoom_action, self.properties_action, self.move_up_action,
+            self.move_down_action, self.remove_action,
+        ):
+            menu.addAction(action)
+        layer_id = self._current_layer_id()
+        if layer_id:
+            menu.addAction("Export Layer", lambda: self.export_layer_requested.emit(layer_id))
+        menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def set_active_layer(self, layer_id: str | None) -> bool:
         if not self.model.set_active_layer(layer_id):

@@ -169,3 +169,34 @@ def test_save_draft_locates_first_invalid_feature_on_topology_error(qtbot, monke
     scene = page.edit_view.scene()
     assert scene.selected_feature_ids() == ["bowtie"]
 
+
+def test_failed_unified_save_does_not_commit_invalid_edit_buffer(qtbot, monkeypatch):
+    """The validation mirror must not mutate the managed working document."""
+    from PySide6.QtWidgets import QMessageBox
+
+    doc = PaleoMapDocument(
+        name="M",
+        linked_target_horizon="H1",
+        facies_polygons=[{
+            "id": "f1",
+            "name": "Initially valid",
+            "coordinates": [[0, 0], [3, 0], [0, 3], [0, 0]],
+        }],
+    )
+    original = list(doc.facies_polygons[0]["coordinates"])
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state([doc])
+    authoring = page._authoring_document
+    assert authoring is not None
+    session = authoring.start_editing()
+    session.set_geometry("f1", {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [3, 3], [3, 0], [0, 3], [0, 0]]],
+    })
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
+
+    assert page.save_draft() is False
+    assert doc.facies_polygons[0]["coordinates"] == original
+    assert session.is_dirty is True
+    assert authoring.active_session is session

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QGraphicsItem,
     QGraphicsView,
     QHBoxLayout,
@@ -12,6 +13,24 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.mapping.document_io import apply_features_to_document
+from paleo_workbench.mapping.map_authoring import MapAuthoringDocument, feature_to_record
+from paleo_workbench.mapping.map_document_snapshot import extent_for_snapshot
+from paleo_workbench.mapping.map_interaction import FeatureSpatialIndex, SnappingService
+from paleo_workbench.mapping.map_scene_adapter import LegacyDocumentSceneAdapter
+from paleo_workbench.mapping.map_tools import (
+    AddLineTool,
+    AddPointTool,
+    AddPolygonTool,
+    MapToolController,
+    MeasureDistanceTool,
+    MoveFeatureTool,
+    PanTool,
+    RectangleSelectTool,
+    SelectTool,
+    VertexTool,
+    ZoomTool,
+)
+from paleo_workbench.mapping.topology import TopologyService
 from paleo_workbench.mapping.reference_layers import ReferenceLayerError, ReferenceLayerService
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.map_attribute_table import MapAttributeTable
@@ -23,6 +42,10 @@ from paleo_workbench.ui.pages.map_edit_view import MapEditView
 from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
 from paleo_workbench.ui.pages.map_reference_panel import MapReferencePanel
 from paleo_workbench.ui.pages.map_workbench_bottom import MapWorkbenchBottom
+from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
+from paleo_workbench.ui.map_action_controller import MapActionController, MapActionState
+from paleo_workbench.ui.map_layer_properties import MapLayerPropertiesDialog
+from paleo_workbench.ui.map_status_bar import MapStatusBar
 from paleo_workbench.viz.mapping_helpers import (
     active_map_document,
     field_value,
@@ -54,6 +77,16 @@ class MappingPage(QWidget):
         self._project_crs: str | None = None
         self._factor_tasks_by_overlay_id: dict[str, object] = {}
         self._native_factor_scene = None
+        self._unified_scene_adapter = LegacyDocumentSceneAdapter()
+        self._unified_document_id: str | None = None
+        self._authoring_document: MapAuthoringDocument | None = None
+        self._unified_authoring_mode = False
+        self._map_tools = MapToolController()
+        self._snapping = SnappingService()
+        self._topology = TopologyService()
+        self._last_measurement: float | None = None
+        self._presentation_dirty = False
+        self._suppressed_layer_ids: set[str] = set()
         self._preview_mode = False
         self._canvas_priority = False
         self._reference_service = ReferenceLayerService()
@@ -69,7 +102,37 @@ class MappingPage(QWidget):
         )
         outer.setSpacing(tokens.SPACE_2)
 
+        # True QAction/QToolBar command surface.  ``MapEditToolbar`` remains a
+        # hidden compatibility shim while downstream callers migrate to actions.
+        self.action_controller = MapActionController(self)
+        self.map_toolbars = QWidget(self)
+        self.map_toolbars.setObjectName("MapAuthoringToolbars")
+        toolbar_layout = QVBoxLayout(self.map_toolbars)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(0)
+        toolbar_layout.addWidget(self.action_controller.toolbar(
+            "Map Navigation", (
+                "pan", "zoom_in", "zoom_out", "full_extent", "previous_extent", "next_extent", "refresh",
+            ), self.map_toolbars
+        ))
+        toolbar_layout.addWidget(self.action_controller.toolbar(
+            "Selection", (
+                "identify", "select", "select_rectangle", "measure_distance", "clear_selection", "select_all", "invert_selection",
+            ), self.map_toolbars
+        ))
+        toolbar_layout.addWidget(self.action_controller.toolbar(
+            "Digitizing", (
+                "toggle_editing", "save_edits", "rollback", "add_point", "add_line",
+                "add_polygon", "move_feature", "vertex", "delete_selected", "undo", "redo",
+            ), self.map_toolbars
+        ))
+        toolbar_layout.addWidget(self.action_controller.toolbar(
+            "Advanced Editing", ("split", "merge", "snapping", "topology", "cancel"), self.map_toolbars
+        ))
+        outer.addWidget(self.map_toolbars)
+
         self.toolbar = MapEditToolbar()
+        self.toolbar.setVisible(False)
         outer.addWidget(self.toolbar)
 
         mid = QHBoxLayout()
@@ -92,9 +155,15 @@ class MappingPage(QWidget):
         preview_layout = QHBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(tokens.SPACE_2)
+        self.preview_canvas_stack = QStackedWidget()
         self.canvas_panel = MapCanvasPanel()
+        self.unified_canvas = UnifiedMapCanvas()
+        self.unified_canvas.set_map_tool_controller(self._map_tools)
+        self.unified_canvas.set_overlay_provider(self._unified_overlay_state)
+        self.preview_canvas_stack.addWidget(self.canvas_panel)
+        self.preview_canvas_stack.addWidget(self.unified_canvas)
         self.chrome_panel = MapChromePanel()
-        preview_layout.addWidget(self.canvas_panel, 1)
+        preview_layout.addWidget(self.preview_canvas_stack, 1)
         preview_layout.addWidget(self.chrome_panel, 0)
         self.center_stack.addWidget(preview_host)
 
@@ -102,6 +171,9 @@ class MappingPage(QWidget):
         self.reference_panel = MapReferencePanel()
         mid.addWidget(self.reference_panel, 0)
         outer.addLayout(mid, 1)
+
+        self.status_bar = MapStatusBar(self)
+        outer.addWidget(self.status_bar)
 
         self.bottom_workbench = MapWorkbenchBottom()
         self.bottom_workbench.setMaximumHeight(220)
@@ -120,7 +192,14 @@ class MappingPage(QWidget):
         self.toolbar.split_facies_requested.connect(self.split_selected_facies)
         self.toolbar.save_draft_requested.connect(self.save_draft)
         self.toolbar.generate_demo_draft_requested.connect(self.generate_demo_draft_requested.emit)
+        self.action_controller.tool_requested.connect(self._on_action_tool_requested)
+        self.action_controller.command_requested.connect(self._on_action_command_requested)
+        self.unified_canvas.tool_operation.connect(self._on_unified_tool_operation)
+        self.unified_canvas.map_position_changed.connect(self._on_unified_cursor_position)
+        self.unified_canvas.extent_changed.connect(self._on_unified_extent_changed)
+        self.unified_canvas.backend_status_changed.connect(lambda _status: self._sync_map_status())
         self.chrome_panel.save_btn.clicked.connect(self.save_draft)
+        self.chrome_panel.chrome_changed.connect(self._on_chrome_changed)
         self.bottom_workbench.factor_shelf.contour_draft_requested.connect(
             self._on_contour_draft_requested
         )
@@ -134,6 +213,7 @@ class MappingPage(QWidget):
         self.layer_tree.layer_visibility_changed.connect(self._on_layer_visibility_changed)
         self.layer_tree.document_selected.connect(self._on_document_selected)
         self.attribute_table.property_changed.connect(self._on_property_changed)
+        self.attribute_table.feature_selection_requested.connect(self._on_attribute_feature_selected)
         self.reference_panel.reference_visibility_changed.connect(self._on_reference_visibility_changed)
         self.reference_panel.reference_opacity_changed.connect(self._on_reference_opacity_changed)
         self.edit_view.view_state_changed.connect(self.reference_panel.set_view_state)
@@ -154,14 +234,21 @@ class MappingPage(QWidget):
             scene.topology_issues_changed.connect(
                 self.bottom_workbench.topology_panel.set_issues
             )
+            scene.command_stack_changed.connect(self._refresh_unified_composition)
 
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        self._sync_action_state()
+        self._sync_map_status()
         self._on_tool_changed(self.toolbar.current_tool())
         self._apply_mode_ui()
         self._emit_mapping_context()
 
     def is_dirty(self) -> bool:
+        if self._presentation_dirty:
+            return True
+        if self._authoring_document is not None and self._authoring_document.is_dirty():
+            return True
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             return scene.is_dirty()
@@ -245,6 +332,8 @@ class MappingPage(QWidget):
         document = active_map_document(documents, prefer_id=prefer_id)
         previous = self._active_document
         self._active_document = document
+        if document is not previous:
+            self._presentation_dirty = False
         self.layer_tree.set_documents(documents)
         self.layer_tree.set_active_document(document)
         scene = self.edit_view.scene()
@@ -263,11 +352,30 @@ class MappingPage(QWidget):
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
             self._sync_reference_snap_points(scene, document)
+        if document is None:
+            self._authoring_document = None
+            self._unified_authoring_mode = False
+            self._suppressed_layer_ids.clear()
+        elif document_id := str(getattr(document, "id", "") or "map"):
+            if self._authoring_document is None or self._authoring_document.document_id != document_id:
+                self._authoring_document = MapAuthoringDocument.from_document(
+                    document, project_crs=project_crs
+                )
+            self._unified_authoring_mode = True
+            self._map_tools.set_active_tool(PanTool())
+            state = dict(getattr(document, "layer_state", None) or {})
+            self._suppressed_layer_ids = {str(value) for value in state.get("removed_layer_ids") or ()}
+        self._apply_mode_ui()
         self.attribute_table.set_feature(None)
+        self.chrome_panel.update_state(document)
         self._publish_reference_layers(document)
+        self._refresh_unified_composition()
+        self._sync_attribute_table_from_authoring()
+        self._install_native_layer_tree(self.unified_scene)
         self.bottom_workbench.factor_shelf.update_state(tasks)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        self._sync_action_state()
         if self._preview_mode:
             self._refresh_preview()
         self._emit_mapping_context()
@@ -355,10 +463,32 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if doc is None or scene is None:
             return False
+        use_authoring = bool(
+            self._authoring_document is not None
+            and self._unified_authoring_mode
+            and (self._authoring_document.is_dirty() or self._presentation_dirty)
+        )
+        original_document = None
+        pending_audit: list[dict[str, object]] = []
+        if use_authoring:
+            # Validate the working edit buffer before promoting it.  The legacy
+            # scene is only a validator/migration mirror; retaining an exact
+            # document copy means a failed validation cannot leak a partial edit
+            # into the persisted working version.
+            original_document = doc.model_copy(deep=True)
+            features = self._authoring_document.records()
+            apply_features_to_document(doc, features)
+            # Keep the legacy surface as a non-authoritative compatibility mirror
+            # for legacy project migration and its established topology validator.
+            scene.load_document(doc)
         scene.refresh_topology()
         valid, issues = scene.validate_for_save()
         self.bottom_workbench.topology_panel.set_issues(issues)
         if not valid:
+            if original_document is not None:
+                for field_name in type(doc).model_fields:
+                    setattr(doc, field_name, getattr(original_document, field_name))
+                scene.load_document(doc)
             from PySide6.QtWidgets import QMessageBox
 
             n = len(issues) if issues else 0
@@ -370,13 +500,23 @@ class MappingPage(QWidget):
                 f"拓扑检查未通过（{n} 项问题）。已定位至首项几何问题，请查看底部拓扑面板修复后再保存。",
             )
             return False
-        features = scene.export_features()
-        apply_features_to_document(doc, features)
+        if use_authoring:
+            pending_audit = self._authoring_document.commit_changes()
+            if pending_audit:
+                doc.edit_history.extend(pending_audit)
+        if not use_authoring:
+            features = scene.export_features()
+            apply_features_to_document(doc, features)
+            self._authoring_document = MapAuthoringDocument.from_document(
+                doc, project_crs=self._project_crs
+            )
         # Persist viewport (center/scale) without clobbering provenance keys
         # like is_demo_draft / generator / seed.
         self._merge_view_state_into_document(doc)
         scene.set_dirty(False)
+        self._presentation_dirty = False
         self._sync_save_enabled()
+        self._sync_action_state()
         if self._preview_mode:
             self._refresh_preview()
         self.draft_saved.emit(doc)
@@ -398,6 +538,24 @@ class MappingPage(QWidget):
         return report
 
     def merge_selected_facies(self) -> str | None:
+        authoring = self._authoring_document
+        if (
+            authoring is not None
+            and authoring.active_kind == "facies"
+            and authoring.active_session is not None
+        ):
+            try:
+                from paleo_workbench.mapping.vector_operations import merge_selected_polygons
+
+                new_id = merge_selected_polygons(
+                    authoring.active_session, authoring.active_layer.selection
+                )
+            except (RuntimeError, ValueError) as exc:
+                QMessageBox.information(self, "合并相带", str(exc))
+                return None
+            authoring.active_layer.set_selection((new_id,))
+            self._on_unified_tool_operation()
+            return new_id
         scene = self._edit_scene()
         if scene is None:
             return None
@@ -424,6 +582,25 @@ class MappingPage(QWidget):
         return new_id
 
     def split_selected_facies(self) -> list[str] | None:
+        authoring = self._authoring_document
+        if authoring is not None:
+            facies = authoring.layer("facies")
+            lines = authoring.layer("line")
+            if facies.edit_session is not None and facies.selection and lines.selection:
+                polygon_id = next(iter(sorted(facies.selection)))
+                line_id = next(iter(sorted(lines.selection)))
+                try:
+                    from paleo_workbench.mapping.vector_operations import split_polygon_by_line
+
+                    line_source = lines.edit_session or lines
+                    line = line_source.feature(line_id)
+                    new_ids = split_polygon_by_line(facies.edit_session, polygon_id, line)
+                except (KeyError, RuntimeError, ValueError) as exc:
+                    QMessageBox.information(self, "分割相带", str(exc))
+                    return None
+                facies.set_selection(new_ids)
+                self._on_unified_tool_operation()
+                return list(new_ids)
         scene = self._edit_scene()
         if scene is None:
             return None
@@ -457,15 +634,23 @@ class MappingPage(QWidget):
         self.set_preview_mode(enabled)
 
     def _apply_mode_ui(self) -> None:
-        self.center_stack.setCurrentIndex(1 if self._preview_mode else 0)
+        # The QGIS/fallback unified canvas is the normal authoring surface.  The
+        # graphics editor remains loaded only for legacy migration compatibility.
+        self.center_stack.setCurrentIndex(1 if self._preview_mode or self._unified_authoring_mode else 0)
+        if self._preview_mode or self._unified_authoring_mode:
+            self.preview_canvas_stack.setCurrentWidget(self.unified_canvas)
         if self._canvas_priority:
             self.bottom_workbench.setVisible(False)
         else:
             self.bottom_workbench.setVisible(not self._preview_mode)
 
     def _refresh_preview(self) -> None:
+        self._refresh_unified_composition()
         if self._native_factor_scene is not None:
-            self.canvas_panel.load_native_scene(self._native_factor_scene)
+            # Factor grids now share the unified renderer with facies/contours/
+            # samples. NativeMapCanvas remains populated only as a compatibility
+            # export surface until unified export replaces it in Phase 5.
+            self.preview_canvas_stack.setCurrentWidget(self.unified_canvas)
             self.chrome_panel.update_state(self._active_document)
             return
         doc = self._active_document
@@ -484,26 +669,540 @@ class MappingPage(QWidget):
             features, wells, period = preview_payload_from_document(doc)
         else:
             features, wells, period = [], [], ""
+        # A built QGIS bridge makes this the primary preview composition. The
+        # legacy preview remains as an explicit compatibility fallback until the
+        # editor migration is complete; it is never reported as QGIS rendering.
+        # Continue loading the compatibility preview payload even while QGIS is
+        # the visible renderer: existing export/accessibility callers consume it
+        # during the migration, but the user sees the unified QGIS frame.
         self.canvas_panel.load_preview(features, wells=wells, period_name=period)
+        self.preview_canvas_stack.setCurrentWidget(self.unified_canvas)
         self.chrome_panel.update_state(doc)
+
+    @property
+    def unified_scene(self):
+        """Registry-backed composition used by the unified renderer during migration."""
+        return self._unified_scene_adapter.scene
+
+    def _refresh_unified_composition(self) -> None:
+        """Project current live editor records into the unified renderer seam."""
+        document = self._active_document
+        scene = self._edit_scene()
+        records = None
+        if self._authoring_document is not None and self._unified_authoring_mode:
+            records = self._authoring_document.records()
+        elif scene is not None and document is not None:
+            records = scene.export_features()
+        visibility = {
+            key: self.layer_tree.layer_is_visible(key)
+            for key in ("facies", "well", "line", "label")
+        }
+        self._unified_scene_adapter.sync(
+            document,
+            project_crs=self._project_crs,
+            visibility=visibility,
+            records=records,
+            excluded_layer_ids=self._suppressed_layer_ids,
+        )
+        self._sync_reference_render_layers(document)
+        if self._authoring_document is not None:
+            for kind in ("facies", "well", "line", "label"):
+                vector_layer = self._authoring_document.layer(kind)
+                if not vector_layer.style and not vector_layer.labels:
+                    continue
+                current_style = self.unified_scene.vector_style(vector_layer.id)
+                current_style.update(vector_layer.style)
+                if vector_layer.labels:
+                    current_style["labels"] = dict(vector_layer.labels)
+                self.unified_scene.set_vector_style(vector_layer.id, current_style)
+        self._restore_unified_composition_state(document)
+        snapshot = self.unified_scene.render_snapshot(project_crs=str(self._project_crs or ""))
+        document_id = str(getattr(document, "id", "") or "") if document is not None else None
+        self.unified_canvas.set_layer_snapshot(snapshot)
+        if document_id != self._unified_document_id:
+            self._unified_document_id = document_id
+            saved = list((getattr(document, "view_state", None) or {}).get("extent") or []) if document else []
+            applied_extent = False
+            if len(saved) == 4:
+                try:
+                    self.unified_canvas.set_extent(tuple(float(value) for value in saved))
+                    applied_extent = True
+                except (TypeError, ValueError):
+                    pass
+            if not applied_extent:
+                self.unified_canvas.set_extent(extent_for_snapshot(snapshot))
+        self._sync_map_status()
 
     def _install_native_layer_tree(self, scene) -> None:
         """Swap the left dock to the C++ registry-backed tree for native overlays."""
+        if self._native_layer_tree is not None and self._native_layer_tree.model.registry is scene.registry:
+            self._native_layer_tree.model.refresh()
+            return
         if self._native_layer_tree is not None:
             self.layer_tree_stack.removeWidget(self._native_layer_tree)
             self._native_layer_tree.deleteLater()
         from paleo_workbench.ui.native_layer_tree import NativeLayerTree
 
         tree = NativeLayerTree(scene.registry, self.layer_tree_stack)
-        tree.zoom_to_layer_requested.connect(self.canvas_panel.native_canvas.zoom_to_extent)
-        tree.model.layer_changed.connect(self.canvas_panel.native_canvas.update)
+        tree.zoom_to_layer_requested.connect(self.unified_canvas.set_extent)
+        tree.model.layer_changed.connect(self._on_native_layer_registry_changed)
+        tree.properties_requested.connect(self._open_layer_properties)
+        tree.active_layer_changed.connect(self._on_native_active_layer)
+        tree.add_layer_requested.connect(self._on_native_add_layer_requested)
         self._native_layer_tree = tree
         self.layer_tree_stack.addWidget(tree)
         self.layer_tree_stack.setCurrentWidget(tree)
         tree.expand_all()
 
+    def _on_native_active_layer(self, layer_id: str | None) -> None:
+        if layer_id is None or self._authoring_document is None:
+            return
+        for kind in ("facies", "well", "line", "label"):
+            if self._authoring_document.layer(kind).id == layer_id:
+                self._authoring_document.set_active_kind(kind)
+                self._sync_action_state()
+                self._sync_map_status()
+                return
+
+    def _on_native_layer_registry_changed(self, layer_id: str) -> None:
+        if self.unified_scene.registry.get(str(layer_id)) is None:
+            self._suppressed_layer_ids.add(str(layer_id))
+        if self._active_document is not None:
+            self._presentation_dirty = True
+        self._stage_composition_state()
+        self._refresh_unified_composition()
+        self._sync_save_enabled()
+        self._emit_mapping_context()
+
+    def _on_native_add_layer_requested(self) -> None:
+        """Import an immutable GDAL reference into the unified composition."""
+        document = self._active_document
+        if document is None:
+            return
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "添加参考图层",
+            "",
+            "GIS 文件 (*.tif *.tiff *.gpkg *.geojson *.json *.shp);;所有文件 (*)",
+        )
+        if not path:
+            return
+        try:
+            layer = self._reference_service.import_layer(
+                path, str(self._project_crs or getattr(document, "map_crs", "") or "")
+            )
+        except ReferenceLayerError as exc:
+            QMessageBox.warning(self, "添加参考图层", str(exc))
+            return
+        document.reference_layers.append(layer)
+        self._presentation_dirty = True
+        self._publish_reference_layers(document)
+        self._refresh_unified_composition()
+        self._install_native_layer_tree(self.unified_scene)
+        if self._native_layer_tree is not None:
+            self._native_layer_tree.set_active_layer(self._reference_scene_layer_id(layer.id))
+        self._sync_save_enabled()
+        self._emit_mapping_context()
+
+    def _reference_scene_layer_id(self, reference_id: str) -> str:
+        document_id = str(getattr(self._active_document, "id", "") or "map")
+        return f"{document_id}:reference:{reference_id}"
+
+    def _sync_reference_render_layers(self, document) -> None:
+        """Mirror ready external sources into MapScene without owning their data."""
+        if document is None:
+            return
+        # Keep the established snapping seam substitutable in headless/legacy
+        # callers.  A minimal snap-only service has no render-payload API and
+        # must not prevent the document/editor from opening.
+        if not hasattr(self._reference_service, "vector_render_payload") or not hasattr(
+            self._reference_service, "raster_render_extent"
+        ):
+            return
+        prefix = f"{getattr(document, 'id', '') or 'map'}:reference:"
+        references = list(getattr(document, "reference_layers", []) or [])
+        for reference in references:
+            ReferenceLayerService.refresh_status(reference)
+        wanted = {
+            self._reference_scene_layer_id(layer.id)
+            for layer in references
+            if layer.status == "ready"
+            and self._reference_scene_layer_id(layer.id) not in self._suppressed_layer_ids
+        }
+        for existing in tuple(self.unified_scene.registry.layers()):
+            if str(existing.id).startswith(prefix) and str(existing.id) not in wanted:
+                self.unified_scene.remove_layer(str(existing.id))
+        for reference in references:
+            layer_id = self._reference_scene_layer_id(reference.id)
+            if layer_id not in wanted or reference.status != "ready":
+                continue
+            existing = self.unified_scene.registry.get(layer_id)
+            if reference.source_kind == "raster":
+                try:
+                    extent = self._reference_service.raster_render_extent(reference)
+                except ReferenceLayerError:
+                    if existing is not None:
+                        self.unified_scene.remove_layer(layer_id)
+                    continue
+                if existing is None:
+                    self.unified_scene.add_raster_source(
+                        layer_id,
+                        reference.source_path,
+                        name=reference.name,
+                        extent=extent,
+                        crs=reference.source_crs,
+                        source_ref=f"reference:{reference.id}",
+                        source_revision=reference.cache_key,
+                    )
+                else:
+                    self.unified_scene.set_raster_source(
+                        layer_id, reference.source_path, source_revision=reference.cache_key, extent=extent
+                    )
+                    existing.name = reference.name
+                    existing.crs = reference.source_crs
+                existing = self.unified_scene.registry.get(layer_id)
+                if existing is not None:
+                    existing.visible = bool(reference.visible)
+                    existing.opacity = float(reference.opacity)
+                continue
+            try:
+                features, extent = self._reference_service.vector_render_payload(reference)
+            except ReferenceLayerError:
+                if existing is not None:
+                    self.unified_scene.remove_layer(layer_id)
+                continue
+            if existing is None:
+                existing = self.unified_scene.add_vector_layer(
+                    layer_id,
+                    features,
+                    name=reference.name,
+                    extent=extent,
+                    crs=reference.project_crs,
+                    source_ref=f"reference:{reference.id}",
+                    style={"fill": "#9c6644", "stroke": "#4d3322", "stroke_width": 1.0},
+                )
+            else:
+                self.unified_scene.set_vector_features(layer_id, features, extent=extent)
+                existing.name = reference.name
+                existing.crs = reference.project_crs
+            existing.visible = bool(reference.visible)
+            existing.opacity = float(reference.opacity)
+
     def _show_legacy_layer_tree(self) -> None:
         self.layer_tree_stack.setCurrentWidget(self.layer_tree)
+
+    def _active_authoring_index(self) -> FeatureSpatialIndex | None:
+        if self._authoring_document is None:
+            return None
+        return self._snapping.index_for(self._authoring_document.active_layer)
+
+    def _snap_map_point(self, point: tuple[float, float]) -> tuple[float, float]:
+        if self._authoring_document is None:
+            return point
+        tolerance = self._snapping.pixel_tolerance * self.unified_canvas.map_units_per_pixel
+        layers = (self._authoring_document.active_layer,) if self._snapping.current_layer_only else self._authoring_document.layers()
+        return self._snapping.snap(point, tolerance=tolerance, layers=layers)
+
+    def _on_action_tool_requested(self, action_id: str) -> None:
+        authoring = self._authoring_document
+        if authoring is None:
+            return
+        if action_id == "pan":
+            tool = PanTool()
+        elif action_id in {"zoom_in", "zoom_out"}:
+            tool = ZoomTool(
+                zoom=self.unified_canvas.zoom_by,
+                factor=0.5 if action_id == "zoom_in" else 2.0,
+                tool_id=action_id,
+            )
+        elif action_id == "measure_distance":
+            tool = MeasureDistanceTool(measurement_ready=self._on_measurement_ready)
+        else:
+            kind_for_action = {
+                "add_point": "well", "add_line": "line", "add_polygon": "facies",
+            }.get(action_id)
+            if kind_for_action is not None:
+                authoring.set_active_kind(kind_for_action)
+                if authoring.editing() and authoring.active_session is None:
+                    authoring.start_editing()
+            layer = authoring.active_layer
+            index = self._active_authoring_index()
+            if index is None:
+                return
+            tolerance = lambda: self._snapping.pixel_tolerance * self.unified_canvas.map_units_per_pixel
+            if action_id in {"select", "identify"}:
+                tool = SelectTool(layer, identify=lambda point: index.identify(point, tolerance()))
+            elif action_id == "select_rectangle":
+                tool = RectangleSelectTool(layer, select_rectangle=index.select_rectangle)
+            else:
+                session = layer.edit_session
+                if session is None:
+                    return
+                if action_id == "add_point":
+                    tool = AddPointTool(session, snap=self._snap_map_point)
+                elif action_id == "add_line":
+                    tool = AddLineTool(session, snap=self._snap_map_point)
+                elif action_id == "add_polygon":
+                    tool = AddPolygonTool(session, snap=self._snap_map_point)
+                elif action_id == "move_feature":
+                    tool = MoveFeatureTool(session, identify=lambda point: index.identify(point, tolerance()))
+                elif action_id == "vertex":
+                    tool = VertexTool(
+                        session,
+                        identify_vertex=lambda point: index.identify_vertex(point, tolerance()),
+                        on_vertex_committed=self._on_unified_vertex_committed,
+                    )
+                else:
+                    return
+        self._map_tools.set_active_tool(tool)
+        self.unified_canvas.setFocus()
+        self._sync_action_state()
+
+    def _on_action_command_requested(self, command_id: str) -> None:
+        authoring = self._authoring_document
+        if command_id == "full_extent":
+            self.unified_canvas.set_extent(extent_for_snapshot(self.unified_scene.render_snapshot(project_crs=self._project_crs or "")))
+        elif command_id == "previous_extent":
+            self.unified_canvas.previous_extent()
+        elif command_id == "next_extent":
+            self.unified_canvas.next_extent()
+        elif command_id == "refresh":
+            self._refresh_unified_composition()
+        elif command_id == "clear_selection" and authoring is not None:
+            authoring.clear_selection()
+        elif command_id == "select_all" and authoring is not None:
+            authoring.active_layer.select_all()
+        elif command_id == "invert_selection" and authoring is not None:
+            authoring.active_layer.invert_selection()
+        elif command_id == "toggle_editing" and authoring is not None:
+            if authoring.active_session is None:
+                authoring.start_editing()
+            else:
+                self.save_draft()
+        elif command_id == "save_edits":
+            self.save_draft()
+        elif command_id == "rollback" and authoring is not None:
+            authoring.rollback_changes()
+        elif command_id == "undo" and authoring is not None and authoring.active_session is not None:
+            authoring.active_session.undo()
+        elif command_id == "redo" and authoring is not None and authoring.active_session is not None:
+            authoring.active_session.redo()
+        elif command_id == "delete_selected" and authoring is not None and authoring.active_session is not None:
+            for feature_id in sorted(authoring.active_layer.selection):
+                authoring.active_session.delete_feature(feature_id)
+            authoring.active_layer.set_selection(())
+        elif command_id == "snapping":
+            self._snapping.enabled = self.action_controller.actions["snapping"].isChecked()
+        elif command_id == "topology":
+            self._topology.enabled = self.action_controller.actions["topology"].isChecked()
+        elif command_id == "cancel":
+            self._map_tools.key_press("escape")
+        elif command_id == "merge":
+            self.merge_selected_facies()
+        elif command_id == "split":
+            self.split_selected_facies()
+        self._on_unified_tool_operation()
+
+    def _on_unified_cursor_position(self, point: tuple[float, float]) -> None:
+        # The existing shelf accepts map coordinates and remains useful in the
+        # unified canvas; it is no longer tied exclusively to QGraphicsView.
+        self.bottom_workbench.factor_shelf.set_cursor_position(point)
+        self._sync_map_status(point=point)
+
+    def _on_unified_extent_changed(self, _extent: tuple[float, float, float, float]) -> None:
+        self._sync_map_status()
+        self._sync_action_state()
+
+    def _on_measurement_ready(self, distance: float) -> None:
+        """Report a completed map-space distance without changing map data."""
+        self._last_measurement = float(distance)
+        self.status_bar.scale.setText(f"Measure: {self._last_measurement:.6g} map units")
+
+    def _sync_map_status(self, *, point: tuple[float, float] | None = None) -> None:
+        authoring = self._authoring_document
+        self.status_bar.update_state(
+            point=point,
+            extent=self.unified_canvas.view_extent,
+            crs=str(self._project_crs or getattr(self._active_document, "map_crs", "") or ""),
+            renderer=self.unified_canvas.backend_status,
+            selection_count=(sum(len(layer.selection) for layer in authoring.layers()) if authoring is not None else 0),
+            editing=bool(authoring and authoring.active_session is not None),
+        )
+
+    def _open_layer_properties(self, layer_id: str) -> None:
+        layer = self.unified_scene.registry.get(str(layer_id))
+        if layer is None:
+            return
+        style = (
+            self.unified_scene.scalar_style(str(layer_id))
+            if self.unified_scene.scalar_layer(str(layer_id)) is not None
+            else self.unified_scene.vector_style(str(layer_id))
+        )
+        dialog = MapLayerPropertiesDialog(
+            layer, style=style, parent=self
+        )
+        dialog.properties_applied.connect(self._apply_layer_properties)
+        dialog.open()
+
+    def _apply_layer_properties(self, layer_id: str, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        layer = self.unified_scene.registry.get(str(layer_id))
+        if layer is None:
+            return
+        layer.name = str(payload.get("name") or layer.name)
+        layer.crs = str(payload.get("crs") or layer.crs)
+        layer.opacity = float(payload.get("opacity", layer.opacity))
+        scalar = self.unified_scene.scalar_layer(str(layer_id))
+        if scalar is not None:
+            requested_scalar = dict(payload.get("scalar_style") or {})
+            requested_range = list(requested_scalar.get("color_range") or ())
+            if len(requested_range) == 2 and requested_range[1] >= requested_range[0]:
+                color_range = (float(requested_range[0]), float(requested_range[1]))
+            else:
+                color_range = None
+            self.unified_scene.set_scalar_style(
+                str(layer_id),
+                color_ramp_name=str(requested_scalar.get("color_ramp") or "default"),
+                color_range=color_range,
+                gamma=float(requested_scalar.get("gamma", 1.0)),
+                nodata=str(requested_scalar.get("nodata") or "transparent"),
+            )
+            self._presentation_dirty = True
+            self._stage_composition_state()
+            self._refresh_unified_composition()
+            self._sync_save_enabled()
+            self._emit_mapping_context()
+            return
+        style = self.unified_scene.vector_style(str(layer_id))
+        requested_style = dict(payload.get("style") or {})
+        for key in ("fill", "stroke"):
+            if requested_style.get(key):
+                style[key] = requested_style[key]
+        if "stroke_width" in requested_style:
+            style["stroke_width"] = requested_style["stroke_width"]
+        for key in ("renderer", "field", "categories", "ranges"):
+            if key in requested_style:
+                style[key] = requested_style[key]
+        style["labels"] = dict(requested_style.get("labels") or {})
+        if self.unified_scene.vector_features(str(layer_id)):
+            self.unified_scene.set_vector_style(str(layer_id), style)
+            authoring = self._authoring_document
+            if authoring is not None:
+                for kind in ("facies", "well", "line", "label"):
+                    if authoring.layer(kind).id == layer_id:
+                        authoring.layer(kind).style = dict(style)
+                        authoring.layer(kind).labels = dict(style.get("labels") or {})
+                        break
+        self._presentation_dirty = True
+        self._stage_composition_state()
+        self._refresh_unified_composition()
+        self._sync_save_enabled()
+        self._emit_mapping_context()
+
+    def _on_unified_vertex_committed(
+        self,
+        feature_id: str,
+        path: tuple[int, ...],
+        origin: tuple[float, float],
+        replacement: tuple[float, float],
+    ) -> None:
+        if self._authoring_document is None:
+            return
+        self._topology.propagate_shared_vertex(
+            (self._authoring_document.active_layer,),
+            origin=origin,
+            replacement=replacement,
+            skip=(self._authoring_document.active_layer.id, feature_id, path),
+        )
+
+    def _on_unified_tool_operation(self) -> None:
+        self._sync_attribute_table_from_authoring()
+        self._refresh_unified_composition()
+        self._sync_action_state()
+        self._sync_save_enabled()
+        self._emit_mapping_context()
+
+    def _sync_attribute_table_from_authoring(self) -> None:
+        authoring = self._authoring_document
+        if authoring is None:
+            self.attribute_table.set_layer_features(())
+            return
+        layer = authoring.active_layer
+        source = layer.edit_session.features() if layer.edit_session is not None else layer.features()
+        self.attribute_table.set_layer_features(
+            [feature_to_record(feature, kind=authoring.active_kind) for feature in source],
+            selected_ids=layer.selection,
+        )
+
+    def _on_attribute_feature_selected(self, feature_id: str) -> None:
+        authoring = self._authoring_document
+        if authoring is None:
+            return
+        layer = authoring.active_layer
+        if feature_id:
+            source = layer.edit_session if layer.edit_session is not None else layer
+            try:
+                source.feature(feature_id)
+            except KeyError:
+                return
+        layer.set_selection((feature_id,) if feature_id else ())
+        self._on_unified_tool_operation()
+
+    def _unified_overlay_state(self) -> dict[str, object]:
+        authoring = self._authoring_document
+        if authoring is None:
+            return {}
+        selected = []
+        for layer in authoring.layers():
+            source = layer.edit_session.features() if layer.edit_session is not None else layer.features()
+            selected.extend(feature for feature in source if feature.feature_id in layer.selection)
+        tool = self._map_tools.active_tool
+        capture = list(getattr(tool, "points", ()) or ())
+        snap = self._snapping.last_match.point if self._snapping.last_match is not None else None
+        chrome = dict(getattr(self._active_document, "map_chrome", None) or {})
+        return {
+            "selected_features": selected,
+            "capture_points": capture,
+            "snap_point": snap,
+            "decorations": {
+                "title": chrome.get("title") or getattr(self._active_document, "name", ""),
+                "elements": list(chrome.get("elements") or ("图例", "指北针", "比例尺", "标题栏")),
+                "legend_items": [
+                    layer.name
+                    for layer in self.unified_scene.registry.layers()
+                    if layer.visible and layer.type.name != "Group"
+                ],
+            },
+        }
+
+    def _sync_action_state(self) -> None:
+        authoring = self._authoring_document
+        if authoring is None:
+            self.action_controller.update_state(MapActionState())
+            return
+        session = authoring.active_session
+        selected = authoring.active_layer.selection
+        polygon_count = 0
+        for feature_id in selected:
+            try:
+                if authoring.active_layer.feature(feature_id).geometry["type"] in {"Polygon", "MultiPolygon"}:
+                    polygon_count += 1
+            except KeyError:
+                continue
+        self.action_controller.update_state(
+            MapActionState(
+                has_active_vector_layer=True,
+                vector_layer_writable=True,
+                editing=session is not None,
+                selected_count=len(selected),
+                compatible_polygon_count=polygon_count,
+                can_undo=bool(session and session.undo_stack),
+                can_redo=bool(session and session.redo_stack),
+                can_previous_extent=self.unified_canvas.can_previous_extent,
+                can_next_extent=self.unified_canvas.can_next_extent,
+            )
+        )
 
     def _on_tool_changed(self, tool_id: str) -> None:
         scene = self._edit_scene()
@@ -523,6 +1222,11 @@ class MappingPage(QWidget):
         scene = self._edit_scene()
         if scene is not None:
             scene.set_layer_visible(kind, visible)
+        if self._active_document is not None:
+            self._presentation_dirty = True
+        self._refresh_unified_composition()
+        self._stage_composition_state()
+        self._sync_save_enabled()
 
     def _on_document_selected(self, document) -> None:
         scene = self._edit_scene()
@@ -559,10 +1263,24 @@ class MappingPage(QWidget):
             self._restore_view_state_from_document(document)
             for key in ("facies", "well", "line", "label"):
                 scene.set_layer_visible(key, self.layer_tree.layer_is_visible(key))
+        self._authoring_document = (
+            MapAuthoringDocument.from_document(document, project_crs=self._project_crs)
+            if document is not None
+            else None
+        )
+        self._unified_authoring_mode = document is not None
+        self._presentation_dirty = False
+        state = dict(getattr(document, "layer_state", None) or {}) if document is not None else {}
+        self._suppressed_layer_ids = {str(value) for value in state.get("removed_layer_ids") or ()}
+        self._map_tools.set_active_tool(PanTool() if document is not None else None)
         self.attribute_table.set_feature(None)
+        self.chrome_panel.update_state(document)
         self._publish_reference_layers(document)
+        self._refresh_unified_composition()
+        self._install_native_layer_tree(self.unified_scene)
         self._sync_undo_redo_enabled()
         self._sync_save_enabled()
+        self._sync_action_state()
         if self._preview_mode:
             self._refresh_preview()
         self._emit_mapping_context()
@@ -586,7 +1304,48 @@ class MappingPage(QWidget):
                 merged["center"] = center
         if "scale" in live:
             merged["scale"] = float(live["scale"])
+        merged["extent"] = [float(value) for value in self.unified_canvas.view_extent]
         doc.view_state = merged
+        doc.map_crs = self._project_crs or getattr(doc, "map_crs", None)
+        state = self._authoring_document.state() if self._authoring_document is not None else {}
+        state["composition"] = self._layer_registry_state()
+        state["removed_layer_ids"] = sorted(self._suppressed_layer_ids)
+        doc.layer_state = state
+
+    def _stage_composition_state(self) -> None:
+        """Keep unsaved presentation edits stable across legacy-adapter refreshes."""
+        doc = self._active_document
+        if doc is None:
+            return
+        state = dict(getattr(doc, "layer_state", None) or {})
+        state["composition"] = self._layer_registry_state()
+        state["removed_layer_ids"] = sorted(self._suppressed_layer_ids)
+        doc.layer_state = state
+
+    def _layer_registry_state(self) -> list[dict[str, object]]:
+        """Serialize LayerRegistry composition without making it a second authority."""
+        state: list[dict[str, object]] = []
+        for index, layer in enumerate(self.unified_scene.registry.layers()):
+            layer_type = getattr(getattr(layer, "type", None), "name", None) or str(getattr(layer, "type", ""))
+            state.append(
+                {
+                    "id": str(layer.id),
+                    "name": str(layer.name),
+                    "type": layer_type,
+                    "order": index,
+                    "parent_id": str(self.unified_scene.registry.parent_id(layer.id) or ""),
+                    "visible": bool(layer.visible),
+                    "opacity": float(layer.opacity),
+                    "crs": str(layer.crs),
+                    "source_ref": str(layer.source_ref),
+                    "style": (
+                        self.unified_scene.scalar_style(str(layer.id))
+                        if self.unified_scene.scalar_layer(str(layer.id)) is not None
+                        else self.unified_scene.vector_style(str(layer.id))
+                    ),
+                }
+            )
+        return state
 
     def _restore_view_state_from_document(self, document) -> None:
         """Apply saved center/scale when present; ignore pure provenance dicts."""
@@ -598,7 +1357,62 @@ class MappingPage(QWidget):
         self.edit_view.apply_view_state(vs)
         self.reference_panel.set_view_state(self.edit_view.view_state())
 
+    def _restore_unified_composition_state(self, document) -> None:
+        """Replay persisted presentation only after authoritative layers are rebuilt."""
+        state = dict(getattr(document, "layer_state", None) or {}) if document else {}
+        entries = [entry for entry in list(state.get("composition") or []) if isinstance(entry, dict)]
+        for entry in entries:
+            layer = self.unified_scene.registry.get(str(entry.get("id") or ""))
+            if layer is None:
+                continue
+            if "name" in entry and str(entry["name"]):
+                layer.name = str(entry["name"])
+            if "crs" in entry:
+                layer.crs = str(entry["crs"] or "")
+            if "visible" in entry:
+                layer.visible = bool(entry["visible"])
+            if "opacity" in entry:
+                layer.opacity = float(entry["opacity"])
+            persisted_style = entry.get("style")
+            if isinstance(persisted_style, dict):
+                if self.unified_scene.scalar_layer(str(layer.id)) is not None:
+                    raw_range = list(persisted_style.get("color_range") or ())
+                    color_range = (
+                        (float(raw_range[0]), float(raw_range[1]))
+                        if len(raw_range) == 2 and float(raw_range[1]) >= float(raw_range[0])
+                        else None
+                    )
+                    self.unified_scene.set_scalar_style(
+                        str(layer.id),
+                        color_ramp_name=str(persisted_style.get("color_ramp") or "default"),
+                        color_range=color_range,
+                        gamma=float(persisted_style.get("gamma", 1.0)),
+                        nodata=str(persisted_style.get("nodata") or "transparent"),
+                    )
+                elif self.unified_scene.vector_features(str(layer.id)):
+                    self.unified_scene.set_vector_style(str(layer.id), persisted_style)
+        # Reapply hierarchy before flat order. The C++ registry validates group
+        # parents/cycles, so stale legacy parent references remain harmless.
+        for entry in entries:
+            layer_id = str(entry.get("id") or "")
+            parent_id = str(entry.get("parent_id") or "")
+            if self.unified_scene.registry.get(layer_id) is not None:
+                self.unified_scene.registry.set_parent(layer_id, parent_id)
+        # Move one entry at a time to its persisted flat registry position.  Invalid
+        # legacy references are ignored, leaving current authoritative layers intact.
+        for entry in sorted(entries, key=lambda item: int(item.get("order", 0))):
+            layer_id = str(entry.get("id") or "")
+            if self.unified_scene.registry.get(layer_id) is not None:
+                self.unified_scene.registry.move_layer(layer_id, max(0, int(entry.get("order", 0))))
+
     def _on_property_changed(self, feature_id: str, key: str, value: object) -> None:
+        if (
+            self._authoring_document is not None
+            and self._unified_authoring_mode
+            and self._authoring_document.change_attribute(feature_id, key, value)
+        ):
+            self._on_unified_tool_operation()
+            return
         scene = self._edit_scene()
         if scene is None:
             return
@@ -617,13 +1431,32 @@ class MappingPage(QWidget):
         layer = self._reference_layer(layer_id)
         if layer is not None:
             layer.visible = bool(visible)
+            self._presentation_dirty = True
+            self._refresh_unified_composition()
+            self._stage_composition_state()
+            self._sync_save_enabled()
             self._emit_mapping_context()
 
     def _on_reference_opacity_changed(self, layer_id: str, opacity: float) -> None:
         layer = self._reference_layer(layer_id)
         if layer is not None:
             layer.opacity = max(0.0, min(1.0, float(opacity)))
+            self._presentation_dirty = True
+            self._refresh_unified_composition()
+            self._stage_composition_state()
+            self._sync_save_enabled()
             self._emit_mapping_context()
+
+    def _on_chrome_changed(self, chrome: dict) -> None:
+        if self._active_document is None:
+            return
+        self._active_document.map_chrome = dict(chrome)
+        self._presentation_dirty = True
+        self.chrome_panel.update_state(self._active_document)
+        # Decorations are a Qt overlay and must not schedule a QGIS data rebuild.
+        self.unified_canvas.update()
+        self._sync_save_enabled()
+        self._emit_mapping_context()
 
     def _on_overlay_requested(self, resource_id: str) -> None:
         """Shared overlay path for the reference dock and the factor shelf.
@@ -649,16 +1482,25 @@ class MappingPage(QWidget):
                 if getattr(draft, "linked_factor_task_id", None) == getattr(task, "id", None)
             ]
             self._native_factor_scene = scene_from_factor_task(
-                task, crs=self._project_crs, contour_drafts=drafts
+                task,
+                crs=self._project_crs,
+                contour_drafts=drafts,
+                scene=self.unified_scene,
             )
         except (KeyError, TypeError, ValueError):
             return
+        # Scalar rasters begin below the document's vector compatibility layers;
+        # contours and samples remain above as separate registry entries.
+        task_id = str(getattr(task, "id", "") or "")
+        if task_id:
+            self.unified_scene.registry.move_layer(task_id, 0)
         self.canvas_panel.load_native_scene(self._native_factor_scene)
         self._install_native_layer_tree(self._native_factor_scene)
-        if not self._preview_mode:
-            self._preview_mode = True
-            self.toolbar.set_preview_mode(True)
-            self._apply_mode_ui()
+        self._refresh_unified_composition()
+        # A factor grid is an ordinary unified-map layer, not a mode change or a
+        # second preview canvas.  The legacy panel stays populated for compatible
+        # callers, while the visible authoring surface remains the same canvas.
+        self.chrome_panel.update_state(self._active_document)
         self._emit_mapping_context()
 
     def export_native_factor_map(self, output_path, *, register: bool = True):
@@ -677,7 +1519,7 @@ class MappingPage(QWidget):
             if self._native_factor_scene.scalar_layer(layer.id) is not None
         ]
         return export_widget_snapshot(
-            self.canvas_panel.native_canvas,
+            self.unified_canvas,
             output_path,
             "PNG",
             project=self._project,
@@ -727,6 +1569,7 @@ class MappingPage(QWidget):
             except ReferenceLayerError:
                 continue
         scene.set_reference_snap_points(points)
+        self._snapping.set_reference_points(points)
 
     def _on_undo(self) -> None:
         scene = self._edit_scene()
@@ -775,11 +1618,13 @@ class MappingPage(QWidget):
         stack = scene.command_stack() if scene is not None else None
         self.toolbar.undo_btn.setEnabled(bool(stack and stack.can_undo()))
         self.toolbar.redo_btn.setEnabled(bool(stack and stack.can_redo()))
+        self._sync_action_state()
 
     def _sync_save_enabled(self) -> None:
         can_save = self._active_document is not None and self.is_dirty()
         self.toolbar.save_draft_btn.setEnabled(can_save)
         self.chrome_panel.save_btn.setEnabled(can_save)
+        self._sync_action_state()
 
     def _emit_mapping_context(self) -> None:
         self.mapping_context_changed.emit(self.mapping_context())

@@ -50,6 +50,7 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     - Well-log canvas (``paint_all``): PNG/SVG/PDF via geoviz_well_log
     - Cross-well composite (``export_composite``): PNG/SVG/PDF
     - Paleo map canvas: PNG/SVG/PDF via professional figure export
+    - Unified map canvas: high-resolution PNG via MapRenderBackend + decorations
     - Native factor-map canvas: PNG via its Qt/native composition path
     - Everything else (seismic GL, engine preview, empty): PNG grab only
     """
@@ -59,7 +60,7 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     kind = _export_surface_kind(target)
     if kind in {"well_log", "cross_well", "paleo_map"}:
         return frozenset({"PNG", "SVG", "PDF"})
-    if kind == "native_factor_map":
+    if kind in {"native_factor_map", "unified_map"}:
         return frozenset({"PNG"})
     if hasattr(target, "grab"):
         return frozenset({"PNG"})
@@ -112,6 +113,11 @@ def _is_native_factor_map_canvas(widget: Any) -> bool:
     return type(widget).__name__ == "NativeMapCanvas" and hasattr(widget, "scene")
 
 
+def _is_unified_map_canvas(widget: Any) -> bool:
+    """Recognize the renderer-backed authoring surface without importing Qt here."""
+    return type(widget).__name__ == "UnifiedMapCanvas" and hasattr(widget, "export_png")
+
+
 def _export_surface_kind(widget: Any) -> str:
     if widget is None:
         return "none"
@@ -123,6 +129,8 @@ def _export_surface_kind(widget: Any) -> str:
         return "paleo_map"
     if _is_native_factor_map_canvas(widget):
         return "native_factor_map"
+    if _is_unified_map_canvas(widget):
+        return "unified_map"
     return "generic"
 
 
@@ -365,6 +373,9 @@ def _export_widget_png(widget: Any, output_path: Path) -> None:
         return
     if kind == "native_factor_map" and hasattr(target, "prepare_for_export"):
         target.prepare_for_export()
+    if kind == "unified_map":
+        target.export_png(str(output_path))
+        return
     if not hasattr(target, "grab"):
         raise ExportError("控件不支持截图导出")
     pixmap = target.grab()
