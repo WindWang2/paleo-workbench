@@ -69,4 +69,3 @@ def test_mapping_page_has_no_direct_feature_painter() -> None:
     source = (HOST / "ui/pages/mapping_page.py").read_text(encoding="utf-8")
     assert "QPainter" not in source
     assert "render_sync(" not in source
-
