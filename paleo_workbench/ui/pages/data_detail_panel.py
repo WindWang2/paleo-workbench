@@ -187,6 +187,28 @@ class DataDetailPanel(QFrame):
         item.setStyleSheet(f"color: {tokens.TEXT_PRIMARY}; font-size: 12px;")
         self.metadata_layout.addWidget(item)
 
+    def show_downstream_impact(self, rows: list[dict] | None) -> None:
+        """Append a simple 下游影响 list (Stage-9 freshness, no graph visualizer)."""
+        if not rows:
+            return
+        title = QLabel("下游影响")
+        title.setStyleSheet(
+            f"color: {tokens.TEXT_PRIMARY}; font-weight: 600; font-size: 12px;"
+        )
+        self.metadata_layout.addWidget(title)
+        for row in rows[:20]:
+            label = row.get("label") or row.get("operation") or "?"
+            state = row.get("state_label") or row.get("state") or ""
+            line = QLabel(f"· {label} — {state}")
+            line.setWordWrap(True)
+            color = (
+                tokens.WARNING
+                if str(row.get("state", "")).upper() == "STALE"
+                else tokens.TEXT_SECONDARY
+            )
+            line.setStyleSheet(f"color: {color}; font-size: 12px;")
+            self.metadata_layout.addWidget(line)
+
     def _add_muted(self, layout: QVBoxLayout, text: str) -> None:
         item = QLabel(text)
         item.setWordWrap(True)

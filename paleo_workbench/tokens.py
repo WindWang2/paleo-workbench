@@ -123,11 +123,12 @@ STEP_LABELS = [
     "沉积相预测", "古地理图编制", "质控与导出",
 ]
 STATUS_TEXT = {
-    "complete": "完成",
-    "running": "进行中",
-    "pending": "待开始",
+    "complete": "已完成",
+    "stale": "需更新",
+    "running": "处理中",
+    "pending": "未开始",
     "warning": "警告",
-    "failed": "失败",
+    "failed": "异常",
     "ready": "就绪",
     "skipped": "已跳过",
     "mock": "Mock",
