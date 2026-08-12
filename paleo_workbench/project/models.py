@@ -202,6 +202,8 @@ class CorrelationInterpretationRef(BaseModel):
     parent_version_id: str | None = None
     status: str = "clean"
     depth_domain: str = "MD"
+    # Distinct depth domains present in tops (for readiness without loading artifact)
+    depth_domains: list[str] = Field(default_factory=list)
     well_resource_ids: list[str] = Field(default_factory=list)
     source_version_ids: list[str] = Field(default_factory=list)
     scientific_fingerprint: str = ""

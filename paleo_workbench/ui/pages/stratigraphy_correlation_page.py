@@ -583,34 +583,39 @@ class StratigraphyCorrelationPage(QWidget):
         return Path(root) / "project.paleo.json"
 
     def _tops_from_canvas(self) -> list:
-        """Collect FormationTop models from the live tops_model (scientific only)."""
+        """Collect FormationTop models with stable IDs (no-op save safe)."""
+        from paleo_workbench.workflow.correlation_session import tops_from_canvas_rows
         from paleo_workbench.workflow.stratigraphy_models import (
-            DepthDomain,
-            FormationTop as SciTop,
             CorrelationMethod,
+            DepthDomain,
         )
 
         name_to_id = {
             name: rid
             for name, rid in zip(self._loaded_names, self._loaded_resource_ids)
         }
-        out = []
         model = self.cross_host.widget.tops_model
-        for t in model.all_tops() or []:
-            well = str(getattr(t, "well", "") or getattr(t, "well_name", "") or "")
-            marker = str(getattr(t, "name", "") or getattr(t, "top_name", "") or "")
-            depth = float(getattr(t, "depth", 0.0) or 0.0)
-            out.append(
-                SciTop(
-                    well_id=name_to_id.get(well, ""),
-                    well_name=well,
-                    marker=marker,
-                    depth=depth,
-                    depth_domain=DepthDomain.MD,
-                    method=CorrelationMethod.IMPORTED,
-                )
-            )
-        return out
+        prev = None
+        if self._correlation_draft is not None:
+            prev = self._correlation_draft.payload.tops
+        return tops_from_canvas_rows(
+            list(model.all_tops() or []),
+            name_to_resource_id=name_to_id,
+            depth_domain=DepthDomain.MD,
+            method=CorrelationMethod.IMPORTED,
+            previous_tops=prev,
+        )
+
+    def _links_from_session(self, tops: list) -> list:
+        """Build adjacent-well CorrelationLink rows for shared markers."""
+        from paleo_workbench.workflow.correlation_session import adjacent_links_for_marker
+        from paleo_workbench.workflow.stratigraphy_models import CorrelationMethod
+
+        # Prefer resource ids order, fall back to names
+        well_order = list(self._loaded_resource_ids) or list(self._loaded_names)
+        return adjacent_links_for_marker(
+            tops, well_order=well_order, method=CorrelationMethod.MANUAL
+        )
 
     def _resolve_well_version_ids(self) -> list[str]:
         from paleo_workbench.catalog.lifecycle import resolve_resource_version
@@ -645,6 +650,7 @@ class StratigraphyCorrelationPage(QWidget):
         from paleo_workbench.workflow.stratigraphy_models import DepthDomain
 
         well_vids = self._resolve_well_version_ids()
+        links = self._links_from_session(tops)
         draft = self._correlation_draft
         if draft is None:
             draft = new_correlation_draft(
@@ -655,11 +661,14 @@ class StratigraphyCorrelationPage(QWidget):
                 depth_domain=DepthDomain.MD,
                 framework_ref=active_target_horizon(self._project) or "",
             )
+            draft.payload.links = links
         else:
             draft.payload.tops = tops
+            draft.payload.links = links
             draft.payload.well_resource_ids = list(self._loaded_resource_ids)
             draft.payload.well_version_ids = well_vids
-            draft.bump()
+            # bump only if content would change (fingerprint handles no-op)
+            draft.dirty = True
         self._correlation_draft = draft
         ref, msg = save_correlation_draft(
             draft, self._project, self._project_file_path()

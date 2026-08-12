@@ -31,6 +31,9 @@ def create_mock_factor_map(
     factor_type: str,
     seed: int,
 ) -> FactorMapTask:
+    # Prefer selected correlation/horizon identity when caller passes empty horizon.
+    horizon = (target_horizon or "").strip() or resolve_default_target_horizon(project)
+    target_horizon = horizon
     rng = random.Random(seed)
     sample_points = [
         {

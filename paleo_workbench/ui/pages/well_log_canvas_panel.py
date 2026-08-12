@@ -49,6 +49,8 @@ class WellLogCanvasPanel(QFrame):
         self.setObjectName("WellLogCanvasPanel")
         self.well_log_data = None
         self._bound_las = False
+        self._project = None
+        self._project_path = None
         self._engine_error: str | None = None
         self._engine_load: dict[str, Any] | None = None
         self._engine_plan: engine_adapter.EngineLoadPlan | None = None
@@ -189,6 +191,8 @@ class WellLogCanvasPanel(QFrame):
         return kinds
 
     def update_state(self, task, project=None) -> None:
+        if project is not None:
+            self._project = project
         if task is None:
             self._show_empty("未选择预测任务")
             return
@@ -271,6 +275,22 @@ class WellLogCanvasPanel(QFrame):
         self.canvas_ready.emit(False)
 
     def _show_well_log(self, data, *, bound_las: bool = False) -> None:
+        # Stage-12: overlay formation tops from selected correlation interpretation
+        project = getattr(self, "_project", None)
+        if project is not None and data is not None:
+            try:
+                from paleo_workbench.workflow.correlation_overlay import (
+                    apply_correlation_tops_to_well_log_data,
+                )
+
+                data = apply_correlation_tops_to_well_log_data(
+                    data,
+                    project,
+                    well_name=str(getattr(data, "well_name", "") or ""),
+                    project_path=getattr(self, "_project_path", None),
+                )
+            except Exception:
+                pass
         self.well_log_data = data
         self._bound_las = bound_las
         name = getattr(data, "well_name", "") or ""

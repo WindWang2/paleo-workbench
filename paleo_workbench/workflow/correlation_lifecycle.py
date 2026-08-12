@@ -177,6 +177,7 @@ def save_correlation_draft(
     except ValueError:
         store_path = managed_path
 
+    domains = detect_depth_domain_mismatch(list(draft.payload.tops))
     ref = CorrelationInterpretationRef(
         id=draft.interpretation_id,
         name=draft.name,
@@ -185,6 +186,7 @@ def save_correlation_draft(
         parent_version_id=parent,
         status="clean",
         depth_domain=draft.payload.depth_domain.value,
+        depth_domains=domains or [draft.payload.depth_domain.value],
         well_resource_ids=list(draft.payload.well_resource_ids),
         source_version_ids=list(draft.payload.well_version_ids),
         scientific_fingerprint=fp,

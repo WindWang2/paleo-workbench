@@ -145,10 +145,27 @@ def evaluate_contract_readiness(
                     severity="block",
                 )
             )
-        # Depth domain mismatch among saved correlation products (metadata)
+        # Depth-domain mix from saved interpretation metadata (no artifact load)
         for ref in getattr(project, "correlation_interpretations", None) or []:
-            # cannot load artifact here; if multiple domains stored as field only one
-            pass
+            domains = list(getattr(ref, "depth_domains", None) or [])
+            if not domains:
+                d0 = getattr(ref, "depth_domain", "") or ""
+                if d0:
+                    domains = [d0]
+            distinct = sorted({str(d) for d in domains if d})
+            if len(distinct) > 1:
+                reasons.append(
+                    ReadinessReason(
+                        code="depth_domain_mismatch",
+                        message_zh=(
+                            "对比解释中存在混用深度域: "
+                            + "、".join(distinct)
+                            + "（软件不自动转换）"
+                        ),
+                        severity="warn",
+                    )
+                )
+                break
 
     if contract.id == "factor_interpolation":
         tasks = getattr(project, "factor_map_tasks", None) or []

@@ -443,3 +443,188 @@ def test_ui_page_has_lifecycle_actions():
     assert "保存解释版本" in src
     assert "save_correlation_draft" in src
     assert "restore_draft_from_project_ref" in src
+    assert "_links_from_session" in src
+    assert "tops_from_canvas_rows" in src
+
+
+def test_stable_top_ids_enable_noop_on_resave(tmp_path: Path, catalog):
+    """Same well/marker/depth with regenerated canvas rows must no-op."""
+    from paleo_workbench.workflow.correlation_session import (
+        adjacent_links_for_marker,
+        tops_from_canvas_rows,
+    )
+
+    class _Row:
+        def __init__(self, well, name, depth):
+            self.well = well
+            self.name = name
+            self.depth = depth
+
+    project = ProjectDocument.new("N")
+    project.meta.project_root = str(tmp_path)
+    proj_path = _proj_path(tmp_path)
+    wells = _well_versions(catalog, 2)
+    name_to_id = {"W0": "well-0", "W1": "well-1"}
+    rows = [_Row("W0", "H1", 100.0), _Row("W1", "H1", 105.0)]
+    tops1 = tops_from_canvas_rows(rows, name_to_resource_id=name_to_id)
+    links1 = adjacent_links_for_marker(
+        tops1, well_order=["well-0", "well-1"]
+    )
+    draft = new_correlation_draft(
+        well_resource_ids=["well-0", "well-1"],
+        well_version_ids=wells,
+        tops=tops1,
+    )
+    draft.payload.links = links1
+    ref1, m1 = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    assert m1 == "ok"
+    v1 = ref1.current_version_id
+    # Simulate UI rebuild: new row objects but same well/marker/depth
+    tops2 = tops_from_canvas_rows(
+        rows, name_to_resource_id=name_to_id, previous_tops=tops1
+    )
+    assert tops2[0].id == tops1[0].id
+    draft.payload.tops = tops2
+    draft.payload.links = adjacent_links_for_marker(
+        tops2, well_order=["well-0", "well-1"]
+    )
+    ref2, m2 = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    assert m2 == "noop_unchanged"
+    assert ref2.current_version_id == v1
+    assert len(links1) >= 1
+
+
+def test_depth_domain_mismatch_surfaces_partial_readiness(tmp_path: Path, catalog):
+    from paleo_workbench.project.models import CorrelationInterpretationRef
+    from paleo_workbench.workflow.contracts.readiness import evaluate_readiness
+    from paleo_workbench.workflow.contracts.registry import reset_default_registry
+    from paleo_workbench.workflow.contracts.models import ReadinessStatus
+
+    reset_default_registry()
+    p = ProjectDocument.new("D")
+    p.resources.extend(
+        [
+            ResourceItem(name="a.las", path="a.las", type="well_log", format="las"),
+            ResourceItem(name="b.las", path="b.las", type="well_log", format="las"),
+        ]
+    )
+    p.correlation_interpretations.append(
+        CorrelationInterpretationRef(
+            name="C",
+            depth_domain="MD",
+            depth_domains=["MD", "TVDSS"],
+            current_version_id="ver_x",
+        )
+    )
+    r = evaluate_readiness(p, "well_correlation")
+    assert r.status is ReadinessStatus.PARTIAL
+    assert any(x.code == "depth_domain_mismatch" for x in r.reasons)
+
+
+def test_fault_input_stales_factor_run(tmp_path: Path, catalog):
+    """Factor run that declares fault version input becomes STALE after fault V2."""
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+    from paleo_workbench.workflow.current_context import CurrentProjectVersionContext
+    from paleo_workbench.workflow.freshness import FreshnessService, FreshnessState
+
+    project = ProjectDocument.new("FF")
+    project.meta.project_root = str(tmp_path)
+    proj_path = _proj_path(tmp_path)
+    fd = new_fault_draft(
+        traces=[FaultTrace(name="f", polyline=[[0, 0], [1, 1]], role="fault")]
+    )
+    fref, m = save_fault_draft(fd, project, proj_path, catalog=catalog)
+    assert m == "ok"
+    f_v1 = fref.current_version_id
+
+    # Factor map run consuming fault V1
+    run = catalog.begin_run(
+        operation="factor_map",
+        input_version_ids=[f_v1],
+        domain_task_id="factor-with-fault",
+        parameters={"method": "IDW"},
+    )
+    fout = catalog.register_derived(
+        run_id=run.run_id,
+        name="factor grid",
+        path="/tmp/fg.npz",
+        checksum="fg1",
+        kind="factor_map_grid",
+        format="npz",
+    )
+    catalog.complete_run(run.run_id)
+
+    # Advance fault to V2
+    fd.payload.traces[0].polyline.append([2.0, 0.0])
+    fd.bump()
+    fref2, m2 = save_fault_draft(fd, project, proj_path, catalog=catalog)
+    assert m2 == "ok"
+    assert fref2.current_version_id != f_v1
+    # Same asset for fault products: force same asset for supersession
+    v1 = catalog.resolve_version(f_v1)
+    v2 = catalog.resolve_version(fref2.current_version_id)
+    assert v1 and v2
+    v2.asset_id = v1.asset_id
+
+    graph = DependencyGraph.from_catalog(catalog)
+    ctx = CurrentProjectVersionContext()
+    for ver in catalog.list_versions():
+        ctx.select(ver.asset_id, ver.version_id)
+    ctx.select(v1.asset_id, v2.version_id)  # current fault is V2
+    svc = FreshnessService(graph, ctx, catalog=catalog)
+    rep = svc.evaluate_version(fout.version_id)
+    assert rep.state is FreshnessState.STALE
+
+
+def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
+    from paleo_workbench.workflow.correlation_overlay import (
+        apply_correlation_tops_to_well_log_data,
+        formation_tops_overlay_for_well,
+    )
+
+    project = ProjectDocument.new("O")
+    project.meta.project_root = str(tmp_path)
+    proj_path = _proj_path(tmp_path)
+    wells = _well_versions(catalog, 2)
+    draft = new_correlation_draft(
+        well_resource_ids=["well-0", "well-1"],
+        well_version_ids=wells,
+        tops=[
+            FormationTop(well_id="well-0", well_name="W0", marker="H1", depth=50.0),
+            FormationTop(well_id="well-1", well_name="W1", marker="H1", depth=55.0),
+        ],
+    )
+    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    assert msg == "ok"
+    # Fix artifact path to absolute under demo.artifacts for overlay load
+    arts = list((tmp_path / "demo.artifacts").rglob("*.correlation.json"))
+    assert arts
+    project.correlation_interpretations[0].artifact_path = arts[0].as_posix()
+
+    rows = formation_tops_overlay_for_well(
+        project, well_id="well-0", project_path=proj_path
+    )
+    assert any(r["marker"] == "H1" and r["depth"] == 50.0 for r in rows)
+
+    class _Data:
+        well_name = "W0"
+
+    data = _Data()
+    apply_correlation_tops_to_well_log_data(
+        data, project, well_id="well-0", project_path=proj_path
+    )
+    assert getattr(data, "correlation_tops", None)
+    assert data.correlation_tops[0]["depth"] == 50.0
+
+
+def test_resolve_default_target_horizon_used_by_mock_factor():
+    from paleo_workbench.workflow.factors import create_mock_factor_map
+    from paleo_workbench.project.models import CorrelationInterpretationRef
+
+    p = ProjectDocument.new("F")
+    p.stratigraphy.target_horizon = ""
+    p.correlation_interpretations.append(
+        CorrelationInterpretationRef(name="C", framework_ref="ZJ2")
+    )
+    task = create_mock_factor_map(p, "", "sand", seed=1)
+    assert task.target_horizon == "ZJ2"
