@@ -189,6 +189,41 @@ class HorizonInterpretationRef(BaseModel):
     display: dict[str, Any] = Field(default_factory=dict)
 
 
+class CorrelationInterpretationRef(BaseModel):
+    """Project pointer to current immutable multi-well correlation version (Stage 12).
+
+    Scientific payload is a portable JSON artifact (tops/links/domain) — not curve arrays.
+    """
+
+    id: str = Field(default_factory=lambda: _id("corr"))
+    name: str = "连井对比"
+    current_version_id: str | None = None
+    artifact_path: str | None = None
+    parent_version_id: str | None = None
+    status: str = "clean"
+    depth_domain: str = "MD"
+    well_resource_ids: list[str] = Field(default_factory=list)
+    source_version_ids: list[str] = Field(default_factory=list)
+    scientific_fingerprint: str = ""
+    framework_ref: str = ""
+    display: dict[str, Any] = Field(default_factory=dict)
+
+
+class FaultInterpretationRef(BaseModel):
+    """Project pointer to current immutable fault interpretation version (Stage 12)."""
+
+    id: str = Field(default_factory=lambda: _id("fault"))
+    name: str = "断层解释"
+    current_version_id: str | None = None
+    artifact_path: str | None = None
+    parent_version_id: str | None = None
+    status: str = "clean"
+    source_version_ids: list[str] = Field(default_factory=list)
+    scientific_fingerprint: str = ""
+    crs: str = ""
+    display: dict[str, Any] = Field(default_factory=dict)
+
+
 class PredictionTask(BaseModel):
     id: str = Field(default_factory=lambda: _id("pred"))
     name: str
@@ -425,6 +460,10 @@ class ProjectDocument(BaseModel):
     compilation_runs: list[CompilationRun] = Field(default_factory=list)
     factor_map_tasks: list[FactorMapTask] = Field(default_factory=list)
     horizon_interpretations: list[HorizonInterpretationRef] = Field(default_factory=list)
+    correlation_interpretations: list[CorrelationInterpretationRef] = Field(
+        default_factory=list
+    )
+    fault_interpretations: list[FaultInterpretationRef] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
     paleomap_documents: list[PaleoMapDocument] = Field(default_factory=list)
     quality_reports: list[QualityReport] = Field(default_factory=list)

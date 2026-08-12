@@ -19,6 +19,8 @@ KNOWN_DATARUN_OPERATIONS = frozenset(
         "modeling",
         "derived_copy",
         "delivery",
+        "stratigraphic_correlation",
+        "fault_interpretation",
     }
 )
 
@@ -31,6 +33,8 @@ CONTRACT_DATARUN_MAP = {
     "paleomap_compile": "map_compile",
     "quality_control": "qc",
     "geomodel_3d": "modeling",
+    "well_correlation": "stratigraphic_correlation",
+    "fault_interpretation": "fault_interpretation",
 }
 
 

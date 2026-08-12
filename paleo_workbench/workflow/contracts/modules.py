@@ -353,12 +353,19 @@ def _well_correlation() -> DomainWorkflowContract:
         name="Well correlation / tops",
         name_zh="连井对比与分层",
         category="well_log",
-        description="Stratigraphy correlation and formation tops workflows.",
-        description_zh="地层对比与分层顶面相关流程。",
-        implementation_status=ImplementationStatus.PARTIAL,
+        description=(
+            "Multi-well correlation interpretation: FormationTop + CorrelationLink "
+            "saved as immutable DERIVED JSON artifact with DataRun lineage."
+        ),
+        description_zh=(
+            "多井连井对比：分层顶（FormationTop）与对比连接（CorrelationLink）"
+            "保存为不可变 DERIVED JSON 成果，并登记 DataRun 血缘。"
+        ),
+        implementation_status=ImplementationStatus.PRODUCTION,
         entry_points=[
+            "paleo_workbench.workflow.correlation_lifecycle",
             "paleo_workbench.workflow.stratigraphy_correlation",
-            "paleo_workbench.ui.pages.sequence_framework_page",
+            "paleo_workbench.catalog.lifecycle.register_stratigraphic_correlation_run",
         ],
         inputs=[
             WorkflowInputSpec(
@@ -367,57 +374,105 @@ def _well_correlation() -> DomainWorkflowContract:
                 resource_types=["well_log"],
                 cardinality=InputCardinality.ONE_OR_MORE,
                 required=True,
+                version_semantics=InputVersionSemantics.CURRENT_VERSION,
                 source_evidence=[
                     _ev(
                         "paleo_workbench.workflow.stratigraphy_correlation",
-                        "WELL_KEY via input_refs",
-                    )
+                        "list_well_log_resources",
+                    ),
+                    _ev(
+                        "paleo_workbench.workflow.stratigraphy_models",
+                        "CorrelationScientificPayload.well_version_ids",
+                    ),
                 ],
             )
         ],
+        parameters=[
+            WorkflowParameterSpec(
+                id="depth_domain",
+                name="深度域",
+                category=ParameterCategory.SCIENTIFIC,
+                description="MD/TVD/TVDSS/TWT/DEPTH/TIME — 仅声明，无自动转换",
+                certainty=Certainty.KNOWN_FROM_CODE,
+                expert_question_id="eq-corr-datum",
+                source_evidence=[
+                    _ev(
+                        "paleo_workbench.workflow.stratigraphy_models",
+                        "DepthDomain",
+                    )
+                ],
+            ),
+            WorkflowParameterSpec(
+                id="viewport",
+                name="视口/缩放",
+                category=ParameterCategory.DISPLAY,
+                description="不写入科学指纹",
+            ),
+        ],
         operations=[
             WorkflowOperationStep(
-                id="correlate",
-                name="多井对比",
-                user_action="选择井集并运行对比/编辑分层",
-                software_action="基于曲线/分层算法生成或更新对比结果（实现为 PARTIAL）",
-            )
+                id="edit_tops_links",
+                name="编辑分层与连接",
+                user_action="选择井集，编辑 FormationTop 与 CorrelationLink，撤销/重做",
+                software_action="维护 CorrelationInterpretationDraft（copy-on-edit）",
+                executor_ref="paleo_workbench.workflow.correlation_lifecycle",
+            ),
+            WorkflowOperationStep(
+                id="save_version",
+                name="保存对比版本",
+                user_action="保存连井对比解释版本",
+                software_action=(
+                    "写 .correlation.json；register_stratigraphic_correlation_run；"
+                    "推进 CorrelationInterpretationRef.current_version_id；无变更则 noop"
+                ),
+                datarun_operation="stratigraphic_correlation",
+                executor_ref="paleo_workbench.workflow.correlation_lifecycle.save_correlation_draft",
+            ),
         ],
         outputs=[
             WorkflowOutputSpec(
-                id="tops",
-                name="分层/对比结果",
+                id="correlation_version",
+                name="连井对比解释版本",
+                asset_kind="stratigraphic_correlation",
+                format="json",
                 data_stage="derived",
-                versioned=False,
+                versioned=True,
                 persistent=True,
                 output_class="scientific",
-                scientific_meaning="井上分层点/对比关系（工程内状态；完整目录版本化不完整）",
-                certainty=Certainty.INFERRED,
+                scientific_meaning="分层顶 + 对比连接 + 深度域 + 井版本 ID（不含曲线采样）",
+                downstream_usage=["factor_interpolation", "horizon_interpretation"],
+                certainty=Certainty.KNOWN_FROM_CODE,
             )
         ],
         qc_rules=[
             WorkflowQCSpec(
-                id="well_qc",
-                name="井 QC 辅助",
+                id="depth_domain_consistent",
+                name="对比内深度域一致性",
                 implemented=True,
-                implementation_ref="paleo_workbench.workflow.well_qc",
+                implementation_ref="paleo_workbench.workflow.correlation_lifecycle.detect_depth_domain_mismatch",
                 severity=QCSeverity.WARNING,
+                expert_confirmation_required=True,
             )
         ],
         upstream_contract_ids=["well_log_ingest", "well_log_visualization"],
         downstream_contract_ids=["factor_interpolation", "horizon_interpretation"],
+        datarun_operations=["stratigraphic_correlation"],
         expert_questions=[
             _q(
                 "eq-corr-datum",
                 mid,
                 ExpertQuestionCategory.WORKFLOW,
                 "连井对比是否要求先完成统一深度基准与曲线标准化，"
-                "还是允许在原始 MD 上直接对比？",
-                "stratigraphy_correlation 可对已加载井运行；未见统一基准硬门禁。",
+                "还是允许在原始 MD 上直接对比？软件当前仅检测域混用并告警，不自动转换。",
+                "DepthDomain 显式声明；detect_depth_domain_mismatch 只报告混用；无 MD↔TVDSS 转换。",
                 "决定对比成果是否可进入生产编图。",
                 "对比顶面与地震时域层位无法对齐。",
                 evidence=[
-                    _ev("paleo_workbench.workflow.stratigraphy_correlation")
+                    _ev("paleo_workbench.workflow.stratigraphy_models", "DepthDomain"),
+                    _ev(
+                        "paleo_workbench.workflow.correlation_lifecycle",
+                        "detect_depth_domain_mismatch",
+                    ),
                 ],
             )
         ],
@@ -634,58 +689,85 @@ def _fault_interpretation() -> DomainWorkflowContract:
     mid = "fault_interpretation"
     return DomainWorkflowContract(
         id=mid,
-        name="Fault / break constraints",
-        name_zh="断层/隔挡约束",
+        name="Fault interpretation",
+        name_zh="断层解释",
         category="interpretation",
-        description="Faults largely as constraint polylines (break) for interpolation.",
-        description_zh="当前以约束折线（break）服务插值为主，完整断层版本生命周期弱于层位。",
+        description=(
+            "Versioned map-plane fault polylines (DERIVED JSON). "
+            "ConstraintLine break remains a separate factor-constraint path. "
+            "3D synthetic faults remain DEMO."
+        ),
+        description_zh=(
+            "版本化平面断层折线（DERIVED JSON）。ConstraintLine break 仍服务插值约束。"
+            "三维合成断层仍为演示路径。"
+        ),
         implementation_status=ImplementationStatus.PARTIAL,
         entry_points=[
+            "paleo_workbench.workflow.fault_lifecycle",
+            "paleo_workbench.catalog.lifecycle.register_fault_interpretation_run",
             "paleo_workbench.project.models.ConstraintLine",
-            "paleo_workbench.workflow.constraints",
         ],
         inputs=[
             WorkflowInputSpec(
                 id="fault_polylines",
-                name="断层/隔挡折线",
+                name="断层折线（工程 CRS）",
                 cardinality=InputCardinality.ZERO_OR_MORE,
                 required=False,
-                role=InputRole.CONSTRAINT,
+                role=InputRole.PRIMARY,
+                source_evidence=[
+                    _ev(
+                        "paleo_workbench.workflow.stratigraphy_models",
+                        "FaultTrace",
+                    )
+                ],
             )
         ],
         operations=[
             WorkflowOperationStep(
-                id="edit_break",
-                name="编辑隔挡线",
-                user_action="在制备页绘制/导入断层折线",
-                software_action="写入 ConstraintLayers；插值时作为 fault_polylines",
-            )
+                id="edit_fault",
+                name="编辑断层轨迹",
+                user_action="绘制/导入断层折线到工作副本",
+                software_action="维护 FaultInterpretationDraft（copy-on-edit）",
+            ),
+            WorkflowOperationStep(
+                id="save_fault_version",
+                name="保存断层版本",
+                user_action="保存断层解释版本",
+                software_action="写 .fault_interp.json；register_fault_interpretation_run",
+                datarun_operation="fault_interpretation",
+                executor_ref="paleo_workbench.workflow.fault_lifecycle.save_fault_draft",
+            ),
         ],
         outputs=[
             WorkflowOutputSpec(
-                id="constraints",
-                name="约束几何",
-                versioned=False,
+                id="fault_version",
+                name="断层解释版本",
+                asset_kind="fault_interpretation",
+                format="json",
+                data_stage="derived",
+                versioned=True,
                 persistent=True,
-                output_class="intermediate",
-                scientific_meaning="参与插值指纹的几何约束（非完整断层模型）",
+                output_class="scientific",
+                scientific_meaning="工程 CRS 下的断层折线（非屏幕坐标；非完整断距模型）",
+                downstream_usage=["factor_interpolation"],
             )
         ],
         upstream_contract_ids=["data_import", "seismic_volume"],
         downstream_contract_ids=["factor_interpolation"],
+        datarun_operations=["fault_interpretation"],
         expert_questions=[
             _q(
                 "eq-fault-throw",
                 mid,
                 ExpertQuestionCategory.GEOLOGICAL_RULE,
                 "单因素插值是否必须使用带断距的三维断层模型，"
-                "还是平面 break 折线已满足当前编图规范？",
-                "约束 IDW 使用 fault_polylines 几何；未强制断距场。",
+                "还是平面 break/fault 折线已满足当前编图规范？",
+                "FaultTrace 为平面折线；ConstraintLine break 参与 IDW；无断距场硬门禁。",
                 "决定构造复杂区单因素是否合格。",
                 "隔挡效果可能不符合地质规范。",
                 evidence=[
+                    _ev("paleo_workbench.workflow.stratigraphy_models", "FaultTrace"),
                     _ev("paleo_workbench.project.models", "ConstraintLine.role"),
-                    _ev("paleo_workbench.workflow.constraints"),
                 ],
             )
         ],

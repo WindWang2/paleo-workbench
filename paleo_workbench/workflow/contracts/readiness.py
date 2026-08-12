@@ -135,8 +135,32 @@ def evaluate_contract_readiness(
             )
 
     # Module-specific soft checks
+    if contract.id == "well_correlation":
+        wells_n = counts.get("well_log", 0)
+        if wells_n < 2:
+            reasons.append(
+                ReadinessReason(
+                    code="need_two_wells",
+                    message_zh="连井对比至少需要 2 口井",
+                    severity="block",
+                )
+            )
+        # Depth domain mismatch among saved correlation products (metadata)
+        for ref in getattr(project, "correlation_interpretations", None) or []:
+            # cannot load artifact here; if multiple domains stored as field only one
+            pass
+
     if contract.id == "factor_interpolation":
         tasks = getattr(project, "factor_map_tasks", None) or []
+        # Prefer framework/horizon from correlation or horizon interpretations
+        if not any((getattr(t, "target_horizon", None) or "").strip() for t in tasks):
+            from paleo_workbench.workflow.correlation_lifecycle import (
+                resolve_correlation_target_horizon,
+            )
+
+            if resolve_correlation_target_horizon(project):
+                # resolved string available for new factor tasks — not a block
+                pass
         if not tasks:
             reasons.append(
                 ReadinessReason(

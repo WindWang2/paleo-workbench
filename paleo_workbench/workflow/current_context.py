@@ -195,6 +195,56 @@ def resolve_current_project_version_context(
                 generator_version="horizon-interp-v1",
             )
 
+    # 2b. Multi-well correlation interpretation current versions (Stage 12)
+    for ref in getattr(project, "correlation_interpretations", None) or []:
+        vid = getattr(ref, "current_version_id", None)
+        if not vid:
+            continue
+        if cat is not None:
+            ver = cat.resolve_version(vid)
+            if ver is not None:
+                ctx.select(ver.asset_id, vid, label=getattr(ref, "name", "") or "")
+                ctx.mark_domain_product_current(
+                    str(getattr(ref, "id", "") or ""), vid
+                )
+            else:
+                ctx.selected_version_ids.add(vid)
+                ctx.labels[vid] = getattr(ref, "name", "") or vid
+        else:
+            ctx.selected_version_ids.add(vid)
+        fp = getattr(ref, "scientific_fingerprint", "") or ""
+        if fp:
+            ctx.set_expected_identity(
+                str(getattr(ref, "id", "") or vid),
+                input_snapshot_hash=fp,
+                generator_version="strat-corr-v1",
+            )
+
+    # 2c. Fault interpretation current versions
+    for ref in getattr(project, "fault_interpretations", None) or []:
+        vid = getattr(ref, "current_version_id", None)
+        if not vid:
+            continue
+        if cat is not None:
+            ver = cat.resolve_version(vid)
+            if ver is not None:
+                ctx.select(ver.asset_id, vid, label=getattr(ref, "name", "") or "")
+                ctx.mark_domain_product_current(
+                    str(getattr(ref, "id", "") or ""), vid
+                )
+            else:
+                ctx.selected_version_ids.add(vid)
+                ctx.labels[vid] = getattr(ref, "name", "") or vid
+        else:
+            ctx.selected_version_ids.add(vid)
+        fp = getattr(ref, "scientific_fingerprint", "") or ""
+        if fp:
+            ctx.set_expected_identity(
+                str(getattr(ref, "id", "") or vid),
+                input_snapshot_hash=fp,
+                generator_version="fault-interp-v1",
+            )
+
     # 3. Factor map product pointers + expected scientific identity.
     # Project pointer is the authoritative "current" product; other historical
     # factor assets must not remain selected (adapter creates one asset per run).
