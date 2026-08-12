@@ -577,10 +577,24 @@ def test_fault_input_stales_factor_run(tmp_path: Path, catalog):
 
 
 def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
+    """Production path: real WellLogData → markers → adapt_well_log_data plan."""
+    import numpy as np
+
+    from paleo_workbench.viz.welllog_engine_adapter import adapt_well_log_data
     from paleo_workbench.workflow.correlation_overlay import (
+        WellLogDataWithMarkers,
         apply_correlation_tops_to_well_log_data,
         formation_tops_overlay_for_well,
     )
+
+    # Prefer real geoviz WellLogData when packages are on PYTHONPATH
+    try:
+        from geoviz_well_log.models import CurveData, WellLogData
+    except Exception:
+        try:
+            from geoviz import CurveData, WellLogData  # type: ignore
+        except Exception:
+            pytest.skip("geoviz WellLogData not importable in this env")
 
     project = ProjectDocument.new("O")
     project.meta.project_root = str(tmp_path)
@@ -596,7 +610,6 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
     )
     ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
     assert msg == "ok"
-    # Fix artifact path to absolute under demo.artifacts for overlay load
     arts = list((tmp_path / "demo.artifacts").rglob("*.correlation.json"))
     assert arts
     project.correlation_interpretations[0].artifact_path = arts[0].as_posix()
@@ -606,15 +619,104 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
     )
     assert any(r["marker"] == "H1" and r["depth"] == 50.0 for r in rows)
 
-    class _Data:
-        well_name = "W0"
-
-    data = _Data()
-    apply_correlation_tops_to_well_log_data(
-        data, project, well_id="well-0", project_path=proj_path
+    depth = np.asarray([0.0, 25.0, 50.0, 75.0, 100.0], dtype=np.float64)
+    values = np.asarray([10.0, 20.0, 30.0, 40.0, 50.0], dtype=np.float64)
+    curve = CurveData(name="GR", unit="API", depth=depth, values=values)
+    raw = WellLogData(
+        well_name="W0", top_depth=0.0, bottom_depth=100.0, curves=[curve]
     )
-    assert getattr(data, "correlation_tops", None)
-    assert data.correlation_tops[0]["depth"] == 50.0
+    # Real model rejects unknown fields
+    with pytest.raises((ValueError, TypeError, AttributeError)):
+        raw.markers = []  # type: ignore[attr-defined]
+
+    wrapped = apply_correlation_tops_to_well_log_data(
+        raw, project, well_id="well-0", project_path=proj_path
+    )
+    assert isinstance(wrapped, WellLogDataWithMarkers)
+    assert wrapped.markers
+    assert any(m.depth == 50.0 and m.label == "H1" for m in wrapped.markers)
+    # Still exposes curve data to adapter
+    assert wrapped.well_name == "W0"
+    assert len(wrapped.curves) == 1
+
+    plan = adapt_well_log_data(wrapped)
+    assert plan.markers, "adapt_well_log_data must pick up markers"
+    assert any(
+        abs(m.depth - 50.0) < 1e-9 and "H1" in (m.label or "")
+        for m in plan.markers
+    )
+
+
+def test_well_log_host_apply_calls_overlay(tmp_path: Path, catalog, monkeypatch, qtbot):
+    """well_log_host.apply runs overlay when project is bound (real Qt host)."""
+    import numpy as np
+
+    from paleo_workbench.viz.hosts.well_log_host import WellLogHost
+    from paleo_workbench.viz.models import VizPayload
+    from paleo_workbench.workflow.correlation_overlay import WellLogDataWithMarkers
+
+    try:
+        from geoviz_well_log.models import CurveData, WellLogData
+    except Exception:
+        try:
+            from geoviz import CurveData, WellLogData  # type: ignore
+        except Exception:
+            pytest.skip("geoviz WellLogData not importable")
+
+    project = ProjectDocument.new("H")
+    project.meta.project_root = str(tmp_path)
+    proj_path = _proj_path(tmp_path)
+    wells = _well_versions(catalog, 1)
+    draft = new_correlation_draft(
+        well_resource_ids=["well-0"],
+        well_version_ids=wells,
+        tops=[FormationTop(well_id="well-0", well_name="W0", marker="TopA", depth=12.5)],
+    )
+    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    assert msg == "ok"
+    arts = list((tmp_path / "demo.artifacts").rglob("*.correlation.json"))
+    project.correlation_interpretations[0].artifact_path = arts[0].as_posix()
+
+    monkeypatch.setattr(
+        "paleo_workbench.viz.welllog_engine_adapter.welllog_engine_env_enabled",
+        lambda: False,
+    )
+    # Legacy path: force empty tracks so apply stays light
+    monkeypatch.setattr(
+        "paleo_workbench.viz.hosts.well_log_host.build_qpainter_tracks",
+        lambda data: [],
+    )
+
+    host = WellLogHost()
+    qtbot.addWidget(host.widget)
+    host.set_project(project, project_path=proj_path)
+    depth = np.asarray([0.0, 10.0, 20.0], dtype=np.float64)
+    values = np.asarray([1.0, 2.0, 3.0], dtype=np.float64)
+    data = WellLogData(
+        well_name="W0",
+        top_depth=0.0,
+        bottom_depth=20.0,
+        curves=[CurveData(name="GR", unit="API", depth=depth, values=values)],
+    )
+    # Spy real overlay by wrapping it
+    import paleo_workbench.workflow.correlation_overlay as ov
+
+    seen: list = []
+    real_apply = ov.apply_correlation_tops_to_well_log_data
+
+    def spy(data, project, **kw):
+        out = real_apply(data, project, **kw)
+        seen.append(out)
+        return out
+
+    # apply() imports from correlation_overlay inside the method body
+    monkeypatch.setattr(ov, "apply_correlation_tops_to_well_log_data", spy)
+
+    ok = host.apply(VizPayload(kind="well_log", label="t", well_log=data))
+    assert ok
+    assert seen, "overlay must run on host.apply"
+    assert isinstance(seen[-1], WellLogDataWithMarkers)
+    assert any(m.label == "TopA" and abs(m.depth - 12.5) < 1e-9 for m in seen[-1].markers)
 
 
 def test_resolve_default_target_horizon_used_by_mock_factor():

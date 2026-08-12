@@ -298,6 +298,11 @@ class WellLogHost:
         self._update_track_bar()
         return True
 
+    def set_project(self, project, project_path=None) -> None:
+        """Optional project binding for Stage-12 correlation top overlays."""
+        self._project = project
+        self._project_path = project_path
+
     def apply(self, payload: VizPayload) -> bool:
         data = payload.well_log
         if data is None and payload.well_logs:
@@ -305,6 +310,23 @@ class WellLogHost:
         if data is None:
             self.clear()
             return False
+
+        # Stage-12: inject selected correlation interpretation tops as markers
+        project = getattr(self, "_project", None)
+        if project is not None:
+            try:
+                from paleo_workbench.workflow.correlation_overlay import (
+                    apply_correlation_tops_to_well_log_data,
+                )
+
+                data = apply_correlation_tops_to_well_log_data(
+                    data,
+                    project,
+                    well_name=str(getattr(data, "well_name", "") or ""),
+                    project_path=getattr(self, "_project_path", None),
+                )
+            except Exception:
+                pass
 
         if engine_adapter.welllog_engine_env_enabled() and self._show_engine(data):
             return True
