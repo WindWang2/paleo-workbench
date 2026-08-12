@@ -151,6 +151,13 @@ class VisualizationWorkspace(QFrame):
         # Empty map → auto; otherwise lock to the chosen facies level.
         self.map_host.set_level(value or AUTO_LEVEL)
 
+    def set_project(self, project, project_path=None) -> None:
+        """Bind project for Stage-12 well-log correlation top overlays.
+
+        Production path: VisualizationPage.update_state → here → well_host.
+        """
+        self.well_host.set_project(project, project_path=project_path)
+
     def update_state(self, prediction_tasks: list | tuple | None) -> None:
         """Legacy mock fallback when no explicit VizRef is open."""
         task = active_prediction_task(prediction_tasks)

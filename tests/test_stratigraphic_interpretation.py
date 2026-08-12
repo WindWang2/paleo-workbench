@@ -647,11 +647,18 @@ def test_well_log_overlay_from_correlation(tmp_path: Path, catalog):
     )
 
 
-def test_well_log_host_apply_calls_overlay(tmp_path: Path, catalog, monkeypatch, qtbot):
-    """well_log_host.apply runs overlay when project is bound (real Qt host)."""
+def test_visualization_workspace_binds_project_for_overlay(
+    tmp_path: Path, catalog, monkeypatch, qtbot
+):
+    """Production path: workspace/page set_project → well_host overlay on apply.
+
+    Must not hand-call well_host.set_project; only VisualizationWorkspace API.
+    """
     import numpy as np
 
-    from paleo_workbench.viz.hosts.well_log_host import WellLogHost
+    from paleo_workbench.ui.pages.composite_visualization_panel import (
+        VisualizationWorkspace,
+    )
     from paleo_workbench.viz.models import VizPayload
     from paleo_workbench.workflow.correlation_overlay import WellLogDataWithMarkers
 
@@ -687,9 +694,13 @@ def test_well_log_host_apply_calls_overlay(tmp_path: Path, catalog, monkeypatch,
         lambda data: [],
     )
 
-    host = WellLogHost()
-    qtbot.addWidget(host.widget)
-    host.set_project(project, project_path=proj_path)
+    workspace = VisualizationWorkspace()
+    qtbot.addWidget(workspace)
+    # Production binder only — never host.set_project in this test
+    workspace.set_project(project, project_path=proj_path)
+    assert workspace.well_host._project is project  # noqa: SLF001
+    assert workspace.well_host._project_path == proj_path  # noqa: SLF001
+
     depth = np.asarray([0.0, 10.0, 20.0], dtype=np.float64)
     values = np.asarray([1.0, 2.0, 3.0], dtype=np.float64)
     data = WellLogData(
@@ -698,7 +709,6 @@ def test_well_log_host_apply_calls_overlay(tmp_path: Path, catalog, monkeypatch,
         bottom_depth=20.0,
         curves=[CurveData(name="GR", unit="API", depth=depth, values=values)],
     )
-    # Spy real overlay by wrapping it
     import paleo_workbench.workflow.correlation_overlay as ov
 
     seen: list = []
@@ -709,14 +719,28 @@ def test_well_log_host_apply_calls_overlay(tmp_path: Path, catalog, monkeypatch,
         seen.append(out)
         return out
 
-    # apply() imports from correlation_overlay inside the method body
     monkeypatch.setattr(ov, "apply_correlation_tops_to_well_log_data", spy)
 
-    ok = host.apply(VizPayload(kind="well_log", label="t", well_log=data))
-    assert ok
-    assert seen, "overlay must run on host.apply"
+    # Production apply path through workspace.load_payload → well_host.apply
+    workspace.load_payload(VizPayload(kind="well_log", label="t", well_log=data))
+    assert seen, "overlay must run on workspace→well_host.apply after set_project"
     assert isinstance(seen[-1], WellLogDataWithMarkers)
     assert any(m.label == "TopA" and abs(m.depth - 12.5) < 1e-9 for m in seen[-1].markers)
+
+
+def test_visualization_page_update_state_binds_well_host_project(qtbot):
+    """VisualizationPage.update_state must forward project to composite well_host."""
+    from paleo_workbench.ui.pages.visualization_page import VisualizationPage
+
+    page = VisualizationPage()
+    qtbot.addWidget(page)
+    project = ProjectDocument.new("PageBind")
+    project.meta.project_root = "/tmp/stage12-page-bind"
+    page.update_state([], [], [], project=project)
+    assert page.composite_panel.well_host._project is project  # noqa: SLF001
+    assert page.composite_panel.well_host._project_path == Path(  # noqa: SLF001
+        "/tmp/stage12-page-bind/project.paleo.json"
+    )
 
 
 def test_resolve_default_target_horizon_used_by_mock_factor():

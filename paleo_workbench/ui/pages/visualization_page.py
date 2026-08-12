@@ -148,6 +148,12 @@ class VisualizationPage(QWidget):
         self._preview_controller.set_project_root(
             project_root_text if project_root_text and project_root_text != "." else None
         )
+        # Stage-12: bind project into composite well-log host so correlation
+        # tops overlay on the main visualization well-log tab.
+        project_path = None
+        if project_root_text and project_root_text != ".":
+            project_path = Path(project_root_text) / "project.paleo.json"
+        self.composite_panel.set_project(project, project_path=project_path)
 
         self.summary_panel.update_state(
             self._resources, self._prediction_tasks, self._map_documents
