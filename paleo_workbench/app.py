@@ -297,7 +297,7 @@ class PaleoWorkbenchWindow(QWidget):
         )
         self._update_status_context()
         steps = home_workflow_steps(self.project)
-        self.app_shell.update_home_page(state, steps)
+        self.app_shell.update_home_page(state, steps, project=self.project)
         self.app_shell.update_data_page(
             state,
             self.project.resources,

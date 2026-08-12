@@ -261,10 +261,14 @@ class AppShell(QWidget):
     def set_project_name(self, name: str) -> None:
         self.status_bar.set_project_name(name)
 
-    def update_home_page(self, state: dict, steps: list) -> None:
+    def update_home_page(self, state: dict, steps: list, project=None) -> None:
         home = self.page_stack.widget(PAGE_INDEX_HOME)
         if hasattr(home, "update_state"):
-            home.update_state(state, steps)
+            # Optional project enables Stage-11 readiness on the contract panel.
+            try:
+                home.update_state(state, steps, project=project)
+            except TypeError:
+                home.update_state(state, steps)
 
     def update_data_page(
         self,
