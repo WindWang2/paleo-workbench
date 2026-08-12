@@ -140,7 +140,7 @@ class WorkflowController:
     def _on_qc_reports_updated(self) -> None:
         state = dashboard_state(self.window.project)
         steps = home_workflow_steps(self.window.project)
-        self.window.app_shell.update_home_page(state, steps)
+        self.window.app_shell.update_home_page(state, steps, project=self.window.project)
         self.window.app_shell.update_review_export_page(
             active_quality_reports(self.window.project),
             self.window.project.paleomap_documents,
@@ -180,7 +180,7 @@ class WorkflowController:
         """Refresh seismic / visualization / home after a new facies task."""
         state = dashboard_state(self.window.project)
         steps = home_workflow_steps(self.window.project)
-        self.window.app_shell.update_home_page(state, steps)
+        self.window.app_shell.update_home_page(state, steps, project=self.window.project)
         self.window.app_shell.update_seismic_prediction_page(
             self.window.project.prediction_tasks, project=self.window.project
         )
@@ -234,13 +234,13 @@ class WorkflowController:
         )
         state = dashboard_state(self.window.project)
         steps = home_workflow_steps(self.window.project)
-        self.window.app_shell.update_home_page(state, steps)
+        self.window.app_shell.update_home_page(state, steps, project=self.window.project)
 
     def _on_stratigraphy_updated(self) -> None:
         """Re-push stratigraphy-bound pages after sequence scheme save/target change."""
         state = dashboard_state(self.window.project)
         steps = home_workflow_steps(self.window.project)
-        self.window.app_shell.update_home_page(state, steps)
+        self.window.app_shell.update_home_page(state, steps, project=self.window.project)
         self.window.app_shell.update_sequence_framework_page(
             self.window.project.stratigraphy
         )

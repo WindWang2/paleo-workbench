@@ -8,6 +8,7 @@ from paleo_workbench.ui.pages.activity_card import RecentActivityCard
 from paleo_workbench.ui.pages.completeness_card import DataCompletenessCard
 from paleo_workbench.ui.pages.workflow_progress import WorkflowProgress
 from paleo_workbench.ui.pages.module_relationship import ModuleRelationshipWidget, LegendWidget
+from paleo_workbench.ui.pages.workflow_contract_panel import WorkflowContractPanel
 
 
 class HomePage(QWidget):
@@ -75,12 +76,40 @@ class HomePage(QWidget):
         bottom.setSpacing(tokens.SPACE_3)
         self.activity_card = RecentActivityCard()
         self.completeness_card = DataCompletenessCard()
+        self.contract_panel = WorkflowContractPanel()
+        self.contract_panel.setMinimumWidth(280)
+        self.contract_panel.setMaximumHeight(320)
         bottom.addWidget(self.activity_card, 1)
+        bottom.addWidget(self.contract_panel, 1)
         bottom.addWidget(self.completeness_card, 0)
         layout.addLayout(bottom, 0)
+        self._project = None
 
-    def update_state(self, state: dict, steps: list) -> None:
+    def update_state(self, state: dict, steps: list, project=None) -> None:
         self.workflow_progress.update_steps(steps)
         self.relationship_widget.update_states(steps)
         self.activity_card.update_state(state, steps)
         self.completeness_card.update_state(state)
+        if project is not None:
+            self._project = project
+        if self._project is not None:
+            self.contract_panel.set_project(self._project)
+            # Map first incomplete/stale-ish step to a contract if possible
+            step_to_contract = {
+                "data_check": "data_import",
+                "factor_map": "factor_interpolation",
+                "prediction": "facies_prediction",
+                "map_compile": "paleomap_compile",
+                "qc": "quality_control",
+                "export": "export",
+            }
+            for step in steps:
+                cid = step_to_contract.get(getattr(step, "step_type", ""))
+                if cid and getattr(step, "status", "") in {
+                    "pending",
+                    "stale",
+                    "running",
+                    "warning",
+                }:
+                    self.contract_panel.set_contract_id(cid)
+                    break
