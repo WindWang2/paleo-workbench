@@ -73,6 +73,9 @@ def resolve_prediction_inputs(project: ProjectDocument, service) -> list[str]:
     version. Factor-map tasks resolve through their registered runs (output
     versions, or propagated inputs for in-memory-only results). Degrades to an
     empty list when nothing is registered yet.
+
+    Prefer :func:`resolve_inputs_for_model` when a ModelVersion is known so
+    DataRun inputs match the model's declared schema (Stage 13).
     """
     from paleo_workbench.catalog.lifecycle import _versions_for_domain_tasks
 
@@ -91,6 +94,20 @@ def resolve_prediction_inputs(project: ProjectDocument, service) -> list[str]:
             seen.add(version_id)
             input_ids.append(version_id)
     return input_ids
+
+
+def resolve_inputs_for_model(
+    project: ProjectDocument,
+    service,
+    model_version_id: str,
+    *,
+    strict: bool = True,
+) -> list[str]:
+    """Schema-driven input resolution for a registered model version (Stage 13)."""
+    from paleo_workbench.prediction.input_contract import resolve_model_inputs
+
+    model_version = service.get_model_version_by_id(model_version_id)
+    return resolve_model_inputs(project, service, model_version, strict=strict)
 
 
 def _resolve_resource_version_id(service, resource_id: str) -> str | None:
@@ -223,6 +240,24 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "model_version": model_version,
         }
 
+    # Stage-13: validate spatial output when the model declares a spatial schema.
+    from paleo_workbench.prediction.spatial_result import (
+        SpatialResultError,
+        validate_spatial_result,
+    )
+
+    expected = (model_version.output_schema or {}).get("spatial_output_type")
+    if expected and str(expected) not in ("", "NONE"):
+        spatial_errors = validate_spatial_result(result, expected_type=str(expected))
+        if spatial_errors:
+            _fail_run(service, run_id, SpatialResultError("; ".join(spatial_errors)))
+            return {
+                "run": service.get_run(run_id),
+                "result": None,
+                "model": model,
+                "model_version": model_version,
+            }
+
     payload = {
         "schema_version": "1.0",
         "model": {
@@ -333,7 +368,12 @@ def materialize_prediction_task(
     ``model_metadata``. Does NOT append to the project — the caller owns the
     project object.
     """
-    result_summary = dict(payload.get("result_summary") or {})
+    try:
+        from paleo_workbench.prediction.spatial_result import bounded_result_summary
+
+        result_summary = bounded_result_summary(payload)
+    except Exception:
+        result_summary = dict(payload.get("result_summary") or {})
     model = payload.get("model") or {}
     adapter_kind = payload.get("adapter_kind") or (
         "mock" if result_summary.get("is_mock") else "local"

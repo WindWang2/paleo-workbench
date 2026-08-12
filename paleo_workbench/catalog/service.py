@@ -1133,6 +1133,9 @@ class DataCatalogService:
         This is the sanctioned production-promotion act: nothing else
         (including ``ensure_default_models`` seeds) may silently downgrade
         it afterwards (review finding C2).
+
+        Stage-13 safety: Demo/heuristic providers and ``demo_only`` versions
+        cannot be promoted (prevents fabricated science via status flip).
         """
         with self._lock:
             model = self._model_or_raise(model_id)
@@ -1146,6 +1149,12 @@ class DataCatalogService:
                 raise CatalogError(
                     f"ModelVersion {model_id}@{model_version} not registered"
                 )
+            # Safety gates (Stage 13): never promote demo/heuristic into production.
+            from paleo_workbench.prediction.model_package import can_promote_to_production
+
+            ok, reason = can_promote_to_production(self, model_id, model_version)
+            if not ok:
+                raise CatalogError(f"Cannot promote to production: {reason}")
             model.status = "production"
             version.status = "production"
             version.demo_only = False
