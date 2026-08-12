@@ -442,6 +442,26 @@ def persist_factor_grid_artifacts(
         has_inline = parameters.get("grid_z") is not None
         if not has_inline and not has_live:
             continue
+        # Catalog registration rehomes the path under intermediate/ and stamps
+        # grid_artifact_version_id. A follow-up save must not rewrite NPZ into
+        # factor_maps and clear that version linkage.
+        existing_path = getattr(task, "grid_artifact_path", None)
+        existing_version = getattr(task, "grid_artifact_version_id", None)
+        if (
+            has_live
+            and existing_path
+            and existing_version
+            and not has_inline
+            and Path(existing_path).is_file()
+        ):
+            try:
+                identity = artifact_file_identity(existing_path)
+            except OSError:
+                identity = None
+            with _LIVE_FACTOR_GRIDS_LOCK:
+                if task_id in _LIVE_FACTOR_GRIDS:
+                    _LIVE_ARTIFACT_IDENTITY[task_id] = identity
+            continue
         result = factor_grid_result_for_task(
             task, crs=project.coordinate.project_crs or None
         )
