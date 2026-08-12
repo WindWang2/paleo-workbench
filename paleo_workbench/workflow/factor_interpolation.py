@@ -17,6 +17,11 @@ Stage-3 artifact-first ownership:
 * Project save externalises the live grid to a managed NPZ artifact; reopen
   uses a warm artifact-backed cache.
 * Legacy inline ``parameters[grid_*]`` remains a **read/migrate** path only.
+
+Stage-4 incremental recompute:
+* Deterministic scientific fingerprints decide CLEAN vs DIRTY.
+* ``batch_prepare_factor_maps(..., force=False)`` skips CLEAN tasks.
+* NO CHANGE ⇒ no interpolation, no new artifact rewrite on save of clean outputs.
 """
 
 from __future__ import annotations
@@ -56,6 +61,15 @@ from paleo_workbench.workflow.factor_grid_result import (
     encode_legacy_axis_list,
     encode_legacy_grid_lists,
 )
+from paleo_workbench.workflow.interpolation_fingerprint import (
+    FactorDirtyState,
+    FactorFingerprints,
+    classify_factor_recompute,
+    fingerprints_for_task,
+    plan_cache_get,
+    plan_cache_put,
+    stamp_fingerprints_on_task,
+)
 from paleo_workbench.workflow.interpolation_plan import (
     InterpolationPlan,
     apply_idw_plan,
@@ -64,6 +78,23 @@ from paleo_workbench.workflow.interpolation_plan import (
     extract_values_aligned,
     plan_key_from_arrays,
 )
+
+# Test / benchmark instrumentation: number of real interpolation executions.
+_INTERPOLATION_EXECUTIONS = 0
+
+
+def reset_interpolation_execution_counter() -> None:
+    global _INTERPOLATION_EXECUTIONS
+    _INTERPOLATION_EXECUTIONS = 0
+
+
+def interpolation_execution_count() -> int:
+    return int(_INTERPOLATION_EXECUTIONS)
+
+
+def _count_interpolation_execution() -> None:
+    global _INTERPOLATION_EXECUTIONS
+    _INTERPOLATION_EXECUTIONS += 1
 
 GENERATOR_VERSION = "factor-interp-v1"
 DEFAULT_FACTOR_TYPES = ("地层厚度", "砂岩含量", "砂地比", "泥岩含量")
@@ -136,6 +167,7 @@ def _attach_result_to_task(
     grid_n: int,
     breaks: list | None,
     engine_method: str,
+    fingerprints: FactorFingerprints | None = None,
 ) -> FactorMapTask:
     """Write live cache + small metadata onto *task* (no full-grid lists).
 
@@ -158,6 +190,10 @@ def _attach_result_to_task(
             )
             grid_result.grid_x = gx
             grid_result.grid_y = gy
+
+    if fingerprints is not None:
+        for key, value in fingerprints.to_dict().items():
+            grid_result.algorithm_parameters[key] = value
 
     clear_live_factor_grid(task.id)
     store_live_factor_grid(task.id, grid_result)
@@ -216,15 +252,20 @@ def _attach_result_to_task(
     if result.get("variance_min") is not None:
         task.quality_metrics["variance_min"] = round(result["variance_min"], 4)
         task.quality_metrics["variance_max"] = round(result["variance_max"], 4)
-    snapshot = {
-        "target_horizon": task.target_horizon,
-        "factor_type": task.factor_type,
-        "method": task.method,
-        "generator_version": GENERATOR_VERSION,
-        "sample_points": points,
-        "grid_n": grid_n,
-    }
-    task.input_snapshot_hash = _snapshot_hash(snapshot)
+    if fingerprints is not None:
+        stamp_fingerprints_on_task(task, fingerprints)
+    else:
+        # Fallback: legacy-style hash (should be rare; callers pass fingerprints).
+        snapshot = {
+            "target_horizon": task.target_horizon,
+            "factor_type": task.factor_type,
+            "method": task.method,
+            "generator_version": GENERATOR_VERSION,
+            "sample_points": points,
+            "grid_n": grid_n,
+            "power": power,
+        }
+        task.input_snapshot_hash = _snapshot_hash(snapshot)
     return task
 
 
@@ -280,6 +321,22 @@ def apply_interpolation_to_task(
 
     engine_method = METHOD_LABEL_TO_ENGINE.get(method, method)
     crs = project.coordinate.project_crs if project is not None else None
+    directions = (
+        direction_line_params(layers, target_horizon=task.target_horizon)
+        if layers is not None
+        else None
+    )
+    fps = fingerprints_for_task(
+        task,
+        project=project,
+        method=method,
+        grid_n=grid_n,
+        power=power,
+        fault_polylines=breaks,
+        generator_version=GENERATOR_VERSION,
+    )
+
+    _count_interpolation_execution()
 
     # --- plan-backed plain IDW (geometry shared across factors) ---------------
     if plan is not None and engine_method in ("IDW", "idw", "mock"):
@@ -309,6 +366,7 @@ def apply_interpolation_to_task(
             grid_n=grid_n,
             breaks=breaks,
             engine_method="IDW",
+            fingerprints=fps,
         )
 
     if engine_method == CONSTRAINED_IDW_ENGINE_LABEL:
@@ -358,6 +416,7 @@ def apply_interpolation_to_task(
         grid_n=grid_n,
         breaks=breaks,
         engine_method=engine_method,
+        fingerprints=fps,
     )
 
 
@@ -403,16 +462,20 @@ def batch_prepare_factor_maps(
     grid_n: int = DEFAULT_GRID_N,
     seed: int = 0,
     power: float = 2.0,
+    force: bool = False,
     cancellation_token=None,
 ) -> list[FactorMapTask]:
     """Run real interpolation for existing tasks or create default factor maps.
 
-    - Existing tasks with sample_points are re-interpolated with the chosen method.
-    - When the project has no factor tasks, creates DEFAULT_FACTOR_TYPES entries
-      (or ``factor_types``) with synthetic samples, then interpolates.
-    - Plain-IDW tasks that share source XY + grid config build one
-      :class:`InterpolationPlan` and apply values per factor.
-    - Returns the list of tasks that were prepared in this call.
+    Stage-4 incremental behaviour (``force=False``, default):
+    * build scientific fingerprints per task;
+    * skip CLEAN tasks (no interpolation, artifact left intact);
+    * recompute only DIRTY / MISSING / UNKNOWN tasks;
+    * dirty plain-IDW tasks still share :class:`InterpolationPlan` / multi-value path.
+
+    ``force=True`` recomputes every prepared task (debug / migration escape hatch).
+
+    Returns the list of tasks considered by this call (clean + dirty).
     """
     horizon = (
         target_horizon
@@ -458,9 +521,30 @@ def batch_prepare_factor_maps(
                 task.parameters = {**params, "sample_points": points}
             prepared.append(task)
 
-    # Group plain-IDW tasks that share geometry; others run independently.
-    groups: dict[str | None, list[FactorMapTask]] = defaultdict(list)
+    # --- Classify CLEAN vs DIRTY before any interpolation --------------------
+    dirty: list[FactorMapTask] = []
     for task in prepared:
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        fps = fingerprints_for_task(
+            task,
+            project=project,
+            method=method,
+            grid_n=grid_n,
+            power=power,
+            generator_version=GENERATOR_VERSION,
+        )
+        state = classify_factor_recompute(task, fps, force=force)
+        if state is FactorDirtyState.CLEAN:
+            continue
+        dirty.append(task)
+
+    if not dirty:
+        return prepared
+
+    # Group *dirty* plain-IDW tasks that share geometry; others run independently.
+    groups: dict[str | None, list[FactorMapTask]] = defaultdict(list)
+    for task in dirty:
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         gkey = _task_plan_group_key(
@@ -484,10 +568,29 @@ def batch_prepare_factor_maps(
                 breaks = break_polylines_for_idw(
                     layers, target_horizon=first.target_horizon
                 )
+            # Session plan cache keyed by geometry fingerprint of first dirty task.
+            geo_key = None
             try:
-                plan = build_idw_plan(pts, grid_n=grid_n, power=power, fault_polylines=breaks)
-            except ValueError:
+                geo_key = fingerprints_for_task(
+                    first,
+                    project=project,
+                    method=method,
+                    grid_n=grid_n,
+                    power=power,
+                    generator_version=GENERATOR_VERSION,
+                ).geometry
+                plan = plan_cache_get(geo_key)
+            except Exception:
                 plan = None
+            if plan is None:
+                try:
+                    plan = build_idw_plan(
+                        pts, grid_n=grid_n, power=power, fault_polylines=breaks
+                    )
+                    if geo_key:
+                        plan_cache_put(geo_key, plan)
+                except ValueError:
+                    plan = None
 
         # Multi-factor vectorised path: one distance/weight pass for the group.
         if (
@@ -515,6 +618,7 @@ def batch_prepare_factor_maps(
                 stack_rows.append(vals)
                 aligned_tasks.append(task)
             if aligned_tasks:
+                _count_interpolation_execution()
                 results = apply_idw_plan_multi(
                     plan,
                     np.stack(stack_rows, axis=0),
@@ -524,6 +628,14 @@ def batch_prepare_factor_maps(
                 for task, result in zip(aligned_tasks, results):
                     if cancellation_token is not None:
                         cancellation_token.raise_if_cancelled()
+                    fps = fingerprints_for_task(
+                        task,
+                        project=project,
+                        method=method,
+                        grid_n=grid_n,
+                        power=power,
+                        generator_version=GENERATOR_VERSION,
+                    )
                     grid_result = FactorGridResult.from_engine_dict(
                         {
                             **result,
@@ -546,6 +658,7 @@ def batch_prepare_factor_maps(
                         grid_n=grid_n,
                         breaks=plan.fault_polylines,
                         engine_method="IDW",
+                        fingerprints=fps,
                     )
             continue
 
