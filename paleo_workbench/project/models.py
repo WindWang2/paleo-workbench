@@ -167,6 +167,27 @@ class FactorMapTask(BaseModel):
     grid_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class HorizonInterpretationRef(BaseModel):
+    """Project-side reference to the current immutable horizon interpretation version.
+
+    Scientific payload lives in a managed ``.horizon_interp.npz`` artifact + catalog
+    DataVersion. Display fields (color/opacity) stay out of scientific fingerprints.
+    """
+
+    id: str = Field(default_factory=lambda: _id("interp"))
+    name: str
+    horizon_key: str
+    current_version_id: str | None = None
+    artifact_path: str | None = None
+    parent_version_id: str | None = None
+    status: str = "clean"  # clean | dirty | stale | invalid
+    vertical_domain: str = "time"
+    shape: list[int] = Field(default_factory=list)
+    source_version_ids: list[str] = Field(default_factory=list)
+    scientific_fingerprint: str = ""
+    display: dict[str, Any] = Field(default_factory=dict)
+
+
 class PredictionTask(BaseModel):
     id: str = Field(default_factory=lambda: _id("pred"))
     name: str
@@ -402,6 +423,7 @@ class ProjectDocument(BaseModel):
     contour_drafts: list[ContourDraft] = Field(default_factory=list)
     compilation_runs: list[CompilationRun] = Field(default_factory=list)
     factor_map_tasks: list[FactorMapTask] = Field(default_factory=list)
+    horizon_interpretations: list[HorizonInterpretationRef] = Field(default_factory=list)
     prediction_tasks: list[PredictionTask] = Field(default_factory=list)
     paleomap_documents: list[PaleoMapDocument] = Field(default_factory=list)
     quality_reports: list[QualityReport] = Field(default_factory=list)

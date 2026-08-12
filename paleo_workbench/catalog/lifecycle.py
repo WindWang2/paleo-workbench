@@ -236,6 +236,51 @@ def register_persisted_factor_grids(
     return registered
 
 
+def register_horizon_interpretation_run(
+    *,
+    name: str,
+    path: str,
+    checksum: str | None = None,
+    source_version_ids: list[str] | None = None,
+    parent_version_id: str | None = None,
+    scientific_fingerprint: str | None = None,
+    domain_task_id: str | None = None,
+    catalog: CatalogPort | None = None,
+) -> tuple[Any, DataVersionRef | None]:
+    """Register a horizon interpretation as DERIVED + lineage run.
+
+    RAW sources are never overwritten; each save produces a new immutable version.
+    """
+    cat = catalog or get_catalog()
+    if cat is None:
+        return None, None
+    inputs = list(source_version_ids or [])
+    if parent_version_id and parent_version_id not in inputs:
+        inputs.append(parent_version_id)
+    run = cat.begin_run(
+        operation="horizon_interpretation",
+        input_version_ids=inputs,
+        parameters={
+            "scientific_fingerprint": scientific_fingerprint,
+            "parent_version_id": parent_version_id,
+        },
+        generator_version="horizon-interp-v1",
+        domain_task_id=domain_task_id,
+        input_snapshot_hash=scientific_fingerprint,
+    )
+    version = cat.register_derived(
+        run_id=run.run_id,
+        name=name,
+        path=path,
+        checksum=checksum,
+        kind="horizon_interpretation",
+        format="npz",
+        tags=["interpretation", "horizon"],
+    )
+    cat.complete_run(run.run_id)
+    return run, version
+
+
 # --------------------------------------------------------------------- prediction
 def _versions_for_domain_tasks(
     task_ids: list[str],
