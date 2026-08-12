@@ -197,35 +197,73 @@ class WorkflowController:
     def _on_seismic_send_to_mapping(self) -> None:
         """Compile a map from the latest prediction and open 编图.
 
-        Prefer production spatial compile when the prediction carries real
-        polygon geometry; otherwise keep the explicit demo draft path
-        (never silently treat demo squares as production).
+        Production predictions with spatial geometry → production compiler.
+        Explicit Demo/mock tasks → demo draft only (never mixed).
+        Scientific/non-demo tasks without spatial geometry → BLOCK
+        (never silently fall through to fake squares).
         """
         if not self.window.project.prediction_tasks:
             QMessageBox.information(self.window, "发送编图", "请先运行地震预测")
             return
         task = self.window.project.prediction_tasks[-1]
-        used_production = False
-        try:
-            from paleo_workbench.pipeline.compile_map_production import (
-                ProductionMapError,
-                compile_map_production,
-            )
-            from paleo_workbench.prediction.spatial_result import is_map_compilable
+        summary = dict(task.result_summary or {})
+        meta = dict(task.model_metadata or {})
+        is_demo_task = bool(
+            summary.get("demo")
+            or summary.get("is_mock")
+            or meta.get("demo")
+            or meta.get("demo_only")
+            or getattr(task, "adapter_kind", "") == "mock"
+        )
 
-            payload = {"result_summary": dict(task.result_summary or {})}
-            if is_map_compilable(payload):
+        from paleo_workbench.pipeline.compile_map_production import (
+            ProductionMapError,
+            compile_map_production,
+        )
+        from paleo_workbench.prediction.spatial_result import is_map_compilable
+
+        payload = {"result_summary": summary}
+        if is_demo_task:
+            # Explicit Demo path only.
+            compile_map_draft(self.window.project, seed=0)
+        elif is_map_compilable(payload):
+            try:
+                catalog_service = None
+                try:
+                    from paleo_workbench.catalog import get_catalog_service
+
+                    catalog_service = get_catalog_service()
+                except Exception:
+                    catalog_service = None
+                pred_vid = str(
+                    meta.get("prediction_version_id")
+                    or meta.get("output_version_id")
+                    or ""
+                ) or None
                 compile_map_production(
                     self.window.project,
                     prediction_task_id=task.id,
                     prediction_payload=payload,
+                    catalog_service=catalog_service,
+                    prediction_version_id=pred_vid,
                 )
-                used_production = True
-        except Exception:
-            used_production = False
-        if not used_production:
-            # Demo path only — labeled is_demo_draft in the document.
-            compile_map_draft(self.window.project, seed=0)
+            except ProductionMapError as exc:
+                QMessageBox.warning(
+                    self.window,
+                    "发送编图",
+                    f"生产编图失败（不会生成演示占位方块）:\n{exc}",
+                )
+                return
+        else:
+            QMessageBox.warning(
+                self.window,
+                "发送编图",
+                "当前预测结果无可编绘的平面空间几何。\n"
+                "井深区间或非空间结果不能自动变成古地理图；"
+                "也不会生成「未分类」占位方块。\n"
+                "请使用生产模型输出 VECTOR_POLYGONS，或通过「生成演示草稿」显式运行演示。",
+            )
+            return
         self.window.app_shell.update_mapping_page(
             self.window.project.paleomap_documents,
             factor_tasks=self.window.project.factor_map_tasks,

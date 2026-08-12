@@ -1048,7 +1048,7 @@ class DataCatalogService:
         runtime: str = "",
         deterministic: bool = True,
         demo_only: bool = False,
-        status: str = "production",
+        status: str = "demo",
         metadata: dict[str, Any] | None = None,
         provenance: dict[str, Any] | None = None,
     ) -> ModelVersion:
@@ -1057,8 +1057,17 @@ class DataCatalogService:
         When ``checksum`` is omitted and ``artifact_uri`` points at a readable
         file, the checksum is computed from it (streaming). A duplicate
         ``(model_id, model_version)`` pair raises :class:`CatalogError`.
+
+        Stage-13: default status is ``demo``. Requesting ``status="production"``
+        is rejected here — callers must use :meth:`promote_model` so demo/heuristic
+        safety gates cannot be bypassed.
         """
         self._model_or_raise(model_id)  # validate the model exists
+        if str(status) == "production":
+            raise CatalogError(
+                "register_model_version cannot set status=production; "
+                "register as demo then call promote_model()"
+            )
         if any(
             v.model_id == model_id and v.model_version == str(model_version)
             for v in self.document.model_versions
@@ -1084,7 +1093,7 @@ class DataCatalogService:
             runtime=runtime,
             deterministic=deterministic,
             demo_only=demo_only,
-            status=status,
+            status=status or "demo",
             metadata=dict(metadata or {}),
             provenance=dict(provenance or {}),
         )

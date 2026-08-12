@@ -111,7 +111,7 @@ class PredictionEvidencePanel(QFrame):
         # as 真实, and heuristic output is not a scientific prediction.
         if summary.get("is_mock"):
             nature = "Mock"
-        elif not summary.get("final_scientific_prediction", True):
+        elif not summary.get("final_scientific_prediction", False):
             nature = "启发式"
         else:
             nature = "科学预测"

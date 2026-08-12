@@ -193,8 +193,6 @@ class SeismicPredictionPage(QWidget):
             except InputContractError as exc:
                 QMessageBox.warning(self, "地震预测", f"输入不满足模型契约: {exc}")
                 return
-            except Exception:
-                input_ids = resolve_prediction_inputs(self._project, service)
         run = start_inference(
             service,
             model_version_id=model_version_id,
@@ -232,6 +230,7 @@ class SeismicPredictionPage(QWidget):
             for task in self._project.factor_map_tasks
             if getattr(task, "status", "") == "complete"
         ]
+        out_vids = list(getattr(run, "output_version_ids", None) or [])
         task = materialize_prediction_task(
             self._project,
             result,
@@ -243,6 +242,8 @@ class SeismicPredictionPage(QWidget):
                 or ""
             ),
             factor_map_ids=factor_ids,
+            run_id=str(getattr(run, "id", "") or ""),
+            output_version_id=str(out_vids[0]) if out_vids else "",
         )
         self._project.prediction_tasks.append(task)
         if self._inference_service is not None:

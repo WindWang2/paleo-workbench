@@ -117,14 +117,13 @@ def validate_spatial_result(
                 coords = geom.get("coordinates")
                 if not _has_finite_ring(coords):
                     errors.append(f"feature[{i}] has non-finite or empty coordinates")
-                # Reject known demo square origin as the sole "geometry"
+                # Reject known demo square origin (production must not launder squares).
                 if _looks_like_demo_square(coords):
-                    # Not an error by itself if model intentionally used that CRS,
-                    # but flag when ring matches the exact demo compiler constant box.
-                    pass
+                    errors.append(
+                        f"feature[{i}] matches demo fixed-square geometry (114/22.5)"
+                    )
         crs = (summary.get("spatial") or payload.get("spatial") or {}).get("crs")
         if not crs:
-            # Soft: warn as error for production maps that need CRS.
             errors.append("VECTOR_POLYGONS missing crs")
 
     elif stype == SPATIAL_WELL_INTERVALS:
@@ -142,8 +141,13 @@ def validate_spatial_result(
         spatial = summary.get("spatial") or payload.get("spatial") or {}
         if spatial.get("grid") is None and not spatial.get("artifact_path"):
             errors.append("CLASSIFIED_RASTER missing grid or artifact_path")
-        if not spatial.get("crs") and not spatial.get("geotransform"):
-            errors.append("CLASSIFIED_RASTER missing crs/geotransform")
+        if not spatial.get("crs"):
+            errors.append("CLASSIFIED_RASTER missing crs")
+        gt = spatial.get("geotransform")
+        if not spatial.get("artifact_path") and (
+            not isinstance(gt, (list, tuple)) or len(gt) != 6
+        ):
+            errors.append("CLASSIFIED_RASTER missing 6-element geotransform or artifact_path")
 
     return errors
 

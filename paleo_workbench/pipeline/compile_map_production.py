@@ -234,34 +234,96 @@ def _register_lineage(
     prediction_version_id: str | None,
     horizon: str,
 ) -> None:
-    """Best-effort map_compile DataRun via lifecycle when a catalog port exists."""
+    """Register map_compile DataRun + optional DERIVED paleomap version.
+
+    Uses:
+    1. explicit *service* when it is a DataCatalogService (tests/production),
+    2. otherwise CatalogPort via get_catalog() / register_map_compile_run.
+    """
+    input_ids: list[str] = []
+    if prediction_version_id:
+        input_ids.append(str(prediction_version_id))
+    source_task_ids = [task.id] if task is not None else []
+    params = {
+        "generator_version": PRODUCTION_MAP_GENERATOR,
+        "target_horizon": horizon,
+        "linked_prediction_task_id": doc.linked_prediction_task_id,
+        "_domain_task_id": doc.id,
+        "source_task_ids": source_task_ids,
+    }
+
+    payload = {
+        "id": doc.id,
+        "name": doc.name,
+        "linked_target_horizon": doc.linked_target_horizon,
+        "linked_prediction_task_id": doc.linked_prediction_task_id,
+        "facies_polygons": doc.facies_polygons,
+        "map_crs": doc.map_crs,
+        "view_state": doc.view_state,
+    }
+
+    # Path 1: DataCatalogService (has register_run + register_result_asset).
+    if service is not None and hasattr(service, "register_run") and hasattr(
+        service, "register_result_asset"
+    ):
+        tmp: Path | None = None
+        try:
+            from paleo_workbench.catalog.models import DataStage
+
+            fd, tmp_name = tempfile.mkstemp(prefix="paleomap_", suffix=".json")
+            tmp = Path(tmp_name)
+            with open(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False)
+            run = service.register_run(
+                operation="map_compile",
+                input_version_ids=input_ids,
+                parameters=params,
+                generator=PRODUCTION_MAP_GENERATOR,
+                status="running",
+            )
+            out = service.register_result_asset(
+                name=doc.name,
+                type="paleomap",
+                format="json",
+                asset_metadata={"kind": "paleomap", "production": True},
+                source_path=str(tmp),
+                stage=DataStage.DERIVED,
+                run_id=run.id,
+                version_metadata={
+                    "kind": "paleomap",
+                    "generator": PRODUCTION_MAP_GENERATOR,
+                    "production": True,
+                },
+            )
+            service.update_run_status(
+                run.id,
+                "complete",
+                extra_parameters={"output_version_id": out.id},
+            )
+            return
+        except Exception:
+            pass
+        finally:
+            if tmp is not None:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+
+    # Path 2: CatalogPort lifecycle helper.
     try:
         from paleo_workbench.catalog.lifecycle import register_map_compile_run
         from paleo_workbench.catalog import get_catalog
     except Exception:
         return
 
-    input_ids: list[str] = []
-    if prediction_version_id:
-        input_ids.append(prediction_version_id)
-    source_task_ids = [task.id] if task is not None else []
-
-    # Prefer catalog port if bound; DataCatalogService is not always the port.
     cat = get_catalog()
-    fd = None
-    tmp: Path | None = None
+    if cat is None:
+        return
+    tmp2: Path | None = None
     try:
-        payload = {
-            "id": doc.id,
-            "name": doc.name,
-            "linked_target_horizon": doc.linked_target_horizon,
-            "linked_prediction_task_id": doc.linked_prediction_task_id,
-            "facies_polygons": doc.facies_polygons,
-            "map_crs": doc.map_crs,
-            "view_state": doc.view_state,
-        }
         fd, tmp_name = tempfile.mkstemp(prefix="paleomap_", suffix=".json")
-        tmp = Path(tmp_name)
+        tmp2 = Path(tmp_name)
         with open(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False)
         register_map_compile_run(
@@ -269,19 +331,15 @@ def _register_lineage(
             input_version_ids=input_ids,
             source_task_ids=source_task_ids or None,
             domain_task_id=doc.id,
-            parameters={
-                "generator_version": PRODUCTION_MAP_GENERATOR,
-                "target_horizon": horizon,
-                "linked_prediction_task_id": doc.linked_prediction_task_id,
-            },
-            result_path=str(tmp),
+            parameters=params,
+            result_path=str(tmp2),
             catalog=cat,
         )
     except Exception:
         pass
     finally:
-        if tmp is not None:
+        if tmp2 is not None:
             try:
-                tmp.unlink()
+                tmp2.unlink()
             except OSError:
                 pass

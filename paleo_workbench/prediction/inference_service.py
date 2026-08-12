@@ -160,7 +160,7 @@ def start_inference(
     model_version_id: str,
     input_version_ids: list[str] | None = None,
     parameters: dict[str, Any] | None = None,
-    operation: str = "inference",
+    operation: str = "prediction",
     generator: str = INFERENCE_GENERATOR,
 ) -> DataRun:
     """Open a running inference DataRun bound to a registered model version.
@@ -174,9 +174,14 @@ def start_inference(
     params = dict(parameters or {})
     seed = int(params.get("seed", 0) or 0)
     input_ids = list(input_version_ids or [])
+    # Stage-13: computation identity includes model + preprocessing, not only inputs.
     snapshot = {
         "model_version_id": model_version_id,
+        "model_id": model.model_id,
+        "model_version": model_version.model_version,
         "input_version_ids": input_ids,
+        "preprocessing_version": getattr(model_version, "preprocessing_version", "") or "",
+        "artifact_checksum": getattr(model_version, "checksum", None) or "",
         "parameters": {k: v for k, v in params.items() if not k.startswith("_")},
     }
     run = service.register_run(
@@ -188,6 +193,7 @@ def start_inference(
             "model_version_id": model_version.id,
             "provider": model.provider,
             "demo_only": bool(model_version.demo_only),
+            "preprocessing_version": getattr(model_version, "preprocessing_version", "") or "",
             "seed": seed,
             "_input_snapshot_hash": _snapshot_hash(snapshot),
             **params,
@@ -265,12 +271,17 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "model_version": model_version.model_version,
             "model_name": model.model_name,
             "demo_only": bool(model_version.demo_only),
+            "preprocessing_version": getattr(model_version, "preprocessing_version", "")
+            or "",
+            "checksum": getattr(model_version, "checksum", None) or "",
+            "model_version_id": model_version.id,
         },
         "generator_version": result.get("generator_version") or model.provider,
         "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
         "input_version_ids": list(run.input_version_ids),
         "seed": seed,
         "parameters": parameters,
+        "run_id": run_id,
         **result,
     }
     output_version = _persist_result(service, run_id, model, payload)
@@ -360,6 +371,8 @@ def materialize_prediction_task(
     workflow: str,
     target_horizon: str = "",
     factor_map_ids: list[str] | None = None,
+    run_id: str = "",
+    output_version_id: str = "",
 ) -> PredictionTask:
     """Build the domain PredictionTask a finished inference displays.
 
@@ -381,6 +394,12 @@ def materialize_prediction_task(
     horizon = target_horizon or (
         project.stratigraphy.target_horizon if project is not None else ""
     )
+    resolved_run = run_id or str(payload.get("run_id") or "")
+    resolved_out = output_version_id or str(
+        (payload.get("parameters") or {}).get("output_version_id")
+        or payload.get("output_version_id")
+        or ""
+    )
     task = PredictionTask(
         name=f"{name_prefix} · {horizon or 'demo'}",
         adapter_kind=adapter_kind,
@@ -392,9 +411,13 @@ def materialize_prediction_task(
             "model_id": model.get("model_id", ""),
             "model_version": model.get("model_version", ""),
             "model_name": model.get("model_name", ""),
+            "model_version_id": model.get("model_version_id", ""),
+            "preprocessing_version": model.get("preprocessing_version", ""),
             "demo_only": bool(model.get("demo_only", False)),
             "demo": bool(result_summary.get("demo", False)),
-            "run_id": "",
+            "run_id": resolved_run,
+            "output_version_id": resolved_out,
+            "prediction_version_id": resolved_out,
         },
         result_summary=result_summary,
         probability_summary=dict(payload.get("probability_summary") or {}),

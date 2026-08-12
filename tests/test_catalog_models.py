@@ -115,49 +115,57 @@ def test_find_production_model_skips_demo_and_wrong_capability(service):
     service.register_model_version(
         "demo-facies-v1", model_version="1", demo_only=True, status="demo"
     )
-    # Another capability: not found either.
+    # Another capability: registered but not for facies_prediction.
     service.register_model(
         model_id="other-v1",
         model_name="Other",
+        model_type="ml",
         capability="seismic_facies",
-        provider="demo",
-        status="production",
+        provider="python_callable",
+        status="demo",
     )
     service.register_model_version(
-        "other-v1", model_version="1", demo_only=False, status="production"
+        "other-v1", model_version="1", demo_only=False, status="demo"
     )
+    service.promote_model("other-v1", "1")
     assert service.find_production_model("facies_prediction") is None
 
 
 def test_find_production_model_returns_newest_production(service):
+    # Stage-13: production status only via promote_model (not register_model_version).
     service.register_model(
-        model_id="heur-v1",
-        model_name="Heuristic",
+        model_id="pkg-v1",
+        model_name="Package",
+        model_type="ml",
         capability="facies_prediction",
-        provider="local_asset",
-        status="production",
+        provider="python_callable",
+        status="demo",
+        metadata={"scientific": True},
     )
     service.register_model_version(
-        "heur-v1", model_version="1", demo_only=False, status="production"
+        "pkg-v1", model_version="1", demo_only=False, status="demo"
     )
+    service.promote_model("pkg-v1", "1")
     version = service.find_production_model("facies_prediction")
     assert version is not None
-    assert version.model_id == "heur-v1"
+    assert version.model_id == "pkg-v1"
     assert version.status == "production"
     assert version.demo_only is False
 
 
 def test_find_production_model_requires_version_production(service):
     service.register_model(
-        model_id="heur-v1",
-        model_name="Heuristic",
+        model_id="pkg-v1",
+        model_name="Package",
+        model_type="ml",
         capability="facies_prediction",
-        provider="local_asset",
+        provider="python_callable",
         status="production",
+        force_status=True,
     )
     # Model is production but the version is archived/demo → not found.
     service.register_model_version(
-        "heur-v1", model_version="1", demo_only=False, status="archived"
+        "pkg-v1", model_version="1", demo_only=False, status="archived"
     )
     assert service.find_production_model("facies_prediction") is None
 
@@ -166,14 +174,20 @@ def test_find_production_model_skips_demo_only_version(service):
     service.register_model(
         model_id="demo-prod",
         model_name="Demo",
+        model_type="ml",
         capability="facies_prediction",
-        provider="demo",
-        status="production",
+        provider="python_callable",
+        status="demo",
     )
-    # demo_only=True must never be returned as a production model.
+    # demo_only=True cannot be promoted; stays out of find_production_model.
     service.register_model_version(
-        "demo-prod", model_version="1", demo_only=True, status="production"
+        "demo-prod", model_version="1", demo_only=True, status="demo"
     )
+    from paleo_workbench.catalog.models import CatalogError
+    import pytest
+
+    with pytest.raises(CatalogError):
+        service.promote_model("demo-prod", "1")
     assert service.find_production_model("facies_prediction") is None
 
 

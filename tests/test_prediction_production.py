@@ -385,11 +385,11 @@ def test_prediction_v2_marks_map_stale_via_freshness(tmp_path, service):
     assert service.get_version(pred_v1).stage == DataStage.DERIVED
     assert service.get_version(pred_v2).stage == DataStage.DERIVED
 
-    # Direct lineage check via DataCatalogService runs for inference.
+    # Direct lineage check via DataCatalogService runs for prediction.
     infer_runs = [
         r
         for r in service.document.runs
-        if r.operation == "inference" and r.status == "complete"
+        if r.operation in {"prediction", "inference"} and r.status == "complete"
     ]
     assert len(infer_runs) >= 2
 
@@ -409,6 +409,85 @@ def test_facies_prediction_readiness_warns_without_production_model(service):
     report = evaluate_contract_readiness(project, contract)
     codes = {r.code for r in report.reasons}
     assert "no_production_model" in codes or "prediction_demo_only" in codes
+
+
+def test_send_to_mapping_logic_blocks_nonspatial_non_demo():
+    """Production non-spatial prediction must not compile demo squares.
+
+    Mirrors workflow_controller branching without Qt.
+    """
+    from paleo_workbench.pipeline.compile_map import compile_map_draft
+    from paleo_workbench.pipeline.compile_map_production import compile_map_production
+    from paleo_workbench.prediction.spatial_result import is_map_compilable
+    from paleo_workbench.project.models import PredictionTask
+
+    project = ProjectDocument.new("SendMap")
+    project.stratigraphy.target_horizon = "H1"
+    scientific = PredictionTask(
+        name="sci",
+        adapter_kind="local",
+        result_summary={
+            "final_scientific_prediction": True,
+            "demo": False,
+            "is_mock": False,
+            "predicted_regions": [{"facies": "S", "probability": 0.9}],
+        },
+        model_metadata={"demo": False, "demo_only": False},
+    )
+    project.prediction_tasks.append(scientific)
+    payload = {"result_summary": scientific.result_summary}
+    assert not is_map_compilable(payload)
+    # Controller must block: production compile raises; demo must not be invoked.
+    with pytest.raises(ProductionMapError):
+        compile_map_production(
+            project, prediction_task_id=scientific.id, prediction_payload=payload
+        )
+    assert not any(
+        (d.view_state or {}).get("is_demo_draft") for d in project.paleomap_documents
+    )
+
+    # Explicit demo task may use demo compiler.
+    demo_task = PredictionTask(
+        name="demo",
+        adapter_kind="mock",
+        result_summary={
+            "demo": True,
+            "is_mock": True,
+            "final_scientific_prediction": False,
+            "predicted_regions": [{"facies": "A", "probability": 0.5}],
+        },
+        model_metadata={"demo": True},
+    )
+    project.prediction_tasks.append(demo_task)
+    compile_map_draft(project, prediction_task_id=demo_task.id, seed=0)
+    assert any((d.view_state or {}).get("is_demo_draft") for d in project.paleomap_documents)
+
+
+def test_map_compile_registers_lineage_on_catalog_service(tmp_path, service):
+    _well_vid, project = _register_well(service, tmp_path)
+    project.stratigraphy.target_horizon = "H1"
+    _model, mver = _install_test_provider(service, tmp_path)
+    input_ids = resolve_inputs_for_model(project, service, mver.id, strict=True)
+    run = start_inference(service, model_version_id=mver.id, input_version_ids=input_ids)
+    out = execute_run(service, run.id)
+    task = materialize_prediction_task(
+        project, out["result"], name_prefix="p", workflow="f", target_horizon="H1"
+    )
+    project.prediction_tasks.append(task)
+    pred_vid = out["run"].output_version_ids[0]
+    doc = compile_map_production(
+        project,
+        target_horizon="H1",
+        prediction_payload=out["result"],
+        prediction_version_id=pred_vid,
+        catalog_service=service,
+    )
+    map_runs = [r for r in service.document.runs if r.operation == "map_compile"]
+    assert map_runs, "map_compile DataRun must be registered via DataCatalogService"
+    assert pred_vid in map_runs[-1].input_version_ids
+    assert map_runs[-1].status == "complete"
+    assert map_runs[-1].output_version_ids
+    assert doc.view_state.get("is_demo_draft") is False
 
 
 def test_schema_driven_inputs_exclude_unrelated_seismic(tmp_path, service):
