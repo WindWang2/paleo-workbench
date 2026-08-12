@@ -153,14 +153,19 @@ def register_factor_map_run(
     catalog: CatalogPort | None = None,
     intermediate_path: str | None = None,
     intermediate_checksum: str | None = None,
+    extra_input_version_ids: list[str] | None = None,
+    interpretation_version_ids: list[str] | None = None,
+    project: "ProjectDocument | None" = None,
 ) -> tuple[Any, DataVersionRef | None]:
     """Register a factor-map interpolation run + its INTERMEDIATE output.
 
     ``task.input_resource_ids`` are resolved to versions (legacy bridge) and
-    become the run's declared inputs. The interpolation grid is registered as
-    INTERMEDIATE only when a real persisted path is given; otherwise the run is
-    recorded with no output version (the grid lives in ``task.parameters`` as
-    in-memory domain state, which is not a file DataVersion).
+    become the run's declared inputs. Horizon interpretation versions for the
+    task's ``target_horizon`` (from *project* or *interpretation_version_ids*)
+    are also declared so Stage-9 freshness can detect interpretation edits.
+    The interpolation grid is registered as INTERMEDIATE only when a real
+    persisted path is given; otherwise the run is recorded with no output
+    version (the grid lives in ``task.parameters`` as in-memory domain state).
 
     Returns ``(run, version_or_None)``; ``(None, None)`` when no catalog
     backend is active.
@@ -169,6 +174,25 @@ def register_factor_map_run(
     if cat is None:
         return None, None
     input_ids = resolve_input_versions(task.input_resource_ids, catalog=cat)
+    seen = set(input_ids)
+    for vid in list(extra_input_version_ids or []) + list(
+        interpretation_version_ids or []
+    ):
+        if vid and vid not in seen:
+            seen.add(vid)
+            input_ids.append(vid)
+    # Auto-collect matching horizon interpretation current versions from project.
+    if project is not None and not interpretation_version_ids:
+        target = (getattr(task, "target_horizon", None) or "").strip()
+        for ref in getattr(project, "horizon_interpretations", None) or []:
+            if target and getattr(ref, "horizon_key", "") != target:
+                # Also match by name when keys differ slightly
+                if getattr(ref, "name", "") != target:
+                    continue
+            vid = getattr(ref, "current_version_id", None)
+            if vid and vid not in seen:
+                seen.add(vid)
+                input_ids.append(vid)
     run = cat.begin_run(
         operation="factor_map",
         input_version_ids=input_ids,
@@ -476,6 +500,96 @@ def register_export_output(
     )
     cat.complete_run(run.run_id)
     return version
+
+
+# ---------------------------------------------------------------- map compile
+def register_map_compile_run(
+    *,
+    name: str,
+    input_version_ids: list[str] | None = None,
+    source_task_ids: list[str] | None = None,
+    domain_task_id: str | None = None,
+    parameters: dict[str, Any] | None = None,
+    result_path: str | None = None,
+    result_checksum: str | None = None,
+    catalog: CatalogPort | None = None,
+) -> tuple[Any, DataVersionRef | None]:
+    """Register a paleomap compilation DataRun (+ optional DERIVED version).
+
+    Inputs should be the exact factor/prediction/interpretation version ids the
+    map actually consumed — not every product in the project.
+    """
+    cat = catalog or get_catalog()
+    if cat is None:
+        return None, None
+    declared = list(input_version_ids or [])
+    if source_task_ids:
+        for vid in _versions_for_domain_tasks(list(source_task_ids), catalog=cat):
+            if vid not in declared:
+                declared.append(vid)
+    run = cat.begin_run(
+        operation="map_compile",
+        input_version_ids=declared,
+        parameters=dict(parameters or {}),
+        generator_version=(parameters or {}).get("generator_version")
+        if parameters
+        else None,
+        domain_task_id=domain_task_id,
+    )
+    version: DataVersionRef | None = None
+    if result_path:
+        version = cat.register_derived(
+            run_id=run.run_id,
+            name=name,
+            path=result_path,
+            checksum=result_checksum or sha256_file_or_none(result_path),
+            kind="paleomap",
+            format="json",
+        )
+    cat.complete_run(run.run_id)
+    return run, version
+
+
+# -------------------------------------------------------------------------- qc
+def register_qc_run(
+    *,
+    name: str,
+    input_version_ids: list[str] | None = None,
+    source_task_ids: list[str] | None = None,
+    domain_task_id: str | None = None,
+    parameters: dict[str, Any] | None = None,
+    report_path: str | None = None,
+    report_checksum: str | None = None,
+    catalog: CatalogPort | None = None,
+) -> tuple[Any, DataVersionRef | None]:
+    """Register a QC DataRun bound to the exact result versions it checked."""
+    cat = catalog or get_catalog()
+    if cat is None:
+        return None, None
+    declared = list(input_version_ids or [])
+    if source_task_ids:
+        for vid in _versions_for_domain_tasks(list(source_task_ids), catalog=cat):
+            if vid not in declared:
+                declared.append(vid)
+    run = cat.begin_run(
+        operation="qc",
+        input_version_ids=declared,
+        parameters=dict(parameters or {}),
+        generator_version="qc-v1",
+        domain_task_id=domain_task_id,
+    )
+    version: DataVersionRef | None = None
+    if report_path:
+        version = cat.register_output(
+            run_id=run.run_id,
+            name=name,
+            path=report_path,
+            checksum=report_checksum or sha256_file_or_none(report_path),
+            kind="qc_report",
+            format="json",
+        )
+    cat.complete_run(run.run_id)
+    return run, version
 
 
 # -------------------------------------------------------------------- modeling
