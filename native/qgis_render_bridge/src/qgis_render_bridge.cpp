@@ -236,13 +236,25 @@ class QgisRenderBridge::Impl {
             auto existing = mirrors.find(spec.id);
             const bool rebuild = existing == mirrors.end()
                 || existing->second.data_revision != spec.data_revision
-                || existing->second.style_revision != spec.style_revision
+                // Vector style can be reapplied to its existing memory layer;
+                // retain the former conservative behavior for raster styles.
+                || (spec.kind == VectorLayerSpec::Kind::Raster
+                    && existing->second.style_revision != spec.style_revision)
                 || existing->second.kind != spec.kind
                 || existing->second.source_path != spec.source_path;
 
             Mirror mirror;
             if (!rebuild) {
                 mirror = std::move(existing->second);
+                if (spec.kind == VectorLayerSpec::Kind::Vector
+                    && mirror.style_revision != spec.style_revision) {
+                    auto* vector_layer = dynamic_cast<QgsVectorLayer*>(mirror.layer.get());
+                    if (vector_layer == nullptr) {
+                        throw std::runtime_error("QGIS vector mirror has an unexpected layer type");
+                    }
+                    apply_renderer_style(*vector_layer, spec);
+                    apply_label_style(*vector_layer, spec);
+                }
             } else {
                 if (spec.kind == VectorLayerSpec::Kind::Raster) {
                     mirror.layer = std::make_unique<QgsRasterLayer>(
@@ -351,22 +363,25 @@ class QgisRenderBridge::Impl {
 
         const auto finished = std::chrono::steady_clock::now();
         const Request request = *active_request;
-        const QImage image = active_job->renderedImage().convertToFormat(QImage::Format_RGBA8888);
-        RenderResult result;
-        result.generation = request.generation;
-        result.width = image.width();
-        result.height = image.height();
-        result.stride = image.bytesPerLine();
-        result.render_ms = std::chrono::duration<double, std::milli>(finished - active_started).count();
-        const auto* bytes = image.constBits();
-        result.rgba.assign(bytes, bytes + image.sizeInBytes());
-
         const bool superseded = discard_active_result || pending_snapshot.has_value()
             || pending_request.has_value();
+        std::optional<RenderResult> result;
+        if (!superseded) {
+            const QImage image = active_job->renderedImage().convertToFormat(QImage::Format_RGBA8888);
+            RenderResult completed_result;
+            completed_result.generation = request.generation;
+            completed_result.width = image.width();
+            completed_result.height = image.height();
+            completed_result.stride = image.bytesPerLine();
+            completed_result.render_ms = std::chrono::duration<double, std::milli>(finished - active_started).count();
+            const auto* bytes = image.constBits();
+            completed_result.rgba.assign(bytes, bytes + image.sizeInBytes());
+            result = std::move(completed_result);
+        }
         active_job.reset();
         active_request.reset();
         discard_active_result = false;
-        if (!superseded) completed = std::move(result);
+        if (result) completed = std::move(*result);
 
         if (pending_snapshot) {
             auto snapshot = std::move(*pending_snapshot);

@@ -45,6 +45,9 @@ class UnifiedMapCanvas(QWidget):
         self._extent_history_index = 0
         self._last_frame: RenderFrame | None = None
         self._image = QImage()
+        # QImage below borrows this immutable payload; retaining it in the GUI
+        # object keeps the native pixels valid until the next delivered frame.
+        self._image_buffer: bytes | None = None
         self._navigation_transform = QTransform()
         self._drag_pos: QPointF | None = None
         self._space_pan = False
@@ -52,8 +55,18 @@ class UnifiedMapCanvas(QWidget):
         self._overlay_provider: Callable[[], Mapping[str, Any]] | None = None
         self._cursor_map: tuple[float, float] | None = None
         self._poll = QTimer(self)
-        self._poll.setInterval(15)
+        self._poll.setSingleShot(True)
         self._poll.timeout.connect(self._take_completed_frame)
+        self._poll_interval_ms = 0
+        self._poll_count = 0
+        self._empty_poll_count = 0
+        self._navigation_render = QTimer(self)
+        self._navigation_render.setSingleShot(True)
+        self._navigation_render.setInterval(24)
+        self._navigation_render.timeout.connect(self._request_render)
+        self._render_request_count = 0
+        self._frame_delivery_count = 0
+        self._frame_bytes_delivered = 0
         self._publish_backend_status()
 
     @property
@@ -77,7 +90,18 @@ class UnifiedMapCanvas(QWidget):
         """Whether the previous frame is being transformed pending a fresh render."""
         return not self._navigation_transform.isIdentity()
 
+    def frame_delivery_diagnostics(self) -> dict[str, int]:
+        """Return local counters used to keep navigation delivery observable."""
+        return {
+            "render_requests": self._render_request_count,
+            "frames_delivered": self._frame_delivery_count,
+            "frame_bytes_delivered": self._frame_bytes_delivered,
+            "polls": self._poll_count,
+            "empty_polls": self._empty_poll_count,
+        }
+
     def set_layer_snapshot(self, snapshot: MapRenderSnapshot) -> None:
+        self._navigation_render.stop()
         self._backend.set_layer_snapshot(snapshot)
         self._request_render()
 
@@ -130,7 +154,11 @@ class UnifiedMapCanvas(QWidget):
                     self._extent_history.pop(0)
                 self._extent_history_index = len(self._extent_history) - 1
         self.extent_changed.emit(self._view_extent)
-        self._request_render()
+        if coalesce_history:
+            self._request_navigation_render()
+        else:
+            self._navigation_render.stop()
+            self._request_render()
 
     def zoom_by(
         self, factor: float, center: tuple[float, float] | None = None, *,
@@ -194,26 +222,40 @@ class UnifiedMapCanvas(QWidget):
     def _request_render(self) -> None:
         self._backend.set_output_size(max(1, self.width()), max(1, self.height()))
         self._backend.request_render()
-        self._poll.start()
+        self._render_request_count += 1
+        self._schedule_frame_poll(0)
+
+    def _request_navigation_render(self) -> None:
+        """Coalesce motion events while the previous frame remains responsive."""
+        self._navigation_render.start()
+
+    def _schedule_frame_poll(self, interval_ms: int) -> None:
+        self._poll_interval_ms = max(0, int(interval_ms))
+        self._poll.start(self._poll_interval_ms)
 
     def _take_completed_frame(self) -> None:
+        self._poll_count += 1
         frame = self._backend.take_completed_frame()
         if frame is None:
-            if not self._backend.render_active:
-                self._poll.stop()
+            if self._backend.render_active:
+                self._empty_poll_count += 1
+                interval = 8 if self._poll_interval_ms <= 0 else min(self._poll_interval_ms * 2, 32)
+                self._schedule_frame_poll(interval)
             return
         self._last_frame = frame
+        self._image_buffer = frame.rgba
         self._image = QImage(
-            frame.rgba,
+            self._image_buffer,
             frame.width,
             frame.height,
             frame.stride,
             QImage.Format.Format_RGBA8888,
-        ).copy()
+        )
         self._navigation_transform = QTransform()
+        self._frame_delivery_count += 1
+        self._frame_bytes_delivered += len(frame.rgba)
         self.frame_ready.emit(frame)
         self.update()
-        self._poll.stop()
 
     def _publish_backend_status(self) -> None:
         self.backend_status_changed.emit(self.backend_status)
@@ -221,6 +263,7 @@ class UnifiedMapCanvas(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         if self.width() > 0 and self.height() > 0:
+            self._navigation_render.stop()
             self._request_render()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
@@ -531,5 +574,8 @@ class UnifiedMapCanvas(QWidget):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._poll.stop()
+        self._navigation_render.stop()
+        self._image = QImage()
+        self._image_buffer = None
         self._backend.shutdown()
         super().closeEvent(event)

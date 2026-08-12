@@ -334,6 +334,18 @@ class QgisMapRenderBackend(MapRenderBackend):
         self._native_module = native_bridge
         self._bridge = None
         self._scalar_raster_cache = None
+        # Geometry payload is keyed to the host's data revision.  Style and
+        # visibility changes can reuse it without re-walking every feature/WKT.
+        self._vector_feature_payloads: dict[
+            str, tuple[int, tuple[dict[str, object], ...]]
+        ] = {}
+        self._vector_feature_entries: dict[
+            str, dict[str, tuple[object, object, dict[str, object]]]
+        ] = {}
+        self._feature_encoding_cache_hits = 0
+        self._feature_encoding_cache_misses = 0
+        self._feature_payload_reuse_hits = 0
+        self._feature_payload_reencode_misses = 0
 
     @property
     def is_available(self) -> bool:
@@ -346,6 +358,15 @@ class QgisMapRenderBackend(MapRenderBackend):
         if self._bridge is None:
             return "available"
         return f"ready ({self._bridge.version})"
+
+    def native_encoding_diagnostics(self) -> dict[str, int]:
+        return {
+            "cached_vector_layers": len(self._vector_feature_payloads),
+            "feature_encoding_cache_hits": self._feature_encoding_cache_hits,
+            "feature_encoding_cache_misses": self._feature_encoding_cache_misses,
+            "feature_payload_reuse_hits": self._feature_payload_reuse_hits,
+            "feature_payload_reencode_misses": self._feature_payload_reencode_misses,
+        }
 
     def initialize(self) -> None:
         if self._native_module is None:
@@ -367,7 +388,26 @@ class QgisMapRenderBackend(MapRenderBackend):
                 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
 
                 self._scalar_raster_cache = ScalarRasterMirrorCache()
-        encoded = _qgis_snapshot(snapshot, scalar_raster_cache=self._scalar_raster_cache)
+        encoded = _qgis_snapshot(
+            snapshot,
+            scalar_raster_cache=self._scalar_raster_cache,
+            vector_feature_payloads=self._vector_feature_payloads,
+            vector_feature_entries=self._vector_feature_entries,
+            encoding_stats=self,
+        )
+        active_vector_ids = {
+            layer.id for layer in snapshot.layers if layer.layer_type == "vector"
+        }
+        self._vector_feature_payloads = {
+            layer_id: payload
+            for layer_id, payload in self._vector_feature_payloads.items()
+            if layer_id in active_vector_ids
+        }
+        self._vector_feature_entries = {
+            layer_id: entries
+            for layer_id, entries in self._vector_feature_entries.items()
+            if layer_id in active_vector_ids
+        }
         if self._scalar_raster_cache is not None:
             self._scalar_raster_cache.retain_layer_ids(
                 {layer.id for layer in snapshot.layers if layer.layer_type == "scalar_grid"}
@@ -455,6 +495,8 @@ class QgisMapRenderBackend(MapRenderBackend):
         if self._scalar_raster_cache is not None:
             self._scalar_raster_cache.clear()
             self._scalar_raster_cache = None
+        self._vector_feature_payloads.clear()
+        self._vector_feature_entries.clear()
         super().shutdown()
 
 
@@ -462,6 +504,9 @@ def _qgis_snapshot(
     snapshot: MapRenderSnapshot,
     *,
     scalar_raster_cache=None,
+    vector_feature_payloads: dict[str, tuple[int, tuple[dict[str, object], ...]]] | None = None,
+    vector_feature_entries: dict[str, dict[str, tuple[object, object, dict[str, object]]]] | None = None,
+    encoding_stats: object | None = None,
 ) -> list[dict[str, object]]:
     """Encode host snapshots into the small native bridge payload."""
     layers: list[dict[str, object]] = []
@@ -505,20 +550,58 @@ def _qgis_snapshot(
             continue
         if layer.layer_type != "vector":
             continue
-        features = []
-        for feature in layer.features:
-            geometry = feature.get("geometry")
-            wkt = _geometry_to_wkt(geometry)
-            if wkt:
-                attributes = dict(feature.get("properties") or {})
-                attributes["__pwb_id"] = str(feature.get("id") or "")
-                features.append(
-                    {
-                        "id": str(feature.get("id") or ""),
+        cached = (
+            vector_feature_payloads.get(layer.id)
+            if vector_feature_payloads is not None
+            else None
+        )
+        if cached is not None and cached[0] == int(layer.data_revision):
+            features = cached[1]
+            if encoding_stats is not None:
+                encoding_stats._feature_encoding_cache_hits += 1
+        else:
+            encoded_features: list[dict[str, object]] = []
+            previous_entries = (
+                vector_feature_entries.get(layer.id, {})
+                if vector_feature_entries is not None
+                else {}
+            )
+            next_entries: dict[str, tuple[object, object, dict[str, object]]] = {}
+            for feature in layer.features:
+                feature_id = str(feature.get("id") or "")
+                geometry = feature.get("geometry")
+                properties = feature.get("properties") or {}
+                cached_entry = previous_entries.get(feature_id)
+                if (
+                    cached_entry is not None
+                    and cached_entry[0] == geometry
+                    and cached_entry[1] == properties
+                ):
+                    encoded = cached_entry[2]
+                    if encoding_stats is not None:
+                        encoding_stats._feature_payload_reuse_hits += 1
+                else:
+                    wkt = _geometry_to_wkt(geometry)
+                    if not wkt:
+                        continue
+                    attributes = dict(properties)
+                    attributes["__pwb_id"] = str(feature.get("id") or "")
+                    encoded = {
+                        "id": feature_id,
                         "wkt": wkt,
                         "attributes": attributes,
                     }
-                )
+                    if encoding_stats is not None:
+                        encoding_stats._feature_payload_reencode_misses += 1
+                encoded_features.append(encoded)
+                next_entries[feature_id] = (geometry, properties, encoded)
+            features = tuple(encoded_features)
+            if vector_feature_payloads is not None:
+                vector_feature_payloads[layer.id] = (int(layer.data_revision), features)
+            if vector_feature_entries is not None:
+                vector_feature_entries[layer.id] = next_entries
+            if encoding_stats is not None:
+                encoding_stats._feature_encoding_cache_misses += 1
         # QGIS' memory provider has no valid geometry URI for an empty generic
         # layer. Empty host categories still remain in LayerRegistry/the tree;
         # they simply need no render mirror until their first feature arrives.
