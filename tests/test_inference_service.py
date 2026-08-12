@@ -285,31 +285,56 @@ def test_register_result_asset_failure_leaves_no_half_asset(service, tmp_path):
 # ------------------------------------------- production promotion durability (C2)
 
 
-def test_promote_model_survives_ensure_default_models(service):
+def test_promote_model_survives_ensure_default_models(service, tmp_path):
     """An explicitly promoted production model must NOT be silently reset to
-    demo by ensure_default_models on the next run (review finding C2)."""
+    demo by ensure_default_models on the next run (review finding C2).
+
+    Stage-13: demo/heuristic cannot be promoted — register a package model.
+    """
+    from paleo_workbench.prediction.model_package import register_model_package
     from paleo_workbench.prediction.providers import (
         CAPABILITY_FACIES,
-        MODEL_ID_HEURISTIC,
         ensure_default_models,
+        register_provider,
+    )
+    from tests.fakes.spatial_model_provider import (
+        PROVIDER_TEST_SPATIAL,
+        TestSpatialModelProvider,
     )
 
     ensure_default_models(service)
-    # No production model initially (honest unavailable state).
     assert service.find_production_model(CAPABILITY_FACIES) is None
 
-    # Explicit promotion (the sanctioned act).
-    promoted = service.promote_model(MODEL_ID_HEURISTIC, "1")
+    register_provider(PROVIDER_TEST_SPATIAL, TestSpatialModelProvider)
+    artifact = tmp_path / "weights.bin"
+    artifact.write_bytes(b"test-weights")
+    register_model_package(
+        service,
+        {
+            "model_id": "test-spatial-pkg-v1",
+            "model_version": "1",
+            "model_name": "Test Spatial",
+            "capability": CAPABILITY_FACIES,
+            "provider": PROVIDER_TEST_SPATIAL,
+            "artifact": str(artifact),
+            "model_type": "ml",
+            "input_schema": {"required_asset_types": ["well_log"]},
+            "output_schema": {"spatial_output_type": "VECTOR_POLYGONS"},
+            "spatial_output_type": "VECTOR_POLYGONS",
+            "scientific": True,
+            "demo_only": False,
+        },
+        require_artifact=True,
+    )
+    promoted = service.promote_model("test-spatial-pkg-v1", "1")
     assert promoted.status == "production"
     assert service.find_production_model(CAPABILITY_FACIES) is not None
 
-    # ensure_default_models runs again (as on every run click) — must preserve.
     ensure_default_models(service)
     found = service.find_production_model(CAPABILITY_FACIES)
     assert found is not None
-    assert found.model_id == MODEL_ID_HEURISTIC
+    assert found.model_id == "test-spatial-pkg-v1"
     assert found.status == "production"
-    assert service.get_model(MODEL_ID_HEURISTIC).status == "production"
 
 
 def test_register_model_force_status_controls_existing_model(service):
@@ -321,9 +346,21 @@ def test_register_model_force_status_controls_existing_model(service):
     )
 
     ensure_default_models(service)
-    service.promote_model(MODEL_ID_DEMO, "1")
-
-    # Seed-style re-registration (force_status=False) does not downgrade.
+    # Stage-13: Demo cannot be promoted; force_status path uses heuristic status flip
+    # via force_status=True instead of promote_model for this unit test.
+    service.register_model(
+        model_id=MODEL_ID_DEMO,
+        model_name="演示相带预测（Demo）",
+        model_type="demo",
+        capability="facies_prediction",
+        provider="demo",
+        status="production",
+        force_status=True,
+    )
+    # force_status can set status, but find_production_model still requires
+    # version production + not demo_only — seed versions stay demo_only.
+    # Re-read the remainder of the original assertions about force_status=False.
+    _ = MODEL_ID_DEMO  # keep import used
     service.register_model(
         model_id=MODEL_ID_DEMO,
         model_name="演示相带预测（Demo）",
