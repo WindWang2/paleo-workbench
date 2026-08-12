@@ -5,49 +5,50 @@ from pathlib import Path
 
 import numpy as np
 
-# Cap total voxels when building a ndarray for prediction / load_demo fallback.
+# Cap total voxels when building a dense ndarray for prediction / joint preview.
+# Full-resolution SEGY is never materialised through this path; consumers that
+# need interactive 2D slices should use SeismicVolumeSource.read_inline/etc.
 MAX_DIM = 128
 MAX_BUDGET = MAX_DIM * MAX_DIM * MAX_DIM
 
 
 def load_seismic_volume_from_path(path: str) -> tuple[np.ndarray | None, str]:
-    """Load a bounded 3-D volume via public ``geoviz.SeismicLoader`` when possible.
+    """Load a **bounded preview** volume via :class:`SeismicVolumeSource`.
 
-    Visualization prefers ``SeismicView.load_segy(path)``; this volume path
-    remains for prediction mocks and load_demo fallbacks.
+    Visualization prefers ``SeismicView.load_segy(path)`` (native async).
+    This helper remains for prediction mocks, joint-host preview LOD, and
+    load_demo fallbacks — it must **not** build a full native-resolution cube.
+
+    Flow::
+
+        path → SeismicVolumeSource.metadata()  # headers only
+            → read_preview(max_budget=MAX_BUDGET)  # strided / cached
     """
     file_path = Path(path)
     if not file_path.is_file():
         return None, "SEGY 文件不存在"
 
     try:
-        from geoviz import SeismicLoader
+        from paleo_workbench.viz.seismic_volume_source import get_shared_seismic_source
 
-        loader = SeismicLoader(str(file_path))
-        try:
-            meta = loader.inspect()
-            fi = max(1, math.ceil(meta.n_inlines / MAX_DIM))
-            fx = max(1, math.ceil(meta.n_crosslines / MAX_DIM))
-            ft = max(1, math.ceil(meta.n_samples / MAX_DIM))
-            volume = loader.get_volume_downsampled(factor=(fi, fx, ft))
-            volume, further = _bound_volume(np.asarray(volume, dtype=np.float32))
-            truncated = fi > 1 or fx > 1 or ft > 1 or further
-            warning = ""
-            if truncated:
-                warning = (
-                    f"SEGY 已按下采样加载 "
-                    f"(shape={tuple(int(x) for x in volume.shape)}, via SeismicLoader)"
-                )
-            return volume, warning
-        finally:
-            loader.close()
+        source = get_shared_seismic_source(file_path)
+        meta = source.metadata()
+        # Time-to-metadata is recorded on meta.metadata_ms for benchmarks.
+        volume, warning = source.read_preview(
+            max_dim=MAX_DIM, max_budget=MAX_BUDGET, lod=0
+        )
+        if volume is None:
+            return None, warning or "SEGY 预览加载失败"
+        if meta.is_pseudo and not warning:
+            warning = "SEGY 无完整三维几何，已按伪三维预览"
+        return volume, warning
     except Exception:
-        pass
-
-    return _load_pseudo_3d_ignore_geometry(str(file_path))
+        # Last-resort independent pseudo path (no shared source).
+        return _load_pseudo_3d_ignore_geometry(str(file_path))
 
 
 def _load_pseudo_3d_ignore_geometry(path: str) -> tuple[np.ndarray | None, str]:
+    """Fallback when structured geometry is unavailable (explicit pseudo path)."""
     try:
         import segyio
     except Exception:
@@ -106,7 +107,7 @@ def _bound_volume(volume: np.ndarray) -> tuple[np.ndarray, bool]:
     if vol.ndim == 1:
         vol = vol.reshape(1, 1, -1)
     elif vol.ndim == 2:
-        vol = vol.reshape(1, vol.shape[0], vol.shape[1])
+        vol = vol.reshape(1, vol.shape[0], vol.shape[-1])
     elif vol.ndim > 3:
         vol = vol.reshape(-1, vol.shape[-2], vol.shape[-1])
 

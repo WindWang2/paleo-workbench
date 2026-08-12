@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsScene, QGraphicsSceneMouse
 
 import geoviz as api
 from paleo_workbench.mapping.document_io import features_from_document
+from paleo_workbench.mapping.feature_query_index import FeatureQueryIndex
 from paleo_workbench.mapping.geometry_schema import new_feature_id
 from paleo_workbench.project.models import PaleoMapDocument
 from paleo_workbench.ui.pages.map_edit_commands import (
@@ -58,6 +59,8 @@ class MapEditScene(QGraphicsScene):
         self.setObjectName("MapEditScene")
         self.setSceneRect(_DEFAULT_SCENE_RECT)
         self._items_by_id: dict[str, FeatureItemMixin] = {}
+        self._hit_query_index = FeatureQueryIndex()
+        self._loading_features = False
         self._tool: str = "select"
         self._bound_document: PaleoMapDocument | None = None
         self._edit_history_max = 200
@@ -216,12 +219,14 @@ class MapEditScene(QGraphicsScene):
         selected or moved via the geometry hit path (Qt item stack already
         skips invisible items; this keeps the C++/Python geometry path aligned).
         """
-        records = [
-            item.to_record()
-            for item in self._items_by_id.values()
-            if self.layer_is_visible(getattr(item, "kind", ""))
-        ]
+        records = self._hit_query_index.query(
+            float(x), float(y), float(tolerance), visible=self.layer_is_visible
+        )
         return api.hit_test(records, float(x), float(y), tolerance=float(tolerance))
+
+    def hit_query_diagnostics(self) -> dict[str, int]:
+        """Expose bounded-query counters for profiling and regression tests."""
+        return self._hit_query_index.diagnostics()
 
     def clear_features(self) -> None:
         self._cancel_drag()
@@ -232,6 +237,8 @@ class MapEditScene(QGraphicsScene):
             if isinstance(item, QGraphicsItem):
                 self.removeItem(item)
         self._items_by_id.clear()
+        self._hit_query_index.clear()
+        self._invalidate_snap_candidates()
         self._command_stack.clear()
         self._bound_document = None
         self.set_dirty(False)
@@ -244,14 +251,21 @@ class MapEditScene(QGraphicsScene):
         if doc is None:
             return
         self._bound_document = doc
-        for record in features_from_document(doc):
-            try:
-                item = self._item_from_record(record)
-            except Exception:
-                continue
-            if item is None:
-                continue
-            self._register_item(item)
+        self._loading_features = True
+        try:
+            for record in features_from_document(doc):
+                try:
+                    item = self._item_from_record(record)
+                except Exception:
+                    continue
+                if item is None:
+                    continue
+                self._register_item(item)
+        finally:
+            self._loading_features = False
+        self._hit_query_index.rebuild(
+            self._items_by_id.values(), record_for_item=self._hit_record_for_item
+        )
         self._fit_scene_rect()
 
     def _append_edit_log(self, command: object, *, action: str = "do") -> None:
@@ -588,6 +602,7 @@ class MapEditScene(QGraphicsScene):
             return False
         ok = self._command_stack.undo()
         if ok:
+            self._invalidate_snap_candidates()
             self.set_dirty(True)
             self.command_stack_changed.emit()
             self._refresh_vertex_handles()
@@ -598,6 +613,7 @@ class MapEditScene(QGraphicsScene):
             return False
         ok = self._command_stack.redo()
         if ok:
+            self._invalidate_snap_candidates()
             self.set_dirty(True)
             self.command_stack_changed.emit()
             self._refresh_vertex_handles()
@@ -723,6 +739,8 @@ class MapEditScene(QGraphicsScene):
                         item.set_ring_coordinates(part_index, ring_index, coords)
                     else:
                         item.set_coordinates(coords)
+                    self._refresh_hit_entry(item)
+                    self._invalidate_snap_candidates()
                     self._sync_handle_positions(item)
             event.accept()
             return
@@ -773,6 +791,7 @@ class MapEditScene(QGraphicsScene):
                             item.set_ring_coordinates(part_index, ring_index, restored)
                         else:
                             item.set_coordinates(restored)
+                        self._refresh_hit_entry(item)
                     self.apply_set_vertex(
                         fid,
                         idx,
@@ -906,6 +925,7 @@ class MapEditScene(QGraphicsScene):
         item = self._items_by_id.get(feature_id)
         if isinstance(item, (FaciesPolygonItem, LineItem)):
             item.set_coordinates(coordinates)
+            self._refresh_hit_entry(item)
             self._invalidate_snap_candidates()
             self.refresh_topology(feature_id)
 
@@ -919,6 +939,7 @@ class MapEditScene(QGraphicsScene):
         item = self._items_by_id.get(feature_id)
         if isinstance(item, FaciesPolygonItem):
             item.set_ring_coordinates(part_index, ring_index, coordinates)
+            self._refresh_hit_entry(item)
             self._invalidate_snap_candidates()
             self.refresh_topology(feature_id)
 
@@ -929,6 +950,7 @@ class MapEditScene(QGraphicsScene):
         translate = getattr(item, "translate_by", None)
         if callable(translate):
             translate(dx, dy)
+            self._refresh_hit_entry(item)
 
     def _apply_property(self, feature_id: str, key: str, value: object) -> None:
         item = self._items_by_id.get(feature_id)
@@ -944,6 +966,7 @@ class MapEditScene(QGraphicsScene):
 
     def _remove_feature_by_id(self, feature_id: str) -> None:
         item = self._items_by_id.pop(feature_id, None)
+        self._hit_query_index.remove(feature_id)
         if item is not None and isinstance(item, QGraphicsItem):
             self.removeItem(item)
         self._invalidate_snap_candidates()
@@ -953,9 +976,20 @@ class MapEditScene(QGraphicsScene):
             return
         self.addItem(item)
         self._items_by_id[item.feature_id] = item
+        if not self._loading_features:
+            self._refresh_hit_entry(item)
         self._invalidate_snap_candidates()
         visible = self._layer_visible.get(item.kind, True)
         item.setVisible(visible)
+
+    @staticmethod
+    def _hit_record_for_item(item: object) -> dict[str, Any]:
+        if not isinstance(item, FeatureItemMixin):
+            return {}
+        return item.to_record()
+
+    def _refresh_hit_entry(self, item: FeatureItemMixin) -> None:
+        self._hit_query_index.upsert(item, record_for_item=self._hit_record_for_item)
 
     def _single_editable_feature_id(self) -> str | None:
         ids = self.selected_feature_ids()
@@ -1067,6 +1101,8 @@ class MapEditScene(QGraphicsScene):
                 try:
                     api.set_vertex(coords, idx, start[0], start[1])
                     item.set_coordinates(coords)
+                    self._refresh_hit_entry(item)
+                    self._invalidate_snap_candidates()
                 except (IndexError, TypeError, ValueError):
                     pass
         self._vertex_drag = False
@@ -1113,6 +1149,8 @@ class MapEditScene(QGraphicsScene):
 
     def _invalidate_snap_candidates(self) -> None:
         self._snap_manager.invalidate_candidates()
+        self._snap_index = None
+        self._snap_index_build = -1
 
     def snap_candidate_build_count(self) -> int:
         return self._snap_manager.build_count()

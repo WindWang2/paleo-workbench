@@ -24,22 +24,38 @@ logger = logging.getLogger(__name__)
 
 
 class PreviewVolumeWorker(QObject):
-    """Background downsampled SEGY load (OwnedWorkerJob target)."""
+    """Background LOD preview SEGY load (OwnedWorkerJob target).
 
-    finished = Signal(object, str)
-    failed = Signal(str)
+    Uses :class:`~paleo_workbench.viz.seismic_volume_source.SeismicVolumeSource`
+    so joint 3D shares the same metadata / cache identity as 2D consumers.
+    """
 
-    def __init__(self, segy_path: str) -> None:
+    finished = Signal(object, str, int)  # volume, warning, generation
+    failed = Signal(str, int)
+
+    def __init__(self, segy_path: str, *, generation: int = 0, lod: int = 0) -> None:
         super().__init__()
         self._path = segy_path
+        self._generation = int(generation)
+        self._lod = int(lod)
 
     @Slot()
     def run(self) -> None:
         try:
-            vol, warning = load_seismic_volume_from_path(self._path)
-            self.finished.emit(vol, warning or "")
+            from paleo_workbench.viz.seismic_volume_source import get_shared_seismic_source
+
+            source = get_shared_seismic_source(self._path)
+            # Metadata-first: headers only before any dense preview work.
+            source.metadata()
+            vol, warning = source.read_lod_volume(level=self._lod)
+            self.finished.emit(vol, warning or "", self._generation)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            # Fallback to legacy helper (still preview-bounded).
+            try:
+                vol, warning = load_seismic_volume_from_path(self._path)
+                self.finished.emit(vol, warning or str(exc), self._generation)
+            except Exception as exc2:
+                self.failed.emit(str(exc2), self._generation)
 
 
 class WellSeismicJointHost(QObject):
@@ -60,6 +76,7 @@ class WellSeismicJointHost(QObject):
         super().__init__(parent)
         self._project: ProjectDocument | None = None
         self._volume_job = OwnedWorkerJob(self)
+        self._volume_generation = 0
         self._paths: JointAssetPaths | None = None
         self._survey_meta: dict = {}
         self._well_identity_registry: WellIdentityRegistry | None = None
@@ -114,6 +131,10 @@ class WellSeismicJointHost(QObject):
         if project is self._project:
             return
         self._project = project
+        # Supersede any in-flight preview load for the previous project.
+        self._volume_generation += 1
+        if self._volume_job.is_running:
+            self._volume_job.cancel()
         if self._scene is not None:
             # Prevent the incoming project's saved slice state from being
             # snapped against the previous project's preview cube.
@@ -380,7 +401,9 @@ class WellSeismicJointHost(QObject):
     def _start_volume_worker(self, segy_path: str) -> None:
         if self._volume_job.is_running:
             self._volume_job.shutdown()
-        worker = PreviewVolumeWorker(segy_path)
+        self._volume_generation += 1
+        generation = self._volume_generation
+        worker = PreviewVolumeWorker(segy_path, generation=generation, lod=0)
         self._volume_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
@@ -390,11 +413,14 @@ class WellSeismicJointHost(QObject):
             ),
         )
 
-    @Slot(object, str)
-    def _on_volume_ready(self, volume, warning: str) -> None:
+    @Slot(object, str, int)
+    def _on_volume_ready(self, volume, warning: str, generation: int = 0) -> None:
         from geoviz import InMemoryVolumeAccess
 
         if self._scene is None:
+            return
+        # Stale generation: project/resource switched while worker ran.
+        if int(generation) != int(self._volume_generation):
             return
         if volume is None:
             self.status_changed.emit(f"预览体加载失败: {warning or 'unknown'}")
@@ -421,7 +447,9 @@ class WellSeismicJointHost(QObject):
         self.status_changed.emit(msg)
         self.scene_updated.emit()
 
-    @Slot(str)
-    def _on_volume_failed(self, err: str) -> None:
+    @Slot(str, int)
+    def _on_volume_failed(self, err: str, generation: int = 0) -> None:
+        if int(generation) != int(self._volume_generation):
+            return
         self.status_changed.emit(f"预览体加载异常: {err}")
         self.scene_updated.emit()
