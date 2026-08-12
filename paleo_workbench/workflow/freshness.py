@@ -692,7 +692,11 @@ class FreshnessService:
         op = op_map.get(step_type)
         if op is None:
             return None
-        reports = self.evaluate_operation(op)
+        reports = list(self.evaluate_operation(op))
+        # Stage-13: inference_service historically used operation="inference";
+        # treat those runs as prediction for freshness until fully migrated.
+        if op == "prediction":
+            reports.extend(self.evaluate_operation("inference"))
         if not reports:
             return None
         if any(r.state is FreshnessState.FAILED for r in reports):

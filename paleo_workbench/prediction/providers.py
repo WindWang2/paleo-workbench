@@ -234,6 +234,18 @@ PROVIDER_BY_NAME: dict[str, type[ModelProvider]] = {
 }
 
 
+def register_provider(name: str, provider_cls: type[ModelProvider]) -> None:
+    """Plugin seam: register a provider class under *name* (e.g. tests/fakes).
+
+    Does not seed the ModelRegistry. Production UI only finds models that are
+    explicitly registered and promoted; test providers must never be installed
+    as default production models.
+    """
+    if not name:
+        raise KeyError("provider name required")
+    PROVIDER_BY_NAME[str(name)] = provider_cls
+
+
 def get_provider(name: str) -> ModelProvider:
     """Instantiate a provider by its registry name (raises on unknown)."""
     if not name:

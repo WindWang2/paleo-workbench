@@ -1109,11 +1109,12 @@ def _paleomap_compile() -> DomainWorkflowContract:
         name="Paleomap compilation",
         name_zh="古地理图编绘",
         category="mapping",
-        description="PaleoMapDocument authoring and demo compile path.",
-        description_zh="古地理图文档编制与演示编译路径。",
+        description="PaleoMapDocument authoring; demo compile isolated from production spatial compile.",
+        description_zh="古地理图文档编制；演示编译与生产空间编图隔离。",
         implementation_status=ImplementationStatus.PARTIAL,
         entry_points=[
             "paleo_workbench.pipeline.compile_map",
+            "paleo_workbench.pipeline.compile_map_production",
             "paleo_workbench.ui.pages.mapping_page",
         ],
         inputs=[
@@ -1138,9 +1139,12 @@ def _paleomap_compile() -> DomainWorkflowContract:
                 id="compile",
                 name="编绘/编译草图",
                 user_action="在制图工作台编辑相多边形/等值线并保存",
-                software_action="更新 PaleoMapDocument；可选 register_map_compile_run",
+                software_action=(
+                    "生产路径：compile_map_production 消费 VECTOR_POLYGONS；"
+                    "演示路径：compile_map_draft（固定方块，is_demo_draft）"
+                ),
                 datarun_operation="map_compile",
-                executor_ref="paleo_workbench.pipeline.compile_map.compile_map_draft",
+                executor_ref="paleo_workbench.pipeline.compile_map_production.compile_map_production",
             )
         ],
         outputs=[

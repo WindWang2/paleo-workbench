@@ -112,7 +112,7 @@ class SeismicControlPanel(QFrame):
         # Mirrors prediction_evidence_panel.py (review finding I3).
         if summary.get("is_mock"):
             nature = "Mock"
-        elif not summary.get("final_scientific_prediction", True):
+        elif not summary.get("final_scientific_prediction", False):
             nature = "启发式"
         else:
             nature = "科学预测"

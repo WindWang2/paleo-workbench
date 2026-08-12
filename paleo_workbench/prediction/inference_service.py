@@ -73,6 +73,9 @@ def resolve_prediction_inputs(project: ProjectDocument, service) -> list[str]:
     version. Factor-map tasks resolve through their registered runs (output
     versions, or propagated inputs for in-memory-only results). Degrades to an
     empty list when nothing is registered yet.
+
+    Prefer :func:`resolve_inputs_for_model` when a ModelVersion is known so
+    DataRun inputs match the model's declared schema (Stage 13).
     """
     from paleo_workbench.catalog.lifecycle import _versions_for_domain_tasks
 
@@ -91,6 +94,20 @@ def resolve_prediction_inputs(project: ProjectDocument, service) -> list[str]:
             seen.add(version_id)
             input_ids.append(version_id)
     return input_ids
+
+
+def resolve_inputs_for_model(
+    project: ProjectDocument,
+    service,
+    model_version_id: str,
+    *,
+    strict: bool = True,
+) -> list[str]:
+    """Schema-driven input resolution for a registered model version (Stage 13)."""
+    from paleo_workbench.prediction.input_contract import resolve_model_inputs
+
+    model_version = service.get_model_version_by_id(model_version_id)
+    return resolve_model_inputs(project, service, model_version, strict=strict)
 
 
 def _resolve_resource_version_id(service, resource_id: str) -> str | None:
@@ -143,7 +160,7 @@ def start_inference(
     model_version_id: str,
     input_version_ids: list[str] | None = None,
     parameters: dict[str, Any] | None = None,
-    operation: str = "inference",
+    operation: str = "prediction",
     generator: str = INFERENCE_GENERATOR,
 ) -> DataRun:
     """Open a running inference DataRun bound to a registered model version.
@@ -157,9 +174,14 @@ def start_inference(
     params = dict(parameters or {})
     seed = int(params.get("seed", 0) or 0)
     input_ids = list(input_version_ids or [])
+    # Stage-13: computation identity includes model + preprocessing, not only inputs.
     snapshot = {
         "model_version_id": model_version_id,
+        "model_id": model.model_id,
+        "model_version": model_version.model_version,
         "input_version_ids": input_ids,
+        "preprocessing_version": getattr(model_version, "preprocessing_version", "") or "",
+        "artifact_checksum": getattr(model_version, "checksum", None) or "",
         "parameters": {k: v for k, v in params.items() if not k.startswith("_")},
     }
     run = service.register_run(
@@ -171,6 +193,7 @@ def start_inference(
             "model_version_id": model_version.id,
             "provider": model.provider,
             "demo_only": bool(model_version.demo_only),
+            "preprocessing_version": getattr(model_version, "preprocessing_version", "") or "",
             "seed": seed,
             "_input_snapshot_hash": _snapshot_hash(snapshot),
             **params,
@@ -223,6 +246,33 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "model_version": model_version,
         }
 
+    # Stage-13: validate spatial output when the model declares a spatial schema.
+    from paleo_workbench.prediction.spatial_result import (
+        SpatialResultError,
+        validate_spatial_result,
+    )
+
+    expected = (model_version.output_schema or {}).get("spatial_output_type")
+    if expected and str(expected) not in ("", "NONE"):
+        spatial_errors = validate_spatial_result(result, expected_type=str(expected))
+        if spatial_errors:
+            _fail_run(service, run_id, SpatialResultError("; ".join(spatial_errors)))
+            return {
+                "run": service.get_run(run_id),
+                "result": None,
+                "model": model,
+                "model_version": model_version,
+            }
+
+    # Align DataRun.generator with provider/result generator_version so Stage-9
+    # expected_identity (from PredictionTask.generator_version) does not flag
+    # GENERATOR_CHANGED immediately after a successful run.
+    provider_generator = str(
+        result.get("generator_version") or model.provider or run.generator or ""
+    )
+    if provider_generator:
+        run.generator = provider_generator
+
     payload = {
         "schema_version": "1.0",
         "model": {
@@ -230,14 +280,22 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "model_version": model_version.model_version,
             "model_name": model.model_name,
             "demo_only": bool(model_version.demo_only),
+            "preprocessing_version": getattr(model_version, "preprocessing_version", "")
+            or "",
+            "checksum": getattr(model_version, "checksum", None) or "",
+            "model_version_id": model_version.id,
         },
-        "generator_version": result.get("generator_version") or model.provider,
+        "generator_version": provider_generator or result.get("generator_version"),
         "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
         "input_version_ids": list(run.input_version_ids),
         "seed": seed,
         "parameters": parameters,
+        "run_id": run_id,
         **result,
     }
+    # Prefer the aligned identity (result may re-set generator_version via **result).
+    if provider_generator:
+        payload["generator_version"] = provider_generator
     output_version = _persist_result(service, run_id, model, payload)
     finished = _now_iso()
     service.update_run_status(
@@ -325,6 +383,8 @@ def materialize_prediction_task(
     workflow: str,
     target_horizon: str = "",
     factor_map_ids: list[str] | None = None,
+    run_id: str = "",
+    output_version_id: str = "",
 ) -> PredictionTask:
     """Build the domain PredictionTask a finished inference displays.
 
@@ -333,13 +393,24 @@ def materialize_prediction_task(
     ``model_metadata``. Does NOT append to the project — the caller owns the
     project object.
     """
-    result_summary = dict(payload.get("result_summary") or {})
+    try:
+        from paleo_workbench.prediction.spatial_result import bounded_result_summary
+
+        result_summary = bounded_result_summary(payload)
+    except Exception:
+        result_summary = dict(payload.get("result_summary") or {})
     model = payload.get("model") or {}
     adapter_kind = payload.get("adapter_kind") or (
         "mock" if result_summary.get("is_mock") else "local"
     )
     horizon = target_horizon or (
         project.stratigraphy.target_horizon if project is not None else ""
+    )
+    resolved_run = run_id or str(payload.get("run_id") or "")
+    resolved_out = output_version_id or str(
+        (payload.get("parameters") or {}).get("output_version_id")
+        or payload.get("output_version_id")
+        or ""
     )
     task = PredictionTask(
         name=f"{name_prefix} · {horizon or 'demo'}",
@@ -352,9 +423,13 @@ def materialize_prediction_task(
             "model_id": model.get("model_id", ""),
             "model_version": model.get("model_version", ""),
             "model_name": model.get("model_name", ""),
+            "model_version_id": model.get("model_version_id", ""),
+            "preprocessing_version": model.get("preprocessing_version", ""),
             "demo_only": bool(model.get("demo_only", False)),
             "demo": bool(result_summary.get("demo", False)),
-            "run_id": "",
+            "run_id": resolved_run,
+            "output_version_id": resolved_out,
+            "prediction_version_id": resolved_out,
         },
         result_summary=result_summary,
         probability_summary=dict(payload.get("probability_summary") or {}),

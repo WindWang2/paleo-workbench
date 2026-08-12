@@ -195,11 +195,75 @@ class WorkflowController:
         )
 
     def _on_seismic_send_to_mapping(self) -> None:
-        """Compile a map draft from the latest prediction and open 编图."""
+        """Compile a map from the latest prediction and open 编图.
+
+        Production predictions with spatial geometry → production compiler.
+        Explicit Demo/mock tasks → demo draft only (never mixed).
+        Scientific/non-demo tasks without spatial geometry → BLOCK
+        (never silently fall through to fake squares).
+        """
         if not self.window.project.prediction_tasks:
             QMessageBox.information(self.window, "发送编图", "请先运行地震预测")
             return
-        compile_map_draft(self.window.project, seed=0)
+        task = self.window.project.prediction_tasks[-1]
+        summary = dict(task.result_summary or {})
+        meta = dict(task.model_metadata or {})
+        is_demo_task = bool(
+            summary.get("demo")
+            or summary.get("is_mock")
+            or meta.get("demo")
+            or meta.get("demo_only")
+            or getattr(task, "adapter_kind", "") == "mock"
+        )
+
+        from paleo_workbench.pipeline.compile_map_production import (
+            ProductionMapError,
+            compile_map_production,
+        )
+        from paleo_workbench.prediction.spatial_result import is_map_compilable
+
+        payload = {"result_summary": summary}
+        if is_demo_task:
+            # Explicit Demo path only.
+            compile_map_draft(self.window.project, seed=0)
+        elif is_map_compilable(payload):
+            try:
+                catalog_service = None
+                try:
+                    from paleo_workbench.catalog import get_catalog_service
+
+                    catalog_service = get_catalog_service()
+                except Exception:
+                    catalog_service = None
+                pred_vid = str(
+                    meta.get("prediction_version_id")
+                    or meta.get("output_version_id")
+                    or ""
+                ) or None
+                compile_map_production(
+                    self.window.project,
+                    prediction_task_id=task.id,
+                    prediction_payload=payload,
+                    catalog_service=catalog_service,
+                    prediction_version_id=pred_vid,
+                )
+            except ProductionMapError as exc:
+                QMessageBox.warning(
+                    self.window,
+                    "发送编图",
+                    f"生产编图失败（不会生成演示占位方块）:\n{exc}",
+                )
+                return
+        else:
+            QMessageBox.warning(
+                self.window,
+                "发送编图",
+                "当前预测结果无可编绘的平面空间几何。\n"
+                "井深区间或非空间结果不能自动变成古地理图；"
+                "也不会生成「未分类」占位方块。\n"
+                "请使用生产模型输出 VECTOR_POLYGONS，或通过「生成演示草稿」显式运行演示。",
+            )
+            return
         self.window.app_shell.update_mapping_page(
             self.window.project.paleomap_documents,
             factor_tasks=self.window.project.factor_map_tasks,
