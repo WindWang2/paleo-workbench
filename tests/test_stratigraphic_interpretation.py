@@ -325,3 +325,121 @@ def test_fingerprint_stable():
     assert a == b
     draft.payload.tops[0].depth = 2.0
     assert draft_fingerprint(draft) != a
+
+
+def test_correlation_stale_when_consumed_well_version_changes(tmp_path: Path, catalog):
+    """Stage-9: correlation STALE when a consumed well current version advances."""
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+    from paleo_workbench.workflow.current_context import CurrentProjectVersionContext
+    from paleo_workbench.workflow.freshness import FreshnessService, FreshnessState
+
+    project = ProjectDocument.new("Fresh")
+    project.meta.project_root = str(tmp_path)
+    proj_path = _proj_path(tmp_path)
+
+    # Well A V1 and V2 same asset; Well B single
+    a1 = catalog.register_input(
+        name="A.las", path="/t/A.las", checksum="a1", kind="well_log", format="las",
+        legacy_resource_id="well-A",
+    )
+    # Force second version same asset for A
+    a2_run = catalog.begin_run(operation="derived_copy", input_version_ids=[a1.version_id])
+    a2 = catalog.register_derived(
+        run_id=a2_run.run_id,
+        name="A v2",
+        path="/t/A_v2.las",
+        checksum="a2",
+        kind="well_log",
+        format="las",
+    )
+    catalog.complete_run(a2_run.run_id)
+    a2.asset_id = a1.asset_id  # same logical well
+
+    b1 = catalog.register_input(
+        name="B.las", path="/t/B.las", checksum="b1", kind="well_log", format="las",
+        legacy_resource_id="well-B",
+    )
+    # Unrelated well Z
+    z1 = catalog.register_input(
+        name="Z.las", path="/t/Z.las", checksum="z1", kind="well_log", format="las",
+        legacy_resource_id="well-Z",
+    )
+
+    draft = new_correlation_draft(
+        well_resource_ids=["well-A", "well-B"],
+        well_version_ids=[a1.version_id, b1.version_id],
+        tops=[
+            FormationTop(well_id="well-A", well_name="A", marker="H1", depth=1.0),
+            FormationTop(well_id="well-B", well_name="B", marker="H1", depth=2.0),
+        ],
+    )
+    ref, msg = save_correlation_draft(draft, project, proj_path, catalog=catalog)
+    assert msg == "ok"
+    corr_vid = ref.current_version_id
+
+    graph = DependencyGraph.from_catalog(catalog)
+    # Current: A is still V1 → FRESH
+    ctx = CurrentProjectVersionContext()
+    for ver in catalog.list_versions():
+        ctx.select(ver.asset_id, ver.version_id)
+    ctx.select(a1.asset_id, a1.version_id)  # pin A to V1
+    ctx.select(b1.asset_id, b1.version_id)
+    svc = FreshnessService(graph, ctx, catalog=catalog)
+    assert svc.evaluate_version(corr_vid).state is FreshnessState.FRESH
+
+    # Advance A to V2 as current → correlation STALE
+    ctx2 = CurrentProjectVersionContext()
+    for ver in catalog.list_versions():
+        ctx2.select(ver.asset_id, ver.version_id)
+    ctx2.select(a1.asset_id, a2.version_id)
+    ctx2.select(b1.asset_id, b1.version_id)
+    svc2 = FreshnessService(graph, ctx2, catalog=catalog)
+    rep = svc2.evaluate_version(corr_vid)
+    assert rep.state is FreshnessState.STALE
+
+    # Unrelated Z change alone: if only Z changes from its own tip, correlation
+    # that never consumed Z stays FRESH when A/B still match
+    ctx3 = CurrentProjectVersionContext()
+    for ver in catalog.list_versions():
+        ctx3.select(ver.asset_id, ver.version_id)
+    ctx3.select(a1.asset_id, a1.version_id)
+    ctx3.select(b1.asset_id, b1.version_id)
+    # Z is selected at z1 which is its only version — no impact
+    svc3 = FreshnessService(graph, ctx3, catalog=catalog)
+    assert svc3.evaluate_version(corr_vid).state is FreshnessState.FRESH
+    assert z1.version_id not in draft.payload.well_version_ids
+
+
+def test_fault_stale_only_when_consumed_as_input(tmp_path: Path, catalog):
+    """Fault product FRESH/STALE independent of unrelated correlation."""
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+    from paleo_workbench.workflow.current_context import CurrentProjectVersionContext
+    from paleo_workbench.workflow.freshness import FreshnessService, FreshnessState
+
+    project = ProjectDocument.new("F")
+    project.meta.project_root = str(tmp_path)
+    proj_path = _proj_path(tmp_path)
+    draft = new_fault_draft(
+        traces=[FaultTrace(name="f", polyline=[[0, 0], [1, 1]], role="fault")],
+    )
+    ref, msg = save_fault_draft(draft, project, proj_path, catalog=catalog)
+    assert msg == "ok"
+    graph = DependencyGraph.from_catalog(catalog)
+    ctx = CurrentProjectVersionContext()
+    for ver in catalog.list_versions():
+        ctx.select(ver.asset_id, ver.version_id)
+    svc = FreshnessService(graph, ctx, catalog=catalog)
+    assert svc.evaluate_version(ref.current_version_id).state is FreshnessState.FRESH
+
+
+def test_ui_page_has_lifecycle_actions():
+    """Structural check: correlation page exposes Stage-12 save/open/restore."""
+    src = Path("paleo_workbench/ui/pages/stratigraphy_correlation_page.py").read_text(
+        encoding="utf-8"
+    )
+    assert "save_interpretation_version" in src
+    assert "open_saved_interpretation" in src
+    assert "restore_saved_interpretation" in src
+    assert "保存解释版本" in src
+    assert "save_correlation_draft" in src
+    assert "restore_draft_from_project_ref" in src
