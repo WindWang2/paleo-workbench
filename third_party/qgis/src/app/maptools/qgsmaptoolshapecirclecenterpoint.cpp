@@ -1,0 +1,103 @@
+/***************************************************************************
+    qgmaptoolshapecirclecenterpoint.cpp  -  map tool for adding circle
+    from center and a point
+    ---------------------
+    begin                : July 2017
+    copyright            : (C) 2017 by Loïc Bartoletti
+    email                : lituus at free dot fr
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaptoolshapecirclecenterpoint.h"
+
+#include "qgsapplication.h"
+#include "qgsgeometryrubberband.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptoolcapture.h"
+#include "qgspoint.h"
+
+#include <QString>
+
+#include "moc_qgsmaptoolshapecirclecenterpoint.cpp"
+
+using namespace Qt::StringLiterals;
+
+const QString QgsMapToolShapeCircleCenterPointMetadata::TOOL_ID = u"circle-by-a-center-point-and-another-point"_s;
+
+QString QgsMapToolShapeCircleCenterPointMetadata::id() const
+{
+  return QgsMapToolShapeCircleCenterPointMetadata::TOOL_ID;
+}
+
+QString QgsMapToolShapeCircleCenterPointMetadata::name() const
+{
+  return QObject::tr( "Circle by a center point and another point" );
+}
+
+QIcon QgsMapToolShapeCircleCenterPointMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"/mActionCircleCenterPoint.svg"_s );
+}
+
+QgsMapToolShapeAbstract::ShapeCategory QgsMapToolShapeCircleCenterPointMetadata::category() const
+{
+  return QgsMapToolShapeAbstract::ShapeCategory::Circle;
+}
+
+QgsMapToolShapeAbstract *QgsMapToolShapeCircleCenterPointMetadata::factory( QgsMapToolCapture *parentTool ) const
+{
+  return new QgsMapToolShapeCircleCenterPoint( parentTool );
+}
+
+
+bool QgsMapToolShapeCircleCenterPoint::cadCanvasReleaseEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( e->button() == Qt::LeftButton )
+  {
+    if ( mPoints.empty() )
+      mPoints.append( point );
+
+    if ( !mTempRubberBand )
+    {
+      Qgis::GeometryType type = mode == QgsMapToolCapture::CapturePolygon ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line;
+      mTempRubberBand = mParentTool->createGeometryRubberBand( type, true );
+      mTempRubberBand->show();
+    }
+  }
+  else if ( e->button() == Qt::RightButton )
+  {
+    if ( mCircle.isEmpty() )
+      return false;
+
+    mPoints.append( point );
+    addCircleToParentTool();
+    return true;
+  }
+  return false;
+}
+
+void QgsMapToolShapeCircleCenterPoint::cadCanvasMoveEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  Q_UNUSED( mode )
+
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( mTempRubberBand && !mPoints.isEmpty() )
+  {
+    mCircle = QgsCircle::fromCenterPoint( mPoints.at( 0 ), point );
+    const QgsGeometry newGeometry( mCircle.toCircularString( true ) );
+    if ( !newGeometry.isEmpty() )
+    {
+      mTempRubberBand->setGeometry( newGeometry.constGet()->clone() );
+      setTransientGeometry( newGeometry );
+    }
+  }
+}

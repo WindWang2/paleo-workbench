@@ -1,0 +1,169 @@
+/***************************************************************************
+                             qgsfieldsitem.h
+                             -------------------
+    begin                : 2011-04-01
+    copyright            : (C) 2011 Radim Blazek
+    email                : radim dot blazek at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+#ifndef QGSFIELDSITEM_H
+#define QGSFIELDSITEM_H
+
+#include "qgis_core.h"
+#include "qgis_sip.h"
+#include "qgsabstractdatabaseproviderconnection.h"
+#include "qgsdataitem.h"
+#include "qgsfield.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+/**
+ * \ingroup core
+ * \brief A browser item which contains a collection of field items.
+ *
+ * QgsFieldsItem contains internal logic to retrieve
+ * the fields and the corresponding vector layer instance from a connection URI,
+ * the schema and the table name.
+ * \since QGIS 3.16
+*/
+class CORE_EXPORT QgsFieldsItem : public QgsDataItem
+{
+    Q_OBJECT
+
+  public:
+    /**
+     * Constructor for QgsFieldsItem, with the specified \a parent item.
+     *
+     * The \a path argument gives the item path in the browser tree. The \a path string can take any form,
+     * but QgsDataItem items pointing to different logical locations should always use a different item \a path.
+     * The \a connectionUri argument is the connection part of the layer URI that it is used internally to create
+     * a connection and retrieve fields information.
+     * The \a providerKey string can be used to specify the key for the QgsDataItemProvider that created this item.
+     * The \a schema and \a tableName are used to retrieve the layer and field information from the \a connectionUri.
+     */
+    QgsFieldsItem( QgsDataItem *parent SIP_TRANSFERTHIS, const QString &path, const QString &connectionUri, const QString &providerKey, const QString &schema, const QString &tableName );
+
+    ~QgsFieldsItem() override;
+
+#ifdef SIP_RUN
+    // clang-format off
+    SIP_PYOBJECT __repr__();
+    % MethodCode
+    QString str = u"<QgsFieldsItem: %1>"_s.arg( sipCpp->path() );
+    sipRes = PyUnicode_FromString( str.toUtf8().constData() );
+    % End
+// clang-format on
+#endif
+
+        QVector<QgsDataItem *> createChildren() override;
+
+    QIcon icon() override;
+
+    /**
+     * Returns the schema name
+     */
+    QString schema() const;
+
+    /**
+     * Returns the table name
+     */
+    QString tableName() const;
+
+    /**
+     * Returns the connection URI
+     */
+    QString connectionUri() const;
+
+    /**
+     * Creates and returns a (possibly NULLPTR) layer from the connection URI and schema/table information
+     */
+    QgsVectorLayer *layer() SIP_FACTORY;
+
+    /**
+     * Returns the fields contained by the item.
+     *
+     * The fields are only populated after the item's children are created.
+     *
+     * \since QGIS 4.0
+     */
+    QgsFields fields() const;
+
+    /**
+     * Returns the (possibly NULLPTR) properties of the table this fields belong to.
+     * \since QGIS 3.16
+     */
+    QgsAbstractDatabaseProviderConnection::TableProperty *tableProperty() const;
+
+    /**
+     * Returns TRUE if the connection supports renaming fields.
+     *
+     * \since QGIS 3.28
+     */
+    bool canRenameFields() const { return mCanRename; }
+
+  private:
+    QString mSchema;
+    QString mTableName;
+    QString mConnectionUri;
+    bool mCanRename = false;
+    std::unique_ptr<QgsAbstractDatabaseProviderConnection::TableProperty> mTableProperty;
+    QgsFields mFields;
+};
+
+
+/**
+ * \ingroup core
+ * \brief A data item representing a single field from a layer.
+ *
+ * Information about the connection URI, the schema and the table as well as the layer
+ * instance the field belongs to can be retrieved from the parent QgsFieldsItem object.
+ * \since QGIS 3.16
+*/
+class CORE_EXPORT QgsFieldItem : public QgsDataItem
+{
+    Q_OBJECT
+  public:
+    /**
+     * Constructor for QgsFieldItem, with the specified \a parent item and \a field.
+     * \note parent item must be a QgsFieldsItem
+     */
+    QgsFieldItem( QgsDataItem *parent SIP_TRANSFERTHIS, const QgsField &field );
+
+    ~QgsFieldItem() override;
+
+#ifdef SIP_RUN
+    // clang-format off
+    SIP_PYOBJECT __repr__();
+    % MethodCode
+    QString str = u"<QgsFieldItem: %1>"_s.arg( sipCpp->name() );
+    sipRes = PyUnicode_FromString( str.toUtf8().constData() );
+    % End
+// clang-format on
+#endif
+
+        QIcon icon() override;
+
+    /**
+     * Returns the field definition.
+     *
+     * \since QGIS 3.26
+     */
+    QgsField field() const { return mField; }
+
+    bool equal( const QgsDataItem *other ) override;
+
+  private:
+    const QgsField mField;
+};
+
+#endif // QGSFIELDSITEM_H

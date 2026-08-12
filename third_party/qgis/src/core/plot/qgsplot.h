@@ -1,0 +1,990 @@
+/***************************************************************************
+                         qgsplot.h
+                         ---------------
+    begin                : March 2022
+    copyright            : (C) 2022 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+#ifndef QGSPLOT_H
+#define QGSPLOT_H
+
+#include <memory>
+
+#include "qgis_core.h"
+#include "qgis_sip.h"
+#include "qgsmargins.h"
+#include "qgspropertycollection.h"
+#include "qgstextformat.h"
+
+#include <QSizeF>
+
+class QgsColorRamp;
+class QgsMarkerSymbol;
+class QgsLineSymbol;
+class QgsFillSymbol;
+class QgsRenderContext;
+class QgsSymbol;
+class QgsNumericFormat;
+
+/**
+ * \brief Base class for plot/chart/graphs.
+ *
+ * \ingroup core
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \since QGIS 3.26
+ */
+class CORE_EXPORT QgsPlot
+{
+    //SIP_TYPEHEADER_INCLUDE( "qgsbarchartplot.h" );
+    //SIP_TYPEHEADER_INCLUDE( "qgslinechartplot.h" );
+    //SIP_TYPEHEADER_INCLUDE( "qgspiechartplot.h" );
+
+#ifdef SIP_RUN
+    SIP_CONVERT_TO_SUBCLASS_CODE
+    if ( QgsPlot *item = dynamic_cast< QgsPlot * >( sipCpp ) )
+    {
+      if ( dynamic_cast<QgsBarChartPlot *>( item ) != NULL )
+      {
+        sipType = sipType_QgsBarChartPlot;
+      }
+      else if ( dynamic_cast<QgsLineChartPlot *>( item ) != NULL )
+      {
+        sipType = sipType_QgsLineChartPlot;
+      }
+      else if ( dynamic_cast<QgsPieChartPlot *>( item ) != NULL )
+      {
+        sipType = sipType_QgsPieChartPlot;
+      }
+      else if ( dynamic_cast<Qgs2DXyPlot *>( item ) != NULL )
+      {
+        sipType = sipType_Qgs2DXyPlot;
+      }
+      else if ( dynamic_cast<Qgs2DPlot *>( item ) != NULL )
+      {
+        sipType = sipType_Qgs2DPlot;
+      }
+      else
+      {
+        sipType = sipType_QgsPlot;
+      }
+    }
+    else
+    {
+      sipType = NULL;
+    }
+  SIP_END
+#endif
+
+  public:
+
+    /**
+     * Data defined properties for different plot types
+     * \since QGIS 4.0
+     */
+    enum class DataDefinedProperty SIP_MONKEYPATCH_SCOPEENUM_UNNEST( QgsPlot, Property ) : int
+    {
+      MarginLeft,         //!< Left margin
+      MarginTop,          //!< Top margin
+      MarginRight,        //!< Right margin
+      MarginBottom,       //!< Bottom margin
+      XAxisMajorInterval, //!< Major grid line interval for X axis
+      XAxisMinorInterval, //!< Minor grid line interval for X axis
+      XAxisLabelInterval, //!< Label interval for X axis
+      YAxisMajorInterval, //!< Major grid line interval for Y axis
+      YAxisMinorInterval, //!< Minor grid line interval for Y axis
+      YAxisLabelInterval, //!< Label interval for Y axis
+      XAxisMinimum,       //!< Minimum X axis value
+      XAxisMaximum,       //!< Maximum X axis value
+      YAxisMinimum,       //!< Minimum Y axis value
+      YAxisMaximum,       //!< Maximum Y axis value
+    };
+
+    QgsPlot() = default;
+
+    virtual ~QgsPlot();
+
+    /**
+     * Returns the plot's type.
+     * \since QGIS 4.0
+     */
+    virtual QString type() const { return QString(); }
+
+    /**
+     * Sets a data defined property for the plot. Any existing property with the same key
+     * will be overwritten.
+     * \see dataDefinedProperties()
+     * \since QGIS 4.0
+     */
+    void setDataDefinedProperty( DataDefinedProperty key, const QgsProperty &property ) { mDataDefinedProperties.setProperty( key, property ); }
+
+    /**
+     * Returns a reference to the plot's property collection, used for data defined overrides.
+     * \see setDataDefinedProperties()
+     * \since QGIS 4.0
+     */
+    QgsPropertyCollection &dataDefinedProperties() { return mDataDefinedProperties; }
+
+    /**
+     * Returns a reference to the plot's property collection, used for data defined overrides.
+     * \see setDataDefinedProperties()
+     * \since QGIS 4.0
+     */
+    const QgsPropertyCollection &dataDefinedProperties() const SIP_SKIP { return mDataDefinedProperties; }
+
+    /**
+     * Sets the plot's property collection, used for data defined overrides.
+     * \param collection property collection. Existing properties will be replaced.
+     * \see dataDefinedProperties()
+     * \since QGIS 4.0
+     */
+    void setDataDefinedProperties( const QgsPropertyCollection &collection ) { mDataDefinedProperties = collection; }
+
+    /**
+     * Writes the plot's properties into an XML \a element.
+     */
+    virtual bool writeXml( QDomElement &element, QDomDocument &document, const QgsReadWriteContext &context ) const;
+
+    /**
+     * Reads the plot's properties from an XML \a element.
+     */
+    virtual bool readXml( const QDomElement &element, const QgsReadWriteContext &context );
+
+    /**
+     * Initializes properties of this plot from an existing \a plot, transferring all applicable
+     * settings. Subclasses should override this method and call the base class implementation first.
+     * \since QGIS 4.0
+     */
+    virtual void initFromPlot( const QgsPlot *plot );
+
+    /**
+     * Returns the plot property definitions.
+     */
+    static const QgsPropertiesDefinition &propertyDefinitions();
+
+  protected:
+    QgsPropertyCollection mDataDefinedProperties;
+
+  private:
+    static void initPropertyDefinitions();
+    static QgsPropertiesDefinition sPropertyDefinitions;
+};
+
+
+/**
+ * \ingroup core
+ * \class QgsPlotRenderContext
+ * \brief Contains information about the context of a plot rendering operation.
+ * \since QGIS 4.0
+ */
+class CORE_EXPORT QgsPlotRenderContext
+{
+  public:
+    /**
+     * Constructor for QgsPlotRenderContext.
+     */
+    QgsPlotRenderContext() = default;
+    ~QgsPlotRenderContext() = default;
+};
+
+
+/**
+ * \brief An abstract class used to encapsulate the data for a plot series.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 4.0
+ */
+class CORE_EXPORT QgsAbstractPlotSeries
+{
+#ifdef SIP_RUN
+    SIP_CONVERT_TO_SUBCLASS_CODE
+    if ( QgsAbstractPlotSeries *item = dynamic_cast< QgsAbstractPlotSeries * >( sipCpp ) )
+    {
+      if ( dynamic_cast<QgsXyPlotSeries *>( item ) != NULL )
+      {
+        sipType = sipType_QgsXyPlotSeries;
+      }
+      else
+      {
+        sipType = sipType_QgsAbstractPlotSeries;
+      }
+    }
+    else
+    {
+      sipType = NULL;
+    }
+  SIP_END
+#endif
+  public:
+
+    QgsAbstractPlotSeries() = default;
+    virtual ~QgsAbstractPlotSeries() = default;
+
+    /**
+     * Returns the series' name.
+     */
+    QString name() const;
+
+    /**
+     * Sets the series' name.
+     */
+    void setName( const QString &name );
+
+    /**
+     * Clones the series
+     */
+    virtual QgsAbstractPlotSeries *clone() const = 0 SIP_FACTORY;
+
+  private:
+    QString mName;
+};
+
+/**
+ * \brief Encapsulates the data for an XY plot series.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 4.0
+ */
+class CORE_EXPORT QgsXyPlotSeries : public QgsAbstractPlotSeries
+{
+  public:
+    QgsXyPlotSeries() = default;
+    ~QgsXyPlotSeries() override = default;
+
+    /**
+     * Returns the series' list of XY pairs of double.
+     */
+    QList<std::pair<double, double>> data() const;
+
+    /**
+     * Sets the series' list of XY pairs of double.
+     */
+    void setData( const QList<std::pair<double, double>> &data );
+
+    /**
+     * Appends a pair of X/Y double values to the series.
+     */
+    void append( double x, double y );
+
+    /**
+     * Clears the series' data.
+     */
+    void clear();
+
+    QgsAbstractPlotSeries *clone() const override SIP_FACTORY;
+
+  private:
+    QList<std::pair<double, double>> mData;
+};
+
+/**
+ * \brief Encapsulates one or more plot series.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 4.0
+ */
+class CORE_EXPORT QgsPlotData
+{
+  public:
+    QgsPlotData() = default;
+    ~QgsPlotData();
+
+    QgsPlotData( const QgsPlotData &other );
+    SIP_SKIP QgsPlotData( QgsPlotData &&other );
+    QgsPlotData &operator=( const QgsPlotData &other );
+    QgsPlotData &operator=( QgsPlotData &&other );
+
+    /**
+     * Returns the list of series forming the plot data.
+     * \note the series' ownership is retained by this object.
+     */
+    QList<QgsAbstractPlotSeries *> series() const;
+
+    /**
+     * Adds a series to the plot data.
+     * \note the series' ownership is transferred to this object.
+     */
+    void addSeries( QgsAbstractPlotSeries *series SIP_TRANSFER );
+
+    /**
+     * Clears all series from the plot data.
+     */
+    void clearSeries();
+
+    /**
+     * Returns the name of the series' categories.
+     */
+    QStringList categories() const;
+
+    /**
+     * Sets the name of the series' \a categories.
+     */
+    void setCategories( const QStringList &categories );
+
+  private:
+    QList<QgsAbstractPlotSeries *> mSeries;
+    QStringList mCategories;
+};
+
+/**
+ * \brief Encapsulates the properties of a plot axis.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 3.26
+ */
+class CORE_EXPORT QgsPlotAxis
+{
+  public:
+    QgsPlotAxis();
+    ~QgsPlotAxis();
+
+    QgsPlotAxis( const QgsPlotAxis &other ) = delete;
+    QgsPlotAxis &operator=( const QgsPlotAxis &other ) = delete;
+
+    /**
+     * Writes the axis' properties into an XML \a element.
+     */
+    bool writeXml( QDomElement &element, QDomDocument &document, const QgsReadWriteContext &context ) const;
+
+    /**
+     * Reads the axis' properties from an XML \a element.
+     */
+    bool readXml( const QDomElement &element, const QgsReadWriteContext &context );
+
+    /**
+     * Returns the axis type.
+     * \since QGIS 4.0
+     */
+    Qgis::PlotAxisType type() const;
+
+    /**
+     * Sets the axis type.
+     * \since QGIS 4.0
+     */
+    void setType( Qgis::PlotAxisType type );
+
+    /**
+     * Returns the interval of minor grid lines for the axis.
+     *
+     * \see setGridIntervalMinor()
+     */
+    double gridIntervalMinor() const { return mGridIntervalMinor; }
+
+    /**
+     * Sets the \a interval of minor grid lines for the axis.
+     *
+     * \see gridIntervalMinor()
+     */
+    void setGridIntervalMinor( double interval ) { mGridIntervalMinor = interval; }
+
+    /**
+     * Returns the interval of major grid lines for the axis.
+     *
+     * \see setGridIntervalMajor()
+     */
+    double gridIntervalMajor() const { return mGridIntervalMajor; }
+
+    /**
+     * Sets the \a interval of major grid lines for the axis.
+     *
+     * \see gridIntervalMajor()
+     */
+    void setGridIntervalMajor( double interval ) { mGridIntervalMajor = interval; }
+
+    /**
+     * Returns the interval of labels for the axis.
+     *
+     * \see setLabelInterval()
+     */
+    double labelInterval() const { return mLabelInterval; }
+
+    /**
+     * Sets the \a interval of labels for the axis.
+     *
+     * \see labelInterval()
+     */
+    void setLabelInterval( double interval ) { mLabelInterval = interval; }
+
+    /**
+     * Returns the line symbol used to render the major lines in the axis grid.
+     *
+     * \see setGridMajorSymbol()
+     */
+    QgsLineSymbol *gridMajorSymbol();
+
+    /**
+     * Returns the line symbol used to render the major lines in the axis grid.
+     *
+     * \see setGridMajorSymbol()
+     * \note not available in Python bindings
+     * \since QGIS 4.0
+     */
+    const QgsLineSymbol *gridMajorSymbol() const SIP_SKIP;
+
+    /**
+     * Sets the \a symbol used to render the major lines in the axis grid.
+     *
+     * Ownership of \a symbol is transferred to the plot.
+     *
+     * \see gridMajorSymbol()
+     */
+    void setGridMajorSymbol( QgsLineSymbol *symbol SIP_TRANSFER );
+
+    /**
+     * Returns the line symbol used to render the minor lines in the axis grid.
+     *
+     * \see setGridMinorSymbol()
+     */
+    QgsLineSymbol *gridMinorSymbol();
+
+    /**
+     * Returns the line symbol used to render the major lines in the axis grid.
+     *
+     * \see setGridMinorSymbol()
+     * \note not available in Python bindings
+     * \since QGIS 4.0
+     */
+    const QgsLineSymbol *gridMinorSymbol() const SIP_SKIP;
+
+    /**
+     * Sets the \a symbol used to render the minor lines in the axis grid.
+     *
+     * Ownership of \a symbol is transferred to the plot.
+     *
+     * \see gridMinorSymbol()
+     */
+    void setGridMinorSymbol( QgsLineSymbol *symbol SIP_TRANSFER );
+
+    /**
+     * Returns the text format used for the axis labels.
+     *
+     * \see setTextFormat()
+     */
+    QgsTextFormat textFormat() const;
+
+    /**
+     * Sets the text \a format used for the axis labels.
+     *
+     * \see textFormat()
+     */
+    void setTextFormat( const QgsTextFormat &format );
+
+    /**
+     * Returns the numeric format used for the axis labels.
+     *
+     * \see setNumericFormat()
+     */
+    QgsNumericFormat *numericFormat() const;
+
+    /**
+     * Sets the numeric \a format used for the axis labels.
+     *
+     * Ownership of \a format is transferred to the plot.
+     *
+     * \see numericFormat()
+     */
+    void setNumericFormat( QgsNumericFormat *format SIP_TRANSFER );
+
+    /**
+     * Returns the axis label suffix, or an empty string if no label suffix is to be used.
+     *
+     * \see setLabelSuffix()
+     * \see labelSuffixPlacement()
+     *
+     * \since QGIS 3.32
+     */
+    QString labelSuffix() const;
+
+    /**
+     * Sets the axis label \a suffix. Set to an empty string if no label suffix is to be used.
+     *
+     * \see labelSuffix()
+     * \see setLabelSuffixPlacement()
+     *
+     * \since QGIS 3.32
+     */
+    void setLabelSuffix( const QString &suffix );
+
+    /**
+     * Returns the placement for the axis label suffixes.
+     *
+     * \see setLabelSuffixPlacement()
+     * \see labelSuffix()
+     *
+     * \since QGIS 3.32
+     */
+    Qgis::PlotAxisSuffixPlacement labelSuffixPlacement() const;
+
+    /**
+     * Sets the \a placement for the axis label suffixes.
+     *
+     * \see labelSuffixPlacement()
+     * \see setLabelSuffix()
+     *
+     * \since QGIS 3.32
+     */
+    void setLabelSuffixPlacement( Qgis::PlotAxisSuffixPlacement placement );
+
+    /**
+     * Copies all properties from \a source axis to \a destination axis.
+     *
+     * \since QGIS 4.0
+     */
+    static void copyProperties( const QgsPlotAxis &source, QgsPlotAxis &destination );
+
+  private:
+#ifdef SIP_RUN
+    QgsPlotAxis( const QgsPlotAxis &other );
+#endif
+
+    Qgis::PlotAxisType mType = Qgis::PlotAxisType::Interval;
+
+    double mGridIntervalMinor = 1;
+    double mGridIntervalMajor = 5;
+
+    double mLabelInterval = 1;
+
+    QString mLabelSuffix;
+    Qgis::PlotAxisSuffixPlacement mSuffixPlacement = Qgis::PlotAxisSuffixPlacement::EveryLabel;
+
+    std::unique_ptr< QgsNumericFormat > mNumericFormat;
+
+    std::unique_ptr< QgsLineSymbol > mGridMajorSymbol;
+    std::unique_ptr< QgsLineSymbol > mGridMinorSymbol;
+
+    QgsTextFormat mLabelTextFormat;
+};
+
+/**
+ * \brief Base class for 2-dimensional plot/chart/graphs.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 3.26
+ */
+class CORE_EXPORT Qgs2DPlot : public QgsPlot
+{
+  public:
+    /**
+     * Constructor for Qgs2DPlot.
+     */
+    Qgs2DPlot();
+
+    ~Qgs2DPlot() override;
+
+    Qgs2DPlot( const Qgs2DPlot &other ) = delete;
+    Qgs2DPlot &operator=( const Qgs2DPlot &other ) = delete;
+
+    bool writeXml( QDomElement &element, QDomDocument &document, const QgsReadWriteContext &context ) const override;
+    bool readXml( const QDomElement &element, const QgsReadWriteContext &context ) override;
+
+    /**
+     * Renders the plot.
+     */
+    virtual void render( QgsRenderContext &context, QgsPlotRenderContext &plotContext, const QgsPlotData &plotData = QgsPlotData() );
+
+    /**
+     * Renders the plot content.
+     *
+     * Subclasses can implement this method to render the actual plot content (e.g. bar charts, scatter plots).
+     * This method will be called after the chart background and grid are rendered, but before the chart border is rendered.
+     *
+     * The default implementation does nothing.
+     *
+     * The \a plotArea argument specifies that area of the plot which corresponds to the actual plot content. Implementations
+     * should take care to scale values accordingly to render points correctly inside this plot area.
+     */
+    virtual void renderContent( QgsRenderContext &context, QgsPlotRenderContext &plotContext, const QRectF &plotArea, const QgsPlotData &plotData = QgsPlotData() );
+
+    /**
+     * Returns the overall size of the plot (in millimeters) (including titles and other components which sit outside the plot area).
+     *
+     * \see setSize()
+     */
+    QSizeF size() const;
+
+    /**
+     * Sets the overall \a size of the plot (including titles and over components which sit outside the plot area).
+     *
+     * \see size()
+     */
+    void setSize( QSizeF size );
+
+    /**
+     * Returns the area of the plot which corresponds to the actual plot content (excluding all titles and other components which sit
+     * outside the plot area).
+     *
+     * The optional \a plotData argument can be passed on to support calculation of label sizes when an axis' type is categorical.
+     */
+    virtual QRectF interiorPlotArea( QgsRenderContext &context, QgsPlotRenderContext &plotContext, const QgsPlotData &plotData = QgsPlotData() ) const;
+
+    /**
+     * Returns the margins of the plot area (in millimeters)
+     *
+     * \see setMargins()
+     */
+    const QgsMargins &margins() const;
+
+    /**
+     * Sets the \a margins of the plot area (in millimeters)
+     *
+     * \see setMargins()
+     */
+    void setMargins( const QgsMargins &margins );
+
+    /**
+     * Copies all Qgs2DPlot-level properties (size, margins, data-defined properties) from \a other to this plot.
+     * \since QGIS 4.0
+     */
+    void copyCommonProperties( const Qgs2DPlot *other );
+
+  protected:
+    //! Applies 2D plot data-defined properties
+    void applyDataDefinedProperties( QgsRenderContext &context, QgsMargins &margins ) const;
+
+  private:
+#ifdef SIP_RUN
+    Qgs2DPlot( const Qgs2DPlot &other );
+#endif
+
+    QSizeF mSize;
+    QgsMargins mMargins;
+
+    friend class Qgs2DXyPlot;
+};
+
+/**
+ * \brief Base class for 2-dimensional plot/chart/graphs with an X and Y axes.
+ *
+ * The base class is responsible for rendering the axis, grid lines and chart area. Subclasses
+ * can implement the renderContent() method to render their actual plot content.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 3.26
+ */
+class CORE_EXPORT Qgs2DXyPlot : public Qgs2DPlot
+{
+  public:
+    /**
+     * Constructor for Qgs2DXyPlot.
+     */
+    Qgs2DXyPlot();
+
+    ~Qgs2DXyPlot() override;
+
+    Qgs2DXyPlot( const Qgs2DXyPlot &other ) = delete;
+    Qgs2DXyPlot &operator=( const Qgs2DXyPlot &other ) = delete;
+
+    bool writeXml( QDomElement &element, QDomDocument &document, const QgsReadWriteContext &context ) const override;
+    bool readXml( const QDomElement &element, const QgsReadWriteContext &context ) override;
+
+    /**
+     * Renders the plot.
+     */
+    void render( QgsRenderContext &context, QgsPlotRenderContext &plotContext, const QgsPlotData &plotData = QgsPlotData() ) override;
+
+    /**
+     * Returns the area of the plot which corresponds to the actual plot content (excluding all titles and other components which sit
+     * outside the plot area).
+     */
+    QRectF interiorPlotArea( QgsRenderContext &context, QgsPlotRenderContext &plotContext, const QgsPlotData &plotData = QgsPlotData() ) const override;
+
+    /**
+     * Automatically sets the grid and label intervals to optimal values
+     * for display in the given render \a context.
+     *
+     * Intervals will be calculated in order to avoid overlapping axis labels and to ensure
+     * round values are shown.
+     */
+    void calculateOptimisedIntervals( QgsRenderContext &context, QgsPlotRenderContext &plotContext );
+
+    /**
+     * Returns the minimum value of the x axis.
+     *
+     * \see setXMinimum()
+     */
+    double xMinimum() const { return mMinX; }
+
+    /**
+     * Sets the \a minimum value of the x axis.
+     *
+     * \see xMinimum()
+     */
+    void setXMinimum( double minimum ) { mMinX = minimum; }
+
+    /**
+     * Returns the minimum value of the y axis.
+     *
+     * \see setYMinimum()
+     */
+    double yMinimum() const { return mMinY; }
+
+    /**
+     * Sets the \a minimum value of the y axis.
+     *
+     * \see yMinimum()
+     */
+    void setYMinimum( double minimum ) { mMinY = minimum; }
+
+    /**
+     * Returns the maximum value of the x axis.
+     *
+     * \see setXMaximum()
+     */
+    double xMaximum() const { return mMaxX; }
+
+    /**
+     * Sets the \a maximum value of the x axis.
+     *
+     * \see xMaximum()
+     */
+    void setXMaximum( double maximum ) { mMaxX = maximum; }
+
+    /**
+     * Returns the maximum value of the y axis.
+     *
+     * \see setYMaximum()
+     */
+    double yMaximum() const { return mMaxY; }
+
+    /**
+     * Sets the \a maximum value of the y axis.
+     *
+     * \see yMaximum()
+     */
+    void setYMaximum( double maximum ) { mMaxY = maximum; }
+
+    /**
+     * Returns a reference to the plot's x axis.
+     *
+     * \see yAxis()
+     */
+    QgsPlotAxis &xAxis() { return mXAxis; }
+
+    /**
+     * Returns a reference to the plot's x axis.
+     *
+     * \see yAxis()
+     */
+    const QgsPlotAxis &xAxis() const SIP_SKIP { return mXAxis; }
+
+    /**
+     * Returns a reference to the plot's y axis.
+     *
+     * \see xAxis()
+     */
+    QgsPlotAxis &yAxis() { return mYAxis; }
+
+    /**
+     * Returns a reference to the plot's y axis.
+     *
+     * \see xAxis()
+     */
+    const QgsPlotAxis &yAxis() const SIP_SKIP { return mYAxis; }
+
+    /**
+     * Returns the fill symbol used to render the background of the chart.
+     *
+     * \see setChartBackgroundSymbol()
+     */
+    QgsFillSymbol *chartBackgroundSymbol();
+
+    /**
+     * Returns the fill symbol used to render the background of the chart.
+     * \see setChartBackgroundSymbol()
+     * \note not available in Python bindings
+     */
+    const QgsFillSymbol *chartBackgroundSymbol() const SIP_SKIP;
+
+    /**
+     * Sets the fill \a symbol used to render the background of the chart.
+     *
+     * Ownership of \a symbol is transferred to the plot.
+     *
+     * \see chartBackgroundSymbol()
+     */
+    void setChartBackgroundSymbol( QgsFillSymbol *symbol SIP_TRANSFER );
+
+    /**
+     * Returns the symbol used to render the border of the chart.
+     *
+     * \see setChartBorderSymbol()
+     */
+    QgsFillSymbol *chartBorderSymbol();
+
+    /**
+     * Returns the symbol used to render the border of the chart.
+     *
+     * \see setChartBorderSymbol()
+     * \note not available in Python bindings
+     */
+    const QgsFillSymbol *chartBorderSymbol() const SIP_SKIP;
+
+    /**
+     * Sets the \a symbol used to render the border of the chart.
+     *
+     * Ownership of \a symbol is transferred to the plot.
+     *
+     * \see chartBorderSymbol()
+     */
+    void setChartBorderSymbol( QgsFillSymbol *symbol SIP_TRANSFER );
+
+    /**
+     * Returns whether the X and Y axes are flipped.
+     */
+    bool flipAxes() const { return mFlipAxes; }
+
+    /**
+     * Sets whether the X and Y axes are flipped.
+     */
+    void setFlipAxes( bool flipAxes );
+
+    /**
+     * Copies all Qgs2DXyPlot-level properties (axis ranges, axes, flip state, background and border symbols)
+     * from \a other to this plot.
+     * \since QGIS 4.0
+     */
+    void copyCommonProperties( const Qgs2DXyPlot *other );
+
+  protected:
+    //! Applies 2D XY plot data-defined properties
+    void applyDataDefinedProperties(
+      QgsRenderContext &context,
+      double &minX,
+      double &maxX,
+      double &minY,
+      double &maxY,
+      double &majorIntervalX,
+      double &minorIntervalX,
+      double &labelIntervalX,
+      double &majorIntervalY,
+      double &minorIntervalY,
+      double &labelIntervalY
+    ) const;
+
+  private:
+#ifdef SIP_RUN
+    Qgs2DXyPlot( const Qgs2DXyPlot &other );
+#endif
+
+    double mMinX = 0;
+    double mMinY = 0;
+    double mMaxX = 10;
+    double mMaxY = 10;
+
+    std::unique_ptr< QgsFillSymbol > mChartBackgroundSymbol;
+    std::unique_ptr< QgsFillSymbol > mChartBorderSymbol;
+
+    QgsPlotAxis mXAxis;
+    QgsPlotAxis mYAxis;
+
+    bool mFlipAxes = false;
+};
+
+/**
+ * \brief Manages default settings for plot objects.
+ *
+ * \warning This class is not considered stable API, and may change in future!
+ *
+ * \ingroup core
+ * \since QGIS 3.30
+ */
+class CORE_EXPORT QgsPlotDefaultSettings
+{
+  public:
+    /**
+     * Returns the default numeric format to use for plot axis labels.
+     */
+    static QgsNumericFormat *axisLabelNumericFormat() SIP_FACTORY;
+
+    /**
+     * Returns the default line symbol to use for axis major grid lines.
+     *
+     * \see axisGridMinorSymbol()
+     */
+    static QgsLineSymbol *axisGridMajorSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default line symbol to use for axis minor grid lines.
+     *
+     * \see axisGridMajorSymbol()
+     */
+    static QgsLineSymbol *axisGridMinorSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default fill symbol to use for the chart area background fill.
+     *
+     * \see chartBorderSymbol()
+     */
+    static QgsFillSymbol *chartBackgroundSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default fill symbol to use for the chart area border.
+     *
+     * \see chartBackgroundSymbol()
+     */
+    static QgsFillSymbol *chartBorderSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default marker symbol to use for line charts.
+     *
+     * \see lineChartLineSymbol()
+     * \since QGIS 4.0
+     */
+    static QgsMarkerSymbol *lineChartMarkerSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default line symbol to use for line charts.
+     *
+     * \see lineChartMarkerSymbol()
+     * \since QGIS 4.0
+     */
+    static QgsLineSymbol *lineChartLineSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default fill symbol to use for bar charts.
+     * \since QGIS 4.0
+     */
+    static QgsFillSymbol *barChartFillSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default fill symbol to use for pie charts.
+     * \since QGIS 4.0
+     */
+    static QgsFillSymbol *pieChartFillSymbol() SIP_FACTORY;
+
+    /**
+     * Returns the default color ramp to use for pie charts.
+     * \since QGIS 4.0
+     */
+    static QgsColorRamp *pieChartColorRamp() SIP_FACTORY;
+
+    /**
+     * Returns the default color ramp to use for pie charts.
+     * \since QGIS 4.0
+     */
+    static QgsNumericFormat *pieChartNumericFormat() SIP_FACTORY;
+};
+
+#endif // QGSPLOT_H

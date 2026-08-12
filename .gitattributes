@@ -1,0 +1,3 @@
+# Keep the fixed upstream QGIS snapshot byte-faithful; its historical whitespace
+# must not be reported as a change made by paleo-workbench.
+third_party/qgis/** -whitespace

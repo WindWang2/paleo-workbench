@@ -1,0 +1,121 @@
+/***************************************************************************
+    qgsmaptoolshapeellipsecenter2points.cpp  -  map tool for adding ellipse
+    from center and 2 points
+    ---------------------
+    begin                : July 2017
+    copyright            : (C) 2017 by Loïc Bartoletti
+    email                : lituus at free dot fr
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaptoolshapeellipsecenter2points.h"
+
+#include <memory>
+
+#include "qgsapplication.h"
+#include "qgsgeometryrubberband.h"
+#include "qgslinestring.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptoolcapture.h"
+#include "qgspoint.h"
+
+#include <QString>
+
+#include "moc_qgsmaptoolshapeellipsecenter2points.cpp"
+
+using namespace Qt::StringLiterals;
+
+const QString QgsMapToolShapeEllipseCenter2PointsMetadata::TOOL_ID = u"ellipse-center-2-points"_s;
+
+QString QgsMapToolShapeEllipseCenter2PointsMetadata::id() const
+{
+  return QgsMapToolShapeEllipseCenter2PointsMetadata::TOOL_ID;
+}
+
+QString QgsMapToolShapeEllipseCenter2PointsMetadata::name() const
+{
+  return QObject::tr( "Ellipse from center and 2 points" );
+}
+
+QIcon QgsMapToolShapeEllipseCenter2PointsMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"/mActionEllipseCenter2Points.svg"_s );
+}
+
+QgsMapToolShapeAbstract::ShapeCategory QgsMapToolShapeEllipseCenter2PointsMetadata::category() const
+{
+  return QgsMapToolShapeAbstract::ShapeCategory::Ellipse;
+}
+
+QgsMapToolShapeAbstract *QgsMapToolShapeEllipseCenter2PointsMetadata::factory( QgsMapToolCapture *parentTool ) const
+{
+  return new QgsMapToolShapeEllipseCenter2Points( parentTool );
+}
+
+bool QgsMapToolShapeEllipseCenter2Points::cadCanvasReleaseEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  const QgsPoint point = mParentTool->mapPoint( *e );
+  if ( e->button() == Qt::LeftButton )
+  {
+    if ( mPoints.size() < 2 )
+      mPoints.append( point );
+
+    if ( !mPoints.isEmpty() && !mTempRubberBand )
+    {
+      Qgis::GeometryType type = mode == QgsMapToolCapture::CapturePolygon ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line;
+      mTempRubberBand = mParentTool->createGeometryRubberBand( type, true );
+      mTempRubberBand->show();
+    }
+  }
+  else if ( e->button() == Qt::RightButton )
+  {
+    if ( mEllipse.isEmpty() )
+      return false;
+
+    addEllipseToParentTool();
+    return true;
+  }
+
+  return false;
+}
+
+void QgsMapToolShapeEllipseCenter2Points::cadCanvasMoveEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  Q_UNUSED( mode )
+
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( mTempRubberBand )
+  {
+    switch ( mPoints.size() )
+    {
+      case 1:
+      {
+        auto line = std::make_unique<QgsLineString>();
+        line->addVertex( mPoints.at( 0 ) );
+        line->addVertex( point );
+        mTempRubberBand->setGeometry( line.release() );
+      }
+      break;
+      case 2:
+      {
+        mEllipse = QgsEllipse::fromCenter2Points( mPoints.at( 0 ), mPoints.at( 1 ), point );
+        const QgsGeometry newGeometry( mEllipse.toPolygon( segments() ) );
+        if ( !newGeometry.isEmpty() )
+        {
+          mTempRubberBand->setGeometry( newGeometry.constGet()->clone() );
+          setTransientGeometry( newGeometry );
+        }
+      }
+      break;
+      default:
+        break;
+    }
+  }
+}

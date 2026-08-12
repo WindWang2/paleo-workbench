@@ -1,0 +1,54 @@
+/***************************************************************************
+  qgsalgorithmsymmetricaldifference.h
+  ---------------------
+  Date                 : April 2018
+  Copyright            : (C) 2018 by Martin Dobias
+  Email                : wonder dot sk at gmail dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSALGORITHMSYMMETRICALDIFFERENCE_H
+#define QGSALGORITHMSYMMETRICALDIFFERENCE_H
+
+
+#include "qgsapplication.h"
+#include "qgsprocessingalgorithm.h"
+
+#include <QString>
+
+#define SIP_NO_FILE
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+class QgsSymmetricalDifferenceAlgorithm : public QgsProcessingAlgorithm
+{
+  public:
+    QgsSymmetricalDifferenceAlgorithm() = default;
+    QIcon icon() const override { return QgsApplication::getThemeIcon( u"/algorithms/mAlgorithmSymmetricalDifference.svg"_s ); }
+    QString svgIconPath() const override { return QgsApplication::iconPath( u"/algorithms/mAlgorithmSymmetricalDifference.svg"_s ); }
+    QString name() const override;
+    QString displayName() const override;
+    QStringList tags() const override;
+    QString group() const override;
+    QString groupId() const override;
+    QString shortHelpString() const override;
+    QString shortDescription() const override;
+    Qgis::ProcessingAlgorithmDocumentationFlags documentationFlags() const override;
+
+  protected:
+    QgsProcessingAlgorithm *createInstance() const override;
+    void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+};
+
+///@endcond PRIVATE
+
+#endif // QGSALGORITHMSYMMETRICALDIFFERENCE_H

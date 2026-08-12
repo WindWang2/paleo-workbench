@@ -1,0 +1,300 @@
+/***************************************************************************
+                        qgsmultipolygon.cpp
+  -------------------------------------------------------------------
+Date                 : 28 Oct 2014
+Copyright            : (C) 2014 by Marco Hugentobler
+email                : marco.hugentobler at sourcepole dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmultipolygon.h"
+
+#include <nlohmann/json.hpp>
+
+#include "qgscurvepolygon.h"
+#include "qgsgeometryutils.h"
+#include "qgslinestring.h"
+#include "qgsmultilinestring.h"
+#include "qgspolygon.h"
+
+#include <QJsonObject>
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+QgsMultiPolygon::QgsMultiPolygon()
+{
+  mWkbType = Qgis::WkbType::MultiPolygon;
+}
+
+QgsMultiPolygon::QgsMultiPolygon( const QList<QgsPolygon> &polygons )
+{
+  if ( polygons.empty() )
+    return;
+
+  mGeometries.reserve( polygons.size() );
+  for ( const QgsPolygon &poly : polygons )
+  {
+    mGeometries.append( poly.clone() );
+  }
+
+  setZMTypeFromSubGeometry( &polygons.at( 0 ), Qgis::WkbType::MultiPolygon );
+}
+
+QgsMultiPolygon::QgsMultiPolygon( const QList<QgsPolygon *> &polygons )
+{
+  if ( polygons.empty() )
+    return;
+
+  mGeometries.reserve( polygons.size() );
+  for ( QgsPolygon *poly : polygons )
+  {
+    mGeometries.append( poly );
+  }
+
+  setZMTypeFromSubGeometry( polygons.at( 0 ), Qgis::WkbType::MultiPolygon );
+}
+
+QgsPolygon *QgsMultiPolygon::polygonN( int index )
+{
+  return qgsgeometry_cast< QgsPolygon * >( geometryN( index ) );
+}
+
+const QgsPolygon *QgsMultiPolygon::polygonN( int index ) const
+{
+  return qgsgeometry_cast< const QgsPolygon * >( geometryN( index ) );
+}
+
+QString QgsMultiPolygon::geometryType() const
+{
+  return u"MultiPolygon"_s;
+}
+
+void QgsMultiPolygon::clear()
+{
+  QgsMultiSurface::clear();
+  mWkbType = Qgis::WkbType::MultiPolygon;
+}
+
+QgsMultiPolygon *QgsMultiPolygon::createEmptyWithSameType() const
+{
+  auto result = std::make_unique< QgsMultiPolygon >();
+  result->mWkbType = mWkbType;
+  return result.release();
+}
+
+QgsMultiPolygon *QgsMultiPolygon::clone() const
+{
+  return new QgsMultiPolygon( *this );
+}
+
+bool QgsMultiPolygon::fromWkt( const QString &wkt )
+{
+  return fromCollectionWkt( wkt, { Qgis::WkbType::Polygon }, u"Polygon"_s );
+}
+
+QDomElement QgsMultiPolygon::asGml2( QDomDocument &doc, int precision, const QString &ns, const AxisOrder axisOrder ) const
+{
+  // GML2 does not support curves
+  QDomElement elemMultiPolygon = doc.createElementNS( ns, u"MultiPolygon"_s );
+
+  if ( isEmpty() )
+    return elemMultiPolygon;
+
+  for ( const QgsAbstractGeometry *geom : mGeometries )
+  {
+    if ( qgsgeometry_cast<const QgsPolygon *>( geom ) )
+    {
+      QDomElement elemPolygonMember = doc.createElementNS( ns, u"polygonMember"_s );
+      elemPolygonMember.appendChild( geom->asGml2( doc, precision, ns, axisOrder ) );
+      elemMultiPolygon.appendChild( elemPolygonMember );
+    }
+  }
+
+  return elemMultiPolygon;
+}
+
+QDomElement QgsMultiPolygon::asGml3( QDomDocument &doc, int precision, const QString &ns, const QgsAbstractGeometry::AxisOrder axisOrder ) const
+{
+  QDomElement elemMultiSurface = doc.createElementNS( ns, u"MultiSurface"_s );
+
+  if ( isEmpty() )
+    return elemMultiSurface;
+
+  for ( const QgsAbstractGeometry *geom : mGeometries )
+  {
+    if ( qgsgeometry_cast<const QgsPolygon *>( geom ) )
+    {
+      QDomElement elemSurfaceMember = doc.createElementNS( ns, u"surfaceMember"_s );
+      elemSurfaceMember.appendChild( geom->asGml3( doc, precision, ns, axisOrder ) );
+      elemMultiSurface.appendChild( elemSurfaceMember );
+    }
+  }
+
+  return elemMultiSurface;
+}
+
+json QgsMultiPolygon::asJsonObject( int precision ) const
+{
+  json polygons( json::array() );
+  for ( const QgsAbstractGeometry *geom : std::as_const( mGeometries ) )
+  {
+    if ( qgsgeometry_cast<const QgsPolygon *>( geom ) )
+    {
+      json coordinates( json::array() );
+      const QgsPolygon *polygon = static_cast<const QgsPolygon *>( geom );
+
+      std::unique_ptr< QgsLineString > exteriorLineString( polygon->exteriorRing()->curveToLine() );
+      QgsPointSequence exteriorPts;
+      exteriorLineString->points( exteriorPts );
+      coordinates.push_back( QgsGeometryUtils::pointsToJson( exteriorPts, precision ) );
+
+      std::unique_ptr< QgsLineString > interiorLineString;
+      for ( int i = 0, n = polygon->numInteriorRings(); i < n; ++i )
+      {
+        interiorLineString.reset( polygon->interiorRing( i )->curveToLine() );
+        QgsPointSequence interiorPts;
+        interiorLineString->points( interiorPts );
+        coordinates.push_back( QgsGeometryUtils::pointsToJson( interiorPts, precision ) );
+      }
+      polygons.push_back( coordinates );
+    }
+  }
+  return { { "type", "MultiPolygon" }, { "coordinates", polygons } };
+}
+
+bool QgsMultiPolygon::addGeometry( QgsAbstractGeometry *g )
+{
+  if ( !qgsgeometry_cast<QgsPolygon *>( g ) )
+  {
+    delete g;
+    return false;
+  }
+
+  if ( mGeometries.empty() )
+  {
+    setZMTypeFromSubGeometry( g, Qgis::WkbType::MultiPolygon );
+  }
+  if ( is3D() && !g->is3D() )
+    g->addZValue();
+  else if ( !is3D() && g->is3D() )
+    g->dropZValue();
+  if ( isMeasure() && !g->isMeasure() )
+    g->addMValue();
+  else if ( !isMeasure() && g->isMeasure() )
+    g->dropMValue();
+
+  return QgsGeometryCollection::addGeometry( g ); // NOLINT(bugprone-parent-virtual-call) clazy:exclude=skipped-base-method
+}
+
+bool QgsMultiPolygon::addGeometries( const QVector<QgsAbstractGeometry *> &geometries )
+{
+  for ( QgsAbstractGeometry *g : geometries )
+  {
+    if ( !qgsgeometry_cast<QgsPolygon *>( g ) )
+    {
+      qDeleteAll( geometries );
+      return false;
+    }
+  }
+
+  if ( mGeometries.empty() && !geometries.empty() )
+  {
+    setZMTypeFromSubGeometry( geometries.at( 0 ), Qgis::WkbType::MultiPolygon );
+  }
+  mGeometries.reserve( mGeometries.size() + geometries.size() );
+  for ( QgsAbstractGeometry *g : geometries )
+  {
+    if ( is3D() && !g->is3D() )
+      g->addZValue();
+    else if ( !is3D() && g->is3D() )
+      g->dropZValue();
+    if ( isMeasure() && !g->isMeasure() )
+      g->addMValue();
+    else if ( !isMeasure() && g->isMeasure() )
+      g->dropMValue();
+    mGeometries.append( g );
+  }
+
+  clearCache();
+  return true;
+}
+
+bool QgsMultiPolygon::insertGeometry( QgsAbstractGeometry *g, int index )
+{
+  if ( !g || !qgsgeometry_cast< QgsPolygon * >( g ) )
+  {
+    delete g;
+    return false;
+  }
+
+  return QgsMultiSurface::insertGeometry( g, index );
+}
+
+QgsMultiPolygon *QgsMultiPolygon::simplifyByDistance( double tolerance ) const
+{
+  auto res = std::make_unique< QgsMultiPolygon >();
+  res->reserve( mGeometries.size() );
+  for ( int i = 0; i < mGeometries.size(); ++i )
+  {
+    res->addGeometry( mGeometries.at( i )->simplifyByDistance( tolerance ) );
+  }
+  return res.release();
+}
+
+QgsMultiSurface *QgsMultiPolygon::toCurveType() const
+{
+  QgsMultiSurface *multiSurface = new QgsMultiSurface();
+  multiSurface->reserve( mGeometries.size() );
+  for ( int i = 0; i < mGeometries.size(); ++i )
+  {
+    multiSurface->addGeometry( mGeometries.at( i )->clone() );
+  }
+  return multiSurface;
+}
+
+QgsAbstractGeometry *QgsMultiPolygon::boundary() const
+{
+  auto multiLine = std::make_unique<QgsMultiLineString>();
+  multiLine->reserve( mGeometries.size() );
+  for ( int i = 0; i < mGeometries.size(); ++i )
+  {
+    if ( QgsPolygon *polygon = qgsgeometry_cast<QgsPolygon *>( mGeometries.at( i ) ) )
+    {
+      QgsAbstractGeometry *polygonBoundary = polygon->boundary();
+
+      if ( QgsLineString *lineStringBoundary = qgsgeometry_cast< QgsLineString * >( polygonBoundary ) )
+      {
+        multiLine->addGeometry( lineStringBoundary );
+      }
+      else if ( QgsMultiLineString *multiLineStringBoundary = qgsgeometry_cast< QgsMultiLineString * >( polygonBoundary ) )
+      {
+        for ( int j = 0; j < multiLineStringBoundary->numGeometries(); ++j )
+        {
+          multiLine->addGeometry( multiLineStringBoundary->geometryN( j )->clone() );
+        }
+        delete multiLineStringBoundary;
+      }
+      else
+      {
+        delete polygonBoundary;
+      }
+    }
+  }
+  if ( multiLine->numGeometries() == 0 )
+  {
+    return nullptr;
+  }
+  return multiLine.release();
+}
+
+bool QgsMultiPolygon::wktOmitChildType() const
+{
+  return true;
+}

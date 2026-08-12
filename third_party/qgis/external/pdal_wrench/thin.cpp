@@ -1,0 +1,219 @@
+/*****************************************************************************
+ *   Copyright (c) 2023, Lutra Consulting Ltd. and Hobu, Inc.                *
+ *                                                                           *
+ *   All rights reserved.                                                    *
+ *                                                                           *
+ *   This program is free software; you can redistribute it and/or modify    *
+ *   it under the terms of the GNU General Public License as published by    *
+ *   the Free Software Foundation; either version 3 of the License, or       *
+ *   (at your option) any later version.                                     *
+ *                                                                           *
+ ****************************************************************************/
+
+#include <iostream>
+#include <filesystem>
+#include <thread>
+
+#include <pdal/PipelineManager.hpp>
+#include <pdal/Stage.hpp>
+#include <pdal/util/ProgramArgs.hpp>
+#include <pdal/pdal_types.hpp>
+#include <pdal/Polygon.hpp>
+
+#include <gdal_utils.h>
+
+#include "utils.hpp"
+#include "alg.hpp"
+#include "vpc.hpp"
+
+using namespace pdal;
+
+namespace fs = std::filesystem;
+
+
+// TODO: add support for filters.sample and/or filters.voxeldownsize
+// (both in streaming mode but more memory intense - keeping occupation grid)
+
+void Thin::addArgs()
+{
+    argOutput = &programArgs.add("output,o", "Output point cloud file", outputFile);
+    argOutputFormatVpc = &programArgs.add("vpc-output-format", "Output format (las/laz/copc)", outputFormatVpc, "copc");
+    argMode = &programArgs.add("mode", " 'every-nth' or 'sample' - either to keep every N-th point or to keep points based on their distance", mode);
+    argStepEveryN = &programArgs.add("step-every-nth", "Keep every N-th point", stepEveryN);
+    argStepSample = &programArgs.add("step-sample", "Minimum spacing between points", stepSample);
+}
+
+bool Thin::checkArgs()
+{
+    if (!argOutput->set())
+    {
+        std::cerr << "missing output" << std::endl;
+        return false;
+    }
+
+    if (!argMode->set())
+    {
+        std::cerr << "missing mode" << std::endl;
+        return false;
+    }
+    else if (mode == "every-nth")
+    {
+        if (!argStepEveryN->set())
+        {
+            std::cerr << "missing step for every N-th point mode" << std::endl;
+            return false;
+        }
+    }
+    else if (mode == "sample")
+    {
+        if (!argStepSample->set())
+        {
+            std::cerr << "missing step for sampling mode" << std::endl;
+            return false;
+        }
+    }
+    else
+    {
+        std::cerr << "unknown mode: " << mode << std::endl;
+        return false;
+    }
+
+    if (argOutputFormatVpc->set())
+    {
+        if (outputFormatVpc != "las" && outputFormatVpc != "laz" && outputFormatVpc != "copc")
+        {
+            std::cerr << "unknown output format: " << outputFormatVpc << std::endl;
+            return false;
+        }
+    }
+
+    if ( isVpcFilename(outputFile) && outputFormatVpc == "copc" )
+    {
+        isStreaming = false;
+    }
+    
+    return true;
+}
+
+
+static std::unique_ptr<PipelineManager> pipeline(ParallelJobInfo *tile, std::string mode, int stepEveryN, double stepSample)
+{
+    std::unique_ptr<PipelineManager> manager( new PipelineManager );
+
+    Stage& r = makeReader(manager.get(), tile->inputFilenames[0]);
+
+    Stage *last = &r;
+
+    // filtering
+    if (!tile->filterBounds.empty())
+    {
+        Options filter_opts;
+        filter_opts.add(pdal::Option("bounds", tile->filterBounds));
+
+        if (readerSupportsBounds(r))
+        {
+            // Reader of the format can do the filtering - use that whenever possible!
+            r.addOptions(filter_opts);
+        }
+        else
+        {
+            // Reader can't do the filtering - do it with a filter
+            last = &manager->makeFilter( "filters.crop", *last, filter_opts);
+        }
+    }
+    if (!tile->filterExpression.empty())
+    {
+        Options filter_opts;
+        filter_opts.add(pdal::Option("expression", tile->filterExpression));
+        last = &manager->makeFilter( "filters.expression", *last, filter_opts);
+    }
+
+    if (mode == "every-nth")
+    {
+        pdal::Options decim_opts;
+        decim_opts.add(pdal::Option("step", stepEveryN));
+        last = &manager->makeFilter( "filters.decimation", *last, decim_opts );
+    }
+    else if (mode == "sample")
+    {
+        pdal::Options sample_opts;
+        sample_opts.add(pdal::Option("cell", stepSample));
+        last = &manager->makeFilter( "filters.sample", *last, sample_opts );
+    }
+
+    makeWriter(manager.get(), tile->outputFilename, last);
+
+    return manager;
+}
+
+
+void Thin::preparePipelines(std::vector<std::unique_ptr<PipelineManager>>& pipelines)
+{
+    if (isVpcFilename(inputFile))
+    {
+        // for /tmp/hello.vpc we will use /tmp/hello dir for all results
+        fs::path outputParentDir = fs::path(outputFile).parent_path();
+        fs::path outputSubdir = outputParentDir / fs::path(outputFile).stem();
+        fs::create_directories(outputSubdir);
+
+        // VPC handling
+        VirtualPointCloud vpc;
+        if (!vpc.read(inputFile))
+            return;
+
+        for (const VirtualPointCloud::File& f : vpc.files)
+        {
+            ParallelJobInfo tile(ParallelJobInfo::FileBased, BOX2D(), filterExpression, filterBounds);
+            tile.inputFilenames.push_back(f.filename);
+
+            tile.outputFilename = tileOutputFileName(outputFile, outputFormatVpc, outputSubdir, f.filename);
+
+            tileOutputFiles.push_back(tile.outputFilename);
+
+            pipelines.push_back(pipeline(&tile, mode, stepEveryN, stepSample));
+        }
+    }
+    else
+    {
+        if (ends_with(outputFile, ".copc.laz"))
+        {
+            isStreaming = false;
+        }
+        ParallelJobInfo tile(ParallelJobInfo::Single, BOX2D(), filterExpression, filterBounds);
+        tile.inputFilenames.push_back(inputFile);
+        tile.outputFilename = outputFile;
+        pipelines.push_back(pipeline(&tile, mode, stepEveryN, stepSample));
+    }
+}
+
+void Thin::finalize(std::vector<std::unique_ptr<PipelineManager>>&)
+{
+    if (tileOutputFiles.empty())
+        return;
+
+    // now build a new output VPC
+    std::vector<std::string> args;
+    args.push_back("--output=" + outputFile);
+    for (std::string f : tileOutputFiles)
+        args.push_back(f);
+    
+    if (isVpcFilename(outputFile))
+    {
+        // now build a new output VPC
+        buildVpc(args);
+    }
+    else
+    {
+        // merge all the output files into a single file        
+        Merge merge;
+        // for copc set isStreaming to false
+        if (ends_with(outputFile, ".copc.laz"))
+        {
+            merge.isStreaming = false;
+        }
+        runAlg(args, merge);
+
+        // remove files as they are not needed anymore - they are merged
+        removeFiles(tileOutputFiles, true);
+    }
+}

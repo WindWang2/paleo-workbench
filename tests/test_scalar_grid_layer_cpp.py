@@ -31,8 +31,12 @@ def test_scalar_grid_layer_caches_native_raster_by_data_and_style_revision():
     layer.set_gamma(2.0)
     assert layer.data_revision == data0
     assert layer.style_revision == style0 + 1
-    layer.rasterize()
+    styled = layer.rasterize()
     assert layer.rasterize_count == 2
+    assert not np.shares_memory(first, styled)
+    assert first[0, 1, 0] != styled[0, 1, 0]
+    # The first Python-owned snapshot remains stable after the native cache changes.
+    assert first[0, 1, 0] == 255
 
     layer.set_mask(np.array([[1, 0], [1, 1]], dtype=np.uint8))
     assert layer.data_revision == data0 + 1

@@ -1,0 +1,114 @@
+/***************************************************************************
+    qgsmaptoolshaperegularpolygoncenterpoint.cpp  -  map tool for adding regular
+    polygon from center and a point
+    ---------------------
+    begin                : July 2017
+    copyright            : (C) 2017 by Loïc Bartoletti
+    email                : lituus at free dot fr
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsmaptoolshaperegularpolygoncenterpoint.h"
+
+#include "qgsapplication.h"
+#include "qgsgeometryrubberband.h"
+#include "qgsmapmouseevent.h"
+#include "qgsmaptoolcapture.h"
+#include "qgspoint.h"
+
+#include <QString>
+
+#include "moc_qgsmaptoolshaperegularpolygoncenterpoint.cpp"
+
+using namespace Qt::StringLiterals;
+
+const QString QgsMapToolShapeRegularPolygonCenterPointMetadata::TOOL_ID = u"regular-polygon-from-center-point"_s;
+
+QString QgsMapToolShapeRegularPolygonCenterPointMetadata::id() const
+{
+  return QgsMapToolShapeRegularPolygonCenterPointMetadata::TOOL_ID;
+}
+
+QString QgsMapToolShapeRegularPolygonCenterPointMetadata::name() const
+{
+  return QObject::tr( "Regular polygon from center and a point" );
+}
+
+QIcon QgsMapToolShapeRegularPolygonCenterPointMetadata::icon() const
+{
+  return QgsApplication::getThemeIcon( u"/mActionRegularPolygonCenterPoint.svg"_s );
+}
+
+QgsMapToolShapeAbstract::ShapeCategory QgsMapToolShapeRegularPolygonCenterPointMetadata::category() const
+{
+  return QgsMapToolShapeAbstract::ShapeCategory::RegularPolygon;
+}
+
+QgsMapToolShapeAbstract *QgsMapToolShapeRegularPolygonCenterPointMetadata::factory( QgsMapToolCapture *parentTool ) const
+{
+  return new QgsMapToolShapeRegularPolygonCenterPoint( parentTool );
+}
+
+QgsMapToolShapeRegularPolygonCenterPoint::~QgsMapToolShapeRegularPolygonCenterPoint()
+{
+  deleteNumberSidesSpinBox();
+}
+
+bool QgsMapToolShapeRegularPolygonCenterPoint::cadCanvasReleaseEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( e->button() == Qt::LeftButton )
+  {
+    if ( mPoints.size() < 1 )
+      mPoints.append( point );
+
+    if ( !mPoints.isEmpty() )
+    {
+      if ( !mTempRubberBand )
+      {
+        Qgis::GeometryType type = mode == QgsMapToolCapture::CapturePolygon ? Qgis::GeometryType::Polygon : Qgis::GeometryType::Line;
+        mTempRubberBand = mParentTool->createGeometryRubberBand( type, true );
+        mTempRubberBand->show();
+
+        createNumberSidesSpinBox();
+      }
+    }
+  }
+  else if ( e->button() == Qt::RightButton )
+  {
+    if ( mRegularPolygon.isEmpty() )
+      return false;
+
+    mPoints.append( point );
+    addRegularPolygonToParentTool();
+    return true;
+  }
+
+  return false;
+}
+
+void QgsMapToolShapeRegularPolygonCenterPoint::cadCanvasMoveEvent( QgsMapMouseEvent *e, QgsMapToolCapture::CaptureMode mode )
+{
+  Q_UNUSED( mode )
+
+  const QgsPoint point = mParentTool->mapPoint( *e );
+
+  if ( mTempRubberBand && !mPoints.isEmpty() )
+  {
+    const QgsRegularPolygon::ConstructionOption option = QgsRegularPolygon::CircumscribedCircle;
+    mRegularPolygon = QgsRegularPolygon( mPoints.at( 0 ), point, mNumberSidesSpinBox->value(), option );
+    const QgsGeometry newGeometry( mRegularPolygon.toPolygon() );
+    if ( !newGeometry.isEmpty() )
+    {
+      mTempRubberBand->setGeometry( newGeometry.constGet()->clone() );
+      setTransientGeometry( newGeometry );
+    }
+  }
+}

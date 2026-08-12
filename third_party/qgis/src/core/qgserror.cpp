@@ -1,0 +1,136 @@
+/***************************************************************************
+                         qgserror.cpp  -  Error container
+                             -------------------
+    begin                : October 2012
+    copyright            : (C) 2012 Radim Blazek
+    email                : radim dot blazek at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+#include "qgsconfig.h"
+#include "qgserror.h"
+
+#include "qgis.h"
+#include "qgslogger.h"
+#include "qgsversion.h"
+
+#include <QRegularExpression>
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+QgsErrorMessage::QgsErrorMessage( const QString &message, const QString &tag, const QString &file, const QString &function, int line )
+  : mMessage( message )
+  , mTag( tag )
+  , mFile( file )
+  , mFunction( function )
+  , mLine( line )
+{}
+
+QgsError::QgsError( const QString &message, const QString &tag )
+{
+  append( message, tag );
+}
+
+void QgsError::append( const QString &message, const QString &tag )
+{
+  mMessageList.append( QgsErrorMessage( message, tag ) );
+}
+
+void QgsError::append( const QgsErrorMessage &message )
+{
+  mMessageList.append( message );
+}
+
+QString QgsError::message( QgsErrorMessage::Format format ) const
+{
+  QString str;
+
+#ifdef QGISDEBUG
+  QString srcUrl;
+#endif
+
+#if defined( QGISDEBUG ) && defined( QGS_GIT_REMOTE_URL )
+  // TODO: verify if we are not ahead to origin (remote hash does not exist)
+  //       and there are no local not committed changes
+  QString hash = QString( Qgis::devVersion() );
+  QString remote = QStringLiteral( QGS_GIT_REMOTE_URL );
+  if ( !hash.isEmpty() && !remote.isEmpty() && remote.contains( "github.com"_L1 ) )
+  {
+    QString path = remote.remove( QRegularExpression( ".*github.com[:/]" ) ).remove( u".git"_s );
+    srcUrl = "https://github.com/" + path + "/blob/" + hash;
+  }
+#endif
+
+  const auto constMMessageList = mMessageList;
+  for ( const QgsErrorMessage &m : constMMessageList )
+  {
+#ifdef QGISDEBUG
+    QString file;
+#ifndef _MSC_VER
+    const int sPrefixLength = strlen( CMAKE_SOURCE_DIR ) + 1;
+    file = m.file().mid( sPrefixLength );
+#else
+    file = m.file();
+#endif
+#endif
+
+    if ( format == QgsErrorMessage::Text )
+    {
+      if ( !str.isEmpty() )
+      {
+        str += '\n'; // new message
+      }
+      if ( !m.tag().isEmpty() )
+      {
+        str += m.tag() + ' ';
+      }
+      str += m.message();
+#ifdef QGISDEBUG
+      QString where;
+      if ( !file.isEmpty() )
+      {
+        where += u"file: %1 row: %2"_s.arg( file ).arg( m.line() );
+      }
+      if ( !m.function().isEmpty() )
+      {
+        where += u"function %1:"_s.arg( m.function() );
+      }
+      if ( !where.isEmpty() )
+      {
+        str += u" (%1)"_s.arg( where );
+      }
+#endif
+    }
+    else // QgsErrorMessage::Html
+    {
+      str += "<p><b>" + m.tag() + ":</b> " + m.message();
+#ifdef QGISDEBUG
+      const QString location = u"%1 : %2 : %3"_s.arg( file ).arg( m.line() ).arg( m.function() );
+      if ( !srcUrl.isEmpty() )
+      {
+        const QString url = u"%1/%2#L%3"_s.arg( srcUrl, file ).arg( m.line() );
+        str += u"<br>(<a href='%1'>%2</a>)"_s.arg( url, location );
+      }
+      else
+      {
+        str += u"<br>(%1)"_s.arg( location );
+      }
+#endif
+    }
+  }
+  return str;
+}
+
+QString QgsError::summary() const
+{
+  // The first message in chain is usually the real error given by backend/server
+  return ( mMessageList.isEmpty() ? QString() : mMessageList.first().message() );
+}

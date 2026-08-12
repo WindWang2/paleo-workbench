@@ -1,0 +1,143 @@
+/***************************************************************************
+                         qgsvirtualpointcloudprovider.h
+                         ----------------
+    begin                : March 2023
+    copyright            : (C) 2023 by Stefanos Natsis
+    email                : uclaros at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSVIRTUALPOINTCLOUDPROVIDER_H
+#define QGSVIRTUALPOINTCLOUDPROVIDER_H
+
+#include <memory>
+
+#include "qgspointclouddataprovider.h"
+#include "qgsprovidermetadata.h"
+
+#define SIP_NO_FILE
+
+///@cond PRIVATE
+
+class QgsCopcPointCloudIndex;
+class QgsRemoteCopcPointCloudIndex;
+
+class QTimer;
+
+class CORE_EXPORT QgsVirtualPointCloudProvider : public QgsPointCloudDataProvider
+{
+    Q_OBJECT
+  public:
+    QgsVirtualPointCloudProvider( const QString &uri, const QgsDataProvider::ProviderOptions &providerOptions, Qgis::DataProviderReadFlags flags = Qgis::DataProviderReadFlags() );
+
+    ~QgsVirtualPointCloudProvider() override;
+
+    Qgis::DataProviderFlags flags() const override;
+    QgsPointCloudDataProvider::Capabilities capabilities() const override;
+    QgsCoordinateReferenceSystem crs() const override;
+
+    QgsRectangle extent() const override;
+    QgsPointCloudAttributeCollection attributes() const override;
+    bool isValid() const override;
+    QString name() const override;
+    QString description() const override;
+    QgsPointCloudIndex index() const override;
+    qint64 pointCount() const override;
+    QVariantMap originalMetadata() const override;
+    void loadIndex() override;
+    void generateIndex() override;
+    PointCloudIndexGenerationState indexingState() override { return PointCloudIndexGenerationState::Indexed; }
+    QgsGeometry polygonBounds() const override;
+    QVector<QgsPointCloudSubIndex> subIndexes() override { return mSubLayers; }
+    void loadSubIndex( int i, bool emitDataChanged = false ) override;
+    bool setSubsetString( const QString &subset, bool updateFeatureCount = false ) override;
+    QgsPointCloudRenderer *createRenderer( const QVariantMap &configuration = QVariantMap() ) const override SIP_FACTORY;
+    bool renderInPreview( const QgsDataProvider::PreviewContext & ) override { return false; }
+
+    /**
+     * Returns a list of all overview indexes.
+     * \since QGIS 4.2
+     */
+    QVector<QgsPointCloudIndex> overviews() const { return mOverviews; }
+
+    /**
+     * Returns the calculated average width of point clouds.
+     * \note We use this value to calculate when to switch between overview and point clouds
+     * \since QGIS 3.42
+     */
+    double averageSubIndexWidth() const { return mAverageSubIndexWidth; }
+
+    /**
+     * Returns the calculated average height of point clouds.
+     * \note We use this value to calculate when to switch between overview and point clouds
+     * \since QGIS 3.42
+     */
+    double averageSubIndexHeight() const { return mAverageSubIndexHeight; }
+
+
+    /**
+     * Returns whether the VPC contains unsupported files (files other than COPC or EPT).
+     *
+     * \since QGIS 4.0
+     */
+    bool containsUnsupportedFiles() const { return mContainsUnsupportedFiles; }
+
+  signals:
+    void subIndexLoaded( int i );
+
+  private:
+    void parseFile();
+    QByteArray readFileContents( const QString &path );
+    void populateAttributeCollection( QSet<QString> names );
+    void onFinishedLoadingSubIndex( int i );
+    QVector<QgsPointCloudSubIndex> mSubLayers;
+    std::unique_ptr<QgsGeometry> mPolygonBounds;
+    QgsPointCloudAttributeCollection mAttributes;
+    QVector<QgsPointCloudIndex> mOverviews;
+    QTimer *mSubIndexLoadedRefreshTimer = nullptr; // owned and parented to this
+    QSet<int> mSubLayersBeingLoaded;
+
+    double mRedMax = std::numeric_limits<double>::lowest();
+    double mGreenMax = std::numeric_limits<double>::lowest();
+    double mBlueMax = std::numeric_limits<double>::lowest();
+
+    QStringList mUriList;
+    QgsRectangle mExtent;
+    qint64 mPointCount = 0;
+    QgsCoordinateReferenceSystem mCrs;
+    double mAverageSubIndexWidth = 0;
+    double mAverageSubIndexHeight = 0;
+    bool mContainsUnsupportedFiles = false;
+    bool mAllEditableFiles = true;
+    bool mAllLocalFiles = true;
+};
+
+class QgsVirtualPointCloudProviderMetadata : public QgsProviderMetadata
+{
+    Q_OBJECT
+  public:
+    QgsVirtualPointCloudProviderMetadata();
+    QIcon icon() const override;
+    QgsProviderMetadata::ProviderMetadataCapabilities capabilities() const override;
+    QgsVirtualPointCloudProvider *createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options, Qgis::DataProviderReadFlags flags = Qgis::DataProviderReadFlags() ) override;
+    QList< QgsProviderSublayerDetails > querySublayers( const QString &uri, Qgis::SublayerQueryFlags flags = Qgis::SublayerQueryFlags(), QgsFeedback *feedback = nullptr ) const override;
+    int priorityForUri( const QString &uri ) const override;
+    QList< Qgis::LayerType > validLayerTypesForUri( const QString &uri ) const override;
+    QString encodeUri( const QVariantMap &parts ) const override;
+    QVariantMap decodeUri( const QString &uri ) const override;
+    QString filters( Qgis::FileFilterType type ) override;
+    ProviderCapabilities providerCapabilities() const override;
+    QList< Qgis::LayerType > supportedLayerTypes() const override;
+    static bool isVpcFileName( const QString &name );
+};
+
+///@endcond
+#endif // QGSVIRTUALPOINTCLOUDPROVIDER_H

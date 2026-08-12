@@ -359,7 +359,7 @@ class QgisMapRenderBackend(MapRenderBackend):
     def set_layer_snapshot(self, snapshot: MapRenderSnapshot) -> None:
         super().set_layer_snapshot(snapshot)
         if self._bridge is not None:
-            self._bridge.set_layer_snapshot(self._native_snapshot(snapshot), snapshot.project_crs)
+            self._set_native_snapshot(snapshot)
 
     def _native_snapshot(self, snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
         if any(layer.layer_type == "scalar_grid" for layer in snapshot.layers):
@@ -367,7 +367,21 @@ class QgisMapRenderBackend(MapRenderBackend):
                 from paleo_workbench.mapping.scalar_raster_mirror import ScalarRasterMirrorCache
 
                 self._scalar_raster_cache = ScalarRasterMirrorCache()
-        return _qgis_snapshot(snapshot, scalar_raster_cache=self._scalar_raster_cache)
+        encoded = _qgis_snapshot(snapshot, scalar_raster_cache=self._scalar_raster_cache)
+        if self._scalar_raster_cache is not None:
+            self._scalar_raster_cache.retain_layer_ids(
+                {layer.id for layer in snapshot.layers if layer.layer_type == "scalar_grid"}
+            )
+        return encoded
+
+    def _set_native_snapshot(self, snapshot: MapRenderSnapshot) -> None:
+        assert self._bridge is not None
+        self._bridge.set_layer_snapshot(self._native_snapshot(snapshot), snapshot.project_crs)
+        # A replacement can arrive while QGIS still renders an old raster source.
+        # It is only safe to unlink deferred /vsimem or disk sources once the bridge
+        # has no active job and has applied the replacement snapshot.
+        if self._scalar_raster_cache is not None and not self._bridge.render_active:
+            self._scalar_raster_cache.release_stale()
 
     def request_render(self) -> int:
         """Request native parallel rendering; native code coalesces stale frames."""
@@ -389,6 +403,8 @@ class QgisMapRenderBackend(MapRenderBackend):
         if self._bridge is None:
             return None
         payload = self._bridge.take_completed_frame()
+        if self._scalar_raster_cache is not None and not self._bridge.render_active:
+            self._scalar_raster_cache.release_stale()
         if payload is None:
             return None
         generation = int(payload["generation"])
@@ -418,9 +434,7 @@ class QgisMapRenderBackend(MapRenderBackend):
         if not self._initialized:
             self.initialize()
         assert self._bridge is not None
-        self._bridge.set_layer_snapshot(
-            self._native_snapshot(self._snapshot), self._snapshot.project_crs
-        )
+        self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
         payload = self._bridge.render_sync(
             self._extent, self._output_size[0], self._output_size[1], self._dpi

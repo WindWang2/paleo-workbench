@@ -1,0 +1,105 @@
+/***************************************************************************
+
+               ----------------------------------------------------
+              date                 : 19.5.2015
+              copyright            : (C) 2015 by Matthias Kuhn
+              email                : matthias (at) opengis.ch
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSWEBVIEW_H
+#define QGSWEBVIEW_H
+
+
+#include "qgswebpage.h"
+
+#include <QTextBrowser>
+#include <QWidget>
+
+#define SIP_NO_FILE
+
+class QPrinter;
+
+/**
+ * \ingroup core
+ * \brief A collection of stubs to mimic the API of QWebView on systems where the real
+ * library is not available. It should be used instead of QWebView inside QGIS.
+ *
+ * QgsWebview used to be based on QtWebKit and is now a simple subclass of QTextBrowser.
+ * Without WebKit this will be an empty QWidget. If you miss methods in here that you would like to use,
+ * please add additional stubs.
+ */
+class CORE_EXPORT QgsWebView : public QTextBrowser
+{
+    /// @cond NOT_STABLE_API
+    Q_OBJECT
+  public:
+    explicit QgsWebView( QWidget *parent = nullptr )
+      : QTextBrowser( parent )
+      , mSettings( std::make_unique<QWebSettings>() )
+      , mPage( std::make_unique<QWebPage>( this ) )
+    {
+      connect( this, &QTextBrowser::anchorClicked, this, &QgsWebView::linkClicked );
+      connect( this, &QgsWebView::pageLoadFinished, mPage.get(), &QWebPage::loadFinished );
+    }
+
+    ~QgsWebView() override {}
+
+    void setUrl( const QUrl &url ) { setSource( url ); }
+
+    void load( const QUrl &url ) { setSource( url ); }
+
+    QUrl url() const { return source(); }
+
+    QWebPage *page() const { return mPage.get(); }
+
+    QWebSettings *settings() const { return mSettings.get(); }
+
+    virtual QgsWebView *createWindow( QWebPage::WebWindowType ) { return new QgsWebView(); }
+
+    void setContent( const QByteArray &data, const QString &contentType, const QUrl & )
+    {
+      QString text = QString::fromUtf8( data );
+      if ( contentType == "text/html" )
+        setHtml( text );
+      else
+        setPlainText( text );
+
+      emit pageLoadFinished( true );
+    }
+
+    void print( QPrinter * ) {}
+
+  signals:
+    void linkClicked( const QUrl &link );
+
+    void pageLoadFinished( bool ok );
+
+  public slots:
+
+    void setHtml( const QString &text )
+    {
+      QTextBrowser::setHtml( text );
+      emit pageLoadFinished( true );
+    }
+
+    void setText( const QString &text )
+    {
+      QTextBrowser::setText( text );
+      emit pageLoadFinished( true );
+    }
+
+  private:
+    std::unique_ptr<QWebSettings> mSettings;
+    std::unique_ptr<QWebPage> mPage;
+
+    /// @endcond
+};
+
+#endif // QGSWEBVIEW_H

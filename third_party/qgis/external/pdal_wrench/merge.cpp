@@ -1,0 +1,190 @@
+/*****************************************************************************
+ *   Copyright (c) 2023, Lutra Consulting Ltd. and Hobu, Inc.                *
+ *                                                                           *
+ *   All rights reserved.                                                    *
+ *                                                                           *
+ *   This program is free software; you can redistribute it and/or modify    *
+ *   it under the terms of the GNU General Public License as published by    *
+ *   the Free Software Foundation; either version 3 of the License, or       *
+ *   (at your option) any later version.                                     *
+ *                                                                           *
+ ****************************************************************************/
+
+#include <iostream>
+#include <fstream>
+#include <filesystem>
+#include <thread>
+
+#include <pdal/PipelineManager.hpp>
+#include <pdal/Stage.hpp>
+#include <pdal/util/ProgramArgs.hpp>
+#include <pdal/pdal_types.hpp>
+#include <pdal/Polygon.hpp>
+
+#include <gdal_utils.h>
+
+#include "utils.hpp"
+#include "alg.hpp"
+#include "vpc.hpp"
+
+using namespace pdal;
+
+namespace fs = std::filesystem;
+
+
+void Merge::addArgs()
+{
+    argOutput = &programArgs.add("output,o", "Output virtual point cloud file", outputFile);
+    // we set hasSingleInput=false so the default "input,i" argument is not added
+    programArgs.add("files", "input files", inputFiles).setPositional();
+    programArgs.add("input-file-list", "Read input files from a text file", inputFileList);
+
+}
+
+bool Merge::checkArgs()
+{
+    if (!argOutput->set())
+    {
+        std::cerr << "missing output" << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+static std::unique_ptr<PipelineManager> pipeline(ParallelJobInfo *tile)
+{
+    assert(tile);
+
+    std::unique_ptr<PipelineManager> manager( new PipelineManager );
+
+    std::vector<Stage*> readers;
+    for (const std::string& f : tile->inputFilenames)
+    {
+        Stage& reader = makeReader( manager.get(), f );
+        readers.push_back(&reader);
+    }
+
+    std::vector<Stage*> last = readers;
+
+    // filtering
+    if (!tile->filterBounds.empty())
+    {
+        Options filter_opts;
+        filter_opts.add(pdal::Option("bounds", tile->filterBounds));
+
+        if (allReadersSupportBounds(readers))
+        {
+            // Reader of the format can do the filtering - use that whenever possible!
+            for (Stage *r : readers)
+              r->addOptions(filter_opts);
+        }
+        else
+        {
+            // Reader can't do the filtering - do it with a filter
+            Stage *filterCrop = &manager->makeFilter( "filters.crop", filter_opts);
+            for (Stage *s : last)
+                filterCrop->setInput(*s);
+            last.clear();
+            last.push_back(filterCrop);
+        }
+    }
+    if (!tile->filterExpression.empty())
+    {
+        Options filter_opts;
+        filter_opts.add(pdal::Option("expression", tile->filterExpression));
+        Stage *filterExpr = &manager->makeFilter( "filters.expression", filter_opts);
+        for (Stage *s : last)
+            filterExpr->setInput(*s);
+        last.clear();
+        last.push_back(filterExpr);
+    }
+
+    // this is a special case for merging COPC files
+    // writers.copc does not support multiple inputs
+    //  merge step is necessary before writing the output
+    if (ends_with(tile->outputFilename, ".copc.laz"))
+    {
+        Stage *merge = &manager->makeFilter("filters.merge");
+        for (Stage *stage : last)
+            merge->setInput(*stage);
+        last.clear();
+        last.push_back(merge);
+    }
+
+    Stage* writer = &makeWriter(manager.get(), tile->outputFilename, nullptr);
+    for (Stage *s : last)
+        writer->setInput(*s);
+
+    return manager;
+}
+
+void Merge::preparePipelines(std::vector<std::unique_ptr<PipelineManager>>& pipelines)
+{
+    ParallelJobInfo tile(ParallelJobInfo::Single, BOX2D(), filterExpression, filterBounds);
+    std::vector<std::string> inputFilesToProcess;
+    // move any input files to inputFilesToProcess, so they go through processInputFile()
+    std::swap(inputFilesToProcess, inputFiles);
+    if (!inputFileList.empty())
+    {
+        std::ifstream inputFile(inputFileList);
+        std::string line;
+        if(!inputFile)
+        {
+            std::cerr << "failed to open input file list: " << inputFileList << std::endl;
+            return;
+        }
+
+        while (std::getline(inputFile, line))
+        {
+            inputFilesToProcess.push_back(line);
+        }
+    }
+    
+    inputFiles.reserve(inputFilesToProcess.size());
+
+    std::function<void(const std::string& inputFile)> processInputFile;
+    processInputFile = [&processInputFile,this](const std::string& inputFile) {
+        if (isVpcFilename(inputFile))
+        {
+            VirtualPointCloud vpc;
+            if (!vpc.read(inputFile))
+            {
+                std::cerr << "could not open input VPC: " << inputFile << std::endl;
+                return;
+            }
+
+            for (const VirtualPointCloud::File& vpcSingleFile : vpc.files)
+            {
+                processInputFile(vpcSingleFile.filename);
+            }
+        }
+        else
+        {
+            inputFiles.push_back(inputFile);
+        }
+    };
+
+    for (const std::string& inputFile : inputFilesToProcess)
+    {
+        processInputFile(inputFile);
+    }
+
+    tile.inputFilenames = inputFiles;
+    tile.outputFilename = outputFile;
+
+    if (ends_with(outputFile, ".copc.laz"))
+    {
+        isStreaming = false;
+    }
+
+    pipelines.push_back(pipeline(&tile));
+
+    // only algs with single input have the number of points figured out already
+    totalPoints = 0;
+    for (const std::string& f : inputFiles)
+    {
+        QuickInfo qi = getQuickInfo(f);
+        totalPoints += qi.m_pointCount;
+    }
+}

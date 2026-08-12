@@ -1,0 +1,162 @@
+/***************************************************************************
+  qgs3ddebugwidget.cpp
+  --------------------------------------
+  Date                 : November 2024
+  Copyright            : (C) 2024 by Matej Bagar
+  Email                : matej dot bagar at lutraconsulting dot co dot uk
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgs3ddebugwidget.h"
+
+#include "qgis.h"
+#include "qgs3dmapcanvas.h"
+#include "qgs3dmapscene.h"
+#include "qgscameracontroller.h"
+
+#include "moc_qgs3ddebugwidget.cpp"
+
+Qgs3DDebugWidget::Qgs3DDebugWidget( Qgs3DMapCanvas *canvas, QWidget *parent )
+  : QWidget( parent )
+  , m3DMapCanvas( canvas )
+{
+  // set up the widget defined in ui file
+  setupUi( this );
+
+  // set up the fixed width of debug widget
+  mCameraInfoGroupBox->setMinimumWidth( mCameraInfoGroupBox->sizeHint().width() );
+  mCameraInfoGroupBox->adjustSize();
+  scrollAreaWidgetContents->setMinimumWidth( scrollAreaWidgetContents->sizeHint().width() );
+  scrollAreaWidgetContents->adjustSize();
+  scrollArea->setMinimumWidth( scrollArea->sizeHint().width() );
+  scrollArea->adjustSize();
+  adjustSize();
+
+  // set up the depth map block
+  mDebugDepthMapCornerComboBox->addItem( tr( "Top Left" ) );
+  mDebugDepthMapCornerComboBox->addItem( tr( "Top Right" ) );
+  mDebugDepthMapCornerComboBox->addItem( tr( "Bottom Left" ) );
+  mDebugDepthMapCornerComboBox->addItem( tr( "Bottom Right" ) );
+  mDebugDepthMapSizeSpinBox->setClearValue( 0.1 );
+
+  // set up the camera info block
+  mNearPlane->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mFarPlane->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mCameraX->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mCameraY->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mCameraZ->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mLookingX->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mLookingY->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+  mLookingZ->setRange( std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() );
+}
+
+void Qgs3DDebugWidget::setMapSettings( Qgs3DMapSettings *mapSettings )
+{
+  mMap = mapSettings;
+
+  // set up the checkbox block
+  whileBlocking( chkShowTileInfo )->setChecked( mMap->debugFlags().testFlag( Qgis::Map3DDebugFlag::ShowTerrainTileInfo ) );
+  whileBlocking( chkShowBoundingBoxes )->setChecked( mMap->debugFlags().testFlag( Qgis::Map3DDebugFlag::ShowTerrainBoundingBoxes ) );
+  whileBlocking( chkShowCameraViewCenter )->setChecked( mMap->debugFlags().testFlag( Qgis::Map3DDebugFlag::ShowCameraViewCenter ) );
+  whileBlocking( chkShowCameraRotationCenter )->setChecked( mMap->debugFlags().testFlag( Qgis::Map3DDebugFlag::ShowCameraRotationCenter ) );
+  whileBlocking( chkShowLightSourceOrigins )->setChecked( mMap->debugFlags().testFlag( Qgis::Map3DDebugFlag::ShowLightSourceOrigins ) );
+  whileBlocking( chkStopUpdates )->setChecked( mMap->stopUpdates() );
+  whileBlocking( chkStopOriginShifts )->setChecked( !m3DMapCanvas->scene()->hasSceneOriginShiftEnabled() );
+  whileBlocking( chkDebugOverlay )->setChecked( mMap->isDebugOverlayEnabled() );
+  connect( chkShowTileInfo, &QCheckBox::toggled, this, [this]( const bool enabled ) {
+    Qgis::Map3DDebugFlags debugFlags = mMap->debugFlags();
+    debugFlags.setFlag( Qgis::Map3DDebugFlag::ShowTerrainTileInfo, enabled );
+    mMap->setDebugFlags( debugFlags );
+  } );
+  connect( chkShowBoundingBoxes, &QCheckBox::toggled, this, [this]( const bool enabled ) {
+    Qgis::Map3DDebugFlags debugFlags = mMap->debugFlags();
+    debugFlags.setFlag( Qgis::Map3DDebugFlag::ShowTerrainBoundingBoxes, enabled );
+    mMap->setDebugFlags( debugFlags );
+  } );
+  connect( chkShowCameraViewCenter, &QCheckBox::toggled, this, [this]( const bool enabled ) {
+    Qgis::Map3DDebugFlags debugFlags = mMap->debugFlags();
+    debugFlags.setFlag( Qgis::Map3DDebugFlag::ShowCameraViewCenter, enabled );
+    mMap->setDebugFlags( debugFlags );
+  } );
+  connect( chkShowCameraRotationCenter, &QCheckBox::toggled, this, [this]( const bool enabled ) {
+    Qgis::Map3DDebugFlags debugFlags = mMap->debugFlags();
+    debugFlags.setFlag( Qgis::Map3DDebugFlag::ShowCameraRotationCenter, enabled );
+    mMap->setDebugFlags( debugFlags );
+  } );
+  connect( chkShowLightSourceOrigins, &QCheckBox::toggled, this, [this]( const bool enabled ) {
+    Qgis::Map3DDebugFlags debugFlags = mMap->debugFlags();
+    debugFlags.setFlag( Qgis::Map3DDebugFlag::ShowLightSourceOrigins, enabled );
+    mMap->setDebugFlags( debugFlags );
+  } );
+  connect( chkStopUpdates, &QCheckBox::toggled, this, [this]( const bool enabled ) { mMap->setStopUpdates( enabled ); } );
+  connect( chkStopOriginShifts, &QCheckBox::toggled, this, [this]( const bool enabled ) { m3DMapCanvas->scene()->setSceneOriginShiftEnabled( !enabled ); } );
+  connect( chkDebugOverlay, &QCheckBox::toggled, this, [this]( const bool enabled ) { mMap->setIsDebugOverlayEnabled( enabled ); } );
+
+  // set up the depth map block
+  whileBlocking( mDebugDepthMapGroupBox )->setChecked( mMap->debugDepthMapEnabled() );
+  whileBlocking( mDebugDepthMapCornerComboBox )->setCurrentIndex( mMap->debugDepthMapCorner() );
+  whileBlocking( mDebugDepthMapSizeSpinBox )->setValue( mMap->debugDepthMapSize() );
+  connect( mDebugDepthMapGroupBox, &QGroupBox::toggled, this, [this]( const bool enabled ) {
+    mMap->setDebugDepthMapSettings( enabled, static_cast<Qt::Corner>( mDebugDepthMapCornerComboBox->currentIndex() ), mDebugDepthMapSizeSpinBox->value() );
+  } );
+  connect( mDebugDepthMapCornerComboBox, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this]( const int index ) {
+    mMap->setDebugDepthMapSettings( mDebugDepthMapGroupBox->isChecked(), static_cast<Qt::Corner>( index ), mDebugDepthMapSizeSpinBox->value() );
+  } );
+  connect( mDebugDepthMapSizeSpinBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    mMap->setDebugDepthMapSettings( mDebugDepthMapGroupBox->isChecked(), static_cast<Qt::Corner>( mDebugDepthMapCornerComboBox->currentIndex() ), value );
+  } );
+
+  // connect the camera info spin boxes with changing functions
+  connect( mNearPlane, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    m3DMapCanvas->cameraController()->camera()->setNearPlane( static_cast<float>( value ) );
+  } );
+  connect( mFarPlane, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) { m3DMapCanvas->cameraController()->camera()->setFarPlane( static_cast<float>( value ) ); } );
+  connect( mCameraX, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    QVector3D newPosition = m3DMapCanvas->cameraController()->camera()->position();
+    newPosition.setX( static_cast<float>( value ) );
+    m3DMapCanvas->cameraController()->camera()->setPosition( newPosition );
+  } );
+  connect( mCameraY, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    QVector3D newPosition = m3DMapCanvas->cameraController()->camera()->position();
+    newPosition.setY( static_cast<float>( value ) );
+    m3DMapCanvas->cameraController()->camera()->setPosition( newPosition );
+  } );
+  connect( mCameraZ, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    QVector3D newPosition = m3DMapCanvas->cameraController()->camera()->position();
+    newPosition.setZ( static_cast<float>( value ) );
+    m3DMapCanvas->cameraController()->camera()->setPosition( newPosition );
+  } );
+  connect( mLookingX, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    QgsVector3D newLookingAt = m3DMapCanvas->cameraController()->lookingAtPoint();
+    newLookingAt.setX( value );
+    m3DMapCanvas->cameraController()->setLookingAtPoint( newLookingAt, m3DMapCanvas->cameraController()->distance(), m3DMapCanvas->cameraController()->pitch(), m3DMapCanvas->cameraController()->yaw() );
+  } );
+  connect( mLookingY, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    QgsVector3D newLookingAt = m3DMapCanvas->cameraController()->lookingAtPoint();
+    newLookingAt.setY( value );
+    m3DMapCanvas->cameraController()->setLookingAtPoint( newLookingAt, m3DMapCanvas->cameraController()->distance(), m3DMapCanvas->cameraController()->pitch(), m3DMapCanvas->cameraController()->yaw() );
+  } );
+  connect( mLookingZ, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( const double value ) {
+    QgsVector3D newLookingAt = m3DMapCanvas->cameraController()->lookingAtPoint();
+    newLookingAt.setZ( value );
+    m3DMapCanvas->cameraController()->setLookingAtPoint( newLookingAt, m3DMapCanvas->cameraController()->distance(), m3DMapCanvas->cameraController()->pitch(), m3DMapCanvas->cameraController()->yaw() );
+  } );
+}
+
+void Qgs3DDebugWidget::updateFromCamera() const
+{
+  whileBlocking( mNearPlane )->setValue( m3DMapCanvas->cameraController()->camera()->nearPlane() );
+  whileBlocking( mFarPlane )->setValue( m3DMapCanvas->cameraController()->camera()->farPlane() );
+  whileBlocking( mCameraX )->setValue( m3DMapCanvas->cameraController()->camera()->position().x() );
+  whileBlocking( mCameraY )->setValue( m3DMapCanvas->cameraController()->camera()->position().y() );
+  whileBlocking( mCameraZ )->setValue( m3DMapCanvas->cameraController()->camera()->position().z() );
+  whileBlocking( mLookingX )->setValue( m3DMapCanvas->cameraController()->lookingAtPoint().x() );
+  whileBlocking( mLookingY )->setValue( m3DMapCanvas->cameraController()->lookingAtPoint().y() );
+  whileBlocking( mLookingZ )->setValue( m3DMapCanvas->cameraController()->lookingAtPoint().z() );
+}

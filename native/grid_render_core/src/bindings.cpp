@@ -10,7 +10,6 @@
 #include "grid_render_core.hpp"
 #include "scalar_grid_layer.hpp"
 
-#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -159,10 +158,10 @@ PYBIND11_MODULE(grid_render_core, m) {
         .def("rasterize", [](pwb::grid_render::ScalarGridLayer& layer) {
             py::array_t<std::uint8_t> out({layer.height(), layer.width(), 4});
             auto* destination = out.mutable_data();
+            const auto destination_size = static_cast<std::size_t>(out.nbytes());
             {
                 py::gil_scoped_release release;
-                const auto rgba = layer.rasterize();
-                std::memcpy(destination, rgba.data(), rgba.size());
+                layer.rasterize_into(destination, destination_size);
             }
             return out;
         });

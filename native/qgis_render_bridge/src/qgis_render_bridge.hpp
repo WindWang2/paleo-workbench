@@ -75,7 +75,8 @@ class QgisRenderBridge {
     QgisRenderBridge(const QgisRenderBridge&) = delete;
     QgisRenderBridge& operator=(const QgisRenderBridge&) = delete;
 
-    void initialize(const std::string& prefix_path = {});
+    /// An empty prefix selects the owned runtime; any other prefix is rejected.
+    void initialize(const std::string& requested_prefix = {});
     void set_layer_snapshot(std::vector<VectorLayerSpec> layers, std::string project_crs);
     /// Starts or coalesces a non-blocking QGIS render for the newest generation.
     void request_render(const std::array<double, 4>& extent, int width, int height,

@@ -1,0 +1,56 @@
+/***************************************************************************
+                         qgsalgorithmaspect.h
+                         ------------------------------
+    begin                : November 2019
+    copyright            : (C) 2019 by Alexander Bruy
+    email                : alexander dot bruy at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#ifndef QGSALGORITHMASPECT_H
+#define QGSALGORITHMASPECT_H
+
+
+#include "qgis_sip.h"
+#include "qgsprocessingalgorithm.h"
+
+#define SIP_NO_FILE
+
+///@cond PRIVATE
+
+/**
+ * Native aspect algorithm.
+ */
+class QgsAspectAlgorithm : public QgsProcessingAlgorithm
+{
+  public:
+    QgsAspectAlgorithm() = default;
+    void initAlgorithm( const QVariantMap &configuration = QVariantMap() ) override;
+    QString name() const override;
+    QString displayName() const override;
+    QStringList tags() const override;
+    QString group() const override;
+    QString groupId() const override;
+    QString shortHelpString() const override;
+    QString shortDescription() const override;
+    QgsAspectAlgorithm *createInstance() const override SIP_FACTORY;
+
+  protected:
+    bool prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+    QVariantMap processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback ) override;
+
+  private:
+    QString mLayerSource;
+};
+
+///@endcond PRIVATE
+
+#endif // QGSALGORITHMASPECT_H

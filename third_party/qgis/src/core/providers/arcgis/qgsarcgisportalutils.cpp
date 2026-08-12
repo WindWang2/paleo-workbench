@@ -1,0 +1,205 @@
+/***************************************************************************
+    qgsarcgisportalutils.h
+    --------------------
+    begin                : December 2020
+    copyright            : (C) 2020 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+#include "qgsarcgisportalutils.h"
+
+#include "qgsarcgisrestquery.h"
+#include "qgsfeedback.h"
+
+#include <QString>
+#include <QUrl>
+#include <QUrlQuery>
+
+using namespace Qt::StringLiterals;
+
+QVariantMap QgsArcGisPortalUtils::retrieveUserInfo(
+  const QString &communityUrl, const QString &user, const QString &authcfg, QString &errorTitle, QString &errorText, const QgsHttpHeaders &requestHeaders, QgsFeedback *feedback, const QString &urlPrefix, bool forceRefresh
+)
+{
+  QString endPoint = communityUrl;
+  if ( endPoint.endsWith( '/' ) )
+    endPoint.chop( 1 );
+
+  if ( user.isEmpty() )
+    endPoint += "/self"_L1;
+  else
+    endPoint += u"/users/"_s + user;
+
+  QUrl queryUrl( endPoint );
+  QUrlQuery query( queryUrl );
+  query.addQueryItem( u"f"_s, u"json"_s );
+  queryUrl.setQuery( query );
+
+  return QgsArcGisRestQueryUtils::queryServiceJSON( queryUrl, authcfg, errorTitle, errorText, requestHeaders, feedback, urlPrefix, forceRefresh );
+}
+
+QVariantMap QgsArcGisPortalUtils::retrieveUserInfo(
+  const QString &communityUrl, const QString &user, const QString &authcfg, QString &errorTitle, QString &errorText, const QMap< QString, QVariant > &requestHeaders, QgsFeedback *feedback, const QString &urlPrefix
+)
+{
+  return QgsArcGisPortalUtils::retrieveUserInfo( communityUrl, user, authcfg, errorTitle, errorText, QgsHttpHeaders( requestHeaders ), feedback, urlPrefix );
+}
+
+QVariantList QgsArcGisPortalUtils::retrieveUserGroups(
+  const QString &communityUrl, const QString &user, const QString &authcfg, QString &errorTitle, QString &errorText, const QgsHttpHeaders &requestHeaders, QgsFeedback *feedback, const QString &urlPrefix, bool forceRefresh
+)
+{
+  const QVariantMap info = retrieveUserInfo( communityUrl, user, authcfg, errorTitle, errorText, requestHeaders, feedback, urlPrefix, forceRefresh );
+  return info.value( u"groups"_s ).toList();
+}
+
+QVariantList QgsArcGisPortalUtils::retrieveUserGroups(
+  const QString &communityUrl, const QString &user, const QString &authcfg, QString &errorTitle, QString &errorText, const QMap< QString, QVariant > &requestHeaders, QgsFeedback *feedback, const QString &urlPrefix
+)
+{
+  return QgsArcGisPortalUtils::retrieveUserGroups( communityUrl, user, authcfg, errorTitle, errorText, QgsHttpHeaders( requestHeaders ), feedback, urlPrefix );
+}
+
+QVariantList QgsArcGisPortalUtils::retrieveGroupContent(
+  const QString &contentUrl,
+  const QString &groupId,
+  const QString &authcfg,
+  QString &errorTitle,
+  QString &errorText,
+  const QgsHttpHeaders &requestHeaders,
+  QgsFeedback *feedback,
+  int pageSize,
+  const QString &urlPrefix,
+  bool forceRefresh
+)
+{
+  QString endPoint = contentUrl;
+  if ( endPoint.endsWith( '/' ) )
+    endPoint.chop( 1 );
+
+  endPoint += u"/groups/"_s + groupId;
+
+  int start = 1;
+
+  QVariantList items;
+  while ( true )
+  {
+    QUrl queryUrl( endPoint );
+    QUrlQuery query( queryUrl );
+    query.addQueryItem( u"f"_s, u"json"_s );
+    query.addQueryItem( u"start"_s, QString::number( start ) );
+    query.addQueryItem( u"num"_s, QString::number( pageSize ) );
+    queryUrl.setQuery( query );
+
+    const QVariantMap response = QgsArcGisRestQueryUtils::queryServiceJSON( queryUrl, authcfg, errorTitle, errorText, requestHeaders, feedback, urlPrefix, forceRefresh );
+    if ( !errorText.isEmpty() )
+      return QVariantList();
+
+    items.append( response.value( u"items"_s ).toList() );
+
+    if ( feedback && feedback->isCanceled() )
+      return items;
+
+    const int total = response.value( u"total"_s ).toInt();
+    start += pageSize;
+    if ( total < start )
+      break;
+  }
+  return items;
+}
+
+QVariantList QgsArcGisPortalUtils::retrieveGroupContent(
+  const QString &contentUrl,
+  const QString &groupId,
+  const QString &authcfg,
+  QString &errorTitle,
+  QString &errorText,
+  const QMap< QString, QVariant > &requestHeaders,
+  QgsFeedback *feedback,
+  int pageSize,
+  const QString &urlPrefix
+)
+{
+  return QgsArcGisPortalUtils::retrieveGroupContent( contentUrl, groupId, authcfg, errorTitle, errorText, QgsHttpHeaders( requestHeaders ), feedback, pageSize, urlPrefix );
+}
+
+QVariantList QgsArcGisPortalUtils::retrieveGroupItemsOfType(
+  const QString &contentUrl,
+  const QString &groupId,
+  const QString &authcfg,
+  const QList<int> &itemTypes,
+  QString &errorTitle,
+  QString &errorText,
+  const QgsHttpHeaders &requestHeaders,
+  QgsFeedback *feedback,
+  int pageSize,
+  const QString &urlPrefix,
+  bool forceRefresh
+)
+{
+  const QVariantList items = retrieveGroupContent( contentUrl, groupId, authcfg, errorTitle, errorText, requestHeaders, feedback, pageSize, urlPrefix, forceRefresh );
+
+  // filter results to desired types
+  QVariantList result;
+  for ( const QVariant &item : items )
+  {
+    const QVariantMap itemDef = item.toMap();
+    const QString itemType = itemDef.value( u"type"_s ).toString();
+
+    for ( const int filterType : itemTypes )
+    {
+      if ( typeToString( static_cast< Qgis::ArcGisRestServiceType >( filterType ) ).compare( itemType, Qt::CaseInsensitive ) == 0 )
+      {
+        result << item;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+QVariantList QgsArcGisPortalUtils::retrieveGroupItemsOfType(
+  const QString &contentUrl,
+  const QString &groupId,
+  const QString &authcfg,
+  const QList<int> &itemTypes,
+  QString &errorTitle,
+  QString &errorText,
+  const QMap< QString, QVariant > &requestHeaders,
+  QgsFeedback *feedback,
+  int pageSize,
+  const QString &urlPrefix
+)
+{
+  return QgsArcGisPortalUtils::retrieveGroupItemsOfType( contentUrl, groupId, authcfg, itemTypes, errorTitle, errorText, QgsHttpHeaders( requestHeaders ), feedback, pageSize, urlPrefix );
+}
+
+
+QString QgsArcGisPortalUtils::typeToString( Qgis::ArcGisRestServiceType type )
+{
+  // note -- these values are different in the Portal REST responses vs the standard ArcGIS REST responses!
+  switch ( type )
+  {
+    case Qgis::ArcGisRestServiceType::FeatureServer:
+      return u"Feature Service"_s;
+    case Qgis::ArcGisRestServiceType::MapServer:
+      return u"Map Service"_s;
+    case Qgis::ArcGisRestServiceType::ImageServer:
+      return u"Image Service"_s;
+    case Qgis::ArcGisRestServiceType::SceneServer:
+      return u"Scene Service"_s;
+
+    case Qgis::ArcGisRestServiceType::GlobeServer:
+    case Qgis::ArcGisRestServiceType::GPServer:
+    case Qgis::ArcGisRestServiceType::GeocodeServer:
+    case Qgis::ArcGisRestServiceType::Unknown:
+      return QString();
+  }
+  BUILTIN_UNREACHABLE
+}

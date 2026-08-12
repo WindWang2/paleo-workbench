@@ -1,0 +1,157 @@
+/***************************************************************************
+                         qgsalgorithmprojectpointcartesian.cpp
+                         ---------------------
+    begin                : April 2017
+    copyright            : (C) 2017 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmprojectpointcartesian.h"
+
+#include "qgsmultipoint.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsProjectPointCartesianAlgorithm::name() const
+{
+  return u"projectpointcartesian"_s;
+}
+
+QString QgsProjectPointCartesianAlgorithm::displayName() const
+{
+  return QObject::tr( "Project points (Cartesian)" );
+}
+
+QStringList QgsProjectPointCartesianAlgorithm::tags() const
+{
+  return QObject::tr( "bearing,azimuth,distance,angle" ).split( ',' );
+}
+
+QString QgsProjectPointCartesianAlgorithm::group() const
+{
+  return QObject::tr( "Vector geometry" );
+}
+
+QString QgsProjectPointCartesianAlgorithm::groupId() const
+{
+  return u"vectorgeometry"_s;
+}
+
+QString QgsProjectPointCartesianAlgorithm::outputName() const
+{
+  return QObject::tr( "Projected" );
+}
+
+QString QgsProjectPointCartesianAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm projects point geometries by a specified distance and bearing (azimuth), creating a new point layer with the projected points.\n\n"
+    "The distance is specified in layer units, and the bearing in degrees clockwise from North."
+  );
+}
+
+QString QgsProjectPointCartesianAlgorithm::shortDescription() const
+{
+  return QObject::tr( "Creates a point layer with geometries projected by a specified distance and bearing (azimuth)." );
+}
+
+QList<int> QgsProjectPointCartesianAlgorithm::inputLayerTypes() const
+{
+  return QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorPoint );
+}
+
+Qgis::ProcessingSourceType QgsProjectPointCartesianAlgorithm::outputLayerType() const
+{
+  return Qgis::ProcessingSourceType::VectorPoint;
+}
+
+QgsProjectPointCartesianAlgorithm *QgsProjectPointCartesianAlgorithm::createInstance() const
+{
+  return new QgsProjectPointCartesianAlgorithm();
+}
+
+void QgsProjectPointCartesianAlgorithm::initParameters( const QVariantMap & )
+{
+  auto bearing = std::make_unique<QgsProcessingParameterNumber>( u"BEARING"_s, QObject::tr( "Bearing (degrees from North)" ), Qgis::ProcessingNumberParameterType::Double, 0, false );
+  bearing->setIsDynamic( true );
+  bearing->setDynamicPropertyDefinition( QgsPropertyDefinition( u"Bearing"_s, QObject::tr( "Bearing (degrees from North)" ), QgsPropertyDefinition::Double ) );
+  bearing->setDynamicLayerParameterName( u"INPUT"_s );
+  addParameter( bearing.release() );
+
+  auto distance = std::make_unique<QgsProcessingParameterDistance>( u"DISTANCE"_s, QObject::tr( "Distance" ), 1, u"INPUT"_s, false );
+  distance->setIsDynamic( true );
+  distance->setDynamicPropertyDefinition( QgsPropertyDefinition( u"Distance"_s, QObject::tr( "Projection distance" ), QgsPropertyDefinition::Double ) );
+  distance->setDynamicLayerParameterName( u"INPUT"_s );
+  addParameter( distance.release() );
+}
+
+Qgis::ProcessingFeatureSourceFlags QgsProjectPointCartesianAlgorithm::sourceFlags() const
+{
+  return Qgis::ProcessingFeatureSourceFlag::SkipGeometryValidityChecks;
+}
+
+bool QgsProjectPointCartesianAlgorithm::prepareAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  mBearing = parameterAsDouble( parameters, u"BEARING"_s, context );
+  mDynamicBearing = QgsProcessingParameters::isDynamic( parameters, u"BEARING"_s );
+  if ( mDynamicBearing )
+    mBearingProperty = parameters.value( u"BEARING"_s ).value<QgsProperty>();
+
+  mDistance = parameterAsDouble( parameters, u"DISTANCE"_s, context );
+  mDynamicDistance = QgsProcessingParameters::isDynamic( parameters, u"DISTANCE"_s );
+  if ( mDynamicDistance )
+    mDistanceProperty = parameters.value( u"DISTANCE"_s ).value<QgsProperty>();
+
+  return true;
+}
+
+QgsFeatureList QgsProjectPointCartesianAlgorithm::processFeature( const QgsFeature &feature, QgsProcessingContext &context, QgsProcessingFeedback * )
+{
+  QgsFeature f = feature;
+  if ( f.hasGeometry() && QgsWkbTypes::geometryType( f.geometry().wkbType() ) == Qgis::GeometryType::Point )
+  {
+    double distance = mDistance;
+    if ( mDynamicDistance )
+      distance = mDistanceProperty.valueAsDouble( context.expressionContext(), distance );
+    double bearing = mBearing;
+    if ( mDynamicBearing )
+      bearing = mBearingProperty.valueAsDouble( context.expressionContext(), bearing );
+
+    const QgsGeometry g = f.geometry();
+    if ( QgsWkbTypes::isMultiType( g.wkbType() ) )
+    {
+      const QgsMultiPoint *mp = static_cast<const QgsMultiPoint *>( g.constGet() );
+      auto result = std::make_unique<QgsMultiPoint>();
+      result->reserve( mp->numGeometries() );
+      for ( int i = 0; i < mp->numGeometries(); ++i )
+      {
+        const QgsPoint *p = mp->pointN( i );
+        result->addGeometry( p->project( distance, bearing ).clone() );
+      }
+      f.setGeometry( QgsGeometry( std::move( result ) ) );
+    }
+    else
+    {
+      const QgsPoint *p = static_cast<const QgsPoint *>( g.constGet() );
+      const QgsPoint result = p->project( distance, bearing );
+      f.setGeometry( QgsGeometry( result.clone() ) );
+    }
+  }
+
+  return QgsFeatureList() << f;
+}
+
+///@endcond

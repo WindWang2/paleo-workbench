@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -410,13 +409,10 @@ void QgisRenderBridge::initialize(const std::string& requested_prefix) {
         throw std::runtime_error("QGIS renderer requires an existing Qt application");
     }
 
-    std::string prefix = requested_prefix;
-    if (prefix.empty()) {
-        if (const char* env_prefix = std::getenv("QGIS_PREFIX_PATH")) prefix = env_prefix;
-    }
-    if (prefix.empty()) prefix = PALEO_QGIS_PREFIX_PATH;
-    if (prefix.empty()) {
-        throw std::runtime_error("QGIS_PREFIX_PATH is required to initialize the renderer");
+    const std::string prefix = PALEO_QGIS_PREFIX_PATH;
+    if (prefix.empty()) throw std::runtime_error("vendored QGIS prefix is not configured");
+    if (!requested_prefix.empty() && requested_prefix != prefix) {
+        throw std::invalid_argument("QGIS renderer only accepts the vendored QGIS prefix");
     }
 
     std::lock_guard<std::mutex> lock(g_qgis_lifecycle_mutex);

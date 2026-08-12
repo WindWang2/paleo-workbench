@@ -1,0 +1,360 @@
+/***************************************************************************
+                         qgsprocessingparameterdefinitionwidget.cpp
+                         ------------------------------------------
+    begin                : July 2019
+    copyright            : (C) 2019 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+
+#include "qgsprocessingparameterdefinitionwidget.h"
+
+#include "qgsapplication.h"
+#include "qgscolorbutton.h"
+#include "qgsgui.h"
+#include "qgsprocessingguiregistry.h"
+#include "qgsprocessingparametertype.h"
+#include "qgsprocessingregistry.h"
+
+#include <QCheckBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMessageBox>
+#include <QString>
+#include <QTabWidget>
+#include <QTextEdit>
+#include <QVBoxLayout>
+
+#include "moc_qgsprocessingparameterdefinitionwidget.cpp"
+
+using namespace Qt::StringLiterals;
+
+QgsProcessingAbstractParameterDefinitionWidget::QgsProcessingAbstractParameterDefinitionWidget(
+  QgsProcessingContext &, const QgsProcessingParameterWidgetContext &context, const QgsProcessingParameterDefinition *, const QgsProcessingAlgorithm *, QWidget *parent
+)
+  : QWidget( parent )
+  , mWidgetContext( context )
+{}
+
+void QgsProcessingAbstractParameterDefinitionWidget::setWidgetContext( const QgsProcessingParameterWidgetContext &context )
+{
+  mWidgetContext = context;
+}
+
+const QgsProcessingParameterWidgetContext &QgsProcessingAbstractParameterDefinitionWidget::widgetContext() const
+{
+  return mWidgetContext;
+}
+
+void QgsProcessingAbstractParameterDefinitionWidget::registerProcessingContextGenerator( QgsProcessingContextGenerator *generator )
+{
+  mContextGenerator = generator;
+}
+
+QgsExpressionContext QgsProcessingAbstractParameterDefinitionWidget::createExpressionContext() const
+{
+  return QgsProcessingWidgetWrapperUtils::createExpressionContext( mContextGenerator, mWidgetContext, nullptr, nullptr );
+}
+
+//
+// QgsProcessingParameterDefinitionWidget
+//
+
+QgsProcessingParameterDefinitionWidget::QgsProcessingParameterDefinitionWidget(
+  const QString &type,
+  QgsProcessingContext &context,
+  const QgsProcessingParameterWidgetContext &widgetContext,
+  const QgsProcessingParameterDefinition *definition,
+  const QgsProcessingAlgorithm *algorithm,
+  QWidget *parent
+)
+  : QWidget( parent )
+  , mType( type )
+{
+  mDefinitionWidget = QgsGui::processingGuiRegistry()->createParameterDefinitionWidget( type, context, widgetContext, definition, algorithm );
+
+  QVBoxLayout *vlayout = new QVBoxLayout();
+
+  QLabel *label = new QLabel( tr( "Description" ) );
+  vlayout->addWidget( label );
+  mDescriptionLineEdit = new QLineEdit();
+  vlayout->addWidget( mDescriptionLineEdit );
+
+  if ( definition )
+  {
+    mDescriptionLineEdit->setText( definition->description() );
+  }
+  connect( mDescriptionLineEdit, &QLineEdit::textEdited, this, &QgsProcessingParameterDefinitionWidget::changed );
+
+  if ( mDefinitionWidget )
+  {
+    connect( mDefinitionWidget, &QgsProcessingAbstractParameterDefinitionWidget::changed, this, &QgsProcessingParameterDefinitionWidget::changed );
+    vlayout->addWidget( mDefinitionWidget );
+  }
+
+  vlayout->addSpacing( 20 );
+  mRequiredCheckBox = new QCheckBox( tr( "Mandatory" ) );
+  if ( definition )
+    mRequiredCheckBox->setChecked( !( definition->flags() & Qgis::ProcessingParameterFlag::Optional ) );
+  else
+    mRequiredCheckBox->setChecked( true );
+  connect( mRequiredCheckBox, &QCheckBox::toggled, this, &QgsProcessingParameterDefinitionWidget::changed );
+
+  vlayout->addWidget( mRequiredCheckBox );
+
+  mAdvancedCheckBox = new QCheckBox( tr( "Advanced" ) );
+  if ( definition )
+    mAdvancedCheckBox->setChecked( definition->flags() & Qgis::ProcessingParameterFlag::Advanced );
+  else
+    mAdvancedCheckBox->setChecked( false );
+  connect( mAdvancedCheckBox, &QCheckBox::toggled, this, &QgsProcessingParameterDefinitionWidget::changed );
+  vlayout->addWidget( mAdvancedCheckBox );
+
+  vlayout->addStretch();
+  setLayout( vlayout );
+}
+
+QgsProcessingParameterDefinition *QgsProcessingParameterDefinitionWidget::createParameter( const QString &name ) const
+{
+  std::unique_ptr<QgsProcessingParameterDefinition> param;
+  Qgis::ProcessingParameterFlags flags;
+
+  if ( !mRequiredCheckBox->isChecked() )
+    flags |= Qgis::ProcessingParameterFlag::Optional;
+  if ( mAdvancedCheckBox->isChecked() )
+    flags |= Qgis::ProcessingParameterFlag::Advanced;
+
+  if ( mDefinitionWidget )
+  {
+    // if a specific definition widget exists, get it to create the parameter (since it will know
+    // how to set all the additional properties of that parameter, which we don't)
+    param.reset( mDefinitionWidget->createParameter( name, mDescriptionLineEdit->text(), flags ) );
+  }
+  else if ( QgsApplication::processingRegistry()->parameterType( mType ) )
+  {
+    // otherwise, just create a default version of the parameter
+    param.reset( QgsApplication::processingRegistry()->parameterType( mType )->create( name ) );
+    if ( param )
+    {
+      param->setDescription( mDescriptionLineEdit->text() );
+      param->setFlags( flags );
+    }
+  }
+
+  return param.release();
+}
+
+void QgsProcessingParameterDefinitionWidget::registerProcessingContextGenerator( QgsProcessingContextGenerator *generator )
+{
+  if ( mDefinitionWidget )
+  {
+    mDefinitionWidget->registerProcessingContextGenerator( generator );
+  }
+}
+
+
+//
+// QgsProcessingParameterDefinitionPanelWidget
+//
+
+QgsProcessingParameterDefinitionPanelWidget::QgsProcessingParameterDefinitionPanelWidget(
+  const QString &type,
+  QgsProcessingContext &context,
+  const QgsProcessingParameterWidgetContext &widgetContext,
+  const QgsProcessingParameterDefinition *definition,
+  const QgsProcessingAlgorithm *algorithm,
+  QWidget *parent
+)
+  : QgsProcessingModelConfigWidget( parent )
+{
+  QVBoxLayout *vLayout = new QVBoxLayout();
+  vLayout->setContentsMargins( 0, 0, 0, 0 );
+  mTabWidget = new QTabWidget();
+  vLayout->addWidget( mTabWidget );
+
+  QVBoxLayout *vLayout2 = new QVBoxLayout();
+  mWidget = new QgsProcessingParameterDefinitionWidget( type, context, widgetContext, definition, algorithm );
+
+  connect( mWidget, &QgsProcessingParameterDefinitionWidget::changed, this, &QgsProcessingParameterDefinitionPanelWidget::widgetChanged );
+
+  vLayout2->addWidget( mWidget );
+  QWidget *w = new QWidget();
+  w->setLayout( vLayout2 );
+  mTabWidget->addTab( w, tr( "Properties" ) );
+
+  QVBoxLayout *commentLayout = new QVBoxLayout();
+  mCommentEdit = new QTextEdit();
+  mCommentEdit->setAcceptRichText( false );
+  commentLayout->addWidget( mCommentEdit, 1 );
+
+  connect( mCommentEdit, &QTextEdit::textChanged, this, &QgsProcessingParameterDefinitionPanelWidget::widgetChanged );
+
+  QHBoxLayout *hl = new QHBoxLayout();
+  hl->setContentsMargins( 0, 0, 0, 0 );
+  hl->addWidget( new QLabel( tr( "Color" ) ) );
+  mCommentColorButton = new QgsColorButton();
+  mCommentColorButton->setAllowOpacity( true );
+  mCommentColorButton->setWindowTitle( tr( "Comment Color" ) );
+  mCommentColorButton->setShowNull( true, tr( "Default" ) );
+  hl->addWidget( mCommentColorButton );
+  commentLayout->addLayout( hl );
+
+  connect( mCommentColorButton, &QgsColorButton::colorChanged, this, &QgsProcessingParameterDefinitionPanelWidget::widgetChanged );
+
+  QWidget *w2 = new QWidget();
+  w2->setLayout( commentLayout );
+  mTabWidget->addTab( w2, tr( "Comments" ) );
+
+  setLayout( vLayout );
+  setPanelTitle(
+    definition                                                    ? tr( "%1 Parameter Definition" ).arg( definition->description() )
+    : QgsApplication::processingRegistry()->parameterType( type ) ? tr( "%1 Parameter Definition" ).arg( QgsApplication::processingRegistry()->parameterType( type )->name() )
+                                                                  : tr( "Parameter Definition" )
+  );
+}
+
+QgsProcessingParameterDefinition *QgsProcessingParameterDefinitionPanelWidget::createParameter( const QString &name ) const
+{
+  return mWidget->createParameter( name );
+}
+
+void QgsProcessingParameterDefinitionPanelWidget::setComments( const QString &comments )
+{
+  mCommentEdit->setPlainText( comments );
+}
+
+QString QgsProcessingParameterDefinitionPanelWidget::comments() const
+{
+  return mCommentEdit->toPlainText();
+}
+
+void QgsProcessingParameterDefinitionPanelWidget::setCommentColor( const QColor &color )
+{
+  if ( color.isValid() )
+    mCommentColorButton->setColor( color );
+  else
+    mCommentColorButton->setToNull();
+}
+
+QColor QgsProcessingParameterDefinitionPanelWidget::commentColor() const
+{
+  return !mCommentColorButton->isNull() ? mCommentColorButton->color() : QColor();
+}
+
+void QgsProcessingParameterDefinitionPanelWidget::switchToCommentTab()
+{
+  mTabWidget->setCurrentIndex( 1 );
+  mCommentEdit->setFocus();
+  mCommentEdit->selectAll();
+}
+
+void QgsProcessingParameterDefinitionPanelWidget::registerProcessingContextGenerator( QgsProcessingContextGenerator *generator )
+{
+  if ( mWidget )
+  {
+    mWidget->registerProcessingContextGenerator( generator );
+  }
+}
+
+#if 0
+void QgsProcessingParameterDefinitionPanelWidget::accept()
+{
+  if ( mWidget->mDescriptionLineEdit->text().isEmpty() )
+  {
+    QMessageBox::warning( this, tr( "Unable to define parameter" ), tr( "Invalid parameter name" ) );
+    return;
+  }
+  QDialog::accept();
+}
+#endif
+
+//
+// QgsProcessingParameterDefinitionDialog
+//
+
+QgsProcessingParameterDefinitionDialog::QgsProcessingParameterDefinitionDialog(
+  const QString &type,
+  QgsProcessingContext &context,
+  const QgsProcessingParameterWidgetContext &widgetContext,
+  const QgsProcessingParameterDefinition *definition,
+  const QgsProcessingAlgorithm *algorithm,
+  QWidget *parent
+)
+  : QDialog( parent )
+{
+  QVBoxLayout *vLayout = new QVBoxLayout();
+  mWidget = new QgsProcessingParameterDefinitionPanelWidget( type, context, widgetContext, definition, algorithm );
+  vLayout->addWidget( mWidget );
+
+  connect( mWidget, &QgsPanelWidget::panelAccepted, this, &QgsProcessingParameterDefinitionDialog::reject );
+
+  QDialogButtonBox *bbox = new QDialogButtonBox( QDialogButtonBox::Cancel | QDialogButtonBox::Ok );
+  connect( bbox, &QDialogButtonBox::accepted, this, &QgsProcessingParameterDefinitionDialog::accept );
+  connect( bbox, &QDialogButtonBox::rejected, this, &QgsProcessingParameterDefinitionDialog::reject );
+
+  vLayout->addWidget( bbox );
+  setLayout( vLayout );
+  setWindowTitle(
+    definition                                                    ? tr( "%1 Parameter Definition" ).arg( definition->description() )
+    : QgsApplication::processingRegistry()->parameterType( type ) ? tr( "%1 Parameter Definition" ).arg( QgsApplication::processingRegistry()->parameterType( type )->name() )
+                                                                  : tr( "Parameter Definition" )
+  );
+  setObjectName( u"QgsProcessingParameterDefinitionDialog"_s );
+  QgsGui::enableAutoGeometryRestore( this );
+}
+
+QgsProcessingParameterDefinition *QgsProcessingParameterDefinitionDialog::createParameter( const QString &name ) const
+{
+  return mWidget->createParameter( name );
+}
+
+void QgsProcessingParameterDefinitionDialog::setComments( const QString &comments )
+{
+  mWidget->setComments( comments );
+}
+
+QString QgsProcessingParameterDefinitionDialog::comments() const
+{
+  return mWidget->comments();
+}
+
+void QgsProcessingParameterDefinitionDialog::setCommentColor( const QColor &color )
+{
+  mWidget->setCommentColor( color );
+}
+
+QColor QgsProcessingParameterDefinitionDialog::commentColor() const
+{
+  return mWidget->commentColor();
+}
+
+void QgsProcessingParameterDefinitionDialog::switchToCommentTab()
+{
+  mWidget->switchToCommentTab();
+}
+
+void QgsProcessingParameterDefinitionDialog::registerProcessingContextGenerator( QgsProcessingContextGenerator *generator )
+{
+  mWidget->registerProcessingContextGenerator( generator );
+}
+
+void QgsProcessingParameterDefinitionDialog::accept()
+{
+  if ( mWidget->mWidget->mDescriptionLineEdit->text().isEmpty() )
+  {
+    QMessageBox::warning( this, tr( "Unable to define parameter" ), tr( "Invalid parameter name" ) );
+    return;
+  }
+  QDialog::accept();
+}

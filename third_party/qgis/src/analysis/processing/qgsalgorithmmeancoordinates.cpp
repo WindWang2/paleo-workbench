@@ -1,0 +1,232 @@
+/***************************************************************************
+                         qgsalgorithmmeancoordinates.cpp
+                         ---------------------
+    begin                : April 2017
+    copyright            : (C) 2017 by Nyall Dawson
+    email                : nyall dot dawson at gmail dot com
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+
+#include "qgsalgorithmmeancoordinates.h"
+
+#include <QString>
+
+using namespace Qt::StringLiterals;
+
+///@cond PRIVATE
+
+QString QgsMeanCoordinatesAlgorithm::name() const
+{
+  return u"meancoordinates"_s;
+}
+
+QString QgsMeanCoordinatesAlgorithm::displayName() const
+{
+  return QObject::tr( "Mean coordinate(s)" );
+}
+
+QStringList QgsMeanCoordinatesAlgorithm::tags() const
+{
+  return QObject::tr( "mean,average,coordinate" ).split( ',' );
+}
+
+QString QgsMeanCoordinatesAlgorithm::group() const
+{
+  return QObject::tr( "Vector analysis" );
+}
+
+QString QgsMeanCoordinatesAlgorithm::groupId() const
+{
+  return u"vectoranalysis"_s;
+}
+
+void QgsMeanCoordinatesAlgorithm::initAlgorithm( const QVariantMap & )
+{
+  addParameter( new QgsProcessingParameterFeatureSource( u"INPUT"_s, QObject::tr( "Input layer" ), QList<int>() << static_cast<int>( Qgis::ProcessingSourceType::VectorAnyGeometry ) ) );
+  addParameter( new QgsProcessingParameterField( u"WEIGHT"_s, QObject::tr( "Weight field" ), QVariant(), u"INPUT"_s, Qgis::ProcessingFieldParameterDataType::Numeric, false, true ) );
+  addParameter( new QgsProcessingParameterField( u"UID"_s, QObject::tr( "Unique ID field" ), QVariant(), u"INPUT"_s, Qgis::ProcessingFieldParameterDataType::Any, false, true ) );
+  addParameter( new QgsProcessingParameterFeatureSink( u"OUTPUT"_s, QObject::tr( "Mean coordinates" ), Qgis::ProcessingSourceType::VectorPoint ) );
+}
+
+QString QgsMeanCoordinatesAlgorithm::shortHelpString() const
+{
+  return QObject::tr(
+    "This algorithm computes a point layer with the center of mass of geometries in an input layer.\n\n"
+    "An attribute can be specified as containing weights to be applied to each feature when computing the center of mass.\n\n"
+    "If an attribute is selected in the <Unique ID field> parameter, features will be grouped according "
+    "to values in this field. Instead of a single point with the center of mass of the whole layer, "
+    "the output layer will contain a center of mass for the features in each category."
+  );
+}
+
+QString QgsMeanCoordinatesAlgorithm::shortDescription() const
+{
+  return QObject::tr( "Computes a point layer with the center of mass of geometries in an input layer." );
+}
+
+QgsMeanCoordinatesAlgorithm *QgsMeanCoordinatesAlgorithm::createInstance() const
+{
+  return new QgsMeanCoordinatesAlgorithm();
+}
+
+QVariantMap QgsMeanCoordinatesAlgorithm::processAlgorithm( const QVariantMap &parameters, QgsProcessingContext &context, QgsProcessingFeedback *feedback )
+{
+  std::unique_ptr<QgsProcessingFeatureSource> source( parameterAsSource( parameters, u"INPUT"_s, context ) );
+  if ( !source )
+    throw QgsProcessingException( invalidSourceError( parameters, u"INPUT"_s ) );
+
+  const QString weightFieldName = parameterAsString( parameters, u"WEIGHT"_s, context );
+  const QString uniqueFieldName = parameterAsString( parameters, u"UID"_s, context );
+
+  QgsAttributeList attributes;
+  int weightIndex = -1;
+  if ( !weightFieldName.isEmpty() )
+  {
+    weightIndex = source->fields().lookupField( weightFieldName );
+    if ( weightIndex >= 0 )
+      attributes.append( weightIndex );
+  }
+
+  int uniqueFieldIndex = -1;
+  if ( !uniqueFieldName.isEmpty() )
+  {
+    uniqueFieldIndex = source->fields().lookupField( uniqueFieldName );
+    if ( uniqueFieldIndex >= 0 )
+      attributes.append( uniqueFieldIndex );
+  }
+
+  QgsFields fields;
+  fields.append( QgsField( u"MEAN_X"_s, QMetaType::Type::Double, QString(), 24, 15 ) );
+  fields.append( QgsField( u"MEAN_Y"_s, QMetaType::Type::Double, QString(), 24, 15 ) );
+  if ( uniqueFieldIndex >= 0 )
+  {
+    const QgsField uniqueField = source->fields().at( uniqueFieldIndex );
+    fields.append( uniqueField );
+  }
+
+  QString dest;
+  std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, u"OUTPUT"_s, context, dest, fields, Qgis::WkbType::Point, source->sourceCrs() ) );
+  if ( !sink )
+    throw QgsProcessingException( invalidSinkError( parameters, u"OUTPUT"_s ) );
+
+  QgsFeatureIterator features = source->getFeatures( QgsFeatureRequest().setSubsetOfAttributes( attributes ), Qgis::ProcessingFeatureSourceFlag::SkipGeometryValidityChecks );
+
+  double step = source->featureCount() > 0 ? 50.0 / source->featureCount() : 1;
+  int i = 0;
+  QgsFeature feat;
+
+  QHash<QVariant, QList<double>> means;
+  while ( features.nextFeature( feat ) )
+  {
+    i++;
+    if ( feedback->isCanceled() )
+    {
+      break;
+    }
+
+    feedback->setProgress( i * step );
+    if ( !feat.hasGeometry() )
+      continue;
+
+
+    QVariant featureClass;
+    if ( uniqueFieldIndex >= 0 )
+    {
+      featureClass = feat.attribute( uniqueFieldIndex );
+    }
+    else
+    {
+      featureClass = u"#####singleclass#####"_s;
+    }
+
+    double weight = 1;
+    if ( weightIndex >= 0 )
+    {
+      bool ok = false;
+      weight = feat.attribute( weightIndex ).toDouble( &ok );
+      if ( !ok )
+        weight = 1.0;
+    }
+
+    if ( weight < 0 )
+    {
+      throw QgsProcessingException( QObject::tr( "Negative weight value found. Please fix your data and try again." ) );
+    }
+
+    const QList<double> values = means.value( featureClass );
+    double cx = 0;
+    double cy = 0;
+    double totalWeight = 0;
+    if ( !values.empty() )
+    {
+      cx = values.at( 0 );
+      cy = values.at( 1 );
+      totalWeight = values.at( 2 );
+    }
+
+    QgsVertexId vid;
+    QgsPoint pt;
+    const QgsAbstractGeometry *g = feat.geometry().constGet();
+    // NOTE - should this be including the duplicate nodes for closed rings? currently it is,
+    // but I suspect that the expected behavior would be to NOT include these
+    while ( g->nextVertex( vid, pt ) )
+    {
+      cx += pt.x() * weight;
+      cy += pt.y() * weight;
+      totalWeight += weight;
+    }
+
+    means[featureClass] = QList<double>() << cx << cy << totalWeight;
+  }
+
+  i = 0;
+  step = !means.empty() ? 50.0 / means.count() : 1;
+  for ( auto it = means.constBegin(); it != means.constEnd(); ++it )
+  {
+    i++;
+    if ( feedback->isCanceled() )
+    {
+      break;
+    }
+
+    feedback->setProgress( 50 + i * step );
+    if ( qgsDoubleNear( it.value().at( 2 ), 0 ) )
+      continue;
+
+    QgsFeature outFeat;
+    const double cx = it.value().at( 0 ) / it.value().at( 2 );
+    const double cy = it.value().at( 1 ) / it.value().at( 2 );
+
+    const QgsPointXY meanPoint( cx, cy );
+    outFeat.setGeometry( QgsGeometry::fromPointXY( meanPoint ) );
+
+    QgsAttributes attributes;
+    attributes << cx << cy;
+    if ( uniqueFieldIndex >= 0 )
+      attributes.append( it.key() );
+
+    outFeat.setAttributes( attributes );
+    if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
+      throw QgsProcessingException( writeFeatureError( sink.get(), parameters, u"OUTPUT"_s ) );
+    else
+      feedback->featureAddedToSink( u"OUTPUT"_s );
+  }
+
+  sink->finalize();
+  feedback->featureSinkFinalized( u"OUTPUT"_s );
+
+  QVariantMap outputs;
+  outputs.insert( u"OUTPUT"_s, dest );
+  return outputs;
+}
+
+
+///@endcond
