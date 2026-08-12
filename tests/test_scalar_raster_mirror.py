@@ -85,3 +85,29 @@ def test_scalar_raster_mirror_does_not_require_optional_gdal_array(tmp_path, mon
 
     assert path.endswith(".tif")
     assert scalar.rasterize_count == 1
+
+
+def test_scalar_raster_mirror_defaults_to_gdal_virtual_memory_and_reclaims_stale_versions() -> None:
+    scene, layer = _scalar_snapshot()
+    cache = ScalarRasterMirrorCache()
+
+    first = cache.ensure(layer)
+    assert first.startswith("/vsimem/")
+    assert cache.uses_virtual_memory
+    assert cache.disk_materialization_count == 0
+    assert gdal.VSIStatL(first) is not None
+
+    scene.set_scalar_style("porosity", gamma=1.2)
+    styled = scene.render_snapshot(project_crs="EPSG:3857").layers[0]
+    second = cache.ensure(styled)
+
+    assert second != first
+    assert cache.materialization_count == 2
+    # The older source remains readable until the QGIS bridge confirms it no
+    # longer owns a raster layer/job using that path.
+    assert gdal.VSIStatL(first) is not None
+    cache.release_stale()
+    assert gdal.VSIStatL(first) is None
+    assert gdal.VSIStatL(second) is not None
+    cache.clear()
+    assert gdal.VSIStatL(second) is None

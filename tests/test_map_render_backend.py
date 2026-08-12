@@ -233,6 +233,19 @@ def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qt
             return frame is not None
 
         qtbot.waitUntil(take_frame, timeout=5_000)
+        cache = backend._scalar_raster_cache
+        assert cache is not None
+        assert cache.uses_virtual_memory
+        assert cache.materialization_count == 1
+        assert cache.disk_materialization_count == 0
+
+        # Viewport-only interaction rerenders the QGIS composition but must not
+        # materialize the already revision-keyed scalar source a second time.
+        backend.set_extent((1.0, 1.0, 9.0, 9.0))
+        backend.request_render()
+        frame = None
+        qtbot.waitUntil(take_frame, timeout=5_000)
+        assert cache.materialization_count == 1
     finally:
         backend.shutdown()
 
