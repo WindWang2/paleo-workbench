@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from geoviz import validate_ring
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, QualityReport, _now_iso
 
 # Ordered rule keys stored on QualityReport.rules (engine keys, not Chinese chips).
@@ -174,6 +173,8 @@ def _collect_issues(project: ProjectDocument, document: PaleoMapDocument) -> lis
                     )
                 )
                 continue
+            from geoviz import validate_ring
+
             ring_issues = validate_ring(ring)
             if any(i.get("code") == "self_intersection" for i in ring_issues):
                 geom = _ring_to_polygon_geometry(ring)

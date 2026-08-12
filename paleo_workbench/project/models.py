@@ -71,6 +71,7 @@ class WorkflowStep(BaseModel):
         "ready",
         "running",
         "complete",
+        "stale",  # complete relative to history, outdated vs current inputs
         "warning",
         "failed",
         "skipped",

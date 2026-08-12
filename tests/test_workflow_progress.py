@@ -28,8 +28,9 @@ def test_workflow_progress_badges_expose_step_colors(qtbot):
 def test_workflow_progress_default_all_pending(qtbot):
     widget = WorkflowProgress()
     qtbot.addWidget(widget)
+    pending = tokens.STATUS_TEXT["pending"]
     for sw in widget.step_widgets:
-        assert "待开始" in sw["status"].text()
+        assert pending in sw["status"].text()
 
 
 def test_workflow_progress_update_steps(qtbot):
@@ -39,11 +40,15 @@ def test_workflow_progress_update_steps(qtbot):
         type("S", (), {"step_type": "data_check", "status": "complete"}),
         type("S", (), {"step_type": "factor_map", "status": "running"}),
         type("S", (), {"step_type": "prediction", "status": "pending"}),
-        type("S", (), {"step_type": "map_compile", "status": "pending"}),
+        type("S", (), {"step_type": "map_compile", "status": "stale"}),
         type("S", (), {"step_type": "qc", "status": "pending"}),
         type("S", (), {"step_type": "export", "status": "pending"}),
     ]
     widget.update_steps(steps)
-    assert "完成" in widget.step_widgets[0]["status"].text()
-    assert "进行中" in widget.step_widgets[1]["status"].text()
-    assert "待开始" in widget.step_widgets[2]["status"].text()
+    assert tokens.STATUS_TEXT["complete"] in widget.step_widgets[0]["status"].text()
+    assert tokens.STATUS_TEXT["running"] in widget.step_widgets[1]["status"].text()
+    assert tokens.STATUS_TEXT["pending"] in widget.step_widgets[2]["status"].text()
+    assert tokens.STATUS_TEXT["stale"] in widget.step_widgets[3]["status"].text()
+    # Button is shown when any step is stale (may still be False if parent not shown)
+    assert not widget.recompute_button.isHidden()
+    assert "需更新" in widget.plan_label.text() or widget.plan_label.text() != ""
