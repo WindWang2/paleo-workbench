@@ -196,9 +196,23 @@ class WellLogPredictionPage(QWidget):
         if self._inference_job.is_running:
             return
         self._inference_service = service
-        input_ids = (
-            [] if demo else resolve_prediction_inputs(self._project, service)
-        )
+        if demo:
+            input_ids = []
+        else:
+            from paleo_workbench.prediction.inference_service import (
+                resolve_inputs_for_model,
+            )
+            from paleo_workbench.prediction.input_contract import InputContractError
+
+            try:
+                input_ids = resolve_inputs_for_model(
+                    self._project, service, model_version_id, strict=True
+                )
+            except InputContractError as exc:
+                QMessageBox.warning(self, "测井预测", f"输入不满足模型契约: {exc}")
+                return
+            except Exception:
+                input_ids = resolve_prediction_inputs(self._project, service)
         run = start_inference(
             service,
             model_version_id=model_version_id,

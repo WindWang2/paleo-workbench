@@ -230,6 +230,17 @@ def evaluate_contract_readiness(
                     severity="block",
                 )
             )
+        only_demo = bool(docs) and all(
+            (getattr(d, "view_state", None) or {}).get("is_demo_draft") for d in docs
+        )
+        if only_demo:
+            reasons.append(
+                ReadinessReason(
+                    code="paleomap_demo_only",
+                    message_zh="当前仅有演示草稿图；生产编图需要真实空间预测几何",
+                    severity="warn",
+                )
+            )
 
     if contract.id == "facies_prediction":
         # Can run mock with empty factors, but warn
@@ -249,6 +260,41 @@ def evaluate_contract_readiness(
                 ReadinessReason(
                     code="mock_adapter",
                     message_zh="当前预测适配器为 mock（非生产模型）",
+                    severity="warn",
+                )
+            )
+        # Stage-13: infrastructure readiness ≠ production model availability.
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+            from paleo_workbench.prediction.providers import (
+                CAPABILITY_FACIES,
+                ensure_default_models,
+            )
+
+            svc = get_catalog_service()
+            if svc is None:
+                reasons.append(
+                    ReadinessReason(
+                        code="no_production_model",
+                        message_zh="未配置生产模型（目录未连接）",
+                        severity="warn",
+                    )
+                )
+            else:
+                ensure_default_models(svc)
+                if svc.find_production_model(CAPABILITY_FACIES) is None:
+                    reasons.append(
+                        ReadinessReason(
+                            code="no_production_model",
+                            message_zh="未配置生产模型；科学预测不可用（演示路径仍可单独运行）",
+                            severity="warn",
+                        )
+                    )
+        except Exception:
+            reasons.append(
+                ReadinessReason(
+                    code="no_production_model",
+                    message_zh="未配置生产模型（或目录未连接）",
                     severity="warn",
                 )
             )

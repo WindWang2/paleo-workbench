@@ -195,11 +195,37 @@ class WorkflowController:
         )
 
     def _on_seismic_send_to_mapping(self) -> None:
-        """Compile a map draft from the latest prediction and open 编图."""
+        """Compile a map from the latest prediction and open 编图.
+
+        Prefer production spatial compile when the prediction carries real
+        polygon geometry; otherwise keep the explicit demo draft path
+        (never silently treat demo squares as production).
+        """
         if not self.window.project.prediction_tasks:
             QMessageBox.information(self.window, "发送编图", "请先运行地震预测")
             return
-        compile_map_draft(self.window.project, seed=0)
+        task = self.window.project.prediction_tasks[-1]
+        used_production = False
+        try:
+            from paleo_workbench.pipeline.compile_map_production import (
+                ProductionMapError,
+                compile_map_production,
+            )
+            from paleo_workbench.prediction.spatial_result import is_map_compilable
+
+            payload = {"result_summary": dict(task.result_summary or {})}
+            if is_map_compilable(payload):
+                compile_map_production(
+                    self.window.project,
+                    prediction_task_id=task.id,
+                    prediction_payload=payload,
+                )
+                used_production = True
+        except Exception:
+            used_production = False
+        if not used_production:
+            # Demo path only — labeled is_demo_draft in the document.
+            compile_map_draft(self.window.project, seed=0)
         self.window.app_shell.update_mapping_page(
             self.window.project.paleomap_documents,
             factor_tasks=self.window.project.factor_map_tasks,
