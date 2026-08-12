@@ -79,13 +79,18 @@ def evaluate_contract_readiness(
                 if pts:
                     n += 1
         elif inp.id == "target_horizon":
-            # string on tasks or stratigraphy
+            # Stratigraphy, factor tasks, or paleomap linked horizon (metadata only).
             th = getattr(getattr(project, "stratigraphy", None), "target_horizon", "") or ""
             if th.strip():
                 n = 1
-            else:
+            if n < 1:
                 for task in getattr(project, "factor_map_tasks", None) or []:
                     if (getattr(task, "target_horizon", None) or "").strip():
+                        n = 1
+                        break
+            if n < 1:
+                for doc in getattr(project, "paleomap_documents", None) or []:
+                    if (getattr(doc, "linked_target_horizon", None) or "").strip():
                         n = 1
                         break
         elif inp.id == "map_document":
@@ -162,6 +167,28 @@ def evaluate_contract_readiness(
                         severity="block",
                     )
                 )
+
+    if contract.id == "paleomap_compile":
+        # P0 mapping path requires a paleomap document with linked target horizon.
+        docs = getattr(project, "paleomap_documents", None) or []
+        if not docs:
+            reasons.append(
+                ReadinessReason(
+                    code="no_paleomap_document",
+                    message_zh="尚未创建古地理图文档",
+                    severity="block",
+                )
+            )
+        elif not any(
+            (getattr(d, "linked_target_horizon", None) or "").strip() for d in docs
+        ):
+            reasons.append(
+                ReadinessReason(
+                    code="no_linked_target_horizon",
+                    message_zh="古地理图未关联目标层位",
+                    severity="block",
+                )
+            )
 
     if contract.id == "facies_prediction":
         # Can run mock with empty factors, but warn

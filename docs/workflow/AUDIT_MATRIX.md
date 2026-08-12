@@ -1,8 +1,8 @@
 # Stage 11 — Professional Workflow Audit Matrix
 
-**BASE_SHA:** `66c785ea650e73f74496cc634193b1cd5a036500`  
-**GEOVIZ_SHA:** `9e152856f0c2ffede37e718f62897e98a45735be`  
-**WELLLOG_SHA:** `915076e22165b4652ab2c51b32bfdb0f0c050992`  
+**BASE_SHA:** `66c785ea650e73f74496cc634193b1cd5a036500`
+**GEOVIZ_SHA:** `9e152856f0c2ffede37e718f62897e98a45735be`
+**WELLLOG_SHA:** `915076e22165b4652ab2c51b32bfdb0f0c050992`
 
 Evidence-based matrix (actual code). Certainty: KNOWN_FROM_CODE unless noted.
 

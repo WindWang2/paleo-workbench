@@ -252,6 +252,55 @@ def test_qc_readiness_needs_map():
     assert r2.status is ReadinessStatus.READY
 
 
+def test_paleomap_compile_readiness_map_vs_factor_only():
+    """Paleomap path uses PaleoMapDocument.linked_target_horizon, not only factor tasks."""
+    # Empty → BLOCKED
+    empty = ProjectDocument.new("pm-empty")
+    r0 = evaluate_readiness(empty, "paleomap_compile")
+    assert r0.status is ReadinessStatus.BLOCKED
+    assert any(
+        "古地理" in x.message_zh or "层位" in x.message_zh for x in r0.reasons
+    )
+
+    # Factor task with target_horizon but no paleomap doc → still BLOCKED for compile
+    factor_only = ProjectDocument.new("pm-factor")
+    factor_only.factor_map_tasks.append(
+        FactorMapTask(
+            name="f",
+            target_horizon="H1",
+            factor_type="sand",
+            method="IDW",
+            parameters={"sample_points": [{"x": 0.0, "y": 0.0, "value": 1.0}]},
+        )
+    )
+    r1 = evaluate_readiness(factor_only, "paleomap_compile")
+    assert r1.status is ReadinessStatus.BLOCKED
+    assert any(x.code == "no_paleomap_document" for x in r1.reasons)
+
+    # Map doc without linked horizon → BLOCKED
+    map_no_h = ProjectDocument.new("pm-noh")
+    map_no_h.paleomap_documents.append(
+        PaleoMapDocument(name="M", linked_target_horizon="")
+    )
+    r2 = evaluate_readiness(map_no_h, "paleomap_compile")
+    assert r2.status is ReadinessStatus.BLOCKED
+    assert any(
+        x.code in {"no_linked_target_horizon", "missing_input:target_horizon"}
+        for x in r2.reasons
+    )
+
+    # Map doc with linked_target_horizon only → READY (metadata path)
+    map_only = ProjectDocument.new("pm-ok")
+    map_only.paleomap_documents.append(
+        PaleoMapDocument(name="M1", linked_target_horizon="H1")
+    )
+    r3 = evaluate_readiness(map_only, "paleomap_compile")
+    assert r3.status is ReadinessStatus.READY, [
+        (x.code, x.message_zh) for x in r3.reasons
+    ]
+    assert r3.freshness_note == "freshness_owned_by_stage9"
+
+
 def test_registry_build_and_readiness_benchmark():
     t0 = time.perf_counter()
     reg = WorkflowContractRegistry()
