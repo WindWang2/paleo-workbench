@@ -11,6 +11,15 @@ from paleo_workbench.project.models import FactorMapTask, ProjectDocument
 GENERATOR_VERSION = "mock-factor-v1"
 
 
+def resolve_default_target_horizon(project: ProjectDocument) -> str:
+    """Consumer hook: stratigraphy → correlation framework → horizon key."""
+    from paleo_workbench.workflow.correlation_lifecycle import (
+        resolve_correlation_target_horizon,
+    )
+
+    return resolve_correlation_target_horizon(project)
+
+
 def _snapshot_hash(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -22,6 +31,9 @@ def create_mock_factor_map(
     factor_type: str,
     seed: int,
 ) -> FactorMapTask:
+    # Prefer selected correlation/horizon identity when caller passes empty horizon.
+    horizon = (target_horizon or "").strip() or resolve_default_target_horizon(project)
+    target_horizon = horizon
     rng = random.Random(seed)
     sample_points = [
         {

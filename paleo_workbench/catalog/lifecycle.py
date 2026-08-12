@@ -598,6 +598,92 @@ def register_qc_run(
     return run, version
 
 
+# ----------------------------------------------------- stratigraphic correlation
+def register_stratigraphic_correlation_run(
+    *,
+    name: str,
+    path: str,
+    checksum: str | None = None,
+    source_version_ids: list[str] | None = None,
+    parent_version_id: str | None = None,
+    scientific_fingerprint: str | None = None,
+    domain_task_id: str | None = None,
+    parameters: dict[str, Any] | None = None,
+    catalog: CatalogPort | None = None,
+) -> tuple[Any, DataVersionRef | None]:
+    """Register multi-well correlation interpretation as DERIVED + lineage run."""
+    cat = catalog or get_catalog()
+    if cat is None:
+        return None, None
+    inputs = list(source_version_ids or [])
+    if parent_version_id and parent_version_id not in inputs:
+        inputs.append(parent_version_id)
+    params = dict(parameters or {})
+    params["scientific_fingerprint"] = scientific_fingerprint
+    params["parent_version_id"] = parent_version_id
+    run = cat.begin_run(
+        operation="stratigraphic_correlation",
+        input_version_ids=inputs,
+        parameters=params,
+        generator_version="strat-corr-v1",
+        domain_task_id=domain_task_id,
+        input_snapshot_hash=scientific_fingerprint,
+    )
+    version = cat.register_derived(
+        run_id=run.run_id,
+        name=name,
+        path=path,
+        checksum=checksum,
+        kind="stratigraphic_correlation",
+        format="json",
+        tags=["interpretation", "correlation", "tops"],
+    )
+    cat.complete_run(run.run_id)
+    return run, version
+
+
+def register_fault_interpretation_run(
+    *,
+    name: str,
+    path: str,
+    checksum: str | None = None,
+    source_version_ids: list[str] | None = None,
+    parent_version_id: str | None = None,
+    scientific_fingerprint: str | None = None,
+    domain_task_id: str | None = None,
+    catalog: CatalogPort | None = None,
+) -> tuple[Any, DataVersionRef | None]:
+    """Register fault interpretation polylines as DERIVED + lineage run."""
+    cat = catalog or get_catalog()
+    if cat is None:
+        return None, None
+    inputs = list(source_version_ids or [])
+    if parent_version_id and parent_version_id not in inputs:
+        inputs.append(parent_version_id)
+    run = cat.begin_run(
+        operation="fault_interpretation",
+        input_version_ids=inputs,
+        parameters={
+            "scientific_fingerprint": scientific_fingerprint,
+            "parent_version_id": parent_version_id,
+        },
+        generator_version="fault-interp-v1",
+        domain_task_id=domain_task_id,
+        input_snapshot_hash=scientific_fingerprint,
+    )
+    version = cat.register_derived(
+        run_id=run.run_id,
+        name=name,
+        path=path,
+        checksum=checksum,
+        kind="fault_interpretation",
+        format="json",
+        tags=["interpretation", "fault"],
+    )
+    cat.complete_run(run.run_id)
+    return run, version
+
+
 # -------------------------------------------------------------------- modeling
 def register_modeling_run(
     *,

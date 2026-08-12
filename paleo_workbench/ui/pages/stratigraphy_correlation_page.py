@@ -288,11 +288,32 @@ class StratigraphyCorrelationPage(QWidget):
         self.export_tops_btn.setObjectName("SecondaryButton")
         self.export_tops_btn.clicked.connect(self._export_tops)
         right.addWidget(self.export_tops_btn)
+        # Stage-12: versioned correlation interpretation lifecycle
+        self.save_interp_btn = QPushButton("保存解释版本")
+        self.save_interp_btn.setObjectName("PrimaryButton")
+        self.save_interp_btn.setToolTip("将当前分层顶保存为不可变连井对比解释版本")
+        self.save_interp_btn.clicked.connect(self.save_interpretation_version)
+        right.addWidget(self.save_interp_btn)
+        self.open_interp_btn = QPushButton("打开已保存解释")
+        self.open_interp_btn.setObjectName("SecondaryButton")
+        self.open_interp_btn.clicked.connect(self.open_saved_interpretation)
+        right.addWidget(self.open_interp_btn)
+        self.restore_interp_btn = QPushButton("恢复已保存版本")
+        self.restore_interp_btn.setObjectName("SecondaryButton")
+        self.restore_interp_btn.setToolTip("丢弃未保存编辑，重新加载当前已保存版本")
+        self.restore_interp_btn.clicked.connect(self.restore_saved_interpretation)
+        right.addWidget(self.restore_interp_btn)
+        self.interp_status = QLabel("解释: 未保存")
+        self.interp_status.setObjectName("WorkFieldValue")
+        self.interp_status.setWordWrap(True)
+        right.addWidget(self.interp_status)
         self.clear_btn = QPushButton("清空剖面")
         self.clear_btn.setObjectName("SecondaryButton")
         self.clear_btn.clicked.connect(self.clear_section)
         right.addWidget(self.clear_btn)
         content.addWidget(self.action_panel, 0)
+        self._correlation_draft = None
+        self._project_path: Path | None = None
 
         outer.addLayout(content, 1)
         self._probe_engine()
@@ -300,6 +321,11 @@ class StratigraphyCorrelationPage(QWidget):
 
     def set_project(self, project) -> None:
         self._project = project
+        self._refresh_interp_status()
+
+    def set_project_path(self, path) -> None:
+        """Project file path used for artifact_dir_for (optional)."""
+        self._project_path = Path(path) if path else None
 
     def backend(self) -> str:
         return self._backend
@@ -547,6 +573,187 @@ class StratigraphyCorrelationPage(QWidget):
             return
         self._register_export(path, fmt="csv", label="分层顶 CSV")
         QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
+
+    def _project_file_path(self) -> Path:
+        if self._project_path is not None:
+            return self._project_path
+        root = "."
+        if self._project is not None:
+            root = getattr(self._project.meta, "project_root", ".") or "."
+        return Path(root) / "project.paleo.json"
+
+    def _tops_from_canvas(self) -> list:
+        """Collect FormationTop models with stable IDs (no-op save safe)."""
+        from paleo_workbench.workflow.correlation_session import tops_from_canvas_rows
+        from paleo_workbench.workflow.stratigraphy_models import (
+            CorrelationMethod,
+            DepthDomain,
+        )
+
+        name_to_id = {
+            name: rid
+            for name, rid in zip(self._loaded_names, self._loaded_resource_ids)
+        }
+        model = self.cross_host.widget.tops_model
+        prev = None
+        if self._correlation_draft is not None:
+            prev = self._correlation_draft.payload.tops
+        return tops_from_canvas_rows(
+            list(model.all_tops() or []),
+            name_to_resource_id=name_to_id,
+            depth_domain=DepthDomain.MD,
+            method=CorrelationMethod.IMPORTED,
+            previous_tops=prev,
+        )
+
+    def _links_from_session(self, tops: list) -> list:
+        """Build adjacent-well CorrelationLink rows for shared markers."""
+        from paleo_workbench.workflow.correlation_session import adjacent_links_for_marker
+        from paleo_workbench.workflow.stratigraphy_models import CorrelationMethod
+
+        # Prefer resource ids order, fall back to names
+        well_order = list(self._loaded_resource_ids) or list(self._loaded_names)
+        return adjacent_links_for_marker(
+            tops, well_order=well_order, method=CorrelationMethod.MANUAL
+        )
+
+    def _resolve_well_version_ids(self) -> list[str]:
+        from paleo_workbench.catalog.lifecycle import resolve_resource_version
+        from paleo_workbench.catalog.lifecycle import register_resource_input
+
+        ids: list[str] = []
+        if self._project is None:
+            return ids
+        by_id = {r.id: r for r in self._project.resources}
+        for rid in self._loaded_resource_ids:
+            ref = resolve_resource_version(rid)
+            if ref is None and rid in by_id:
+                ref = register_resource_input(by_id[rid])
+            if ref is not None:
+                ids.append(ref.version_id)
+        return ids
+
+    def save_interpretation_version(self) -> None:
+        """Persist current tops as immutable correlation interpretation (Stage 12)."""
+        if self._project is None:
+            QMessageBox.warning(self, "保存解释", "未绑定工程")
+            return
+        tops = self._tops_from_canvas()
+        if not tops and not self._loaded_resource_ids:
+            QMessageBox.warning(self, "保存解释", "请先加载连井剖面并确保有分层顶")
+            return
+        from paleo_workbench.workflow.correlation_lifecycle import (
+            new_correlation_draft,
+            save_correlation_draft,
+        )
+        from paleo_workbench.workflow.stratigraphy import active_target_horizon
+        from paleo_workbench.workflow.stratigraphy_models import DepthDomain
+
+        well_vids = self._resolve_well_version_ids()
+        links = self._links_from_session(tops)
+        draft = self._correlation_draft
+        if draft is None:
+            draft = new_correlation_draft(
+                name="连井对比",
+                well_resource_ids=list(self._loaded_resource_ids),
+                well_version_ids=well_vids,
+                tops=tops,
+                depth_domain=DepthDomain.MD,
+                framework_ref=active_target_horizon(self._project) or "",
+            )
+            draft.payload.links = links
+        else:
+            draft.payload.tops = tops
+            draft.payload.links = links
+            draft.payload.well_resource_ids = list(self._loaded_resource_ids)
+            draft.payload.well_version_ids = well_vids
+            # bump only if content would change (fingerprint handles no-op)
+            draft.dirty = True
+        self._correlation_draft = draft
+        ref, msg = save_correlation_draft(
+            draft, self._project, self._project_file_path()
+        )
+        if msg == "noop_unchanged":
+            self.interp_status.setText(
+                f"解释: 无变更（保持 {getattr(ref, 'current_version_id', '')}）"
+            )
+            QMessageBox.information(self, "保存解释", "科学内容未变化，未创建新版本")
+            return
+        if ref is None:
+            QMessageBox.warning(self, "保存解释", f"保存失败: {msg}")
+            return
+        self.interp_status.setText(
+            f"解释: 已保存 {ref.current_version_id or ''}（{msg}）"
+        )
+        QMessageBox.information(
+            self,
+            "保存解释",
+            f"已保存连井对比版本\n{ref.current_version_id or ''}",
+        )
+        self.section_updated.emit()
+
+    def open_saved_interpretation(self) -> None:
+        """Load latest project correlation interpretation as working copy."""
+        if self._project is None:
+            QMessageBox.warning(self, "打开解释", "未绑定工程")
+            return
+        from paleo_workbench.workflow.correlation_lifecycle import (
+            restore_draft_from_project_ref,
+        )
+
+        draft = restore_draft_from_project_ref(
+            self._project, self._project_file_path()
+        )
+        if draft is None:
+            QMessageBox.information(self, "打开解释", "工程中尚无已保存的连井对比解释")
+            return
+        self._correlation_draft = draft
+        self._apply_draft_tops_to_canvas(draft)
+        self.interp_status.setText(
+            f"解释: 已打开工作副本（父版本 {draft.payload.parent_version_id or '—'}）"
+        )
+        self.section_updated.emit()
+
+    def restore_saved_interpretation(self) -> None:
+        """Discard unsaved draft edits and reload immutable selected version."""
+        if self._project is None:
+            return
+        if self._correlation_draft is not None and self._correlation_draft.dirty:
+            ans = QMessageBox.question(
+                self,
+                "恢复已保存版本",
+                "将丢弃未保存的分层编辑，确认？",
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+        self.open_saved_interpretation()
+
+    def _apply_draft_tops_to_canvas(self, draft) -> None:
+        """Push scientific tops into CrossWell tops_model when possible."""
+        try:
+            canvas = self.cross_host.widget
+            canvas.tops_model.clear()
+            for t in draft.payload.tops:
+                canvas.tops_model.add_top(
+                    FormationTop(t.well_name or t.well_id, t.marker, float(t.depth))
+                )
+            self.formation_combo.clear()
+            self.formation_combo.addItems(canvas.tops_model.formation_names())
+        except Exception:
+            pass
+
+    def _refresh_interp_status(self) -> None:
+        if self._project is None:
+            self.interp_status.setText("解释: 未绑定工程")
+            return
+        refs = list(getattr(self._project, "correlation_interpretations", None) or [])
+        if not refs:
+            self.interp_status.setText("解释: 未保存")
+            return
+        ref = refs[-1]
+        self.interp_status.setText(
+            f"解释: 当前 {ref.current_version_id or '—'} / {ref.name}"
+        )
 
     def _select_bound_wells(self) -> None:
         if self._project is None:
