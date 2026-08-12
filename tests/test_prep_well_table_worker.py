@@ -88,8 +88,8 @@ def test_preparation_page_derives_well_table_from_factor_samples(qtbot):
 def test_factor_prepare_worker_runs_batch(qtbot):
     project = ProjectDocument.new("Worker")
     project.stratigraphy.target_horizon = "H1"
-    # empty tasks → worker creates defaults
-    worker = FactorPrepareWorker(project, method="IDW")
+    # empty tasks → worker creates defaults in snapshot only
+    worker = FactorPrepareWorker(project, method="IDW", generation=1)
     results: list[int] = []
     completed: list[object] = []
     errors: list[str] = []
@@ -106,7 +106,7 @@ def test_factor_prepare_worker_runs_batch(qtbot):
 def test_factor_prepare_worker_returns_snapshot_result_without_mutating_live_project(qtbot):
     project = ProjectDocument.new("Snapshot")
     project.stratigraphy.target_horizon = "H1"
-    worker = FactorPrepareWorker(project, method="IDW")
+    worker = FactorPrepareWorker(project, method="IDW", generation=1)
     completed: list[object] = []
     worker.completed.connect(completed.append)
 
@@ -117,7 +117,8 @@ def test_factor_prepare_worker_returns_snapshot_result_without_mutating_live_pro
     result = completed[0]
     assert result.count >= 1
     assert result.factor_map_tasks
-
+    assert result.dirty_count >= 1
+    assert result.generation == 1
 
 def test_preparation_page_async_generate(qtbot, monkeypatch):
     """Generate starts a QThread and emits factor_maps_updated when done."""
@@ -175,25 +176,43 @@ def test_running_prepare_shutdown_is_kept_and_stale_snapshot_never_commits(
     started = Event()
     release = Event()
 
-    def blocked_prepare(snapshot, method="IDW", **_kwargs):
+    def blocked_schedule(snapshot, **_kwargs):
         started.set()
         release.wait(timeout=5.0)
-        snapshot.factor_map_tasks = [
-            FactorMapTask(
-                name="stale",
-                target_horizon="H",
-                factor_type="地层厚度",
-                status="complete",
-            )
-        ]
-        return snapshot.factor_map_tasks
+        from paleo_workbench.workflow.factor_prepare_scheduler import (
+            FactorPrepareBatchResult,
+            FactorPrepareTaskResult,
+        )
+
+        stale = FactorMapTask(
+            name="stale",
+            target_horizon="H",
+            factor_type="地层厚度",
+            method="IDW",
+            status="complete",
+        )
+        return FactorPrepareBatchResult(
+            generation=snapshot.generation,
+            method="IDW",
+            task_results=(
+                FactorPrepareTaskResult(
+                    task_id=stale.id,
+                    dirty_state="MISSING_OUTPUT",
+                    reused=False,
+                    task=stale,
+                ),
+            ),
+            clean_count=0,
+            dirty_count=1,
+            executed_count=1,
+            failed_count=0,
+            created_default_tasks=True,
+        )
 
     monkeypatch.setattr(
-        # FactorPrepareWorker imports batch_prepare_factor_maps into its own
-        # module namespace, so the blocker must be patched there (patching the
-        # workflow module cannot intercept the worker-thread call).
-        "paleo_workbench.ui.pages.factor_prepare_worker.batch_prepare_factor_maps",
-        blocked_prepare,
+        # Worker runs schedule in its thread; patch the scheduler entrypoint.
+        "paleo_workbench.ui.pages.factor_prepare_worker.run_factor_prepare_schedule",
+        blocked_schedule,
     )
     page._start_prepare_worker("IDW")
     assert started.wait(timeout=2.0)

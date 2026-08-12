@@ -7,7 +7,7 @@ from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.boundary_panel import BoundaryPanel
 from geoviz import CancellationToken
 
-from paleo_workbench.ui.pages.factor_prepare_worker import FactorPrepareResult, FactorPrepareWorker
+from paleo_workbench.ui.pages.factor_prepare_worker import FactorPrepareWorker
 from paleo_workbench.ui.pages.contour_draft_worker import (
     ContourDraftResult,
     ContourDraftWorker,
@@ -17,6 +17,12 @@ from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.factor_task_panel import FactorTaskPanel
 from paleo_workbench.ui.pages.well_table_panel import WellTablePanel
+from paleo_workbench.workflow.factor_prepare_scheduler import (
+    FactorPrepareBatchResult,
+    FactorPrepareProgress,
+    build_prepare_snapshot,
+    commit_prepare_batch_result,
+)
 from paleo_workbench.workflow.well_qc import qc_summary, run_well_table_qc
 from paleo_workbench.workflow.well_table import (
     attach_well_table_to_factor_task,
@@ -24,11 +30,14 @@ from paleo_workbench.workflow.well_table import (
     well_table_from_factor_task,
 )
 
+# Back-compat for tests that imported FactorPrepareResult from the page module.
+FactorPrepareResult = FactorPrepareBatchResult
+
 
 class PreparationPage(QWidget):
     """制备 page: tasks, WellTable, preview grid, boundary + async interpolation."""
 
-    # Emitted after batch_prepare_factor_maps mutates project.factor_map_tasks
+    # Emitted after staged prepare results are committed to project.factor_map_tasks
     factor_maps_updated = Signal()
     # Emitted after ContourDraft generation mutates contour_drafts / maps
     contour_drafts_updated = Signal()
@@ -39,6 +48,7 @@ class PreparationPage(QWidget):
         self.setObjectName("PreparationPage")
         self._project = None
         self._tasks: list = []
+        self._prepare_generation = 0
         self._prepare_job = OwnedWorkerJob(self)
         self._prepare_job.released.connect(self._clear_prepare_job)
         self._contour_job = OwnedWorkerJob(self)
@@ -79,6 +89,10 @@ class PreparationPage(QWidget):
 
     def set_project(self, project) -> None:
         """Bind the live ProjectDocument so batch generate can mutate factor_map_tasks."""
+        # Project switch supersedes any in-flight prepare generation.
+        if project is not self._project and self.is_prepare_running():
+            self._prepare_generation += 1
+            self._prepare_job.cancel()
         self._project = project
         self._refresh_well_table_view()
 
@@ -187,11 +201,24 @@ class PreparationPage(QWidget):
 
     def _start_prepare_worker(self, method: str) -> None:
         self._set_generate_enabled(False)
+        self._prepare_generation += 1
+        generation = self._prepare_generation
         token = CancellationToken()
+        # Snapshot on the host thread so scientific inputs match Stage-4 fingerprints.
+        snapshot = build_prepare_snapshot(
+            self._project,
+            generation=generation,
+            method=method,
+        )
+        self.task_panel.summary_label.setText(
+            f"制备中… 任务 {len(snapshot.tasks)} · 生成代 {generation}"
+        )
         worker = FactorPrepareWorker(
             self._project,
             method=method,
             cancellation_token=token,
+            generation=generation,
+            snapshot=snapshot,
         )
         self._prepare_job.start(
             worker,
@@ -199,6 +226,8 @@ class PreparationPage(QWidget):
             result_connections=(
                 (worker.completed, self._on_prepare_completed),
                 (worker.failed, self._on_prepare_failed),
+                (worker.progress, self._on_prepare_progress),
+                (worker.cancelled, self._on_prepare_cancelled),
             ),
             cancel=token.cancel,
             target=self._project,
@@ -208,18 +237,40 @@ class PreparationPage(QWidget):
         if not self.is_contour_running():
             self._set_generate_enabled(True)
 
-    def _on_prepare_completed(self, result: FactorPrepareResult) -> None:
+    def _on_prepare_progress(self, update: FactorPrepareProgress) -> None:
+        if update.generation != self._prepare_generation:
+            return
+        if self._prepare_job.target is not self._project:
+            return
+        msg = update.message or update.phase
+        self.task_panel.summary_label.setText(
+            f"制备中：复用 {update.clean} · 需计算 {update.dirty} · "
+            f"已完成 {update.completed}/{update.total_tasks}"
+            + (f" · {msg}" if msg else "")
+        )
+
+    def _on_prepare_completed(self, result: FactorPrepareBatchResult) -> None:
         target = self._prepare_job.target
         if target is None or self._project is not target:
             return
-        target.factor_map_tasks = list(result.factor_map_tasks)
+        if int(result.generation) != int(self._prepare_generation):
+            # Superseded by a newer prepare request or project switch.
+            return
+        discarded = commit_prepare_batch_result(
+            target,
+            result,
+            expected_generation=self._prepare_generation,
+        )
         self.update_state(target.factor_map_tasks)
         self.factor_maps_updated.emit()
-        # Non-blocking status: avoid modal spam in automated tests if overridden
-        if result.count >= 0:
-            self.task_panel.summary_label.setText(
-                self.task_panel.summary_label.text() + f" · 本次生成 {result.count} 个"
-            )
+        extra = ""
+        if discarded:
+            extra = f" · 丢弃过期 {len(discarded)}"
+        self.task_panel.summary_label.setText(
+            f"已制备 {sum(1 for t in target.factor_map_tasks if t.status == 'complete')} / "
+            f"{len(target.factor_map_tasks)} 个单因素图"
+            f" · 复用 {result.clean_count} · 计算 {result.executed_count}{extra}"
+        )
 
     def _on_prepare_failed(self, message: str) -> None:
         if self._prepare_job.target is not self._project:
@@ -227,6 +278,11 @@ class PreparationPage(QWidget):
         # Async failures must not enter a nested modal loop while the shell may
         # be rebuilding. Keep the error visible and recoverable in-page.
         self.task_panel.summary_label.setText(f"单因素图生成失败：{message}")
+
+    def _on_prepare_cancelled(self) -> None:
+        if self._prepare_job.target is not self._project:
+            return
+        self.task_panel.summary_label.setText("单因素图生成已取消")
 
     def _on_contour_draft_requested(self) -> None:
         """Schedule ContourDraft extraction outside the GUI thread."""
