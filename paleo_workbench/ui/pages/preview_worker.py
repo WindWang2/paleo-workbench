@@ -393,7 +393,7 @@ class PreviewRequestController(QObject):
 
         self._start_job(generation, snap, key, cache_generation)
 
-    def shutdown(self, wait_ms: int | None = None) -> None:
+    def shutdown(self, wait_ms: int | None = None) -> bool:
         """Stop accepting work and wait for the active worker (no force-kill)."""
         self._shutting_down = True
         self._pending = None
@@ -402,13 +402,13 @@ class PreviewRequestController(QObject):
         self._inflight_keys.clear()
 
         if self._active_job.thread is None:
-            return
+            return True
 
         # Preserve the former two-stage finite wait as one total deadline.
         deadline = self._shutdown_wait_ms if wait_ms is None else wait_ms
         initial_wait_ms = max(int(deadline), 0)
         second_wait_ms = min(initial_wait_ms + 500, 2_000)
-        self._active_job.shutdown(initial_wait_ms + second_wait_ms)
+        return self._active_job.shutdown(initial_wait_ms + second_wait_ms)
 
     def _start_job(
         self,

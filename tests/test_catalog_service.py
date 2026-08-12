@@ -209,6 +209,27 @@ def test_link_external_is_explicitly_unmanaged(service, tmp_path):
     assert asset.metadata.get("external") is True or version.managed is False
 
 
+def test_open_without_index_keeps_canonical_catalog_queryable(tmp_path):
+    project_path = _make_project(tmp_path)
+    source = _make_source(tmp_path)
+    initial = DataCatalogService.open(project_path)
+    version = initial.import_raw(source)
+    initial.close()
+
+    index_path = catalog_dir_for(project_path) / "catalog.sqlite"
+    index_path.unlink()
+    deferred = DataCatalogService.open(
+        project_path, ensure_index=False, sweep_temp=False
+    )
+    try:
+        assert deferred.get_version(version.id).id == version.id
+        assert deferred.index_revision() is None
+        deferred.ensure_index_ready()
+        assert deferred.index_revision() == deferred.document.catalog_revision
+    finally:
+        deferred.close()
+
+
 def test_external_offline_verify_reports_missing(service, tmp_path):
     src = _make_source(tmp_path)
     version = service.link_external(src)
@@ -547,3 +568,55 @@ def test_find_versions_by_tag_uses_index(service, tmp_path):
         assert svc.find_versions_by_tag("reviewed") == [v.id]
     finally:
         svc.close()
+
+
+def test_open_without_index_keeps_canonical_queries_usable(tmp_path: Path):
+    project = _make_project(tmp_path)
+    service = DataCatalogService.open(project)
+    version = service.import_raw(_make_source(tmp_path))
+    service.close()
+
+    deferred = DataCatalogService.open(project, ensure_index=False)
+    try:
+        # SQLite is an acceleration cache only; the canonical document still
+        # answers lookup/query requests before a deferred rebuild.
+        deferred._index.reset()
+        assert deferred.get_version(version.id).id == version.id
+        assert len(deferred.search_assets()) == 1
+        assert deferred.index_revision() is None
+        deferred.ensure_index_ready()
+        assert deferred.index_revision() == deferred.document.catalog_revision
+    finally:
+        deferred.close()
+
+
+def test_add_tags_batches_one_canonical_write(service, tmp_path, monkeypatch):
+    version = service.import_raw(_make_source(tmp_path))
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+    service.add_tags(["one", "two", "three"], version_id=version.id)
+
+    assert calls == 1
+    assert {tag.name for tag in service.document.tags} == {"one", "two", "three"}
+    assert service.find_versions_by_tag("two") == [version.id]
+
+
+def test_add_tags_batch_rolls_back_on_canonical_failure(service, tmp_path, monkeypatch):
+    version = service.import_raw(_make_source(tmp_path))
+
+    def fail(_document):
+        raise OSError("injected catalog failure")
+
+    monkeypatch.setattr(service._store, "save", fail)
+    with pytest.raises(OSError):
+        service.add_tags(["one", "two"], version_id=version.id)
+
+    assert service.document.tags == []
+    assert service.document.version_tags.get(version.id, []) == []

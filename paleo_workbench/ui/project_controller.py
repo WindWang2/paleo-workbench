@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from pydantic import ValidationError
 
@@ -26,12 +27,32 @@ class ProjectController:
         self._last_open_error: str | None = None
         self._confirm_title: str | None = None
         self._confirm_message: str | None = None
+        # Runtime-only session identity.  It never becomes project data; its
+        # sole job is making project replacement an explicit lifecycle edge.
+        self._session_generation = 0
 
-    def new_project(self, name: str = "Untitled Project") -> None:
-        """Replace the in-memory project (no confirm — callers that need one ask first)."""
-        self.window.project = ProjectDocument.new(name)
-        self.window.project_path = None
-        # The catalog is project-scoped; an unsaved project has none.
+    @property
+    def session_generation(self) -> int:
+        return self._session_generation
+
+    def _end_current_session(self) -> bool:
+        """Stop old-project work before its catalog/path can be replaced.
+
+        A non-cooperative worker may be detached for safe process shutdown,
+        but a normal project replacement must not close its catalog underneath
+        it.  Callers abort the replacement and leave the current session live.
+        """
+        self._session_generation += 1
+        shell = getattr(self.window, "app_shell", None)
+        shutdown = getattr(shell, "shutdown_workers", None)
+        if callable(shutdown):
+            try:
+                if shutdown() is False:
+                    self._session_generation += 1
+                    return False
+            except Exception:
+                self._session_generation += 1
+                return False
         self._close_catalog()
         try:
             from paleo_workbench.catalog import reset_catalog
@@ -39,7 +60,34 @@ class ProjectController:
             reset_catalog()
         except Exception:
             pass
-        self.window._refresh_shell()
+        return True
+
+    def shutdown_current_session(self) -> bool:
+        """Public deterministic shutdown hook for the window/application."""
+        return self._end_current_session()
+
+    def _restore_current_shell_after_failed_stop(self) -> None:
+        """Rebuild the unchanged project UI after a non-cooperative timeout.
+
+        ``OwnedWorkerJob`` has already detached the timed-out job and severed
+        its result connections.  Rebuilding the old shell restores a usable
+        UI bound to the same document/catalog without allowing that worker to
+        mutate a subsequently selected project.
+        """
+
+        refresh = getattr(self.window, "_refresh_shell", None)
+        if callable(refresh):
+            refresh(defer_nonvisible_bindings=True)
+
+    def new_project(self, name: str = "Untitled Project") -> None:
+        """Replace the in-memory project (no confirm — callers that need one ask first)."""
+        if not self._end_current_session():
+            self._restore_current_shell_after_failed_stop()
+            self.window._show_project_error("切换工程失败", "当前工程仍有未停止的后台任务。")
+            return
+        self.window.project = ProjectDocument.new(name)
+        self.window.project_path = None
+        self.window._refresh_shell(defer_nonvisible_bindings=True)
 
     def open_project_path(self, path: str | Path) -> bool:
         """Load project from path (no confirm — UI handlers ask before calling)."""
@@ -64,11 +112,20 @@ class ProjectController:
         except OSError as e:
             self._last_open_error = f"无法读取工程文件：\n{target}\n{e}"
             return False
+        # The old shell may own native sessions/workers that still point at its
+        # document/catalog.  Tear it down before publishing the new project.
+        if not self._end_current_session():
+            self._restore_current_shell_after_failed_stop()
+            self._last_open_error = "当前工程仍有未停止的后台任务，无法安全切换。"
+            return False
         self.window.project = loaded
         self.window.project.meta.project_root = str(target.resolve().parent)
         self.window.project_path = target
-        self._open_catalog(target, loaded)
-        self.window._refresh_shell()
+        catalog_error = self._open_catalog(target, loaded)
+        if catalog_error is not None:
+            self._last_open_error = f"目录元数据不可用：\n{target}\n{catalog_error}"
+        self.window._refresh_shell(defer_nonvisible_bindings=True)
+        self._schedule_catalog_maintenance(target, loaded)
         return True
 
     @staticmethod
@@ -88,7 +145,7 @@ class ProjectController:
             pass
 
     @staticmethod
-    def _open_catalog(target: Path, loaded: ProjectDocument) -> None:
+    def _open_catalog(target: Path, loaded: ProjectDocument) -> str | None:
         """Wire the Core Data Catalog for the opened project.
 
         Installs the Core-backed CatalogPort adapter as the active runtime
@@ -105,11 +162,56 @@ class ProjectController:
             )
 
             ProjectController._close_catalog()
-            service = DataCatalogService.open(target)
+            service = DataCatalogService.open(
+                target, ensure_index=False, sweep_temp=False
+            )
             set_catalog(CoreCatalogAdapter(service))
-            service.migrate_legacy_resources(loaded.resources)
-        except Exception:
-            pass
+            return None
+        except Exception as error:
+            # Never leave a closed/stale adapter from the previous project
+            # installed after a recoverable catalog-open failure.
+            try:
+                from paleo_workbench.catalog import reset_catalog
+
+                reset_catalog()
+            except Exception:
+                pass
+            return f"{error.__class__.__name__}: {error}"
+
+    def _schedule_catalog_maintenance(
+        self, target: Path, loaded: ProjectDocument
+    ) -> None:
+        """Move optional catalog migration/index work past first usable UI.
+
+        The authoritative project and canonical catalog have already opened.
+        Legacy projection and the rebuildable SQLite index are deliberately
+        deferred one event turn; identity checks make a queued callback from a
+        replaced project a no-op.
+        """
+        generation = self._session_generation
+
+        def maintain() -> None:
+            if (
+                generation != self._session_generation
+                or self.window.project is not loaded
+                or self.window.project_path != target
+            ):
+                return
+            try:
+                from paleo_workbench.catalog import get_catalog_service
+
+                service = get_catalog_service()
+                if service is None:
+                    return
+                service.migrate_legacy_resources(loaded.resources)
+                service._sweep_temp_on_open()
+                service.ensure_index_ready()
+            except Exception:
+                # Canonical project/catalog remain available even if an
+                # optional acceleration rebuild cannot complete.
+                return
+
+        QTimer.singleShot(0, maintain)
 
     def save_project(self) -> Path | None:
         if not self.window._flush_mapping_draft():
@@ -126,7 +228,7 @@ class ProjectController:
                 )
                 ProjectManager(self.window.project_path).save(self.window.project)
                 self._register_persisted_factor_grids(self.window.project_path)
-            except OSError as e:
+            except (OSError, ValueError, TypeError, ValidationError) as e:
                 self.window._show_project_error("保存工程失败", str(e))
                 return None
             return self.window.project_path
@@ -145,42 +247,100 @@ class ProjectController:
             return None
         self._flush_joint_analysis_state()
         target = self._normalize_project_path(Path(path))
+        old_path = self.window.project_path
+        old_root = self.window.project.meta.project_root
+        relocation = None
+        # A timed-out worker remains attached to the current project/catalog.
+        # Do not enter the rollback path below: it rebases runtime paths and
+        # refreshes the shell, both of which would disturb that live session.
+        if old_path is not None and old_path != target and not self._end_current_session():
+            self._restore_current_shell_after_failed_stop()
+            self.window._show_project_error(
+                "另存为失败", "当前工程仍有未停止的后台任务，无法安全另存为。"
+            )
+            return None
         try:
             # Re-home <old>.artifacts/ BEFORE writing the project file (whose
             # layout creation would otherwise pre-create the target artifacts
             # dir and defeat the move): payloads + catalog travel with the
-            # project — no orphan-on-save-as, no forced re-import. Best-effort:
-            # a relocation failure must not block saving.
-            try:
-                from paleo_workbench.project.paths import relocate_artifacts
+            # project — no orphan-on-save-as, no forced re-import.  Close the
+            # old SQLite handle first (important on Windows) and fail closed if
+            # relocation cannot complete; otherwise a new JSON could claim
+            # artifact paths that were never moved.
+            if old_path is not None and old_path != target:
+                from paleo_workbench.project.paths import stage_artifact_relocation
+                from paleo_workbench.project.paths import artifact_dir_for
 
-                if self.window.project_path is not None:
-                    old_path = self.window.project_path
-                    relocate_artifacts(self.window.project_path, target)
-                    self._rebase_factor_grid_artifact_paths(old_path, target)
-            except Exception:
-                pass
+                if artifact_dir_for(target).exists():
+                    raise OSError(
+                        "Save As 目标已存在工程成果目录；为避免混合两个工程的数据，"
+                        "请选择空目标路径。"
+                    )
+
+                relocation = stage_artifact_relocation(old_path, target)
+                self._rebase_factor_grid_artifact_paths(old_path, target)
+                self._rebase_interpretation_artifact_paths(old_path, target)
+                # The copied catalog belongs to the target before its project
+                # JSON lands.  Rebase it now so an interruption after JSON
+                # replacement can never leave a valid target project pointing
+                # at the old artifact-directory name.
+                self._rebase_staged_catalog_artifact_paths(target)
             self.window.project.meta.project_root = str(target.resolve().parent)
             ProjectManager(target).save(self.window.project)
-        except OSError as e:
+        except Exception as e:
+            if relocation is not None:
+                relocation.rollback()
+            if old_path is not None and old_path != target:
+                self._rebase_factor_grid_artifact_paths(target, old_path)
+                self._rebase_interpretation_artifact_paths(target, old_path)
+                self.window.project.meta.project_root = old_root
+                self.window.project_path = old_path
+                self._open_catalog(old_path, self.window.project)
+                refresh = getattr(self.window, "_refresh_shell", None)
+                if callable(refresh):
+                    refresh()
             self.window._show_project_error("保存工程失败", str(e))
             return None
         self.window.project_path = target
         # The catalog is bound to the project path: rebind to the new location
         # (best-effort — a catalog failure never blocks saving).
         self._open_catalog(target, self.window.project)
-        try:
-            # Version paths embed the OLD artifacts-dir name; rebase them to
-            # the new location so relocated payloads keep resolving.
-            from paleo_workbench.catalog import get_catalog_service
-
-            service = get_catalog_service()
-            if service is not None:
-                service._rebase_artifact_paths()
-        except Exception:
-            pass
+        refresh = getattr(self.window, "_refresh_shell", None)
+        if old_path is not None and old_path != target and callable(refresh):
+            # ``_end_current_session`` deliberately released the old shell's
+            # native/worker state before moving its artifacts. Rebuild a fresh
+            # shell only after the new path and catalog are authoritative.
+            refresh()
+        self._schedule_catalog_maintenance(target, self.window.project)
         self._register_persisted_factor_grids(target)
+        if relocation is not None:
+            try:
+                relocation.commit()
+            except OSError as error:
+                self.window._show_project_error(
+                    "另存为后清理失败",
+                    f"新工程已保存，但旧成果目录未能清理：{error}",
+                )
         return target
+
+    @staticmethod
+    def _rebase_staged_catalog_artifact_paths(target: Path) -> None:
+        """Commit target-catalog path rebasing before target JSON publication."""
+
+        try:
+            from paleo_workbench.catalog.service import DataCatalogService
+
+            service = DataCatalogService.open(
+                target, ensure_index=False, sweep_temp=False
+            )
+            try:
+                service._rebase_artifact_paths()
+            finally:
+                service.close()
+        except Exception:
+            # The caller's staged artifact rollback removes target-only data;
+            # re-raise so target metadata is never published with stale links.
+            raise
 
     def _register_persisted_factor_grids(self, project_path: Path) -> None:
         """Attach newly persisted grid artifacts to the active project catalog."""
@@ -211,6 +371,24 @@ class ProjectController:
                 continue
             task.grid_artifact_path = (new_root / relative).as_posix()
 
+    def _rebase_interpretation_artifact_paths(
+        self, old_project_path: Path, new_project_path: Path
+    ) -> None:
+        """Rebase only interpretation payloads owned by the moved artifact tree."""
+
+        old_root = artifact_dir_for(old_project_path).resolve()
+        new_root = artifact_dir_for(new_project_path).resolve()
+        for interpretation in self.window.project.horizon_interpretations:
+            raw = interpretation.artifact_path
+            if not raw:
+                continue
+            try:
+                relative = Path(raw).resolve().relative_to(old_root)
+            except ValueError:
+                # Explicitly external payloads keep their original path.
+                continue
+            interpretation.artifact_path = (new_root / relative).as_posix()
+
     def _flush_joint_analysis_state(self) -> None:
         """Persist joint presentation from 井震联合 page before project write.
 
@@ -239,13 +417,10 @@ class ProjectController:
         # The sample project is unsaved/in-memory → no catalog. Reset BEFORE
         # bootstrapping so sample imports never write into the previous
         # project's catalog (cross-project pollution).
-        self._close_catalog()
-        try:
-            from paleo_workbench.catalog import reset_catalog
-
-            reset_catalog()
-        except Exception:
-            pass
+        if not self._end_current_session():
+            self._restore_current_shell_after_failed_stop()
+            self.window._show_project_error("打开样例工程失败", "当前工程仍有未停止的后台任务。")
+            return False
         try:
             root = resolve_sample_data_root(data_root)
             result = bootstrap_sample_project(root)

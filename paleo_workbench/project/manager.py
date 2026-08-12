@@ -1,20 +1,170 @@
+"""Portable project persistence with bounded runtime snapshots.
+
+``ProjectDocument`` remains the project/business authority.  The small runtime
+snapshot in this module is deliberately *not* persisted and is only used to
+avoid repeating work when a live document has not changed.  The on-disk
+``*.paleo.json`` file remains one complete, portable snapshot.
+"""
+
 from __future__ import annotations
 
+from dataclasses import dataclass
+from copy import deepcopy
+from enum import Enum
 import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
+import weakref
 
-from paleo_workbench.project.models import ProjectDocument, _now_iso
+from pydantic import ValidationError
+
+from paleo_workbench.catalog.storage import fsync_dir
 from paleo_workbench.project.factor_grid_artifacts import persist_factor_grid_artifacts
+from paleo_workbench.project.models import ProjectDocument, _now_iso
 from paleo_workbench.project.paths import (
     ensure_artifact_layout,
+    project_dir_for,
     relativize_path,
     resolve_project_path,
 )
 
 
-def _relativize_reference_layers(data: dict, project_path: Path) -> None:
+class ProjectDirtyDomain(str, Enum):
+    """Runtime-only domains used to explain a bounded project save."""
+
+    PROJECT_METADATA = "project_metadata"
+    RESOURCES = "resources"
+    INTERPRETATIONS = "interpretations"
+    FACTOR_TASKS = "factor_tasks"
+    PREDICTIONS = "predictions"
+    MAP_DOCUMENTS = "map_documents"
+    QC = "qc"
+    EXPORTS = "exports"
+
+
+_DOMAIN_BY_SECTION = {
+    "meta": ProjectDirtyDomain.PROJECT_METADATA,
+    "coordinate": ProjectDirtyDomain.PROJECT_METADATA,
+    "stratigraphy": ProjectDirtyDomain.PROJECT_METADATA,
+    "joint_analysis": ProjectDirtyDomain.PROJECT_METADATA,
+    "resources": ProjectDirtyDomain.RESOURCES,
+    "well_tables": ProjectDirtyDomain.INTERPRETATIONS,
+    "constraint_layers": ProjectDirtyDomain.INTERPRETATIONS,
+    "contour_drafts": ProjectDirtyDomain.INTERPRETATIONS,
+    "horizon_interpretations": ProjectDirtyDomain.INTERPRETATIONS,
+    "version_sets": ProjectDirtyDomain.INTERPRETATIONS,
+    "compilation_runs": ProjectDirtyDomain.FACTOR_TASKS,
+    "factor_map_tasks": ProjectDirtyDomain.FACTOR_TASKS,
+    "prediction_tasks": ProjectDirtyDomain.PREDICTIONS,
+    "paleomap_documents": ProjectDirtyDomain.MAP_DOCUMENTS,
+    "quality_reports": ProjectDirtyDomain.QC,
+    "export_artifacts": ProjectDirtyDomain.EXPORTS,
+}
+
+
+@dataclass(frozen=True)
+class ProjectPersistenceSnapshot:
+    """Last known persisted state for one live :class:`ProjectDocument`.
+
+    ``runtime_sections`` use the document's absolute runtime paths; portable
+    sections keep the already-normalized JSON-ready values.  Reusing an
+    unchanged portable section avoids a full ``Path.resolve`` walk during an
+    unrelated metadata save, without creating another editable project model.
+    """
+
+    project_path: Path
+    runtime_sections: dict[str, Any]
+    portable_sections: dict[str, Any]
+    # Some old portable projects still contain inline numerical grids.  They
+    # need one artifact migration even when their in-memory representation is
+    # otherwise identical to the just-loaded document.
+    pending_sections: frozenset[str] = frozenset()
+
+    def changed_sections(self, current: dict[str, Any]) -> set[str]:
+        return {
+            name
+            for name, value in current.items()
+            if self.runtime_sections.get(name) != value
+            or name in self.pending_sections
+        }
+
+    def dirty_domains(self, current: dict[str, Any]) -> set[ProjectDirtyDomain]:
+        return {
+            _DOMAIN_BY_SECTION.get(name, ProjectDirtyDomain.PROJECT_METADATA)
+            for name in self.changed_sections(current)
+        }
+
+
+@dataclass(frozen=True)
+class ProjectSaveStats:
+    """Diagnostics for local benchmarks and focused tests (not persisted)."""
+
+    wrote_project_file: bool
+    dirty_domains: frozenset[ProjectDirtyDomain]
+    factor_artifacts_persisted: int = 0
+
+
+# Pydantic documents are mutable and intentionally do not carry persistence
+# bookkeeping.  A weak identity map gives a document one ephemeral snapshot
+# without changing its JSON schema or keeping closed projects alive.
+_SNAPSHOTS: dict[int, tuple[weakref.ref[ProjectDocument], ProjectPersistenceSnapshot]] = {}
+
+
+def _snapshot_for(project: ProjectDocument) -> ProjectPersistenceSnapshot | None:
+    entry = _SNAPSHOTS.get(id(project))
+    if entry is None:
+        return None
+    reference, snapshot = entry
+    if reference() is project:
+        return snapshot
+    _SNAPSHOTS.pop(id(project), None)
+    return None
+
+
+def _remember_snapshot(project: ProjectDocument, snapshot: ProjectPersistenceSnapshot) -> None:
+    key = id(project)
+
+    def _forget(_reference: weakref.ref[ProjectDocument], *, _key: int = key) -> None:
+        _SNAPSHOTS.pop(_key, None)
+
+    _SNAPSHOTS[key] = (weakref.ref(project, _forget), snapshot)
+
+
+def _runtime_sections(project: ProjectDocument) -> dict[str, Any]:
+    """Return a detached comparison view, omitting runtime-only root binding."""
+
+    sections = project.model_dump(mode="json")
+    sections["meta"] = dict(sections["meta"])
+    sections["meta"]["project_root"] = "."
+    return sections
+
+
+def project_backup_path(project_path: str | Path) -> Path:
+    """Return the single bounded last-known-good project metadata backup."""
+
+    path = Path(project_path)
+    return path.with_name(f"{path.name}.bak")
+
+
+def _cleanup_project_temps(project_path: Path) -> None:
+    """Remove only stale temp files that this manager itself could create."""
+
+    prefix = f".{project_path.name}."
+    try:
+        candidates = project_path.parent.glob(f"{prefix}*.tmp")
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    candidate.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _relativize_reference_layers(data: dict[str, Any], project_path: Path) -> None:
     for doc in data.get("paleomap_documents") or []:
         for layer in doc.get("reference_layers") or []:
             source = layer.get("source_path")
@@ -25,25 +175,25 @@ def _relativize_reference_layers(data: dict, project_path: Path) -> None:
             layer["external"] = external
 
 
-def _resolve_reference_layers(data: dict, project_path: Path) -> None:
-    for doc in data.get("paleomap_documents") or []:
-        for layer in doc.get("reference_layers") or []:
-            source = layer.get("source_path")
+def _resolve_reference_layers(project: ProjectDocument, project_path: Path) -> None:
+    for doc in project.paleomap_documents:
+        for layer in doc.reference_layers:
+            source = layer.source_path
             if not source:
                 continue
-            layer["source_path"] = resolve_project_path(source, project_path)
+            layer.source_path = resolve_project_path(source, project_path)
             # File presence check on the resolved absolute path (status offline).
-            path = Path(layer["source_path"])
+            path = Path(layer.source_path)
             if not path.is_file():
-                layer["status"] = "offline"
-                layer["error_message"] = layer.get("error_message") or "参考图源文件不可用"
-            elif layer.get("status") == "offline":
-                layer["status"] = "ready"
-                if layer.get("error_message") == "参考图源文件不可用":
-                    layer["error_message"] = ""
+                layer.status = "offline"
+                layer.error_message = layer.error_message or "参考图源文件不可用"
+            elif layer.status == "offline":
+                layer.status = "ready"
+                if layer.error_message == "参考图源文件不可用":
+                    layer.error_message = ""
 
 
-def _relativize_factor_grid_artifacts(data: dict, project_path: Path) -> None:
+def _relativize_factor_grid_artifacts(data: dict[str, Any], project_path: Path) -> None:
     for task in data.get("factor_map_tasks") or []:
         artifact_path = task.get("grid_artifact_path")
         if not artifact_path:
@@ -52,68 +202,288 @@ def _relativize_factor_grid_artifacts(data: dict, project_path: Path) -> None:
         task["grid_artifact_path"] = stored
 
 
-def _resolve_factor_grid_artifacts(data: dict, project_path: Path) -> None:
-    for task in data.get("factor_map_tasks") or []:
-        artifact_path = task.get("grid_artifact_path")
+def _resolve_factor_grid_artifacts(project: ProjectDocument, project_path: Path) -> None:
+    for task in project.factor_map_tasks:
+        if task.grid_artifact_path:
+            task.grid_artifact_path = resolve_project_path(
+                task.grid_artifact_path, project_path
+            )
+
+
+def _relativize_interpretation_artifacts(
+    data: dict[str, Any], project_path: Path
+) -> None:
+    """Keep managed interpretation payload references portable like factor grids."""
+
+    for interpretation in data.get("horizon_interpretations") or []:
+        artifact_path = interpretation.get("artifact_path")
         if not artifact_path:
             continue
-        task["grid_artifact_path"] = resolve_project_path(artifact_path, project_path)
+        stored, _ = relativize_path(artifact_path, project_path)
+        interpretation["artifact_path"] = stored
+
+
+def _resolve_interpretation_artifacts(
+    project: ProjectDocument, project_path: Path
+) -> None:
+    for interpretation in project.horizon_interpretations:
+        if interpretation.artifact_path:
+            interpretation.artifact_path = resolve_project_path(
+                interpretation.artifact_path, project_path
+            )
+
+
+def _resolve_project_paths(project: ProjectDocument, project_path: Path) -> None:
+    project_dir = project_dir_for(project_path)
+    for resource in project.resources:
+        resource.path = resolve_project_path(
+            resource.path, project_path, project_dir=project_dir
+        )
+    for artifact in project.export_artifacts:
+        artifact.output_path = resolve_project_path(
+            artifact.output_path, project_path, project_dir=project_dir
+        )
+    _resolve_reference_layers(project, project_path)
+    _resolve_factor_grid_artifacts(project, project_path)
+    _resolve_interpretation_artifacts(project, project_path)
+
+
+def _pending_persistence_sections(project: ProjectDocument) -> frozenset[str]:
+    """Return legacy sections that require one write-side migration.
+
+    The normal session snapshot makes ``open → Save`` a no-op.  Old projects
+    carrying an inline factor grid are the deliberate exception: Stage 3's
+    artifact-first contract requires migration to an immutable artifact on the
+    first save, even though no user-visible model field changed after load.
+    """
+
+    for task in project.factor_map_tasks:
+        if task.parameters.get("grid_z") is not None:
+            return frozenset({"factor_map_tasks"})
+    return frozenset()
+
+
+def _portable_section(section: str, value: Any, project_path: Path) -> Any:
+    """Normalize only a changed section for portable project JSON."""
+
+    project_dir = project_dir_for(project_path)
+    if section == "resources":
+        for resource in value:
+            path, external = relativize_path(
+                resource["path"], project_path, project_dir=project_dir
+            )
+            resource["path"] = path
+            resource["external"] = external
+    elif section == "export_artifacts":
+        for artifact in value:
+            output_path, _ = relativize_path(
+                artifact["output_path"], project_path, project_dir=project_dir
+            )
+            artifact["output_path"] = output_path
+    elif section == "paleomap_documents":
+        _relativize_reference_layers({"paleomap_documents": value}, project_path)
+    elif section == "factor_map_tasks":
+        _relativize_factor_grid_artifacts({"factor_map_tasks": value}, project_path)
+    elif section == "horizon_interpretations":
+        _relativize_interpretation_artifacts(
+            {"horizon_interpretations": value}, project_path
+        )
+    return value
 
 
 class ProjectManager:
+    """Read/write one portable project JSON with crash-safe metadata recovery."""
+
     def __init__(self, project_path: str | Path):
         self.project_path = Path(project_path)
+        self.last_save_stats = ProjectSaveStats(False, frozenset())
+        self.last_recovery_message: str | None = None
 
-    def save(self, project: ProjectDocument) -> None:
-        updated_at = _now_iso()
-        # Persist numerical grids before constructing the JSON payload, so no inline
-        # grid arrays leak back into a saved project.
-        persist_factor_grid_artifacts(project, self.project_path)
-        data = project.model_dump()
-        data["meta"]["updated_at"] = updated_at
-        for resource in data["resources"]:
-            path, external = relativize_path(resource["path"], self.project_path)
-            resource["path"] = path
-            resource["external"] = external
-        for artifact in data["export_artifacts"]:
-            output_path, _ = relativize_path(artifact["output_path"], self.project_path)
-            artifact["output_path"] = output_path
-        _relativize_reference_layers(data, self.project_path)
-        _relativize_factor_grid_artifacts(data, self.project_path)
+    def _portable_payload(
+        self,
+        project: ProjectDocument,
+        runtime_sections: dict[str, Any],
+        changed_sections: set[str],
+    ) -> dict[str, Any]:
+        snapshot = _snapshot_for(project)
+        can_reuse = (
+            snapshot is not None
+            and snapshot.project_path == self.project_path
+        )
+        payload: dict[str, Any] = {}
+        for section, value in runtime_sections.items():
+            if can_reuse and section not in changed_sections:
+                payload[section] = snapshot.portable_sections[section]
+            else:
+                # ``model_dump`` already produced a detached JSON-compatible
+                # section; its in-place path normalization cannot mutate the
+                # live ProjectDocument or the previous snapshot.
+                payload[section] = _portable_section(section, value, self.project_path)
+        return payload
+
+    def _write_payload(self, payload: str) -> None:
+        """Atomically replace project metadata and retain one good revision."""
+
         self.project_path.parent.mkdir(parents=True, exist_ok=True)
-        ensure_artifact_layout(self.project_path)
-        # Atomic replace so a crash mid-write cannot leave a truncated project file.
-        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        backup = project_backup_path(self.project_path)
         fd, tmp_name = tempfile.mkstemp(
             prefix=f".{self.project_path.name}.",
             suffix=".tmp",
             dir=str(self.project_path.parent),
         )
+        old_moved = False
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if self.project_path.exists():
+                os.replace(self.project_path, backup)
+                old_moved = True
             os.replace(tmp_name, self.project_path)
+            # Best effort on platforms/filesystems where opening a directory is
+            # unsupported.  The file itself has already been flushed.
+            fsync_dir(self.project_path.parent)
         except Exception:
             try:
                 os.unlink(tmp_name)
             except OSError:
                 pass
+            if old_moved and not self.project_path.exists() and backup.exists():
+                try:
+                    os.replace(backup, self.project_path)
+                    fsync_dir(self.project_path.parent)
+                except OSError:
+                    pass
             raise
+
+    def save(self, project: ProjectDocument) -> bool:
+        """Persist changed project metadata; return whether JSON was rewritten.
+
+        A full portable JSON is still written for a changed project.  For a
+        clean live document this method avoids factor-artifact probing, path
+        translation, JSON encoding, fsync and replacement entirely.
+        """
+
+        runtime_sections = _runtime_sections(project)
+        snapshot = _snapshot_for(project)
+        same_path = snapshot is not None and snapshot.project_path == self.project_path
+        changed_sections = (
+            snapshot.changed_sections(runtime_sections) if same_path else set(runtime_sections)
+        )
+        if same_path and not changed_sections:
+            self.last_save_stats = ProjectSaveStats(False, frozenset())
+            return False
+
+        factor_changes = 0
+        if not same_path or "factor_map_tasks" in changed_sections:
+            # Only inspect numerical factor payloads when the task domain has
+            # changed (or on an initial/save-as persistence boundary).
+            factor_changes = len(persist_factor_grid_artifacts(project, self.project_path))
+            if factor_changes:
+                runtime_sections = _runtime_sections(project)
+                changed_sections = (
+                    snapshot.changed_sections(runtime_sections)
+                    if same_path
+                    else set(runtime_sections)
+                )
+
+        updated_at = _now_iso()
+        payload_data = self._portable_payload(project, runtime_sections, changed_sections)
+        payload_data["meta"] = dict(payload_data["meta"])
+        payload_data["meta"]["updated_at"] = updated_at
+        # The persisted file is portable.  Runtime consumers receive the
+        # concrete root from ProjectController on open, while document paths
+        # have already been resolved independently of this hint.
+        payload_data["meta"]["project_root"] = "."
+        # Ensure a new project owns the same durable artifact layout before its
+        # portable metadata references it. Existing clean sessions do not reach
+        # this point and therefore do no directory/artifact work.
+        ensure_artifact_layout(self.project_path)
+        payload = json.dumps(payload_data, ensure_ascii=False, indent=2)
+        self._write_payload(payload)
+
         project.meta.updated_at = updated_at
+        committed_runtime = _runtime_sections(project)
+        _remember_snapshot(
+            project,
+            ProjectPersistenceSnapshot(
+                project_path=self.project_path,
+                runtime_sections=committed_runtime,
+                portable_sections=payload_data,
+                pending_sections=frozenset(),
+            ),
+        )
+        dirty_domains = frozenset(
+            _DOMAIN_BY_SECTION.get(section, ProjectDirtyDomain.PROJECT_METADATA)
+            for section in changed_sections
+        )
+        self.last_save_stats = ProjectSaveStats(True, dirty_domains, factor_changes)
+        return True
+
+    def _load_data(self) -> tuple[dict[str, Any], ProjectDocument, bool]:
+        """Read canonical metadata, falling back to one last-known-good copy."""
+
+        self.last_recovery_message = None
+        try:
+            data = json.loads(self.project_path.read_text(encoding="utf-8"))
+            return data, ProjectDocument.model_validate(data), False
+        except (OSError, ValueError, TypeError, ValidationError) as original_error:
+            backup = project_backup_path(self.project_path)
+            if not backup.is_file():
+                raise original_error
+            try:
+                data = json.loads(backup.read_text(encoding="utf-8"))
+                project = ProjectDocument.model_validate(data)
+            except (OSError, ValueError, TypeError, ValidationError):
+                raise original_error
+            try:
+                os.replace(backup, self.project_path)
+                fsync_dir(self.project_path.parent)
+            except OSError:
+                pass
+            self.last_recovery_message = "已恢复上一次完整工程元数据版本"
+            return data, project, True
 
     def load(self) -> ProjectDocument:
-        data = json.loads(self.project_path.read_text(encoding="utf-8"))
-        # Project files keep in-project paths relative for portability. Runtime
-        # consumers such as previews must receive paths anchored to this project,
-        # rather than to the application's current working directory.
-        for resource in data.get("resources", []):
-            resource["path"] = resolve_project_path(resource["path"], self.project_path)
-        for artifact in data.get("export_artifacts", []):
-            artifact["output_path"] = resolve_project_path(
-                artifact["output_path"], self.project_path
-            )
-        _resolve_reference_layers(data, self.project_path)
-        _resolve_factor_grid_artifacts(data, self.project_path)
-        return ProjectDocument.model_validate(data)
+        _cleanup_project_temps(self.project_path)
+        data, project, _recovered = self._load_data()
+        # Validate portable schema first, then resolve the handful of runtime
+        # path-bearing fields in the authoritative business document.  Keeping
+        # ``data`` untouched lets the session retain its already-portable
+        # sections without another all-resource relativization pass.
+        _resolve_project_paths(project, self.project_path)
+        # The persisted hint stays portable (``."``), while runtime consumers
+        # receive the concrete root without turning an immediate clean save
+        # into a false metadata mutation.
+        project.meta.project_root = str(self.project_path.resolve().parent)
+        runtime_sections = _runtime_sections(project)
+        portable_sections = {
+            section: data.get(section, runtime_sections[section])
+            for section in runtime_sections
+        }
+        portable_sections["meta"] = dict(portable_sections["meta"])
+        portable_sections["meta"]["project_root"] = "."
+        # Reference-layer status is runtime-derived from source availability;
+        # retain its normalized portable representation so a later unrelated
+        # save does not accidentally resurrect an obsolete ``ready`` status.
+        portable_sections["paleomap_documents"] = _portable_section(
+            "paleomap_documents",
+            deepcopy(runtime_sections["paleomap_documents"]),
+            self.project_path,
+        )
+        portable_sections["factor_map_tasks"] = _portable_section(
+            "factor_map_tasks",
+            deepcopy(runtime_sections["factor_map_tasks"]),
+            self.project_path,
+        )
+        _remember_snapshot(
+            project,
+            ProjectPersistenceSnapshot(
+                project_path=self.project_path,
+                runtime_sections=runtime_sections,
+                portable_sections=portable_sections,
+                pending_sections=_pending_persistence_sections(project),
+            ),
+        )
+        return project

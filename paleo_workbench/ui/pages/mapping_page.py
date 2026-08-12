@@ -454,8 +454,8 @@ class MappingPage(QWidget):
     def _clear_contour_job(self) -> None:
         self.bottom_workbench.factor_shelf.contour_draft_btn.setEnabled(True)
 
-    def shutdown_workers(self, wait_ms: int = 3_000) -> None:
-        self._contour_job.shutdown(wait_ms)
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        return self._contour_job.shutdown(wait_ms)
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""

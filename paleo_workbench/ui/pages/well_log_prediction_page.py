@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Slot
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.catalog import get_catalog_service
@@ -43,6 +44,8 @@ class WellLogPredictionPage(QWidget):
         self._selected_index: int | None = None
         self._inference_service = None
         self._inference_job = OwnedWorkerJob(self)
+        self._session_token = object()
+        self._active_inference_context = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -74,11 +77,36 @@ class WellLogPredictionPage(QWidget):
         self.evidence_panel.export_requested.connect(self._on_export)
 
     def set_project(self, project) -> None:
+        if project is not self._project:
+            self._session_token = object()
         self._project = project
+
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        """Cancel project-owned inference and release pinned native buffers."""
+        joined = self._inference_job.shutdown(wait_ms)
+        # A failed join means ProjectController will keep the current session
+        # and its catalog alive.  Keep this page's current document/native
+        # canvas intact as well; the detached worker has no result connection
+        # and cannot publish into it.
+        if not joined:
+            return False
+        self._session_token = object()
+        self._active_inference_context = None
+        self._inference_service = None
+        self._project = None
+        self.canvas_panel.shutdown()
+        return joined
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        # qtbot/application teardown can destroy a page between a worker's
+        # terminal signal and its queued release callback.  Join first so the
+        # QThread can never outlive this QObject parent.
+        self.shutdown_workers()
+        event.accept()
 
     def update_state(self, prediction_tasks: list | tuple | None, project=None) -> None:
         if project is not None:
-            self._project = project
+            self.set_project(project)
         self._tasks = list(prediction_tasks or [])
         if self._selected_index is not None and not (
             0 <= self._selected_index < len(self._tasks)
@@ -211,13 +239,30 @@ class WellLogPredictionPage(QWidget):
             },
         )
         worker = InferenceWorker(service, run.id)
-        worker.completed.connect(self._on_inference_completed)
-        worker.failed.connect(self._on_inference_failed)
+        self._active_inference_context = (self._session_token, self._project, service)
         self._inference_job.start(
             worker,
             terminal_signals=(worker.terminal,),
+            result_connections=(
+                (worker.completed, self._on_inference_completed_if_current),
+                (worker.failed, self._on_inference_failed_if_current),
+            ),
             target=name_prefix,
         )
+
+    @Slot(object)
+    def _on_inference_completed_if_current(self, payload) -> None:
+        context = self._active_inference_context
+        if context != (self._session_token, self._project, self._inference_service):
+            return
+        self._on_inference_completed(payload)
+
+    @Slot(str)
+    def _on_inference_failed_if_current(self, text: str) -> None:
+        context = self._active_inference_context
+        if context is None or context[:2] != (self._session_token, self._project):
+            return
+        self._on_inference_failed(text)
 
     def _on_inference_completed(self, payload: dict) -> None:
         run = payload.get("run")

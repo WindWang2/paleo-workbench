@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QStackedLayout, QVBoxLayout
 
 from geoviz import SeismicView
@@ -32,6 +33,8 @@ class SeismicViewPanel(QFrame):
         self.setObjectName("SeismicViewPanel")
         self.volume_shape: tuple[int, int, int] | None = None
         self._horizon_name: str = ""
+        self._expected_segy_path: str | None = None
+        self._segy_session_active = True
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -75,6 +78,16 @@ class SeismicViewPanel(QFrame):
             self.view.segy_loaded.connect(self._on_segy_loaded)
         self.stack.addWidget(self.view)
         outer.addWidget(host, 1)
+
+    def __del__(self) -> None:
+        # pytest and other non-interactive owners may drop the Python wrapper
+        # without delivering QWidget close/deferred-delete events.  The
+        # engine's SliceReadWorker is unparented by design, so make this final
+        # best-effort cleanup explicit as well.
+        try:
+            self.shutdown()
+        except Exception:
+            pass
 
     @staticmethod
     def _attribute_card(label_text: str, status_text: str) -> QFrame:
@@ -156,6 +169,7 @@ class SeismicViewPanel(QFrame):
                 label.setText(f"{current}  目标层位:{self._horizon_name}".strip())
 
     def _show_empty(self, message: str) -> None:
+        self._expected_segy_path = None
         self.view.cancel_pending_segy_load()
         self.volume_shape = None
         self.empty_label.setText(message)
@@ -163,7 +177,36 @@ class SeismicViewPanel(QFrame):
         self.stack.setCurrentWidget(self.empty_label)
         self.view_ready.emit(False)
 
+    def shutdown(self) -> None:
+        """Cancel retained SEGY/slice work before the project session closes."""
+
+        self._segy_session_active = False
+        self._expected_segy_path = None
+        cleanup = getattr(self.view, "cleanup", None)
+        if callable(cleanup):
+            cleanup()
+        else:
+            cancel = getattr(self.view, "cancel_pending_segy_load", None)
+            if callable(cancel):
+                cancel()
+        self.volume_shape = None
+        self.stack.setCurrentWidget(self.empty_label)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.shutdown()
+        super().closeEvent(event)
+
+    def event(self, event: QEvent) -> bool:  # type: ignore[override]
+        # QWidget parents can dispose this panel through ``deleteLater``
+        # without a close event.  Stop SeismicView's retained slice worker in
+        # both paths so it cannot outlive a discarded project shell.
+        if event.type() == QEvent.Type.DeferredDelete:
+            self.shutdown()
+        return super().event(event)
+
     def _show_volume(self, volume) -> None:
+        self._expected_segy_path = None
+        self.view.cancel_pending_segy_load()
         self.volume_shape = tuple(int(value) for value in volume.shape)
         self.view.load_demo(volume)
         self.empty_label.setHidden(True)
@@ -174,6 +217,8 @@ class SeismicViewPanel(QFrame):
 
     def _show_segy_loading(self, path: str) -> None:
         """Keep the engine surface visible while its worker prepares SEGY."""
+        self._segy_session_active = True
+        self._expected_segy_path = str(path)
         self.volume_shape = None
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.view)
@@ -181,6 +226,14 @@ class SeismicViewPanel(QFrame):
         self.view.load_segy_async(path)
 
     def _on_segy_loaded(self, result) -> None:
+        # SeismicView has its own generation filtering.  Keep an additional
+        # panel/session guard so a queued terminal signal can never revive a
+        # panel after project shutdown or after a different task is selected.
+        if (
+            not self._segy_session_active
+            or getattr(result, "path", None) != self._expected_segy_path
+        ):
+            return
         volume = getattr(result, "volume", None)
         if volume is None:
             return

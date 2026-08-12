@@ -105,11 +105,12 @@ class PreparationPage(QWidget):
     def is_prepare_running(self) -> bool:
         return self._prepare_job.is_running
 
-    def shutdown_workers(self, wait_ms: int = 3_000) -> None:
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         """Quit in-flight prepare thread (call before shell deleteLater)."""
-        self._shutdown_contour_worker(wait_ms)
-        self._prepare_job.shutdown(wait_ms)
+        contour_joined = self._contour_job.shutdown(wait_ms)
+        prepare_joined = self._prepare_job.shutdown(wait_ms)
         self._set_generate_enabled(True)
+        return contour_joined and prepare_joined
 
     def _shutdown_contour_worker(self, wait_ms: int) -> None:
         self._contour_job.shutdown(wait_ms)

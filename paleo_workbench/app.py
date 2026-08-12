@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import QApplication, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.project.models import ProjectDocument
@@ -270,24 +270,35 @@ class PaleoWorkbenchWindow(QWidget):
 
     # --- shell rebuild helpers ---
 
-    def _refresh_shell(self) -> None:
+    def _refresh_shell(self, *, defer_nonvisible_bindings: bool = False) -> None:
         """Tear down the current app shell and build a fresh one for ``self.project``."""
-        prep = self.app_shell.preparation_page_widget()
-        if prep is not None and hasattr(prep, "shutdown_workers"):
-            prep.shutdown_workers()
-        mapping = self.app_shell.mapping_page_widget()
-        if mapping is not None and hasattr(mapping, "shutdown_workers"):
-            mapping.shutdown_workers()
+        self.app_shell.shutdown_workers()
         self.outer_layout.removeWidget(self.app_shell)
         self.app_shell.setParent(None)
         self.app_shell.deleteLater()
-        self.app_shell = AppShell(project=self.project)
+        self.app_shell = AppShell(
+            project=self.project,
+            defer_nonvisible_bindings=defer_nonvisible_bindings,
+        )
         self._apply_project_to_shell()
         self.outer_layout.addWidget(self.app_shell)
         self._wire_menu_bar()
         self._update_title()
         # Re-bind project file path after shell rebuild (import/export I/O).
         self.app_shell.set_data_project_path(self.project_path)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        """Close project-owned workers/catalog deterministically on app exit."""
+        if not self.project_controller.shutdown_current_session():
+            self.project_controller._restore_current_shell_after_failed_stop()
+            QMessageBox.warning(
+                self,
+                "无法关闭",
+                "后台任务尚未停止。工程保持打开，等待任务结束后请再次关闭。",
+            )
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _apply_project_to_shell(self) -> None:
         """Push ``self.project`` into the current shell's pages (set in __init__/_refresh)."""

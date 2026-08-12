@@ -233,19 +233,31 @@ class DataCatalogService:
     # -- lifecycle ----------------------------------------------------------
 
     @classmethod
-    def open(cls, project_path: str | Path) -> "DataCatalogService":
+    def open(
+        cls,
+        project_path: str | Path,
+        *,
+        ensure_index: bool = True,
+        sweep_temp: bool = True,
+    ) -> "DataCatalogService":
         """Open (or initialize) the catalog for *project_path*.
 
         A missing, stale, or corrupt SQLite index is rebuilt from the
-        canonical store; index problems never block opening the project.
+        canonical store when ``ensure_index`` is true.  Project-session open
+        may set it false because all catalog reads have a canonical in-memory
+        fallback; the next write rebuilds/synchronizes the disposable index.
+        ``sweep_temp`` is likewise optional session maintenance, never a
+        prerequisite for canonical catalog availability.
         """
         project_path = Path(project_path)
         store = CatalogStore(project_path)
         document = store.load()
         index = CatalogIndex(project_path)
         service = cls(project_path, document, store, index)
-        service._ensure_index_fresh()
-        service._sweep_temp_on_open()
+        if ensure_index:
+            service._ensure_index_fresh()
+        if sweep_temp:
+            service._sweep_temp_on_open()
         return service
 
     def _sweep_temp_on_open(self) -> None:
@@ -309,6 +321,16 @@ class DataCatalogService:
                 self._index.rebuild(self.document)
             except Exception:
                 pass
+
+    def ensure_index_ready(self) -> None:
+        """Synchronously rebuild/prime the disposable index on explicit demand.
+
+        Most catalogue operations can use their canonical-document fallback,
+        so this method is intentionally opt-in for session startup.  It is
+        public to give UI/controller code an honest point at which to request
+        index readiness without making SQLite authoritative.
+        """
+        self._ensure_index_fresh()
 
     def rebuild_index(self) -> None:
         """Force a full index rebuild from the canonical store."""
@@ -1639,6 +1661,90 @@ class DataCatalogService:
         Delegates to :func:`paleo_workbench.catalog.tags.add_tag`.
         """
         return _tags.add_tag(self, name, asset_id=asset_id, version_id=version_id)
+
+    def add_tags(
+        self,
+        names: Iterable[str],
+        *,
+        asset_id: str | None = None,
+        version_id: str | None = None,
+    ) -> list[Tag]:
+        """Add several tags with at most one canonical catalog write.
+
+        This is deliberately a narrow metadata-only transaction rather than a
+        generic deferred-save context.  Version/artifact placement has its own
+        immediate rollback guarantees; deferring those commits would enlarge a
+        crash window.  Here every mutation is in the CatalogDocument, so a
+        failed canonical save can restore the exact pre-batch metadata state.
+        """
+        with self._lock:
+            if asset_id is None and version_id is None:
+                raise CatalogError("add_tags requires asset_id or version_id")
+            if asset_id is not None:
+                self._asset_or_raise(asset_id)
+            if version_id is not None:
+                self._version_or_raise(version_id)
+
+            # A deep copy is bounded to this explicit metadata batch and only
+            # retained until the single canonical write finishes.  It is never
+            # on normal project-save/open paths.
+            before_tags = list(self.document.tags)
+            before_asset_tags = {
+                key: list(value) for key, value in self.document.asset_tags.items()
+            }
+            before_version_tags = {
+                key: list(value)
+                for key, value in self.document.version_tags.items()
+            }
+            result: list[Tag] = []
+            changed = False
+            try:
+                for name in names:
+                    if not str(name or "").strip():
+                        continue
+                    normalized = self._normalize_tag_for_batch(str(name))
+                    tag = self._tag_by_normalized_name(normalized)
+                    if tag is None:
+                        tag = Tag(
+                            name=normalized,
+                            display_name=" ".join(str(name).split()),
+                        )
+                        self.document.tags.append(tag)
+                        changed = True
+                    if asset_id is not None:
+                        ids = self.document.asset_tags.setdefault(asset_id, [])
+                        if tag.id not in ids:
+                            ids.append(tag.id)
+                            changed = True
+                    if version_id is not None:
+                        ids = self.document.version_tags.setdefault(version_id, [])
+                        if tag.id not in ids:
+                            ids.append(tag.id)
+                            changed = True
+                    result.append(tag)
+                if changed:
+                    self._save()
+                return result
+            except Exception:
+                self.document.tags = before_tags
+                self.document.asset_tags = before_asset_tags
+                self.document.version_tags = before_version_tags
+                raise
+
+    def _tag_by_normalized_name(self, normalized: str) -> Tag | None:
+        for tag in self.document.tags:
+            if tag.name == normalized:
+                return tag
+        return None
+
+    @staticmethod
+    def _normalize_tag_for_batch(name: str) -> str:
+        from paleo_workbench.catalog.models import normalize_tag_name
+
+        normalized = normalize_tag_name(name)
+        if not normalized:
+            raise CatalogError("Empty tag name")
+        return normalized
 
     def remove_tag(
         self,

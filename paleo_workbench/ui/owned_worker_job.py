@@ -63,7 +63,11 @@ class OwnedWorkerJob(QObject):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)  # type: ignore[attr-defined]
         for signal, slot in self._result_connections:
-            signal.connect(slot)
+            # Result slots belong to the page/controller (GUI thread), while
+            # workers live in the owned QThread.  Force queued delivery even
+            # for a Python callable so a completion can never mutate Qt state
+            # from the worker thread.
+            signal.connect(slot, Qt.ConnectionType.QueuedConnection)
         for signal in terminal_signals:
             signal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         # Move worker back to the main thread on thread finish, executing on the worker's thread.
@@ -169,7 +173,9 @@ class OwnedWorkerJob(QObject):
         self._result_connections = []
         if self._destroyed_conn is not None:
             try:
-                self.destroyed.disconnect(self._destroyed_conn)
+                # PySide's bound-signal ``disconnect`` expects a callable,
+                # whereas the connection overload belongs to QObject.
+                QObject.disconnect(self._destroyed_conn)
             except (RuntimeError, TypeError):
                 pass
             self._destroyed_conn = None

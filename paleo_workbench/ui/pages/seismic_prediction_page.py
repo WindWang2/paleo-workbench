@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Slot
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QVBoxLayout, QWidget
 
 from paleo_workbench.ui import tokens
@@ -39,6 +40,8 @@ class SeismicPredictionPage(QWidget):
         self._tasks: list = []
         self._inference_service = None
         self._inference_job = OwnedWorkerJob(self)
+        self._session_token = object()
+        self._active_inference_context = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -75,11 +78,36 @@ class SeismicPredictionPage(QWidget):
         self.view_panel.view_ready.connect(self._on_view_ready)
 
     def set_project(self, project) -> None:
+        if project is not self._project:
+            self._session_token = object()
         self._project = project
+
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        """Stop project-owned inference before its catalog is rebound."""
+        joined = self._inference_job.shutdown(wait_ms)
+        # A switch is aborted when a job cannot join.  Preserve the current
+        # page/session in that case; result signals were disconnected by the
+        # owned job and the old catalog remains open for the detached worker.
+        if not joined:
+            return False
+        self._session_token = object()
+        self._active_inference_context = None
+        self._inference_service = None
+        self._project = None
+        shutdown = getattr(self.view_panel, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+        return joined
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        # A page owns its inference thread; joining here covers direct widget
+        # destruction as well as normal project-session shutdown.
+        self.shutdown_workers()
+        event.accept()
 
     def update_state(self, prediction_tasks: list | tuple | None, project=None) -> None:
         if project is not None:
-            self._project = project
+            self.set_project(project)
         self._tasks = list(prediction_tasks or [])
         task = self._current_task()
         self.view_panel.update_state(task, project=self._project)
@@ -193,13 +221,30 @@ class SeismicPredictionPage(QWidget):
             },
         )
         worker = InferenceWorker(service, run.id)
-        worker.completed.connect(self._on_inference_completed)
-        worker.failed.connect(self._on_inference_failed)
+        self._active_inference_context = (self._session_token, self._project, service)
         self._inference_job.start(
             worker,
             terminal_signals=(worker.terminal,),
+            result_connections=(
+                (worker.completed, self._on_inference_completed_if_current),
+                (worker.failed, self._on_inference_failed_if_current),
+            ),
             target=name_prefix,
         )
+
+    @Slot(object)
+    def _on_inference_completed_if_current(self, payload) -> None:
+        context = self._active_inference_context
+        if context != (self._session_token, self._project, self._inference_service):
+            return
+        self._on_inference_completed(payload)
+
+    @Slot(str)
+    def _on_inference_failed_if_current(self, text: str) -> None:
+        context = self._active_inference_context
+        if context is None or context[:2] != (self._session_token, self._project):
+            return
+        self._on_inference_failed(text)
 
     def _on_inference_completed(self, payload: dict) -> None:
         run = payload.get("run")
