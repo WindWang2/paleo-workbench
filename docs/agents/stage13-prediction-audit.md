@@ -1,9 +1,9 @@
 # Stage 13 — Prediction production pipeline audit
 
-**BASE_SHA:** `0a4dc451` (local main at worktree creation)  
-**GEOVIZ_SHA:** `9e152856`  
-**WELLLOG_SHA:** `915076e2`  
-**Worktree:** `paleo-wt-grok-prediction-production`  
+**BASE_SHA:** `0a4dc451` (local main at worktree creation)
+**GEOVIZ_SHA:** `9e152856`
+**WELLLOG_SHA:** `915076e2`
+**Worktree:** `paleo-wt-grok-prediction-production`
 **Branch:** `grok/prediction-production-pipeline-20260812`
 
 ## Component matrix

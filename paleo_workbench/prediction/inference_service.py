@@ -264,6 +264,15 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
                 "model_version": model_version,
             }
 
+    # Align DataRun.generator with provider/result generator_version so Stage-9
+    # expected_identity (from PredictionTask.generator_version) does not flag
+    # GENERATOR_CHANGED immediately after a successful run.
+    provider_generator = str(
+        result.get("generator_version") or model.provider or run.generator or ""
+    )
+    if provider_generator:
+        run.generator = provider_generator
+
     payload = {
         "schema_version": "1.0",
         "model": {
@@ -276,7 +285,7 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "checksum": getattr(model_version, "checksum", None) or "",
             "model_version_id": model_version.id,
         },
-        "generator_version": result.get("generator_version") or model.provider,
+        "generator_version": provider_generator or result.get("generator_version"),
         "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
         "input_version_ids": list(run.input_version_ids),
         "seed": seed,
@@ -284,6 +293,9 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
         "run_id": run_id,
         **result,
     }
+    # Prefer the aligned identity (result may re-set generator_version via **result).
+    if provider_generator:
+        payload["generator_version"] = provider_generator
     output_version = _persist_result(service, run_id, model, payload)
     finished = _now_iso()
     service.update_run_status(
