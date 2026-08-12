@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 class PreviewVolumeWorker(QObject):
-    """Background LOD preview SEGY load (OwnedWorkerJob target).
+    """Background progressive LOD brick load (OwnedWorkerJob target).
 
-    Uses :class:`~paleo_workbench.viz.seismic_volume_source.SeismicVolumeSource`
-    so joint 3D shares the same metadata / cache identity as 2D consumers.
+    Emits ``(volume, warning, generation, lod_level)``. Dense bricks are only
+    for GL display; scene slicing uses :class:`SourceBackedVolumeAccess`.
     """
 
-    finished = Signal(object, str, int)  # volume, warning, generation
+    finished = Signal(object, str, int, int)  # volume, warning, generation, lod
     failed = Signal(str, int)
 
     def __init__(self, segy_path: str, *, generation: int = 0, lod: int = 0) -> None:
@@ -45,15 +45,15 @@ class PreviewVolumeWorker(QObject):
             from paleo_workbench.viz.seismic_volume_source import get_shared_seismic_source
 
             source = get_shared_seismic_source(self._path)
-            # Metadata-first: headers only before any dense preview work.
             source.metadata()
             vol, warning = source.read_lod_volume(level=self._lod)
-            self.finished.emit(vol, warning or "", self._generation)
+            self.finished.emit(vol, warning or "", self._generation, self._lod)
         except Exception as exc:
-            # Fallback to legacy helper (still preview-bounded).
             try:
                 vol, warning = load_seismic_volume_from_path(self._path)
-                self.finished.emit(vol, warning or str(exc), self._generation)
+                self.finished.emit(
+                    vol, warning or str(exc), self._generation, self._lod
+                )
             except Exception as exc2:
                 self.failed.emit(str(exc2), self._generation)
 
@@ -77,6 +77,8 @@ class WellSeismicJointHost(QObject):
         self._project: ProjectDocument | None = None
         self._volume_job = OwnedWorkerJob(self)
         self._volume_generation = 0
+        self._volume_phase = "EMPTY"
+        self._source_backed_access = None
         self._paths: JointAssetPaths | None = None
         self._survey_meta: dict = {}
         self._well_identity_registry: WellIdentityRegistry | None = None
@@ -133,6 +135,8 @@ class WellSeismicJointHost(QObject):
         self._project = project
         # Supersede any in-flight preview load for the previous project.
         self._volume_generation += 1
+        self._volume_phase = "EMPTY"
+        self._source_backed_access = None
         if self._volume_job.is_running:
             self._volume_job.cancel()
         if self._scene is not None:
@@ -399,10 +403,40 @@ class WellSeismicJointHost(QObject):
             self._scene.set_well_curves(curves)
 
     def _start_volume_worker(self, segy_path: str) -> None:
+        """Bind source-backed access immediately, then progressive dense L0→L1."""
         if self._volume_job.is_running:
             self._volume_job.shutdown()
         self._volume_generation += 1
         generation = self._volume_generation
+
+        # Phase 1: metadata + source-backed access (no dense cube required).
+        try:
+            from paleo_workbench.viz.seismic_volume_source import (
+                get_shared_seismic_source,
+            )
+            from paleo_workbench.viz.source_backed_volume_access import (
+                SourceBackedVolumeAccess,
+            )
+
+            source = get_shared_seismic_source(segy_path)
+            meta = source.metadata()
+            access = SourceBackedVolumeAccess(source)
+            self._source_backed_access = access
+            if self._scene is not None:
+                self._scene.set_volume_access(access)
+                self._scene.set_preview_mode(True)
+            self._volume_phase = "METADATA_READY"
+            self.status_changed.emit(
+                f"元数据就绪 {meta.shape} · 正在加载 L0 预览…"
+            )
+            self.scene_updated.emit()
+        except Exception as exc:
+            logger.exception("source-backed bind failed; fallback dense only")
+            self._source_backed_access = None
+            self.status_changed.emit(f"源访问失败，回退预览体: {exc}")
+
+        # Phase 2: background L0 dense brick for GL.
+        self._volume_phase = "L0_LOADING"
         worker = PreviewVolumeWorker(segy_path, generation=generation, lod=0)
         self._volume_job.start(
             worker,
@@ -413,21 +447,49 @@ class WellSeismicJointHost(QObject):
             ),
         )
 
-    @Slot(object, str, int)
-    def _on_volume_ready(self, volume, warning: str, generation: int = 0) -> None:
+    def _maybe_start_next_lod(self, segy_path: str, current_lod: int) -> None:
+        if current_lod != 0 or self._volume_job.is_running:
+            return
+        generation = self._volume_generation
+        self._volume_phase = "L1_LOADING"
+        self.status_changed.emit("精细化中 (L1)…")
+        worker = PreviewVolumeWorker(segy_path, generation=generation, lod=1)
+        self._volume_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_volume_ready),
+                (worker.failed, self._on_volume_failed),
+            ),
+        )
+
+    @Slot(object, str, int, int)
+    def _on_volume_ready(
+        self, volume, warning: str, generation: int = 0, lod: int = 0
+    ) -> None:
         from geoviz import InMemoryVolumeAccess
 
         if self._scene is None:
             return
-        # Stale generation: project/resource switched while worker ran.
         if int(generation) != int(self._volume_generation):
             return
         if volume is None:
+            self._volume_phase = "FAILED"
             self.status_changed.emit(f"预览体加载失败: {warning or 'unknown'}")
             self.scene_updated.emit()
             return
-        self._scene.set_volume_access(InMemoryVolumeAccess(volume))
-        self._scene.set_preview_mode(True)
+
+        access = self._source_backed_access
+        if access is not None:
+            access.set_display_data(volume, lod_level=int(lod), adopt_shape=True)
+            # Re-bind same object so registration matches display shape; wells stay.
+            self._scene.set_volume_access(access)
+            self._scene.set_preview_mode(True)
+        else:
+            self._scene.set_volume_access(InMemoryVolumeAccess(volume))
+            self._scene.set_preview_mode(True)
+
+        self._volume_phase = "L0_READY" if int(lod) == 0 else f"L{int(lod)}_READY"
         names = list(self._scene.well_trajectories().keys())
         if (
             getattr(self, "_auto_default_fence", True)
@@ -439,7 +501,7 @@ class WellSeismicJointHost(QObject):
             except Exception:
                 pass
         src = self._paths.source if self._paths else "?"
-        msg = f"已加载预览体 shape={tuple(volume.shape)} · 来源={src}"
+        msg = f"已加载 L{int(lod)} 预览 shape={tuple(volume.shape)} · 来源={src}"
         if warning:
             msg += f" · {warning}"
         if self._scene.fences:
@@ -447,9 +509,16 @@ class WellSeismicJointHost(QObject):
         self.status_changed.emit(msg)
         self.scene_updated.emit()
 
+        if int(lod) == 0 and self._paths is not None and self._paths.segy is not None:
+            try:
+                self._maybe_start_next_lod(str(self._paths.segy), int(lod))
+            except Exception:
+                logger.debug("L1 schedule skipped", exc_info=True)
+
     @Slot(str, int)
     def _on_volume_failed(self, err: str, generation: int = 0) -> None:
         if int(generation) != int(self._volume_generation):
             return
+        self._volume_phase = "FAILED"
         self.status_changed.emit(f"预览体加载异常: {err}")
         self.scene_updated.emit()
