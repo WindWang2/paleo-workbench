@@ -202,7 +202,14 @@ class VisualizationWorkspace(QFrame):
             self.status_label.setText(payload.message or "无可视化数据")
             return
 
-        self._clear_all()
+        # Keep the native single-well session alive across a same-document
+        # reload so WellLogHost can select append/style/interval patches rather
+        # than clearing and replacing the retained scene first.
+        keep_well_session = (
+            payload.kind in {"well_log", "prediction", "cross_well"}
+            and (payload.well_log is not None or bool(payload.well_logs))
+        )
+        self._clear_all(preserve_well=keep_well_session)
         parts: list[str] = []
         if payload.warning:
             parts.append(payload.warning)
@@ -258,8 +265,9 @@ class VisualizationWorkspace(QFrame):
         # the payload (it knows whether the map is hierarchical).
         self._refresh_level_selector()
 
-    def _clear_all(self) -> None:
-        self.well_host.clear()
+    def _clear_all(self, *, preserve_well: bool = False) -> None:
+        if not preserve_well:
+            self.well_host.clear()
         self.well_section_host.clear()
         self.seismic_host.clear()
         self.cross_well_host.clear()
@@ -278,4 +286,3 @@ class VisualizationWorkspace(QFrame):
 
 # Backward-compatible alias
 CompositeVisualizationPanel = VisualizationWorkspace
-
