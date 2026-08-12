@@ -251,6 +251,7 @@ def register_persisted_factor_grids(
             catalog=cat,
             intermediate_path=artifact.as_posix(),
             intermediate_checksum=sha256_file_or_none(artifact),
+            project=project,
         )
         if version is None:
             continue
@@ -313,26 +314,31 @@ def _versions_for_domain_tasks(
 ) -> list[str]:
     """Resolve domain task ids to version ids through the run graph.
 
-    A task's DataRun is linked via ``domain_task_id``. We return both its
-    registered output versions AND its declared input versions: the outputs are
-    the direct lineage, but when a task produces no file version (e.g. a factor
-    grid that stays in ``task.parameters``), propagating its *inputs* keeps the
-    lineage chain connected back to the source RAW data.
+    Uses only the **latest** DataRun per ``domain_task_id`` (catalog list order
+    is oldest→newest). Prefer that run's output versions. When the latest run
+    has no file outputs (in-memory-only factor grids), fall back to its
+    declared input versions so lineage still reaches RAW ancestors — without
+    unioning every historical recompute.
     """
     wanted = set(task_ids)
     if not wanted:
         return []
+    latest_by_task: dict[str, Any] = {}
+    for run in catalog.list_runs():
+        tid = run.domain_task_id
+        if tid in wanted:
+            latest_by_task[tid] = run  # last write wins
     out: list[str] = []
     seen: set[str] = set()
-    for run in catalog.list_runs():
-        if run.domain_task_id in wanted:
-            for vid in run.output_version_ids:
+    for run in latest_by_task.values():
+        outputs = list(run.output_version_ids or [])
+        if outputs:
+            for vid in outputs:
                 if vid not in seen:
                     seen.add(vid)
                     out.append(vid)
-            # Propagate the run's declared inputs so in-memory-only results
-            # (no output version) do not break the ancestor chain.
-            for vid in run.input_version_ids:
+        else:
+            for vid in run.input_version_ids or []:
                 if vid not in seen:
                     seen.add(vid)
                     out.append(vid)

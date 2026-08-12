@@ -52,6 +52,8 @@ class CurrentProjectVersionContext:
             }
         )
     )
+    # domain_task_id → currently selected product version_id (project pointer)
+    current_by_domain_task: dict[str, str] = field(default_factory=dict)
 
     def select(self, asset_id: str, version_id: str, *, label: str = "") -> None:
         """Record that *asset_id* currently points at *version_id*.
@@ -68,6 +70,20 @@ class CurrentProjectVersionContext:
         self.selected_version_ids.add(version_id)
         if label:
             self.labels[version_id] = label
+
+    def mark_domain_product_current(self, domain_task_id: str, version_id: str) -> None:
+        """Record which product version is current for a domain task.
+
+        Historical recompute outputs (often new assets) remain in the catalog but
+        are not the project-selected tip.
+        """
+        if not domain_task_id or not version_id:
+            return
+        prev = self.current_by_domain_task.get(domain_task_id)
+        if prev and prev != version_id:
+            self.selected_version_ids.discard(prev)
+        self.current_by_domain_task[domain_task_id] = version_id
+        self.selected_version_ids.add(version_id)
 
     def current_for_asset(self, asset_id: str | None) -> str | None:
         if not asset_id:
@@ -172,13 +188,16 @@ def resolve_current_project_version_context(
         # Expected identity for the interpretation itself
         fp = getattr(ref, "scientific_fingerprint", "") or ""
         if fp:
+            # Key must match DataRun.domain_task_id (interpretation_id).
             ctx.set_expected_identity(
-                f"interp:{getattr(ref, 'id', vid)}",
+                str(getattr(ref, "id", "") or vid),
                 input_snapshot_hash=fp,
                 generator_version="horizon-interp-v1",
             )
 
-    # 3. Factor map product pointers + expected scientific identity
+    # 3. Factor map product pointers + expected scientific identity.
+    # Project pointer is the authoritative "current" product; other historical
+    # factor assets must not remain selected (adapter creates one asset per run).
     for task in getattr(project, "factor_map_tasks", None) or []:
         grid_vid = getattr(task, "grid_artifact_version_id", None)
         if grid_vid and cat is not None:
@@ -188,6 +207,10 @@ def resolve_current_project_version_context(
                     ver.asset_id,
                     grid_vid,
                     label=getattr(task, "name", "") or "",
+                )
+                ctx.mark_domain_product_current(
+                    str(getattr(task, "id", "") or ""),
+                    grid_vid,
                 )
         snap = getattr(task, "input_snapshot_hash", "") or ""
         gen = getattr(task, "generator_version", None)

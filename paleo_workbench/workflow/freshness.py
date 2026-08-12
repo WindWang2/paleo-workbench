@@ -149,10 +149,13 @@ class FreshnessService:
         context: CurrentProjectVersionContext,
         *,
         catalog: Any | None = None,
+        check_integrity: bool = False,
     ) -> None:
         self.graph = graph
         self.context = context
         self.catalog = catalog
+        # Integrity re-hash is orthogonal and expensive — off for UI/dashboard.
+        self.check_integrity = check_integrity
         self._run_cache: dict[str, FreshnessReport] = {}
         self._version_cache: dict[str, FreshnessReport] = {}
 
@@ -164,6 +167,7 @@ class FreshnessService:
         catalog: Any | None = None,
         service: Any | None = None,
         extra_selected: dict[str, str] | None = None,
+        check_integrity: bool = False,
     ) -> "FreshnessService":
         from paleo_workbench.catalog.runtime import get_catalog
 
@@ -174,12 +178,12 @@ class FreshnessService:
             ctx = resolve_current_project_version_context(
                 project, catalog=None, service=service, extra_selected=extra_selected
             )
-            return cls(graph, ctx, catalog=None)
+            return cls(graph, ctx, catalog=None, check_integrity=check_integrity)
         graph = DependencyGraph.from_catalog(cat)
         ctx = resolve_current_project_version_context(
             project, catalog=cat, service=service, extra_selected=extra_selected
         )
-        return cls(graph, ctx, catalog=cat)
+        return cls(graph, ctx, catalog=cat, check_integrity=check_integrity)
 
     def clear_cache(self) -> None:
         self._run_cache.clear()
@@ -192,30 +196,36 @@ class FreshnessService:
 
         Matching rules (first hit wins):
 
-        1. Same asset: catalog/project ``current_by_asset`` differs from input.
-        2. Input itself is selected → current.
-        3. Another selected version shares producing ``domain_task_id`` (e.g.
-           successive horizon interpretation saves that each created a new
-           asset) → only the selected tip is current.
-        4. Unknown → no mismatch (do not guess STALE).
+        1. Project domain-task product pointer differs from input (multi-asset
+           recompute: each run may create a new asset).
+        2. Same asset: catalog/project ``current_by_asset`` differs from input.
+        3. Domain-task supersession via producing runs / selected tips.
+        4. Parent-link supersession via run parameters.
+        5. Input itself is selected with no competing tip → current.
+        6. Unknown → no mismatch (do not guess STALE).
         """
-        if input_version_id in self.context.selected_version_ids:
-            return None
+        prod = self.graph.producing_run.get(input_version_id)
+        domain_id = None
+        if prod and prod in self.graph.runs:
+            domain_id = self.graph.runs[prod].domain_task_id
+
+        # 1. Explicit project product tip for this domain task
+        if domain_id:
+            tip = self.context.current_by_domain_task.get(domain_id)
+            if tip and tip != input_version_id:
+                return tip, self.graph.asset_id_for(tip)
 
         asset_id = self.graph.asset_id_for(input_version_id)
         current = self.context.current_for_asset(asset_id) if asset_id else None
         if current is not None and current != input_version_id:
             return current, asset_id
 
-        # Domain-task supersession (interpretation branch / multi-asset lineage)
-        prod = self.graph.producing_run.get(input_version_id)
-        domain_id = None
-        if prod and prod in self.graph.runs:
-            domain_id = self.graph.runs[prod].domain_task_id
+        # 3. Domain-task supersession among selected tips only (do not force
+        # "latest run" — user may intentionally select an older tip).
         if domain_id:
             for sel in self.context.selected_version_ids:
                 if sel == input_version_id:
-                    return None
+                    continue
                 sel_prod = self.graph.producing_run.get(sel)
                 if not sel_prod:
                     continue
@@ -223,9 +233,8 @@ class FreshnessService:
                 if sel_run and sel_run.domain_task_id == domain_id:
                     return sel, self.graph.asset_id_for(sel)
 
-        # Parent-link supersession via run parameters
+        # 4. Parent-link supersession
         if prod and prod in self.graph.runs:
-            # Any selected version that lists this input as parent_version_id
             for sel in self.context.selected_version_ids:
                 sel_prod = self.graph.producing_run.get(sel)
                 if not sel_prod:
@@ -236,6 +245,9 @@ class FreshnessService:
                 parent = (sel_run.parameters or {}).get("parent_version_id")
                 if parent == input_version_id:
                     return sel, self.graph.asset_id_for(sel)
+
+        if input_version_id in self.context.selected_version_ids:
+            return None
 
         return None
 
@@ -458,67 +470,77 @@ class FreshnessService:
                         break
             exp_model = expected.get("model_ref")
             if exp_model:
-                run_model = (run.parameters or {}).get("model_ref") or {}
-                # model_ref may live on DataRun.model_ref via parameters only on port
+                run_params = dict(run.parameters or {})
+                run_model = run_params.get("model_ref")
+                if not isinstance(run_model, dict):
+                    run_model = {
+                        k: run_params[k]
+                        for k in (
+                            "model_id",
+                            "model_version",
+                            "model_version_id",
+                            "preprocessing_version",
+                        )
+                        if k in run_params
+                    }
                 for mk in ("model_version_id", "model_version", "model_id"):
-                    if mk in exp_model and run_model.get(mk) not in (None, exp_model[mk]):
-                        if run_model.get(mk) != exp_model[mk]:
-                            reasons.append(
-                                FreshnessReason(
-                                    type=FreshnessReasonType.MODEL_VERSION_CHANGED,
-                                    operation=run.operation or "",
-                                    detail=f"{mk} changed",
-                                )
-                            )
-                            break
-
-        # Payload / integrity on outputs (orthogonal to scientific freshness).
-        # Only probe disk when a non-empty path is recorded — synthetic/in-memory
-        # catalog fixtures without files must not become MISSING.
-        integrity_note: str | None = None
-        for out_vid in run.output_version_ids or []:
-            ver = self.graph.versions.get(out_vid)
-            if ver is None and self.catalog is not None:
-                ver = self.catalog.resolve_version(out_vid)
-            if ver is None:
-                continue
-            path = getattr(ver, "path", "") or ""
-            if not path:
-                continue
-            if self.catalog is not None and hasattr(self.catalog, "verify_integrity"):
-                try:
-                    from pathlib import Path as _Path
-
-                    exists = _Path(path).is_file()
-                    checksum = getattr(ver, "checksum", None) or ""
-                    # Real SHA-256 digests are 64 hex chars. Synthetic fixtures use
-                    # short placeholders like "sha-name" — skip disk probes for those.
-                    real_digest = len(checksum) == 64 and all(
-                        c in "0123456789abcdef" for c in checksum.lower()
-                    )
-                    if not exists:
-                        if real_digest:
-                            integrity_note = "missing"
-                            reasons.append(
-                                FreshnessReason(
-                                    type=FreshnessReasonType.MISSING_PAYLOAD,
-                                    operation=run.operation or "",
-                                    detail=f"output {out_vid} payload missing",
-                                )
-                            )
+                    if mk not in exp_model:
                         continue
-                    status_i = self.catalog.verify_integrity(out_vid)
-                    integrity_note = getattr(status_i, "value", str(status_i))
-                    if integrity_note == "modified":
+                    if run_model.get(mk) != exp_model[mk]:
                         reasons.append(
                             FreshnessReason(
-                                type=FreshnessReasonType.INTEGRITY_MODIFIED,
+                                type=FreshnessReasonType.MODEL_VERSION_CHANGED,
                                 operation=run.operation or "",
-                                detail=f"output {out_vid} integrity modified",
+                                detail=f"{mk} changed",
                             )
                         )
-                except Exception:
-                    pass
+                        break
+
+        # Payload / integrity on outputs (orthogonal to scientific freshness).
+        # Default off on UI paths — full SHA re-hash blocks the main thread.
+        integrity_note: str | None = None
+        if self.check_integrity:
+            for out_vid in run.output_version_ids or []:
+                ver = self.graph.versions.get(out_vid)
+                if ver is None and self.catalog is not None:
+                    ver = self.catalog.resolve_version(out_vid)
+                if ver is None:
+                    continue
+                path = getattr(ver, "path", "") or ""
+                if not path:
+                    continue
+                if self.catalog is not None and hasattr(self.catalog, "verify_integrity"):
+                    try:
+                        from pathlib import Path as _Path
+
+                        exists = _Path(path).is_file()
+                        checksum = getattr(ver, "checksum", None) or ""
+                        real_digest = len(checksum) == 64 and all(
+                            c in "0123456789abcdef" for c in checksum.lower()
+                        )
+                        if not exists:
+                            if real_digest:
+                                integrity_note = "missing"
+                                reasons.append(
+                                    FreshnessReason(
+                                        type=FreshnessReasonType.MISSING_PAYLOAD,
+                                        operation=run.operation or "",
+                                        detail=f"output {out_vid} payload missing",
+                                    )
+                                )
+                            continue
+                        status_i = self.catalog.verify_integrity(out_vid)
+                        integrity_note = getattr(status_i, "value", str(status_i))
+                        if integrity_note == "modified":
+                            reasons.append(
+                                FreshnessReason(
+                                    type=FreshnessReasonType.INTEGRITY_MODIFIED,
+                                    operation=run.operation or "",
+                                    detail=f"output {out_vid} integrity modified",
+                                )
+                            )
+                    except Exception:
+                        pass
 
         if any(r.type is FreshnessReasonType.MISSING_PAYLOAD for r in reasons) and not any(
             r.type
