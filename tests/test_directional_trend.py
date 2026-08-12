@@ -147,7 +147,11 @@ def test_apply_pulls_direction_from_project_constraints():
     assert task.parameters["azimuth_deg"] == 90.0
     assert task.parameters["semi_major"] == 3.0
     assert task.parameters["semi_minor"] == 0.3
-    assert "grid_z" in task.parameters
+    # Stage-3+: numerical payload lives in the live FactorGrid cache, not nested lists.
+    assert "grid_z" not in task.parameters
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert np.isfinite(factor_grid_result_for_task(task).grid_z).sum() > 0
 
 
 def test_flagged_points_skipped_in_directional_extract():
