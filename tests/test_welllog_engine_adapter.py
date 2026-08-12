@@ -95,30 +95,135 @@ def test_parity_snapshot_matches_legacy_key_fields():
     assert snap["lithology_bounds"][0][2] == "砂"
 
 
-def test_submit_plan_to_view_calls_submit_curve_once():
+def test_submit_plan_to_view_submits_one_complete_multitrack_document():
     plan = adapter.adapt_well_log_data(_sample_well())
-    calls: list[tuple] = []
+    calls: list[dict] = []
 
     class FakeView:
-        def submit_curve(self, depth, values, doc, axis, curve, mn, du, vu):
-            calls.append((depth, values, doc, axis, curve, mn, du, vu))
+        def submit_multi_track(self, payload):
+            calls.append(payload)
             return {
                 "depth": {"access_mode": "zero_copy"},
-                "curve": {"access_mode": "zero_copy"},
+                "curve_count": len(payload["curves"]),
+                "track_count": len(payload["tracks"]),
                 "render_prepared": True,
             }
 
     result = adapter.submit_plan_to_view(FakeView(), plan)
     assert len(calls) == 1
-    depth, values, doc, _axis, curve, mn, du, vu = calls[0]
-    assert mn == "GR"
-    assert du == "m"
-    assert vu == "GAPI"
-    assert isinstance(depth, np.ndarray) and depth.flags.writeable is False
+    payload = calls[0]
+    assert len(payload["curves"]) == 2
+    assert len(payload["tracks"]) == 4  # lithology, facies, GR, RHOB
+    assert {item["semantic"] for item in payload["intervals"]} == {
+        "lithology", "facies"
+    }
+    first = payload["curves"][0]
+    assert first["mnemonic"] == "GR"
+    assert first["value_unit"] == "GAPI"
+    assert isinstance(first["depth"], np.ndarray) and first["depth"].flags.writeable is False
     assert result["sample_count"] == 3
-    assert result["document_id"] == doc
-    assert result["curve_id"] == curve
+    assert result["curve_count"] == 2
     assert result["lithology_count"] == 2
+
+
+def test_update_prefers_append_then_patch_without_full_resubmit():
+    previous = adapter.adapt_well_log_data(_sample_well())
+    data = _sample_well()
+    for curve in data.curves:
+        curve.depth.append(curve.depth[-1] + 1.0)
+        curve.values.append(curve.values[-1] + 1.0)
+    data.lithology[0].bottom = 1002.0
+    current = adapter.adapt_well_log_data(data)
+    calls: list[str] = []
+
+    class FakeView:
+        def append_curves(self, payload):
+            calls.append("append")
+            assert len(payload["tails"]) == 2
+            return {"incremental": True}
+
+        def patch_document(self, payload):
+            calls.append("patch")
+            assert "intervals" in payload
+            return {"patched": True}
+
+        def submit_multi_track(self, payload):
+            calls.append("full")
+            return {"curve_count": 2, "track_count": len(payload["tracks"])}
+
+    result = adapter.update_plan_to_view(FakeView(), current, previous)
+    assert calls == ["append", "patch"]
+    assert result["update_kind"] == "append"
+
+
+def test_readonly_numpy_input_is_not_list_materialized_or_copied():
+    class Curve:
+        name = "GR"
+        unit = "API"
+        display_range = (0.0, 150.0)
+        color = "#15803d"
+        line_style = "solid"
+
+    class Well:
+        well_name = "typed"
+        top_depth = 0.0
+        bottom_depth = 3.0
+        lithology = []
+        facies = []
+        intervals = None
+
+    curve = Curve()
+    curve.depth = np.arange(4.0, dtype=np.float64)
+    curve.values = np.arange(4.0, dtype=np.float64)
+    curve.depth.flags.writeable = False
+    curve.values.flags.writeable = False
+    well = Well()
+    well.curves = [curve]
+
+    plan = adapter.adapt_well_log_data(well)
+    assert np.shares_memory(plan.primary.depth, curve.depth)
+    assert np.shares_memory(plan.primary.values, curve.values)
+
+
+def test_optional_business_markers_reach_the_native_payload():
+    class Marker:
+        id = "bf03db8b-102f-40cc-a4ce-227b24c6e0c8"
+        depth = 1001.0
+        label = "H1"
+        semantic = "formation_top"
+
+    class MarkerWell:
+        well_name = "marker-well"
+        top_depth = 1000.0
+        bottom_depth = 1002.0
+        curves = [
+            type(
+                "Curve",
+                (),
+                {
+                    "name": "GR",
+                    "unit": "API",
+                    "depth": [1000.0, 1001.0, 1002.0],
+                    "values": [10.0, 20.0, 30.0],
+                },
+            )()
+        ]
+        lithology = []
+        facies = []
+        intervals = None
+        markers = [Marker()]
+
+    data = MarkerWell()
+    plan = adapter.adapt_well_log_data(data)
+    payload = adapter.plan_to_submit_payload(plan)
+    assert payload["markers"] == [
+        {
+            "id": Marker.id,
+            "depth": 1001.0,
+            "label": "H1",
+            "semantic": "formation_top",
+        }
+    ]
 
 
 def test_submit_plan_without_curves_raises():

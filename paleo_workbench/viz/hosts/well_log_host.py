@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QStackedLayout,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 from geoviz import WellLogCanvas, build_qpainter_tracks
 
 from paleo_workbench import tokens
+from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 from paleo_workbench.viz.models import VizPayload
 
 
@@ -87,10 +89,12 @@ class TrackVisibilityDialog(QDialog):
 
 
 class WellLogHost:
-    """Host for ``geoviz_well_log.WellLogCanvas`` (aligns with WellLogPage).
+    """Primary retained-native well-log host with a QPainter compatibility fallback.
 
-    Embeds a top track summary bar displaying all loaded well log tracks (测井道列表)
-    alongside a track visibility settings button and the interactive 2D QPainter canvas.
+    Workbench business data remains the source of truth; when the optional
+    binding is available the visible surface is a ``WellLogView`` backed by
+    one retained document/session.  The previous QPainter canvas is kept only
+    for unavailable/disabled native backends and backwards-compatible callers.
     """
 
     tab_title = "测井"
@@ -146,6 +150,10 @@ class WellLogHost:
 
         layout.addLayout(header_layout)
 
+        self.view_host = QFrame()
+        self.view_stack = QStackedLayout(self.view_host)
+        self.view_stack.setContentsMargins(0, 0, 0, 0)
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("WellLogScrollArea")
         self.scroll_area.setWidgetResizable(True)
@@ -161,9 +169,34 @@ class WellLogHost:
         self.canvas = WellLogCanvas()
         self.widget.canvas = self.canvas
         self.scroll_area.setWidget(self.canvas)
-        layout.addWidget(self.scroll_area, 1)
+        self.view_stack.addWidget(self.scroll_area)
+
+        self.engine_host = QFrame()
+        self.engine_host.setObjectName("WellLogHostEngineSurface")
+        engine_layout = QVBoxLayout(self.engine_host)
+        engine_layout.setContentsMargins(0, 0, 0, 0)
+        self.engine_placeholder = QLabel("WellLogEngine 不可用，已使用 Legacy (QPainter)")
+        self.engine_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.engine_placeholder.setWordWrap(True)
+        engine_layout.addWidget(self.engine_placeholder)
+        self.view_stack.addWidget(self.engine_host)
+        layout.addWidget(self.view_host, 1)
+
+        self._engine_view: QWidget | None = None
+        self._engine_plan: engine_adapter.EngineLoadPlan | None = None
+        self._engine_load: dict | None = None
+        self._WellLogView = None
+        self._engine_error: str | None = None
+        self._probe_engine()
 
     def _open_track_settings(self) -> None:
+        if self._engine_plan is not None and self.view_stack.currentWidget() is self.engine_host:
+            QMessageBox.information(
+                self.widget,
+                "设置显示井道",
+                "WellLogEngine 当前保留完整文档；请切换到 Legacy 调整兼容画布井道。",
+            )
+            return
         if not self.canvas.tracks:
             QMessageBox.information(self.widget, "设置显示井道", "当前未加载测井道数据")
             return
@@ -175,6 +208,14 @@ class WellLogHost:
             self._update_track_bar()
 
     def _update_track_bar(self) -> None:
+        if self._engine_plan is not None and self.view_stack.currentWidget() is self.engine_host:
+            names = [curve.mnemonic for curve in self._engine_plan.curves]
+            interval_count = len(self._engine_plan.intervals)
+            suffix = f" · 区间 {interval_count}" if interval_count else ""
+            self.track_bar.setText(
+                f"📋 WellLogEngine ({len(names)} 曲线):  {' | '.join(names)}{suffix}"
+            )
+            return
         visible_tracks = [
             t for t in self.canvas.tracks if getattr(t, "_visible", True)
         ]
@@ -186,8 +227,76 @@ class WellLogHost:
             self.track_bar.setText("📋 显示中井道 (0 道): 已隐藏全部井道")
 
     def clear(self) -> None:
+        self._release_engine_document()
         self.canvas.set_tracks([])
+        self.view_stack.setCurrentWidget(self.scroll_area)
+        self.settings_btn.setEnabled(True)
         self.track_bar.setText("测井道列表: 未加载数据")
+
+    def _probe_engine(self) -> None:
+        _mod, view_cls, _errors = engine_adapter.try_import_welllog()
+        self._WellLogView = view_cls
+        self._engine_error = None if view_cls is not None else "welllog 绑定未安装"
+
+    def _ensure_engine_view(self) -> QWidget | None:
+        if self._engine_view is not None:
+            return self._engine_view
+        self._probe_engine()
+        if self._WellLogView is None:
+            return None
+        try:
+            view = self._WellLogView()
+        except Exception as exc:  # pragma: no cover - platform/binding specific
+            self._engine_error = f"WellLogView 创建失败: {exc}"
+            return None
+        engine_layout = self.engine_host.layout()
+        assert engine_layout is not None
+        engine_layout.addWidget(view, 1)
+        self.engine_placeholder.hide()
+        self._engine_view = view
+        return view
+
+    def _release_engine_document(self) -> None:
+        if self._engine_view is not None:
+            engine_layout = self.engine_host.layout()
+            if engine_layout is not None:
+                engine_layout.removeWidget(self._engine_view)
+            self._engine_view.hide()
+            self._engine_view.setParent(None)
+            self._engine_view.deleteLater()
+            self._engine_view = None
+        self._engine_plan = None
+        self._engine_load = None
+
+    def _show_engine(self, data) -> bool:
+        plan = engine_adapter.adapt_well_log_data(data)
+        if plan.primary is None:
+            self._engine_error = "无可用曲线提交到 WellLogEngine"
+            return False
+        if (
+            self._engine_plan is not None
+            and self._engine_plan.document_id != plan.document_id
+        ):
+            self._release_engine_document()
+        view = self._ensure_engine_view()
+        if view is None:
+            return False
+        try:
+            self._engine_load = engine_adapter.update_plan_to_view(
+                view, plan, self._engine_plan
+            )
+        except Exception as exc:
+            self._engine_error = f"{exc.__class__.__name__}: {exc}"
+            self._release_engine_document()
+            return False
+        self._engine_plan = plan
+        self.canvas.set_tracks([])
+        self.engine_placeholder.hide()
+        view.show()
+        self.view_stack.setCurrentWidget(self.engine_host)
+        self.settings_btn.setEnabled(True)
+        self._update_track_bar()
+        return True
 
     def apply(self, payload: VizPayload) -> bool:
         data = payload.well_log
@@ -197,8 +306,16 @@ class WellLogHost:
             self.clear()
             return False
 
+        if engine_adapter.welllog_engine_env_enabled() and self._show_engine(data):
+            return True
+
+        # Native initialization/submission failure always drops the retained
+        # session before returning to the legacy compatibility surface.
+        self._release_engine_document()
         tracks = build_qpainter_tracks(data)
         self.canvas.set_tracks(tracks)
+        self.view_stack.setCurrentWidget(self.scroll_area)
+        self.settings_btn.setEnabled(True)
         self._update_track_bar()
 
         return True

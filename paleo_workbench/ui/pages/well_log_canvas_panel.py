@@ -51,6 +51,7 @@ class WellLogCanvasPanel(QFrame):
         self._bound_las = False
         self._engine_error: str | None = None
         self._engine_load: dict[str, Any] | None = None
+        self._engine_plan: engine_adapter.EngineLoadPlan | None = None
         self._engine_view: QWidget | None = None
         self._WellLogView = None
         self._welllog_mod = None
@@ -180,7 +181,8 @@ class WellLogCanvasPanel(QFrame):
     def track_kinds(self) -> list[str]:
         """Rough labels of built tracks for tests / diagnostics."""
         if self._backend == "engine" and self._engine_load is not None:
-            return ["WellLogEngine", self._engine_load.get("mnemonic") or "curve"]
+            count = int(self._engine_load.get("track_count") or 0)
+            return ["WellLogEngine", *["NativeTrack"] * count]
         kinds: list[str] = []
         for track in list(getattr(self.canvas, "tracks", None) or []):
             kinds.append(type(track).__name__)
@@ -248,8 +250,15 @@ class WellLogCanvasPanel(QFrame):
 
     def _release_engine_document(self) -> None:
         if self._engine_view is not None:
-            engine_adapter.clear_engine_view(self._engine_view)
+            layout = self.engine_host.layout()
+            if layout is not None:
+                layout.removeWidget(self._engine_view)
+            self._engine_view.hide()
+            self._engine_view.setParent(None)
+            self._engine_view.deleteLater()
+            self._engine_view = None
         self._engine_load = None
+        self._engine_plan = None
 
     def _show_empty(self, message: str) -> None:
         self.well_log_data = None
@@ -274,6 +283,11 @@ class WellLogCanvasPanel(QFrame):
             # Fall through to Legacy so the page remains usable (AC: Legacy 回退).
             self._engine_error = self._engine_error or "WellLogEngine 路径失败"
             # Keep backend selection as engine for explicit retry, but paint legacy.
+
+        # A Legacy selection or an Engine failure must release the old native
+        # Session and its pinned buffers.  Otherwise engine → legacy switching
+        # leaves an invisible retained document alive indefinitely.
+        self._release_engine_document()
 
         tracks = build_qpainter_tracks(self.well_log_data)
         self.canvas.set_tracks(tracks)
@@ -303,6 +317,15 @@ class WellLogCanvasPanel(QFrame):
             self.canvas_ready.emit(False)
             return False
 
+        # Resource/well switches must release the old Session (and its pinned
+        # NumPy buffers). Updates to the same document intentionally retain the
+        # live view so viewport, selection, and native LOD remain available.
+        if (
+            self._engine_plan is not None
+            and self._engine_plan.document_id != plan.document_id
+        ):
+            self._release_engine_document()
+
         view = self._ensure_engine_view()
         if view is None:
             self.engine_placeholder.setText(
@@ -315,33 +338,30 @@ class WellLogCanvasPanel(QFrame):
             return False
 
         try:
-            # Drop previous document so resource/project switches never leave
-            # a stale session document (#169).
-            engine_adapter.clear_engine_view(view)
-            load = engine_adapter.submit_plan_to_view(view, plan)
+            load = engine_adapter.update_plan_to_view(
+                view, plan, self._engine_plan
+            )
             self._engine_load = load
+            self._engine_plan = plan
             self._engine_error = None
             self.engine_placeholder.hide()
             view.show()
             self.empty_label.setHidden(True)
             self.stack.setCurrentWidget(self.engine_host)
-            extra = ""
+            extra = f" · {load.get('curve_count', 0)} 曲线 / {load.get('track_count', 0)} 轨"
             if plan.lithology_bounds or plan.facies_bounds:
-                extra = (
-                    f" · 岩性{len(plan.lithology_bounds)}/"
-                    f"相{len(plan.facies_bounds)}（区间绑定待引擎 API）"
-                )
+                extra += f" · 岩性{len(plan.lithology_bounds)}/相{len(plan.facies_bounds)}"
             self.title_label.setText(
                 f"测井预测剖面 · {name} ({src}) · Engine · "
-                f"{load.get('mnemonic')}{extra}"
+                f"{load.get('update_kind', 'full_replace')}{extra}"
                 if name
-                else f"测井预测剖面 · Engine · {load.get('mnemonic')}"
+                else f"测井预测剖面 · Engine{extra}"
             )
             self.canvas_ready.emit(True)
             return True
         except Exception as exc:
             self._engine_error = f"{exc.__class__.__name__}: {exc}"
-            self._engine_load = None
+            self._release_engine_document()
             self.engine_placeholder.setText(
                 f"WellLogEngine 加载失败。\n{self._engine_error}\n"
                 "已可切换回 Legacy。"

@@ -185,11 +185,12 @@ def test_canvas_panel_engine_path_with_fake_view(qtbot, monkeypatch):
             super().__init__(parent)
             self.submit_calls = 0
 
-        def submit_curve(self, *args, **kwargs):
+        def submit_multi_track(self, payload):
             self.submit_calls += 1
             return {
                 "depth": {"access_mode": "zero_copy"},
-                "curve": {"access_mode": "zero_copy"},
+                "curve_count": len(payload["curves"]),
+                "track_count": len(payload["tracks"]),
                 "render_prepared": True,
             }
 
@@ -210,10 +211,19 @@ def test_canvas_panel_engine_path_with_fake_view(qtbot, monkeypatch):
 
     assert panel.engine_load_report() is not None
     assert panel.engine_load_report()["sample_count"] > 0
+    assert panel.engine_load_report()["curve_count"] >= 1
     assert panel.is_canvas_ready()
     assert "WellLogEngine" in panel.track_kinds()
     assert panel._engine_view is not None
     assert panel._engine_view.submit_calls == 1
+
+    # Engine → Legacy detaches the native widget/session rather than retaining
+    # an invisible document and its pinned NumPy buffers.
+    view = panel._engine_view
+    panel.set_backend("legacy")
+    assert panel._engine_view is None
+    assert view.parent() is None
+    assert panel.stack.currentWidget() is panel.canvas_scroll
 
     # Project/task clear releases load (no stale document report).
     panel.update_state(None)
