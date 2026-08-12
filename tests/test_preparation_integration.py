@@ -1,3 +1,5 @@
+import numpy as np
+
 from paleo_workbench.app import PaleoWorkbenchWindow
 from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.ui.pages.preparation_page import PreparationPage
@@ -47,7 +49,11 @@ def test_batch_generate_runs_idw_and_updates_mapping_shelf(qtbot):
     assert len(window.project.factor_map_tasks) >= 3
     task = window.project.factor_map_tasks[0]
     assert task.method == "IDW"
-    assert "grid_z" in task.parameters
+    # Stage-3+: numerical payload lives in the live FactorGrid cache, not nested lists.
+    assert "grid_z" not in task.parameters
+    from paleo_workbench.project.factor_grid_artifacts import factor_grid_result_for_task
+
+    assert np.isfinite(factor_grid_result_for_task(task).grid_z).sum() > 0
     assert task.quality_metrics.get("range")
     assert "3 / 3" in prep.task_panel.summary_label.text() or " / " in prep.task_panel.summary_label.text()
 

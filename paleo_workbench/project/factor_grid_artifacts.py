@@ -439,9 +439,33 @@ def persist_factor_grid_artifacts(
         task_id = str(getattr(task, "id", "") or "")
         with _LIVE_FACTOR_GRIDS_LOCK:
             has_live = task_id in _LIVE_FACTOR_GRIDS
+            live_identity = _LIVE_ARTIFACT_IDENTITY.get(task_id)
         has_inline = parameters.get("grid_z") is not None
         if not has_inline and not has_live:
             continue
+        # Skip rewrite when the live entry already matches an on-disk artifact
+        # (no new catalog churn). Catalog registration rehomes the path under
+        # intermediate/, so identity may change while the sealed live buffer
+        # is still the canonical content — preserve grid_artifact_version_id.
+        existing_path = getattr(task, "grid_artifact_path", None)
+        existing_version = getattr(task, "grid_artifact_version_id", None)
+        if has_live and existing_path and not has_inline:
+            skip = False
+            try:
+                path_identity = artifact_file_identity(existing_path)
+            except OSError:
+                path_identity = None
+            if live_identity is not None and path_identity == live_identity:
+                skip = True
+            elif existing_version and path_identity is not None:
+                # Managed catalog path still on disk; re-key live identity.
+                skip = True
+            if skip:
+                if path_identity is not None and path_identity != live_identity:
+                    with _LIVE_FACTOR_GRIDS_LOCK:
+                        if task_id in _LIVE_FACTOR_GRIDS:
+                            _LIVE_ARTIFACT_IDENTITY[task_id] = path_identity
+                continue
         result = factor_grid_result_for_task(
             task, crs=project.coordinate.project_crs or None
         )
