@@ -17,7 +17,7 @@ def _compile_args() -> list[str]:
 
 setup(
     name="layer_model_core",
-    version="0.1.0",
+    version="0.2.17a0",
     description="Authoritative C++ layer model for paleo-workbench native maps",
     ext_modules=[
         Pybind11Extension(

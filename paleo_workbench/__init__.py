@@ -2,7 +2,7 @@
 
 from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
-__version__ = "0.1.0"
+__version__ = "0.2.17a0"
 
 # ISS-ENV-01: prefer editable installs; fall back to checkout package roots.
 ensure_geoviz_on_path()

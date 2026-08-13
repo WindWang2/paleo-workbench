@@ -41,7 +41,7 @@ ext_modules = [
 
 setup(
     name="seismic_3d_core",
-    version="0.1.0",
+    version="0.2.17a0",
     description="Native 3D seismic volume processing and slice extraction acceleration",
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},

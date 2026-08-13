@@ -39,7 +39,7 @@ ext_modules = [
 
 setup(
     name="grid_render_core",
-    version="0.1.0",
+    version="0.2.17a0",
     description="Native scalar-grid rasterisation hot path for paleo-workbench factor maps",
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},

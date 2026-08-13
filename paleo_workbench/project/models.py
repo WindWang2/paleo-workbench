@@ -18,7 +18,7 @@ def _id(prefix: str) -> str:
 class ProjectMeta(BaseModel):
     name: str
     region: str = ""
-    version: str = "0.1.0"
+    version: str = "0.2.17a0"
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
     project_root: str = "."

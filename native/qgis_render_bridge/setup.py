@@ -151,7 +151,7 @@ def _extension() -> Pybind11Extension:
 
 setup(
     name="qgis_render_bridge",
-    version="0.1.0",
+    version="0.2.17a0",
     description="Optional narrow C++ QGIS renderer bridge for paleo-workbench",
     ext_modules=[_extension()] if _enabled() else [],
     cmdclass={"build_ext": build_ext},
