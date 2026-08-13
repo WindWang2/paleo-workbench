@@ -10,7 +10,11 @@ from paleo_workbench.ui.navigation import (
     PAGE_INDEX_GEOMODEL,
     PAGE_INDEX_MAPPING,
     PAGE_INDEX_PREPARATION,
+    PAGE_INDEX_REVIEW,
+    PAGE_INDEX_SEISMIC,
+    PAGE_INDEX_SEQUENCE,
     PAGE_INDEX_VISUALIZATION,
+    PAGE_INDEX_WELL_LOG,
 )
 from paleo_workbench.ui.preview_settings_dialog import PreviewSettingsDialog
 
@@ -56,8 +60,7 @@ class WorkflowController:
         page = self.window.app_shell.mapping_page_widget()
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_MAPPING, page)
         if hasattr(page, "generate_demo_draft_requested"):
             page.generate_demo_draft_requested.connect(
                 self._on_generate_demo_map_draft
@@ -69,8 +72,7 @@ class WorkflowController:
         page = self.window.app_shell.preparation_page_widget()
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_PREPARATION, page)
         if hasattr(page, "factor_maps_updated"):
             page.factor_maps_updated.connect(self._on_factor_maps_updated)
         if hasattr(page, "contour_drafts_updated"):
@@ -80,8 +82,9 @@ class WorkflowController:
         page = self.window.app_shell.sequence_framework_page_widget()
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(
+            PAGE_INDEX_SEQUENCE, page
+        )
         if hasattr(page, "stratigraphy_updated"):
             # Avoid duplicate connections across shell rebuilds of the same page
             # instance is new each rebuild; connect once per shell.
@@ -91,8 +94,7 @@ class WorkflowController:
         page = self.window.app_shell.seismic_prediction_page_widget()
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_SEISMIC, page)
         if hasattr(page, "prediction_updated"):
             page.prediction_updated.connect(self._on_seismic_prediction_updated)
         if hasattr(page, "send_to_mapping_requested"):
@@ -102,8 +104,7 @@ class WorkflowController:
         page = self.window.app_shell.well_log_prediction_page_widget()
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_WELL_LOG, page)
         if hasattr(page, "prediction_updated"):
             page.prediction_updated.connect(self._on_well_log_prediction_updated)
         if hasattr(page, "send_to_preparation_requested"):
@@ -114,8 +115,7 @@ class WorkflowController:
         page = self.window.app_shell.page_stack.widget(PAGE_INDEX_GEOMODEL)
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_GEOMODEL, page)
         if hasattr(page, "well_selected"):
             page.well_selected.connect(self._on_geomodel_well_selected)
 
@@ -132,8 +132,7 @@ class WorkflowController:
         page = self.window.app_shell.review_export_page_widget()
         if page is None:
             return
-        if hasattr(page, "set_project"):
-            page.set_project(self.window.project)
+        self.window.app_shell.defer_page_project_binding(PAGE_INDEX_REVIEW, page)
         if hasattr(page, "reports_updated"):
             page.reports_updated.connect(self._on_qc_reports_updated)
 

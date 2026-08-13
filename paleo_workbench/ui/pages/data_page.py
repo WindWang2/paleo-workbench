@@ -223,17 +223,26 @@ class DataPage(QWidget):
             self._shutdown_workers()
         return super().event(event)
 
-    def _shutdown_workers(self) -> None:
+    def _shutdown_workers(self) -> bool:
         wait_ms = 5000 if "pytest" in sys.modules else 100
-        self._preview_controller.shutdown(wait_ms)
-        self._visualization_controller.shutdown(wait_ms)
-        self.reader_panel.release_engine_widgets()
-        self._shutdown_import_jobs(wait_ms)
-        self._verify_job.shutdown(wait_ms)
+        preview_joined = self._preview_controller.shutdown(wait_ms)
+        visualization_joined = self._visualization_controller.shutdown(wait_ms)
+        import_joined = self._shutdown_import_jobs(wait_ms)
+        verify_joined = self._verify_job.shutdown(wait_ms)
+        joined = all(
+            result is not False
+            for result in (preview_joined, visualization_joined, import_joined, verify_joined)
+        )
+        # Do not tear down active-engine widgets if a project switch is about
+        # to be rejected because a cooperative job did not stop.
+        if joined:
+            self.reader_panel.release_engine_widgets()
+        return joined
 
-    def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> None:
-        self._import_job.shutdown(wait_ms)
+    def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> bool:
+        joined = self._import_job.shutdown(wait_ms)
         self._set_import_running(False)
+        return joined
 
     def update_state(
         self,

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from paleo_workbench.ui.icon_rail import IconRail
+from paleo_workbench.ui.deferred_page_bindings import DeferredPageBindings
 from paleo_workbench.ui.menu_bar import MenuBar
 from paleo_workbench.ui.page_placeholder import PagePlaceholder
 from paleo_workbench.ui.pages.data_page import DataPage
@@ -49,13 +50,24 @@ from paleo_workbench.ui.navigation import (
 
 
 class AppShell(QWidget):
-    def __init__(self, project: ProjectDocument | None = None, parent=None):
+    def __init__(
+        self,
+        project: ProjectDocument | None = None,
+        parent=None,
+        *,
+        defer_nonvisible_bindings: bool = False,
+    ):
         super().__init__(parent)
         self.setObjectName("AppShell")
         self.setStyleSheet(tokens.build_qss())
         self.project = project or ProjectDocument.new("Untitled Project")
         self._well_location_state_store = WellLocationPreviewStateStore()
         self._fade_anim: QPropertyAnimation | None = None
+        # Opening a large project must not eagerly bind every data-heavy page.
+        # These are main-thread callbacks only, keyed by page and operation so
+        # repeated refreshes retain just the latest committed project state.
+        self._defer_nonvisible_bindings = defer_nonvisible_bindings
+        self._deferred_page_bindings = DeferredPageBindings()
 
         # Stage memory: track the last visited page for each stage
         self._stage_subpage_memory: dict[int, int] = {
@@ -106,7 +118,11 @@ class AppShell(QWidget):
         self.page_stack.addWidget(self.mapping_page)  # index 8 = 编图
         self.page_stack.addWidget(ReviewExportPage()) # index 9 = 成图审核
         self.geomodel_page = GeologicalModeling3DPage()
-        self.geomodel_page.set_project(self.project)
+        self._run_or_defer_page_update(
+            PAGE_INDEX_GEOMODEL,
+            "project",
+            lambda: self.geomodel_page.set_project(self.project),
+        )
         self.page_stack.addWidget(self.geomodel_page)  # index 10 = 井震联合
         self._mapping_context = self._build_mapping_context()
         middle.addWidget(self.icon_rail)
@@ -180,6 +196,7 @@ class AppShell(QWidget):
         if not 0 <= index < self.page_stack.count():
             return
         self.page_stack.setCurrentIndex(index)
+        self._flush_page_updates(index)
 
         # Update Stage & Subpage state memory
         stage_idx = navigation.get_stage_for_page(index)
@@ -257,6 +274,79 @@ class AppShell(QWidget):
 
     def mapping_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_MAPPING)
+
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        """Deterministically release project-scoped jobs before a switch.
+
+        Page ``closeEvent`` handlers remain a last line of defence, but a
+        project switch must not wait for Qt deferred deletion before closing a
+        catalog or replacing native sessions.
+        """
+        all_joined = True
+        for index in range(self.page_stack.count()):
+            page = self.page_stack.widget(index)
+            if page is None:
+                continue
+            shutdown = getattr(page, "shutdown_workers", None)
+            if callable(shutdown):
+                result = shutdown(wait_ms)
+                if result is False:
+                    all_joined = False
+                continue
+            shutdown = getattr(page, "_shutdown_workers", None)
+            if callable(shutdown):
+                result = shutdown()
+                if result is False:
+                    all_joined = False
+        joint_shutdown = getattr(getattr(self, "geomodel_page", None), "_joint_host", None)
+        shutdown = getattr(joint_shutdown, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+        return all_joined
+
+    def _run_or_defer_page_update(
+        self, index: int, name: str, callback
+    ) -> None:
+        """Apply a page binding now, or retain its newest state until visit."""
+
+        if (
+            self._defer_nonvisible_bindings
+            and index != PAGE_INDEX_DATA
+            and index != PAGE_INDEX_HOME
+            and self.page_stack.currentIndex() != index
+        ):
+            self._deferred_page_bindings.schedule(index, name, callback)
+            return
+        callback()
+
+    def _update_or_defer_page(
+        self, index: int, name: str, callback
+    ) -> None:
+        """Apply a semantic page state refresh, even after its first visit."""
+
+        if self._defer_nonvisible_bindings and index != self.page_stack.currentIndex():
+            self._deferred_page_bindings.schedule(index, name, callback)
+            return
+        callback()
+
+    def defer_page_project_binding(self, index: int, page) -> None:
+        """Let workflow wiring bind a project without defeating lazy open."""
+
+        setter = getattr(page, "set_project", None)
+        if callable(setter):
+            self._run_or_defer_page_update(
+                index,
+                "project",
+                lambda: setter(self.project),
+            )
+
+    def _flush_page_updates(self, index: int) -> None:
+        self._deferred_page_bindings.flush(index)
+
+    def has_deferred_page_updates(self, index: int) -> bool:
+        """Testing/diagnostic seam for first-usable-project page binding."""
+
+        return self._deferred_page_bindings.has_pending(index)
 
     def set_project_name(self, name: str) -> None:
         self.status_bar.set_project_name(name)
@@ -347,46 +437,59 @@ class AppShell(QWidget):
 
     def update_well_log_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(PAGE_INDEX_WELL_LOG)
-        if hasattr(page, "set_project"):
-            page.set_project(project if project is not None else self.project)
-        if hasattr(page, "update_state"):
-            page.update_state(
-                prediction_tasks,
-                project=project if project is not None else self.project,
-            )
+        selected_project = project if project is not None else self.project
+
+        def update() -> None:
+            if hasattr(page, "set_project"):
+                page.set_project(selected_project)
+            if hasattr(page, "update_state"):
+                page.update_state(prediction_tasks, project=selected_project)
+
+        self._update_or_defer_page(PAGE_INDEX_WELL_LOG, "state", update)
 
     def well_log_prediction_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_WELL_LOG)
 
     def update_seismic_prediction_page(self, prediction_tasks: list, project=None) -> None:
         page = self.page_stack.widget(PAGE_INDEX_SEISMIC)
-        if hasattr(page, "set_project"):
-            page.set_project(project if project is not None else self.project)
-        if hasattr(page, "update_state"):
-            page.update_state(
-                prediction_tasks,
-                project=project if project is not None else self.project,
-            )
+        selected_project = project if project is not None else self.project
+
+        def update() -> None:
+            if hasattr(page, "set_project"):
+                page.set_project(selected_project)
+            if hasattr(page, "update_state"):
+                page.update_state(prediction_tasks, project=selected_project)
+
+        self._update_or_defer_page(PAGE_INDEX_SEISMIC, "state", update)
 
     def seismic_prediction_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_SEISMIC)
 
     def update_sequence_framework_page(self, stratigraphy) -> None:
         page = self.page_stack.widget(PAGE_INDEX_SEQUENCE)
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "update_state"):
-            page.update_state(stratigraphy)
+
+        def update() -> None:
+            if hasattr(page, "set_project"):
+                page.set_project(self.project)
+            if hasattr(page, "update_state"):
+                page.update_state(stratigraphy)
+
+        self._update_or_defer_page(PAGE_INDEX_SEQUENCE, "state", update)
 
     def sequence_framework_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_SEQUENCE)
 
     def update_stratigraphy_correlation_page(self, project=None) -> None:
         page = self.page_stack.widget(PAGE_INDEX_STRATIGRAPHY)
-        if hasattr(page, "set_project"):
-            page.set_project(project if project is not None else self.project)
-        if hasattr(page, "update_state"):
-            page.update_state(project if project is not None else self.project)
+        selected_project = project if project is not None else self.project
+
+        def update() -> None:
+            if hasattr(page, "set_project"):
+                page.set_project(selected_project)
+            if hasattr(page, "update_state"):
+                page.update_state(selected_project)
+
+        self._update_or_defer_page(PAGE_INDEX_STRATIGRAPHY, "state", update)
 
     def stratigraphy_correlation_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_STRATIGRAPHY)
@@ -399,20 +502,29 @@ class AppShell(QWidget):
         project=None,
     ) -> None:
         page = self.page_stack.widget(PAGE_INDEX_VISUALIZATION)
-        if hasattr(page, "update_state"):
-            page.update_state(
-                resources,
-                prediction_tasks,
-                map_documents,
-                project=project if project is not None else self.project,
-            )
+        selected_project = project if project is not None else self.project
+
+        def update() -> None:
+            if hasattr(page, "update_state"):
+                page.update_state(
+                    resources,
+                    prediction_tasks,
+                    map_documents,
+                    project=selected_project,
+                )
+
+        self._update_or_defer_page(PAGE_INDEX_VISUALIZATION, "state", update)
 
     def update_preparation_page(self, tasks: list) -> None:
         page = self.page_stack.widget(PAGE_INDEX_PREPARATION)
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "update_state"):
-            page.update_state(tasks)
+
+        def update() -> None:
+            if hasattr(page, "set_project"):
+                page.set_project(self.project)
+            if hasattr(page, "update_state"):
+                page.update_state(tasks)
+
+        self._update_or_defer_page(PAGE_INDEX_PREPARATION, "state", update)
 
     def preparation_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_PREPARATION)
@@ -425,15 +537,19 @@ class AppShell(QWidget):
         project_crs: str | None = None,
     ) -> None:
         page = self.mapping_page_widget()
-        if hasattr(page, "update_state"):
-            page.update_state(
-                map_documents,
-                factor_tasks=factor_tasks,
-                project_crs=project_crs,
-            )
-        self._mapping_context = self._build_mapping_context()
-        if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
-            self.sidebar.update_mapping_context(**self._mapping_context)
+
+        def update() -> None:
+            if hasattr(page, "update_state"):
+                page.update_state(
+                    map_documents,
+                    factor_tasks=factor_tasks,
+                    project_crs=project_crs,
+                )
+            self._mapping_context = self._build_mapping_context()
+            if self.page_stack.currentIndex() == PAGE_INDEX_MAPPING:
+                self.sidebar.update_mapping_context(**self._mapping_context)
+
+        self._update_or_defer_page(PAGE_INDEX_MAPPING, "state", update)
 
     def update_mapping_context(self, context: dict) -> None:
         self._mapping_context = self._normalize_mapping_context(context)
@@ -458,10 +574,14 @@ class AppShell(QWidget):
 
     def update_review_export_page(self, reports: list, map_documents: list, artifacts: list) -> None:
         page = self.page_stack.widget(PAGE_INDEX_REVIEW)
-        if hasattr(page, "set_project"):
-            page.set_project(self.project)
-        if hasattr(page, "update_state"):
-            page.update_state(reports, map_documents, artifacts)
+
+        def update() -> None:
+            if hasattr(page, "set_project"):
+                page.set_project(self.project)
+            if hasattr(page, "update_state"):
+                page.update_state(reports, map_documents, artifacts)
+
+        self._update_or_defer_page(PAGE_INDEX_REVIEW, "state", update)
 
     def review_export_page_widget(self):
         return self.page_stack.widget(PAGE_INDEX_REVIEW)

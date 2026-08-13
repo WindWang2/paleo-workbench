@@ -50,6 +50,24 @@ def test_seismic_prediction_page_update_delegates(qtbot):
     assert calls["context"] == [(tasks[-1], "—", "振幅", "vd")]
 
 
+def test_seismic_completion_from_replaced_project_is_ignored(qtbot, monkeypatch):
+    page = SeismicPredictionPage()
+    qtbot.addWidget(page)
+    old_project = ProjectDocument.new("old")
+    new_project = ProjectDocument.new("new")
+    service = object()
+    page.set_project(old_project)
+    page._inference_service = service
+    page._active_inference_context = (page._session_token, old_project, service)
+    received = []
+    monkeypatch.setattr(page, "_on_inference_completed", received.append)
+
+    page.set_project(new_project)
+    page._on_inference_completed_if_current({"stale": True})
+
+    assert received == []
+
+
 @pytest.fixture
 def catalog_service(tmp_path):
     project_path = tmp_path / "proj" / "demo.paleo.json"
@@ -64,6 +82,9 @@ def catalog_service(tmp_path):
 
 def test_run_without_catalog_shows_unavailable_state(qtbot, monkeypatch):
     """No active catalog → explicit unavailable state, NO auto-run of mock."""
+    # The catalog is process-global runtime state; do not inherit a service
+    # from an earlier catalog-backed test when asserting the unavailable path.
+    reset_catalog()
     project = ProjectDocument.new("Run")
     page = SeismicPredictionPage()
     qtbot.addWidget(page)

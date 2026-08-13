@@ -13,7 +13,12 @@ from pathlib import Path
 
 
 from paleo_workbench.catalog.service import DataCatalogService
-from paleo_workbench.project.paths import artifact_dir_for, relocate_artifacts
+from paleo_workbench.project.paths import (
+    artifact_dir_for,
+    relocate_artifacts,
+    stage_artifact_relocation,
+)
+from paleo_workbench.project.models import HorizonInterpretationRef
 
 
 def _make_project(tmp_path: Path, name: str = "demo.paleo.json") -> Path:
@@ -118,6 +123,23 @@ def test_cross_device_fallback_copies_tree(tmp_path, monkeypatch):
     assert (artifact_dir_for(target) / "raw" / "keep.bin").read_bytes() == b"data"
 
 
+def test_staged_relocation_rolls_back_when_target_save_fails(tmp_path):
+    project = _make_project(tmp_path)
+    source_file = artifact_dir_for(project) / "raw" / "keep.bin"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_bytes(b"data")
+    target = _make_project(tmp_path, "renamed.paleo.json")
+
+    staged = stage_artifact_relocation(project, target)
+    assert staged.staged
+    assert source_file.exists()
+    assert (artifact_dir_for(target) / "raw" / "keep.bin").read_bytes() == b"data"
+    staged.rollback()
+
+    assert source_file.read_bytes() == b"data"
+    assert not artifact_dir_for(target).exists()
+
+
 # ------------------------------------------------------------- end-to-end save-as
 
 
@@ -165,3 +187,97 @@ def test_save_as_keeps_catalog_continuity(tmp_path, monkeypatch):
         assert reopened.verify_integrity(version_id).status_for(version_id) == "verified"
     finally:
         reopened.close()
+
+
+def test_save_as_rebases_managed_interpretation_but_keeps_external_path(tmp_path):
+    """Interpretation versions travel with the managed artifact tree only."""
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.project_controller import ProjectController
+
+    project = _make_project(tmp_path, "orig.paleo.json")
+    managed = artifact_dir_for(project) / "interpretations" / "horizon-v3.npz"
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"immutable")
+    external = tmp_path / "external" / "regional-horizon.npz"
+    external.parent.mkdir()
+    external.write_bytes(b"external")
+    target = _make_project(tmp_path, "moved.paleo.json")
+
+    class _Window:
+        def __init__(self) -> None:
+            self.project_path = project
+            self.project = ProjectDocument.new("Interpretations")
+            self.project.horizon_interpretations = [
+                HorizonInterpretationRef(
+                    name="managed", horizon_key="H1", artifact_path=managed.as_posix()
+                ),
+                HorizonInterpretationRef(
+                    name="external", horizon_key="H2", artifact_path=external.as_posix()
+                ),
+            ]
+
+        def _flush_mapping_draft(self):
+            return True
+
+        def _flush_joint_analysis_state(self):
+            pass
+
+        def _show_project_error(self, title, message):
+            raise AssertionError(f"unexpected error: {title}: {message}")
+
+    window = _Window()
+    assert ProjectController(window).save_project_as(target) == target
+    managed_ref, external_ref = window.project.horizon_interpretations
+    expected = artifact_dir_for(target) / "interpretations" / "horizon-v3.npz"
+    assert managed_ref.artifact_path == expected.as_posix()
+    assert expected.read_bytes() == b"immutable"
+    assert external_ref.artifact_path == external.as_posix()
+    assert external.read_bytes() == b"external"
+
+
+def test_save_as_failed_project_write_restores_source_artifacts(tmp_path, monkeypatch):
+    """The staged move is rolled back when target metadata cannot commit."""
+    from paleo_workbench.project.manager import ProjectManager
+    from paleo_workbench.project.models import ProjectDocument
+    from paleo_workbench.ui.project_controller import ProjectController
+
+    project = _make_project(tmp_path, "orig.paleo.json")
+    source_payload = artifact_dir_for(project) / "raw" / "keep.bin"
+    source_payload.parent.mkdir(parents=True)
+    source_payload.write_bytes(b"source-payload")
+    target = tmp_path / "proj" / "moved.paleo.json"
+
+    class FakeWindow:
+        def __init__(self):
+            self.project_path = project
+            self.project = ProjectDocument.new("Source")
+            self.errors: list[tuple[str, str]] = []
+
+        def _flush_mapping_draft(self):
+            return True
+
+        def _flush_joint_analysis_state(self):
+            pass
+
+        def _show_project_error(self, title, message):
+            self.errors.append((title, message))
+
+        def _refresh_shell(self):
+            pass
+
+    original_save = ProjectManager.save
+
+    def fail_target_save(self, document):
+        if self.project_path == target:
+            raise OSError("injected metadata write failure")
+        return original_save(self, document)
+
+    monkeypatch.setattr(ProjectManager, "save", fail_target_save)
+    window = FakeWindow()
+    controller = ProjectController(window)
+
+    assert controller.save_project_as(target) is None
+    assert source_payload.read_bytes() == b"source-payload"
+    assert not artifact_dir_for(target).exists()
+    assert window.project_path == project
+    assert window.errors and "injected metadata write failure" in window.errors[-1][1]

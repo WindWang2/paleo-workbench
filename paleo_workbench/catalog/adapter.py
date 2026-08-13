@@ -232,9 +232,7 @@ class CoreCatalogAdapter:
                     parent_version_ids=[current.id],
                 )
                 self._bridge_legacy_id(version, legacy_resource_id)
-                for tag in tags or []:
-                    if tag:
-                        service.add_tag(tag, version_id=version.id)
+                service.add_tags(tags or [], version_id=version.id)
                 return self._version_ref(version)
             version = service.import_raw(
                 resolved,
@@ -244,9 +242,7 @@ class CoreCatalogAdapter:
                 _legacy_resource_id=legacy_resource_id,
                 known_sha256=checksum,
             )
-        for tag in tags or []:
-            if tag:
-                service.add_tag(tag, version_id=version.id)
+        service.add_tags(tags or [], version_id=version.id)
         return self._version_ref(version)
 
     # ------------------------------------------------------------ dedup helpers
@@ -532,9 +528,7 @@ class CoreCatalogAdapter:
 
     # --------------------------------------------------------------- tags / integrity
     def add_tags(self, version_id: str, tags: list[str]) -> None:
-        for tag in tags:
-            if tag:
-                self._service.add_tag(tag, version_id=version_id)
+        self._service.add_tags(tags, version_id=version_id)
 
     def verify_integrity(self, version_id: str) -> IntegrityStatus:
         try:

@@ -15,6 +15,7 @@ def test_seismic_view_panel_empty_state(qtbot):
     assert panel.objectName() == "SeismicViewPanel"
     assert panel.empty_label.text() == "未选择预测任务"
     assert panel.volume_shape is None
+    assert panel.view._slice_worker is None
 
 
 def test_seismic_view_panel_exposes_reference_attribute_strip(qtbot):
@@ -126,6 +127,26 @@ def test_seismic_view_panel_schedules_path_only_payload(qtbot, monkeypatch, tmp_
 
     assert scheduled == [str(path)]
     assert panel.stack.currentWidget() is panel.view
+    assert panel.volume_shape is None
+
+
+def test_seismic_panel_ignores_late_load_after_shutdown(qtbot, monkeypatch, tmp_path):
+    path = tmp_path / "bound.sgy"
+    panel = SeismicViewPanel()
+    qtbot.addWidget(panel)
+    panel._show_segy_loading(str(path))
+    panel.shutdown()
+    received = []
+    monkeypatch.setattr(panel.view, "load_demo", received.append)
+
+    class _Result:
+        def __init__(self) -> None:
+            self.path = str(path)
+            self.volume = np.ones((2, 3, 4), dtype=np.float32)
+
+    panel._on_segy_loaded(_Result())
+
+    assert received == []
     assert panel.volume_shape is None
 
 

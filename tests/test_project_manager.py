@@ -4,7 +4,13 @@ import pytest
 
 from paleo_workbench.resources.import_service import import_files
 from paleo_workbench.project.manager import ProjectManager
-from paleo_workbench.project.models import ExportArtifact, ProjectDocument, ResourceItem
+from paleo_workbench.project.manager import project_backup_path
+from paleo_workbench.project.models import (
+    ExportArtifact,
+    HorizonInterpretationRef,
+    ProjectDocument,
+    ResourceItem,
+)
 from paleo_workbench.project.paths import artifact_dir_for
 
 
@@ -100,6 +106,121 @@ def test_resaving_loaded_project_keeps_relative_resource_paths(tmp_path: Path):
 
     assert reloaded.resources[0].path == data_file.resolve().as_posix()
     assert reloaded.resources[0].external is False
+
+
+def test_clean_save_after_load_is_a_true_noop(tmp_path: Path, monkeypatch):
+    """A reopened, untouched project avoids artifact/path/JSON save work."""
+    project_path = tmp_path / "demo.paleo.json"
+    resource = tmp_path / "data" / "well.las"
+    resource.parent.mkdir()
+    resource.write_text("~Version\n", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    project.resources.append(
+        ResourceItem(name="well", path=str(resource), type="well_log", format="las")
+    )
+    ProjectManager(project_path).save(project)
+    manager = ProjectManager(project_path)
+    loaded = manager.load()
+    before = project_path.read_bytes()
+
+    import paleo_workbench.project.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "persist_factor_grid_artifacts",
+        lambda *_args: pytest.fail("clean save must not inspect factor artifacts"),
+    )
+    assert manager.save(loaded) is False
+    assert manager.last_save_stats.wrote_project_file is False
+    assert project_path.read_bytes() == before
+
+
+def test_metadata_only_save_reuses_resource_path_section(tmp_path: Path, monkeypatch):
+    project_path = tmp_path / "demo.paleo.json"
+    resource = tmp_path / "data" / "well.las"
+    resource.parent.mkdir()
+    resource.write_text("~Version\n", encoding="utf-8")
+    project = ProjectDocument.new("Before")
+    project.resources.append(
+        ResourceItem(name="well", path=str(resource), type="well_log", format="las")
+    )
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+    loaded.meta.name = "After"
+
+    import paleo_workbench.project.manager as manager_module
+
+    monkeypatch.setattr(
+        manager_module,
+        "relativize_path",
+        lambda *_args: pytest.fail("metadata save must reuse resource paths"),
+    )
+    assert manager.save(loaded) is True
+    assert manager.last_save_stats.dirty_domains
+    assert ProjectManager(project_path).load().meta.name == "After"
+
+
+def test_project_backup_recovers_corrupt_canonical_json(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    manager = ProjectManager(project_path)
+    project = ProjectDocument.new("First")
+    manager.save(project)
+    project.meta.name = "Second"
+    manager.save(project)
+    backup = project_backup_path(project_path)
+    assert backup.is_file()
+
+    project_path.write_text("{ truncated", encoding="utf-8")
+    recovered = ProjectManager(project_path)
+    loaded = recovered.load()
+
+    assert loaded.meta.name == "First"
+    assert recovered.last_recovery_message
+    assert project_path.is_file()
+
+
+def test_load_cleans_only_owned_project_temp_files(tmp_path: Path):
+    project_path = tmp_path / "demo.paleo.json"
+    manager = ProjectManager(project_path)
+    manager.save(ProjectDocument.new("Demo"))
+    owned = tmp_path / ".demo.paleo.json.interrupted.tmp"
+    unrelated = tmp_path / ".other.paleo.json.interrupted.tmp"
+    owned.write_text("partial", encoding="utf-8")
+    unrelated.write_text("user file", encoding="utf-8")
+
+    manager.load()
+
+    assert not owned.exists()
+    assert unrelated.exists()
+
+
+def test_metadata_save_does_not_touch_immutable_interpretation_payload(tmp_path: Path):
+    """A title edit is metadata-only, never an interpretation artifact rewrite."""
+    project_path = tmp_path / "demo.paleo.json"
+    payload = tmp_path / "demo.artifacts" / "outputs" / "horizon-v3.npz"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"immutable-horizon-v3")
+    project = ProjectDocument.new("Before")
+    project.horizon_interpretations.append(
+        HorizonInterpretationRef(
+            name="Horizon V3",
+            horizon_key="H3",
+            current_version_id="version_h3",
+            artifact_path=payload.as_posix(),
+        )
+    )
+    manager = ProjectManager(project_path)
+    manager.save(project)
+    loaded = manager.load()
+    before_bytes = payload.read_bytes()
+    before_mtime_ns = payload.stat().st_mtime_ns
+
+    loaded.meta.name = "After"
+    assert manager.save(loaded) is True
+
+    assert payload.read_bytes() == before_bytes
+    assert payload.stat().st_mtime_ns == before_mtime_ns
 
 
 def test_external_resource_paths_remain_absolute_and_external(tmp_path: Path):

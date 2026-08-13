@@ -180,6 +180,13 @@ class WellLogCanvasPanel(QFrame):
     def engine_load_report(self) -> dict[str, Any] | None:
         return self._engine_load
 
+    def shutdown(self) -> None:
+        """Release the retained native document before a project switch/close."""
+        self._release_engine_document()
+        self.well_log_data = None
+        self._bound_las = False
+        self.canvas.set_tracks([])
+
     def track_kinds(self) -> list[str]:
         """Rough labels of built tracks for tests / diagnostics."""
         if self._backend == "engine" and self._engine_load is not None:

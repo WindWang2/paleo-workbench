@@ -299,4 +299,3 @@ def test_app_shell_stepper_switches_stage_and_recalls_subpage(qtbot):
 
     shell.workflow_stepper.stage_buttons[2].click()
     assert shell.page_stack.currentIndex() == 6
-

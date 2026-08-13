@@ -272,6 +272,11 @@ class VisualizationPage(QWidget):
             self._preview_controller.shutdown()
         return super().event(event)
 
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        """Release async previews before a project-scoped shell is replaced."""
+
+        return self._preview_controller.shutdown(wait_ms)
+
     def _reload_current(self) -> None:
         if self._current_ref is not None:
             self.open_ref(self._current_ref)

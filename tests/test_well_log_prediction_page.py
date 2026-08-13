@@ -2,6 +2,7 @@ from paleo_workbench.ui.pages.prediction_evidence_panel import PredictionEvidenc
 from paleo_workbench.ui.pages.prediction_task_panel import PredictionTaskPanel
 from paleo_workbench.ui.pages.well_log_canvas_panel import WellLogCanvasPanel
 from paleo_workbench.ui.pages.well_log_prediction_page import WellLogPredictionPage
+from paleo_workbench.project.models import ProjectDocument
 
 
 def test_well_log_prediction_page_assembles_three_widgets(qtbot):
@@ -37,3 +38,21 @@ def test_well_log_prediction_page_update_delegates(qtbot):
     assert calls["task"] == [(tasks, None)]
     assert calls["canvas"] == [(tasks[-1], project)]
     assert calls["evidence"] == [(tasks[-1], False)]
+
+
+def test_well_log_completion_from_replaced_project_is_ignored(qtbot, monkeypatch):
+    page = WellLogPredictionPage()
+    qtbot.addWidget(page)
+    old_project = ProjectDocument.new("old")
+    new_project = ProjectDocument.new("new")
+    service = object()
+    page.set_project(old_project)
+    page._inference_service = service
+    page._active_inference_context = (page._session_token, old_project, service)
+    received = []
+    monkeypatch.setattr(page, "_on_inference_completed", received.append)
+
+    page.set_project(new_project)
+    page._on_inference_completed_if_current({"stale": True})
+
+    assert received == []
