@@ -38,7 +38,7 @@ from pathlib import Path
 
 from paleo_workbench.catalog.checksum import CHUNK_SIZE
 from paleo_workbench.catalog.models import CatalogDocument
-from paleo_workbench.catalog.storage import catalog_dir_for, fsync_dir
+from paleo_workbench.catalog.storage import catalog_dir_for, fsync_dir, is_cas_path
 
 BLOBS_DIRNAME = "blobs"
 
@@ -52,20 +52,6 @@ def blob_path(project_path: str | Path, digest: str) -> Path:
     """Absolute path of the blob for *digest* (sharded by the first 2 chars)."""
     root = blob_dir_for(Path(project_path))
     return root / digest[:2] / digest
-
-
-def is_cas_path(project_path: str | Path, rel_path: str) -> bool:
-    """True when a project-relative payload path points into ``blobs/``.
-
-    Blob-backed versions share their payload with other versions, so the
-    lifecycle must treat them by refcount (never move/unlink a shared blob).
-    """
-    root = blob_dir_for(Path(project_path))
-    candidate = root / rel_path
-    try:
-        return candidate.resolve().is_relative_to(root.resolve())
-    except (ValueError, OSError):
-        return False
 
 
 def has_blob(project_path: str | Path, digest: str) -> bool:

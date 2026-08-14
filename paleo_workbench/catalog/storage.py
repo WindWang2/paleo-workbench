@@ -352,6 +352,13 @@ def place_managed_file(
                 # without content proof, or a stale digest could silently link
                 # a version to content that differs from the source file).
                 blob = blob_path(project, known_sha256)
+                if not keep_source:
+                    # Dedup hit must not orphan the source working file in
+                    # working/{version_id}/ (same move semantics as below).
+                    try:
+                        source.unlink()
+                    except OSError:
+                        pass
                 project_dir = _project_dir(project)
                 return blob.relative_to(project_dir).as_posix(), blob.stat().st_size, known_sha256
         except OSError:

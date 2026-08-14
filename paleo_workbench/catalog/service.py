@@ -1444,6 +1444,8 @@ class DataCatalogService:
                 return version
             asset = self._asset_or_raise(version.asset_id)
             previous_current = asset.current_version_id
+            trash_meta = version.metadata.get("trash") or {}
+            reason = trash_meta.get("reason")
             self._untombstone_version(version)
             if asset.current_version_id is None or not any(
                 v.id == asset.current_version_id and not v.trashed
@@ -1453,7 +1455,9 @@ class DataCatalogService:
             try:
                 self._save()
             except Exception:
-                self._rollback_untombstone(version, asset, previous_current)
+                self._rollback_untombstone(
+                    version, asset, previous_current, reason=reason
+                )
                 raise
             return version
 
@@ -1465,8 +1469,14 @@ class DataCatalogService:
             previous_current = asset.current_version_id
             previous_trashed = asset.trashed
             previous_trashed_at = asset.trashed_at
+            # (version, reason) pairs for the versions this restore actually
+            # untombstones; the trash reason must be captured before
+            # _untombstone_version pops the metadata.
+            restore_targets: list[tuple[DataVersion, str | None]] = []
             for version in versions:
                 if version.trashed:
+                    trash_meta = version.metadata.get("trash") or {}
+                    restore_targets.append((version, trash_meta.get("reason")))
                     self._untombstone_version(version)
             asset.trashed = False
             asset.trashed_at = None
@@ -1478,19 +1488,24 @@ class DataCatalogService:
             except Exception:
                 asset.trashed = previous_trashed
                 asset.trashed_at = previous_trashed_at
-                for version in versions:
-                    self._rollback_untombstone(version, asset, previous_current)
+                # Roll back ONLY the versions the restore modified; versions
+                # that were already live must stay live.
+                for version, reason in restore_targets:
+                    self._rollback_untombstone(
+                        version, asset, previous_current, reason=reason
+                    )
                 raise
             return asset
 
     def _rollback_untombstone(
-        self, version: DataVersion, asset: DataAsset, previous_current: str | None
+        self,
+        version: DataVersion,
+        asset: DataAsset,
+        previous_current: str | None,
+        reason: str | None = None,
     ) -> None:
         """Re-apply a tombstone after a failed restore save (payload moved back
         into ``trash/``)."""
-        reason = None
-        if version.metadata.get("trash"):
-            reason = version.metadata["trash"].get("reason")
         self._tombstone_version(version, reason)
         if version.managed:
             self._move_payload_to_trash(version)
@@ -1522,15 +1537,19 @@ class DataCatalogService:
                 for v in self.document.versions
                 if not v.trashed and v.sha256
             }
+            # Payload unlink jobs are collected up front and run only AFTER a
+            # successful save: a failed save must leave the trash payloads
+            # restorable (catalog.json still references them).
+            payload_purges = [
+                (
+                    self.resolve_path(version),
+                    version.sha256 is not None
+                    and version.sha256 in surviving_digests,
+                )
+                for version in trashed_versions
+                if version.managed
+            ]
             for version in trashed_versions:
-                if version.managed:
-                    shared = (
-                        version.sha256 is not None
-                        and version.sha256 in surviving_digests
-                    )
-                    purge_trashed_payload(
-                        self.project_path, self.resolve_path(version), shared=shared
-                    )
                 self._remove_version(version)
             # An asset is removed only when NONE of its versions survives the
             # purge. restore_version() can untrash a single version of a
@@ -1564,6 +1583,10 @@ class DataCatalogService:
                 self.document.version_tags.update(removed_version_tags)
                 self.document.asset_tags.update(removed_asset_tags)
                 raise
+            # State is durable now; the unlink is best-effort and cannot
+            # corrupt it (a leftover trash payload is a harmless orphan).
+            for payload_path, shared in payload_purges:
+                purge_trashed_payload(self.project_path, payload_path, shared=shared)
             return len(trashed_versions) + len(trashed_assets)
 
     # -- promote ---------------------------------------------------------------

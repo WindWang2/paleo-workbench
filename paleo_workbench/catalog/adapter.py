@@ -341,6 +341,7 @@ class CoreCatalogAdapter:
         kind: str,
         format: str,
         tags: list[str] | None,
+        checksum: str | None = None,
     ) -> DataVersionRef:
         service = self._service
         run = service.get_run(run_id)
@@ -354,6 +355,7 @@ class CoreCatalogAdapter:
                 stage,
                 parent_version_ids=list(run.input_version_ids),
                 run_id=run.id,
+                known_sha256=checksum,
             )
         except Exception:
             if asset in service.document.assets:
@@ -376,7 +378,8 @@ class CoreCatalogAdapter:
         tags: list[str] | None = None,
     ) -> DataVersionRef:
         return self._register_produced(
-            run_id, name, path, DataStage.INTERMEDIATE, kind, format, tags
+            run_id, name, path, DataStage.INTERMEDIATE, kind, format, tags,
+            checksum=checksum,
         )
 
     def register_output(
@@ -391,7 +394,8 @@ class CoreCatalogAdapter:
         tags: list[str] | None = None,
     ) -> DataVersionRef:
         return self._register_produced(
-            run_id, name, path, DataStage.OUTPUT, kind, format, tags
+            run_id, name, path, DataStage.OUTPUT, kind, format, tags,
+            checksum=checksum,
         )
 
     def register_derived(
@@ -406,7 +410,8 @@ class CoreCatalogAdapter:
         tags: list[str] | None = None,
     ) -> DataVersionRef:
         return self._register_produced(
-            run_id, name, path, DataStage.DERIVED, kind, format, tags
+            run_id, name, path, DataStage.DERIVED, kind, format, tags,
+            checksum=checksum,
         )
 
     # --------------------------------------------------------------- lineage

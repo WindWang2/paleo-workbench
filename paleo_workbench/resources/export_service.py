@@ -13,7 +13,7 @@ from paleo_workbench.project.paths import (
     relativize_path,
     resolve_project_path,
 )
-from paleo_workbench.resources.exporters import ExportError, get_available_formats
+from paleo_workbench.resources.exporters import ExportError, atomic_output, get_available_formats
 from paleo_workbench.resources.io_registry import TYPE_LABELS, VIEW_EXPORT_FORMATS
 from paleo_workbench.project.artifacts import record_export
 
@@ -258,9 +258,10 @@ def export_project_inventory(
     }
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        with atomic_output(output_path) as tmp:
+            tmp.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
     except OSError as exc:
         return ExportJobResult(success=False, message=f"写入清单失败: {exc}")
 

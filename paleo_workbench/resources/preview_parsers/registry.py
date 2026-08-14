@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.project.paths import safe_file_stat
+from paleo_workbench.project.paths import is_within_directory, safe_file_stat
 from paleo_workbench.resources.preview_parsers.document_parsers import (
     artifact_preview,
     audio_preview,
@@ -58,14 +58,43 @@ class PreviewRegistry:
     def register_format(self, fmt: str, parser: PreviewParserCallable) -> None:
         self._format_parsers[fmt.lower()] = parser
 
+    @staticmethod
+    def _resolve_project_path(path: str, project_root: str | Path) -> str:
+        """Resolve project-relative resource paths against ``project_root``.
+
+        Mirrors ``viz/adapter._absolute_path``: existing files win, absolute
+        paths pass through, and relative joins are confined to the project
+        root (no ``..`` escape).
+        """
+        candidate = Path(path).expanduser()
+        if candidate.is_file():
+            return str(candidate.resolve())
+        if candidate.is_absolute():
+            return str(candidate)
+        root = str(project_root).strip()
+        if root and root not in {".", ".."}:
+            root_path = Path(root).expanduser().resolve()
+            joined = (root_path / candidate).resolve()
+            if not is_within_directory(joined, root_path):
+                # Escape attempt — do not open files outside the project root.
+                return str(candidate)
+            return str(joined)
+        return str(candidate)
+
     def build_preview(
         self,
         asset: ResourceItem | ExportArtifact,
         settings: PreviewSettings,
         safe_stat_fn: Callable[[Path], tuple[int, int] | None] = safe_file_stat,
+        project_root: str | Path | None = None,
     ) -> PreviewResult:
         if isinstance(asset, ExportArtifact):
             return artifact_preview(asset)
+
+        if project_root is not None and asset.path and not Path(asset.path).is_absolute():
+            resolved = self._resolve_project_path(asset.path, project_root)
+            if resolved != asset.path:
+                asset = asset.model_copy(update={"path": resolved})
 
         path = Path(asset.path)
         revision = resource_revision_token(asset, safe_stat_fn=safe_stat_fn)

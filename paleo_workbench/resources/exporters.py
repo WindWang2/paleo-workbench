@@ -1,9 +1,12 @@
 """Format conversion exporters for the data page and export service."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
-from typing import Callable
+import tempfile
+from typing import Callable, Iterator
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.resources.io_registry import CONVERT_LABEL_EXT
@@ -11,6 +14,35 @@ from paleo_workbench.resources.io_registry import CONVERT_LABEL_EXT
 
 class ExportError(Exception):
     """Raised when a format conversion fails."""
+
+
+@contextmanager
+def atomic_output(output_path: Path) -> Iterator[Path]:
+    """Yield a temp path beside *output_path*; atomically replace on success.
+
+    Converters write to the temp file first and only ``Path.replace`` it onto
+    the final name after a successful conversion, so a failed export never
+    leaves a corrupt partial file at the user-visible destination. The temp
+    keeps the target suffix so extension-based format inference (e.g. pandas
+    ``to_excel``) still works.
+    """
+    output_path = Path(output_path)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.",
+        suffix=output_path.suffix,
+        dir=str(output_path.parent),
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        yield tmp_path
+        tmp_path.replace(output_path)
+    except BaseException:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 # Input format sets
@@ -29,7 +61,8 @@ def las_to_csv(input_path: Path, output_path: Path) -> None:
 
         las = lasio.read(str(input_path))
         df = las.df()
-        df.to_csv(output_path, index=True)
+        with atomic_output(output_path) as tmp:
+            df.to_csv(tmp, index=True)
     except Exception as exc:
         raise ExportError(f"LAS -> CSV 失败: {exc}") from exc
 
@@ -41,7 +74,8 @@ def las_to_xlsx(input_path: Path, output_path: Path) -> None:
 
         las = lasio.read(str(input_path))
         df = las.df()
-        df.to_excel(output_path, index=True)
+        with atomic_output(output_path) as tmp:
+            df.to_excel(tmp, index=True)
     except Exception as exc:
         raise ExportError(f"LAS -> XLSX 失败: {exc}") from exc
 
@@ -78,9 +112,10 @@ def las_to_json_summary(input_path: Path, output_path: Path) -> None:
             "curve_count": len(curves),
             "curves": curves,
         }
-        output_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        with atomic_output(output_path) as tmp:
+            tmp.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
     except Exception as exc:
         raise ExportError(f"LAS -> JSON 摘要失败: {exc}") from exc
 
@@ -94,7 +129,8 @@ def table_to_json(input_path: Path, output_path: Path) -> None:
             df = pd.read_csv(input_path)
         else:
             df = pd.read_excel(input_path)
-        df.to_json(output_path, orient="records", force_ascii=False)
+        with atomic_output(output_path) as tmp:
+            df.to_json(tmp, orient="records", force_ascii=False)
     except Exception as exc:
         raise ExportError(f"表格 -> JSON 失败: {exc}") from exc
 
@@ -110,7 +146,8 @@ def table_to_xlsx(input_path: Path, output_path: Path) -> None:
             df = pd.read_excel(input_path)
         else:
             raise ExportError(f"不支持的表格格式: {ext}")
-        df.to_excel(output_path, index=False)
+        with atomic_output(output_path) as tmp:
+            df.to_excel(tmp, index=False)
     except ExportError:
         raise
     except Exception as exc:
@@ -122,7 +159,8 @@ def image_to_png(input_path: Path, output_path: Path) -> None:
         from PIL import Image
 
         with Image.open(input_path) as img:
-            img.save(output_path, "PNG")
+            with atomic_output(output_path) as tmp:
+                img.save(tmp, "PNG")
     except Exception as exc:
         raise ExportError(f"图像 -> PNG 失败: {exc}") from exc
 
@@ -130,7 +168,8 @@ def image_to_png(input_path: Path, output_path: Path) -> None:
 def text_to_txt(input_path: Path, output_path: Path) -> None:
     try:
         text = input_path.read_text(encoding="utf-8", errors="replace")
-        output_path.write_text(text, encoding="utf-8")
+        with atomic_output(output_path) as tmp:
+            tmp.write_text(text, encoding="utf-8")
     except Exception as exc:
         raise ExportError(f"文本 -> TXT 失败: {exc}") from exc
 
@@ -144,9 +183,10 @@ def geojson_normalize(input_path: Path, output_path: Path) -> None:
         if data.get("type") not in {"FeatureCollection", "Feature", "GeometryCollection"}:
             # Still write normalized JSON for generic .json
             pass
-        output_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        with atomic_output(output_path) as tmp:
+            tmp.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
     except ExportError:
         raise
     except Exception as exc:
@@ -175,9 +215,10 @@ def seismic_to_summary_json(input_path: Path, output_path: Path) -> None:
             }
         finally:
             loader.close()
-        output_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        with atomic_output(output_path) as tmp:
+            tmp.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
     except Exception as exc:
         raise ExportError(f"SEGY -> 摘要 JSON 失败: {exc}") from exc
 

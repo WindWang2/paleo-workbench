@@ -74,6 +74,7 @@ class DataAssetRegistry:
         self,
         asset: ResourceItem | ExportArtifact,
         settings: PreviewSettings,
+        project_root: str | Path | None = None,
     ) -> PreviewResult:
         """Parse preview representation for an asset."""
         from paleo_workbench.resources.preview_parsers.registry import default_registry
@@ -83,7 +84,7 @@ class DataAssetRegistry:
             return self._format_specs[fmt].preview_parser(asset, settings)  # type: ignore
 
         registry = default_registry()
-        return registry.build_preview(asset, settings)
+        return registry.build_preview(asset, settings, project_root=project_root)
 
     def export(self, asset: Any, format_id: str, output_path: str | Path) -> bool:
         """Export asset to output path in specified format."""

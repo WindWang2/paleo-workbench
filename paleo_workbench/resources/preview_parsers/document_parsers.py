@@ -17,6 +17,10 @@ from paleo_workbench.resources.preview_parsers.table_parsers import (
 if TYPE_CHECKING:
     from paleo_workbench.ui.pages.preview_settings import PreviewSettings
 
+# Upper bound (px per side) for GeoTIFF preview reads: overview levels that
+# would decode more than this are not used.
+_GEOTIFF_MAX_READ_PX = 2048
+
 
 def resource_revision_token(asset: ResourceItem, safe_stat_fn=safe_file_stat) -> tuple[object, ...]:
     path = Path(asset.path)
@@ -90,12 +94,27 @@ def geotiff_preview(resource: ResourceItem, settings: PreviewSettings) -> Previe
             long_side = max(dataset.width, dataset.height)
             decim = max(1, (long_side + target_px - 1) // target_px)
             overviews = dataset.overviews(1)
+            # Bounded read: decode a built overview instead of the full
+            # resolution raster (GB-scale MemoryError risk). Prefer the
+            # smallest overview reaching the thumbnail decimation, kept
+            # within ~2 k px per side; fall back to the most decimated
+            # level available. The base level is used when no decimation
+            # is needed (source already below target) or no overviews exist.
+            level = 1
             if decim > 1 and overviews:
-                suitable_overview = next(
-                    (value for value in overviews if value >= decim),
-                    None,
-                )
-            thumbnail = dataset.read()[0][::decim, ::decim]
+                bounded = [
+                    v for v in overviews if long_side // v <= _GEOTIFF_MAX_READ_PX
+                ]
+                suitable_overview = next((v for v in bounded if v >= decim), None)
+                if suitable_overview is None:
+                    suitable_overview = max(bounded or overviews)
+                level = int(suitable_overview)
+            out_height = max(1, dataset.height // level)
+            out_width = max(1, dataset.width // level)
+            thumbnail = dataset.read(1, out_shape=(out_height, out_width))
+            if max(out_height, out_width) > target_px:
+                step = max(1, (max(out_height, out_width) + target_px - 1) // target_px)
+                thumbnail = thumbnail[::step, ::step]
     except Exception:
         return image_fallback(resource, revision, "地理元数据读取失败，仅显示图像")
     try:
