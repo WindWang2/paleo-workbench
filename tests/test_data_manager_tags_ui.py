@@ -224,12 +224,12 @@ def test_tag_filter_menu_empty_candidates_hint(qtbot):
 # --- F5: default columns -----------------------------------------------------------
 
 
-def test_default_column_keys_are_seven():
+def test_default_column_keys_include_lineage():
     assert DEFAULT_COLUMN_KEYS == [
-        "name", "type", "stage", "version", "tags", "integrity", "modified",
+        "name", "type", "stage", "version", "lineage", "tags", "integrity", "modified",
     ]
     assert [COLUMN_BY_KEY[k].label for k in DEFAULT_COLUMN_KEYS] == [
-        "文件名", "类型", "生命周期", "版本", "标签", "完整性", "修改时间",
+        "文件名", "类型", "生命周期", "版本", "血缘", "标签", "完整性", "修改时间",
     ]
 
 

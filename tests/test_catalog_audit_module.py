@@ -286,3 +286,130 @@ def test_completed_run_without_output_is_flagged(service, tmp_path):
     report = service.audit()
     issues = report.by_kind("orphan_completed_run")
     assert issues and issues[0].severity == "low"
+
+
+# --- provenance / stale runs / output claims (data-governance v2) -------------
+
+
+def test_nonraw_version_without_run_or_parents_is_unprovenanced(service, tmp_path):
+    raw, _ = _seed_catalog(service, tmp_path)
+    orphan = service.register_version(
+        raw.asset_id,
+        _make_source(tmp_path, "lone.npy", b"lone"),
+        DataStage.DERIVED,
+        parent_version_ids=[],
+        run_id=None,
+    )
+
+    report = service.audit()
+    issues = [i for i in report.by_kind("unprovenanced_version") if i.ref_id == orphan.id]
+    assert issues and issues[0].severity == "medium"
+    assert report.ok is False
+
+
+def test_raw_import_is_never_unprovenanced(service, tmp_path):
+    raw, _ = _seed_catalog(service, tmp_path)
+    report = service.audit()
+    assert not [
+        i for i in report.by_kind("unprovenanced_version") if i.ref_id == raw.id
+    ]
+
+
+def test_stale_running_run_is_flagged(service, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    raw, _ = _seed_catalog(service, tmp_path)
+    run = service.register_run(
+        "factor_map", input_version_ids=[raw.id], status="running"
+    )
+    service.get_run(run.id).created_at = (
+        datetime.now(timezone.utc) - timedelta(hours=30)
+    ).isoformat()
+
+    report = service.audit()
+    issues = [i for i in report.by_kind("stale_running_run") if i.ref_id == run.id]
+    assert issues and issues[0].severity == "low"
+
+
+def test_fresh_running_run_is_not_flagged(service, tmp_path):
+    raw, _ = _seed_catalog(service, tmp_path)
+    run = service.register_run(
+        "factor_map", input_version_ids=[raw.id], status="running"
+    )
+
+    report = service.audit()
+    assert not [i for i in report.by_kind("stale_running_run") if i.ref_id == run.id]
+
+
+def test_output_claimed_by_two_runs_is_reported(service, tmp_path):
+    raw, derived = _seed_catalog(service, tmp_path)
+    service.register_run("second_claim", output_version_ids=[derived.id])
+
+    report = service.audit()
+    issues = [i for i in report.by_kind("multi_claimed_output") if i.ref_id == derived.id]
+    assert issues
+
+
+def test_run_output_without_matching_parent_edge_diverges(service, tmp_path):
+    raw, _ = _seed_catalog(service, tmp_path)
+    other = service.register_version(
+        raw.asset_id,
+        _make_source(tmp_path, "other.npy", b"other"),
+        DataStage.INTERMEDIATE,
+        parent_version_ids=[],
+        run_id=None,
+    )
+    # A run claims raw → other, but other has no parent edge to raw: the
+    # version-graph walk (UI 血缘) will not show that input.
+    service.register_run(
+        "mystery", input_version_ids=[raw.id], output_version_ids=[other.id]
+    )
+
+    report = service.audit()
+    issues = [
+        i for i in report.by_kind("run_lineage_divergence") if i.ref_id == other.id
+    ]
+    assert issues
+
+
+def test_external_path_missing_is_medium(service, tmp_path):
+    external_src = _make_source(tmp_path, "ext.sgy", b"ext")
+    version = service.link_external(external_src, name="ext.sgy", type="seismic")
+    external_src.unlink()
+
+    report = service.audit()
+    issues = [
+        i for i in report.by_kind("external_path_missing") if i.ref_id == version.id
+    ]
+    assert issues and issues[0].severity == "medium"
+
+
+def test_invalid_governance_value_is_reported(service, tmp_path):
+    raw, _ = _seed_catalog(service, tmp_path)
+    asset = service.get_asset(raw.asset_id)
+    asset.metadata["confidence"] = "bogus"
+    service._save()
+
+    report = service.audit()
+    issues = [
+        i for i in report.by_kind("invalid_metadata_value") if i.ref_id == asset.id
+    ]
+    assert issues and "confidence" in issues[0].detail
+
+
+def test_statistics_aggregates_counts_and_severities(service, tmp_path):
+    raw, _ = _seed_catalog(service, tmp_path)
+    orphan = service.register_version(
+        raw.asset_id,
+        _make_source(tmp_path, "lone2.npy", b"lone2"),
+        DataStage.DERIVED,
+    )
+
+    report = service.audit()
+    stats = report.statistics
+    assert stats["assets"] == 1
+    assert stats["versions"] == 3
+    assert stats["runs"] >= 1
+    assert stats["kind_unprovenanced_version"] >= 1
+    assert stats["issues_medium"] >= 1
+    assert stats["issues_high"] == len(report.by_severity("high"))

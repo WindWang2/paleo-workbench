@@ -44,6 +44,24 @@ class WorkflowController:
         """Route dialog output to the current shell, never a stale page."""
         self.window.app_shell.data_page.reader_panel.set_preview_settings(settings)
 
+    def _refresh_data_page(self) -> None:
+        """Refresh the Data Manager after workflow products changed.
+
+        Factor grids, predictions, QC outputs and map compiles register new
+        catalog versions; without this the produce→browse journey breaks
+        (the data page kept showing pre-run rows until a manual refresh).
+        """
+        try:
+            app_shell = self.window.app_shell
+            if hasattr(app_shell, "update_data_page"):
+                app_shell.update_data_page(
+                    dashboard_state(self.window.project),
+                    self.window.project.resources,
+                    self.window.project.export_artifacts,
+                )
+        except Exception:
+            pass
+
     def wire_home_page(self) -> None:
         page = self.window.app_shell.home_page_widget()
         if page is None:
@@ -145,6 +163,7 @@ class WorkflowController:
             self.window.project.paleomap_documents,
             self.window.project.export_artifacts,
         )
+        self._refresh_data_page()
 
     def _on_well_log_prediction_updated(self) -> None:
         """Refresh well-log / seismic / viz pages after a new single-well task."""
@@ -192,6 +211,7 @@ class WorkflowController:
             self.window.project.paleomap_documents,
             project=self.window.project,
         )
+        self._refresh_data_page()
 
     def _on_seismic_send_to_mapping(self) -> None:
         """Compile a map from the latest prediction and open 编图.
@@ -268,6 +288,9 @@ class WorkflowController:
             factor_tasks=self.window.project.factor_map_tasks,
             project_crs=self.window.project.coordinate.project_crs,
         )
+        # The production compile registered a paleomap catalog version —
+        # surface it in the Data Manager too.
+        self._refresh_data_page()
         self.window.app_shell.icon_rail.set_active(PAGE_INDEX_MAPPING)
         self.window.app_shell._switch_page(PAGE_INDEX_MAPPING)
 
@@ -281,6 +304,7 @@ class WorkflowController:
             factor_tasks=self.window.project.factor_map_tasks,
             project_crs=self.window.project.coordinate.project_crs,
         )
+        self._refresh_data_page()
 
     def _on_contour_drafts_updated(self) -> None:
         """Refresh mapping after ContourDraft isolines are pushed to map documents."""

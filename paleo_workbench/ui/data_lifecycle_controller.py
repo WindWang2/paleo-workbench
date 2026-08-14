@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
@@ -242,6 +243,149 @@ class DataLifecycleController:
         return service, ref
 
     # ------------------------------------------------------------------ #
+    # Catalog rows: batch enrichment + catalog-only asset surfacing
+    # ------------------------------------------------------------------ #
+
+    def _catalog_row_target(self, asset: object):
+        """Resolve a table row to ``(service, asset_id, version_id, name)``.
+
+        Covers both row shapes: bridged ResourceItems and catalog-only Core
+        DataAsset rows. None when the row has no resolvable catalog version
+        (no catalog wired, or a pure legacy item).
+        """
+        unwrapped = unwrap_asset(asset)
+        if isinstance(unwrapped, ResourceItem):
+            service, ref = self.catalog_bridge(unwrapped)
+            if service is None or ref is None:
+                return None
+            return service, ref.asset_id, ref.version_id, unwrapped.name
+        from paleo_workbench.catalog.models import DataAsset
+
+        if isinstance(unwrapped, DataAsset) and unwrapped.current_version_id:
+            service = self.catalog_service()
+            if service is None:
+                return None
+            return service, unwrapped.id, unwrapped.current_version_id, unwrapped.name
+        return None
+
+    def catalog_enricher(self):
+        """A ``view -> view`` enricher over the CURRENT catalog state, or None.
+
+        One overview pass (per refresh) covers every table row: stage/version
+        truth, integrity, tags, lineage status, governance values. Returns
+        None when no catalog is active (legacy behavior).
+        """
+        service = self.catalog_service()
+        if service is None:
+            return None
+        try:
+            from paleo_workbench.ui.pages.data_view_models import make_catalog_enricher
+
+            return make_catalog_enricher(service)
+        except Exception:
+            return None
+
+    def catalog_only_rows(self, enricher=None) -> list:
+        """Row objects for catalog assets WITHOUT a legacy companion.
+
+        Factor-map grids, predictions, paleomaps, interpretations and QC
+        outputs are registered by business modules as catalog versions with
+        no ResourceItem — they used to be invisible in Data Manager. Returned
+        as prebuilt AssetView rows (trashed assets excluded; the 回收站 view
+        lists them via companions). Catalog OUTPUTs that already have an
+        ExportArtifact row (registered exports) are excluded so the table
+        never lists the same deliverable twice.
+        """
+        service = self.catalog_service()
+        if service is None:
+            return []
+        try:
+            from paleo_workbench.ui.pages.data_view_models import (
+                asset_view_from_catalog_overview,
+                catalog_row_overview,
+            )
+
+            if enricher is not None and getattr(enricher, "overview_map", None):
+                overviews = enricher.overview_map
+            else:
+                overviews = catalog_row_overview(service)
+        except Exception:
+            return []
+        legacy_ids = {r.id for r in self.page.project.resources}
+        # Export artifacts render their own rows AND carry their registered
+        # catalog version id — drop those catalog assets from the extra rows.
+        artifact_version_ids = {
+            a.catalog_version_id
+            for a in self.page.project.export_artifacts
+            if getattr(a, "catalog_version_id", None)
+        }
+        version_to_asset = getattr(enricher, "version_to_asset", None) or {}
+        artifact_asset_ids = {
+            version_to_asset[vid] for vid in artifact_version_ids if vid in version_to_asset
+        }
+        project_root = self.page._preview_disk_project_root()
+        rows = []
+        for asset_id, overview in overviews.items():
+            if overview.trashed:
+                continue
+            if asset_id in legacy_ids or asset_id in artifact_asset_ids:
+                continue
+            if overview.legacy_resource_id and overview.legacy_resource_id in legacy_ids:
+                continue
+            try:
+                rows.append(
+                    asset_view_from_catalog_overview(overview, project_root=project_root)
+                )
+            except Exception:
+                continue
+        return rows
+
+    def update_governance_metadata(self, asset_id: str, patch: dict) -> bool:
+        """Persist a governance patch through the Core service (validated)."""
+        service = self.catalog_service()
+        if service is None:
+            self.page._set_action_status("治理信息需要活动数据目录")
+            return False
+        try:
+            service.update_asset_metadata(asset_id, patch)
+        except Exception as exc:
+            self.page._set_action_status(f"治理信息保存失败: {exc}")
+            return False
+        self.page._refresh()
+        self.page._update_inspector_for_current_selection()
+        self.page._set_action_status("已保存治理信息")
+        return True
+
+    def resolve_catalog_asset_id(self, asset: object) -> str | None:
+        """Catalog asset id for a table row (bridge / companion / direct).
+
+        ExportArtifact rows resolve ONLY through their registered
+        ``catalog_version_id`` — the artifact's own ``id`` (``artifact_…``)
+        is NOT a catalog asset id and must never reach the catalog API.
+        """
+        unwrapped = unwrap_asset(asset)
+        if isinstance(unwrapped, ResourceItem):
+            _svc, ref = self.catalog_bridge(unwrapped)
+            return ref.asset_id if ref is not None else None
+        if isinstance(unwrapped, ExportArtifact):
+            version_id = getattr(unwrapped, "catalog_version_id", None)
+            if not version_id:
+                return None
+            service = self.catalog_service()
+            if service is None:
+                return None
+            try:
+                return service.get_version(version_id).asset_id
+            except Exception:
+                return None
+        from paleo_workbench.catalog.models import DataAsset
+
+        if isinstance(unwrapped, DataAsset):
+            return unwrapped.id
+        # Enriched catalog-only views carry the catalog asset id directly.
+        return getattr(unwrapped, "id", None)
+
+    # ------------------------------------------------------------------ #
     # Remove / trash / restore / rescan
     # ------------------------------------------------------------------ #
 
@@ -258,6 +402,26 @@ class DataLifecycleController:
         removed_count = 0
         trashed_count = 0
         target_ids = {getattr(it, "id", None) for it in items if getattr(it, "id", None)}
+
+        # Catalog-only rows (no legacy companion) trash directly in the
+        # catalog. They surface as AssetView rows whose raw_asset is a Core
+        # DataAsset (unwrap_asset resolves to it).
+        service = self.catalog_service()
+        if service is not None:
+            from paleo_workbench.catalog.models import DataAsset as _DataAsset
+
+            for item in items:
+                unwrapped = unwrap_asset(item)
+                if not isinstance(unwrapped, _DataAsset):
+                    continue
+                try:
+                    service.trash_asset(unwrapped.id, reason="移出项目")
+                    trashed_count += 1
+                    target_ids.discard(unwrapped.id)
+                except Exception as exc:
+                    page._set_action_status(f"移入回收站失败，未移除: {exc}")
+                    page._refresh()
+                    return False
 
         for item in items:
             resource = unwrap_asset(item)
@@ -404,31 +568,52 @@ class DataLifecycleController:
         Requires an active catalog: the derived result is an immutable DERIVED
         DataVersion with lineage — never a RAW-path alias. Without a catalog the
         action fails visibly; catalog failures surface as errors, never a
-        half-state.
+        half-state. Catalog-only rows produce the derived asset directly (no
+        legacy companion needed — it surfaces as its own catalog row).
         """
         page = self.page
         asset = unwrap_asset(asset)
-        if not isinstance(asset, ResourceItem):
-            page._set_action_status("仅支持为 ResourceItem 数据创建派生副本")
-            return
-
-        service, ref = self.catalog_bridge(asset)
-        if service is None or ref is None:
+        target = self._catalog_row_target(asset)
+        if target is None:
             page._set_action_status("创建派生副本需要活动数据目录（数据未桥接）")
             return
+        service, asset_id, version_id, name = target
+        if isinstance(asset, ResourceItem):
+            try:
+                derived_item = self.create_derived_via_catalog(
+                    asset, service=service, ref=SimpleNamespace(
+                        asset_id=asset_id, version_id=version_id
+                    )
+                )
+            except Exception as exc:
+                page._set_action_status(f"创建派生副本失败: {exc}")
+                return
+            if derived_item is None:
+                page._set_action_status("创建派生副本失败: 无法解析源版本")
+                return
+            page.project.resources.append(derived_item)
+            page._refresh()
+            page._set_selected_asset(derived_item)
+            page._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
+            return
         try:
-            derived_item = self.create_derived_via_catalog(asset, service=service, ref=ref)
+            source_version = service.get_version(version_id)
+            payload = service.resolve_path(source_version)
+            if not payload.is_file():
+                page._set_action_status("创建派生副本失败: 无法解析源版本")
+                return
+            version = service.create_derived(
+                source_path=payload,
+                parent_version_ids=[source_version.id],
+                name=f"{name}_derived",
+                operation="derived_copy",
+                generator="data_manager",
+            )
         except Exception as exc:
             page._set_action_status(f"创建派生副本失败: {exc}")
             return
-        if derived_item is None:
-            page._set_action_status("创建派生副本失败: 无法解析源版本")
-            return
-
-        page.project.resources.append(derived_item)
         page._refresh()
-        page._set_selected_asset(derived_item)
-        page._set_action_status(f"已从 🔒 RAW 建立派生副本: {derived_item.name}")
+        page._set_action_status(f"已建立派生副本: {name}_derived (v{version.version_number})")
 
     def create_derived_via_catalog(
         self,
@@ -546,20 +731,18 @@ class DataLifecycleController:
         immutable version of the SAME asset."""
         page = self.page
         asset = unwrap_asset(asset)
-        if not isinstance(asset, ResourceItem):
-            page._set_action_status("仅支持为资源数据创建新版本")
-            return
-        service, ref = self.catalog_bridge(asset)
-        if service is None or ref is None:
+        target = self._catalog_row_target(asset)
+        if target is None:
             page._set_action_status("新建版本需要活动数据目录（数据未桥接）")
             return
+        service, asset_id, version_id, name = target
         try:
-            working_path = service.create_working_copy(ref.version_id)
+            working_path = service.create_working_copy(version_id)
         except Exception as exc:
             page._set_action_status(f"创建工作副本失败: {exc}")
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(working_path.as_posix()))
-        dlg = _NewVersionDialog(page, asset_name=asset.name)
+        dlg = _NewVersionDialog(page, asset_name=name)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             page._set_action_status(f"已创建可编辑工作副本（未提交）: {working_path}")
             return
@@ -571,7 +754,7 @@ class DataLifecycleController:
         try:
             run = service.register_run(
                 "working_copy_commit",
-                input_version_ids=[ref.version_id],
+                input_version_ids=[version_id],
                 parameters={"stage": dlg.stage().value, "name": dlg.version_name()},
             )
             run_id = run.id
@@ -580,7 +763,7 @@ class DataLifecycleController:
         try:
             version = service.commit_working_copy(
                 working_path,
-                asset_id=ref.asset_id,
+                asset_id=asset_id,
                 name=dlg.version_name(),
                 stage=dlg.stage(),
                 run_id=run_id,
@@ -599,19 +782,17 @@ class DataLifecycleController:
         version (promote DataRun + current_version_id advance)."""
         page = self.page
         asset = unwrap_asset(asset)
-        if not isinstance(asset, ResourceItem):
-            page._set_action_status("仅支持为资源数据提升版本")
-            return
-        service, ref = self.catalog_bridge(asset)
-        if service is None or ref is None:
+        target = self._catalog_row_target(asset)
+        if target is None:
             page._set_action_status("提升为正式数据需要活动数据目录（数据未桥接）")
             return
-        dlg = _PromoteDialog(page, asset_name=asset.name)
+        _service, _asset_id, version_id, name = target
+        dlg = _PromoteDialog(page, asset_name=name)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            version = service.promote_version(
-                ref.version_id,
+            version = self.catalog_service().promote_version(
+                version_id,
                 to_stage=dlg.stage(),
                 reviewed_by=dlg.reviewed_by(),
                 note=dlg.note(),
@@ -628,7 +809,7 @@ class DataLifecycleController:
         exported path, checksum, timestamp, format, delivery status)."""
         page = self.page
         asset = unwrap_asset(asset)
-        service, ref = self.catalog_bridge(asset)
+        service, ref = self.catalog_bridge(asset) if isinstance(asset, ResourceItem) else (None, None)
         source_path: Path | None = None
         if isinstance(asset, ResourceItem):
             source_path = page._resolve_resource_path(asset)
@@ -655,6 +836,18 @@ class DataLifecycleController:
             if not source_path.is_file() and service is not None and ref is not None:
                 try:
                     source_path = service.resolve_path(service.get_version(ref.version_id))
+                except Exception:
+                    source_path = None
+        elif not isinstance(asset, ExportArtifact):
+            # Catalog-only rows (Core DataAsset): resolve the current
+            # version's managed payload through the catalog.
+            service = self.catalog_service()
+            version_id = getattr(asset, "current_version_id", None)
+            if service is not None and version_id:
+                try:
+                    version = service.get_version(version_id)
+                    source_path = service.resolve_path(version)
+                    ref = SimpleNamespace(asset_id=asset.id, version_id=version.id)
                 except Exception:
                     source_path = None
         if source_path is None or not source_path.is_file():
@@ -742,6 +935,20 @@ class DataLifecycleController:
     def handle_tag_added(self, asset: object, tag_name: str) -> None:
         page = self.page
         asset = unwrap_asset(asset)
+        from paleo_workbench.catalog.models import DataAsset
+
+        if isinstance(asset, DataAsset):
+            # Catalog-only row: the catalog is the only tag home (no legacy
+            # ResourceItem to mirror onto).
+            service = self.catalog_service()
+            if service is not None:
+                try:
+                    service.add_tag(tag_name, asset_id=asset.id)
+                    page._refresh()
+                    page._set_action_status(f"已添加标签 #{tag_name}")
+                except Exception as exc:
+                    page._set_action_status(f"添加标签失败: {exc}")
+            return
         if isinstance(asset, ResourceItem):
             if tag_name not in asset.tags:
                 asset.tags.append(tag_name)
@@ -752,6 +959,18 @@ class DataLifecycleController:
     def handle_tag_removed(self, asset: object, tag_name: str) -> None:
         page = self.page
         asset = unwrap_asset(asset)
+        from paleo_workbench.catalog.models import DataAsset
+
+        if isinstance(asset, DataAsset):
+            service = self.catalog_service()
+            if service is not None:
+                try:
+                    service.remove_tag(tag_name, asset_id=asset.id)
+                    page._refresh()
+                    page._set_action_status(f"已移除标签 #{tag_name}")
+                except Exception as exc:
+                    page._set_action_status(f"移除标签失败: {exc}")
+            return
         if isinstance(asset, ResourceItem):
             if tag_name in asset.tags:
                 asset.tags.remove(tag_name)

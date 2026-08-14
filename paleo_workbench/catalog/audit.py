@@ -15,6 +15,24 @@ current_version / orphan artifacts / path mismatch):
                                versions (may be purge-retained provenance,
                                hence informational)
 - ``lineage_cycle``          — parent-chain cycles
+- ``unprovenanced_version``  — non-RAW version with no producing run AND no
+                               parents (cannot answer "where did this come
+                               from")
+- ``stale_running_run``      — run stuck in ``running`` status past the
+                               staleness window (crashed producer)
+- ``multi_claimed_output``   — one version claimed as output by several runs,
+                               or the claimed run disagrees with
+                               ``version.run_id``
+- ``run_lineage_divergence`` — run input×output pair with no matching parent
+                               edge on the output version (the version-graph
+                               walk will not show that input)
+- ``science_run_without_inputs`` — completed factor_map/prediction/
+                               map_compile/qc run with zero input versions
+                               (chain to RAW unrecorded at this step)
+- ``external_path_missing``  — unmanaged version whose source file is gone
+                               (existence stat only)
+- ``invalid_metadata_value`` — governance field value outside its controlled
+                               vocabulary (manual catalog.json edits)
 - ``dangling_tag_ref``       — association-map entries whose owner id or tag id
                                is unknown
 - ``unused_tag``             — tag entity with zero associations (informational)
@@ -32,14 +50,22 @@ mismatch is reported, not auto-fixed).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 
 from paleo_workbench.catalog import gc as _gc
+from paleo_workbench.catalog.models import DataStage
 from paleo_workbench.catalog.storage import STAGE_DIRS, is_cas_path
 from paleo_workbench.project.paths import artifact_dir_for
 
 SEVERITY_HIGH = "high"
 SEVERITY_MEDIUM = "medium"
 SEVERITY_LOW = "low"
+
+# A run still ``running`` after this window is almost certainly a crashed
+# producer (the adapter books runs as running before executing and completes
+# them in a finally-path; nothing legitimately runs this long).
+STALE_RUN_AFTER_SECONDS = 24 * 3600
 
 
 @dataclass
@@ -72,6 +98,16 @@ class AuditReport:
         return counts
 
     @property
+    def statistics(self) -> dict[str, int]:
+        """Aggregated statistics: entity counts, issues per severity and per kind."""
+        stats: dict[str, int] = dict(self.checked)
+        for severity in (SEVERITY_HIGH, SEVERITY_MEDIUM, SEVERITY_LOW):
+            stats[f"issues_{severity}"] = len(self.by_severity(severity))
+        for kind, count in self.counts_by_kind().items():
+            stats[f"kind_{kind}"] = count
+        return stats
+
+    @property
     def ok(self) -> bool:
         """True when no high/medium issue was found (low = informational)."""
         return not self.by_severity(SEVERITY_HIGH) and not self.by_severity(
@@ -79,7 +115,9 @@ class AuditReport:
         )
 
 
-def audit_catalog(service, *, deep: bool = False) -> AuditReport:
+def audit_catalog(
+    service, *, deep: bool = False, stale_run_after_seconds: int | None = None
+) -> AuditReport:
     """Run all structural checks over the canonical document.
 
     ``deep=True`` additionally re-hashes every non-trashed managed payload
@@ -107,6 +145,19 @@ def audit_catalog(service, *, deep: bool = False) -> AuditReport:
         _check_lineage(report, versions, version_ids)
         _check_run_links(report, document.runs, version_ids)
         _check_run_outputs(report, document.runs)
+        _check_science_run_inputs(report, document.runs)
+        _check_provenance(report, versions)
+        _check_stale_runs(
+            report, document.runs, version_ids,
+            after_seconds=(
+                STALE_RUN_AFTER_SECONDS
+                if stale_run_after_seconds is None
+                else stale_run_after_seconds
+            ),
+        )
+        _check_output_claims(report, document.runs, version_by_id)
+        _check_run_lineage_divergence(report, document.runs, version_by_id)
+        _check_governance_metadata(report, assets)
         _check_tags(report, document, asset_ids, version_ids)
         _check_paths(report, service, versions)
 
@@ -252,6 +303,193 @@ def _check_run_outputs(report: AuditReport, runs) -> None:
             )
 
 
+def _check_science_run_inputs(report: AuditReport, runs) -> None:
+    """Completed science runs that declare zero input versions.
+
+    factor_map / prediction / map_compile / qc always consume catalog inputs
+    in the production flow; a completed run with no inputs means the chain
+    from this step back to RAW is unrecorded (the 血缘 walk stops here).
+    Runs with status failed/cancelled are legitimately input-less retries;
+    ``export`` is exempt (external figure exports may have no resolved
+    sources).
+    """
+    _SCIENCE_OPS = {"factor_map", "prediction", "map_compile", "qc"}
+    for run in runs:
+        if run.operation not in _SCIENCE_OPS:
+            continue
+        if run.status not in ("completed", "complete"):
+            continue
+        if run.input_version_ids:
+            continue
+        report.issues.append(
+            AuditIssue(
+                "science_run_without_inputs",
+                SEVERITY_MEDIUM,
+                run.id,
+                f"completed '{run.operation}' run records no input versions — "
+                "its outputs cannot be traced to RAW",
+            )
+        )
+
+
+def _check_provenance(report: AuditReport, versions) -> None:
+    """Non-RAW versions that can never answer "which run/inputs produced me"."""
+    for version in versions:
+        if version.stage == DataStage.RAW or version.trashed:
+            continue
+        if version.run_id is None and not version.parent_version_ids:
+            report.issues.append(
+                AuditIssue(
+                    "unprovenanced_version",
+                    SEVERITY_MEDIUM,
+                    version.id,
+                    f"{version.stage.value} version has no producing run and "
+                    "no parent versions",
+                )
+            )
+
+
+def _check_stale_runs(
+    report: AuditReport, runs, version_ids: set, *, after_seconds: int
+) -> None:
+    """Runs stuck in ``running`` past the staleness window.
+
+    A dangling input/output id on a stale run is already reported by
+    ``broken_run_link``; here the run itself never finished.
+    """
+    now = datetime.now(timezone.utc)
+    for run in runs:
+        if run.status != "running":
+            continue
+        started = _parse_iso(run.created_at)
+        if started is None:
+            continue
+        age = (now - started).total_seconds()
+        if age > after_seconds:
+            report.issues.append(
+                AuditIssue(
+                    "stale_running_run",
+                    SEVERITY_LOW,
+                    run.id,
+                    f"'{run.operation}' run still running after "
+                    f"{int(age / 3600)}h",
+                )
+            )
+
+
+def _parse_iso(raw: str | None):
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _check_output_claims(
+    report: AuditReport, runs, version_by_id: dict
+) -> None:
+    """One output version claimed by several runs, or a claim that disagrees
+    with the version's own ``run_id`` (its canonical producer)."""
+    claims: dict[str, list] = {}
+    for run in runs:
+        for output_id in run.output_version_ids:
+            if output_id in version_by_id:
+                claims.setdefault(output_id, []).append(run)
+    for output_id, claiming_runs in claims.items():
+        version = version_by_id[output_id]
+        if len(claiming_runs) > 1:
+            names = ", ".join(f"{r.operation}:{r.id}" for r in claiming_runs)
+            report.issues.append(
+                AuditIssue(
+                    "multi_claimed_output",
+                    SEVERITY_LOW,
+                    output_id,
+                    f"version claimed as output by {len(claiming_runs)} runs ({names})",
+                )
+            )
+        elif version.run_id is not None and version.run_id != claiming_runs[0].id:
+            report.issues.append(
+                AuditIssue(
+                    "multi_claimed_output",
+                    SEVERITY_LOW,
+                    output_id,
+                    f"version.run_id {version.run_id} != claiming run "
+                    f"{claiming_runs[0].id} ({claiming_runs[0].operation})",
+                )
+            )
+
+
+def _check_run_lineage_divergence(
+    report: AuditReport, runs, version_by_id: dict
+) -> None:
+    """Run input→output pairs with no matching parent edge on the output.
+
+    The adapter's convention mirrors run inputs into ``parent_version_ids``
+    so the version-graph walk (UI 血缘) shows the same chain as the run
+    record; a divergence means the walk silently hides a real input.
+    Purged inputs are tolerated (purge-retained provenance).
+    """
+    for run in runs:
+        if not run.input_version_ids or not run.output_version_ids:
+            continue
+        for output_id in run.output_version_ids:
+            version = version_by_id.get(output_id)
+            if version is None:
+                continue
+            live_inputs = [
+                vid
+                for vid in run.input_version_ids
+                if vid in version_by_id
+            ]
+            if not live_inputs:
+                continue
+            if not set(live_inputs) & set(version.parent_version_ids):
+                report.issues.append(
+                    AuditIssue(
+                        "run_lineage_divergence",
+                        SEVERITY_LOW,
+                        output_id,
+                        f"run {run.id} ({run.operation}) consumed "
+                        f"{len(live_inputs)} input(s) but the output version "
+                        "has no matching parent edge",
+                    )
+                )
+
+
+def _check_governance_metadata(report: AuditReport, assets) -> None:
+    """Governance fields carrying values outside their vocabularies.
+
+    Manual ``catalog.json`` edits bypass :meth:`update_asset_metadata`;
+    the audit keeps the drift visible instead of silently breaking filters.
+    """
+    from paleo_workbench.catalog.governance import (
+        GOVERNANCE_FIELDS,
+        normalize_governance_value,
+    )
+
+    for asset in assets:
+        for key, spec in GOVERNANCE_FIELDS.items():
+            raw = asset.metadata.get(key)
+            if raw in (None, "") or spec.vocabulary is None:
+                continue
+            try:
+                normalize_governance_value(key, raw)
+            except ValueError:
+                report.issues.append(
+                    AuditIssue(
+                        "invalid_metadata_value",
+                        SEVERITY_LOW,
+                        asset.id,
+                        f"{spec.label}({key})={raw!r} 不在受控词表 "
+                        f"{('、'.join(spec.vocabulary))}",
+                    )
+                )
+
+
 def _check_tags(report: AuditReport, document, asset_ids: set, version_ids: set) -> None:
     tag_ids = {t.id for t in document.tags}
     for asset_id, ids in document.asset_tags.items():
@@ -373,7 +611,18 @@ def _check_payloads(
     """
     for version in versions:
         if not version.managed:
-            continue  # external files are outside catalog custody
+            # External files are outside catalog custody, but a missing
+            # source still breaks every consumer — report it (stat only).
+            if version.path and not Path(version.path).exists():
+                report.issues.append(
+                    AuditIssue(
+                        "external_path_missing",
+                        SEVERITY_MEDIUM,
+                        version.id,
+                        f"external payload not found: {version.path}",
+                    )
+                )
+            continue
         payload = service.resolve_path(version)
         if not payload.exists():
             # A trashed version's payload may legitimately be missing (a

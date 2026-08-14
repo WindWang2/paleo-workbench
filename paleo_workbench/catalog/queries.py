@@ -81,16 +81,18 @@ def search_assets(
     tags: list[str] | tuple[str, ...] | None = None,
     tag_op: str = "and",
     type: str | None = None,
+    metadata: dict | None = None,
     include_trashed: bool = False,
 ) -> list:
-    """Filter assets by name substring, stage, tag(s), and/or type.
+    """Filter assets by name substring, stage, tag(s), type, and/or metadata.
 
     ``tags`` accepts several tag names combined with ``tag_op`` (``"and"`` /
     ``"or"``); the single-``tag`` parameter is kept for compatibility and is
-    unioned into ``tags``. Trashed (soft-deleted) assets are excluded unless
-    ``include_trashed``. When the SQLite index is missing/unavailable the
-    in-memory document scan below is used, so search always reflects the
-    canonical document.
+    unioned into ``tags``. ``metadata`` matches ``asset.metadata[key]`` by
+    string equality (governance fields live there). Trashed (soft-deleted)
+    assets are excluded unless ``include_trashed``. When the SQLite index is
+    missing/unavailable the in-memory document scan below is used, so search
+    always reflects the canonical document.
     """
     tag_list = [t for t in (list(tags) if tags else []) if str(t).strip()]
     if tag is not None and str(tag).strip():
@@ -98,6 +100,11 @@ def search_assets(
     tag_list = [normalize_tag_name(t) for t in tag_list]
     if tag_op not in ("and", "or"):
         raise ValueError(f"tag_op must be 'and' or 'or', got {tag_op!r}")
+    metadata_pairs = [
+        (str(k), str(v))
+        for k, v in (metadata or {}).items()
+        if str(v).strip() != ""
+    ]
     try:
         if service.index_revision() != service.document.catalog_revision:
             # A readable-but-stale index must not be queried (I3): only the
@@ -109,6 +116,7 @@ def search_assets(
             tags=tag_list or None,
             tag_op=tag_op,
             type=type,
+            metadata=metadata_pairs or None,
         )
         # Use the service's maintained id→asset map (O(1) per row) instead of
         # rebuilding it per query, so a filtered search is O(result), not O(N).
@@ -129,6 +137,14 @@ def search_assets(
         results = [a for a in results if needle in a.name.casefold()]
     if type:
         results = [a for a in results if a.type == type]
+    if metadata_pairs:
+        results = [
+            a
+            for a in results
+            if all(
+                str(a.metadata.get(k, "")) == v for k, v in metadata_pairs
+            )
+        ]
     if stage is not None:
         with_stage = {v.asset_id for v in service.document.versions if v.stage == stage}
         results = [a for a in results if a.id in with_stage]
