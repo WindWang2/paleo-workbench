@@ -456,7 +456,16 @@ class UnifiedMapCanvas(QWidget):
             self._space_pan = True
             event.accept()
             return
-        key_name = "escape" if event.key() == Qt.Key.Key_Escape else (event.text() or event.key().name)
+        key = event.key()
+        # PySide6's QKeyEvent.key() returns an int; calling ``.name`` on it
+        # raised AttributeError for no-text non-Escape keys (arrows, Delete,
+        # F-keys) and aborted the handler before the tool controller or the
+        # parent keyPressEvent ran.
+        if key == Qt.Key.Key_Escape:
+            key_name = "escape"
+        else:
+            text = event.text()
+            key_name = text if text else Qt.Key(key).name.lower()
         if self._tool_controller is not None and self._tool_controller.key_press(key_name):
             self.tool_operation.emit()
             self.update()

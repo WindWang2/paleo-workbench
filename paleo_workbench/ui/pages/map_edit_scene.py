@@ -1094,17 +1094,29 @@ class MapEditScene(QGraphicsScene):
         if self._vertex_drag and self._vertex_drag_feature_id and self._vertex_drag_start_xy is not None:
             item = self._items_by_id.get(self._vertex_drag_feature_id)
             idx = self._vertex_drag_index
+            part_index = self._vertex_drag_part_index
+            ring_index = self._vertex_drag_ring_index
             start = self._vertex_drag_start_xy
-            # Facies and line vertices share the same drag path — restore both.
+            # Mirror mouseReleaseEvent's part/ring addressing: restoring the
+            # outer ring only moved an arbitrary vertex when the drag was on a
+            # hole / non-first part (silent geometry corruption on cancel).
             if isinstance(item, (FaciesPolygonItem, LineItem)) and idx is not None:
-                coords = item.coordinates()
+                restored = (
+                    item.ring_coordinates(part_index, ring_index)
+                    if isinstance(item, FaciesPolygonItem)
+                    else item.coordinates()
+                )
                 try:
-                    api.set_vertex(coords, idx, start[0], start[1])
-                    item.set_coordinates(coords)
-                    self._refresh_hit_entry(item)
-                    self._invalidate_snap_candidates()
+                    api.set_vertex(restored, idx, start[0], start[1])
                 except (IndexError, TypeError, ValueError):
                     pass
+                else:
+                    if isinstance(item, FaciesPolygonItem):
+                        item.set_ring_coordinates(part_index, ring_index, restored)
+                    else:
+                        item.set_coordinates(restored)
+                    self._refresh_hit_entry(item)
+                    self._invalidate_snap_candidates()
         self._vertex_drag = False
         self._vertex_drag_feature_id = None
         self._vertex_drag_index = None

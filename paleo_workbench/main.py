@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 
 # Prefer Wayland on Wayland sessions; clear accidental QT_QPA_PLATFORM=xcb
@@ -58,6 +59,13 @@ def main() -> int:
         data_root = resolve_sample_data_root()
         project = bootstrap_sample_project(data_root).document
     except Exception:
+        # A failed sample bootstrap should never crash startup, but silently
+        # swallowing it hid real config/data-root problems; log so a missing
+        # sample tree is diagnosable instead of an empty window with no clue.
+        logging.getLogger("paleo_workbench").warning(
+            "sample project bootstrap failed; starting with no project",
+            exc_info=True,
+        )
         project = None
 
     window = PaleoWorkbenchWindow(project=project)

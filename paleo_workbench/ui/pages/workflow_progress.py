@@ -95,7 +95,7 @@ class WorkflowProgress(QWidget):
             if status == "stale":
                 stale_count += 1
             self.step_widgets[i]["status"].setText(
-                tokens.STATUS_TEXT.get(status, "未开始")
+                tokens.STATUS_TEXT.get(status, "待开始")
             )
             color = (
                 tokens.WARNING

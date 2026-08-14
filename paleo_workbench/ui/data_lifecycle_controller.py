@@ -608,7 +608,7 @@ class DataLifecycleController:
                 try:
                     from paleo_workbench.project.paths import resolve_project_path
                     source_path = Path(
-                        resolve_project_path(str(rel), self._project_file_for_io())
+                        resolve_project_path(str(rel), page._project_file_for_io())
                     )
                 except Exception:
                     source_path = rel

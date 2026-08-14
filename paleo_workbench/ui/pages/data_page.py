@@ -640,6 +640,9 @@ class DataPage(QWidget):
                         )
 
         menu.exec(global_pos)
+        # A fresh menu is built per right-click; schedule its teardown so the
+        # parented menu/actions/QShortcuts don't accumulate for the session.
+        menu.deleteLater()
 
     def _export_selected_asset(self, format_label: str) -> None:
         asset = self._selected_asset

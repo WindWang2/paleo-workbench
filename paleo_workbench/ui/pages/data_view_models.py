@@ -279,21 +279,25 @@ def asset_view_from_resource(resource: ResourceItem, project_root: Path | None =
     else:
         integrity = IntegrityState.UNKNOWN
 
-    size_bytes = resource.parsed_summary.get("size_bytes")
-    if size_bytes is None and file_exists and path_obj.is_file():
-        try:
-            size_bytes = path_obj.stat().st_size
-        except OSError:
-            size_bytes = None
-
-    modified_at = "—"
+    # Single stat() pass shared by size + mtime (previously two filesystem
+    # round-trips per asset per refresh, executed ≥2× per refresh across the
+    # filter-index rebuild and model rebuild — UI stalls scaled with NAS
+    # latency × asset count).
+    stat_result = None
     if file_exists and path_obj.is_file():
         try:
-            mtime = path_obj.stat().st_mtime
-            from datetime import datetime
-            modified_at = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            stat_result = path_obj.stat()
         except OSError:
-            pass
+            stat_result = None
+
+    size_bytes = resource.parsed_summary.get("size_bytes")
+    if size_bytes is None and stat_result is not None:
+        size_bytes = stat_result.st_size
+
+    modified_at = "—"
+    if stat_result is not None:
+        from datetime import datetime
+        modified_at = datetime.fromtimestamp(stat_result.st_mtime).strftime("%Y-%m-%d %H:%M")
 
     type_label = RESOURCE_TYPE_DISPLAY_LABELS.get(resource.type, resource.type)
 

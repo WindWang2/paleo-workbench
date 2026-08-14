@@ -930,6 +930,20 @@ class GeologicalModeling3DPage(QWidget):
         self._restore_joint_display_settings()
         self._restore_joint_slice_settings()
 
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        """Join the page's OwnedWorkerJobs on project switch / app close.
+
+        Mirrors the teardown hook sibling pages expose so AppShell.shutdown_workers
+        reclaims the modeling/export/advisor/stratal jobs (and their result
+        connections into this page) instead of letting them run against a
+        closed catalog/document.
+        """
+        joined = True
+        for job in (self._modeling_job, self._export_job, self._advisor_job, self._stratal_job):
+            if not job.shutdown(wait_ms):
+                joined = False
+        return joined
+
     def _build_joint_slice_card(self) -> QFrame:
         """Build a one-row control surface for orthogonal slices."""
         card = QFrame()
@@ -1452,12 +1466,20 @@ class GeologicalModeling3DPage(QWidget):
                     / 100.0
                 ),
             )
-        self._joint_host.scene.restore_orthogonal_slice_state(restored)
+        scene = self._joint_host.scene
+        if scene is None:
+            # Joint engine failed to construct (e.g. volume unavailable); the
+            # deferred set_project binding must not raise here or it aborts
+            # DeferredPageBindings.flush and drops sibling page bindings.
+            return
+        scene.restore_orthogonal_slice_state(restored)
         self._refresh_joint_slice_card()
 
     def _refresh_joint_slice_card(self) -> None:
         """Refresh controls from the scene-owned slice state."""
         scene = self._joint_host.scene
+        if scene is None:
+            return
         registration = scene.registration
         state = scene.orthogonal_slice_state
         ready = registration is not None
@@ -1910,8 +1932,12 @@ class GeologicalModeling3DPage(QWidget):
             take = getattr(self._joint_widget, "take_profile_widget", None)
             profile = take() if callable(take) else self._joint_widget.profile_widget
             layout_3d = self.joint_3d_host.layout()
-            if self._joint_3d_placeholder is not None:
-                self._joint_3d_placeholder.setParent(None)
+            # Capture the placeholder locally before nulling the attribute: a
+            # later exception must still be able to surface on it instead of
+            # raising AttributeError on the now-None attribute.
+            placeholder = self._joint_3d_placeholder
+            if placeholder is not None:
+                placeholder.setParent(None)
                 self._joint_3d_placeholder = None
             layout_3d.addWidget(self._joint_widget, 1)
             if profile is not None:
@@ -1925,7 +1951,8 @@ class GeologicalModeling3DPage(QWidget):
             self._install_joint_well_pick()
         except Exception as exc:
             logger.exception("joint widget mount failed")
-            self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
+            if self._joint_3d_placeholder is not None:
+                self._joint_3d_placeholder.setText(f"挂载失败: {exc}")
 
     def _install_joint_well_pick(self) -> None:
         """Install click/drag filter on joint 3D for pick + draw-snap (#123/#124)."""

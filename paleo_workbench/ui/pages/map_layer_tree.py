@@ -189,6 +189,11 @@ class MapLayerTree(QFrame):
         if isinstance(data, tuple) and data and data[0] == "layer":
             # Selecting a layer does not change document
             return
+        if isinstance(data, tuple) and data and data[0] == "reference_layer":
+            # Reference-layer rows are not map documents; treating them as one
+            # emitted a raw tuple as the active document and crashed the host
+            # page's load_document() with AttributeError.
+            return
         # Document node
         if data is not self._active_document:
             self._active_document = data

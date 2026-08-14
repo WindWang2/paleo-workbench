@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QToolBar, QWidget
 
@@ -63,6 +63,10 @@ class MapActionController(QObject):
         action.setIconText(self._LABELS[action_id])
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
+            # The window also binds Ctrl+S to project save. Keep this mapping
+            # action's shortcut confined to the editing widget tree so the two
+            # don't collide into an ambiguous "Ctrl+S" shortcut.
+            action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.actions[action_id] = action
         return action
 

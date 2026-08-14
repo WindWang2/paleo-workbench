@@ -1183,10 +1183,14 @@ class MappingPage(QWidget):
             return
         session = authoring.active_session
         selected = authoring.active_layer.selection
+        # Newly digitized features live only in the edit session's working set;
+        # VectorLayer.feature() sees committed features and raises KeyError for
+        # them, which undercounted polygons and kept merge/split disabled.
+        source = session if session is not None else authoring.active_layer
         polygon_count = 0
         for feature_id in selected:
             try:
-                if authoring.active_layer.feature(feature_id).geometry["type"] in {"Polygon", "MultiPolygon"}:
+                if source.feature(feature_id).geometry["type"] in {"Polygon", "MultiPolygon"}:
                     polygon_count += 1
             except KeyError:
                 continue

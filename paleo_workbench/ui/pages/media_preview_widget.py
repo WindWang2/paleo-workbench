@@ -78,6 +78,12 @@ class MediaPreviewWidget(QWidget):
         self._player.stop()
         self.play_btn.setText("播放")
 
+    def hideEvent(self, event) -> None:  # noqa: N802
+        # Stop audio when the widget is hidden (page switch / tab change) so a
+        # previewed clip does not keep playing after the user navigates away.
+        self.stop()
+        super().hideEvent(event)
+
     def set_media_path(self, path: str) -> None:
         from PySide6.QtCore import QUrl
 

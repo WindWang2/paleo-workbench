@@ -233,10 +233,18 @@ class PaleoWorkbenchWindow(QWidget):
             sidebar.toggle_collapse()
 
     def _on_density_changed(self, density: str) -> None:
-        """Rebuild the global QSS at the requested density (comfortable|compact)."""
+        """Rebuild the global QSS at the requested density (comfortable|compact).
+
+        AppShell installs its own widget-level QSS at construction; per Qt's
+        cascade rule a widget/ancestor stylesheet wins over the QApplication
+        stylesheet, so the compact rebuild must be re-applied on the shell too
+        or the comfortable padding silently stays for the whole main window.
+        """
+        qss = tokens.build_qss(density=density)
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(tokens.build_qss(density=density))
+            app.setStyleSheet(qss)
+        self.app_shell.setStyleSheet(qss)
         self.app_shell.menu_bar.set_density_checked(density)
 
     def _on_about(self) -> None:

@@ -45,7 +45,13 @@ class SequenceTargetPanel(QFrame):
             f" border-radius: {tokens.RADIUS_BUTTON}px; padding: 2px 6px; }}"
         )
         self.target_combo.lineEdit().setPlaceholderText("未设置")
-        self.target_combo.currentTextChanged.connect(self._on_target_text)
+        # For an editable combo, ``currentTextChanged`` fires on every keystroke
+        # and cascades apply_stratigraphy_scheme (writes partial horizons into
+        # the project + a full refresh per keystroke). Fire only on commit:
+        # dropdown selection (``activated``) and Enter/return (``returnPressed``).
+        line_edit = self.target_combo.lineEdit()
+        line_edit.returnPressed.connect(self._on_target_committed)
+        self.target_combo.activated.connect(lambda _i: self._on_target_committed())
         layout.addWidget(self.target_combo)
         # Alias: prefer currentText() / target_horizon_text() over .text().
         self.target_value = self.target_combo
@@ -92,6 +98,20 @@ class SequenceTargetPanel(QFrame):
     def _on_target_text(self, text: str) -> None:
         if not self._suppress:
             self.target_changed.emit(text.strip())
+
+    def _on_target_committed(self) -> None:
+        """Emit target change only on a committed edit (Enter / selection).
+
+        Both ``returnPressed`` and ``activated`` can fire for the same Enter
+        press on an editable combo, so dedupe on the committed text.
+        """
+        if self._suppress:
+            return
+        text = self.current_target()
+        if text == getattr(self, "_last_committed_target", None):
+            return
+        self._last_committed_target = text
+        self.target_changed.emit(text)
 
     def _on_scheme_text(self, text: str) -> None:
         if not self._suppress:

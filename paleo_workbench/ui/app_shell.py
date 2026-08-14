@@ -206,6 +206,8 @@ class AppShell(QWidget):
         self.icon_rail.set_active(index)
 
         self.sidebar.setVisible(False)
+        # The sidebar is hidden but still holds context state (restored on any
+        # later reveal, and asserted by tests), so keep the context updates.
         if index == PAGE_INDEX_DATA:
             self.sidebar.update_data_context(**self._data_context)
         elif index == PAGE_INDEX_MAPPING:

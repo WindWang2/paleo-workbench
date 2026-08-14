@@ -41,20 +41,30 @@ class JsonTreePreviewWidget(QTreeView):
         root = self._model.invisibleRootItem()
         if isinstance(payload, dict):
             for key, value in payload.items():
-                root.appendRow(self._build_row(str(key), value))
+                root.appendRow(self._build_row(str(key), value, depth=0))
         elif isinstance(payload, list):
-            root.appendRow(self._build_row("[root]", payload))
+            root.appendRow(self._build_row("[root]", payload, depth=0))
         else:
-            root.appendRow(self._build_row("[root]", payload))
+            root.appendRow(self._build_row("[root]", payload, depth=0))
         self._expand_initial_depth()
 
-    def _build_row(self, key: str, value: object):
+    # Hard cap on nesting before a deep user payload overflows the interpreter
+    # stack (Python's default recursion limit is ~1000 and each level here
+    # costs several frames). Deeper levels render as a placeholder node.
+    _MAX_BUILD_DEPTH = 64
+
+    def _build_row(self, key: str, value: object, *, depth: int = 0):
         key_item = QStandardItem(key)
+        if depth >= self._MAX_BUILD_DEPTH:
+            val_item = QStandardItem("…")
+            val_item.setEditable(False)
+            key_item.setEditable(False)
+            return [key_item, val_item]
         if isinstance(value, dict):
             val_item = QStandardItem(f"{{object · {len(value)} keys}}")
             val_item.setEditable(False)
             for k, v in value.items():
-                key_item.appendRow(self._build_row(str(k), v))
+                key_item.appendRow(self._build_row(str(k), v, depth=depth + 1))
             return [key_item, val_item]
         if isinstance(value, list):
             if len(value) > self.array_collapse_threshold:
@@ -66,7 +76,7 @@ class JsonTreePreviewWidget(QTreeView):
             val_item = QStandardItem(f"[list · {len(value)}]")
             val_item.setEditable(False)
             for i, v in enumerate(value):
-                key_item.appendRow(self._build_row(str(i), v))
+                key_item.appendRow(self._build_row(str(i), v, depth=depth + 1))
             return [key_item, val_item]
         val_item = QStandardItem(str(value))
         val_item.setEditable(False)
@@ -89,5 +99,15 @@ class JsonTreePreviewWidget(QTreeView):
         item = self._model.itemFromIndex(index)
         stored = item.data(Qt.ItemDataRole.UserRole)
         if isinstance(stored, list) and item.rowCount() == 0:
+            depth = self._index_depth(index)
             for i, v in enumerate(stored):
-                item.appendRow(self._build_row(str(i), v))
+                item.appendRow(self._build_row(str(i), v, depth=depth + 1))
+
+    @staticmethod
+    def _index_depth(index) -> int:
+        depth = 0
+        parent = index.parent()
+        while parent.isValid():
+            depth += 1
+            parent = parent.parent()
+        return depth

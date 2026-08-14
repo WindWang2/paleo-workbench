@@ -60,7 +60,7 @@ class MapLayerPropertiesDialog(QDialog):
 
         source = QWidget(self)
         source_form = QFormLayout(source)
-        source_form.addRow("Source", QLabel(str(layer.source_ref) or "managed", source))
+        source_form.addRow("Source", QLabel(layer.source_ref or "managed", source))
         source_form.addRow("Layer type", QLabel(self._layer_type, source))
         self.tabs.addTab(source, "Source")
 
@@ -138,7 +138,7 @@ class MapLayerPropertiesDialog(QDialog):
         metadata = QWidget(self)
         metadata_form = QFormLayout(metadata)
         metadata_form.addRow("Metadata", QLabel(str(dict(layer.metadata)), metadata))
-        metadata_form.addRow("Provenance", QLabel(str(layer.provenance_ref), metadata))
+        metadata_form.addRow("Provenance", QLabel(layer.provenance_ref or "managed", metadata))
         self.tabs.addTab(metadata, "Metadata / Provenance")
 
         buttons = QDialogButtonBox(

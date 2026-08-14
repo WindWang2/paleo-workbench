@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QPixmap
@@ -20,6 +22,10 @@ class PdfPreviewPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("PdfPreviewPanel")
         self._document = document
+        # Take ownership so the document is destroyed with its preview widget
+        # (previously parented to the DataDetailPanel and leaked one-per-PDF).
+        if document is not None:
+            document.setParent(self)
         self._page_index = 0
 
         layout = QVBoxLayout(self)
@@ -77,6 +83,9 @@ class DataDetailPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("DataDetailPanel")
         self.setMinimumWidth(240)
+        # Project file used to resolve project-RELATIVE resource/artifact paths
+        # for preview. Set by the owning DataPage; None keeps legacy behavior.
+        self.project_path: Path | None = None
         self.setStyleSheet(
             f"QFrame#DataDetailPanel {{ background: {tokens.BG_SIDEBAR};"
             f" border: 1px solid {tokens.BORDER};"
@@ -145,7 +154,7 @@ class DataDetailPanel(QFrame):
         for label, value in rows:
             self._add_row(label, value)
 
-        state = preview_for_resource(resource)
+        state = preview_for_resource(resource, base_path=self.project_path)
         self.preview_title.setText(state.title)
         if state.mode == "image" and state.image_path:
             if not self._add_image_preview(state.image_path):
@@ -176,7 +185,7 @@ class DataDetailPanel(QFrame):
         for label, value in rows:
             self._add_row(label, value)
 
-        state = preview_for_artifact(artifact)
+        state = preview_for_artifact(artifact, base_path=self.project_path)
         self.preview_title.setText(state.title)
         for line in state.lines:
             self._add_muted(self.preview_layout, line)
@@ -265,3 +274,7 @@ class DataDetailPanel(QFrame):
             widget = child.widget()
             if widget is not None:
                 widget.setParent(None)
+                # Schedule teardown so parented children (e.g. the QPdfDocument
+                # owned by a PdfPreviewPanel) are actually released instead of
+                # accumulating one-per-selection across the session.
+                widget.deleteLater()

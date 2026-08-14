@@ -126,7 +126,7 @@ STATUS_TEXT = {
     "complete": "已完成",
     "stale": "需更新",
     "running": "处理中",
-    "pending": "未开始",
+    "pending": "待开始",
     "warning": "警告",
     "failed": "异常",
     "ready": "就绪",

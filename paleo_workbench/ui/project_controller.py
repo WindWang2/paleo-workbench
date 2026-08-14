@@ -101,6 +101,12 @@ class ProjectController:
         except json.JSONDecodeError as e:
             self._last_open_error = f"工程文件 JSON 损坏：\n{target}\n{e}"
             return False
+        except UnicodeDecodeError as e:
+            # Non-UTF-8 project file (e.g. saved in a legacy encoding): a
+            # ValueError sibling of JSONDecodeError that previously escaped
+            # this handler and crashed the menu slot without any dialog.
+            self._last_open_error = f"工程文件不是 UTF-8 编码，无法读取：\n{target}\n{e}"
+            return False
         except ValidationError as e:
             self._last_open_error = f"工程文件格式无效：\n{target}\n{e}"
             return False
@@ -123,7 +129,18 @@ class ProjectController:
         self.window.project_path = target
         catalog_error = self._open_catalog(target, loaded)
         if catalog_error is not None:
-            self._last_open_error = f"目录元数据不可用：\n{target}\n{catalog_error}"
+            # The project opened; the catalog is degraded, not fatal. The
+            # _last_open_error channel is only DISPLAYED when open_project_path
+            # returns False, so storing it alone kept this warning invisible
+            # and the app silently ran with a dead catalog (audit A4).
+            self._last_open_error = (
+                f"目录元数据不可用：\n{target}\n{catalog_error}"
+            )
+            self.window._show_project_error(
+                "目录元数据不可用",
+                "工程已打开，但数据目录元数据不可用（分类 / 标签 / 溯源功能受限）。\n"
+                f"{target}\n{catalog_error}",
+            )
         self.window._refresh_shell(defer_nonvisible_bindings=True)
         self._schedule_catalog_maintenance(target, loaded)
         return True

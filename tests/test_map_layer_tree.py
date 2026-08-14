@@ -160,3 +160,46 @@ def test_layer_tree_no_reference_group_when_empty(qtbot):
     doc_item = root.child(0)
     # Only 4 editable layers, no reference group
     assert doc_item.childCount() == 4
+
+
+def test_layer_tree_selecting_reference_layer_does_not_emit_document(qtbot):
+    """Audit G1-1: reference-layer rows must not become the active document.
+
+    Selecting one previously fell through to the document branch, set a raw
+    ("reference_layer", layer) tuple as _active_document and emitted it via
+    document_selected, crashing the host page's load_document().
+    """
+    from PySide6.QtWidgets import QTreeWidgetItem
+
+    from paleo_workbench.project.models import MapReferenceLayer, PaleoMapDocument
+    from paleo_workbench.ui.pages.map_layer_tree import MapLayerTree
+
+    tree = MapLayerTree()
+    qtbot.addWidget(tree)
+    layer = MapReferenceLayer(
+        name="断层参考",
+        source_path="/tmp/faults.geojson",
+        source_kind="vector",
+        source_crs="EPSG:4326",
+        project_crs="EPSG:3857",
+        status="ready",
+    )
+    doc = PaleoMapDocument(
+        name="Map A",
+        linked_target_horizon="H1",
+        reference_layers=[layer],
+    )
+    tree.set_documents([doc])
+    tree.set_active_document(doc)
+
+    emitted: list[object] = []
+    tree.document_selected.connect(emitted.append)
+
+    root = tree.tree.topLevelItem(0)
+    doc_item = root.child(0)
+    ref_group = doc_item.child(4)
+    ref_item: QTreeWidgetItem = ref_group.child(0)
+    tree.tree.setCurrentItem(ref_item)
+
+    assert emitted == []
+    assert tree._active_document is doc

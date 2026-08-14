@@ -145,14 +145,18 @@ class WellLogPredictionPage(QWidget):
             return False
         for index, task in enumerate(self._tasks):
             if getattr(task, "name", None) == well_name:
-                # Set the list selection synchronously: reset to -1 first so the
-                # target row change always fires (QListWidget won't emit
-                # currentRowChanged for a no-op set), then select the item.
+                # Set the list selection synchronously. ``setCurrentItem`` fires
+                # currentRowChanged → _on_task_selected (full canvas+evidence
+                # update); block signals during the set so the update below runs
+                # exactly once instead of duplicating the LAS-merge/engine-plan
+                # work on every 3D-page well sync.
                 lst = self.task_panel.task_list
                 item = lst.item(index)
+                lst.blockSignals(True)
                 lst.setCurrentRow(-1)
                 if item is not None:
                     lst.setCurrentItem(item)
+                lst.blockSignals(False)
                 self._selected_index = index
                 task = self._current_task()
                 self.canvas_panel.update_state(task, project=self._project)

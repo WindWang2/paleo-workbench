@@ -421,6 +421,16 @@ class StratigraphyCorrelationPage(QWidget):
             self._engine_view = None
         self.engine_placeholder.show()
 
+    def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
+        """Release the native multi-well Session on project switch/close.
+
+        Mirrors the teardown hook sibling pages (WellLogPredictionPage) expose
+        so AppShell.shutdown_workers reclaims the engine view instead of
+        relying on widget destruction.
+        """
+        self._release_engine_view()
+        return True
+
     def update_state(self, project=None) -> None:
         if project is not None:
             self._project = project

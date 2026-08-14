@@ -1233,3 +1233,52 @@ def test_preview_settings_change_invalidates_and_reloads_selected_asset(
     assert page._visualization_controller.generation == previous_visual_generation + 1
     assert requested == [selected]
     assert visual_requests == []
+
+
+def test_deliver_export_artifact_resolves_project_relative_output(
+    qtbot, monkeypatch, tmp_path: Path
+):
+    """Regression (audit): deliver_asset must resolve project-relative export
+    paths through the page's project file.
+
+    The controller previously called the DataPage-only ``_project_file_for_io``
+    helper on itself; the AttributeError was swallowed and every delivery of a
+    relative-output artifact failed with 源文件不存在.
+    """
+    from PySide6.QtWidgets import QDialog
+
+    from paleo_workbench.ui import data_lifecycle_controller as dlc
+
+    project = ProjectDocument.new("Demo")
+    out = tmp_path / "exports" / "map.pdf"
+    out.parent.mkdir(parents=True)
+    out.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    artifact = ExportArtifact(
+        linked_id="map_1",
+        format="PDF",
+        output_path="exports/map.pdf",
+    )
+    project.export_artifacts.append(artifact)
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.project_path = tmp_path / "demo.paleo.json"
+
+    destination = tmp_path / "handoff" / "map-final.pdf"
+
+    class AcceptedDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):  # noqa: A003 - Qt API name
+            return QDialog.DialogCode.Accepted
+
+        def output_path(self):
+            return destination
+
+    monkeypatch.setattr(dlc, "_DeliveryDialog", AcceptedDialog)
+    page._lifecycle.deliver_asset(artifact)
+
+    status = page.data_toolbar.operation_status_label.text()
+    assert "源文件不存在" not in status
+    assert "已导出 / 交付" in status
+    assert destination.read_bytes() == b"%PDF-1.4\n%%EOF\n"

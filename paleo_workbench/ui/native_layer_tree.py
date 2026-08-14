@@ -255,7 +255,11 @@ class NativeLayerModel(QAbstractItemModel):
                 return False
             if not math.isfinite(opacity):
                 return False
-            if layer.opacity != max(0.0, min(1.0, opacity)):
+            # Clamp the value identically to the guard: assigning the raw
+            # value let out-of-range opacity (e.g. 5, -3) persist into the
+            # authoritative native LayerRegistry.
+            opacity = max(0.0, min(1.0, opacity))
+            if layer.opacity != opacity:
                 layer.opacity = opacity
                 changed = True
         if not changed:
