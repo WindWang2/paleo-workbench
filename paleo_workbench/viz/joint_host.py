@@ -86,6 +86,9 @@ class WellSeismicJointHost(QObject):
         self._persisted_well_identity_map: dict[str, str] = {}
         self._scene = None
         self._engine_error: str | None = None
+        # True while an L1 start waits for OwnedWorkerJob.released (see
+        # _maybe_start_next_lod).
+        self._lod_release_pending = False
 
         ensure_geoviz_on_path()
         try:
@@ -275,6 +278,7 @@ class WellSeismicJointHost(QObject):
             self.status_changed.emit(f"删除剖面失败: {exc}")
 
     def shutdown(self) -> None:
+        self._cancel_pending_lod()
         if self._volume_job.is_running:
             self._volume_job.shutdown()
 
@@ -345,6 +349,10 @@ class WellSeismicJointHost(QObject):
         assert self._scene is not None
         tops_by_well: dict[str, list[tuple[str, float]]] = {}
         if paths.tops is not None and paths.tops.is_file():
+            # Parse TD tables once for the whole tops file, not once per line.
+            td_map: dict = {}
+            if paths.td_dir is not None:
+                td_map = load_td_tables(paths.td_dir)
             for line in paths.tops.read_text(encoding="utf-8", errors="replace").splitlines():
                 s = line.strip()
                 if not s or s.startswith("#"):
@@ -358,9 +366,6 @@ class WellSeismicJointHost(QObject):
                 except ValueError:
                     continue
                 z = md
-                td_map = {}
-                if paths.td_dir is not None:
-                    td_map = load_td_tables(paths.td_dir)
                 tbl = td_map.get(wname)
                 if tbl is not None:
                     z = float(tbl.md_to_time_ms(md))
@@ -404,6 +409,7 @@ class WellSeismicJointHost(QObject):
 
     def _start_volume_worker(self, segy_path: str) -> None:
         """Bind source-backed access immediately, then progressive dense L0→L1."""
+        self._cancel_pending_lod()
         if self._volume_job.is_running:
             self._volume_job.shutdown()
         self._volume_generation += 1
@@ -448,8 +454,37 @@ class WellSeismicJointHost(QObject):
         )
 
     def _maybe_start_next_lod(self, segy_path: str, current_lod: int) -> None:
-        if current_lod != 0 or self._volume_job.is_running:
+        if current_lod != 0:
             return
+        if self._volume_job.is_running:
+            # The L0 result slot is queued BEFORE OwnedWorkerJob's queued
+            # thread-finished release, so is_running is still True here even
+            # though the L0 worker has finished. Defer L1 to that release
+            # instead of dropping progressive refinement.
+            if not self._lod_release_pending:
+                self._lod_release_pending = True
+                self._volume_job.released.connect(self._on_volume_job_released)
+            return
+        self._start_next_lod_worker(segy_path)
+
+    def _cancel_pending_lod(self) -> None:
+        if not self._lod_release_pending:
+            return
+        self._lod_release_pending = False
+        try:
+            self._volume_job.released.disconnect(self._on_volume_job_released)
+        except (RuntimeError, TypeError):
+            pass
+
+    def _on_volume_job_released(self) -> None:
+        self._cancel_pending_lod()
+        if self._volume_phase != "L0_READY" or self._volume_job.is_running:
+            return
+        if self._paths is None or self._paths.segy is None:
+            return
+        self._start_next_lod_worker(str(self._paths.segy))
+
+    def _start_next_lod_worker(self, segy_path: str) -> None:
         generation = self._volume_generation
         self._volume_phase = "L1_LOADING"
         self.status_changed.emit("精细化中 (L1)…")

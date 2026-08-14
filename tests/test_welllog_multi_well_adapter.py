@@ -180,3 +180,37 @@ def test_md_mode_zero_shift():
     )
     assert plan.wells[0].depth_shift == 0.0
     assert plan.wells[0].transform_points == ()
+
+
+def test_correlation_bands_follow_depth_order_not_label_order():
+    """Audit E2: band top/bottom pairs must be consecutive in DEPTH.
+
+    Alphabetical pairing produced bowtie bands whenever label sort order
+    disagrees with depth (H1..H12 → "H1-H10", "H12-H2"; "Mudstone B" above
+    "Sandstone A" as top).
+    """
+    logs = [_well("A", 10, 20), _well("B", 30, 40)]
+    # Depths deliberately disagree with alphabetical label order.
+    tops = {
+        "A": [("H10", 1000.0), ("H2", 1001.0), ("H9", 1002.0)],
+        "B": [("H10", 1000.4), ("H2", 1001.2), ("H9", 1002.1)],
+    }
+    plan = multi.adapt_multi_well_section(
+        logs, ["A", "B"], resource_ids=["a", "b"], tops_by_well=tops
+    )
+    bands = [o for o in plan.overlays if o.kind == "correlation_band"]
+    formations = [o.formation for o in bands]
+    assert formations == ["H10-H2", "H2-H9"]
+
+    def marker_depth(doc_id, marker_id):
+        for slot in plan.wells:
+            if slot.document_id == doc_id:
+                for m in slot.markers:
+                    if m.marker_id == marker_id:
+                        return m.reference_depth
+        raise AssertionError("marker not found")
+
+    for band in bands:
+        top = marker_depth(band.left_document_id, band.left_marker_id)
+        bottom = marker_depth(band.left_document_id, band.left_bottom_marker_id)
+        assert top < bottom, band.formation

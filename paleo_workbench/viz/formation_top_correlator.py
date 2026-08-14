@@ -83,12 +83,32 @@ class FormationTopCorrelator:
         ref_curve: np.ndarray,
         target_curve: np.ndarray,
         ref_top_depth: float,
-        start_depth: float = 0.0,
-        depth_step: float = 0.5,
+        start_depth: float | None = None,
+        depth_step: float | None = None,
+        ref_depths: np.ndarray | None = None,
+        target_depths: np.ndarray | None = None,
     ) -> TopRecommendation:
-        """Use DTW curve alignment to recommend corresponding marker top depth in target well."""
+        """Use DTW curve alignment to recommend corresponding marker top depth in target well.
+
+        The depth mapping comes from the curves' own depth axes when
+        ``ref_depths``/``target_depths`` are provided; explicit
+        ``start_depth``/``depth_step`` override them. Only when no depth
+        information is given does the legacy uniform 0.0/0.5 grid apply.
+        """
         if len(ref_curve) == 0 or len(target_curve) == 0:
             return TopRecommendation(suggested_depth=ref_top_depth, confidence=0.0, dtw_cost=999.0)
+
+        if start_depth is None and ref_depths is not None and len(ref_depths) == len(ref_curve):
+            start_depth = float(np.asarray(ref_depths, dtype=float)[0])
+            if depth_step is None and len(ref_depths) > 1:
+                diffs = np.diff(np.asarray(ref_depths, dtype=float))
+                step = float(np.median(diffs))
+                if step > 0.0:
+                    depth_step = step
+        if start_depth is None:
+            start_depth = 0.0
+        if depth_step is None or depth_step <= 0.0:
+            depth_step = 0.5
 
         # Convert ref_top_depth to index
         ref_idx = int(np.clip((ref_top_depth - start_depth) / depth_step, 0, len(ref_curve) - 1))
@@ -96,7 +116,12 @@ class FormationTopCorrelator:
         alignment = self.dtw_matcher.match_curves(ref_curve, target_curve)
         target_idx = self.dtw_matcher.transfer_top_index(ref_idx, alignment.path_ref, alignment.path_target)
 
-        suggested_depth = start_depth + target_idx * depth_step
+        if target_depths is not None and len(target_depths) == len(target_curve):
+            # Real LAS depth axis: map the warped index back to measured depth.
+            target_idx = int(np.clip(target_idx, 0, len(target_depths) - 1))
+            suggested_depth = float(np.asarray(target_depths, dtype=float)[target_idx])
+        else:
+            suggested_depth = start_depth + target_idx * depth_step
         confidence = float(np.exp(-alignment.cost / (len(ref_curve) * 2.0)))
 
         return TopRecommendation(

@@ -55,7 +55,9 @@ class FormationVolumeIntegrator:
         """Construct watertight closed 3D polyhedron and compute surface integral via Gauss Divergence Theorem."""
         # Build 3D mesh vertices: top vertices [0..N-1], bot vertices [N..2N-1]
         n = rows * cols
-        v_total = np.vstack([top_verts, bot_verts])
+        # Accumulate in float64: float32 cross products cancel catastrophically
+        # at UTM-scale coordinates (verified >2000% volume error).
+        v_total = np.vstack([top_verts, bot_verts]).astype(np.float64)
 
         faces = []
 

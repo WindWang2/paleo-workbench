@@ -180,4 +180,8 @@ class WellSectionHost:
             self.datum_combo.addItem(f"⚓ 按【{name}】顶界拉平", name)
 
         self.datum_combo.blockSignals(False)
+        # Rebuilding with signals blocked skipped _on_datum_changed; apply the
+        # combo's actual selection so the canvas does not keep a stale datum
+        # mode from the previous well set (same path a user selection takes).
+        self._on_datum_changed()
         return True

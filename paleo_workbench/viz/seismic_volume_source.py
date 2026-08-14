@@ -153,11 +153,10 @@ class SeismicVolumeSource:
                 loader = SeismicLoader(self._path)
                 raw = loader.inspect()
                 self._loader = loader
-                has_geometry = True
-                # Unstructured fallback inside loader uses n_inlines==1 and all traces as xlines.
-                if int(raw.n_inlines) <= 1 and int(raw.n_crosslines) > 64:
-                    # Still real geometry if loader got ilines; flag pseudo only later.
-                    pass
+                # The loader's unstructured fallback mocks 1 inline x N crosslines
+                # when real ilines/xlines are absent; that pseudo geometry must
+                # not bind a survey or serve structured slice reads.
+                has_geometry = self._loader_has_geometry()
                 self._meta = SeismicVolumeMetadata(
                     path=self._path,
                     source_id=source_id_for_path(self._path),
@@ -171,7 +170,7 @@ class SeismicVolumeSource:
                     xline_step=int(raw.xline_step),
                     t0_ms=float(getattr(raw, "t0_ms", 0.0) or 0.0),
                     has_geometry=has_geometry,
-                    is_pseudo=False,
+                    is_pseudo=not has_geometry,
                     metadata_ms=(time.perf_counter() - t0) * 1000.0,
                 )
                 return self._meta
@@ -206,6 +205,19 @@ class SeismicVolumeSource:
                     pass
                 self._loader = None
 
+    def _loader_has_geometry(self) -> bool:
+        """True when the loader's open handle exposes real ilines/xlines.
+
+        ``None`` means segyio opened the file unstructured; slice reads would
+        then fail with raw TypeError/AttributeError inside the loader.
+        """
+        handle = getattr(self._loader, "_f", None)
+        return (
+            handle is not None
+            and getattr(handle, "ilines", None) is not None
+            and getattr(handle, "xlines", None) is not None
+        )
+
     def __enter__(self) -> "SeismicVolumeSource":
         return self
 
@@ -226,7 +238,11 @@ class SeismicVolumeSource:
         self, kind: Orientation, index: int, *, lod: int = 0
     ) -> np.ndarray:
         meta = self.metadata()
-        if meta.is_pseudo or self._loader is None:
+        if (
+            meta.is_pseudo
+            or self._loader is None
+            or not self._loader_has_geometry()
+        ):
             raise RuntimeError(
                 "lazy slice requires structured SEGY geometry; use read_preview()"
             )
@@ -286,7 +302,11 @@ class SeismicVolumeSource:
         if hit is not None:
             return hit, ""
 
-        if meta.is_pseudo or self._loader is None:
+        if (
+            meta.is_pseudo
+            or self._loader is None
+            or not self._loader_has_geometry()
+        ):
             from paleo_workbench.viz.seismic_load import _load_pseudo_3d_ignore_geometry
 
             vol, warning = _load_pseudo_3d_ignore_geometry(self._path)
@@ -373,11 +393,23 @@ _REGISTRY_LOCK = threading.Lock()
 
 def get_shared_seismic_source(path: str | Path) -> SeismicVolumeSource:
     """Return a process-shared source for *path* (metadata-first, cached slices)."""
-    key = str(Path(path).resolve()) if Path(path).exists() else str(path)
+    p = Path(path)
+    key = str(p.resolve()) if p.exists() else str(p)
     with _REGISTRY_LOCK:
         src = _REGISTRY.get(key)
         if src is not None and not src._closed:
-            return src
+            if p.exists() and src.source_id != source_id_for_path(p):
+                # File replaced on disk under the same path: drop the stale
+                # handle (its cached meta keeps the old identity/loader) so a
+                # fresh open sees the new content.
+                del _REGISTRY[key]
+                try:
+                    get_global_seismic_cache().invalidate_source(src.source_id)
+                except Exception:
+                    pass
+                src.close()
+            else:
+                return src
         src = SeismicVolumeSource(path)
         _REGISTRY[key] = src
         return src

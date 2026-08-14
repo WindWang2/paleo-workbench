@@ -333,6 +333,9 @@ class QgisMapRenderBackend(MapRenderBackend):
             native_bridge = None
         self._native_module = native_bridge
         self._bridge = None
+        # Snapshot arrived before the bridge existed (or after shutdown());
+        # request_render must deliver it or the first async frame is blank.
+        self._native_snapshot_pending = False
         self._scalar_raster_cache = None
         # Geometry payload is keyed to the host's data revision.  Style and
         # visibility changes can reuse it without re-walking every feature/WKT.
@@ -381,6 +384,10 @@ class QgisMapRenderBackend(MapRenderBackend):
         super().set_layer_snapshot(snapshot)
         if self._bridge is not None:
             self._set_native_snapshot(snapshot)
+        else:
+            # Bridge not created yet (or shut down): deliver on the next render
+            # request, which initializes the bridge on the async path too.
+            self._native_snapshot_pending = True
 
     def _native_snapshot(self, snapshot: MapRenderSnapshot) -> list[dict[str, object]]:
         if any(layer.layer_type == "scalar_grid" for layer in snapshot.layers):
@@ -428,6 +435,11 @@ class QgisMapRenderBackend(MapRenderBackend):
         if not self._initialized:
             self.initialize()
         assert self._bridge is not None
+        if self._native_snapshot_pending:
+            # A snapshot arrived before the bridge existed; push it now so the
+            # first async render composes current layers instead of a blank frame.
+            self._native_snapshot_pending = False
+            self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
         self._completed = None
         self._bridge.request_render(
@@ -474,6 +486,7 @@ class QgisMapRenderBackend(MapRenderBackend):
         if not self._initialized:
             self.initialize()
         assert self._bridge is not None
+        self._native_snapshot_pending = False
         self._set_native_snapshot(self._snapshot)
         generation = self._next_generation()
         payload = self._bridge.render_sync(

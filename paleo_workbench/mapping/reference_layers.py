@@ -85,10 +85,24 @@ def _normalize_crs_input(crs: str) -> str:
     return text
 
 
+def _pin_traditional_axis_order(srs: osr.SpatialReference | None) -> None:
+    """Force traditional GIS (x=longitude, y=latitude) ordering on an SRS.
+
+    GDAL ≥ 3 defaults user-created geographic SRSs to authority-compliant axis
+    order (e.g. EPSG:4326 → lat, long), while every workbench consumer — layer
+    extents, GeoJSON render payloads, snap points — speaks traditional GIS
+    order. Both transform sides are pinned explicitly so reference layers never
+    come back mirrored across the diagonal.
+    """
+    if srs is not None:
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+
 def _spatial_reference(crs: str) -> osr.SpatialReference:
     value = osr.SpatialReference()
     if value.SetFromUserInput(_normalize_crs_input(crs)) != 0:
         raise ReferenceLayerError(f"无法识别项目基准坐标：{crs}")
+    _pin_traditional_axis_order(value)
     return value
 
 
@@ -151,6 +165,7 @@ class ReferenceLayerService:
             source_crs = _canonical_crs(source_srs)
             target_srs = _spatial_reference(project_crs)
             # Construct once at import time to fail early for incompatible CRSs.
+            _pin_traditional_axis_order(source_srs)
             osr.CoordinateTransformation(source_srs, target_srs)
             return MapReferenceLayer(
                 name=source_path.stem,
@@ -201,6 +216,7 @@ class ReferenceLayerService:
             if source is None or source.GetSpatialRef() is None:
                 return []
             target_srs = _spatial_reference(layer.project_crs)
+            _pin_traditional_axis_order(source.GetSpatialRef())
             transform = osr.CoordinateTransformation(source.GetSpatialRef(), target_srs)
             points: list[tuple[float, float]] = []
             source.ResetReading()
@@ -252,6 +268,7 @@ class ReferenceLayerService:
                 layer.status = "failed"
                 layer.error_message = "矢量参考图缺少坐标系"
                 raise ReferenceLayerError(layer.error_message)
+            _pin_traditional_axis_order(source.GetSpatialRef())
             transform = osr.CoordinateTransformation(source.GetSpatialRef(), _spatial_reference(layer.project_crs))
             definition = source.GetLayerDefn()
             field_names = [
@@ -338,6 +355,7 @@ class ReferenceLayerService:
             source_srs = dataset.GetSpatialRef()
             if source_srs is None:
                 raise ReferenceLayerError("栅格参考图缺少坐标系")
+            _pin_traditional_axis_order(source_srs)
             coordinate_transform = osr.CoordinateTransformation(source_srs, _spatial_reference(layer.project_crs))
             corners = []
             for px, py in (

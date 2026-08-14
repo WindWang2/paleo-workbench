@@ -17,8 +17,14 @@ class WellSectionDatum:
         mode: str = "md",
         target_horizon: str | None = None,
         kb_elevations: dict[str, float] | None = None,
+        diagnostics: list[str] | None = None,
     ) -> dict[str, float]:
-        """Calculate vertical depth shifts (z_aligned = z_true + shift) for each well."""
+        """Calculate vertical depth shifts (z_aligned = z_true + shift) for each well.
+
+        When *diagnostics* is provided, wells that cannot be corrected (missing
+        target horizon or KB) append a notice instead of silently sitting at
+        shift 0.0 beside corrected wells. Their shift values are unchanged.
+        """
         if mode not in self.VALID_MODES:
             raise ValueError(f"Invalid mode '{mode}'. Must be one of {self.VALID_MODES}")
 
@@ -29,8 +35,12 @@ class WellSectionDatum:
             if mode == "md":
                 shifts[wname] = 0.0
             elif mode == "tvdss":
-                kb = (kb_elevations or {}).get(wname, 0.0)
-                shifts[wname] = -float(kb)
+                kb = (kb_elevations or {}).get(wname)
+                if kb is None and diagnostics is not None:
+                    diagnostics.append(
+                        f"well '{wname}': KB elevation missing; tvdss shift left at 0.0"
+                    )
+                shifts[wname] = -float(kb or 0.0)
             elif mode == "horizon":
                 if not target_horizon:
                     shifts[wname] = 0.0
@@ -46,6 +56,10 @@ class WellSectionDatum:
                 if h_depth is not None:
                     shifts[wname] = -h_depth
                 else:
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            f"well '{wname}': target horizon '{target_horizon}' missing; shift left at 0.0"
+                        )
                     shifts[wname] = 0.0
 
         return shifts

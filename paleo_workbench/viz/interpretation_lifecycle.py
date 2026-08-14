@@ -117,11 +117,8 @@ def save_draft_as_new_version(
         # content only if they pass expected_fingerprint=None.
         return None, "fingerprint_mismatch_at_schedule"
 
-    # Live draft may have advanced after snapshot if multi-threaded; re-check.
-    live_fp = draft.scientific_fingerprint_now()
-    if live_fp != snap.scientific_fingerprint:
-        # Save still produces a version for the snapshot content, but draft stays dirty.
-        pass
+    # A live draft that advanced mid-save is handled below: the version freezes
+    # the snapshot content and the draft simply stays dirty (no adopt).
 
     interp_dir = artifact_dir_for(path) / "interpretations"
     version_token = _id("ver")
@@ -279,10 +276,11 @@ def classify_stale(
     """
     if current_vertical_domain is not None and current_vertical_domain != ref.vertical_domain:
         return "stale"
-    if current_crs is not None and ref.scientific_fingerprint:
-        # CRS change is scientific; fingerprint embeds crs at save time.
-        # Without re-fingerprint we only know if caller says CRS changed.
-        pass
+    # CRS drift is NOT classifiable here: HorizonInterpretationRef carries no
+    # saved CRS (only the opaque scientific fingerprint does), so there is
+    # nothing to compare ``current_crs`` against. Callers that track a CRS
+    # change must treat affected interpretations as stale themselves
+    # (re-open + re-save re-fingerprints the new CRS).
     if current_source_version_ids is not None:
         expected = set(ref.source_version_ids or [])
         actual = set(current_source_version_ids)

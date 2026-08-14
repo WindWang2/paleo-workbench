@@ -1,6 +1,8 @@
 """Seismic 3D API façade delegating to native_backend."""
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from paleo_workbench.native_backend import native_backend
@@ -96,7 +98,8 @@ class AttributeTaskWorker(QThread):
     """Asynchronous worker executing seismic attribute calculations off the UI thread."""
 
     progress_changed = Signal(float)
-    finished = Signal(np.ndarray)
+    # Named result_ready: a `finished` Signal here would shadow QThread.finished.
+    result_ready = Signal(np.ndarray)
     error = Signal(str)
 
     def __init__(
@@ -135,7 +138,7 @@ class AttributeTaskWorker(QThread):
 
             if not self._is_cancelled:
                 self.progress_changed.emit(100.0)
-                self.finished.emit(result)
+                self.result_ready.emit(result)
         except Exception as exc:
             self.error.emit(str(exc))
 

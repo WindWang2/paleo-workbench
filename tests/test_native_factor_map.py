@@ -38,7 +38,28 @@ def test_managed_artifact_transfers_to_native_scalar_layer_without_interpolation
     assert layer.source_ref == str(artifact)
     image = scene.raster_rgba("porosity")
     assert image.shape == (2, 2, 4)
-    assert image[1, 1, 3] == 0
+    # North-up raster rows: grid_y[1] = 40 (north) supplies display row 0, so
+    # the None cell (y=40, x=20) is the top-right pixel.
+    assert image[0, 1, 3] == 0
+
+
+def test_scalar_raster_rows_are_north_up():
+    """Raster row 0 must be the northern grid row (ymax), not ymin.
+
+    ``FactorGridResult`` stores rows ascending in y; the display layer flips
+    rows once at transfer so painter canvases, the QGIS GeoTIFF mirror, and
+    raster exports all agree with world coordinates (no N-S mirrored maps).
+    """
+    scene = NativeMapScene()
+    scene.add_factor_grid(_result(), layer_id="surface")
+    scalar = scene.scalar_layer("surface")
+    rgba = scalar.rasterize()
+    # Southern row (y=30, values 0.0/0.5) is the last display row; the
+    # northern row (y=40, values 1.0/nan) is display row 0.
+    south, north = rgba[-1, 0, :3].copy(), rgba[0, 0, :3].copy()
+    assert not np.array_equal(south, north)
+    assert rgba[0, 1, 3] == 0  # nodata (northern row, x=20) transparent
+    assert rgba[1, 1, 3] == 255  # finite cell (southern row, x=20) opaque
 
 
 def test_style_visibility_opacity_and_view_operations_do_not_recompute_interpolation():

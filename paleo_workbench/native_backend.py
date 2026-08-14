@@ -114,15 +114,34 @@ def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndar
 def _py_fast_slice_to_indexed8(
     volume: np.ndarray, axis: int, index: int
 ) -> tuple[np.ndarray, float, float]:
+    """Pure-Python parity fallback for ``seismic_3d_core.fast_slice_to_indexed8``.
+
+    Mirrors the C++ hot path (``native/seismic_3d_core/src/seismic_3d_core.cpp``):
+    non-finite samples are excluded from the min/max stretch; axis-2 (time)
+    slices larger than 65,536 cells use the same stride-4 sampled min/max;
+    non-finite pixels render as 0; and a degenerate (constant / all-invalid)
+    slice fills 0 and reports the range ``(0.0, 0.0)``.
+    """
     slice_data = _py_fast_slice_extract(volume, axis, index)
-    slice_clean = np.nan_to_num(slice_data, nan=0.0, posinf=0.0, neginf=0.0)
-    v_min = float(slice_clean.min()) if slice_clean.size > 0 else 0.0
-    v_max = float(slice_clean.max()) if slice_clean.size > 0 else 0.0
-    if v_max > v_min:
-        norm = ((slice_clean - v_min) / (v_max - v_min) * 255.0).astype(np.uint8)
+    axis_idx = int(axis) % np.asarray(volume).ndim
+    flat = slice_data.reshape(-1)
+    # Stride-4 sampled stretch pass only on the axis-2 slice path, like C++.
+    sampled = flat[::4] if (axis_idx == 2 and flat.size > 65536) else flat
+    finite = sampled[np.isfinite(sampled)]
+    if finite.size > 0:
+        v_min = float(finite.min())
+        v_max = float(finite.max())
     else:
-        norm = np.zeros(slice_clean.shape, dtype=np.uint8)
-    return norm, v_min, v_max
+        v_min = v_max = 0.0
+    if v_min >= v_max:
+        return np.zeros(slice_data.shape, dtype=np.uint8), 0.0, 0.0
+    inv_range = np.float32(255.0) / np.float32(v_max - v_min)
+    with np.errstate(invalid="ignore", over="ignore"):
+        norm = (slice_data.astype(np.float32) - np.float32(v_min)) * inv_range
+    norm = np.clip(norm, np.float32(0.0), np.float32(255.0))
+    out = norm.astype(np.uint8)  # truncation toward zero, like the C++ cast
+    out[~np.isfinite(slice_data)] = 0
+    return out, v_min, v_max
 
 
 def _py_fast_resample_volume_3d(
@@ -137,9 +156,18 @@ def _py_fast_resample_volume_3d(
     t0, t1, t2 = target_shape
     if t0 <= 0 or t1 <= 0 or t2 <= 0:
         raise ValueError("target_shape elements must all be positive")
-    idx0 = np.linspace(0, s0 - 1, t0, dtype=np.int32)
-    idx1 = np.linspace(0, s1 - 1, t1, dtype=np.int32)
-    idx2 = np.linspace(0, s2 - 1, t2, dtype=np.int32)
+    # Mirror the C++ sampling grid exactly: src = min(s-1, trunc(i * s/t))
+    # computed in float32, NOT linspace endpoints (audit A1/I4 — the previous
+    # linspace grid disagreed with the native path at 23/32 positions for a
+    # 100→32 downsample, so preview volumes differed by backend).
+    def _src_indices(size: int, target: int) -> np.ndarray:
+        step = np.float32(size) / np.float32(max(1, target))
+        idx = (np.arange(target, dtype=np.float32) * step).astype(np.int64)
+        return np.minimum(size - 1, idx)
+
+    idx0 = _src_indices(s0, t0)
+    idx1 = _src_indices(s1, t1)
+    idx2 = _src_indices(s2, t2)
     return vol[np.ix_(idx0, idx1, idx2)]
 
 
@@ -182,7 +210,14 @@ def _py_compute_coherence_3d(
                 vert_len = float(k1 - k0 + 1)
                 run_num = np.sum(mean_sq[k0 : k1 + 1])
                 run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
-                coh[i, j, k] = float(np.clip(run_num / run_den, 0.0, 1.0))
+                value = run_num / run_den
+                if isinstance(value, float) and math.isnan(value):
+                    # C++ parity: NaN input propagates into the sums, and the
+                    # std::min/std::max clamp chain maps NaN to 0.0 (never a
+                    # NaN sample in the output volume).
+                    coh[i, j, k] = 0.0
+                else:
+                    coh[i, j, k] = float(np.clip(value, 0.0, 1.0))
 
     return coh
 

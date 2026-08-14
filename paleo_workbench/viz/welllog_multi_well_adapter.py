@@ -311,11 +311,23 @@ def _build_overlays(
                 )
             )
         # Correlation bands between consecutive shared tops on adjacent wells.
-        ordered = [
-            lab
-            for lab in shared_labels
-            if _marker_by_label(left, lab) and _marker_by_label(right, lab)
-        ]
+        # Band tops/bottoms must follow DEPTH order: the shared label list is
+        # alphabetical, and pairing alphabetically yields inverted "bowtie"
+        # bands whenever label sort order disagrees with marker depth order
+        # (e.g. H1..H12 → "H1-H10", "H12-H2").
+        def _pair_depth(label: str, _left=left, _right=right) -> float:
+            lm = _marker_by_label(_left, label)
+            rm = _marker_by_label(_right, label)
+            return float(lm.reference_depth) + float(rm.reference_depth)  # type: ignore[union-attr]
+
+        ordered = sorted(
+            (
+                lab
+                for lab in shared_labels
+                if _marker_by_label(left, lab) and _marker_by_label(right, lab)
+            ),
+            key=_pair_depth,
+        )
         for j in range(len(ordered) - 1):
             top_lab, bot_lab = ordered[j], ordered[j + 1]
             lt = _marker_by_label(left, top_lab)

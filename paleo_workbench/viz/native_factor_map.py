@@ -80,6 +80,22 @@ class PointGeometry:
     radius: float = 3.0
 
 
+def _north_up_grid(
+    grid_z: np.ndarray, mask: np.ndarray | None
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Convert ascending-y grid rows to the display layer's north-up row order.
+
+    ``FactorGridResult`` stores rows ascending in y (row 0 = ymin), matching the
+    interpolation engine's axes. The native display layer's raster cache and the
+    GeoTIFF mirror both treat row 0 as the northern edge (image/GeoTIFF top), so
+    the one-time transfer flips rows once instead of every consumer flipping on
+    each render or export.
+    """
+    z = np.ascontiguousarray(grid_z[::-1], dtype=np.float32)
+    flipped_mask = None if mask is None else np.ascontiguousarray(mask[::-1], dtype=np.uint8)
+    return z, flipped_mask
+
+
 class MapScene:
     """Generic composition state backed by C++ registry and native grid payloads.
 
@@ -131,7 +147,9 @@ class MapScene:
         """
         if not isinstance(result, FactorGridResult):
             raise TypeError("result must be a FactorGridResult")
-        native_layer = grid_render_core.ScalarGridLayer(result.grid_z, result.mask)
+        native_layer = grid_render_core.ScalarGridLayer(
+            *_north_up_grid(result.grid_z, result.mask)
+        )
         ramp = _rgba_lut(default_rgba_lut() if color_ramp is None else color_ramp)
         native_layer.set_color_ramp(ramp)
         if color_range is None:
@@ -381,9 +399,10 @@ class MapScene:
         if scalar is None or map_layer is None:
             return False
         before = scalar.data_revision
-        scalar.set_grid(np.ascontiguousarray(grid_z, dtype=np.float32))
-        if mask is not None:
-            scalar.set_mask(np.ascontiguousarray(mask, dtype=np.uint8))
+        north_grid, north_mask = _north_up_grid(grid_z, mask)
+        scalar.set_grid(north_grid)
+        if north_mask is not None:
+            scalar.set_mask(north_mask)
         if scalar.data_revision == before:
             return False
         map_layer.bump_data_revision()

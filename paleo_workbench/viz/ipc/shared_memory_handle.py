@@ -37,10 +37,21 @@ class SharedMemoryArrayHandle:
             dtype=dt.name,
             size_bytes=size_bytes,
         )
-        handle = cls(shm_name=shm.name, shape=shape, dtype=dt, is_owner=True)
+        try:
+            handle = cls(shm_name=shm.name, shape=shape, dtype=dt, is_owner=True)
+        except BaseException:
+            shm.close()
+            shm.unlink()
+            raise
+        # __init__ attached its own mapping; release the create-time one so
+        # exactly one mapping per handle remains.
+        shm.close()
         return handle, meta
 
     def close(self) -> None:
+        # Drop the ndarray first: while it exports the shm buffer, close()
+        # would raise BufferError and silently leak the mapping.
+        self.array = None
         if getattr(self, "_shm", None) is not None:
             try:
                 self._shm.close()

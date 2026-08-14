@@ -99,6 +99,29 @@ def _contains(point: Point, ring: object) -> bool:
     return inside
 
 
+def _contains_polygon(point: Point, geometry: Mapping[str, object]) -> bool:
+    """Even-odd across a polygon's rings: inside the outer ring and no hole.
+
+    GeoJSON stores holes as subsequent rings, so a point inside any hole must
+    NOT identify the feature.
+    """
+    geometry_type = str(geometry.get("type") or "")
+    coords = geometry.get("coordinates")
+    polygons: list[object] = []
+    if geometry_type == "Polygon" and isinstance(coords, (list, tuple)):
+        polygons = [coords]
+    elif geometry_type == "MultiPolygon" and isinstance(coords, (list, tuple)):
+        polygons = [polygon for polygon in coords if isinstance(polygon, (list, tuple))]
+    for polygon in polygons:
+        hit = False
+        for ring in polygon:
+            if isinstance(ring, (list, tuple)) and _contains(point, ring):
+                hit = not hit
+        if hit:
+            return True
+    return False
+
+
 def _rings(geometry: Mapping[str, object]) -> Iterable[tuple[Point, ...]]:
     geometry_type = str(geometry.get("type") or "")
     coords = geometry.get("coordinates")
@@ -249,7 +272,7 @@ class FeatureSpatialIndex:
             geometry = feature.geometry
             geometry_type = str(geometry["type"])
             if geometry_type in {"Polygon", "MultiPolygon"}:
-                if any(_contains(point, ring) for ring in _rings(geometry)):
+                if _contains_polygon(point, geometry):
                     return feature.feature_id
             for ring in _rings(geometry):
                 if any(_distance_to_segment(point, start, end) <= tolerance for start, end in zip(ring, ring[1:])):

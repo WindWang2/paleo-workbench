@@ -78,6 +78,27 @@ def test_vector_reference_is_normalized_to_project_crs(tmp_path):
     assert service.vector_snap_points(layer)[0][0] > 13_000_000
 
 
+def test_geographic_project_crs_keeps_traditional_axis_order(tmp_path):
+    """EPSG:4326 project CRS must yield (longitude, latitude) coordinates.
+
+    GDAL ≥ 3 defaults user-created geographic SRSs to authority-compliant
+    (lat, long) axis order; without an explicit pin, reference layers render
+    mirrored across the diagonal. GeoJSON sources store (long, lat).
+    """
+    source = tmp_path / "faults.geojson"
+    _write_geojson(source, include_crs=True)
+    service = ReferenceLayerService()
+    layer = service.import_layer(source, "EPSG:4326")
+
+    points = service.vector_snap_points(layer)
+    assert points[0] == pytest.approx((120.0, 30.0))
+    assert points[1] == pytest.approx((120.1, 30.1))
+
+    features, extent = service.vector_render_payload(layer)
+    assert features[0]["geometry"]["coordinates"][0] == [120.0, 30.0]
+    assert extent == pytest.approx((120.0, 30.0, 120.1, 30.1))
+
+
 def test_vector_reference_render_payload_is_cached_and_uses_project_crs(tmp_path):
     source = tmp_path / "faults.geojson"
     _write_geojson(source, include_crs=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -165,10 +166,14 @@ class WellTieHost:
         well_log = payload.well_log
         if well_log is None and payload.well_logs:
             well_log = payload.well_logs[0]
+        # Seed from a stable digest: hash() is salt-per-process, so a salted
+        # seed made the synthetic trace non-reproducible across sessions.
+        label = str(payload.label or payload.kind)
+        seed = int.from_bytes(hashlib.sha256(label.encode("utf-8")).digest()[:4], "big") % (2**31)
         arrays = build_tie_arrays(
             well_log,
             payload.seismic_volume,
-            seed=abs(hash(payload.label or payload.kind)) % (2**31),
+            seed=seed,
         )
         if arrays is None:
             return False

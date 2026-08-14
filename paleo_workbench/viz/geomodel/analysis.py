@@ -125,7 +125,7 @@ def generate_seismic_slice_overlay(nx_pts: int = 30, ny_pts: int = 30):
 def run_auto_tie(bh_raw_data: list[dict], freq: float) -> dict | None:
     """Real cross-correlation auto-tie via ``geoviz.correlate_synthetic_to_trace``.
 
-    Uses the first borehole for calibration: build a synthetic seismogram from
+    Uses the first borehole with layers for calibration: build a synthetic seismogram from
     its lithology-derived sonic/density logs, synthesize a demo "field" trace,
     and return ``{"shift_samples": int, "cc": float}``. ``None`` when no
     borehole data or no synthetic can be built.
@@ -133,7 +133,11 @@ def run_auto_tie(bh_raw_data: list[dict], freq: float) -> dict | None:
     if not bh_raw_data:
         return None
 
-    bh = bh_raw_data[0]
+    # Calibration needs a borehole with layers; boreholes whose layer stack
+    # is empty cannot build logs (max() over layers would fail) — skip them.
+    bh = next((b for b in bh_raw_data if b.get("layers")), None)
+    if bh is None:
+        return None
     layers = bh["layers"]
     depths, n_samples = _well_depth_axis(layers)
 

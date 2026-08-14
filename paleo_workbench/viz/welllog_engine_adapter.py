@@ -40,6 +40,106 @@ _FACIES_PALETTE = (
     "#ebdef0",
 )
 
+# Sedimentary facies / lithology fill colors. Mirrors the canonical mapping in
+# geo-viz-engine's geoviz_well_log.pattern_map.FACIES_COLORS: the geoviz facade
+# deliberately does not export it, and workbench production code may import the
+# facade only (test_geoviz_package_independence), so the table is vendored here.
+_FACIES_COLORS = {
+    # Rock Types & Lithologies
+    "砂岩": "#f0d9b5",
+    "泥岩": "#d4c5a9",
+    "灰岩": "#b5d4c1",
+    "白云岩": "#a8cdb8",
+    "页岩": "#c9bfa0",
+    "粉砂岩": "#e6c9a8",
+    # Coastal & Flats
+    "砂坪": "#f0d9b5",
+    "泥坪": "#d4c5a9",
+    "云质坪": "#c4d4c0",
+    "混积潮坪": "#c4d4c0",
+    "碎屑岩潮坪": "#d4c5a9",
+    "潮坪": "#d4c5a9",
+    "混合坪": "#e2d2b5",
+    "潮汐水道": "#ebd2b0",
+    "潮汐砂脊": "#ebd2b0",
+    "潮沟": "#ebd2b0",
+    "潮道": "#ebd2b0",
+    "泥裂": "#c0dcc0",
+    "藻席": "#c0dcc0",
+    # Shelf
+    "泥质陆棚": "#d4c5a9",
+    "砂质陆棚": "#f0d9b5",
+    "砂泥质陆棚": "#dccfb5",
+    "碎屑岩浅水陆棚": "#d4c5a9",
+    "混积浅水陆棚": "#c4d4c0",
+    "陆棚": "#d9d4c8",
+    "混积": "#c4d4c0",
+    "陆棚泥": "#d4c5a9",
+    "陆棚砂": "#f0d9b5",
+    "风暴沉积": "#dccfb5",
+    # Delta & Fluvial
+    "三角洲": "#e6c9a8",
+    "河流": "#f0d9b5",
+    "河道": "#ebd2b0",
+    "沼泽": "#c0dcc0",
+    "三角洲前缘": "#ebd2b0",
+    "三角洲平原": "#ebd2b0",
+    "前三角洲": "#dccfb5",
+    "分流河道": "#ebd2b0",
+    "天然堤": "#e2d2b5",
+    "辫状河道": "#ebd2b0",
+    # Marine & Deep Water
+    "深水盆地": "#9bb5cf",
+    "深海": "#9bb5cf",
+    "半深海": "#a8c0d8",
+    "深海平原": "#9bb5cf",
+    "海底扇": "#abc4d4",
+    "深海泥": "#9bb5cf",
+    "浊积岩": "#adc6d9",
+    "等深积岩": "#9bb5cf",
+    "碎屑流": "#abc4d4",
+    # Lakes (湖泊)
+    "湖": "#92d4f0",
+    "深湖": "#53b3df",
+    "半深湖": "#73c3ef",
+    "浅湖": "#aae2f7",
+    "湖底泥": "#73c3ef",
+    # Carbonates & Reefs
+    "碳酸盐台地": "#b5d4c1",
+    "局限台地": "#b8d4cc",
+    "开阔台地": "#b5d4c1",
+    "台地边缘": "#94d6b5",
+    "生物礁": "#b5d4c1",
+    "礁": "#b5d4c1",
+    "粒屑滩": "#bde3cf",
+    # Transitional & Others
+    "滨岸": "#f0d9b5",
+    "前滨": "#f0d9b5",
+    "临滨": "#f0d9b5",
+    "后滨": "#f0d9b5",
+    "沿岸坝": "#f0d9b5",
+    "海滩砂": "#f0d9b5",
+    "冲越扇": "#f0d9b5",
+    "蒸发岩": "#e8dcc8",
+    "蒸发盐": "#e8dcc8",
+    "膏盐": "#e8dcc8",
+    "冰川": "#c8d8e4",
+    "冰碛": "#c8d8e4",
+    "火山岩": "#c4a8a0",
+    "熔岩": "#c4a8a0",
+    "变质岩": "#bfb8b0",
+    "冲积扇": "#e6c9a8",
+    "洪积扇": "#e6c9a8",
+    "扇中": "#e6c9a8",
+    "扇根": "#e6c9a8",
+    "扇缘": "#e6c9a8",
+    "泥石流": "#e6c9a8",
+    "片流沉积": "#e6c9a8",
+    "潟湖": "#b8d4cc",
+    "半咸水潟湖": "#b8d4cc",
+    "超咸水潟湖": "#a0c7c0",
+}
+
 
 def welllog_engine_env_enabled() -> bool:
     """Return whether the product-default native backend is enabled."""
@@ -198,17 +298,14 @@ def _display_range(curve: Any) -> tuple[float, float]:
 
 
 def _interval_color(label: str, index: int, *, semantic: str) -> str:
-    try:
-        from geoviz import FACIES_COLORS
-
-        color = FACIES_COLORS.get(label)
-        if color:
-            return str(color)
-        for key in sorted(FACIES_COLORS, key=len, reverse=True):
+    color = _FACIES_COLORS.get(label)
+    if color is None:
+        for key in sorted(_FACIES_COLORS, key=len, reverse=True):
             if key and key in label:
-                return str(FACIES_COLORS[key])
-    except Exception:
-        pass
+                color = _FACIES_COLORS[key]
+                break
+    if color:
+        return str(color)
     if semantic == "lithology":
         return "#e0e0e0"
     return _FACIES_PALETTE[index % len(_FACIES_PALETTE)]
@@ -513,11 +610,21 @@ def _interval_signature(plan: EngineLoadPlan) -> tuple[EngineIntervalSubmission,
     return tuple(plan.intervals)
 
 
+def _marker_signature(plan: EngineLoadPlan) -> tuple[EngineMarkerSubmission, ...]:
+    return tuple(plan.markers)
+
+
 def update_plan_to_view(
     view: Any, current: EngineLoadPlan, previous: EngineLoadPlan | None
 ) -> dict[str, Any]:
     """Choose the smallest correctness-preserving native Session operation."""
     if previous is None or not _same_structure(previous, current):
+        return submit_plan_to_view(view, current)
+
+    # Markers can only be delivered through a full submit_multi_track payload
+    # (the engine's patch_document accepts tracks/intervals only), so any
+    # marker change forces a full replace instead of a silent no-op.
+    if _marker_signature(previous) != _marker_signature(current):
         return submit_plan_to_view(view, current)
 
     styles_changed = _style_signature(previous) != _style_signature(current)

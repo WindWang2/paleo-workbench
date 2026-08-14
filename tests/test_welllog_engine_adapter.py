@@ -156,6 +156,55 @@ def test_update_prefers_append_then_patch_without_full_resubmit():
     assert result["update_kind"] == "append"
 
 
+def test_update_marker_change_forces_full_resubmit():
+    """Marker edits must reach the native view; patch cannot carry markers."""
+    from types import SimpleNamespace
+
+    class WithMarkers:
+        """Duck-typed WellLogData carrier exposing a markers list."""
+
+        def __init__(self, data, markers):
+            self._data = data
+            self.markers = markers
+
+        def __getattr__(self, name):
+            return getattr(self._data, name)
+
+    previous = adapter.adapt_well_log_data(_sample_well())
+    edited = WithMarkers(
+        _sample_well(),
+        [SimpleNamespace(depth=1001.0, label="H1", semantic="formation_top")],
+    )
+    current = adapter.adapt_well_log_data(edited)
+    calls: list[str] = []
+
+    class FakeView:
+        def append_curves(self, payload):
+            calls.append("append")
+            return {"incremental": True}
+
+        def patch_document(self, payload):
+            calls.append("patch")
+            return {"patched": True}
+
+        def submit_multi_track(self, payload):
+            calls.append("full")
+            assert any(m["label"] == "H1" for m in payload["markers"])
+            return {"curve_count": 2, "track_count": len(payload["tracks"])}
+
+    result = adapter.update_plan_to_view(FakeView(), current, previous)
+    assert calls == ["full"]
+    assert result["update_kind"] == "full_replace"
+
+    # Identical plans — markers included — still collapse to "unchanged".
+    calls.clear()
+    result = adapter.update_plan_to_view(
+        FakeView(), adapter.adapt_well_log_data(_sample_well()), previous
+    )
+    assert calls == []
+    assert result["update_kind"] == "unchanged"
+
+
 def test_readonly_numpy_input_is_not_list_materialized_or_copied():
     class Curve:
         name = "GR"

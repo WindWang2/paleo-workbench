@@ -33,7 +33,7 @@ def test_attribute_task_worker_asynchronous(qtbot):
     results: list[np.ndarray] = []
 
     worker.progress_changed.connect(progresses.append)
-    worker.finished.connect(results.append)
+    worker.result_ready.connect(results.append)
 
     worker.start()
     qtbot.waitUntil(lambda: len(results) > 0, timeout=3000)

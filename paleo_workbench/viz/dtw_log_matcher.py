@@ -1,7 +1,14 @@
+"""DTW matcher for automated well-to-well curve correlation."""
+
 from dataclasses import dataclass
-from typing import Any
+import math
 
 import numpy as np
+
+# Upper bound on cost-matrix cells before the curves are decimated. DTW is
+# quadratic; two 100k-sample LAS preview curves would otherwise need ~75 GiB
+# and freeze the host for minutes.
+_MAX_COST_CELLS = 1_000_000
 
 
 @dataclass
@@ -16,6 +23,25 @@ class AlignmentResult:
 class DTWLogMatcher:
     """Dynamic Time Warping (DTW) matcher for automated well-to-well curve correlation."""
 
+    @staticmethod
+    def _normalized(curve: np.ndarray) -> np.ndarray:
+        """Z-normalize a curve, imputing LAS nulls (NaN/±inf) with the finite mean.
+
+        Raw NaN samples poison ``std``/``mean`` (NaN is truthy, so the ``or 1.0``
+        guard never engaged) and turn every DTW cost into NaN, which degrades
+        the backtracked path to a degenerate transfer result. Imputation keeps
+        every original sample index addressable; null intervals simply stop
+        contributing shape information.
+        """
+        values = np.asarray(curve, dtype=np.float64).reshape(-1)
+        finite = values[np.isfinite(values)]
+        fill = float(finite.mean()) if finite.size else 0.0
+        values = np.where(np.isfinite(values), values, fill)
+        std = float(np.std(values))
+        if not np.isfinite(std) or std <= 0.0:
+            std = 1.0
+        return (values - float(np.mean(values))) / std
+
     def match_curves(
         self,
         curve_ref: np.ndarray,
@@ -23,25 +49,30 @@ class DTWLogMatcher:
         window: int | None = None,
     ) -> AlignmentResult:
         """Compute optimal non-linear DTW alignment path between two log curves."""
-        n_ref = len(curve_ref)
-        n_target = len(curve_target)
+        c_ref = self._normalized(curve_ref)
+        c_target = self._normalized(curve_target)
+        n_ref = c_ref.size
+        n_target = c_target.size
 
-        # Normalize input curves to zero mean unit variance for robust matching
-        std_ref = float(np.std(curve_ref)) or 1.0
-        std_target = float(np.std(curve_target)) or 1.0
-
-        c_ref = (curve_ref - np.mean(curve_ref)) / std_ref
-        c_target = (curve_target - np.mean(curve_target)) / std_target
+        # Decimate over-long curves so the cost matrix stays bounded; path
+        # indices are mapped back to original sample space below.
+        stride = 1
+        if n_ref * n_target > _MAX_COST_CELLS:
+            stride = int(math.ceil(math.sqrt(n_ref * n_target / _MAX_COST_CELLS)))
+        d_ref = c_ref[::stride]
+        d_target = c_target[::stride]
+        d_n_ref = d_ref.size
+        d_n_target = d_target.size
 
         # Construct pairwise distance matrix
-        cost_matrix = np.full((n_ref + 1, n_target + 1), fill_value=np.inf)
+        cost_matrix = np.full((d_n_ref + 1, d_n_target + 1), fill_value=np.inf)
         cost_matrix[0, 0] = 0.0
 
-        for i in range(1, n_ref + 1):
-            for j in range(1, n_target + 1):
+        for i in range(1, d_n_ref + 1):
+            for j in range(1, d_n_target + 1):
                 if window is not None and abs(i - j) > window:
                     continue
-                dist = (c_ref[i - 1] - c_target[j - 1]) ** 2
+                dist = (d_ref[i - 1] - d_target[j - 1]) ** 2
                 cost_matrix[i, j] = dist + min(
                     cost_matrix[i - 1, j],      # Insertion
                     cost_matrix[i, j - 1],      # Deletion
@@ -49,7 +80,7 @@ class DTWLogMatcher:
                 )
 
         # Backtrack optimal alignment path to (0, 0)
-        i, j = n_ref, n_target
+        i, j = d_n_ref, d_n_target
         path_ref: list[int] = []
         path_target: list[int] = []
 
@@ -77,8 +108,12 @@ class DTWLogMatcher:
         path_ref.reverse()
         path_target.reverse()
 
+        if stride > 1:
+            path_ref = [min(idx * stride, n_ref - 1) for idx in path_ref]
+            path_target = [min(idx * stride, n_target - 1) for idx in path_target]
+
         return AlignmentResult(
-            cost=float(cost_matrix[n_ref, n_target]),
+            cost=float(cost_matrix[d_n_ref, d_n_target]),
             path_ref=path_ref,
             path_target=path_target,
         )

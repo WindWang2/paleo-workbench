@@ -24,10 +24,15 @@ def _scene() -> MapScene:
     scene = MapScene()
     scene.add_factor_grid(result, layer_id="grid")
     scene.add_contours("contours", [[(0.0, 5.0), (10.0, 5.0)]], extent=result.extent, crs=result.crs)
-    scene.add_sample_points("samples", [(1.0, 1.0)], extent=result.extent, crs=result.crs)
+    # Sample point sits in the NW finite quadrant, clear of every probe pixel.
+    scene.add_sample_points("samples", [(2.0, 9.0)], extent=result.extent, crs=result.crs)
+    # The polygon lies in the SW finite-value quadrant (grid_z = 0.0, opaque
+    # under the north-up raster). Layer ordering is only observable where the
+    # raster below the polygon is opaque; on a nodata cell the polygon shows
+    # through regardless of order, so the probe must target an opaque cell.
     scene.add_vector_layer(
         "facies",
-        ({"id": "f1", "geometry": {"type": "Polygon", "coordinates": [[[6, 6], [9, 6], [6, 9], [6, 6]]]}, "properties": {"name": "delta"}},),
+        ({"id": "f1", "geometry": {"type": "Polygon", "coordinates": [[[1, 1], [4, 1], [1, 4], [1, 1]]]}, "properties": {"name": "delta"}},),
         name="Facies", extent=result.extent, crs=result.crs,
         style={"fill": "#e03131", "stroke": "#ffffff", "stroke_width": 1.0},
     )
@@ -51,14 +56,18 @@ def test_golden_fallback_composition_has_scalar_contour_symbol_and_polygon_layer
     frame = _frame(_scene())
     image = _image(frame)
 
-    scalar = image.pixelColor(20, 20)
+    # Scalar raster (NW finite quadrant, grid_z = 0.5).
+    scalar = image.pixelColor(35, 30)
+    # Contour line: anti-aliased white over the scalar raster, so it renders as
+    # a bright, near-neutral line. ``min > 100`` (bright) and a bounded spread
+    # vs. the strongly tinted scalar regions keeps it robust to the specific
+    # background value the north-up raster places beneath the line.
     contour = image.pixelColor(80, 60)
-    polygon = image.pixelColor(110, 25)
+    # Polygon (SW quadrant, opaque raster cell beneath).
+    polygon = image.pixelColor(30, 90)
     assert (scalar.red(), scalar.green(), scalar.blue()) != BACKGROUND
-    # Anti-aliasing blends the one-pixel contour with the scalar beneath it, so
-    # assert a light neutral line rather than an unstable exact white byte value.
     assert min(contour.red(), contour.green(), contour.blue()) > 100
-    assert max(contour.red(), contour.green(), contour.blue()) - min(contour.red(), contour.green(), contour.blue()) < 12
+    assert max(contour.red(), contour.green(), contour.blue()) - min(contour.red(), contour.green(), contour.blue()) < 25
     assert polygon.red() > 150 and polygon.green() < 100 and polygon.blue() < 100
 
 
