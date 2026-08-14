@@ -81,6 +81,13 @@ class MappingPage(QWidget):
         self._unified_document_id: str | None = None
         self._authoring_document: MapAuthoringDocument | None = None
         self._unified_authoring_mode = False
+        # Authoring revision tracking: raw (data_revision, session revision) keys
+        # are translated into small effective integers so unchanged refreshes
+        # skip feature rebuilding end to end. Reset when the authoring document
+        # object is replaced.
+        self._unified_raw_revisions: dict[str, tuple[int, int]] = {}
+        self._unified_effective_revisions: dict[str, int] = {}
+        self._unified_revisions_owner: int | None = None
         self._map_tools = MapToolController()
         self._snapping = SnappingService()
         self._topology = TopologyService()
@@ -698,6 +705,27 @@ class MappingPage(QWidget):
         """Registry-backed composition used by the unified renderer during migration."""
         return self._unified_scene_adapter.scene
 
+    def _unified_data_revisions(self) -> dict[str, int] | None:
+        """Translate authoring-layer revision keys into stable per-kind integers."""
+        authoring = self._authoring_document
+        if authoring is None or not self._unified_authoring_mode:
+            return None
+        owner = id(authoring)
+        if self._unified_revisions_owner != owner:
+            # New authoring object: force a bump for every kind even when raw
+            # keys repeat, keeping effective revisions globally monotonic (the
+            # document feature cache is keyed by them and must never collide).
+            self._unified_revisions_owner = owner
+            self._unified_raw_revisions.clear()
+        revisions: dict[str, int] = {}
+        for kind in ("facies", "well", "line", "label"):
+            raw = authoring.data_revision_key(kind)
+            if self._unified_raw_revisions.get(kind) != raw:
+                self._unified_raw_revisions[kind] = raw
+                self._unified_effective_revisions[kind] = self._unified_effective_revisions.get(kind, 0) + 1
+            revisions[kind] = self._unified_effective_revisions.get(kind, 1)
+        return revisions
+
     def _refresh_unified_composition(self) -> None:
         """Project current live editor records into the unified renderer seam."""
         document = self._active_document
@@ -717,6 +745,7 @@ class MappingPage(QWidget):
             visibility=visibility,
             records=records,
             excluded_layer_ids=self._suppressed_layer_ids,
+            data_revisions=self._unified_data_revisions(),
         )
         self._sync_reference_render_layers(document)
         if self._authoring_document is not None:
@@ -1093,8 +1122,12 @@ class MappingPage(QWidget):
         for key in ("fill", "stroke"):
             if requested_style.get(key):
                 style[key] = requested_style[key]
-        if "stroke_width" in requested_style:
-            style["stroke_width"] = requested_style["stroke_width"]
+        for key in ("stroke_width", "marker_size"):
+            if key in requested_style:
+                style[key] = requested_style[key]
+        for key in ("line_pattern", "marker"):
+            if requested_style.get(key):
+                style[key] = requested_style[key]
         for key in ("renderer", "field", "categories", "ranges"):
             if key in requested_style:
                 style[key] = requested_style[key]
@@ -1521,32 +1554,34 @@ class MappingPage(QWidget):
         self.chrome_panel.update_state(self._active_document)
         self._emit_mapping_context()
 
-    def export_native_factor_map(self, output_path, *, register: bool = True):
-        """Export the active native factor composition through the shared OUTPUT path.
+    def export_native_factor_map(self, output_path, *, register: bool = True, format_label: str = "PNG"):
+        """Export the active unified composition through the shared OUTPUT path.
 
-        The scalar-layer ids are factor-task ids by construction, so they provide the
-        export lineage without consulting interpolation or legacy Matplotlib canvases.
+        The scalar-layer ids are factor-task ids by construction, so they provide
+        export lineage together with each layer's catalog provenance reference
+        (DataVersion id) recorded on the render snapshot.
         """
-        if self._native_factor_scene is None:
+        if self._native_factor_scene is None and self.unified_scene is None:
             return None
         from paleo_workbench.resources.export_service import export_widget_snapshot
 
         task_ids = [
             layer.id
-            for layer in self._native_factor_scene.registry.layers()
-            if self._native_factor_scene.scalar_layer(layer.id) is not None
+            for layer in self.unified_scene.registry.layers()
+            if self.unified_scene.scalar_layer(layer.id) is not None
         ]
+        lineage_ids = list(dict.fromkeys(task_ids + list(self.unified_canvas.snapshot_source_version_ids)))
         return export_widget_snapshot(
             self.unified_canvas,
             output_path,
-            "PNG",
+            str(format_label).upper(),
             project=self._project,
             # MappingPage is intentionally not coupled to a controller-owned
             # project filename. ProjectManager will relativize this path on save.
             project_path=None,
-            linked_id=task_ids[0] if task_ids else "factor_map",
+            linked_id=lineage_ids[0] if lineage_ids else "factor_map",
             register=register,
-            source_task_ids=task_ids,
+            source_task_ids=lineage_ids,
         )
 
     def _on_topology_locate_requested(self, feature_id: str) -> None:

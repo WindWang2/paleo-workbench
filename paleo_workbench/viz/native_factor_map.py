@@ -115,6 +115,11 @@ class MapScene:
         self._vector_styles: dict[str, dict] = {}
         self._scalar_styles: dict[str, dict] = {}
         self._change_listeners: list[Callable[[], None]] = []
+        # Contour/point geometry is immutable after add; remember the derived
+        # render features so render_snapshot stays O(registry) instead of
+        # re-building one dict per path/point on every refresh.
+        self._contour_render_cache: dict[str, tuple[ContourGeometry, tuple[dict, ...], dict]] = {}
+        self._point_render_cache: dict[str, tuple[PointGeometry, tuple[dict, ...], dict]] = {}
 
     def add_change_listener(self, listener: Callable[[], None]) -> None:
         if listener not in self._change_listeners:
@@ -172,7 +177,9 @@ class MapScene:
         map_layer.extent = result.extent
         map_layer.crs = result.crs or ""
         map_layer.source_ref = source_ref
-        map_layer.set_provenance_ref(result.run_ref or "")
+        # Prefer the interpolation run reference; fall back to the managed
+        # artifact version id so exports can always cite a catalog DataVersion.
+        map_layer.set_provenance_ref(result.run_ref or str(source_ref))
         map_layer.set_metadata("algorithm_id", result.algorithm_id)
         self._scalars[layer_id] = native_layer
         self._scalar_styles[layer_id] = {
@@ -275,12 +282,13 @@ class MapScene:
         features: Iterable[dict],
         *,
         extent: tuple[float, float, float, float] | None = None,
+        assume_changed: bool = False,
     ) -> bool:
         layer = self.registry.get(layer_id)
         if layer is None or layer_id not in self._vectors:
             return False
         next_features = tuple(dict(feature) for feature in features)
-        if next_features == self._vectors[layer_id] and extent is None:
+        if not assume_changed and next_features == self._vectors[layer_id] and extent is None:
             return False
         self._vectors[layer_id] = next_features
         if extent is not None:
@@ -504,6 +512,61 @@ class MapScene:
     def point_geometry(self, layer_id: str) -> PointGeometry | None:
         return self._points.get(layer_id)
 
+    def _contour_render_payload(self, layer_id: str, contour: ContourGeometry) -> tuple[tuple[dict, ...], dict]:
+        cached = self._contour_render_cache.get(layer_id)
+        if cached is not None and cached[0] is contour:
+            return cached[1], cached[2]
+        features = tuple(
+            {
+                "id": f"{layer_id}:{index}",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [list(point) for point in path],
+                },
+                "properties": {},
+            }
+            for index, path in enumerate(contour.paths)
+            if len(path) >= 2
+        )
+        style = {
+            "fill": "transparent",
+            "stroke": "#%02x%02x%02x" % contour.color[:3],
+            "stroke_width": contour.width,
+        }
+        self._contour_render_cache[layer_id] = (contour, features, style)
+        return features, style
+
+    def _point_render_payload(self, layer_id: str, points: PointGeometry) -> tuple[tuple[dict, ...], dict]:
+        cached = self._point_render_cache.get(layer_id)
+        if cached is not None and cached[0] is points:
+            return cached[1], cached[2]
+        features = tuple(
+            {
+                "id": f"{layer_id}:{index}",
+                "geometry": {"type": "Point", "coordinates": list(point)},
+                "properties": {},
+            }
+            for index, point in enumerate(points.points)
+        )
+        style = {
+            "fill": "#%02x%02x%02x" % points.color[:3],
+            "marker_size": points.radius * 2.0,
+        }
+        self._point_render_cache[layer_id] = (points, features, style)
+        return features, style
+
+    @staticmethod
+    def _layer_scale_range(map_layer) -> tuple[float, float] | None:
+        try:
+            scale_range = map_layer.scale_range
+            min_scale = float(scale_range.min_scale)
+            max_scale = float(scale_range.max_scale)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if min_scale <= 0.0 and max_scale <= 0.0:
+            return None
+        return (min_scale if min_scale > 0.0 else 0.0, max_scale if max_scale > 0.0 else float("inf"))
+
     def render_snapshot(self, *, project_crs: str = "") -> MapRenderSnapshot:
         """Export the authoritative composition order as an immutable render input."""
         layers: list[MapLayerSnapshot] = []
@@ -525,37 +588,10 @@ class MapScene:
                 style = self._vector_styles.get(layer_id, {})
             elif layer_id in self._contours:
                 contour = self._contours[layer_id]
-                features = tuple(
-                    {
-                        "id": f"{layer_id}:{index}",
-                        "geometry": {
-                            "type": "LineString",
-                            "coordinates": [list(point) for point in path],
-                        },
-                        "properties": {},
-                    }
-                    for index, path in enumerate(contour.paths)
-                    if len(path) >= 2
-                )
-                style = {
-                    "fill": "transparent",
-                    "stroke": "#%02x%02x%02x" % contour.color[:3],
-                    "stroke_width": contour.width,
-                }
+                features, style = self._contour_render_payload(layer_id, contour)
             elif layer_id in self._points:
                 points = self._points[layer_id]
-                features = tuple(
-                    {
-                        "id": f"{layer_id}:{index}",
-                        "geometry": {"type": "Point", "coordinates": list(point)},
-                        "properties": {},
-                    }
-                    for index, point in enumerate(points.points)
-                )
-                style = {
-                    "fill": "#%02x%02x%02x" % points.color[:3],
-                    "marker_size": points.radius * 2.0,
-                }
+                features, style = self._point_render_payload(layer_id, points)
             layers.append(
                 MapLayerSnapshot(
                     id=layer_id,
@@ -570,6 +606,9 @@ class MapScene:
                     visible=map_layer.visible,
                     opacity=map_layer.opacity,
                     renderer_payload=renderer_payload,
+                    source_version_id=str(map_layer.provenance_ref or ""),
+                    metadata=dict(map_layer.metadata or {}),
+                    scale_range=self._layer_scale_range(map_layer),
                 )
             )
         return MapRenderSnapshot(project_crs=project_crs, layers=tuple(layers))
@@ -584,6 +623,8 @@ class MapScene:
             self._raster_sources.pop(layer_id, None)
             self._vector_styles.pop(layer_id, None)
             self._scalar_styles.pop(layer_id, None)
+            self._contour_render_cache.pop(layer_id, None)
+            self._point_render_cache.pop(layer_id, None)
             self._emit_changed()
         return removed
 

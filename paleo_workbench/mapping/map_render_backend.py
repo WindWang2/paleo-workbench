@@ -2,17 +2,29 @@
 
 Project and editing code produce immutable snapshots. Render adapters consume those
 snapshots and return copied RGBA frames; neither adapter is an authority for map data.
+
+The fallback adapter owns all direct QPainter feature painting so application pages
+never become a second rendering stack. It renders through one shared composition
+pipeline (:meth:`FallbackMapRenderBackend._paint_composition`) for raster frames and
+for vector export targets (SVG/PDF painters), keeping screen and export identical.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 import math
+import os
+import threading
+import time
 from typing import Any, Mapping
 
+import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
+
+from paleo_workbench.mapping.map_styles import MarkerSymbol, VectorStyle
 
 __all__ = [
     "FallbackMapRenderBackend",
@@ -26,6 +38,7 @@ __all__ = [
 
 
 _BACKGROUND = QColor("#181c22")
+_BASE_DPI = 96.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +64,13 @@ class MapLayerSnapshot:
     # Renderer-only payload (for example an existing native ScalarGridLayer).
     # It is never serialized into project state or treated as scientific data.
     renderer_payload: object | None = None
+    # Catalog provenance: the DataVersion id this layer was produced from, when
+    # known. Carried through the seam so exports can record their inputs.
+    source_version_id: str = ""
+    metadata: Mapping[str, str] = field(default_factory=dict)
+    # Optional 1:N scale-denominator visibility window (min, max); ``None``
+    # means the layer renders at every scale.
+    scale_range: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,104 +185,825 @@ class MapRenderBackend(ABC):
         return self._generation
 
 
+# ---------------------------------------------------------------------------
+# Fallback renderer internals
+# ---------------------------------------------------------------------------
+
+
+class _PreparedFeature:
+    """Viewport-independent parsed geometry for one feature."""
+
+    __slots__ = ("feature_id", "kind", "parts", "bbox", "properties")
+
+    def __init__(
+        self,
+        feature_id: str,
+        kind: str,
+        parts: tuple[np.ndarray, ...],
+        bbox: tuple[float, float, float, float],
+        properties: Mapping[str, Any],
+    ) -> None:
+        self.feature_id = feature_id
+        self.kind = kind  # point | line | polygon
+        self.parts = parts  # each (N, 2) float64 array; polygons keep ring order
+        self.bbox = bbox
+        self.properties = properties
+
+
+class _PreparedLayer:
+    """Parsed vector payload cached per layer data revision.
+
+    Geometry is stored as flat concatenated arrays so a frame performs a handful
+    of vectorised transforms over the whole layer instead of one Python-level
+    transform/simplify pass per part. Feature order (and therefore draw order)
+    is preserved by the index arrays.
+    """
+
+    __slots__ = (
+        "revision",
+        "features",
+        "feature_kinds",
+        "feature_bboxes",
+        "point_xy",
+        "point_feature",
+        "path_xy",
+        "path_offsets",
+        "path_feature",
+        "path_is_ring",
+    )
+
+    _KIND_IDS = {"point": 0, "line": 1, "polygon": 2}
+
+    def __init__(self, features: tuple[_PreparedFeature, ...], revision: int) -> None:
+        self.features = features
+        self.revision = revision
+        count = len(features)
+        self.feature_kinds = np.fromiter(
+            (self._KIND_IDS[feature.kind] for feature in features),
+            dtype=np.int8,
+            count=count,
+        )
+        self.feature_bboxes = np.array(
+            [feature.bbox for feature in features], dtype=np.float64
+        ).reshape(count, 4)
+        point_coords: list[np.ndarray] = []
+        point_feature: list[int] = []
+        path_coords: list[np.ndarray] = []
+        path_feature: list[int] = []
+        path_is_ring: list[bool] = []
+        for index, feature in enumerate(features):
+            if feature.kind == "point":
+                for part in feature.parts:
+                    point_coords.append(part)
+                    point_feature.append(index)
+                continue
+            for part in feature.parts:
+                path_coords.append(part)
+                path_feature.append(index)
+                path_is_ring.append(feature.kind == "polygon")
+        self.point_xy = (
+            np.concatenate(point_coords).reshape(-1, 2) if point_coords else None
+        )
+        self.point_feature = (
+            np.array(point_feature, dtype=np.int32) if point_feature else None
+        )
+        if path_coords:
+            self.path_xy = np.concatenate(path_coords).reshape(-1, 2)
+            self.path_offsets = np.zeros(len(path_coords) + 1, dtype=np.int64)
+            np.cumsum([len(part) for part in path_coords], out=self.path_offsets[1:])
+            self.path_feature = np.array(path_feature, dtype=np.int32)
+            self.path_is_ring = np.array(path_is_ring, dtype=bool)
+        else:
+            self.path_xy = None
+            self.path_offsets = np.zeros(1, dtype=np.int64)
+            self.path_feature = np.zeros(0, dtype=np.int32)
+            self.path_is_ring = np.zeros(0, dtype=bool)
+
+    @property
+    def vertex_count(self) -> int:
+        total = 0 if self.path_xy is None else len(self.path_xy)
+        if self.point_xy is not None:
+            total += len(self.point_xy)
+        return total
+
+
+def _as_points(value: object) -> np.ndarray | None:
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return None
+    try:
+        return np.asarray(value, dtype=np.float64).reshape(-1, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _prepare_geometry(geometry: object) -> tuple[str, tuple[np.ndarray, ...]] | None:
+    """Classify a GeoJSON geometry into (kind, parts) with float64 arrays."""
+    if not isinstance(geometry, Mapping):
+        return None
+    geometry_type = str(geometry.get("type") or "")
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Point":
+        part = _as_points(coordinates)
+        return ("point", (part,)) if part is not None else None
+    if geometry_type == "MultiPoint":
+        parts = tuple(point for point in (_as_points(value) for value in coordinates or ()) if point is not None)
+        return ("point", parts) if parts else None
+    if geometry_type == "LineString":
+        part = _as_points(coordinates)
+        return ("line", (part,)) if part is not None and len(part) >= 2 else None
+    if geometry_type == "MultiLineString":
+        parts = tuple(
+            line
+            for line in (_as_points(value) for value in coordinates or ())
+            if line is not None and len(line) >= 2
+        )
+        return ("line", parts) if parts else None
+    if geometry_type == "Polygon":
+        parts = tuple(
+            ring
+            for ring in (_as_points(value) for value in coordinates or ())
+            if ring is not None and len(ring) >= 3
+        )
+        return ("polygon", parts) if parts else None
+    if geometry_type == "MultiPolygon":
+        parts: list[np.ndarray] = []
+        for polygon in coordinates or ():
+            if not isinstance(polygon, (list, tuple)):
+                continue
+            parts.extend(
+                ring
+                for ring in (_as_points(value) for value in polygon)
+                if ring is not None and len(ring) >= 3
+            )
+        return ("polygon", tuple(parts)) if parts else None
+    return None
+
+
+def _bbox_for(parts: tuple[np.ndarray, ...]) -> tuple[float, float, float, float]:
+    stacked = np.concatenate(parts) if len(parts) > 1 else parts[0]
+    mins = stacked.min(axis=0)
+    maxs = stacked.max(axis=0)
+    return (float(mins[0]), float(mins[1]), float(maxs[0]), float(maxs[1]))
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
-    """Explicit minimal renderer for tests and hosts without a QGIS bridge.
+    """Explicit QPainter renderer for tests and hosts without a QGIS bridge.
 
     This adapter owns all direct QPainter feature painting so application pages never
-    become a second rendering stack. It is intentionally limited to basic GeoJSON
-    vector geometry; scalar-grid composition remains delegated to the existing native
-    layer path until its QGIS mirror is introduced in the next vertical slice.
+    become a second rendering stack. Vector geometry is parsed once per data revision
+    into cached float64 parts; every frame then performs vectorised world→screen
+    transforms, viewport culling, pixel-grid LOD simplification and batched draws.
+
+    ``threaded=True`` moves per-frame rasterisation onto one background worker so
+    first-time preparation of very large layers never blocks the UI thread. The
+    latest-generation contract is identical to the QGIS adapter: stale frames are
+    discarded, cancelled requests never surface.
     """
 
     backend_name = "fallback"
 
-    @staticmethod
-    def _color(value: object, fallback: str) -> QColor:
-        color = QColor(str(value or fallback))
-        return color if color.isValid() else QColor(fallback)
+    #: Frame-level vertex budget for path rasterisation. Beyond this, geometry
+    #: is stride-decimated (endpoints kept) so pan/zoom stays responsive on
+    #: six-figure feature maps. Override with PALEO_RENDER_VERTEX_BUDGET.
+    DEFAULT_VERTEX_BUDGET = 150_000
 
-    def _screen_point(self, point: object) -> QPointF | None:
-        if not isinstance(point, (list, tuple)) or len(point) < 2:
-            return None
+    def __init__(self, *, threaded: bool = False) -> None:
+        super().__init__()
+        self._threaded = bool(threaded)
         try:
-            x, y = float(point[0]), float(point[1])
+            budget = int(os.environ.get("PALEO_RENDER_VERTEX_BUDGET", self.DEFAULT_VERTEX_BUDGET))
         except (TypeError, ValueError):
-            return None
-        xmin, ymin, xmax, ymax = self._extent
+            budget = self.DEFAULT_VERTEX_BUDGET
+        self._vertex_budget = max(1_000, budget)
+        self._executor: ThreadPoolExecutor | None = None
+        self._render_future: Future[RenderFrame] | None = None
+        self._prepared_lock = threading.Lock()
+        self._prepared: dict[str, _PreparedLayer] = {}
+        self._frame_cache: tuple[tuple, RenderFrame] | None = None
+        self._diagnostics = {
+            "prepared_layers": 0,
+            "prepared_cache_hits": 0,
+            "prepared_cache_misses": 0,
+            "features_total": 0,
+            "features_drawn": 0,
+            "points_drawn": 0,
+            "vertices_simplified": 0,
+            "frames_rendered": 0,
+            "frames_from_cache": 0,
+            "last_render_ms": 0.0,
+        }
+
+    # -- public API ---------------------------------------------------------
+
+    def render_diagnostics(self) -> dict[str, Any]:
+        """Return counters describing caches, culling and LOD for this backend."""
+        result = dict(self._diagnostics)
+        result["threaded"] = self._executor is not None
+        result["render_active"] = self.render_active
+        return result
+
+    def _ensure_executor(self) -> None:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="pwb-fallback-render"
+            )
+
+    def request_render(self) -> int:
+        """Render the newest generation off the UI thread when threaded.
+
+        Falls back to the synchronous base contract otherwise, which keeps
+        tiny local/test maps immediately consistent.
+        """
+        if not self._initialized:
+            self.initialize()
+        generation = self._next_generation()
+        cached = self._cached_frame()
+        if cached is not None:
+            self._diagnostics["frames_from_cache"] += 1
+            self._completed = replace(cached, generation=generation)
+            return generation
+        self._completed = None
+        if not self._threaded:
+            self._completed = self._render_frame(generation)
+            return generation
+        self._ensure_executor()
+        self._render_future = self._executor.submit(self._render_frame, generation)
+        return generation
+
+    def take_completed_frame(self) -> RenderFrame | None:
+        frame = super().take_completed_frame()
+        if frame is not None:
+            return frame
+        future = self._render_future
+        if future is not None and future.done():
+            self._render_future = None
+            try:
+                frame = future.result()
+            except Exception:  # noqa: BLE001 - a failed frame must never crash polling
+                return None
+            if frame.generation != self._generation:
+                return None
+            self._remember_frame(frame)
+            return frame
+        return None
+
+    @property
+    def render_active(self) -> bool:
+        future = self._render_future
+        return future is not None and not future.done()
+
+    def cancel_render(self) -> None:
+        super().cancel_render()
+        # Bump the generation so a still-running cancelled frame is discarded
+        # on arrival; the worker itself is cooperative and cannot be interrupted.
+        self._next_generation()
+        self._render_future = None
+
+    def shutdown(self) -> None:
+        self._render_future = None
+        executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=False)
+        with self._prepared_lock:
+            self._prepared.clear()
+        self._frame_cache = None
+        super().shutdown()
+
+    def render_sync(self) -> RenderFrame:
+        if not self._initialized:
+            self.initialize()
+        cached = self._cached_frame()
+        if cached is not None:
+            self._diagnostics["frames_from_cache"] += 1
+            return replace(cached, generation=self._next_generation())
+        frame = self._render_frame(self._next_generation())
+        self._remember_frame(frame)
+        return frame
+
+    def render_to_painter(self, painter: QPainter, width: int, height: int, *, dpi: float | None = None) -> None:
+        """Paint the current composition into any QPaintDevice target.
+
+        Used for vector exports (QSvgGenerator, QPdfWriter) so exported files are
+        generated by the exact same pipeline that renders the screen frame.
+        """
+        if not self._initialized:
+            self.initialize()
+        self._paint_composition(painter, int(width), int(height), self._dpi if dpi is None else float(dpi))
+
+    # -- frame cache --------------------------------------------------------
+
+    def _frame_key(self) -> tuple:
+        layers = tuple(
+            (
+                layer.id,
+                layer.layer_type,
+                int(layer.data_revision),
+                int(layer.style_revision),
+                bool(layer.visible),
+                round(float(layer.opacity), 6),
+            )
+            for layer in self._snapshot.layers
+        )
+        return (self._extent, self._output_size, self._dpi, layers, self._snapshot.project_crs)
+
+    def _remember_frame(self, frame: RenderFrame) -> None:
+        self._frame_cache = (self._frame_key(), frame)
+
+    def _cached_frame(self) -> RenderFrame | None:
+        cached = self._frame_cache
+        if cached is not None and cached[0] == self._frame_key():
+            return cached[1]
+        return None
+
+    def _render_frame(self, generation: int) -> RenderFrame:
         width, height = self._output_size
-        return QPointF(
-            (x - xmin) * width / (xmax - xmin),
-            height - (y - ymin) * height / (ymax - ymin),
+        image = QImage(width, height, QImage.Format.Format_RGBA8888)
+        image.fill(_BACKGROUND)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        started = time.perf_counter()
+        try:
+            self._paint_composition(painter, width, height, self._dpi)
+        finally:
+            painter.end()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        self._diagnostics["frames_rendered"] += 1
+        self._diagnostics["last_render_ms"] = elapsed_ms
+        return RenderFrame(
+            generation=generation,
+            width=image.width(),
+            height=image.height(),
+            stride=image.bytesPerLine(),
+            rgba=image.constBits().tobytes(),
+            render_ms=elapsed_ms,
         )
 
-    def _path(self, rings: object) -> QPainterPath:
-        path = QPainterPath()
-        if not isinstance(rings, (list, tuple)):
-            return path
-        for ring in rings:
-            if not isinstance(ring, (list, tuple)):
+    # -- composition pipeline ----------------------------------------------
+
+    def _scale_denominator(self, width: int) -> float:
+        """Approximate 1:N denominator assuming map units are metres."""
+        xmin, _, xmax, _ = self._extent
+        units_per_pixel = (xmax - xmin) / max(1, width)
+        return units_per_pixel / (0.0254 / _BASE_DPI)
+
+    def _paint_composition(self, painter: QPainter, width: int, height: int, dpi: float) -> None:
+        xmin, ymin, xmax, ymax = self._extent
+        span_x = xmax - xmin
+        span_y = ymax - ymin
+        if span_x <= 0.0 or span_y <= 0.0:
+            return
+        scale_denominator = self._scale_denominator(width)
+        dpi_scale = max(0.05, float(dpi) / _BASE_DPI)
+        self._diagnostics["features_total"] = 0
+        self._diagnostics["features_drawn"] = 0
+        self._diagnostics["points_drawn"] = 0
+        self._diagnostics["vertices_simplified"] = 0
+        for layer in self._snapshot.layers:
+            if not layer.visible or layer.opacity <= 0.0:
                 continue
-            polygon = QPolygonF()
-            for point in ring:
-                screen = self._screen_point(point)
-                if screen is not None:
-                    polygon.append(screen)
-            if len(polygon) >= 3:
-                path.addPolygon(polygon)
-        path.setFillRule(Qt.FillRule.OddEvenFill)
-        return path
-
-    def _draw_geometry(self, painter: QPainter, geometry: object, style: Mapping[str, Any]) -> None:
-        if not isinstance(geometry, Mapping):
-            return
-        geometry_type = str(geometry.get("type") or "")
-        coordinates = geometry.get("coordinates")
-        fill = self._color(style.get("fill"), "#6c8ebf")
-        stroke = self._color(style.get("stroke"), "#26364d")
-        try:
-            width = max(0.0, float(style.get("stroke_width", 1.0)))
-        except (TypeError, ValueError):
-            width = 1.0
-        painter.setPen(QPen(stroke, width))
-        painter.setBrush(fill)
-
-        if geometry_type == "Point":
-            center = self._screen_point(coordinates)
-            if center is None:
-                return
+            scale_range = layer.scale_range
+            if (
+                scale_range is not None
+                and not (scale_range[0] <= scale_denominator <= scale_range[1])
+            ):
+                continue
+            painter.save()
+            painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
             try:
-                radius = max(1.0, float(style.get("marker_size", 6.0)) / 2.0)
-            except (TypeError, ValueError):
-                radius = 3.0
-            painter.drawEllipse(center, radius, radius)
-            return
-        if geometry_type == "MultiPoint" and isinstance(coordinates, (list, tuple)):
-            for point in coordinates:
-                self._draw_geometry(
-                    painter, {"type": "Point", "coordinates": point}, style
+                if layer.layer_type == "scalar_grid":
+                    self._draw_scalar_grid(painter, layer)
+                elif layer.layer_type == "vector" and layer.features:
+                    self._paint_vector_layer(
+                        painter, layer, xmin, ymin, span_x, span_y, width, height, dpi_scale
+                    )
+            finally:
+                painter.restore()
+
+    def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
+        cached = self._prepared.get(layer.id)
+        if cached is not None and cached.revision == int(layer.data_revision):
+            self._diagnostics["prepared_cache_hits"] += 1
+            return cached
+        items: list[_PreparedFeature] = []
+        for feature in layer.features:
+            prepared = _prepare_geometry(feature.get("geometry"))
+            if prepared is None:
+                continue
+            kind, parts = prepared
+            items.append(
+                _PreparedFeature(
+                    str(feature.get("id") or ""),
+                    kind,
+                    parts,
+                    _bbox_for(parts),
+                    feature.get("properties") or {},
                 )
+            )
+        prepared_layer = _PreparedLayer(tuple(items), int(layer.data_revision))
+        with self._prepared_lock:
+            existing = self._prepared.get(layer.id)
+            if existing is not None and existing.revision == int(layer.data_revision):
+                self._diagnostics["prepared_cache_hits"] += 1
+                return existing
+            self._prepared[layer.id] = prepared_layer
+        self._diagnostics["prepared_cache_misses"] += 1
+        self._diagnostics["prepared_layers"] = len(self._prepared)
+        return prepared_layer
+
+    def _paint_vector_layer(
+        self,
+        painter: QPainter,
+        layer: MapLayerSnapshot,
+        xmin: float,
+        ymin: float,
+        span_x: float,
+        span_y: float,
+        width: int,
+        height: int,
+        dpi_scale: float,
+    ) -> None:
+        style = VectorStyle.from_dict(layer.style)
+        scale_x = width / span_x
+        scale_y = height / span_y
+        marker_radius = max(0.5, style.marker_size * dpi_scale / 2.0)
+        stroke_width = max(0.0, style.stroke_width * dpi_scale)
+        pad_x = (marker_radius + stroke_width) / scale_x
+        pad_y = (marker_radius + stroke_width) / scale_y
+        view = (
+            xmin - pad_x,
+            ymin - pad_y,
+            xmin + span_x + pad_x,
+            ymin + span_y + pad_y,
+        )
+        pen = QPen(
+            self._color(style.stroke, "#26364d"),
+            max(0.5, stroke_width) if stroke_width > 0.0 else 1.0,
+        )
+        dash = style.line_pattern.dash_pattern(stroke_width)
+        if dash:
+            pen.setDashPattern(list(dash))
+            pen.setDashCap(Qt.PenCapStyle.FlatCap)
+        painter.setPen(pen)
+        fill = self._color(style.fill, "#6c8ebf")
+        transparent_fill = style.fill == "transparent" or fill.alpha() == 0
+        painter.setBrush(Qt.BrushStyle.NoBrush if transparent_fill else fill)
+        prepared = self._prepared_layer(layer)
+        self._diagnostics["features_total"] += len(prepared.features)
+        visible_features = self._cull_features(prepared, view)
+        self._diagnostics["features_drawn"] += int(visible_features.sum())
+        if not visible_features.any():
             return
-        if geometry_type == "LineString":
-            points = [self._screen_point(point) for point in coordinates or ()]
-            valid = [point for point in points if point is not None]
-            if len(valid) >= 2:
-                path = QPainterPath(valid[0])
-                for point in valid[1:]:
-                    path.lineTo(point)
+        if prepared.path_xy is not None:
+            self._paint_layer_paths(
+                painter, prepared, visible_features, style, view,
+                xmin, ymin, scale_x, scale_y, width, height,
+                marker_radius, stroke_width, transparent_fill, fill,
+            )
+        if prepared.point_xy is not None:
+            self._paint_layer_points(
+                painter, prepared, visible_features, style, view,
+                xmin, ymin, scale_x, scale_y, width, height,
+                marker_radius, stroke_width, transparent_fill, fill, dpi_scale,
+            )
+
+    @staticmethod
+    def _cull_features(prepared: _PreparedLayer, view: tuple[float, float, float, float]) -> np.ndarray:
+        boxes = prepared.feature_bboxes
+        if boxes.size == 0:
+            return np.zeros(0, dtype=bool)
+        vx0, vy0, vx1, vy1 = view
+        return (
+            (boxes[:, 2] >= vx0)
+            & (boxes[:, 0] <= vx1)
+            & (boxes[:, 3] >= vy0)
+            & (boxes[:, 1] <= vy1)
+        )
+
+    def _paint_layer_paths(
+        self,
+        painter: QPainter,
+        prepared: _PreparedLayer,
+        visible_features: np.ndarray,
+        style: VectorStyle,
+        view: tuple[float, float, float, float],
+        xmin: float,
+        ymin: float,
+        scale_x: float,
+        scale_y: float,
+        width: int,
+        height: int,
+        marker_radius: float,
+        stroke_width: float,
+        transparent_fill: bool,
+        fill: QColor,
+    ) -> None:
+        xy = prepared.path_xy
+        screen = np.empty_like(xy)
+        screen[:, 0] = (xy[:, 0] - xmin) * scale_x
+        screen[:, 1] = height - (xy[:, 1] - ymin) * scale_y
+        offsets = prepared.path_offsets
+        starts = offsets[:-1]
+        lengths = np.diff(offsets)
+        part_visible = visible_features[prepared.path_feature]
+        if not part_visible.any():
+            return
+        # Finer per-part culling in screen space (feature bboxes only bound a
+        # feature's full extent; long lines crossing the viewport survive here).
+        pad_px = marker_radius + stroke_width + 1.0
+        min_x = np.minimum.reduceat(screen[:, 0], starts)
+        max_x = np.maximum.reduceat(screen[:, 0], starts)
+        min_y = np.minimum.reduceat(screen[:, 1], starts)
+        max_y = np.maximum.reduceat(screen[:, 1], starts)
+        in_view = (
+            part_visible
+            & (max_x >= -pad_px)
+            & (min_x <= width + pad_px)
+            & (max_y >= -pad_px)
+            & (min_y <= height + pad_px)
+        )
+        part_indices = np.nonzero(in_view)[0]
+        if part_indices.size == 0:
+            return
+        # Adaptive pixel-grid LOD: coarser quantisation only when the frame is
+        # heavily oversampled, keeping pan/zoom responsive at six-figure counts.
+        visible_vertices = int(lengths[part_indices].sum())
+        tolerance = 1.0
+        if visible_vertices > 400_000:
+            tolerance = 2.0
+        if visible_vertices > 1_200_000:
+            tolerance = 3.0
+        quantised = np.floor(screen / tolerance).astype(np.int64)
+        # Keep a vertex only when its quantised pixel differs from a neighbour
+        # (plus part endpoints), collapsing sub-pixel vertex runs.
+        keep = np.zeros(len(screen), dtype=bool)
+        if len(screen) > 2:
+            differs = (quantised[1:] != quantised[:-1]).any(axis=1)
+            keep[:-1] |= differs
+            keep[1:] |= differs
+        keep[starts] = True
+        keep[offsets[1:] - 1] = True
+        # Hard vertex budget: stride-decimate when a frame is still oversampled
+        # (sub-pixel-dense geometry), bounding worst-case rasterisation time
+        # independently of dataset size.
+        stride = 1
+        if visible_vertices > self._vertex_budget:
+            stride = int(math.ceil(visible_vertices / self._vertex_budget))
+            positions = np.arange(len(screen))
+            keep &= (positions % stride == 0)
+            keep[starts] = True
+            keep[offsets[1:] - 1] = True
+        kept_index = np.nonzero(keep)[0]
+
+        rings = prepared.path_is_ring
+        part_feature = prepared.path_feature
+        drawn_vertices = 0
+        categories = (
+            dict(style.categories)
+            if style.renderer == "categorized" and style.categories
+            else None
+        )
+
+        def kept_slice(part: int) -> np.ndarray:
+            start, end = offsets[part], offsets[part + 1]
+            return kept_index[np.searchsorted(kept_index, start):np.searchsorted(kept_index, end)]
+
+        # Lines: stroke-only pass. Per-part QPainterPath built from float
+        # moveTo/lineTo calls measured fastest; QPolygonF/QPointF construction
+        # and multi-subpath mega-paths are both significantly slower.
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for part in part_indices:
+            if rings[part]:
+                continue
+            kept = kept_slice(part)
+            drawn_vertices += len(kept)
+            if len(kept) < 2:
+                continue
+            coordinates = screen[kept].tolist()
+            path = QPainterPath()
+            path.moveTo(coordinates[0][0], coordinates[0][1])
+            for x, y in coordinates[1:]:
+                path.lineTo(x, y)
+            painter.drawPath(path)
+        painter.restore()
+
+        # Polygons: rings of one feature share a path so OddEvenFill keeps
+        # holes correct; category fills switch brushes between features.
+        current_feature = -1
+        path: QPainterPath | None = None
+
+        def flush_polygon() -> None:
+            nonlocal path, current_feature
+            if path is not None and not path.isEmpty():
+                if categories is not None and current_feature >= 0:
+                    key = str(
+                        prepared.features[current_feature].properties.get(style.field) or ""
+                    )
+                    color_name = categories.get(key)
+                    if color_name is not None:
+                        painter.save()
+                        painter.setBrush(self._color(color_name, style.fill))
+                        painter.drawPath(path)
+                        painter.restore()
+                        path = None
+                        current_feature = -1
+                        return
                 painter.drawPath(path)
+            path = None
+            current_feature = -1
+
+        for part in part_indices:
+            if not rings[part]:
+                continue
+            kept = kept_slice(part)
+            drawn_vertices += len(kept)
+            if len(kept) < 3:
+                continue
+            feature = int(part_feature[part])
+            if feature != current_feature:
+                flush_polygon()
+                current_feature = feature
+                path = QPainterPath()
+                path.setFillRule(Qt.FillRule.OddEvenFill)
+            coordinates = screen[kept].tolist()
+            assert path is not None
+            path.moveTo(coordinates[0][0], coordinates[0][1])
+            for x, y in coordinates[1:]:
+                path.lineTo(x, y)
+        flush_polygon()
+        self._diagnostics["vertices_simplified"] += visible_vertices - drawn_vertices
+
+    def _paint_layer_points(
+        self,
+        painter: QPainter,
+        prepared: _PreparedLayer,
+        visible_features: np.ndarray,
+        style: VectorStyle,
+        view: tuple[float, float, float, float],
+        xmin: float,
+        ymin: float,
+        scale_x: float,
+        scale_y: float,
+        width: int,
+        height: int,
+        marker_radius: float,
+        stroke_width: float,
+        transparent_fill: bool,
+        fill: QColor,
+        dpi_scale: float,
+    ) -> None:
+        xy = prepared.point_xy
+        screen = np.empty_like(xy)
+        screen[:, 0] = (xy[:, 0] - xmin) * scale_x
+        screen[:, 1] = height - (xy[:, 1] - ymin) * scale_y
+        pad_px = marker_radius + stroke_width + 1.0
+        in_view = (
+            visible_features[prepared.point_feature]
+            & (screen[:, 0] >= -pad_px)
+            & (screen[:, 0] <= width + pad_px)
+            & (screen[:, 1] >= -pad_px)
+            & (screen[:, 1] <= height + pad_px)
+        )
+        count = int(in_view.sum())
+        if count == 0:
             return
-        if geometry_type == "MultiLineString" and isinstance(coordinates, (list, tuple)):
-            for line in coordinates:
-                self._draw_geometry(
-                    painter, {"type": "LineString", "coordinates": line}, style
+        points = screen[in_view]
+        feature_indices = prepared.point_feature[in_view]
+        # Grid de-duplication LOD: when markers shrink below ~1.5 px, thousands
+        # of coincident screen dots collapse to one draw each.
+        if marker_radius < 1.5 and count > 4_000:
+            quantised = np.floor(points).astype(np.int64)
+            _, unique_at = np.unique(quantised, axis=0, return_index=True)
+            points = points[np.sort(unique_at)]
+            feature_indices = feature_indices[np.sort(unique_at)]
+            count = len(points)
+        self._diagnostics["points_drawn"] += count
+        categorized = (
+            dict(style.categories)
+            if style.renderer == "categorized" and style.categories
+            else None
+        )
+        batch_dots = marker_radius < 1.0 or (
+            style.marker is MarkerSymbol.CIRCLE and marker_radius <= 4.0
+        )
+        # Complex per-point symbols stay affordable by capping them: beyond the
+        # cap the layer degrades to batched dots (points still visible).
+        symbol_loop = not batch_dots and count <= 5_000
+        if categorized is not None and not transparent_fill:
+            groups: dict[str, list[int]] = {}
+            for position, feature_index in enumerate(feature_indices):
+                key = str(prepared.features[feature_index].properties.get(style.field) or "")
+                groups.setdefault(key, []).append(position)
+            for key, positions in groups.items():
+                color_name = categorized.get(key)
+                painter.setBrush(
+                    self._color(color_name, style.fill)
+                    if color_name
+                    else (Qt.BrushStyle.NoBrush if transparent_fill else fill)
                 )
+                selected = points[positions]
+                if symbol_loop:
+                    for px, py in selected.tolist():
+                        self._draw_point_symbol(painter, QPointF(px, py), marker_radius, style.marker)
+                else:
+                    self._draw_dots(painter, selected, marker_radius)
             return
-        if geometry_type == "Polygon":
-            painter.drawPath(self._path(coordinates))
+        if symbol_loop:
+            for px, py in points.tolist():
+                self._draw_point_symbol(painter, QPointF(px, py), marker_radius, style.marker)
+        else:
+            self._draw_dots(painter, points, marker_radius)
+        labels = style.labels
+        if labels is not None and labels.visible and labels.field and count <= 1_500:
+            for position, (px, py) in enumerate(points.tolist()):
+                feature = prepared.features[feature_indices[position]]
+                anchor = QPointF(px, py)
+                self._draw_label_text(painter, anchor, feature, labels.field, style, dpi_scale)
+
+    def _draw_dots(self, painter: QPainter, points: np.ndarray, radius: float) -> None:
+        """One batched drawPoints call for any number of dot markers."""
+        painter.save()
+        dot_pen = QPen(painter.pen())
+        dot_pen.setWidthF(max(1.0, radius * 2.0))
+        dot_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        dot_pen.setDashPattern([])
+        painter.setPen(dot_pen)
+        painter.drawPoints(QPolygonF([QPointF(px, py) for px, py in points.tolist()]))
+        painter.restore()
+
+    def _draw_point_symbol(
+        self, painter: QPainter, centre: QPointF, radius: float, marker: MarkerSymbol
+    ) -> None:
+        if marker is MarkerSymbol.SQUARE:
+            painter.drawRect(QRectF(centre.x() - radius, centre.y() - radius, radius * 2, radius * 2))
+        elif marker is MarkerSymbol.TRIANGLE:
+            tip = centre + QPointF(0, -radius * 1.2)
+            left = centre + QPointF(-radius, radius)
+            right = centre + QPointF(radius, radius)
+            painter.drawPolygon(QPolygonF([tip, left, right]))
+        elif marker is MarkerSymbol.DIAMOND:
+            painter.drawPolygon(
+                QPolygonF(
+                    [
+                        centre + QPointF(0, -radius),
+                        centre + QPointF(radius, 0),
+                        centre + QPointF(0, radius),
+                        centre + QPointF(-radius, 0),
+                    ]
+                )
+            )
+        elif marker is MarkerSymbol.CROSS:
+            painter.drawLine(centre + QPointF(-radius, -radius), centre + QPointF(radius, radius))
+            painter.drawLine(centre + QPointF(radius, -radius), centre + QPointF(-radius, radius))
+        elif marker is MarkerSymbol.STAR:
+            star: list[QPointF] = []
+            for index in range(10):
+                angle = -math.pi / 2 + index * math.pi / 5
+                length = radius if index % 2 == 0 else radius * 0.45
+                star.append(centre + QPointF(length * math.cos(angle), length * math.sin(angle)))
+            painter.drawPolygon(QPolygonF(star))
+        elif marker is MarkerSymbol.WELL:
+            # 井符号: ring plus centre dot on the standard pen.
+            painter.drawEllipse(centre, radius, radius)
+            painter.drawPoint(centre)
+        else:
+            painter.drawEllipse(centre, radius, radius)
+
+    def _draw_label_text(
+        self,
+        painter: QPainter,
+        anchor: QPointF,
+        feature: _PreparedFeature,
+        field: str,
+        style: VectorStyle,
+        dpi_scale: float,
+    ) -> None:
+        text = str(
+            feature.properties.get(field)
+            or feature.properties.get("name")
+            or feature.properties.get("text")
+            or ""
+        ).strip()
+        if not text:
             return
-        if geometry_type == "MultiPolygon" and isinstance(coordinates, (list, tuple)):
-            for polygon in coordinates:
-                painter.drawPath(self._path(polygon))
+        assert style.labels is not None
+        position = anchor + QPointF(max(4.0, style.marker_size * dpi_scale / 2.0 + 2.0), -4.0 * dpi_scale)
+        painter.save()
+        font = painter.font()
+        font.setPointSizeF(max(6.0, style.labels.size * dpi_scale))
+        font.setBold(style.labels.bold)
+        if style.labels.font_family:
+            font.setFamily(style.labels.font_family)
+        painter.setFont(font)
+        halo = QColor(style.labels.halo_color)
+        if halo.alpha() > 0 and style.labels.halo_width > 0:
+            offset = style.labels.halo_width * dpi_scale
+            painter.setPen(halo)
+            for dx, dy in ((-offset, 0), (offset, 0), (0, -offset), (0, offset)):
+                painter.drawText(position + QPointF(dx, dy), text)
+        painter.setPen(QColor(style.labels.color))
+        painter.drawText(position, text)
+        painter.restore()
 
     def _draw_scalar_grid(self, painter: QPainter, layer: MapLayerSnapshot) -> None:
         """Composite the existing native scalar-raster cache without interpolation."""
@@ -289,34 +1030,24 @@ class FallbackMapRenderBackend(MapRenderBackend):
         if top_left is not None and bottom_right is not None:
             painter.drawImage(QRectF(top_left, bottom_right).normalized(), image)
 
-    def render_sync(self) -> RenderFrame:
-        if not self._initialized:
-            self.initialize()
-        generation = self._next_generation()
+    @staticmethod
+    def _color(value: object, fallback: str) -> QColor:
+        color = QColor(str(value or fallback))
+        return color if color.isValid() else QColor(fallback)
+
+    def _screen_point(self, point: object) -> QPointF | None:
+        """World→screen helper kept for scalar mirroring and ad-hoc callers."""
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            return None
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError):
+            return None
+        xmin, ymin, xmax, ymax = self._extent
         width, height = self._output_size
-        image = QImage(width, height, QImage.Format.Format_RGBA8888)
-        image.fill(_BACKGROUND)
-        painter = QPainter(image)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        for layer in self._snapshot.layers:
-            if not layer.visible or layer.opacity <= 0.0:
-                continue
-            painter.save()
-            painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
-            if layer.layer_type == "scalar_grid":
-                self._draw_scalar_grid(painter, layer)
-            for feature in layer.features:
-                self._draw_geometry(painter, feature.get("geometry"), layer.style)
-            painter.restore()
-        painter.end()
-        rgba = image.constBits().tobytes()
-        return RenderFrame(
-            generation=generation,
-            width=image.width(),
-            height=image.height(),
-            stride=image.bytesPerLine(),
-            rgba=rgba,
-            render_ms=0.0,
+        return QPointF(
+            (x - xmin) * width / (xmax - xmin),
+            height - (y - ymin) * height / (ymax - ymin),
         )
 
 
@@ -689,6 +1420,13 @@ def _geometry_to_wkt(geometry: object) -> str:
 
 
 def create_map_render_backend(*, prefer_qgis: bool = True) -> MapRenderBackend:
-    """Select QGIS only when its optional native bridge is genuinely available."""
+    """Select QGIS only when its optional native bridge is genuinely available.
+
+    The fallback is threaded by default: the UI canvas must never block on the
+    first preparation of a large vector layer. Tests construct it directly and
+    keep the synchronous contract.
+    """
     qgis = QgisMapRenderBackend()
-    return qgis if prefer_qgis and qgis.is_available else FallbackMapRenderBackend()
+    if prefer_qgis and qgis.is_available:
+        return qgis
+    return FallbackMapRenderBackend(threaded=True)

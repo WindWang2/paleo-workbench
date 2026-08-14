@@ -7,25 +7,25 @@ until Phase 3 migrates those records to authoritative vector layers/edit session
 
 from __future__ import annotations
 
-from hashlib import blake2b
-import json
+from collections import OrderedDict
 import math
 from typing import Any, Iterable, Mapping
 
 from paleo_workbench.mapping.document_io import features_from_document
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
+from paleo_workbench.mapping.map_styles import default_style_for, style_dict_revision
 
 __all__ = ["document_render_snapshot", "extent_for_snapshot"]
 
 
-_DEFAULT_STYLES: dict[str, Mapping[str, Any]] = {
-    "facies": {"fill": "#6c8ebf", "stroke": "#26364d", "stroke_width": 1.0},
-    "well": {"fill": "#22b8a7", "stroke": "#182431", "marker_size": 7.0},
-    "line": {"fill": "transparent", "stroke": "#f08c46", "stroke_width": 2.0},
-    # Label points are retained for the later QGIS labeling pass; fallback keeps
-    # a subtle marker so an otherwise empty annotation layer remains visible.
-    "label": {"fill": "#eff3f8", "stroke": "#182431", "marker_size": 4.0},
-}
+_LAYER_KINDS = ("facies", "well", "line", "label")
+_LAYER_NAMES = {"facies": "Facies", "well": "Wells", "line": "Lines", "label": "Labels"}
+
+# Per-(document, kind, revision) cache of built feature tuples and extents. A
+# composition refresh that changes nothing (or one layer) must not re-walk every
+# record and coordinate; entries are immutable and shared across snapshots.
+_FEATURE_CACHE_LIMIT = 24
+_FEATURE_CACHE: OrderedDict[tuple[str, str, int], tuple[tuple[dict[str, Any], ...], tuple[float, float, float, float]]] = OrderedDict()
 
 
 def _authoring_style(document, kind: str) -> dict[str, Any]:
@@ -43,8 +43,16 @@ def _authoring_style(document, kind: str) -> dict[str, Any]:
 
 
 def _stable_revision(value: object) -> int:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-    return int.from_bytes(blake2b(encoded.encode("utf-8"), digest_size=8).digest(), "big")
+    """Content-stable revision via recursive tuple freezing (no JSON round-trip)."""
+
+    def freeze(item: object) -> object:
+        if isinstance(item, Mapping):
+            return tuple(sorted((str(key), freeze(child)) for key, child in item.items()))
+        if isinstance(item, (list, tuple)):
+            return tuple(freeze(child) for child in item)
+        return item
+
+    return hash(freeze(value))
 
 
 def _point(value: object) -> list[float] | None:
@@ -92,39 +100,127 @@ def _features_for_kind(records: Iterable[Mapping[str, Any]], kind: str) -> tuple
     return tuple(features)
 
 
+def _grouped_features(
+    records: Iterable[Mapping[str, Any]],
+    needed: set[str],
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    """One pass over the records, bucketing only the requested kinds.
+
+    Also accumulates each bucket's coordinate bounds inline, so the snapshot
+    never re-walks every coordinate a second time for extents.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = {kind: [] for kind in needed}
+    bounds: dict[str, list[float]] = {kind: [math.inf, math.inf, -math.inf, -math.inf] for kind in needed}
+
+    def expand(kind: str, coordinates: object) -> None:
+        box = bounds[kind]
+        if isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
+            try:
+                x, y = float(coordinates[0]), float(coordinates[1])
+            except (TypeError, ValueError):
+                pass
+            else:
+                if math.isfinite(x) and math.isfinite(y):
+                    if x < box[0]:
+                        box[0] = x
+                    if y < box[1]:
+                        box[1] = y
+                    if x > box[2]:
+                        box[2] = x
+                    if y > box[3]:
+                        box[3] = y
+                return
+        for child in coordinates or ():  # nested ring / line levels
+            expand(kind, child)
+
+    for record in records:
+        kind = str(record.get("kind") or "")
+        if kind not in buckets:
+            continue
+        geometry = _geometry_from_record(record)
+        if geometry is None:
+            continue
+        properties = dict(record.get("properties") or {})
+        for key in ("name", "facies", "text", "topology_status"):
+            if record.get(key) is not None:
+                properties[key] = record[key]
+        buckets[kind].append(
+            {"id": str(record.get("id") or ""), "geometry": geometry, "properties": properties}
+        )
+        expand(kind, geometry.get("coordinates"))
+    return {kind: tuple(features) for kind, features in buckets.items() if kind in needed}, bounds
+
+
+def _extent_from_bounds(bounds: list[float]) -> tuple[float, float, float, float]:
+    if not math.isfinite(bounds[0]):
+        return (0.0, 0.0, 1.0, 1.0)
+    return _positive_extent((bounds[0], bounds[1], bounds[2], bounds[3]))
+
+
 def document_render_snapshot(
     document,
     *,
     project_crs: str | None,
     visibility: Mapping[str, bool] | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    data_revisions: Mapping[str, int] | None = None,
 ) -> MapRenderSnapshot:
     """Create a revisioned render snapshot from a legacy document or live scene.
 
     ``records`` allows unsaved MapEditScene output to render without modifying the
-    document. The output has one vector layer per existing compatibility layer kind;
-    future LayerRegistry-backed vector layers replace this adapter transparently.
+    document. ``data_revisions`` optionally supplies authoritative per-kind content
+    revisions (from ``MapAuthoringDocument`` vector layers); unchanged revisions
+    reuse cached feature tuples and extents without walking the records again.
+    The output has one vector layer per existing compatibility layer kind; future
+    LayerRegistry-backed vector layers replace this adapter transparently.
     """
     if document is None:
         return MapRenderSnapshot(project_crs=str(project_crs or ""))
-    source_records = tuple(records) if records is not None else tuple(features_from_document(document))
-    visible_by_kind = dict(visibility or {})
+    revisions = dict(data_revisions or {})
     document_id = str(getattr(document, "id", "map") or "map")
-    facies_style = dict(_DEFAULT_STYLES["facies"])
+    grouped: dict[str, tuple[dict[str, Any], ...]] = {}
+    bounds: dict[str, list[float]] = {}
+
+    def grouped_features(needed: set[str]) -> None:
+        nonlocal grouped, bounds
+        missing = needed - grouped.keys()
+        if not missing:
+            return
+        source = tuple(records) if records is not None else tuple(features_from_document(document))
+        built, built_bounds = _grouped_features(source, missing)
+        grouped.update(built)
+        bounds.update(built_bounds)
+
+    visible_by_kind = dict(visibility or {})
+    facies_style = default_style_for("facies").to_dict()
     facies_style.update(dict(getattr(document, "facies_style", None) or {}))
     layers: list[MapLayerSnapshot] = []
-    for kind in ("facies", "well", "line", "label"):
-        features = _features_for_kind(source_records, kind)
-        style = dict(facies_style if kind == "facies" else _DEFAULT_STYLES[kind])
+    for kind in _LAYER_KINDS:
+        revision = revisions.get(kind)
+        cache_key = (document_id, kind, revision) if revision is not None else None
+        if cache_key is not None and cache_key in _FEATURE_CACHE:
+            features, extent = _FEATURE_CACHE[cache_key]
+            _FEATURE_CACHE.move_to_end(cache_key)
+            data_revision = int(revision)
+        else:
+            grouped_features({kind})
+            features = grouped.get(kind) or ()
+            extent = _extent_from_bounds(bounds.get(kind) or [math.inf] * 4)
+            data_revision = int(revision) if revision is not None else _stable_revision(features)
+            if cache_key is not None:
+                _FEATURE_CACHE[cache_key] = (features, extent)
+                while len(_FEATURE_CACHE) > _FEATURE_CACHE_LIMIT:
+                    _FEATURE_CACHE.popitem(last=False)
+        style = dict(facies_style if kind == "facies" else default_style_for(kind).to_dict())
         style.update(_authoring_style(document, kind))
         layers.append(
             MapLayerSnapshot(
                 id=f"{document_id}:{kind}",
-                name={"facies": "Facies", "well": "Wells", "line": "Lines", "label": "Labels"}[kind],
+                name=_LAYER_NAMES[kind],
                 layer_type="vector",
-                extent=_extent_for_features(features),
+                extent=extent,
                 crs=str(project_crs or ""),
-                data_revision=_stable_revision(features),
+                data_revision=data_revision,
                 style_revision=_stable_revision(style),
                 features=features,
                 style=style,

@@ -150,6 +150,11 @@ class MapAuthoringDocument:
                 ),
             )
         self.active_kind = "facies"
+        # Per-kind record cache keyed by (data_revision, session revision). A
+        # render refresh walks the document even when nothing changed; these
+        # keys make repeated ``records()`` calls O(changed layers) instead of
+        # O(all features). Cached record dicts are shared, never mutated.
+        self._records_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
 
     @classmethod
     def from_document(cls, document, *, project_crs: str | None = None) -> "MapAuthoringDocument":
@@ -211,9 +216,23 @@ class MapAuthoringDocument:
         records: list[dict[str, Any]] = []
         for kind in _LAYER_KINDS:
             layer = self.layer(kind)
-            source = layer.edit_session.features() if layer.edit_session is not None else layer.features()
-            records.extend(feature_to_record(feature, kind=kind) for feature in source)
+            session = layer.edit_session
+            key = (layer.data_revision, session.revision if session is not None else -1)
+            cached = self._records_cache.get(kind)
+            if cached is not None and cached[0] == key:
+                records.extend(cached[1])
+                continue
+            source = session.features() if session is not None else layer.features()
+            built = [feature_to_record(feature, kind=kind) for feature in source]
+            self._records_cache[kind] = (key, built)
+            records.extend(built)
         return records
+
+    def data_revision_key(self, kind: str) -> tuple[int, int]:
+        """Cheap change key for one layer covering commits plus live edits."""
+        layer = self.layer(kind)
+        session = layer.edit_session
+        return (layer.data_revision, session.revision if session is not None else -1)
 
     def selected_feature_ids(self) -> set[str]:
         return self.active_layer.selection
