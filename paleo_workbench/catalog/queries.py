@@ -88,8 +88,10 @@ def search_assets(
     below is used, so search always reflects the canonical document.
     """
     try:
-        if service.index_revision() is None:
-            raise RuntimeError("index unavailable — falling back to scan")
+        if service.index_revision() != service.document.catalog_revision:
+            # A readable-but-stale index must not be queried (I3): only the
+            # canonical document scan reflects the current state.
+            raise RuntimeError("index stale — falling back to scan")
         rows = service._index.search_assets(
             text=text,
             stage=stage.value if stage else None,

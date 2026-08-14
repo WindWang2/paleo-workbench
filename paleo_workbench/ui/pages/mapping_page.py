@@ -455,7 +455,21 @@ class MappingPage(QWidget):
         self.bottom_workbench.factor_shelf.contour_draft_btn.setEnabled(True)
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
-        return self._contour_job.shutdown(wait_ms)
+        joined = self._contour_job.shutdown(wait_ms)
+        # The native raster worker lives on the embedded NativeMapCanvas and
+        # never receives a QCloseEvent when the window/shell is torn down —
+        # without this the QThread is destroyed while running (qFatal abort on
+        # exit, H12). Shut it down explicitly on the same hook.
+        try:
+            canvas_panel = getattr(self, "canvas_panel", None)
+            native_canvas = getattr(canvas_panel, "native_canvas", None)
+            if native_canvas is not None:
+                controller = getattr(native_canvas, "_raster_controller", None)
+                if controller is not None:
+                    controller.shutdown(wait_ms)
+        except Exception:
+            pass
+        return joined
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""

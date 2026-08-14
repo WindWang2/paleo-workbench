@@ -277,9 +277,12 @@ def test_probe_slice_indices():
         FenceSection("F", np.array([[0.0, 0.0], [10000.0, 10000.0]], dtype=float))
     )
     probe = scene.set_probe(s_m=100.0, z=20.0)
-    # A valid probe lies on the fence at s=100m; its xy must be a real point
-    # on the section (the prior `... or True` let a (0,0) degenerate pass).
-    assert isinstance(probe.x, float) and isinstance(probe.y, float)
+    # A valid probe lies on the fence at s=100m along the diagonal
+    # (0,0)->(10000,10000): distance from the origin is s=100m, so the point
+    # must be ~(70.71, 70.71). The prior `isinstance` check passed for any
+    # numeric value including a (0,0) degenerate (F5).
+    assert probe.x == pytest.approx(70.71067811865476, abs=1e-6)
+    assert probe.y == pytest.approx(70.71067811865476, abs=1e-6)
     idx = scene.probe_slice_indices()
     assert idx is not None
     assert len(idx) == 3

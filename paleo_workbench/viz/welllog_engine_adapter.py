@@ -159,7 +159,10 @@ def try_import_welllog() -> tuple[Any, type | None, type | None]:
         import welllog  # type: ignore
 
         return welllog, getattr(welllog, "WellLogView", None), welllog
-    except Exception:
+    except ImportError:
+        # Only import failures mean "binding not installed": any other
+        # exception is a real regression and must not silently degrade the
+        # workbench to the legacy path (H13).
         return None, None, None
 
 

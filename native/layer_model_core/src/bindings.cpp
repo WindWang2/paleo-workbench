@@ -50,8 +50,13 @@ PYBIND11_MODULE(layer_model_core, m) {
                 return py::make_tuple(extent[0], extent[1], extent[2], extent[3]);
             },
             &lm::MapLayer::set_extent)
-        .def_property("scale_range", &lm::MapLayer::scale_range,
-                      &lm::MapLayer::set_scale_range)
+        .def_property(
+            "scale_range",
+            // Return a COPY: the default reference_internal policy would hand
+            // out a live reference to the C++ member, letting callers mutate
+            // render state without bumping style_revision (H12).
+            [](const lm::MapLayer& layer) { return layer.scale_range(); },
+            &lm::MapLayer::set_scale_range)
         .def_property("source_ref", &lm::MapLayer::source_ref,
                       &lm::MapLayer::set_source_ref)
         .def_property_readonly("provenance_ref", &lm::MapLayer::provenance_ref)

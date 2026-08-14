@@ -596,40 +596,41 @@ class DataCatalogService:
         ``known_sha256`` / ``_register_blob`` (private; adapter import path):
         see :func:`paleo_workbench.catalog.storage.place_managed_file`.
         """
-        asset = self._asset_or_raise(asset_id)
-        source_path = Path(source_path)
-        if not source_path.is_file():
-            raise CatalogError(f"Source file not found: {source_path}")
-        run: DataRun | None = None
-        if run_id is not None:
-            run = self.get_run(run_id)  # raises before any payload is placed
-        previous_current = asset.current_version_id
-        version, payload = self._build_version(
-            asset, source_path, stage,
-            version_id=version_id,
-            parent_version_ids=list(parent_version_ids),
-            run_id=run_id, metadata=metadata, move=move,
-            known_sha256=known_sha256,
-            register_blob=_register_blob,
-        )
-        self._add_version(version)
-        asset.current_version_id = version.id
-        run_output_added = False
-        if run is not None and version.id not in run.output_version_ids:
-            run.output_version_ids.append(version.id)
-            run_output_added = True
-        try:
-            self._save()
-        except Exception:
-            if run is not None and run_output_added:
-                run.output_version_ids.remove(version.id)
-            self._rollback(
-                versions=[version], payload=payload,
-                restore_current=(asset, previous_current),
-                restore_payload_to=_restore_payload_to,
+        with self._lock:
+            asset = self._asset_or_raise(asset_id)
+            source_path = Path(source_path)
+            if not source_path.is_file():
+                raise CatalogError(f"Source file not found: {source_path}")
+            run: DataRun | None = None
+            if run_id is not None:
+                run = self.get_run(run_id)  # raises before any payload is placed
+            previous_current = asset.current_version_id
+            version, payload = self._build_version(
+                asset, source_path, stage,
+                version_id=version_id,
+                parent_version_ids=list(parent_version_ids),
+                run_id=run_id, metadata=metadata, move=move,
+                known_sha256=known_sha256,
+                register_blob=_register_blob,
             )
-            raise
-        return version
+            self._add_version(version)
+            asset.current_version_id = version.id
+            run_output_added = False
+            if run is not None and version.id not in run.output_version_ids:
+                run.output_version_ids.append(version.id)
+                run_output_added = True
+            try:
+                self._save()
+            except Exception:
+                if run is not None and run_output_added:
+                    run.output_version_ids.remove(version.id)
+                self._rollback(
+                    versions=[version], payload=payload,
+                    restore_current=(asset, previous_current),
+                    restore_payload_to=_restore_payload_to,
+                )
+                raise
+            return version
 
     def register_intermediate(
         self, asset_id: str, source_path: str | Path, **kwargs: Any
@@ -1598,6 +1599,17 @@ class DataCatalogService:
             ]
             for version in trashed_versions:
                 self._remove_version(version)
+            # A live asset whose EVERY version was individually trashed and
+            # purged is a zombie (zero versions, current_version_id=None):
+            # drop it so listings cannot show an empty asset row (I3).
+            live_asset_ids = {v.asset_id for v in self.document.versions}
+            zombie_assets = [
+                a
+                for a in self.document.assets
+                if not a.trashed and a.id not in live_asset_ids
+            ]
+            for asset in zombie_assets:
+                self._remove_asset(asset)
             # An asset is removed only when NONE of its versions survives the
             # purge. restore_version() can untrash a single version of a
             # trashed asset; deleting the asset then would orphan that live
@@ -1622,6 +1634,8 @@ class DataCatalogService:
             except Exception:
                 for version in trashed_versions:
                     self._add_version(version)
+                for asset in zombie_assets:
+                    self._add_asset(asset)
                 for asset in trashed_assets:
                     # Only re-add assets actually removed (un-trashed assets
                     # stayed in the document the whole time).
@@ -1930,6 +1944,17 @@ class DataCatalogService:
             if rewritten is not None:
                 model_version.artifact_uri = rewritten
                 changed = True
+            # The trash tombstone records the ORIGINAL payload path; it must
+            # be rebased with the same head-swap or restore after save-as
+            # strands the payload outside the current artifacts root (H7/I).
+            trash = (version.metadata or {}).get("trash")
+            if isinstance(trash, dict):
+                orig = trash.get("original_path")
+                if orig:
+                    ohead, osep, orest = str(orig).partition("/")
+                    if osep and ohead.endswith(".artifacts") and ohead != current:
+                        trash["original_path"] = f"{current}/{orest}"
+                        changed = True
         if changed:
             self._save()
         return changed

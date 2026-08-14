@@ -373,8 +373,15 @@ class ProjectController:
                 ProjectManager(project_path).save(self.window.project)
         except Exception:
             # Catalog provenance is best-effort; the already-written project artifact
-            # remains usable and can be registered on a later save.
-            pass
+            # remains usable and can be registered on a later save. Log it so a
+            # repeated failure (and the follow-up duplicate registration it can
+            # cause) is visible instead of silent (H14).
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "register_persisted_factor_grids failed; will retry on next save",
+                exc_info=True,
+            )
 
     def _rebase_factor_grid_artifact_paths(
         self, old_project_path: Path, new_project_path: Path

@@ -233,7 +233,15 @@ def _py_marching_cubes_3d(
             "or scikit-image (pip install scikit-image)."
         )
     vol = np.asarray(volume, dtype=np.float32)
-    verts, faces, _normals, _values = marching_cubes(vol, level=float(isovalue))
+    level = float(isovalue)
+    if vol.size == 0 or not (np.nanmin(vol) <= level <= np.nanmax(vol)):
+        # Match the C++ contract: an out-of-range isovalue yields an EMPTY
+        # mesh, not a ValueError (K-F2).
+        return (
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.int32),
+        )
+    verts, faces, _normals, _values = marching_cubes(vol, level=level)
     return verts.astype(np.float32), faces.astype(np.int32)
 
 
