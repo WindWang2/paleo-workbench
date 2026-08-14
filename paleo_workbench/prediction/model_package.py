@@ -365,8 +365,16 @@ def register_model_package(
     return model, version
 
 
-def can_promote_to_production(service, model_id: str, model_version: str) -> tuple[bool, str]:
-    """Return (ok, reason) for promote gates (shared with catalog.promote_model)."""
+def can_promote_to_production(
+    service, model_id: str, model_version: str, *, require_input_schema: bool = True
+) -> tuple[bool, str]:
+    """Return (ok, reason) for promote gates (shared with catalog.promote_model).
+
+    ``require_input_schema`` is a PROMOTE-time requirement: a version promoted
+    before the schema contract existed must not silently disappear from
+    find_production_model on upgrade (Agent L P2) — reads keep the other
+    gates but tolerate the legacy empty-schema case.
+    """
     try:
         model = service.get_model(model_id)
         version = service.get_model_version(model_id, model_version)
@@ -386,6 +394,6 @@ def can_promote_to_production(service, model_id: str, model_version: str) -> tup
         return False, "model metadata marks scientific=False"
     if version.metadata.get("scientific") is False:
         return False, "version metadata marks scientific=False (H4-3b)"
-    if not version.input_schema:
+    if require_input_schema and not version.input_schema:
         return False, "input_schema is required for production promotion (H5-b)"
     return True, "ok"

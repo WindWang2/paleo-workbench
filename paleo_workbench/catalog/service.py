@@ -1255,7 +1255,14 @@ class DataCatalogService:
                 continue
             from paleo_workbench.prediction.model_package import can_promote_to_production
 
-            ok, _reason = can_promote_to_production(self, model.model_id, version.model_version)
+            ok, _reason = can_promote_to_production(
+                self,
+                model.model_id,
+                version.model_version,
+                # Schema is enforced at promote time; legacy pre-schema
+                # promotions must not vanish from reads on upgrade.
+                require_input_schema=False,
+            )
             if not ok:
                 continue
             if best is None or version.created_at > best.created_at:
@@ -1608,8 +1615,14 @@ class DataCatalogService:
                 for a in self.document.assets
                 if not a.trashed and a.id not in live_asset_ids
             ]
+            removed_zombie_tags = {
+                aid: tags
+                for aid, tags in list(self.document.asset_tags.items())
+                if aid in {a.id for a in zombie_assets}
+            }
             for asset in zombie_assets:
                 self._remove_asset(asset)
+                self.document.asset_tags.pop(asset.id, None)
             # An asset is removed only when NONE of its versions survives the
             # purge. restore_version() can untrash a single version of a
             # trashed asset; deleting the asset then would orphan that live
@@ -1643,6 +1656,7 @@ class DataCatalogService:
                         self._add_asset(asset)
                 self.document.version_tags.update(removed_version_tags)
                 self.document.asset_tags.update(removed_asset_tags)
+                self.document.asset_tags.update(removed_zombie_tags)
                 raise
             # State is durable now; the unlink is best-effort and cannot
             # corrupt it (a leftover trash payload is a harmless orphan).

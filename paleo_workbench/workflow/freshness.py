@@ -748,10 +748,13 @@ class FreshnessService:
         for r in reports:
             run = self.graph.runs.get(r.subject_id)
             started = run.started_at if run is not None else ""
+            # Equal timestamps (imported/rounded) resolve to the later entry
+            # in catalog order, which is deterministic for a given file.
             key = r.domain_task_id or f"run:{r.subject_id}"
             prev = latest.get(key)
             if prev is None or started >= prev[0]:
                 latest[key] = (started, r)
+        selected = [r for (_s, r) in latest.values()]
         selected = [r for (_created, r) in latest.values()]
         if any(r.state is FreshnessState.FAILED for r in selected):
             return FreshnessState.FAILED

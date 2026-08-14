@@ -62,33 +62,40 @@ def test_readiness_facies_evaluation_is_read_only(tmp_path: Path, monkeypatch):
 
 
 def test_readiness_preserves_user_edited_model_identity(tmp_path: Path):
-    """register_model(force_status=False) must not clobber identity fields."""
+    """Seeds must not rebind a promoted model (H4-3a).
+
+    Protection is at the SEED layer: ensure_default_models skips existing
+    models entirely (round-3 contract), and find_production_model re-runs the
+    promote gates so a rebound provider can never be served as production.
+    """
+    from paleo_workbench.prediction.providers import (
+        CAPABILITY_FACIES,
+        ensure_default_models,
+    )
+
     svc = _make_catalog(tmp_path)
+    ensure_default_models(svc)
     svc.register_model(
-        model_id="corp-facies-v3",
-        model_name="用户改名后的正式模型名",
+        model_id="facies-heuristic-v1",
+        model_name="Promoted Heuristic Became Real",
         model_type="ml",
-        capability="facies_prediction",
+        capability=CAPABILITY_FACIES,
         provider="test_spatial",
         status="production",
-        metadata={"scientific": True},
+        metadata={"scientific": True, "source": "user"},
+        force_status=True,
     )
-    # Seed-like call with different defaults (H4-3a scenario).
-    svc.register_model(
-        model_id="corp-facies-v3",
-        model_name="演示相带预测（Demo）",
-        model_type="heuristic",
-        capability="facies_prediction",
-        provider="local_asset",
-        status="demo",
-        metadata={"scientific": False},
-    )
-    m = next(m for m in svc.document.models if m.model_id == "corp-facies-v3")
-    assert m.model_name == "用户改名后的正式模型名"
-    assert m.model_type == "ml"
+    rev_before = svc.document.catalog_revision
+    ensure_default_models(svc)
+    m = svc.get_model("facies-heuristic-v1")
     assert m.provider == "test_spatial"
+    assert m.model_type == "ml"
     assert m.status == "production"
-    assert m.metadata["scientific"] is True
+    # No-op seed must not rewrite the catalog file.
+    assert svc.document.catalog_revision == rev_before
+    # The version slot still points at the seeded version (not rebound).
+    v = svc.get_model_version("facies-heuristic-v1", "1")
+    assert v is not None
 
 
 def test_register_model_noop_does_not_rewrite_catalog(tmp_path: Path):
@@ -820,30 +827,55 @@ def test_plan_orders_map_after_prediction_without_version_edge(tmp_path: Path):
     assert ops.index("prediction") < ops.index("map_compile"), ops
 
 
-def test_cycle_detection_reports_all_cycles(tmp_path: Path):
-    """A self-loop must not mask a separate A→B→A cycle."""
-    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+def test_cycle_detection_reports_all_cycles():
+    """A self-loop must not mask a separate A->B->A cycle."""
+    from paleo_workbench.catalog.types import DataRunRef, DataStage, DataVersionRef
     from paleo_workbench.workflow.dependency_graph import DependencyGraph
 
-    svc = _make_catalog(tmp_path)
-    (tmp_path / "a.bin").write_bytes(b"A")
-    (tmp_path / "b.bin").write_bytes(b"B")
-    (tmp_path / "g.npz").write_bytes(b"GRID")
-    (tmp_path / "g2.npz").write_bytes(b"GRID2")
-    cat = CoreCatalogAdapter(svc)
-    va = cat.register_input(name="a", path=str(tmp_path / "a.bin"), checksum=None, kind="well_log", format="las").version_id
-    vb = cat.register_input(name="b", path=str(tmp_path / "b.bin"), checksum=None, kind="well_log", format="las").version_id
-    # Self-loop run (consumes and produces the same version via a new version).
-    run1 = cat.begin_run(operation="factor_map", input_version_ids=[va], domain_task_id="s")
-    o1 = cat.register_derived(run_id=run1.run_id, name="o1", path=str(tmp_path / "g.npz"), checksum=None, kind="factor_grid", format="npz")
-    cat.complete_run(run1.run_id)
-    run2 = cat.begin_run(operation="factor_map", input_version_ids=[o1.version_id, vb], domain_task_id="s2")
-    o2 = cat.register_derived(run_id=run2.run_id, name="o2", path=str(tmp_path / "g2.npz"), checksum=None, kind="factor_grid", format="npz")
-    cat.complete_run(run2.run_id)
-    # o1 → o2 and o2 → o1 via an explicit parent link is not needed; the key
-    # regression is that a self-loop alone previously short-circuited.
-    g = DependencyGraph.from_catalog(cat)
-    assert isinstance(g.cycle_nodes, frozenset)
+    def _ver(vid, asset):
+        return DataVersionRef(
+            asset_id=asset, version_id=vid, name=vid, stage=DataStage.INTERMEDIATE
+        )
+
+    def _run(rid, inputs, outputs, op="factor_map"):
+        return DataRunRef(
+            run_id=rid,
+            operation=op,
+            input_version_ids=inputs,
+            output_version_ids=outputs,
+            status="completed",
+        )
+
+    class _FakeCat:
+        def __init__(self, versions, runs):
+            self._versions = versions
+            self._runs = runs
+
+        def list_versions(self):
+            return self._versions
+
+        def list_runs(self):
+            return self._runs
+
+    # Self-loop: run_s consumes and produces o_s (o_s -> o_s edge).
+    # Independent cycle: run1 consumes a -> o1; run2 consumes o1 -> o2;
+    # run3 consumes o2 AND a -> o1' is NOT a cycle; instead:
+    # run2 consumes o1 -> o2; run3 consumes o2 -> o1 (o1 -> o2 -> o1).
+    versions = [
+        _ver("a", "asset-a"),
+        _ver("o_s", "asset-s"),
+        _ver("o1", "asset-1"),
+        _ver("o2", "asset-2"),
+    ]
+    runs = [
+        _run("run_s", ["o_s"], ["o_s"]),
+        _run("run1", ["a"], ["o1"]),
+        _run("run2", ["o1"], ["o2"]),
+        _run("run3", ["o2", "a"], ["o1"]),  # o1 -> o2 -> o1 cycle
+    ]
+    graph = DependencyGraph.from_catalog(_FakeCat(versions, runs))
+    assert "o_s" in graph.cycle_nodes  # self-loop reported
+    assert "o1" in graph.cycle_nodes and "o2" in graph.cycle_nodes  # A->B->A
 
 
 # --------------------------------------------------------------------------- WP5
@@ -907,7 +939,6 @@ def test_horizon_save_noop_does_not_mint_version(tmp_path: Path):
     """H7: identical content re-save must be a no-op."""
     import numpy as np
 
-    from paleo_workbench.viz.interpretation_draft import HorizonInterpretationDraft
     from paleo_workbench.viz.interpretation_lifecycle import (
         open_draft_from_array,
         save_draft_as_new_version,
@@ -932,7 +963,6 @@ def test_horizon_save_registration_failure_cleans_artifact(tmp_path: Path, monke
     from paleo_workbench.viz.interpretation_lifecycle import (
         open_draft_from_array,
         save_draft_as_new_version,
-        register_interpretation_version,
     )
 
     def _boom(*a, **k):
@@ -963,15 +993,12 @@ def test_overlay_reapply_replaces_correlation_markers():
     from types import SimpleNamespace
 
     from paleo_workbench.workflow.correlation_overlay import (
-        FormationTopMarker,
-        WellLogDataWithMarkers,
         apply_correlation_tops_to_well_log_data,
     )
     from paleo_workbench.workflow.correlation_session import stable_top_id
     from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
 
     project = ProjectDocument.new("p")
-    project.correlation_interpretations = []
     from paleo_workbench.project.models import CorrelationInterpretationRef
 
     tops = [
@@ -989,27 +1016,20 @@ def test_overlay_reapply_replaces_correlation_markers():
         id="corr-1",
         name="C",
         current_version_id="v1",
-        artifact_path="/no/such/file.json",  # never loaded: payload injected below
+        artifact_path="/no/such/file.json",
     )
     project.correlation_interpretations.append(ref)
 
-    # Inject the payload directly (avoid file IO).
     import paleo_workbench.workflow.correlation_overlay as ov
 
     orig = ov.load_current_correlation_payload
-
-    def _fake_payload(proj, project_path=None):
-        return ref, payload
-
-    ov.load_current_correlation_payload = _fake_payload
+    ov.load_current_correlation_payload = lambda proj, project_path=None: (ref, payload)
     try:
         base = SimpleNamespace(well_name="W0")
         first = apply_correlation_tops_to_well_log_data(base, project)
         assert len(first.markers) == 1
-        # Simulate backend toggle: the stored (wrapped) data is re-applied.
         second = apply_correlation_tops_to_well_log_data(first, project)
         assert len(second.markers) == 1, "markers must not accumulate"
-        # Tops edit: depth changes; stale depth must not survive.
         tops[0].depth = 1007.0
         third = apply_correlation_tops_to_well_log_data(second, project)
         assert len(third.markers) == 1
@@ -1022,12 +1042,11 @@ def test_overlay_skips_non_md_domain_tops():
     """H8: TWT tops must not be plotted numerically on the MD log axis."""
     from types import SimpleNamespace
 
-    from paleo_workbench.workflow.correlation_session import stable_top_id
-    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
-
     from paleo_workbench.workflow.correlation_overlay import (
         apply_correlation_tops_to_well_log_data,
     )
+    from paleo_workbench.workflow.correlation_session import stable_top_id
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
 
     project = ProjectDocument.new("p")
     from paleo_workbench.project.models import CorrelationInterpretationRef
@@ -1072,23 +1091,21 @@ def test_correlation_artifact_resolves_project_first(tmp_path: Path, monkeypatch
     from types import SimpleNamespace
 
     from paleo_workbench.workflow.correlation_artifact import (
-        read_correlation_artifact,
         write_correlation_artifact,
     )
     from paleo_workbench.workflow.correlation_overlay import (
         load_current_correlation_payload,
+    )
+    from paleo_workbench.workflow.stratigraphy_models import (
+        CorrelationScientificPayload,
+        DepthDomain,
+        FormationTop,
     )
 
     projA = tmp_path / "A"
     projB = tmp_path / "B"
     (projA / "x.artifacts" / "correlations").mkdir(parents=True)
     (projB / "x.artifacts" / "correlations").mkdir(parents=True)
-
-    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
-
-    from paleo_workbench.workflow.stratigraphy_models import (
-        CorrelationScientificPayload,
-    )
 
     topsA = [FormationTop(id="t1", well_id="w1", well_name="W1", marker="TopA", depth=1002.0, depth_domain=DepthDomain.MD)]
     topsB = [FormationTop(id="t2", well_id="w1", well_name="W1", marker="TopA", depth=1007.0, depth_domain=DepthDomain.MD)]
@@ -1107,7 +1124,6 @@ def test_correlation_artifact_resolves_project_first(tmp_path: Path, monkeypatch
     write_correlation_artifact(
         _payload(topsB), projB / "x.artifacts" / "correlations", "corr_v1"
     )
-    # Identical relative path in both projects — the CWD trap.
     rel = "x.artifacts/correlations/corr_v1.correlation.json"
 
     from paleo_workbench.project.models import CorrelationInterpretationRef, ProjectDocument
@@ -1118,7 +1134,6 @@ def test_correlation_artifact_resolves_project_first(tmp_path: Path, monkeypatch
             id="c", name="C", current_version_id="v", artifact_path=rel
         )
     )
-    # Launch the app "inside project A": CWD contains A's identical file.
     monkeypatch.chdir(projA)
     ref, payload = load_current_correlation_payload(projectB, project_path=projB / "x.paleo.json")
     assert payload is not None
@@ -1138,7 +1153,6 @@ def test_source_id_changes_on_inode_replace(tmp_path: Path):
     p = tmp_path / "survey.sgy"
     p.write_bytes(b"A" * 4096)
     id1 = source_id_for_path(p)
-    # Same size + preserved mtime via os.replace (new inode).
     p2 = tmp_path / "survey_new.sgy"
     p2.write_bytes(b"B" * 4096)
     st = p.stat()
@@ -1163,15 +1177,12 @@ def test_directional_fingerprint_covers_weights_and_flags():
         "grid_n": 40,
     }
     fp1 = build_factor_fingerprints(**base)
-    # b_i down-weight (the well-QC pipeline does exactly this).
     pts2 = [dict(pt, b_i=0.1) for pt in base["sample_points"]]
     fp2 = build_factor_fingerprints(**{**base, "sample_points": pts2})
     assert fp1.result != fp2.result
-    # qc_flag flip (engine drops non-ok samples).
     pts3 = [dict(pt, qc_flag="outlier") for pt in base["sample_points"]]
     fp3 = build_factor_fingerprints(**{**base, "sample_points": pts3})
     assert fp1.result != fp3.result
-    # IDW is unaffected by weight-only changes (no false recompute churn).
     idw = {**base, "method": "IDW"}
     fp4 = build_factor_fingerprints(**idw)
     fp5 = build_factor_fingerprints(**{**idw, "sample_points": pts2})

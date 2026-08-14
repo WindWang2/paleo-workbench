@@ -329,10 +329,18 @@ def _resolve_map_input_ids(
     if task is None:
         return []
     try:
-        from paleo_workbench.prediction.inference_service import _ServiceRunView
         from paleo_workbench.catalog.lifecycle import _versions_for_domain_tasks
 
-        return _versions_for_domain_tasks([task.id], catalog=_ServiceRunView(service))
+        if service is not None and hasattr(service, "document"):
+            # DataCatalogService: expose runs through the service view.
+            from paleo_workbench.prediction.inference_service import _ServiceRunView
+
+            return _versions_for_domain_tasks(
+                [task.id], catalog=_ServiceRunView(service)
+            )
+        # Pure CatalogPort (InMemoryCatalog / PALEO_DATA_CATALOG backends):
+        # it already IS the port the lifecycle helper expects.
+        return _versions_for_domain_tasks([task.id], catalog=service)
     except Exception:
         return []
 

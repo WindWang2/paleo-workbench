@@ -232,12 +232,13 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
     A failed run never fabricates output.
     """
     run = service.get_run(run_id)
+    if (run.status or "").lower() != "running":
+        # Late/duplicate execution must not touch a terminal run — and must
+        # not be swallowed into a "failed" relabel of a completed run (round-3).
+        raise CatalogError(
+            f"execute_run requires a running run; {run_id} is {run.status!r}"
+        )
     try:
-        if (run.status or "").lower() != "running":
-            # Late/duplicate execution must not touch a terminal run (round-3).
-            raise CatalogError(
-                f"execute_run requires a running run; {run_id} is {run.status!r}"
-            )
         model_version_id = (run.parameters or {}).get("model_version_id")
         if not model_version_id:
             raise CatalogError(f"Run {run_id} has no model_version_id")
@@ -334,6 +335,28 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
             "model_version": model_version,
         }
     except Exception as exc:  # noqa: BLE001 — prelude/persist failures must not strand a running run
+        # If the failure happened AFTER an output version was registered, the
+        # run DID produce; mark it complete (best-effort) so the catalog never
+        # shows a failed run with a current, consumable output (Agent L P2).
+        try:
+            after = service.get_run(run_id)
+            if after.output_version_ids:
+                service.update_run_status(
+                    run_id,
+                    "complete",
+                    extra_parameters={
+                        "error": f"{exc.__class__.__name__}: {exc}",
+                        "_finished_at": _now_iso(),
+                    },
+                )
+                return {
+                    "run": service.get_run(run_id),
+                    "result": None,
+                    "model": None,
+                    "model_version": None,
+                }
+        except Exception:
+            pass
         _fail_run(service, run_id, exc)
         return {
             "run": service.get_run(run_id),

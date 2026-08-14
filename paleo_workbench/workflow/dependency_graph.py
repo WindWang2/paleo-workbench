@@ -301,13 +301,24 @@ class DependencyGraph:
 
         # Synthetic domain edges: a map_compile consuming a prediction task's
         # product must run AFTER that prediction run even when the version
-        # edge is absent (in-memory prediction results, H11 ordering). Guarded
-        # by reachability so we never introduce a cycle.
-        by_domain: dict[str, str] = {}
+        # edge is absent (in-memory prediction results, H11 ordering). Bind to
+        # the LATEST run of the task deterministically (a set iteration order
+        # would pick arbitrarily across processes). Guarded by reachability so
+        # we never introduce a cycle.
+        by_domain: dict[str, list[str]] = {}
         for rid in wanted:
             run = self.runs[rid]
             if run.domain_task_id:
-                by_domain.setdefault(run.domain_task_id, rid)
+                by_domain.setdefault(run.domain_task_id, []).append(rid)
+        latest_by_domain: dict[str, str] = {}
+        for tid, rids in by_domain.items():
+            latest_by_domain[tid] = max(
+                rids,
+                key=lambda rid: (
+                    getattr(self.runs[rid], "started_at", "") or "",
+                    rid,
+                ),
+            )
         synthetic: list[tuple[str, str]] = []
         for rid in wanted:
             run = self.runs[rid]
@@ -317,7 +328,7 @@ class DependencyGraph:
             linked = str(params.get("linked_prediction_task_id") or "")
             source_ids = [str(s) for s in (params.get("source_task_ids") or [])]
             for tid in ([linked] if linked else []) + source_ids:
-                prod_rid = by_domain.get(tid)
+                prod_rid = latest_by_domain.get(tid)
                 if prod_rid is None or prod_rid == rid or prod_rid not in wanted:
                     continue
                 if not _reachable(adj, rid, prod_rid):

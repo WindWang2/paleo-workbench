@@ -64,25 +64,18 @@ def test_register_model_is_idempotent_on_model_id(service):
     service.register_model(
         model_id="m1", model_name="A", capability="cap", provider="p", status="demo"
     )
-    # Round-2 review: a defaults/seed re-registration (force_status=False)
-    # must NOT clobber identity fields a user or promote already set.
+    # Public update contract (round-3): non-empty identity fields refresh;
+    # empty fields never wipe stored values.
     updated = service.register_model(
         model_id="m1", model_name="A2", capability="cap2", provider="p", status="demo"
     )
     assert len(service.list_models()) == 1
-    assert updated.model_name == "A"
-    assert updated.capability == "cap"
-    # Explicit identity repair still works via force_status=True.
-    repaired = service.register_model(
-        model_id="m1",
-        model_name="A2",
-        capability="cap2",
-        provider="p",
-        status="demo",
-        force_status=True,
-    )
-    assert repaired.model_name == "A2"
-    assert repaired.capability == "cap2"
+    assert updated.model_name == "A2"
+    assert updated.capability == "cap2"
+    # Empty optional fields never wipe a previously stored value.
+    refreshed = service.register_model(model_id="m1", model_name="A3")
+    assert refreshed.capability == "cap2"
+    assert refreshed.provider == "p"
 
 
 def test_duplicate_model_version_raises(service):

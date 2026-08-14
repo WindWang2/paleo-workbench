@@ -151,7 +151,14 @@ def test_joint_host_progressive_lod_after_release(qtbot, monkeypatch):
         finished = Signal(object, str, int, int)
         failed = Signal(str, int)
 
-        def __init__(self, segy_path: str, *, generation: int = 0, lod: int = 0):
+        def __init__(
+            self,
+            segy_path: str,
+            *,
+            generation: int = 0,
+            lod: int = 0,
+            cancellation_token=None,
+        ):
             super().__init__()
             self._generation = int(generation)
             self._lod = int(lod)

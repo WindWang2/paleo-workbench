@@ -266,22 +266,27 @@ def test_resolve_target_horizon_from_correlation():
     assert resolve_correlation_target_horizon(project) == "H_PRIMARY"
 
 
-def test_well_correlation_readiness_needs_two_wells():
+def test_well_correlation_readiness_needs_two_wells(tmp_path: Path):
     from paleo_workbench.workflow.contracts.readiness import evaluate_readiness
     from paleo_workbench.workflow.contracts.registry import reset_default_registry
     from paleo_workbench.workflow.contracts.models import ReadinessStatus
 
     reset_default_registry()
+    a = tmp_path / "a.las"
+    b = tmp_path / "b.las"
+    a.write_bytes(b"LAS")
+    b.write_bytes(b"LAS")
     p = ProjectDocument.new("R")
+    p.meta.project_root = str(tmp_path)
     r = evaluate_readiness(p, "well_correlation")
     assert r.status is ReadinessStatus.BLOCKED
     p.resources.append(
-        ResourceItem(name="a.las", path="a.las", type="well_log", format="las")
+        ResourceItem(name="a.las", path=str(a), type="well_log", format="las")
     )
     r1 = evaluate_readiness(p, "well_correlation")
     assert r1.status is ReadinessStatus.BLOCKED
     p.resources.append(
-        ResourceItem(name="b.las", path="b.las", type="well_log", format="las")
+        ResourceItem(name="b.las", path=str(b), type="well_log", format="las")
     )
     r2 = evaluate_readiness(p, "well_correlation")
     assert r2.status is ReadinessStatus.READY
@@ -501,11 +506,16 @@ def test_depth_domain_mismatch_surfaces_partial_readiness(tmp_path: Path, catalo
     from paleo_workbench.workflow.contracts.models import ReadinessStatus
 
     reset_default_registry()
+    a = tmp_path / "a.las"
+    b = tmp_path / "b.las"
+    a.write_bytes(b"LAS")
+    b.write_bytes(b"LAS")
     p = ProjectDocument.new("D")
+    p.meta.project_root = str(tmp_path)
     p.resources.extend(
         [
-            ResourceItem(name="a.las", path="a.las", type="well_log", format="las"),
-            ResourceItem(name="b.las", path="b.las", type="well_log", format="las"),
+            ResourceItem(name="a.las", path=str(a), type="well_log", format="las"),
+            ResourceItem(name="b.las", path=str(b), type="well_log", format="las"),
         ]
     )
     p.correlation_interpretations.append(

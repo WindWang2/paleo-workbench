@@ -357,30 +357,31 @@ class SeismicVolumeSource:
             if cancellation_token is not None:
                 cancellation_token.raise_if_cancelled()
             assert self._loader is not None
-            # Long volume reads must not hold the source lock: foreground
-            # slice reads on the GUI thread would freeze for the whole read
-            # (H10). Use a fresh per-call loader handle so concurrent
-            # slice reads proceed independently.
-            from geoviz import SeismicLoader
+        # Long volume reads must NOT hold the source lock: foreground slice
+        # reads on the GUI thread would freeze for the whole read (H10). Use
+        # a fresh per-call loader handle so concurrent slice reads proceed
+        # independently.
+        from geoviz import SeismicLoader
 
-            fresh_loader = SeismicLoader(self._path)
-            volume = fresh_loader.get_volume_downsampled(
-                factor=strides, cancellation_token=cancellation_token
+        fresh_loader = SeismicLoader(self._path)
+        volume = fresh_loader.get_volume_downsampled(
+            factor=strides, cancellation_token=cancellation_token
+        )
+        self.physical_reads += 1
+        vol = np.ascontiguousarray(volume, dtype=np.float32)
+        # Final bound if budget still exceeded (safety).
+        from paleo_workbench.viz.seismic_load import _bound_volume
+
+        vol, further = _bound_volume(vol)
+        warning = ""
+        if strides != (1, 1, 1) or further:
+            warning = (
+                f"SEGY 已按 LOD 预览加载 "
+                f"(shape={tuple(int(x) for x in vol.shape)}, strides={strides})"
             )
-            self.physical_reads += 1
-            vol = np.ascontiguousarray(volume, dtype=np.float32)
-            # Final bound if budget still exceeded (safety).
-            from paleo_workbench.viz.seismic_load import _bound_volume
-
-            vol, further = _bound_volume(vol)
-            warning = ""
-            if strides != (1, 1, 1) or further:
-                warning = (
-                    f"SEGY 已按 LOD 预览加载 "
-                    f"(shape={tuple(int(x) for x in vol.shape)}, strides={strides})"
-                )
+        with self._lock:
             cached = self._cache.put(key, vol)
-            return cached, warning
+        return cached, warning
 
     def read_lod_volume(
         self,
