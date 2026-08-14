@@ -112,17 +112,60 @@ OPERATION_LABELS_ZH: dict[str, str] = {
 }
 
 
+def _task_consumer_links(
+    project: Any,
+    affected_task_ids: set[str],
+) -> dict[str, set[str]]:
+    """Map consumer domain-task id -> producer task ids it consumes at the
+    TASK level (prediction.input_factor_map_ids, map.linked_prediction_task_id).
+    These links exist even when the consumer's run-graph lineage is empty (a
+    prediction executed before its factor grid was registered records no
+    input versions — H11).
+    """
+    links: dict[str, set[str]] = {}
+    if not affected_task_ids:
+        return links
+
+    for task in getattr(project, "prediction_tasks", None) or []:
+        factor_ids = set(getattr(task, "input_factor_map_ids", None) or [])
+        producers = factor_ids & affected_task_ids
+        if producers:
+            links.setdefault(task.id, set()).update(producers)
+
+    pred_consumers = set(links.keys())
+    for doc in getattr(project, "paleomap_documents", None) or []:
+        linked = getattr(doc, "linked_prediction_task_id", None)
+        producers = {linked} & (affected_task_ids | pred_consumers) if linked else set()
+        if producers:
+            links.setdefault(doc.id, set()).update(producers)
+    return links
+
+
+def _task_linked_run_ids(
+    graph: DependencyGraph,
+    task_links: dict[str, set[str]],
+) -> set[str]:
+    out: set[str] = set()
+    for tid in task_links:
+        for rid in graph.domain_task_runs.get(tid, ()):
+            out.add(rid)
+    return out
+
+
 def build_recompute_plan(
     freshness: FreshnessService,
     *,
     changed_version_ids: Sequence[str] | None = None,
     stale_only: bool = True,
     operations: Sequence[str] | None = None,
+    project: Any | None = None,
 ) -> RecomputePlan:
     """Build a minimal plan for affected / stale scientific products.
 
     If *changed_version_ids* is given, only transitive dependents of those
     versions are considered. Otherwise all STALE runs in the graph are planned.
+    *project* enables task-level dependency expansion for runs whose lineage
+    is empty (see :func:`_task_linked_run_ids`).
     """
     graph = freshness.graph
     plan = RecomputePlan(changed_version_ids=list(changed_version_ids or []))
@@ -134,6 +177,8 @@ def build_recompute_plan(
         )
 
     candidate_runs: list[Any]
+    task_forced: set[str] = set()
+    task_links: dict[str, set[str]] = {}
     if changed_version_ids:
         # Roots include the new tip *and* prior versions of the same asset so
         # dependents of superseded versions (e.g. Factor from H1 v2 after H1
@@ -154,6 +199,20 @@ def build_recompute_plan(
                         for out in graph.run_outputs.get(rid, ()):
                             roots.add(out)
         candidate_runs = graph.transitive_downstream_runs(roots)
+        if project is not None:
+            # Empty-lineage consumers still depend on the changed versions at
+            # the task level: include their runs as candidates (H11).
+            affected_task_ids = {
+                r.domain_task_id
+                for r in candidate_runs
+                if getattr(r, "domain_task_id", None)
+            }
+            task_links = _task_consumer_links(project, affected_task_ids)
+            task_forced = _task_linked_run_ids(graph, task_links)
+            seen_ids = {r.run_id for r in candidate_runs}
+            for rid in sorted(task_forced):
+                if rid not in seen_ids and rid in graph.runs:
+                    candidate_runs.append(graph.runs[rid])
     else:
         candidate_runs = list(graph.runs.values())
 
@@ -171,14 +230,19 @@ def build_recompute_plan(
             FreshnessState.MISSING,
             FreshnessState.FAILED,
         }:
-            continue
-        if report.state is FreshnessState.UNKNOWN and stale_only:
-            # Do not force recompute on incomplete lineage
-            continue
+            # UNKNOWN runs are not forced — EXCEPT task-linked consumers
+            # included above: recomputing them re-establishes lineage (H11).
+            if not (
+                report.state is FreshnessState.UNKNOWN
+                and run.run_id in task_forced
+            ):
+                continue
         stale_run_ids.append(run.run_id)
 
     try:
-        ordered = graph.topological_runs(stale_run_ids)
+        ordered = graph.topological_runs(
+            stale_run_ids, task_consumers=task_links if task_links else None
+        )
     except DependencyGraphError as exc:
         plan.cycle_error = str(exc)
         ordered = [graph.runs[rid] for rid in stale_run_ids if rid in graph.runs]
@@ -390,4 +454,8 @@ def plan_for_changed_versions(
 ) -> RecomputePlan:
     """Convenience: freshness service + plan for upstream version changes."""
     svc = FreshnessService.for_project(project, catalog=catalog)
-    return build_recompute_plan(svc, changed_version_ids=list(changed_version_ids))
+    return build_recompute_plan(
+        svc,
+        changed_version_ids=list(changed_version_ids),
+        project=project,
+    )

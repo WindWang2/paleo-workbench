@@ -110,16 +110,38 @@ def build_stratal_grids(
         ms = map_coordinates(
             grid_ms.astype(float), coords, order=1, mode="nearest", cval=np.nan
         )
-        # Vectorize the registration's ms -> preview-sample-index transform
-        # (registration.time_ms_to_sample_idx) instead of a per-pixel Python
-        # loop: (twt - t0)/dt * (n_sample_prev-1)/(n_samples_full-1).
-        dt = survey.dt_ms if survey.dt_ms and survey.dt_ms > 0 else 1.0
-        full_t = (ms - survey.t0_ms) / dt
-        full_nt = max(survey.n_samples - 1, 1)
-        s_idx = full_t / full_nt * max(reg.n_sample - 1, 0)
-        return np.asarray(s_idx, dtype=float)
+        return ms_to_preview_sample_index(
+            ms,
+            dt_ms=survey.dt_ms,
+            t0_ms=survey.t0_ms,
+            n_samples=survey.n_samples,
+            n_sample_preview=reg.n_sample,
+        )
 
     return _to_preview_sample_index(top_ms), _to_preview_sample_index(bot_ms)
+
+
+def ms_to_preview_sample_index(
+    ms: np.ndarray,
+    *,
+    dt_ms: float,
+    t0_ms: float,
+    n_samples: int,
+    n_sample_preview: int,
+) -> np.ndarray:
+    """Vectorized ms -> preview-sample-index transform.
+
+    The registration's ``time_ms_to_sample_idx`` rescaled to the preview
+    sampling: ``(twt - t0)/dt / (n_samples-1) * (n_sample_preview-1)``.
+    Endpooints: ``t0`` maps to 0; ``t0 + (n_samples-1)*dt`` maps to
+    ``n_sample_preview-1``. Non-positive ``dt_ms`` degrades to 1.0 (matching
+    the legacy per-pixel loop).
+    """
+    dt = dt_ms if dt_ms and dt_ms > 0 else 1.0
+    full_t = (np.asarray(ms, dtype=float) - t0_ms) / dt
+    full_nt = max(n_samples - 1, 1)
+    s_idx = full_t / full_nt * max(n_sample_preview - 1, 0)
+    return np.asarray(s_idx, dtype=float)
 
 
 def build_stratal_surfaces(

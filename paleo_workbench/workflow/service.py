@@ -228,7 +228,9 @@ def build_affected_products_plan(
     from paleo_workbench.workflow.recompute_plan import build_recompute_plan
 
     svc = FreshnessService.for_project(project, catalog=catalog)
-    return build_recompute_plan(svc, changed_version_ids=changed_version_ids)
+    return build_recompute_plan(
+        svc, changed_version_ids=changed_version_ids, project=project
+    )
 
 
 def downstream_impact_for_version(

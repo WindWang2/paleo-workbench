@@ -121,6 +121,11 @@ class SeismicVolumeCache:
 
     def put(self, key: SeismicCacheKey, array: np.ndarray) -> np.ndarray:
         arr = np.ascontiguousarray(array, dtype=np.float32)
+        if arr is array:
+            # ascontiguousarray made no copy: own the buffer before freezing
+            # it, or the CALLER's array would silently become read-only
+            # (round-2 H10 latent hazard).
+            arr = arr.copy()
         if arr.flags.writeable:
             arr.setflags(write=False)
         nbytes = int(arr.nbytes)

@@ -356,6 +356,9 @@ def run_basic_qc(
         kwargs["id"] = previous_id
     report = QualityReport(**kwargs)
 
+    # Provenance marker (filled by the registration below, H14).
+    report.provenance_registered = False
+
     if existing_idx is not None:
         project.quality_reports[existing_idx] = report
     else:
@@ -376,7 +379,7 @@ def run_basic_qc(
 
         cat = get_catalog()
         if cat is not None:
-            register_qc_run(
+            run_qc, _qc_version = register_qc_run(
                 name=f"QC {document.name}",
                 source_task_ids=[document.id],
                 domain_task_id=report.id,
@@ -386,6 +389,8 @@ def run_basic_qc(
                 },
                 catalog=cat,
             )
+            if run_qc is not None:
+                report.provenance_registered = True
     except Exception:
         import logging
 

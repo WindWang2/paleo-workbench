@@ -362,6 +362,10 @@ class QualityReport(BaseModel):
     issues: list[dict[str, Any]] = Field(default_factory=list)
     status: str = "pending"
     generated_at: str = Field(default_factory=_now_iso)
+    # Round-2 (H14): catalog qc-DataRun registration outcome. False means the
+    # report exists but its provenance run could not be registered (visible,
+    # not silent).
+    provenance_registered: bool = True
 
 
 class VersionSnapshot(BaseModel):

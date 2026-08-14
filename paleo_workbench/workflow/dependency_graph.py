@@ -277,12 +277,22 @@ class DependencyGraph:
             return run
         return None
 
-    def topological_runs(self, run_ids: Iterable[str]) -> list[DataRunRef]:
+    def topological_runs(
+        self,
+        run_ids: Iterable[str],
+        *,
+        task_consumers: Mapping[str, set[str]] | None = None,
+    ) -> list[DataRunRef]:
         """Order *run_ids* so producers come before consumers.
 
-        Uses version edges between runs. Raises :class:`DependencyGraphError`
-        only when the *requested subset* contains a cycle; global cycles that
-        do not involve the subset are ignored.
+        Uses version edges between runs. ``task_consumers`` (consumer domain
+        task -> producer task ids) adds guarded synthetic ordering edges for
+        runs whose version lineage is empty but whose TASK-level dependency
+        is known (H11: prediction/map must recompute after their factor/prediction
+        producers even when the recorded lineage is empty).
+        Raises :class:`DependencyGraphError` only when the *requested subset*
+        contains a cycle; global cycles that do not involve the subset are
+        ignored.
         """
         wanted = {rid for rid in run_ids if rid in self.runs}
         if not wanted:
@@ -320,19 +330,29 @@ class DependencyGraph:
                 ),
             )
         synthetic: list[tuple[str, str]] = []
+
+        def _add_synthetic(consumer_rid: str, producer_task_ids) -> None:
+            for tid in producer_task_ids:
+                prod_rid = latest_by_domain.get(str(tid))
+                if prod_rid is None or prod_rid == consumer_rid or prod_rid not in wanted:
+                    continue
+                if not _reachable(adj, consumer_rid, prod_rid):
+                    synthetic.append((prod_rid, consumer_rid))
+
+        by_consumer_task: dict[str, list[str]] = {}
         for rid in wanted:
             run = self.runs[rid]
-            if run.operation != "map_compile":
-                continue
-            params = run.parameters or {}
-            linked = str(params.get("linked_prediction_task_id") or "")
-            source_ids = [str(s) for s in (params.get("source_task_ids") or [])]
-            for tid in ([linked] if linked else []) + source_ids:
-                prod_rid = latest_by_domain.get(tid)
-                if prod_rid is None or prod_rid == rid or prod_rid not in wanted:
-                    continue
-                if not _reachable(adj, rid, prod_rid):
-                    synthetic.append((prod_rid, rid))
+            if run.domain_task_id:
+                by_consumer_task.setdefault(run.domain_task_id, []).append(rid)
+        for rid in wanted:
+            run = self.runs[rid]
+            if run.operation == "map_compile":
+                params = run.parameters or {}
+                linked = str(params.get("linked_prediction_task_id") or "")
+                source_ids = [str(s) for s in (params.get("source_task_ids") or [])]
+                _add_synthetic(rid, ([linked] if linked else []) + source_ids)
+            if task_consumers and run.domain_task_id in task_consumers:
+                _add_synthetic(rid, task_consumers[run.domain_task_id])
         for src, dst in synthetic:
             if dst not in adj[src]:
                 adj[src].add(dst)

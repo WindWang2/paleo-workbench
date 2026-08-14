@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from paleo_workbench.catalog.service import CatalogError, DataCatalogService
@@ -1199,3 +1200,104 @@ def test_fingerprint_normalizes_negative_zero():
     fp1 = build_factor_fingerprints(sample_points=pts, method="IDW", grid_n=20)
     fp2 = build_factor_fingerprints(sample_points=pts2, method="IDW", grid_n=20)
     assert fp1.result == fp2.result
+
+
+# --------------------------------------------------------------------------- FU1
+# Task-level plan expansion for empty-lineage runs (H11 truncation).
+
+
+def test_plan_includes_empty_lineage_prediction_after_upstream_change(tmp_path: Path):
+    """A prediction run registered before its factor run recorded NO input
+    versions. After the upstream RAW version advances, the recompute plan
+    must still include the prediction (task-level dependency) instead of
+    silently truncating the chain at the factor step."""
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.catalog.service import DataCatalogService
+    from paleo_workbench.project.models import PredictionTask
+    from paleo_workbench.workflow.current_context import (
+        resolve_current_project_version_context,
+    )
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+    from paleo_workbench.workflow.freshness import FreshnessService
+    from paleo_workbench.workflow.recompute_plan import build_recompute_plan
+
+    svc = DataCatalogService.open(tmp_path / "cat")
+    (tmp_path / "w.las").write_bytes(b"LAS v1")
+    (tmp_path / "w_v2.las").write_bytes(b"LAS v2")
+    (tmp_path / "g.npz").write_bytes(b"GRID")
+    cat = CoreCatalogAdapter(svc)
+    # RAW v1 -> factor run (output grid).
+    asset = cat.register_input(name="w.las", path=str(tmp_path / "w.las"), checksum=None, kind="well_log", format="las")
+    raw_v1 = asset.version_id
+    run_f = cat.begin_run(operation="factor_map", input_version_ids=[raw_v1], domain_task_id="fa")
+    grid = cat.register_derived(run_id=run_f.run_id, name="grid", path=str(tmp_path / "g.npz"), checksum=None, kind="factor_grid", format="npz")
+    cat.complete_run(run_f.run_id)
+    # Prediction run with EMPTY lineage (registered before the factor run
+    # existed — the timing hole): operation prediction, no input versions.
+    run_p = cat.begin_run(operation="prediction", input_version_ids=[], domain_task_id="pred-1")
+    cat.complete_run(run_p.run_id)
+    # The RAW asset advances to v2 (same asset, new version).
+    raw_v2 = svc.register_version(
+        asset.asset_id,
+        tmp_path / "w_v2.las",
+        svc.get_version(raw_v1).stage,
+    ).id
+
+    project = ProjectDocument.new("p")
+    project.prediction_tasks.append(
+        PredictionTask(
+            id="pred-1",
+            name="pred",
+            input_factor_map_ids=["fa"],
+            status="complete",
+        )
+    )
+    ctx = resolve_current_project_version_context(project, catalog=cat)
+    svc_f = FreshnessService(DependencyGraph.from_catalog(cat), ctx, catalog=cat)
+
+    plan = build_recompute_plan(
+        svc_f, changed_version_ids=[raw_v2, raw_v1], project=project
+    )
+    ops = [s.operation for s in plan.steps]
+    assert "factor_map" in ops
+    assert "prediction" in ops, (
+        f"empty-lineage prediction must be planned via its task link; got {ops}"
+    )
+    assert ops.index("factor_map") < ops.index("prediction")
+
+
+# --------------------------------------------------------------------------- FU2/FU4
+# Follow-up fixes: production transform hoisting + cache ownership.
+
+
+def test_ms_to_preview_sample_index_production_function():
+    """FU2 (K-F6): pin the PRODUCTION transform, not a test-local copy."""
+    from paleo_workbench.viz.stratal_adapter import ms_to_preview_sample_index
+
+    out = ms_to_preview_sample_index(
+        np.asarray([100.0, 200.0, 300.0]),
+        dt_ms=4.0,
+        t0_ms=100.0,
+        n_samples=51,
+        n_sample_preview=21,
+    )
+    # t0 -> 0; t0 + 100ms (25 samples of 50) -> 10 of 20; t0+200ms -> 20.
+    assert out[0] == pytest.approx(0.0)
+    assert out[1] == pytest.approx(10.0)
+    assert out[2] == pytest.approx(20.0)
+
+
+def test_volume_cache_put_does_not_freeze_caller_array():
+    """FU4: cache.put must own its buffer — the caller's array stays writable."""
+    from paleo_workbench.viz.seismic_volume_cache import (
+        SeismicCacheKey,
+        SeismicVolumeCache,
+    )
+
+    cache = SeismicVolumeCache()
+    data = np.ones((4, 4), dtype=np.float32)  # already contiguous float32
+    entry = cache.put(SeismicCacheKey(source_id="s", kind="preview", index=0, lod=0), data)
+    assert data.flags.writeable, "caller's array must not be frozen by cache.put"
+    assert not entry.flags.writeable
+    got = cache.get(SeismicCacheKey(source_id="s", kind="preview", index=0, lod=0))
+    assert got is not None

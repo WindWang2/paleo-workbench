@@ -73,15 +73,24 @@ def test_stratal_ms_to_sample_index_endpoints_and_monotonicity():
         n_samples=50, dt_ms=4.0, t0_ms=100.0,
     )
     reg = SimpleNamespace(n_sample=20)  # preview downsampled to 20 samples
+    # Call the PRODUCTION transform (K-F6: the previous test recomputed
+    # expectations with a test-local copy of the formula and could never
+    # catch a regression in the shipped arithmetic).
+    from paleo_workbench.viz.stratal_adapter import ms_to_preview_sample_index
+
+    def transform(twt):
+        return float(
+            ms_to_preview_sample_index(
+                np.asarray([twt]),
+                dt_ms=survey.dt_ms,
+                t0_ms=survey.t0_ms,
+                n_samples=survey.n_samples,
+                n_sample_preview=reg.n_sample,
+            )[0]
+        )
+
+    scale = reg.n_sample - 1
     dt = survey.dt_ms
-    full_nt = max(survey.n_samples - 1, 1)
-    scale = max(reg.n_sample - 1, 0)
-
-    def transform(twt: float) -> float:
-        # The production formula (stratal_adapter._to_preview_sample_index):
-        # (twt - t0)/dt / (n_samples-1) * (n_sample-1)
-        return (twt - survey.t0_ms) / dt / full_nt * scale
-
     # t0 boundary -> preview sample 0.
     assert transform(survey.t0_ms) == pytest.approx(0.0)
     # Last full sample (t0 + (n_samples-1)*dt) -> last preview sample.
@@ -89,10 +98,19 @@ def test_stratal_ms_to_sample_index_endpoints_and_monotonicity():
     assert transform(last_twt) == pytest.approx(scale)
     # Monotonic non-decreasing in twt.
     twts = np.linspace(survey.t0_ms, last_twt, 9)
-    out = np.array([transform(t) for t in twts])
+    out = np.asarray([transform(t) for t in twts])
     assert (np.diff(out) >= 0).all()
     # Spot check a mid value against an independent hand computation.
     assert transform(survey.t0_ms + 25 * dt) == pytest.approx(25 / 49.0 * 19.0)
+    # Degenerate dt (<=0) degrades to dt=1.0, never divides by zero.
+    degenerate = ms_to_preview_sample_index(
+        np.asarray([survey.t0_ms + 10.0]),
+        dt_ms=0.0,
+        t0_ms=survey.t0_ms,
+        n_samples=survey.n_samples,
+        n_sample_preview=reg.n_sample,
+    )[0]
+    assert degenerate == pytest.approx(10.0 / 49.0 * 19.0)
 
 
 def test_stratal_adapter_end_to_end_with_demo_and_renderer(qtbot):
