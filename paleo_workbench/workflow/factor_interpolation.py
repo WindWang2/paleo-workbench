@@ -37,6 +37,7 @@ import numpy as np
 from geoviz import (  # re-exported for tests / callers — facade only
     extract_xy_values,
     interpolate_factor_grid,
+    JobCancelled,
     resolve_anisotropy_params,
     synthetic_sample_points,
 )
@@ -267,6 +268,44 @@ def _attach_result_to_task(
         }
         task.input_snapshot_hash = _snapshot_hash(snapshot)
     return task
+
+
+def _apply_interpolation_isolated(
+    task: FactorMapTask,
+    *,
+    method: str,
+    grid_n: int,
+    power: float,
+    project: ProjectDocument | None,
+    cancellation_token,
+    plan: InterpolationPlan | None = None,
+) -> FactorMapTask:
+    """Run one task's interpolation, isolating engine failures to that task.
+
+    A degenerate task (e.g. fewer sample points than the engine requires) marks
+    only itself ``failed`` with a ``last_error`` diagnostic instead of raising
+    through the batch and discarding every successfully interpolated task.
+    """
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
+    try:
+        return apply_interpolation_to_task(
+            task,
+            method=method,
+            grid_n=grid_n,
+            power=power,
+            project=project,
+            cancellation_token=cancellation_token,
+            plan=plan,
+        )
+    except JobCancelled:
+        raise
+    except Exception as exc:
+        task.status = "failed"
+        params = dict(task.parameters or {})
+        params["last_error"] = f"{type(exc).__name__}: {exc}"
+        task.parameters = params
+        return task
 
 
 def apply_interpolation_to_task(
@@ -568,17 +607,21 @@ def batch_prepare_factor_maps(
                 breaks = break_polylines_for_idw(
                     layers, target_horizon=first.target_horizon
                 )
-            # Session plan cache keyed by geometry fingerprint of first dirty task.
+            # Session plan cache keyed by geometry + algorithm fingerprints of
+            # the first dirty task. Power lives in the ALGORITHM fingerprint
+            # (not geometry), so including both is what makes a power change
+            # rebuild the plan instead of silently reusing the old-power grid.
             geo_key = None
             try:
-                geo_key = fingerprints_for_task(
+                fingerprints = fingerprints_for_task(
                     first,
                     project=project,
                     method=method,
                     grid_n=grid_n,
                     power=power,
                     generator_version=GENERATOR_VERSION,
-                ).geometry
+                )
+                geo_key = f"{fingerprints.geometry}:{fingerprints.algorithm}"
                 plan = plan_cache_get(geo_key)
             except Exception:
                 plan = None
@@ -606,7 +649,7 @@ def batch_prepare_factor_maps(
                         (task.parameters or {}).get("sample_points") or [], plan
                     )
                 except ValueError:
-                    apply_interpolation_to_task(
+                    _apply_interpolation_isolated(
                         task,
                         method=method,
                         grid_n=grid_n,
@@ -673,7 +716,7 @@ def batch_prepare_factor_maps(
                     )
                 except ValueError:
                     use_plan = None
-            apply_interpolation_to_task(
+            _apply_interpolation_isolated(
                 task,
                 method=method,
                 grid_n=grid_n,

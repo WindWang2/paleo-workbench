@@ -77,7 +77,10 @@ def resolve_model_inputs(
             schema["min_wells"] > 0,
         )
     ):
-        return resolve_prediction_inputs(project, service)
+        input_ids = resolve_prediction_inputs(project, service)
+        if schema["required_curves"] and strict:
+            _enforce_required_curves(project, service, input_ids, schema["required_curves"])
+        return input_ids
 
     input_ids: list[str] = []
     seen: set[str] = set()
@@ -191,7 +194,88 @@ def resolve_model_inputs(
                 f"模型缺少必需输入类型: {', '.join(missing)}"
             )
 
+    if schema["required_curves"] and strict:
+        _enforce_required_curves(project, service, input_ids, schema["required_curves"])
+
     return input_ids
+
+
+def _enforce_required_curves(
+    project: ProjectDocument,
+    service,
+    input_ids: list[str],
+    required_curves: list[str],
+) -> None:
+    """Raise :class:`InputContractError` when resolved inputs lack required curves.
+
+    Curve availability is best-effort: recorded ``parsed_summary["curves"]``
+    first, otherwise the LAS header is read via the shared lightweight preview
+    loader. Fail closed: unreadable or missing well-log inputs cannot satisfy
+    the contract.
+    """
+    names, inspected = _resolved_well_curve_names(project, service, input_ids)
+    required = [str(curve) for curve in required_curves]
+    missing = [curve for curve in required if curve.upper() not in names]
+    if not missing:
+        return
+    if inspected == 0:
+        raise InputContractError(
+            f"模型要求曲线 {', '.join(required)}，但未解析到提供曲线的测井输入"
+        )
+    available = ", ".join(sorted(names)) or "无"
+    raise InputContractError(
+        f"模型缺少必需曲线: {', '.join(missing)}（测井输入可用曲线: {available}）"
+    )
+
+
+def _resolved_well_curve_names(
+    project: ProjectDocument,
+    service,
+    input_ids: list[str],
+) -> tuple[set[str], int]:
+    """Return (curve mnemonics, inspected well-log input count) for resolved inputs."""
+    from paleo_workbench.prediction.inference_service import _resolve_resource_version_id
+    from paleo_workbench.prediction.adapters import _resolve_resource_path
+
+    resolved = set(input_ids)
+    names: set[str] = set()
+    inspected = 0
+    for resource in project.resources:
+        if getattr(resource, "type", "") != "well_log":
+            continue
+        version_id = _resolve_resource_version_id(service, resource.id)
+        if version_id is None or version_id not in resolved:
+            continue
+        inspected += 1
+        for curve in (getattr(resource, "parsed_summary", None) or {}).get("curves") or []:
+            name = (
+                curve
+                if isinstance(curve, str)
+                else str(
+                    (curve.get("mnemonic") if isinstance(curve, dict) else None)
+                    or (curve.get("name") if isinstance(curve, dict) else None)
+                    or getattr(curve, "mnemonic", "")
+                    or getattr(curve, "name", "")
+                )
+            ).strip()
+            if name:
+                names.add(name.upper())
+        path = _resolve_resource_path(resource, project)
+        if path is None:
+            continue
+        try:
+            from geoviz import load_las_preview
+
+            data = load_las_preview(str(path), fast=True)
+        except Exception:
+            continue
+        for curve in getattr(data, "curves", None) or []:
+            name = str(
+                getattr(curve, "name", "") or getattr(curve, "mnemonic", "") or ""
+            ).strip()
+            if name:
+                names.add(name.upper())
+    return names, inspected
 
 
 def _asset_type_for_version(service, version_id: str) -> str:

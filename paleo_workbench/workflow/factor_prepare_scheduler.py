@@ -98,6 +98,11 @@ class FactorPrepareBatchResult:
     execute_ms: float = 0.0
     workers: int = 1
     created_default_tasks: bool = False
+    # Schedule-time overrides actually used for execution. The commit-time
+    # stale-input guard must re-derive fingerprints with THESE values; falling
+    # back to per-task defaults would discard every non-default prepare.
+    grid_n: int | None = None
+    power: float = 2.0
 
     @property
     def count(self) -> int:
@@ -241,6 +246,17 @@ def classify_snapshot_tasks(
     return clean, dirty
 
 
+def _task_failure(task: FactorMapTask) -> str | None:
+    """Return the recorded per-task failure diagnostic, if any.
+
+    ``_apply_interpolation_isolated`` marks a degenerate task ``failed`` with a
+    ``last_error`` parameter instead of raising through the batch.
+    """
+    if getattr(task, "status", "") == "failed":
+        return str((task.parameters or {}).get("last_error") or "interpolation failed")
+    return None
+
+
 def run_factor_prepare_schedule(
     snapshot: FactorPrepareSnapshot,
     *,
@@ -382,19 +398,23 @@ def run_factor_prepare_schedule(
             )
             for task, state, result_fp in dirty_pairs:
                 executed += 1
+                error = _task_failure(task)
+                if error is not None:
+                    failed_n += 1
                 results_by_id[task.id] = FactorPrepareTaskResult(
                     task_id=task.id,
                     dirty_state=state.value,
                     reused=False,
                     task=task.model_copy(deep=True),
                     scheduled_result_fingerprint=result_fp,
+                    error=error,
                 )
             _emit(
                 total=total,
                 clean_n=clean_n,
                 dirty_n=dirty_n,
                 completed=clean_n + executed,
-                failed=0,
+                failed=failed_n,
                 phase="executed",
                 message=f"计算 {executed}/{dirty_n}",
             )
@@ -449,6 +469,7 @@ def run_factor_prepare_schedule(
                             reused=False,
                             task=updated.model_copy(deep=True),
                             scheduled_result_fingerprint=result_fp,
+                            error=_task_failure(updated),
                         )
                     )
                 return out
@@ -466,6 +487,8 @@ def run_factor_prepare_schedule(
                     for item in group_results:
                         results_by_id[item.task_id] = item
                         executed += 1
+                        if item.error:
+                            failed_n += 1
                     _emit(
                         total=total,
                         clean_n=clean_n,
@@ -509,6 +532,8 @@ def run_factor_prepare_schedule(
         execute_ms=execute_ms,
         workers=worker_n,
         created_default_tasks=snapshot.created_defaults,
+        grid_n=snapshot.grid_n,
+        power=snapshot.power,
     )
 
 
@@ -565,6 +590,10 @@ def commit_prepare_batch_result(
                     live,
                     project=live_project,
                     method=result.method,
+                    # Re-derive with the SCHEDULED overrides (not per-task
+                    # defaults) or every non-default prepare looks stale.
+                    grid_n=result.grid_n,
+                    power=result.power,
                     generator_version=GENERATOR_VERSION,
                 )
                 if current.result != item.scheduled_result_fingerprint:

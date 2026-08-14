@@ -376,35 +376,44 @@ def factor_grid_result_for_task(
     global _ARTIFACT_PHYSICAL_LOADS
     artifact_path = getattr(task, "grid_artifact_path", None)
     key = str(getattr(task, "id", "") or "")
+    artifact_missing: FileNotFoundError | None = None
 
     if artifact_path:
+        identity = None
         try:
             identity = artifact_file_identity(artifact_path)
-        except FileNotFoundError:
-            raise
+        except FileNotFoundError as err:
+            # The artifact disappeared while the task still references it —
+            # e.g. a failed Save-As rolled back the staged artifacts tree even
+            # though this session's live grid is still valid. Fall through to
+            # the live/legacy resolution below instead of bricking every later
+            # save; the next successful save re-externalizes the grid and
+            # rewrites ``grid_artifact_path`` (self-healing).
+            artifact_missing = err
         except OSError as err:
             raise FileNotFoundError(
                 f"factor grid artifact not readable: {artifact_path}"
             ) from err
-        with _LIVE_FACTOR_GRIDS_LOCK:
-            live = _LIVE_FACTOR_GRIDS.get(key)
-            if live is not None and _LIVE_ARTIFACT_IDENTITY.get(key) == identity:
-                _LIVE_FACTOR_GRIDS.move_to_end(key)
-                cached = live
-            else:
-                cached = None
-        if cached is not None:
-            return _shell_from_live(cached, crs=crs, copy=copy)
-        # Physical load (once per identity).
-        loaded = read_grid_artifact(artifact_path)
-        with _LIVE_FACTOR_GRIDS_LOCK:
-            _ARTIFACT_PHYSICAL_LOADS += 1
-        store_live_factor_grid(key, loaded, artifact_identity=identity)
-        with _LIVE_FACTOR_GRIDS_LOCK:
-            live = _LIVE_FACTOR_GRIDS.get(key)
-        if live is None:
-            return loaded if not copy else loaded.copied()
-        return _shell_from_live(live, crs=crs, copy=copy)
+        if identity is not None:
+            with _LIVE_FACTOR_GRIDS_LOCK:
+                live = _LIVE_FACTOR_GRIDS.get(key)
+                if live is not None and _LIVE_ARTIFACT_IDENTITY.get(key) == identity:
+                    _LIVE_FACTOR_GRIDS.move_to_end(key)
+                    cached = live
+                else:
+                    cached = None
+            if cached is not None:
+                return _shell_from_live(cached, crs=crs, copy=copy)
+            # Physical load (once per identity).
+            loaded = read_grid_artifact(artifact_path)
+            with _LIVE_FACTOR_GRIDS_LOCK:
+                _ARTIFACT_PHYSICAL_LOADS += 1
+            store_live_factor_grid(key, loaded, artifact_identity=identity)
+            with _LIVE_FACTOR_GRIDS_LOCK:
+                live = _LIVE_FACTOR_GRIDS.get(key)
+            if live is None:
+                return loaded if not copy else loaded.copied()
+            return _shell_from_live(live, crs=crs, copy=copy)
 
     with _LIVE_FACTOR_GRIDS_LOCK:
         live = _LIVE_FACTOR_GRIDS.get(key)
@@ -412,6 +421,11 @@ def factor_grid_result_for_task(
             _LIVE_FACTOR_GRIDS.move_to_end(key)
     if live is not None:
         return _shell_from_live(live, crs=crs, copy=copy)
+
+    if artifact_missing is not None:
+        # No live grid and no legacy inline payload: the artifact really is
+        # gone. Surface the original loss instead of a confusing KeyError.
+        raise artifact_missing
 
     return FactorGridResult.from_legacy_task_parameters(
         dict(task.parameters or {}),

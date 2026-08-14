@@ -54,6 +54,8 @@ _DOMAIN_BY_SECTION = {
     "constraint_layers": ProjectDirtyDomain.INTERPRETATIONS,
     "contour_drafts": ProjectDirtyDomain.INTERPRETATIONS,
     "horizon_interpretations": ProjectDirtyDomain.INTERPRETATIONS,
+    "correlation_interpretations": ProjectDirtyDomain.INTERPRETATIONS,
+    "fault_interpretations": ProjectDirtyDomain.INTERPRETATIONS,
     "version_sets": ProjectDirtyDomain.INTERPRETATIONS,
     "compilation_runs": ProjectDirtyDomain.FACTOR_TASKS,
     "factor_map_tasks": ProjectDirtyDomain.FACTOR_TASKS,

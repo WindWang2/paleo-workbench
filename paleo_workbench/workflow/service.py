@@ -62,7 +62,13 @@ def _evidence_step_status(project: ProjectDocument, step_type: str) -> str:
         reports = _active_quality_reports(project)
         if not reports and not project.quality_reports:
             return "pending"
-        if any(getattr(report, "status", "") == "failed" for report in reports):
+        # ``_status_from_issues`` can yield "error" (a critical issue present);
+        # treat it as a failed gate alongside the legacy "failed" status so an
+        # error-severity QC report does not fall through to "complete".
+        if any(
+            getattr(report, "status", "") in ("failed", "error")
+            for report in reports
+        ):
             return "failed"
         if any(getattr(report, "status", "") == "warning" for report in reports):
             return "warning"
