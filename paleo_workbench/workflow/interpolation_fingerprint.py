@@ -103,17 +103,21 @@ def _finite_float(value: Any) -> float | None:
         return None
     if not math.isfinite(number):
         return None
-    return number
+    # Normalize -0.0 → 0.0 so the fingerprint is insensitive to sign-of-zero
+    # (identical science, identical hash).
+    return number + 0.0
 
 
 def extract_sample_records(
     sample_points: Sequence[dict[str, Any]] | None,
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """Pull ordered (x, y, z) samples with the same validity rules as extract_xy_values.
 
     Order is preserved: algorithms may depend on sample order for ties/duplicates.
+    Directional-engine extras (``q``/``b_i``/``qc_flag``) ride along so the
+    fingerprint can cover them for that backend (H11).
     """
-    out: list[dict[str, float]] = []
+    out: list[dict[str, Any]] = []
     for pt in sample_points or []:
         if not isinstance(pt, dict):
             continue
@@ -132,7 +136,16 @@ def extract_sample_records(
             continue
         if x is None or y is None or z is None:
             continue
-        out.append({"x": x, "y": y, "z": z})
+        record: dict[str, Any] = {"x": x, "y": y, "z": z}
+        for key in ("q", "b_i"):
+            if key in pt and pt[key] is not None:
+                try:
+                    record[key] = float(pt[key])
+                except (TypeError, ValueError):
+                    pass
+        if "qc_flag" in pt and pt["qc_flag"] is not None:
+            record["qc_flag"] = str(pt["qc_flag"])
+        out.append(record)
     return out
 
 
@@ -238,10 +251,18 @@ def build_factor_fingerprints(
         "breaks": breaks,
         "target_horizon": (target_horizon or "").strip(),
     }
-    values_payload = {
+    values_payload: dict[str, Any] = {
         "schema": FINGERPRINT_SCHEMA_VERSION,
         "z": zz,
     }
+    if backend == "directional":
+        # The directional engine multiplies each sample's weight by q and b_i
+        # and DROPS samples whose qc_flag is not ok/"" (H11): those per-sample
+        # scientific inputs must be part of the fingerprint or a QC weight
+        # change would be classified CLEAN while the surface changes.
+        values_payload["q"] = [s.get("q") for s in samples]
+        values_payload["b_i"] = [s.get("b_i") for s in samples]
+        values_payload["qc_flag"] = [s.get("qc_flag") for s in samples]
     algorithm_payload: dict[str, Any] = {
         "schema": FINGERPRINT_SCHEMA_VERSION,
         "method": str(method),

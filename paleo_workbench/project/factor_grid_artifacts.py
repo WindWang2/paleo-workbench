@@ -456,6 +456,19 @@ def persist_factor_grid_artifacts(
             live_identity = _LIVE_ARTIFACT_IDENTITY.get(task_id)
         has_inline = parameters.get("grid_z") is not None
         if not has_inline and not has_live:
+            # A task marked complete whose grid was evicted from the bounded
+            # live cache and never externalized has NO payload: save must not
+            # silently drop the computed product while claiming complete (H11).
+            if (
+                getattr(task, "status", "") == "complete"
+                and not getattr(task, "grid_artifact_path", None)
+            ):
+                task.status = "pending"
+                task.quality_metrics = dict(task.quality_metrics or {})
+                task.quality_metrics["payload_missing"] = (
+                    "live grid evicted before save; re-run prepare"
+                )
+                changed.append(task)
             continue
         # Skip rewrite when the live entry already matches an on-disk artifact
         # (no new catalog churn). Catalog registration rehomes the path under

@@ -67,11 +67,20 @@ class SeismicVolumeMetadata:
 
 
 def source_id_for_path(path: str | Path) -> str:
-    """Identity that invalidates cache when the file is replaced on disk."""
+    """Identity that invalidates cache when the file is replaced on disk.
+
+    Size+mtime alone miss a same-size replacement with preserved mtime
+    (``cp -p`` / ``rsync -a`` / restored archives). The inode number
+    (st_ino) + device (st_dev) detect any actual file swap even when every
+    timestamp is preserved (H10 cache identity).
+    """
     p = Path(path)
     try:
         st = p.stat()
-        return f"{p.resolve().as_posix()}|{st.st_size}|{int(st.st_mtime_ns)}"
+        return (
+            f"{p.resolve().as_posix()}|{st.st_size}|{int(st.st_mtime_ns)}"
+            f"|{st.st_dev}|{st.st_ino}"
+        )
     except OSError:
         return f"{p.as_posix()}|missing"
 
@@ -348,7 +357,14 @@ class SeismicVolumeSource:
             if cancellation_token is not None:
                 cancellation_token.raise_if_cancelled()
             assert self._loader is not None
-            volume = self._loader.get_volume_downsampled(
+            # Long volume reads must not hold the source lock: foreground
+            # slice reads on the GUI thread would freeze for the whole read
+            # (H10). Use a fresh per-call loader handle so concurrent
+            # slice reads proceed independently.
+            from geoviz import SeismicLoader
+
+            fresh_loader = SeismicLoader(self._path)
+            volume = fresh_loader.get_volume_downsampled(
                 factor=strides, cancellation_token=cancellation_token
             )
             self.physical_reads += 1

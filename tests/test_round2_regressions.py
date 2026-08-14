@@ -1123,3 +1123,68 @@ def test_correlation_artifact_resolves_project_first(tmp_path: Path, monkeypatch
     ref, payload = load_current_correlation_payload(projectB, project_path=projB / "x.paleo.json")
     assert payload is not None
     assert payload.tops[0].depth == pytest.approx(1007.0), "must read B, not A"
+
+
+# --------------------------------------------------------------------------- WP7/WP8
+# Seismic cache identity / fingerprint completeness (H10/H11).
+
+
+def test_source_id_changes_on_inode_replace(tmp_path: Path):
+    """H10: same-size, mtime-preserved replacement must change the identity."""
+    import os
+
+    from paleo_workbench.viz.seismic_volume_source import source_id_for_path
+
+    p = tmp_path / "survey.sgy"
+    p.write_bytes(b"A" * 4096)
+    id1 = source_id_for_path(p)
+    # Same size + preserved mtime via os.replace (new inode).
+    p2 = tmp_path / "survey_new.sgy"
+    p2.write_bytes(b"B" * 4096)
+    st = p.stat()
+    os.utime(p2, ns=(st.st_atime_ns, st.st_mtime_ns))
+    os.replace(p2, p)
+    id2 = source_id_for_path(p)
+    assert id1 != id2
+
+
+def test_directional_fingerprint_covers_weights_and_flags():
+    """H11: q/b_i/qc_flag changes must dirty the directional fingerprint."""
+    from paleo_workbench.workflow.interpolation_fingerprint import (
+        build_factor_fingerprints,
+    )
+
+    base = {
+        "sample_points": [
+            {"x": 100.0, "y": 200.0, "z": 10.0, "q": 1.0, "b_i": 1.0, "qc_flag": "ok"},
+            {"x": 110.0, "y": 210.0, "z": 12.0, "q": 1.0, "b_i": 1.0, "qc_flag": "ok"},
+        ],
+        "method": "方向趋势",
+        "grid_n": 40,
+    }
+    fp1 = build_factor_fingerprints(**base)
+    # b_i down-weight (the well-QC pipeline does exactly this).
+    pts2 = [dict(pt, b_i=0.1) for pt in base["sample_points"]]
+    fp2 = build_factor_fingerprints(**{**base, "sample_points": pts2})
+    assert fp1.result != fp2.result
+    # qc_flag flip (engine drops non-ok samples).
+    pts3 = [dict(pt, qc_flag="outlier") for pt in base["sample_points"]]
+    fp3 = build_factor_fingerprints(**{**base, "sample_points": pts3})
+    assert fp1.result != fp3.result
+    # IDW is unaffected by weight-only changes (no false recompute churn).
+    idw = {**base, "method": "IDW"}
+    fp4 = build_factor_fingerprints(**idw)
+    fp5 = build_factor_fingerprints(**{**idw, "sample_points": pts2})
+    assert fp4.result == fp5.result
+
+
+def test_fingerprint_normalizes_negative_zero():
+    from paleo_workbench.workflow.interpolation_fingerprint import (
+        build_factor_fingerprints,
+    )
+
+    pts = [{"x": 0.0, "y": -0.0, "z": 1.0}]
+    pts2 = [{"x": -0.0, "y": 0.0, "z": 1.0}]
+    fp1 = build_factor_fingerprints(sample_points=pts, method="IDW", grid_n=20)
+    fp2 = build_factor_fingerprints(sample_points=pts2, method="IDW", grid_n=20)
+    assert fp1.result == fp2.result

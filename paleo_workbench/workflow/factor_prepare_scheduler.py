@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from geoviz import JobCancelled
 
+from paleo_workbench.project.factor_grid_artifacts import clear_live_factor_grid
 from paleo_workbench.project.models import (
     CoordinateReference,
     FactorMapTask,
@@ -549,12 +550,26 @@ def commit_prepare_batch_result(
     Returns list of discarded task ids (stale generation / fingerprint mismatch).
     """
     discarded: list[str] = []
+
+    def _invalidate_live_grids(ids: list[str]) -> list[str]:
+        # A discarded commit must not leave its grid in the process-global
+        # live cache: the renderer/saver would otherwise serve (or persist)
+        # the rejected grid for the task (H11 torn-cache finding).
+        for tid in ids:
+            try:
+                clear_live_factor_grid(tid)
+            except Exception:
+                pass
+        return ids
+
     if int(result.generation) != int(expected_generation):
-        return [item.task_id for item in result.task_results]
+        return _invalidate_live_grids([item.task_id for item in result.task_results])
 
     if result.cancelled:
         # Default: no partial commit on cancel.
-        return [item.task_id for item in result.task_results if not item.reused]
+        return _invalidate_live_grids(
+            [item.task_id for item in result.task_results if not item.reused]
+        )
 
     live_by_id = {t.id: t for t in live_project.factor_map_tasks}
     new_tasks: list[FactorMapTask] = []
@@ -567,7 +582,7 @@ def commit_prepare_batch_result(
                 continue
             new_tasks.append(item.task)
         live_project.factor_map_tasks = new_tasks
-        return discarded
+        return _invalidate_live_grids(discarded)
 
     for item in result.task_results:
         if item.reused:
@@ -606,4 +621,4 @@ def commit_prepare_batch_result(
         idx = live_project.factor_map_tasks.index(live)
         live_project.factor_map_tasks[idx] = item.task
 
-    return discarded
+    return _invalidate_live_grids(discarded)

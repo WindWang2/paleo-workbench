@@ -33,22 +33,43 @@ class PreviewVolumeWorker(QObject):
     finished = Signal(object, str, int, int)  # volume, warning, generation, lod
     failed = Signal(str, int)
 
-    def __init__(self, segy_path: str, *, generation: int = 0, lod: int = 0) -> None:
+    def __init__(
+        self,
+        segy_path: str,
+        *,
+        generation: int = 0,
+        lod: int = 0,
+        cancellation_token=None,
+    ) -> None:
         super().__init__()
         self._path = segy_path
         self._generation = int(generation)
         self._lod = int(lod)
+        self._cancellation_token = cancellation_token
 
     @Slot()
     def run(self) -> None:
         try:
+            if self._cancellation_token is not None:
+                self._cancellation_token.raise_if_cancelled()
             from paleo_workbench.viz.seismic_volume_source import get_shared_seismic_source
 
             source = get_shared_seismic_source(self._path)
             source.metadata()
-            vol, warning = source.read_lod_volume(level=self._lod)
+            vol, warning = source.read_lod_volume(
+                level=self._lod, cancellation_token=self._cancellation_token
+            )
             self.finished.emit(vol, warning or "", self._generation, self._lod)
         except Exception as exc:
+            try:
+                from geoviz import JobCancelled
+            except Exception:
+                JobCancelled = None
+            if JobCancelled is not None and isinstance(exc, JobCancelled):
+                # Cooperative cancellation: report and stop — do NOT start the
+                # legacy dense fallback read (H10).
+                self.failed.emit(f"已取消: {exc}", self._generation)
+                return
             try:
                 vol, warning = load_seismic_volume_from_path(self._path)
                 self.finished.emit(
@@ -443,7 +464,14 @@ class WellSeismicJointHost(QObject):
 
         # Phase 2: background L0 dense brick for GL.
         self._volume_phase = "L0_LOADING"
-        worker = PreviewVolumeWorker(segy_path, generation=generation, lod=0)
+        try:
+            from geoviz import CancellationToken
+        except Exception:
+            CancellationToken = None
+        token = CancellationToken() if CancellationToken is not None else None
+        worker = PreviewVolumeWorker(
+            segy_path, generation=generation, lod=0, cancellation_token=token
+        )
         self._volume_job.start(
             worker,
             terminal_signals=(worker.finished, worker.failed),
@@ -451,6 +479,7 @@ class WellSeismicJointHost(QObject):
                 (worker.finished, self._on_volume_ready),
                 (worker.failed, self._on_volume_failed),
             ),
+            cancel=token.cancel if token is not None else None,
         )
 
     def _maybe_start_next_lod(self, segy_path: str, current_lod: int) -> None:
