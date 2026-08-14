@@ -160,6 +160,26 @@ class FreshnessService:
         self.check_integrity = check_integrity
         self._run_cache: dict[str, FreshnessReport] = {}
         self._version_cache: dict[str, FreshnessReport] = {}
+        # Index of selected versions by producing domain task / parent link,
+        # so _selection_mismatch rules 3/4 are O(1) lookups instead of full
+        # scans per input (perf: plan build was O(runs × selections)).
+        self._selected_by_key: dict[tuple, list[str]] | None = None
+
+    def _index_selected(self) -> None:
+        if self._selected_by_key is not None:
+            return
+        index: dict[tuple, list[str]] = {}
+        for sel in self.context.selected_version_ids:
+            prod = self.graph.producing_run.get(sel)
+            run = self.graph.runs.get(prod) if prod else None
+            if run is None:
+                continue
+            if run.domain_task_id:
+                index.setdefault(("domain", run.domain_task_id), []).append(sel)
+            parent = (run.parameters or {}).get("parent_version_id")
+            if parent:
+                index.setdefault(("parent", str(parent)), []).append(sel)
+        self._selected_by_key = index
 
     @classmethod
     def for_project(
@@ -190,6 +210,24 @@ class FreshnessService:
     def clear_cache(self) -> None:
         self._run_cache.clear()
         self._version_cache.clear()
+        self._selected_by_key = None
+
+    def _input_is_withdrawn(self, input_version_id: str) -> bool:
+        """True when the input version is gone from the catalog or trashed.
+
+        A downstream product must never stay FRESH on top of a withdrawn
+        input (H1): trashing/purging an upstream RAW/derived version makes
+        every consumer's lineage reference dangling, which is a provenance
+        defect, not "no mismatch".
+        """
+        ver = self.graph.versions.get(input_version_id)
+        if ver is None and self.catalog is not None:
+            ver = self.catalog.resolve_version(input_version_id)
+        if ver is None:
+            return True  # purged / unknown version
+        if getattr(ver, "trashed", False):
+            return True
+        return False
 
     def _selection_mismatch(
         self, input_version_id: str
@@ -225,28 +263,17 @@ class FreshnessService:
         # 3. Domain-task supersession among selected tips only (do not force
         # "latest run" — user may intentionally select an older tip).
         if domain_id:
-            for sel in self.context.selected_version_ids:
+            self._index_selected()
+            for sel in self._selected_by_key.get(("domain", domain_id), ()):
                 if sel == input_version_id:
                     continue
-                sel_prod = self.graph.producing_run.get(sel)
-                if not sel_prod:
-                    continue
-                sel_run = self.graph.runs.get(sel_prod)
-                if sel_run and sel_run.domain_task_id == domain_id:
-                    return sel, self.graph.asset_id_for(sel)
+                return sel, self.graph.asset_id_for(sel)
 
         # 4. Parent-link supersession
         if prod and prod in self.graph.runs:
-            for sel in self.context.selected_version_ids:
-                sel_prod = self.graph.producing_run.get(sel)
-                if not sel_prod:
-                    continue
-                sel_run = self.graph.runs.get(sel_prod)
-                if not sel_run:
-                    continue
-                parent = (sel_run.parameters or {}).get("parent_version_id")
-                if parent == input_version_id:
-                    return sel, self.graph.asset_id_for(sel)
+            self._index_selected()
+            for sel in self._selected_by_key.get(("parent", input_version_id), ()):
+                return sel, self.graph.asset_id_for(sel)
 
         if input_version_id in self.context.selected_version_ids:
             return None
@@ -385,6 +412,18 @@ class FreshnessService:
         for in_vid in inputs:
             in_asset = self.graph.asset_id_for(in_vid)
             if in_asset and in_asset in output_assets:
+                continue
+            if self._input_is_withdrawn(in_vid):
+                # Trashed/purged upstream: the product's lineage is dangling —
+                # report it as a provenance defect instead of FRESH (H1).
+                reasons.append(
+                    FreshnessReason(
+                        type=FreshnessReasonType.MISSING_LINEAGE,
+                        upstream_version_id=in_vid,
+                        operation=run.operation or "",
+                        detail=f"input {in_vid} withdrawn/trashed from catalog",
+                    )
+                )
                 continue
             mismatch = self._selection_mismatch(in_vid)
             if mismatch is None:

@@ -245,8 +245,25 @@ def downstream_impact_for_version(
     from paleo_workbench.workflow.recompute_plan import OPERATION_LABELS_ZH
 
     svc = FreshnessService.for_project(project, catalog=catalog)
+    # Root expansion mirrors build_recompute_plan: dependents attach to the
+    # SUPERSEDED version they consumed, so the panel must include the whole
+    # asset + domain-task sibling set or it silently shows "affects nothing"
+    # for a newly-current tip (H1).
+    graph = svc.graph
+    roots: set[str] = {version_id}
+    asset = graph.asset_id_for(version_id)
+    if asset:
+        for other in graph.asset_versions.get(asset, ()):
+            roots.add(other)
+    prod = graph.producing_run.get(version_id)
+    if prod and prod in graph.runs:
+        domain = graph.runs[prod].domain_task_id
+        if domain:
+            for rid in graph.domain_task_runs.get(domain, ()):
+                for out in graph.run_outputs.get(rid, ()):
+                    roots.add(out)
     rows: list[dict[str, Any]] = []
-    for report in svc.downstream_impact([version_id]):
+    for report in svc.downstream_impact(sorted(roots)):
         rows.append(
             {
                 "run_id": report.subject_id,

@@ -367,6 +367,32 @@ def run_basic_qc(
         run.active_paleomap_document_id = map_document_id
         run.updated_at = _now_iso()
 
+    # Provenance: record a qc DataRun bound to the map's DERIVED version
+    # (H3). Best-effort with explicit logging — QC itself is a domain
+    # artifact, but the catalog run is what freshness/dashboard count on.
+    try:
+        from paleo_workbench.catalog import get_catalog
+        from paleo_workbench.catalog.lifecycle import register_qc_run
+
+        cat = get_catalog()
+        if cat is not None:
+            register_qc_run(
+                name=f"QC {document.name}",
+                source_task_ids=[document.id],
+                domain_task_id=report.id,
+                parameters={
+                    "map_document_id": map_document_id,
+                    "qc_status": status,
+                },
+                catalog=cat,
+            )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "qc DataRun registration failed for map %s", map_document_id, exc_info=True
+        )
+
     return report
 
 

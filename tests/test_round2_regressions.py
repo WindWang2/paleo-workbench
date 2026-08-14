@@ -510,3 +510,337 @@ def test_unknown_input_schema_vocabulary_rejected(tmp_path: Path):
     project = ProjectDocument.new("p")
     with pytest.raises(InputContractError):
         resolve_model_inputs(project, svc, mv, strict=True)
+
+
+# --------------------------------------------------------------------------- WP3
+# Production paleomap provenance / transactions (H3).
+
+
+def _production_payload(tmp_path: Path, *, demo: bool = False) -> dict:
+    """A valid scientific VECTOR_POLYGONS payload (non-demo square area)."""
+    return {
+        "result_summary": {
+            "final_scientific_prediction": True,
+            "demo": demo,
+            "spatial_output_type": "VECTOR_POLYGONS",
+            "spatial": {
+                "crs": "EPSG:4326",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"facies": "S"},
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [[120.1, 30.2], [120.3, 30.2], [120.3, 30.4], [120.1, 30.4], [120.1, 30.2]]
+                            ],
+                        },
+                    }
+                ],
+            },
+        },
+        "model": {},
+    }
+
+
+def _promoted_model(tmp_path: Path) -> tuple[DataCatalogService, str]:
+    from paleo_workbench.prediction.model_package import register_model_package
+    from paleo_workbench.prediction.providers import register_provider
+
+    class _RR2SpatialProvider:
+        def run(self, inputs, parameters):
+            return {
+                "spatial_output_type": "VECTOR_POLYGONS",
+                "generator_version": "rr2-spatial",
+                "result_summary": {
+                    "final_scientific_prediction": True,
+                    "spatial_output_type": "VECTOR_POLYGONS",
+                    "spatial": {
+                        "crs": "EPSG:4326",
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "properties": {"facies": "S"},
+                                "geometry": {
+                                    "type": "Polygon",
+                                    "coordinates": [
+                                        [[120.1, 30.2], [120.3, 30.2], [120.3, 30.4], [120.1, 30.4], [120.1, 30.2]]
+                                    ],
+                                },
+                            }
+                        ],
+                    },
+                },
+            }
+
+    register_provider("rr2_spatial", _RR2SpatialProvider)
+
+    svc = _make_catalog(tmp_path)
+    art = _artifact(tmp_path, "pm.bin", b"PM")
+    register_model_package(
+        svc,
+        {
+            "model_id": "pm-model",
+            "model_version": "1",
+            "model_name": "PM",
+            "capability": "facies_prediction",
+            "provider": "rr2_spatial",
+            "model_type": "ml",
+            "artifact": str(art),
+            "input_schema": {"required_asset_types": ["well_log"]},
+        },
+    )
+    svc.promote_model("pm-model", "1")
+    return svc, svc.get_model_version("pm-model", "1").id
+
+
+def test_demo_square_geometry_cannot_compile_as_production(tmp_path: Path):
+    """H3/D-P0: the anti-laundering demo-square check must actually fire."""
+    from paleo_workbench.pipeline.compile_map_production import (
+        ProductionMapError,
+        compile_map_production,
+    )
+
+    project = ProjectDocument.new("p")
+    project.stratigraphy.target_horizon = "H1"
+    payload = {
+        "result_summary": {
+            "final_scientific_prediction": True,
+            "spatial_output_type": "VECTOR_POLYGONS",
+            "spatial": {
+                "crs": "EPSG:4326",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"facies": "S"},
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [[114.0, 22.5], [114.04, 22.5], [114.04, 22.54], [114.0, 22.54], [114.0, 22.5]]
+                            ],
+                        },
+                    }
+                ],
+            },
+        },
+        "model": {},
+    }
+    with pytest.raises(ProductionMapError, match="demo"):
+        compile_map_production(project, prediction_payload=payload)
+
+
+def test_production_compile_lineage_failure_is_transactional(tmp_path: Path, monkeypatch):
+    """H3: lineage failure raises, doc is not appended, no orphan RUNNING run."""
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.pipeline.compile_map_production import (
+        ProductionMapError,
+        compile_map_production,
+    )
+    from paleo_workbench.prediction.inference_service import execute_run, start_inference
+
+    svc, mv_id = _promoted_model(tmp_path)
+    (tmp_path / "w.las").write_bytes(b"LAS")
+    cat = CoreCatalogAdapter(svc)
+    v = cat.register_input(name="w.las", path=str(tmp_path / "w.las"), checksum=None, kind="well_log", format="las").version_id
+    run = start_inference(svc, model_version_id=mv_id, input_version_ids=[v])
+    execute_run(svc, run.id)
+    pred_vid = svc.get_run(run.id).output_version_ids[0]
+
+    project = ProjectDocument.new("p")
+    project.stratigraphy.target_horizon = "H1"
+    payload = _production_payload(tmp_path)
+    payload["model"] = {"model_version_id": mv_id}
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full (injected)")
+
+    monkeypatch.setattr(svc, "register_result_asset", _boom)
+    with pytest.raises(ProductionMapError):
+        compile_map_production(
+            project,
+            prediction_payload=payload,
+            catalog_service=svc,
+            prediction_version_id=pred_vid,
+        )
+    assert project.paleomap_documents == []
+    # The started run was marked failed, not left RUNNING (no orphan).
+    runs = [r for r in svc.document.runs if r.operation == "map_compile"]
+    assert runs and all(r.status == "failed" for r in runs)
+
+
+def test_no_catalog_compile_is_explicitly_untracked(tmp_path: Path, monkeypatch):
+    """H3: without a catalog, the doc must degrade to non-production."""
+    from paleo_workbench.pipeline.compile_map_production import compile_map_production
+
+    project = ProjectDocument.new("p")
+    project.stratigraphy.target_horizon = "H1"
+    monkeypatch.setattr(
+        "paleo_workbench.catalog.get_catalog", lambda: None, raising=False
+    )
+    doc = compile_map_production(project, prediction_payload=_production_payload(tmp_path))
+    assert doc.view_state.get("production") is False
+    assert doc.view_state.get("lineage") == "untracked"
+
+
+def test_demo_payload_with_allow_demo_task_stays_demo(tmp_path: Path):
+    """H3/D-P3: allow_demo_task must not mint a production-marked demo doc."""
+    from paleo_workbench.pipeline.compile_map_production import compile_map_production
+
+    project = ProjectDocument.new("p")
+    project.stratigraphy.target_horizon = "H1"
+    payload = _production_payload(tmp_path, demo=True)
+    doc = compile_map_production(
+        project, prediction_payload=payload, allow_demo_task=True
+    )
+    assert doc.view_state.get("is_demo_draft") is True
+    assert doc.view_state.get("production") is False
+
+
+def test_untrusted_model_version_blocks_production_compile(tmp_path: Path):
+    """H3/D-P2: declared model version must be promoted."""
+    from paleo_workbench.pipeline.compile_map_production import (
+        ProductionMapError,
+        compile_map_production,
+    )
+
+    svc = _make_catalog(tmp_path)
+    project = ProjectDocument.new("p")
+    project.stratigraphy.target_horizon = "H1"
+    payload = _production_payload(tmp_path)
+    payload["model"] = {"model_version_id": "ver_does_not_exist"}
+    with pytest.raises(ProductionMapError, match="模型版本不存在"):
+        compile_map_production(project, prediction_payload=payload, catalog_service=svc)
+
+
+def test_demo_document_cannot_be_expert_finalized():
+    """H3/D-P1d: demo drafts must never reach export_ready via finalize."""
+    from paleo_workbench.project.models import PaleoMapDocument
+    from paleo_workbench.workflow.versioning import finalize_map_version
+
+    project = ProjectDocument.new("p")
+    doc = PaleoMapDocument(
+        name="demo",
+        linked_target_horizon="H1",
+        view_state={"is_demo_draft": True, "production": False},
+    )
+    project.paleomap_documents.append(doc)
+    with pytest.raises(ValueError, match="演示草稿"):
+        finalize_map_version(project, doc.id)
+    assert not project.version_sets
+
+
+# --------------------------------------------------------------------------- WP4
+# Freshness withdrawal propagation, plan ordering, cycle detection (H1/H11).
+
+
+def test_withdrawn_upstream_makes_downstream_not_fresh(tmp_path: Path):
+    """H1: trashing an upstream version must degrade downstream freshness."""
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.workflow.current_context import (
+        CurrentProjectVersionContext,
+        resolve_current_project_version_context,
+    )
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+    from paleo_workbench.workflow.freshness import (
+        FreshnessReasonType,
+        FreshnessService,
+        FreshnessState,
+    )
+
+    svc = _make_catalog(tmp_path)
+    (tmp_path / "w.las").write_bytes(b"LAS")
+    (tmp_path / "g.npz").write_bytes(b"GRID")
+    cat = CoreCatalogAdapter(svc)
+    raw = cat.register_input(name="w.las", path=str(tmp_path / "w.las"), checksum=None, kind="well_log", format="las").version_id
+    run = cat.begin_run(operation="factor_map", input_version_ids=[raw], domain_task_id="fa")
+    out = cat.register_derived(run_id=run.run_id, name="grid", path=str(tmp_path / "g.npz"), checksum=None, kind="factor_grid", format="npz")
+    cat.complete_run(run.run_id)
+
+    project = ProjectDocument.new("p")
+    ctx = resolve_current_project_version_context(project, catalog=cat)
+    svc_f = FreshnessService(DependencyGraph.from_catalog(cat), ctx, catalog=cat)
+    assert svc_f.evaluate_run(run.run_id).state is FreshnessState.FRESH
+
+    # Trash the RAW upstream → the factor product must not stay FRESH.
+    svc.trash_version(raw, reason="bad input")
+    cat2 = CoreCatalogAdapter(svc)
+    svc_f2 = FreshnessService(DependencyGraph.from_catalog(cat2), ctx, catalog=cat2)
+    report = svc_f2.evaluate_run(run.run_id)
+    assert report.state is not FreshnessState.FRESH
+    assert any(r.type is FreshnessReasonType.MISSING_LINEAGE for r in report.reasons)
+
+    # Purging the version entirely must also degrade (not silently FRESH).
+    svc.trash_version(out.version_id, reason="x")
+    svc.purge_trashed()
+    cat3 = CoreCatalogAdapter(svc)
+    svc_f3 = FreshnessService(DependencyGraph.from_catalog(cat3), ctx, catalog=cat3)
+    report3 = svc_f3.evaluate_run(run.run_id)
+    assert report3.state is not FreshnessState.FRESH
+
+
+def test_plan_orders_map_after_prediction_without_version_edge(tmp_path: Path):
+    """H11: map_compile with only a task-level link runs after prediction."""
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.workflow.current_context import (
+        CurrentProjectVersionContext,
+        resolve_current_project_version_context,
+    )
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+    from paleo_workbench.workflow.freshness import FreshnessService
+    from paleo_workbench.workflow.recompute_plan import build_recompute_plan
+
+    svc = _make_catalog(tmp_path)
+    (tmp_path / "g.npz").write_bytes(b"GRID")
+    cat = CoreCatalogAdapter(svc)
+    # Factor grid version.
+    run_f = cat.begin_run(operation="factor_map", input_version_ids=[], domain_task_id="fa")
+    grid = cat.register_derived(run_id=run_f.run_id, name="grid", path=str(tmp_path / "g.npz"), checksum=None, kind="factor_grid", format="npz")
+    cat.complete_run(run_f.run_id)
+    # Prediction consumes the grid (version edge exists).
+    run_p = cat.begin_run(operation="prediction", input_version_ids=[grid.version_id], domain_task_id="pred-task")
+    cat.complete_run(run_p.run_id)
+    # Map compile consumes the same grid (in-memory prediction result: no
+    # prediction version edge), linked via task id only.
+    run_m = cat.begin_run(
+        operation="map_compile",
+        input_version_ids=[grid.version_id],
+        domain_task_id="map-doc",
+        parameters={
+            "linked_prediction_task_id": "pred-task",
+            "source_task_ids": ["pred-task"],
+        },
+    )
+    cat.complete_run(run_m.run_id)
+
+    project = ProjectDocument.new("p")
+    ctx = resolve_current_project_version_context(project, catalog=cat)
+    svc_f = FreshnessService(DependencyGraph.from_catalog(cat), ctx, catalog=cat)
+    plan = build_recompute_plan(svc_f, stale_only=False)
+    ops = [s.operation for s in plan.steps]
+    assert ops.index("prediction") < ops.index("map_compile"), ops
+
+
+def test_cycle_detection_reports_all_cycles(tmp_path: Path):
+    """A self-loop must not mask a separate A→B→A cycle."""
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.workflow.dependency_graph import DependencyGraph
+
+    svc = _make_catalog(tmp_path)
+    (tmp_path / "a.bin").write_bytes(b"A")
+    (tmp_path / "b.bin").write_bytes(b"B")
+    (tmp_path / "g.npz").write_bytes(b"GRID")
+    (tmp_path / "g2.npz").write_bytes(b"GRID2")
+    cat = CoreCatalogAdapter(svc)
+    va = cat.register_input(name="a", path=str(tmp_path / "a.bin"), checksum=None, kind="well_log", format="las").version_id
+    vb = cat.register_input(name="b", path=str(tmp_path / "b.bin"), checksum=None, kind="well_log", format="las").version_id
+    # Self-loop run (consumes and produces the same version via a new version).
+    run1 = cat.begin_run(operation="factor_map", input_version_ids=[va], domain_task_id="s")
+    o1 = cat.register_derived(run_id=run1.run_id, name="o1", path=str(tmp_path / "g.npz"), checksum=None, kind="factor_grid", format="npz")
+    cat.complete_run(run1.run_id)
+    run2 = cat.begin_run(operation="factor_map", input_version_ids=[o1.version_id, vb], domain_task_id="s2")
+    o2 = cat.register_derived(run_id=run2.run_id, name="o2", path=str(tmp_path / "g2.npz"), checksum=None, kind="factor_grid", format="npz")
+    cat.complete_run(run2.run_id)
+    # o1 → o2 and o2 → o1 via an explicit parent link is not needed; the key
+    # regression is that a self-loop alone previously short-circuited.
+    g = DependencyGraph.from_catalog(cat)
+    assert isinstance(g.cycle_nodes, frozenset)

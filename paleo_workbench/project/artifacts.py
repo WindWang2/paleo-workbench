@@ -42,7 +42,7 @@ def record_export(
         linked_id=linked_id,
         format=fmt,
         output_path=output_path,
-        included_map_elements=["legend", "north_arrow", "scale_bar"],
+        included_map_elements=[],
         source_task_ids=list(source_task_ids),
     )
     project.export_artifacts.append(artifact)
@@ -96,7 +96,15 @@ def _register_catalog_output(
         artifact.catalog_version_id = version.version_id
     except Exception:
         # Provenance is best-effort; the domain ExportArtifact is the source of
-        # truth for "did the export happen". Do not raise.
+        # truth for "did the export happen". Do not raise, but make the loss
+        # visible (H14: never convert provenance loss into silent success).
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "export catalog lineage registration failed for %s",
+            artifact.output_path,
+            exc_info=True,
+        )
         artifact.catalog_version_id = None
 
 

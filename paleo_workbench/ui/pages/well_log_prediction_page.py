@@ -317,7 +317,18 @@ class WellLogPredictionPage(QWidget):
             try:
                 link_run_to_domain_task(self._inference_service, run.id, task.id)
             except Exception:
-                pass
+                # Provenance-critical bridge: record the failure instead of
+                # silently dropping it (H3 — downstream lineage would be empty).
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "link_run_to_domain_task failed for run %s task %s",
+                    run.id,
+                    task.id,
+                    exc_info=True,
+                )
+                task.model_metadata = dict(task.model_metadata or {})
+                task.model_metadata["link_failed"] = True
         self._tasks = list(self._project.prediction_tasks)
         self._selected_index = len(self._tasks) - 1
         self.update_state(self._tasks, project=self._project)

@@ -122,6 +122,14 @@ def finalize_map_version(
     if map_doc is None:
         raise ValueError(f"unknown map document: {map_document_id}")
 
+    # Demo drafts must never be expert-finalized as production (H3): the
+    # highest-trust step cannot launder heuristic geometry.
+    vs_state = map_doc.view_state or {}
+    if vs_state.get("is_demo_draft") or vs_state.get("production") is False:
+        raise ValueError(
+            "演示草稿图不能专家定稿为生产成果；请先通过生产编图路径生成正式图件"
+        )
+
     qc = _linked_qc_report(project, map_document_id)
     if require_qc_pass:
         if qc is None:

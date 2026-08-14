@@ -121,11 +121,13 @@ class DependencyGraph:
         self._built = True
 
     def _detect_cycle_nodes(self) -> set[str]:
-        """Detect cycles on the version→version graph (iterative DFS)."""
+        """Detect cycles on the version→version graph (iterative DFS).
+
+        Self-loops are collected like any other cycle (no early return that
+        would mask additional cycles elsewhere in the graph).
+        """
         adj: dict[str, list[str]] = defaultdict(list)
         for edge in self.edges:
-            if edge.source_version_id == edge.target_version_id:
-                return {edge.source_version_id}
             adj[edge.source_version_id].append(edge.target_version_id)
 
         # Deduplicate adjacency lists
@@ -297,6 +299,34 @@ class DependencyGraph:
                             adj[rid].add(consumer)
                             indeg[consumer] = indeg.get(consumer, 0) + 1
 
+        # Synthetic domain edges: a map_compile consuming a prediction task's
+        # product must run AFTER that prediction run even when the version
+        # edge is absent (in-memory prediction results, H11 ordering). Guarded
+        # by reachability so we never introduce a cycle.
+        by_domain: dict[str, str] = {}
+        for rid in wanted:
+            run = self.runs[rid]
+            if run.domain_task_id:
+                by_domain.setdefault(run.domain_task_id, rid)
+        synthetic: list[tuple[str, str]] = []
+        for rid in wanted:
+            run = self.runs[rid]
+            if run.operation != "map_compile":
+                continue
+            params = run.parameters or {}
+            linked = str(params.get("linked_prediction_task_id") or "")
+            source_ids = [str(s) for s in (params.get("source_task_ids") or [])]
+            for tid in ([linked] if linked else []) + source_ids:
+                prod_rid = by_domain.get(tid)
+                if prod_rid is None or prod_rid == rid or prod_rid not in wanted:
+                    continue
+                if not _reachable(adj, rid, prod_rid):
+                    synthetic.append((prod_rid, rid))
+        for src, dst in synthetic:
+            if dst not in adj[src]:
+                adj[src].add(dst)
+                indeg[dst] = indeg.get(dst, 0) + 1
+
         q = deque(sorted(rid for rid, d in indeg.items() if d == 0))
         ordered: list[DataRunRef] = []
         while q:
@@ -311,3 +341,20 @@ class DependencyGraph:
                 "cycle detected in recompute subset; cannot topologically order plan"
             )
         return ordered
+
+
+def _reachable(adj: dict[str, set[str]], src: str, dst: str) -> bool:
+    """True when *dst* is reachable from *src* via directed edges."""
+    if src == dst:
+        return True
+    seen = {src}
+    stack = [src]
+    while stack:
+        node = stack.pop()
+        for nxt in adj.get(node, ()):
+            if nxt == dst:
+                return True
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return False

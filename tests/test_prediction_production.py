@@ -300,9 +300,16 @@ def test_production_map_preserves_real_coordinates(tmp_path, service):
         prediction_task_id=task.id,
         prediction_payload=out["result"],
         prediction_version_id=out["run"].output_version_ids[0],
+        catalog_service=service,
     )
     assert doc.view_state.get("is_demo_draft") is False
     assert doc.view_state.get("production") is True
+    # H3: lineage must be durably registered with the prediction input.
+    assert any(
+        r.operation == "map_compile"
+        and out["run"].output_version_ids[0] in r.input_version_ids
+        for r in service.document.runs
+    )
     assert len(doc.facies_polygons) == 2
     ring = doc.facies_polygons[0]["geometry"]["coordinates"][0]
     xs = [p[0] for p in ring]

@@ -104,8 +104,11 @@ def compile_map_production(
 ) -> PaleoMapDocument:
     """Compile a production PaleoMapDocument from spatial prediction geometry.
 
-    Raises :class:`ProductionMapError` when geometry is missing or demo-only
-    without ``allow_demo_task``.
+    Raises :class:`ProductionMapError` when geometry is missing, demo-only
+    (without ``allow_demo_task``), untrusted, or when catalog lineage cannot
+    be registered. Production provenance is part of the compile contract
+    (H3): a document is never appended to the project while the catalog holds
+    no lineage for it.
     """
     task = _resolve_task(project, prediction_task_id)
     payload = prediction_payload
@@ -115,7 +118,13 @@ def compile_map_production(
         payload = _payload_from_task(task)
 
     summary = payload.get("result_summary") or {}
-    if summary.get("demo") or summary.get("is_mock") or payload.get("demo"):
+    demo_marked = bool(
+        summary.get("demo")
+        or summary.get("is_mock")
+        or payload.get("demo")
+        or (payload.get("model") or {}).get("demo_only")
+    )
+    if demo_marked:
         if not allow_demo_task:
             raise ProductionMapError(
                 "演示/mock 预测结果不能用于生产古地理编图；请使用「生成演示草稿」"
@@ -126,6 +135,53 @@ def compile_map_production(
             raise ProductionMapError(
                 "非科学预测结果（final_scientific_prediction=False）不能用于生产编图"
             )
+
+    # Scientific validation gate: finite rings, closure, CRS, and the
+    # demo-square anti-laundering check must ALL pass (D-P0).
+    from paleo_workbench.prediction.spatial_result import validate_spatial_result
+
+    validation_errors = validate_spatial_result(
+        payload,
+        require_scientific=not bool(summary.get("allow_map_compile")),
+    )
+    if validation_errors:
+        raise ProductionMapError("预测几何未通过生产校验: " + "; ".join(validation_errors))
+
+    # Model trust: when the payload declares a model version, it must resolve
+    # to a promoted production version (D-P2). Fail closed when a catalog is
+    # present but the claim cannot be verified; with NO catalog the document
+    # cannot claim production at all, so the unverifiable claim is moot.
+    model_meta = payload.get("model") or {}
+    declared_mv_id = str(
+        model_meta.get("model_version_id") or model_meta.get("version_id") or ""
+    ).strip()
+    if declared_mv_id:
+        trust_catalog = catalog_service
+        if trust_catalog is None:
+            try:
+                from paleo_workbench.catalog import get_catalog
+
+                trust_catalog = get_catalog()
+            except Exception:
+                trust_catalog = None
+        if trust_catalog is not None:
+            verifier = (
+                trust_catalog
+                if hasattr(trust_catalog, "get_model_version_by_id")
+                else None
+            )
+            if verifier is None:
+                raise ProductionMapError("声明了模型版本但无法验证其生产状态")
+            try:
+                declared_mv = verifier.get_model_version_by_id(declared_mv_id)
+            except Exception as exc:
+                raise ProductionMapError(
+                    f"声明的模型版本不存在: {declared_mv_id} ({exc})"
+                ) from exc
+            if declared_mv.status != "production" or declared_mv.demo_only:
+                raise ProductionMapError(
+                    "声明的模型版本未处于生产状态，不能用于生产编图"
+                )
 
     stype = spatial_type_of(payload)
     if stype == "WELL_INTERVALS":
@@ -165,33 +221,64 @@ def compile_map_production(
     # Wells: only real sample points (no synthetic 114/22.x placement).
     well_overlays = _wells_real_only(project)
 
+    # Only link the task when the payload actually came from it: a
+    # caller-supplied payload with a default task resolution is unverified.
+    linked_task = task if (prediction_task_id is not None or prediction_payload is None) else None
+
     doc = PaleoMapDocument(
         name=name,
         linked_target_horizon=horizon,
-        linked_prediction_task_id=task.id if task is not None else None,
+        linked_prediction_task_id=linked_task.id if linked_task is not None else None,
         facies_polygons=features,
         well_overlays=well_overlays,
         map_chrome={"title": name, "legend_facies": legend},
         map_crs=str(crs or ""),
         view_state={
             "generator": PRODUCTION_MAP_GENERATOR,
-            "is_demo_draft": False,
+            "is_demo_draft": demo_marked,
             "spatial_output_type": SPATIAL_VECTOR_POLYGONS,
-            "production": True,
+            # Production is granted only after lineage registration below.
+            "production": False,
         },
     )
-    project.paleomap_documents.append(doc)
-    if project.compilation_runs:
-        project.compilation_runs[-1].active_paleomap_document_id = doc.id
 
-    if catalog_service is not None:
+    if demo_marked:
+        # Explicit demo path: never pretend provenance is complete.
+        doc.view_state["production"] = False
+        doc.view_state["lineage"] = "untracked"
+        project.paleomap_documents.append(doc)
+        if project.compilation_runs:
+            project.compilation_runs[-1].active_paleomap_document_id = doc.id
+        return doc
+
+    catalog = catalog_service
+    if catalog is None:
+        try:
+            from paleo_workbench.catalog import get_catalog
+
+            catalog = get_catalog()
+        except Exception:
+            catalog = None
+    if catalog is None:
+        # No-catalog mode must degrade explicitly, not fake provenance (H3).
+        doc.view_state["production"] = False
+        doc.view_state["lineage"] = "untracked"
+    else:
+        # Lineage FIRST: a production document is only committed to the
+        # project once its DataRun + DERIVED version are durably registered.
         _register_lineage(
-            catalog_service,
+            catalog,
             doc=doc,
-            task=task,
+            task=linked_task,
             prediction_version_id=prediction_version_id,
             horizon=horizon,
         )
+        doc.view_state["production"] = True
+        doc.view_state["lineage"] = "registered"
+
+    project.paleomap_documents.append(doc)
+    if project.compilation_runs:
+        project.compilation_runs[-1].active_paleomap_document_id = doc.id
     return doc
 
 
@@ -226,6 +313,30 @@ def _wells_real_only(project: ProjectDocument) -> list[dict[str, Any]]:
     return wells
 
 
+def _resolve_map_input_ids(
+    service,
+    task: PredictionTask | None,
+    prediction_version_id: str | None,
+) -> list[str]:
+    """Resolve the prediction input version ids for the map_compile run.
+
+    Prefers the explicit ``prediction_version_id``; otherwise resolves the
+    task's latest prediction output through the run graph so lineage never
+    registers with an empty input list (H3).
+    """
+    if prediction_version_id:
+        return [str(prediction_version_id)]
+    if task is None:
+        return []
+    try:
+        from paleo_workbench.prediction.inference_service import _ServiceRunView
+        from paleo_workbench.catalog.lifecycle import _versions_for_domain_tasks
+
+        return _versions_for_domain_tasks([task.id], catalog=_ServiceRunView(service))
+    except Exception:
+        return []
+
+
 def _register_lineage(
     service,
     *,
@@ -239,10 +350,17 @@ def _register_lineage(
     Uses:
     1. explicit *service* when it is a DataCatalogService (tests/production),
     2. otherwise CatalogPort via get_catalog() / register_map_compile_run.
+
+    Any provenance failure raises :class:`ProductionMapError` — the caller
+    must not commit a production document with partial lineage (H3). A run
+    that already started is marked ``failed`` before the error propagates so
+    no RUNNING orphan survives.
     """
-    input_ids: list[str] = []
-    if prediction_version_id:
-        input_ids.append(str(prediction_version_id))
+    input_ids = _resolve_map_input_ids(service, task, prediction_version_id)
+    if not input_ids:
+        raise ProductionMapError(
+            "生产编图需要可解析的预测结果版本（未找到 lineage 输入）"
+        )
     source_task_ids = [task.id] if task is not None else []
     params = {
         "generator_version": PRODUCTION_MAP_GENERATOR,
@@ -267,7 +385,7 @@ def _register_lineage(
         service, "register_result_asset"
     ):
         tmp: Path | None = None
-        run_id: str | None = None
+        run = None
         try:
             from paleo_workbench.catalog.models import DataStage
 
@@ -303,12 +421,22 @@ def _register_lineage(
                 extra_parameters={"output_version_id": out.id},
             )
             return
-        except Exception:
-            if run_id is not None:
+        except Exception as exc:
+            # No orphan RUNNING run: mark it failed before propagating.
+            if run is not None:
                 try:
-                    service.update_run_status(run_id, "failed")
+                    service.update_run_status(
+                        run.id,
+                        "failed",
+                        extra_parameters={
+                            "error": f"{exc.__class__.__name__}: {exc}"
+                        },
+                    )
                 except Exception:
                     pass
+            raise ProductionMapError(
+                f"目录 lineage 登记失败（生产编图已中止）: {exc}"
+            ) from exc
         finally:
             if tmp is not None:
                 try:
@@ -316,16 +444,14 @@ def _register_lineage(
                 except OSError:
                     pass
 
-    # Path 2: CatalogPort lifecycle helper.
+    # Path 2: CatalogPort lifecycle helper (no duplicate fallback — Path 1
+    # either succeeds or raises, so this runs only when the caller passed a
+    # port adapter rather than a DataCatalogService).
     try:
         from paleo_workbench.catalog.lifecycle import register_map_compile_run
-        from paleo_workbench.catalog import get_catalog
-    except Exception:
-        return
+    except Exception as exc:
+        raise ProductionMapError(f"catalog lifecycle 不可用: {exc}") from exc
 
-    cat = get_catalog()
-    if cat is None:
-        return
     tmp2: Path | None = None
     try:
         fd, tmp_name = tempfile.mkstemp(prefix="paleomap_", suffix=".json")
@@ -339,10 +465,12 @@ def _register_lineage(
             domain_task_id=doc.id,
             parameters=params,
             result_path=str(tmp2),
-            catalog=cat,
+            catalog=service,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        raise ProductionMapError(
+            f"目录 lineage 登记失败（生产编图已中止）: {exc}"
+        ) from exc
     finally:
         if tmp2 is not None:
             try:

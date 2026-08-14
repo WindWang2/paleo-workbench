@@ -136,6 +136,12 @@ class _ServiceRunView:
     def list_runs(self):
         return [_RunProxy(run) for run in self._service.document.runs]
 
+    def resolve_version(self, version_id):
+        try:
+            return self._service.get_version(version_id)
+        except Exception:
+            return None
+
 
 class _RunProxy:
     __slots__ = ("_run",)
