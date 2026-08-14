@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -60,6 +62,7 @@ class DataAssetTable(QWidget):
         self._selected_assets: list[object] = []
         self._filter_query = FilterQuery(node_type="all")
         self._search_text = ""
+        self._project_root: Path | None = None
         self._visible_column_keys = list(DEFAULT_COLUMN_KEYS)
         self.column_actions: dict[str, QAction] = {}
         self._syncing_column_actions = False
@@ -107,11 +110,16 @@ class DataAssetTable(QWidget):
         self,
         resources: list[ResourceItem],
         artifacts: list[ExportArtifact],
+        project_root: Path | None = None,
     ) -> None:
         self._resources = list(resources)
         self._artifacts = list(artifacts)
+        self._project_root = project_root
         assets: list[object] = [*self._resources, *self._artifacts]
-        self._index.rebuild(assets)
+        # project_root makes project-relative paths resolvable so relative
+        # assets are not misreported as MISSING (F4).
+        self._index.rebuild(assets, project_root=project_root)
+        self.model.set_project_root(project_root)
         self._filter_query.search_text = self._search_text
         filtered = self._index.filter_query(self._filter_query)
         self.model.set_assets_filtered(
@@ -197,7 +205,9 @@ class DataAssetTable(QWidget):
     def _apply_filter(self) -> None:
         assets = self.model.assets()
         if not assets and (self._resources or self._artifacts):
-            self.update_assets(self._resources, self._artifacts)
+            self.update_assets(
+                self._resources, self._artifacts, project_root=self._project_root
+            )
             return
         filtered = self._index.filter_query(self._filter_query)
         self.model.set_filtered_rows(filtered)

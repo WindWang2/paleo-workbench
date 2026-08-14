@@ -73,15 +73,17 @@ class AssetContextMenu(QMenu):
             edit_raw.setEnabled(False)
             edit_raw.setToolTip("原始数据已锁定，不能直接编辑。请创建派生副本。")
 
-        elif view.stage == DataStage.DERIVED:
+        elif view.stage in (DataStage.DERIVED, DataStage.INTERMEDIATE):
             # 新建版本 / 工作副本: create a mutable working copy of the current
             # version, reveal it for editing, then commit it as a new immutable
             # version. Wired by DataPage when the asset is catalog-bridged.
+            # Available on both DERIVED and INTERMEDIATE (F7 gate relaxation).
             new_ver = self._add_action("ctx_new_version", "新建版本 / 工作副本 (New Version)")
             new_ver.setEnabled(True)
             new_ver.setToolTip("创建工作副本并提交为新版本 (需数据目录)")
 
-        elif view.stage == DataStage.INTERMEDIATE:
+            # 提升为正式数据: copy the current version as a new immutable
+            # OUTPUT version. Also offered on both mutable stages (F7).
             promote = self._add_action("ctx_promote", "提升为正式数据 (Promote)")
             promote.setEnabled(True)
             promote.setToolTip("将当前版本复制为新的不可变 OUTPUT 版本")

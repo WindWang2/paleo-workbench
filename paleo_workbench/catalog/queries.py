@@ -78,15 +78,26 @@ def search_assets(
     text: str | None = None,
     stage: DataStage | None = None,
     tag: str | None = None,
+    tags: list[str] | tuple[str, ...] | None = None,
+    tag_op: str = "and",
     type: str | None = None,
     include_trashed: bool = False,
 ) -> list:
-    """Filter assets by name substring, stage, tag, and/or type.
+    """Filter assets by name substring, stage, tag(s), and/or type.
 
-    Trashed (soft-deleted) assets are excluded unless ``include_trashed``.
-    When the SQLite index is missing/unavailable the in-memory document scan
-    below is used, so search always reflects the canonical document.
+    ``tags`` accepts several tag names combined with ``tag_op`` (``"and"`` /
+    ``"or"``); the single-``tag`` parameter is kept for compatibility and is
+    unioned into ``tags``. Trashed (soft-deleted) assets are excluded unless
+    ``include_trashed``. When the SQLite index is missing/unavailable the
+    in-memory document scan below is used, so search always reflects the
+    canonical document.
     """
+    tag_list = [t for t in (list(tags) if tags else []) if str(t).strip()]
+    if tag is not None and str(tag).strip():
+        tag_list.append(str(tag))
+    tag_list = [normalize_tag_name(t) for t in tag_list]
+    if tag_op not in ("and", "or"):
+        raise ValueError(f"tag_op must be 'and' or 'or', got {tag_op!r}")
     try:
         if service.index_revision() != service.document.catalog_revision:
             # A readable-but-stale index must not be queried (I3): only the
@@ -95,7 +106,8 @@ def search_assets(
         rows = service._index.search_assets(
             text=text,
             stage=stage.value if stage else None,
-            tag=normalize_tag_name(tag) if tag else None,
+            tags=tag_list or None,
+            tag_op=tag_op,
             type=type,
         )
         # Use the service's maintained id→asset map (O(1) per row) instead of
@@ -120,7 +132,15 @@ def search_assets(
     if stage is not None:
         with_stage = {v.asset_id for v in service.document.versions if v.stage == stage}
         results = [a for a in results if a.id in with_stage]
-    if tag:
-        tagged = set(find_assets_by_tag(service, tag))
-        results = [a for a in results if a.id in tagged]
+    if tag_list:
+        per_tag = [set(find_assets_by_tag(service, t)) for t in tag_list]
+        if tag_op == "and":
+            tagged: set[str] | None = None
+            for ids in per_tag:
+                tagged = ids if tagged is None else tagged & ids
+        else:
+            tagged = set()
+            for ids in per_tag:
+                tagged |= ids
+        results = [a for a in results if a.id in (tagged or set())]
     return results

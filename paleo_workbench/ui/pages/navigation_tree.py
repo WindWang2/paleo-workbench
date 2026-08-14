@@ -11,8 +11,10 @@ Emits ``category_changed(str)`` and ``filter_query_changed(FilterQuery)``.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QMenu, QTreeWidget, QTreeWidgetItem
 
 from paleo_workbench.ui import tokens
 from paleo_workbench.ui.pages.data_view_models import DataStage, IntegrityState
@@ -55,6 +57,8 @@ INTEGRITY_LEAVES = [
 class NavigationTree(QTreeWidget):
     category_changed = Signal(str)
     filter_query_changed = Signal(object)  # FilterQuery
+    # Right-click "管理标签" on the 标签 group header (Tag Manager entry).
+    manage_tags_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,6 +72,8 @@ class NavigationTree(QTreeWidget):
         )
         self.setMinimumWidth(200)
         self.tag_parent_item: QTreeWidgetItem | None = None
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
         self.currentItemChanged.connect(self._on_current_changed)
         self._build_tree()
 
@@ -123,8 +129,13 @@ class NavigationTree(QTreeWidget):
 
         self.setCurrentItem(None)
 
-    def update_counts(self, resources: list, artifacts: list) -> None:
-        counts = compute_catalog_counts(resources, artifacts)
+    def update_counts(
+        self,
+        resources: list,
+        artifacts: list,
+        project_root: Path | None = None,
+    ) -> None:
+        counts = compute_catalog_counts(resources, artifacts, project_root=project_root)
         self._update_tree_counts(counts)
 
     def set_trash_count(self, count: int) -> None:
@@ -234,6 +245,17 @@ class NavigationTree(QTreeWidget):
             return FilterQuery(node_type="all")
         query: FilterQuery | None = current.data(0, Qt.ItemDataRole.UserRole)
         return query or FilterQuery(node_type="all")
+
+    def _on_context_menu(self, pos) -> None:
+        """Right-click menu on the 标签 group header → 管理标签 (Tag Manager)."""
+        item = self.itemAt(pos)
+        if item is None or item is not self.tag_parent_item:
+            return
+        menu = QMenu(self)
+        manage_action = menu.addAction("管理标签")
+        action = menu.exec(self.viewport().mapToGlobal(pos))
+        if action is manage_action:
+            self.manage_tags_requested.emit()
 
     def _on_current_changed(
         self, current: QTreeWidgetItem, _previous: QTreeWidgetItem

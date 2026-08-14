@@ -66,9 +66,28 @@ class CoreCatalogAdapter:
         return self._service
 
     # ------------------------------------------------------------- conversions
+    def _tag_by_id(self) -> dict:
+        """Tag id→Tag map cached per (document, revision).
+
+        ``_version_ref`` runs once per listed version; rebuilding the map
+        there made ``list_versions`` O(versions × tags). The cache invalidates
+        on any save (revision bump) or document swap (reopen).
+        """
+        document = self._service.document
+        cache = getattr(self, "_tag_map_cache", None)
+        if (
+            cache is not None
+            and cache[0] is document
+            and cache[1] == document.catalog_revision
+        ):
+            return cache[2]
+        by_id = {t.id: t for t in document.tags}
+        self._tag_map_cache = (document, document.catalog_revision, by_id)
+        return by_id
+
     def _tag_names(self, version: DataVersion) -> list[str]:
         tag_ids = self._service.document.version_tags.get(version.id, [])
-        by_id = {t.id: t for t in self._service.document.tags}
+        by_id = self._tag_by_id()
         return [
             by_id[tid].display_name or by_id[tid].name
             for tid in tag_ids
@@ -343,11 +362,30 @@ class CoreCatalogAdapter:
         format: str,
         tags: list[str] | None,
         checksum: str | None = None,
+        reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
         run = service.get_run(run_id)
-        asset = service._new_asset(name, kind or None, format or None, None)
-        service._add_asset(asset)
+        asset = None
+        if reuse_legacy_id:
+            ref = self.resolve_legacy_resource(reuse_legacy_id)
+            if ref is not None:
+                try:
+                    asset = service.get_asset(ref.asset_id)
+                except CatalogError:
+                    asset = None
+        created = False
+        if asset is None:
+            asset = service._new_asset(name, kind or None, format or None, None)
+            if (
+                reuse_legacy_id
+                and service._asset_by_legacy_id(reuse_legacy_id) is None
+            ):
+                # Bridge the new asset so the NEXT registration with the same
+                # reuse key appends a version instead of spawning an asset.
+                asset.legacy_resource_id = reuse_legacy_id
+            service._add_asset(asset)
+            created = True
         try:
             # register_version links the run's output in the same atomic save.
             version = service.register_version(
@@ -359,7 +397,7 @@ class CoreCatalogAdapter:
                 known_sha256=checksum,
             )
         except Exception:
-            if asset in service.document.assets:
+            if created and asset in service.document.assets:
                 service._remove_asset(asset)
             raise
         for tag in tags or []:
@@ -393,10 +431,11 @@ class CoreCatalogAdapter:
         kind: str = "",
         format: str = "",
         tags: list[str] | None = None,
+        reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         return self._register_produced(
             run_id, name, path, DataStage.OUTPUT, kind, format, tags,
-            checksum=checksum,
+            checksum=checksum, reuse_legacy_id=reuse_legacy_id,
         )
 
     def register_derived(

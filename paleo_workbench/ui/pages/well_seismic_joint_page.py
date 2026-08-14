@@ -154,6 +154,54 @@ class WellSeismicJointPage(QWidget):
         self._status.setText("快照导出失败")
         return None
 
+    def _loaded_source_resource_ids(self) -> list[str]:
+        """Resource ids of the seismic / well data currently loaded into the
+        joint scene (lineage sources for the snapshot export).
+
+        Path matching goes through ``resource_ids_for_paths`` so relative
+        resource paths resolve against the PROJECT dir (never the process
+        CWD); an empty match with loaded paths is logged, not silent."""
+        if self._project is None:
+            return []
+        paths = self._host.paths
+        if paths is None:
+            return []
+        wanted: list[str] = []
+        if paths.segy is not None:
+            wanted.append(str(paths.segy))
+        if paths.well_head is not None:
+            wanted.append(str(paths.well_head))
+        wanted.extend(str(las) for las in paths.las_files or [])
+        if not wanted:
+            return []
+        from paleo_workbench.catalog.lifecycle import resource_ids_for_paths
+
+        ids = resource_ids_for_paths(
+            getattr(self._project, "resources", None) or [],
+            wanted,
+            project_path=self._catalog_project_path(),
+        )
+        if not ids:
+            logger.warning(
+                "well-seismic snapshot export: no project resources matched the "
+                "loaded scene paths (%d paths) — OUTPUT lineage will be empty",
+                len(wanted),
+            )
+        return ids
+
+    @staticmethod
+    def _catalog_project_path() -> str | None:
+        """Project file path from the active catalog service (may be None)."""
+        try:
+            from paleo_workbench.catalog import get_catalog_service
+
+            service = get_catalog_service()
+            if service is not None:
+                return str(service.project_path)
+        except Exception:
+            pass
+        return None
+
     def _register_snapshot_export(self, path: str) -> None:
         """Best-effort OUTPUT DataVersion registration (no catalog → no-op)."""
         if self._project is None:
@@ -165,6 +213,7 @@ class WellSeismicJointPage(QWidget):
                 name="井震联合快照 export",
                 output_path=str(path),
                 fmt="png",
+                source_task_ids=self._loaded_source_resource_ids(),
                 linked_id="well_seismic_joint",
                 catalog=None,
             )

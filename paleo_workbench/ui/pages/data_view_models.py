@@ -19,7 +19,7 @@ from paleo_workbench.ui.tokens import format_size
 # The single authoritative lifecycle enum lives in the Data Catalog Core
 # (ADR 0056, lowercase values "raw"/"derived"/"intermediate"/"output").
 # Re-exported here so existing UI imports keep working.
-from paleo_workbench.catalog import DataStage  # noqa: F401
+from paleo_workbench.catalog import DataStage, normalize_tag_name  # noqa: F401
 
 # Presentation data for the Core DataStage — UI-only, keyed on the Core enum.
 STAGE_LABELS = {
@@ -108,6 +108,8 @@ class VersionView:
     parent_version_id: str | None = None
     managed: bool = True
     source_note: str = ""
+    # Version-level tags (catalog version_tags); empty for un-enriched views.
+    tags: list[str] = field(default_factory=list)
 
     @property
     def checksum_display(self) -> str:
@@ -183,7 +185,9 @@ class AssetView:
 
     def __post_init__(self) -> None:
         if not self.normalized_tags and self.tags:
-            self.normalized_tags = {t.strip().lower() for t in self.tags if t}
+            self.normalized_tags = {
+                normalize_tag_name(t) for t in self.tags if t and str(t).strip()
+            }
 
     @property
     def is_raw(self) -> bool:
@@ -492,6 +496,20 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
         versions = service.list_versions(asset_id)
     except Exception:
         versions = []
+    # Version-level tags come from the catalog association map
+    # (document.version_tags: version_id -> [tag_id]).
+    tag_by_id = {}
+    version_tag_map: dict[str, list[str]] = {}
+    try:
+        tag_by_id = {t.id: t for t in service.document.tags}
+        for vid, tids in service.document.version_tags.items():
+            version_tag_map[vid] = [
+                tag_by_id[tid].display_name or tag_by_id[tid].name
+                for tid in tids
+                if tid in tag_by_id
+            ]
+    except Exception:
+        version_tag_map = {}
     current_version = None
     if versions:
         view.versions = [
@@ -504,6 +522,7 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
                 parent_version_id=v.parent_version_ids[0] if v.parent_version_ids else None,
                 managed=v.managed,
                 source_note=f"catalog v{v.version_number}",
+                tags=list(version_tag_map.get(v.id, [])),
             )
             for v in versions
         ]
@@ -527,7 +546,7 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
     # --- tags -------------------------------------------------------------
     try:
         tag_ids = service.document.asset_tags.get(asset_id, [])
-        by_id = {t.id: t for t in service.document.tags}
+        by_id = tag_by_id or {t.id: t for t in service.document.tags}
         catalog_tags = [
             by_id[tid].display_name or by_id[tid].name
             for tid in tag_ids
@@ -537,7 +556,9 @@ def enrich_view_from_catalog(view: AssetView, service: Any, asset_id: str) -> As
         catalog_tags = []
     if catalog_tags:
         view.tags = catalog_tags
-        view.normalized_tags = {t.strip().lower() for t in catalog_tags if t}
+        view.normalized_tags = {
+            normalize_tag_name(t) for t in catalog_tags if t and str(t).strip()
+        }
 
     # --- lineage ----------------------------------------------------------
     if asset.current_version_id:

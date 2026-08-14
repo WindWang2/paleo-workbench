@@ -808,11 +808,24 @@ class CatalogIndex:
         text: str | None = None,
         stage: DataStage | str | None = None,
         tag: str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
         type: str | None = None,
     ) -> list[dict]:
-        """Search assets by name substring, version stage, tag, and asset type."""
+        """Search assets by name substring, version stage, tag(s), and type.
+
+        ``tags`` + ``tag_op`` (``"and"``/``"or"``) express multi-tag queries;
+        a single ``tag`` is unioned into ``tags``.
+        """
         return self._safe(
-            [], self._search_assets, text=text, stage=stage, tag=tag, type=type
+            [],
+            self._search_assets,
+            text=text,
+            stage=stage,
+            tag=tag,
+            tags=tags,
+            tag_op=tag_op,
+            type=type,
         )
 
     def _search_assets(
@@ -820,6 +833,8 @@ class CatalogIndex:
         text: str | None = None,
         stage: DataStage | str | None = None,
         tag: str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
         type: str | None = None,
     ) -> list[dict]:
         joins: list[str] = []
@@ -829,11 +844,28 @@ class CatalogIndex:
             joins.append("JOIN versions v ON v.asset_id = a.id")
             wheres.append("v.stage = ?")
             params.append(stage.value if isinstance(stage, DataStage) else str(stage))
-        if tag is not None:
-            joins.append("JOIN asset_tags at ON at.asset_id = a.id")
-            joins.append("JOIN tags t ON t.id = at.tag_id")
-            wheres.append("t.name = ?")
-            params.append(normalize_tag_name(tag))
+        tag_list = [normalize_tag_name(t) for t in (tags or []) if str(t).strip()]
+        if tag is not None and str(tag).strip():
+            tag_list.append(normalize_tag_name(tag))
+        if tag_list:
+            # EXISTS per tag keeps AND/OR semantics without DISTINCT-fanout;
+            # every branch is index-backed (idx_asset_tags_tag_id, tags.name).
+            if tag_op == "or":
+                placeholders = ", ".join("?" for _ in tag_list)
+                wheres.append(
+                    "EXISTS (SELECT 1 FROM asset_tags at_o"
+                    " JOIN tags t_o ON t_o.id = at_o.tag_id"
+                    f" WHERE at_o.asset_id = a.id AND t_o.name IN ({placeholders}))"
+                )
+                params.extend(tag_list)
+            else:
+                for tag_name in tag_list:
+                    wheres.append(
+                        "EXISTS (SELECT 1 FROM asset_tags at_a"
+                        " JOIN tags t_a ON t_a.id = at_a.tag_id"
+                        " WHERE at_a.asset_id = a.id AND t_a.name = ?)"
+                    )
+                    params.append(tag_name)
         if text:
             wheres.append("a.name LIKE ?")
             params.append(f"%{text}%")

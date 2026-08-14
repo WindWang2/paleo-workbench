@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QWidget
 
 from paleo_workbench.ui import tokens
 
@@ -17,6 +18,10 @@ class DataToolbar(QWidget):
     verify_requested = Signal()
     reader_toggled = Signal()
     search_changed = Signal(str)
+    # Multi-tag asset-table filter: (selected tag names, "and"|"or").
+    tag_filter_changed = Signal(list, str)
+    # Open the Tag Manager dialog (tags CRUD / merge / prune).
+    tag_manager_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,9 +89,33 @@ class DataToolbar(QWidget):
         )
         layout.addWidget(self.clear_preview_cache_btn)
 
+        # --- Tag tools -------------------------------------------------------
+        # 标签筛选: checkable tag list + AND/OR + clear, applied immediately.
+        self.tag_filter_btn = QPushButton("标签筛选")
+        self.tag_filter_btn.setObjectName("SecondaryButton")
+        self.tag_filter_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.tag_filter_btn.setToolTip("按标签筛选资产表（支持多选与 AND/OR 组合）")
+        self._tag_filter_menu = QMenu(self.tag_filter_btn)
+        self._tag_filter_menu.aboutToShow.connect(self._rebuild_tag_filter_menu)
+        self.tag_filter_btn.setMenu(self._tag_filter_menu)
+        layout.addWidget(self.tag_filter_btn)
+
+        self.tag_manager_btn = QPushButton("标签管理")
+        self.tag_manager_btn.setObjectName("SecondaryButton")
+        self.tag_manager_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.tag_manager_btn.setToolTip("管理标签：新建 / 重命名 / 合并 / 清理")
+        self.tag_manager_btn.clicked.connect(self.tag_manager_requested.emit)
+        layout.addWidget(self.tag_manager_btn)
+
         self.operation_status_label = QLabel("")
         self.operation_status_label.setStyleSheet(f"color: {tokens.TEXT_SECONDARY};")
         layout.addWidget(self.operation_status_label)
+
+        # Tag filter panel state (menu rebuilt lazily from candidates).
+        self._tag_candidates: list[str] = []
+        self._selected_tags: list[str] = []
+        self._tag_operator: str = "and"
+        self._tag_check_actions: list[QAction] = []
 
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -120,6 +149,96 @@ class DataToolbar(QWidget):
 
     def set_column_settings_button(self, button: QPushButton) -> None:
         self.column_settings_slot.layout().addWidget(button)
+
+    # --- Tag filter panel -----------------------------------------------------
+
+    def set_tag_candidates(self, tags: list[str]) -> None:
+        """Provide the selectable tag list (from FilterIndex counts or the
+        catalog service). Rebuilds the menu on next open."""
+        self._tag_candidates = sorted(
+            {t for t in tags if t and str(t).strip()}
+        )
+
+    def tag_candidates(self) -> list[str]:
+        return list(self._tag_candidates)
+
+    def set_tag_operator(self, operator: str) -> None:
+        if operator in ("and", "or"):
+            self._tag_operator = operator
+
+    def current_tag_selection(self) -> list[str]:
+        return [a.text() for a in self._tag_check_actions if a.isChecked()]
+
+    def current_tag_operator(self) -> str:
+        return self._tag_operator
+
+    def apply_tag_selection(self, tags: list[str], operator: str = "and") -> None:
+        """Programmatically set the checked tag filter (single source of truth
+        for the visible filter state, e.g. Tag Manager 双击查看关联数据)."""
+        self._selected_tags = [t for t in tags if t and str(t).strip()]
+        if operator in ("and", "or"):
+            self._tag_operator = operator
+        self._emit_tag_filter()
+
+    def _rebuild_tag_filter_menu(self) -> None:
+        self._tag_filter_menu.clear()
+        self._tag_check_actions = []
+
+        if not self._tag_candidates:
+            empty = QAction("暂无可用标签", self._tag_filter_menu)
+            empty.setEnabled(False)
+            self._tag_filter_menu.addAction(empty)
+            return
+
+        for tag in self._tag_candidates:
+            action = QAction(tag, self._tag_filter_menu)
+            action.setCheckable(True)
+            action.setChecked(tag in self._selected_tags)
+            action.toggled.connect(
+                lambda checked, name=tag: self._on_tag_toggled(name, checked)
+            )
+            self._tag_filter_menu.addAction(action)
+            self._tag_check_actions.append(action)
+
+        self._tag_filter_menu.addSeparator()
+
+        operator_group = QActionGroup(self._tag_filter_menu)
+        operator_group.setExclusive(True)
+        for label, value in (("匹配全部 (AND)", "and"), ("匹配任一 (OR)", "or")):
+            op_action = QAction(label, self._tag_filter_menu)
+            op_action.setCheckable(True)
+            op_action.setChecked(self._tag_operator == value)
+            op_action.setActionGroup(operator_group)
+            op_action.toggled.connect(
+                lambda checked, op=value: self._on_operator_changed(op, checked)
+            )
+            self._tag_filter_menu.addAction(op_action)
+
+        self._tag_filter_menu.addSeparator()
+
+        clear_action = QAction("清除标签筛选", self._tag_filter_menu)
+        clear_action.triggered.connect(self.clear_tag_filter)
+        self._tag_filter_menu.addAction(clear_action)
+
+    def _on_tag_toggled(self, tag_name: str, checked: bool) -> None:
+        if checked and tag_name not in self._selected_tags:
+            self._selected_tags.append(tag_name)
+        elif not checked and tag_name in self._selected_tags:
+            self._selected_tags.remove(tag_name)
+        self._emit_tag_filter()
+
+    def _on_operator_changed(self, operator: str, checked: bool) -> None:
+        if not checked:
+            return
+        self._tag_operator = operator
+        self._emit_tag_filter()
+
+    def clear_tag_filter(self) -> None:
+        self._selected_tags = []
+        self._emit_tag_filter()
+
+    def _emit_tag_filter(self) -> None:
+        self.tag_filter_changed.emit(list(self._selected_tags), self._tag_operator)
 
     def _on_search_text_changed(self, text: str) -> None:
         self._pending_search = text

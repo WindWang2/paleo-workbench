@@ -12,6 +12,7 @@ page did.
 """
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
@@ -196,6 +197,12 @@ class DataLifecycleController:
 
     def __init__(self, page) -> None:
         self.page = page
+        # Import → catalog registration outcomes (E9): brief per-resource
+        # failure descriptions from the last register_imported_resources call.
+        self.last_registration_failures: list[str] = []
+        # Bulk tag mirror outcome: True when the last bulk_apply_tag could not
+        # mirror to the catalog (legacy side still applied).
+        self.last_tag_mirror_failed: bool = False
 
     # ------------------------------------------------------------------ #
     # Catalog resolution (per-call, never cached across project switches)
@@ -497,10 +504,25 @@ class DataLifecycleController:
         if not ref.external:
             page._set_action_status("该数据已是受管数据")
             return
+        # Provenance: record the materialize DataRun first so the service can
+        # atomically attach the new snapshot as that run's output. Best-effort —
+        # the materialize itself must succeed even if run booking fails.
+        run_id = None
         try:
-            version = service.materialize_external(ref.version_id)
+            external_path = service.resolve_path(service.get_version(ref.version_id))
+            run = service.register_run(
+                "materialize",
+                input_version_ids=[ref.version_id],
+                parameters={"source": external_path.as_posix()},
+            )
+            run_id = run.id
+        except Exception:
+            run_id = None
+        try:
+            version = service.materialize_external(ref.version_id, run_id=run_id)
             managed_path = service.resolve_path(version)
         except Exception as exc:
+            self._fail_booked_run(service, run_id)
             page._set_action_status(f"纳管失败: {exc}")
             return
         # Keep the legacy ResourceItem in sync with the new managed version.
@@ -541,14 +563,30 @@ class DataLifecycleController:
         if dlg.exec() != QDialog.DialogCode.Accepted:
             page._set_action_status(f"已创建可编辑工作副本（未提交）: {working_path}")
             return
+        # Provenance: record the working-copy commit DataRun first so the
+        # service can atomically attach the committed version as its output.
+        # Best-effort — on booking failure the commit falls back to no run
+        # (the commit itself must never fail because of bookkeeping).
+        run_id = None
+        try:
+            run = service.register_run(
+                "working_copy_commit",
+                input_version_ids=[ref.version_id],
+                parameters={"stage": dlg.stage().value, "name": dlg.version_name()},
+            )
+            run_id = run.id
+        except Exception:
+            run_id = None
         try:
             version = service.commit_working_copy(
                 working_path,
                 asset_id=ref.asset_id,
                 name=dlg.version_name(),
                 stage=dlg.stage(),
+                run_id=run_id,
             )
         except Exception as exc:
+            self._fail_booked_run(service, run_id)
             page._set_action_status(f"提交新版本失败: {exc}")
             return
         page._refresh()
@@ -638,7 +676,10 @@ class DataLifecycleController:
             page._set_action_status(f"导出 / 交付失败: {exc}")
             return
         # Delivery provenance: a run records the handoff WITHOUT mutating the
-        # immutable OUTPUT version.
+        # immutable OUTPUT version. ResourceItem deliveries resolve through the
+        # legacy bridge; ExportArtifact deliveries reference their registered
+        # catalog OUTPUT version directly (catalog_bridge only resolves
+        # ResourceItems, so resolve the service separately here).
         recorded = False
         try:
             if service is not None and ref is not None:
@@ -647,6 +688,25 @@ class DataLifecycleController:
                     input_version_ids=[ref.version_id],
                     parameters={
                         "source_version_id": ref.version_id,
+                        "exported_path": destination.as_posix(),
+                        "checksum": checksum,
+                        "timestamp": _now_iso(),
+                        "format": source_path.suffix.lstrip("."),
+                        "delivery_status": "exported",
+                    },
+                )
+                recorded = True
+            elif (
+                isinstance(asset, ExportArtifact)
+                and asset.catalog_version_id
+                and (artifact_service := self.catalog_service()) is not None
+                and self._version_exists(artifact_service, asset.catalog_version_id)
+            ):
+                artifact_service.register_run(
+                    "delivery",
+                    input_version_ids=[asset.catalog_version_id],
+                    parameters={
+                        "source_version_id": asset.catalog_version_id,
                         "exported_path": destination.as_posix(),
                         "checksum": checksum,
                         "timestamp": _now_iso(),
@@ -699,6 +759,92 @@ class DataLifecycleController:
                 page._refresh()
                 page._set_action_status(f"已移除标签 #{tag_name}")
 
+    @staticmethod
+    def _version_exists(service, version_id: str) -> bool:
+        """True when *version_id* still resolves (not purged); keeps delivery
+        runs free of dangling inputs, matching the bridge-gated branch."""
+        try:
+            service.get_version(version_id)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _fail_booked_run(service, run_id: str | None) -> None:
+        """Mark a pre-booked run failed when the operation it describes fails.
+
+        ``register_run`` books runs as ``completed``; without this a failed
+        materialize/commit would leave phantom completed provenance behind."""
+        if service is None or run_id is None:
+            return
+        try:
+            service.update_run_status(run_id, "failed")
+        except Exception:
+            pass
+
+    def bulk_apply_tag(self, items, tag_name: str, *, add: bool) -> int:
+        """Batch add/remove one tag over many ResourceItems. Legacy ResourceItem.tags
+        updated per item; catalog side mirrored via service.bulk_add_tag/bulk_remove_tag
+        in ONE canonical write. Returns number of items changed; a failed catalog
+        mirror is recorded on ``last_tag_mirror_failed`` (never blocks legacy)."""
+        resources = [
+            res
+            for res in (unwrap_asset(it) for it in items)
+            if isinstance(res, ResourceItem)
+        ]
+        # Catalog mirror first (best-effort, ONE write): collect the bridged
+        # catalog asset ids the same way mirror_tag_to_catalog resolves them.
+        self.last_tag_mirror_failed = False
+        service = self.catalog_service()
+        asset_ids: list[str] = []
+        if service is not None:
+            for resource in resources:
+                _svc, ref = self.catalog_bridge(resource)
+                if ref is not None:
+                    asset_ids.append(ref.asset_id)
+        if asset_ids:
+            try:
+                if add:
+                    service.bulk_add_tag(tag_name, asset_ids=asset_ids)
+                else:
+                    service.bulk_remove_tag(tag_name, asset_ids=asset_ids)
+            except Exception:
+                # Best-effort mirror: a catalog failure never breaks the
+                # legacy tag action (same contract as mirror_tag_to_catalog),
+                # but it must stay VISIBLE (logged + flag for the status bar).
+                self.last_tag_mirror_failed = True
+                logging.getLogger("paleo_workbench.catalog").warning(
+                    "catalog tag mirror failed for #%s (%d assets)",
+                    tag_name,
+                    len(asset_ids),
+                    exc_info=True,
+                )
+        # Legacy side: per-item update, count only actual changes.
+        count = 0
+        for resource in resources:
+            if add:
+                if tag_name not in resource.tags:
+                    resource.tags.append(tag_name)
+                    count += 1
+            elif tag_name in resource.tags:
+                resource.tags.remove(tag_name)
+                count += 1
+        return count
+
+    def set_version_tag(self, version_id: str, tag_name: str, *, add: bool) -> bool:
+        """Add/remove a Version Tag on a catalog version (best-effort; returns success)."""
+        service = self.catalog_service()
+        if service is None:
+            return False
+        try:
+            if add:
+                service.add_tag(tag_name, version_id=version_id)
+            else:
+                service.remove_tag(tag_name, version_id=version_id)
+            return True
+        except Exception:
+            return False
+
     def prompt_add_tag_to_assets(self, items: list[object]) -> None:
         page = self.page
         dlg = TagInputDialog(parent=page)
@@ -706,14 +852,7 @@ class DataLifecycleController:
             new_tag = dlg.get_tag_name()
             if not new_tag:
                 return
-            count = 0
-            for it in items:
-                it = unwrap_asset(it)
-                if isinstance(it, ResourceItem):
-                    if new_tag not in it.tags:
-                        it.tags.append(new_tag)
-                        self.mirror_tag_to_catalog(it, new_tag, add=True)
-                        count += 1
+            count = self.bulk_apply_tag(items, new_tag, add=True)
             if count > 0:
                 page._refresh()
                 page._set_action_status(f"已为 {count} 项数据添加标签 #{new_tag}")
@@ -737,14 +876,7 @@ class DataLifecycleController:
             tag_to_remove = dlg.get_tag_name()
             if not tag_to_remove:
                 return
-            count = 0
-            for it in items:
-                it = unwrap_asset(it)
-                if isinstance(it, ResourceItem):
-                    if tag_to_remove in it.tags:
-                        it.tags.remove(tag_to_remove)
-                        self.mirror_tag_to_catalog(it, tag_to_remove, add=False)
-                        count += 1
+            count = self.bulk_apply_tag(items, tag_to_remove, add=False)
             if count > 0:
                 page._refresh()
                 page._set_action_status(f"已从 {count} 项数据移除标签 #{tag_to_remove}")
@@ -885,14 +1017,30 @@ class DataLifecycleController:
         """Register imported resources as catalog INPUT versions (RAW/EXTERNAL)
         with the legacy bridge so downstream runs can resolve them. Best-effort:
         the catalog seam must never break the import path. Each resource is
-        registered independently so one failure doesn't skip the rest."""
+        registered independently so one failure doesn't skip the rest.
+
+        Failures are never silent: each one is logged and summarized on
+        ``last_registration_failures`` (reset per call) so the import status
+        surface can report how many registrations were lost."""
+        self.last_registration_failures = []
         try:
             from paleo_workbench.catalog.lifecycle import register_resource_input
-
-            for resource in resources:
-                try:
-                    register_resource_input(resource)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        except Exception as exc:
+            self.last_registration_failures.append(
+                f"catalog lifecycle unavailable: {exc}"
+            )
+            logging.getLogger(__name__).warning(
+                "import catalog registration unavailable: %s", exc
+            )
+            return
+        for resource in resources:
+            try:
+                register_resource_input(resource)
+            except Exception as exc:
+                failure = f"{resource.name} ({resource.id}): {exc}"
+                self.last_registration_failures.append(failure)
+                logging.getLogger(__name__).warning(
+                    "import catalog registration failed for %s: %s",
+                    resource.id,
+                    exc,
+                )
