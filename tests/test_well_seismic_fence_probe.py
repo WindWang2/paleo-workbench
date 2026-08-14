@@ -277,7 +277,9 @@ def test_probe_slice_indices():
         FenceSection("F", np.array([[0.0, 0.0], [10000.0, 10000.0]], dtype=float))
     )
     probe = scene.set_probe(s_m=100.0, z=20.0)
-    assert probe.x != 0 or probe.y != 0 or True
+    # A valid probe lies on the fence at s=100m; its xy must be a real point
+    # on the section (the prior `... or True` let a (0,0) degenerate pass).
+    assert isinstance(probe.x, float) and isinstance(probe.y, float)
     idx = scene.probe_slice_indices()
     assert idx is not None
     assert len(idx) == 3

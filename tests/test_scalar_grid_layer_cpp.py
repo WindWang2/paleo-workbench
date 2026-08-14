@@ -5,7 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-grid_render_core = pytest.importorskip("grid_render_core")
+# grid_render_core is a first-party REQUIRED native module (CI builds it as
+# required); a plain import keeps a build/import regression loud instead of
+# degrading to a silent skip.
+import grid_render_core  # noqa: E402
 
 
 def _ramp() -> np.ndarray:

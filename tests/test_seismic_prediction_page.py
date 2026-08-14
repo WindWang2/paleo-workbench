@@ -141,7 +141,9 @@ def test_demo_run_creates_honestly_marked_task(qtbot, catalog_service):
     assert task.result_summary.get("demo") is True
     assert task.model_metadata.get("demo_only") is True
     # The inference run is tracked in the catalog with a DERIVED output.
-    runs = [r for r in catalog_service.document.runs if r.operation == "inference"]
+    # Stage-13 renamed the run operation "inference" → "prediction"
+    # (freshness.py still accepts the legacy value for migrated projects).
+    runs = [r for r in catalog_service.document.runs if r.operation == "prediction"]
     assert runs, "expected an inference DataRun"
     assert runs[-1].status == "complete"
     assert len(runs[-1].output_version_ids) == 1

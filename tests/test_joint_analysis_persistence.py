@@ -30,7 +30,9 @@ def test_joint_analysis_state_roundtrip_in_project():
     )
     data = doc.model_dump()
     assert "joint_analysis" in data
-    assert "volume" not in str(data["joint_analysis"]).lower() or True
+    # The persisted joint analysis carries the tree-check state (the prior
+    # `... or True` escape let this pass while asserting nothing).
+    assert data["joint_analysis"]["tree_checks"]["地震预览体 (geoviz)"] is True
     restored = ProjectDocument.model_validate(data)
     assert restored.joint_analysis.vertical_domain == "Depth"
     assert restored.joint_analysis.active_fence_wells == ["A1", "A2"]

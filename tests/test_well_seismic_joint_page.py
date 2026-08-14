@@ -13,10 +13,12 @@ def test_geomodel_page_index_and_no_joint_rail(qtbot):
     assert navigation.PAGE_INDEX_GEOMODEL == 10
     assert tokens.PAGE_NAMES[10] == "井震联合"
     assert len(tokens.PAGE_NAMES) == 11
-    assert not hasattr(navigation, "PAGE_INDEX_WELL_SEISMIC_JOINT") or True
-    # Joint must not appear in interpretation subpages
+    # The Well-Seismic-Joint page index was removed from the navigation module
+    # when it merged into the geomodel page; the legacy name must be gone.
+    assert not hasattr(navigation, "PAGE_INDEX_WELL_SEISMIC_JOINT")
+    # The merged geomodel page is not an interpretation subpage.
     interp = navigation.get_subpages_for_stage(navigation.STAGE_INDEX_INTERPRETATION)
-    assert navigation.PAGE_INDEX_GEOMODEL not in interp or True
+    assert navigation.PAGE_INDEX_GEOMODEL not in interp
     assert all(
         getattr(navigation, "PAGE_INDEX_WELL_SEISMIC_JOINT", -1) != p for p in interp
     )

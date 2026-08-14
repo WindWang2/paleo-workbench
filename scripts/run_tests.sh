@@ -41,6 +41,10 @@ case "$target" in
 workbench)
     cd "$ROOT"
     # Root pyproject already sets pythonpath to the submodule packages.
+    # --continue-on-collection-errors lets the run finish when some modules
+    # fail to import (e.g. unbuilt native extensions on a fresh checkout);
+    # collection errors STILL make pytest exit non-zero, so this does NOT
+    # mask real import regressions — grep the summary for "error" lines.
     exec python3 -m pytest -p no:randomly --continue-on-collection-errors "$@"
     ;;
 engine)

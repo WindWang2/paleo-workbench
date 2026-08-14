@@ -118,7 +118,9 @@ def test_save_new_version_immutable_and_parent_chain(tmp_path: Path):
         )
         # After catalog rehome, path may move under intermediate/ — verify from catalog if needed
         if first_path.is_file():
-            assert first_path.read_bytes() == art1_bytes or True  # may rehome
+            # The immutable v1 bytes must be preserved across the catalog
+            # rehome — the artifact CONTENT never changes, only its location.
+            assert first_path.read_bytes() == art1_bytes
         assert project.horizon_interpretations[0].current_version_id == ref2.current_version_id
     finally:
         reset_catalog()

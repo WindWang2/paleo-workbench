@@ -244,8 +244,9 @@ def test_constrained_deterministic_and_mask():
     b = run_constrained_idw(points, grid_n=24)
     np.testing.assert_array_equal(a["grid_z"], b["grid_z"])
     assert np.isfinite(a["grid_z"]).sum() > 0
-    # Outside domain cells are NaN (mask semantics).
-    assert np.isnan(a["grid_z"]).sum() >= 0
+    # Outside-domain cells are NaN (mask semantics): a constrained-IDW grid
+    # over a small 3-point cloud always leaves SOME cells outside the hull.
+    assert np.isnan(a["grid_z"]).sum() > 0
 
 
 def test_apply_stores_live_factor_grid_and_legacy_lists():

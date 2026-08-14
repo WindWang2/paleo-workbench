@@ -108,8 +108,10 @@ def test_open_project_path_loads(qtbot, tmp_path: Path):
     data_page = window.app_shell.data_page_widget()
     assert any(r.name == "r1" for r in window.project.resources)
     # Sanity: data page model holds at least the one resource.
-    if hasattr(data_page, "table") and hasattr(data_page.table, "model"):
-        assert data_page.table.model().rowCount() >= 1
+    # (DataPage exposes ``asset_table`` (a DataAssetTable) whose ``model``
+    # is the AssetTableModel; the prior ``hasattr(data_page, "table")`` guard
+    # used the wrong name so this check never ran.)
+    assert data_page.asset_table.model.rowCount() >= 1
 
 
 def test_open_project_path_invalid_returns_false(qtbot, tmp_path: Path):

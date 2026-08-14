@@ -157,3 +157,71 @@ def test_clear_and_apply_roundtrip():
     # Without live cache or artifact / inline payload, legacy path fails.
     with pytest.raises((ValueError, KeyError, TypeError)):
         factor_grid_result_for_task(task)
+
+
+def test_missing_artifact_falls_back_to_live_grid_then_self_heals(tmp_path):
+    """Audit A2: a vanished artifact must not brick the live session.
+
+    A failed Save-As rolls back the staged artifacts tree while tasks still
+    reference target-rooted artifact paths; resolution previously raised
+    FileNotFoundError on every later save despite the valid live grid.
+    """
+    task = FactorMapTask(
+        name="f",
+        target_horizon="H1",
+        factor_type="孔隙度",
+        method="IDW",
+        parameters={"sample_points": [
+            {"x": 0.0, "y": 0.0, "value": 1.0},
+            {"x": 1.0, "y": 0.0, "value": 2.0},
+            {"x": 0.0, "y": 1.0, "value": 3.0},
+            {"x": 1.0, "y": 1.0, "value": 4.0},
+        ]},
+    )
+    apply_interpolation_to_task(task, method="IDW", grid_n=8)
+    assert task.grid_artifact_path is None
+
+    # Persist once so the task becomes artifact-backed, then store the live
+    # grid (as an in-session interpolation would) and DELETE the artifact —
+    # the failed-Save-As rollback state.
+    from pathlib import Path as _Path
+
+    from paleo_workbench.project.factor_grid_artifacts import (
+        persist_factor_grid_artifacts,
+        store_live_factor_grid,
+    )
+    from paleo_workbench.project.models import ProjectDocument
+
+    project = ProjectDocument.new("P")
+    project.factor_map_tasks = [task]
+
+    persist_factor_grid_artifacts(project, tmp_path / "proj.paleo.json")
+    assert task.grid_artifact_path
+    result = factor_grid_result_for_task(task)
+    store_live_factor_grid(task.id, result)
+    _Path(task.grid_artifact_path).unlink()
+
+    # Resolution falls back to the live grid instead of raising.
+    healed = factor_grid_result_for_task(task)
+    assert healed.grid_z.shape == result.grid_z.shape
+    np.testing.assert_array_equal(healed.grid_z, result.grid_z)
+
+    # The next save re-externalizes the grid and rewrites the artifact path.
+    persist_factor_grid_artifacts(project, tmp_path / "proj.paleo.json")
+    assert _Path(task.grid_artifact_path).is_file()
+    reloaded = factor_grid_result_for_task(task)
+    np.testing.assert_array_equal(reloaded.grid_z, result.grid_z)
+
+
+def test_missing_artifact_without_fallback_still_raises(tmp_path):
+    """Genuine artifact loss (no live grid, no legacy payload) stays loud."""
+    task = FactorMapTask(
+        name="f",
+        target_horizon="H1",
+        factor_type="孔隙度",
+        method="IDW",
+        parameters={},
+        grid_artifact_path=str(tmp_path / "never-written.npz"),
+    )
+    with pytest.raises(FileNotFoundError):
+        factor_grid_result_for_task(task)
