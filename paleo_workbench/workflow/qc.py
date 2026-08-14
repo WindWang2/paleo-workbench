@@ -6,6 +6,9 @@ Issues may carry spatial fields for IssueLayer locate:
 
 from __future__ import annotations
 
+import json
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from paleo_workbench.project.models import PaleoMapDocument, ProjectDocument, QualityReport, _now_iso
@@ -371,26 +374,47 @@ def run_basic_qc(
         run.updated_at = _now_iso()
 
     # Provenance: record a qc DataRun bound to the map's DERIVED version
-    # (H3). Best-effort with explicit logging — QC itself is a domain
-    # artifact, but the catalog run is what freshness/dashboard count on.
+    # (H3). The report JSON is serialized to a temp file so the run carries a
+    # real OUTPUT version (the catalog copies the payload into managed storage;
+    # the temp file is removed afterwards). Best-effort with explicit logging —
+    # QC itself is a domain artifact, but the catalog run is what
+    # freshness/dashboard count on.
     try:
         from paleo_workbench.catalog import get_catalog
         from paleo_workbench.catalog.lifecycle import register_qc_run
 
         cat = get_catalog()
         if cat is not None:
-            run_qc, _qc_version = register_qc_run(
-                name=f"QC {document.name}",
-                source_task_ids=[document.id],
-                domain_task_id=report.id,
-                parameters={
-                    "map_document_id": map_document_id,
-                    "qc_status": status,
-                },
-                catalog=cat,
-            )
-            if run_qc is not None:
-                report.provenance_registered = True
+            tmp_path: Path | None = None
+            try:
+                fd, tmp_name = tempfile.mkstemp(prefix="qc_report_", suffix=".json")
+                tmp_path = Path(tmp_name)
+                with open(fd, "w", encoding="utf-8") as handle:
+                    json.dump(
+                        report.model_dump(mode="json"),
+                        handle,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                run_qc, _qc_version = register_qc_run(
+                    name=f"QC {document.name}",
+                    source_task_ids=[document.id],
+                    domain_task_id=report.id,
+                    parameters={
+                        "map_document_id": map_document_id,
+                        "qc_status": status,
+                    },
+                    report_path=str(tmp_path),
+                    catalog=cat,
+                )
+                if run_qc is not None:
+                    report.provenance_registered = True
+            finally:
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
     except Exception:
         import logging
 

@@ -46,5 +46,15 @@ COLUMN_TOOLTIPS = {
     "path": "文件完整路径",
 }
 
-DEFAULT_COLUMN_KEYS = ["name"]
+# Target default view (F5): the seven columns a data manager scans first —
+# identity, lifecycle context, versioning, tagging, integrity, freshness.
+DEFAULT_COLUMN_KEYS = [
+    "name",
+    "type",
+    "stage",
+    "version",
+    "tags",
+    "integrity",
+    "modified",
+]
 HEADERS = [column.label for column in COLUMN_DEFINITIONS]

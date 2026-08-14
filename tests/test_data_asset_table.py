@@ -2,7 +2,11 @@ from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import QTableView
 
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
-from paleo_workbench.ui.pages.data_asset_table import DataAssetTable
+from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS, DataAssetTable
+from paleo_workbench.ui.pages.data_table_columns import COLUMN_BY_KEY
+
+
+DEFAULT_HEADERS = [COLUMN_BY_KEY[key].label for key in DEFAULT_COLUMN_KEYS]
 
 
 def table_text(table_widget, row: int, column: int) -> str:
@@ -32,7 +36,7 @@ def test_asset_table_uses_table_view(qtbot):
 def test_asset_table_columns(qtbot):
     table = DataAssetTable()
     qtbot.addWidget(table)
-    assert table_headers(table) == ["文件名"]
+    assert table_headers(table) == DEFAULT_HEADERS
 
 
 def test_asset_table_renders_resources_and_artifacts(qtbot):
@@ -213,7 +217,7 @@ def test_asset_table_reset_columns_restores_defaults(qtbot):
     table.set_visible_columns(["name", "format"])
     table.reset_columns()
 
-    assert table_headers(table) == ["文件名"]
+    assert table_headers(table) == DEFAULT_HEADERS
 
 
 def test_asset_table_search_matches_hidden_columns(qtbot):

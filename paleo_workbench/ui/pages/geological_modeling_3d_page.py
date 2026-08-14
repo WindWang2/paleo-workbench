@@ -103,6 +103,10 @@ class GeologicalModeling3DPage(QWidget):
 
         # Joint analysis host (geoviz) — PRD #85 / #88
         self._project: ProjectDocument | None = None
+        # Lineage sources for mesh exports (E7): the input versions declared by
+        # the most recent modeling run. Empty for synthetic demo runs (honest:
+        # a synthetic grid has no source data to trace back to).
+        self._last_modeling_run_inputs: list[str] = []
         self._joint_loaded_once = False
         self._joint_well_visibility_restored = False
         self._joint_widget = None
@@ -926,6 +930,9 @@ class GeologicalModeling3DPage(QWidget):
     def set_project(self, project: ProjectDocument | None) -> None:
         self._project = project
         self._joint_well_visibility_restored = False
+        # Provenance memory is per-project: never carry the previous project's
+        # modeling inputs into the next one's mesh exports.
+        self._last_modeling_run_inputs = []
         self._joint_host.set_project(project)
         self._restore_joint_display_settings()
         self._restore_joint_slice_settings()
@@ -2406,6 +2413,46 @@ class GeologicalModeling3DPage(QWidget):
 
         logger.info("3D geological modeling successfully updated in viewport.")
 
+    def _modeling_input_version_ids(self, catalog) -> list[str]:
+        """Version ids of the seismic / well data the joint scene is built
+        from — the honest lineage inputs for the modeling run (empty when the
+        demo scene has no project data loaded)."""
+        if self._project is None:
+            return []
+        paths = self._joint_host.paths
+        if paths is None:
+            return []
+        wanted: list[str] = []
+        if paths.segy is not None:
+            wanted.append(str(paths.segy))
+        if paths.well_head is not None:
+            wanted.append(str(paths.well_head))
+        wanted.extend(str(las) for las in paths.las_files or [])
+        if not wanted:
+            return []
+        try:
+            from paleo_workbench.catalog.lifecycle import resource_ids_for_paths
+
+            project_path = getattr(
+                getattr(catalog, "service", None), "project_path", None
+            )
+            resource_ids = resource_ids_for_paths(
+                getattr(self._project, "resources", None) or [],
+                wanted,
+                project_path=project_path,
+            )
+        except Exception:
+            return []
+        version_ids: list[str] = []
+        for resource_id in resource_ids:
+            try:
+                ref = catalog.resolve_legacy_resource(resource_id)
+            except Exception:
+                ref = None
+            if ref is not None and ref.version_id not in version_ids:
+                version_ids.append(ref.version_id)
+        return version_ids
+
     def _register_modeling_run(self, result: dict, *, is_demo: bool) -> None:
         """Registration seam (P2): record the modeling action as a DataRun.
 
@@ -2423,7 +2470,7 @@ class GeologicalModeling3DPage(QWidget):
                 return
             from paleo_workbench.catalog.lifecycle import register_modeling_run
 
-            register_modeling_run(
+            run, _version = register_modeling_run(
                 name="三维地质建模（合成演示）" if is_demo else "三维地质建模",
                 source="synthetic/demo" if is_demo else "real_data",
                 demo=is_demo,
@@ -2432,8 +2479,13 @@ class GeologicalModeling3DPage(QWidget):
                     "algorithm": result.get("algorithm", "synthetic_demo"),
                     "source": "synthetic/demo" if is_demo else "real_data",
                 },
+                input_version_ids=self._modeling_input_version_ids(catalog),
                 catalog=catalog,
             )
+            if run is not None:
+                # Remember the run's declared inputs so the mesh export below
+                # can carry real source lineage (E7).
+                self._last_modeling_run_inputs = list(run.input_version_ids or [])
         except Exception:  # noqa: BLE001 — provenance must never block 3D render
             logger.exception("register_modeling_run failed (best-effort)")
 
@@ -2710,9 +2762,9 @@ class GeologicalModeling3DPage(QWidget):
 
     def _register_mesh_export(self, filepath: str) -> None:
         """Best-effort OUTPUT DataVersion registration for FLAC3D/Abaqus mesh
-        exports. The OUTPUT is registered with provenance metadata but no
-        source lineage (the synthetic grid has no source task); no catalog →
-        no-op."""
+        exports. The OUTPUT carries the current modeling run's declared input
+        versions as source lineage (empty for the synthetic demo grid, which
+        honestly has no source data); no catalog → no-op."""
         if self._project is None:
             return
         try:
@@ -2724,6 +2776,7 @@ class GeologicalModeling3DPage(QWidget):
                 name="数值模拟网格模型 export",
                 output_path=str(filepath),
                 fmt=fmt,
+                source_version_ids=list(self._last_modeling_run_inputs),
                 linked_id="geological_modeling_3d",
                 catalog=None,
             )

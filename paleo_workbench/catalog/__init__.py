@@ -23,6 +23,7 @@ This package is the single authoritative Data Catalog. Integration surface:
 """
 
 from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+from paleo_workbench.catalog.audit import AuditIssue, AuditReport
 from paleo_workbench.catalog.checksum import sha256_file, sha256_file_or_none
 from paleo_workbench.catalog.db import CatalogIndex
 from paleo_workbench.catalog.migration import (
@@ -58,6 +59,8 @@ from paleo_workbench.catalog.types import (
 )
 
 __all__ = [
+    "AuditIssue",
+    "AuditReport",
     "CatalogDocument",
     "CatalogError",
     "CatalogIndex",

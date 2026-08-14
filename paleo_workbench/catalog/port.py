@@ -108,8 +108,14 @@ class CatalogPort(Protocol):
         kind: str = "",
         format: str = "",
         tags: list[str] | None = None,
+        reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
-        """Register a final OUTPUT of a run (user-delivered result)."""
+        """Register a final OUTPUT of a run (user-delivered result).
+
+        ``reuse_legacy_id`` (optional): when an asset bridged to that legacy
+        id already exists, the output becomes its NEXT version instead of a
+        new asset (repeatable reports stay one asset with a version history).
+        """
         ...
 
     def register_derived(

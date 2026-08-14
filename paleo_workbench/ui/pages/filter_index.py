@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
+from paleo_workbench.catalog import normalize_tag_name
 from paleo_workbench.project.models import ExportArtifact, ResourceItem
 from paleo_workbench.ui.pages.asset_table_model import RESOURCE_TYPE_LABELS
 from paleo_workbench.ui.pages.data_view_models import (
@@ -55,6 +56,11 @@ class FilterQuery:
     data_type: str | None = None
     tag: str | None = None
     integrity: str | None = None
+    # Multi-tag secondary criteria: all listed tags combined with
+    # ``tag_operator`` ("and" = asset must carry every tag, "or" = any).
+    # The legacy singular ``tag`` field is unioned into ``tags`` at match time.
+    tags: list[str] = field(default_factory=list)
+    tag_operator: str = "and"
 
 
 @dataclass
@@ -117,9 +123,8 @@ class FilterIndex:
                     return False
         elif query.node_type == "tag":
             if query.node_value:
-                normalized_target = query.node_value.strip().lower()
-                asset_tags = [t.strip().lower() for t in view.tags]
-                if normalized_target not in asset_tags:
+                normalized_target = normalize_tag_name(query.node_value)
+                if normalized_target not in view.normalized_tags:
                     return False
         elif query.node_type == "integrity":
             if query.node_value and view.integrity_state.value != query.node_value:
@@ -137,10 +142,20 @@ class FilterIndex:
             return False
         if query.data_type and view.type != query.data_type:
             return False
+        tag_criteria = [t for t in (query.tags or []) if t and str(t).strip()]
         if query.tag:
-            target_tag = query.tag.strip().lower()
-            if target_tag not in view.normalized_tags:
-                return False
+            tag_criteria.append(query.tag)
+        if tag_criteria:
+            normalized_targets = {
+                normalize_tag_name(t) for t in tag_criteria if str(t).strip()
+            }
+            if normalized_targets:
+                if query.tag_operator == "or":
+                    if not normalized_targets & view.normalized_tags:
+                        return False
+                else:  # "and" (default): the asset must carry every tag.
+                    if not normalized_targets <= view.normalized_tags:
+                        return False
         if query.integrity and view.integrity_state.value != query.integrity:
             return False
 

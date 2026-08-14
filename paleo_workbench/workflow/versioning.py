@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any
 
 from paleo_workbench.project.models import (
@@ -14,6 +15,8 @@ from paleo_workbench.project.models import (
     VersionSnapshot,
     _now_iso,
 )
+
+_log = logging.getLogger("paleo_workbench.versioning")
 
 
 def _fingerprint_map(doc: PaleoMapDocument) -> str:
@@ -178,6 +181,26 @@ def finalize_map_version(
         if run.status in {"draft", "running", "review_required", "blocked"}:
             run.status = "export_ready"
         run.updated_at = _now_iso()
+
+    # Catalog provenance: record the sign-off as a ``version_finalize`` DataRun
+    # over the finalized map's registered versions. Best-effort — no catalog
+    # (or unresolvable lineage) skips the run; a registration failure must
+    # NEVER fail the finalize itself.
+    try:
+        from paleo_workbench.catalog import get_catalog
+        from paleo_workbench.catalog.lifecycle import register_finalize_run
+
+        port = get_catalog()
+        if port is not None:
+            register_finalize_run(
+                port,
+                snapshot=snap,
+                operator=operator,
+                note=note,
+                version_set_id=vset.id,
+            )
+    except Exception:
+        _log.debug("version_finalize DataRun registration skipped", exc_info=True)
 
     return vset
 

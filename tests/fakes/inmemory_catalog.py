@@ -200,8 +200,17 @@ class InMemoryCatalog:
         kind: str,
         format: str,
         tags: list[str] | None,
+        reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         run = self._runs[run_id]
+        # Asset reuse: same contract as the Core adapter — a repeatable
+        # output (e.g. per-document QC reports) becomes the NEXT version of
+        # the asset bridged to *reuse_legacy_id* instead of a new asset.
+        reuse_asset_id: str | None = None
+        if reuse_legacy_id:
+            bridged = self._legacy_index.get(reuse_legacy_id)
+            if bridged and bridged in self._versions:
+                reuse_asset_id = self._versions[bridged].asset_id
         ref = self._new_version(
             name=name,
             stage=stage,
@@ -212,8 +221,12 @@ class InMemoryCatalog:
             external=False,
             producing_run_id=run_id,
             tags=tags,
-            legacy_resource_id=None,
+            legacy_resource_id=reuse_legacy_id if reuse_asset_id is None else None,
         )
+        if reuse_asset_id is not None:
+            ref.asset_id = reuse_asset_id
+        elif reuse_legacy_id:
+            self._legacy_index[reuse_legacy_id] = ref.version_id
         self._link_inputs_to_output(run, ref.version_id)
         return ref
 
@@ -242,9 +255,11 @@ class InMemoryCatalog:
         kind: str = "",
         format: str = "",
         tags: list[str] | None = None,
+        reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         return self._register_produced(
-            run_id, name, path, DataStage.OUTPUT, checksum, kind, format, tags
+            run_id, name, path, DataStage.OUTPUT, checksum, kind, format, tags,
+            reuse_legacy_id=reuse_legacy_id,
         )
 
     def register_derived(

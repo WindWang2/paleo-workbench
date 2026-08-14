@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterable
 
 from paleo_workbench.catalog import (
     CatalogPort,
@@ -47,6 +47,7 @@ if TYPE_CHECKING:
         PredictionTask,
         ProjectDocument,
         ResourceItem,
+        VersionSnapshot,
     )
 
 
@@ -422,6 +423,42 @@ def register_prediction_run(
 
 
 # ------------------------------------------------------------------------ export
+def resource_ids_for_paths(
+    resources: Iterable[Any],
+    paths: Iterable[Any],
+    *,
+    project_path: str | Path | None = None,
+) -> list[str]:
+    """Resource ids whose payload path matches any of *paths* (absolute form).
+
+    Relative resource paths (the import contract stores project-relative
+    paths) resolve against the PROJECT directory — never the process CWD —
+    mirroring ``adapter.register_input``. When *project_path* is unknown,
+    relative paths honestly match nothing rather than guessing via CWD.
+    """
+    base = Path(project_path).expanduser().resolve().parent if project_path else None
+
+    def _abs(raw: Any) -> Path | None:
+        try:
+            p = Path(str(raw))
+            if not p.is_absolute():
+                if base is None:
+                    return None
+                p = base / p
+            return p.resolve()
+        except (OSError, RuntimeError):
+            return None
+
+    wanted = {_abs(p) for p in paths}
+    wanted.discard(None)
+    ids: list[str] = []
+    for resource in resources or []:
+        resource_path = _abs(getattr(resource, "path", ""))
+        if resource_path is not None and resource_path in wanted:
+            ids.append(resource.id)
+    return ids
+
+
 def _resolve_export_inputs(
     source_version_ids: list[str] | None,
     source_task_ids: list[str] | None,
@@ -611,17 +648,89 @@ def register_qc_run(
         domain_task_id=domain_task_id,
     )
     version: DataVersionRef | None = None
-    if report_path:
-        version = cat.register_output(
-            run_id=run.run_id,
-            name=name,
-            path=report_path,
-            checksum=report_checksum or sha256_file_or_none(report_path),
-            kind="qc_report",
-            format="json",
-        )
-    cat.complete_run(run.run_id)
+    try:
+        if report_path:
+            version = cat.register_output(
+                run_id=run.run_id,
+                name=name,
+                path=report_path,
+                checksum=report_checksum or sha256_file_or_none(report_path),
+                kind="qc_report",
+                format="json",
+                # One asset per checked document: re-running QC appends a
+                # version instead of spawning a new single-version asset.
+                reuse_legacy_id=(
+                    f"qc-report-{domain_task_id}" if domain_task_id else None
+                ),
+            )
+        cat.complete_run(run.run_id)
+    except Exception:
+        # No orphan RUNNING run when the output registration fails.
+        try:
+            cat.complete_run(run.run_id, status="failed")
+        except Exception:
+            pass
+        raise
     return run, version
+
+
+# ----------------------------------------------------------- version finalize
+def register_finalize_run(
+    port: CatalogPort | None = None,
+    *,
+    snapshot: "VersionSnapshot",
+    operator: str = "",
+    note: str = "",
+    version_set_id: str | None = None,
+) -> str | None:
+    """Register a VersionSet finalization as a ``version_finalize`` DataRun.
+
+    Input versions are resolved from the snapshot's map document through the
+    run graph: the production map compile runs carry the map document id as
+    their domain task id, so the finalized map's registered DERIVED version is
+    reachable that way. The finalize itself produces no new file — the run
+    records who signed off which snapshot over which map versions.
+
+    Returns the run id, or None when no catalog backend is active or no input
+    version could be resolved (never raises — an untraceable finalize is not
+    registered rather than fabricating provenance; a skipped registration is
+    logged as a warning so the gap stays discoverable).
+    """
+    cat = port or get_catalog()
+    if cat is None:
+        return None
+    input_ids = _versions_for_domain_tasks(
+        [snapshot.map_document_id], catalog=cat
+    )
+    if not input_ids:
+        _log.warning(
+            "version_finalize run skipped: no resolvable catalog inputs for map %s",
+            snapshot.map_document_id,
+        )
+        return None
+    run = cat.begin_run(
+        operation="version_finalize",
+        input_version_ids=input_ids,
+        parameters={
+            "version_set_id": version_set_id,
+            "snapshot_id": snapshot.id,
+            "operator": operator,
+            "note": note,
+            "content_fingerprint": snapshot.content_fingerprint,
+        },
+        generator_version="versioning-v1",
+        domain_task_id=version_set_id,
+    )
+    try:
+        cat.complete_run(run.run_id)
+    except Exception:
+        # No orphan RUNNING run if completion booking fails.
+        try:
+            cat.complete_run(run.run_id, status="failed")
+        except Exception:
+            pass
+        raise
+    return run.run_id
 
 
 # ----------------------------------------------------- stratigraphic correlation
@@ -705,16 +814,33 @@ def register_fault_interpretation_run(
         domain_task_id=domain_task_id,
         input_snapshot_hash=scientific_fingerprint,
     )
-    version = cat.register_derived(
-        run_id=run.run_id,
-        name=name,
-        path=path,
-        checksum=checksum,
-        kind="fault_interpretation",
-        format="json",
-        tags=["interpretation", "fault"],
-    )
-    cat.complete_run(run.run_id)
+    try:
+        version = cat.register_derived(
+            run_id=run.run_id,
+            name=name,
+            path=path,
+            checksum=checksum,
+            kind="fault_interpretation",
+            format="json",
+            tags=["interpretation", "fault"],
+        )
+    except Exception:
+        # No orphan RUNNING run (H7 failure injection) — same compensation as
+        # horizon / stratigraphic correlation registration.
+        try:
+            cat.complete_run(run.run_id, status="failed")
+        except Exception:
+            pass
+        raise
+    try:
+        cat.complete_run(run.run_id)
+    except Exception:
+        # The version is committed; at least never leave a stuck RUNNING run.
+        try:
+            cat.complete_run(run.run_id, status="failed")
+        except Exception:
+            pass
+        raise
     return run, version
 
 

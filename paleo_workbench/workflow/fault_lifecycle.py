@@ -147,16 +147,25 @@ def save_fault_draft(
 
     from paleo_workbench.catalog.lifecycle import register_fault_interpretation_run
 
-    _run, version = register_fault_interpretation_run(
-        name=f"{draft.name} fault",
-        path=artifact.as_posix(),
-        checksum=checksum,
-        source_version_ids=list(draft.payload.source_version_ids),
-        parent_version_id=parent,
-        scientific_fingerprint=fp,
-        domain_task_id=draft.interpretation_id,
-        catalog=catalog,
-    )
+    try:
+        _run, version = register_fault_interpretation_run(
+            name=f"{draft.name} fault",
+            path=artifact.as_posix(),
+            checksum=checksum,
+            source_version_ids=list(draft.payload.source_version_ids),
+            parent_version_id=parent,
+            scientific_fingerprint=fp,
+            domain_task_id=draft.interpretation_id,
+            catalog=catalog,
+        )
+    except Exception:
+        # Compensate: no ghost artifact when catalog registration failed (H7,
+        # same contract as save_correlation_draft).
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     version_id = version.version_id if version is not None else version_token
     managed_path = version.path if version is not None else artifact.as_posix()
     try:

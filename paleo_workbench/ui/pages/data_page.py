@@ -9,9 +9,10 @@ from dataclasses import replace
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QDialog, QFileDialog, QLineEdit, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from paleo_workbench.catalog import normalize_tag_name
 from paleo_workbench.project.models import (
     ExportArtifact,
     ProjectDocument,
@@ -42,11 +43,16 @@ from paleo_workbench.ui.pages.data_view_models import (
     enrich_view_from_catalog,
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
-from paleo_workbench.ui.pages.filter_index import CATEGORIES
+from paleo_workbench.ui.pages.filter_index import CATEGORIES, FilterQuery
 from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
 from paleo_workbench.ui.pages.resource_summary import ResourceSummaryBar
+from paleo_workbench.ui.pages.tag_widgets import (
+    BulkAddTagDialog,
+    BulkRemoveTagDialog,
+    TagManagerDialog,
+)
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
 
@@ -169,7 +175,9 @@ class DataPage(QWidget):
 
         # Wire tree & table navigation
         self.navigation_tree.category_changed.connect(self._on_navigation_category_changed)
-        self.navigation_tree.filter_query_changed.connect(self.asset_table.set_filter_query)
+        self.navigation_tree.filter_query_changed.connect(
+            self._on_navigation_filter_query
+        )
 
         self.asset_table.selected_asset_changed.connect(self._set_selected_asset)
         self.asset_table.selected_assets_changed.connect(self._set_selected_assets)
@@ -187,6 +195,9 @@ class DataPage(QWidget):
         self.data_toolbar.clear_preview_cache_requested.connect(self.clear_preview_cache)
         self.data_toolbar.search_changed.connect(self.asset_table.set_search_text)
         self.data_toolbar.reader_toggled.connect(self._toggle_reader_from_toolbar)
+        self.data_toolbar.tag_filter_changed.connect(self._on_tag_filter_changed)
+        self.data_toolbar.tag_manager_requested.connect(self._open_tag_manager)
+        self.navigation_tree.manage_tags_requested.connect(self._open_tag_manager)
         self._sync_toolbar_toggle_state()
 
         # Wire inspector panel interactive signals
@@ -194,6 +205,8 @@ class DataPage(QWidget):
         self.inspector_panel.tag_removed.connect(self._handle_tag_removed)
         self.inspector_panel.verify_requested.connect(self._verify_single_asset)
         self.inspector_panel.create_derived_requested.connect(self._create_derived_copy)
+        self.inspector_panel.version_tag_added.connect(self._handle_version_tag_added)
+        self.inspector_panel.version_tag_removed.connect(self._handle_version_tag_removed)
 
         self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
         self.reader_panel.preview_settings_changed.connect(self._handle_preview_settings_changed)
@@ -256,12 +269,19 @@ class DataPage(QWidget):
         self._preview_controller.set_project_root(preview_root)
         self._visualization_controller.set_project_root(preview_root)
         self.summary_bar.update_state(state)
-        self.navigation_tree.update_counts(self._resources, self._artifacts)
+        # project_root lets the tree counts and the table resolve
+        # project-relative paths (F4: no MISSING false positives).
+        self.navigation_tree.update_counts(
+            self._resources, self._artifacts, project_root=preview_root
+        )
         self.navigation_tree.set_trash_count(len(self._trashed_companions()))
         display_resources = list(self._resources)
         if self._trash_view_active():
             display_resources.extend(self._trashed_companions())
-        self.asset_table.update_assets(display_resources, self._artifacts)
+        self.asset_table.update_assets(
+            display_resources, self._artifacts, project_root=preview_root
+        )
+        self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
         self._update_selection_action_state()
         self._sync_visualization_button()
         self._emit_data_context()
@@ -749,10 +769,21 @@ class DataPage(QWidget):
         asset is bridged (legacy plain view otherwise)."""
         if asset is None:
             self.inspector_panel.update_asset(None)
+            self.inspector_panel.set_version_tags_enabled(False)
             return
         view = asset_view_from_object(asset)
         view = self._enrich_view_from_catalog(view)
         self.inspector_panel.update_asset(view)
+        # Version tag editing needs a catalog-bridged asset (F6).
+        resource = view.raw_asset
+        service, ref = (
+            self._catalog_bridge(resource)
+            if isinstance(resource, ResourceItem)
+            else (None, None)
+        )
+        self.inspector_panel.set_version_tags_enabled(
+            service is not None and ref is not None
+        )
 
     def _enrich_view_from_catalog(self, view: AssetView) -> AssetView:
         resource = view.raw_asset
@@ -799,11 +830,193 @@ class DataPage(QWidget):
     def _handle_tag_removed(self, asset: object, tag_name: str) -> None:
         self._lifecycle.handle_tag_removed(asset, tag_name)
 
+    # --- Version Tags (F6) ---
+
+    def _handle_version_tag_added(self, version_id: str, tag_name: str) -> None:
+        if self._apply_version_tag(version_id, tag_name, add=True):
+            self._refresh()
+            self._update_inspector_for_current_selection()
+            self._set_action_status(f"已为版本添加标签 #{tag_name}")
+
+    def _handle_version_tag_removed(self, version_id: str, tag_name: str) -> None:
+        if self._apply_version_tag(version_id, tag_name, add=False):
+            self._refresh()
+            self._update_inspector_for_current_selection()
+            self._set_action_status(f"已从版本移除标签 #{tag_name}")
+
+    def _update_inspector_for_current_selection(self) -> None:
+        """Re-push the inspector after an out-of-band catalog change so the
+        versions table reflects it without requiring a re-selection."""
+        if self._selected_asset is not None:
+            self._update_inspector(self._selected_asset)
+
+    def _apply_version_tag(self, version_id: str, tag_name: str, *, add: bool) -> bool:
+        """Delegate a version-level tag change to the lifecycle controller
+        (``set_version_tag`` contract; guarded while it lands)."""
+        setter = getattr(self._lifecycle, "set_version_tag", None)
+        if setter is None:
+            self._set_action_status("版本标签需要数据目录支持")
+            return False
+        try:
+            ok = bool(setter(version_id, tag_name, add=add))
+        except Exception:
+            ok = False
+        if not ok:
+            self._set_action_status(f"版本标签操作失败: #{tag_name}")
+        return ok
+
+    # --- Bulk tag dialogs (F3) ---
+
     def _prompt_add_tag_to_assets(self, items: list[object]) -> None:
-        self._lifecycle.prompt_add_tag_to_assets(items)
+        dlg = BulkAddTagDialog(parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        names = dlg.tag_names()
+        if not names:
+            self._set_action_status("未输入有效标签")
+            return
+        total = 0
+        for name in names:
+            total += self._bulk_apply_tag(items, name, add=True)
+        self._refresh()
+        skipped = len(items) - sum(
+            1 for it in items if isinstance(self._unwrap_asset(it), ResourceItem)
+        )
+        suffix = f"（跳过 {skipped} 个成果项）" if skipped > 0 else ""
+        mirror = (
+            "（数据目录同步失败，标签仅写入项目数据）"
+            if getattr(self._lifecycle, "last_tag_mirror_failed", False)
+            else ""
+        )
+        self._set_action_status(
+            f"已为 {total} 项数据添加 {len(names)} 个标签{suffix}{mirror}"
+        )
 
     def _prompt_remove_tag_from_assets(self, items: list[object]) -> None:
-        self._lifecycle.prompt_remove_tag_from_assets(items)
+        union: set[str] = set()
+        for it in items:
+            unwrapped = self._unwrap_asset(it)
+            if isinstance(unwrapped, ResourceItem):
+                union.update(
+                    t for t in (unwrapped.tags or []) if t and str(t).strip()
+                )
+                # Catalog-only tags (e.g. added via Tag Manager on the asset)
+                # must be removable too — merge the bridged asset's tags in.
+                service, ref = self._catalog_bridge(unwrapped)
+                if service is not None and ref is not None:
+                    try:
+                        for tag in service.list_tags():
+                            if ref.asset_id in service.find_assets_by_tag(tag.name):
+                                union.add(tag.display_name or tag.name)
+                    except Exception:
+                        pass
+        if not union:
+            self._set_action_status("选中数据无可用标签")
+            return
+        dlg = BulkRemoveTagDialog(sorted(union), parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dlg.selected_tags()
+        if not selected:
+            return
+        total = 0
+        for name in selected:
+            total += self._bulk_apply_tag(items, name, add=False)
+        self._refresh()
+        mirror = (
+            "（数据目录同步失败，标签仅从项目数据移除）"
+            if getattr(self._lifecycle, "last_tag_mirror_failed", False)
+            else ""
+        )
+        self._set_action_status(f"已从 {total} 项数据移除 {len(selected)} 个标签{mirror}")
+
+    def _bulk_apply_tag(self, items: list[object], tag_name: str, *, add: bool) -> int:
+        """Apply one tag to many items via the controller bulk API; falls back
+        to the legacy per-resource loop while the contract method lands."""
+        bulk = getattr(self._lifecycle, "bulk_apply_tag", None)
+        if bulk is not None:
+            try:
+                return int(bulk(items, tag_name, add=add))
+            except Exception:
+                return 0
+        count = 0
+        for it in items:
+            unwrapped = self._unwrap_asset(it)
+            if not isinstance(unwrapped, ResourceItem):
+                continue
+            has = tag_name in (unwrapped.tags or [])
+            if add and not has:
+                unwrapped.tags.append(tag_name)
+                self._mirror_tag_to_catalog(unwrapped, tag_name, add=True)
+                count += 1
+            elif not add and has:
+                unwrapped.tags.remove(tag_name)
+                self._mirror_tag_to_catalog(unwrapped, tag_name, add=False)
+                count += 1
+        return count
+
+    # --- Multi-tag asset-table filter (F1) ---
+
+    def _on_navigation_filter_query(self, query: FilterQuery) -> None:
+        """Navigation node switches keep the toolbar tag filter applied — the
+        visible filter state (checked tags + operator) must never diverge from
+        what the table actually shows (search text is preserved the same way
+        inside ``set_filter_query``)."""
+        try:
+            tags = self.data_toolbar.current_tag_selection()
+            operator = self.data_toolbar.current_tag_operator()
+        except Exception:
+            tags, operator = [], "and"
+        if tags:
+            query = replace(query, tags=list(tags), tag_operator=operator)
+        self.asset_table.set_filter_query(query)
+
+    def _on_tag_filter_changed(self, tags: list[str], operator: str) -> None:
+        try:
+            base = self.navigation_tree.current_filter_query()
+        except Exception:
+            base = FilterQuery(node_type="all")
+        query = replace(base, tags=list(tags), tag_operator=operator)
+        self.asset_table.set_filter_query(query)
+
+    def _collect_tag_candidates(self) -> list[str]:
+        """Selectable tags for the toolbar 标签筛选 panel: legacy resource tags
+        plus catalog tag names when a catalog is active. One entry per
+        NORMALIZED tag (case/whitespace variants collapse to one row)."""
+        by_normalized: dict[str, str] = {}
+        for raw in (
+            str(t)
+            for r in self._resources
+            for t in (getattr(r, "tags", None) or [])
+        ):
+            name = raw.strip()
+            if name:
+                by_normalized.setdefault(normalize_tag_name(name), name)
+        service = self._catalog_service()
+        if service is not None:
+            try:
+                for tag in service.list_tags():
+                    by_normalized.setdefault(
+                        normalize_tag_name(tag.name), tag.display_name or tag.name
+                    )
+            except Exception:
+                pass
+        return sorted(by_normalized.values())
+
+    # --- Tag Manager (F2) ---
+
+    def _open_tag_manager(self) -> None:
+        dlg = TagManagerDialog(service_provider=self._catalog_service, parent=self)
+        dlg.tag_selected.connect(self._filter_assets_by_tag)
+        dlg.tags_changed.connect(self._refresh)
+        dlg.exec()
+
+    def _filter_assets_by_tag(self, tag_name: str) -> None:
+        """查看关联数据: filter the asset table to assets carrying *tag_name*.
+
+        Routes through the toolbar's tag-filter state so the visible filter
+        (checked menu entries, operator) matches what the table shows."""
+        self.data_toolbar.apply_tag_selection([tag_name], "and")
 
     # --- Integrity Verification ---
 

@@ -26,6 +26,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
+from paleo_workbench.catalog import audit as _audit
 from paleo_workbench.catalog import queries as _queries
 from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
@@ -660,10 +661,26 @@ class DataCatalogService:
         atomic operation (thread-safe: workers must not mutate
         ``document.assets`` directly — this is the only sanctioned path).
 
+        When *run_id* is given, the new version's lineage parents are set to
+        the run's input versions, so DERIVED/OUTPUT results stay traceable to
+        their inputs through the version graph (not only via the run record).
+        Inputs that no longer exist (e.g. purged after the run was recorded)
+        are filtered out so new versions are never born with broken lineage —
+        the run record itself keeps the full historical reference list.
+
         On failure the newly-created asset is rolled back from the document,
         so no half-registered asset survives. Returns the committed version.
         """
         with self._lock:
+            parents: list[str] = []
+            if run_id is not None:
+                self._ensure_maps()
+                known = self._version_by_id
+                parents = [
+                    pid
+                    for pid in self.get_run(run_id).input_version_ids
+                    if pid in known
+                ]
             asset = self._new_asset(name, type, format, asset_metadata)
             self._add_asset(asset)
             try:
@@ -671,6 +688,7 @@ class DataCatalogService:
                     asset.id,
                     source_path,
                     stage,
+                    parent_version_ids=parents,
                     run_id=run_id,
                     metadata=version_metadata,
                 )
@@ -801,8 +819,14 @@ class DataCatalogService:
             raise
         return version
 
-    def materialize_external(self, version_id: str) -> DataVersion:
-        """Promote an external link to a managed immutable RAW snapshot."""
+    def materialize_external(
+        self, version_id: str, *, run_id: str | None = None
+    ) -> DataVersion:
+        """Promote an external link to a managed immutable RAW snapshot.
+
+        When *run_id* is given the snapshot version is linked as that run's
+        output (same atomic save), recording who/when materialized the file.
+        """
         linked = self._version_or_raise(version_id)
         if linked.managed:
             raise CatalogError(f"Version {version_id} is already managed")
@@ -814,6 +838,7 @@ class DataCatalogService:
             source,
             DataStage.RAW,
             parent_version_ids=[linked.id],
+            run_id=run_id,
         )
 
     # -- working copies / derived --------------------------------------------
@@ -1760,6 +1785,17 @@ class DataCatalogService:
         """
         return _queries.verify_integrity(self, version_id=version_id)
 
+    def audit(self, *, deep: bool = False) -> "_audit.AuditReport":
+        """Structural audit of the catalog (detection only, never mutates).
+
+        Checks payload existence, lineage references, tag associations,
+        ``current_version_id`` validity, storage layout, and orphan files.
+        ``deep=True`` additionally re-hashes payloads (integrity mismatches).
+
+        Delegates to :func:`paleo_workbench.catalog.audit.audit_catalog`.
+        """
+        return _audit.audit_catalog(self, deep=deep)
+
     # -- tags ------------------------------------------------------------------
 
     def _tag_by_name(self, name: str) -> Tag | None:
@@ -1872,12 +1908,98 @@ class DataCatalogService:
         """Delegates to :func:`paleo_workbench.catalog.tags.remove_tag`."""
         return _tags.remove_tag(self, name, asset_id=asset_id, version_id=version_id)
 
-    def rename_tag(self, old_name: str, new_name: str) -> Tag:
-        """Rename a tag; merges into an existing tag on normalized collision.
+    def rename_tag(
+        self,
+        old_name: str,
+        new_name: str,
+        *,
+        on_collision: str = "merge",
+    ) -> Tag:
+        """Rename a tag. On normalized collision with an existing tag the
+        default ``merge`` re-points associations at the existing tag;
+        ``on_collision="error"`` refuses the rename instead.
 
         Delegates to :func:`paleo_workbench.catalog.tags.rename_tag`.
         """
-        return _tags.rename_tag(self, old_name, new_name)
+        return _tags.rename_tag(
+            self, old_name, new_name, on_collision=on_collision
+        )
+
+    def merge_tags(self, source_name: str, target_name: str) -> Tag:
+        """Merge *source_name* into *target_name* (both must exist); the source
+        tag entity is dropped with no dangling associations.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.merge_tags`.
+        """
+        return _tags.merge_tags(self, source_name, target_name)
+
+    def create_tag(self, name: str) -> Tag:
+        """Create (or return) a tag entity with no associations (one write).
+
+        Delegates to :func:`paleo_workbench.catalog.tags.create_tag`.
+        """
+        return _tags.create_tag(self, name)
+
+    def bulk_add_tag(
+        self,
+        name: str,
+        *,
+        asset_ids: Iterable[str] = (),
+        version_ids: Iterable[str] = (),
+    ) -> Tag:
+        """Associate one tag with many assets/versions in ONE catalog write.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.bulk_add_tag`.
+        """
+        return _tags.bulk_add_tag(
+            self, name, asset_ids=list(asset_ids), version_ids=list(version_ids)
+        )
+
+    def bulk_remove_tag(
+        self,
+        name: str,
+        *,
+        asset_ids: Iterable[str] = (),
+        version_ids: Iterable[str] = (),
+    ) -> None:
+        """Remove one tag association from many assets/versions in ONE write.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.bulk_remove_tag`.
+        """
+        return _tags.bulk_remove_tag(
+            self, name, asset_ids=list(asset_ids), version_ids=list(version_ids)
+        )
+
+    def tag_usage(self) -> dict[str, dict]:
+        """Per-tag association counts: ``{tag_id: {"name", "display_name",
+        "assets", "versions"}}`` — Asset Tags and Version Tags counted apart.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.tag_usage`.
+        """
+        return _tags.tag_usage(self)
+
+    def search_tags(
+        self, text: str, *, limit: int | None = None
+    ) -> list[Tag]:
+        """Substring search over tag names (normalized both sides).
+
+        Delegates to :func:`paleo_workbench.catalog.tags.search_tags`.
+        """
+        return _tags.search_tags(self, text, limit=limit)
+
+    def delete_unused_tag(self, name: str) -> Tag:
+        """Delete a zero-association tag entity; refuses tags still in use.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.delete_unused_tag`.
+        """
+        return _tags.delete_unused_tag(self, name)
+
+    def prune_unused_tags(self) -> list[Tag]:
+        """Delete every zero-association tag entity; returns the removed ones.
+
+        Delegates to :func:`paleo_workbench.catalog.tags.prune_unused_tags`.
+        """
+        return _tags.prune_unused_tags(self)
 
     def list_tags(self) -> list[Tag]:
         """Delegates to :func:`paleo_workbench.catalog.tags.list_tags`."""
@@ -1899,12 +2021,16 @@ class DataCatalogService:
         text: str | None = None,
         stage: DataStage | None = None,
         tag: str | None = None,
+        tags: list[str] | tuple[str, ...] | None = None,
+        tag_op: str = "and",
         type: str | None = None,
         include_trashed: bool = False,
     ) -> list[DataAsset]:
-        """Filter assets by name substring, stage, tag, and/or type.
+        """Filter assets by name substring, stage, tag(s), and/or type.
 
-        Trashed (soft-deleted) assets are excluded unless ``include_trashed``.
+        ``tags`` accepts several tag names combined with ``tag_op``
+        (``"and"`` / ``"or"``). Trashed (soft-deleted) assets are excluded
+        unless ``include_trashed``.
 
         Delegates to :func:`paleo_workbench.catalog.queries.search_assets`.
         """
@@ -1913,6 +2039,8 @@ class DataCatalogService:
             text=text,
             stage=stage,
             tag=tag,
+            tags=tags,
+            tag_op=tag_op,
             type=type,
             include_trashed=include_trashed,
         )
@@ -1958,17 +2086,6 @@ class DataCatalogService:
             if rewritten is not None:
                 model_version.artifact_uri = rewritten
                 changed = True
-            # The trash tombstone records the ORIGINAL payload path; it must
-            # be rebased with the same head-swap or restore after save-as
-            # strands the payload outside the current artifacts root (H7/I).
-            trash = (version.metadata or {}).get("trash")
-            if isinstance(trash, dict):
-                orig = trash.get("original_path")
-                if orig:
-                    ohead, osep, orest = str(orig).partition("/")
-                    if osep and ohead.endswith(".artifacts") and ohead != current:
-                        trash["original_path"] = f"{current}/{orest}"
-                        changed = True
         if changed:
             self._save()
         return changed

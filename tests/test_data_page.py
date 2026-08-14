@@ -215,11 +215,15 @@ def test_data_page_reset_columns_action_restores_defaults(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
 
-    # Add a column, then reset → back to name-only default.
+    # Add a column, then reset → back to the seven default columns (F5).
     page.column_actions["path"].trigger()
     page.reset_columns_action.trigger()
 
-    assert _table_headers(page) == ["文件名"]
+    from paleo_workbench.ui.pages.data_table_columns import COLUMN_BY_KEY
+
+    assert _table_headers(page) == [
+        COLUMN_BY_KEY[key].label for key in DEFAULT_COLUMN_KEYS
+    ]
     assert page.asset_table.visible_column_keys() == DEFAULT_COLUMN_KEYS
 
 
@@ -580,9 +584,9 @@ def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
     update_counts: list[int] = []
     original_update_assets = page.asset_table.update_assets
 
-    def tracking_update_assets(resources, artifacts):
+    def tracking_update_assets(resources, artifacts, project_root=None):
         update_counts.append(len(resources))
-        return original_update_assets(resources, artifacts)
+        return original_update_assets(resources, artifacts, project_root=project_root)
 
     page.asset_table.update_assets = tracking_update_assets
 

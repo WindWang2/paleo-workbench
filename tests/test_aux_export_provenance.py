@@ -17,6 +17,7 @@ from paleo_workbench.catalog import (
     CoreCatalogAdapter,
     DataCatalogService,
     DataStage,
+    reset_catalog,
     set_catalog,
 )
 from paleo_workbench.project.models import ProjectDocument
@@ -40,6 +41,9 @@ def catalog(tmp_path: Path):
     adapter = CoreCatalogAdapter(service)
     set_catalog(adapter)
     yield adapter
+    # Reset the runtime BEFORE closing: a leaked adapter over a closed service
+    # would poison get_catalog() for test modules that run after this one.
+    reset_catalog()
     service.close()
 
 
