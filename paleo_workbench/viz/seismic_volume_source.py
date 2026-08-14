@@ -197,6 +197,7 @@ class SeismicVolumeSource:
 
     def close(self) -> None:
         with self._lock:
+            source_id = self.source_id
             self._closed = True
             if self._loader is not None:
                 try:
@@ -204,6 +205,15 @@ class SeismicVolumeSource:
                 except Exception:
                     pass
                 self._loader = None
+            # Keep _meta for source_id identity after close; drop the loader so
+            # later reads cannot refill the shared cache with a pseudo cube.
+        # Do not flush the process-global cache: a sibling shared source may
+        # still be serving slices under the same source_id.
+        if self._cache is not get_global_seismic_cache():
+            try:
+                self._cache.invalidate_source(source_id)
+            except Exception:
+                pass
 
     def _loader_has_geometry(self) -> bool:
         """True when the loader's open handle exposes real ilines/xlines.
@@ -237,6 +247,8 @@ class SeismicVolumeSource:
     def _read_orientation(
         self, kind: Orientation, index: int, *, lod: int = 0
     ) -> np.ndarray:
+        if self._closed:
+            raise RuntimeError("SeismicVolumeSource is closed")
         meta = self.metadata()
         if (
             meta.is_pseudo
@@ -290,6 +302,8 @@ class SeismicVolumeSource:
         Uses strided engine downsampling when geometry is available; falls back
         to the legacy pseudo-3D path only when geometry is absent.
         """
+        if self._closed:
+            raise RuntimeError("SeismicVolumeSource is closed")
         meta = self.metadata()
         key = SeismicCacheKey(
             source_id=meta.source_id,

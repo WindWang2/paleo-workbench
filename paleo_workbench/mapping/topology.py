@@ -51,8 +51,15 @@ class TopologyService:
             from shapely.geometry import shape
             from shapely.validation import explain_validity
         except ImportError:
-            shape = None
-            explain_validity = None
+            return [
+                {
+                    "severity": "error",
+                    "layer_id": "",
+                    "feature_id": "",
+                    "code": "shapely_unavailable",
+                    "message": "拓扑检查需要 Shapely/GEOS，当前不可用",
+                }
+            ]
         for layer in layers:
             session = layer.edit_session
             features = session.features() if session is not None else layer.features()

@@ -59,15 +59,28 @@ class OwnedWorkerJob(QObject):
         self._worker = worker
         self._cancel = cancel
         self._target = target
-        self._result_connections = list(result_connections)
+        self._result_connections = []
         worker.moveToThread(thread)
         thread.started.connect(worker.run)  # type: ignore[attr-defined]
-        for signal, slot in self._result_connections:
+        state = self._state
+        for signal, slot in result_connections:
             # Result slots belong to the page/controller (GUI thread), while
             # workers live in the owned QThread.  Force queued delivery even
             # for a Python callable so a completion can never mutate Qt state
-            # from the worker thread.
-            signal.connect(slot, Qt.ConnectionType.QueuedConnection)
+            # from the worker thread.  Guard with the job released flag so a
+            # QMetaCall already queued before shutdown cannot commit after
+            # disconnect (Qt still delivers posted queued events).
+            def _guarded(*args, _slot=slot, _state=state, **kwargs):
+                if _state.get("released"):
+                    return None
+                try:
+                    return _slot(*args, **kwargs)
+                except RuntimeError:
+                    # QObject already deleted during teardown; drop the late call.
+                    return None
+
+            signal.connect(_guarded, Qt.ConnectionType.QueuedConnection)
+            self._result_connections.append((signal, _guarded))
         for signal in terminal_signals:
             signal.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         # Move worker back to the main thread on thread finish, executing on the worker's thread.
@@ -100,6 +113,9 @@ class OwnedWorkerJob(QObject):
         if thread is None or worker is None:
             return True
 
+        # Mark released before disconnect so any already-queued result
+        # delivery is dropped by the guarded slot.
+        self._state["released"] = True
         self._disconnect_results()
         # Disconnect our own slot so no queued thread.finished signal can
         # arrive after identity is released (C-2 race-condition guard).

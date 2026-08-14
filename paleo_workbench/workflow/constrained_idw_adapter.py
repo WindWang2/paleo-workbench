@@ -362,6 +362,14 @@ def run_constrained_idw(
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
 
+    try:
+        import scipy.ndimage  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "约束IDW 需要 SciPy（scipy.ndimage）才能保持可达域/孔洞填充语义；"
+            "当前环境未安装 SciPy，拒绝降级为不同网格。"
+        ) from exc
+
     engine = _ensure_haiyou_engine()
     generate = engine["generate_constrained_idw"]
     Config = engine["Config"]

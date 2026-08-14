@@ -13,6 +13,7 @@ Bounded ``result_summary`` for PredictionTask must not embed full grids.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from paleo_workbench.prediction.model_package import (
@@ -176,7 +177,14 @@ def is_map_compilable(payload: dict[str, Any] | None) -> bool:
     stype = spatial_type_of(payload)
     if stype != SPATIAL_VECTOR_POLYGONS:
         return False
-    return bool(extract_polygon_features(payload))
+    features = extract_polygon_features(payload)
+    if not features:
+        return False
+    for feat in features:
+        coords = (feat.get("geometry") or {}).get("coordinates")
+        if _looks_like_demo_square(coords):
+            return False
+    return True
 
 
 def _has_finite_ring(coords: Any) -> bool:
@@ -206,6 +214,11 @@ def _looks_like_demo_square(coords: Any) -> bool:
             ring = ring[0]
         xs = [float(p[0]) for p in ring]
         ys = [float(p[1]) for p in ring]
-        return min(xs) == 114.0 and min(ys) == 22.5 and max(xs) - min(xs) == 0.04
+        return (
+            math.isclose(min(xs), 114.0, abs_tol=1e-6)
+            and math.isclose(min(ys), 22.5, abs_tol=1e-6)
+            and math.isclose(max(xs) - min(xs), 0.04, abs_tol=1e-6)
+            and math.isclose(max(ys) - min(ys), 0.04, abs_tol=1e-6)
+        )
     except (TypeError, ValueError, IndexError):
         return False
