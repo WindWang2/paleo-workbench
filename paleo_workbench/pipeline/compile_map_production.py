@@ -267,6 +267,7 @@ def _register_lineage(
         service, "register_result_asset"
     ):
         tmp: Path | None = None
+        run_id: str | None = None
         try:
             from paleo_workbench.catalog.models import DataStage
 
@@ -281,6 +282,7 @@ def _register_lineage(
                 generator=PRODUCTION_MAP_GENERATOR,
                 status="running",
             )
+            run_id = run.id
             out = service.register_result_asset(
                 name=doc.name,
                 type="paleomap",
@@ -302,7 +304,11 @@ def _register_lineage(
             )
             return
         except Exception:
-            pass
+            if run_id is not None:
+                try:
+                    service.update_run_status(run_id, "failed")
+                except Exception:
+                    pass
         finally:
             if tmp is not None:
                 try:

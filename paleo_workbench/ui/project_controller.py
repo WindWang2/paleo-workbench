@@ -8,7 +8,11 @@ from pydantic import ValidationError
 
 from paleo_workbench.project.manager import ProjectManager
 from paleo_workbench.project.models import ProjectDocument
-from paleo_workbench.project.paths import ProjectPathError, artifact_dir_for
+from paleo_workbench.project.paths import (
+    ProjectPathError,
+    artifact_dir_for,
+    rebase_owned_artifact_path,
+)
 from paleo_workbench.pipeline.assets import ensure_demo_prediction
 from paleo_workbench.pipeline.bootstrap import (
     bootstrap_sample_project,
@@ -378,33 +382,39 @@ class ProjectController:
         """Keep runtime artifact paths aligned after a successful save-as relocation."""
         old_root = artifact_dir_for(old_project_path).resolve()
         new_root = artifact_dir_for(new_project_path).resolve()
+        old_dir = Path(old_project_path).expanduser().resolve().parent
         for task in self.window.project.factor_map_tasks:
             raw = task.grid_artifact_path
             if not raw:
                 continue
-            try:
-                relative = Path(raw).resolve().relative_to(old_root)
-            except ValueError:
-                continue
-            task.grid_artifact_path = (new_root / relative).as_posix()
+            rebased = rebase_owned_artifact_path(
+                raw, old_root=old_root, new_root=new_root, project_dir=old_dir
+            )
+            if rebased is not None:
+                task.grid_artifact_path = rebased
 
     def _rebase_interpretation_artifact_paths(
         self, old_project_path: Path, new_project_path: Path
     ) -> None:
-        """Rebase only interpretation payloads owned by the moved artifact tree."""
+        """Rebase horizon / correlation / fault payloads owned by the moved tree."""
 
         old_root = artifact_dir_for(old_project_path).resolve()
         new_root = artifact_dir_for(new_project_path).resolve()
-        for interpretation in self.window.project.horizon_interpretations:
-            raw = interpretation.artifact_path
+        old_dir = Path(old_project_path).expanduser().resolve().parent
+        refs = (
+            list(self.window.project.horizon_interpretations)
+            + list(self.window.project.correlation_interpretations)
+            + list(self.window.project.fault_interpretations)
+        )
+        for interpretation in refs:
+            raw = getattr(interpretation, "artifact_path", None)
             if not raw:
                 continue
-            try:
-                relative = Path(raw).resolve().relative_to(old_root)
-            except ValueError:
-                # Explicitly external payloads keep their original path.
-                continue
-            interpretation.artifact_path = (new_root / relative).as_posix()
+            rebased = rebase_owned_artifact_path(
+                raw, old_root=old_root, new_root=new_root, project_dir=old_dir
+            )
+            if rebased is not None:
+                interpretation.artifact_path = rebased
 
     def _flush_joint_analysis_state(self) -> None:
         """Persist joint presentation from 井震联合 page before project write.

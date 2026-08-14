@@ -312,7 +312,7 @@ class FreshnessService:
 
         reasons: list[FreshnessReason] = []
         status = (run.status or "").lower()
-        if status in {"failed", "error"}:
+        if status in {"failed", "error", "cancelled", "canceled"}:
             report = FreshnessReport(
                 state=FreshnessState.FAILED,
                 subject_kind="run",

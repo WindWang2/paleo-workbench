@@ -167,6 +167,39 @@ def ensure_artifact_layout(project_path: Path) -> Path:
     return root
 
 
+def rebase_owned_artifact_path(
+    raw: str,
+    *,
+    old_root: Path,
+    new_root: Path,
+    project_dir: Path | None = None,
+) -> str | None:
+    """Rewrite a project-owned artifact path after Save As relocation.
+
+    Tries resolve-against-old-root first, then a ``<name>.artifacts/`` prefix
+    rewrite so relative refs that resolve against CWD still move with the
+    project. Returns None when the path is external / unrelated.
+    """
+    if not raw:
+        return None
+    candidates = [Path(raw)]
+    if project_dir is not None and not Path(raw).is_absolute():
+        candidates.append(Path(project_dir) / raw)
+    for candidate in candidates:
+        try:
+            relative = candidate.resolve().relative_to(old_root)
+        except ValueError:
+            continue
+        return (new_root / relative).as_posix()
+    posix = Path(raw).as_posix()
+    old_name = old_root.name
+    new_name = new_root.name
+    prefix = f"{old_name}/"
+    if posix.startswith(prefix) and old_name.endswith(".artifacts"):
+        return f"{new_name}/{posix[len(prefix):]}"
+    return None
+
+
 def project_dir_for(project_path: Path) -> Path:
     """Return the resolved directory that contains the ``.paleo.json`` file."""
     return Path(project_path).expanduser().resolve().parent

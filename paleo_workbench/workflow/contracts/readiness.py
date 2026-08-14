@@ -2,12 +2,14 @@
 
 Distinct from Stage-9 freshness: readiness asks whether required inputs
 exist to *run* a module; freshness asks whether existing results are current.
-Never loads SEG-Y/LAS bodies or factor NPZ arrays.
+Never loads SEG-Y/LAS bodies or factor NPZ arrays. Evaluation must not
+mutate catalog or project state (read-only query).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from paleo_workbench.workflow.contracts.models import (
@@ -42,12 +44,47 @@ class ReadinessReport:
         }
 
 
+def _resource_payload_present(resource: Any, project: Any) -> bool:
+    """True when *resource* still looks like a usable metadata input.
+
+    Metadata-only: ``Path.exists`` / status check, never open(). Relative
+    fixture paths without a real ``project_root`` stay counted so in-memory
+    tests keep working. Absolute missing files and ``status=missing`` do not.
+    """
+    if getattr(resource, "status", "indexed") == "missing":
+        return False
+    path = getattr(resource, "path", "") or ""
+    if not path:
+        return True
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate.exists()
+    meta = getattr(project, "meta", None)
+    root = getattr(meta, "project_root", "") or "" if meta is not None else ""
+    if root and root != ".":
+        root_path = Path(root)
+        if root_path.is_dir():
+            return (root_path / path).exists()
+    return True
+
+
 def _resource_counts(project: Any) -> dict[str, int]:
     counts: dict[str, int] = {}
     for r in getattr(project, "resources", None) or []:
+        if not _resource_payload_present(r, project):
+            continue
         t = getattr(r, "type", "") or "unknown"
         counts[t] = counts.get(t, 0) + 1
     return counts
+
+
+def _count_complete_factor_maps(project: Any) -> int:
+    """Count factor tasks that actually completed (not leftover failed paths)."""
+    return sum(
+        1
+        for t in (getattr(project, "factor_map_tasks", None) or [])
+        if getattr(t, "status", "") == "complete"
+    )
 
 
 def _count_for_types(counts: dict[str, int], types: list[str]) -> int:
@@ -96,12 +133,9 @@ def evaluate_contract_readiness(
         elif inp.id == "map_document":
             n = len(getattr(project, "paleomap_documents", None) or [])
         elif inp.id == "factor_maps":
-            n = sum(
-                1
-                for t in (getattr(project, "factor_map_tasks", None) or [])
-                if getattr(t, "status", "") == "complete"
-                or getattr(t, "grid_artifact_path", None)
-            )
+            # A failed task with a stale grid_artifact_path is not a usable
+            # input; only tasks that actually completed count.
+            n = _count_complete_factor_maps(project)
         elif inp.id in {"source_products", "prediction_or_factors", "parent_version", "seismic_or_seed"}:
             # optional-ish; required handled below by cardinality on other fields
             continue
@@ -130,6 +164,17 @@ def evaluate_contract_readiness(
                     code=f"missing_input:{inp.id}",
                     message_zh=f"缺少必需输入：{inp.name}",
                     severity="block",
+                    input_id=inp.id,
+                )
+            )
+        elif n > 1 and inp.cardinality is InputCardinality.EXACTLY_ONE:
+            # EXACTLY_ONE is not ">=1": a contract declaring a single input
+            # cannot silently pick among several matches.
+            reasons.append(
+                ReadinessReason(
+                    code=f"ambiguous_input:{inp.id}",
+                    message_zh=f"{inp.name} 需要恰好一个输入，当前有 {n} 个",
+                    severity="warn",
                     input_id=inp.id,
                 )
             )
@@ -264,12 +309,10 @@ def evaluate_contract_readiness(
                 )
             )
         # Stage-13: infrastructure readiness ≠ production model availability.
+        # Read-only: never seed/mutate the catalog from an evaluation.
         try:
             from paleo_workbench.catalog import get_catalog_service
-            from paleo_workbench.prediction.providers import (
-                CAPABILITY_FACIES,
-                ensure_default_models,
-            )
+            from paleo_workbench.prediction.providers import CAPABILITY_FACIES
 
             svc = get_catalog_service()
             if svc is None:
@@ -281,20 +324,28 @@ def evaluate_contract_readiness(
                     )
                 )
             else:
-                ensure_default_models(svc)
-                if svc.find_production_model(CAPABILITY_FACIES) is None:
+                try:
+                    if svc.find_production_model(CAPABILITY_FACIES) is None:
+                        reasons.append(
+                            ReadinessReason(
+                                code="no_production_model",
+                                message_zh="未配置生产模型；科学预测不可用（演示路径仍可单独运行）",
+                                severity="warn",
+                            )
+                        )
+                except Exception:
                     reasons.append(
                         ReadinessReason(
-                            code="no_production_model",
-                            message_zh="未配置生产模型；科学预测不可用（演示路径仍可单独运行）",
+                            code="catalog_read_error",
+                            message_zh="目录查询失败，无法确认生产模型状态",
                             severity="warn",
                         )
                     )
         except Exception:
             reasons.append(
                 ReadinessReason(
-                    code="no_production_model",
-                    message_zh="未配置生产模型（或目录未连接）",
+                    code="catalog_read_error",
+                    message_zh="目录查询失败，无法确认生产模型状态",
                     severity="warn",
                 )
             )
