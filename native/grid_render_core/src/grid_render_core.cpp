@@ -2,6 +2,7 @@
 #include "grid_render_core.hpp"
 
 #include <cmath>
+#include <cstring>
 
 namespace pwb::grid_render {
 
@@ -15,6 +16,13 @@ void render_grid_rgba(const int width, const int height,
                       std::uint8_t opacity,
                       std::uint8_t* out) noexcept {
     if (width <= 0 || height <= 0 || lut_size < 1 || !grid_z || !lut || !out) {
+        // Never return uninitialized memory to the caller: zero the output so
+        // a degenerate early return yields a fully transparent raster instead
+        // of raw heap contents.
+        if (out != nullptr && width > 0 && height > 0) {
+            std::memset(out, 0,
+                        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+        }
         return;
     }
     if (!(gamma > 0.0f)) {

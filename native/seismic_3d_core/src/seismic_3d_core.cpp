@@ -341,6 +341,13 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
     float* dst = static_cast<float*>(r_buf.ptr);
     std::fill(dst, dst + ni * nx * nt, 1.0f);
 
+    if (ni == 0 || nx == 0 || nt == 0) {
+        // Degenerate volume: the coherence default (1.0) is already filled.
+        // Returning here avoids `nt - 1` underflowing to SIZE_MAX below, which
+        // indexed the empty mean_sq/sum_sq vectors (segfault).
+        return result;
+    }
+
     // size_t loop variables avoid the int->size_t sign-conversion hazard at
     // extremely large dims (review M2) and keep the running-sum window math
     // in unsigned space consistently.
@@ -474,7 +481,10 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
                         // triangles (cpp-core-review I2). Skip the whole cube
                         // — the surface simply has a hole where data is
                         // missing, rather than emitting NaN vertices.
-                        if (std::isnan(v)) {
+                        // Non-finite includes ±Inf: an +Inf corner classifies
+                        // as inside, and Inf/Inf interpolation still yields
+                        // NaN vertices (audit I5).
+                        if (!std::isfinite(v)) {
                             cube_has_nan = true;
                             break;
                         }

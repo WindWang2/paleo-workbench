@@ -70,8 +70,11 @@ py::array_t<std::uint8_t> render_grid_rgba_py(
     const int width = static_cast<int>(gz.shape[1]);
 
     auto lu = lut.request();
-    if (lu.ndim != 2 || lu.shape[1] != 4) {
-        throw std::invalid_argument("lut must be a (lut_size, 4) RGBA uint8 array");
+    // shape[0] >= 1 is required: an empty LUT would make the core renderer
+    // return early while the output buffer (allocated unzeroed) still holds
+    // raw heap garbage that would be handed back to Python.
+    if (lu.ndim != 2 || lu.shape[0] < 1 || lu.shape[1] != 4) {
+        throw std::invalid_argument("lut must be a (lut_size, 4) RGBA uint8 array with at least one entry");
     }
     const int lut_size = static_cast<int>(lu.shape[0]);
 

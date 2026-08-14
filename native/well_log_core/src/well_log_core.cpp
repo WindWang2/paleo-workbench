@@ -282,12 +282,17 @@ py::tuple fast_las_parse_data(const std::string& content, double null_value = -9
     // Surface long-row truncation (M8): previously extra columns vanished
     // silently. py::warn requires the GIL, which is held again here.
     if (truncated_rows > 0 && !headers.empty()) {
-        PyErr_WarnEx(
-            PyExc_UserWarning,
-            ("LAS data has " + std::to_string(truncated_rows) + " row(s) with more "
-             "columns than the " + std::to_string(num_cols) + " declared header(s); "
-             "extra columns were truncated").c_str(),
-            1);
+        if (PyErr_WarnEx(
+                PyExc_UserWarning,
+                ("LAS data has " + std::to_string(truncated_rows) + " row(s) with more "
+                 "columns than the " + std::to_string(num_cols) + " declared header(s); "
+                 "extra columns were truncated").c_str(),
+                1) < 0) {
+            // Warning escalated to error (-W error): a Python exception is now
+            // set. Returning a value with a pending exception would surface as
+            // a bogus SystemError, so propagate the real error (audit I11).
+            throw py::error_already_set();
+        }
     }
 
     py::tuple py_headers(headers.size());

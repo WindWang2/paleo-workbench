@@ -18,10 +18,20 @@ using pwb::qgis_render::VectorLayerSpec;
 
 namespace {
 
+py::dict as_dict(const py::handle& value, const char* what) {
+    // reinterpret_borrow without a type check would run PyDict_Next on a
+    // non-dict (user-typed JSON can supply lists/strings) — undefined
+    // behavior. Validate and raise a proper TypeError instead (audit I6).
+    if (!py::isinstance<py::dict>(value)) {
+        throw py::type_error(std::string(what) + " must be a dict");
+    }
+    return py::reinterpret_borrow<py::dict>(value);
+}
+
 std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
     std::vector<VectorLayerSpec> layers;
     for (const py::handle item : values) {
-        const py::dict data = py::reinterpret_borrow<py::dict>(item);
+        const py::dict data = as_dict(item, "layer");
         VectorLayerSpec layer;
         layer.id = py::cast<std::string>(data["id"]);
         layer.name = py::cast<std::string>(data["name"]);
@@ -31,7 +41,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             layer.source_path = py::cast<std::string>(data["source_path"]);
         }
         if (data.contains("style")) {
-            const py::dict style = py::reinterpret_borrow<py::dict>(data["style"]);
+            const py::dict style = as_dict(data["style"], "layer style");
             if (style.contains("fill")) layer.fill = py::cast<std::string>(style["fill"]);
             if (style.contains("stroke")) layer.stroke = py::cast<std::string>(style["stroke"]);
             if (style.contains("stroke_width")) layer.stroke_width = py::cast<double>(style["stroke_width"]);
@@ -39,7 +49,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             if (style.contains("renderer")) layer.renderer_kind = py::cast<std::string>(style["renderer"]);
             if (style.contains("field")) layer.classification_field = py::cast<std::string>(style["field"]);
             if (style.contains("categories")) {
-                const py::dict categories = py::reinterpret_borrow<py::dict>(style["categories"]);
+                const py::dict categories = as_dict(style["categories"], "style categories");
                 for (const auto item : categories) {
                     layer.categories.push_back({
                         py::cast<std::string>(py::str(item.first)),
@@ -50,7 +60,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
             }
             if (style.contains("ranges")) {
                 for (const py::handle range_item : py::reinterpret_borrow<py::iterable>(style["ranges"])) {
-                    const py::dict range = py::reinterpret_borrow<py::dict>(range_item);
+                    const py::dict range = as_dict(range_item, "style range");
                     layer.ranges.push_back({
                         py::cast<double>(range["lower"]),
                         py::cast<double>(range["upper"]),
@@ -60,7 +70,7 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
                 }
             }
             if (style.contains("labels")) {
-                const py::dict labels = py::reinterpret_borrow<py::dict>(style["labels"]);
+                const py::dict labels = as_dict(style["labels"], "style labels");
                 layer.labels_enabled = labels.contains("field") && !py::cast<std::string>(labels["field"]).empty();
                 if (labels.contains("field")) layer.label_field = py::cast<std::string>(labels["field"]);
                 if (labels.contains("font_family")) layer.label_font_family = py::cast<std::string>(labels["font_family"]);
@@ -74,14 +84,14 @@ std::vector<VectorLayerSpec> parse_layers(const py::iterable& values) {
         layer.visible = py::cast<bool>(data["visible"]);
         layer.opacity = py::cast<double>(data["opacity"]);
         for (const py::handle feature_item : py::reinterpret_borrow<py::iterable>(data["features"])) {
-            const py::dict feature = py::reinterpret_borrow<py::dict>(feature_item);
+            const py::dict feature = as_dict(feature_item, "feature");
             FeatureSpec parsed{
                 py::cast<std::string>(feature["id"]),
                 py::cast<std::string>(feature["wkt"]),
                 {},
             };
             if (feature.contains("attributes")) {
-                const py::dict attributes = py::reinterpret_borrow<py::dict>(feature["attributes"]);
+                const py::dict attributes = as_dict(feature["attributes"], "feature attributes");
                 for (const auto attribute : attributes) {
                     parsed.attributes.emplace_back(
                         py::cast<std::string>(py::str(attribute.first)),
