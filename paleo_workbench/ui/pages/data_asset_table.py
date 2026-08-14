@@ -111,15 +111,19 @@ class DataAssetTable(QWidget):
         resources: list[ResourceItem],
         artifacts: list[ExportArtifact],
         project_root: Path | None = None,
+        *,
+        extra_assets: list[object] | None = None,
+        enricher=None,
     ) -> None:
         self._resources = list(resources)
         self._artifacts = list(artifacts)
         self._project_root = project_root
-        assets: list[object] = [*self._resources, *self._artifacts]
+        assets: list[object] = [*self._resources, *self._artifacts, *(extra_assets or [])]
         # project_root makes project-relative paths resolvable so relative
         # assets are not misreported as MISSING (F4).
-        self._index.rebuild(assets, project_root=project_root)
+        self._index.rebuild(assets, project_root=project_root, enricher=enricher)
         self.model.set_project_root(project_root)
+        self.model.set_view_enricher(enricher)
         self._filter_query.search_text = self._search_text
         filtered = self._index.filter_query(self._filter_query)
         self.model.set_assets_filtered(

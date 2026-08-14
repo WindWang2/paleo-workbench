@@ -1,6 +1,8 @@
 """Host for ``geoviz_well_log.WellSectionCanvas`` (Multi-Well Correlation Workbench)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -142,9 +144,38 @@ class WellSectionHost:
         if path:
             pixmap = self.canvas.grab()
             if pixmap.save(path):
+                self._register_export(path)
                 QMessageBox.information(self.widget, "导出成功", f"剖面图件已成功保存至:\n{path}")
             else:
                 QMessageBox.warning(self.widget, "导出失败", "图像保存失败，请检查文件写入权限。")
+
+    @staticmethod
+    def _register_export(path: str) -> None:
+        """Register the exported figure as a catalog OUTPUT version.
+
+        Every scientific artifact leaves the app with provenance (checksum,
+        timestamp, export run); a registration failure never blocks the
+        export itself — the file on disk is already the user's deliverable.
+        """
+        try:
+            from paleo_workbench.catalog import get_catalog
+            from paleo_workbench.catalog.lifecycle import register_export_output
+
+            register_export_output(
+                name=Path(path).name,
+                output_path=path,
+                fmt="png",
+                linked_id="viz_well_section",
+                catalog=get_catalog(),
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "well-section export catalog registration failed for %s",
+                path,
+                exc_info=True,
+            )
 
     def clear(self) -> None:
         self.canvas.set_wells([])

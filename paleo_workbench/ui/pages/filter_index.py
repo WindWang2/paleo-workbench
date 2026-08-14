@@ -49,7 +49,7 @@ _STATUS_LABELS = {
 
 @dataclass
 class FilterQuery:
-    node_type: str = "all"  # "all", "stage", "type", "tag", "integrity"
+    node_type: str = "all"  # "all", "stage", "type", "tag", "integrity", "review_status"
     node_value: str | None = None
     search_text: str = ""
     stage: str | None = None
@@ -61,6 +61,9 @@ class FilterQuery:
     # The legacy singular ``tag`` field is unioned into ``tags`` at match time.
     tags: list[str] = field(default_factory=list)
     tag_operator: str = "and"
+    # Governance filter: review_status vocabulary value (draft/pending_review/
+    # approved/rejected).
+    review_status: str | None = None
 
 
 @dataclass
@@ -71,6 +74,7 @@ class CatalogCounts:
     tags: dict[str, int] = field(default_factory=dict)
     integrity: dict[str, int] = field(default_factory=dict)
     categories: dict[str, int] = field(default_factory=dict)
+    review_status: dict[str, int] = field(default_factory=dict)
 
 
 class FilterIndex:
@@ -79,9 +83,19 @@ class FilterIndex:
         self._views: list[AssetView] = []
         self._haystacks: list[str] = []
 
-    def rebuild(self, assets: Sequence[ResourceItem | ExportArtifact | Any], project_root: Path | None = None) -> None:
+    def rebuild(
+        self,
+        assets: Sequence[ResourceItem | ExportArtifact | Any],
+        project_root: Path | None = None,
+        enricher: Any = None,
+    ) -> None:
         self._assets = list(assets)
-        self._views = [asset_view_from_object(a, project_root=project_root) for a in self._assets]
+        self._views = []
+        for asset in self._assets:
+            view = asset_view_from_object(asset, project_root=project_root)
+            if enricher is not None:
+                view = enricher(view)
+            self._views.append(view)
         self._haystacks = [self._haystack(view) for view in self._views]
 
     def filter(self, category: str, search_text: str) -> list[int]:
@@ -129,6 +143,10 @@ class FilterIndex:
         elif query.node_type == "integrity":
             if query.node_value and view.integrity_state.value != query.node_value:
                 return False
+        elif query.node_type == "review_status":
+            if query.node_value:
+                if view.governance.get("review_status") != query.node_value:
+                    return False
         elif query.node_type == "legacy_category":
             if query.node_value and query.node_value != "全部":
                 if isinstance(view.raw_asset, ExportArtifact):
@@ -157,6 +175,8 @@ class FilterIndex:
                     if not normalized_targets <= view.normalized_tags:
                         return False
         if query.integrity and view.integrity_state.value != query.integrity:
+            return False
+        if query.review_status and view.governance.get("review_status") != query.review_status:
             return False
 
         return True
@@ -210,6 +230,8 @@ class FilterIndex:
             status_zh,
             view.source,
             view.path,
+            view.lineage_status,
+            " ".join(str(v) for v in view.governance.values()),
         ]
         if view.parsed_summary:
             parts.append(str(view.parsed_summary))
@@ -220,16 +242,25 @@ def compute_catalog_counts(
     resources: Sequence[ResourceItem],
     artifacts: Sequence[ExportArtifact],
     project_root: Path | None = None,
+    extra_assets: Sequence[Any] | None = None,
+    enricher: Any = None,
 ) -> CatalogCounts:
-    views: list[AssetView] = [
-        *[asset_view_from_object(r, project_root=project_root) for r in resources],
-        *[asset_view_from_object(a, project_root=project_root) for a in artifacts],
-    ]
+    views: list[AssetView] = []
+    for asset in [*resources, *artifacts, *(extra_assets or [])]:
+        view = asset_view_from_object(asset, project_root=project_root)
+        if enricher is not None:
+            view = enricher(view)
+        views.append(view)
 
     total = len(views)
     stage_counts = Counter(v.stage.value for v in views)
     type_counts = Counter(v.type for v in views)
     integrity_counts = Counter(v.integrity_state.value for v in views)
+    review_counts = Counter(
+        v.governance["review_status"]
+        for v in views
+        if v.governance.get("review_status")
+    )
 
     tag_counter = Counter()
     for v in views:
@@ -251,6 +282,7 @@ def compute_catalog_counts(
         tags=dict(tag_counter),
         integrity=dict(integrity_counts),
         categories=category_counts,
+        review_status=dict(review_counts),
     )
 
 

@@ -44,6 +44,8 @@ from paleo_workbench.ui.pages.data_view_models import (
 )
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
 from paleo_workbench.ui.pages.filter_index import CATEGORIES, FilterQuery
+from paleo_workbench.ui.pages.catalog_health_dialog import CatalogHealthDialog
+from paleo_workbench.ui.pages.governance_dialog import GovernanceMetadataDialog
 from paleo_workbench.ui.pages.integrity_worker import IntegrityCheckReport
 from paleo_workbench.ui.pages.preview_provider import PreviewResult
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
@@ -188,6 +190,7 @@ class DataPage(QWidget):
         self.data_toolbar.import_files_requested.connect(self.begin_import_files_from_dialog)
         self.data_toolbar.import_folder_requested.connect(self.begin_import_folder_from_dialog)
         self.data_toolbar.verify_requested.connect(self._verify_current_or_all_assets)
+        self.data_toolbar.health_check_requested.connect(self._open_catalog_health)
         self.data_toolbar.rescan_requested.connect(self.rescan_selected_asset)
         self.data_toolbar.remove_requested.connect(self.remove_selected_asset)
         self.data_toolbar.open_folder_requested.connect(self.open_selected_folder)
@@ -207,6 +210,8 @@ class DataPage(QWidget):
         self.inspector_panel.create_derived_requested.connect(self._create_derived_copy)
         self.inspector_panel.version_tag_added.connect(self._handle_version_tag_added)
         self.inspector_panel.version_tag_removed.connect(self._handle_version_tag_removed)
+        self.inspector_panel.governance_edit_requested.connect(self._edit_governance_metadata)
+        self.inspector_panel.lineage_version_activated.connect(self._locate_lineage_asset)
 
         self.reader_panel.reader_mode_changed.connect(self._handle_reader_mode_changed)
         self.reader_panel.preview_settings_changed.connect(self._handle_preview_settings_changed)
@@ -269,17 +274,29 @@ class DataPage(QWidget):
         self._preview_controller.set_project_root(preview_root)
         self._visualization_controller.set_project_root(preview_root)
         self.summary_bar.update_state(state)
+        # Catalog enrichment (one batch pass): stage/version/integrity truth,
+        # lineage status, governance values for the table rows.
+        enricher = self._lifecycle.catalog_enricher()
+        catalog_rows = self._lifecycle.catalog_only_rows(enricher)
         # project_root lets the tree counts and the table resolve
         # project-relative paths (F4: no MISSING false positives).
         self.navigation_tree.update_counts(
-            self._resources, self._artifacts, project_root=preview_root
+            self._resources,
+            self._artifacts,
+            project_root=preview_root,
+            extra_assets=catalog_rows,
+            enricher=enricher,
         )
         self.navigation_tree.set_trash_count(len(self._trashed_companions()))
         display_resources = list(self._resources)
         if self._trash_view_active():
             display_resources.extend(self._trashed_companions())
         self.asset_table.update_assets(
-            display_resources, self._artifacts, project_root=preview_root
+            display_resources,
+            self._artifacts,
+            project_root=preview_root,
+            extra_assets=catalog_rows,
+            enricher=enricher,
         )
         self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
         self._update_selection_action_state()
@@ -292,6 +309,21 @@ class DataPage(QWidget):
             self.project.resources,
             self.project.export_artifacts,
         )
+        # A model reset rebuilds every row view; a stale selection object
+        # (e.g. the pre-edit AssetView of a catalog-only row) would keep
+        # feeding the inspector old data. Re-point the selection at the
+        # CURRENT row object with the same id.
+        if self._selected_asset is not None:
+            selected_id = getattr(self._unwrap_asset(self._selected_asset), "id", None)
+            if selected_id is not None:
+                for row in range(self.asset_table.model.rowCount()):
+                    current = self.asset_table.model.asset_at(row)
+                    if current is not None and getattr(
+                        self._unwrap_asset(current), "id", None
+                    ) == selected_id:
+                        self._selected_asset = current
+                        self._selected_assets = [current]
+                        break
 
     def _trash_view_active(self) -> bool:
         """True when the navigation tree's 回收站 filter is active."""
@@ -542,6 +574,15 @@ class DataPage(QWidget):
         menu = AssetContextMenu(self)
         menu.build(target, viz_supported)
 
+        # Catalog gating: an action is available when the row resolves to a
+        # catalog version — bridged resources AND catalog-only product rows
+        # both qualify (they are not "unbridged" just for not being
+        # ResourceItems).
+        first_view = asset_view_from_object(first) if first is not None else None
+        catalog_version_id = (
+            self._current_version_id_for(first_view) if first_view is not None else None
+        )
+
         preview_act = menu.find_action("ctx_preview")
         if preview_act:
             preview_act.triggered.connect(lambda: self._request_summary(first))
@@ -550,8 +591,7 @@ class DataPage(QWidget):
         if create_derived_act:
             # §8.2: derived requires an active catalog; without a bridge the
             # action is disabled with a clear tooltip (never a RAW-path alias).
-            _svc, derived_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
-            if derived_ref is None:
+            if catalog_version_id is None:
                 create_derived_act.setEnabled(False)
                 create_derived_act.setToolTip("创建派生副本需要活动数据目录")
             else:
@@ -559,8 +599,7 @@ class DataPage(QWidget):
 
         new_version_act = menu.find_action("ctx_new_version")
         if new_version_act:
-            _svc, nv_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
-            if nv_ref is None:
+            if catalog_version_id is None:
                 new_version_act.setEnabled(False)
                 new_version_act.setToolTip("新建版本需要活动数据目录（数据未桥接）")
             else:
@@ -568,8 +607,7 @@ class DataPage(QWidget):
 
         promote_act = menu.find_action("ctx_promote")
         if promote_act:
-            _svc, prom_ref = self._catalog_bridge(first) if isinstance(first, ResourceItem) else (None, None)
-            if prom_ref is None:
+            if catalog_version_id is None:
                 promote_act.setEnabled(False)
                 promote_act.setToolTip("提升为正式数据需要活动数据目录（数据未桥接）")
             else:
@@ -766,14 +804,28 @@ class DataPage(QWidget):
 
     def _update_inspector(self, asset: object | None) -> None:
         """Build the inspector AssetView, enriched from the catalog when the
-        asset is bridged (legacy plain view otherwise)."""
+        asset is bridged (legacy plain view otherwise). Catalog-bridged assets
+        additionally get their full lineage chains (上游至 RAW / 下游) pushed
+        into the 血缘 tree."""
         if asset is None:
             self.inspector_panel.update_asset(None)
             self.inspector_panel.set_version_tags_enabled(False)
+            self.inspector_panel.set_governance_enabled(False)
             return
         view = asset_view_from_object(asset)
         view = self._enrich_view_from_catalog(view)
-        self.inspector_panel.update_asset(view)
+        lineage_up = lineage_down = None
+        service = self._catalog_service()
+        version_id = self._current_version_id_for(view)
+        if service is not None and version_id is not None:
+            try:
+                lineage_up = service.get_lineage_chain(version_id)
+                lineage_down = service.get_lineage_chain(
+                    version_id, direction="descendants"
+                )
+            except Exception:
+                lineage_up = lineage_down = None
+        self.inspector_panel.update_asset(view, lineage_up=lineage_up, lineage_down=lineage_down)
         # Version tag editing needs a catalog-bridged asset (F6).
         resource = view.raw_asset
         service, ref = (
@@ -781,17 +833,105 @@ class DataPage(QWidget):
             if isinstance(resource, ResourceItem)
             else (None, None)
         )
-        self.inspector_panel.set_version_tags_enabled(
-            service is not None and ref is not None
+        bridged = service is not None and ref is not None
+        self.inspector_panel.set_version_tags_enabled(bridged)
+        self.inspector_panel.set_governance_enabled(
+            bridged or self._lifecycle.resolve_catalog_asset_id(asset) is not None
         )
+
+    def _current_version_id_for(self, view: AssetView) -> str | None:
+        """The catalog version id backing *view* (None when unbridged)."""
+        resource = view.raw_asset
+        if isinstance(resource, ResourceItem):
+            _svc, ref = self._catalog_bridge(resource)
+            return ref.version_id if ref is not None else None
+        if isinstance(resource, ExportArtifact):
+            version_id = getattr(resource, "catalog_version_id", None)
+            return version_id or None
+        # Catalog-only rows carry the current version id on their single
+        # VersionView; the legacy synthetic sentinels mean "not catalog".
+        if view.versions and view.versions[0].version_id not in ("—", "v1"):
+            return view.versions[0].version_id
+        return None
+
+    # --- Catalog Health (数据健康检查) ---------------------------------------
+
+    def _open_catalog_health(self) -> None:
+        dlg = CatalogHealthDialog(self, service_provider=self._catalog_service)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.run_audit(deep=False)
+        dlg.exec()
+
+    # --- Governance metadata editing -------------------------------------------
+
+    def _edit_governance_metadata(self, view: AssetView) -> None:
+        asset_id = self._lifecycle.resolve_catalog_asset_id(view)
+        if asset_id is None:
+            self._set_action_status("治理信息需要数据目录桥接的资产")
+            return
+        dlg = GovernanceMetadataDialog(
+            self, asset_name=view.name, current=view.governance
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._lifecycle.update_governance_metadata(asset_id, dlg.patch())
+
+    # --- Lineage navigation ------------------------------------------------------
+
+    def _locate_lineage_asset(self, version_id: str, asset_id: str) -> None:
+        """Double-clicked a lineage node: select that asset's row (bridged
+        companion or catalog-only row) so the inspector follows. Prefers a
+        VISIBLE row (the active filter/search may hide the target); when only
+        a hidden row matches, still pushes the inspector and tells the user
+        why the table selection looks unchanged."""
+        def _matches(asset: object) -> bool:
+            return self._lifecycle.resolve_catalog_asset_id(asset) == asset_id
+
+        visible_assets = list(getattr(self.asset_table, "_visible_assets", []) or [])
+        chosen = next((a for a in visible_assets if _matches(a)), None)
+        hidden_note = False
+        if chosen is None:
+            chosen = next(
+                (a for a in self.asset_table.model.assets() if _matches(a)), None
+            )
+            hidden_note = chosen is not None
+        if chosen is None:
+            self._set_action_status(
+                "该血缘节点没有对应的数据行（如外部输入、回收站或已清除版本）"
+            )
+            return
+        if hidden_note:
+            self._set_action_status("已定位资产（当前筛选条件下不可见）")
+        self.asset_table.set_selected_asset(chosen)
+        self._set_selected_asset(chosen)
+        # set_selected_asset alone does not drive the inspector (the table's
+        # selection signal normally does); push it explicitly so the inspector
+        # shows the located asset immediately.
+        self._update_inspector(chosen)
 
     def _enrich_view_from_catalog(self, view: AssetView) -> AssetView:
         resource = view.raw_asset
-        service, ref = self._catalog_bridge(resource)
-        if service is None or ref is None:
+        asset_id: str | None = None
+        if isinstance(resource, ResourceItem):
+            service, ref = self._catalog_bridge(resource)
+            asset_id = ref.asset_id if ref is not None else None
+        elif isinstance(resource, ExportArtifact):
+            # Artifact rows bridge through their registered catalog OUTPUT
+            # version (the same resolution the table enricher uses), so the
+            # inspector and the table never tell different stories.
+            service = self._catalog_service()
+            version_id = getattr(resource, "catalog_version_id", None)
+            if service is not None and version_id:
+                try:
+                    asset_id = service.get_version(version_id).asset_id
+                except Exception:
+                    asset_id = None
+        else:
+            return view  # catalog-only rows are already catalog-built
+        if service is None or asset_id is None:
             return view
         try:
-            return enrich_view_from_catalog(view, service, ref.asset_id)
+            return enrich_view_from_catalog(view, service, asset_id)
         except Exception:
             # Enrichment is best-effort; the plain legacy view still renders.
             return view
@@ -1142,8 +1282,12 @@ class DataPage(QWidget):
         self._emit_data_context()
 
     def _set_import_status(self, report: ImportReport) -> None:
+        # Catalog registration failures must be visible, not just logged:
+        # the row exists in the project but has no provenance backing.
+        failures = len(getattr(self._lifecycle, "last_registration_failures", []) or [])
+        suffix = f" · 目录登记失败 {failures}" if failures else ""
         self._set_action_status(
-            f"已归档 {report.added_count} · 重复路径 {len(report.skipped_path)} · 警告 {len(report.warnings)}"
+            f"已归档 {report.added_count} · 重复路径 {len(report.skipped_path)} · 警告 {len(report.warnings)}{suffix}"
         )
 
     def _apply_import_report(self, report: ImportReport) -> None:

@@ -207,18 +207,34 @@ def register_factor_map_run(
         input_snapshot_hash=task.input_snapshot_hash or None,
     )
     version: DataVersionRef | None = None
-    if intermediate_path:
-        version = cat.register_intermediate(
-            run_id=run.run_id,
-            name=f"{task.name} grid",
-            path=intermediate_path,
-            checksum=intermediate_checksum,
-            kind="factor_map_grid",
-            format="npz",
-            tags=[task.factor_type] if task.factor_type else [],
-        )
-    cat.complete_run(run.run_id)
+    try:
+        if intermediate_path:
+            version = cat.register_intermediate(
+                run_id=run.run_id,
+                name=f"{task.name} grid",
+                path=intermediate_path,
+                checksum=intermediate_checksum,
+                kind="factor_map_grid",
+                format="npz",
+                tags=[task.factor_type] if task.factor_type else [],
+            )
+        cat.complete_run(run.run_id)
+    except Exception:
+        _fail_run(cat, run.run_id)
+        raise
     return run, version
+
+
+def _fail_run(cat: "CatalogPort", run_id: str | None) -> None:
+    """Best-effort compensation: a registration step failed, so the booked
+    run must not linger as phantom ``running`` provenance (the audit's
+    ``stale_running_run`` would only surface it a day later)."""
+    if run_id is None:
+        return
+    try:
+        cat.complete_run(run_id, status="failed")
+    except Exception:
+        _log.warning("failed-run compensation error for %s", run_id, exc_info=True)
 
 
 def register_persisted_factor_grids(
@@ -409,16 +425,20 @@ def register_prediction_run(
         input_snapshot_hash=task.input_snapshot_hash or None,
     )
     version: DataVersionRef | None = None
-    if result_path:
-        version = cat.register_derived(
-            run_id=run.run_id,
-            name=f"{task.name} result",
-            path=result_path,
-            checksum=result_checksum,
-            kind="prediction_result",
-            format="json",
-        )
-    cat.complete_run(run.run_id)
+    try:
+        if result_path:
+            version = cat.register_derived(
+                run_id=run.run_id,
+                name=f"{task.name} result",
+                path=result_path,
+                checksum=result_checksum,
+                kind="prediction_result",
+                format="json",
+            )
+        cat.complete_run(run.run_id)
+    except Exception:
+        _fail_run(cat, run.run_id)
+        raise
     return run, version
 
 
@@ -558,16 +578,20 @@ def register_export_output(
         parameters={"format": fmt, "linked_id": linked_id},
         generator_version=None,
     )
-    checksum = sha256_file_or_none(output_path)
-    version = cat.register_output(
-        run_id=run.run_id,
-        name=name or Path(output_path).name,
-        path=output_path,
-        checksum=checksum,
-        kind="export",
-        format=fmt,
-    )
-    cat.complete_run(run.run_id)
+    try:
+        checksum = sha256_file_or_none(output_path)
+        version = cat.register_output(
+            run_id=run.run_id,
+            name=name or Path(output_path).name,
+            path=output_path,
+            checksum=checksum,
+            kind="export",
+            format=fmt,
+        )
+        cat.complete_run(run.run_id)
+    except Exception:
+        _fail_run(cat, run.run_id)
+        raise
     return version
 
 
@@ -606,16 +630,20 @@ def register_map_compile_run(
         domain_task_id=domain_task_id,
     )
     version: DataVersionRef | None = None
-    if result_path:
-        version = cat.register_derived(
-            run_id=run.run_id,
-            name=name,
-            path=result_path,
-            checksum=result_checksum or sha256_file_or_none(result_path),
-            kind="paleomap",
-            format="json",
-        )
-    cat.complete_run(run.run_id)
+    try:
+        if result_path:
+            version = cat.register_derived(
+                run_id=run.run_id,
+                name=name,
+                path=result_path,
+                checksum=result_checksum or sha256_file_or_none(result_path),
+                kind="paleomap",
+                format="json",
+            )
+        cat.complete_run(run.run_id)
+    except Exception:
+        _fail_run(cat, run.run_id)
+        raise
     return run, version
 
 

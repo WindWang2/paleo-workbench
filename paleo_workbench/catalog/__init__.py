@@ -26,6 +26,15 @@ from paleo_workbench.catalog.adapter import CoreCatalogAdapter
 from paleo_workbench.catalog.audit import AuditIssue, AuditReport
 from paleo_workbench.catalog.checksum import sha256_file, sha256_file_or_none
 from paleo_workbench.catalog.db import CatalogIndex
+from paleo_workbench.catalog.governance import (
+    GOVERNANCE_FIELDS,
+    GOVERNANCE_KEYS,
+    GovernanceError,
+    governance_display_rows,
+    governance_values,
+    normalize_governance_patch,
+)
+from paleo_workbench.catalog.lineage_graph import LineageChain, LineageChainNode
 from paleo_workbench.catalog.migration import (
     MigrationReport,
     migrate_resources,
@@ -74,16 +83,24 @@ __all__ = [
     "DataStage",
     "DataVersion",
     "DataVersionRef",
+    "GOVERNANCE_FIELDS",
+    "GOVERNANCE_KEYS",
+    "GovernanceError",
     "ImmutableVersionError",
     "IntegrityReport",
     "IntegrityStatus",
+    "LineageChain",
+    "LineageChainNode",
     "LineageEdge",
     "MigrationReport",
     "Tag",
+    "governance_display_rows",
+    "governance_values",
     "get_catalog",
     "get_catalog_service",
     "migrate_resources",
     "needs_migration",
+    "normalize_governance_patch",
     "normalize_tag_name",
     "reset_catalog",
     "set_catalog",

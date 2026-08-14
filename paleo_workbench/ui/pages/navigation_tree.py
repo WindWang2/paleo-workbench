@@ -6,6 +6,7 @@ Presents structured smart groups for:
 - 数据类型 (Data Types: seismic, well_log, horizon, etc.)
 - 标签 (Dynamic Tag List with counts)
 - 状态与完整性 (Integrity: Verified, Modified, Missing, External)
+- 治理 (Governance: dynamic review-status leaves with counts)
 
 Emits ``category_changed(str)`` and ``filter_query_changed(FilterQuery)``.
 """
@@ -52,6 +53,13 @@ INTEGRITY_LEAVES = [
     ("❌ 缺失", IntegrityState.MISSING.value, "MISSING"),
     ("🔗 外部链接", IntegrityState.UNMANAGED.value, "UNMANAGED"),
 ]
+
+REVIEW_STATUS_LABELS = {
+    "draft": "草稿",
+    "pending_review": "待审核",
+    "approved": "已通过",
+    "rejected": "已驳回",
+}
 
 
 class NavigationTree(QTreeWidget):
@@ -127,6 +135,13 @@ class NavigationTree(QTreeWidget):
             item.setData(0, Qt.ItemDataRole.UserRole + 1, int_val)
         integrity_group.setExpanded(False)
 
+        # 6. 治理 (Governance: dynamic review-status leaves)
+        self.review_parent_item = QTreeWidgetItem(self, ["治理 · 审核状态 0"])
+        self.review_parent_item.setFlags(
+            self.review_parent_item.flags() & ~Qt.ItemFlag.ItemIsSelectable
+        )
+        self.review_parent_item.setExpanded(False)
+
         self.setCurrentItem(None)
 
     def update_counts(
@@ -134,8 +149,17 @@ class NavigationTree(QTreeWidget):
         resources: list,
         artifacts: list,
         project_root: Path | None = None,
+        *,
+        extra_assets: list | None = None,
+        enricher=None,
     ) -> None:
-        counts = compute_catalog_counts(resources, artifacts, project_root=project_root)
+        counts = compute_catalog_counts(
+            resources,
+            artifacts,
+            project_root=project_root,
+            extra_assets=extra_assets,
+            enricher=enricher,
+        )
         self._update_tree_counts(counts)
 
     def set_trash_count(self, count: int) -> None:
@@ -151,6 +175,37 @@ class NavigationTree(QTreeWidget):
         # Update dynamic tags list
         if self.tag_parent_item is not None:
             self._update_tag_nodes(counts.tags)
+        # Update dynamic review-status leaves (governance group)
+        if getattr(self, "review_parent_item", None) is not None:
+            self._update_review_nodes(counts.review_status)
+
+    def _update_review_nodes(self, review_counts: dict[str, int]) -> None:
+        parent = self.review_parent_item
+        current = self.currentItem()
+        selected_value = None
+        if current is not None and current.parent() is parent:
+            query = current.data(0, Qt.ItemDataRole.UserRole)
+            if query and query.node_type == "review_status":
+                selected_value = query.node_value
+
+        parent.takeChildren()
+        total = sum(review_counts.values())
+        parent.setText(0, f"治理 · 审核状态 {total}")
+
+        target_to_reselect = None
+        for value in sorted(review_counts):
+            label = REVIEW_STATUS_LABELS.get(value, value)
+            child = QTreeWidgetItem(parent, [f"{label} {review_counts[value]}"])
+            child.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                FilterQuery(node_type="review_status", node_value=value),
+            )
+            child.setData(0, Qt.ItemDataRole.UserRole + 1, value)
+            if selected_value and value == selected_value:
+                target_to_reselect = child
+        if target_to_reselect is not None:
+            self.setCurrentItem(target_to_reselect)
 
     def _update_node_recursive(self, item: QTreeWidgetItem, counts: CatalogCounts) -> None:
         query: FilterQuery | None = item.data(0, Qt.ItemDataRole.UserRole)
@@ -168,6 +223,8 @@ class NavigationTree(QTreeWidget):
                 count = counts.integrity.get(query.node_value, 0)
             elif query.node_type == "tag" and query.node_value:
                 count = counts.tags.get(query.node_value, 0)
+            elif query.node_type == "review_status" and query.node_value:
+                count = counts.review_status.get(query.node_value, 0)
 
             item.setText(0, f"{label_base} {count}")
 

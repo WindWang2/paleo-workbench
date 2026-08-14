@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from paleo_workbench.catalog import audit as _audit
+from paleo_workbench.catalog import lineage_graph as _lineage
 from paleo_workbench.catalog import queries as _queries
 from paleo_workbench.catalog import tags as _tags
 from paleo_workbench.catalog.checksum import sha256_file
@@ -1314,6 +1315,86 @@ class DataCatalogService:
                 run = None
         return {"version": version, "parents": parents, "children": children, "run": run}
 
+    def get_lineage_chain(
+        self,
+        version_id: str,
+        *,
+        direction: str = "ancestors",
+        max_depth: int | None = None,
+    ) -> "_lineage.LineageChain":
+        """Full lineage tree from *version_id* (version→run→input chain).
+
+        ``direction="ancestors"`` walks to the RAW inputs, ``"descendants"``
+        to downstream products. Delegates to
+        :func:`paleo_workbench.catalog.lineage_graph.build_lineage_chain`
+        (walks the maintained id maps — no per-query rebuild, cycle-safe).
+        """
+        return _lineage.build_lineage_chain(
+            self, version_id, direction=direction, max_depth=max_depth
+        )
+
+    def lineage_summaries(self) -> dict[str, dict[str, Any]]:
+        """Per-version lineage status ``{"to_raw", "broken", "has_parents"}``.
+
+        Computed once per catalog revision and cached (table columns ask for
+        every asset on each refresh; the walk itself is O(V+E) memoized DFS).
+        """
+        with self._lock:
+            revision = self.document.catalog_revision
+            cache = getattr(self, "_lineage_summary_cache", None)
+            cache_rev = getattr(self, "_lineage_summary_cache_rev", None)
+            if cache is None or cache_rev != revision:
+                cache = _lineage.compute_summaries(self)
+                self._lineage_summary_cache = cache
+                self._lineage_summary_cache_rev = revision
+            return cache
+
+    # -- governance metadata ----------------------------------------------------
+
+    def update_asset_metadata(
+        self, asset_id: str, patch: dict[str, Any]
+    ) -> DataAsset:
+        """Apply a metadata patch to an ASSET with validation + rollback.
+
+        Governance fields (source/region/creator/discipline/confidence/
+        review_status — see :mod:`paleo_workbench.catalog.governance`) are
+        normalized against their controlled vocabularies; other keys pass
+        through. Asset metadata is identity-level and mutable; VERSION
+        metadata stays immutable with the version (there is deliberately no
+        version-level counterpart of this method).
+
+        Snapshot-rollback on save failure mirrors :meth:`add_tags`.
+        """
+        from paleo_workbench.catalog.governance import (
+            GovernanceError,
+            normalize_governance_patch,
+        )
+
+        with self._lock:
+            asset = self._asset_or_raise(asset_id)
+            normalized = normalize_governance_patch(patch)
+            before_metadata = dict(asset.metadata)
+            before_updated = asset.updated_at
+            changed = False
+            for key, value in normalized.items():
+                stored = None if value in (None, "") else value
+                if asset.metadata.get(key) != stored:
+                    if stored is None:
+                        asset.metadata.pop(key, None)
+                    else:
+                        asset.metadata[key] = stored
+                    changed = True
+            if not changed:
+                return asset
+            asset.updated_at = _now_iso()
+            try:
+                self._save()
+            except Exception:
+                asset.metadata = before_metadata
+                asset.updated_at = before_updated
+                raise
+            return asset
+
     # -- trash / restore / purge ----------------------------------------------
 
     def _tombstone_version(self, version: DataVersion, reason: str | None) -> str:
@@ -2024,13 +2105,16 @@ class DataCatalogService:
         tags: list[str] | tuple[str, ...] | None = None,
         tag_op: str = "and",
         type: str | None = None,
+        metadata: dict[str, Any] | None = None,
         include_trashed: bool = False,
     ) -> list[DataAsset]:
-        """Filter assets by name substring, stage, tag(s), and/or type.
+        """Filter assets by name substring, stage, tag(s), type, and/or
+        metadata key-value pairs (governance fields included).
 
         ``tags`` accepts several tag names combined with ``tag_op``
-        (``"and"`` / ``"or"``). Trashed (soft-deleted) assets are excluded
-        unless ``include_trashed``.
+        (``"and"`` / ``"or"``). ``metadata`` values match by string equality
+        against ``asset.metadata[key]``. Trashed (soft-deleted) assets are
+        excluded unless ``include_trashed``.
 
         Delegates to :func:`paleo_workbench.catalog.queries.search_assets`.
         """
@@ -2042,6 +2126,7 @@ class DataCatalogService:
             tags=tags,
             tag_op=tag_op,
             type=type,
+            metadata=metadata,
             include_trashed=include_trashed,
         )
 

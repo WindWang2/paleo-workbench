@@ -16,6 +16,8 @@ class DataToolbar(QWidget):
     visualize_requested = Signal()
     clear_preview_cache_requested = Signal()
     verify_requested = Signal()
+    # Data health entry: open the Catalog Health (audit) dialog.
+    health_check_requested = Signal()
     reader_toggled = Signal()
     search_changed = Signal(str)
     # Multi-tag asset-table filter: (selected tag names, "and"|"or").
@@ -51,6 +53,13 @@ class DataToolbar(QWidget):
         self.verify_btn.setToolTip("后台校验数据资产完整性与 SHA-256")
         self.verify_btn.clicked.connect(self.verify_requested.emit)
         layout.addWidget(self.verify_btn)
+
+        self.health_btn = QPushButton("健康检查")
+        self.health_btn.setObjectName("SecondaryButton")
+        self.health_btn.setMinimumHeight(tokens.CONTROL_HEIGHT)
+        self.health_btn.setToolTip("数据目录健康体检：资产/版本统计、缺失、血缘断链、标签悬挂、孤儿文件")
+        self.health_btn.clicked.connect(self.health_check_requested.emit)
+        layout.addWidget(self.health_btn)
 
         self.rescan_btn = QPushButton("重新扫描")
         self.rescan_btn.setObjectName("SecondaryButton")

@@ -87,14 +87,31 @@ class DataAssetRegistry:
         return registry.build_preview(asset, settings, project_root=project_root)
 
     def export(self, asset: Any, format_id: str, output_path: str | Path) -> bool:
-        """Export asset to output path in specified format."""
-        from paleo_workbench.resources.exporters import export_asset
+        """Export asset to output path in specified format.
 
-        fmt = format_id.lower()
-        if fmt in self._format_specs and self._format_specs[fmt].exporter is not None:
-            return self._format_specs[fmt].exporter(asset, format_id, Path(output_path))  # type: ignore
+        A registered :class:`FormatSpec` exporter wins; otherwise dispatch
+        through the shared converter table (the same one behind
+        ``get_available_formats``) so every export path has one
+        implementation. Raises :class:`ExportError` when the format has no
+        converter (the previous lazy import referenced a name that does not
+        exist and would have raised ImportError here).
+        """
+        from paleo_workbench.resources.exporters import (
+            ExportError,
+            get_available_formats,
+        )
 
-        return export_asset(asset, format_id, output_path)
+        fmt = (format_id or "").lower()
+        spec = self._format_specs.get(fmt)
+        if spec is not None and spec.exporter is not None:
+            return bool(spec.exporter(asset, format_id, Path(output_path)))
+
+        label = fmt.upper()
+        for available, convert_fn in get_available_formats(asset):
+            if available == label:
+                convert_fn(Path(asset.path), Path(output_path))
+                return True
+        raise ExportError(f"没有可用于 {label} 的导出器: {getattr(asset, 'format', '?')}")
 
 
 # ---------------------------------------------------------------------------

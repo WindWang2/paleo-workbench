@@ -36,6 +36,13 @@ RESOURCE_TYPE_LABELS = {
 }
 
 
+def _review_status_display(view: AssetView) -> str:
+    from paleo_workbench.catalog.governance import governance_display
+
+    value = view.governance.get("review_status", "")
+    return governance_display("review_status", value) if value else "—"
+
+
 class AssetTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,12 +51,18 @@ class AssetTableModel(QAbstractTableModel):
         self._filtered_rows: list[int] = []
         self._column_keys: list[str] = []
         self._project_root: Path | None = None
+        # Optional view -> view overlay (catalog enrichment) applied once per
+        # row build; None keeps the legacy behavior for un-bridged projects.
+        self._view_enricher = None
 
     def set_project_root(self, root: Path | str | None) -> None:
         if root:
             self._project_root = Path(root)
         else:
             self._project_root = None
+
+    def set_view_enricher(self, enricher) -> None:
+        self._view_enricher = enricher
 
     def set_column_keys(self, keys: list[str]) -> None:
         self.beginResetModel()
@@ -59,12 +72,15 @@ class AssetTableModel(QAbstractTableModel):
     def set_assets(self, assets: list[object]) -> None:
         self.beginResetModel()
         self._raw_assets = list(assets)
-        self._views = [
-            asset_view_from_object(a, project_root=self._project_root)
-            for a in self._raw_assets
-        ]
+        self._views = [self._build_view(a) for a in self._raw_assets]
         self._filtered_rows = list(range(len(self._raw_assets)))
         self.endResetModel()
+
+    def _build_view(self, asset: object) -> AssetView:
+        view = asset_view_from_object(asset, project_root=self._project_root)
+        if self._view_enricher is not None:
+            view = self._view_enricher(view)
+        return view
 
     def set_filtered_rows(self, rows: list[int]) -> None:
         self.beginResetModel()
@@ -81,10 +97,7 @@ class AssetTableModel(QAbstractTableModel):
         if column_keys is not None:
             self._column_keys = list(column_keys)
         self._raw_assets = list(assets)
-        self._views = [
-            asset_view_from_object(a, project_root=self._project_root)
-            for a in self._raw_assets
-        ]
+        self._views = [self._build_view(a) for a in self._raw_assets]
         self._filtered_rows = list(rows)
         self.endResetModel()
 
@@ -164,6 +177,10 @@ class AssetTableModel(QAbstractTableModel):
             return "受管" if view.managed else "外部"
         if key == "integrity":
             return f"{view.integrity_state.icon_symbol} {view.integrity_state.label}"
+        if key == "lineage":
+            return view.lineage_status or "—"
+        if key == "review_status":
+            return _review_status_display(view)
         if key == "format":
             return view.format
         if key == "status":
@@ -192,6 +209,14 @@ class AssetTableModel(QAbstractTableModel):
             return f"生命周期: {stage_label(view.stage)} ({view.stage.value})"
         if key == "integrity":
             return f"完整性: {view.integrity_state.label}\n校验和: {view.checksum_display}"
+        if key == "lineage":
+            return (
+                f"血缘: {view.lineage_status}"
+                if view.lineage_status
+                else "血缘: 未连接数据目录"
+            )
+        if key == "review_status":
+            return "审核状态 (治理元数据)"
         if key == "path":
             return view.path
         if key == "tags":

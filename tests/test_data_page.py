@@ -584,9 +584,11 @@ def test_async_import_refreshes_table_once(qtbot, tmp_path: Path):
     update_counts: list[int] = []
     original_update_assets = page.asset_table.update_assets
 
-    def tracking_update_assets(resources, artifacts, project_root=None):
+    def tracking_update_assets(resources, artifacts, project_root=None, **kwargs):
         update_counts.append(len(resources))
-        return original_update_assets(resources, artifacts, project_root=project_root)
+        return original_update_assets(
+            resources, artifacts, project_root=project_root, **kwargs
+        )
 
     page.asset_table.update_assets = tracking_update_assets
 

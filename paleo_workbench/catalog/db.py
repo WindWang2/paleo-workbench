@@ -811,11 +811,15 @@ class CatalogIndex:
         tags: list[str] | tuple[str, ...] | None = None,
         tag_op: str = "and",
         type: str | None = None,
+        metadata: list[tuple[str, str]] | None = None,
     ) -> list[dict]:
-        """Search assets by name substring, version stage, tag(s), and type.
+        """Search assets by name substring, version stage, tag(s), type, and
+        metadata key-value pairs.
 
         ``tags`` + ``tag_op`` (``"and"``/``"or"``) express multi-tag queries;
-        a single ``tag`` is unioned into ``tags``.
+        a single ``tag`` is unioned into ``tags``. ``metadata`` pairs match
+        ``json_extract(assets.metadata, '$."key"') = value`` (governance
+        fields live in that JSON column — no schema change needed).
         """
         return self._safe(
             [],
@@ -826,6 +830,7 @@ class CatalogIndex:
             tags=tags,
             tag_op=tag_op,
             type=type,
+            metadata=metadata,
         )
 
     def _search_assets(
@@ -836,6 +841,7 @@ class CatalogIndex:
         tags: list[str] | tuple[str, ...] | None = None,
         tag_op: str = "and",
         type: str | None = None,
+        metadata: list[tuple[str, str]] | None = None,
     ) -> list[dict]:
         joins: list[str] = []
         wheres: list[str] = []
@@ -872,6 +878,14 @@ class CatalogIndex:
         if type is not None:
             wheres.append("a.type = ?")
             params.append(str(type))
+        for key, value in metadata or []:
+            # Metadata lives as a JSON TEXT column (assets.metadata); the
+            # json_extract predicate keeps governance filtering on the index
+            # path at 10k+ assets without a schema change. The path is quoted
+            # and the extraction CAST to TEXT so non-string values (manual
+            # catalog.json edits) match like the canonical scan does.
+            wheres.append("CAST(json_extract(a.metadata, ?) AS TEXT) = ?")
+            params.extend([f'$."{key}"', str(value)])
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         sql = f"SELECT DISTINCT a.* FROM assets a {' '.join(joins)} {where}"
         rows = self._connect().execute(sql, params).fetchall()

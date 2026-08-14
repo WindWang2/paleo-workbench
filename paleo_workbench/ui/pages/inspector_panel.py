@@ -2,10 +2,10 @@
 
 Provides 6 structured inspector tabs / sections:
 1. 概要 (Overview)
-2. 元数据 (Metadata)
+2. 元数据 (Metadata: 治理信息 + 目录元数据 + 解析摘要)
 3. 标签 (Tags)
 4. 版本 (Versions)
-5. 血缘 (Lineage)
+5. 血缘 (Lineage: full upstream-to-RAW / downstream tree with run nodes)
 6. 完整性 (Integrity)
 """
 from __future__ import annotations
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -42,6 +44,184 @@ from paleo_workbench.ui.pages.preview_widgets import TablePreviewWidget
 from paleo_workbench.ui.pages.tag_widgets import TagContainerWidget, TagInputDialog
 
 
+class LineageTreeWidget(QWidget):
+    """Full-chain lineage view: 上游追溯 (to RAW) + 下游衍生 as a tree with
+    interleaved run nodes; selection shows version/run details."""
+
+    version_activated = Signal(str, str)  # (version_id, asset_id)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        layout.setSpacing(tokens.SPACE_1)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabel("血缘链")
+        self.tree.setColumnCount(1)
+        self.tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self.tree.setEditTriggers(QTreeWidget.EditTrigger.NoEditTriggers)
+        self.tree.itemSelectionChanged.connect(self._on_selection)
+        self.tree.itemDoubleClicked.connect(self._on_double_clicked)
+        layout.addWidget(self.tree, 1)
+
+        self.detail_label = QLabel("点击节点查看版本 / 运行详情（双击版本定位数据行）")
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.detail_label.setStyleSheet(
+            f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;"
+            " padding: 4px; border: 1px solid rgba(0,0,0,0);"
+        )
+        self.detail_label.setMinimumHeight(56)
+        layout.addWidget(self.detail_label)
+        self._selected_payload: tuple[str, dict] | None = None
+
+    # -- population -----------------------------------------------------------
+
+    def clear_chain(self, message: str = "") -> None:
+        self.tree.clear()
+        self._selected_payload = None
+        self.detail_label.setText(message or "原始导入资产 / 无上游依赖")
+
+    def load_chains(self, view: AssetView, upstream, downstream) -> None:
+        """Populate from :class:`LineageChain` objects (upstream ancestors +
+        downstream descendants), with producing runs interleaved.
+
+        The upstream chain's ROOT is the current version (its producing run
+        and inputs hang below it), so the current asset appears exactly once.
+        """
+        self.tree.clear()
+        if upstream is not None:
+            up_top = QTreeWidgetItem(self.tree, ["⬆ 上游追溯 (至 RAW 输入)"])
+            up_top.setFlags(up_top.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self._append_version_node(up_top, upstream.root, "up")
+            up_top.setExpanded(True)
+            if getattr(upstream, "truncated", False):
+                note = QTreeWidgetItem(up_top, ["… (层级/节点数达上限，已截断)"])
+                note.setFlags(note.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        else:
+            current = QTreeWidgetItem(
+                self.tree,
+                [f"■ 当前: {view.name} ({view.current_version})"],
+            )
+            current.setFlags(current.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+
+        if downstream is not None:
+            down_top = QTreeWidgetItem(self.tree, ["⬇ 下游衍生"])
+            down_top.setFlags(down_top.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            for child in downstream.root.children:
+                self._append_version_node(down_top, child, "down")
+            # Stay collapsed: downstream trees can be wide; upstream is the
+            # primary question and gets fully expanded below.
+            down_top.setExpanded(False)
+            if getattr(downstream, "truncated", False):
+                note = QTreeWidgetItem(down_top, ["… (已截断)"])
+                note.setFlags(note.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        if upstream is not None:
+            self._expand_recursive(self.tree.topLevelItem(0))
+        self.detail_label.setText("点击节点查看版本 / 运行详情（双击版本定位数据行）")
+
+    @staticmethod
+    def _expand_recursive(item: QTreeWidgetItem) -> None:
+        item.setExpanded(True)
+        for i in range(item.childCount()):
+            LineageTreeWidget._expand_recursive(item.child(i))
+
+    def _append_version_node(
+        self, parent: QTreeWidgetItem, node, direction: str
+    ) -> QTreeWidgetItem:
+        label = f"{stage_icon(node.stage)} {node.asset_name} · {stage_label(node.stage)} v{node.version_number}"
+        if node.trashed:
+            label += " 🗑"
+        item = QTreeWidgetItem(parent, [label])
+        payload = {
+            "kind": "version",
+            "version_id": node.version_id,
+            "asset_id": node.asset_id,
+            "asset_name": node.asset_name,
+            "stage": node.stage.value,
+            "version_number": node.version_number,
+            "path": node.path,
+            "sha256": node.sha256,
+            "created_at": node.created_at,
+            "managed": node.managed,
+            "trashed": node.trashed,
+            "tags": list(node.tags),
+            "run_id": node.run_id,
+            "run_operation": node.run_operation,
+            "run_status": node.run_status,
+            "run_generator": node.run_generator,
+        }
+        item.setData(0, Qt.ItemDataRole.UserRole, ("version", payload))
+        # Children: the producing run (when known) sits between the version
+        # and its linked versions, mirroring OUTPUT → Run → INPUT semantics.
+        holders = [item]
+        if node.run_operation:
+            run_item = QTreeWidgetItem(item, [f"⚙ {node.run_operation} (run)"])
+            run_item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                (
+                    "run",
+                    {
+                        "kind": "run",
+                        "run_id": node.run_id,
+                        "operation": node.run_operation,
+                        "status": node.run_status,
+                        "generator": node.run_generator,
+                        "output_version_id": node.version_id,
+                    },
+                ),
+            )
+            holders = [run_item, item]
+        for child in node.children:
+            self._append_version_node(holders[0], child, direction)
+        return item
+
+    # -- interaction ------------------------------------------------------------
+
+    def _on_selection(self) -> None:
+        items = self.tree.selectedItems()
+        if not items:
+            self._selected_payload = None
+            return
+        payload = items[0].data(0, Qt.ItemDataRole.UserRole)
+        if not payload:
+            self.detail_label.setText("")
+            return
+        self._selected_payload = payload
+        kind, data = payload
+        if kind == "version":
+            checksum = data.get("sha256") or "无"
+            if len(str(checksum)) > 16:
+                checksum = f"{str(checksum)[:12]}…"
+            tags = "、".join(data.get("tags") or []) or "—"
+            run = data.get("run_operation") or "—"
+            self.detail_label.setText(
+                f"版本 {data.get('asset_name')} v{data.get('version_number')} · "
+                f"阶段 {data.get('stage')}\n"
+                f"路径: {data.get('path') or '—'}\n"
+                f"校验和: {checksum} · 标签: {tags} · 生成 Run: {run}"
+            )
+        else:
+            self.detail_label.setText(
+                f"Run {data.get('operation')} · 状态 {data.get('status') or '—'} · "
+                f"generator {data.get('generator') or '—'}\n"
+                f"id: {data.get('run_id')}"
+            )
+
+    def _on_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not payload:
+            return
+        kind, data = payload
+        if kind == "version":
+            self.version_activated.emit(data["version_id"], data["asset_id"])
+
+    def selected_payload(self) -> tuple[str, dict] | None:
+        return self._selected_payload
+
+
 class InspectorPanel(QFrame):
     """Rich tabbed inspector for data assets."""
 
@@ -52,6 +232,11 @@ class InspectorPanel(QFrame):
     # Version-level tags (F6): (version_id, tag_name)
     version_tag_added = Signal(str, str)
     version_tag_removed = Signal(str, str)
+    # Governance metadata editing: (AssetView) — the page resolves the
+    # catalog asset id (legacy bridge or catalog-only row).
+    governance_edit_requested = Signal(object)
+    # Lineage navigation: double-clicked (version_id, asset_id) from the tree.
+    lineage_version_activated = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,9 +281,36 @@ class InspectorPanel(QFrame):
         self.overview_table = TablePreviewWidget()
         self.tabs.addTab(self.overview_table, "概要")
 
-        # Tab 2: 元数据 Metadata
+        # Tab 2: 元数据 Metadata (治理信息 + 目录元数据 + 解析摘要)
+        metadata_tab = QWidget()
+        metadata_layout = QVBoxLayout(metadata_tab)
+        metadata_layout.setContentsMargins(tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1, tokens.SPACE_1)
+        metadata_layout.setSpacing(tokens.SPACE_1)
+
+        gov_hdr = QLabel("治理信息 (来源 / 区域 / 负责人 / 学科 / 可信等级 / 审核状态):")
+        gov_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        metadata_layout.addWidget(gov_hdr)
+        self.governance_table = TablePreviewWidget()
+        metadata_layout.addWidget(self.governance_table)
+        self.governance_edit_btn = QPushButton("编辑治理信息")
+        self.governance_edit_btn.setObjectName("SecondaryButton")
+        self.governance_edit_btn.setFixedHeight(24)
+        self.governance_edit_btn.setToolTip("编辑标准治理字段（写入数据目录，受控词表校验）")
+        self.governance_edit_btn.clicked.connect(self._on_governance_edit_clicked)
+        metadata_layout.addWidget(self.governance_edit_btn)
+
+        cat_hdr = QLabel("目录元数据 (Catalog):")
+        cat_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        metadata_layout.addWidget(cat_hdr)
+        self.catalog_metadata_table = TablePreviewWidget()
+        metadata_layout.addWidget(self.catalog_metadata_table)
+
+        parsed_hdr = QLabel("解析摘要 (Parsed Summary):")
+        parsed_hdr.setStyleSheet(f"color: {tokens.TEXT_SECONDARY}; font-size: 11px;")
+        metadata_layout.addWidget(parsed_hdr)
         self.metadata_table = TablePreviewWidget()
-        self.tabs.addTab(self.metadata_table, "元数据")
+        metadata_layout.addWidget(self.metadata_table)
+        self.tabs.addTab(metadata_tab, "元数据")
 
         # Tab 3: 标签 Tags
         self.tags_widget = QWidget()
@@ -160,9 +372,10 @@ class InspectorPanel(QFrame):
 
         self.tabs.addTab(version_tab, "版本")
 
-        # Tab 5: 血缘 Lineage
-        self.lineage_table = TablePreviewWidget()
-        self.tabs.addTab(self.lineage_table, "血缘")
+        # Tab 5: 血缘 Lineage (full upstream/downstream tree)
+        self.lineage_tree = LineageTreeWidget()
+        self.lineage_tree.version_activated.connect(self.lineage_version_activated.emit)
+        self.tabs.addTab(self.lineage_tree, "血缘")
 
         # Tab 6: 完整性 Integrity
         self.integrity_widget = QWidget()
@@ -197,7 +410,12 @@ class InspectorPanel(QFrame):
         layout.addWidget(self.tabs, 1)
         self.tabs.hide()
 
-    def update_asset(self, asset: object | None) -> None:
+    def update_asset(
+        self,
+        asset: object | None,
+        lineage_up: object | None = None,
+        lineage_down: object | None = None,
+    ) -> None:
         self._current_asset = asset
         if asset is None:
             self._current_view = None
@@ -218,7 +436,7 @@ class InspectorPanel(QFrame):
         self._populate_metadata(view)
         self._populate_tags(view)
         self._populate_versions(view)
-        self._populate_lineage(view)
+        self._populate_lineage(view, lineage_up, lineage_down)
         self._populate_integrity(view)
 
     def _populate_overview(self, view: AssetView) -> None:
@@ -242,6 +460,32 @@ class InspectorPanel(QFrame):
         self.overview_table.load_table(("属性", "值"), tuple(rows))
 
     def _populate_metadata(self, view: AssetView) -> None:
+        from paleo_workbench.catalog.governance import (
+            GOVERNANCE_FIELDS,
+            GOVERNANCE_KEYS,
+            governance_display,
+        )
+
+        gov_rows: list[tuple[str, str]] = []
+        for key in GOVERNANCE_KEYS:
+            value = view.governance.get(key)
+            if value:
+                gov_rows.append(
+                    (GOVERNANCE_FIELDS[key].label, governance_display(key, value))
+                )
+        if not gov_rows:
+            gov_rows = [("提示", "未填写（点击下方按钮编辑）")]
+        self.governance_table.load_table(("字段", "值"), tuple(gov_rows))
+
+        catalog_rows: list[tuple[str, str]] = []
+        for key in sorted(view.catalog_metadata or {}):
+            if key in GOVERNANCE_KEYS:
+                continue
+            catalog_rows.append((str(key), str(view.catalog_metadata[key])))
+        if not catalog_rows:
+            catalog_rows = [("提示", "暂无目录扩展元数据")]
+        self.catalog_metadata_table.load_table(("属性", "值"), tuple(catalog_rows))
+
         rows: list[tuple[str, str]] = []
         if view.parsed_summary:
             for k, v in view.parsed_summary.items():
@@ -249,6 +493,15 @@ class InspectorPanel(QFrame):
         if not rows:
             rows = [("提示", "暂无附加解析元数据")]
         self.metadata_table.load_table(("属性", "值"), tuple(rows))
+
+    def set_governance_enabled(self, enabled: bool) -> None:
+        """Governance editing needs an active catalog (page toggles it)."""
+        self.governance_edit_btn.setEnabled(bool(enabled))
+        self.governance_edit_btn.setVisible(True)
+
+    def _on_governance_edit_clicked(self) -> None:
+        if self._current_view is not None:
+            self.governance_edit_requested.emit(self._current_view)
 
     def _populate_tags(self, view: AssetView) -> None:
         self.tag_container.set_tags(view.tags)
@@ -323,22 +576,34 @@ class InspectorPanel(QFrame):
         if action is not None and action.text():
             self.version_tag_removed.emit(version.version_id, action.text())
 
-    def _populate_lineage(self, view: AssetView) -> None:
-        rows: list[tuple[str, str]] = []
-        lineage = view.lineage
-        if lineage.parent_ids:
-            rows.append(("父节点 / 上游资产", ", ".join(lineage.parent_names or lineage.parent_ids)))
-        if lineage.run_id:
-            rows.append(("生成 Runs / 任务", lineage.run_id))
-        if lineage.workflow_step:
-            rows.append(("工作流步骤", lineage.workflow_step))
-        if lineage.child_ids:
-            rows.append(("子节点 / 下游衍生", ", ".join(lineage.child_names or lineage.child_ids)))
-
-        if not rows:
-            rows = [("血缘关系", "原始导入资产 / 无上游依赖")]
-
-        self.lineage_table.load_table(("关系类型", "详细信息"), tuple(rows))
+    def _populate_lineage(
+        self,
+        view: AssetView,
+        lineage_up: object | None = None,
+        lineage_down: object | None = None,
+    ) -> None:
+        if lineage_up is None and lineage_down is None:
+            lineage = view.lineage
+            if lineage.has_lineage:
+                # Un-enriched legacy view: keep the one-hop summary as text.
+                rows: list[tuple[str, str]] = []
+                if lineage.parent_ids:
+                    rows.append(
+                        ("父节点 / 上游资产", ", ".join(lineage.parent_names or lineage.parent_ids))
+                    )
+                if lineage.run_id:
+                    rows.append(("生成 Runs / 任务", lineage.run_id))
+                if lineage.workflow_step:
+                    rows.append(("工作流步骤", lineage.workflow_step))
+                if lineage.child_ids:
+                    rows.append(
+                        ("子节点 / 下游衍生", ", ".join(lineage.child_names or lineage.child_ids))
+                    )
+                self.lineage_tree.clear_chain("；".join(f"{k}: {v}" for k, v in rows))
+            else:
+                self.lineage_tree.clear_chain()
+            return
+        self.lineage_tree.load_chains(view, lineage_up, lineage_down)
 
     def _populate_integrity(self, view: AssetView) -> None:
         st = view.integrity_state
