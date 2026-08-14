@@ -266,6 +266,14 @@ def _ensure_model_version(service, model_id: str, model_version: str, **kwargs) 
         )
 
 
+def _existing_model(service, model_id: str) -> Model | None:
+    """Return the registered model or None. Never creates or rewrites."""
+    try:
+        return service.get_model(model_id)
+    except Exception:
+        return None
+
+
 def ensure_default_models(service) -> tuple[Model, Model, ModelVersion, ModelVersion]:
     """Idempotently register the demo + heuristic models (both status=demo).
 
@@ -275,18 +283,22 @@ def ensure_default_models(service) -> tuple[Model, Model, ModelVersion, ModelVer
     ``DataCatalogService.promote_model(model_id, model_version)`` sets BOTH
     the model and version status and clears ``demo_only`` atomically.
 
-    Existing models are never downgraded here: if a model was explicitly
-    promoted to ``status="production"``, this seed call preserves that state
-    (``register_model(..., force_status=False)``)."""
-    demo_model = service.register_model(
-        model_id=MODEL_ID_DEMO,
-        model_name="演示相带预测（Demo）",
-        model_type="demo",
-        capability=CAPABILITY_FACIES,
-        provider=PROVIDER_DEMO,
-        status="demo",
-        metadata={"source": "synthetic/demo", "demo_only": True},
-    )
+    Existing models are never rewritten here: if a model was explicitly
+    promoted or had its identity changed, this seed call leaves name / type /
+    provider / capability / status / metadata untouched and only fills a
+    missing version. Callers that want to repair identity must use
+    :meth:`DataCatalogService.register_model` directly."""
+    demo_model = _existing_model(service, MODEL_ID_DEMO)
+    if demo_model is None:
+        demo_model = service.register_model(
+            model_id=MODEL_ID_DEMO,
+            model_name="演示相带预测（Demo）",
+            model_type="demo",
+            capability=CAPABILITY_FACIES,
+            provider=PROVIDER_DEMO,
+            status="demo",
+            metadata={"source": "synthetic/demo", "demo_only": True},
+        )
     demo_version = _ensure_model_version(
         service,
         MODEL_ID_DEMO,
@@ -296,19 +308,21 @@ def ensure_default_models(service) -> tuple[Model, Model, ModelVersion, ModelVer
         status="demo",
         metadata={"source": "synthetic/demo"},
     )
-    heuristic_model = service.register_model(
-        model_id=MODEL_ID_HEURISTIC,
-        model_name="GR 中值启发式相带估计（非科学预测）",
-        model_type="heuristic",
-        capability=CAPABILITY_FACIES,
-        provider=PROVIDER_LOCAL_ASSET,
-        status="demo",
-        metadata={
-            "scientific": False,
-            "probabilities_uncalibrated": True,
-            "note": "GR median/window rule — real computation, not a trained model",
-        },
-    )
+    heuristic_model = _existing_model(service, MODEL_ID_HEURISTIC)
+    if heuristic_model is None:
+        heuristic_model = service.register_model(
+            model_id=MODEL_ID_HEURISTIC,
+            model_name="GR 中值启发式相带估计（非科学预测）",
+            model_type="heuristic",
+            capability=CAPABILITY_FACIES,
+            provider=PROVIDER_LOCAL_ASSET,
+            status="demo",
+            metadata={
+                "scientific": False,
+                "probabilities_uncalibrated": True,
+                "note": "GR median/window rule — real computation, not a trained model",
+            },
+        )
     heuristic_version = _ensure_model_version(
         service,
         MODEL_ID_HEURISTIC,

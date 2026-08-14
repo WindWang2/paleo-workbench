@@ -314,3 +314,7 @@ class _RunProxy:
     @property
     def input_version_ids(self):
         return self._run.input_version_ids
+
+    @property
+    def status(self):
+        return self._run.status

@@ -979,9 +979,22 @@ class DataCatalogService:
 
         ``extra_parameters`` are merged into the run's parameters (used by the
         CatalogPort adapter to record finish timestamps).
+
+        Terminal statuses (complete/failed/cancelled) cannot be overwritten
+        by a different status. A failed or cancelled run must not later be
+        marked complete; retry creates a new run.
         """
         with self._lock:
             run = self.get_run(run_id)
+            current = (run.status or "").lower()
+            target = (status or "").lower()
+            aliases = {"complete", "completed"}
+            terminal = {"complete", "completed", "failed", "cancelled", "canceled"}
+            if current in terminal and current != target:
+                if not (current in aliases and target in aliases):
+                    raise CatalogError(
+                        f"cannot change terminal run {run_id} from {run.status!r} to {status!r}"
+                    )
             run.status = status
             if extra_parameters:
                 run.parameters.update(extra_parameters)
@@ -1009,16 +1022,22 @@ class DataCatalogService:
         provenance: dict[str, Any] | None = None,
         force_status: bool = False,
     ) -> Model:
-        """Register (or update) a logical model. Idempotent on ``model_id``:
-        re-registering refreshes name/capability/provider/status/metadata so
-        defaults can be repaired without duplicating entries.
+        """Register (or update) a logical model. Idempotent on ``model_id``.
+
+        Re-registering with non-empty identity fields refreshes
+        name/type/capability/provider so an explicit package update still
+        works. Empty optional fields never wipe a previously stored value
+        (``capability=""`` must not hide a production model from
+        :meth:`find_production_model`).
 
         ``force_status`` (default False) protects an existing model from being
         silently downgraded by a seed/defaults call: when the model already
         exists and ``force_status`` is False, its ``status`` and ``metadata``
         are preserved (an explicit promote must never be clobbered by
         ``ensure_default_models`` — review finding C2). Pass True only when
-        the caller deliberately changes status (e.g. promote/demote)."""
+        the caller deliberately changes status (e.g. promote/demote).
+
+        No-op re-registrations do not rewrite the catalog file."""
         if not model_id or not model_name:
             raise CatalogError("register_model requires model_id and model_name")
         existing = None
@@ -1027,16 +1046,34 @@ class DataCatalogService:
                 existing = model
                 break
         if existing is not None:
-            existing.model_name = model_name
-            existing.model_type = model_type or existing.model_type
-            existing.capability = capability
-            existing.provider = provider or existing.provider
+            changed = False
+            if existing.model_name != model_name:
+                existing.model_name = model_name
+                changed = True
+            if (
+                model_type
+                and model_type != "unknown"
+                and existing.model_type != model_type
+            ):
+                existing.model_type = model_type
+                changed = True
+            if capability and existing.capability != capability:
+                existing.capability = capability
+                changed = True
+            if provider and existing.provider != provider:
+                existing.provider = provider
+                changed = True
             if force_status:
-                existing.status = status
-                existing.metadata = dict(metadata or {})
+                new_meta = dict(metadata or {})
+                if existing.status != status or existing.metadata != new_meta:
+                    existing.status = status
+                    existing.metadata = new_meta
+                    changed = True
             if provenance:
                 existing.provenance.update(provenance)
-            self._save()
+                changed = True
+            if changed:
+                self._save()
             return existing
         model = Model(
             model_id=model_id,
@@ -1855,12 +1892,33 @@ class DataCatalogService:
         """
         current = artifact_dir_for(self.project_path).name
         changed = False
+
+        def _rewrite(raw: str | None) -> str | None:
+            if not raw:
+                return None
+            posix = Path(str(raw)).as_posix()
+            head, sep, rest = posix.partition("/")
+            if sep and head.endswith(".artifacts") and head != current:
+                return f"{current}/{rest}"
+            return None
+
         for version in self.document.versions:
             if not version.managed:
                 continue
-            head, sep, rest = version.path.partition("/")
-            if sep and head.endswith(".artifacts") and head != current:
-                version.path = f"{current}/{rest}"
+            rewritten = _rewrite(version.path)
+            if rewritten is not None:
+                version.path = rewritten
+                changed = True
+            trash = version.metadata.get("trash")
+            if isinstance(trash, dict):
+                original = _rewrite(trash.get("original_path"))
+                if original is not None:
+                    trash["original_path"] = original
+                    changed = True
+        for model_version in self.document.model_versions:
+            rewritten = _rewrite(getattr(model_version, "artifact_uri", "") or "")
+            if rewritten is not None:
+                model_version.artifact_uri = rewritten
                 changed = True
         if changed:
             self._save()

@@ -307,6 +307,9 @@ def register_horizon_interpretation_run(
 
 
 # --------------------------------------------------------------------- prediction
+_COMPLETE_RUN_STATUSES = frozenset({"complete", "completed"})
+
+
 def _versions_for_domain_tasks(
     task_ids: list[str],
     *,
@@ -314,34 +317,39 @@ def _versions_for_domain_tasks(
 ) -> list[str]:
     """Resolve domain task ids to version ids through the run graph.
 
-    Uses only the **latest** DataRun per ``domain_task_id`` (catalog list order
-    is oldest→newest). Prefer that run's output versions. When the latest run
-    has no file outputs (in-memory-only factor grids), fall back to its
-    declared input versions so lineage still reaches RAW ancestors — without
-    unioning every historical recompute.
+    Uses only the latest **complete** DataRun per ``domain_task_id`` (catalog
+    list order is oldest→newest). Prefer that run's output versions. When the
+    latest complete run has no file outputs (in-memory-only factor grids),
+    fall back to *that* run's declared input versions.
+
+    Failed / cancelled / running later runs are ignored so a retry that dies
+    cannot replace a real product with RAW ancestor ids.
     """
     wanted = set(task_ids)
     if not wanted:
         return []
-    latest_by_task: dict[str, Any] = {}
+    latest_complete: dict[str, Any] = {}
+    latest_with_outputs: dict[str, Any] = {}
     for run in catalog.list_runs():
         tid = run.domain_task_id
-        if tid in wanted:
-            latest_by_task[tid] = run  # last write wins
+        if tid not in wanted:
+            continue
+        status = (getattr(run, "status", "") or "").lower()
+        if status not in _COMPLETE_RUN_STATUSES:
+            continue
+        latest_complete[tid] = run
+        if list(getattr(run, "output_version_ids", None) or []):
+            latest_with_outputs[tid] = run
     out: list[str] = []
     seen: set[str] = set()
-    for run in latest_by_task.values():
-        outputs = list(run.output_version_ids or [])
-        if outputs:
-            for vid in outputs:
-                if vid not in seen:
-                    seen.add(vid)
-                    out.append(vid)
-        else:
-            for vid in run.input_version_ids or []:
-                if vid not in seen:
-                    seen.add(vid)
-                    out.append(vid)
+    for tid, run in latest_complete.items():
+        chosen_run = latest_with_outputs.get(tid, run)
+        outputs = list(chosen_run.output_version_ids or [])
+        chosen = outputs if outputs else list(chosen_run.input_version_ids or [])
+        for vid in chosen:
+            if vid not in seen:
+                seen.add(vid)
+                out.append(vid)
     return out
 
 

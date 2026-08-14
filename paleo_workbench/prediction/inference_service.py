@@ -153,6 +153,10 @@ class _RunProxy:
     def input_version_ids(self):
         return self._run.input_version_ids
 
+    @property
+    def status(self):
+        return self._run.status
+
 
 def start_inference(
     service,
@@ -218,6 +222,10 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
     errors (unknown run/version, unpersistable result) propagate.
     """
     run = service.get_run(run_id)
+    if (run.status or "").lower() != "running":
+        raise CatalogError(
+            f"execute_run requires a running run; {run_id} is {run.status!r}"
+        )
     model_version_id = (run.parameters or {}).get("model_version_id")
     if not model_version_id:
         raise CatalogError(f"Run {run_id} has no model_version_id")
