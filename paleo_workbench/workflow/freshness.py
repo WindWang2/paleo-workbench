@@ -133,7 +133,9 @@ FRESHNESS_UI_LABELS: dict[str, str] = {
 WORKFLOW_STATUS_FOR_FRESHNESS: dict[FreshnessState, str] = {
     FreshnessState.FRESH: "complete",
     FreshnessState.STALE: "stale",
-    FreshnessState.UNKNOWN: "complete",  # degrade: show complete, not crash
+    # UNKNOWN must not render as complete: provenance-less results are not
+    # "已完成" (H1). "warning" maps to the existing 状态未知 label.
+    FreshnessState.UNKNOWN: "warning",
     FreshnessState.MISSING: "warning",
     FreshnessState.FAILED: "failed",
     FreshnessState.RUNNING: "running",
@@ -699,16 +701,29 @@ class FreshnessService:
             reports.extend(self.evaluate_operation("inference"))
         if not reports:
             return None
-        if any(r.state is FreshnessState.FAILED for r in reports):
+        # Superseded runs must not poison the step: within each domain task
+        # only the most recent run participates, so a failed attempt followed
+        # by a successful retry (or vice versa) reports the latest state.
+        # Untasked (legacy) runs keep their own slot.
+        latest: dict[str, tuple[str, FreshnessReport]] = {}
+        for r in reports:
+            run = self.graph.runs.get(r.subject_id)
+            started = run.started_at if run is not None else ""
+            key = r.domain_task_id or f"run:{r.subject_id}"
+            prev = latest.get(key)
+            if prev is None or started >= prev[0]:
+                latest[key] = (started, r)
+        selected = [r for (_created, r) in latest.values()]
+        if any(r.state is FreshnessState.FAILED for r in selected):
             return FreshnessState.FAILED
-        if any(r.state is FreshnessState.RUNNING for r in reports):
+        if any(r.state is FreshnessState.RUNNING for r in selected):
             return FreshnessState.RUNNING
-        if any(r.state is FreshnessState.STALE for r in reports):
+        if any(r.state is FreshnessState.STALE for r in selected):
             return FreshnessState.STALE
-        if any(r.state is FreshnessState.MISSING for r in reports):
+        if any(r.state is FreshnessState.MISSING for r in selected):
             return FreshnessState.MISSING
-        if all(r.state is FreshnessState.FRESH for r in reports):
+        if all(r.state is FreshnessState.FRESH for r in selected):
             return FreshnessState.FRESH
-        if any(r.state is FreshnessState.UNKNOWN for r in reports):
+        if any(r.state is FreshnessState.UNKNOWN for r in selected):
             return FreshnessState.UNKNOWN
         return FreshnessState.FRESH

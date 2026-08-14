@@ -328,6 +328,10 @@ def _versions_for_domain_tasks(
     wanted = set(task_ids)
     if not wanted:
         return []
+    # Round-2 + round-3 combined semantics: the latest COMPLETE run per task
+    # wins; a run WITH file outputs is preferred over a complete-but-empty
+    # run (in-memory propagation). Failed/running/cancelled runs never stand
+    # in for the product, and withdrawn (trashed) outputs are excluded (H5).
     latest_complete: dict[str, Any] = {}
     latest_with_outputs: dict[str, Any] = {}
     for run in catalog.list_runs():
@@ -347,9 +351,15 @@ def _versions_for_domain_tasks(
         outputs = list(chosen_run.output_version_ids or [])
         chosen = outputs if outputs else list(chosen_run.input_version_ids or [])
         for vid in chosen:
-            if vid not in seen:
-                seen.add(vid)
-                out.append(vid)
+            if vid in seen:
+                continue
+            if outputs:
+                ref = catalog.resolve_version(vid)
+                if ref is not None and getattr(ref, "trashed", False):
+                    # Withdrawn output must not enter a production run (H5-a).
+                    continue
+            seen.add(vid)
+            out.append(vid)
     return out
 
 

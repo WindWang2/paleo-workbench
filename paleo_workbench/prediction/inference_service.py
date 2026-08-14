@@ -51,6 +51,8 @@ def _snapshot_hash(payload: dict[str, Any]) -> str:
 def _input_info(service, version_id: str) -> dict[str, Any]:
     """Payload info for one declared input version (for the provider)."""
     version = service.get_version(version_id)
+    if getattr(version, "trashed", False):
+        raise CatalogError(f"Input version {version_id} is trashed (H5-a)")
     asset = None
     for candidate in service.document.assets:
         if candidate.id == version.asset_id:
@@ -177,7 +179,9 @@ def start_inference(
     model = service.get_model(model_version.model_id)
     params = dict(parameters or {})
     seed = int(params.get("seed", 0) or 0)
-    input_ids = list(input_version_ids or [])
+    # Canonicalize input order + duplicates so the reproducibility snapshot is
+    # permutation-invariant (H5-e): the same input SET yields the same hash.
+    input_ids = sorted({str(v) for v in (input_version_ids or [])})
     # Stage-13: computation identity includes model + preprocessing, not only inputs.
     snapshot = {
         "model_version_id": model_version_id,
@@ -216,55 +220,39 @@ def start_inference(
 def execute_run(service, run_id: str) -> dict[str, Any]:
     """Execute a running inference run and persist its outcome.
 
-    Returns ``{"run", "result", "model", "model_version"}``. Provider errors
-    are caught and recorded on the run (status ``failed`` + ``error``) with NO
-    output version — a failed run never fabricates output. Catalog-level
-    errors (unknown run/version, unpersistable result) propagate.
+    Returns ``{"run", "result", "model", "model_version"}``. Any error —
+    provider, schema, lookup or persistence — is recorded on the run
+    (status ``failed`` + ``error``) so a run never strands in "running".
+    A failed run never fabricates output.
     """
     run = service.get_run(run_id)
-    if (run.status or "").lower() != "running":
-        raise CatalogError(
-            f"execute_run requires a running run; {run_id} is {run.status!r}"
-        )
-    model_version_id = (run.parameters or {}).get("model_version_id")
-    if not model_version_id:
-        raise CatalogError(f"Run {run_id} has no model_version_id")
-    model_version = service.get_model_version_by_id(model_version_id)
-    model = service.get_model(model_version.model_id)
-    provider = get_provider(model.provider)
-    seed = int((run.parameters or {}).get("seed", 0) or 0)
-    inputs = {
-        version_id: _input_info(service, version_id)
-        for version_id in run.input_version_ids
-    }
-    parameters = {
-        k: v
-        for k, v in (run.parameters or {}).items()
-        if not k.startswith("_") and k not in _RESERVED_KEYS
-    }
-    parameters["seed"] = seed
     try:
-        result = provider.run(inputs, parameters)
-    except Exception as exc:  # noqa: BLE001 — surface into run status honestly
-        _fail_run(service, run_id, exc)
-        return {
-            "run": service.get_run(run_id),
-            "result": None,
-            "model": model,
-            "model_version": model_version,
+        if (run.status or "").lower() != "running":
+            # Late/duplicate execution must not touch a terminal run (round-3).
+            raise CatalogError(
+                f"execute_run requires a running run; {run_id} is {run.status!r}"
+            )
+        model_version_id = (run.parameters or {}).get("model_version_id")
+        if not model_version_id:
+            raise CatalogError(f"Run {run_id} has no model_version_id")
+        model_version = service.get_model_version_by_id(model_version_id)
+        model = service.get_model(model_version.model_id)
+        provider = get_provider(model.provider)
+        seed = int((run.parameters or {}).get("seed", 0) or 0)
+        inputs = {
+            version_id: _input_info(service, version_id)
+            for version_id in run.input_version_ids
         }
-
-    # Stage-13: validate spatial output when the model declares a spatial schema.
-    from paleo_workbench.prediction.spatial_result import (
-        SpatialResultError,
-        validate_spatial_result,
-    )
-
-    expected = (model_version.output_schema or {}).get("spatial_output_type")
-    if expected and str(expected) not in ("", "NONE"):
-        spatial_errors = validate_spatial_result(result, expected_type=str(expected))
-        if spatial_errors:
-            _fail_run(service, run_id, SpatialResultError("; ".join(spatial_errors)))
+        parameters = {
+            k: v
+            for k, v in (run.parameters or {}).items()
+            if not k.startswith("_") and k not in _RESERVED_KEYS
+        }
+        parameters["seed"] = seed
+        try:
+            result = provider.run(inputs, parameters)
+        except Exception as exc:  # noqa: BLE001 — surface into run status honestly
+            _fail_run(service, run_id, exc)
             return {
                 "run": service.get_run(run_id),
                 "result": None,
@@ -272,55 +260,81 @@ def execute_run(service, run_id: str) -> dict[str, Any]:
                 "model_version": model_version,
             }
 
-    # Align DataRun.generator with provider/result generator_version so Stage-9
-    # expected_identity (from PredictionTask.generator_version) does not flag
-    # GENERATOR_CHANGED immediately after a successful run.
-    provider_generator = str(
-        result.get("generator_version") or model.provider or run.generator or ""
-    )
-    if provider_generator:
-        run.generator = provider_generator
+        # Stage-13: validate spatial output when the model declares a spatial schema.
+        from paleo_workbench.prediction.spatial_result import (
+            SpatialResultError,
+            validate_spatial_result,
+        )
 
-    payload = {
-        "schema_version": "1.0",
-        "model": {
-            "model_id": model.model_id,
-            "model_version": model_version.model_version,
-            "model_name": model.model_name,
-            "demo_only": bool(model_version.demo_only),
-            "preprocessing_version": getattr(model_version, "preprocessing_version", "")
-            or "",
-            "checksum": getattr(model_version, "checksum", None) or "",
-            "model_version_id": model_version.id,
-        },
-        "generator_version": provider_generator or result.get("generator_version"),
-        "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
-        "input_version_ids": list(run.input_version_ids),
-        "seed": seed,
-        "parameters": parameters,
-        "run_id": run_id,
-        **result,
-    }
-    # Prefer the aligned identity (result may re-set generator_version via **result).
-    if provider_generator:
-        payload["generator_version"] = provider_generator
-    output_version = _persist_result(service, run_id, model, payload)
-    finished = _now_iso()
-    service.update_run_status(
-        run_id,
-        "complete",
-        extra_parameters={
-            "_finished_at": finished,
-            "output_version_id": output_version.id,
-        },
-    )
-    return {
-        "run": service.get_run(run_id),
-        "result": payload,
-        "output_version": output_version,
-        "model": model,
-        "model_version": model_version,
-    }
+        expected = (model_version.output_schema or {}).get("spatial_output_type")
+        if expected and str(expected) not in ("", "NONE"):
+            spatial_errors = validate_spatial_result(result, expected_type=str(expected))
+            if spatial_errors:
+                _fail_run(service, run_id, SpatialResultError("; ".join(spatial_errors)))
+                return {
+                    "run": service.get_run(run_id),
+                    "result": None,
+                    "model": model,
+                    "model_version": model_version,
+                }
+
+        # Align DataRun.generator with provider/result generator_version so Stage-9
+        # expected_identity (from PredictionTask.generator_version) does not flag
+        # GENERATOR_CHANGED immediately after a successful run.
+        provider_generator = str(
+            result.get("generator_version") or model.provider or run.generator or ""
+        )
+        if provider_generator:
+            run.generator = provider_generator
+
+        payload = {
+            "schema_version": "1.0",
+            "model": {
+                "model_id": model.model_id,
+                "model_version": model_version.model_version,
+                "model_name": model.model_name,
+                "demo_only": bool(model_version.demo_only),
+                "preprocessing_version": getattr(model_version, "preprocessing_version", "")
+                or "",
+                "checksum": getattr(model_version, "checksum", None) or "",
+                "model_version_id": model_version.id,
+            },
+            "generator_version": provider_generator or result.get("generator_version"),
+            "input_snapshot_hash": (run.parameters or {}).get("_input_snapshot_hash"),
+            "input_version_ids": list(run.input_version_ids),
+            "seed": seed,
+            "parameters": parameters,
+            "run_id": run_id,
+            **result,
+        }
+        # Prefer the aligned identity (result may re-set generator_version via **result).
+        if provider_generator:
+            payload["generator_version"] = provider_generator
+        output_version = _persist_result(service, run_id, model, payload)
+        finished = _now_iso()
+        service.update_run_status(
+            run_id,
+            "complete",
+            extra_parameters={
+                "_finished_at": finished,
+                "output_version_id": output_version.id,
+            },
+        )
+        return {
+            "run": service.get_run(run_id),
+            "result": payload,
+            "output_version": output_version,
+            "model": model,
+            "model_version": model_version,
+        }
+    except Exception as exc:  # noqa: BLE001 — prelude/persist failures must not strand a running run
+        _fail_run(service, run_id, exc)
+        return {
+            "run": service.get_run(run_id),
+            "result": None,
+            "model": None,
+            "model_version": None,
+        }
 
 
 def _persist_result(service, run_id: str, model, payload: dict[str, Any]) -> Any:

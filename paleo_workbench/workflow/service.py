@@ -116,7 +116,11 @@ def _apply_freshness_overlay(
             return "running"
         if state is FreshnessState.MISSING:
             return "warning"
-        # FRESH / UNKNOWN → keep evidence complete
+        if state is FreshnessState.UNKNOWN:
+            # Provenance unknown is not "已完成" (H1): surface the distinct
+            # 状态未知 state instead of collapsing into evidence complete.
+            return "warning"
+        # FRESH → keep evidence complete
         return evidence_status
     except Exception:
         return evidence_status

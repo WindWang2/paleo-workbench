@@ -1034,9 +1034,11 @@ class DataCatalogService:
         silently downgraded by a seed/defaults call: when the model already
         exists and ``force_status`` is False, its ``status`` and ``metadata``
         are preserved (an explicit promote must never be clobbered by
-        ``ensure_default_models`` — review finding C2). Pass True only when
-        the caller deliberately changes status (e.g. promote/demote).
-
+        ``ensure_default_models`` — review finding C2). Seeds additionally
+        never touch existing models at all (``ensure_default_models`` skips
+        them), so a seeded id can never rebind a promoted model to a
+        heuristic/demo provider. Pass True only when the caller deliberately
+        changes status (e.g. promote/demote).
         No-op re-registrations do not rewrite the catalog file."""
         if not model_id or not model_name:
             raise CatalogError("register_model requires model_id and model_name")
@@ -1234,8 +1236,11 @@ class DataCatalogService:
 
         A version qualifies only when BOTH its model and the version are
         ``status == "production"`` and the version is not ``demo_only``.
-        Returns None when no production model exists — callers must surface an
-        honest "no production model" state instead of running a mock.
+        Re-runs the promote gates so a model whose identity was mutated after
+        promotion (provider/model_type/scientific/schema) is never served as
+        production (H4-3a/H4-3c). Returns None when no production model
+        exists — callers must surface an honest "no production model" state
+        instead of running a mock.
         """
         best: ModelVersion | None = None
         for version in self.document.model_versions:
@@ -1246,6 +1251,11 @@ class DataCatalogService:
             except CatalogError:
                 continue
             if model.status != "production" or model.capability != capability:
+                continue
+            from paleo_workbench.prediction.model_package import can_promote_to_production
+
+            ok, _reason = can_promote_to_production(self, model.model_id, version.model_version)
+            if not ok:
                 continue
             if best is None or version.created_at > best.created_at:
                 best = version

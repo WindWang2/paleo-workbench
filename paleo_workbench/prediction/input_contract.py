@@ -17,6 +17,23 @@ class InputContractError(ValueError):
     """Required model inputs cannot be resolved from the project/catalog."""
 
 
+# Keys parse_input_schema understands; anything else is unknown vocabulary.
+_RECOGNIZED_SCHEMA_KEYS = frozenset(
+    {
+        "required_asset_types",
+        "asset_types",
+        "optional_asset_types",
+        "required_curves",
+        "curves",
+        "require_target_horizon",
+        "require_correlation",
+        "require_horizon_interpretation",
+        "require_fault_interpretation",
+        "min_wells",
+    }
+)
+
+
 def parse_input_schema(schema: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize input_schema keys used by resolve_model_inputs."""
     schema = dict(schema or {})
@@ -77,6 +94,14 @@ def resolve_model_inputs(
             schema["min_wells"] > 0,
         )
     ):
+        raw_schema = getattr(model_version, "input_schema", None) or {}
+        if strict and raw_schema and not (set(raw_schema) & _RECOGNIZED_SCHEMA_KEYS):
+            # A schema that declares something we cannot interpret must not
+            # silently fall back to the project-wide gather (H5-b).
+            raise InputContractError(
+                "input_schema 使用了未识别的结构，无法按契约解析输入："
+                + ", ".join(sorted(str(k) for k in raw_schema.keys()))
+            )
         input_ids = resolve_prediction_inputs(project, service)
         if schema["required_curves"] and strict:
             _enforce_required_curves(project, service, input_ids, schema["required_curves"])
@@ -179,13 +204,11 @@ def resolve_model_inputs(
             if t in {"correlation", "horizon", "fault"}:
                 continue
             if t == "factor_map":
+                # The contract requires an ACTUALLY resolved factor version:
+                # a task marked complete whose latest run failed does not
+                # satisfy it (H5-c).
                 if "factor_map" not in present_types and "factor_grid" not in present_types:
-                    # domain-task versions may not advertise factor_map type
-                    if not any(
-                        getattr(ft, "status", "") == "complete"
-                        for ft in project.factor_map_tasks
-                    ):
-                        missing.append("factor_map")
+                    missing.append("factor_map")
                 continue
             if t not in present_types:
                 missing.append(t)

@@ -64,12 +64,25 @@ def test_register_model_is_idempotent_on_model_id(service):
     service.register_model(
         model_id="m1", model_name="A", capability="cap", provider="p", status="demo"
     )
+    # Round-2 review: a defaults/seed re-registration (force_status=False)
+    # must NOT clobber identity fields a user or promote already set.
     updated = service.register_model(
         model_id="m1", model_name="A2", capability="cap2", provider="p", status="demo"
     )
     assert len(service.list_models()) == 1
-    assert updated.model_name == "A2"
-    assert updated.capability == "cap2"
+    assert updated.model_name == "A"
+    assert updated.capability == "cap"
+    # Explicit identity repair still works via force_status=True.
+    repaired = service.register_model(
+        model_id="m1",
+        model_name="A2",
+        capability="cap2",
+        provider="p",
+        status="demo",
+        force_status=True,
+    )
+    assert repaired.model_name == "A2"
+    assert repaired.capability == "cap2"
 
 
 def test_duplicate_model_version_raises(service):
@@ -125,7 +138,11 @@ def test_find_production_model_skips_demo_and_wrong_capability(service):
         status="demo",
     )
     service.register_model_version(
-        "other-v1", model_version="1", demo_only=False, status="demo"
+        "other-v1",
+        model_version="1",
+        demo_only=False,
+        status="demo",
+        input_schema={"required_asset_types": ["seismic"]},
     )
     service.promote_model("other-v1", "1")
     assert service.find_production_model("facies_prediction") is None
@@ -143,7 +160,11 @@ def test_find_production_model_returns_newest_production(service):
         metadata={"scientific": True},
     )
     service.register_model_version(
-        "pkg-v1", model_version="1", demo_only=False, status="demo"
+        "pkg-v1",
+        model_version="1",
+        demo_only=False,
+        status="demo",
+        input_schema={"required_asset_types": ["well_log"]},
     )
     service.promote_model("pkg-v1", "1")
     version = service.find_production_model("facies_prediction")

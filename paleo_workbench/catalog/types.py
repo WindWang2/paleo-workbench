@@ -93,6 +93,7 @@ class DataVersionRef:
         "format",
         "integrity",
         "legacy_resource_id",
+        "trashed",
     )
 
     def __init__(
@@ -112,6 +113,7 @@ class DataVersionRef:
         format: str = "",
         integrity: IntegrityStatus | str = IntegrityStatus.UNKNOWN,
         legacy_resource_id: str | None = None,
+        trashed: bool = False,
     ) -> None:
         self.asset_id = asset_id
         self.version_id = version_id
@@ -130,6 +132,9 @@ class DataVersionRef:
         )
         # Bridge to the legacy ResourceItem that produced this version (migration).
         self.legacy_resource_id = legacy_resource_id
+        # Tombstone flag mirrored from the canonical DataVersion (H5-a: trashed
+        # versions must never be resolved as production inputs).
+        self.trashed = trashed
 
     def to_dict(self) -> dict[str, Any]:
         return {

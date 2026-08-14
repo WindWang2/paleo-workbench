@@ -54,3 +54,4 @@ native/**/*_selftest
 build/
 CMakeFiles/
 .zcode/
+*.cpython-3*-x86_64-linux-gnu.so

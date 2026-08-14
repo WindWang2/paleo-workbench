@@ -122,6 +122,23 @@ def load_manifest_dict(source: Path | str | dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _strict_bool(raw: dict[str, Any], key: str, default: bool) -> bool:
+    """Parse a manifest boolean field strictly (H4-1).
+
+    Python truthiness would turn ``"false"``/``"0"``/``"no"`` into True and
+    silently invert the author's declaration. Only real booleans (or the
+    unambiguous strings ``"true"``/``"false"``) are accepted.
+    """
+    value = raw.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in {"true", "false"}:
+            return s == "true"
+    raise ModelPackageError(f"{key} must be a boolean, got {value!r}")
+
+
 def parse_model_package_manifest(
     source: Path | str | dict[str, Any],
     *,
@@ -144,8 +161,9 @@ def parse_model_package_manifest(
         raise ModelPackageError("provider is required")
 
     model_type = str(raw.get("model_type") or "ml").strip() or "ml"
-    demo_only = bool(raw.get("demo_only", False))
-    scientific = bool(raw.get("scientific", not demo_only))
+    demo_only = _strict_bool(raw, "demo_only", False)
+    scientific = _strict_bool(raw, "scientific", not demo_only)
+    deterministic = _strict_bool(raw, "deterministic", True)
     spatial = str(raw.get("spatial_output_type") or SPATIAL_VECTOR_POLYGONS).strip()
     if spatial not in KNOWN_SPATIAL_TYPES:
         raise ModelPackageError(f"Unknown spatial_output_type: {spatial!r}")
@@ -164,6 +182,10 @@ def parse_model_package_manifest(
     output_schema = raw.get("output_schema") or {}
     if not isinstance(input_schema, dict) or not isinstance(output_schema, dict):
         raise ModelPackageError("input_schema and output_schema must be objects")
+    metadata_raw = raw.get("metadata") or {}
+    provenance_raw = raw.get("provenance") or {}
+    if not isinstance(metadata_raw, dict) or not isinstance(provenance_raw, dict):
+        raise ModelPackageError("metadata and provenance must be objects")
 
     # Enrich output_schema with spatial type when absent.
     if spatial and "spatial_output_type" not in output_schema:
@@ -181,13 +203,13 @@ def parse_model_package_manifest(
         output_schema=dict(output_schema),
         preprocessing_version=str(raw.get("preprocessing_version") or ""),
         runtime=str(raw.get("runtime") or "python_callable"),
-        deterministic=bool(raw.get("deterministic", True)),
+        deterministic=deterministic,
         spatial_output_type=spatial or SPATIAL_NONE,
         model_type=model_type,
         demo_only=demo_only,
         scientific=scientific,
-        provenance=dict(raw.get("provenance") or {}),
-        metadata=dict(raw.get("metadata") or {}),
+        provenance=dict(provenance_raw),
+        metadata=dict(metadata_raw),
     )
 
 
@@ -209,6 +231,10 @@ def validate_model_package(
         )
     if manifest.demo_only and not allow_non_scientific:
         errors.append("demo_only packages cannot be registered as production")
+    if manifest.scientific is False and not allow_non_scientific:
+        # The author explicitly declared this package non-scientific; a later
+        # promote must not be able to flip the label (H4-3b).
+        errors.append("scientific=false packages cannot be registered as production")
     if require_artifact:
         if not manifest.artifact:
             errors.append("artifact path is required for production packages")
@@ -275,10 +301,48 @@ def register_model_package(
         provenance=manifest.provenance,
         force_status=False,
     )
-    # Re-register path for versions: get or create.
+    # Re-register path for versions: get or create, with identity checks (H4-2).
+    # Registering the same (model_id, model_version) with a DIFFERENT artifact
+    # or schema must raise instead of silently returning the old version.
     try:
-        version = service.get_model_version(manifest.model_id, manifest.model_version)
+        existing_version = service.get_model_version(
+            manifest.model_id, manifest.model_version
+        )
     except Exception:
+        existing_version = None
+    if existing_version is not None:
+        conflicts: list[str] = []
+        if manifest.checksum and existing_version.checksum and manifest.checksum != existing_version.checksum:
+            conflicts.append(f"checksum {existing_version.checksum} != {manifest.checksum}")
+        if (
+            manifest.input_schema
+            and existing_version.input_schema
+            and manifest.input_schema != existing_version.input_schema
+        ):
+            conflicts.append("input_schema differs")
+        if (
+            manifest.output_schema
+            and existing_version.output_schema
+            and manifest.output_schema != existing_version.output_schema
+        ):
+            conflicts.append("output_schema differs")
+        if (
+            manifest.preprocessing_version
+            and existing_version.preprocessing_version
+            and manifest.preprocessing_version != existing_version.preprocessing_version
+        ):
+            conflicts.append("preprocessing_version differs")
+        if existing_version.deterministic != manifest.deterministic:
+            conflicts.append("deterministic differs")
+        if existing_version.demo_only != manifest.demo_only:
+            conflicts.append("demo_only differs")
+        if conflicts:
+            raise ModelPackageError(
+                f"identity conflict for {manifest.model_id}@{manifest.model_version}: "
+                + "; ".join(conflicts)
+            )
+        version = existing_version
+    else:
         version = service.register_model_version(
             manifest.model_id,
             model_version=manifest.model_version,
@@ -310,10 +374,18 @@ def can_promote_to_production(service, model_id: str, model_version: str) -> tup
         return False, str(exc)
     if version.demo_only:
         return False, "demo_only model versions cannot be promoted to production"
-    if model.provider in NON_PROMOTABLE_PROVIDERS:
+    # Case/alias-insensitive checks: "Demo"/"DEMO"/"local-asset" must not
+    # slip past exact-match allowlists (H4-3c).
+    provider_norm = (model.provider or "").strip().casefold()
+    if provider_norm in {p.strip().casefold() for p in NON_PROMOTABLE_PROVIDERS}:
         return False, f"provider {model.provider!r} is not promotable to production"
-    if model.model_type in NON_PROMOTABLE_MODEL_TYPES:
+    type_norm = (model.model_type or "").strip().casefold()
+    if type_norm in {t.strip().casefold() for t in NON_PROMOTABLE_MODEL_TYPES}:
         return False, f"model_type {model.model_type!r} is not promotable to production"
     if model.metadata.get("scientific") is False:
         return False, "model metadata marks scientific=False"
+    if version.metadata.get("scientific") is False:
+        return False, "version metadata marks scientific=False (H4-3b)"
+    if not version.input_schema:
+        return False, "input_schema is required for production promotion (H5-b)"
     return True, "ok"

@@ -309,7 +309,7 @@ def evaluate_contract_readiness(
                 )
             )
         # Stage-13: infrastructure readiness ≠ production model availability.
-        # Read-only: never seed/mutate the catalog from an evaluation.
+        # Read-only: never seed/mutate the catalog from an evaluation. 
         try:
             from paleo_workbench.catalog import get_catalog_service
             from paleo_workbench.prediction.providers import CAPABILITY_FACIES
@@ -334,6 +334,8 @@ def evaluate_contract_readiness(
                             )
                         )
                 except Exception:
+                    # Distinguish "model absent" from "catalog read failed":
+                    # a failing store must not masquerade as no-model.
                     reasons.append(
                         ReadinessReason(
                             code="catalog_read_error",
