@@ -409,16 +409,21 @@ class WellLogPredictionPage(QWidget):
         if self._project is None:
             return
         try:
-            from paleo_workbench.catalog.lifecycle import register_export_output
+            from paleo_workbench.project.artifacts import record_export
 
             task = self._current_task()
-            register_export_output(
-                name="测井剖面 canvas export",
+            record_export(
+                self._project,
+                linked_id="well_log_canvas",
                 output_path=str(path),
                 fmt=fmt,
-                source_task_ids=[task.id] if task is not None else None,
-                catalog=None,
+                source_task_ids=[task.id] if task is not None else [],
             )
         except Exception:
             # Provenance is best-effort; never break the export flow.
-            pass
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "engine canvas export provenance registration failed",
+                exc_info=True,
+            )

@@ -70,6 +70,40 @@ def open_draft_from_array(
     )
 
 
+def _canonical_version_id(
+    cat, provisional: str, *, domain_task_id: str, fingerprint: str
+) -> str | None:
+    """Resolve the canonical catalog version id for a provisional token.
+
+    Pre-catalog saves store a throwaway ``ver_<uuid>`` token in the artifact
+    descriptor; the catalog assigns a different id. Resolve by domain task +
+    scientific fingerprint so lineage never references a nonexistent version
+    (H7).
+    """
+    if not provisional:
+        return None
+    try:
+        if cat is not None and cat.resolve_version(provisional) is not None:
+            return provisional
+    except Exception:
+        pass
+    if cat is None:
+        return None
+    try:
+        for run in cat.list_runs():
+            if run.domain_task_id != domain_task_id:
+                continue
+            params = getattr(run, "parameters", None) or {}
+            if params.get("scientific_fingerprint") != fingerprint:
+                continue
+            outs = list(run.output_version_ids or [])
+            if outs:
+                return outs[0]
+    except Exception:
+        return None
+    return None
+
+
 def open_draft_from_version(
     artifact_path: Path | str,
     *,
@@ -78,6 +112,22 @@ def open_draft_from_version(
 ) -> HorizonInterpretationDraft:
     """Load an immutable version artifact as a new draft baseline."""
     z, desc = read_interpretation_artifact(artifact_path)
+    parent_version_id = desc.get("version_id") or desc.get("parent_version_id")
+    if parent_version_id:
+        from paleo_workbench.catalog import get_catalog
+
+        try:
+            cat = get_catalog()
+        except Exception:
+            cat = None
+        canonical = _canonical_version_id(
+            cat,
+            str(parent_version_id),
+            domain_task_id=str(desc.get("interpretation_id") or ""),
+            fingerprint=str(desc.get("scientific_fingerprint") or ""),
+        )
+        if canonical:
+            parent_version_id = canonical
     return HorizonInterpretationDraft(
         interpretation_id=interpretation_id
         or str(desc.get("interpretation_id") or _id()),
@@ -86,7 +136,7 @@ def open_draft_from_version(
         baseline_z=z,
         vertical_domain=str(desc.get("vertical_domain") or "time"),
         crs=desc.get("crs"),
-        parent_version_id=desc.get("version_id") or desc.get("parent_version_id"),
+        parent_version_id=str(parent_version_id or "") or None,
         source_version_ids=list(desc.get("source_version_ids") or []),
         generation=generation,
     )
@@ -117,6 +167,12 @@ def save_draft_as_new_version(
         # content only if they pass expected_fingerprint=None.
         return None, "fingerprint_mismatch_at_schedule"
 
+    # No-op detection (mirrors correlation/fault lifecycles): saving identical
+    # scientific content must not mint a duplicate immutable version.
+    existing_ref = _find_interpretation_ref(project, snap.interpretation_id)
+    if existing_ref is not None and existing_ref.scientific_fingerprint == snap.scientific_fingerprint:
+        return existing_ref, "noop_unchanged"
+
     # A live draft that advanced mid-save is handled below: the version freezes
     # the snapshot content and the draft simply stays dirty (no adopt).
 
@@ -146,16 +202,25 @@ def save_draft_as_new_version(
         return None, f"artifact_write_failed:{exc}"
 
     checksum = sha256_file_or_none(artifact)
-    version_ref = register_interpretation_version(
-        name=f"{snap.name} interpretation",
-        path=artifact.as_posix(),
-        checksum=checksum,
-        parent_version_id=snap.parent_version_id,
-        source_version_ids=list(snap.source_version_ids),
-        scientific_fingerprint=snap.scientific_fingerprint,
-        domain_task_id=snap.interpretation_id,
-        catalog=catalog,
-    )
+    try:
+        version_ref = register_interpretation_version(
+            name=f"{snap.name} interpretation",
+            path=artifact.as_posix(),
+            checksum=checksum,
+            parent_version_id=snap.parent_version_id,
+            source_version_ids=list(snap.source_version_ids),
+            scientific_fingerprint=snap.scientific_fingerprint,
+            domain_task_id=snap.interpretation_id,
+            catalog=catalog,
+        )
+    except Exception:
+        # Compensate: the staged artifact must not linger as a ghost file when
+        # catalog registration failed (H7 failure injection).
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     version_id = version_ref.version_id if version_ref is not None else version_token
     managed_path = version_ref.path if version_ref is not None else artifact.as_posix()
 
@@ -300,3 +365,12 @@ def _upsert_interpretation_ref(
             return
     items.append(ref)
     project.horizon_interpretations = items
+
+
+def _find_interpretation_ref(
+    project: ProjectDocument, interpretation_id: str
+) -> HorizonInterpretationRef | None:
+    for ref in getattr(project, "horizon_interpretations", None) or []:
+        if ref.id == interpretation_id:
+            return ref
+    return None

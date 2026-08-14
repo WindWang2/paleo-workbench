@@ -73,19 +73,41 @@ def load_current_correlation_payload(
     ref = current_correlation_ref(project)
     if ref is None or not ref.artifact_path:
         return None, None
-    p = Path(ref.artifact_path)
-    if not p.is_file() and project_path is not None:
-        p = Path(project_path).resolve().parent / ref.artifact_path
-    if not p.is_file():
-        root = getattr(getattr(project, "meta", None), "project_root", "") or ""
-        if root:
-            cand = Path(root) / ref.artifact_path
-            if cand.is_file():
-                p = cand
-    if not p.is_file():
+    p = _resolve_correlation_artifact(ref.artifact_path, project_path, project)
+    if p is None:
         return ref, None
     payload, _ = read_correlation_artifact(p)
     return ref, payload
+
+
+def _resolve_correlation_artifact(
+    artifact_path: str,
+    project_path: Path | str | None,
+    project: ProjectDocument,
+) -> Path | None:
+    """Resolve a correlation artifact path project-first (H9).
+
+    The stored path is project-relative; probing the process CWD first lets a
+    duplicated project (same relative path) read the OTHER project's artifact
+    when the app was launched from inside it. Project-relative resolution
+    must win; CWD is a last-resort legacy fallback.
+    """
+    raw = str(artifact_path or "")
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate if candidate.is_file() else None
+    if project_path is not None:
+        cand = Path(project_path).resolve().parent / candidate
+        if cand.is_file():
+            return cand
+    root = getattr(getattr(project, "meta", None), "project_root", "") or ""
+    if root:
+        cand = Path(root) / candidate
+        if cand.is_file():
+            return cand
+    return candidate if candidate.is_file() else None
 
 
 def formation_tops_overlay_for_well(
@@ -104,10 +126,23 @@ def formation_tops_overlay_for_well(
     )
 
 
-def markers_from_overlay_rows(rows: list[dict[str, Any]]) -> list[FormationTopMarker]:
-    """Convert overlay dicts to adapter-readable marker objects."""
+def markers_from_overlay_rows(
+    rows: list[dict[str, Any]],
+    *,
+    allowed_domains: set[str] | None = None,
+) -> list[FormationTopMarker]:
+    """Convert overlay dicts to adapter-readable marker objects.
+
+    ``allowed_domains`` guards H8: a formation top whose depth domain does not
+    match the target log axis must never be placed numerically (the software
+    does not convert depth domains). Skipped rows are reported via the
+    returned ``overlay_diagnostics`` when requested.
+    """
     out: list[FormationTopMarker] = []
     for r in rows:
+        domain = str(r.get("depth_domain") or "MD")
+        if allowed_domains is not None and domain not in allowed_domains:
+            continue
         try:
             depth = float(r.get("depth"))
         except (TypeError, ValueError):
@@ -138,6 +173,10 @@ def apply_correlation_tops_to_well_log_data(
     Does not mutate RAW LAS / WellLogData schema. If no tops, returns *data*
     unchanged. Production consumers must pass the return value into
     ``adapt_well_log_data`` / host apply paths.
+
+    Re-applying the overlay replaces previously applied correlation markers
+    (same ``semantic``) instead of appending, so backend toggles and tops
+    edits can never accumulate stale duplicate tops (H9).
     """
     if data is None:
         return data
@@ -150,11 +189,28 @@ def apply_correlation_tops_to_well_log_data(
     )
     if not rows:
         return data
-    markers = markers_from_overlay_rows(rows)
+    # The log axis is a depth axis in meters (MD); non-MD tops are skipped
+    # with a warning instead of being plotted at numerically wrong positions
+    # (H8 — no silent domain conversion).
+    domain_rows = [r for r in rows if str(r.get("depth_domain") or "MD") == "MD"]
+    skipped = len(rows) - len(domain_rows)
+    markers = markers_from_overlay_rows(domain_rows)
+    if skipped:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "skipped %d correlation top(s) with non-MD depth domain on well-log overlay (no auto-conversion)",
+            skipped,
+        )
     if not markers:
         return data
-    # Merge with any existing markers on a prior wrapper or duck type
+    # Replace correlation-managed markers; keep other marker semantics.
     existing = list(getattr(data, "markers", None) or [])
+    kept = [
+        m
+        for m in existing
+        if getattr(m, "semantic", "formation_top") != "formation_top"
+    ]
     if isinstance(data, WellLogDataWithMarkers):
-        return WellLogDataWithMarkers(data.base, existing + markers)
-    return WellLogDataWithMarkers(data, existing + markers)
+        return WellLogDataWithMarkers(data.base, kept + markers)
+    return WellLogDataWithMarkers(data, kept + markers)

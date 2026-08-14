@@ -152,23 +152,31 @@ def save_correlation_draft(
 
     from paleo_workbench.catalog.lifecycle import register_stratigraphic_correlation_run
 
-    _run, version = register_stratigraphic_correlation_run(
-        name=f"{draft.name} correlation",
-        path=artifact.as_posix(),
-        checksum=checksum,
-        source_version_ids=list(draft.payload.well_version_ids),
-        parent_version_id=parent,
-        scientific_fingerprint=fp,
-        domain_task_id=draft.interpretation_id,
-        parameters={
-            "depth_domain": draft.payload.depth_domain.value,
-            "well_resource_ids": list(draft.payload.well_resource_ids),
-            "method_summary": list(draft.payload.method_summary),
-            "top_count": len(draft.payload.tops),
-            "link_count": len(draft.payload.links),
-        },
-        catalog=catalog,
-    )
+    try:
+        _run, version = register_stratigraphic_correlation_run(
+            name=f"{draft.name} correlation",
+            path=artifact.as_posix(),
+            checksum=checksum,
+            source_version_ids=list(draft.payload.well_version_ids),
+            parent_version_id=parent,
+            scientific_fingerprint=fp,
+            domain_task_id=draft.interpretation_id,
+            parameters={
+                "depth_domain": draft.payload.depth_domain.value,
+                "well_resource_ids": list(draft.payload.well_resource_ids),
+                "method_summary": list(draft.payload.method_summary),
+                "top_count": len(draft.payload.tops),
+                "link_count": len(draft.payload.links),
+            },
+            catalog=catalog,
+        )
+    except Exception:
+        # Compensate: no ghost artifact when catalog registration failed (H7).
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     version_id = version.version_id if version is not None else version_token
     managed_path = version.path if version is not None else artifact.as_posix()
     try:

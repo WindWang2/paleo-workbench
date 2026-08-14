@@ -39,8 +39,12 @@ def tops_from_canvas_rows(
 ) -> list[FormationTop]:
     """Map canvas/tops_model rows to scientific FormationTop with stable ids.
 
-    *rows* items expose ``well``/``well_name``, ``name``/``top_name``, ``depth``.
-    If *previous_tops* has the same well+marker, reuse that id (and keep method).
+    *rows* items expose ``well``/``well_name``, ``name``/``top_name``/
+    ``formation_name``, ``depth``/``depth_m`` (the geoviz cross-well canvas
+    model uses ``well_name``/``formation_name``/``depth_m`` — reading the
+    wrong attribute previously persisted empty markers at depth 0.0).
+    If *previous_tops* has the same well+marker, reuse that id (and keep
+    method + depth_domain so reopen→resave cannot relabel domains).
     """
     name_to_id = name_to_resource_id or {}
     prev_by_key: dict[tuple[str, str, str], FormationTop] = {}
@@ -50,14 +54,26 @@ def tops_from_canvas_rows(
     out: list[FormationTop] = []
     for t in rows:
         well = str(getattr(t, "well", "") or getattr(t, "well_name", "") or "")
-        marker = str(getattr(t, "name", "") or getattr(t, "top_name", "") or "")
-        depth = float(getattr(t, "depth", 0.0) or 0.0)
+        marker = str(
+            getattr(t, "name", "")
+            or getattr(t, "top_name", "")
+            or getattr(t, "formation_name", "")
+            or ""
+        )
+        depth_raw = getattr(t, "depth", None)
+        if depth_raw is None:
+            depth_raw = getattr(t, "depth_m", 0.0)
+        depth = float(depth_raw or 0.0)
         well_id = name_to_id.get(well, "")
         key = (well_id, well, marker)
         prev = prev_by_key.get(key)
         tid = prev.id if prev is not None else stable_top_id(
             well_id=well_id, well_name=well, marker=marker
         )
+        # Preserve the previously recorded depth domain: the canvas is
+        # domain-free, so without this a reopen+resave silently relabels
+        # TWT/TVDSS tops as MD (H8).
+        domain = prev.depth_domain if prev is not None else depth_domain
         out.append(
             FormationTop(
                 id=tid,
@@ -65,7 +81,7 @@ def tops_from_canvas_rows(
                 well_name=well,
                 marker=marker,
                 depth=depth,
-                depth_domain=depth_domain,
+                depth_domain=domain,
                 method=prev.method if prev is not None else method,
             )
         )

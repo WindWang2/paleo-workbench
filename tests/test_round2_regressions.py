@@ -844,3 +844,282 @@ def test_cycle_detection_reports_all_cycles(tmp_path: Path):
     # regression is that a self-loop alone previously short-circuited.
     g = DependencyGraph.from_catalog(cat)
     assert isinstance(g.cycle_nodes, frozenset)
+
+
+# --------------------------------------------------------------------------- WP5
+# Interpretation lifecycle / depth-domain (H7/H8).
+
+
+def test_tops_from_canvas_reads_geoviz_row_shape():
+    """P0: real geoviz canvas rows (well_name/formation_name/depth_m)."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.correlation_session import tops_from_canvas_rows
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain
+
+    rows = [
+        SimpleNamespace(well_name="W0", formation_name="H1", depth_m=100.0),
+        SimpleNamespace(well_name="W0", formation_name="H2", depth_m=250.0),
+        SimpleNamespace(well_name="W1", formation_name="H1", depth_m=105.0),
+    ]
+    tops = tops_from_canvas_rows(
+        rows,
+        name_to_resource_id={"W0": "well-0", "W1": "well-1"},
+        depth_domain=DepthDomain.MD,
+    )
+    assert len(tops) == 3
+    assert tops[0].marker == "H1"
+    assert tops[0].depth == pytest.approx(100.0)
+    assert tops[2].marker == "H1"
+    assert tops[2].depth == pytest.approx(105.0)
+
+
+def test_tops_domain_preserved_on_resave():
+    """H8: reopen→resave must not relabel TWT tops as MD."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.correlation_session import tops_from_canvas_rows
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
+
+    prev = [
+        FormationTop(
+            id="top_x",
+            well_id="well-0",
+            well_name="W0",
+            marker="H1",
+            depth=2500.0,
+            depth_domain=DepthDomain.TWT,
+        )
+    ]
+    rows = [SimpleNamespace(well_name="W0", formation_name="H1", depth_m=2500.0)]
+    tops = tops_from_canvas_rows(
+        rows,
+        name_to_resource_id={"W0": "well-0"},
+        depth_domain=DepthDomain.MD,  # page hardcode
+        previous_tops=prev,
+    )
+    assert tops[0].id == "top_x"
+    assert tops[0].depth_domain is DepthDomain.TWT
+    assert tops[0].depth == pytest.approx(2500.0)
+
+
+def test_horizon_save_noop_does_not_mint_version(tmp_path: Path):
+    """H7: identical content re-save must be a no-op."""
+    import numpy as np
+
+    from paleo_workbench.viz.interpretation_draft import HorizonInterpretationDraft
+    from paleo_workbench.viz.interpretation_lifecycle import (
+        open_draft_from_array,
+        save_draft_as_new_version,
+    )
+
+    project = ProjectDocument.new("p")
+    draft = open_draft_from_array(
+        np.zeros((8, 8), dtype=np.float32), horizon_key="H1", name="H1"
+    )
+    ref1, msg1 = save_draft_as_new_version(draft, project, tmp_path / "proj" / "p.paleo.json")
+    assert msg1 == "ok"
+    v1 = ref1.current_version_id
+    ref2, msg2 = save_draft_as_new_version(draft, project, tmp_path / "proj" / "p.paleo.json")
+    assert msg2 == "noop_unchanged"
+    assert ref2.current_version_id == v1
+
+
+def test_horizon_save_registration_failure_cleans_artifact(tmp_path: Path, monkeypatch):
+    """H7: catalog failure must not leave a ghost artifact."""
+    import numpy as np
+
+    from paleo_workbench.viz.interpretation_lifecycle import (
+        open_draft_from_array,
+        save_draft_as_new_version,
+        register_interpretation_version,
+    )
+
+    def _boom(*a, **k):
+        raise OSError("catalog down (injected)")
+
+    monkeypatch.setattr(
+        "paleo_workbench.viz.interpretation_lifecycle.register_interpretation_version",
+        _boom,
+    )
+    project = ProjectDocument.new("p")
+    draft = open_draft_from_array(
+        np.zeros((8, 8), dtype=np.float32), horizon_key="H1", name="H1"
+    )
+    proj_path = tmp_path / "proj" / "p.paleo.json"
+    with pytest.raises(OSError):
+        save_draft_as_new_version(draft, project, proj_path)
+    interp_dir = tmp_path / "proj" / "p.artifacts" / "interpretations"
+    leftovers = list(interp_dir.glob("*.npz")) if interp_dir.exists() else []
+    assert leftovers == []
+
+
+# --------------------------------------------------------------------------- WP6
+# Well-log overlay / project isolation (H8/H9).
+
+
+def test_overlay_reapply_replaces_correlation_markers():
+    """H9: re-applying an overlay must replace, not accumulate, tops."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.correlation_overlay import (
+        FormationTopMarker,
+        WellLogDataWithMarkers,
+        apply_correlation_tops_to_well_log_data,
+    )
+    from paleo_workbench.workflow.correlation_session import stable_top_id
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
+
+    project = ProjectDocument.new("p")
+    project.correlation_interpretations = []
+    from paleo_workbench.project.models import CorrelationInterpretationRef
+
+    tops = [
+        FormationTop(
+            id=stable_top_id(well_name="W0", marker="TopA"),
+            well_id="well-0",
+            well_name="W0",
+            marker="TopA",
+            depth=1002.0,
+            depth_domain=DepthDomain.MD,
+        )
+    ]
+    payload = SimpleNamespace(tops=tops)
+    ref = CorrelationInterpretationRef(
+        id="corr-1",
+        name="C",
+        current_version_id="v1",
+        artifact_path="/no/such/file.json",  # never loaded: payload injected below
+    )
+    project.correlation_interpretations.append(ref)
+
+    # Inject the payload directly (avoid file IO).
+    import paleo_workbench.workflow.correlation_overlay as ov
+
+    orig = ov.load_current_correlation_payload
+
+    def _fake_payload(proj, project_path=None):
+        return ref, payload
+
+    ov.load_current_correlation_payload = _fake_payload
+    try:
+        base = SimpleNamespace(well_name="W0")
+        first = apply_correlation_tops_to_well_log_data(base, project)
+        assert len(first.markers) == 1
+        # Simulate backend toggle: the stored (wrapped) data is re-applied.
+        second = apply_correlation_tops_to_well_log_data(first, project)
+        assert len(second.markers) == 1, "markers must not accumulate"
+        # Tops edit: depth changes; stale depth must not survive.
+        tops[0].depth = 1007.0
+        third = apply_correlation_tops_to_well_log_data(second, project)
+        assert len(third.markers) == 1
+        assert third.markers[0].depth == pytest.approx(1007.0)
+    finally:
+        ov.load_current_correlation_payload = orig
+
+
+def test_overlay_skips_non_md_domain_tops():
+    """H8: TWT tops must not be plotted numerically on the MD log axis."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.correlation_session import stable_top_id
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
+
+    from paleo_workbench.workflow.correlation_overlay import (
+        apply_correlation_tops_to_well_log_data,
+    )
+
+    project = ProjectDocument.new("p")
+    from paleo_workbench.project.models import CorrelationInterpretationRef
+
+    tops = [
+        FormationTop(
+            id=stable_top_id(well_name="W0", marker="TWT1"),
+            well_id="well-0",
+            well_name="W0",
+            marker="TWT1",
+            depth=2500.0,
+            depth_domain=DepthDomain.TWT,
+        ),
+        FormationTop(
+            id=stable_top_id(well_name="W0", marker="MD1"),
+            well_id="well-0",
+            well_name="W0",
+            marker="MD1",
+            depth=500.0,
+            depth_domain=DepthDomain.MD,
+        ),
+    ]
+    payload = SimpleNamespace(tops=tops)
+    ref = CorrelationInterpretationRef(
+        id="corr-2", name="C", current_version_id="v1", artifact_path="/no/such/file.json"
+    )
+    project.correlation_interpretations.append(ref)
+    import paleo_workbench.workflow.correlation_overlay as ov
+
+    orig = ov.load_current_correlation_payload
+    ov.load_current_correlation_payload = lambda proj, project_path=None: (ref, payload)
+    try:
+        base = SimpleNamespace(well_name="W0")
+        wrapped = apply_correlation_tops_to_well_log_data(base, project)
+        assert [m.label for m in wrapped.markers] == ["MD1"]
+    finally:
+        ov.load_current_correlation_payload = orig
+
+
+def test_correlation_artifact_resolves_project_first(tmp_path: Path, monkeypatch):
+    """H9: a duplicated project must read ITS OWN artifact, not the CWD copy."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.correlation_artifact import (
+        read_correlation_artifact,
+        write_correlation_artifact,
+    )
+    from paleo_workbench.workflow.correlation_overlay import (
+        load_current_correlation_payload,
+    )
+
+    projA = tmp_path / "A"
+    projB = tmp_path / "B"
+    (projA / "x.artifacts" / "correlations").mkdir(parents=True)
+    (projB / "x.artifacts" / "correlations").mkdir(parents=True)
+
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
+
+    from paleo_workbench.workflow.stratigraphy_models import (
+        CorrelationScientificPayload,
+    )
+
+    topsA = [FormationTop(id="t1", well_id="w1", well_name="W1", marker="TopA", depth=1002.0, depth_domain=DepthDomain.MD)]
+    topsB = [FormationTop(id="t2", well_id="w1", well_name="W1", marker="TopA", depth=1007.0, depth_domain=DepthDomain.MD)]
+
+    def _payload(tops):
+        return CorrelationScientificPayload(
+            interpretation_id="c",
+            tops=tops,
+            depth_domain=DepthDomain.MD,
+            well_resource_ids=["w1"],
+        )
+
+    write_correlation_artifact(
+        _payload(topsA), projA / "x.artifacts" / "correlations", "corr_v1"
+    )
+    write_correlation_artifact(
+        _payload(topsB), projB / "x.artifacts" / "correlations", "corr_v1"
+    )
+    # Identical relative path in both projects — the CWD trap.
+    rel = "x.artifacts/correlations/corr_v1.correlation.json"
+
+    from paleo_workbench.project.models import CorrelationInterpretationRef, ProjectDocument
+
+    projectB = ProjectDocument.new("B")
+    projectB.correlation_interpretations.append(
+        CorrelationInterpretationRef(
+            id="c", name="C", current_version_id="v", artifact_path=rel
+        )
+    )
+    # Launch the app "inside project A": CWD contains A's identical file.
+    monkeypatch.chdir(projA)
+    ref, payload = load_current_correlation_payload(projectB, project_path=projB / "x.paleo.json")
+    assert payload is not None
+    assert payload.tops[0].depth == pytest.approx(1007.0), "must read B, not A"

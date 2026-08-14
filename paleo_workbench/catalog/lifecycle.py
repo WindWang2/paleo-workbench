@@ -293,15 +293,23 @@ def register_horizon_interpretation_run(
         domain_task_id=domain_task_id,
         input_snapshot_hash=scientific_fingerprint,
     )
-    version = cat.register_derived(
-        run_id=run.run_id,
-        name=name,
-        path=path,
-        checksum=checksum,
-        kind="horizon_interpretation",
-        format="npz",
-        tags=["interpretation", "horizon"],
-    )
+    try:
+        version = cat.register_derived(
+            run_id=run.run_id,
+            name=name,
+            path=path,
+            checksum=checksum,
+            kind="horizon_interpretation",
+            format="npz",
+            tags=["interpretation", "horizon"],
+        )
+    except Exception:
+        # No orphan RUNNING run (H7 failure injection).
+        try:
+            cat.complete_run(run.run_id, status="failed")
+        except Exception:
+            pass
+        raise
     cat.complete_run(run.run_id)
     return run, version
 
@@ -647,15 +655,23 @@ def register_stratigraphic_correlation_run(
         domain_task_id=domain_task_id,
         input_snapshot_hash=scientific_fingerprint,
     )
-    version = cat.register_derived(
-        run_id=run.run_id,
-        name=name,
-        path=path,
-        checksum=checksum,
-        kind="stratigraphic_correlation",
-        format="json",
-        tags=["interpretation", "correlation", "tops"],
-    )
+    try:
+        version = cat.register_derived(
+            run_id=run.run_id,
+            name=name,
+            path=path,
+            checksum=checksum,
+            kind="stratigraphic_correlation",
+            format="json",
+            tags=["interpretation", "correlation", "tops"],
+        )
+    except Exception:
+        # No orphan RUNNING run (H7 failure injection).
+        try:
+            cat.complete_run(run.run_id, status="failed")
+        except Exception:
+            pass
+        raise
     cat.complete_run(run.run_id)
     return run, version
 
