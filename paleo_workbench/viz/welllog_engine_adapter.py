@@ -458,6 +458,29 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
     return plan
 
 
+_LOG_SCALE_FLOOR = 1e-10  # same floor the legacy renderer clips log axes to
+
+
+def _log_track_range(
+    curve: EngineCurveSubmission, lower: float
+) -> tuple[bool, float]:
+    """Sanitize a log-scale track minimum; return (is_log, scale_min).
+
+    The native engine rejects ``logarithmic && minimum <= 0`` and fails the
+    whole document (WL-3), so a single non-positive sample (or a
+    null-dominated curve defaulting to (0, 100)) must not take down every
+    track. The positive floor mirrors the legacy renderer's ``max(lo, 1e-10)``
+    clip so both backends display the same log range. A curve with no
+    positive finite sample at all cannot use a log axis and falls back to
+    linear.
+    """
+    values = np.asarray(curve.values, dtype=np.float64)
+    has_positive = bool(np.isfinite(values[values > 0.0]).any())
+    if not has_positive:
+        return False, lower
+    return True, max(lower, _LOG_SCALE_FLOOR)
+
+
 def _track_payload(plan: EngineLoadPlan) -> list[dict[str, Any]]:
     tracks: list[dict[str, Any]] = []
     semantics = {interval.semantic for interval in plan.intervals}
@@ -470,12 +493,17 @@ def _track_payload(plan: EngineLoadPlan) -> list[dict[str, Any]]:
         lower, upper = curve.display_range
         if not upper > lower:
             upper = lower + 1.0
+        is_log = curve.mnemonic.upper() in _LOG_SCALE_CURVES
+        if is_log:
+            is_log, lower = _log_track_range(curve, lower)
+            if not is_log:
+                plan.diagnostics.append(f"log_scale_fallback:{curve.mnemonic}")
         tracks.append(
             {
                 "width_mm": 40.0,
                 "scale_min": lower,
                 "scale_max": upper,
-                "scale_mode": "log" if curve.mnemonic.upper() in _LOG_SCALE_CURVES else "linear",
+                "scale_mode": "log" if is_log else "linear",
                 "layers": [
                     {
                         "curve_id": curve.curve_id,

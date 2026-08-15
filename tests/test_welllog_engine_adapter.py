@@ -315,3 +315,104 @@ def test_403_default_depth_unit_stays_meter():
     assert plan.primary.depth_unit == "m"
     payload = adapter.plan_to_submit_payload(plan)
     assert payload["depth_unit"] == "m"
+
+
+# ---------------------------------------------------------------------------
+# #402 — a single non-positive RT/RXO sample must not fail the whole native
+# document: log tracks sanitize their minimum (legacy-consistent 1e-10 floor),
+# and curves without any positive finite sample fall back to linear.
+# ---------------------------------------------------------------------------
+
+def _rt_curve(name="RT", values=None, display_range=(-0.5, 100.0)):
+    values = values if values is not None else [10.0] * 19 + [-0.5]
+    return CurveData(
+        name=name,
+        unit="ohm.m",
+        depth=[1000.0 + i for i in range(len(values))],
+        values=values,
+        display_range=display_range,
+    )
+
+
+def _rt_track(payload, plan, mnemonic="RT"):
+    curve_id = next(c.curve_id for c in plan.curves if c.mnemonic == mnemonic)
+    return next(t for t in payload["tracks"] if t["layers"][0]["curve_id"] == curve_id)
+
+
+def test_402_negative_rt_sample_sanitizes_log_track_minimum():
+    plan = adapter.adapt_well_log_data(
+        WellLogData(
+            well_name="c47",
+            top_depth=1000.0,
+            bottom_depth=1019.0,
+            curves=[
+                CurveData(name="GR", unit="API", depth=[1000.0 + i for i in range(20)],
+                          values=[10.0 + i for i in range(20)], display_range=(0.0, 150.0)),
+                _rt_curve(),
+            ],
+        )
+    )
+    payload = adapter.plan_to_submit_payload(plan)
+    track = _rt_track(payload, plan, "RT")
+    assert track["scale_mode"] == "log"
+    assert track["scale_min"] > 0.0
+    assert track["scale_min"] == pytest.approx(1e-10)  # legacy renderer floor
+    assert track["scale_max"] == 100.0
+    assert "log_scale_fallback" not in " ".join(plan.diagnostics)
+
+
+def test_402_positive_rt_range_is_unchanged():
+    plan = adapter.adapt_well_log_data(
+        WellLogData(
+            well_name="ok", top_depth=1000.0, bottom_depth=1019.0,
+            curves=[_rt_curve(display_range=(0.2, 2000.0))],
+        )
+    )
+    track = _rt_track(adapter.plan_to_submit_payload(plan), plan, "RT")
+    assert track["scale_mode"] == "log"
+    assert track["scale_min"] == pytest.approx(0.2)
+
+
+def test_402_all_negative_rt_falls_back_to_linear_with_diagnostic():
+    plan = adapter.adapt_well_log_data(
+        WellLogData(
+            well_name="neg", top_depth=1000.0, bottom_depth=1019.0,
+            curves=[_rt_curve(values=[-5.0] * 20, display_range=(-5.0, -1.0))],
+        )
+    )
+    track = _rt_track(adapter.plan_to_submit_payload(plan), plan, "RT")
+    assert track["scale_mode"] == "linear"
+    assert "log_scale_fallback:RT" in plan.diagnostics
+
+
+def test_402_null_dominated_rt_is_dropped_before_tracks():
+    # A curve with no finite sample never reaches the track payload: it is
+    # dropped upstream with a diagnostic, so it cannot submit a bad log track.
+    plan = adapter.adapt_well_log_data(
+        WellLogData(
+            well_name="nulls", top_depth=1000.0, bottom_depth=1019.0,
+            curves=[_rt_curve(values=[float("nan")] * 20, display_range=(0.0, 100.0))],
+        )
+    )
+    assert "curve_empty:RT" in plan.diagnostics
+    assert not [c for c in plan.curves if c.mnemonic == "RT"]
+
+
+def test_402_submit_accepts_sanitized_log_payload():
+    """Mocked engine validator: log tracks must never carry a non-positive min."""
+    plan = adapter.adapt_well_log_data(
+        WellLogData(
+            well_name="mocked", top_depth=1000.0, bottom_depth=1019.0,
+            curves=[_rt_curve()],
+        )
+    )
+
+    class _StrictView:
+        def submit_multi_track(self, payload):
+            for track in payload["tracks"]:
+                if track["scale_mode"] == "log":
+                    assert track["scale_min"] > 0.0, "log track min must be positive"
+            return {"track_count": len(payload["tracks"])}
+
+    report = adapter.submit_plan_to_view(_StrictView(), plan)
+    assert report["track_count"] == 1
