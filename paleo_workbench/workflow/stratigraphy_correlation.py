@@ -44,10 +44,14 @@ def load_correlation_wells(
     resource_ids: list[str] | None = None,
     max_wells: int = 8,
     attach_prediction_facies: bool = True,
-) -> tuple[list[Any], list[str], list[str]]:
+) -> tuple[list[Any], list[str], list[str], list[str]]:
     """Load WellLogData for correlation section.
 
-    Returns (logs, names, warnings).
+    Returns ``(logs, names, loaded_ids, warnings)`` — ``loaded_ids`` holds the
+    resource id of every successfully loaded well, aligned index-by-index with
+    ``logs``/``names``.  Skipped wells (missing/unparseable LAS, unsupported
+    visualization) never appear in any of the three lists, so callers must not
+    reconstruct ids by positional slicing of the request list.
     """
     wells = list_well_log_resources(project)
     if resource_ids is not None:
@@ -58,6 +62,7 @@ def load_correlation_wells(
     adapter = VizAdapter()
     logs: list[Any] = []
     names: list[str] = []
+    loaded_ids: list[str] = []
     warnings: list[str] = []
     task = project.prediction_tasks[-1] if project.prediction_tasks else None
 
@@ -79,7 +84,8 @@ def load_correlation_wells(
         names.append(
             str(getattr(data, "well_name", "") or Path(resource.name).stem or resource.id)
         )
-    return logs, names, warnings
+        loaded_ids.append(resource.id)
+    return logs, names, loaded_ids, warnings
 
 
 def prediction_bound_well_ids(project: ProjectDocument) -> list[str]:

@@ -383,10 +383,23 @@ class AppShell(QWidget):
             self.sidebar.update_data_context(**self._data_context)
 
     def set_data_project_path(self, path) -> None:
-        """Propagate the open ``*.paleo.json`` path to DataPage I/O."""
-        page = self.data_page_widget()
-        if hasattr(page, "set_project_path"):
-            page.set_project_path(path)
+        """Propagate the open ``*.paleo.json`` path to every project-bound page.
+
+        DataPage, VisualizationPage, WellLogPredictionPage,
+        StratigraphyCorrelationPage and ReviewExportPage derive artifact /
+        export locations from the real project file path; without this
+        routing they would fabricate ``project.paleo.json`` / ``x.paleo.json``
+        names and write into phantom ``.artifacts/`` trees. Pages without a
+        ``set_project_path`` hook are skipped.
+        """
+        for index in range(self.page_stack.count()):
+            page = self.page_stack.widget(index)
+            if page is None or not hasattr(page, "set_project_path"):
+                continue
+            try:
+                page.set_project_path(path)
+            except Exception:
+                continue
 
     def update_data_context(self, context: dict) -> None:
         self._data_context = {
