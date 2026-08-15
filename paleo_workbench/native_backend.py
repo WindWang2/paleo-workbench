@@ -181,19 +181,36 @@ def _py_fast_resample_volume_3d(
     t0, t1, t2 = target_shape
     if t0 <= 0 or t1 <= 0 or t2 <= 0:
         raise ValueError("target_shape elements must all be positive")
-    # Mirror the C++ sampling grid exactly: src = min(s-1, trunc(i * s/t))
-    # computed in float32, NOT linspace endpoints (audit A1/I4 — the previous
-    # linspace grid disagreed with the native path at 23/32 positions for a
-    # 100→32 downsample, so preview volumes differed by backend).
-    def _src_indices(size: int, target: int) -> np.ndarray:
+    # Mirror the C++ peak-preserving stride-block decimation (issue #419)
+    # exactly: each target cell aggregates its source stride block and keeps
+    # the sample with the largest |value| (sign preserved, first-wins ties);
+    # a block containing any NaN yields NaN. The block bounds use the same
+    # float32 trunc(i * s/t) arithmetic as the C++ side (audit A1/I4), with
+    # the last target's block forced to the source edge.
+    def _blocks(size: int, target: int) -> tuple[np.ndarray, np.ndarray]:
         step = np.float32(size) / np.float32(max(1, target))
-        idx = (np.arange(target, dtype=np.float32) * step).astype(np.int64)
-        return np.minimum(size - 1, idx)
+        lo = (np.arange(target, dtype=np.float32) * step).astype(np.int64)
+        nxt = np.empty(target, dtype=np.int64)
+        nxt[:-1] = (np.arange(1, target, dtype=np.float32) * step).astype(np.int64) - 1
+        nxt[-1] = size - 1
+        hi = np.maximum(lo, nxt)  # upsampling: single-sample blocks
+        return lo, hi
 
-    idx0 = _src_indices(s0, t0)
-    idx1 = _src_indices(s1, t1)
-    idx2 = _src_indices(s2, t2)
-    return vol[np.ix_(idx0, idx1, idx2)]
+    lo0, hi0 = _blocks(s0, t0)
+    lo1, hi1 = _blocks(s1, t1)
+    lo2, hi2 = _blocks(s2, t2)
+
+    out = np.empty((t0, t1, t2), dtype=np.float32)
+    for i in range(t0):
+        for j in range(t1):
+            for k in range(t2):
+                sub = vol[lo0[i] : hi0[i] + 1, lo1[j] : hi1[j] + 1, lo2[k] : hi2[k] + 1]
+                if np.isnan(sub).any():
+                    out[i, j, k] = np.nan
+                    continue
+                flat = sub.ravel()  # C order: same scan order as the C++ loops
+                out[i, j, k] = flat[int(np.argmax(np.abs(flat)))]
+    return out
 
 
 def _py_compute_coherence_3d(

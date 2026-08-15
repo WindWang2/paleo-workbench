@@ -294,19 +294,74 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
     auto r_buf = result.request();
     float* dst = static_cast<float*>(r_buf.ptr);
 
+    // Peak-preserving stride-block decimation (issue #419): the old nearest
+    // grid-point sampling dropped any thin reflection between stride samples,
+    // so LOD previews lost events that the native traces still contain. Each
+    // target cell now aggregates its source stride block [lo, hi] per axis
+    // (hi of the last target forced to the source edge, since float32
+    // rounding of t*step can land below s) and keeps the sample with the
+    // largest |value|, sign preserved. A block containing any NaN is
+    // conservatively NaN, matching the Python fallback and the NaN semantics
+    // of the other kernels in this module. Blocks are contiguous and cover
+    // the whole source; upsampling (step < 1) yields single-sample blocks
+    // (the old nearest sample), so identity resampling is unchanged.
     float step0 = static_cast<float>(s0) / static_cast<float>(std::max<size_t>(1, t0));
     float step1 = static_cast<float>(s1) / static_cast<float>(std::max<size_t>(1, t1));
     float step2 = static_cast<float>(s2) / static_cast<float>(std::max<size_t>(1, t2));
 
+    auto block_bounds = [](size_t s, size_t t, float step, std::vector<size_t>& lo, std::vector<size_t>& hi) {
+        lo.resize(t);
+        hi.resize(t);
+        for (size_t i = 0; i < t; ++i) {
+            lo[i] = static_cast<size_t>(i * step);
+            if (i + 1 == t) {
+                hi[i] = s - 1;
+            } else {
+                // Guarded decrement: trunc((i+1)*step) can be 0 when
+                // upsampling (step < 1); size_t underflow would read OOB.
+                size_t next = static_cast<size_t>((i + 1) * step);
+                hi[i] = (next > 0) ? next - 1 : 0;
+            }
+            if (hi[i] < lo[i]) hi[i] = lo[i];  // upsampling: single sample
+        }
+    };
+    std::vector<size_t> lo0, hi0, lo1, hi1, lo2, hi2;
+    block_bounds(s0, t0, step0, lo0, hi0);
+    block_bounds(s1, t1, step1, lo1, hi1);
+    block_bounds(s2, t2, step2, lo2, hi2);
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
     {
         py::gil_scoped_release release;
         for (size_t i = 0; i < t0; ++i) {
-            size_t src_i = std::min(s0 - 1, static_cast<size_t>(i * step0));
             for (size_t j = 0; j < t1; ++j) {
-                size_t src_j = std::min(s1 - 1, static_cast<size_t>(j * step1));
+                size_t dst_base = (i * t1 + j) * t2;
                 for (size_t k = 0; k < t2; ++k) {
-                    size_t src_k = std::min(s2 - 1, static_cast<size_t>(k * step2));
-                    dst[i * (t1 * t2) + j * t2 + k] = src[src_i * (s1 * s2) + src_j * s2 + src_k];
+                    float best = 0.0f;
+                    float best_abs = 0.0f;
+                    bool block_nan = false;
+                    for (size_t si = lo0[i]; si <= hi0[i]; ++si) {
+                        size_t row_base = si * (s1 * s2);
+                        for (size_t sj = lo1[j]; sj <= hi1[j]; ++sj) {
+                            size_t col_base = row_base + sj * s2;
+                            for (size_t sk = lo2[k]; sk <= hi2[k]; ++sk) {
+                                float v = src[col_base + sk];
+                                if (std::isnan(v)) {
+                                    block_nan = true;
+                                    break;
+                                }
+                                float a = std::fabs(v);
+                                if (a > best_abs) {
+                                    best_abs = a;
+                                    best = v;
+                                }
+                            }
+                            if (block_nan) break;
+                        }
+                        if (block_nan) break;
+                    }
+                    dst[dst_base + k] = block_nan ? nan : best;
                 }
             }
         }
