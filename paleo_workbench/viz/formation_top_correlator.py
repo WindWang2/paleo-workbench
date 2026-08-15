@@ -122,7 +122,12 @@ class FormationTopCorrelator:
             suggested_depth = float(np.asarray(target_depths, dtype=float)[target_idx])
         else:
             suggested_depth = start_depth + target_idx * depth_step
-        confidence = float(np.exp(-alignment.cost / (len(ref_curve) * 2.0)))
+        # Normalize by the number of steps actually matched by the DTW path.
+        # Normalizing by the full-resolution reference length would overstate
+        # confidence for decimated curves (the cost is accumulated over
+        # len(path) steps, not len(ref_curve)).
+        path_len = max(1, len(alignment.path_ref))
+        confidence = float(np.exp(-alignment.cost / path_len))
 
         return TopRecommendation(
             suggested_depth=float(suggested_depth),
