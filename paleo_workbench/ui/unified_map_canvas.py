@@ -446,7 +446,15 @@ class UnifiedMapCanvas(QWidget):
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         delta = event.angleDelta().y()
         if delta:
-            self.zoom_by(0.8 if delta > 0 else 1.25, coalesce_history=True)
+            # Anchor the zoom at the world point under the cursor (matching
+            # NativeMapCanvas and MapEditView); extent-center anchoring made
+            # the point under the cursor drift by ~5% of the viewport per
+            # wheel notch.
+            self.zoom_by(
+                0.8 if delta > 0 else 1.25,
+                self.screen_to_map(event.position()),
+                coalesce_history=True,
+            )
             event.accept()
             return
         event.ignore()
