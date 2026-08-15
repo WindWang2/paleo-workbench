@@ -83,6 +83,56 @@ def test_idw_apply_perf_smoke(label, grid_n, n_pts, trials):
     assert peak_mb < (200.0 if grid_n <= 128 else 600.0)
 
 
+def _wavy_breaks(n_polys: int = 2, n_verts: int = 40) -> list[list[tuple[float, float]]]:
+    lines = []
+    for p in range(n_polys):
+        pts = []
+        for i in range(n_verts):
+            t = i / (n_verts - 1)
+            x = 5.0 + t * 90.0
+            y = 40.0 + (p * 15.0) + 8.0 * np.sin(t * 6.0 + p)
+            pts.append((float(x), float(y)))
+        lines.append(pts)
+    return lines
+
+
+def test_idw_fault_barrier_perf_smoke():
+    """Fault-barrier apply must stay seconds-level (previously minutes).
+
+    The old per-pair Python LOS loop took ~40-70 s at this size on reference
+    hardware; the vectorized + plan-cached mask runs in well under 5 s.
+    """
+    from paleo_workbench.workflow.interpolation_plan import (
+        apply_idw_plan,
+        build_idw_plan,
+    )
+
+    rng = np.random.default_rng(5)
+    n_pts = 300
+    pts = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(
+            rng.uniform(0.0, 100.0, n_pts),
+            rng.uniform(0.0, 100.0, n_pts),
+            rng.uniform(10.0, 100.0, n_pts),
+        )
+    ]
+    breaks = _wavy_breaks()
+    plan = build_idw_plan(pts, grid_n=50, power=2.0, fault_polylines=breaks)
+    values = np.asarray([p["value"] for p in pts], dtype=np.float64)
+
+    def run_once():
+        apply_idw_plan(plan, values)
+
+    median, p90, peak_mb = _median_time(run_once, trials=3, warmup=1)
+    print(
+        f"[perf] IDW faults grid=50 n={n_pts} breaks=2x40: "
+        f"median={median:.4f}s p90={p90:.4f}s peak≈{peak_mb:.1f}MB"
+    )
+    assert median < 10.0
+    assert peak_mb < 400.0
+
+
 def test_constrained_idw_perf_smoke():
     pts = _points(30, seed=3)
 
@@ -96,6 +146,43 @@ def test_constrained_idw_perf_smoke():
     )
     assert median < 30.0
     assert peak_mb < 400.0
+
+
+def test_constrained_idw_barrier_perf_smoke():
+    """Constrained IDW with barriers must stay seconds-level.
+
+    The old per-(cell, well) LOS loop over all barrier segments took ~3-24 s
+    at this size (reference hardware / this host); the vectorized LOS mask
+    plus vectorized postprocessing runs in well under 10 s.
+    """
+    rng = np.random.default_rng(3)
+    n_pts = 120
+    pts = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(
+            rng.uniform(0.0, 100.0, n_pts),
+            rng.uniform(0.0, 100.0, n_pts),
+            rng.normal(25.0, 5.0, n_pts),
+        )
+    ]
+    lines = []
+    for p in range(2):
+        poly = []
+        for i in range(40):
+            t = i / 39
+            poly.append((5.0 + t * 90.0, 40.0 + p * 15.0 + 8.0 * np.sin(t * 6.0 + p)))
+        lines.append(poly)
+
+    def run_once():
+        run_constrained_idw(pts, grid_n=80, power=2.0, break_polylines=lines)
+
+    median, p90, peak_mb = _median_time(run_once, trials=2, warmup=1)
+    print(
+        f"[perf] constrained grid=80 n=120 breaks=2x40: "
+        f"median={median:.4f}s p90={p90:.4f}s peak≈{peak_mb:.1f}MB"
+    )
+    assert median < 10.0
+    assert peak_mb < 500.0
 
 
 def test_repeated_geometry_live_grid_no_extra_list_parse():

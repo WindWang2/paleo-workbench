@@ -19,7 +19,9 @@ from paleo_workbench.mapping.geometry_schema import (
 
 # Default well marker radius in scene/map units.
 WELL_RADIUS = 0.4
-# Vertex handle half-size in scene/map units.
+# Vertex handle half-size in scene/map units. Handles stay world-sized (Qt's
+# ItemIgnoresTransformations crashes scene picking without a view); picking is
+# pixel-consistent via MapEditScene._handle_at's screen-pixel radius.
 VERTEX_HANDLE_HALF = 0.35
 
 _FACIES_FILL = QColor(tokens.PRIMARY)

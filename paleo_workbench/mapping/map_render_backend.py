@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import math
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
@@ -165,6 +165,19 @@ class MapRenderBackend(ABC):
         return self._generation
 
 
+def _iter_coordinate_pairs(value: object) -> Iterable[tuple[float, float]]:
+    """Yield leaf (x, y) pairs from nested GeoJSON coordinate arrays."""
+    if isinstance(value, (list, tuple)) and len(value) >= 2 and not isinstance(value[0], (list, tuple)):
+        try:
+            yield float(value[0]), float(value[1])
+        except (TypeError, ValueError):
+            pass
+        return
+    if isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _iter_coordinate_pairs(child)
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
     """Explicit minimal renderer for tests and hosts without a QGIS bridge.
 
@@ -172,9 +185,39 @@ class FallbackMapRenderBackend(MapRenderBackend):
     become a second rendering stack. It is intentionally limited to basic GeoJSON
     vector geometry; scalar-grid composition remains delegated to the existing native
     layer path until its QGIS mirror is introduced in the next vertical slice.
+
+    Rendering is incremental: features are culled against the viewport (with cached
+    per-feature bounds), and frames are reused across pan steps by blitting the
+    previous frame and re-rasterizing only the newly exposed strips. A frame cache
+    keyed by (layer revisions, viewport, size, dpi) short-circuits identical requests.
     """
 
     backend_name = "fallback"
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Per-layer feature bounds for viewport culling. Entries survive data
+        # revision bumps: the stored geometry object is compared by value so an
+        # edit only recomputes bounds for the features it actually changed.
+        self._feature_bounds: dict[str, dict[str, tuple[object, tuple[float, float, float, float] | None]]] = {}
+        # Last rendered frame plus its input key for pan-strip reuse.
+        self._frame_cache: QImage | None = None
+        self._frame_cache_key: tuple[object, ...] | None = None
+        self._frame_cache_extent: tuple[float, float, float, float] | None = None
+        self._frame_cache_scales: tuple[float, float] = (0.0, 0.0)
+        self._rasterization_count = 0
+        self._frame_cache_hits = 0
+        self._strip_reuse_count = 0
+        self._culled_feature_count = 0
+
+    def fallback_diagnostics(self) -> dict[str, int]:
+        """Structural counters for regression tests (never time thresholds)."""
+        return {
+            "rasterization_count": self._rasterization_count,
+            "frame_cache_hits": self._frame_cache_hits,
+            "strip_reuse_count": self._strip_reuse_count,
+            "culled_feature_count": self._culled_feature_count,
+        }
 
     @staticmethod
     def _color(value: object, fallback: str) -> QColor:
@@ -294,10 +337,176 @@ class FallbackMapRenderBackend(MapRenderBackend):
             self.initialize()
         generation = self._next_generation()
         width, height = self._output_size
+        key = self._render_key()
+        cached = self._frame_cache
+        if cached is not None and key == self._frame_cache_key:
+            # Identical input (layer revisions, viewport, size, dpi): the frame
+            # is already current; serve it without re-rasterizing.
+            self._frame_cache_hits += 1
+            return self._frame_from_image(generation, cached)
         image = QImage(width, height, QImage.Format.Format_RGBA8888)
         image.fill(_BACKGROUND)
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        shift = self._reusable_shift() if cached is not None else None
+        if shift is not None:
+            # Pan at the same scale: blit the previous frame and rasterize only
+            # the newly exposed strips (dirty-region reuse).
+            self._strip_reuse_count += 1
+            dx_px, dy_px = shift
+            painter.drawImage(QPointF(-dx_px, -dy_px), cached)
+            self._paint_scalar_grids(painter)
+            self._paint_strips(painter, dx_px, dy_px)
+        else:
+            self._rasterization_count += 1
+            self._paint_full(painter)
+        painter.end()
+        self._frame_cache = image
+        self._frame_cache_key = key
+        self._frame_cache_extent = self._extent
+        self._frame_cache_scales = self._pixel_scales()
+        return self._frame_from_image(generation, image)
+
+    def _render_key(self) -> tuple[object, ...]:
+        """Input key for the rendered-frame cache (excludes pure pan state)."""
+        layers_key = tuple(
+            (
+                layer.id,
+                layer.layer_type,
+                int(layer.data_revision),
+                int(layer.style_revision),
+                bool(layer.visible),
+                float(layer.opacity),
+                tuple(float(value) for value in layer.extent),
+                layer.name,
+                layer.crs,
+            )
+            for layer in self._snapshot.layers
+        )
+        return (tuple(float(value) for value in self._extent), self._output_size, float(self._dpi), layers_key)
+
+    def _pixel_scales(self) -> tuple[float, float]:
+        xmin, ymin, xmax, ymax = self._extent
+        width, height = self._output_size
+        return (width / (xmax - xmin), height / (ymax - ymin))
+
+    def _units_per_pixel(self) -> float:
+        xmin, ymin, xmax, ymax = self._extent
+        width, height = self._output_size
+        return max((xmax - xmin) / max(1, width), (ymax - ymin) / max(1, height))
+
+    def _reusable_shift(self) -> tuple[float, float] | None:
+        """Pixel shift of the cached frame for a same-scale pan, or None."""
+        if self._frame_cache is None or self._frame_cache_key is None:
+            return None
+        key = self._render_key()
+        if key[1:] != self._frame_cache_key[1:]:
+            # Layer revisions, output size or dpi changed: cache is stale.
+            return None
+        scales = self._pixel_scales()
+        cached_scales = self._frame_cache_scales
+        if scales[0] <= 0.0 or scales[1] <= 0.0 or cached_scales[0] <= 0.0 or cached_scales[1] <= 0.0:
+            return None
+        if abs(scales[0] - cached_scales[0]) > 1e-9 * max(1.0, cached_scales[0]) or (
+            abs(scales[1] - cached_scales[1]) > 1e-9 * max(1.0, cached_scales[1])
+        ):
+            # Zoom changed the scale: full re-rasterization required.
+            return None
+        assert self._frame_cache_extent is not None
+        xmin, ymin, _xmax, _ymax = self._extent
+        c_xmin, c_ymin, _c_xmax, _c_ymax = self._frame_cache_extent
+        dx_px = (xmin - c_xmin) * scales[0]
+        dy_px = (ymin - c_ymin) * scales[1]
+        dx, dy = round(dx_px), round(dy_px)
+        if abs(dx_px - dx) > 0.05 or abs(dy_px - dy) > 0.05:
+            # Non-pixel-aligned shift would blur the blit; render fresh instead.
+            return None
+        width, height = self._output_size
+        if abs(dx) >= width or abs(dy) >= height:
+            return None
+        return float(dx), float(dy)
+
+    def _layer_screen_margin(self, layer: MapLayerSnapshot) -> float:
+        """Painted-pixel pad beyond a feature bbox (pen + marker + AA pad)."""
+        style = dict(layer.style or {})
+        try:
+            stroke = max(0.0, float(style.get("stroke_width", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            stroke = 0.0
+        try:
+            marker = max(0.0, float(style.get("marker_size", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            marker = 0.0
+        return stroke / 2.0 + marker / 2.0 + 2.0
+
+    def _layer_margin_units(self, layer: MapLayerSnapshot) -> float:
+        return self._layer_screen_margin(layer) * self._units_per_pixel()
+
+    def _bounds_for_feature(
+        self, layer: MapLayerSnapshot, feature: Mapping[str, Any],
+    ) -> tuple[float, float, float, float] | None:
+        """Cached per-feature bounds keyed by feature geometry (cull without rescan).
+
+        The geometry object is the cache key by value, so bounds survive data
+        revision bumps and are recomputed only for features an edit changed.
+        """
+        cache = self._feature_bounds.get(layer.id)
+        if cache is None:
+            cache = {}
+            self._feature_bounds[layer.id] = cache
+        feature_id = str(feature.get("id") or "")
+        geometry = feature.get("geometry")
+        cached = cache.get(feature_id)
+        # Same snapshot object is the common case (identity beats deep equality).
+        if cached is not None and (cached[0] is geometry or cached[0] == geometry):
+            return cached[1]
+        coordinates = geometry.get("coordinates") if isinstance(geometry, dict) else None
+        pairs = tuple(_iter_coordinate_pairs(coordinates))
+        if not pairs:
+            bounds: tuple[float, float, float, float] | None = None
+        else:
+            xs = [pair[0] for pair in pairs]
+            ys = [pair[1] for pair in pairs]
+            bounds = (min(xs), min(ys), max(xs), max(ys))
+        cache[feature_id] = (geometry, bounds)
+        if len(cache) > 2 * max(1, len(layer.features)):
+            current_ids = {str(feature.get("id") or "") for feature in layer.features}
+            self._feature_bounds[layer.id] = {
+                feature_id: entry for feature_id, entry in cache.items() if feature_id in current_ids
+            }
+        return bounds
+
+    @staticmethod
+    def _bounds_intersect(
+        bounds: tuple[float, float, float, float] | None,
+        view: tuple[float, float, float, float],
+        margin: float,
+    ) -> bool:
+        if bounds is None:
+            return True  # unmeasurable geometry is always painted
+        xmin, ymin, xmax, ymax = view
+        return not (
+            bounds[2] < xmin - margin
+            or bounds[0] > xmax + margin
+            or bounds[3] < ymin - margin
+            or bounds[1] > ymax + margin
+        )
+
+    def _paint_vector_layer(
+        self,
+        painter: QPainter,
+        layer: MapLayerSnapshot,
+        view: tuple[float, float, float, float],
+        margin: float,
+    ) -> None:
+        for feature in layer.features:
+            if not self._bounds_intersect(self._bounds_for_feature(layer, feature), view, margin):
+                self._culled_feature_count += 1
+                continue
+            self._draw_geometry(painter, feature.get("geometry"), layer.style)
+
+    def _paint_full(self, painter: QPainter) -> None:
+        view = tuple(float(value) for value in self._extent)
         for layer in self._snapshot.layers:
             if not layer.visible or layer.opacity <= 0.0:
                 continue
@@ -305,10 +514,51 @@ class FallbackMapRenderBackend(MapRenderBackend):
             painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
             if layer.layer_type == "scalar_grid":
                 self._draw_scalar_grid(painter, layer)
-            for feature in layer.features:
-                self._draw_geometry(painter, feature.get("geometry"), layer.style)
+            self._paint_vector_layer(painter, layer, view, self._layer_margin_units(layer))
             painter.restore()
-        painter.end()
+
+    def _paint_scalar_grids(self, painter: QPainter) -> None:
+        """Recomposite scalar rasters over a reused frame (idempotent source-over)."""
+        for layer in self._snapshot.layers:
+            if layer.layer_type != "scalar_grid" or not layer.visible or layer.opacity <= 0.0:
+                continue
+            painter.save()
+            painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
+            self._draw_scalar_grid(painter, layer)
+            painter.restore()
+
+    def _paint_strips(self, painter: QPainter, dx_px: float, dy_px: float) -> None:
+        """Rasterize only the viewport strips exposed by a same-scale pan."""
+        width, height = self._output_size
+        strips: list[QRectF] = []
+        if dx_px > 0.0:
+            strips.append(QRectF(width - dx_px, 0.0, dx_px, height))
+        elif dx_px < 0.0:
+            strips.append(QRectF(0.0, 0.0, -dx_px, height))
+        if dy_px > 0.0:
+            strips.append(QRectF(0.0, height - dy_px, width, dy_px))
+        elif dy_px < 0.0:
+            strips.append(QRectF(0.0, 0.0, width, -dy_px))
+        if not strips:
+            return
+        xmin, ymin, xmax, ymax = self._extent
+        sx, sy = self._pixel_scales()
+        for strip in strips:
+            strip_view = (
+                xmin + strip.left() / sx,
+                ymax - strip.bottom() / sy,
+                xmin + strip.right() / sx,
+                ymax - strip.top() / sy,
+            )
+            for layer in self._snapshot.layers:
+                if not layer.visible or layer.opacity <= 0.0:
+                    continue
+                painter.save()
+                painter.setOpacity(max(0.0, min(1.0, float(layer.opacity))))
+                self._paint_vector_layer(painter, layer, strip_view, self._layer_margin_units(layer))
+                painter.restore()
+
+    def _frame_from_image(self, generation: int, image: QImage) -> RenderFrame:
         rgba = image.constBits().tobytes()
         return RenderFrame(
             generation=generation,
@@ -318,6 +568,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             rgba=rgba,
             render_ms=0.0,
         )
+
+    def shutdown(self) -> None:
+        self._frame_cache = None
+        self._frame_cache_key = None
+        self._feature_bounds.clear()
+        super().shutdown()
 
 
 class QgisMapRenderBackend(MapRenderBackend):

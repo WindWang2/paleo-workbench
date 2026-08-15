@@ -48,10 +48,45 @@ The copied modules are **byte-for-byte identical** to the upstream SHA above
   - `_save_to_qsettings` is a no-op (the host owns any GUI preference storage).
   - The helper docstrings/comments describe the PySide host boundary.
 
+- `drawing/single_factor/constrained_engine.py` has two host-driven behavior
+  fixes (see issues #370 / #382 in `paleo-workbench`):
+  - Barrier blanking band: the returned display grid keeps the corridor as
+    nodata (NaN) instead of filling it with `value_min` (upstream's "green
+    band = 0" convention for a normalized [0,1] surface). The host passes
+    real factor units, so the old fill fabricated an observed-minimum band
+    along every fault.
+  - Barrier line-of-sight: when active barriers exist the engine always uses
+    the per-cell LOS point path (upstream switched to a vectorized batch +
+    narrow near-barrier refine above 4096 domain cells, which leaked values
+    past dead-end barriers on larger grids; the host caps grid resolution at
+    200, so the point path stays responsive).
+
   To re-verify the parity of every other vendored file against the upstream
   SHA, diff this directory against the upstream checkout and expect
-  `performance.py` (and only it) to differ:
+  `performance.py` and the two `constrained_engine.py` hunks above to differ:
   `grep -rn "PALEO_\|PySide\|PyQt6" .` should hit only `performance.py`.
+
+- `drawing/single_factor/constrained_engine.py` carries host performance
+  modifications (numerical results are unchanged; verified by the parity
+  tests in `tests/test_constrained_idw_engine_parity.py`, which compare the
+  vectorized implementations bit-for-bit against the reference scalar loops):
+  - `_barrier_blocked_mask` / `_offset_barrier_blocked_mask`: vectorized
+    replacements for the per-(cell, well, segment) `is_blocked_by_barrier`
+    LOS loop, with identical `strict_segments_intersect` arithmetic.
+  - `_interpolate_grid_point_euclidean`: vectorized well-candidate selection
+    for the pure-Euclidean IDW case (identical sort / weighting semantics).
+  - `build_barrier_blank_mask`: vectorized stadium-distance buffer instead of
+    the sampling + per-cell `_point_within_polyline_stadium_buffer` loop.
+  - `smooth_valid_grid` / `refine_domain_boundary_transition`: vectorized
+    neighbor-weight accumulation (same per-element float operations and
+    accumulation order).
+  - `apply_well_residual_anchoring`: per-well patch windows vectorized with
+    NumPy (same per-element arithmetic; `np.hypot` vs `math.hypot` may differ
+    by one ulp on ~0.6% of distances, so anchoring parity is asserted within
+    tight float tolerance).
+- `drawing/single_factor/fast_grid.py` reuses a module-level
+  `ThreadPoolExecutor` across calls instead of constructing one per
+  interpolation (same work distribution, no numerical change).
 
 ## What was NOT vendored
 

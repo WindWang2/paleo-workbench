@@ -11,6 +11,13 @@ FactorMap/Prediction/WellTable/JointAnalysis/ExportArtifact keep working.
 The migration is a pure metadata projection: it never mutates ``ResourceItem``,
 never touches ``.paleo.json``, never copies files, and never re-hashes payloads
 (file materialization and integrity work belong to the service layer).
+Because no file is ever copied, NO projected version is ``managed``: every
+legacy resource is registered as an unmanaged link to the user's file in
+place (absolute path), which is exactly what the audit's ``path_mismatch``
+rule expects from unmanaged versions. Registering the original in-place file
+as "managed" violated the managed layout contract and made the health audit
+report permanent MEDIUM ``path_mismatch`` for every legacy resource
+(issue #396 / C34).
 
 Idempotence: re-running with the same document skips resources already
 represented in it — either as a projected asset (id == resource id) or as an
@@ -33,7 +40,7 @@ from paleo_workbench.catalog.models import (
     DataVersion,
 )
 from paleo_workbench.project.models import _now_iso, ResourceItem
-from paleo_workbench.project.paths import project_dir_for, relativize_path
+from paleo_workbench.project.paths import project_dir_for
 
 # Candidate parsed_summary keys that may hold the original absolute path.
 _ABS_PATH_KEYS = ("source_path", "absolute_path", "path")
@@ -72,14 +79,15 @@ def _stored_path(
 ) -> tuple[str, bool]:
     """Return the projected version's ``(path, managed)``.
 
-    Managed versions store a project-relative POSIX path; unmanaged (external)
-    versions store an absolute path. A resource whose path resolves outside the
-    project directory is treated as unmanaged even when ``external`` is unset.
+    The migration never copies files, so no legacy resource is ``managed``
+    (managed = immutable copy under ``<project>.artifacts/<stage>/...``):
+    every projected version links the user's file in place as an unmanaged
+    version with an absolute path. Projecting the original in-place file as
+    managed violated the managed path layout and made the health audit
+    report permanent MEDIUM ``path_mismatch`` for every legacy resource
+    (issue #396 / C34).
     """
-    if resource.external:
-        return _absolute_posix(resource.path, project_dir), False
-    stored, outside = relativize_path(resource.path, project_path)
-    return stored, not outside
+    return _absolute_posix(resource.path, project_dir), False
 
 
 def _source_uri(resource: ResourceItem) -> str | None:

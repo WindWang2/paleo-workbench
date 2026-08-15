@@ -88,7 +88,10 @@ markers = [
 ]
 pythonpath = [
     ".",
-    "geo-viz-engine",
+    # NOTE: the bare geo-viz-engine root is deliberately NOT on the path:
+    # it hosts committed cpython-313 .so binaries that shadow the freshly
+    # built extensions (packaging #435). `geoviz` itself resolves from the
+    # editable installs in requirements-geoviz.txt.
     "geo-viz-engine/packages/geoviz_common",
     "geo-viz-engine/packages/geoviz_paleo_map",
     "geo-viz-engine/packages/geoviz_plots",

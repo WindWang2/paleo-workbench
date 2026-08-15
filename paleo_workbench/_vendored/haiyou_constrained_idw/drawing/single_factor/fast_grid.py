@@ -8,10 +8,32 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
+
+# Reused executor: creating a ThreadPoolExecutor per interpolation call costs
+# tens of ms of thread spin-up even on tiny grids.
+_executor_lock = threading.Lock()
+_executor: Optional[ThreadPoolExecutor] = None
+_executor_workers = 0
+
+
+def _shared_executor(workers: int) -> ThreadPoolExecutor:
+    global _executor, _executor_workers
+    workers = max(1, int(workers))
+    if _executor is not None and _executor_workers == workers:
+        return _executor
+    with _executor_lock:
+        if _executor is not None and _executor_workers != workers:
+            _executor.shutdown(wait=False)
+            _executor = None
+        if _executor is None:
+            _executor = ThreadPoolExecutor(max_workers=workers)
+            _executor_workers = workers
+    return _executor
 
 
 def resolve_performance_grid_resolution(
@@ -494,11 +516,11 @@ def interpolate_idw_grid_batch(
             r0, r1 = rr
             return _idw_row_block(r0, r1, **common_cpu)
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_run_cpu, rr) for rr in ranges]
-            for fut in as_completed(futures):
-                r0, r1, block_vals, _ = fut.result()
-                result[r0:r1] = block_vals
+        pool = _shared_executor(workers)
+        futures = [pool.submit(_run_cpu, rr) for rr in ranges]
+        for fut in as_completed(futures):
+            r0, r1, block_vals, _ = fut.result()
+            result[r0:r1] = block_vals
 
     if use_gpu:
         try:

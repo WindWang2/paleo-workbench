@@ -351,8 +351,8 @@ class GeologicalModeling3DPage(QWidget):
             "font-weight: 600; color: %s;" % tokens.TEXT_PRIMARY
         )
         j2_header.addWidget(self._joint_2d_title)
-        # Time-only chip (#122): 2D always Time even when 3D domain is Depth
-        self._joint_2d_time_chip = QLabel("2D: Time")
+        # Unified domain chip: 2D and 3D always share the scene domain.
+        self._joint_2d_time_chip = QLabel("域: Time · 2D/3D 联动")
         self._joint_2d_time_chip.setObjectName("Joint2DTimeChip")
         self._joint_2d_time_chip.setStyleSheet(
             "QLabel#Joint2DTimeChip {"
@@ -928,14 +928,25 @@ class GeologicalModeling3DPage(QWidget):
         return Qt.PartiallyChecked
 
     def set_project(self, project: ProjectDocument | None) -> None:
+        project_changed = project is not self._project
         self._project = project
         self._joint_well_visibility_restored = False
+        if project_changed:
+            # Re-arm first-show loading so the NEXT project actually reloads
+            # the joint scene instead of leaving the previous volume/wells on
+            # screen. Same-project calls (e.g. the save-flush) must NOT reset
+            # this: they would trigger a full reload on the next visit that
+            # clears user-created fences/probes and rebinds fresh ids.
+            self._joint_loaded_once = False
         # Provenance memory is per-project: never carry the previous project's
         # modeling inputs into the next one's mesh exports.
         self._last_modeling_run_inputs = []
         self._joint_host.set_project(project)
         self._restore_joint_display_settings()
         self._restore_joint_slice_settings()
+        if project_changed:
+            # Drop the previous project's rendered brick/overlays immediately.
+            self._on_joint_scene_updated()
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         """Join the page's OwnedWorkerJobs on project switch / app close.
@@ -1246,8 +1257,11 @@ class GeologicalModeling3DPage(QWidget):
                 self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
                 return
             self._stratal_status.setText("正在生成演示地层切片…")
+            # Parentless on purpose: a parent would make moveToThread in
+            # OwnedWorkerJob.start a silent no-op and the computation would
+            # run on the GUI thread (review finding #8 regression, C17).
             worker = StratalWorker(
-                demo=True, fractions=tuple(fractions), parent=self
+                demo=True, fractions=tuple(fractions)
             )
             self._stratal_job.start(
                 worker,
@@ -1279,6 +1293,9 @@ class GeologicalModeling3DPage(QWidget):
         vol = renderer.volume_data()
         scene = self._joint_host.scene
         self._stratal_status.setText("正在计算比例地层切片…")
+        # Parentless on purpose: a parent would make moveToThread in
+        # OwnedWorkerJob.start a silent no-op and the computation would
+        # run on the GUI thread (review finding #8 regression, C17).
         worker = StratalWorker(
             demo=False,
             fractions=tuple(fractions),
@@ -1286,7 +1303,6 @@ class GeologicalModeling3DPage(QWidget):
             volume=vol,
             top_path=top_path,
             bottom_path=bot_path,
-            parent=self,
         )
         self._stratal_job.start(
             worker,
@@ -1473,6 +1489,10 @@ class GeologicalModeling3DPage(QWidget):
                     / 100.0
                 ),
             )
+        self._pending_slice_numbers = (
+            getattr(state, "orthogonal_inline_number", None),
+            getattr(state, "orthogonal_crossline_number", None),
+        )
         scene = self._joint_host.scene
         if scene is None:
             # Joint engine failed to construct (e.g. volume unavailable); the
@@ -1481,6 +1501,39 @@ class GeologicalModeling3DPage(QWidget):
             return
         scene.restore_orthogonal_slice_state(restored)
         self._refresh_joint_slice_card()
+
+    def _apply_pending_slice_numbers(self) -> None:
+        """Map persisted survey line numbers onto the live preview indices.
+
+        Called when a registration first exists: saved preview indices are
+        LOD-relative, but the physical line numbers are stable across
+        sessions and LOD refinements.
+        """
+        pending = getattr(self, "_pending_slice_numbers", None)
+        if pending is None:
+            return
+        scene = self._joint_host.scene
+        registration = getattr(scene, "registration", None)
+        if registration is None or pending[0] is None or pending[1] is None:
+            # Keep the pending numbers until a registration exists: they are
+            # consumed exactly once the volume is bound, not on every scene
+            # update (set_project fires one while registration is still None).
+            return
+        self._pending_slice_numbers = None
+        try:
+            vi, vx = registration.il_xl_to_volume_idx(
+                float(pending[0]), float(pending[1])
+            )
+            scene.set_orthogonal_slice_indices(
+                inline_index=max(0, min(registration.n_inline - 1, round(vi))),
+                crossline_index=max(
+                    0, min(registration.n_crossline - 1, round(vx))
+                ),
+            )
+            self._refresh_joint_slice_card()
+            self._sync_joint_slice_renderer()
+        except Exception:
+            logger.debug("pending slice numbers apply failed", exc_info=True)
 
     def _refresh_joint_slice_card(self) -> None:
         """Refresh controls from the scene-owned slice state."""
@@ -1762,11 +1815,20 @@ class GeologicalModeling3DPage(QWidget):
                 state = getattr(self._project, "joint_analysis", None)
                 domain = getattr(state, "vertical_domain", None) or "Time"
             if hasattr(self, "_joint_domain"):
+                scene = self._joint_host.scene
+                if (
+                    scene is not None
+                    and str(domain).lower().startswith("depth")
+                    and not scene.depth_available
+                ):
+                    # Saved Depth is unrealizable without a transform.
+                    domain = "Time"
                 self._joint_domain.blockSignals(True)
                 idx = self._joint_domain.findText(domain)
                 if idx >= 0:
                     self._joint_domain.setCurrentIndex(idx)
                 self._joint_domain.blockSignals(False)
+                self._update_domain_combo_availability()
             restoring_fence = False
             if self._project is not None:
                 state = getattr(self._project, "joint_analysis", None)
@@ -1778,6 +1840,23 @@ class GeologicalModeling3DPage(QWidget):
             )
             self._restore_joint_fence_from_project()
             self._update_domain_z_guard(domain)
+            # Reload may have left the scene on a different domain than the
+            # saved combo text (e.g. empty-data early exit): re-sync the
+            # combo from the scene so UI and scene cannot diverge.
+            scene = self._joint_host.scene
+            if scene is not None and hasattr(self, "_joint_domain"):
+                actual = (
+                    "Depth"
+                    if scene.vertical_domain.value.startswith("depth")
+                    else "Time"
+                )
+                if self._joint_domain.currentText() != actual:
+                    self._joint_domain.blockSignals(True)
+                    idx = self._joint_domain.findText(actual)
+                    if idx >= 0:
+                        self._joint_domain.setCurrentIndex(idx)
+                    self._joint_domain.blockSignals(False)
+                self._update_domain_combo_availability()
 
     def collect_joint_analysis_state(self):
         """Snapshot joint UI into project model (no voxels) — #90."""
@@ -1796,8 +1875,11 @@ class GeologicalModeling3DPage(QWidget):
                 child = group.child(j)
                 checks[child.text(0)] = child.checkState(0) == Qt.Checked
         domain = "Time"
-        if hasattr(self, "_joint_domain"):
-            domain = self._joint_domain.currentText() or "Time"
+        scene = self._joint_host.scene
+        if scene is not None:
+            domain = (
+                "Depth" if scene.vertical_domain.value.startswith("depth") else "Time"
+            )
         wells: list[str] = []
         if hasattr(self, "_joint_well_a"):
             a = self._joint_well_a.currentData() or self._joint_well_a.currentText()
@@ -1805,7 +1887,6 @@ class GeologicalModeling3DPage(QWidget):
             if a and b:
                 wells = [str(a), str(b)]
         fence_name = None
-        scene = self._joint_host.scene
         if scene is not None and getattr(scene, "fences", None):
             for f in scene.fences:
                 if getattr(f, "id", None) == getattr(scene, "active_fence_id", None):
@@ -1827,7 +1908,20 @@ class GeologicalModeling3DPage(QWidget):
             if paths.horizons:
                 # Multi-horizon: pipe-separated absolute paths
                 hints["horizons"] = "|".join(str(p) for p in paths.horizons if p)
-        slice_state = self._joint_host.scene.orthogonal_slice_state
+        from geoviz import OrthogonalSliceState as _OSS
+
+        slice_state = (
+            scene.orthogonal_slice_state
+            if scene is not None
+            else _OSS()
+        )
+        il_number = xl_number = None
+        registration = getattr(scene, "registration", None)
+        if registration is not None and slice_state.inline_index is not None:
+            il_number, xl_number = registration.volume_idx_to_il_xl(
+                float(slice_state.inline_index),
+                float(slice_state.crossline_index or 0),
+            )
         return JointAnalysisState(
             tree_checks=checks,
             well_visibility={
@@ -1848,6 +1942,8 @@ class GeologicalModeling3DPage(QWidget):
             well_width_px=self._joint_well_width.value(),
             orthogonal_inline_index=slice_state.inline_index,
             orthogonal_crossline_index=slice_state.crossline_index,
+            orthogonal_inline_number=il_number,
+            orthogonal_crossline_number=xl_number,
             time_slices=[
                 JointTimeSliceState(
                     time_ms=item.time_ms,
@@ -2142,34 +2238,40 @@ class GeologicalModeling3DPage(QWidget):
         super().keyPressEvent(event)
 
     def _apply_profile_time_only_policy(self, profile) -> None:
-        """Force 2D fence extract on Time even if scene domain is Depth (#122)."""
+        """2D profile follows the scene domain (single display domain).
+
+        The old #122 "force Time" split left 3D on Depth while the 2D strip
+        showed Time; the profile now extracts with the scene's domain, and
+        any stale per-profile override is cleared here.
+        """
         set_dom = getattr(profile, "set_extract_domain", None)
         if not callable(set_dom):
             return
         try:
-            from geoviz import VerticalDomain
-
-            set_dom(VerticalDomain.TIME)
+            set_dom(None)
         except Exception:
-            logger.debug("profile Time-only policy unavailable", exc_info=True)
+            logger.debug("profile domain follow unavailable", exc_info=True)
 
     def _sync_joint_2d_time_chip(self, domain: str | None = None) -> None:
-        """Surface 2D Time-only vs 3D Depth in the bottom strip header."""
+        """Surface the single shared 2D/3D domain in the bottom strip header."""
         chip = getattr(self, "_joint_2d_time_chip", None)
         if chip is None:
             return
+        scene = self._joint_host.scene
+        if scene is not None:
+            domain = scene.vertical_domain.value
         if domain is None and hasattr(self, "_joint_domain"):
             domain = self._joint_domain.currentText()
         domain = domain or "Time"
         if str(domain).lower().startswith("depth"):
-            chip.setText("2D: Time-only · Depth 仅 3D")
+            chip.setText("域: Depth · 2D/3D 联动")
             chip.setStyleSheet(
                 "QLabel#Joint2DTimeChip {"
                 " color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa;"
                 " border-radius: 999px; padding: 2px 8px; font-size: 11px; }"
             )
         else:
-            chip.setText("2D: Time")
+            chip.setText("域: Time · 2D/3D 联动")
             chip.setStyleSheet(
                 "QLabel#Joint2DTimeChip {"
                 " color: %s; background: %s; border: 1px solid %s; border-radius: 999px;"
@@ -2181,6 +2283,12 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_status.setText(text)
 
     def _on_joint_scene_updated(self) -> None:
+        if self._joint_host.scene is None:
+            # Engine unavailable: nothing to sync; widgets keep their
+            # placeholder states instead of crashing the flush path.
+            return
+        if getattr(self, "_pending_slice_numbers", None) is not None:
+            self._apply_pending_slice_numbers()
         self._apply_joint_display_settings()
         self._ensure_joint_widget()
         if self._joint_widget is not None and self._joint_host.scene is not None:
@@ -2253,14 +2361,30 @@ class GeologicalModeling3DPage(QWidget):
         ]
 
     def _on_joint_domain_changed(self, text: str) -> None:
-        # 3D / scene domain follows toolbar; 2D profile stays Time (#122)
-        self._joint_host.set_vertical_domain(text)
-        self._update_domain_z_guard(text)
-        self._sync_joint_2d_time_chip(text)
+        # One authoritative display domain: 3D scene AND 2D profile follow it.
+        applied = self._joint_host.set_vertical_domain(text)
+        if not applied and hasattr(self, "_joint_domain"):
+            # Depth unavailable (no time-depth transform): revert the combo
+            # to the scene's actual domain instead of showing a fake state.
+            scene = self._joint_host.scene
+            actual = (
+                "Depth"
+                if scene is not None
+                and scene.vertical_domain.value.startswith("depth")
+                else "Time"
+            )
+            self._joint_domain.blockSignals(True)
+            idx = self._joint_domain.findText(actual)
+            if idx >= 0:
+                self._joint_domain.setCurrentIndex(idx)
+            self._joint_domain.blockSignals(False)
+        self._update_domain_z_guard(text if applied else "Time")
+        self._sync_joint_2d_time_chip()
         self._refresh_joint_slice_card()
         self._sync_joint_slice_renderer()
         profile = getattr(self, "_joint_profile", None)
         if profile is not None:
+            # Clear any stale override so the 2D strip follows the scene.
             self._apply_profile_time_only_policy(profile)
             if hasattr(profile, "refresh"):
                 profile.refresh()
@@ -2275,8 +2399,35 @@ class GeologicalModeling3DPage(QWidget):
             str(self._joint_well_b.currentData() or self._joint_well_b.currentText()),
         )
 
+    def _update_domain_combo_availability(self) -> None:
+        """Disable the Depth option while no time-depth transform exists."""
+        combo = getattr(self, "_joint_domain", None)
+        if combo is None:
+            return
+        scene = self._joint_host.scene
+        depth_ok = bool(scene is not None and scene.depth_available)
+        idx = combo.findText("Depth")
+        if idx < 0:
+            return
+        model = combo.model()
+        item_method = getattr(model, "item", None)
+        item = item_method(idx) if callable(item_method) else None
+        if item is None:
+            return
+        item.setEnabled(depth_ok)
+        if depth_ok:
+            combo.setToolTip("切换竖直显示域（Time/Depth 同域应用于 2D 与 3D）")
+        else:
+            combo.setToolTip(
+                "Depth 不可用：缺少时深转换（速度模型/checkshot/深度域数据体）"
+            )
+
     def _update_domain_z_guard(self, domain: str) -> None:
-        """Warn / soft-hide model volume when joint domain is Time (#97)."""
+        """Warn / soft-hide model volume when joint domain is Time (#97).
+
+        The note replaces its previous text (no append-only status fragments
+        that contradict each other after a domain flip).
+        """
         is_time = not str(domain).lower().startswith("depth")
         for item in list(getattr(self, "active_items", []) or []):
             name = type(item).__name__
@@ -2285,11 +2436,18 @@ class GeologicalModeling3DPage(QWidget):
                     item.setVisible(not is_time)
                 except Exception:
                     pass
-        if hasattr(self, "_joint_status") and is_time:
-            msg = self._joint_status.text() or ""
+        note = ""
+        if is_time:
             note = "竖直域=Time：已弱化深度网格体（Z 语义可能不一致）"
-            if note not in msg:
-                self._joint_status.setText((msg + " · " + note).strip(" ·"))
+        if hasattr(self, "_joint_status"):
+            msg = self._joint_status.text() or ""
+            previous = getattr(self, "_domain_guard_note", "")
+            if previous and previous in msg:
+                msg = msg.replace(previous, "").strip(" ·")
+            if note:
+                msg = (msg + " · " + note).strip(" ·") if msg else note
+            self._joint_status.setText(msg)
+        self._domain_guard_note = note
         self.gl_widget.update()
 
     def _align_joint_camera(self) -> None:

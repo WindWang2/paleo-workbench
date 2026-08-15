@@ -17,5 +17,7 @@ def test_advisory_xfail_registry_is_empty():
 
 def test_advisory_xfail_does_not_cover_workstation_host_package():
     """Workstation host job must stay a hard gate — never blanket-xfail it."""
-    for needle in ADVISORY_XFAIL:
-        assert "test_well_log_workstation" not in needle
+    offending = [
+        needle for needle in ADVISORY_XFAIL if "test_well_log_workstation" in needle
+    ]
+    assert offending == [], f"workstation tests must not be blanket-xfailed: {offending}"

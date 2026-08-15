@@ -23,10 +23,10 @@ def test_native_backend_singleton_instance():
     assert isinstance(native_backend, NativeEngineBackend)
 
 
-def test_is_accelerated_returns_bool():
+def test_is_accelerated_reflects_cpp_capability():
     for feature in ["seismic_3d", "well_log", "map_edit"]:
-        val = is_accelerated(feature)
-        assert isinstance(val, bool)
+        assert is_accelerated(feature) is native_backend.has_cpp(feature)
+    assert is_accelerated("no_such_feature") is False
 
 
 def test_disabled_acceleration_context_manager():
@@ -105,3 +105,33 @@ def test_native_version_is_string_or_none():
         version = native_version(feature)
         assert version is None or isinstance(version, str)
     assert native_version("no_such_feature") is None
+    """install_all_hooks() twice must wire the geoviz provider hooks and stay clean."""
+    try:
+        from geoviz import (
+            get_downsample_provider,
+            get_isosurface_extractor,
+            get_las_parser_provider,
+            set_downsample_provider,
+            set_isosurface_extractor,
+            set_las_parser_provider,
+        )
+    except ImportError:
+        pytest.skip("geoviz not importable in this environment")
+
+    from paleo_workbench.native_backend import _cpp_las_parser_provider, _cpp_minmax_provider
+
+    prev = (
+        get_downsample_provider(),
+        get_isosurface_extractor(),
+        get_las_parser_provider(),
+    )
+    try:
+        install_all_hooks()
+        install_all_hooks()
+        assert get_downsample_provider() is _cpp_minmax_provider
+        assert get_las_parser_provider() is _cpp_las_parser_provider
+        assert get_isosurface_extractor() is not None
+    finally:
+        set_downsample_provider(prev[0])
+        set_isosurface_extractor(prev[1])
+        set_las_parser_provider(prev[2])

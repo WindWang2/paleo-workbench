@@ -282,6 +282,12 @@ jobs:
   merge-gate:
     name: Merge gate (full monorepo + workstation)
     needs: [test, well-log-workstation]
+    # Fail closed (#436): the implicit `if: success()` on a `needs` job makes
+    # it SKIP — never fail — whenever a needed job fails, so the gate could
+    # not block merging while the workstation matrix was red. `if: always()`
+    # runs the gate on every outcome; the step below fails unless both product
+    # gates are green (or the run was cancelled).
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Confirm product gates
@@ -290,3 +296,11 @@ jobs:
           echo "Well Log Workstation (host) matrix is green."
           echo "Also require workflow 'WellLogEngine C++' on the same SHA."
           echo "Policy: docs/ci-merge-policy.md."
+
+      - name: Fail closed unless every product gate is green
+        if: ${{ needs.test.result != 'success' || needs.well-log-workstation.result != 'success' }}
+        run: |
+          echo "A required product gate is not green:"
+          echo "  Tests: ${{ needs.test.result }}"
+          echo "  Well Log Workstation: ${{ needs.well-log-workstation.result }}"
+          exit 1

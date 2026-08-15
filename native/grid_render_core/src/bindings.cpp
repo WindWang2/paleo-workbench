@@ -60,7 +60,7 @@ std::vector<std::uint8_t> ramp_values(const U8Array& ramp) {
 }
 
 py::array_t<std::uint8_t> render_grid_rgba_py(
-    FloatArray grid_z, py::object mask_obj, U8Array lut, float lo, float hi,
+    FloatArray grid_z, py::object mask_obj, U8Array lut, double lo, double hi,
     float gamma, std::uint8_t opacity) {
     auto gz = grid_z.request();
     if (gz.ndim != 2) {

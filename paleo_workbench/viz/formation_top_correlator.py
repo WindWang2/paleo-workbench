@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import warnings
+
 import numpy as np
 
 from paleo_workbench.viz.dtw_log_matcher import DTWLogMatcher
@@ -98,20 +100,39 @@ class FormationTopCorrelator:
         if len(ref_curve) == 0 or len(target_curve) == 0:
             return TopRecommendation(suggested_depth=ref_top_depth, confidence=0.0, dtw_cost=999.0)
 
+        ref_is_descending = False
         if start_depth is None and ref_depths is not None and len(ref_depths) == len(ref_curve):
-            start_depth = float(np.asarray(ref_depths, dtype=float)[0])
-            if depth_step is None and len(ref_depths) > 1:
-                diffs = np.diff(np.asarray(ref_depths, dtype=float))
-                step = float(np.median(diffs))
+            depths = np.asarray(ref_depths, dtype=float)
+            if len(ref_depths) > 1:
+                step = float(np.median(np.diff(depths)))
                 if step > 0.0:
-                    depth_step = step
+                    if depth_step is None:
+                        depth_step = step
+                    start_depth = float(depths[0])
+                elif step < 0.0:
+                    # Descending depth axis (deepest-first LAS files): index
+                    # the reference grid from the shallowest sample and flip
+                    # the computed index back into file order below.
+                    if depth_step is None:
+                        depth_step = -step
+                    start_depth = float(depths[-1])
+                    ref_is_descending = True
         if start_depth is None:
             start_depth = 0.0
         if depth_step is None or depth_step <= 0.0:
             depth_step = 0.5
+            if ref_depths is not None:
+                warnings.warn(
+                    "ref_depths 无法用于单调深度网格（非单调或长度与曲线不一致），"
+                    "已回退到均匀 0.5 网格",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         # Convert ref_top_depth to index
         ref_idx = int(np.clip((ref_top_depth - start_depth) / depth_step, 0, len(ref_curve) - 1))
+        if ref_is_descending:
+            ref_idx = len(ref_curve) - 1 - ref_idx
 
         alignment = self.dtw_matcher.match_curves(ref_curve, target_curve)
         target_idx = self.dtw_matcher.transfer_top_index(ref_idx, alignment.path_ref, alignment.path_target)
@@ -122,7 +143,18 @@ class FormationTopCorrelator:
             suggested_depth = float(np.asarray(target_depths, dtype=float)[target_idx])
         else:
             suggested_depth = start_depth + target_idx * depth_step
-        confidence = float(np.exp(-alignment.cost / (len(ref_curve) * 2.0)))
+        # Normalize by the number of steps actually matched by the DTW path.
+        # Normalizing by the full-resolution reference length would overstate
+        # confidence for decimated curves (the cost is accumulated over
+        # len(path) steps, not len(ref_curve)).
+        path_len = max(1, len(alignment.path_ref))
+        confidence = float(np.exp(-alignment.cost / path_len))
+        # Normalize by the number of cost cells actually accumulated: the
+        # matcher decimates over-long curves, and the returned cost is summed
+        # over the decimated path — normalizing by the full input length
+        # inflated confidence on decimated inputs (C40).
+        cell_count = max(1, len(alignment.path_ref))
+        confidence = float(np.exp(-alignment.cost / (cell_count * 2.0)))
 
         return TopRecommendation(
             suggested_depth=float(suggested_depth),

@@ -473,3 +473,29 @@ def test_geotiff_preview_without_overviews_still_bounded(tmp_path):
     result = geotiff_preview(resource, _text_settings())
     assert result.mode == "geotiff"
     assert result.image_bytes
+
+
+def test_legacy_migration_audit_has_no_path_mismatch(service, tmp_path):
+    """Migrating a legacy project must not produce MEDIUM path_mismatch
+    issues: the migration registers the user's in-place file as an unmanaged
+    link (no copy), which the audit treats as external (issue #396 / C34)."""
+    legacy_dir = tmp_path / "proj" / "data"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    well = legacy_dir / "well.las"
+    well.write_bytes(b"legacy-payload")
+    resource = ResourceItem(
+        id="res_well_1",
+        name="well.las",
+        path=well.as_posix(),
+        type="well_log",
+        format="las",
+        checksum=sha256_file(well),
+        status="indexed",
+    )
+    report = service.migrate_legacy_resources([resource])
+    assert report.migrated_count == 1
+    assert service.document.versions[0].managed is False
+
+    audit = service.audit()
+    assert audit.by_kind("path_mismatch") == []
+    assert audit.ok, [i.detail for i in audit.issues]

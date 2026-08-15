@@ -77,6 +77,177 @@ def xy_signature(x: np.ndarray, y: np.ndarray) -> str:
     return h.hexdigest()[:24]
 
 
+# Per-chunk element budget (cells × wells).  The fault mask and the IDW weight
+# tensors are chunked so peak memory stays flat as the well count grows
+# (chunk = budget // n_wells cells) instead of scaling with 16384 × n_wells.
+_ELEMENT_BUDGET = 4_194_304  # 16_384 cells × 256 wells
+
+
+def _chunk_cells_for_budget(element_budget: int, n_src: int) -> int:
+    return max(1, int(element_budget) // max(1, int(n_src)))
+
+
+def _fault_segments(
+    fault_polylines: Sequence[Sequence[tuple[float, float]]] | None,
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for polyline in fault_polylines or []:
+        if len(polyline) >= 2:
+            for i in range(len(polyline) - 1):
+                segments.append((polyline[i], polyline[i + 1]))
+    return segments
+
+
+def _fault_blocked_mask(
+    cell_x: np.ndarray,
+    cell_y: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    fault_segments: Sequence[tuple[tuple[float, float], tuple[float, float]]],
+    *,
+    element_budget: int = _ELEMENT_BUDGET,
+    cancellation_token=None,
+    tolerance: float = 1e-12,
+) -> np.ndarray:
+    """Vectorized fault-barrier LOS mask: ``blocked[c, w]`` == segment c→w crosses any fault.
+
+    Replicates the reference per-element Python loop (``_segments_intersect``)
+    exactly — same orientation arithmetic, same tolerance handling, same
+    endpoint-touch / collinear semantics — but evaluated with NumPy per fault
+    segment.  Cells are processed in chunks bounded by ``element_budget`` so
+    peak memory stays flat as the well count grows.  Cancellation is checked
+    between cell chunks and between segments.
+
+    Orientation identities keep the per-segment work small: with
+    ``outer = cross(cell, well)`` (segment-independent), each segment only adds
+    two 1-D ``cross`` terms per endpoint::
+        orient(cell, well, q) = cross(well, q) - cross(cell, q) + outer
+    """
+    n_cells = int(np.size(cell_x))
+    n_wells = int(np.size(x))
+    blocked = np.zeros((n_cells, n_wells), dtype=bool)
+    if n_cells == 0 or n_wells == 0 or not fault_segments:
+        return blocked
+    cell_x = np.asarray(cell_x, dtype=np.float64)
+    cell_y = np.asarray(cell_y, dtype=np.float64)
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    wx = x[None, :]
+    wy = y[None, :]
+    chunk = _chunk_cells_for_budget(element_budget, n_wells)
+    for start in range(0, n_cells, chunk):
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        stop = min(start + chunk, n_cells)
+        cx = cell_x[start:stop, None]
+        cy = cell_y[start:stop, None]
+        # cross(cell, well) — shared by every segment.
+        outer = cx * wy - cy * wx
+        chunk_blocked = np.zeros((stop - start, n_wells), dtype=bool)
+        for (q1x, q1y), (q2x, q2y) in fault_segments:
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled()
+            seg_dx = q2x - q1x
+            seg_dy = q2y - q1y
+            # Orientation of each fault endpoint w.r.t. the (cell → well) line.
+            o1 = (wx * q1y - wy * q1x) - (cx * q1y - cy * q1x) + outer
+            o2 = (wx * q2y - wy * q2x) - (cx * q2y - cy * q2x) + outer
+            # Orientation of each cell / well w.r.t. the fault segment line
+            # (column/row vectors broadcast to the (cell × well) pair grid).
+            o3 = seg_dx * (cy - q1y) - seg_dy * (cx - q1x)
+            o4 = seg_dx * (wy - q1y) - seg_dy * (wx - q1x)
+            s1 = o1 > tolerance
+            s2 = o1 < -tolerance
+            s3 = o2 > tolerance
+            s4 = o2 < -tolerance
+            strict = ((s1 & s4) | (s2 & s3)) & (
+                ((o3 > tolerance) & (o4 < -tolerance))
+                | ((o3 < -tolerance) & (o4 > tolerance))
+            )
+            hit = strict
+            # Endpoint-touch / collinear-overlap branches (rare): they require
+            # a fault endpoint on some (cell → well) line, i.e. |o| <= tol for
+            # some pair.  Generic geometry never satisfies that; scan only when
+            # the cheap all() check fails.
+            if not (s1 | s2).all():
+                rows, cols = np.nonzero(~(s1 | s2))
+                if rows.size:
+                    cxs = cx[rows, 0]
+                    cys = cy[rows, 0]
+                    wxs = wx[0, cols]
+                    wys = wy[0, cols]
+                    ok = (
+                        (np.minimum(cxs, wxs) - tolerance <= q1x)
+                        & (q1x <= np.maximum(cxs, wxs) + tolerance)
+                        & (np.minimum(cys, wys) - tolerance <= q1y)
+                        & (q1y <= np.maximum(cys, wys) + tolerance)
+                    )
+                    if np.any(ok):
+                        hit[rows[ok], cols[ok]] = True
+            if not (s3 | s4).all():
+                rows, cols = np.nonzero(~(s3 | s4))
+                if rows.size:
+                    cxs = cx[rows, 0]
+                    cys = cy[rows, 0]
+                    wxs = wx[0, cols]
+                    wys = wy[0, cols]
+                    ok = (
+                        (np.minimum(cxs, wxs) - tolerance <= q2x)
+                        & (q2x <= np.maximum(cxs, wxs) + tolerance)
+                        & (np.minimum(cys, wys) - tolerance <= q2y)
+                        & (q2y <= np.maximum(cys, wys) + tolerance)
+                    )
+                    if np.any(ok):
+                        hit[rows[ok], cols[ok]] = True
+            # Cell on the fault segment line (blocks the whole row) / well on
+            # the fault segment line (blocks the whole column).
+            o3_flat = o3[:, 0]
+            o4_flat = o4[0, :]
+            cells_on = (np.abs(o3_flat) <= tolerance) & (
+                (min(q1x, q2x) - tolerance <= cx[:, 0])
+                & (cx[:, 0] <= max(q1x, q2x) + tolerance)
+                & (min(q1y, q2y) - tolerance <= cy[:, 0])
+                & (cy[:, 0] <= max(q1y, q2y) + tolerance)
+            )
+            wells_on = (np.abs(o4_flat) <= tolerance) & (
+                (min(q1x, q2x) - tolerance <= wx[0, :])
+                & (wx[0, :] <= max(q1x, q2x) + tolerance)
+                & (min(q1y, q2y) - tolerance <= wy[0, :])
+                & (wy[0, :] <= max(q1y, q2y) + tolerance)
+            )
+            if np.any(cells_on):
+                hit[cells_on, :] = True
+            if np.any(wells_on):
+                hit[:, wells_on] = True
+            chunk_blocked |= hit
+        blocked[start:stop] = chunk_blocked
+    return blocked
+
+
+def _plan_fault_mask(
+    plan: "InterpolationPlan", cancellation_token=None
+) -> np.ndarray | None:
+    """Full-grid LOS barrier mask for *plan*, computed once and cached.
+
+    The mask depends only on geometry (grid axes + well XY + fault segments),
+    never on factor values, so one mask serves every factor in a batch.
+    """
+    if not plan.fault_polylines:
+        return None
+    if plan.fault_mask is None:
+        cell_x = np.tile(plan.grid_x, len(plan.grid_y))
+        cell_y = np.repeat(plan.grid_y, len(plan.grid_x))
+        plan.fault_mask = _fault_blocked_mask(
+            cell_x,
+            cell_y,
+            plan.source_x,
+            plan.source_y,
+            _fault_segments(plan.fault_polylines),
+            cancellation_token=cancellation_token,
+        )
+    return plan.fault_mask
+
+
 def _grid_axes_from_samples(
     x: np.ndarray, y: np.ndarray, grid_n: int
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -168,6 +339,8 @@ class InterpolationPlan:
     fault_polylines: list[list[tuple[float, float]]] | None = None
     # Session geometry interning for multi-factor axis sharing
     geometry_id: str = field(default="")
+    # Lazily computed full-grid LOS barrier mask (see _plan_fault_mask).
+    fault_mask: np.ndarray | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.source_x = _freeze_array(np.ascontiguousarray(self.source_x, dtype=np.float64))
@@ -227,13 +400,19 @@ def _idw_multi_chunked(
     *,
     power: float,
     fault_polylines: list[list[tuple[float, float]]] | None,
-    max_cells_per_chunk: int = 16_384,
+    fault_mask: np.ndarray | None = None,
+    element_budget: int = _ELEMENT_BUDGET,
     cancellation_token=None,
 ) -> np.ndarray:
     """IDW for F value stacks sharing geometry: shape (F, H, W).
 
     Distances / base weights are built once per cell chunk, then dotted with each
     factor's values.  Avoids an F×G×N tensor by streaming factors over the chunk.
+    Chunks are sized by an element budget (cells × wells), so per-chunk memory
+    stays flat as the well count grows.  ``fault_mask`` is the precomputed
+    (G, N) LOS barrier mask (see :func:`_fault_blocked_mask`); when faults are
+    present and no mask is supplied it is computed once and reused for all
+    chunks, with the cancellation token checked between chunks.
     """
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
@@ -250,37 +429,33 @@ def _idw_multi_chunked(
     if n_src == 0 or H == 0 or W == 0:
         return np.full((n_factors, H, W), np.nan, dtype=np.float64)
 
-    fault_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
-    if fault_polylines:
-        for polyline in fault_polylines:
-            if len(polyline) >= 2:
-                for i in range(len(polyline) - 1):
-                    fault_segments.append((polyline[i], polyline[i + 1]))
+    fault_segments = _fault_segments(fault_polylines)
 
     cell_x = np.tile(grid_x, H)
     cell_y = np.repeat(grid_y, W)
     out = np.full((n_factors, cell_x.size), np.nan, dtype=np.float64)
-    chunk = max(1, int(max_cells_per_chunk))
+    chunk = _chunk_cells_for_budget(element_budget, n_src)
+    if fault_segments and fault_mask is None:
+        fault_mask = _fault_blocked_mask(
+            cell_x,
+            cell_y,
+            x,
+            y,
+            fault_segments,
+            element_budget=element_budget,
+            cancellation_token=cancellation_token,
+        )
     for start in range(0, cell_x.size, chunk):
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         stop = min(start + chunk, cell_x.size)
         dx = cell_x[start:stop, None] - x[None, :]
-        dy = cell_y[start:stop, None] - y[None, :]
-        distances = np.maximum(np.hypot(dx, dy), epsilon)
-        weights = 1.0 / (distances**power)
-        if fault_segments:
-            for local_cell, (node_x, node_y) in enumerate(
-                zip(cell_x[start:stop], cell_y[start:stop])
-            ):
-                node = (float(node_x), float(node_y))
-                for sample_index, (sample_x, sample_y) in enumerate(zip(x, y)):
-                    control = (float(sample_x), float(sample_y))
-                    if any(
-                        _segments_intersect(node, control, segment_start, segment_end)
-                        for segment_start, segment_end in fault_segments
-                    ):
-                        weights[local_cell, sample_index] = 0.0
+        distances = np.hypot(dx, cell_y[start:stop, None] - y[None, :], out=dx)
+        np.maximum(distances, epsilon, out=distances)
+        np.power(distances, power, out=distances)
+        weights = 1.0 / distances
+        if fault_mask is not None:
+            weights[fault_mask[start:stop]] = 0.0
         totals = np.sum(weights, axis=1)
         populated = totals > epsilon
         # weights[populated]: (P, N); z_stack: (F, N) → (F, P)
@@ -320,6 +495,7 @@ def apply_idw_plan(
         plan.grid_y,
         power=plan.key.power,
         fault_polylines=plan.fault_polylines,
+        fault_mask=_plan_fault_mask(plan, cancellation_token),
         cancellation_token=cancellation_token,
     )
     grid_z = np.ascontiguousarray(grids[0], dtype=np.float64)
@@ -364,6 +540,7 @@ def apply_idw_plan_multi(
         plan.grid_y,
         power=plan.key.power,
         fault_polylines=plan.fault_polylines,
+        fault_mask=_plan_fault_mask(plan, cancellation_token),
         cancellation_token=cancellation_token,
     )
     results: list[dict[str, Any]] = []

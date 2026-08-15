@@ -16,6 +16,7 @@ from paleo_workbench.project.models import (
     ResourceItem,
 )
 from paleo_workbench.workflow.factor_interpolation import (
+    GENERATOR_VERSION,
     apply_interpolation_to_task,
     batch_prepare_factor_maps,
     interpolation_execution_count,
@@ -28,6 +29,7 @@ from paleo_workbench.workflow.factor_prepare_scheduler import (
     prepare_worker_count,
     run_factor_prepare_schedule,
 )
+from paleo_workbench.workflow.interpolation_fingerprint import fingerprints_for_task
 
 
 def _points(n: int = 8, seed: int = 0) -> list[dict]:
@@ -389,6 +391,75 @@ def test_degenerate_task_fails_alone_and_batch_commits_survivors():
     for item in healthy:
         assert item.task_id not in discarded
         assert live_by_id[item.task_id].status == "complete"
+
+
+def test_fingerprint_derived_once_per_task_in_batch(monkeypatch):
+    """One prepare request must derive each task's fingerprint exactly once.
+
+    Issue #444: the classify / plan-cache-key / apply phases each re-derived
+    the full sample serialization + SHA-256 for the same task (3-4x per
+    request).  The request-scoped memo collapses that to a single derivation.
+    """
+    import paleo_workbench.workflow.interpolation_fingerprint as ifp
+
+    derived = []
+    original = ifp._fingerprints_for_task_uncached
+
+    def counting(*args, **kwargs):
+        derived.append(str(args[0].id))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ifp, "_fingerprints_for_task_uncached", counting)
+
+    project = _project_with_tasks(n=4, shared_xy=True)
+    batch_prepare_factor_maps(project, method="IDW", grid_n=20)
+
+    # One derivation per task (was 4 classify + 1 plan-key + 4 apply = 9+).
+    assert len(derived) == 4
+    assert len(set(derived)) == 4
+
+
+def test_scheduler_derives_fingerprint_once_per_task_until_commit_guard(monkeypatch):
+    """Scheduler classify+execute share one derivation; the commit guard re-derives.
+
+    The commit-time stale-input guard intentionally recomputes from the LIVE
+    project (its purpose is to reject patches whose inputs changed while the
+    workers ran), so it is the only remaining derivation per changed task.
+    """
+    import paleo_workbench.workflow.interpolation_fingerprint as ifp
+
+    derived = []
+    original = ifp._fingerprints_for_task_uncached
+
+    def counting(*args, **kwargs):
+        derived.append(str(args[0].id))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ifp, "_fingerprints_for_task_uncached", counting)
+
+    project = _project_with_tasks(n=4, shared_xy=True)
+    snapshot = build_prepare_snapshot(project, generation=1, method="IDW", grid_n=20)
+    result = run_factor_prepare_schedule(snapshot)
+    assert result.executed_count == 4
+
+    # classify + execute phases: exactly one derivation per task.
+    assert len(derived) == 4
+    assert len(set(derived)) == 4
+
+    derived.clear()
+    discarded = commit_prepare_batch_result(
+        project, result, expected_generation=snapshot.generation
+    )
+    assert discarded == []
+    # Commit guard: one fresh derivation per changed (dirty) task.
+    assert len(derived) == 4
+    # Committed fingerprints still equal a fresh recomputation.
+    for task in project.factor_map_tasks:
+        fresh = fingerprints_for_task(
+            task, project=project, method="IDW", grid_n=20,
+            generator_version=GENERATOR_VERSION,
+        )
+        assert fresh.result == task.input_snapshot_hash
 
 
 def test_commit_guard_uses_scheduled_grid_n_and_power():

@@ -32,6 +32,16 @@ class DetachedJobKeeper(QObject):
         # relay signal so registry mutation and deleteLater happen on the
         # keeper/QApplication thread.
         thread.finished.connect(lambda key=key: self.release_requested.emit(key))
+        if thread.isFinished():
+            # The thread finished between the shutdown wait() timeout and
+            # this connection (TOCTOU): QThread.finished is emitted exactly
+            # once and never replays, so the relay would never fire and the
+            # (thread, worker) entry would leak forever.  The finished flag
+            # is set before the signal is emitted, so observing it here means
+            # the emission is already past — release manually.  Racing the
+            # flag itself is safe: a duplicate release_requested emission is
+            # a no-op in _release.
+            self.release_requested.emit(key)
 
     def owns(self, thread: QThread) -> bool:
         return id(thread) in self._jobs
