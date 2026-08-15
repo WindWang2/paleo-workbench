@@ -739,7 +739,27 @@ def test_visualization_workspace_binds_project_for_overlay(
 
 
 def test_visualization_page_update_state_binds_well_host_project(qtbot):
-    """VisualizationPage.update_state must forward project to composite well_host."""
+    """VisualizationPage.update_state must forward project to composite well_host.
+
+    The real project file path is routed via ``set_project_path`` — the page
+    must never fabricate ``project.paleo.json`` (that created a phantom
+    artifacts tree on export).
+    """
+    from paleo_workbench.ui.pages.visualization_page import VisualizationPage
+
+    page = VisualizationPage()
+    qtbot.addWidget(page)
+    project = ProjectDocument.new("PageBind")
+    project.meta.project_root = "/tmp/stage12-page-bind"
+    proj_path = Path("/tmp/stage12-page-bind/real.paleo.json")
+    page.set_project_path(proj_path)
+    page.update_state([], [], [], project=project)
+    assert page.composite_panel.well_host._project is project  # noqa: SLF001
+    assert page.composite_panel.well_host._project_path == proj_path  # noqa: SLF001
+
+
+def test_visualization_page_never_fabricates_project_file_name(qtbot):
+    """Unrouted page must not invent ``project.paleo.json`` / ``x.paleo.json``."""
     from paleo_workbench.ui.pages.visualization_page import VisualizationPage
 
     page = VisualizationPage()
@@ -747,10 +767,8 @@ def test_visualization_page_update_state_binds_well_host_project(qtbot):
     project = ProjectDocument.new("PageBind")
     project.meta.project_root = "/tmp/stage12-page-bind"
     page.update_state([], [], [], project=project)
-    assert page.composite_panel.well_host._project is project  # noqa: SLF001
-    assert page.composite_panel.well_host._project_path == Path(  # noqa: SLF001
-        "/tmp/stage12-page-bind/project.paleo.json"
-    )
+    assert page.composite_panel.well_host._project_path is None  # noqa: SLF001
+    assert page._project_path is None
 
 
 def test_resolve_default_target_horizon_used_by_mock_factor():

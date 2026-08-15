@@ -399,7 +399,14 @@ def run_basic_qc(
                 run_qc, _qc_version = register_qc_run(
                     name=f"QC {document.name}",
                     source_task_ids=[document.id],
-                    domain_task_id=report.id,
+                    # Stable per-map domain key: the linked prediction task
+                    # (falling back to the document id). A per-report key made
+                    # every historical QC run its own "latest" domain, so the
+                    # step aggregation kept stale QC runs of superseded maps
+                    # forever (issue #373 / C15).
+                    domain_task_id=(
+                        document.linked_prediction_task_id or document.id
+                    ),
                     parameters={
                         "map_document_id": map_document_id,
                         "qc_status": status,

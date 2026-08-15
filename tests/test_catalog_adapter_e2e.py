@@ -666,3 +666,46 @@ def test_reimport_after_trash_rebridges_freshly(catalog, tmp_path):
     resolved = catalog.resolve_legacy_resource(legacy_id)
     assert resolved is not None
     assert resolved.version_id == v2.version_id
+
+
+# ===================================================== C15 stable domain asset
+
+
+def test_rerun_same_domain_task_append_version_not_new_asset(tmp_path, catalog):
+    """A rerun of the same domain task must register its produced version on
+    the SAME asset (superseding the tip), so the superseded tip never stays
+    "current" and poisons freshness (issue #373 / C15)."""
+    src = tmp_path / "w.las"
+    src.write_bytes(b"LAS")
+    raw = catalog.register_input(
+        name="w.las", path=str(src), checksum=None, kind="well_log", format="las"
+    )
+    grid1 = tmp_path / "grid-v1.npz"
+    grid1.write_bytes(b"GRID-1")
+    run1 = catalog.begin_run(
+        operation="factor_map",
+        input_version_ids=[raw.version_id],
+        domain_task_id="task-f",
+    )
+    out1 = catalog.register_intermediate(
+        run_id=run1.run_id, name="grid", path=str(grid1), kind="factor_map_grid"
+    )
+    catalog.complete_run(run1.run_id)
+
+    grid2 = tmp_path / "grid-v2.npz"
+    grid2.write_bytes(b"GRID-2")
+    run2 = catalog.begin_run(
+        operation="factor_map",
+        input_version_ids=[raw.version_id],
+        domain_task_id="task-f",
+    )
+    out2 = catalog.register_intermediate(
+        run_id=run2.run_id, name="grid", path=str(grid2), kind="factor_map_grid"
+    )
+    catalog.complete_run(run2.run_id)
+
+    assert out1.asset_id == out2.asset_id
+    assert out1.version_id != out2.version_id
+    svc = catalog.service
+    asset = svc.get_asset(out2.asset_id)
+    assert asset.current_version_id == out2.version_id

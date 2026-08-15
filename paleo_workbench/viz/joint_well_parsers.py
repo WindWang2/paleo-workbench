@@ -89,10 +89,13 @@ def parse_td_table(path: Path | str, well_name: str | None = None) -> TimeDepthT
         s = line.strip()
         if not s or s.startswith("#"):
             if "Well :" in s or "Well:" in s:
-                # # Well : A1
-                bits = s.replace(":", " ").split()
-                if bits:
-                    name = bits[-1]
+                # # Well : A1 — the well name is the token right after the
+                # colon attached to "Well". "# Well :" (unnamed) and label
+                # comments like "# Well label: check" must not hijack the
+                # well name (previously bits[-1] picked up "Well"/"check").
+                left, sep, right = s.partition(":")
+                if sep and left.strip().endswith("Well") and right.strip():
+                    name = right.strip().split()[0]
             continue
         parts = s.split()
         if len(parts) < 4:
@@ -115,13 +118,29 @@ def parse_td_table(path: Path | str, well_name: str | None = None) -> TimeDepthT
 
 def load_td_tables(td_dir: Path | str) -> dict[str, TimeDepthTable]:
     """Load all *.dat TD tables in a directory keyed by well name."""
+    import warnings
+
     root = Path(td_dir)
     out: dict[str, TimeDepthTable] = {}
+    sources: dict[str, Path] = {}
     if not root.is_dir():
         return out
     for p in sorted(root.glob("*.dat")):
         tbl = parse_td_table(p)
-        if tbl is not None:
-            out[tbl.well_name] = tbl
-            out[p.stem] = tbl
+        if tbl is None:
+            continue
+        for key in dict.fromkeys((tbl.well_name, p.stem)):
+            if key in sources:
+                # Duplicate key (stem == another table's well name, or two
+                # files resolving to the same name): keep the first loaded
+                # table instead of silently overwriting it.
+                warnings.warn(
+                    f"TD 时深表键 '{key}' 冲突：{p.name}（井名 {tbl.well_name}）与 "
+                    f"{sources[key].name} 注册到同一键，保留先加载的 {sources[key].name}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            sources[key] = p
+            out[key] = tbl
     return out

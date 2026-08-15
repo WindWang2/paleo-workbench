@@ -98,6 +98,26 @@ class MapAttributeTable(QFrame):
         self._suppress_feature_selection = False
         self.set_feature(self._layer_features.get(selected))
 
+    def set_selected_ids(
+        self, selected_ids: set[str] | tuple[str, ...] | list[str],
+    ) -> None:
+        """Move the combo/feature selection without rebuilding feature entries.
+
+        The property grid is keyed to the feature list bound by the last
+        ``set_layer_features`` call; this keeps selection-only updates O(1)
+        instead of re-converting every feature record.
+        """
+        if not self._layer_features:
+            return
+        selected = next(iter(sorted(str(value) for value in selected_ids)), "")
+        if selected not in self._layer_features:
+            selected = ""
+        self._suppress_feature_selection = True
+        target = self.feature_combo.findData(selected)
+        self.feature_combo.setCurrentIndex(max(0, target))
+        self._suppress_feature_selection = False
+        self.set_feature(self._layer_features.get(selected))
+
     def _on_feature_selected(self, _index: int) -> None:
         if self._suppress_feature_selection:
             return

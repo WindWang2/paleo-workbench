@@ -48,13 +48,22 @@ def _depth_axis(well_log: Any, n: int = 100) -> np.ndarray:
     return np.linspace(top, bottom, max(n, 2), dtype=np.float64)
 
 
-def _twt_from_sonic(depths: np.ndarray, sonic: np.ndarray) -> np.ndarray:
-    """Integrate sonic (µs/m) to two-way time in ms (same math as WellTieCalibration)."""
+def _twt_from_sonic(
+    depths: np.ndarray, sonic: np.ndarray, depth_unit: str = "m"
+) -> np.ndarray:
+    """Integrate sonic (µs/m) to two-way time in ms (same math as WellTieCalibration).
+
+    ``sonic`` is normalized to µs/m by the caller, so a foot depth axis must
+    be converted to meters first (WL-4) — otherwise TWT comes out 0.3048×
+    too small.
+    """
     depths = np.asarray(depths, dtype=np.float64)
     sonic = np.asarray(sonic, dtype=np.float64)
     if depths.size < 2:
         return np.zeros_like(depths)
     dz = np.diff(depths)
+    if str(depth_unit or "").strip().lower() in {"ft", "f", "feet", "foot"}:
+        dz = dz * 0.3048  # ft -> m
     owt_us = dz * (sonic[:-1] + sonic[1:]) / 2.0
     twt = np.zeros_like(depths)
     twt[1:] = 2.0 * np.cumsum(owt_us) / 1000.0
@@ -105,10 +114,12 @@ def build_tie_arrays(
         depths = _depth_axis(well_log, n_fallback)
         sonic_pair = _curve_arrays(well_log, _SONIC_NAMES)
         dens_pair = _curve_arrays(well_log, _DENSITY_NAMES)
+        depth_unit = str(getattr(well_log, "depth_unit", "") or "")
     else:
         depths = np.linspace(1000.0, 2000.0, n_fallback, dtype=np.float64)
         sonic_pair = None
         dens_pair = None
+        depth_unit = "m"
 
     n = int(depths.size)
     if n < 2:
@@ -130,7 +141,7 @@ def build_tie_arrays(
     else:
         density = np.linspace(2.15, 2.55, n, dtype=np.float64)
 
-    twt = _twt_from_sonic(depths, sonic)
+    twt = _twt_from_sonic(depths, sonic, depth_unit=depth_unit)
     seismic = _seismic_trace(seismic_volume, n, seed=seed)
     return depths, twt, sonic, density, seismic
 

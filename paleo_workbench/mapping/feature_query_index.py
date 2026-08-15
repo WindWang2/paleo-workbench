@@ -164,7 +164,10 @@ class FeatureQueryIndex:
             and visible(entry.kind)
             and _intersects(entry.bounds, bounds)
         ]
-        candidates.sort(key=lambda entry: entry.order)
+        # Descending insertion order: the top-most (later-added) feature is
+        # returned first, matching Qt item stacking and the unified canvas
+        # (map_interaction.py), whose hit_test takes the first candidate.
+        candidates.sort(key=lambda entry: entry.order, reverse=True)
         self._query_count += 1
         self._candidate_count += len(candidates)
         return [entry.record for entry in candidates]

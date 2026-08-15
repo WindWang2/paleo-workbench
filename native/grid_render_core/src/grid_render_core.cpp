@@ -11,7 +11,7 @@ void render_grid_rgba(const int width, const int height,
                       const std::uint8_t* mask,
                       const std::uint8_t* lut,
                       const int lut_size,
-                      const float lo, const float hi,
+                      const double lo, const double hi,
                       float gamma,
                       std::uint8_t opacity,
                       std::uint8_t* out) noexcept {
@@ -28,9 +28,17 @@ void render_grid_rgba(const int width, const int height,
     if (!(gamma > 0.0f)) {
         gamma = 1.0f;  // safe default; pow(0, <=0) is undefined
     }
-    const float denom = hi - lo;
-    const bool have_range = denom > 0.0f;
-    const float inv_denom = have_range ? (1.0f / denom) : 0.0f;
+    // Range validity is judged in double precision (parity with the Python
+    // fallback): a float32 denom collapses near-degenerate ranges such as
+    // hi - lo = 1e-10 to zero, flattening the whole grid to the ramp start
+    // colour on the native path but not the fallback (issue #446). The
+    // per-pixel interpolation still runs in float32, byte-identical to the
+    // fallback's (gz - float32(lo)) * float32(inv_denom).
+    const double denom = hi - lo;
+    const bool have_range = denom > 0.0;
+    const double inv_denom = have_range ? (1.0 / denom) : 0.0;
+    const float lo32 = static_cast<float>(lo);
+    const float inv_denom32 = static_cast<float>(inv_denom);
     const int max_idx = lut_size - 1;
 
     const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -42,7 +50,7 @@ void render_grid_rgba(const int width, const int height,
             px[3] = 0;  // nodata / masked -> fully transparent
             continue;
         }
-        float t = have_range ? (v - lo) * inv_denom : 0.0f;
+        float t = have_range ? (v - lo32) * inv_denom32 : 0.0f;
         if (t < 0.0f) t = 0.0f;
         else if (t > 1.0f) t = 1.0f;
         if (gamma != 1.0f) {
