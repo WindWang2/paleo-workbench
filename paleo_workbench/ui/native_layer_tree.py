@@ -225,6 +225,13 @@ class NativeLayerModel(QAbstractItemModel):
                 absolute = self._registry.index_of(anchor.id)
                 if row >= len(siblings):
                     absolute += 1
+                # move_layer removes the dragged layer before inserting.  When
+                # the dragged layer currently sits before the anchor, removal
+                # shifts the anchor (and the insertion point) left by one;
+                # inserting at the pre-removal index would overshoot a row.
+                dragged_index = self._registry.index_of(layer_id)
+                if dragged_index < absolute:
+                    absolute -= 1
             else:
                 absolute = self._registry.size - 1
             self._registry.move_layer(layer_id, max(0, int(absolute)))
