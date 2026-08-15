@@ -25,17 +25,33 @@ shell, no GUI workflow code, no sample data, no symbol library:
 - `drawing/single_factor/masks.py` — domain / barrier masks
 - `drawing/single_factor/direction_corridor.py` — anisotropic direction blend
 - `drawing/compute/__init__.py`, `drawing/compute/performance.py` — CPU/GPU
-  settings plumbing (pure; `performance.py` retains upstream's *lazy*
-  `from PyQt6.QtCore import QSettings` inside two unused persistence helpers —
-  unreachable from the interpolation path, and never imported at runtime; the
-  host's `test_constrained_idw_integration` gate asserts PyQt6 never loads).
+  settings plumbing (pure; see *Local modifications* below — `performance.py`
+  is the one vendored file that is **not** byte-identical to upstream).
 
 The package `__init__.py` files here are Qt-free stubs (the upstream
 `drawing/__init__.py` and `drawing/single_factor/__init__.py` import PyQt6 and
 the GUI workflow, which a PySide6 host must not load).
 
 The copied modules are **byte-for-byte identical** to the upstream SHA above
-(verified at vendor time).
+(verified at vendor time), **except for the local modifications listed below**.
+
+## Local modifications
+
+- `drawing/compute/performance.py` was rewritten by the host in the two
+  persistence helpers (numerical behavior of the interpolation path is
+  unchanged):
+  - Upstream's lazy `from PyQt6.QtCore import QSettings` import was **removed**.
+  - `_load_from_qsettings` now reads the process-level environment knob
+    `PALEO_HAIYOU_CPU_PERCENT` (integer CPU-percent budget) instead of
+    QSettings, and additionally pins `hardware_accel = False` /
+    `gpu_percent = 0`.
+  - `_save_to_qsettings` is a no-op (the host owns any GUI preference storage).
+  - The helper docstrings/comments describe the PySide host boundary.
+
+  To re-verify the parity of every other vendored file against the upstream
+  SHA, diff this directory against the upstream checkout and expect
+  `performance.py` (and only it) to differ:
+  `grep -rn "PALEO_\|PySide\|PyQt6" .` should hit only `performance.py`.
 
 ## What was NOT vendored
 
