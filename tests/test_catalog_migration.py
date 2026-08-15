@@ -75,8 +75,12 @@ def test_migrate_local_resource_projects_asset_and_raw_v1(tmp_path: Path):
     assert version.asset_id == "res_well_1"
     assert version.version_number == 1
     assert version.stage is DataStage.RAW
-    assert version.managed is True
-    assert version.path == "data/well.las"
+    # No file is ever copied: the projected version links the user's file in
+    # place as an unmanaged (external) version with an absolute path — the
+    # health audit's path_mismatch rule only applies to managed versions
+    # (issue #396 / C34).
+    assert version.managed is False
+    assert version.path == well.as_posix()
     assert version.format == "las"
     assert version.size_bytes == 2
     assert version.sha256 == "abc123"
@@ -137,9 +141,9 @@ def test_missing_file_warns_and_still_migrates(tmp_path: Path):
     assert "res_missing_1" in report.warnings[0]
     (version,) = document.versions
     assert version.sha256 is None
-    # Already-relative input is normalized to a project-relative POSIX path.
-    assert version.path == "data/gone.las"
-    # No absolute path is derivable from a relative path → source_uri None.
+    # The projected version always carries an absolute path (unmanaged link).
+    assert version.path == (tmp_path / "data" / "gone.las").as_posix()
+    # No absolute path is derivable from a relative input → source_uri None.
     assert version.source_uri is None
 
 
@@ -271,8 +275,10 @@ def test_mixed_resources_external_missing_and_local(tmp_path: Path):
     assert "res_missing" in report.warnings[0]
 
     (local_v, ext_v, missing_v) = document.versions
-    assert local_v.managed is True
-    assert local_v.path == "data/local.las"
+    # In-project resources are ALSO unmanaged links (no file copy happens in
+    # migration) with an absolute path (issue #396 / C34).
+    assert local_v.managed is False
+    assert local_v.path == local.as_posix()
     assert ext_v.managed is False
     assert ext_v.path == ext.as_posix()
     # A recorded checksum is preserved even when the file is gone.
