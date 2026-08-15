@@ -302,6 +302,12 @@ def test_export_artifact_delivery_registers_delivery_run(
 
     page._deliver_asset(artifact)
 
+    # The payload copy runs on a worker (#379); wait for the delivery run.
+    qtbot.waitUntil(
+        lambda: "已记录交付元数据" in page.data_toolbar.operation_status_label.text(),
+        timeout=5000,
+    )
+
     runs = [r for r in core.list_runs() if r.operation == "delivery"]
     assert len(runs) == 1
     assert runs[0].input_version_ids == [version.id]
