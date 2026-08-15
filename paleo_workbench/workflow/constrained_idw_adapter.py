@@ -224,8 +224,18 @@ def _boundary_from_samples(
         hull = MultiPoint(list(zip(xs.tolist(), ys.tolist()))).convex_hull
         coords_xy = getattr(getattr(hull, "exterior", None), "coords", None)
         if coords_xy is not None and len(list(coords_xy)) >= 4:
-            exterior = tuple((float(x), float(y)) for x, y in coords_xy)
-            return Boundary(exterior=exterior), list(exterior)
+            # Apply the promised buffer to the hull ring. The rasterizer's strict
+            # cell-center ray casting excludes cell centers exactly on the ring,
+            # so without this the outermost wells (the very points that define
+            # the map edge) fall outside the interpolation domain: they are never
+            # residual-anchored and cannot be LOO-sampled.
+            buffered = hull.buffer(buf)
+            buffered_coords = getattr(
+                getattr(buffered, "exterior", None), "coords", None
+            )
+            if buffered_coords is not None and len(list(buffered_coords)) >= 4:
+                exterior = tuple((float(x), float(y)) for x, y in buffered_coords)
+                return Boundary(exterior=exterior), list(exterior)
     except Exception:
         pass
     # Degenerate fallback: bbox rectangle with margin.
@@ -242,27 +252,31 @@ def _boundary_from_samples(
 
 def _leave_one_out_grid_fidelity(
     grid_z: np.ndarray, grid_x: np.ndarray, grid_y: np.ndarray, wells
-) -> float:
+) -> tuple[float, int]:
     """In-sample R² of the interpolated surface at the well locations.
 
     Constrained-IDW re-anchors wells (``well_anchor_enabled``), so the grid
     should reproduce well values closely. We bilinearly sample the grid at each
     well and report 1 - SS_res/SS_tot. Cheap (O(n_wells)) and an honest quality
     indicator consistent with the other methods' reported R².
+
+    Wells whose bilinear window touches nodata cells are *counted as missing*
+    and excluded from the R² — never replaced by a fabricated prediction.
+    Returns ``(r_squared, n_skipped)``.
     """
     values = np.array([w.value for w in wells], dtype=float)
     if values.size < 2 or float(values.std()) < 1e-12:
-        return 1.0
+        return 1.0, 0
     gx = np.asarray(grid_x, dtype=float)
     gy = np.asarray(grid_y, dtype=float)
     z = np.asarray(grid_z, dtype=float)
-    pred = np.empty(values.shape, dtype=float)
+    pred = np.full(values.shape, np.nan, dtype=float)
     x0, x1 = gx[0], gx[-1]
     y0, y1 = gy[0], gy[-1]
     nx = gx.size
     ny = gy.size
 
-    def _sample(px: float, py: float) -> float:
+    def _sample(px: float, py: float) -> float | None:
         fi = (px - x0) / (x1 - x0) * (nx - 1) if nx > 1 else 0.0
         fj = (py - y0) / (y1 - y0) * (ny - 1) if ny > 1 else 0.0
         i = min(max(int(math.floor(fi)), 0), nx - 2)
@@ -276,15 +290,29 @@ def _leave_one_out_grid_fidelity(
             + z[j + 1, i] * (1 - a) * b
             + z[j + 1, i + 1] * a * b
         )
-        return float(v) if math.isfinite(float(v)) else float(values.mean())
+        if not math.isfinite(float(v)):
+            return None
+        return float(v)
 
+    n_skipped = 0
     for k, w in enumerate(wells):
-        pred[k] = _sample(w.x, w.y)
-    ss_res = float(np.sum((values - pred) ** 2))
-    ss_tot = float(np.sum((values - values.mean()) ** 2))
+        sampled = _sample(w.x, w.y)
+        if sampled is None:
+            n_skipped += 1
+            continue
+        pred[k] = sampled
+    valid = np.isfinite(pred)
+    if int(valid.sum()) < 2:
+        # R² is undefined with fewer than two samplable wells; keep the
+        # degenerate-input convention (1.0) but report how many were skipped.
+        return 1.0, n_skipped
+    v_obs = values[valid]
+    v_pred = pred[valid]
+    ss_res = float(np.sum((v_obs - v_pred) ** 2))
+    ss_tot = float(np.sum((v_obs - v_obs.mean()) ** 2))
     if ss_tot < 1e-12:
-        return 1.0
-    return float(max(0.0, min(1.0, 1.0 - ss_res / ss_tot)))
+        return 1.0, n_skipped
+    return float(max(0.0, min(1.0, 1.0 - ss_res / ss_tot))), n_skipped
 
 
 def _value_range_from_wells(wells: Sequence[Any]) -> tuple[float | None, float | None]:
@@ -437,7 +465,9 @@ def run_constrained_idw(
     z_min = float(finite.min())
     z_max = float(finite.max())
     z_mean = float(finite.mean())
-    r_squared = _leave_one_out_grid_fidelity(grid_z, grid_x, grid_y, wells)
+    r_squared, r_squared_n_skipped = _leave_one_out_grid_fidelity(
+        grid_z, grid_x, grid_y, wells
+    )
 
     return {
         "grid_x": grid_x,
@@ -452,6 +482,10 @@ def run_constrained_idw(
         "max": z_max,
         "mean": z_mean,
         "r_squared": r_squared,
+        # Transparency for the quality metric: how many wells were excluded
+        # from the R² because their sampling window hit nodata (never faked).
+        "r_squared_n_sampled": int(len(wells) - r_squared_n_skipped),
+        "r_squared_n_skipped": r_squared_n_skipped,
         # Keep the resolved domain boundary so downstream consumers can show
         # the constrained interpolation extent (e.g. as a reference outline).
         "boundary": [[float(x), float(y)] for x, y in boundary_xy],
