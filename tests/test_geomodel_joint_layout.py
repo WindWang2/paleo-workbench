@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import Qt
 
 
@@ -274,26 +275,30 @@ def test_nav_label_is_joint_workbench():
 
 
 def test_joint_2d_time_only_chip_and_empty_hint(qtbot):
-    """#122: 2D strip chrome exposes Time-only; empty hint guides fence creation."""
+    """Unified domain chip: 2D/3D share one domain; empty hint guides fences."""
     from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
 
     page = GeologicalModeling3DPage()
     qtbot.addWidget(page)
     assert hasattr(page, "_joint_2d_time_chip")
     assert "Time" in page._joint_2d_time_chip.text()
+    assert "联动" in page._joint_2d_time_chip.text()
     # Before profile mount: empty-state guidance on placeholder
     ph = getattr(page, "_joint_2d_placeholder", None)
     if ph is not None:
         assert "fence" in ph.text().lower() or "井" in ph.text()
+    # Without a time-depth transform, Depth is refused and the chip keeps
+    # reporting the actual (Time) domain — no fake Depth display.
     page._on_joint_domain_changed("Depth")
-    assert "Depth" in page._joint_2d_time_chip.text() or "仅 3D" in page._joint_2d_time_chip.text()
-    assert "Time" in page._joint_2d_time_chip.text()
+    scene = page._joint_host.scene
+    if scene is not None and not scene.depth_available:
+        assert "Time" in page._joint_2d_time_chip.text()
     page._on_joint_domain_changed("Time")
-    assert page._joint_2d_time_chip.text() == "2D: Time"
+    assert page._joint_2d_time_chip.text() == "域: Time · 2D/3D 联动"
 
 
-def test_profile_force_time_extract_domain(qtbot):
-    """FenceProfile2D can force Time extract while scene is Depth (#122)."""
+def test_profile_follows_scene_extract_domain(qtbot):
+    """FenceProfile2D follows the scene domain (old #122 Time-force removed)."""
     from paleo_workbench.env_bootstrap import ensure_geoviz_on_path
 
     ensure_geoviz_on_path()
@@ -339,13 +344,21 @@ def test_profile_force_time_extract_domain(qtbot):
     scene.add_fence(
         FenceSection("F", np.array([[0.0, 0.0], [5000.0, 5000.0]], dtype=np.float64))
     )
-    scene.set_depth_transform(select_depth_transform(has_external_volume=False, v0_m_s=3000.0))
+    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=3000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
 
     profile = FenceProfile2D()
     qtbot.addWidget(profile)
-    profile.set_extract_domain(VerticalDomain.TIME)
+    # The workbench page policy clears any override: profile follows scene.
+    page_policy_clear = getattr(profile, "set_extract_domain", None)
+    if callable(page_policy_clear):
+        page_policy_clear(None)
     profile.set_scene(scene)
     # Not empty: has fence + volume
     assert profile._label.pixmap() is not None and not profile._label.pixmap().isNull()
     assert scene.vertical_domain is VerticalDomain.DEPTH
+    # The profile's z range matches the scene-domain (depth) extraction axis,
+    # i.e. 2D and 3D describe the same physical vertical extent.
+    ext = scene.extract_active_fence()
+    assert ext is not None
+    assert profile._z1 == pytest.approx(float(ext.sample_axis[-1]))

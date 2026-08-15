@@ -28,7 +28,7 @@ def test_host_has_scene_when_geoviz_available():
 
 
 def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
-    """reload(preferred_domain=Depth) must not leave scene stuck on Time."""
+    """Domain switching is fail-closed: Depth needs a transform, Time always works."""
     from paleo_workbench.viz import joint_host as mod
 
     monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
@@ -36,13 +36,19 @@ def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
     host = WellSeismicJointHost()
     if host.scene is None:
         pytest.skip(f"geoviz unavailable: {host.engine_error}")
-    host.set_vertical_domain("Depth", emit_scene=False)
-    from geoviz import VerticalDomain
+    from geoviz import VerticalDomain, select_depth_transform
 
-    assert host.scene.vertical_domain is VerticalDomain.DEPTH
-    # Simulate project preference applied after a bind
+    # Without a time-depth transform, Depth is refused (never faked with V0).
+    assert host.set_vertical_domain("Depth", emit_scene=False) is False
+    assert host.scene.vertical_domain is VerticalDomain.TIME
     host.set_vertical_domain("Time", emit_scene=False)
-    host.set_vertical_domain("Depth", emit_scene=False)
+    # With an explicit transform (e.g. synthetic demo), Depth applies and a
+    # reload(preferred_domain=...) restore keeps it — not forced back to Time.
+    host.scene.set_depth_transform(select_depth_transform(constant_v0=True))
+    assert host.set_vertical_domain("Depth", emit_scene=False) is True
+    assert host.scene.vertical_domain is VerticalDomain.DEPTH
+    host.set_vertical_domain("Time", emit_scene=False)
+    assert host.set_vertical_domain("Depth", emit_scene=False) is True
     assert host.scene.vertical_domain is VerticalDomain.DEPTH
 
 
@@ -59,7 +65,8 @@ def test_host_auto_default_fence_defaults_true(tmp_path, monkeypatch):
     assert host.auto_default_fence is True
 
 
-def test_host_depth_status_mentions_2d_stays_time(tmp_path, monkeypatch):
+def test_host_depth_unavailable_status_and_unified_domain(tmp_path, monkeypatch):
+    """Without a transform the host refuses Depth and says why; 2D/3D stay unified."""
     from paleo_workbench.viz import joint_host as mod
 
     monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
@@ -68,9 +75,17 @@ def test_host_depth_status_mentions_2d_stays_time(tmp_path, monkeypatch):
         pytest.skip(f"geoviz unavailable: {host.engine_error}")
     statuses: list[str] = []
     host.status_changed.connect(statuses.append)
-    host.set_vertical_domain("Depth", emit_scene=False)
+    assert host.set_vertical_domain("Depth", emit_scene=False) is False
     assert statuses
-    assert "2D" in statuses[-1] and "Time" in statuses[-1]
+    assert "不可用" in statuses[-1]
+    assert "Time" in statuses[-1]
+    from geoviz import VerticalDomain, select_depth_transform
+
+    assert host.scene.vertical_domain is VerticalDomain.TIME
+    host.scene.set_depth_transform(select_depth_transform(constant_v0=True))
+    assert host.set_vertical_domain("Depth", emit_scene=False) is True
+    assert "同域" in statuses[-1]
+    assert host.scene.vertical_domain is VerticalDomain.DEPTH
 
 
 def test_host_loads_gr_using_each_las_curve_depth_samples(tmp_path, monkeypatch):

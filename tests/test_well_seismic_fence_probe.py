@@ -73,7 +73,12 @@ def test_shared_fence_extract_identity():
 
 
 def test_extract_active_fence_domain_override_time_while_scene_depth():
-    """2D Time-only policy: extract Time sample axis while scene is Depth (#122)."""
+    """Unified domain policy: 2D and 3D share the scene domain (old #122 split removed).
+
+    Depth still requires an explicit transform (fail-closed); the extraction
+    ``domain`` override remains an API for callers that manage their own
+    domain, and Time/Depth axes differ by the transform.
+    """
     scene = _scene_with_volume()
     scene.add_fence(
         FenceSection(
@@ -81,15 +86,32 @@ def test_extract_active_fence_domain_override_time_while_scene_depth():
             vertices_xy=np.array([[0.0, 0.0], [5000.0, 5000.0]], dtype=np.float64),
         )
     )
-    scene.set_depth_transform(select_depth_transform(has_external_volume=False, v0_m_s=3000.0))
+    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=3000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
-    time_ext = scene.extract_active_fence(n_along=16, domain=VerticalDomain.TIME)
+    # Default extraction (what the 2D profile uses) follows the scene domain.
+    default_ext = scene.extract_active_fence(n_along=16)
     depth_ext = scene.extract_active_fence(n_along=16, domain=VerticalDomain.DEPTH)
-    assert time_ext is not None and depth_ext is not None
+    time_ext = scene.extract_active_fence(n_along=16, domain=VerticalDomain.TIME)
+    assert default_ext is not None and depth_ext is not None and time_ext is not None
+    # 2D and 3D consumers see the SAME (depth) axis by default — no split-brain.
+    np.testing.assert_allclose(default_ext.sample_axis, depth_ext.sample_axis)
     # Time axis is ms-scale (survey t0 + n*dt); Depth axis is metres via V0
     assert float(time_ext.sample_axis[-1]) != float(depth_ext.sample_axis[-1])
     # Scene domain still Depth after override extract
+    assert scene.vertical_domain is VerticalDomain.DEPTH
+
+
+def test_depth_domain_unavailable_without_transform():
+    """Fail-closed: Depth is refused while no time-depth transform exists."""
+    scene = _scene_with_volume()
+    assert scene.depth_available is False
+    with pytest.raises(ValueError, match="no time-depth transform"):
+        scene.set_vertical_domain(VerticalDomain.DEPTH)
+    assert scene.vertical_domain is VerticalDomain.TIME
+    scene.set_depth_transform(select_depth_transform(constant_v0=True))
+    assert scene.depth_available is True
+    scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
 
 
@@ -290,7 +312,7 @@ def test_probe_slice_indices():
 
 def test_depth_domain_and_v0_warning():
     scene = _scene_with_volume()
-    scene.set_depth_transform(select_depth_transform(has_external_volume=False, v0_m_s=2500))
+    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=2500))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
     assert scene.depth_transform.approximate_warning is not None
