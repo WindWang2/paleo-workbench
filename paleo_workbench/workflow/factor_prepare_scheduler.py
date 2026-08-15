@@ -226,6 +226,7 @@ def materialize_execution_project(snapshot: FactorPrepareSnapshot) -> ProjectDoc
 def classify_snapshot_tasks(
     snapshot: FactorPrepareSnapshot,
     project: ProjectDocument,
+    fingerprint_memo: dict | None = None,
 ) -> tuple[list[tuple[FactorMapTask, FactorDirtyState, str]], list[tuple[FactorMapTask, FactorDirtyState, str]]]:
     """Return (clean, dirty) pairs of (task, state, result_fingerprint)."""
     clean: list[tuple[FactorMapTask, FactorDirtyState, str]] = []
@@ -238,6 +239,7 @@ def classify_snapshot_tasks(
             grid_n=snapshot.grid_n,
             power=snapshot.power,
             generator_version=GENERATOR_VERSION,
+            memo=fingerprint_memo,
         )
         state = classify_factor_recompute(task, fps, force=snapshot.force)
         if state is FactorDirtyState.CLEAN:
@@ -304,6 +306,9 @@ def run_factor_prepare_schedule(
         cancellation_token.raise_if_cancelled()
 
     exec_project = materialize_execution_project(snapshot)
+    # One fingerprint derivation per task for this whole request: the classify
+    # phase and the execute phase (batch_prepare_factor_maps) share the memo.
+    fp_memo: dict = {}
     # Ensure sample points exist on pending tasks (same as batch_prepare).
     for task in exec_project.factor_map_tasks:
         params = task.parameters or {}
@@ -317,7 +322,9 @@ def run_factor_prepare_schedule(
             )
             task.parameters = {**params, "sample_points": points}
 
-    clean_pairs, dirty_pairs = classify_snapshot_tasks(snapshot, exec_project)
+    clean_pairs, dirty_pairs = classify_snapshot_tasks(
+        snapshot, exec_project, fingerprint_memo=fp_memo
+    )
     classify_ms = (time.perf_counter() - t_class0) * 1000.0
     total = len(exec_project.factor_map_tasks)
     clean_n = len(clean_pairs)
@@ -396,6 +403,7 @@ def run_factor_prepare_schedule(
                 force=snapshot.force,
                 seed=snapshot.seed,
                 cancellation_token=cancellation_token,
+                fingerprint_memo=fp_memo,
             )
             for task, state, result_fp in dirty_pairs:
                 executed += 1
@@ -459,6 +467,7 @@ def run_factor_prepare_schedule(
                     force=True,  # already known dirty; avoid re-classify miss
                     seed=snapshot.seed,
                     cancellation_token=cancellation_token,
+                    fingerprint_memo=fp_memo,
                 )
                 out: list[FactorPrepareTaskResult] = []
                 for task, state, result_fp in items:

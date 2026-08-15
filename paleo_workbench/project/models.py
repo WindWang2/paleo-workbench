@@ -442,6 +442,12 @@ class JointAnalysisState(BaseModel):
     well_width_px: int = Field(default=5, ge=2, le=10)
     orthogonal_inline_index: int | None = None
     orthogonal_crossline_index: int | None = None
+    # Physical survey line numbers of the orthogonal planes. Preview indices
+    # are LOD-relative, so restoring them across sessions with a different
+    # preview shape would land on a different physical line; numbers are the
+    # stable representation (indices remain as a legacy fallback).
+    orthogonal_inline_number: float | None = None
+    orthogonal_crossline_number: float | None = None
     time_slices: list[JointTimeSliceState] = Field(
         default_factory=list,
         max_length=8,

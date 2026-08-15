@@ -272,6 +272,44 @@ class SeismicVolumeSource:
     def read_timeslice(self, index: int, *, lod: int = 0) -> np.ndarray:
         return self._read_orientation("timeslice", index, lod=lod)
 
+    def read_trace(self, il_index: int, xl_index: int) -> np.ndarray:
+        """Read one vertical trace (n_samples,) at zero-based il/xl indices.
+
+        Single-trace reads back fence/probe sampling without materialising a
+        whole inline (engine ``SeismicLoader.read_trace`` takes line numbers).
+        """
+        if self._closed:
+            raise RuntimeError("SeismicVolumeSource is closed")
+        meta = self.metadata()
+        if (
+            meta.is_pseudo
+            or self._loader is None
+            or not self._loader_has_geometry()
+        ):
+            raise RuntimeError(
+                "lazy trace requires structured SEGY geometry"
+            )
+        key = SeismicCacheKey(
+            source_id=meta.source_id,
+            kind="trace",
+            index=int(il_index),
+            lod=int(xl_index),
+        )
+        hit = self._cache.get(key)
+        if hit is not None:
+            return hit
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit is not None:
+                return hit
+            loader = self._loader
+            assert loader is not None
+            iline = meta.iline_number(int(il_index))
+            xline = meta.xline_number(int(xl_index))
+            data = np.asarray(loader.read_trace(iline, xline), dtype=np.float32)
+            self.physical_reads += 1
+            return self._cache.put(key, data)
+
     def _read_orientation(
         self, kind: Orientation, index: int, *, lod: int = 0
     ) -> np.ndarray:
@@ -333,12 +371,28 @@ class SeismicVolumeSource:
         if self._closed:
             raise RuntimeError("SeismicVolumeSource is closed")
         meta = self.metadata()
+        strides = preview_strides(
+            meta.n_inlines,
+            meta.n_crosslines,
+            meta.n_samples,
+            max_dim=max_dim,
+            max_budget=max_budget,
+        )
+        # Extra LOD coarsens further.
+        if lod > 0:
+            scale = 2**lod
+            strides = tuple(max(1, s * scale) for s in strides)  # type: ignore[assignment]
+        # Key the preview cache by the STRIDES actually used: two LOD levels
+        # whose (max_dim, budget) resolve to the same strides produce the
+        # identical cube, so the finer level should be a cache hit instead of
+        # a full re-read (the ladder often converges, e.g. 256³ and 384³ both
+        # give (1,1,2) on a 256x256x512 survey).
         key = SeismicCacheKey(
             source_id=meta.source_id,
             kind="preview",
             index=0,
-            lod=int(lod),
-            attribute=f"d{max_dim}_b{max_budget}",
+            lod=0,
+            attribute="s{}-{}-{}".format(*strides),
         )
         hit = self._cache.get(key)
         if hit is not None:
@@ -465,21 +519,68 @@ class SeismicVolumeSource:
         cancellation_token=None,
     ) -> tuple[np.ndarray | None, str]:
         """LOD ladder: 0=preview (128³), 1=medium (~256), 2=finer (~384)."""
-        level = max(0, min(2, int(level)))
-        # Invert: higher LOD number = finer detail (goal text L0 preview / L2 detail).
-        # Implement as max_dim growth.
-        dims = (DEFAULT_PREVIEW_MAX_DIM, 256, 384)
-        budgets = (
-            DEFAULT_PREVIEW_BUDGET,
-            256 * 256 * 256,
-            384 * 384 * 256,
+        vol, _strides, warning = self.read_lod_volume_with_strides(
+            level, cancellation_token=cancellation_token
         )
-        return self.read_preview(
-            max_dim=dims[level],
-            max_budget=budgets[level],
+        return vol, warning
+
+    def read_lod_volume_with_strides(
+        self,
+        level: int = 0,
+        *,
+        cancellation_token=None,
+    ) -> tuple[np.ndarray | None, tuple[int, int, int], str]:
+        """LOD ladder read that also returns the exact per-axis strides.
+
+        0=preview (128³), 1=medium (~256), 2=finer (~384). Higher level =
+        finer detail. Strides are returned so volume-access registration can
+        map preview indices to native samples exactly.
+        """
+        level = max(0, min(2, int(level)))
+        meta = self.metadata()
+        max_dim, max_budget = lod_level_params(level)
+        strides = preview_strides(
+            meta.n_inlines,
+            meta.n_crosslines,
+            meta.n_samples,
+            max_dim=max_dim,
+            max_budget=max_budget,
+        )
+        vol, warning = self.read_preview(
+            max_dim=max_dim,
+            max_budget=max_budget,
             lod=0,
             cancellation_token=cancellation_token,
         )
+        if vol is None or meta.is_pseudo:
+            # Pseudo/unstructured fallback cubes are not stride-built; the
+            # joint host renders them through InMemoryVolumeAccess, so the
+            # strides are unused there.
+            return vol, (1, 1, 1), warning
+        expected = tuple(
+            -(-d // s)
+            for d, s in zip(
+                (meta.n_inlines, meta.n_crosslines, meta.n_samples), strides
+            )
+        )
+        if tuple(int(x) for x in vol.shape) != expected:
+            raise RuntimeError(
+                f"LOD {level} preview shape {vol.shape} does not match "
+                f"strides {strides} (expected {expected})"
+            )
+        return vol, strides, warning
+
+
+def lod_level_params(level: int) -> tuple[int, int]:
+    """(max_dim, max_voxel_budget) for the LOD ladder level (0/1/2)."""
+    level = max(0, min(2, int(level)))
+    dims = (DEFAULT_PREVIEW_MAX_DIM, 256, 384)
+    budgets = (
+        DEFAULT_PREVIEW_BUDGET,
+        256 * 256 * 256,
+        384 * 384 * 256,
+    )
+    return dims[level], budgets[level]
 
 
 def _downsample_2d(data: np.ndarray, *, step: int) -> np.ndarray:
