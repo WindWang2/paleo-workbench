@@ -620,3 +620,96 @@ def test_add_tags_batch_rolls_back_on_canonical_failure(service, tmp_path, monke
 
     assert service.document.tags == []
     assert service.document.version_tags.get(version.id, []) == []
+
+
+# --- lock discipline (zombie-asset prevention) ------------------------------
+
+
+def test_import_raw_adds_asset_under_service_lock(service, tmp_path, monkeypatch):
+    """The asset must enter the document inside the service lock, so a
+    concurrent save can never persist an asset with zero versions."""
+    import threading
+
+    from paleo_workbench.catalog.service import DataCatalogService
+
+    lock_state: dict[str, bool] = {}
+    original = DataCatalogService._add_asset
+
+    def spy(self, asset):
+        # _is_owned() is True exactly when the current thread holds the lock
+        # (re-entrant acquire would succeed either way, so it cannot probe).
+        lock_state["held"] = self._lock._is_owned()
+        return original(self, asset)
+
+    monkeypatch.setattr(DataCatalogService, "_add_asset", spy)
+    service.import_raw(_make_source(tmp_path))
+
+    assert lock_state.get("held") is True
+
+
+def test_concurrent_import_and_tag_untag_never_persists_zombie(service, tmp_path, monkeypatch):
+    """Two threads alternating import_raw with add_tag/remove_tag for 200
+    rounds: every canonical save must persist a consistent document (never an
+    asset with zero versions), the save count must match the operation count,
+    and the on-disk document must equal the in-memory one at the end."""
+    import threading
+
+    # A stable tag target so the tagger thread always has a valid asset id.
+    anchor = service.import_raw(_make_source(tmp_path, name="anchor.las"))
+
+    saves = []
+    real_save = service._store.save
+
+    def checked(document):
+        # Every persisted snapshot must be consistent: no asset may exist
+        # without at least one version (the zombie torn state).
+        assets = {a.id for a in document.assets}
+        versions = {v.asset_id for v in document.versions}
+        zombies = assets - versions
+        assert not zombies, f"save persisted zombie asset(s): {zombies}"
+        saves.append(document.catalog_revision)
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", checked)
+
+    rounds = 200
+    errors: list[BaseException] = []
+
+    def importer():
+        try:
+            for i in range(rounds):
+                service.import_raw(
+                    _make_source(tmp_path, name=f"w{i}.las", payload=f"data-{i}".encode())
+                )
+        except BaseException as exc:  # pragma: no cover - failure detail
+            errors.append(exc)
+
+    def tagger():
+        try:
+            for i in range(rounds):
+                if i % 2 == 0:
+                    service.add_tag("qc", asset_id=anchor.asset_id)
+                else:
+                    service.remove_tag("qc", asset_id=anchor.asset_id)
+        except BaseException as exc:  # pragma: no cover - failure detail
+            errors.append(exc)
+
+    threads = [threading.Thread(target=importer), threading.Thread(target=tagger)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    assert not errors, errors
+    assert not any(t.is_alive() for t in threads)
+
+    # Save count is exact: one canonical write per import_raw plus one per
+    # effective tag mutation (alternating add/remove always changes state).
+    assert len(saves) == rounds * 2, len(saves)
+
+    # Every asset carries at least one version; on-disk state == memory.
+    assert all(
+        any(v.asset_id == a.id for v in service.document.versions)
+        for a in service.document.assets
+    )
+    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")

@@ -25,49 +25,54 @@ def add_tag(
     asset_id: str | None = None,
     version_id: str | None = None,
 ) -> Tag:
-    """Get-or-create a normalized tag and associate it. Idempotent."""
-    if asset_id is None and version_id is None:
-        raise CatalogError("add_tag requires asset_id or version_id")
-    normalized = normalize_tag_name(name)
-    if not normalized:
-        raise CatalogError("Empty tag name")
-    if asset_id is not None:
-        service._asset_or_raise(asset_id)
-    if version_id is not None:
-        service._version_or_raise(version_id)
-    tag = _tag_by_name(service, normalized)
-    created = False
-    if tag is None:
-        tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
-        service.document.tags.append(tag)
-        created = True
-    changed = False
-    if asset_id is not None:
-        ids = service.document.asset_tags.setdefault(asset_id, [])
-        if tag.id not in ids:
-            ids.append(tag.id)
-            changed = True
-    if version_id is not None:
-        ids = service.document.version_tags.setdefault(version_id, [])
-        if tag.id not in ids:
-            ids.append(tag.id)
-            changed = True
-    if created or changed:
-        try:
-            service._save()
-        except Exception:
-            if created and tag in service.document.tags:
-                service.document.tags.remove(tag)
-            if asset_id is not None:
-                service.document.asset_tags[asset_id] = [
-                    t for t in service.document.asset_tags.get(asset_id, []) if t != tag.id
-                ]
-            if version_id is not None:
-                service.document.version_tags[version_id] = [
-                    t for t in service.document.version_tags.get(version_id, []) if t != tag.id
-                ]
-            raise
-    return tag
+    """Get-or-create a normalized tag and associate it. Idempotent.
+
+    Holds the service lock across mutation and save so a concurrent import /
+    save can never interleave a half-applied association into the document.
+    """
+    with service._lock:
+        if asset_id is None and version_id is None:
+            raise CatalogError("add_tag requires asset_id or version_id")
+        normalized = normalize_tag_name(name)
+        if not normalized:
+            raise CatalogError("Empty tag name")
+        if asset_id is not None:
+            service._asset_or_raise(asset_id)
+        if version_id is not None:
+            service._version_or_raise(version_id)
+        tag = _tag_by_name(service, normalized)
+        created = False
+        if tag is None:
+            tag = Tag(name=normalized, display_name=" ".join(str(name).split()))
+            service.document.tags.append(tag)
+            created = True
+        changed = False
+        if asset_id is not None:
+            ids = service.document.asset_tags.setdefault(asset_id, [])
+            if tag.id not in ids:
+                ids.append(tag.id)
+                changed = True
+        if version_id is not None:
+            ids = service.document.version_tags.setdefault(version_id, [])
+            if tag.id not in ids:
+                ids.append(tag.id)
+                changed = True
+        if created or changed:
+            try:
+                service._save()
+            except Exception:
+                if created and tag in service.document.tags:
+                    service.document.tags.remove(tag)
+                if asset_id is not None:
+                    service.document.asset_tags[asset_id] = [
+                        t for t in service.document.asset_tags.get(asset_id, []) if t != tag.id
+                    ]
+                if version_id is not None:
+                    service.document.version_tags[version_id] = [
+                        t for t in service.document.version_tags.get(version_id, []) if t != tag.id
+                    ]
+                raise
+        return tag
 
 
 def remove_tag(
@@ -77,18 +82,19 @@ def remove_tag(
     asset_id: str | None = None,
     version_id: str | None = None,
 ) -> None:
-    tag = _tag_by_name(service, name)
-    if tag is None:
-        return
-    changed = False
-    if asset_id is not None and tag.id in service.document.asset_tags.get(asset_id, []):
-        service.document.asset_tags[asset_id].remove(tag.id)
-        changed = True
-    if version_id is not None and tag.id in service.document.version_tags.get(version_id, []):
-        service.document.version_tags[version_id].remove(tag.id)
-        changed = True
-    if changed:
-        service._save()
+    with service._lock:
+        tag = _tag_by_name(service, name)
+        if tag is None:
+            return
+        changed = False
+        if asset_id is not None and tag.id in service.document.asset_tags.get(asset_id, []):
+            service.document.asset_tags[asset_id].remove(tag.id)
+            changed = True
+        if version_id is not None and tag.id in service.document.version_tags.get(version_id, []):
+            service.document.version_tags[version_id].remove(tag.id)
+            changed = True
+        if changed:
+            service._save()
 
 
 def rename_tag(

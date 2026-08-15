@@ -742,34 +742,40 @@ class DataCatalogService:
         the same size, no copy happens and the version references the shared
         blob (O(1)). Every managed RAW import also registers its payload in
         the content store so later imports of the same content dedup to it.
+
+        Runs fully under the service lock (re-entrant with
+        :meth:`register_version`): the new asset is added and persisted in
+        the same locked section, so a concurrent save can never persist the
+        asset without its version (zombie zero-version asset on disk).
         """
-        source_path = Path(source_path)
-        if not source_path.is_file():
-            raise CatalogError(f"Source file not found: {source_path}")
-        asset: DataAsset | None = None
-        if asset_id is not None:
-            target = self._asset_or_raise(asset_id)
-        else:
-            target = self._new_asset(
-                name or source_path.name, type, format, metadata
-            )
-            if (
-                _legacy_resource_id is not None
-                and target.legacy_resource_id is None
-                and self._live_asset_by_legacy_id(_legacy_resource_id) is None
-            ):
-                target.legacy_resource_id = _legacy_resource_id
-            asset = target
-            self._add_asset(target)
-        try:
-            return self.register_version(
-                target.id, source_path, DataStage.RAW, metadata=metadata,
-                known_sha256=known_sha256, _register_blob=True,
-            )
-        except Exception:
-            if asset is not None and asset in self.document.assets:
-                self._remove_asset(asset)
-            raise
+        with self._lock:
+            source_path = Path(source_path)
+            if not source_path.is_file():
+                raise CatalogError(f"Source file not found: {source_path}")
+            asset: DataAsset | None = None
+            if asset_id is not None:
+                target = self._asset_or_raise(asset_id)
+            else:
+                target = self._new_asset(
+                    name or source_path.name, type, format, metadata
+                )
+                if (
+                    _legacy_resource_id is not None
+                    and target.legacy_resource_id is None
+                    and self._live_asset_by_legacy_id(_legacy_resource_id) is None
+                ):
+                    target.legacy_resource_id = _legacy_resource_id
+                asset = target
+                self._add_asset(target)
+            try:
+                return self.register_version(
+                    target.id, source_path, DataStage.RAW, metadata=metadata,
+                    known_sha256=known_sha256, _register_blob=True,
+                )
+            except Exception:
+                if asset is not None and asset in self.document.assets:
+                    self._remove_asset(asset)
+                raise
 
     def link_external(
         self,
