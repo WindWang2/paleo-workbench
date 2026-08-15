@@ -102,3 +102,56 @@ def test_native_layer_tree_opacity_clamps(qtbot):
     assert layer.opacity == 1.0
     tree.model.setData(opacity_index, -3.0, Qt.ItemDataRole.EditRole)
     assert layer.opacity == 0.0
+
+
+def _vector_layer():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id="ref", name="ref", type=SimpleNamespace(name="VectorGrid"),
+        crs="", opacity=1.0, source_ref="", data_revision=1, style_revision=1,
+        provenance_ref="", metadata={},
+    )
+
+
+def test_layer_properties_ok_blocks_invalid_classes_json(qtbot):
+    """Audit C83: OK must not silently close over unparseable Classes JSON;
+    an inline error appears next to the field instead."""
+    from PySide6.QtWidgets import QDialog
+
+    dlg = MapLayerPropertiesDialog(_vector_layer())
+    qtbot.addWidget(dlg)
+
+    dlg.renderer_combo.setCurrentText("categorized")
+    dlg.classes_edit.setPlainText('{"delta": #6c8ebf}')
+    assert dlg.classes_json_error() is not None
+
+    dlg._accept_after_apply()
+
+    assert dlg.result() != QDialog.DialogCode.Accepted
+    assert not dlg.classes_error_label.isHidden()
+    assert "Invalid Classes JSON" in dlg.classes_error_label.text()
+    # Editing the text again hides the error and allows acceptance.
+    dlg.classes_edit.setPlainText('{"delta": "#6c8ebf"}')
+    assert dlg.classes_error_label.isHidden()
+    assert dlg.classes_json_error() is None
+
+
+def test_layer_properties_ok_applies_valid_classes_json(qtbot):
+    """Valid Classes JSON still applies categories and closes the dialog."""
+    from PySide6.QtWidgets import QDialog
+
+    dlg = MapLayerPropertiesDialog(_vector_layer())
+    qtbot.addWidget(dlg)
+    received = []
+    dlg.properties_applied.connect(lambda layer_id, payload: received.append(payload))
+
+    dlg.renderer_combo.setCurrentText("categorized")
+    dlg.classes_edit.setPlainText('{"delta": "#6c8ebf"}')
+
+    dlg._accept_after_apply()
+
+    assert received
+    assert received[0]["style"]["categories"] == {"delta": "#6c8ebf"}
+    assert dlg.result() == QDialog.DialogCode.Accepted
+    dlg.deleteLater()

@@ -88,6 +88,10 @@ class DataAssetTable(QWidget):
         self.table = QTableView()
         self.table.setObjectName("DataAssetGrid")
         self.table.setModel(self.model)
+        # Connected after setModel so this handler runs last on modelReset,
+        # after the view/selection-model reset handling has cleared the
+        # selection (see _on_model_reset).
+        self.model.modelReset.connect(self._on_model_reset)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -300,6 +304,22 @@ class DataAssetTable(QWidget):
         kind = "artifact" if isinstance(asset, ExportArtifact) else "resource"
         asset_id = getattr(asset, "id", str(id(asset)))
         return (kind, asset_id)
+
+    def _on_model_reset(self) -> None:
+        """Keep the row -> asset mapping in lockstep with the model.
+
+        The model is the single source of truth for the display order
+        (filters and header sorting both reset it).  Rebuild ``_visible_assets``
+        from the model and restore the selection on its correct row, so a sort
+        (or any reset) can never leave highlight and selection on different
+        rows (see #412).
+        """
+        self._visible_assets = [
+            asset
+            for row in range(self.model.rowCount())
+            if (asset := self.model.asset_at(row)) is not None
+        ]
+        self._sync_selection()
 
     def _sync_selection(self) -> bool:
         selected_key = self._asset_key(self._selected_asset)
