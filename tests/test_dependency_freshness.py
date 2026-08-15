@@ -723,3 +723,131 @@ def test_benchmark_10k_smoke():
     )
     assert len(g.runs) == n_versions - 1
     assert build_ms < 5000  # generous ceiling
+
+
+# ------------------------------------------------------------------ C15 identity
+# Freshness/recompute identity must be stable across reruns: superseded
+# per-run asset tips must not stay "current", QC must collapse to the latest
+# run per map, and byte-identical supersession must not invalidate consumers.
+
+
+def test_arch1_factor_rerun_new_asset_keeps_latest_prediction_fresh():
+    """Asset-per-run factor reruns (legacy catalogs) must not stale a
+    prediction that was re-run on the CURRENT grid, and the reversed
+    "current is <superseded version>" reason must not appear."""
+    cat = InMemoryCatalog()
+    raw = _raw(cat, "raw")
+    project = ProjectDocument.new("P")
+    task = FactorMapTask(
+        name="H1",
+        target_horizon="H1",
+        factor_type="砂岩含量",
+        method="IDW",
+        grid_artifact_version_id=None,  # set after the reruns below
+        input_snapshot_hash="snap1",
+        generator_version="g1",
+    )
+    project.factor_map_tasks.append(task)
+    # Runs are registered under the task's real id (like register_factor_map_run).
+    _, grid_v1 = _run_with_output(
+        cat, operation="factor_map", inputs=[raw], name="grid-v1",
+        domain_task_id=task.id, generator_version="g1",
+        input_snapshot_hash="snap1",
+    )
+    # Re-run of the same factor task → NEW asset (legacy asset-per-run layout).
+    _, grid_v2 = _run_with_output(
+        cat, operation="factor_map", inputs=[raw], name="grid-v2",
+        domain_task_id=task.id, generator_version="g1",
+        input_snapshot_hash="snap1",
+    )
+    assert grid_v1 != grid_v2
+    # Prediction re-run on the CURRENT grid.
+    _, pred = _run_with_output(
+        cat, operation="prediction", inputs=[grid_v2], name="pred",
+        domain_task_id="task-p", generator_version="g1",
+        input_snapshot_hash="snap-p",
+    )
+    task.grid_artifact_version_id = grid_v2
+
+    svc = _svc(cat, project=project)
+    rep = svc.evaluate_version(pred)
+    assert rep.state is FreshnessState.FRESH, [
+        (r.type.value, r.upstream_version_id, r.current_version_id)
+        for r in rep.reasons
+    ]
+    # No reversed "run used <current>; current is <superseded>" reason.
+    assert not any(
+        r.type is FreshnessReasonType.UPSTREAM_VERSION_CHANGED
+        and r.current_version_id == grid_v1
+        for r in rep.reasons
+    )
+
+
+def test_arch2_qc_step_fresh_after_rerun_on_stable_key():
+    """With a stable per-map QC domain key, only the latest QC run
+    participates: re-running QC after a recompile returns the step to FRESH
+    even though the historical QC run is stale."""
+    cat = InMemoryCatalog()
+    raw = _raw(cat, "raw")
+    _, map_v1 = _run_with_output(
+        cat, operation="map_compile", inputs=[raw], name="map-v1",
+        domain_task_id="doc-1",
+    )
+    _, map_v2 = _run_with_output(
+        cat, operation="map_compile", inputs=[raw], name="map-v2",
+        domain_task_id="doc-2",
+    )
+    asset = _force_same_asset(cat, map_v1, map_v2)
+    # Both QC runs keyed by the stable linked task id (the fix): the QC of
+    # the superseded map and the QC of the current map collapse to the latest.
+    _, _ = _run_with_output(
+        cat, operation="qc", inputs=[map_v1], name="qc-r1",
+        domain_task_id="task-t",
+    )
+    r2, _ = _run_with_output(
+        cat, operation="qc", inputs=[map_v2], name="qc-r2",
+        domain_task_id="task-t",
+    )
+    svc = _svc(cat, current={asset: map_v2})
+    assert svc.evaluate_version(map_v2).state is FreshnessState.FRESH
+    assert svc.evaluate_run(r2).state is FreshnessState.FRESH
+    assert svc.step_freshness("qc") is FreshnessState.FRESH
+
+
+def test_arch3_same_checksum_promote_keeps_consumers_fresh():
+    """A byte-identical supersession (promote copies the payload, same
+    sha256) must not stale the consumers that ran on the promoted source,
+    and the recompute plan must stay empty (issue #373 / C15)."""
+    from paleo_workbench.catalog.models import DataStage
+
+    cat = InMemoryCatalog()
+    raw = _raw(cat, "raw")
+    v1 = cat.resolve_version(raw)
+    assert v1 is not None
+    v2 = cat._new_version(
+        name=v1.name,
+        stage=DataStage.OUTPUT,
+        path=v1.path,
+        checksum=v1.checksum,  # identical payload bytes
+        kind=v1.kind,
+        format=v1.format,
+        external=False,
+        producing_run_id=None,
+        tags=list(v1.tags),
+        legacy_resource_id=None,
+    )
+    v2.asset_id = v1.asset_id  # promote keeps the same asset
+    _, factor = _run_with_output(
+        cat, operation="factor_map", inputs=[v1.version_id], name="factor",
+        domain_task_id="task-f",
+    )
+    _, pred = _run_with_output(
+        cat, operation="prediction", inputs=[factor], name="pred",
+        domain_task_id="task-p",
+    )
+
+    svc = _svc(cat, current={v1.asset_id: v2.version_id})
+    assert svc.evaluate_version(factor).state is FreshnessState.FRESH
+    assert svc.evaluate_version(pred).state is FreshnessState.FRESH
+    plan = build_recompute_plan(svc, changed_version_ids=[v2.version_id])
+    assert plan.compute_steps == []

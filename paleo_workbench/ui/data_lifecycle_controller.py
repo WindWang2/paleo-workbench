@@ -498,11 +498,17 @@ class DataLifecycleController:
         page._set_action_status("已从回收站还原")
         return True
 
-    def rescan_selected_asset(self) -> bool:
+    def prepare_rescan(self) -> tuple[str, object, Path, Path | None]:
+        """Validate + resolve the rescan target (GUI-thread-cheap).
+
+        Returns ``(status, resource, path, project_path)`` with status one of
+        ``"ok"``, ``"missing"`` (already applied + reported) or ``"invalid"``.
+        The heavy directory scan itself runs on a worker (#379).
+        """
         page = self.page
         if not isinstance(page._selected_asset, ResourceItem):
             page._set_action_status("请选择一个项目资源")
-            return False
+            return "invalid", None, Path(), None
         resource = page._selected_asset
         path = page._resolve_resource_path(resource)
         if not path.exists():
@@ -513,22 +519,31 @@ class DataLifecycleController:
             page._refresh()
             page._request_summary(resource)
             page._set_action_status("文件不存在")
-            return True
+            return "missing", resource, path, page._project_file_for_io()
+        return "ok", resource, path, page._project_file_for_io()
 
-        project_path = page._project_file_for_io()
-        scanned = scan_resources(path.parent, project_path=project_path)
-        path_resolved = path.resolve()
-        updated = None
+    def run_rescan(self, folder: Path, project_path: Path | None) -> list:
+        """Scan *folder* (worker thread): rglob + per-file checksums."""
+        return scan_resources(folder, project_path=project_path)
+
+    def find_rescan_match(
+        self, scanned: list, path_resolved: Path, project_path: Path | None
+    ) -> object | None:
+        """Locate the scanned item corresponding to the rescan target."""
         for item in scanned:
             try:
                 item_path = Path(item.path)
                 if not item_path.is_absolute() and project_path is not None:
                     item_path = Path(resolve_project_path(str(item.path), project_path))
                 if item_path.resolve() == path_resolved:
-                    updated = item
-                    break
+                    return item
             except OSError:
                 continue
+        return None
+
+    def apply_rescan_result(self, resource: ResourceItem, updated) -> bool:
+        """Apply the scanned item onto the resource and refresh the UI."""
+        page = self.page
         if updated is None:
             page._set_action_status("重新扫描未找到文件")
             return False
@@ -557,6 +572,16 @@ class DataLifecycleController:
         page._request_summary(resource)
         page._set_action_status("已重新扫描")
         return True
+
+    def rescan_selected_asset(self) -> bool:
+        """Synchronous rescan (direct callers/tests); the page uses the
+        worker variant that splits prepare/scan/apply (#379)."""
+        status, resource, path, project_path = self.prepare_rescan()
+        if status != "ok":
+            return status == "missing"
+        scanned = self.run_rescan(path.parent, project_path)
+        updated = self.find_rescan_match(scanned, path.resolve(), project_path)
+        return self.apply_rescan_result(resource, updated)
 
     # ------------------------------------------------------------------ #
     # Derived copy via catalog
@@ -803,10 +828,13 @@ class DataLifecycleController:
         page._refresh()
         page._set_action_status(f"已提升为正式数据: {version.id} (v{version.version_number})")
 
-    def deliver_asset(self, asset: object) -> None:
-        """导出 / 交付: copy the OUTPUT payload to a user-chosen destination and
-        record delivery metadata as a ``delivery`` DataRun (source version,
-        exported path, checksum, timestamp, format, delivery status)."""
+    def prepare_delivery(self, asset: object):
+        """Resolve the payload source and ask for a destination (GUI thread).
+
+        Returns ``(source_path, destination, service, ref)`` or None after
+        reporting an error/cancel status.  The payload copy + checksum itself
+        runs on a worker (#379).
+        """
         page = self.page
         asset = unwrap_asset(asset)
         service, ref = self.catalog_bridge(asset) if isinstance(asset, ResourceItem) else (None, None)
@@ -826,6 +854,7 @@ class DataLifecycleController:
             if not rel.is_absolute():
                 try:
                     from paleo_workbench.project.paths import resolve_project_path
+
                     source_path = Path(
                         resolve_project_path(str(rel), page._project_file_for_io())
                     )
@@ -852,27 +881,34 @@ class DataLifecycleController:
                     source_path = None
         if source_path is None or not source_path.is_file():
             page._set_action_status("导出 / 交付失败: 源文件不存在")
-            return
+            return None
         suggested = str(default_export_dir(page._project_file_for_io()) / source_path.name)
         dlg = _DeliveryDialog(page, asset_name=getattr(asset, "name", source_path.name), suggested_path=suggested)
         if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
+            return None
         destination = dlg.output_path()
         if not str(destination).strip():
             page._set_action_status("导出 / 交付已取消")
-            return
-        try:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, destination)
-            checksum = sha256_file(destination)
-        except Exception as exc:
-            page._set_action_status(f"导出 / 交付失败: {exc}")
-            return
-        # Delivery provenance: a run records the handoff WITHOUT mutating the
-        # immutable OUTPUT version. ResourceItem deliveries resolve through the
-        # legacy bridge; ExportArtifact deliveries reference their registered
-        # catalog OUTPUT version directly (catalog_bridge only resolves
-        # ResourceItems, so resolve the service separately here).
+            return None
+        return source_path, Path(destination), service, ref
+
+    def run_delivery_copy(self, source_path: Path, destination: Path) -> str:
+        """Copy the payload and checksum the destination (worker thread)."""
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination)
+        return sha256_file(destination)
+
+    def finish_delivery(
+        self,
+        asset: object,
+        service,
+        ref,
+        source_path: Path,
+        destination: Path,
+        checksum: str,
+    ) -> None:
+        """Record the delivery DataRun and report status (GUI thread)."""
+        page = self.page
         recorded = False
         try:
             if service is not None and ref is not None:
@@ -913,6 +949,20 @@ class DataLifecycleController:
         page._set_action_status(
             f"已导出 / 交付: {destination.name} ({'已记录交付元数据' if recorded else '未记录交付元数据'})"
         )
+
+    def deliver_asset(self, asset: object) -> None:
+        """导出 / 交付 (synchronous composition for direct callers/tests; the
+        page uses the worker variant that splits prepare/copy/finish, #379)."""
+        prepared = self.prepare_delivery(asset)
+        if prepared is None:
+            return
+        source_path, destination, service, ref = prepared
+        try:
+            checksum = self.run_delivery_copy(source_path, destination)
+        except Exception as exc:
+            self.page._set_action_status(f"导出 / 交付失败: {exc}")
+            return
+        self.finish_delivery(asset, service, ref, source_path, destination, checksum)
 
     # ------------------------------------------------------------------ #
     # Tag mirroring

@@ -31,6 +31,7 @@ class ReviewExportPage(QWidget):
         super().__init__(parent)
         self.setObjectName("ReviewExportPage")
         self._project = None
+        self._project_path: Path | None = None
         self._reports: list = []
         self._map_documents: list = []
         self._artifacts: list = []
@@ -66,6 +67,10 @@ class ReviewExportPage(QWidget):
     def set_project(self, project) -> None:
         self._project = project
 
+    def set_project_path(self, path) -> None:
+        """Bind the real ``*.paleo.json`` path for export/artifact routing."""
+        self._project_path = Path(path) if path else None
+
     def update_state(self, reports: list, map_documents: list, artifacts: list) -> None:
         self._reports = list(reports or [])
         self._map_documents = list(map_documents or [])
@@ -96,11 +101,7 @@ class ReviewExportPage(QWidget):
             QMessageBox.information(self, "导出", "暂无质检报告可导出，请先运行检查")
             return
         report = reports[0]
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_path)
         suggested = start_dir / f"qc_{report.linked_map_document_id or report.id}.json"
         path, _ = QFileDialog.getSaveFileName(
             self,

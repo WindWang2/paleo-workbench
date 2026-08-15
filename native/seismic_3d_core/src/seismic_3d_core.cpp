@@ -152,7 +152,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             if (ax == 0) {
                 const float* src = ptr + idx * (dim1 * dim2);
                 #if defined(_OPENMP)
-                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < total; ++i) {
                     float v = src[i];
@@ -162,7 +162,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 }
             } else if (ax == 1) {
                 #if defined(_OPENMP)
-                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < dim0; ++i) {
                     size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -180,7 +180,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 // stride-4 sample could skip both extrema on large slices.
                 const size_t block = 4;
                 #if defined(_OPENMP)
-                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t k = 0; k < total; k += block) {
     #if defined(__GNUC__) || defined(__clang__)
@@ -204,7 +204,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             if (ax == 0) {
                 const float* src = ptr + idx * (dim1 * dim2);
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < total; ++i) {
                     float v = src[i];
@@ -217,7 +217,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 }
             } else if (ax == 1) {
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < dim0; ++i) {
                     size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -234,7 +234,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                 }
             } else {
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t k = 0; k < total; ++k) {
     #if defined(__GNUC__) || defined(__clang__)

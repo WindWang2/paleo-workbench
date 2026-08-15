@@ -84,6 +84,75 @@ class _ImportWorker(QObject):
         self.finished.emit(report)
 
 
+class _RegisterWorker(QObject):
+    """Catalog registration for a finished import batch (hash+copy+save).
+
+    Runs off the GUI thread so a GB-scale batch (checksum + full copy into
+    ``<project>.artifacts/raw/`` + per-file catalog saves) never freezes the
+    window on the import-finished slot (#379).
+    """
+
+    finished = Signal(list)  # registration failure descriptions
+    failed = Signal(str)
+
+    def __init__(self, lifecycle, resources: list, parent=None):
+        super().__init__(parent)
+        self._lifecycle = lifecycle
+        self._resources = resources
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self._lifecycle.register_imported_resources(self._resources)
+            self.finished.emit(list(self._lifecycle.last_registration_failures))
+        except Exception as exc:  # pragma: no cover - defensive UI boundary
+            self.failed.emit(str(exc))
+
+
+class _RescanWorker(QObject):
+    """Tree rescan (rglob + per-file checksums) off the GUI thread (#379)."""
+
+    finished = Signal(object)  # list of scanned ResourceItems
+    failed = Signal(str)
+
+    def __init__(self, lifecycle, folder: Path, project_path=None, parent=None):
+        super().__init__(parent)
+        self._lifecycle = lifecycle
+        self._folder = folder
+        self._project_path = project_path
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            scanned = self._lifecycle.run_rescan(self._folder, self._project_path)
+        except Exception as exc:  # pragma: no cover - defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(scanned)
+
+
+class _DeliveryWorker(QObject):
+    """Delivery payload copy + checksum off the GUI thread (#379)."""
+
+    finished = Signal(str)  # destination checksum
+    failed = Signal(str)
+
+    def __init__(self, lifecycle, source: Path, destination: Path, parent=None):
+        super().__init__(parent)
+        self._lifecycle = lifecycle
+        self._source = source
+        self._destination = destination
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            checksum = self._lifecycle.run_delivery_copy(self._source, self._destination)
+        except Exception as exc:  # pragma: no cover - defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(checksum)
+
+
 class DataPage(QWidget):
     data_context_changed = Signal(dict)
     import_finished = Signal(object)
@@ -106,8 +175,15 @@ class DataPage(QWidget):
         self._selected_asset: object | None = None
         self._selected_assets: list[object] = []
         self._import_job = OwnedWorkerJob(self)
-        self._import_job.released.connect(self._finish_import_job)
+        self._import_job.released.connect(self._on_scan_job_released)
+        self._register_job = OwnedWorkerJob(self)
+        self._register_job.released.connect(self._finish_import_job)
+        self._rescan_job = OwnedWorkerJob(self)
+        self._deliver_job = OwnedWorkerJob(self)
         self._verify_job = OwnedWorkerJob(self)
+        self._last_import_report: ImportReport | None = None
+        self._rescan_context: tuple | None = None
+        self._delivery_context: tuple | None = None
         self._import_in_progress = False
         self._viz_adapter = VizAdapter()
         # Business orchestration (catalog-aware lifecycle actions) lives in the
@@ -253,10 +329,17 @@ class DataPage(QWidget):
         preview_joined = self._preview_controller.shutdown(wait_ms)
         visualization_joined = self._visualization_controller.shutdown(wait_ms)
         import_joined = self._shutdown_import_jobs(wait_ms)
+        deliver_joined = self._deliver_job.shutdown(wait_ms)
         verify_joined = self._verify_job.shutdown(wait_ms)
         joined = all(
             result is not False
-            for result in (preview_joined, visualization_joined, import_joined, verify_joined)
+            for result in (
+                preview_joined,
+                visualization_joined,
+                import_joined,
+                deliver_joined,
+                verify_joined,
+            )
         )
         # Do not tear down active-engine widgets if a project switch is about
         # to be rejected because a cooperative job did not stop.
@@ -266,8 +349,10 @@ class DataPage(QWidget):
 
     def _shutdown_import_jobs(self, wait_ms: int = 5_000) -> bool:
         joined = self._import_job.shutdown(wait_ms)
+        reg_joined = self._register_job.shutdown(wait_ms)
+        rescan_joined = self._rescan_job.shutdown(wait_ms)
         self._set_import_running(False)
-        return joined
+        return joined and reg_joined and rescan_joined
 
     def update_state(
         self,
@@ -475,15 +560,60 @@ class DataPage(QWidget):
         if report is None:
             self._set_action_status("导入未返回有效报告")
             return
-        self._apply_import_report(report)
-        self.import_finished.emit(report)
+        self.project.resources.extend(report.added)
+        self._last_import_report = report
+        # Catalog registration (checksum + full copy + per-file saves) is the
+        # heaviest import step; run it on a worker so a GB-scale batch never
+        # freezes the window on this finish slot (#379).
+        self._start_registration_worker(report.added)
 
     def _handle_import_failed(self, message: str) -> None:
         self._set_action_status(f"导入失败: {message}")
         self.import_failed.emit(message)
 
+    def _start_registration_worker(self, resources: list) -> None:
+        if not resources:
+            self._handle_registration_finished([])
+            return
+        worker = _RegisterWorker(self._lifecycle, resources)
+        self._register_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_registration_finished_signal),
+                (worker.failed, self._handle_registration_failed_signal),
+            ),
+            target=self.project,
+        )
+        self._set_action_status("正在登记目录元数据...")
+
+    @Slot(object)
+    def _handle_registration_finished_signal(self, failures: list) -> None:
+        if self._register_job.target is not self.project:
+            return
+        self._handle_registration_finished(failures)
+
+    @Slot(str)
+    def _handle_registration_failed_signal(self, message: str) -> None:
+        if self._register_job.target is not self.project:
+            return
+        self._handle_registration_finished([message])
+
+    def _handle_registration_finished(self, failures: list) -> None:
+        self._lifecycle.last_registration_failures = list(failures or [])
+        self._refresh()
+        report = self._last_import_report
+        if report is not None:
+            self._set_import_status(report)
+        self.import_finished.emit(report)
+
     def _finish_import_job(self) -> None:
         self._set_import_running(False)
+
+    def _on_scan_job_released(self) -> None:
+        """Scan worker done; the import stays 'running' until registration ends."""
+        if not self._register_job.is_running:
+            self._finish_import_job()
 
     def _set_import_running(self, running: bool) -> None:
         self._import_in_progress = running
@@ -511,7 +641,45 @@ class DataPage(QWidget):
         return self._lifecycle.restore_selected_asset()
 
     def rescan_selected_asset(self) -> bool:
-        return self._lifecycle.rescan_selected_asset()
+        """重新扫描: the tree scan (rglob + per-file hashes) runs on a worker
+        so a directory with GB-scale sibling files never freezes the window
+        (#379)."""
+        if self._rescan_job.is_running:
+            self._set_action_status("重新扫描正在进行中...")
+            return False
+        status, resource, path, project_path = self._lifecycle.prepare_rescan()
+        if status != "ok":
+            # "missing" was already applied + reported synchronously.
+            return status == "missing"
+        worker = _RescanWorker(self._lifecycle, path.parent, project_path=project_path)
+        self._rescan_context = (resource, path)
+        self._rescan_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_rescan_finished_signal),
+                (worker.failed, self._handle_rescan_failed_signal),
+            ),
+            target=self.project,
+        )
+        self._set_action_status("正在重新扫描...")
+        return True
+
+    @Slot(object)
+    def _handle_rescan_finished_signal(self, scanned: list) -> None:
+        if self._rescan_job.target is not self.project:
+            return
+        resource, path = self._rescan_context or (None, None)
+        self._rescan_context = None
+        if resource is None:
+            return
+        project_path = self._project_file_for_io()
+        updated = self._lifecycle.find_rescan_match(scanned, path.resolve(), project_path)
+        self._lifecycle.apply_rescan_result(resource, updated)
+
+    @Slot(str)
+    def _handle_rescan_failed_signal(self, message: str) -> None:
+        self._set_action_status(f"重新扫描失败: {message}")
 
     def open_selected_folder(self) -> Path | None:
         if self._selected_asset is None:
@@ -569,8 +737,45 @@ class DataPage(QWidget):
     # --- export / delivery ----------------------------------------------------
 
     def _deliver_asset(self, asset: object) -> None:
-        """导出 / 交付 (orchestration in DataLifecycleController)."""
-        self._lifecycle.deliver_asset(asset)
+        """导出 / 交付: the payload copy + checksum runs on a worker so a
+        multi-hundred-MB OUTPUT never freezes the window after the dialog
+        closes (#379)."""
+        if self._deliver_job.is_running:
+            self._set_action_status("交付正在进行中...")
+            return
+        prepared = self._lifecycle.prepare_delivery(asset)
+        if prepared is None:
+            return
+        source_path, destination, service, ref = prepared
+        self._delivery_context = (asset, service, ref, source_path, destination)
+        worker = _DeliveryWorker(self._lifecycle, source_path, destination)
+        self._deliver_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_delivery_finished_signal),
+                (worker.failed, self._handle_delivery_failed_signal),
+            ),
+            target=self.project,
+        )
+        self._set_action_status("正在导出 / 交付...")
+
+    @Slot(str)
+    def _handle_delivery_finished_signal(self, checksum: str) -> None:
+        if self._deliver_job.target is not self.project:
+            return
+        ctx = self._delivery_context
+        self._delivery_context = None
+        if ctx is None:
+            return
+        asset, service, ref, source_path, destination = ctx
+        self._lifecycle.finish_delivery(
+            asset, service, ref, source_path, destination, checksum
+        )
+
+    @Slot(str)
+    def _handle_delivery_failed_signal(self, message: str) -> None:
+        self._set_action_status(f"导出 / 交付失败: {message}")
 
     def _show_context_menu(self, global_pos, target) -> None:
         viz_supported = False

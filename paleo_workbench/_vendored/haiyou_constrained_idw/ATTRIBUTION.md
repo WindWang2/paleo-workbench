@@ -48,9 +48,22 @@ The copied modules are **byte-for-byte identical** to the upstream SHA above
   - `_save_to_qsettings` is a no-op (the host owns any GUI preference storage).
   - The helper docstrings/comments describe the PySide host boundary.
 
+- `drawing/single_factor/constrained_engine.py` has two host-driven behavior
+  fixes (see issues #370 / #382 in `paleo-workbench`):
+  - Barrier blanking band: the returned display grid keeps the corridor as
+    nodata (NaN) instead of filling it with `value_min` (upstream's "green
+    band = 0" convention for a normalized [0,1] surface). The host passes
+    real factor units, so the old fill fabricated an observed-minimum band
+    along every fault.
+  - Barrier line-of-sight: when active barriers exist the engine always uses
+    the per-cell LOS point path (upstream switched to a vectorized batch +
+    narrow near-barrier refine above 4096 domain cells, which leaked values
+    past dead-end barriers on larger grids; the host caps grid resolution at
+    200, so the point path stays responsive).
+
   To re-verify the parity of every other vendored file against the upstream
   SHA, diff this directory against the upstream checkout and expect
-  `performance.py` (and only it) to differ:
+  `performance.py` and the two `constrained_engine.py` hunks above to differ:
   `grep -rn "PALEO_\|PySide\|PyQt6" .` should hit only `performance.py`.
 
 ## What was NOT vendored

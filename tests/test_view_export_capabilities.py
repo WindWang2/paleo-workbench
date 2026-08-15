@@ -12,8 +12,45 @@ from paleo_workbench.resources.export_service import (
 
 
 class _WellLike:
+    def __init__(self, tracks=None):
+        self.tracks = tracks or ["track"]
+
     def paint_all(self, painter):  # pragma: no cover - duck type
         pass
+
+
+class _EmptyCanvas:
+    def __init__(self):
+        self.tracks = []
+
+    def paint_all(self, painter):  # pragma: no cover - duck type
+        pass
+
+
+class _EngineWellHost:
+    """Well-log host whose view_stack shows the engine surface (legacy empty)."""
+
+    def __init__(self):
+        self.widget = _EmptyCanvas()
+        self.canvas = self.widget
+        self.engine_host = object()
+        self.view_stack = _Stack(self.engine_host)
+        self.widget.export_capabilities = self.export_capabilities
+
+    def export_capabilities(self):
+        if self.view_stack.currentWidget() is self.engine_host:
+            return frozenset({"PNG"})
+        if self.canvas.tracks:
+            return frozenset({"PNG", "SVG", "PDF"})
+        return frozenset()
+
+
+class _Stack:
+    def __init__(self, current):
+        self._current = current
+
+    def currentWidget(self):
+        return self._current
 
 
 class _CrossInner:
@@ -51,6 +88,47 @@ def test_list_view_export_labels_catalog():
 
 def test_capabilities_well_log_full_vector():
     assert view_export_capabilities(_WellLike()) == frozenset({"PNG", "SVG", "PDF"})
+
+
+def test_capabilities_empty_well_log_canvas_claims_nothing():
+    """#381: an empty well-log canvas must not claim vector export."""
+    assert view_export_capabilities(_EmptyCanvas()) == frozenset()
+
+
+def test_capabilities_engine_well_log_surface_png_only():
+    """#381: engine surface owns the view -> PNG grab only, never blank vector."""
+    host = _EngineWellHost()
+    assert view_export_capabilities(host.widget) == frozenset({"PNG"})
+
+
+def test_export_snapshot_rejects_blank_well_log_svg(tmp_path):
+    """#381: exporting SVG from an empty well-log surface must fail, not succeed."""
+    host = _EngineWellHost()
+    out = tmp_path / "blank.svg"
+    result = export_widget_snapshot(host.widget, out, "SVG", register=False)
+    assert result.success is False
+    assert "不支持" in result.message or "无可导出" in result.message
+    assert not out.exists()
+
+    result_png = export_widget_snapshot(_EmptyCanvas(), tmp_path / "blank.png", "PNG", register=False)
+    assert result_png.success is False
+
+
+def test_real_well_log_host_capabilities_follow_backend(qtbot):
+    """#381: WellLogHost capabilities must follow the active backend."""
+    from paleo_workbench.viz.hosts.well_log_host import WellLogHost
+
+    host = WellLogHost()
+    qtbot.addWidget(host.widget)
+    # Nothing loaded, legacy surface active: nothing honest to export.
+    assert view_export_capabilities(host.widget) == frozenset()
+    # Engine surface owns the view (legacy canvas empty): PNG grab only.
+    host.view_stack.setCurrentWidget(host.engine_host)
+    assert view_export_capabilities(host.widget) == frozenset({"PNG"})
+    # Back to a loaded legacy canvas: full vector set restored.
+    host.view_stack.setCurrentWidget(host.scroll_area)
+    host.canvas.tracks.append(object())
+    assert view_export_capabilities(host.widget) == frozenset({"PNG", "SVG", "PDF"})
 
 
 def test_capabilities_cross_well_unwraps_shell():
@@ -109,6 +187,10 @@ def test_visualization_page_gates_buttons_by_tab(qtbot):
     )
 
     tabs.setCurrentIndex(well_idx)
+    # A freshly built well-log host has no tracks yet; #381 requires the
+    # empty surface to disable vector export. Simulate a loaded legacy
+    # canvas, then the full vector set must be offered again.
+    page.composite_panel.well_host.canvas.tracks.append(object())
     page._sync_export_capabilities()
     assert page.trace_panel.export_svg_btn.isEnabled() is True
     assert page.trace_panel.export_pdf_btn.isEnabled() is True

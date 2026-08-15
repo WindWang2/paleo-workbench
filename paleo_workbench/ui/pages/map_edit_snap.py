@@ -10,7 +10,9 @@ from paleo_workbench.ui.pages.map_edit_items import (
     WellPointItem,
 )
 
-_DEFAULT_SNAP_TOL = 0.5
+# Snap tolerance is defined in screen pixels; the scene converts it to scene
+# units via the current view scale before querying candidates.
+_DEFAULT_SNAP_TOL = 8.0
 
 
 class MapSnapManager:

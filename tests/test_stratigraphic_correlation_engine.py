@@ -62,3 +62,35 @@ def test_stratigraphic_correlation_engine_recommend_top():
 
     assert rec.suggested_depth >= 10.0
     assert rec.confidence > 0.0
+
+
+def test_recommend_top_without_bound_wells_returns_ui_detectable_sentinel():
+    """#405: unbound engine must return the empty-input sentinel so the UI can
+    show '不可用' instead of rendering a misleading 0.00 confidence."""
+    engine = StratigraphicCorrelationEngine()
+    rec = engine.recommend_top(ref_well="W1", target_well="W2", ref_top_depth=10.0)
+    assert rec.confidence == 0.0
+    assert rec.dtw_cost >= 999.0  # sentinel marker the page checks
+
+
+def test_recommend_top_confidence_normalized_over_decimated_cells():
+    """#405/C40: confidence must be normalized by the cells DTW actually
+    accumulated (decimated), not the full input length (which inflated it)."""
+    from paleo_workbench.viz.dtw_log_matcher import DTWLogMatcher
+
+    n = 5000  # 25e6 cells -> forced decimation (1e6 cap)
+    base = np.sin(np.linspace(0, 8 * np.pi, n))
+    ref = base.copy()
+    target = np.roll(base, 7)
+    wells = [
+        {"name": "W1", "curves": {"GR": ref}},
+        {"name": "W2", "curves": {"GR": target}},
+    ]
+    engine = StratigraphicCorrelationEngine().with_wells(wells)
+    rec = engine.recommend_top(ref_well="W1", target_well="W2", ref_top_depth=100.0)
+    assert 0.0 < rec.confidence <= 1.0
+
+    alignment = engine.align_curves("W1", "W2", curve_key="GR")
+    assert len(alignment.path_ref) < n, "long curves must be decimated"
+    expected = float(np.exp(-alignment.cost / (len(alignment.path_ref) * 2.0)))
+    assert rec.confidence == pytest.approx(expected)
