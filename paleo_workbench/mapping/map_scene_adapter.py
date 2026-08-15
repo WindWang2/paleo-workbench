@@ -36,6 +36,7 @@ class LegacyDocumentSceneAdapter:
         project_crs: str | None,
         visibility: Mapping[str, bool] | None = None,
         records: Iterable[Mapping[str, object]] | None = None,
+        layer_revisions: Mapping[str, int] | None = None,
         excluded_layer_ids: Iterable[str] = (),
     ):
         """Synchronize revisions into the scene and return its render snapshot."""
@@ -53,6 +54,7 @@ class LegacyDocumentSceneAdapter:
             project_crs=project_crs,
             visibility=visibility,
             records=records,
+            layer_revisions=layer_revisions,
         )
         excluded = {str(layer_id) for layer_id in excluded_layer_ids}
         source_layers = tuple(layer for layer in source.layers if layer.id not in excluded)
