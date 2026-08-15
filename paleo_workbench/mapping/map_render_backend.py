@@ -493,8 +493,15 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 self._maybe_submit_pending()
                 return None
             # Preparation finished off-thread; rasterise here on the GUI
-            # thread (fonts!) — cheap now that every layer is prepared.
-            frame, key = self._render_frame(generation)
+            # thread (fonts!) — cheap now that every layer is prepared. A
+            # painting failure must surface through render_errors exactly
+            # like a worker-side failure did, never raise into the poller.
+            try:
+                frame, key = self._render_frame(generation)
+            except Exception:  # noqa: BLE001
+                self._diagnostics["render_errors"] += 1
+                self._maybe_submit_pending()
+                return None
             self._frame_cache = (key, frame)
             return frame
         return None
@@ -1173,11 +1180,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             height - (y - ymin) * height / (ymax - ymin),
         )
 
-    def shutdown(self) -> None:
-        self._frame_cache = None
-        self._frame_cache_key = None
-        self._feature_bounds.clear()
-        super().shutdown()
+    # NOTE: the pre-v2 shutdown override was dropped in the merge — it
+    # cleared caches (_feature_bounds/_frame_cache_key) that only the old
+    # per-feature backend defined, so calling it on the v2 backend raised
+    # AttributeError during teardown and failed the threaded-render tests.
+    # The v2 shutdown above (executor + prepared layers + frame cache)
+    # already covers everything this class owns.
 
 
 class QgisMapRenderBackend(MapRenderBackend):
