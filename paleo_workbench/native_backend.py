@@ -7,7 +7,9 @@ geoviz visualization engine hook injections.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from decimal import Decimal
 import math
+import re
 from typing import Any, Callable, Generator
 import warnings
 
@@ -261,6 +263,10 @@ def _py_minmax_downsample(
         )
     if target_pixels <= 0:
         raise ValueError(f"target_pixels must be positive (got {target_pixels})")
+    if target_pixels > (2**31 - 1) // 2:
+        # Parity with well_log_core's C++ guard: a target_pixels this large
+        # would overflow the int arithmetic in the native implementation.
+        raise ValueError("target_pixels too large (would overflow)")
 
     n_pts = len(d)
     if n_pts <= target_pixels * 2:
@@ -301,45 +307,112 @@ def _py_minmax_downsample(
     return np.array(out_d, dtype=np.float32), np.array(out_v, dtype=np.float32)
 
 
+def _wl_token_value(tok: str, null_value: float) -> float:
+    """Parse one whitespace-delimited LAS token with C++ from_chars semantics.
+
+    ``float()`` handles the well-formed cases (including ``inf``/``nan``); when
+    it rejects the token, the numeric prefix is parsed instead — the C++ side's
+    std::from_chars stops at the first non-numeric character (``0x1p3`` -> 0.0,
+    ``1.0<NBSP>2.5`` -> 1.0, ``123abc`` -> 123.0). Tokens with no numeric
+    prefix are NaN. Inf is mapped to NaN like the C++ tokenizer.
+    """
+    if not tok:
+        return np.nan
+    if tok[0].isspace():
+        # float() would silently skip leading Unicode whitespace (e.g. NBSP)
+        # that the C++ from_chars treats as token content; parse the prefix.
+        val = None
+    else:
+        try:
+            val = float(tok)
+        except ValueError:
+            val = None
+    if val is None:
+        m = _NUM_PREFIX_RE.match(tok)
+        if m is None:
+            return np.nan
+        val = float(m.group(0))
+    if abs(val) < 1e-300:
+        # std::from_chars reports result_out_of_range for values that round to
+        # zero (|exact| < half of the smallest double subnormal, 2**-1075) and
+        # the C++ side maps that to NaN, while Python float() silently
+        # underflows to 0.0. Compare the exact decimal token so genuine
+        # subnormals survive (``5e-324`` -> 5e-324) but true underflow is NaN
+        # (``1e-324``, ``1e-999``).
+        try:
+            if Decimal(tok) and abs(Decimal(tok)) < _DOUBLE_MIN_SUBNORMAL:
+                return np.nan
+        except Exception:  # noqa: BLE001 — non-decimal token: nothing to do
+            pass
+    if math.isnan(val) or math.isinf(val) or val == null_value:
+        return np.nan
+    return val
+
+
+# std::from_chars (general format) numeric-prefix pattern: optional sign,
+# decimal mantissa with optional fraction, optional exponent. No hex floats.
+_NUM_PREFIX_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+
+# Half the smallest positive double subnormal (2**-1075): the exact
+# underflow boundary where std::from_chars switches from returning the rounded
+# subnormal to reporting result_out_of_range.
+_DOUBLE_MIN_SUBNORMAL = Decimal(2) ** -1075
+
+
 def _py_fast_las_parse_data(
     content: str, null_value: float = -999.0
 ) -> tuple[tuple[str, ...], np.ndarray]:
-    lines = content.splitlines()
+    """Pure-Python parity fallback for ``well_log_core.fast_las_parse_data``.
+
+    Must mirror the C++ tokenizer exactly (issue #421): lines split on ``\\n``
+    only (NOT on VT/FF like ``str.splitlines``), tokens split on the ASCII
+    whitespace set used by the C++ side (``\\x0b``/``\\x0c`` are separators,
+    U+00A0 NBSP is a regular token character), tokens parse with from_chars
+    numeric-prefix semantics (``0x1p3`` -> ``0.0``, ``1.0<NBSP>2.5`` -> ``1.0``),
+    no inline ``~A`` mnemonics yields an EMPTY header tuple (no fabricated
+    ``COL_n``), and the long-row truncation warning fires only when headers
+    were declared.
+    """
+    if isinstance(content, bytes):
+        # pybind11's std::string caster accepts bytes verbatim; mirror it.
+        content = content.decode("utf-8", errors="replace")
+    elif not isinstance(content, str):
+        raise TypeError("content must be a str or bytes LAS payload")
+
     in_data = False
     headers: list[str] = []
     rows: list[list[float]] = []
 
-    for line in lines:
-        stripped = line.strip()
+    for line in content.split("\n"):
+        # C++ skips leading wl_is_space chars only — ASCII whitespace, not the
+        # full Unicode set (an NBSP-leading line must stay a NaN token).
+        stripped = line.lstrip(" \t\r\v\f")
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith("~A") or stripped.startswith("~a"):
             in_data = True
             rest = stripped[2:]
             if rest and rest[0] in " \t":
-                headers = rest.split()
+                headers = [t for t in re.split(r"[ \t\r\n\v\f]+", rest) if t]
             else:
                 headers = []
             continue
         if in_data:
-            tokens = stripped.split()
             row = []
-            for tok in tokens:
-                try:
-                    val = float(tok)
-                    if math.isnan(val) or math.isinf(val) or val == null_value:
-                        row.append(np.nan)
-                    else:
-                        row.append(val)
-                except ValueError:
-                    row.append(np.nan)
+            for tok in re.split(r"[ \t\r\n\v\f]+", stripped):
+                if not tok:
+                    continue
+                row.append(_wl_token_value(tok, null_value))
             if row:
                 rows.append(row)
 
     if not headers and rows:
-        headers = [f"COL_{i}" for i in range(len(rows[0]))]
+        # Parity with C++: no inline mnemonics -> empty headers; the column
+        # count is taken from the first data row instead of fabricated names.
+        num_cols = len(rows[0])
+    else:
+        num_cols = len(headers)
 
-    num_cols = len(headers)
     truncated = 0
     if num_cols and rows:
         norm_rows = []
@@ -351,18 +424,20 @@ def _py_fast_las_parse_data(
                 r = r + [np.nan] * (num_cols - len(r))
             norm_rows.append(r)
         rows = norm_rows
-        if truncated:
+        # C++ emits the truncation warning only when headers were declared
+        # (with empty headers, extra columns are dropped silently).
+        if truncated and headers:
             warnings.warn(
                 f"LAS data has {truncated} row(s) with more columns than the "
                 f"{num_cols} declared header(s); extra columns were truncated",
                 UserWarning,
-                stacklevel=2,
+                stacklevel=1,
             )
 
     arr = (
         np.array(rows, dtype=np.float64)
         if rows
-        else np.zeros((0, len(headers)), dtype=np.float64)
+        else np.zeros((0, num_cols), dtype=np.float64)
     )
     return tuple(headers), arr
 
