@@ -725,6 +725,53 @@ def test_benchmark_10k_smoke():
     assert build_ms < 5000  # generous ceiling
 
 
+def test_for_project_caches_graph_per_catalog_revision(monkeypatch):
+    """Same catalog revision rebuilds the graph once; a save rebuilds it once (C15b)."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.freshness import (
+        clear_dependency_graph_cache,
+    )
+
+    clear_dependency_graph_cache()
+    try:
+        document = SimpleNamespace(catalog_revision=1)
+
+        class _FakeRevisionCatalog:
+            service = SimpleNamespace(document=document)
+
+            def list_versions(self):
+                return []
+
+            def list_runs(self):
+                return []
+
+        fake = _FakeRevisionCatalog()
+        builds: list = []
+        orig = DependencyGraph.from_catalog
+
+        @classmethod
+        def counting_from_catalog(cls, catalog):
+            builds.append(catalog)
+            return orig(catalog)
+
+        monkeypatch.setattr(DependencyGraph, "from_catalog", counting_from_catalog)
+
+        svc1 = FreshnessService.for_project(catalog=fake)
+        assert len(builds) == 1
+        svc2 = FreshnessService.for_project(catalog=fake)
+        assert len(builds) == 1  # cache hit: no rebuild
+        assert svc1.graph is svc2.graph
+
+        # A persisted save bumps the revision → exactly one rebuild.
+        document.catalog_revision = 2
+        svc3 = FreshnessService.for_project(catalog=fake)
+        assert len(builds) == 2
+        assert svc3.graph is not svc2.graph
+        FreshnessService.for_project(catalog=fake)
+        assert len(builds) == 2  # second revision reused
+    finally:
+        clear_dependency_graph_cache()
 # ------------------------------------------------------------------ C15 identity
 # Freshness/recompute identity must be stable across reruns: superseded
 # per-run asset tips must not stay "current", QC must collapse to the latest

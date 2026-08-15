@@ -203,5 +203,8 @@ def test_app_send_to_preparation_builds_factor_maps(qtbot):
     assert isinstance(page, WellLogPredictionPage)
 
     page.evidence_panel.send_btn.click()
-    assert len(window.project.factor_map_tasks) >= 1
+    # 发送制备 runs on a worker thread (C05); wait for the guarded commit.
+    qtbot.waitUntil(
+        lambda: len(window.project.factor_map_tasks) >= 1, timeout=60_000
+    )
     assert all(t.status == "complete" for t in window.project.factor_map_tasks)
