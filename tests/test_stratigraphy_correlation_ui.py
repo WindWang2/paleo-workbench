@@ -60,7 +60,7 @@ def _load_page(qtbot, tmp_path, monkeypatch) -> StratigraphyCorrelationPage:
         mod,
         "load_correlation_wells",
         lambda project, resource_ids=None, max_wells=8: (
-            [_log("A1"), _log("A2")], ["A1", "A2"], [],
+            [_log("A1"), _log("A2")], ["A1", "A2"], ["id-a1", "id-a2"], [],
         ),
     )
     page = StratigraphyCorrelationPage()
@@ -165,6 +165,37 @@ def test_clear_section_resets_models(qtbot, tmp_path, monkeypatch):
     assert page.cross_host.widget.picks_model.all_picks() == []
     assert page.track_list.count() == 0
     assert page.formation_combo.count() == 0
+
+
+def test_dtw_propagation_unbound_engine_shows_unavailable(qtbot, monkeypatch):
+    """#405: no curves bound -> status must say 不可用, never 置信度: 0.00."""
+    monkeypatch.setenv("PALEO_USE_WELLLOG_ENGINE", "0")
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+    canvas = page.cross_host.widget
+    canvas.picks_model.add_pick("TopA", "W1", 100.0)
+    canvas.propagate_pick_via_dtw = lambda *a, **k: []
+    page.dtw_btn.click()
+    text = page.status_label.text()
+    assert "置信度: 不可用" in text
+    assert "置信度: 0.00" not in text
+
+
+def test_dtw_propagation_after_load_shows_real_confidence(qtbot, tmp_path, monkeypatch):
+    """#405: with wells bound via load_section the confidence must be non-zero."""
+    page = _load_page(qtbot, tmp_path, monkeypatch)
+    canvas = page.cross_host.widget
+    # _load_page loads A1/A2 with GR curves under the same names.
+    canvas.picks_model.add_pick("TopA", "A1", 900.0)
+    canvas.propagate_pick_via_dtw = lambda *a, **k: []
+    page.dtw_btn.click()
+    text = page.status_label.text()
+    import re
+
+    match = re.search(r"置信度: (\d+\.\d+)", text)
+    assert match, f"expected a numeric confidence in: {text}"
+    assert float(match.group(1)) > 0.0
+    assert "不可用" not in text
 
 
 def test_browse_after_completed_link_does_not_reactivate(qtbot, tmp_path, monkeypatch):

@@ -207,6 +207,9 @@ def resolve_current_project_version_context(
                 ctx.mark_domain_product_current(
                     str(getattr(ref, "id", "") or ""), vid
                 )
+                _deselect_superseded_domain_tips(
+                    ctx, cat, str(getattr(ref, "id", "") or ""), vid
+                )
             else:
                 ctx.selected_version_ids.add(vid)
                 ctx.labels[vid] = getattr(ref, "name", "") or vid
@@ -231,6 +234,9 @@ def resolve_current_project_version_context(
                 ctx.select(ver.asset_id, vid, label=getattr(ref, "name", "") or "")
                 ctx.mark_domain_product_current(
                     str(getattr(ref, "id", "") or ""), vid
+                )
+                _deselect_superseded_domain_tips(
+                    ctx, cat, str(getattr(ref, "id", "") or ""), vid
                 )
             else:
                 ctx.selected_version_ids.add(vid)
@@ -259,6 +265,14 @@ def resolve_current_project_version_context(
                     label=getattr(task, "name", "") or "",
                 )
                 ctx.mark_domain_product_current(
+                    str(getattr(task, "id", "") or ""),
+                    grid_vid,
+                )
+                # Superseded per-run asset tips (legacy asset-per-run catalogs)
+                # must not stay selected and poison rule 3 (issue #373 / C15).
+                _deselect_superseded_domain_tips(
+                    ctx,
+                    cat,
                     str(getattr(task, "id", "") or ""),
                     grid_vid,
                 )
@@ -322,8 +336,45 @@ def resolve_current_project_version_context(
         )
 
     # 5. Explicit overrides
-    if extra_selected:
-        for asset_id, vid in extra_selected.items():
-            ctx.select(asset_id, vid)
+        if extra_selected:
+            for asset_id, vid in extra_selected.items():
+                ctx.select(asset_id, vid)
 
     return ctx
+
+
+def _deselect_superseded_domain_tips(
+    ctx: CurrentProjectVersionContext,
+    catalog: Any | None,
+    domain_task_id: str,
+    keep_version_id: str,
+) -> None:
+    """Keep only the project-selected tip of a domain task selected.
+
+    Legacy asset-per-run catalogs leave superseded per-run asset tips selected
+    through their catalog ``current_version_id``; those tips must not keep
+    poisoning freshness rule 3 with a competing "current" version (issue
+    #373 / C15). Explicit selections applied later (``extra_selected``)
+    still win. Best-effort: a catalog that cannot resolve versions simply
+    leaves the selection untouched.
+    """
+    if catalog is None or not domain_task_id or not keep_version_id:
+        return
+    try:
+        run_by_id = {r.run_id: r for r in catalog.list_runs()}
+    except Exception:
+        return
+    for vid in list(ctx.selected_version_ids):
+        if vid == keep_version_id:
+            continue
+        try:
+            ver = catalog.resolve_version(vid)
+        except Exception:
+            continue
+        if ver is None or not getattr(ver, "producing_run_id", None):
+            continue
+        producing = run_by_id.get(ver.producing_run_id)
+        if producing is None:
+            continue
+        if getattr(producing, "domain_task_id", None) == domain_task_id:
+            ctx.selected_version_ids.discard(vid)

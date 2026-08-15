@@ -67,6 +67,19 @@ class FactorPreviewGrid(QWidget):
             else:
                 self.rsquared_label.hide()
             layout.addWidget(self.rsquared_label)
+
+            dup_count = int(metrics.get("duplicate_wells_dropped") or 0)
+            self.dup_label = QLabel("")
+            self.dup_label.setStyleSheet(
+                f"color: {tokens.ERROR_RED}; font-size: 11px;"
+                " border: none; background: transparent;"
+            )
+            if dup_count > 0:
+                self.dup_label.setText(f"{dup_count} 口同坐标井已去重（保留先录入值）")
+                self.dup_label.show()
+            else:
+                self.dup_label.hide()
+            layout.addWidget(self.dup_label)
             layout.addStretch()
 
         def mouseReleaseEvent(self, event: QMouseEvent) -> None:

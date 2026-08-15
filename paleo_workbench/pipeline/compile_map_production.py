@@ -264,6 +264,15 @@ def compile_map_production(
         doc.view_state["production"] = False
         doc.view_state["lineage"] = "untracked"
     else:
+        # Freeze the FINAL document state FIRST so the registered lineage
+        # payload carries the same production flag as the document (the
+        # payload is serialized from view_state inside _register_lineage;
+        # flipping afterwards left the JSON stamped production:false while
+        # the document was production:true — issue #393 / C30). A failure
+        # below discards the doc entirely, so the flags are never persisted
+        # in a half-set state.
+        doc.view_state["production"] = True
+        doc.view_state["lineage"] = "registered"
         # Lineage FIRST: a production document is only committed to the
         # project once its DataRun + DERIVED version are durably registered.
         _register_lineage(
@@ -273,8 +282,6 @@ def compile_map_production(
             prediction_version_id=prediction_version_id,
             horizon=horizon,
         )
-        doc.view_state["production"] = True
-        doc.view_state["lineage"] = "registered"
 
     project.paleomap_documents.append(doc)
     if project.compilation_runs:

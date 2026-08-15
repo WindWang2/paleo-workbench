@@ -381,3 +381,48 @@ def test_purge_keeps_run_links_incremental_like_rebuild(tmp_path: Path):
     assert conn.execute(
         "SELECT COUNT(*) FROM run_outputs WHERE run_id = 'run_x'"
     ).fetchone()[0] == 1
+def test_alternating_thread_writes_keep_index_in_sync(tmp_path: Path):
+    """Cross-thread saves (InferenceWorker pattern) must neither silently
+    stale the index nor trigger rebuild churn: one connection per thread
+    (issue #394 / C31)."""
+    import threading
+
+    from paleo_workbench.catalog.service import DataCatalogService
+
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    index = svc._index
+    # Open rebuilt once; count ONLY post-open rebuilds.
+    rebuilds = {"count": 0}
+    original_rebuild = index.rebuild
+
+    def _counting(document):
+        rebuilds["count"] += 1
+        return original_rebuild(document)
+
+    index.rebuild = _counting  # type: ignore[method-assign]
+
+    def _saves(n: int) -> None:
+        for i in range(10):
+            src = tmp_path / f"w{n}-{i}.bin"
+            src.write_bytes(b"payload")
+            svc.import_raw(src)
+
+    # First write on the MAIN thread so the main thread owns its connection.
+    src = tmp_path / "m0.bin"
+    src.write_bytes(b"payload")
+    svc.import_raw(src)
+    try:
+        threads = [threading.Thread(target=_saves, args=(n,)) for n in (1, 2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert svc.index_revision() == svc.document.catalog_revision
+        assert len(svc.document.versions) == 21
+        # No delete-and-rebuild churn from cross-thread failures.
+        assert rebuilds["count"] == 0
+    finally:
+        svc.close()

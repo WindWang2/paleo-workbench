@@ -503,3 +503,84 @@ def test_load_falls_back_to_bak_when_canonical_corrupt(tmp_path):
         _json.loads(canonical.read_text(encoding="utf-8"))
     finally:
         svc2.close()
+
+
+# ------------------------------------------------ first-save backup + corrupt
+
+
+def test_first_save_seeds_backup(tmp_path):
+    """A once-saved catalog must already have a .bak (same revision), so a
+    corrupt canonical file never sits in a no-backup window (issue #372)."""
+    project = _make_project(tmp_path)
+    svc = DataCatalogService.open(project)
+    svc.import_raw(_source(tmp_path, "a.bin", b"v1"))
+    svc.close()
+
+    canonical = catalog_file_for(project)
+    bak = catalog_bak_file_for(project)
+    assert canonical.is_file()
+    assert bak.is_file()
+    assert json.loads(bak.read_text(encoding="utf-8")) == json.loads(
+        canonical.read_text(encoding="utf-8")
+    )
+
+
+def test_load_raises_when_canonical_corrupt_and_no_backup(tmp_path):
+    """Corrupt canonical without a .bak must fail loudly and isolate the
+    corrupt bytes, never silently return an empty catalog (issue #372)."""
+    project = _make_project(tmp_path)
+    canonical = catalog_file_for(project)
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    corrupt = b'{"truncated": '
+    canonical.write_bytes(corrupt)
+
+    with pytest.raises(CatalogError, match="corrupt and no backup"):
+        CatalogStore(project).load()
+
+    # The corrupt bytes are preserved in an isolated file, not overwritten.
+    assert not canonical.exists()
+    isolated = [p for p in canonical.parent.iterdir()
+                if p.name.startswith("catalog.json.corrupt-")]
+    assert len(isolated) == 1
+    assert isolated[0].read_bytes() == corrupt
+
+
+def test_load_raises_on_schema_invalid_without_backup(tmp_path):
+    """Valid JSON with an invalid shape (pydantic ValidationError) is treated
+    the same as torn JSON: raise + isolate, never an empty catalog."""
+    project = _make_project(tmp_path)
+    canonical = catalog_file_for(project)
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    canonical.write_text(
+        '{"catalog_revision": "x", "assets": [{"id": 12345}]}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CatalogError, match="corrupt and no backup"):
+        DataCatalogService.open(project)
+
+    assert not canonical.exists()
+    isolated = [p for p in canonical.parent.iterdir()
+                if p.name.startswith("catalog.json.corrupt-")]
+    assert len(isolated) == 1
+
+
+def test_open_never_saves_empty_catalog_over_corrupt(tmp_path):
+    """After a loud failure, a subsequent mutation save must not destroy the
+    corrupt bytes: no service is installed, so no save can run."""
+    project = _make_project(tmp_path)
+    canonical = catalog_file_for(project)
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    corrupt = b'{"truncated": '
+    canonical.write_bytes(corrupt)
+
+    with pytest.raises(CatalogError):
+        DataCatalogService.open(project)
+
+    isolated = [p for p in canonical.parent.iterdir()
+                if p.name.startswith("catalog.json.corrupt-")]
+    assert len(isolated) == 1
+    assert isolated[0].read_bytes() == corrupt
+    # Nothing was written to the canonical path or the .bak.
+    assert not canonical.exists()
+    assert not catalog_bak_file_for(project).exists()
