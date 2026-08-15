@@ -118,6 +118,32 @@ def test_preview_is_bounded_and_cached(tmp_path: Path):
     src.close()
 
 
+def test_read_preview_in_flight_dedup_concurrent(tmp_path: Path):
+    """Concurrent read_preview calls for the same key must issue ONE read (C43)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    segy = _write_mini_segy(tmp_path / "dedup.sgy", n_il=60, n_xl=60, n_s=60)
+    src = SeismicVolumeSource(segy)
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = [
+            pool.submit(
+                src.read_preview, max_dim=16, max_budget=16**3
+            )
+            for _ in range(10)
+        ]
+        results = [f.result() for f in futures]
+    volumes = [r[0] for r in results]
+    assert all(v is not None for v in volumes)
+    assert all(np.allclose(volumes[0], v) for v in volumes)
+    # Exactly one physical read for the shared preview key.
+    assert src.physical_reads == 1
+    # Warm cache hit afterwards stays at one read.
+    vol, _ = src.read_preview(max_dim=16, max_budget=16**3)
+    assert vol is not None
+    assert src.physical_reads == 1
+    src.close()
+
+
 def test_shared_source_registry(tmp_path: Path):
     segy = _write_mini_segy(tmp_path / "shared.sgy")
     a = get_shared_seismic_source(segy)

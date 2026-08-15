@@ -8,6 +8,7 @@ catalog lineage + :class:`CurrentProjectVersionContext`.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Sequence
@@ -17,6 +18,47 @@ from paleo_workbench.workflow.current_context import (
     resolve_current_project_version_context,
 )
 from paleo_workbench.workflow.dependency_graph import DependencyGraph, DependencyGraphError
+
+# Rebuilding DependencyGraph is O(V+E) Python object construction + cycle DFS
+# (~0.08 ms/version with adapter re-wrapping); every refresh signal paid it
+# from scratch even when the catalog had not changed (C15b). Cache the last
+# few graphs keyed by (document identity, catalog_revision): any persisted
+# catalog save bumps the revision and invalidates the entry; a new document
+# (project reopen) gets its own key. Backends without a document/revision
+# (test fakes) bypass the cache and keep today's always-rebuild behavior.
+_GRAPH_CACHE_MAX = 4
+_GRAPH_CACHE: "OrderedDict[tuple[int, int], tuple[Any, DependencyGraph]]" = (
+    OrderedDict()
+)
+
+
+def _cached_graph_for(catalog: Any) -> DependencyGraph:
+    """Return the dependency graph, reusing it while the catalog revision stands.
+
+    The cache entry keeps a strong reference to the document so an identity
+    key can never collide with a recycled object at the same address.
+    """
+    service = getattr(catalog, "service", None)
+    document = getattr(service, "document", None)
+    revision = getattr(document, "catalog_revision", None)
+    key: tuple[int, int] | None = None
+    if document is not None and revision is not None:
+        key = (id(document), int(revision))
+        entry = _GRAPH_CACHE.get(key)
+        if entry is not None and entry[0] is document:
+            return entry[1]
+    graph = DependencyGraph.from_catalog(catalog)
+    if key is not None:
+        _GRAPH_CACHE[key] = (document, graph)
+        _GRAPH_CACHE.move_to_end(key)
+        while len(_GRAPH_CACHE) > _GRAPH_CACHE_MAX:
+            _GRAPH_CACHE.popitem(last=False)
+    return graph
+
+
+def clear_dependency_graph_cache() -> None:
+    """Drop cached graphs (tests / project teardown)."""
+    _GRAPH_CACHE.clear()
 
 
 class FreshnessState(str, Enum):
@@ -201,7 +243,7 @@ class FreshnessService:
                 project, catalog=None, service=service, extra_selected=extra_selected
             )
             return cls(graph, ctx, catalog=None, check_integrity=check_integrity)
-        graph = DependencyGraph.from_catalog(cat)
+        graph = _cached_graph_for(cat)
         ctx = resolve_current_project_version_context(
             project, catalog=cat, service=service, extra_selected=extra_selected
         )

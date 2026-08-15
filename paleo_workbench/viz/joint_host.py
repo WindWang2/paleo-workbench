@@ -89,6 +89,69 @@ class PreviewVolumeWorker(QObject):
                 self.failed.emit(f"{fallback_warning} · {exc2}", self._generation)
 
 
+class SurveyMetaWorker(QObject):
+    """Background SEG-Y survey metadata pass (survey corners + volume meta).
+
+    For 2D lines / non-standard geometry both ``survey_corners_from_segy``
+    and ``SeismicVolumeSource.metadata`` perform full trace-header scans
+    (several passes over every header); running them on the GUI thread froze
+    the joint reload for seconds-to-minutes (C09). The worker runs the two
+    scans off-thread; the host caches the result per file identity so
+    reloads do not re-scan.
+    """
+
+    finished = Signal(object, int)  # payload dict, generation
+    failed = Signal(str, int)
+
+    def __init__(
+        self,
+        segy_path: str,
+        *,
+        generation: int = 0,
+        cancellation_token=None,
+    ) -> None:
+        super().__init__()
+        self._path = str(segy_path)
+        self._generation = int(generation)
+        self._cancellation_token = cancellation_token
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            if self._cancellation_token is not None:
+                self._cancellation_token.raise_if_cancelled()
+            from paleo_workbench.viz.joint_segy_survey import (
+                survey_corners_from_segy,
+            )
+            from paleo_workbench.viz.seismic_volume_source import (
+                get_shared_seismic_source,
+            )
+
+            source = get_shared_seismic_source(self._path)
+            volume_meta = source.metadata()
+            if self._cancellation_token is not None:
+                self._cancellation_token.raise_if_cancelled()
+            p1, p2, p3, meta = survey_corners_from_segy(self._path)
+            payload = {
+                "p1": p1,
+                "p2": p2,
+                "p3": p3,
+                "corners_meta": meta,
+                "volume_meta": volume_meta,
+                "source_id": source.source_id,
+            }
+            self.finished.emit(payload, self._generation)
+        except Exception as exc:
+            try:
+                from geoviz import JobCancelled
+            except Exception:  # pragma: no cover - geoviz always present
+                JobCancelled = None
+            if JobCancelled is not None and isinstance(exc, JobCancelled):
+                self.failed.emit(f"已取消: {exc}", self._generation)
+            else:
+                self.failed.emit(str(exc), self._generation)
+
+
 class WellSeismicJointHost(QObject):
     """Non-UI host for joint scene lifecycle.
 
@@ -120,6 +183,12 @@ class WellSeismicJointHost(QObject):
         # True while an L1 start waits for OwnedWorkerJob.released (see
         # _maybe_start_next_lod).
         self._lod_release_pending = False
+        # Survey corners + volume metadata per file identity (source_id), so
+        # a reload reuses the one background scan instead of re-scanning (C09).
+        self._survey_payload_cache: dict[str, dict] = {}
+        # SEG-Y path waiting for OwnedWorkerJob.released before the L0 volume
+        # worker starts (survey→volume chaining, see _on_volume_job_released).
+        self._pending_l0_start: str | None = None
 
         ensure_geoviz_on_path()
         try:
@@ -249,6 +318,15 @@ class WellSeismicJointHost(QObject):
             )
             self.scene_updated.emit()
             return
+        if paths.segy is not None:
+            # Both SEG-Y metadata scans (survey corners + volume metadata) run
+            # in a background worker so the GUI thread never performs full
+            # trace-header passes (C09); reloads reuse the cached payload.
+            self.status_changed.emit(
+                f"正在后台读取 SEG-Y 元数据… ({paths.segy.name})"
+            )
+            self._ensure_survey_meta(str(paths.segy))
+            return
         try:
             self._apply_wells_and_survey(paths)
             self._apply_tops_and_curves(paths)
@@ -273,12 +351,8 @@ class WellSeismicJointHost(QObject):
             self.scene_updated.emit()
             return
 
-        if paths.segy is not None:
-            self.status_changed.emit(f"正在后台加载预览体… ({paths.segy.name})")
-            self._start_volume_worker(str(paths.segy))
-        else:
-            self.status_changed.emit(f"已加载井/测网（无 SEGY）· 来源={paths.source}")
-            self.scene_updated.emit()
+        self.status_changed.emit(f"已加载井/测网（无 SEGY）· 来源={paths.source}")
+        self.scene_updated.emit()
 
     def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> bool:
         """Set the shared (2D + 3D) vertical domain: 'Time' or 'Depth'.
@@ -358,19 +432,120 @@ class WellSeismicJointHost(QObject):
     # Internals
     # ------------------------------------------------------------------
 
-    def _apply_wells_and_survey(self, paths: JointAssetPaths) -> None:
+    def _cached_survey_payload(self, segy_path: str) -> dict | None:
+        """Reuse the one background scan when the file identity is unchanged."""
+        try:
+            from paleo_workbench.viz.seismic_volume_source import (
+                get_shared_seismic_source,
+            )
+
+            source = get_shared_seismic_source(segy_path)
+            return self._survey_payload_cache.get(source.source_id)
+        except Exception:
+            return None
+
+    def _ensure_survey_meta(self, segy_path: str) -> None:
+        """Supersede in-flight loads, then scan/cache SEG-Y metadata off-thread."""
+        self._cancel_pending_lod()
+        if self._volume_job.is_running:
+            self._volume_job.shutdown()
+        self._volume_generation += 1
+        generation = self._volume_generation
+        cached = self._cached_survey_payload(segy_path)
+        if cached is not None:
+            self._on_survey_meta_ready(cached, generation)
+            return
+        self._volume_phase = "META_LOADING"
+        try:
+            from geoviz import CancellationToken
+        except Exception:  # pragma: no cover - geoviz always present
+            CancellationToken = None
+        token = CancellationToken() if CancellationToken is not None else None
+        worker = SurveyMetaWorker(
+            segy_path, generation=generation, cancellation_token=token
+        )
+        self._volume_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_survey_meta_ready),
+                (worker.failed, self._on_survey_meta_failed),
+            ),
+            cancel=token.cancel if token is not None else None,
+        )
+
+    @Slot(object, int)
+    def _on_survey_meta_ready(self, payload: dict, generation: int = 0) -> None:
+        if self._scene is None:
+            return
+        if int(generation) != int(self._volume_generation):
+            return
+        paths = self._paths
+        if paths is None or paths.segy is None:
+            return
+        # Cache per file identity so the next reload skips the header scans.
+        try:
+            self._survey_payload_cache[str(payload.get("source_id") or "")] = payload
+        except Exception:
+            pass
+        try:
+            self._apply_wells_and_survey(paths, payload)
+            self._apply_tops_and_curves(paths)
+            domain = self._pending_domain
+            if domain is None and self._project is not None:
+                state = getattr(self._project, "joint_analysis", None)
+                domain = getattr(state, "vertical_domain", None) if state else None
+            if domain:
+                self.set_vertical_domain(domain, emit_scene=False)
+        except Exception as exc:
+            self.status_changed.emit(f"加载失败: {exc}")
+            logger.exception("joint load failed")
+            return
+        self._chain_volume_start(str(paths.segy))
+
+    @Slot(str, int)
+    def _on_survey_meta_failed(self, err: str, generation: int = 0) -> None:
+        if int(generation) != int(self._volume_generation):
+            return
+        self._volume_phase = "META_FAILED"
+        self.status_changed.emit(f"SEG-Y 元数据读取失败: {err} · 回退预览体")
+        self.scene_updated.emit()
+        # Preserve the legacy dense-fallback behavior: still start the L0
+        # preview worker, which falls back to a full dense read if needed.
+        if self._paths is not None and self._paths.segy is not None:
+            self._chain_volume_start(str(self._paths.segy))
+
+    def _chain_volume_start(self, segy_path: str) -> None:
+        """Start the L0 volume worker now, or on the job's released signal.
+
+        Result slots (e.g. survey-meta finished/failed) are delivered before
+        OwnedWorkerJob.released, so starting the next worker directly would
+        collide with the still-live survey thread (C09 chaining race). Defer
+        through the released signal — same pattern as the L1 ladder.
+        """
+        if self._volume_job.is_running:
+            if not self._lod_release_pending:
+                self._lod_release_pending = True
+                self._volume_job.released.connect(self._on_volume_job_released)
+            self._pending_l0_start = str(segy_path)
+            return
+        self._start_volume_worker(str(segy_path))
+
+    def _apply_wells_and_survey(
+        self, paths: JointAssetPaths, survey_payload: dict | None = None
+    ) -> None:
         from geoviz import (
             align_horizon_corners_to_loader_axes,
             horizon_corners_from_dat,
-            survey_corners_from_segy,
         )
 
         assert self._scene is not None
         # Domain is applied by reload(preferred_domain=...) after this bind.
         self._survey_meta = {}
 
-        if paths.segy is not None:
-            p1, p2, p3, meta = survey_corners_from_segy(paths.segy)
+        if paths.segy is not None and survey_payload is not None:
+            p1, p2, p3 = survey_payload["p1"], survey_payload["p2"], survey_payload["p3"]
+            meta = survey_payload["corners_meta"]
             self._survey_meta = meta
             self._scene.set_survey_from_corners(
                 p1,
@@ -504,14 +679,16 @@ class WellSeismicJointHost(QObject):
             self._scene.set_well_curves(curves)
 
     def _start_volume_worker(self, segy_path: str) -> None:
-        """Bind source-backed access immediately, then progressive dense L0→L1."""
+        """Bind source-backed access (metadata cached from the survey pass), then L0."""
         self._cancel_pending_lod()
         if self._volume_job.is_running:
             self._volume_job.shutdown()
         self._volume_generation += 1
         generation = self._volume_generation
 
-        # Phase 1: metadata + source-backed access (no dense cube required).
+        # Phase 1: metadata + source-backed access. metadata() was already
+        # fetched by the survey worker and is cached on the shared source, so
+        # this never performs a trace-header scan on the GUI thread (C09).
         try:
             from paleo_workbench.viz.seismic_volume_source import (
                 get_shared_seismic_source,
@@ -538,10 +715,13 @@ class WellSeismicJointHost(QObject):
             self.status_changed.emit(f"源访问失败，回退预览体: {exc}")
 
         # Phase 2: background L0 dense brick for GL.
+        self._start_l0_worker(segy_path, generation)
+
+    def _start_l0_worker(self, segy_path: str, generation: int) -> None:
         self._volume_phase = "L0_LOADING"
         try:
             from geoviz import CancellationToken
-        except Exception:
+        except Exception:  # pragma: no cover - geoviz always present
             CancellationToken = None
         token = CancellationToken() if CancellationToken is not None else None
         worker = PreviewVolumeWorker(
@@ -582,6 +762,14 @@ class WellSeismicJointHost(QObject):
 
     def _on_volume_job_released(self) -> None:
         self._cancel_pending_lod()
+        if self._volume_job.is_running:
+            return
+        pending = self._pending_l0_start
+        if pending is not None:
+            # Survey metadata pass finished: now start the L0 volume worker.
+            self._pending_l0_start = None
+            self._start_volume_worker(pending)
+            return
         if self._volume_phase != "L0_READY" or self._volume_job.is_running:
             return
         if self._paths is None or self._paths.segy is None:

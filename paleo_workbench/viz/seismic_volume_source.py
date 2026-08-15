@@ -117,6 +117,24 @@ def preview_strides(
     return (fi, fx, ft)
 
 
+class _InFlightPreviewRead:
+    """Single-flight slot for one preview cache key.
+
+    The first caller performs the read and publishes ``result``/``warning``
+    (or ``error``) through a ``threading.Event``; concurrent callers for the
+    same key wait on the event and reuse the first read instead of issuing a
+    duplicate full strided/pseudo pass (C43 in-flight dedup).
+    """
+
+    __slots__ = ("event", "result", "warning", "error")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.result: Any = None
+        self.warning: str = ""
+        self.error: BaseException | None = None
+
+
 class SeismicVolumeSource:
     """Lazy SEGY accessor with shared cache and LOD/preview helpers."""
 
@@ -134,6 +152,7 @@ class SeismicVolumeSource:
         self._closed = False
         self._is_pseudo = False
         self.physical_reads = 0
+        self._in_flight: dict[SeismicCacheKey, _InFlightPreviewRead] = {}
 
     # ------------------------------------------------------------------ open
     @property
@@ -379,58 +398,119 @@ class SeismicVolumeSource:
         if hit is not None:
             return hit, ""
 
-        if (
+        pseudo = (
             meta.is_pseudo
             or self._loader is None
             or not self._loader_has_geometry()
-        ):
-            from paleo_workbench.viz.seismic_load import _load_pseudo_3d_ignore_geometry
+        )
 
-            vol, warning = _load_pseudo_3d_ignore_geometry(self._path)
-            if vol is None:
-                return None, warning or "SEGY preview failed"
-            cached = self._cache.put(key, vol)
-            return cached, warning or "SEGY 无完整三维几何，已按伪三维预览"
-
+        # Single-flight: claim the slot under lock, then perform the read
+        # WITHOUT holding the lock (long strided/pseudo reads must not block
+        # foreground slice reads, H10). Concurrent callers for the same key
+        # wait on the first read instead of duplicating it (C43).
         with self._lock:
             hit = self._cache.get(key)
             if hit is not None:
                 return hit, ""
-            if cancellation_token is not None:
+            slot = self._in_flight.get(key)
+            if slot is None:
+                slot = _InFlightPreviewRead()
+                self._in_flight[key] = slot
+                owner = True
+            else:
+                owner = False
+            if owner and cancellation_token is not None:
                 cancellation_token.raise_if_cancelled()
-            assert self._loader is not None
-        # Long volume reads must NOT hold the source lock: foreground slice
-        # reads on the GUI thread would freeze for the whole read (H10). Use
-        # a fresh per-call loader handle so concurrent slice reads proceed
-        # independently.
-        from geoviz import SeismicLoader
+            if not pseudo:
+                assert self._loader is not None
 
-        fresh_loader = SeismicLoader(self._path)
-        volume = fresh_loader.get_volume_downsampled(
-            factor=strides, cancellation_token=cancellation_token
-        )
-        self.physical_reads += 1
-        vol = np.ascontiguousarray(volume, dtype=np.float32)
-        # The strides fully determine the preview shape; a mismatch means a
-        # stride/budget bug. Re-resampling to hide it (the old _bound_volume
-        # path) would silently break the exact logical→native index mapping.
-        expected = tuple(
-            -(-d // s) for d, s in zip((meta.n_inlines, meta.n_crosslines, meta.n_samples), strides)
-        )
-        if tuple(int(x) for x in vol.shape) != expected:
-            raise RuntimeError(
-                f"preview shape {vol.shape} does not match strides {strides} "
-                f"(expected {expected})"
+        if not owner:
+            slot.event.wait()
+            with self._lock:
+                self._in_flight.pop(key, None)
+            if slot.error is not None:
+                raise slot.error
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached, slot.warning
+            return slot.result, slot.warning
+
+        try:
+            if pseudo:
+                from paleo_workbench.viz.seismic_load import (
+                    _load_pseudo_3d_ignore_geometry,
+                )
+
+                vol, warning = _load_pseudo_3d_ignore_geometry(self._path)
+                if vol is None:
+                    self._publish_in_flight(key, slot, None, warning or "SEGY preview failed")
+                    return None, warning or "SEGY preview failed"
+                cached = self._cache.put(key, vol)
+                self._publish_in_flight(
+                    key,
+                    slot,
+                    cached,
+                    warning or "SEGY 无完整三维几何，已按伪三维预览",
+                )
+                return cached, warning or "SEGY 无完整三维几何，已按伪三维预览"
+
+            strides = preview_strides(
+                meta.n_inlines,
+                meta.n_crosslines,
+                meta.n_samples,
+                max_dim=max_dim,
+                max_budget=max_budget,
             )
-        warning = ""
-        if strides != (1, 1, 1):
-            warning = (
-                f"SEGY 已按 LOD 预览加载 "
-                f"(shape={tuple(int(x) for x in vol.shape)}, strides={strides})"
+            # Extra LOD coarsens further.
+            if lod > 0:
+                scale = 2**lod
+                strides = tuple(max(1, s * scale) for s in strides)  # type: ignore[assignment]
+
+            # Long volume reads must NOT hold the source lock: foreground slice
+            # reads on the GUI thread would freeze for the whole read (H10). Use
+            # a fresh per-call loader handle so concurrent slice reads proceed
+            # independently.
+            from geoviz import SeismicLoader
+
+            fresh_loader = SeismicLoader(self._path)
+            volume = fresh_loader.get_volume_downsampled(
+                factor=strides, cancellation_token=cancellation_token
             )
-        with self._lock:
+            self.physical_reads += 1
+            vol = np.ascontiguousarray(volume, dtype=np.float32)
+            # Final bound if budget still exceeded (safety).
+            from paleo_workbench.viz.seismic_load import _bound_volume
+
+            vol, further = _bound_volume(vol)
+            warning = ""
+            if strides != (1, 1, 1) or further:
+                warning = (
+                    f"SEGY 已按 LOD 预览加载 "
+                    f"(shape={tuple(int(x) for x in vol.shape)}, strides={strides})"
+                )
             cached = self._cache.put(key, vol)
-        return cached, warning
+            self._publish_in_flight(key, slot, cached, warning)
+            return cached, warning
+        except BaseException as exc:
+            with self._lock:
+                self._in_flight.pop(key, None)
+                slot.error = exc
+                slot.event.set()
+            raise
+
+    def _publish_in_flight(
+        self,
+        key: SeismicCacheKey,
+        slot: _InFlightPreviewRead,
+        result: Any,
+        warning: str,
+    ) -> None:
+        """Publish the owner's read result so joined callers can proceed."""
+        with self._lock:
+            self._in_flight.pop(key, None)
+            slot.result = result
+            slot.warning = warning
+            slot.event.set()
 
     def read_lod_volume(
         self,
