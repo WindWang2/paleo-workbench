@@ -7,6 +7,17 @@
 
 namespace py = pybind11;
 
+// OpenMP parallel regions are only worthwhile above a work-size threshold:
+// team spawn/join barriers cost tens of microseconds per region regardless of
+// workload, so on many-core hosts a 16K-260K element slice (i.e. everything up
+// to a 512^3 slice) ran ~130x SLOWER with the default team size than serially
+// (issue #384). Regions at or below the threshold execute serially through the
+// `if` clause (no team is spawned), keeping the per-call overhead flat for all
+// interactive slice sizes; only very large slices (> 524,288 elements, i.e.
+// 1024^3+ volumes) parallelise, where a normal host's speedup outweighs the
+// region cost.
+static constexpr size_t kOmpMinParallelElems = 1u << 19;  // 524,288
+
 // Fast 2D Slice Extraction from 3D Volume
 py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py::array::forcecast> input, int axis, int index) {
     auto buf = input.request();
@@ -54,7 +65,7 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         {
             py::gil_scoped_release release;
             #if defined(_OPENMP)
-            #pragma omp parallel for schedule(static)
+            #pragma omp parallel for schedule(static) if(dim0 * dim2 > kOmpMinParallelElems)
             #endif
             for (size_t i = 0; i < dim0; ++i) {
                 size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -78,7 +89,7 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
             py::gil_scoped_release release;
             size_t total_elem = dim0 * dim1;
             #if defined(_OPENMP)
-            #pragma omp parallel for schedule(static)
+            #pragma omp parallel for schedule(static) if(total_elem > kOmpMinParallelElems)
             #endif
             for (size_t k = 0; k < total_elem; ++k) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -138,7 +149,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
         if (ax == 0) {
             const float* src = ptr + idx * (dim1 * dim2);
             #if defined(_OPENMP)
-            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
             #endif
             for (size_t i = 0; i < total; ++i) {
                 float v = src[i];
@@ -152,7 +163,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             } else {
                 float inv_range = 255.0f / (max_val - min_val);
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < total; ++i) {
                     float v = src[i];
@@ -166,7 +177,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             }
         } else if (ax == 1) {
             #if defined(_OPENMP)
-            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
             #endif
             for (size_t i = 0; i < dim0; ++i) {
                 size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -183,7 +194,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             } else {
                 float inv_range = 255.0f / (max_val - min_val);
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < dim0; ++i) {
                     size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -204,7 +215,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             // Strided min/max sample pass to avoid double full-volume cache miss
             size_t step = (total > 65536) ? 4 : 1;
             #if defined(_OPENMP)
-            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
+            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
             #endif
             for (size_t k = 0; k < total; k += step) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -221,7 +232,7 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
             } else {
                 float inv_range = 255.0f / (max_val - min_val);
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t k = 0; k < total; ++k) {
 #if defined(__GNUC__) || defined(__clang__)
