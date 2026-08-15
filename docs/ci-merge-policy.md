@@ -42,6 +42,19 @@ the workflow asserts ≥ 9 `qgis` tests are collected.
 
 ## Windows WellLogEngine
 
+**Windows source checkout of the monorepo is blocked by the geo-viz-engine
+submodule (packaging #441):** the pinned gitlink contains filenames Windows
+filesystems cannot materialize (`{"filename": "ui-ref-screenshot.png"}` /
+`{"filename": "ui-ref-scroll.png"}` at the submodule root), so `git submodule
+update --init --recursive` aborts on windows-latest. The root fix is in the
+geo-viz-engine repo (rename the files + new release) followed by a gitlink
+bump here; until then every workflow job inits only the `well-log-engine`
+submodule (workaround comments carry the tracking reference). The main CI
+`Tests` job runs a guard step that allowlists the two known offenders and
+fails on any *new* Windows-invalid submodule path, so a broken gitlink can
+never be re-pinned silently. The application CI (ci.yml) remains
+Ubuntu-only; a windows-latest leg is a follow-up of #441.
+
 **Status (as of #236):** matrix row **re-enabled** (`os: [ubuntu-latest, windows-latest]`) for `shared=OFF` and `shared=ON` in `.github/workflows/well-log-engine.yml`. Windows path runs with `WELLLOG_BUILD_TEXT=OFF` and `WELLLOG_BUILD_ARROW=OFF` (HarfBuzz/FreeType/ICU and Arrow not on stock Windows runners), `WELLLOG_WARNINGS_AS_ERRORS=OFF`, and a locally built zlib prefix.
 
 Code staged in #234 that makes the Windows build clean:
