@@ -47,6 +47,9 @@ def _view_format_rank(label: str) -> int:
 def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     """Formats the active visualization surface can honestly export.
 
+    - Hosts exposing their own ``export_capabilities()`` decide first (the
+      well-log host reports the active backend: engine surface → PNG only,
+      empty canvas → nothing, legacy tracks → full vector set).
     - Well-log canvas (``paint_all``): PNG/SVG/PDF via geoviz_well_log
     - Cross-well composite (``export_composite``): PNG/SVG/PDF
     - Paleo map canvas: PNG/SVG/PDF via professional figure export
@@ -56,15 +59,37 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     """
     if widget is None:
         return frozenset()
+    host_caps = _host_export_capabilities(widget)
+    if host_caps is not None:
+        return host_caps
     target = _resolve_export_target(widget)
     kind = _export_surface_kind(target)
     if kind in {"well_log", "cross_well", "paleo_map"}:
+        if kind == "well_log" and not getattr(target, "tracks", None):
+            # Empty legacy canvas (nothing loaded, or the engine surface owns
+            # the view): vector export would silently produce a blank file.
+            return frozenset()
         return frozenset({"PNG", "SVG", "PDF"})
     if kind in {"native_factor_map", "unified_map"}:
         return frozenset({"PNG"})
     if hasattr(target, "grab"):
         return frozenset({"PNG"})
     return frozenset()
+
+
+def _host_export_capabilities(widget: Any) -> frozenset[str] | None:
+    """Delegate to a host-owned capability declaration when present.
+
+    Returns None when the widget is not a capability-owning host, so the
+    duck-type fallback below still applies.
+    """
+    fn = getattr(widget, "export_capabilities", None)
+    if callable(fn):
+        try:
+            return frozenset(fn())
+        except Exception:
+            return None
+    return None
 
 
 def _resolve_export_target(widget: Any) -> Any:
@@ -359,6 +384,16 @@ def _export_widget_png(widget: Any, output_path: Path) -> None:
     target = _resolve_export_target(widget)
     kind = _export_surface_kind(target)
     if kind == "well_log":
+        if not getattr(target, "tracks", None):
+            # Engine surface owns the view (legacy canvas intentionally
+            # empty): grab the container so the rendered engine view lands
+            # in the PNG instead of exporting a blank file.
+            if _host_export_capabilities(widget) == frozenset({"PNG"}):
+                pixmap = widget.grab()
+                if not pixmap.save(str(output_path), "PNG"):
+                    raise ExportError("PNG 保存失败")
+                return
+            raise ExportError("无可导出的测井曲线（画布为空）")
         try:
             from geoviz import export_png as engine_png
 
@@ -388,9 +423,22 @@ def _export_widget_svg(widget: Any, output_path: Path) -> None:
     target = _resolve_export_target(widget)
     kind = _export_surface_kind(target)
     if kind == "well_log":
+        if not getattr(target, "tracks", None):
+            raise ExportError(
+                "无可导出的测井曲线（当前为 WellLogEngine 或空画布）；"
+                "请切换到 Legacy 后端后导出矢量图"
+            )
         from geoviz import export_svg as engine_svg
 
         engine_svg(target, str(output_path))
+        # Backstop: a blank canvas would otherwise be reported as a
+        # successful export (a 440-byte SVG with zero elements, #381).
+        try:
+            content = output_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            content = ""
+        if "<path" not in content and "<text" not in content:
+            raise ExportError("导出的 SVG 不包含任何曲线元素，已中止")
         return
     if kind == "cross_well":
         target.export_composite(str(output_path), fmt="svg")
@@ -405,6 +453,11 @@ def _export_widget_pdf(widget: Any, output_path: Path) -> None:
     target = _resolve_export_target(widget)
     kind = _export_surface_kind(target)
     if kind == "well_log":
+        if not getattr(target, "tracks", None):
+            raise ExportError(
+                "无可导出的测井曲线（当前为 WellLogEngine 或空画布）；"
+                "请切换到 Legacy 后端后导出矢量图"
+            )
         from geoviz import export_pdf as engine_pdf
 
         engine_pdf(target, str(output_path))

@@ -510,16 +510,23 @@ class StratigraphyCorrelationPage(QWidget):
         ref_well = wells[0]
         ref_depth = ref.depth_for_well(ref_well)
 
-        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence
+        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence.
+        # Curves are bound via with_wells on load; an unbound/empty engine
+        # returns the empty-input sentinel, which must NOT render as a real
+        # 0.00 confidence.
         rec = self.correlation_engine.recommend_top(
             ref_well=ref_well,
             target_well=wells[1] if len(wells) > 1 else ref_well,
             ref_top_depth=ref_depth,
         )
+        if rec.dtw_cost >= 999.0:
+            conf_text = "置信度: 不可用"
+        else:
+            conf_text = f"置信度: {rec.confidence:.2f}"
 
         created = canvas.propagate_pick_via_dtw(ref_well, ref_depth, ref.formation_name)
         self.status_label.setText(
-            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 (置信度: {rec.confidence:.2f})"
+            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 ({conf_text})"
             "（点击接受 / 右键拒绝）"
         )
 
@@ -563,11 +570,7 @@ class StratigraphyCorrelationPage(QWidget):
         if not model.all_tops():
             QMessageBox.warning(self, "导出", "没有分层顶数据")
             return
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_file_path())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出分层顶 CSV",
@@ -584,13 +587,17 @@ class StratigraphyCorrelationPage(QWidget):
         self._register_export(path, fmt="csv", label="分层顶 CSV")
         QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
 
-    def _project_file_path(self) -> Path:
+    def _project_file_path(self) -> Path | None:
+        """Real ``*.paleo.json`` path routed by AppShell, or None when unsaved.
+
+        Artifacts must derive from the real project file name (``<name>.
+        artifacts``); fabricating ``project.paleo.json`` here used to leak
+        correlation payloads into a phantom ``project.artifacts/`` tree that
+        Save As never migrates and restore could not find.
+        """
         if self._project_path is not None:
-            return self._project_path
-        root = "."
-        if self._project is not None:
-            root = getattr(self._project.meta, "project_root", ".") or "."
-        return Path(root) / "project.paleo.json"
+            return Path(self._project_path)
+        return None
 
     def _tops_from_canvas(self) -> list:
         """Collect FormationTop models with stable IDs (no-op save safe)."""
@@ -648,6 +655,23 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "保存解释", "未绑定工程")
             return
+        if len(self._loaded_names) != len(self._loaded_resource_ids):
+            # Never persist mispaired well identities: every top's well_id /
+            # lineage must resolve to the well that actually rendered it.
+            QMessageBox.warning(
+                self,
+                "保存解释",
+                "井名与资源 id 配对不一致，已取消保存。请重新加载连井剖面。",
+            )
+            return
+        project_file = self._project_file_path()
+        if project_file is None:
+            QMessageBox.warning(
+                self,
+                "保存解释",
+                "请先保存工程，再保存解释版本（工件随工程文件归档到 <工程名>.artifacts/）。",
+            )
+            return
         tops = self._tops_from_canvas()
         if not tops and not self._loaded_resource_ids:
             QMessageBox.warning(self, "保存解释", "请先加载连井剖面并确保有分层顶")
@@ -681,7 +705,7 @@ class StratigraphyCorrelationPage(QWidget):
             draft.dirty = True
         self._correlation_draft = draft
         ref, msg = save_correlation_draft(
-            draft, self._project, self._project_file_path()
+            draft, self._project, project_file
         )
         if msg == "noop_unchanged":
             self.interp_status.setText(
@@ -707,13 +731,26 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "打开解释", "未绑定工程")
             return
+        project_file = self._project_file_path()
+        if project_file is None:
+            QMessageBox.information(self, "打开解释", "工程中尚无已保存的连井对比解释")
+            return
         from paleo_workbench.workflow.correlation_lifecycle import (
             restore_draft_from_project_ref,
         )
 
-        draft = restore_draft_from_project_ref(
-            self._project, self._project_file_path()
-        )
+        try:
+            draft = restore_draft_from_project_ref(self._project, project_file)
+        except (OSError, ValueError) as exc:
+            # Missing/moved interpretation payloads (e.g. refs left behind by
+            # a legacy phantom ``project.artifacts/`` save) must surface as a
+            # dialog, never as an uncaught exception inside a Qt slot.
+            QMessageBox.warning(
+                self,
+                "打开解释",
+                f"解释工件缺失或不可读，请重新保存解释版本:\n{exc}",
+            )
+            return
         if draft is None:
             QMessageBox.information(self, "打开解释", "工程中尚无已保存的连井对比解释")
             return
@@ -794,7 +831,7 @@ class StratigraphyCorrelationPage(QWidget):
         if not ids:
             QMessageBox.information(self, "地层对比", "工程中没有测井 LAS 资源")
             return
-        logs, names, warnings = load_correlation_wells(
+        logs, names, loaded_ids, warnings = load_correlation_wells(
             self._project, resource_ids=ids, max_wells=8
         )
         if not logs:
@@ -806,7 +843,11 @@ class StratigraphyCorrelationPage(QWidget):
             return
         self._loaded_logs = list(logs)
         self._loaded_names = list(names)
-        self._loaded_resource_ids = list(ids)[: len(logs)]
+        # Per-well success list from the loader: a well that failed to load
+        # mid-list must NOT shift the remaining wells onto their predecessors'
+        # resource ids (positional truncation mispaired every subsequent top).
+        self._loaded_resource_ids = list(loaded_ids)
+        self._bind_correlation_engine_wells()
         ok, top_notices, path_msg = self._apply_loaded_section()
         self.loaded_value.setText(f"已加载: {len(names)} 口井")
         tops_bits = []
@@ -827,6 +868,21 @@ class StratigraphyCorrelationPage(QWidget):
             msg += f"；Engine: {self._engine_error}"
         self.status_label.setText(msg if ok else "加载失败")
         self.section_updated.emit()
+
+    def _bind_correlation_engine_wells(self) -> None:
+        """Feed the loaded section curves into the DTW recommendation engine.
+
+        Without this, ``recommend_top`` sees an empty well list and returns
+        the 0.00-confidence sentinel, so the status bar always showed
+        "置信度: 0.00" next to picks the canvas DTW actually created.
+        """
+        wells: list[dict[str, Any]] = []
+        for log, name in zip(self._loaded_logs, self._loaded_names):
+            curves: dict[str, Any] = {}
+            for curve in getattr(log, "curves", None) or []:
+                curves[curve.name] = list(curve.values)
+            wells.append({"name": name, "curves": curves})
+        self.correlation_engine.with_wells(wells)
 
     def _reload_current_section(self) -> None:
         if not self._loaded_logs:
@@ -930,6 +986,7 @@ class StratigraphyCorrelationPage(QWidget):
         self._loaded_names = []
         self._loaded_logs = []
         self._loaded_resource_ids = []
+        self.correlation_engine.with_wells([])
         self._engine_plan = None
         self._engine_report = None
         self._engine_error = None
@@ -976,11 +1033,7 @@ class StratigraphyCorrelationPage(QWidget):
             return
         opts = dialog.options()
         fmt = opts["fmt"]
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_file_path())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出连井剖面",

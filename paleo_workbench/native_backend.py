@@ -420,6 +420,8 @@ def _py_fast_las_parse_data(
         raise TypeError("content must be a str or bytes LAS payload")
 
     in_data = False
+    in_curve_info = False
+    curve_mnemonics: list[str] = []
     headers: list[str] = []
     rows: list[list[float]] = []
 
@@ -429,13 +431,44 @@ def _py_fast_las_parse_data(
         stripped = line.lstrip(" \t\r\v\f")
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped.startswith("~A") or stripped.startswith("~a"):
-            in_data = True
-            rest = stripped[2:]
-            if rest and rest[0] in " \t":
-                headers = [t for t in re.split(r"[ \t\r\n\v\f]+", rest) if t]
-            else:
-                headers = []
+        if stripped.startswith("~"):
+            section = stripped[1:2].lower()
+            if section == "c":
+                # ~CURVE block: the authoritative curve list (CWLS ~C section),
+                # mirroring the C++ parser (workbench #433).
+                in_curve_info = True
+                in_data = False
+                continue
+            if section == "a":
+                # Start of the data section. Inline tokens are only treated as
+                # column headers when separated from `~A` by whitespace
+                # (`~A DEPT GR DEN`); a directly-attached suffix is part of the
+                # section name (`~Ascii` must not yield "scii"). Per CWLS the
+                # trailing words of `~A` (e.g. "~A LOG DATA") are a title, not
+                # headers, so the ~CURVE mnemonics win whenever the file
+                # declares a ~CURVE block.
+                in_data = True
+                in_curve_info = False
+                rest = stripped[2:]
+                if rest and rest[0] in " \t":
+                    inline_headers = [
+                        t for t in re.split(r"[ \t\r\n\v\f]+", rest) if t
+                    ]
+                else:
+                    inline_headers = []
+                headers = list(curve_mnemonics) if curve_mnemonics else inline_headers
+                continue
+            in_curve_info = False
+            continue
+        if in_curve_info:
+            # "MNEM.UNIT : DESCRIPTION" -> mnemonic up to the first dot. Token
+            # splitting stays on the ASCII whitespace set the C++ istringstream
+            # uses; str.split() would additionally split on NBSP.
+            first = next(
+                (t for t in re.split(r"[ \t\r\n\v\f]+", stripped) if t), None
+            )
+            if first is not None:
+                curve_mnemonics.append(first.split(".", 1)[0])
             continue
         if in_data:
             row = []

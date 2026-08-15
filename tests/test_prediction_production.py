@@ -635,3 +635,38 @@ def test_schema_driven_inputs_exclude_unrelated_seismic(tmp_path, service):
                 asset_type = a.type
                 break
         assert asset_type != "seismic"
+
+
+def test_production_lineage_payload_matches_document_flags(tmp_path, service):
+    """The registered lineage payload must carry the SAME production flag as
+    the final document — the registration order previously stamped the JSON
+    with production:false while the document ended up production:true
+    (issue #393 / C30)."""
+    _well_vid, project = _register_well(service, tmp_path)
+    project.stratigraphy.target_horizon = "H1"
+    _model, mver = _install_test_provider(service, tmp_path)
+    input_ids = resolve_inputs_for_model(project, service, mver.id, strict=True)
+    run = start_inference(service, model_version_id=mver.id, input_version_ids=input_ids)
+    out = execute_run(service, run.id)
+    task = materialize_prediction_task(
+        project, out["result"], name_prefix="p", workflow="f", target_horizon="H1"
+    )
+    project.prediction_tasks.append(task)
+    doc = compile_map_production(
+        project,
+        target_horizon="H1",
+        prediction_payload=out["result"],
+        prediction_version_id=out["run"].output_version_ids[0],
+        catalog_service=service,
+    )
+    assert doc.view_state.get("production") is True
+    map_run = [r for r in service.document.runs if r.operation == "map_compile"][-1]
+    assert map_run.output_version_ids
+    out_vid = map_run.output_version_ids[0]
+    version = service.get_version(out_vid)
+    payload = json.loads(
+        service.resolve_path(version).read_text(encoding="utf-8")
+    )
+    # The lineage JSON and the document agree on the production flag.
+    assert payload["view_state"]["production"] is True
+    assert payload["view_state"]["production"] == doc.view_state["production"]

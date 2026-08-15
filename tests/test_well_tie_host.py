@@ -118,3 +118,36 @@ def test_composite_loads_well_tie_from_well_log_payload(qtbot):
     assert "井震标定" in panel.status_label.text()
     # Primary tab remains 测井 for well_log kind.
     assert panel.tabs.tabText(panel.tabs.currentIndex()) == "测井"
+
+
+# ---------------------------------------------------------------------------
+# #403 — a foot depth axis must not be integrated as meters in _twt_from_sonic
+# (TWT would otherwise come out 0.3048x too small).
+# ---------------------------------------------------------------------------
+
+def test_twt_from_sonic_feet_axis_matches_meter_integration():
+    from paleo_workbench.viz.hosts.well_tie_host import _twt_from_sonic
+
+    depths_ft = np.linspace(6000.0, 6400.0, 41)
+    sonic = np.linspace(250.0, 220.0, 41)  # µs/m (already normalized)
+    twt_ft = _twt_from_sonic(depths_ft, sonic, depth_unit="ft")
+    twt_m = _twt_from_sonic(depths_ft * 0.3048, sonic, depth_unit="m")
+    np.testing.assert_allclose(twt_ft, twt_m)
+    # Foot integration must be smaller than the old (wrong) meter assumption.
+    wrong = _twt_from_sonic(depths_ft, sonic, depth_unit="m")
+    assert abs(float(twt_ft[-1]) - float(wrong[-1]) * 0.3048) < 1e-9
+
+
+def test_build_tie_arrays_feet_well_uses_foot_depths():
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    data = _well_with_dt_rhob()
+    ft_data = WellLogDataWithDepthUnit(data, "ft")
+    arrays = build_tie_arrays(ft_data, None)
+    assert arrays is not None
+    _depths, twt, sonic, _density, _seismic = arrays
+    # The same (meter) depths labeled "ft" must integrate 0.3048x smaller:
+    # the old code treated them as meters and produced a 3.28x-too-large TWT.
+    expected = build_tie_arrays(WellLogDataWithDepthUnit(data, "m"), None)
+    np.testing.assert_allclose(twt, expected[1] * 0.3048)
+    assert float(twt[-1]) > 0.0

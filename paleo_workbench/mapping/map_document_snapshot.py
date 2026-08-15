@@ -98,12 +98,16 @@ def document_render_snapshot(
     project_crs: str | None,
     visibility: Mapping[str, bool] | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    layer_revisions: Mapping[str, int] | None = None,
 ) -> MapRenderSnapshot:
     """Create a revisioned render snapshot from a legacy document or live scene.
 
     ``records`` allows unsaved MapEditScene output to render without modifying the
-    document. The output has one vector layer per existing compatibility layer kind;
-    future LayerRegistry-backed vector layers replace this adapter transparently.
+    document. ``layer_revisions`` supplies authoritative per-layer data revision
+    counters (keyed by layer id) so data edits bump a counter instead of hashing
+    every feature; without it the full-content hash is used as a fallback. The
+    output has one vector layer per existing compatibility layer kind; future
+    LayerRegistry-backed vector layers replace this adapter transparently.
     """
     if document is None:
         return MapRenderSnapshot(project_crs=str(project_crs or ""))
@@ -115,16 +119,21 @@ def document_render_snapshot(
     layers: list[MapLayerSnapshot] = []
     for kind in ("facies", "well", "line", "label"):
         features = _features_for_kind(source_records, kind)
+        layer_id = f"{document_id}:{kind}"
+        if layer_revisions is not None:
+            data_revision = int(layer_revisions.get(layer_id) or 0)
+        else:
+            data_revision = _stable_revision(features)
         style = dict(facies_style if kind == "facies" else _DEFAULT_STYLES[kind])
         style.update(_authoring_style(document, kind))
         layers.append(
             MapLayerSnapshot(
-                id=f"{document_id}:{kind}",
+                id=layer_id,
                 name={"facies": "Facies", "well": "Wells", "line": "Lines", "label": "Labels"}[kind],
                 layer_type="vector",
                 extent=_extent_for_features(features),
                 crs=str(project_crs or ""),
-                data_revision=_stable_revision(features),
+                data_revision=data_revision,
                 style_revision=_stable_revision(style),
                 features=features,
                 style=style,

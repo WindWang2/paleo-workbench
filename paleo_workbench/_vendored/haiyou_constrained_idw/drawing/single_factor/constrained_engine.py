@@ -820,12 +820,15 @@ def generate_constrained_idw(
     diagnostics["vectorized_idw"] = 0
     # Performance-critical: NEVER run pure-Python per-cell IDW for direction-only
     # cases (600² domain freezes the UI). Use vectorized batch + direction_field.
-    # Barriers: vectorize first, then refine only a band near barriers (LOS).
+    # Barriers are a hard LOS constraint: only the per-cell point path honours
+    # it everywhere. Upstream switched to a vectorized batch + narrow
+    # near-barrier LOS refine above 4096 domain cells, which leaked values
+    # past dead-end barriers on larger grids. The host (the only caller of
+    # this vendored copy) caps grid_resolution at 200, so the point path
+    # stays responsive (~2 s worst case with barriers).
     domain_cell_count = int(np.count_nonzero(domain_mask))
-    # Small domains (unit tests / tiny grids): full point path for barrier LOS quality.
-    # Production maps use vectorized IDW plus a narrow near-barrier LOS refine.
-    use_full_point_path = bool(active_barriers) and (
-        domain_cell_count < 4096 or bool(getattr(config, "force_point_path", False))
+    use_full_point_path = bool(active_barriers) or bool(
+        getattr(config, "force_point_path", False)
     )
 
     if use_full_point_path:
@@ -1161,22 +1164,17 @@ def generate_constrained_idw(
     contour_grid = np.array(working_surface, dtype=float, copy=True)
     contour_grid[~contour_support_mask] = np.nan
 
-    # 提取用归 0 前连续面；显示再写绿带 0
+    # 提取用归 0 前连续面；显示：屏障走廊保持 nodata（本 vendored 副本的唯一
+    # 使用方是 paleo-workbench，它以真实因子单位调用并基于本网格自行重导等值线；
+    # 上游"绿带 = 0"的归一化显示约定会沿每条断层伪造观测最小值带）。
     extract_base_surface = np.array(contour_grid, dtype=float, copy=True)
     if blank_mask is not None and bool(np.any(blank_mask)) and active_barriers:
         bm = np.asarray(blank_mask, dtype=bool)
         in_boundary = bm & np.asarray(boundary_mask, dtype=bool)
-        if config.value_min is not None and math.isfinite(float(config.value_min)):
-            barrier_fill_value = float(config.value_min)
-        else:
-            finite_surface = contour_grid[np.isfinite(contour_grid)]
-            barrier_fill_value = (
-                float(np.nanmin(finite_surface)) if finite_surface.size else 0.0
-            )
-        contour_grid[in_boundary] = barrier_fill_value
+        contour_grid[in_boundary] = np.nan
         diagnostics["barrier_buffer_forced_zero_cells"] = int(np.count_nonzero(in_boundary))
         diagnostics["barrier_buffer_filled_cells"] = int(np.count_nonzero(in_boundary))
-        diagnostics["barrier_buffer_fill_value"] = float(barrier_fill_value)
+        diagnostics["barrier_buffer_fill_value"] = float("nan")
     else:
         diagnostics["barrier_buffer_forced_zero_cells"] = 0
         diagnostics["barrier_buffer_filled_cells"] = 0

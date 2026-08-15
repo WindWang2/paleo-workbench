@@ -41,9 +41,21 @@ from paleo_workbench.ui.pages.map_edit_topology import (
 
 _DEFAULT_SCENE_RECT = QRectF(-5000, -5000, 10000, 10000)
 _SCENE_PAD = 50.0
-# Edge hit tolerance for double-click insert (scene units, squared compared via dist2).
-_EDGE_HIT_TOL2 = 0.75 * 0.75
-_DEFAULT_SNAP_TOL = 0.5
+# Pick, snap and handle tolerances are screen pixels converted to scene units
+# via the current view scale. World-unit constants made degree-CRS documents
+# pick/snap within tens of kilometers (0.5 units = 0.5 deg) and made handles
+# sub-pixel at fit view.
+_DEFAULT_SNAP_TOL = 8.0
+# Edge hit tolerance for double-click insert (screen pixels, squared compare).
+_EDGE_HIT_TOL = 8.0
+# Vertex-handle and feature pick radii in screen pixels. The handle radius is
+# kept below the edge tolerance so double-click edge inserts are not shadowed
+# by nearby vertices on short edges.
+_HANDLE_PICK_TOL = 4.0
+_FEATURE_PICK_TOL = 8.0
+# Adjacency-warning gap tolerance stays a world-unit geometry gate; it must
+# not inherit the screen-pixel snap tolerance.
+_ADJACENCY_GAP_TOL = 0.5
 
 
 class MapEditScene(QGraphicsScene):
@@ -215,14 +227,18 @@ class MapEditScene(QGraphicsScene):
     def hit_test_at(self, x: float, y: float, tolerance: float = 0.0) -> str | None:
         """Return feature id under map point via map_edit_api (Python or C++).
 
-        Only considers features on visible layers so hidden geometry cannot be
-        selected or moved via the geometry hit path (Qt item stack already
-        skips invisible items; this keeps the C++/Python geometry path aligned).
+        ``tolerance`` is in screen pixels and is converted to scene units at the
+        current view scale, so degree-CRS documents do not pick within tens of
+        kilometers. Only features on visible layers are considered so hidden
+        geometry cannot be selected or moved via the geometry hit path (Qt item
+        stack already skips invisible items; this keeps the C++/Python geometry
+        path aligned).
         """
+        tolerance_units = float(tolerance) * self._units_per_pixel()
         records = self._hit_query_index.query(
-            float(x), float(y), float(tolerance), visible=self.layer_is_visible
+            float(x), float(y), tolerance_units, visible=self.layer_is_visible
         )
-        return api.hit_test(records, float(x), float(y), tolerance=float(tolerance))
+        return api.hit_test(records, float(x), float(y), tolerance=tolerance_units)
 
     def hit_query_diagnostics(self) -> dict[str, int]:
         """Expose bounded-query counters for profiling and regression tests."""
@@ -516,11 +532,17 @@ class MapEditScene(QGraphicsScene):
             for item in self._items_by_id.values()
             if isinstance(item, FaciesPolygonItem)
         ]
-        apply_adjacency_warnings(facies, gap_tol=self._snap_tolerance)
+        # Geometry gate in world units, independent of the pixel snap tolerance.
+        apply_adjacency_warnings(facies, gap_tol=_ADJACENCY_GAP_TOL)
 
     def rebuild_topology_forced(self, snap_tol: float | None = None) -> dict[str, Any]:
         """Snap shared nodes across facies, re-validate rings/adjacency, undoable."""
-        tol = float(self._snap_tolerance if snap_tol is None else snap_tol)
+        # The scene snap tolerance is screen pixels; convert it unless the
+        # caller passed an explicit world-unit tolerance.
+        if snap_tol is None:
+            tol = self._snap_tolerance * self._units_per_pixel()
+        else:
+            tol = float(snap_tol)
         facies = [
             item
             for item in self._items_by_id.values()
@@ -739,9 +761,11 @@ class MapEditScene(QGraphicsScene):
                         item.set_ring_coordinates(part_index, ring_index, coords)
                     else:
                         item.set_coordinates(coords)
-                    self._refresh_hit_entry(item)
-                    self._invalidate_snap_candidates()
                     self._sync_handle_positions(item)
+                    # The drag is a visual preview: the spatial index and the
+                    # snap-candidate cache are refreshed on commit (release) or
+                    # cancel only, so a 60 Hz drag never rebuilds scene-wide
+                    # snap candidates or re-serializes the dragged feature.
             event.accept()
             return
         if self._dragging and self._tool == "move":
@@ -839,7 +863,8 @@ class MapEditScene(QGraphicsScene):
                         edge = api.closest_edge(item.coordinates(), x, y)
                         if edge is not None:
                             i, qx, qy, dist2 = edge
-                            if dist2 <= _EDGE_HIT_TOL2:
+                            edge_tol2 = (_EDGE_HIT_TOL * self._units_per_pixel()) ** 2
+                            if dist2 <= edge_tol2:
                                 self.apply_insert_vertex(fid, i + 1, qx, qy)
                                 event.accept()
                                 return
@@ -988,6 +1013,18 @@ class MapEditScene(QGraphicsScene):
             return {}
         return item.to_record()
 
+    def _units_per_pixel(self) -> float:
+        """Scene units per screen pixel at the current view scale.
+
+        Returns 1.0 when the scene has no attached view (offscreen tests and
+        headless usage), which keeps pixel tolerances equal to scene units.
+        """
+        for view in self.views():
+            scale = view.transform().m11()
+            if scale > 0.0:
+                return 1.0 / scale
+        return 1.0
+
     def _refresh_hit_entry(self, item: FeatureItemMixin) -> None:
         self._hit_query_index.upsert(item, record_for_item=self._hit_record_for_item)
 
@@ -1051,15 +1088,24 @@ class MapEditScene(QGraphicsScene):
                 handle.setPos(coords[idx][0], coords[idx][1])
 
     def _handle_at(self, pos: QPointF) -> VertexHandleItem | None:
-        for item in self.items(pos):
-            if isinstance(item, VertexHandleItem):
-                return item
-        path = QPainterPath()
-        path.addEllipse(pos, 0.4, 0.4)
-        for item in self.items(path):
-            if isinstance(item, VertexHandleItem):
-                return item
-        return None
+        """Return the nearest vertex handle within a screen-pixel radius.
+
+        Handles ignore view transforms (constant screen size), and
+        QGraphicsScene.items() shape picking is unreliable for such items, so
+        the scene scans its own handle list with a pixel-converted radius.
+        """
+        radius = _HANDLE_PICK_TOL * self._units_per_pixel()
+        radius2 = radius * radius
+        best: VertexHandleItem | None = None
+        best_dist2 = radius2
+        for handle in self._vertex_handles:
+            dx = handle.pos().x() - pos.x()
+            dy = handle.pos().y() - pos.y()
+            dist2 = dx * dx + dy * dy
+            if dist2 <= best_dist2:
+                best = handle
+                best_dist2 = dist2
+        return best
 
     def _feature_item_at(self, pos: QPointF) -> FeatureItemMixin | None:
         """Return topmost feature item at *pos*, ignoring hidden layers."""
@@ -1068,9 +1114,10 @@ class MapEditScene(QGraphicsScene):
                 getattr(item, "kind", "")
             ):
                 return item
-        # Slight tolerance for thin edges / small wells.
+        # Slight tolerance for thin edges / small wells (screen pixels).
+        radius = _FEATURE_PICK_TOL * self._units_per_pixel()
         path = QPainterPath()
-        path.addEllipse(pos, 0.5, 0.5)
+        path.addEllipse(pos, radius, radius)
         for item in self.items(path):
             if isinstance(item, FeatureItemMixin) and self.layer_is_visible(
                 getattr(item, "kind", "")
@@ -1157,7 +1204,8 @@ class MapEditScene(QGraphicsScene):
             self._snap_index_build = build
         draft = self._draft_manager.points
         extras = [tuple(p) for p in draft] if draft else []
-        return self._snap_index.snap(float(x), float(y), manager.tolerance, extras)
+        tolerance_units = manager.tolerance * self._units_per_pixel()
+        return self._snap_index.snap(float(x), float(y), tolerance_units, extras)
 
     def _invalidate_snap_candidates(self) -> None:
         self._snap_manager.invalidate_candidates()
