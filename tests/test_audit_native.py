@@ -107,3 +107,49 @@ def test_slice_to_indexed8_constant_slice_reports_zero_range():
     assert (native_lo, native_hi) == (0.0, 0.0)
     assert (py_lo, py_hi) == (0.0, 0.0)
     np.testing.assert_array_equal(native_u8, py_u8)
+
+
+@pytest.mark.skipif(not HAS_CPP_SEISMIC, reason="seismic_3d_core not built")
+def test_slice_to_indexed8_large_time_slice_preserves_true_extrema():
+    """Audit C44: the axis-2 min/max pass must be min/max-preserving.
+
+    The old stride-4 sample (total > 65536 cells) skipped the true maximum at
+    flat index 1506 (≡ 2 mod 4) and reported (0, 0), black-screening the
+    slice. Every element must contribute to the extrema.
+    """
+    volume = np.zeros((300, 300, 3), dtype=np.float32)
+    volume[5, 6, 1] = 9.5  # flat index 1506 of the axis-2 slice, ≡ 2 (mod 4)
+
+    native_u8, native_lo, native_hi = fast_slice_to_indexed8(volume, 2, 1)
+    with disabled_acceleration():
+        py_u8, py_lo, py_hi = fast_slice_to_indexed8(volume, 2, 1)
+
+    assert (native_lo, native_hi) == (0.0, 9.5)
+    assert (py_lo, py_hi) == (0.0, 9.5)
+    assert native_u8[5, 6] == 255
+    assert py_u8[5, 6] == 255
+
+
+@pytest.mark.skipif(not HAS_CPP_SEISMIC, reason="seismic_3d_core not built")
+def test_slice_to_indexed8_value_range_parity():
+    """A caller-supplied (vmin, vmax) overrides the per-slice stretch in both
+    backends and keeps slice-to-slice color mapping stable (C44)."""
+    rng = np.random.default_rng(11)
+    volume = rng.uniform(-10.0, 10.0, size=(9, 12, 15)).astype(np.float32)
+    volume[3, 4, 5] = np.nan
+
+    native_u8, native_lo, native_hi = fast_slice_to_indexed8(
+        volume, 1, 4, value_range=(-2.0, 2.0)
+    )
+    with disabled_acceleration():
+        py_u8, py_lo, py_hi = fast_slice_to_indexed8(
+            volume, 1, 4, value_range=(-2.0, 2.0)
+        )
+
+    assert (native_lo, native_hi) == (-2.0, 2.0)
+    assert (py_lo, py_hi) == (-2.0, 2.0)
+    np.testing.assert_array_equal(native_u8, py_u8)
+    # Values beyond the range clamp instead of re-stretching.
+    assert native_u8.min() == 0
+    assert native_u8.max() == 255
+    assert native_u8[3, 5] == 0  # NaN pixel still renders as 0

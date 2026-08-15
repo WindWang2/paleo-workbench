@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
 from paleo_workbench.tokens import BG_SEARCH, BORDER, PRIMARY, PRIMARY_HOVER, RADIUS_BUTTON, SPACE_2, SPACE_3, TEXT_SECONDARY
-from paleo_workbench.viz.seismic_3d_api import fast_slice_to_indexed8
+from paleo_workbench.viz.seismic_3d_api import fast_slice_to_indexed8, global_stretch_range
 
 
 class SeismicSlicePreviewWidget(QWidget):
@@ -15,6 +15,11 @@ class SeismicSlicePreviewWidget(QWidget):
         self._volume: np.ndarray | None = None
         self._path = ""
         self._revision = None
+        # Volume-wide stretch range, computed once on the first rendered frame
+        # and reused for every slice so adjacent slices share one stable color
+        # mapping (per-slice min/max made contrast jump between slices and
+        # black-screened constant slices).
+        self._stretch_range: tuple[float, float] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -96,6 +101,7 @@ class SeismicSlicePreviewWidget(QWidget):
         self._path = path
         self._revision = revision
         self._volume = volume
+        self._stretch_range = None  # recomputed for the new volume on next render
 
         if volume is None:
             self.image_label.setText(message or "无地震数据或无法解析")
@@ -137,7 +143,11 @@ class SeismicSlicePreviewWidget(QWidget):
         idx = self.type_combo.currentIndex()
         val = self.slider.value()
 
-        norm, _, _ = fast_slice_to_indexed8(self._volume, axis=idx, index=val)
+        if self._stretch_range is None:
+            self._stretch_range = global_stretch_range(self._volume)
+        norm, _, _ = fast_slice_to_indexed8(
+            self._volume, axis=idx, index=val, value_range=self._stretch_range
+        )
         if idx in (0, 1):
             norm = norm.T
 
