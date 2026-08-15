@@ -219,10 +219,14 @@ class FallbackMapRenderBackend(MapRenderBackend):
         coordinates = geometry.get("coordinates")
         fill = self._color(style.get("fill"), "#6c8ebf")
         stroke = self._color(style.get("stroke"), "#26364d")
+        # Exports at elevated DPI keep the same physical stroke/marker size as
+        # the 96-dpi screen: cosmetic sizes scale by dpi/96 while geometry
+        # positions stay in output pixels (fallback export DPI fix).
+        dpi_scale = self._dpi / 96.0
         try:
-            width = max(0.0, float(style.get("stroke_width", 1.0)))
+            width = max(0.0, float(style.get("stroke_width", 1.0))) * dpi_scale
         except (TypeError, ValueError):
-            width = 1.0
+            width = 1.0 * dpi_scale
         painter.setPen(QPen(stroke, width))
         painter.setBrush(fill)
 
@@ -231,9 +235,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
             if center is None:
                 return
             try:
-                radius = max(1.0, float(style.get("marker_size", 6.0)) / 2.0)
+                radius = max(1.0, float(style.get("marker_size", 6.0)) / 2.0) * dpi_scale
             except (TypeError, ValueError):
-                radius = 3.0
+                radius = 3.0 * dpi_scale
             painter.drawEllipse(center, radius, radius)
             return
         if geometry_type == "MultiPoint" and isinstance(coordinates, (list, tuple)):

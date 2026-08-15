@@ -324,17 +324,21 @@ class UnifiedMapCanvas(QWidget):
 
     def _paint_decorations(
         self, painter: QPainter, decorations: Mapping[str, Any], *, width: int | None = None,
-        height: int | None = None,
+        height: int | None = None, dpi: float | None = None,
     ) -> None:
         canvas_width = self.width() if width is None else int(width)
         canvas_height = self.height() if height is None else int(height)
+        # Export overlays scale cosmetic sizes (fonts, pen widths, glyphs) with
+        # dpi/96 so a 300-dpi export matches the physical screen look; the
+        # screen path (dpi=None) stays unchanged.
+        dpi_scale = (float(dpi) / 96.0) if dpi else 1.0
         elements = {str(item) for item in decorations.get("elements") or ()}
         title = str(decorations.get("title") or "")
         if title and (not elements or "标题栏" in elements or "title" in elements):
             painter.save()
             painter.setPen(QColor("#f8f9fa"))
             font = painter.font()
-            font.setPointSize(max(10, font.pointSize() + 3))
+            font.setPointSizeF(max(10, font.pointSize() + 3) * dpi_scale)
             font.setBold(True)
             painter.setFont(font)
             painter.drawText(QRectF(14, 10, canvas_width - 28, canvas_height - 20), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title)
@@ -346,24 +350,24 @@ class UnifiedMapCanvas(QWidget):
                 pixels = max(35.0, canvas_width * 0.2)
                 y = canvas_height - 24.0
                 painter.save()
-                painter.setPen(QPen(QColor("#ffffff"), 2.0))
+                painter.setPen(QPen(QColor("#ffffff"), 2.0 * dpi_scale))
                 painter.drawLine(QPointF(16, y), QPointF(16 + pixels, y))
-                painter.drawLine(QPointF(16, y - 4), QPointF(16, y + 4))
-                painter.drawLine(QPointF(16 + pixels, y - 4), QPointF(16 + pixels, y + 4))
-                painter.drawText(QPointF(16, y - 7), f"{target_units:.3g} map units")
+                painter.drawLine(QPointF(16, y - 4 * dpi_scale), QPointF(16, y + 4 * dpi_scale))
+                painter.drawLine(QPointF(16 + pixels, y - 4 * dpi_scale), QPointF(16 + pixels, y + 4 * dpi_scale))
+                painter.drawText(QPointF(16, y - 7 * dpi_scale), f"{target_units:.3g} map units")
                 painter.restore()
         if not elements or "指北针" in elements or "north_arrow" in elements:
             painter.save()
             center = QPointF(canvas_width - 28, 37)
-            painter.setPen(QPen(QColor("#ffffff"), 1.5))
+            painter.setPen(QPen(QColor("#ffffff"), 1.5 * dpi_scale))
             painter.setBrush(QColor("#343a40"))
-            painter.drawPolygon(QPolygonF([center + QPointF(0, -18), center + QPointF(-6, 10), center + QPointF(0, 5), center + QPointF(6, 10)]))
-            painter.drawText(center + QPointF(-5, -22), "N")
+            painter.drawPolygon(QPolygonF([center + QPointF(0, -18 * dpi_scale), center + QPointF(-6 * dpi_scale, 10 * dpi_scale), center + QPointF(0, 5 * dpi_scale), center + QPointF(6 * dpi_scale, 10 * dpi_scale)]))
+            painter.drawText(center + QPointF(-5 * dpi_scale, -22 * dpi_scale), "N")
             painter.restore()
         if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
             items = [str(item) for item in decorations["legend_items"]][:8]
             painter.save()
-            painter.setPen(QPen(QColor("#dfe6ee"), 1.0))
+            painter.setPen(QPen(QColor("#dfe6ee"), 1.0 * dpi_scale))
             painter.setBrush(QColor(24, 28, 34, 210))
             height = 10 + 18 * len(items)
             rect = QRectF(canvas_width - 180, canvas_height - height - 16, 164, height)
@@ -396,7 +400,8 @@ class UnifiedMapCanvas(QWidget):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             state = self._overlay_provider() if self._overlay_provider is not None else {}
             self._paint_decorations(
-                painter, (state or {}).get("decorations") or {}, width=width, height=height
+                painter, (state or {}).get("decorations") or {},
+                width=width, height=height, dpi=dpi,
             )
             painter.end()
             return image
