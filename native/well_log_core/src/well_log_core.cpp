@@ -305,6 +305,8 @@ py::tuple fast_las_parse_data(const std::string& content, double null_value = -9
 
 PYBIND11_MODULE(well_log_core, m) {
     m.doc() = "Native well log curve processing, LOD downsampling and fast LAS parsing acceleration";
+    // Build metadata for source-freshness checks (packaging #435).
+    m.attr("__version__") = "0.2.17a0";
     m.def("minmax_downsample", &minmax_downsample, py::arg("depth"), py::arg("values"), py::arg("target_pixels") = 1000);
     m.def("fast_las_parse_data", &fast_las_parse_data, py::arg("content"), py::arg("null_value") = -999.0);
 }

@@ -1,15 +1,21 @@
 """Tests for NativeEngineBackend deep module interface and seam toggling."""
 from __future__ import annotations
 
+import types
+
 import numpy as np
 import pytest
 
 from paleo_workbench.native_backend import (
     NativeEngineBackend,
+    _module_origin,
+    _repo_root,
     disabled_acceleration,
     install_all_hooks,
     is_accelerated,
     native_backend,
+    native_status,
+    native_version,
 )
 
 
@@ -63,3 +69,39 @@ def test_install_all_hooks_idempotent():
     # Must run cleanly without error
     install_all_hooks()
     install_all_hooks()
+
+
+def _fake_module(origin_dir) -> types.ModuleType:
+    mod = types.ModuleType("fake_native_module")
+    mod.__file__ = str(origin_dir / "fake_native_module.cpython-313-x86_64-linux-gnu.so")
+    return mod
+
+
+def test_module_origin_classifies_repo_root_binary_as_stale(tmp_path):
+    """A module resolving from the repository root is a stale committed binary."""
+    repo_root = _repo_root()
+    root_binary = _fake_module(repo_root)
+    assert _module_origin(root_binary) == "repo_root"
+
+
+def test_module_origin_classifies_installed_and_missing(tmp_path):
+    installed = _fake_module(tmp_path / "site-packages" / "native_pkg")
+    assert _module_origin(installed) == "installed"
+    assert _module_origin(None) == "missing"
+
+
+def test_native_status_distinguishes_stale_missing_fresh():
+    """native_status must tell 'stale' (repo-root committed binary shadowing a
+    fresh build) apart from 'missing'; 'fresh' otherwise (packaging #435)."""
+    for feature in ("seismic_3d", "well_log", "map_edit", "grid_render"):
+        assert native_status(feature) in {"fresh", "stale", "missing"}
+    assert native_status("no_such_feature") == "missing"
+
+
+def test_native_version_is_string_or_none():
+    """Native modules must expose __version__ when freshly built; the API must
+    never raise for stale committed binaries or missing modules."""
+    for feature in ("seismic_3d", "well_log", "map_edit", "grid_render"):
+        version = native_version(feature)
+        assert version is None or isinstance(version, str)
+    assert native_version("no_such_feature") is None

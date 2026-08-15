@@ -111,6 +111,8 @@ py::array_t<std::uint8_t> render_grid_rgba_py(
 
 PYBIND11_MODULE(grid_render_core, m) {
     m.doc() = "Native scalar-grid rasterisation hot path for paleo-workbench factor maps.";
+    // Build metadata for source-freshness checks (packaging #435).
+    m.attr("__version__") = "0.2.17a0";
     m.def(
         "render_grid_rgba",
         &render_grid_rgba_py,
