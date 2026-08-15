@@ -106,6 +106,11 @@ class WellLogHost:
         self.widget.setAutoFillBackground(True)
         self.widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.widget.setMinimumSize(100, 100)
+        # Export capability resolution must come from the active backend, not
+        # from duck-typing the (possibly empty) legacy canvas: the engine
+        # surface clears the legacy tracks, and claiming vector export from
+        # that empty canvas produced blank "successful" SVG/PDF files (#381).
+        self.widget.export_capabilities = self.export_capabilities
 
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(
@@ -297,6 +302,21 @@ class WellLogHost:
         self.settings_btn.setEnabled(True)
         self._update_track_bar()
         return True
+
+    def export_capabilities(self) -> frozenset[str]:
+        """Formats this host can honestly export for the active backend.
+
+        The legacy QPainter canvas is the only vector-exportable surface.
+        When the WellLogEngine surface owns the view the legacy canvas is
+        intentionally empty (``set_tracks([])``), and duck-typing it would
+        yield a blank "successful" SVG/PDF/PNG.  The engine surface only
+        supports a widget grab (PNG, same limitation as #169).
+        """
+        if self.view_stack.currentWidget() is self.engine_host:
+            return frozenset({"PNG"})
+        if self.canvas.tracks:
+            return frozenset({"PNG", "SVG", "PDF"})
+        return frozenset()
 
     def set_project(self, project, project_path=None) -> None:
         """Optional project binding for Stage-12 correlation top overlays."""

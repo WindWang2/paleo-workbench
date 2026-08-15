@@ -58,3 +58,44 @@ def test_app_review_page_wired(qtbot):
     page = window.app_shell.review_export_page_widget()
     assert isinstance(page, ReviewExportPage)
     assert page._project is window.project
+
+
+def test_export_quality_report_json_is_atomic_and_nan_free(tmp_path, monkeypatch):
+    """ERR-5: failed export leaves the old file intact; NaN metrics serialize as null."""
+    import json
+
+    from paleo_workbench.project.models import QualityReport
+    from paleo_workbench.workflow import qc_report_export
+
+    out = tmp_path / "qc.json"
+    report = QualityReport(
+        linked_map_document_id="m1",
+        issues=[{"metric": float("nan"), "score": float("inf"), "ok": 1.5}],
+    )
+    export_quality_report_json(report, out)
+    parsed = json.loads(out.read_text(encoding="utf-8"), parse_constant=_reject_const)
+    assert parsed["issues"][0]["metric"] is None
+    assert parsed["issues"][0]["score"] is None
+
+    # A write failure must leave the previously exported content untouched.
+    before = out.read_text(encoding="utf-8")
+
+    real_replace = Path.replace
+
+    def failing_replace(self, target, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+    try:
+        export_quality_report_json(report, out)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("expected OSError to propagate")
+    monkeypatch.setattr(Path, "replace", real_replace)
+    assert out.read_text(encoding="utf-8") == before
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".qc.json")]
+
+
+def _reject_const(name):
+    raise ValueError(f"non-standard JSON constant: {name}")

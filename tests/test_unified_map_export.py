@@ -66,3 +66,35 @@ def test_qgis_unified_export_cancels_interactive_work_without_a_stale_frame(tmp_
 
     image = QImage(str(output))
     assert (image.width(), image.height()) == (360, 240)
+
+
+def test_fallback_export_scales_title_font_with_dpi(tmp_path, qtbot) -> None:
+    """Export decorations scale the title font by dpi/96 (same physical size
+    as the 96-dpi screen look); the screen path is unchanged."""
+    import numpy as np
+
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.set_layer_snapshot(_snapshot())
+    canvas.set_extent((0.0, 0.0, 10.0, 10.0))
+    canvas.set_overlay_provider(lambda: {
+        "decorations": {"title": "TITLE", "elements": ["标题栏"]}
+    })
+
+    def title_height(dpi: float) -> int:
+        image = canvas.render_export_image(800, 600, dpi=dpi)
+        pixels = np.frombuffer(image.constBits().tobytes(), dtype=np.uint8).reshape(600, 800, 4).astype(int)
+        background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+        diff = np.abs(pixels - background).sum(axis=2)
+        # The title is the top-most decoration; ignore map content below.
+        rows = np.where((diff > 24).any(axis=1))[0]
+        title_rows = rows[rows < 100]
+        assert title_rows.size > 0
+        return int(title_rows.max() - title_rows.min() + 1)
+
+    height_96 = title_height(96.0)
+    height_300 = title_height(300.0)
+    # Glyph rasterization quantizes to integer pixels; the ratio must track
+    # dpi/96 (old behavior: exactly 1.0 regardless of dpi).
+    assert height_96 > 0
+    assert height_300 / height_96 == pytest.approx(300.0 / 96.0, rel=0.1)

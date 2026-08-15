@@ -1128,6 +1128,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             height - (y - ymin) * height / (ymax - ymin),
         )
 
+    def shutdown(self) -> None:
+        self._frame_cache = None
+        self._frame_cache_key = None
+        self._feature_bounds.clear()
+        super().shutdown()
+
 
 class QgisMapRenderBackend(MapRenderBackend):
     """Optional native QGIS adapter with the same host-oriented frame contract."""

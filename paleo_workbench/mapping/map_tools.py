@@ -30,6 +30,10 @@ class MapTool:
     """One exclusive interactive operation; rendering overlays remain external."""
 
     tool_id = "tool"
+    # Whether a handled operation mutates document data.  Hosts use this to
+    # distinguish data edits (composition resync) from pure pointer/selection
+    # feedback (overlay repaint only), so 60 Hz pointer events never recompose.
+    edits_data = False
 
     def __init__(self) -> None:
         self.active = False
@@ -206,6 +210,7 @@ class RectangleSelectTool(MapTool):
 class _CaptureTool(MapTool):
     geometry_type = ""
     tool_id = "capture"
+    edits_data = True
 
     def __init__(
         self,
@@ -275,6 +280,7 @@ class AddPolygonTool(_CaptureTool):
 
 class MoveFeatureTool(MapTool):
     tool_id = "move_feature"
+    edits_data = True
 
     def __init__(self, session: VectorEditSession, *, identify: Callable[[Point], str | None]) -> None:
         super().__init__()
@@ -308,6 +314,7 @@ class MoveFeatureTool(MapTool):
 
 class VertexTool(MapTool):
     tool_id = "vertex"
+    edits_data = True
 
     def __init__(
         self,

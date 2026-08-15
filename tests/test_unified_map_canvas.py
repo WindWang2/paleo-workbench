@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+
 from paleo_workbench.mapping.map_render_backend import (
     FallbackMapRenderBackend,
     MapLayerSnapshot,
@@ -118,3 +122,58 @@ def test_unified_canvas_temporarily_transforms_the_previous_frame_for_navigation
     canvas.pan_by_pixels(12.0, 0.0)
     assert canvas.navigation_preview_active
     qtbot.waitUntil(lambda: not canvas.navigation_preview_active, timeout=2_000)
+
+
+def _wheel_event(pos: QPointF, delta: int) -> QWheelEvent:
+    return QWheelEvent(
+        pos,
+        pos,
+        QPoint(0, 0),
+        QPoint(0, delta),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+
+@pytest.mark.parametrize("delta", [120, -120])
+def test_unified_canvas_wheel_zoom_keeps_cursor_map_point_fixed(qtbot, delta) -> None:
+    """Wheel zoom must anchor at the cursor, not the extent center (MAP-3).
+
+    The point under the cursor must map to the same world coordinates before
+    and after every wheel notch, matching NativeMapCanvas / MapEditView.
+    """
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(300, 180)
+    canvas.set_layer_snapshot(_snapshot())
+    canvas.set_extent((0.0, 0.0, 10.0, 10.0))
+    canvas.show()
+
+    cursor = QPointF(240.0, 40.0)
+    before = canvas.screen_to_map(cursor)
+    canvas.wheelEvent(_wheel_event(cursor, delta))
+    after = canvas.screen_to_map(cursor)
+
+    assert canvas.view_extent != (0.0, 0.0, 10.0, 10.0)
+    assert after[0] == pytest.approx(before[0], abs=1e-9)
+    assert after[1] == pytest.approx(before[1], abs=1e-9)
+
+
+def test_unified_canvas_wheel_zoom_keeps_cursor_fixed_across_many_notches(qtbot) -> None:
+    """N notches at one cursor drift by 0; pan round-trips still return exactly."""
+    canvas = UnifiedMapCanvas(backend=FallbackMapRenderBackend())
+    qtbot.addWidget(canvas)
+    canvas.resize(300, 180)
+    canvas.set_layer_snapshot(_snapshot())
+    canvas.set_extent((0.0, 0.0, 10.0, 10.0))
+    canvas.show()
+
+    cursor = QPointF(60.0, 150.0)
+    before = canvas.screen_to_map(cursor)
+    for _ in range(6):
+        canvas.wheelEvent(_wheel_event(cursor, 120))
+    after = canvas.screen_to_map(cursor)
+    assert after[0] == pytest.approx(before[0], abs=1e-9)
+    assert after[1] == pytest.approx(before[1], abs=1e-9)

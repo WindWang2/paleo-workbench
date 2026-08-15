@@ -483,12 +483,16 @@ def test_package_importable_and_joint_widget_facades_renderer(qtbot):
 
 
 def test_joint_widget_exposes_gr_colored_3d_overlay_specs(qtbot):
+    from geoviz import select_depth_transform
     from geoviz_well_seismic_3d import (
         JointDisplaySettings,
         WellSeismicJointWidget,
     )
 
     scene = WellSeismicScene()
+    # Depth requires an explicit transform (fail-closed); the test opts into
+    # the constant-V0 approximation the way a synthetic demo would.
+    scene.set_depth_transform(select_depth_transform(constant_v0=True))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     scene.set_wells(
         [
@@ -501,7 +505,14 @@ def test_joint_widget_exposes_gr_colored_3d_overlay_specs(qtbot):
                 100,
                 id=JointWellId("source:a1"),
             )
-        ]
+        ],
+        td_tables={
+            "source:a1": TimeDepthTable(
+                well_name="A1",
+                time_ms=np.array([0.0, 50.0, 100.0]),
+                md_m=np.array([0.0, 50.0, 100.0]),
+            )
+        },
     )
     scene.set_well_curves(
         {

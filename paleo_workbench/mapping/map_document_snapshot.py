@@ -179,6 +179,7 @@ def document_render_snapshot(
     records: Iterable[Mapping[str, Any]] | None = None,
     data_revisions: Mapping[str, int] | None = None,
     cache_owner: object | None = None,
+    layer_revisions: Mapping[str, int] | None = None,
 ) -> MapRenderSnapshot:
     """Create a revisioned render snapshot from a legacy document or live scene.
 
@@ -195,6 +196,15 @@ def document_render_snapshot(
     if document is None:
         return MapRenderSnapshot(project_crs=str(project_crs or ""))
     revisions = dict(data_revisions or {})
+    if not revisions and layer_revisions is not None:
+        # Bridge the layer-id-keyed counters (map-perf #461 API): strip the
+        # "{document_id}:" prefix back down to the compatibility kind.
+        prefix = f"{str(getattr(document, 'id', 'map') or 'map')}:"
+        revisions = {
+            str(key)[len(prefix):]: int(value)
+            for key, value in layer_revisions.items()
+            if str(key).startswith(prefix)
+        }
     owner_token = id(cache_owner) if cache_owner is not None and revisions else None
     document_id = str(getattr(document, "id", "map") or "map")
     grouped: dict[str, tuple[dict[str, Any], ...]] = {}

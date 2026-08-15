@@ -557,6 +557,144 @@ def test_failed_commit_restores_working_copy(service, tmp_path, monkeypatch):
     assert len(service.document.versions) == 1
 
 
+def test_commit_working_copy_stores_version_name_in_metadata(service, tmp_path):
+    """The New Version dialog's optional name must reach the committed
+    version's metadata when committing onto an EXISTING asset (DATA-9)."""
+    src = _make_source(tmp_path, payload=b"base")
+    parent = service.import_raw(src)
+    working = service.create_working_copy(parent.id)
+    working.write_bytes(b"edited")
+
+    new_version = service.commit_working_copy(
+        working, asset_id=parent.asset_id, name="去毛刺滤波版"
+    )
+
+    assert service.get_version(new_version.id).metadata["name"] == "去毛刺滤波版"
+    # Stable, queryable through the public listing.
+    latest = service.list_versions(parent.asset_id)[-1]
+    assert latest.metadata.get("name") == "去毛刺滤波版"
+
+
+def test_commit_working_copy_empty_name_writes_no_metadata_key(service, tmp_path):
+    src = _make_source(tmp_path, payload=b"base")
+    parent = service.import_raw(src)
+    working = service.create_working_copy(parent.id)
+    working.write_bytes(b"edited")
+
+    new_version = service.commit_working_copy(working, asset_id=parent.asset_id, name="")
+
+    assert "name" not in service.get_version(new_version.id).metadata
+    # The parent's own name is untouched (no asset rename).
+    assert service.get_asset(parent.asset_id).name != ""
+
+
+def test_commit_working_copy_new_asset_branch_keeps_name_semantics(service, tmp_path):
+    """asset_id=None: the name still names the NEW ASSET (existing behavior)."""
+    src = _make_source(tmp_path, payload=b"base")
+    parent = service.import_raw(src)
+    working = service.create_working_copy(parent.id)
+    working.write_bytes(b"edited")
+
+    version = service.commit_working_copy(working, asset_id=None, name="my-derived")
+
+    assert service.get_asset(version.asset_id).name == "my-derived"
+
+
+# --- batch save (bulk registration write amplification, C38) ------------------
+
+
+def test_batch_save_merges_many_imports_into_one_canonical_write(service, tmp_path, monkeypatch):
+    """200 imports inside one batch must persist with a SINGLE canonical
+    store write (O(N²) full-document rewrite + fsync per version otherwise)."""
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+
+    with service.batch_save():
+        for i in range(200):
+            service.import_raw(
+                _make_source(tmp_path, name=f"w{i}.las", payload=f"data-{i}".encode())
+            )
+
+    assert calls == 1, calls
+    assert len(service.document.assets) == 200
+    # Every asset has its version (no zombie), disk equals memory, and the
+    # index is fresh for dedup/reads.
+    assert all(
+        any(v.asset_id == a.id for v in service.document.versions)
+        for a in service.document.assets
+    )
+    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
+    assert service.index_revision() == service.document.catalog_revision
+
+
+def test_batch_save_body_failure_persists_nothing_and_restores(service, tmp_path, monkeypatch):
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+
+    with pytest.raises(RuntimeError):
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="a.las"))
+            raise RuntimeError("boom")
+
+    assert calls == 0  # nothing was ever written to the canonical store
+    assert service.document.assets == []
+    assert service.document.versions == []
+    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
+
+
+def test_batch_save_flush_failure_restores_document(service, tmp_path, monkeypatch):
+    def boom(document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service._store, "save", boom)
+
+    with pytest.raises(OSError):
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="a.las"))
+            service.import_raw(_make_source(tmp_path, name="b.las"))
+
+    # The failed flush must not leave the half-batched document in memory.
+    assert service.document.assets == []
+    assert service.document.versions == []
+
+
+def test_batch_save_nested_batches_flush_once(service, tmp_path, monkeypatch):
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+
+    with service.batch_save():
+        service.import_raw(_make_source(tmp_path, name="a.las"))
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="b.las"))
+        service.import_raw(_make_source(tmp_path, name="c.las"))
+
+    assert calls == 1
+    assert len(service.document.assets) == 3
+
+
 def test_find_versions_by_tag_uses_index(service, tmp_path):
     v = service.import_raw(_make_source(tmp_path))
     service.add_tag("reviewed", version_id=v.id)
@@ -620,3 +758,163 @@ def test_add_tags_batch_rolls_back_on_canonical_failure(service, tmp_path, monke
 
     assert service.document.tags == []
     assert service.document.version_tags.get(version.id, []) == []
+
+
+# --- lock discipline (zombie-asset prevention) ------------------------------
+
+
+def test_import_raw_adds_asset_under_service_lock(service, tmp_path, monkeypatch):
+    """The asset must enter the document inside the service lock, so a
+    concurrent save can never persist an asset with zero versions."""
+    import threading
+
+    from paleo_workbench.catalog.service import DataCatalogService
+
+    lock_state: dict[str, bool] = {}
+    original = DataCatalogService._add_asset
+
+    def spy(self, asset):
+        # _is_owned() is True exactly when the current thread holds the lock
+        # (re-entrant acquire would succeed either way, so it cannot probe).
+        lock_state["held"] = self._lock._is_owned()
+        return original(self, asset)
+
+    monkeypatch.setattr(DataCatalogService, "_add_asset", spy)
+    service.import_raw(_make_source(tmp_path))
+
+    assert lock_state.get("held") is True
+
+
+def test_concurrent_import_and_tag_untag_never_persists_zombie(service, tmp_path, monkeypatch):
+    """Two threads alternating import_raw with add_tag/remove_tag for 200
+    rounds: every canonical save must persist a consistent document (never an
+    asset with zero versions), the save count must match the operation count,
+    and the on-disk document must equal the in-memory one at the end."""
+    import threading
+
+    # A stable tag target so the tagger thread always has a valid asset id.
+    anchor = service.import_raw(_make_source(tmp_path, name="anchor.las"))
+
+    saves = []
+    real_save = service._store.save
+
+    def checked(document):
+        # Every persisted snapshot must be consistent: no asset may exist
+        # without at least one version (the zombie torn state).
+        assets = {a.id for a in document.assets}
+        versions = {v.asset_id for v in document.versions}
+        zombies = assets - versions
+        assert not zombies, f"save persisted zombie asset(s): {zombies}"
+        saves.append(document.catalog_revision)
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", checked)
+
+    rounds = 200
+    errors: list[BaseException] = []
+
+    def importer():
+        try:
+            for i in range(rounds):
+                service.import_raw(
+                    _make_source(tmp_path, name=f"w{i}.las", payload=f"data-{i}".encode())
+                )
+        except BaseException as exc:  # pragma: no cover - failure detail
+            errors.append(exc)
+
+    def tagger():
+        try:
+            for i in range(rounds):
+                if i % 2 == 0:
+                    service.add_tag("qc", asset_id=anchor.asset_id)
+                else:
+                    service.remove_tag("qc", asset_id=anchor.asset_id)
+        except BaseException as exc:  # pragma: no cover - failure detail
+            errors.append(exc)
+
+    threads = [threading.Thread(target=importer), threading.Thread(target=tagger)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    assert not errors, errors
+    assert not any(t.is_alive() for t in threads)
+
+    # Save count is exact: one canonical write per import_raw plus one per
+    # effective tag mutation (alternating add/remove always changes state).
+    assert len(saves) == rounds * 2, len(saves)
+
+    # Every asset carries at least one version; on-disk state == memory.
+    assert all(
+        any(v.asset_id == a.id for v in service.document.versions)
+        for a in service.document.assets
+    )
+    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
+def test_result_asset_registration_does_not_hold_lock_across_payload_io(
+    service, tmp_path, monkeypatch
+):
+    """C70: ``register_result_asset`` (the worker-thread registration path)
+    must not hold the catalog lock while the payload is copied+hashed; a
+    concurrent GUI-thread call such as ``add_tags`` must not stall for the
+    duration of that disk I/O."""
+    import threading
+    import time as time_mod
+
+    import paleo_workbench.catalog.service as service_mod
+
+    existing = service.import_raw(_make_source(tmp_path, name="existing.las"))
+    src = _make_source(tmp_path, name="worker-result.json", payload=b"x" * 4096)
+
+    entered_placement = threading.Event()
+    real_place = service_mod.place_managed_file
+
+    def slow_place(*args, **kwargs):
+        # Stand-in for a large payload: the copy+hash+fsync takes ~0.5 s.
+        entered_placement.set()
+        time_mod.sleep(0.5)
+        return real_place(*args, **kwargs)
+
+    monkeypatch.setattr(service_mod, "place_managed_file", slow_place)
+
+    errors: list[str] = []
+
+    def register_in_worker() -> None:
+        try:
+            service.register_result_asset(
+                name="worker result",
+                type="prediction",
+                format="json",
+                asset_metadata={},
+                source_path=src,
+                stage=DataStage.OUTPUT,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface to the main thread
+            errors.append(repr(exc))
+
+    worker = threading.Thread(target=register_in_worker)
+    worker.start()
+    assert entered_placement.wait(timeout=5.0), "worker never reached payload placement"
+
+    started = time_mod.perf_counter()
+    service.add_tags(["audit-label"], asset_id=existing.asset_id)
+    elapsed_ms = (time_mod.perf_counter() - started) * 1000
+
+    worker.join(timeout=10.0)
+    assert not worker.is_alive()
+    assert errors == []
+
+    # The GUI-thread call finished well inside the 0.5 s placement window:
+    # its lock wait is decoupled from the worker's disk I/O.
+    assert elapsed_ms < 250, (
+        f"GUI add_tags stalled {elapsed_ms:.0f} ms while worker payload "
+        "I/O (0.5 s) was in flight — lock still spans copy+hash"
+    )
+    # The concurrent registration still commits a consistent document.
+    assert {"audit-label"} <= {tag.name for tag in service.document.tags}
+    assert any(v.asset_id == existing.asset_id for v in service.document.versions)
+    registered = [
+        a for a in service.document.assets if a.name == "worker result"
+    ]
+    assert len(registered) == 1
+    assert registered[0].current_version_id is not None

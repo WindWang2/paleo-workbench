@@ -46,7 +46,11 @@ class UnifiedMapCanvas(QWidget):
     frame_ready = Signal(object)
     extent_changed = Signal(tuple)
     map_position_changed = Signal(tuple)
-    tool_operation = Signal()
+    # Emitted when a tool operation is handled.  The boolean argument is True
+    # only when the operation mutated document data (composition must resync);
+    # pointer/selection feedback (measure hover, select clicks, zoom) emits
+    # False so hosts repaint overlays without recomposing the whole document.
+    tool_operation = Signal(bool)
 
     def __init__(self, *, backend: MapRenderBackend | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -172,6 +176,10 @@ class UnifiedMapCanvas(QWidget):
         """Set a cheap overlay snapshot producer (selection/rubber band/snap mark)."""
         self._overlay_provider = provider
         self.update()
+
+    def _active_tool_edits_data(self) -> bool:
+        tool = self._tool_controller.active_tool if self._tool_controller is not None else None
+        return bool(getattr(tool, "edits_data", False))
 
     @property
     def map_units_per_pixel(self) -> float:
@@ -687,7 +695,15 @@ class UnifiedMapCanvas(QWidget):
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         delta = event.angleDelta().y()
         if delta:
-            self.zoom_by(0.8 if delta > 0 else 1.25, coalesce_history=True)
+            # Anchor the zoom at the world point under the cursor (matching
+            # NativeMapCanvas and MapEditView); extent-center anchoring made
+            # the point under the cursor drift by ~5% of the viewport per
+            # wheel notch.
+            self.zoom_by(
+                0.8 if delta > 0 else 1.25,
+                self.screen_to_map(event.position()),
+                coalesce_history=True,
+            )
             event.accept()
             return
         event.ignore()
@@ -708,7 +724,7 @@ class UnifiedMapCanvas(QWidget):
             text = event.text()
             key_name = text if text else Qt.Key(key).name.lower()
         if self._tool_controller is not None and self._tool_controller.key_press(key_name):
-            self.tool_operation.emit()
+            self.tool_operation.emit(self._active_tool_edits_data())
             self.update()
             event.accept()
             return
@@ -743,7 +759,7 @@ class UnifiedMapCanvas(QWidget):
                 modifiers=self._modifier_names(event.modifiers()),
             )
             if handled:
-                self.tool_operation.emit()
+                self.tool_operation.emit(self._active_tool_edits_data())
                 self.update()
                 event.accept()
                 return
@@ -759,7 +775,7 @@ class UnifiedMapCanvas(QWidget):
         self._cursor_map = self.screen_to_map(event.position())
         self.map_position_changed.emit(self._cursor_map)
         if self._tool_controller is not None and self._tool_controller.active_tool is not None:
-            handled = self._tool_controller.active_tool.mouse_move(
+            self._tool_controller.active_tool.mouse_move(
                 self._cursor_map, modifiers=self._modifier_names(event.modifiers())
             )
             if handled:
@@ -786,7 +802,7 @@ class UnifiedMapCanvas(QWidget):
                 modifiers=self._modifier_names(event.modifiers()),
             )
             if handled:
-                self.tool_operation.emit()
+                self.tool_operation.emit(self._active_tool_edits_data())
                 self.update()
                 event.accept()
                 return
@@ -799,7 +815,7 @@ class UnifiedMapCanvas(QWidget):
                 modifiers=self._modifier_names(event.modifiers()),
             )
             if handled:
-                self.tool_operation.emit()
+                self.tool_operation.emit(self._active_tool_edits_data())
                 self.update()
                 event.accept()
                 return

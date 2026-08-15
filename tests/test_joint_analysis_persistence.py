@@ -55,6 +55,15 @@ def test_joint_analysis_state_roundtrip_in_project():
     assert "shape" not in data["joint_analysis"]
 
 
+
+def _enable_scene_depth(page):
+    """Install an explicit (demo) T-D transform so Depth is legitimately available."""
+    from geoviz import select_depth_transform
+
+    scene = page._joint_host.scene
+    if scene is not None:
+        scene.set_depth_transform(select_depth_transform(constant_v0=True))
+
 def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.viz import joint_host as host_mod
     from paleo_workbench.ui.pages.geological_modeling_3d_page import GeologicalModeling3DPage
@@ -69,6 +78,7 @@ def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
         "asset:test|name:A1": "source:a1"
     }
     page.set_project(doc)
+    _enable_scene_depth(page)
     page._joint_domain.setCurrentText("Depth")
     state = page.collect_joint_analysis_state()
     assert state.vertical_domain == "Depth"
@@ -153,7 +163,7 @@ def test_orthogonal_slice_card_restores_stack_domain_and_project_state(
         dt_ms=2.0,
     )
     page._joint_host.scene.set_volume_access(
-        InMemoryVolumeAccess(np.zeros((5, 7, 11), dtype=np.float32))
+        InMemoryVolumeAccess(np.zeros((5, 5, 11), dtype=np.float32))
     )
     page._refresh_joint_slice_card()
 
@@ -175,6 +185,7 @@ def test_orthogonal_slice_card_restores_stack_domain_and_project_state(
     assert not page._joint_active_time_visible.isChecked()
     assert page._joint_time_opacity.value() == 65
 
+    _enable_scene_depth(page)
     page._joint_domain.setCurrentText("Depth")
     assert not page._joint_time_selector.isEnabled()
 
@@ -217,7 +228,7 @@ def test_orthogonal_slice_card_adds_and_activates_snapped_time(
         dt_ms=2.0,
     )
     page._joint_host.scene.set_volume_access(
-        InMemoryVolumeAccess(np.zeros((5, 7, 11), dtype=np.float32))
+        InMemoryVolumeAccess(np.zeros((5, 5, 11), dtype=np.float32))
     )
     page._refresh_joint_slice_card()
 
@@ -379,6 +390,7 @@ def test_project_controller_flushes_joint_on_save(qtbot, tmp_path, monkeypatch):
         entries={"current:a": "source:a"},
     )
     page._joint_loaded_once = True  # simulate visited 三维建模 hybrid
+    _enable_scene_depth(page)
     page._joint_domain.setCurrentText("Depth")
     # Avoid mapping topology flush issues
     monkeypatch.setattr(win, "_flush_mapping_draft", lambda: True)

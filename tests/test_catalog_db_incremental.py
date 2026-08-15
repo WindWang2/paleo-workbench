@@ -42,7 +42,32 @@ def _seed(document: CatalogDocument, count: int = 5) -> None:
 
 
 def _snapshot(index: CatalogIndex, document: CatalogDocument) -> dict:
-    """Query-level fingerprint of the index, comparable across indexes."""
+    """Query-level fingerprint of the index, comparable across indexes.
+
+    Includes the ``runs`` / ``run_inputs`` / ``run_outputs`` tables (the
+    incremental sync must stay byte-equivalent to a full rebuild there too —
+    previously only the row/edge query surface was fingerprinted, which
+    masked the missing ``runs`` upsert).
+    """
+    conn = index._connect()
+    runs = {
+        row["id"]: (
+            row["operation"],
+            row["status"],
+            row["parameters"],
+            row["generator"],
+            row["created_at"],
+        )
+        for row in conn.execute("SELECT * FROM runs ORDER BY id")
+    }
+    run_inputs = {
+        (row["run_id"], row["version_id"])
+        for row in conn.execute("SELECT run_id, version_id FROM run_inputs ORDER BY 1, 2")
+    }
+    run_outputs = {
+        (row["run_id"], row["version_id"])
+        for row in conn.execute("SELECT run_id, version_id FROM run_outputs ORDER BY 1, 2")
+    }
     return {
         "revision": index.revision(),
         "assets": {a["id"] for a in index.search_assets()},
@@ -57,6 +82,9 @@ def _snapshot(index: CatalogIndex, document: CatalogDocument) -> dict:
             a.id: [v["id"] for v in index.list_versions(a.id)]
             for a in document.assets
         },
+        "runs": runs,
+        "run_inputs": run_inputs,
+        "run_outputs": run_outputs,
     }
 
 
@@ -268,3 +296,133 @@ def test_wal_mode_engaged_and_reset_cleans_wal_files(tmp_path: Path):
     assert not Path(f"{index.db_path}-wal").exists()
     assert not Path(f"{index.db_path}-shm").exists()
     assert not index.db_path.exists()
+
+
+def test_incremental_sync_writes_runs_row_and_updates_status(tmp_path: Path):
+    """A run appearing (or changing) in an incremental revision must land in
+    the ``runs`` table — only a full rebuild used to write it (DATA-1)."""
+    index = CatalogIndex(tmp_path)
+    document = CatalogDocument(catalog_revision=0)
+    index.rebuild(document)
+    _seed(document)
+    document.catalog_revision = 1
+    index.rebuild(document)
+
+    document.catalog_revision += 1
+    document.runs.append(
+        DataRun(
+            id="r1", operation="factor_map",
+            input_version_ids=["v1"], output_version_ids=["v5"],
+            status="completed",
+        )
+    )
+    index.sync(document)
+    conn = index._connect()
+    row = conn.execute(
+        "SELECT operation, status FROM runs WHERE id = 'r1'"
+    ).fetchone()
+    assert row is not None, "incremental sync must write the runs row"
+    assert tuple(row) == ("factor_map", "completed")
+
+    # A status change must flow through the incremental path too.
+    document.catalog_revision += 1
+    document.runs[0].status = "complete"
+    index.sync(document)
+    row = conn.execute("SELECT status FROM runs WHERE id = 'r1'").fetchone()
+    assert row[0] == "complete"
+
+    fresh = CatalogIndex(tmp_path / "fresh")
+    fresh.rebuild(document)
+    assert _snapshot(index, document) == _snapshot(fresh, document)
+
+
+def test_purge_keeps_run_links_incremental_like_rebuild(tmp_path: Path):
+    """Purging a version must NOT drop the run's input/output link rows in
+    the incremental index: the run record retains the ids as provenance and a
+    full rebuild re-creates them (DATA-2)."""
+    index = CatalogIndex(tmp_path)
+    document = CatalogDocument(catalog_revision=0)
+    index.rebuild(document)
+    for i in (1, 2):
+        asset = DataAsset(id=f"a{i}", name=f"asset {i}", type="well_log")
+        version = DataVersion(
+            id=f"v{i}", asset_id=asset.id, version_number=1,
+            stage=DataStage.RAW, path=f"raw/a{i}/v{i}/f.bin", sha256=f"h{i}",
+        )
+        document.assets.append(asset)
+        document.versions.append(version)
+    document.catalog_revision = 1
+    index.rebuild(document)
+
+    # A run links the two versions; sync incrementally.
+    document.catalog_revision += 1
+    document.runs.append(
+        DataRun(
+            id="run_x", operation="compute",
+            input_version_ids=["v1"], output_version_ids=["v2"],
+        )
+    )
+    index.sync(document)
+
+    # Purge both versions (as purge_trashed does) while the run keeps its
+    # historical links; sync incrementally.
+    document.catalog_revision += 1
+    document.versions = [v for v in document.versions if v.id not in {"v1", "v2"}]
+    document.assets = [a for a in document.assets if a.id not in {"a1", "a2"}]
+    index.sync(document)
+
+    fresh = CatalogIndex(tmp_path / "fresh")
+    fresh.rebuild(document)
+    assert _snapshot(index, document) == _snapshot(fresh, document)
+    conn = fresh._connect()
+    assert conn.execute(
+        "SELECT COUNT(*) FROM run_inputs WHERE run_id = 'run_x'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM run_outputs WHERE run_id = 'run_x'"
+    ).fetchone()[0] == 1
+def test_alternating_thread_writes_keep_index_in_sync(tmp_path: Path):
+    """Cross-thread saves (InferenceWorker pattern) must neither silently
+    stale the index nor trigger rebuild churn: one connection per thread
+    (issue #394 / C31)."""
+    import threading
+
+    from paleo_workbench.catalog.service import DataCatalogService
+
+    project_path = tmp_path / "proj" / "demo.paleo.json"
+    project_path.parent.mkdir(parents=True, exist_ok=True)
+    project_path.write_text("{}", encoding="utf-8")
+    svc = DataCatalogService.open(project_path)
+    index = svc._index
+    # Open rebuilt once; count ONLY post-open rebuilds.
+    rebuilds = {"count": 0}
+    original_rebuild = index.rebuild
+
+    def _counting(document):
+        rebuilds["count"] += 1
+        return original_rebuild(document)
+
+    index.rebuild = _counting  # type: ignore[method-assign]
+
+    def _saves(n: int) -> None:
+        for i in range(10):
+            src = tmp_path / f"w{n}-{i}.bin"
+            src.write_bytes(b"payload")
+            svc.import_raw(src)
+
+    # First write on the MAIN thread so the main thread owns its connection.
+    src = tmp_path / "m0.bin"
+    src.write_bytes(b"payload")
+    svc.import_raw(src)
+    try:
+        threads = [threading.Thread(target=_saves, args=(n,)) for n in (1, 2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert svc.index_revision() == svc.document.catalog_revision
+        assert len(svc.document.versions) == 21
+        # No delete-and-rebuild churn from cross-thread failures.
+        assert rebuilds["count"] == 0
+    finally:
+        svc.close()

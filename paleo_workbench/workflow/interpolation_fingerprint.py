@@ -308,6 +308,43 @@ def build_factor_fingerprints(
     )
 
 
+def _fingerprint_memo_key(
+    task: Any,
+    *,
+    method: str | None,
+    grid_n: int | None,
+    power: float,
+    fault_polylines: Sequence[Sequence[tuple[float, float]]] | None,
+    generator_version: str,
+) -> tuple:
+    """Identity of a fingerprint derivation within one prepare request.
+
+    A request-scoped memo (see ``fingerprints_for_task(memo=...)``) reuses the
+    derivation for the same task + resolved inputs instead of re-serializing
+    and re-hashing every sample 3-4x per prepare generation.  The commit-time
+    stale-input guard intentionally does NOT use the memo: it must re-derive
+    from live project inputs.
+    """
+    params = dict(getattr(task, "parameters", None) or {})
+    points = params.get("sample_points") or []
+    breaks_key: Any = None
+    if fault_polylines is not None:
+        breaks_key = tuple(
+            tuple((float(x), float(y)) for x, y in poly)
+            for poly in fault_polylines
+        )
+    return (
+        str(getattr(task, "id", "") or ""),
+        str(method if method is not None else getattr(task, "method", "IDW")),
+        int(grid_n if grid_n is not None else int(params.get("grid_n") or 50)),
+        float(power),
+        str(generator_version),
+        str(getattr(task, "target_horizon", "") or ""),
+        int(len(points)),
+        breaks_key,
+    )
+
+
 def fingerprints_for_task(
     task: Any,
     *,
@@ -317,8 +354,59 @@ def fingerprints_for_task(
     power: float = 2.0,
     fault_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
     generator_version: str = DEFAULT_GENERATOR_VERSION,
+    memo: dict | None = None,
 ) -> FactorFingerprints:
-    """Resolve project constraints and build fingerprints for *task*."""
+    """Resolve project constraints and build fingerprints for *task*.
+
+    When *memo* (a plain dict, scoped to one prepare request) is supplied,
+    derivations are cached per (task id, resolved inputs) so a task's
+    fingerprint is computed once per request instead of once per call site.
+    """
+    if memo is not None:
+        key = _fingerprint_memo_key(
+            task,
+            method=method,
+            grid_n=grid_n,
+            power=power,
+            fault_polylines=fault_polylines,
+            generator_version=generator_version,
+        )
+        cached = memo.get(key)
+        if cached is not None:
+            return cached
+        fps = _fingerprints_for_task_uncached(
+            task,
+            project=project,
+            method=method,
+            grid_n=grid_n,
+            power=power,
+            fault_polylines=fault_polylines,
+            generator_version=generator_version,
+        )
+        memo[key] = fps
+        return fps
+    return _fingerprints_for_task_uncached(
+        task,
+        project=project,
+        method=method,
+        grid_n=grid_n,
+        power=power,
+        fault_polylines=fault_polylines,
+        generator_version=generator_version,
+    )
+
+
+def _fingerprints_for_task_uncached(
+    task: Any,
+    *,
+    project: Any | None = None,
+    method: str | None = None,
+    grid_n: int | None = None,
+    power: float = 2.0,
+    fault_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
+    generator_version: str = DEFAULT_GENERATOR_VERSION,
+) -> FactorFingerprints:
+    """Uncached derivation (see :func:`fingerprints_for_task`)."""
     params = dict(getattr(task, "parameters", None) or {})
     points = params.get("sample_points") or []
     # Prepare-time overrides (method/grid_n/power) win over stored task params so

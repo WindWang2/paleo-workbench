@@ -52,6 +52,15 @@ class OwnedWorkerJob(QObject):
     ) -> None:
         if self._thread is not None:
             raise RuntimeError("worker job already owns a thread")
+        if worker.parent() is not None:
+            # moveToThread cannot relocate a QObject that has a parent
+            # (silent no-op + warning), which would leave run() executing on
+            # the GUI thread.  Fail loudly so this wiring bug can never
+            # regress silently again (C17).
+            raise RuntimeError(
+                "worker must be constructed without a parent so "
+                "moveToThread can relocate it to its own QThread"
+            )
 
         self._state = {"released": False}
         thread = QThread()

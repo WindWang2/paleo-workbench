@@ -30,10 +30,19 @@ def test_page_switch_completes_at_full_opacity(qtbot):
     shell = AppShell()
     qtbot.addWidget(shell)
     shell._switch_page(2)
-    qtbot.wait(250)  # wait for 150ms animation to finish
     page = shell.page_stack.widget(2)
+    # The fade must actually be attached on switch; without this check a
+    # regression that never starts the animation would pass vacuously.
+    effect = page.graphicsEffect()
+    assert isinstance(effect, QGraphicsOpacityEffect), (
+        "page fade effect was never attached during the switch"
+    )
+    assert effect.opacity() < 1.0  # fade in progress (starts at 0.7)
+    qtbot.wait(250)  # wait for 150ms animation to finish
     effect = page.graphicsEffect()
     if isinstance(effect, QGraphicsOpacityEffect):
+        # Finalize detaches the effect; a lingering sub-1.0 effect means the
+        # animation did not complete at full opacity.
         assert effect.opacity() == pytest.approx(1.0)
 
 

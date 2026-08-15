@@ -8,6 +8,7 @@ catalog lineage + :class:`CurrentProjectVersionContext`.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Sequence
@@ -17,6 +18,47 @@ from paleo_workbench.workflow.current_context import (
     resolve_current_project_version_context,
 )
 from paleo_workbench.workflow.dependency_graph import DependencyGraph, DependencyGraphError
+
+# Rebuilding DependencyGraph is O(V+E) Python object construction + cycle DFS
+# (~0.08 ms/version with adapter re-wrapping); every refresh signal paid it
+# from scratch even when the catalog had not changed (C15b). Cache the last
+# few graphs keyed by (document identity, catalog_revision): any persisted
+# catalog save bumps the revision and invalidates the entry; a new document
+# (project reopen) gets its own key. Backends without a document/revision
+# (test fakes) bypass the cache and keep today's always-rebuild behavior.
+_GRAPH_CACHE_MAX = 4
+_GRAPH_CACHE: "OrderedDict[tuple[int, int], tuple[Any, DependencyGraph]]" = (
+    OrderedDict()
+)
+
+
+def _cached_graph_for(catalog: Any) -> DependencyGraph:
+    """Return the dependency graph, reusing it while the catalog revision stands.
+
+    The cache entry keeps a strong reference to the document so an identity
+    key can never collide with a recycled object at the same address.
+    """
+    service = getattr(catalog, "service", None)
+    document = getattr(service, "document", None)
+    revision = getattr(document, "catalog_revision", None)
+    key: tuple[int, int] | None = None
+    if document is not None and revision is not None:
+        key = (id(document), int(revision))
+        entry = _GRAPH_CACHE.get(key)
+        if entry is not None and entry[0] is document:
+            return entry[1]
+    graph = DependencyGraph.from_catalog(catalog)
+    if key is not None:
+        _GRAPH_CACHE[key] = (document, graph)
+        _GRAPH_CACHE.move_to_end(key)
+        while len(_GRAPH_CACHE) > _GRAPH_CACHE_MAX:
+            _GRAPH_CACHE.popitem(last=False)
+    return graph
+
+
+def clear_dependency_graph_cache() -> None:
+    """Drop cached graphs (tests / project teardown)."""
+    _GRAPH_CACHE.clear()
 
 
 class FreshnessState(str, Enum):
@@ -201,7 +243,7 @@ class FreshnessService:
                 project, catalog=None, service=service, extra_selected=extra_selected
             )
             return cls(graph, ctx, catalog=None, check_integrity=check_integrity)
-        graph = DependencyGraph.from_catalog(cat)
+        graph = _cached_graph_for(cat)
         ctx = resolve_current_project_version_context(
             project, catalog=cat, service=service, extra_selected=extra_selected
         )
@@ -229,6 +271,32 @@ class FreshnessService:
             return True
         return False
 
+    def _checksum_for(self, version_id: str) -> str | None:
+        """Recorded payload checksum for *version_id*, or None when unknown."""
+        ver = self.graph.versions.get(version_id)
+        if ver is not None:
+            return getattr(ver, "checksum", None) or None
+        if self.catalog is not None:
+            try:
+                resolved = self.catalog.resolve_version(version_id)
+            except Exception:
+                return None
+            return getattr(resolved, "checksum", None) or None
+        return None
+
+    def _content_identical(self, a: str, b: str) -> bool:
+        """True when both versions record the SAME payload checksum.
+
+        A byte-identical supersession (e.g. promote copies the payload and
+        records the same SHA-256) does not change what a consumer actually
+        ran on, so it must not invalidate freshness (issue #373 / C15).
+        Unknown checksums keep the mismatch (conservative).
+        """
+        first = self._checksum_for(a)
+        if not first:
+            return False
+        return first == self._checksum_for(b)
+
     def _selection_mismatch(
         self, input_version_id: str
     ) -> tuple[str, str | None] | None:
@@ -243,6 +311,11 @@ class FreshnessService:
         4. Parent-link supersession via run parameters.
         5. Input itself is selected with no competing tip → current.
         6. Unknown → no mismatch (do not guess STALE).
+
+        Rules 1–3 tolerate content-identical supersession: when the candidate
+        "current" version records the same payload checksum as the input, the
+        consumer's scientific input has not changed, so no mismatch is
+        reported.
         """
         prod = self.graph.producing_run.get(input_version_id)
         domain_id = None
@@ -253,11 +326,15 @@ class FreshnessService:
         if domain_id:
             tip = self.context.current_by_domain_task.get(domain_id)
             if tip and tip != input_version_id:
+                if self._content_identical(tip, input_version_id):
+                    return None
                 return tip, self.graph.asset_id_for(tip)
 
         asset_id = self.graph.asset_id_for(input_version_id)
         current = self.context.current_for_asset(asset_id) if asset_id else None
         if current is not None and current != input_version_id:
+            if self._content_identical(current, input_version_id):
+                return None
             return current, asset_id
 
         # 3. Domain-task supersession among selected tips only (do not force
@@ -266,6 +343,8 @@ class FreshnessService:
             self._index_selected()
             for sel in self._selected_by_key.get(("domain", domain_id), ()):
                 if sel == input_version_id:
+                    continue
+                if self._content_identical(sel, input_version_id):
                     continue
                 return sel, self.graph.asset_id_for(sel)
 

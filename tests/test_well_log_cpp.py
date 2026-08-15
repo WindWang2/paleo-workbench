@@ -72,7 +72,8 @@ def test_c4_minmax_downsample_mismatched_shape_or_dim_raises():
         with pytest.raises(ValueError):
             minmax_downsample(depth, v, 10)
 
-        with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+        # Python fallback must enforce the same contract
+        with disabled_acceleration():
             with pytest.raises(ValueError):
                 minmax_downsample(depth, v, 10)
 
@@ -85,7 +86,7 @@ def test_i5_minmax_downsample_negative_target_pixels_raises(target_px):
     with pytest.raises(ValueError):
         minmax_downsample(depth, val, target_px)
 
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+    with disabled_acceleration():
         with pytest.raises(ValueError):
             minmax_downsample(depth, val, target_px)
 
@@ -95,7 +96,7 @@ def test_m7_minmax_downsample_nan_inf_policy():
     values = np.array([np.nan, 2.0, np.nan, 8.0, np.inf, -np.inf, np.nan, np.nan, np.nan, np.nan], dtype=np.float32)
 
     d_cpp, v_cpp = minmax_downsample(depth, values, target_pixels=2)
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+    with disabled_acceleration():
         d_py, v_py = minmax_downsample(depth, values, target_pixels=2)
 
     np.testing.assert_array_equal(d_cpp, d_py)
@@ -109,7 +110,7 @@ def test_m9_fast_las_parse_inf_converted_to_nan():
 100.2 50.0
 """
     h_cpp, d_cpp = fast_las_parse_data(content)
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+    with disabled_acceleration():
         h_py, d_py = fast_las_parse_data(content)
 
     assert h_cpp == ("DEPT", "GR")
@@ -127,7 +128,7 @@ def test_i4_las_parse_null_value_strict_masking():
 """
     # Default null_value = -999.0: only -999.0 is masked as NaN
     _, d_cpp = fast_las_parse_data(content, null_value=-999.0)
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+    with disabled_acceleration():
         _, d_py = fast_las_parse_data(content, null_value=-999.0)
 
     assert np.isnan(d_cpp[0, 1]) and np.isnan(d_py[0, 1])
@@ -136,7 +137,7 @@ def test_i4_las_parse_null_value_strict_masking():
 
     # Custom null_value = -999.25: only -999.25 is masked as NaN
     _, d_cpp2 = fast_las_parse_data(content, null_value=-999.25)
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+    with disabled_acceleration():
         _, d_py2 = fast_las_parse_data(content, null_value=-999.25)
 
     assert d_cpp2[0, 1] == -999.0 and d_py2[0, 1] == -999.0
@@ -151,11 +152,58 @@ def test_m8_las_parse_row_truncation_warning():
     with pytest.warns(UserWarning, match="more columns than the 2 declared header"):
         h_cpp, d_cpp = fast_las_parse_data(content)
 
-    with patch.object(well_log_api, "HAS_CPP_WELL_LOG", False):
+    with disabled_acceleration():
         with pytest.warns(UserWarning, match="more columns than the 2 declared header"):
             h_py, d_py = fast_las_parse_data(content)
 
     assert d_cpp.shape == (2, 2)
     assert d_py.shape == (2, 2)
+
+
+
+
+def test_433_a_log_data_parity_both_paths():
+    """~A LOG DATA must not truncate columns; ~CURVE mnemonics are authoritative."""
+    content = """~CURVE INFORMATION
+ DEPT  .M                   : DEPTH
+ GR    .API                 : GAMMA RAY
+ RHOB  .G/CC                : BULK DENSITY
+~A LOG DATA
+ 2000.00   45.2   2.35
+ 2001.00   52.1   2.38
+ 2002.00   61.8   2.41
+"""
+    h_cpp, d_cpp = fast_las_parse_data(content)
+    with disabled_acceleration():
+        h_py, d_py = fast_las_parse_data(content)
+
+    assert h_cpp == ("DEPT", "GR", "RHOB")
+    assert h_py == ("DEPT", "GR", "RHOB")
+    assert d_cpp.shape == (3, 3)
+    assert d_py.shape == (3, 3)
+    assert d_cpp[1, 2] == 2.38
+    assert d_py[1, 2] == 2.38
+def test_has_cpp_flag_patch_does_not_change_dispatch_routing():
+    """Guard #438: native_backend.dispatch routes by is_accelerated(), never by
+    the façade HAS_CPP_* constant. Flipping HAS_CPP_WELL_LOG must not switch the
+    fallback path, or the Python-fallback legs above silently re-run C++."""
+    depth = np.linspace(0.0, 10.0, 20, dtype=np.float32)
+    values = np.linspace(0.0, 10.0, 20, dtype=np.float32)
+
+    old_flag = well_log_api.HAS_CPP_WELL_LOG
+    well_log_api.HAS_CPP_WELL_LOG = False
+    try:
+        with patch(
+            "paleo_workbench.native_backend.well_log_core.minmax_downsample",
+            return_value=(depth, values),
+        ) as cpp_spy:
+            minmax_downsample(depth, values, 4)
+    finally:
+        well_log_api.HAS_CPP_WELL_LOG = old_flag
+
+    assert cpp_spy.called, (
+        "dispatch must ignore HAS_CPP_WELL_LOG; if it reads the flag, the "
+        "fallback legs in this file silently re-run C++ again"
+    )
 
 

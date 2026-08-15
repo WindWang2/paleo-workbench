@@ -7,6 +7,17 @@
 
 namespace py = pybind11;
 
+// OpenMP parallel regions are only worthwhile above a work-size threshold:
+// team spawn/join barriers cost tens of microseconds per region regardless of
+// workload, so on many-core hosts a 16K-260K element slice (i.e. everything up
+// to a 512^3 slice) ran ~130x SLOWER with the default team size than serially
+// (issue #384). Regions at or below the threshold execute serially through the
+// `if` clause (no team is spawned), keeping the per-call overhead flat for all
+// interactive slice sizes; only very large slices (> 524,288 elements, i.e.
+// 1024^3+ volumes) parallelise, where a normal host's speedup outweighs the
+// region cost.
+static constexpr size_t kOmpMinParallelElems = 1u << 19;  // 524,288
+
 // Fast 2D Slice Extraction from 3D Volume
 py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py::array::forcecast> input, int axis, int index) {
     auto buf = input.request();
@@ -54,7 +65,7 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
         {
             py::gil_scoped_release release;
             #if defined(_OPENMP)
-            #pragma omp parallel for schedule(static)
+            #pragma omp parallel for schedule(static) if(dim0 * dim2 > kOmpMinParallelElems)
             #endif
             for (size_t i = 0; i < dim0; ++i) {
                 size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -78,7 +89,7 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
             py::gil_scoped_release release;
             size_t total_elem = dim0 * dim1;
             #if defined(_OPENMP)
-            #pragma omp parallel for schedule(static)
+            #pragma omp parallel for schedule(static) if(total_elem > kOmpMinParallelElems)
             #endif
             for (size_t k = 0; k < total_elem; ++k) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -92,7 +103,7 @@ py::array_t<float> fast_slice_extract(py::array_t<float, py::array::c_style | py
 }
 
 // Fast 2D Slice Extraction directly into normalized uint8 Indexed8 array
-py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::array::forcecast> input, int axis, int index) {
+py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::array::forcecast> input, int axis, int index, py::object value_range) {
     auto buf = input.request();
     if (buf.ndim != 3) {
         throw std::runtime_error("Input volume must be 3D");
@@ -131,28 +142,80 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
 
     float min_val = std::numeric_limits<float>::infinity();
     float max_val = -std::numeric_limits<float>::infinity();
+    // A caller-provided volume-wide (vmin, vmax) overrides the per-slice
+    // stretch so adjacent slices share one stable color mapping (C44).
+    bool use_fixed_range = false;
+    if (!value_range.is_none()) {
+        try {
+            auto range = py::cast<std::pair<double, double>>(value_range);
+            min_val = static_cast<float>(range.first);
+            max_val = static_cast<float>(range.second);
+            use_fixed_range = true;
+        } catch (const py::cast_error&) {
+            throw std::invalid_argument("value_range must be a (vmin, vmax) pair of numbers");
+        }
+    }
 
     {
         py::gil_scoped_release release;
 
-        if (ax == 0) {
-            const float* src = ptr + idx * (dim1 * dim2);
-            #if defined(_OPENMP)
-            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
-            #endif
-            for (size_t i = 0; i < total; ++i) {
-                float v = src[i];
-                if (std::isnan(v) || std::isinf(v)) continue;
-                if (v < min_val) min_val = v;
-                if (v > max_val) max_val = v;
-            }
-
-            if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
-                std::fill(dst, dst + total, static_cast<uint8_t>(0));
-            } else {
-                float inv_range = 255.0f / (max_val - min_val);
+        if (!use_fixed_range) {
+            if (ax == 0) {
+                const float* src = ptr + idx * (dim1 * dim2);
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
+                #endif
+                for (size_t i = 0; i < total; ++i) {
+                    float v = src[i];
+                    if (std::isnan(v) || std::isinf(v)) continue;
+                    if (v < min_val) min_val = v;
+                    if (v > max_val) max_val = v;
+                }
+            } else if (ax == 1) {
+                #if defined(_OPENMP)
+                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
+                #endif
+                for (size_t i = 0; i < dim0; ++i) {
+                    size_t src_offset = i * (dim1 * dim2) + idx * dim2;
+                    for (size_t j = 0; j < dim2; ++j) {
+                        float v = ptr[src_offset + j];
+                        if (std::isnan(v) || std::isinf(v)) continue;
+                        if (v < min_val) min_val = v;
+                        if (v > max_val) max_val = v;
+                    }
+                }
+            } else {
+                // axis == 2 (Time slice): min/max-preserving block pass.
+                // Every element contributes to the block extrema, so the
+                // reported range can never miss the true min/max — the old
+                // stride-4 sample could skip both extrema on large slices.
+                const size_t block = 4;
+                #if defined(_OPENMP)
+                #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static) if(total > kOmpMinParallelElems)
+                #endif
+                for (size_t k = 0; k < total; k += block) {
+    #if defined(__GNUC__) || defined(__clang__)
+                    __builtin_prefetch(&ptr[(k + 16 * block) * dim2 + idx], 0, 0);
+    #endif
+                    const size_t end = std::min(k + block, total);
+                    for (size_t j = k; j < end; ++j) {
+                        float v = ptr[j * dim2 + idx];
+                        if (std::isnan(v) || std::isinf(v)) continue;
+                        if (v < min_val) min_val = v;
+                        if (v > max_val) max_val = v;
+                    }
+                }
+            }
+        }
+
+        if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
+            std::fill(dst, dst + total, static_cast<uint8_t>(0));
+        } else {
+            float inv_range = 255.0f / (max_val - min_val);
+            if (ax == 0) {
+                const float* src = ptr + idx * (dim1 * dim2);
+                #if defined(_OPENMP)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < total; ++i) {
                     float v = src[i];
@@ -163,27 +226,9 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                         dst[i] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, norm)));
                     }
                 }
-            }
-        } else if (ax == 1) {
-            #if defined(_OPENMP)
-            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
-            #endif
-            for (size_t i = 0; i < dim0; ++i) {
-                size_t src_offset = i * (dim1 * dim2) + idx * dim2;
-                for (size_t j = 0; j < dim2; ++j) {
-                    float v = ptr[src_offset + j];
-                    if (std::isnan(v) || std::isinf(v)) continue;
-                    if (v < min_val) min_val = v;
-                    if (v > max_val) max_val = v;
-                }
-            }
-
-            if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
-                std::fill(dst, dst + total, static_cast<uint8_t>(0));
-            } else {
-                float inv_range = 255.0f / (max_val - min_val);
+            } else if (ax == 1) {
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t i = 0; i < dim0; ++i) {
                     size_t src_offset = i * (dim1 * dim2) + idx * dim2;
@@ -198,35 +243,14 @@ py::tuple fast_slice_to_indexed8(py::array_t<float, py::array::c_style | py::arr
                         }
                     }
                 }
-            }
-        } else {
-            // axis == 2 (Time slice)
-            // Strided min/max sample pass to avoid double full-volume cache miss
-            size_t step = (total > 65536) ? 4 : 1;
-            #if defined(_OPENMP)
-            #pragma omp parallel for reduction(min:min_val) reduction(max:max_val) schedule(static)
-            #endif
-            for (size_t k = 0; k < total; k += step) {
-#if defined(__GNUC__) || defined(__clang__)
-                __builtin_prefetch(&ptr[(k + 16 * step) * dim2 + idx], 0, 0);
-#endif
-                float v = ptr[k * dim2 + idx];
-                if (std::isnan(v) || std::isinf(v)) continue;
-                if (v < min_val) min_val = v;
-                if (v > max_val) max_val = v;
-            }
-
-            if (min_val >= max_val || std::isinf(min_val) || std::isinf(max_val)) {
-                std::fill(dst, dst + total, static_cast<uint8_t>(0));
             } else {
-                float inv_range = 255.0f / (max_val - min_val);
                 #if defined(_OPENMP)
-                #pragma omp parallel for schedule(static)
+                #pragma omp parallel for schedule(static) if(total > kOmpMinParallelElems)
                 #endif
                 for (size_t k = 0; k < total; ++k) {
-#if defined(__GNUC__) || defined(__clang__)
+    #if defined(__GNUC__) || defined(__clang__)
                     __builtin_prefetch(&ptr[(k + 16) * dim2 + idx], 0, 0);
-#endif
+    #endif
                     float v = ptr[k * dim2 + idx];
                     if (std::isnan(v) || std::isinf(v)) {
                         dst[k] = 0;
@@ -283,19 +307,74 @@ py::array_t<float> fast_resample_volume_3d(py::array_t<float, py::array::c_style
     auto r_buf = result.request();
     float* dst = static_cast<float*>(r_buf.ptr);
 
+    // Peak-preserving stride-block decimation (issue #419): the old nearest
+    // grid-point sampling dropped any thin reflection between stride samples,
+    // so LOD previews lost events that the native traces still contain. Each
+    // target cell now aggregates its source stride block [lo, hi] per axis
+    // (hi of the last target forced to the source edge, since float32
+    // rounding of t*step can land below s) and keeps the sample with the
+    // largest |value|, sign preserved. A block containing any NaN is
+    // conservatively NaN, matching the Python fallback and the NaN semantics
+    // of the other kernels in this module. Blocks are contiguous and cover
+    // the whole source; upsampling (step < 1) yields single-sample blocks
+    // (the old nearest sample), so identity resampling is unchanged.
     float step0 = static_cast<float>(s0) / static_cast<float>(std::max<size_t>(1, t0));
     float step1 = static_cast<float>(s1) / static_cast<float>(std::max<size_t>(1, t1));
     float step2 = static_cast<float>(s2) / static_cast<float>(std::max<size_t>(1, t2));
 
+    auto block_bounds = [](size_t s, size_t t, float step, std::vector<size_t>& lo, std::vector<size_t>& hi) {
+        lo.resize(t);
+        hi.resize(t);
+        for (size_t i = 0; i < t; ++i) {
+            lo[i] = static_cast<size_t>(i * step);
+            if (i + 1 == t) {
+                hi[i] = s - 1;
+            } else {
+                // Guarded decrement: trunc((i+1)*step) can be 0 when
+                // upsampling (step < 1); size_t underflow would read OOB.
+                size_t next = static_cast<size_t>((i + 1) * step);
+                hi[i] = (next > 0) ? next - 1 : 0;
+            }
+            if (hi[i] < lo[i]) hi[i] = lo[i];  // upsampling: single sample
+        }
+    };
+    std::vector<size_t> lo0, hi0, lo1, hi1, lo2, hi2;
+    block_bounds(s0, t0, step0, lo0, hi0);
+    block_bounds(s1, t1, step1, lo1, hi1);
+    block_bounds(s2, t2, step2, lo2, hi2);
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
     {
         py::gil_scoped_release release;
         for (size_t i = 0; i < t0; ++i) {
-            size_t src_i = std::min(s0 - 1, static_cast<size_t>(i * step0));
             for (size_t j = 0; j < t1; ++j) {
-                size_t src_j = std::min(s1 - 1, static_cast<size_t>(j * step1));
+                size_t dst_base = (i * t1 + j) * t2;
                 for (size_t k = 0; k < t2; ++k) {
-                    size_t src_k = std::min(s2 - 1, static_cast<size_t>(k * step2));
-                    dst[i * (t1 * t2) + j * t2 + k] = src[src_i * (s1 * s2) + src_j * s2 + src_k];
+                    float best = 0.0f;
+                    float best_abs = 0.0f;
+                    bool block_nan = false;
+                    for (size_t si = lo0[i]; si <= hi0[i]; ++si) {
+                        size_t row_base = si * (s1 * s2);
+                        for (size_t sj = lo1[j]; sj <= hi1[j]; ++sj) {
+                            size_t col_base = row_base + sj * s2;
+                            for (size_t sk = lo2[k]; sk <= hi2[k]; ++sk) {
+                                float v = src[col_base + sk];
+                                if (std::isnan(v)) {
+                                    block_nan = true;
+                                    break;
+                                }
+                                float a = std::fabs(v);
+                                if (a > best_abs) {
+                                    best_abs = a;
+                                    best = v;
+                                }
+                            }
+                            if (block_nan) break;
+                        }
+                        if (block_nan) break;
+                    }
+                    dst[dst_base + k] = block_nan ? nan : best;
                 }
             }
         }
@@ -388,16 +467,26 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                 }
 
                 // Running-sum over the clamped vertical window [k0, k1].
+                // NaN safety (issue #385): a NaN sample makes run_num/run_den
+                // NaN, and NaN - x == NaN, so the incremental updates can never
+                // flush it once the sample leaves the window. Track how many
+                // NaN samples the window currently contains and, when the last
+                // one exits, rebuild the window sums from scratch to recover.
                 size_t k0 = 0;
                 size_t k1 = std::min(nt - 1, half_t);
                 double run_num = 0.0;
                 double run_den = 0.0;
+                size_t nan_in_window = 0;
                 for (size_t k = k0; k <= k1; ++k) {
                     run_num += mean_sq[k];
                     run_den += sum_sq[k];
+                    if (std::isnan(mean_sq[k])) ++nan_in_window;
                 }
                 for (size_t k = 0; k < nt; ++k) {
                     double den = run_den / static_cast<double>(k1 - k0 + 1) + 1e-12;
+                    // NaN propagates to 0.0 through the std::min/std::max clamp
+                    // chain whenever the window overlaps a NaN sample, matching
+                    // the Python fallback's per-window recompute semantics.
                     float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
                     dst[i * (nx * nt) + j * nt + k] = coh_val;
 
@@ -409,11 +498,23 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                             ++k1;
                             run_num += mean_sq[k1];
                             run_den += sum_sq[k1];
+                            if (std::isnan(mean_sq[k1])) ++nan_in_window;
                         }
                         while (k0 < new_lo) {
+                            if (std::isnan(mean_sq[k0])) --nan_in_window;
                             run_num -= mean_sq[k0];
                             run_den -= sum_sq[k0];
                             ++k0;
+                        }
+                        if (nan_in_window == 0 && std::isnan(run_num)) {
+                            // The window is NaN-free again but the accumulators
+                            // were poisoned; rebuild them from the window data.
+                            run_num = 0.0;
+                            run_den = 0.0;
+                            for (size_t kk = k0; kk <= k1; ++kk) {
+                                run_num += mean_sq[kk];
+                                run_den += sum_sq[kk];
+                            }
                         }
                     }
                 }
@@ -630,7 +731,7 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
 PYBIND11_MODULE(seismic_3d_core, m) {
     m.doc() = "Native 3D seismic volume processing and slice extraction acceleration";
     m.def("fast_slice_extract", &fast_slice_extract, py::arg("volume"), py::arg("axis"), py::arg("index"));
-    m.def("fast_slice_to_indexed8", &fast_slice_to_indexed8, py::arg("volume"), py::arg("axis"), py::arg("index"));
+    m.def("fast_slice_to_indexed8", &fast_slice_to_indexed8, py::arg("volume"), py::arg("axis"), py::arg("index"), py::arg("value_range") = py::none());
     m.def("fast_resample_volume_3d", &fast_resample_volume_3d, py::arg("volume"), py::arg("target_shape"));
     m.def("compute_coherence_3d", &compute_coherence_3d, py::arg("volume"), py::arg("inline_window") = 3, py::arg("crossline_window") = 3, py::arg("sample_window") = 3);
     m.def("marching_cubes_3d", &marching_cubes_3d, py::arg("volume"), py::arg("isovalue") = 0.0);

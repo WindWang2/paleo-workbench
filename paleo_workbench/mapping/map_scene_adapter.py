@@ -45,6 +45,7 @@ class LegacyDocumentSceneAdapter:
         project_crs: str | None,
         visibility: Mapping[str, bool] | None = None,
         records: Iterable[Mapping[str, object]] | None = None,
+        layer_revisions: Mapping[str, int] | None = None,
         excluded_layer_ids: Iterable[str] = (),
         data_revisions: Mapping[str, int] | None = None,
         cache_owner: object | None = None,
@@ -67,6 +68,7 @@ class LegacyDocumentSceneAdapter:
             records=records,
             data_revisions=data_revisions,
             cache_owner=cache_owner,
+            layer_revisions=layer_revisions,
         )
         excluded = {str(layer_id) for layer_id in excluded_layer_ids}
         source_layers = tuple(layer for layer in source.layers if layer.id not in excluded)

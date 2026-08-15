@@ -7,7 +7,9 @@ geoviz visualization engine hook injections.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from decimal import Decimal
 import math
+import re
 from typing import Any, Callable, Generator
 import warnings
 
@@ -62,11 +64,18 @@ def _py_render_grid_rgba(
     index is selected by truncation toward zero; alpha is ``lut_alpha * opacity / 255``.
     """
     gz = np.ascontiguousarray(grid_z, dtype=np.float32)
+    if gz.ndim != 2:
+        # Parity with the C++ binding's argument validation.
+        raise ValueError("grid_z must be a 2-D (height, width) float32 array")
     height, width = gz.shape
     lut_buf = np.ascontiguousarray(lut, dtype=np.uint8)
+    if lut_buf.ndim != 2 or lut_buf.shape[0] < 1 or lut_buf.shape[1] != 4:
+        # Parity with the C++ binding: malformed LUTs raise instead of
+        # silently returning an all-zero raster (issue #446).
+        raise ValueError(
+            "lut must be a (lut_size, 4) RGBA uint8 array with at least one entry"
+        )
     out = np.zeros((height, width, 4), dtype=np.uint8)
-    if lut_buf.shape[0] < 1 or lut_buf.shape[1] != 4:
-        return out
     if not (gamma > 0.0):
         gamma = 1.0
     have_range = (hi - lo) > 0.0
@@ -76,7 +85,12 @@ def _py_render_grid_rgba(
     finite = np.isfinite(gz)
     valid = finite
     if mask is not None:
-        valid = valid & (np.ascontiguousarray(mask, dtype=np.uint8) != 0)
+        mask_buf = np.ascontiguousarray(mask, dtype=np.uint8)
+        if mask_buf.ndim != 2 or mask_buf.shape != gz.shape:
+            # Parity with the C++ binding: a mis-shaped mask raises instead of
+            # silently broadcasting (issue #446).
+            raise ValueError("mask must match grid_z shape")
+        valid = valid & (mask_buf != 0)
 
     with np.errstate(invalid="ignore", over="ignore"):
         if have_range:
@@ -99,7 +113,18 @@ def _py_render_grid_rgba(
 # Pure-Python Fallback Implementations
 # ---------------------------------------------------------------------------
 def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndarray:
-    vol = np.asarray(volume)
+    # Parity with the pybind11 `int` caster: values outside the C++ int range
+    # raise TypeError on the native path before any other validation.
+    if not (-(2**31) <= int(axis) < 2**31) or not (-(2**31) <= int(index) < 2**31):
+        raise TypeError(
+            f"axis and index must fit in a C++ int (got axis={axis}, index={index})"
+        )
+    # float32 dtype contract: the C++ side accepts any numeric dtype via
+    # forcecast and downcasts to float32 (issue #446), so the fallback does
+    # the same instead of silently preserving float64.
+    vol = np.asarray(volume, dtype=np.float32)
+    if vol.ndim != 3:
+        raise RuntimeError("Input volume must be 3D")
     axis_idx = int(axis) % vol.ndim
     dim = vol.shape[axis_idx]
     if dim == 0:
@@ -112,28 +137,35 @@ def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndar
 
 
 def _py_fast_slice_to_indexed8(
-    volume: np.ndarray, axis: int, index: int
+    volume: np.ndarray, axis: int, index: int, value_range: tuple[float, float] | None = None
 ) -> tuple[np.ndarray, float, float]:
     """Pure-Python parity fallback for ``seismic_3d_core.fast_slice_to_indexed8``.
 
     Mirrors the C++ hot path (``native/seismic_3d_core/src/seismic_3d_core.cpp``):
-    non-finite samples are excluded from the min/max stretch; axis-2 (time)
-    slices larger than 65,536 cells use the same stride-4 sampled min/max;
-    non-finite pixels render as 0; and a degenerate (constant / all-invalid)
-    slice fills 0 and reports the range ``(0.0, 0.0)``.
+    non-finite samples are excluded from the min/max stretch; every element
+    contributes to the min/max (min/max-preserving — the old stride-4 sample
+    could skip both extrema on large time slices); an optional ``value_range``
+    ``(vmin, vmax)`` overrides the per-slice stretch so all slices of a volume
+    share one color mapping; non-finite pixels render as 0; and a degenerate
+    (constant / all-invalid) range fills 0 and reports ``(0.0, 0.0)``.
     """
     slice_data = _py_fast_slice_extract(volume, axis, index)
-    axis_idx = int(axis) % np.asarray(volume).ndim
-    flat = slice_data.reshape(-1)
-    # Stride-4 sampled stretch pass only on the axis-2 slice path, like C++.
-    sampled = flat[::4] if (axis_idx == 2 and flat.size > 65536) else flat
-    finite = sampled[np.isfinite(sampled)]
-    if finite.size > 0:
-        v_min = float(finite.min())
-        v_max = float(finite.max())
+    if value_range is not None:
+        v_min = float(value_range[0])
+        v_max = float(value_range[1])
     else:
-        v_min = v_max = 0.0
-    if v_min >= v_max:
+        flat = slice_data.reshape(-1)
+        finite = flat[np.isfinite(flat)]
+        if finite.size > 0:
+            v_min = float(finite.min())
+            v_max = float(finite.max())
+        else:
+            v_min = v_max = 0.0
+    if (
+        v_min >= v_max
+        or not math.isfinite(v_min)
+        or not math.isfinite(v_max)
+    ):
         return np.zeros(slice_data.shape, dtype=np.uint8), 0.0, 0.0
     inv_range = np.float32(255.0) / np.float32(v_max - v_min)
     with np.errstate(invalid="ignore", over="ignore"):
@@ -156,19 +188,36 @@ def _py_fast_resample_volume_3d(
     t0, t1, t2 = target_shape
     if t0 <= 0 or t1 <= 0 or t2 <= 0:
         raise ValueError("target_shape elements must all be positive")
-    # Mirror the C++ sampling grid exactly: src = min(s-1, trunc(i * s/t))
-    # computed in float32, NOT linspace endpoints (audit A1/I4 — the previous
-    # linspace grid disagreed with the native path at 23/32 positions for a
-    # 100→32 downsample, so preview volumes differed by backend).
-    def _src_indices(size: int, target: int) -> np.ndarray:
+    # Mirror the C++ peak-preserving stride-block decimation (issue #419)
+    # exactly: each target cell aggregates its source stride block and keeps
+    # the sample with the largest |value| (sign preserved, first-wins ties);
+    # a block containing any NaN yields NaN. The block bounds use the same
+    # float32 trunc(i * s/t) arithmetic as the C++ side (audit A1/I4), with
+    # the last target's block forced to the source edge.
+    def _blocks(size: int, target: int) -> tuple[np.ndarray, np.ndarray]:
         step = np.float32(size) / np.float32(max(1, target))
-        idx = (np.arange(target, dtype=np.float32) * step).astype(np.int64)
-        return np.minimum(size - 1, idx)
+        lo = (np.arange(target, dtype=np.float32) * step).astype(np.int64)
+        nxt = np.empty(target, dtype=np.int64)
+        nxt[:-1] = (np.arange(1, target, dtype=np.float32) * step).astype(np.int64) - 1
+        nxt[-1] = size - 1
+        hi = np.maximum(lo, nxt)  # upsampling: single-sample blocks
+        return lo, hi
 
-    idx0 = _src_indices(s0, t0)
-    idx1 = _src_indices(s1, t1)
-    idx2 = _src_indices(s2, t2)
-    return vol[np.ix_(idx0, idx1, idx2)]
+    lo0, hi0 = _blocks(s0, t0)
+    lo1, hi1 = _blocks(s1, t1)
+    lo2, hi2 = _blocks(s2, t2)
+
+    out = np.empty((t0, t1, t2), dtype=np.float32)
+    for i in range(t0):
+        for j in range(t1):
+            for k in range(t2):
+                sub = vol[lo0[i] : hi0[i] + 1, lo1[j] : hi1[j] + 1, lo2[k] : hi2[k] + 1]
+                if np.isnan(sub).any():
+                    out[i, j, k] = np.nan
+                    continue
+                flat = sub.ravel()  # C order: same scan order as the C++ loops
+                out[i, j, k] = flat[int(np.argmax(np.abs(flat)))]
+    return out
 
 
 def _py_compute_coherence_3d(
@@ -261,6 +310,10 @@ def _py_minmax_downsample(
         )
     if target_pixels <= 0:
         raise ValueError(f"target_pixels must be positive (got {target_pixels})")
+    if target_pixels > (2**31 - 1) // 2:
+        # Parity with well_log_core's C++ guard: a target_pixels this large
+        # would overflow the int arithmetic in the native implementation.
+        raise ValueError("target_pixels too large (would overflow)")
 
     n_pts = len(d)
     if n_pts <= target_pixels * 2:
@@ -301,45 +354,145 @@ def _py_minmax_downsample(
     return np.array(out_d, dtype=np.float32), np.array(out_v, dtype=np.float32)
 
 
+def _wl_token_value(tok: str, null_value: float) -> float:
+    """Parse one whitespace-delimited LAS token with C++ from_chars semantics.
+
+    ``float()`` handles the well-formed cases (including ``inf``/``nan``); when
+    it rejects the token, the numeric prefix is parsed instead — the C++ side's
+    std::from_chars stops at the first non-numeric character (``0x1p3`` -> 0.0,
+    ``1.0<NBSP>2.5`` -> 1.0, ``123abc`` -> 123.0). Tokens with no numeric
+    prefix are NaN. Inf is mapped to NaN like the C++ tokenizer.
+    """
+    if not tok:
+        return np.nan
+    if tok[0].isspace():
+        # float() would silently skip leading Unicode whitespace (e.g. NBSP)
+        # that the C++ from_chars treats as token content; parse the prefix.
+        val = None
+    else:
+        try:
+            val = float(tok)
+        except ValueError:
+            val = None
+    if val is None:
+        m = _NUM_PREFIX_RE.match(tok)
+        if m is None:
+            return np.nan
+        val = float(m.group(0))
+    if abs(val) < 1e-300:
+        # std::from_chars reports result_out_of_range for values that round to
+        # zero (|exact| < half of the smallest double subnormal, 2**-1075) and
+        # the C++ side maps that to NaN, while Python float() silently
+        # underflows to 0.0. Compare the exact decimal token so genuine
+        # subnormals survive (``5e-324`` -> 5e-324) but true underflow is NaN
+        # (``1e-324``, ``1e-999``).
+        try:
+            if Decimal(tok) and abs(Decimal(tok)) < _DOUBLE_MIN_SUBNORMAL:
+                return np.nan
+        except Exception:  # noqa: BLE001 — non-decimal token: nothing to do
+            pass
+    if math.isnan(val) or math.isinf(val) or val == null_value:
+        return np.nan
+    return val
+
+
+# std::from_chars (general format) numeric-prefix pattern: optional sign,
+# decimal mantissa with optional fraction, optional exponent. No hex floats.
+_NUM_PREFIX_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+
+# Half the smallest positive double subnormal (2**-1075): the exact
+# underflow boundary where std::from_chars switches from returning the rounded
+# subnormal to reporting result_out_of_range.
+_DOUBLE_MIN_SUBNORMAL = Decimal(2) ** -1075
+
+
 def _py_fast_las_parse_data(
     content: str, null_value: float = -999.0
 ) -> tuple[tuple[str, ...], np.ndarray]:
-    lines = content.splitlines()
+    """Pure-Python parity fallback for ``well_log_core.fast_las_parse_data``.
+
+    Must mirror the C++ tokenizer exactly (issue #421): lines split on ``\\n``
+    only (NOT on VT/FF like ``str.splitlines``), tokens split on the ASCII
+    whitespace set used by the C++ side (``\\x0b``/``\\x0c`` are separators,
+    U+00A0 NBSP is a regular token character), tokens parse with from_chars
+    numeric-prefix semantics (``0x1p3`` -> ``0.0``, ``1.0<NBSP>2.5`` -> ``1.0``),
+    no inline ``~A`` mnemonics yields an EMPTY header tuple (no fabricated
+    ``COL_n``), and the long-row truncation warning fires only when headers
+    were declared.
+    """
+    if isinstance(content, bytes):
+        # pybind11's std::string caster accepts bytes verbatim; mirror it.
+        content = content.decode("utf-8", errors="replace")
+    elif not isinstance(content, str):
+        raise TypeError("content must be a str or bytes LAS payload")
+
     in_data = False
+    in_curve_info = False
+    curve_mnemonics: list[str] = []
     headers: list[str] = []
     rows: list[list[float]] = []
 
-    for line in lines:
-        stripped = line.strip()
+    for line in content.split("\n"):
+        # C++ skips leading wl_is_space chars only — ASCII whitespace, not the
+        # full Unicode set (an NBSP-leading line must stay a NaN token).
+        stripped = line.lstrip(" \t\r\v\f")
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped.startswith("~A") or stripped.startswith("~a"):
-            in_data = True
-            rest = stripped[2:]
-            if rest and rest[0] in " \t":
-                headers = rest.split()
-            else:
-                headers = []
+        if stripped.startswith("~"):
+            section = stripped[1:2].lower()
+            if section == "c":
+                # ~CURVE block: the authoritative curve list (CWLS ~C section),
+                # mirroring the C++ parser (workbench #433).
+                in_curve_info = True
+                in_data = False
+                continue
+            if section == "a":
+                # Start of the data section. Inline tokens are only treated as
+                # column headers when separated from `~A` by whitespace
+                # (`~A DEPT GR DEN`); a directly-attached suffix is part of the
+                # section name (`~Ascii` must not yield "scii"). Per CWLS the
+                # trailing words of `~A` (e.g. "~A LOG DATA") are a title, not
+                # headers, so the ~CURVE mnemonics win whenever the file
+                # declares a ~CURVE block.
+                in_data = True
+                in_curve_info = False
+                rest = stripped[2:]
+                if rest and rest[0] in " \t":
+                    inline_headers = [
+                        t for t in re.split(r"[ \t\r\n\v\f]+", rest) if t
+                    ]
+                else:
+                    inline_headers = []
+                headers = list(curve_mnemonics) if curve_mnemonics else inline_headers
+                continue
+            in_curve_info = False
+            continue
+        if in_curve_info:
+            # "MNEM.UNIT : DESCRIPTION" -> mnemonic up to the first dot. Token
+            # splitting stays on the ASCII whitespace set the C++ istringstream
+            # uses; str.split() would additionally split on NBSP.
+            first = next(
+                (t for t in re.split(r"[ \t\r\n\v\f]+", stripped) if t), None
+            )
+            if first is not None:
+                curve_mnemonics.append(first.split(".", 1)[0])
             continue
         if in_data:
-            tokens = stripped.split()
             row = []
-            for tok in tokens:
-                try:
-                    val = float(tok)
-                    if math.isnan(val) or math.isinf(val) or val == null_value:
-                        row.append(np.nan)
-                    else:
-                        row.append(val)
-                except ValueError:
-                    row.append(np.nan)
+            for tok in re.split(r"[ \t\r\n\v\f]+", stripped):
+                if not tok:
+                    continue
+                row.append(_wl_token_value(tok, null_value))
             if row:
                 rows.append(row)
 
     if not headers and rows:
-        headers = [f"COL_{i}" for i in range(len(rows[0]))]
+        # Parity with C++: no inline mnemonics -> empty headers; the column
+        # count is taken from the first data row instead of fabricated names.
+        num_cols = len(rows[0])
+    else:
+        num_cols = len(headers)
 
-    num_cols = len(headers)
     truncated = 0
     if num_cols and rows:
         norm_rows = []
@@ -351,18 +504,20 @@ def _py_fast_las_parse_data(
                 r = r + [np.nan] * (num_cols - len(r))
             norm_rows.append(r)
         rows = norm_rows
-        if truncated:
+        # C++ emits the truncation warning only when headers were declared
+        # (with empty headers, extra columns are dropped silently).
+        if truncated and headers:
             warnings.warn(
                 f"LAS data has {truncated} row(s) with more columns than the "
                 f"{num_cols} declared header(s); extra columns were truncated",
                 UserWarning,
-                stacklevel=2,
+                stacklevel=1,
             )
 
     arr = (
         np.array(rows, dtype=np.float64)
         if rows
-        else np.zeros((0, len(headers)), dtype=np.float64)
+        else np.zeros((0, num_cols), dtype=np.float64)
     )
     return tuple(headers), arr
 

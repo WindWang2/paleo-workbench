@@ -25,17 +25,68 @@ shell, no GUI workflow code, no sample data, no symbol library:
 - `drawing/single_factor/masks.py` — domain / barrier masks
 - `drawing/single_factor/direction_corridor.py` — anisotropic direction blend
 - `drawing/compute/__init__.py`, `drawing/compute/performance.py` — CPU/GPU
-  settings plumbing (pure; `performance.py` retains upstream's *lazy*
-  `from PyQt6.QtCore import QSettings` inside two unused persistence helpers —
-  unreachable from the interpolation path, and never imported at runtime; the
-  host's `test_constrained_idw_integration` gate asserts PyQt6 never loads).
+  settings plumbing (pure; see *Local modifications* below — `performance.py`
+  is the one vendored file that is **not** byte-identical to upstream).
 
 The package `__init__.py` files here are Qt-free stubs (the upstream
 `drawing/__init__.py` and `drawing/single_factor/__init__.py` import PyQt6 and
 the GUI workflow, which a PySide6 host must not load).
 
 The copied modules are **byte-for-byte identical** to the upstream SHA above
-(verified at vendor time).
+(verified at vendor time), **except for the local modifications listed below**.
+
+## Local modifications
+
+- `drawing/compute/performance.py` was rewritten by the host in the two
+  persistence helpers (numerical behavior of the interpolation path is
+  unchanged):
+  - Upstream's lazy `from PyQt6.QtCore import QSettings` import was **removed**.
+  - `_load_from_qsettings` now reads the process-level environment knob
+    `PALEO_HAIYOU_CPU_PERCENT` (integer CPU-percent budget) instead of
+    QSettings, and additionally pins `hardware_accel = False` /
+    `gpu_percent = 0`.
+  - `_save_to_qsettings` is a no-op (the host owns any GUI preference storage).
+  - The helper docstrings/comments describe the PySide host boundary.
+
+- `drawing/single_factor/constrained_engine.py` has two host-driven behavior
+  fixes (see issues #370 / #382 in `paleo-workbench`):
+  - Barrier blanking band: the returned display grid keeps the corridor as
+    nodata (NaN) instead of filling it with `value_min` (upstream's "green
+    band = 0" convention for a normalized [0,1] surface). The host passes
+    real factor units, so the old fill fabricated an observed-minimum band
+    along every fault.
+  - Barrier line-of-sight: when active barriers exist the engine always uses
+    the per-cell LOS point path (upstream switched to a vectorized batch +
+    narrow near-barrier refine above 4096 domain cells, which leaked values
+    past dead-end barriers on larger grids; the host caps grid resolution at
+    200, so the point path stays responsive).
+
+  To re-verify the parity of every other vendored file against the upstream
+  SHA, diff this directory against the upstream checkout and expect
+  `performance.py` and the two `constrained_engine.py` hunks above to differ:
+  `grep -rn "PALEO_\|PySide\|PyQt6" .` should hit only `performance.py`.
+
+- `drawing/single_factor/constrained_engine.py` carries host performance
+  modifications (numerical results are unchanged; verified by the parity
+  tests in `tests/test_constrained_idw_engine_parity.py`, which compare the
+  vectorized implementations bit-for-bit against the reference scalar loops):
+  - `_barrier_blocked_mask` / `_offset_barrier_blocked_mask`: vectorized
+    replacements for the per-(cell, well, segment) `is_blocked_by_barrier`
+    LOS loop, with identical `strict_segments_intersect` arithmetic.
+  - `_interpolate_grid_point_euclidean`: vectorized well-candidate selection
+    for the pure-Euclidean IDW case (identical sort / weighting semantics).
+  - `build_barrier_blank_mask`: vectorized stadium-distance buffer instead of
+    the sampling + per-cell `_point_within_polyline_stadium_buffer` loop.
+  - `smooth_valid_grid` / `refine_domain_boundary_transition`: vectorized
+    neighbor-weight accumulation (same per-element float operations and
+    accumulation order).
+  - `apply_well_residual_anchoring`: per-well patch windows vectorized with
+    NumPy (same per-element arithmetic; `np.hypot` vs `math.hypot` may differ
+    by one ulp on ~0.6% of distances, so anchoring parity is asserted within
+    tight float tolerance).
+- `drawing/single_factor/fast_grid.py` reuses a module-level
+  `ThreadPoolExecutor` across calls instead of constructing one per
+  interpolation (same work distribution, no numerical change).
 
 ## What was NOT vendored
 

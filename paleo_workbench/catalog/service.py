@@ -60,9 +60,68 @@ from paleo_workbench.catalog.storage import (
     trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
-from paleo_workbench.catalog.store import CatalogStore
+from paleo_workbench.catalog.store import CatalogStore, catalog_file_for
 from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
+
+
+class _BatchSave:
+    """Context manager returned by :meth:`DataCatalogService.batch_save`.
+
+    Defers the canonical store write until the outermost batch exits; on a
+    failed body (or failed flush) the document is restored to a deep copy of
+    its pre-batch state so memory never diverges from the unwritten disk.
+    """
+
+    def __init__(self, service: "DataCatalogService") -> None:
+        self._service = service
+        self._snapshot: CatalogDocument | None = None
+
+    def __enter__(self) -> "DataCatalogService":
+        service = self._service
+        with service._lock:
+            if service._batch_depth == 0:
+                self._snapshot = service.document.model_copy(deep=True)
+            service._batch_depth += 1
+        return service
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        service = self._service
+        with service._lock:
+            service._batch_depth -= 1
+            if exc_type is not None:
+                # Body failed: nothing was written; restore the pre-batch
+                # document so the in-memory state matches the disk.
+                if service._batch_depth == 0 and self._snapshot is not None:
+                    service.document = self._snapshot
+                    service._invalidate_maps()
+                return False
+            if service._batch_depth:
+                return False  # an outer batch still owns the flush
+            try:
+                service._store.save(service.document)
+            except Exception:
+                if self._snapshot is not None:
+                    service.document = self._snapshot
+                    service._invalidate_maps()
+                raise
+            service._sync_index_best_effort()
+            return False
+class CatalogStaleWriteError(OSError):
+    """Raised when the canonical catalog advanced past this session's baseline.
+
+    The catalog is rewritten as a whole document; without an ownership
+    protocol a second process holding an older in-memory snapshot silently
+    overwrites (last-writer-wins) everything the first process committed
+    (#411).  Save-time stale detection refuses the overwrite instead.
+    """
+
+
+def _disk_mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 class DataCatalogService:
@@ -83,6 +142,12 @@ class DataCatalogService:
         # payloads (verify_integrity) on a worker thread while the UI thread
         # may be saving. Re-entrant so public methods can nest under _save.
         self._lock = threading.RLock()
+        # Active :meth:`batch_save` nesting depth: >0 defers canonical writes.
+        self._batch_depth = 0
+        # Cross-process stale-write baseline: mtime of the canonical file as
+        # of open / last successful save. A save whose file advanced past it
+        # means another process wrote since we last looked (#411).
+        self._disk_mtime_ns: int | None = None
         # Maintained id→object indexes (P4): every document list mutation goes
         # through ``_add_*`` / ``_remove_*`` so lookups stay O(1) instead of
         # linear scans. ``None`` = not yet built (built lazily from the
@@ -256,6 +321,7 @@ class DataCatalogService:
         document = store.load()
         index = CatalogIndex(project_path)
         service = cls(project_path, document, store, index)
+        service._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(project_path))
         if ensure_index:
             service._ensure_index_fresh()
         if sweep_temp:
@@ -287,15 +353,43 @@ class DataCatalogService:
         """Persist canonical document and sync the index.
 
         The revision only advances if the canonical save succeeds, so a
-        failed save leaves no half-bumped state.
+        failed save leaves no half-bumped state. Inside :meth:`batch_save`
+        the canonical write is deferred to the context exit (one write for
+        the whole batch); the index still syncs incrementally so index-backed
+        reads and import dedup stay fresh during the batch.
+        failed save leaves no half-bumped state.  Before writing, the file's
+        mtime is compared against this session's baseline: a document that
+        advanced on disk since we last read/wrote it was committed by another
+        process, and overwriting it would silently drop that process's data
+        (last-writer-wins, #411) — refuse instead.
         """
         with self._lock:
+            baseline = self._disk_mtime_ns
+            current = _disk_mtime_ns(catalog_file_for(self.project_path))
+            if baseline is None:
+                # The canonical file did not exist when this session opened
+                # (or first saved); if it exists now, another process created
+                # it since and an overwrite would drop its commits.
+                if current is not None:
+                    raise CatalogStaleWriteError(
+                        "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
+                        "本次保存已中止。请重新打开工程后重试。"
+                    )
+            elif current is not None and current != baseline:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
+                    "本次保存已中止。请重新打开工程后重试。"
+                )
             self.document.catalog_revision += 1
+            if self._batch_depth:
+                self._sync_index_best_effort()
+                return
             try:
                 self._store.save(self.document)
             except Exception:
                 self.document.catalog_revision -= 1
                 raise
+            self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
             self._sync_index_best_effort()
 
     def _sync_index_best_effort(self) -> None:
@@ -308,6 +402,23 @@ class DataCatalogService:
             except Exception:
                 # The index is a cache; canonical truth is already saved.
                 pass
+
+    def batch_save(self) -> "_BatchSave":
+        """Context manager merging many mutator calls into ONE canonical write.
+
+        While active, :meth:`_save` bumps the revision and keeps the SQLite
+        index incrementally fresh (so index-backed dedup/reads stay O(log N))
+        but DEFERS the canonical ``catalog.json`` write; a single store write
+        happens at context exit. Bulk registration / recompute loops therefore
+        pay one full-document serialization + fsync instead of one per version
+        commit (the O(N²) write path, C38).
+
+        Atomicity is preserved: when the body raises, the document is restored
+        to its pre-batch state and nothing is persisted; a failed flush
+        likewise restores and re-raises. Nested batches are supported — only
+        the outermost exit flushes.
+        """
+        return _BatchSave(self)
 
     def _ensure_index_fresh(self) -> None:
         try:
@@ -658,9 +769,15 @@ class DataCatalogService:
         run_id: str | None = None,
         version_metadata: dict[str, Any] | None = None,
     ) -> DataVersion:
-        """Create a result asset and register its version in ONE locked,
-        atomic operation (thread-safe: workers must not mutate
+        """Create a result asset and register its version in ONE atomic
+        document operation (thread-safe: workers must not mutate
         ``document.assets`` directly — this is the only sanctioned path).
+
+        The payload copy+hash (potentially large, disk-bound) happens OUTSIDE
+        the lock: holding the lock across it would stall every concurrent
+        GUI-thread catalog call (``register_run``/``add_tags``/...) for the
+        whole I/O duration.  Only the document mutation and canonical save
+        are locked, so asset + version + run linkage still commit atomically.
 
         When *run_id* is given, the new version's lineage parents are set to
         the run's input versions, so DERIVED/OUTPUT results stay traceable to
@@ -672,30 +789,48 @@ class DataCatalogService:
         On failure the newly-created asset is rolled back from the document,
         so no half-registered asset survives. Returns the committed version.
         """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise CatalogError(f"Source file not found: {source_path}")
         with self._lock:
             parents: list[str] = []
+            run: DataRun | None = None
             if run_id is not None:
                 self._ensure_maps()
                 known = self._version_by_id
+                run = self.get_run(run_id)
                 parents = [
-                    pid
-                    for pid in self.get_run(run_id).input_version_ids
-                    if pid in known
+                    pid for pid in run.input_version_ids if pid in known
                 ]
             asset = self._new_asset(name, type, format, asset_metadata)
+        # Copy+hash+fsync of the payload — no lock held while the bytes land
+        # on disk, so GUI-thread catalog calls never wait for worker I/O.
+        version, payload = self._build_version(
+            asset, source_path, stage,
+            version_id=None,
+            parent_version_ids=parents,
+            run_id=run_id,
+            metadata=version_metadata,
+            move=False,
+        )
+        with self._lock:
             self._add_asset(asset)
+            self._add_version(version)
+            asset.current_version_id = version.id
+            run_output_added = False
+            if run is not None and version.id not in run.output_version_ids:
+                run.output_version_ids.append(version.id)
+                run_output_added = True
             try:
-                return self.register_version(
-                    asset.id,
-                    source_path,
-                    stage,
-                    parent_version_ids=parents,
-                    run_id=run_id,
-                    metadata=version_metadata,
-                )
+                self._save()
             except Exception:
-                self._remove_asset(asset)
+                if run_output_added:
+                    run.output_version_ids.remove(version.id)
+                self._rollback(
+                    assets=[asset], versions=[version], payload=payload,
+                )
                 raise
+            return version
 
     # -- import / link / materialize -----------------------------------------
 
@@ -742,34 +877,40 @@ class DataCatalogService:
         the same size, no copy happens and the version references the shared
         blob (O(1)). Every managed RAW import also registers its payload in
         the content store so later imports of the same content dedup to it.
+
+        Runs fully under the service lock (re-entrant with
+        :meth:`register_version`): the new asset is added and persisted in
+        the same locked section, so a concurrent save can never persist the
+        asset without its version (zombie zero-version asset on disk).
         """
-        source_path = Path(source_path)
-        if not source_path.is_file():
-            raise CatalogError(f"Source file not found: {source_path}")
-        asset: DataAsset | None = None
-        if asset_id is not None:
-            target = self._asset_or_raise(asset_id)
-        else:
-            target = self._new_asset(
-                name or source_path.name, type, format, metadata
-            )
-            if (
-                _legacy_resource_id is not None
-                and target.legacy_resource_id is None
-                and self._live_asset_by_legacy_id(_legacy_resource_id) is None
-            ):
-                target.legacy_resource_id = _legacy_resource_id
-            asset = target
-            self._add_asset(target)
-        try:
-            return self.register_version(
-                target.id, source_path, DataStage.RAW, metadata=metadata,
-                known_sha256=known_sha256, _register_blob=True,
-            )
-        except Exception:
-            if asset is not None and asset in self.document.assets:
-                self._remove_asset(asset)
-            raise
+        with self._lock:
+            source_path = Path(source_path)
+            if not source_path.is_file():
+                raise CatalogError(f"Source file not found: {source_path}")
+            asset: DataAsset | None = None
+            if asset_id is not None:
+                target = self._asset_or_raise(asset_id)
+            else:
+                target = self._new_asset(
+                    name or source_path.name, type, format, metadata
+                )
+                if (
+                    _legacy_resource_id is not None
+                    and target.legacy_resource_id is None
+                    and self._live_asset_by_legacy_id(_legacy_resource_id) is None
+                ):
+                    target.legacy_resource_id = _legacy_resource_id
+                asset = target
+                self._add_asset(target)
+            try:
+                return self.register_version(
+                    target.id, source_path, DataStage.RAW, metadata=metadata,
+                    known_sha256=known_sha256, _register_blob=True,
+                )
+            except Exception:
+                if asset is not None and asset in self.document.assets:
+                    self._remove_asset(asset)
+                raise
 
     def link_external(
         self,
@@ -871,6 +1012,12 @@ class DataCatalogService:
 
         When *parent_version_ids* is omitted, the parent is inferred from the
         working-copy directory created by :meth:`create_working_copy`.
+
+        ``name`` names the new ASSET when *asset_id* is None; when committing
+        onto an existing asset it is stored as ``metadata["name"]`` on the new
+        version (so the New Version dialog's "version name" input survives
+        persistence instead of being silently dropped). An empty name writes
+        no metadata key.
         """
         working_path = Path(working_path)
         if parent_version_ids is None:
@@ -894,10 +1041,13 @@ class DataCatalogService:
                 if asset in self.document.assets:
                     self._remove_asset(asset)
                 raise
+        version_metadata = dict(metadata or {})
+        if name:
+            version_metadata["name"] = name
         return self.register_version(
             asset_id, working_path, stage,
             parent_version_ids=parent_version_ids,
-            run_id=run_id, metadata=metadata, move=True,
+            run_id=run_id, metadata=version_metadata, move=True,
             _restore_payload_to=working_path,
         )
 
@@ -1022,10 +1172,20 @@ class DataCatalogService:
                     raise CatalogError(
                         f"cannot change terminal run {run_id} from {run.status!r} to {status!r}"
                     )
+            before_status = run.status
+            before_parameters = dict(run.parameters)
             run.status = status
             if extra_parameters:
                 run.parameters.update(extra_parameters)
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                # Snapshot-rollback: a failed save must not leave the run
+                # half-updated in memory while the disk keeps the old state
+                # (failure-compensation paths rely on this, e.g. _fail_run).
+                run.status = before_status
+                run.parameters = before_parameters
+                raise
             return run
 
     # -- model registry --------------------------------------------------------
