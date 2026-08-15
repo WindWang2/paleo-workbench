@@ -45,6 +45,13 @@ class ProjectController:
         A non-cooperative worker may be detached for safe process shutdown,
         but a normal project replacement must not close its catalog underneath
         it.  Callers abort the replacement and leave the current session live.
+        Detached (timed-out) jobs are also part of the gate: they are no
+        longer owned by any page, so ``shutdown_workers`` reports them as
+        joined, yet their threads are still running — ending the session (or
+        the application) while one of them is alive tears down QApplication on
+        a running QThread (C18: "QThread: Destroyed while thread is still
+        running", SIGABRT).  The session stays live until the keeper drains;
+        the user closes again afterwards (documented UX).
         """
         self._session_generation += 1
         shell = getattr(self.window, "app_shell", None)
@@ -57,6 +64,15 @@ class ProjectController:
             except Exception:
                 self._session_generation += 1
                 return False
+        try:
+            from paleo_workbench.ui.thread_keeper import detached_job_keeper
+
+            if detached_job_keeper().job_count() > 0:
+                self._session_generation += 1
+                return False
+        except Exception:
+            self._session_generation += 1
+            return False
         self._close_catalog()
         try:
             from paleo_workbench.catalog import reset_catalog
