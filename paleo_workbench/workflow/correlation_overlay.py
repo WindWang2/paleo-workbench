@@ -191,9 +191,24 @@ def apply_correlation_tops_to_well_log_data(
         return data
     # The log axis is a depth axis in meters (MD); non-MD tops are skipped
     # with a warning instead of being plotted at numerically wrong positions
-    # (H8 — no silent domain conversion).
+    # (H8 — no silent domain conversion). When the log axis is a foot axis
+    # (DEPT.FT LAS), meter-domain MD tops are converted so they stay aligned
+    # instead of being misplaced by the ×3.28 factor (WL-4).
     domain_rows = [r for r in rows if str(r.get("depth_domain") or "MD") == "MD"]
     skipped = len(rows) - len(domain_rows)
+    axis_unit = str(getattr(data, "depth_unit", "") or "").strip().lower()
+    if axis_unit in {"ft", "f", "feet", "foot"}:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "correlation overlay: converting %d MD top(s) from meters to feet to match the %s depth axis",
+            len(domain_rows),
+            axis_unit,
+        )
+        domain_rows = [
+            {**r, "depth": float(r["depth"]) * 3.280839895013123}
+            for r in domain_rows
+        ]
     markers = markers_from_overlay_rows(domain_rows)
     if skipped:
         import logging

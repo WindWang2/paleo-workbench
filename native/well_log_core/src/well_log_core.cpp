@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cerrno>
 #include <cstdlib>
+#include <cctype>
 #include <limits>
 #include <algorithm>
 
@@ -193,12 +194,14 @@ inline WlToken wl_parse_token(const char* p, const char* end) {
 py::tuple fast_las_parse_data(const std::string& content, double null_value = -999.0) {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     std::vector<std::string> headers;
+    std::vector<std::string> curve_mnemonics;  // authoritative columns from ~CURVE
     std::vector<double> values;       // flat row-major buffer
     std::vector<size_t> row_widths;   // values per row (short rows pad to num_cols with NaN)
 
     {
         py::gil_scoped_release release;
         bool in_data = false;
+        bool in_curve_info = false;
         const char* base = content.data();
         const size_t n = content.size();
         size_t pos = 0;
@@ -214,21 +217,52 @@ py::tuple fast_las_parse_data(const std::string& content, double null_value = -9
             const char first = base[begin];
             if (first == '#') continue;
 
-            if (first == '~' && begin + 1 < line_end &&
-                (base[begin + 1] == 'A' || base[begin + 1] == 'a')) {
-                // Marks the start of the data section. Inline tokens are only
-                // treated as column headers when separated from `~A` by
-                // whitespace (`~A DEPT GR DEN`); a directly-attached suffix is
-                // part of the section name (`~Ascii` must not yield "scii").
-                in_data = true;
-                headers.clear();
-                if (begin + 2 < line_end &&
-                    (base[begin + 2] == ' ' || base[begin + 2] == '\t')) {
-                    std::istringstream h_stream(content.substr(begin + 2, line_end - (begin + 2)));
-                    std::string token;
-                    while (h_stream >> token) {
-                        headers.push_back(token);
+            if (first == '~' && begin + 1 < line_end) {
+                const char section = static_cast<char>(std::tolower(static_cast<unsigned char>(base[begin + 1])));
+                if (section == 'c') {
+                    // ~CURVE block: the authoritative curve list. Mnemonics
+                    // become the column headers (CWLS ~C section).
+                    in_curve_info = true;
+                    in_data = false;
+                    continue;
+                }
+                if (section == 'a') {
+                    // Start of the data section. Inline tokens are only
+                    // treated as column headers when separated from `~A` by
+                    // whitespace (`~A DEPT GR DEN`); a directly-attached suffix
+                    // is part of the section name (`~Ascii` must not yield
+                    // "scii"). Per CWLS the trailing words of `~A` (e.g.
+                    // "~A LOG DATA") are a title, not headers, so the ~CURVE
+                    // mnemonics win whenever the file declares a ~CURVE block.
+                    in_data = true;
+                    in_curve_info = false;
+                    std::vector<std::string> inline_headers;
+                    if (begin + 2 < line_end &&
+                        (base[begin + 2] == ' ' || base[begin + 2] == '\t')) {
+                        std::istringstream h_stream(content.substr(begin + 2, line_end - (begin + 2)));
+                        std::string token;
+                        while (h_stream >> token) {
+                            inline_headers.push_back(token);
+                        }
                     }
+                    if (!curve_mnemonics.empty()) {
+                        headers = curve_mnemonics;
+                    } else {
+                        headers = std::move(inline_headers);
+                    }
+                    continue;
+                }
+                in_curve_info = false;
+                continue;
+            }
+
+            if (in_curve_info) {
+                std::istringstream c_stream(content.substr(begin, line_end - begin));
+                std::string token;
+                if (c_stream >> token) {
+                    // "MNEM.UNIT : DESCRIPTION" -> mnemonic up to the first dot.
+                    const size_t dot = token.find('.');
+                    curve_mnemonics.push_back(dot == std::string::npos ? token : token.substr(0, dot));
                 }
                 continue;
             }

@@ -49,3 +49,65 @@ DEN.G/CC: Density
     assert data.shape == (3, 3)
     assert data[0, 0] == 1000.00
     assert np.isnan(data[2, 2])
+
+
+# ---------------------------------------------------------------------------
+# #433 — ~A trailing words are a title, not column headers; ~CURVE is the
+# authoritative column/header source (CWLS LAS 2.0: "~A LOG DATA").
+# ---------------------------------------------------------------------------
+
+_CURVE_BLOCK = """~CURVE INFORMATION
+ DEPT  .M                   : DEPTH
+ GR    .API                 : GAMMA RAY
+ RHOB  .G/CC                : BULK DENSITY
+"""
+
+_DATA_ROWS = """ 2000.00   45.2   2.35
+ 2001.00   52.1   2.38
+ 2002.00   61.8   2.41
+"""
+
+
+@pytest.mark.parametrize(
+    "a_line",
+    [
+        "~A LOG DATA",   # CWLS title form: must NOT become column headers
+        "~A DEPT GR DEN",  # true inline header form: same mnemonics as ~CURVE
+        "~A",            # bare marker
+        "~ASCII",        # attached suffix is part of the section name
+    ],
+)
+def test_433_headers_come_from_curve_block(a_line):
+    content = _CURVE_BLOCK + a_line + "\n" + _DATA_ROWS
+    for force_python in (False, True):
+        if force_python:
+            from paleo_workbench.native_backend import disabled_acceleration
+
+            with disabled_acceleration():
+                headers, data = fast_las_parse_data(content)
+        else:
+            headers, data = fast_las_parse_data(content)
+        assert headers == ("DEPT", "GR", "RHOB")
+        assert data.shape == (3, 3)
+
+
+def test_433_no_curve_block_keeps_inline_header_fallback():
+    from paleo_workbench.native_backend import disabled_acceleration
+
+    content = "~A DEPT GR DEN\n" + _DATA_ROWS
+    with disabled_acceleration():
+        headers, data = fast_las_parse_data(content)
+    assert headers == ("DEPT", "GR", "DEN")
+    assert data.shape == (3, 3)
+
+
+def test_433_curve_block_always_wins_over_inline_words():
+    """~A words that disagree with ~CURVE count must be ignored (2 != 3)."""
+    from paleo_workbench.native_backend import disabled_acceleration
+
+    content = _CURVE_BLOCK + "~A LOG DATA\n" + _DATA_ROWS
+    with disabled_acceleration():
+        headers, data = fast_las_parse_data(content)
+    assert headers == ("DEPT", "GR", "RHOB")
+    assert data.shape == (3, 3)
+    assert data[1, 2] == 2.38  # RHOB column survives

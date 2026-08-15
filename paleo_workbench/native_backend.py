@@ -306,6 +306,8 @@ def _py_fast_las_parse_data(
 ) -> tuple[tuple[str, ...], np.ndarray]:
     lines = content.splitlines()
     in_data = False
+    in_curve_info = False
+    curve_mnemonics: list[str] = []
     headers: list[str] = []
     rows: list[list[float]] = []
 
@@ -313,13 +315,28 @@ def _py_fast_las_parse_data(
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped.startswith("~A") or stripped.startswith("~a"):
-            in_data = True
-            rest = stripped[2:]
-            if rest and rest[0] in " \t":
-                headers = rest.split()
-            else:
-                headers = []
+        if stripped.startswith("~"):
+            section = stripped[1:2].lower()
+            if section == "c":
+                # ~CURVE block: authoritative curve list (CWLS ~C section).
+                in_curve_info = True
+                in_data = False
+                continue
+            if section == "a":
+                in_data = True
+                in_curve_info = False
+                rest = stripped[2:]
+                inline_headers = rest.split() if rest and rest[0] in " \t" else []
+                # The ~A trailing words are a title (e.g. "~A LOG DATA"), not
+                # column headers, in CWLS LAS 2.0; the ~CURVE mnemonics are the
+                # authoritative header/column source. Fall back to inline words
+                # only for files that carry no ~CURVE block.
+                headers = list(curve_mnemonics) if curve_mnemonics else inline_headers
+                continue
+            in_curve_info = False
+            continue
+        if in_curve_info:
+            curve_mnemonics.append(stripped.split()[0].split(".", 1)[0])
             continue
         if in_data:
             tokens = stripped.split()

@@ -90,6 +90,7 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
 
     data_headers = ()
     data_rows = ()
+    data_warning = ""
     try:
         import numpy as np
 
@@ -98,6 +99,10 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
         content = path.read_text(encoding="utf-8", errors="replace")
         _headers, arr = fast_las_parse_data(content, header.null_value)
         if arr.ndim == 2 and arr.shape[0] > 0:
+            if arr.shape[1] != len(curves):
+                data_warning = (
+                    f"数据表列数（{arr.shape[1]}）与曲线定义数（{len(curves)}）不一致"
+                )
             data_headers = tuple(c.mnemonic for c in curves[: arr.shape[1]])
             limit = min(arr.shape[0], 100)
             rows_list = []
@@ -115,6 +120,13 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
     except Exception:
         pass
 
+    if data_warning:
+        warning = "；".join(
+            w for w in (data_warning, "曲线列表已按行上限截断" if truncated else "") if w
+        )
+    else:
+        warning = "曲线列表已按行上限截断" if truncated else ""
+
     return PreviewResult(
         mode="well_log",
         title=resource.name,
@@ -128,7 +140,7 @@ def las_preview(resource: ResourceItem, settings: PreviewSettings) -> PreviewRes
         table_rows=rows,
         data_headers=data_headers,
         data_rows=data_rows,
-        warning="曲线列表已按行上限截断" if truncated else "",
+        warning=warning,
         truncated=truncated,
     )
 
