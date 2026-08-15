@@ -34,8 +34,13 @@ from PySide6.QtWidgets import (
 from geoviz import FormationTop
 
 from paleo_workbench.resources.export_service import default_export_dir
-from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDialog
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.pages.cross_well_export_dialog import CrossWellExportDialog
+from paleo_workbench.ui.pages.dtw_propagation_worker import (
+    DtwPropagationWorker,
+    bounded_dtw_band,
+)
 from paleo_workbench.viz import welllog_engine_adapter as engine_adapter
 from paleo_workbench.viz import welllog_multi_well_adapter as multi_adapter
 from paleo_workbench.viz.hosts.cross_well_host import CrossWellHost
@@ -75,6 +80,10 @@ class StratigraphyCorrelationPage(QWidget):
             "engine" if engine_adapter.welllog_engine_env_enabled() else "legacy"
         )
         self.correlation_engine = StratigraphicCorrelationEngine()
+        self._dtw_job = OwnedWorkerJob(self)
+        self._dtw_job.released.connect(self._on_dtw_job_released)
+        self._dtw_formation = ""
+        self._dtw_confidence = 0.0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -351,6 +360,8 @@ class StratigraphyCorrelationPage(QWidget):
             self.backend_combo.blockSignals(False)
         self._sync_backend_stack()
         if self._loaded_logs:
+            if self._dtw_job.is_running:
+                self._dtw_job.cancel()
             self._reload_current_section()
 
     def _on_backend_combo(self, _index: int) -> None:
@@ -428,6 +439,8 @@ class StratigraphyCorrelationPage(QWidget):
         so AppShell.shutdown_workers reclaims the engine view instead of
         relying on widget destruction.
         """
+        if self._dtw_job.is_running:
+            self._dtw_job.shutdown(wait_ms)
         self._release_engine_view()
         return True
 
@@ -507,21 +520,79 @@ class StratigraphyCorrelationPage(QWidget):
         if not wells:
             self.status_label.setText("参考拾取点没有关联井")
             return
+        if self._dtw_job.is_running:
+            # Second click while running acts as cooperative cancel.
+            self._dtw_job.cancel()
+            self.status_label.setText("正在取消 DTW 传播…")
+            return
         ref_well = wells[0]
         ref_depth = ref.depth_for_well(ref_well)
 
-        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence
+        # Leverage StratigraphicCorrelationEngine for top depth recommendation
+        # & confidence (dead wiring today: receives empty curves; keep cheap).
         rec = self.correlation_engine.recommend_top(
             ref_well=ref_well,
             target_well=wells[1] if len(wells) > 1 else ref_well,
             ref_top_depth=ref_depth,
         )
-
-        created = canvas.propagate_pick_via_dtw(ref_well, ref_depth, ref.formation_name)
-        self.status_label.setText(
-            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 (置信度: {rec.confidence:.2f})"
-            "（点击接受 / 右键拒绝）"
+        n_samples = self._max_loaded_curve_samples()
+        band = bounded_dtw_band(n_samples)
+        worker = DtwPropagationWorker(
+            canvas,
+            ref_well=ref_well,
+            ref_depth=ref_depth,
+            formation=ref.formation_name,
+            n_samples=n_samples,
+            band_radius=band,
         )
+        self._dtw_formation = ref.formation_name
+        self._dtw_confidence = rec.confidence
+        self.dtw_btn.setEnabled(False)
+        self.status_label.setText("DTW 传播中…（再次点击可取消）")
+        self._dtw_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed, worker.cancelled),
+            result_connections=(
+                (worker.progress, self._on_dtw_progress),
+                (worker.finished, self._on_dtw_finished),
+                (worker.failed, self._on_dtw_failed),
+                (worker.cancelled, self._on_dtw_cancelled),
+            ),
+            cancel=worker.cancel,
+            target=canvas,
+        )
+
+    def _max_loaded_curve_samples(self) -> int:
+        """Largest curve length across loaded wells (band-cap safety bound)."""
+        n = 0
+        for data in self._loaded_logs:
+            for curve in getattr(data, "curves", None) or []:
+                vals = getattr(curve, "values", None)
+                if vals is None:
+                    vals = getattr(curve, "data", None)
+                if vals is not None:
+                    n = max(n, len(vals))
+        return n
+
+    def _on_dtw_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            self.status_label.setText(f"DTW 传播中… {done}/{total} 井（再次点击可取消）")
+
+    def _on_dtw_finished(self, created) -> None:
+        self.status_label.setText(
+            f"DTW 已为层位 {self._dtw_formation} 生成 {len(created)} 个建议拾取 "
+            f"(置信度: {self._dtw_confidence:.2f})（点击接受 / 右键拒绝）"
+        )
+
+    def _on_dtw_failed(self, message: str) -> None:
+        self.status_label.setText(f"DTW 传播失败: {message}")
+
+    def _on_dtw_cancelled(self) -> None:
+        self.status_label.setText("DTW 传播已取消")
+
+    def _on_dtw_job_released(self) -> None:
+        # Restore toolbar enablement matching the active backend (legacy only).
+        self._sync_backend_stack()
 
     def _on_track_item_changed(self, item: QListWidgetItem) -> None:
         visible = item.checkState() == Qt.CheckState.Checked
@@ -785,6 +856,8 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "地层对比", "未绑定工程")
             return
+        if self._dtw_job.is_running:
+            self._dtw_job.cancel()
         ids = self.selected_resource_ids()
         if not ids:
             # Auto-select up to 4 wells if none checked
@@ -920,6 +993,8 @@ class StratigraphyCorrelationPage(QWidget):
         return True
 
     def clear_section(self) -> None:
+        if self._dtw_job.is_running:
+            self._dtw_job.cancel()
         self.cross_host.clear()
         canvas = self.cross_host.widget
         canvas.tops_model.clear()
