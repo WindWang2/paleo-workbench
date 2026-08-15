@@ -510,16 +510,23 @@ class StratigraphyCorrelationPage(QWidget):
         ref_well = wells[0]
         ref_depth = ref.depth_for_well(ref_well)
 
-        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence
+        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence.
+        # Curves are bound via with_wells on load; an unbound/empty engine
+        # returns the empty-input sentinel, which must NOT render as a real
+        # 0.00 confidence.
         rec = self.correlation_engine.recommend_top(
             ref_well=ref_well,
             target_well=wells[1] if len(wells) > 1 else ref_well,
             ref_top_depth=ref_depth,
         )
+        if rec.dtw_cost >= 999.0:
+            conf_text = "置信度: 不可用"
+        else:
+            conf_text = f"置信度: {rec.confidence:.2f}"
 
         created = canvas.propagate_pick_via_dtw(ref_well, ref_depth, ref.formation_name)
         self.status_label.setText(
-            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 (置信度: {rec.confidence:.2f})"
+            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 ({conf_text})"
             "（点击接受 / 右键拒绝）"
         )
 
@@ -840,6 +847,7 @@ class StratigraphyCorrelationPage(QWidget):
         # mid-list must NOT shift the remaining wells onto their predecessors'
         # resource ids (positional truncation mispaired every subsequent top).
         self._loaded_resource_ids = list(loaded_ids)
+        self._bind_correlation_engine_wells()
         ok, top_notices, path_msg = self._apply_loaded_section()
         self.loaded_value.setText(f"已加载: {len(names)} 口井")
         tops_bits = []
@@ -860,6 +868,21 @@ class StratigraphyCorrelationPage(QWidget):
             msg += f"；Engine: {self._engine_error}"
         self.status_label.setText(msg if ok else "加载失败")
         self.section_updated.emit()
+
+    def _bind_correlation_engine_wells(self) -> None:
+        """Feed the loaded section curves into the DTW recommendation engine.
+
+        Without this, ``recommend_top`` sees an empty well list and returns
+        the 0.00-confidence sentinel, so the status bar always showed
+        "置信度: 0.00" next to picks the canvas DTW actually created.
+        """
+        wells: list[dict[str, Any]] = []
+        for log, name in zip(self._loaded_logs, self._loaded_names):
+            curves: dict[str, Any] = {}
+            for curve in getattr(log, "curves", None) or []:
+                curves[curve.name] = list(curve.values)
+            wells.append({"name": name, "curves": curves})
+        self.correlation_engine.with_wells(wells)
 
     def _reload_current_section(self) -> None:
         if not self._loaded_logs:
@@ -963,6 +986,7 @@ class StratigraphyCorrelationPage(QWidget):
         self._loaded_names = []
         self._loaded_logs = []
         self._loaded_resource_ids = []
+        self.correlation_engine.with_wells([])
         self._engine_plan = None
         self._engine_report = None
         self._engine_error = None
