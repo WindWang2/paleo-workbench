@@ -820,12 +820,15 @@ def generate_constrained_idw(
     diagnostics["vectorized_idw"] = 0
     # Performance-critical: NEVER run pure-Python per-cell IDW for direction-only
     # cases (600² domain freezes the UI). Use vectorized batch + direction_field.
-    # Barriers: vectorize first, then refine only a band near barriers (LOS).
+    # Barriers are a hard LOS constraint: only the per-cell point path honours
+    # it everywhere. Upstream switched to a vectorized batch + narrow
+    # near-barrier LOS refine above 4096 domain cells, which leaked values
+    # past dead-end barriers on larger grids. The host (the only caller of
+    # this vendored copy) caps grid_resolution at 200, so the point path
+    # stays responsive (~2 s worst case with barriers).
     domain_cell_count = int(np.count_nonzero(domain_mask))
-    # Small domains (unit tests / tiny grids): full point path for barrier LOS quality.
-    # Production maps use vectorized IDW plus a narrow near-barrier LOS refine.
-    use_full_point_path = bool(active_barriers) and (
-        domain_cell_count < 4096 or bool(getattr(config, "force_point_path", False))
+    use_full_point_path = bool(active_barriers) or bool(
+        getattr(config, "force_point_path", False)
     )
 
     if use_full_point_path:

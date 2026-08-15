@@ -230,3 +230,54 @@ def test_370_contour_draft_has_no_min_level_isolines_along_fault():
         if 0.0 <= p[0] <= 7.0 and 4.0 <= p[1] <= 6.0
     ]
     assert not on_fault, f"min-level contour along the fault corridor: {on_fault[:3]}"
+
+
+# --------------------------------------------------------------------------- #
+# #382 — line-of-sight semantics must not flip at the 4096-cell threshold
+# --------------------------------------------------------------------------- #
+
+
+def test_382_los_consistent_across_grid_resolutions():
+    """A dead-end barrier must block wells behind it at every resolution.
+
+    Wells L (value 1.0) and R (value 10.0) flank a vertical dead-end barrier;
+    a probe just right of the barrier must see only right-side wells. The
+    vectorized batch path (used above 4096 domain cells) had no LOS and leaked
+    ~13% of the value range; the per-cell LOS path must now be used whenever
+    barriers are active.
+    """
+    pts = _pts(
+        (-4.0, -4.0, 1.0),
+        (-4.0, 0.0, 1.0),
+        (-4.0, 4.0, 1.0),
+        (4.0, -4.0, 10.0),
+        (4.0, 0.0, 10.0),
+        (4.0, 4.0, 10.0),
+    )
+    breaks = [[(0.0, -8.0), (0.0, 1.0)]]  # dead-end: does not span the domain
+    probes: dict[int, float] = {}
+    for grid_n in (24, 40, 60, 80, 96, 120):
+        result = run_constrained_idw(pts, grid_n=grid_n, power=2.0, break_polylines=breaks)
+        row, col = _nearest_cell(result["grid_x"], result["grid_y"], 2.0, 0.0)
+        value = float(result["grid_z"][row, col])
+        assert math.isfinite(value)
+        assert value > 9.0, f"grid_n={grid_n}: barrier leak, probe={value:.4f}"
+        probes[grid_n] = value
+    # Semantics are resolution-independent: the residual spread is grid
+    # geometry noise, not the old 4096-cell threshold flip (9.66 → 8.50).
+    assert max(probes.values()) - min(probes.values()) < 0.5
+
+
+def test_382_no_barrier_path_unchanged_deterministic():
+    """Without barriers the vectorized batch path still runs and is stable."""
+    pts = _pts(
+        (0.0, 0.0, 1.0),
+        (4.0, 0.0, 2.0),
+        (0.0, 4.0, 3.0),
+        (4.0, 4.0, 4.0),
+        (2.0, 2.0, 2.5),
+    )
+    a = run_constrained_idw(pts, grid_n=96, power=2.0)
+    b = run_constrained_idw(pts, grid_n=96, power=2.0)
+    np.testing.assert_array_equal(a["grid_z"], b["grid_z"])
+    assert np.isfinite(a["grid_z"]).sum() > 0
