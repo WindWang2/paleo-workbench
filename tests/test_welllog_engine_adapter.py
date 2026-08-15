@@ -289,3 +289,29 @@ def test_try_import_welllog_does_not_raise():
         assert view_cls is None
     else:
         assert view_cls is not None
+
+
+# ---------------------------------------------------------------------------
+# #403 — the depth-axis unit declared in ~C (DEPT.FT) must reach the engine
+# submission payload instead of a hardcoded "m".
+# ---------------------------------------------------------------------------
+
+def test_403_adapted_plan_carries_detected_depth_unit():
+    from paleo_workbench.viz.well_log_load import WellLogDataWithDepthUnit
+
+    plan = adapter.adapt_well_log_data(
+        WellLogDataWithDepthUnit(_sample_well(), "ft")
+    )
+    assert plan.primary.depth_unit == "ft"
+    assert all(curve.depth_unit == "ft" for curve in plan.curves)
+    payload = adapter.plan_to_submit_payload(plan)
+    assert payload["depth_unit"] == "ft"
+    snap = adapter.parity_snapshot(WellLogDataWithDepthUnit(_sample_well(), "ft"))
+    assert snap["curves"][0]["depth_unit"] == "ft"
+
+
+def test_403_default_depth_unit_stays_meter():
+    plan = adapter.adapt_well_log_data(_sample_well())
+    assert plan.primary.depth_unit == "m"
+    payload = adapter.plan_to_submit_payload(plan)
+    assert payload["depth_unit"] == "m"

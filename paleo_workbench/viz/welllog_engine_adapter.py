@@ -282,6 +282,20 @@ def _finite_pairs(
     return depth_out, values_out, nulls
 
 
+_FT_UNITS = frozenset({"FT", "F", "FEET", "FOOT"})
+_M_UNITS = frozenset({"M", "METER", "METERS", "MTR", "MTRS"})
+
+
+def _normalize_depth_unit(value: Any) -> str:
+    """Map a depth-axis unit string to the engine contract ("m"/"ft")."""
+    unit = str(value or "").strip().upper()
+    if unit in _FT_UNITS:
+        return "ft"
+    if unit in _M_UNITS:
+        return "m"
+    return "m"
+
+
 def _pick_primary(curves: Iterable[Any]) -> tuple[int, str]:
     curves = list(curves)
     for index, curve in enumerate(curves):
@@ -388,6 +402,7 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
 
     primary_index, _ = _pick_primary(source_curves)
     document_id = stable_entity_id("document", well_name)
+    depth_unit = _normalize_depth_unit(getattr(data, "depth_unit", None))
     for index, curve in enumerate(source_curves):
         mnemonic = str(getattr(curve, "name", "") or f"CURVE_{index}")
         unit = str(getattr(curve, "unit", "") or "unit")
@@ -406,7 +421,7 @@ def adapt_well_log_data(data: Any) -> EngineLoadPlan:
             axis_id=stable_entity_id("axis", well_name, mnemonic, str(index)),
             curve_id=curve_id,
             mnemonic=mnemonic,
-            depth_unit="m",
+            depth_unit=depth_unit,
             value_unit=unit,
             depth=depth,
             values=values,

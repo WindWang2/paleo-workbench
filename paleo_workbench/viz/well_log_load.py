@@ -8,6 +8,60 @@ _MAX_CACHE_SIZE = 16
 _las_cache: OrderedDict[tuple[str, float], Any] = OrderedDict()
 
 
+class WellLogDataWithDepthUnit:
+    """Duck-type wrapper: proxies WellLogData attributes + exposes ``depth_unit``.
+
+    The engine's ``WellLogData`` has no depth-unit field (the ``~C`` block's
+    ``DEPT.FT`` header unit is dropped by its loader), and pydantic rejects
+    unknown setattr fields, so the detected unit rides along on a wrapper
+    (same convention as ``WellLogDataWithMarkers`` in correlation_overlay).
+    """
+
+    __slots__ = ("_base", "depth_unit")
+
+    def __init__(self, base: Any, depth_unit: str) -> None:
+        object.__setattr__(self, "_base", base)
+        object.__setattr__(self, "depth_unit", depth_unit)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base, name)
+
+    @property
+    def base(self) -> Any:
+        return self._base
+
+
+_FT_UNITS = frozenset({"FT", "F", "FEET", "FOOT"})
+_M_UNITS = frozenset({"M", "METER", "METERS", "MTR", "MTRS"})
+
+
+def detect_depth_unit(path: str) -> str:
+    """Return the LAS depth-axis unit ("m" or "ft") declared in ``~C``.
+
+    Uses the engine's own header parser so the result matches what the
+    preview/loaders see: the DEPT/DEPTH curve's unit (``DEPT.FT``). Returns
+    "m" when the file is not LAS or the unit is not declared.
+    """
+    file_path = Path(path)
+    if file_path.suffix.lower() == ".xml":
+        return "m"
+    try:
+        from geoviz import inspect_las_file
+
+        header = inspect_las_file(str(file_path), header_only=True)
+    except Exception:
+        return "m"
+    try:
+        unit = str(getattr(header.curves[header.depth_index], "unit", "") or "").strip().upper()
+    except (IndexError, AttributeError):
+        return "m"
+    if unit in _FT_UNITS:
+        return "ft"
+    if unit in _M_UNITS:
+        return "m"
+    return "m"
+
+
 def load_well_log_from_path(path: str) -> Any | None:
     """Return engine ``WellLogData`` for LAS or XML well log files.
 
@@ -50,6 +104,9 @@ def load_well_log_from_path(path: str) -> Any | None:
             )
 
         if result is not None:
+            depth_unit = detect_depth_unit(str(file_path))
+            if depth_unit != "m":
+                result = WellLogDataWithDepthUnit(result, depth_unit)
             _las_cache[cache_key] = result
             _las_cache.move_to_end(cache_key)
             while len(_las_cache) > _MAX_CACHE_SIZE:
