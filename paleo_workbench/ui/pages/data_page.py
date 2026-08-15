@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -57,6 +56,14 @@ from paleo_workbench.ui.pages.tag_widgets import (
 )
 from paleo_workbench.viz.adapter import VizAdapter
 from paleo_workbench.workflow.service import dashboard_state
+
+# Cooperative-shutdown wait budget (ms) for preview/visualization/import/
+# verify jobs.  One budget for production and tests alike — a shorter
+# production budget than the pytest branch made "detach on close" the norm
+# (any in-flight job exceeded 100 ms), silently forfeiting result delivery
+# and piling detached threads onto the app-exit path (C18).  Five seconds
+# still bounds a stuck worker while letting cooperative jobs finish normally.
+_SHUTDOWN_WAIT_MS = 5_000
 
 
 class _ImportWorker(QObject):
@@ -242,7 +249,7 @@ class DataPage(QWidget):
         return super().event(event)
 
     def _shutdown_workers(self) -> bool:
-        wait_ms = 5000 if "pytest" in sys.modules else 100
+        wait_ms = _SHUTDOWN_WAIT_MS
         preview_joined = self._preview_controller.shutdown(wait_ms)
         visualization_joined = self._visualization_controller.shutdown(wait_ms)
         import_joined = self._shutdown_import_jobs(wait_ms)

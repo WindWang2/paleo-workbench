@@ -195,3 +195,43 @@ def test_stratal_worker_real_path_without_survey_fails_cleanly(qtbot):
     with qtbot.waitSignal(worker.failed, timeout=5000) as blocker:
         worker.run()
     assert "survey/registration" in blocker.args[0] or "不可用" in blocker.args[0]
+
+
+def test_stratal_worker_runs_off_gui_thread_via_owned_job(qtbot):
+    """Stratal computation must execute on the owned worker QThread, never
+    the GUI thread (C17).
+
+    Regression: the page constructed StratalWorker with ``parent=self``, which
+    made ``moveToThread`` in ``OwnedWorkerJob.start`` a silent no-op — run()
+    was queued back to the GUI thread and froze the UI for the whole
+    horizon-parse + resample duration.
+    """
+    from PySide6.QtCore import QThread
+    from PySide6.QtWidgets import QApplication
+
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+    from paleo_workbench.ui.pages.geological_modeling_workers import StratalWorker
+
+    executed_on: list[QThread] = []
+
+    class _ThreadAwareStratalWorker(StratalWorker):
+        def run(self) -> None:
+            executed_on.append(QThread.currentThread())
+            super().run()
+
+    worker = _ThreadAwareStratalWorker(demo=True, fractions=(0.25,))
+    job = OwnedWorkerJob()
+    completed: list[dict] = []
+    job.start(
+        worker,
+        terminal_signals=(worker.terminal,),
+        result_connections=((worker.completed, completed.append),),
+    )
+    qtbot.waitUntil(lambda: bool(completed), timeout=5_000)
+    qtbot.waitUntil(lambda: job.thread is None, timeout=5_000)
+
+    app = QApplication.instance()
+    assert app is not None
+    assert len(executed_on) == 1
+    assert executed_on[0] is not app.thread()
+    assert completed[0]["demo"] is True
