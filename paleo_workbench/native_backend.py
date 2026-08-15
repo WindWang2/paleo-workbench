@@ -112,28 +112,35 @@ def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndar
 
 
 def _py_fast_slice_to_indexed8(
-    volume: np.ndarray, axis: int, index: int
+    volume: np.ndarray, axis: int, index: int, value_range: tuple[float, float] | None = None
 ) -> tuple[np.ndarray, float, float]:
     """Pure-Python parity fallback for ``seismic_3d_core.fast_slice_to_indexed8``.
 
     Mirrors the C++ hot path (``native/seismic_3d_core/src/seismic_3d_core.cpp``):
-    non-finite samples are excluded from the min/max stretch; axis-2 (time)
-    slices larger than 65,536 cells use the same stride-4 sampled min/max;
-    non-finite pixels render as 0; and a degenerate (constant / all-invalid)
-    slice fills 0 and reports the range ``(0.0, 0.0)``.
+    non-finite samples are excluded from the min/max stretch; every element
+    contributes to the min/max (min/max-preserving — the old stride-4 sample
+    could skip both extrema on large time slices); an optional ``value_range``
+    ``(vmin, vmax)`` overrides the per-slice stretch so all slices of a volume
+    share one color mapping; non-finite pixels render as 0; and a degenerate
+    (constant / all-invalid) range fills 0 and reports ``(0.0, 0.0)``.
     """
     slice_data = _py_fast_slice_extract(volume, axis, index)
-    axis_idx = int(axis) % np.asarray(volume).ndim
-    flat = slice_data.reshape(-1)
-    # Stride-4 sampled stretch pass only on the axis-2 slice path, like C++.
-    sampled = flat[::4] if (axis_idx == 2 and flat.size > 65536) else flat
-    finite = sampled[np.isfinite(sampled)]
-    if finite.size > 0:
-        v_min = float(finite.min())
-        v_max = float(finite.max())
+    if value_range is not None:
+        v_min = float(value_range[0])
+        v_max = float(value_range[1])
     else:
-        v_min = v_max = 0.0
-    if v_min >= v_max:
+        flat = slice_data.reshape(-1)
+        finite = flat[np.isfinite(flat)]
+        if finite.size > 0:
+            v_min = float(finite.min())
+            v_max = float(finite.max())
+        else:
+            v_min = v_max = 0.0
+    if (
+        v_min >= v_max
+        or not math.isfinite(v_min)
+        or not math.isfinite(v_max)
+    ):
         return np.zeros(slice_data.shape, dtype=np.uint8), 0.0, 0.0
     inv_range = np.float32(255.0) / np.float32(v_max - v_min)
     with np.errstate(invalid="ignore", over="ignore"):
