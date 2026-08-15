@@ -68,6 +68,7 @@ def _load_page(qtbot, tmp_path, monkeypatch) -> StratigraphyCorrelationPage:
             [_log("A1"), _log("A2")],
             ["A1", "A2"],
             [],
+            [],
         ),
     )
     page = StratigraphyCorrelationPage()

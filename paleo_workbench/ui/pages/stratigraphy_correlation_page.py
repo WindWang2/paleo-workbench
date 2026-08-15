@@ -84,6 +84,7 @@ class StratigraphyCorrelationPage(QWidget):
         self._dtw_job.released.connect(self._on_dtw_job_released)
         self._dtw_formation = ""
         self._dtw_confidence = 0.0
+        self._dtw_conf_text = "置信度: 不可用"
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -529,16 +530,18 @@ class StratigraphyCorrelationPage(QWidget):
         ref_depth = ref.depth_for_well(ref_well)
 
         # Leverage StratigraphicCorrelationEngine for top depth recommendation
-        # & confidence (dead wiring today: receives empty curves; keep cheap).
-        # Leverage StratigraphicCorrelationEngine for top depth recommendation & confidence.
-        # Curves are bound via with_wells on load; an unbound/empty engine
-        # returns the empty-input sentinel, which must NOT render as a real
-        # 0.00 confidence.
+        # & confidence. Curves are bound via with_wells on load; an unbound or
+        # empty engine returns the empty-input sentinel (dtw_cost >= 999.0),
+        # which must NOT render as a real 0.00 confidence.
         rec = self.correlation_engine.recommend_top(
             ref_well=ref_well,
             target_well=wells[1] if len(wells) > 1 else ref_well,
             ref_top_depth=ref_depth,
         )
+        if rec.dtw_cost >= 999.0:
+            self._dtw_conf_text = "置信度: 不可用"
+        else:
+            self._dtw_conf_text = f"置信度: {rec.confidence:.2f}"
         n_samples = self._max_loaded_curve_samples()
         band = bounded_dtw_band(n_samples)
         worker = DtwPropagationWorker(
@@ -548,15 +551,6 @@ class StratigraphyCorrelationPage(QWidget):
             formation=ref.formation_name,
             n_samples=n_samples,
             band_radius=band,
-        if rec.dtw_cost >= 999.0:
-            conf_text = "置信度: 不可用"
-        else:
-            conf_text = f"置信度: {rec.confidence:.2f}"
-
-        created = canvas.propagate_pick_via_dtw(ref_well, ref_depth, ref.formation_name)
-        self.status_label.setText(
-            f"DTW 已为层位 {ref.formation_name} 生成 {len(created)} 个建议拾取 ({conf_text})"
-            "（点击接受 / 右键拒绝）"
         )
         self._dtw_formation = ref.formation_name
         self._dtw_confidence = rec.confidence
@@ -594,7 +588,7 @@ class StratigraphyCorrelationPage(QWidget):
     def _on_dtw_finished(self, created) -> None:
         self.status_label.setText(
             f"DTW 已为层位 {self._dtw_formation} 生成 {len(created)} 个建议拾取 "
-            f"(置信度: {self._dtw_confidence:.2f})（点击接受 / 右键拒绝）"
+            f"({self._dtw_conf_text})（点击接受 / 右键拒绝）"
         )
 
     def _on_dtw_failed(self, message: str) -> None:
