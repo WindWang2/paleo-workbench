@@ -60,6 +60,19 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["paleo_workbench*"]
 
+# Non-.py package assets are loaded from the filesystem at runtime
+# (paleo_workbench/ui/icon_rail.py, menu_bar.py, mapping docs, vendored
+# ATTRIBUTION.md) — without this, wheels silently ship them missing and the
+# UI degrades to plain-text navigation (packaging #439). Keep in sync with
+# tests/test_wheel_assets.py.
+[tool.setuptools.package-data]
+paleo_workbench = [
+    "ui/assets/icons/*.svg",
+    "ui/pages/prototypes/*.html",
+    "mapping/*.md",
+    "_vendored/haiyou_constrained_idw/*.md",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
