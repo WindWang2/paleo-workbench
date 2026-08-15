@@ -31,6 +31,16 @@ from paleo_workbench.project.paths import (
 )
 
 
+class ProjectStaleWriteError(OSError):
+    """Raised when the on-disk project file advanced past this session's baseline.
+
+    ``*.paleo.json`` is rewritten as one whole document; a second process
+    holding an older in-memory snapshot would silently overwrite the first
+    process's commits (last-writer-wins, #411).  Save-time stale detection
+    refuses the overwrite instead.
+    """
+
+
 class ProjectDirtyDomain(str, Enum):
     """Runtime-only domains used to explain a bounded project save."""
 
@@ -79,6 +89,10 @@ class ProjectPersistenceSnapshot:
     project_path: Path
     runtime_sections: dict[str, Any]
     portable_sections: dict[str, Any]
+    # mtime of the on-disk project file at load / last save. A save whose
+    # file advanced past it means another process wrote since we last looked
+    # (#411 stale-write detection).
+    disk_mtime_ns: int | None = None
     # Some old portable projects still contain inline numerical grids.  They
     # need one artifact migration even when their in-memory representation is
     # otherwise identical to the just-loaded document.
@@ -148,6 +162,13 @@ def project_backup_path(project_path: str | Path) -> Path:
 
     path = Path(project_path)
     return path.with_name(f"{path.name}.bak")
+
+
+def _file_mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def _cleanup_project_temps(project_path: Path) -> None:
@@ -377,6 +398,17 @@ class ProjectManager:
             self.last_save_stats = ProjectSaveStats(False, frozenset())
             return False
 
+        if same_path and snapshot.disk_mtime_ns is not None:
+            current = _file_mtime_ns(self.project_path)
+            if current is not None and current != snapshot.disk_mtime_ns:
+                # Another process wrote the project since this session loaded
+                # or last saved it; a whole-document overwrite would silently
+                # drop that process's commits (last-writer-wins, #411).
+                raise ProjectStaleWriteError(
+                    f"工程文件已被其他实例修改（{self.project_path.name}）；"
+                    "为避免覆盖他人提交，保存已中止。请重新打开工程后重试。"
+                )
+
         factor_changes = 0
         if not same_path or "factor_map_tasks" in changed_sections:
             # Only inspect numerical factor payloads when the task domain has
@@ -413,6 +445,7 @@ class ProjectManager:
                 project_path=self.project_path,
                 runtime_sections=committed_runtime,
                 portable_sections=payload_data,
+                disk_mtime_ns=_file_mtime_ns(self.project_path),
                 pending_sections=frozenset(),
             ),
         )
@@ -485,6 +518,7 @@ class ProjectManager:
                 project_path=self.project_path,
                 runtime_sections=runtime_sections,
                 portable_sections=portable_sections,
+                disk_mtime_ns=_file_mtime_ns(self.project_path),
                 pending_sections=_pending_persistence_sections(project),
             ),
         )

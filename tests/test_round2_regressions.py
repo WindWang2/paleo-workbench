@@ -1087,6 +1087,53 @@ def test_overlay_skips_non_md_domain_tops():
         ov.load_current_correlation_payload = orig
 
 
+def test_overlay_converts_md_tops_onto_feet_axis():
+    """WL-4: meter-domain MD tops must be converted, not numerically placed,
+    when the log axis is a foot (DEPT.FT) depth axis."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.workflow.correlation_overlay import (
+        apply_correlation_tops_to_well_log_data,
+    )
+    from paleo_workbench.workflow.correlation_session import stable_top_id
+    from paleo_workbench.workflow.stratigraphy_models import DepthDomain, FormationTop
+
+    project = ProjectDocument.new("p")
+    from paleo_workbench.project.models import CorrelationInterpretationRef
+
+    tops = [
+        FormationTop(
+            id=stable_top_id(well_name="W0", marker="MD1"),
+            well_id="well-0",
+            well_name="W0",
+            marker="MD1",
+            depth=500.0,
+            depth_domain=DepthDomain.MD,
+        ),
+    ]
+    payload = SimpleNamespace(tops=tops)
+    ref = CorrelationInterpretationRef(
+        id="corr-3", name="C", current_version_id="v1", artifact_path="/no/such/file.json"
+    )
+    project.correlation_interpretations.append(ref)
+    import paleo_workbench.workflow.correlation_overlay as ov
+
+    orig = ov.load_current_correlation_payload
+    ov.load_current_correlation_payload = lambda proj, project_path=None: (ref, payload)
+    try:
+        base = SimpleNamespace(well_name="W0", depth_unit="ft")
+        wrapped = apply_correlation_tops_to_well_log_data(base, project)
+        assert len(wrapped.markers) == 1
+        assert wrapped.markers[0].depth == pytest.approx(500.0 * 3.280839895013123)
+        # Meter axis: numeric placement unchanged.
+        flat = apply_correlation_tops_to_well_log_data(
+            SimpleNamespace(well_name="W0"), project
+        )
+        assert flat.markers[0].depth == pytest.approx(500.0)
+    finally:
+        ov.load_current_correlation_payload = orig
+
+
 def test_correlation_artifact_resolves_project_first(tmp_path: Path, monkeypatch):
     """H9: a duplicated project must read ITS OWN artifact, not the CWD copy."""
     from types import SimpleNamespace

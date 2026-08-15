@@ -1,0 +1,413 @@
+"""Numerical correctness regression tests for the constrained-IDW algorithm.
+
+Locks the fixes for the constrained/plain-IDW algorithm correctness issue group:
+
+- #369 边界井落插值域外：hull 缓冲区死代码 → 最外圈井不被锚定、R² 均值伪造
+- #370 断层走廊被填充为观测最小值而非空值
+- #382 4096 域单元阈值两侧 line-of-sight 语义不一致
+- #399 重复坐标井 anchor last-wins 与 exact-hit first-wins 不一致
+- #400 米制常数直接用于度 CRS 工程
+
+Style follows ``tests/test_factor_interpolation_correctness.py`` (tight, justified
+tolerances; NaN-aware grid comparisons).
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pytest
+
+from paleo_workbench.workflow import constrained_idw_adapter as cia
+from paleo_workbench.workflow.constrained_idw_adapter import (
+    run_constrained_idw,
+)
+
+
+def _pts(*triples: tuple[float, float, float]) -> list[dict]:
+    return [{"x": x, "y": y, "value": v} for x, y, v in triples]
+
+
+def _nearest_cell(gx, gy, x: float, y: float) -> tuple[int, int]:
+    col = int(np.argmin(np.abs(np.asarray(gx) - x)))
+    row = int(np.argmin(np.abs(np.asarray(gy) - y)))
+    return row, col
+
+
+# --------------------------------------------------------------------------- #
+# #369 — boundary wells inside the interpolation domain; R² without faking
+# --------------------------------------------------------------------------- #
+
+
+def test_369_hull_wells_anchored_finite_and_equal_to_observations():
+    """Hull (outermost) wells must sit inside the domain and be residual-anchored.
+
+    z = 0.5 + 0.5·x + 0.5·y is an exact plane; every well's nearest grid node
+    must be finite and reproduce the observed value (previously the raw hull
+    ring excluded the corner wells from anchoring).
+    """
+    pts = _pts(
+        (0.0, 0.0, 0.5),
+        (10.0, 0.0, 5.5),
+        (0.0, 10.0, 5.5),
+        (10.0, 10.0, 10.5),  # hull corners
+        (5.0, 0.0, 3.0),
+        (0.0, 5.0, 3.0),
+        (5.0, 10.0, 8.0),
+        (10.0, 5.0, 8.0),  # hull edge midpoints
+        (5.0, 5.0, 5.5),  # interior
+    )
+    result = run_constrained_idw(pts, grid_n=50, power=2.0)
+    gz, gx, gy = result["grid_z"], result["grid_x"], result["grid_y"]
+    for p in pts:
+        row, col = _nearest_cell(gx, gy, p["x"], p["y"])
+        assert math.isfinite(float(gz[row, col])), (
+            f"well ({p['x']}, {p['y']}) nearest cell is outside the domain"
+        )
+        assert float(gz[row, col]) == pytest.approx(p["value"], rel=1e-6, abs=1e-4)
+
+
+def test_369_exact_surface_r_squared_approaches_one():
+    """LOO R² on an exactly reproduced plane must be ≈1.0 (was 0.12–0.69)."""
+    pts = _pts(
+        (0.0, 0.0, 0.5),
+        (10.0, 0.0, 5.5),
+        (0.0, 10.0, 5.5),
+        (10.0, 10.0, 10.5),
+        (5.0, 5.0, 5.5),
+        (2.0, 2.0, 2.5),
+        (8.0, 2.0, 5.5),
+    )
+    result = run_constrained_idw(pts, grid_n=50, power=2.0)
+    assert result["r_squared"] > 0.99
+    assert result["r_squared_n_skipped"] == 0
+    # Grid max must express the observed max (10.5) — not fall short of it.
+    assert result["max"] == pytest.approx(10.5, rel=0.02)
+    # and the surface must actually reach it somewhere on the map.
+    assert np.nanmax(result["grid_z"]) == pytest.approx(10.5, rel=0.02)
+
+
+def test_369_boundary_geometry_keeps_promised_3_percent_buffer():
+    """The documented 3% outward hull buffer must be measurable on the domain."""
+    pts = _pts(
+        (0.0, 0.0, 0.5),
+        (10.0, 0.0, 5.5),
+        (0.0, 10.0, 5.5),
+        (10.0, 10.0, 10.5),
+        (5.0, 5.0, 5.5),
+    )
+    from shapely.geometry import Point, Polygon
+
+    wells = cia._build_wells(pts)
+    _boundary, exterior = cia._boundary_from_samples(pts, wells)
+    poly = Polygon(exterior)
+    buf = 0.03 * 10.0
+    for w in wells:
+        dist = poly.boundary.distance(Point(w.x, w.y))
+        assert dist >= buf * 0.99, (
+            f"well ({w.x}, {w.y}) not buffered inside the domain (dist {dist})"
+        )
+    assert poly.contains(Point(5.0, 5.0))
+    # Buffered hull bbox extends ≥ buf past the sample bbox on every side.
+    xs = [w.x for w in wells]
+    ys = [w.y for w in wells]
+    assert min(p[0] for p in exterior) <= min(xs) - buf * 0.99
+    assert max(p[0] for p in exterior) >= max(xs) + buf * 0.99
+    assert min(p[1] for p in exterior) <= min(ys) - buf * 0.99
+    assert max(p[1] for p in exterior) >= max(ys) + buf * 0.99
+
+
+def test_369_loo_fidelity_counts_missing_instead_of_fabricating_mean():
+    """Wells whose bilinear window hits nodata are excluded, never mean-faked."""
+    xs = np.linspace(0.0, 4.0, 5)
+    ys = np.linspace(0.0, 4.0, 5)
+    # Exact plane z = x + y → bilinear sampling reproduces every well exactly.
+    gx, gy = np.meshgrid(xs, ys)
+    grid_z = gx + gy
+    grid_z[0, :] = np.nan  # nodata row → well at (0, 0) window is not finite
+    wells = cia._build_wells(_pts((0.0, 0.0, 0.0), (2.0, 2.0, 4.0), (4.0, 4.0, 8.0)))
+    r2, skipped = cia._leave_one_out_grid_fidelity(grid_z, xs, ys, wells)
+    assert skipped == 1
+    # Remaining wells are reproduced exactly; the mean-fake path would have
+    # yielded r2 ≈ 0 for this configuration.
+    assert r2 == pytest.approx(1.0)
+
+
+# --------------------------------------------------------------------------- #
+# #370 — barrier corridor is nodata, never a fabricated minimum band
+# --------------------------------------------------------------------------- #
+
+
+def _thickness_points() -> list[dict]:
+    """Five wells, thickness 20–80 m (issue #370 reproduction scenario)."""
+    return _pts(
+        (0.0, 0.0, 20.0),
+        (5.0, 0.0, 40.0),
+        (10.0, 0.0, 60.0),
+        (0.0, 10.0, 30.0),
+        (10.0, 10.0, 80.0),
+    )
+
+
+def test_370_barrier_corridor_cells_are_nodata():
+    """Cells inside the fault blanking band must be NaN, not observed-min values."""
+    breaks = [[(0.0, 5.0), (10.0, 5.0)]]
+    result = run_constrained_idw(
+        _thickness_points(), grid_n=50, power=2.0, break_polylines=breaks
+    )
+    gz, gx, gy = result["grid_z"], result["grid_x"], result["grid_y"]
+    # Rows whose centers lie within one cell of the fault line y=5, restricted
+    # to the central x-range the corridor fully covers (the blanking band does
+    # not reach the map's outer edge cells).
+    row = int(np.argmin(np.abs(np.asarray(gy) - 5.0)))
+    central = (np.asarray(gx) >= 1.0) & (np.asarray(gx) <= 9.0)
+    band = gz[max(0, row - 1): row + 2, :][:, central]
+    assert not np.isfinite(band).any(), (
+        "fault corridor must be nodata, got finite values "
+        f"{sorted(set(float(v) for v in band[np.isfinite(band)]))[:6]}"
+    )
+
+
+def test_370_statistics_min_comes_from_real_data():
+    from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+
+    breaks = [[(0.0, 5.0), (10.0, 5.0)]]
+    result = run_constrained_idw(
+        _thickness_points(), grid_n=50, power=2.0, break_polylines=breaks
+    )
+    grid = FactorGridResult.from_constrained_idw_dict(result, factor_name="thickness")
+    # The fabricated 19.99999994 band previously defined the reported min;
+    # now the corridor is nodata and the min is the true observation.
+    assert grid.statistics.min == pytest.approx(20.0)
+    assert result["min"] >= 20.0 - 1e-6
+
+
+def test_370_contour_draft_has_no_min_level_isolines_along_fault():
+    """No minimum-level isoline may be drawn along the fault blanking band.
+
+    Before the fix the corridor was filled with the observed min (≈20.0 in
+    float32), so marching squares traced a level-20 line along the band
+    boundary. With the band as nodata the only level-20 geometry is the tiny
+    anchor halo at the minimum well (bottom-left corner), far from the fault.
+    """
+    from paleo_workbench.project.models import (
+        ConstraintLayers,
+        ConstraintLine,
+        FactorMapTask,
+        ProjectDocument,
+        ProjectMeta,
+    )
+    from paleo_workbench.workflow.contour_draft import contour_draft_from_factor_task
+    from paleo_workbench.workflow.factor_interpolation import apply_interpolation_to_task
+
+    # Dead-end fault (does not span the map) so the band ends inside the domain.
+    line = ConstraintLine(
+        id="break-1",
+        name="fault",
+        role="break",
+        coordinates=[[0.0, 5.0], [7.0, 5.0]],
+    )
+    project = ProjectDocument(meta=ProjectMeta(name="t"))
+    project.constraint_layers.append(
+        ConstraintLayers(id="cl-1", name="breaks", lines=[line])
+    )
+    task = FactorMapTask(
+        name="H 厚度",
+        target_horizon="H",
+        factor_type="地层厚度",
+        method="约束IDW",
+        parameters={"sample_points": _thickness_points()},
+        status="pending",
+    )
+    apply_interpolation_to_task(task, method="约束IDW", grid_n=50, project=project)
+    draft = contour_draft_from_factor_task(task, levels=[20.0, 30.0, 40.0, 50.0, 60.0])
+    on_fault = [
+        (seg.level, p)
+        for seg in draft.segments
+        if seg.level == 20.0
+        for p in seg.coordinates
+        if 0.0 <= p[0] <= 7.0 and 4.0 <= p[1] <= 6.0
+    ]
+    assert not on_fault, f"min-level contour along the fault corridor: {on_fault[:3]}"
+
+
+# --------------------------------------------------------------------------- #
+# #382 — line-of-sight semantics must not flip at the 4096-cell threshold
+# --------------------------------------------------------------------------- #
+
+
+def test_382_los_consistent_across_grid_resolutions():
+    """A dead-end barrier must block wells behind it at every resolution.
+
+    Wells L (value 1.0) and R (value 10.0) flank a vertical dead-end barrier;
+    a probe just right of the barrier must see only right-side wells. The
+    vectorized batch path (used above 4096 domain cells) had no LOS and leaked
+    ~13% of the value range; the per-cell LOS path must now be used whenever
+    barriers are active.
+    """
+    pts = _pts(
+        (-4.0, -4.0, 1.0),
+        (-4.0, 0.0, 1.0),
+        (-4.0, 4.0, 1.0),
+        (4.0, -4.0, 10.0),
+        (4.0, 0.0, 10.0),
+        (4.0, 4.0, 10.0),
+    )
+    breaks = [[(0.0, -8.0), (0.0, 1.0)]]  # dead-end: does not span the domain
+    probes: dict[int, float] = {}
+    for grid_n in (24, 40, 60, 80, 96, 120):
+        result = run_constrained_idw(pts, grid_n=grid_n, power=2.0, break_polylines=breaks)
+        row, col = _nearest_cell(result["grid_x"], result["grid_y"], 2.0, 0.0)
+        value = float(result["grid_z"][row, col])
+        assert math.isfinite(value)
+        assert value > 9.0, f"grid_n={grid_n}: barrier leak, probe={value:.4f}"
+        probes[grid_n] = value
+    # Semantics are resolution-independent: the residual spread is grid
+    # geometry noise, not the old 4096-cell threshold flip (9.66 → 8.50).
+    assert max(probes.values()) - min(probes.values()) < 0.5
+
+
+def test_382_no_barrier_path_unchanged_deterministic():
+    """Without barriers the vectorized batch path still runs and is stable."""
+    pts = _pts(
+        (0.0, 0.0, 1.0),
+        (4.0, 0.0, 2.0),
+        (0.0, 4.0, 3.0),
+        (4.0, 4.0, 4.0),
+        (2.0, 2.0, 2.5),
+    )
+    a = run_constrained_idw(pts, grid_n=96, power=2.0)
+    b = run_constrained_idw(pts, grid_n=96, power=2.0)
+    np.testing.assert_array_equal(a["grid_z"], b["grid_z"])
+    assert np.isfinite(a["grid_z"]).sum() > 0
+
+
+# --------------------------------------------------------------------------- #
+# #399 — duplicate-coordinate wells: one first-wins rule for every stage
+# --------------------------------------------------------------------------- #
+
+
+def test_399_duplicate_coordinate_wells_first_wins():
+    """Two wells at the same XY must resolve to the FIRST value everywhere.
+
+    Previously the exact-hit IDW stage kept the first well (1.0) while the
+    residual-anchor stage overwrote in list order (last-wins → 0.1): the same
+    data produced unreproducible surfaces. Deduplication at the host boundary
+    unifies both stages on first-wins.
+    """
+    pts = _pts(
+        (0.0, 0.0, 1.0),
+        (4.0, 0.0, 1.0),
+        (0.0, 4.0, 1.0),
+        (4.0, 4.0, 1.0),
+        (2.0, 2.0, 1.0),  # first measurement at (2,2)
+        (2.0, 2.0, 0.1),  # duplicate location, later measurement
+    )
+    result = run_constrained_idw(pts, grid_n=25, power=2.0)
+    assert result["n_points"] == 5
+    assert result["duplicate_wells_dropped"] == 1
+    row, col = _nearest_cell(result["grid_x"], result["grid_y"], 2.0, 2.0)
+    value = float(result["grid_z"][row, col])
+    assert math.isfinite(value)
+    assert value == pytest.approx(1.0, abs=0.05), (
+        f"duplicate cell must keep the first value (1.0), got {value}"
+    )
+
+
+def test_399_duplicate_count_surfaced_on_task():
+    """The dropped-duplicate count reaches the task quality metrics (UI hook)."""
+    from paleo_workbench.project.models import FactorMapTask
+    from paleo_workbench.workflow.factor_interpolation import apply_interpolation_to_task
+
+    pts = _pts(
+        (0.0, 0.0, 1.0),
+        (4.0, 0.0, 1.0),
+        (0.0, 4.0, 1.0),
+        (4.0, 4.0, 1.0),
+        (2.0, 2.0, 1.0),
+        (2.0, 2.0, 0.1),
+    )
+    task = FactorMapTask(
+        name="t",
+        target_horizon="H",
+        factor_type="砂",
+        method="约束IDW",
+        parameters={"sample_points": pts},
+        status="pending",
+    )
+    apply_interpolation_to_task(task, method="约束IDW", grid_n=25)
+    assert task.status == "complete"
+    assert task.quality_metrics["duplicate_wells_dropped"] == 1
+    assert task.quality_metrics["n_points"] == 5
+
+
+# --------------------------------------------------------------------------- #
+# #400 — barrier buffer must not apply metre constants to degree CRS
+# --------------------------------------------------------------------------- #
+
+
+def test_400_barrier_buffer_helper_units():
+    """Geographic CRS gets an explicit ~300 m buffer in degrees; else None."""
+    expected = 300.0 / 111_320.0
+    assert cia.barrier_buffer_distance_for_crs("EPSG:4326") == pytest.approx(expected)
+    # Host default project_crs carries a free-text suffix pyproj cannot parse.
+    assert cia.barrier_buffer_distance_for_crs("EPSG:4326 / WGS84") == pytest.approx(
+        expected
+    )
+    assert cia.barrier_buffer_distance_for_crs("EPSG:3857") is None  # projected
+    assert cia.barrier_buffer_distance_for_crs("EPSG:32650") is None  # UTM metres
+    assert cia.barrier_buffer_distance_for_crs(None) is None
+
+
+def _degree_barrier_scenario():
+    """3+3 wells (20–80 m) flanking a full-spanning barrier in degree coords."""
+    pts = _pts(
+        (0.2, 0.0, 20.0),
+        (0.2, 0.5, 30.0),
+        (0.2, 1.0, 40.0),
+        (0.8, 0.0, 60.0),
+        (0.8, 0.5, 70.0),
+        (0.8, 1.0, 80.0),
+    )
+    breaks = [[(0.5, -0.2), (0.5, 1.2)]]
+    return pts, breaks
+
+
+def test_400_degree_crs_has_no_kilometre_corridor():
+    """In a degree CRS the barrier blank band must be ~300 m, not kilometres.
+
+    The auto buffer's metre constants resolve to ~0.045° (~5 km) on a 1° map;
+    with the CRS-aware fix the band is the 300 m target, which is sub-cell at
+    every host resolution, so no corridor cells appear next to the barrier.
+    """
+    pts, breaks = _degree_barrier_scenario()
+    with_crs = run_constrained_idw(
+        pts, grid_n=60, power=2.0, break_polylines=breaks, crs="EPSG:4326 / WGS84"
+    )
+    without_crs = run_constrained_idw(pts, grid_n=60, power=2.0, break_polylines=breaks)
+    gz, gx, gy = with_crs["grid_z"], with_crs["grid_x"], with_crs["grid_y"]
+    row = int(np.argmin(np.abs(np.asarray(gy) - 0.5)))
+    central = (np.asarray(gx) >= 0.45) & (np.asarray(gx) <= 0.55)
+    n_with = int((~np.isfinite(gz[row, :]))[central].sum())
+    gz2, gx2 = without_crs["grid_z"], without_crs["grid_x"]
+    row2 = int(np.argmin(np.abs(np.asarray(gy) - 0.5)))
+    central2 = (np.asarray(gx2) >= 0.45) & (np.asarray(gx2) <= 0.55)
+    n_without = int((~np.isfinite(gz2[row2, :]))[central2].sum())
+    assert n_without >= 5, "sanity: old auto buffer must produce a wide corridor"
+    assert n_with <= 1, f"degree CRS corridor too wide: {n_with} cells (~{n_with*0.018} deg)"
+
+
+def test_400_metre_crs_behavior_unchanged():
+    """Passing a projected CRS must not alter the auto-buffer numerics."""
+    S = 111_320.0  # same geographic footprint as the degree scenario, in metres
+    pts = [
+        {"x": p["x"] * S, "y": p["y"] * S, "value": p["value"]}
+        for p in _degree_barrier_scenario()[0]
+    ]
+    breaks = [[(0.5 * S, -0.2 * S), (0.5 * S, 1.2 * S)]]
+    with_crs = run_constrained_idw(
+        pts, grid_n=60, power=2.0, break_polylines=breaks, crs="EPSG:3857"
+    )
+    auto = run_constrained_idw(pts, grid_n=60, power=2.0, break_polylines=breaks)
+    np.testing.assert_array_equal(with_crs["grid_z"], auto["grid_z"])

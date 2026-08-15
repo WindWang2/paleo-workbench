@@ -229,6 +229,32 @@ class FreshnessService:
             return True
         return False
 
+    def _checksum_for(self, version_id: str) -> str | None:
+        """Recorded payload checksum for *version_id*, or None when unknown."""
+        ver = self.graph.versions.get(version_id)
+        if ver is not None:
+            return getattr(ver, "checksum", None) or None
+        if self.catalog is not None:
+            try:
+                resolved = self.catalog.resolve_version(version_id)
+            except Exception:
+                return None
+            return getattr(resolved, "checksum", None) or None
+        return None
+
+    def _content_identical(self, a: str, b: str) -> bool:
+        """True when both versions record the SAME payload checksum.
+
+        A byte-identical supersession (e.g. promote copies the payload and
+        records the same SHA-256) does not change what a consumer actually
+        ran on, so it must not invalidate freshness (issue #373 / C15).
+        Unknown checksums keep the mismatch (conservative).
+        """
+        first = self._checksum_for(a)
+        if not first:
+            return False
+        return first == self._checksum_for(b)
+
     def _selection_mismatch(
         self, input_version_id: str
     ) -> tuple[str, str | None] | None:
@@ -243,6 +269,11 @@ class FreshnessService:
         4. Parent-link supersession via run parameters.
         5. Input itself is selected with no competing tip → current.
         6. Unknown → no mismatch (do not guess STALE).
+
+        Rules 1–3 tolerate content-identical supersession: when the candidate
+        "current" version records the same payload checksum as the input, the
+        consumer's scientific input has not changed, so no mismatch is
+        reported.
         """
         prod = self.graph.producing_run.get(input_version_id)
         domain_id = None
@@ -253,11 +284,15 @@ class FreshnessService:
         if domain_id:
             tip = self.context.current_by_domain_task.get(domain_id)
             if tip and tip != input_version_id:
+                if self._content_identical(tip, input_version_id):
+                    return None
                 return tip, self.graph.asset_id_for(tip)
 
         asset_id = self.graph.asset_id_for(input_version_id)
         current = self.context.current_for_asset(asset_id) if asset_id else None
         if current is not None and current != input_version_id:
+            if self._content_identical(current, input_version_id):
+                return None
             return current, asset_id
 
         # 3. Domain-task supersession among selected tips only (do not force
@@ -266,6 +301,8 @@ class FreshnessService:
             self._index_selected()
             for sel in self._selected_by_key.get(("domain", domain_id), ()):
                 if sel == input_version_id:
+                    continue
+                if self._content_identical(sel, input_version_id):
                     continue
                 return sel, self.graph.asset_id_for(sel)
 

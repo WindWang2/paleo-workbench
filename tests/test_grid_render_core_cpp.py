@@ -19,7 +19,11 @@ import math
 import numpy as np
 import pytest
 
-from paleo_workbench.native_backend import NativeEngineBackend, _py_render_grid_rgba
+from paleo_workbench.native_backend import (
+    NativeEngineBackend,
+    _py_render_grid_rgba,
+    disabled_acceleration,
+)
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from paleo_workbench.viz.grid_render import render_grid_rgba
 
@@ -165,3 +169,74 @@ def test_facade_rgb_lut_gets_alpha_255():
     grid = np.array([[1.0]], dtype=np.float32)
     out = render_grid_rgba(grid, lut_rgb, lo=0.0, hi=1.0)
     assert out[0, 0, 3] == 255  # RGB LUT -> opaque
+
+
+# --- Issue #446: native/fallback boundary parity --------------------------
+
+
+@pytest.mark.skipif(not HAS_CPP, reason="grid_render_core C++ extension not built")
+@pytest.mark.parametrize(
+    "grid, mask, lut, lo, hi, gamma, opacity",
+    [
+        # near-degenerate range: hi - lo = 1e-10 is positive in float64 but
+        # collapses to 0.0f in float32 — the range must be honoured anyway
+        (np.array([[0.0, 1.0]], dtype=np.float32), None, _gray_lut(), 0.0, 1e-10, 1.0, 255),
+        # hi == lo degenerate range
+        (np.array([[5.0]], dtype=np.float32), None, _gray_lut(), 5.0, 5.0, 1.0, 255),
+        # float64 grid_z (forcecast to float32 on both paths)
+        (np.array([[0.0, 1.0]], dtype=np.float64), None, _gray_lut(), 0.0, 1.0, 1.0, 255),
+        # NaN/Inf nodata + gamma != 1
+        (np.array([[np.nan, np.inf, 0.5]], dtype=np.float32), None, _gray_lut(), 0.0, 1.0, 2.2, 255),
+        # mask with valid shape
+        (np.ones((2, 3), dtype=np.float32), np.ones((2, 3), dtype=np.uint8), _gray_lut(), 0.0, 1.0, 1.0, 100),
+        # negative lo with gamma
+        (np.array([[-2.0, 2.0]], dtype=np.float32), None, _gray_lut(), -2.0, 2.0, 0.5, 255),
+    ],
+)
+def test_grid_render_boundary_parity(grid, mask, lut, lo, hi, gamma, opacity):
+    """Dtype, value and degenerate-range parity across both backends."""
+    backend = NativeEngineBackend()
+    cpp = backend.dispatch("render_grid_rgba", grid, mask, lut, lo, hi, gamma, opacity)
+    with disabled_acceleration():
+        py = backend.dispatch("render_grid_rgba", grid, mask, lut, lo, hi, gamma, opacity)
+    np.testing.assert_array_equal(cpp, py)
+
+
+@pytest.mark.skipif(not HAS_CPP, reason="grid_render_core C++ extension not built")
+def test_grid_render_near_degenerate_range_uses_float64_judgement():
+    """hi - lo = 1e-10 must NOT be judged as 'no range' (which flattened the
+    whole grid to the ramp bottom on the native path only)."""
+    lut = _gray_lut()
+    grid = np.array([[0.0, 1.0]], dtype=np.float32)
+    backend = NativeEngineBackend()
+    cpp = backend.dispatch("render_grid_rgba", grid, None, lut, 0.0, 1e-10, 1.0, 255)
+    with disabled_acceleration():
+        py = backend.dispatch("render_grid_rgba", grid, None, lut, 0.0, 1e-10, 1.0, 255)
+    np.testing.assert_array_equal(cpp, py)
+    assert cpp[0, 0, 0] == 0    # v=0.0 -> ramp bottom
+    assert cpp[0, 1, 0] == 255  # v=1.0 -> ramp top (not flattened to bottom)
+
+
+@pytest.mark.skipif(not HAS_CPP, reason="grid_render_core C++ extension not built")
+@pytest.mark.parametrize(
+    "grid, mask, lut",
+    [
+        (np.zeros((2, 2), dtype=np.float32), None, np.zeros((0, 4), dtype=np.uint8)),
+        (np.zeros((2, 2), dtype=np.float32), None, np.zeros((5, 3), dtype=np.uint8)),
+        (np.zeros((2, 2), dtype=np.float32), None, np.zeros(4, dtype=np.uint8)),
+        (np.zeros((2, 2), dtype=np.float32), np.ones((1, 2), dtype=np.uint8), _gray_lut()),
+        (np.zeros((2, 4), dtype=np.float32), np.ones((4, 2), dtype=np.uint8), _gray_lut()),
+        (np.zeros(4, dtype=np.float32), None, _gray_lut()),
+        (np.zeros((2, 2, 2), dtype=np.float32), None, _gray_lut()),
+        (np.zeros((2, 2), dtype=np.float32), np.zeros((2, 2, 2), dtype=np.uint8), _gray_lut()),
+    ],
+)
+def test_grid_render_malformed_inputs_raise_on_both_paths(grid, mask, lut):
+    """Malformed LUT/mask shapes raise ValueError on both backends instead of
+    the fallback silently returning an all-zero raster or broadcasting."""
+    backend = NativeEngineBackend()
+    with pytest.raises(ValueError):
+        backend.dispatch("render_grid_rgba", grid, mask, lut, 0.0, 1.0, 1.0, 255)
+    with disabled_acceleration():
+        with pytest.raises(ValueError):
+            backend.dispatch("render_grid_rgba", grid, mask, lut, 0.0, 1.0, 1.0, 255)

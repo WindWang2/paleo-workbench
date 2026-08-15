@@ -135,3 +135,51 @@ def test_well_log_cache_is_bounded(tmp_path: Path):
 
     assert len(mod._las_cache) <= 16
 
+
+
+# ---------------------------------------------------------------------------
+# #403 — the LAS ~C DEPT unit must survive loading (workbench wrapper), so the
+# engine adapter no longer hardcodes depth_unit="m".
+# ---------------------------------------------------------------------------
+
+FEET_LAS = """~VERSION INFORMATION
+ VERS .                 2.0 : CWLS LOG ASCII STANDARD -VERSION 2.0
+~WELL INFORMATION
+ WELL.             WELL-01 : WELL NAME
+ NULL.              -999.25 : NULL VALUE
+~CURVE INFORMATION
+ DEPT  .FT                  : DEPTH
+ GR    .API                 : GAMMA RAY
+~A
+ 2000.00   45.2
+ 2001.00   52.1
+"""
+
+
+def test_403_feet_las_carries_depth_unit_wrapper(tmp_path: Path):
+    from paleo_workbench.viz.well_log_load import (
+        WellLogDataWithDepthUnit,
+        detect_depth_unit,
+        load_well_log_from_path,
+    )
+
+    path = tmp_path / "feet.las"
+    path.write_text(FEET_LAS, encoding="utf-8")
+    assert detect_depth_unit(str(path)) == "ft"
+    data = load_well_log_from_path(str(path))
+    assert isinstance(data, WellLogDataWithDepthUnit)
+    assert data.depth_unit == "ft"
+
+
+def test_403_meter_las_stays_unwrapped(tmp_path: Path):
+    from paleo_workbench.viz.well_log_load import (
+        WellLogDataWithDepthUnit,
+        detect_depth_unit,
+        load_well_log_from_path,
+    )
+
+    path = tmp_path / "meter.las"
+    path.write_text(SAMPLE_LAS, encoding="utf-8")  # DEPT .M fixture
+    assert detect_depth_unit(str(path)) == "m"
+    data = load_well_log_from_path(str(path))
+    assert not isinstance(data, WellLogDataWithDepthUnit)

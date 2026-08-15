@@ -60,9 +60,26 @@ from paleo_workbench.catalog.storage import (
     trash_dir_for as _trash_dir_for,
     trash_payload as _move_to_trash,
 )
-from paleo_workbench.catalog.store import CatalogStore
+from paleo_workbench.catalog.store import CatalogStore, catalog_file_for
 from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
+
+
+class CatalogStaleWriteError(OSError):
+    """Raised when the canonical catalog advanced past this session's baseline.
+
+    The catalog is rewritten as a whole document; without an ownership
+    protocol a second process holding an older in-memory snapshot silently
+    overwrites (last-writer-wins) everything the first process committed
+    (#411).  Save-time stale detection refuses the overwrite instead.
+    """
+
+
+def _disk_mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 class DataCatalogService:
@@ -83,6 +100,10 @@ class DataCatalogService:
         # payloads (verify_integrity) on a worker thread while the UI thread
         # may be saving. Re-entrant so public methods can nest under _save.
         self._lock = threading.RLock()
+        # Cross-process stale-write baseline: mtime of the canonical file as
+        # of open / last successful save. A save whose file advanced past it
+        # means another process wrote since we last looked (#411).
+        self._disk_mtime_ns: int | None = None
         # Maintained id→object indexes (P4): every document list mutation goes
         # through ``_add_*`` / ``_remove_*`` so lookups stay O(1) instead of
         # linear scans. ``None`` = not yet built (built lazily from the
@@ -256,6 +277,7 @@ class DataCatalogService:
         document = store.load()
         index = CatalogIndex(project_path)
         service = cls(project_path, document, store, index)
+        service._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(project_path))
         if ensure_index:
             service._ensure_index_fresh()
         if sweep_temp:
@@ -287,15 +309,36 @@ class DataCatalogService:
         """Persist canonical document and sync the index.
 
         The revision only advances if the canonical save succeeds, so a
-        failed save leaves no half-bumped state.
+        failed save leaves no half-bumped state.  Before writing, the file's
+        mtime is compared against this session's baseline: a document that
+        advanced on disk since we last read/wrote it was committed by another
+        process, and overwriting it would silently drop that process's data
+        (last-writer-wins, #411) — refuse instead.
         """
         with self._lock:
+            baseline = self._disk_mtime_ns
+            current = _disk_mtime_ns(catalog_file_for(self.project_path))
+            if baseline is None:
+                # The canonical file did not exist when this session opened
+                # (or first saved); if it exists now, another process created
+                # it since and an overwrite would drop its commits.
+                if current is not None:
+                    raise CatalogStaleWriteError(
+                        "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
+                        "本次保存已中止。请重新打开工程后重试。"
+                    )
+            elif current is not None and current != baseline:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
+                    "本次保存已中止。请重新打开工程后重试。"
+                )
             self.document.catalog_revision += 1
             try:
                 self._store.save(self.document)
             except Exception:
                 self.document.catalog_revision -= 1
                 raise
+            self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
             self._sync_index_best_effort()
 
     def _sync_index_best_effort(self) -> None:

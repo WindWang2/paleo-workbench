@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -148,7 +149,13 @@ class CatalogIndex:
 
     def __init__(self, project_path: str | Path):
         self.project_path = Path(project_path)
-        self._conn: sqlite3.Connection | None = None
+        # One connection PER THREAD (sqlite3 connections are not shareable:
+        # check_same_thread=True raises ProgrammingError on cross-thread use,
+        # which used to be swallowed into a silently stale index — issue
+        # #394 / C31). WAL keeps readers on other threads consistent without
+        # blocking the single writer (the service serializes saves).
+        self._conns: dict[int, sqlite3.Connection] = {}
+        self._conns_lock = threading.Lock()
         # In-memory snapshot of the last-synced document rows
         # (``{table: {id: tuple-of-columns}}``), used by the incremental sync
         # to upsert only changed rows. ``None`` = unknown state (first sync in
@@ -171,10 +178,37 @@ class CatalogIndex:
         return self.open()
 
     def close(self) -> None:
-        """Close the cached connection, if any."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        """Close ALL cached connections (one per thread), if any.
+
+        A connection owned by another thread cannot be closed from here; it
+        is dropped from the pool and garbage-collected, and the owning thread
+        reconnects lazily on its next use.
+        """
+        with self._conns_lock:
+            conns = list(self._conns.values())
+            self._conns.clear()
+        for conn in conns:
+            try:
+                conn.close()
+            except sqlite3.DatabaseError:
+                pass
+
+    def _drop_current_connection(self) -> None:
+        """Close and forget the CURRENT thread's connection.
+
+        Error-recovery path: a failed statement leaves the connection in an
+        unknown state, so the next call reconnects fresh. Other threads'
+        connections are never touched — closing a live foreign connection
+        could interrupt an in-flight writer (issue #394 / C31).
+        """
+        tid = threading.get_ident()
+        with self._conns_lock:
+            conn = self._conns.pop(tid, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.DatabaseError:
+                pass
 
     def reset(self) -> None:
         """Delete the database file (plus journal/WAL/SHM) so a fresh rebuild.
@@ -191,26 +225,32 @@ class CatalogIndex:
                 pass
 
     def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(self.db_path))
-            conn.row_factory = sqlite3.Row
-            # WAL is safe here: writes are single-writer (the service serializes
-            # saves under its lock) and WAL gives readers a consistent snapshot
-            # without blocking. ``reset()`` cleans up -wal/-shm files.
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.DatabaseError:
-                pass  # e.g. read-only media — DELETE journal still works
-            self._conn = conn
-        return self._conn
+        """Return the CURRENT thread's cached connection (create on demand)."""
+        tid = threading.get_ident()
+        with self._conns_lock:
+            conn = self._conns.get(tid)
+        if conn is not None:
+            return conn
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        # WAL is safe here: writes are single-writer (the service serializes
+        # saves under its lock) and WAL gives readers a consistent snapshot
+        # without blocking. ``reset()`` cleans up -wal/-shm files.
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.DatabaseError:
+            pass  # e.g. read-only media — DELETE journal still works
+        with self._conns_lock:
+            self._conns[tid] = conn
+        return conn
 
     # -- state ----------------------------------------------------------------
 
     def _read_sync_state(self, key: str) -> str | None:
         """Read one sync_state value; None when missing/unreadable/corrupt."""
         if not self.db_path.is_file():
-            self.close()
+            self._drop_current_connection()
             return None
         try:
             row = self._connect().execute(
@@ -218,7 +258,7 @@ class CatalogIndex:
             ).fetchone()
             return row[0] if row is not None else None
         except (sqlite3.DatabaseError, OSError):
-            self.close()
+            self._drop_current_connection()
             return None
 
     def revision(self) -> int | None:
@@ -795,12 +835,12 @@ class CatalogIndex:
     def _safe(self, default: Any, fn: Any, *args: Any, **kwargs: Any) -> Any:
         """Run *fn*, returning *default* (and dropping the connection) on trouble."""
         if not self.db_path.is_file():
-            self.close()
+            self._drop_current_connection()
             return default
         try:
             return fn(*args, **kwargs)
         except (sqlite3.DatabaseError, OSError):
-            self.close()
+            self._drop_current_connection()
             return default
 
     def search_assets(
