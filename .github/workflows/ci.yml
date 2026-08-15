@@ -112,19 +112,16 @@ jobs:
           python -m pip install --prefer-binary \
             -c /tmp/gdal-constraint.txt \
             -e ".[dev,native]"
-          # geo-viz-engine subpackages (may pull shapely, scipy, …)
-          if [ -f requirements-geoviz.txt ]; then
-            python -m pip install --prefer-binary -r requirements-geoviz.txt || true
-          fi
-          # Core geoviz packages needed by mapping/preview tests
-          python -m pip install -e geo-viz-engine/packages/geoviz_common || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_well_log || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_paleo_map || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_seismic || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_cross_well || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_plots || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_map || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_well_tie || true
+          # geo-viz-engine subpackages (may pull shapely, scipy, …). These
+          # installs MUST fail closed (packaging #442): the previous `|| true`
+          # best-effort silently shrank the tested surface (broken dependency
+          # graphs surfaced only as scattered skips), and the hand-kept
+          # eight-package fallback list had drifted from
+          # requirements-geoviz.txt — geoviz_well_seismic_3d was missing.
+          # requirements-geoviz.txt is the single source of truth.
+          python -m pip install --prefer-binary -r requirements-geoviz.txt
+          # Import smoke: prove the geoviz graph actually installed.
+          python -c "import geoviz, geoviz_well_seismic_3d"
           python -m pip install shapely
 
       - name: Build map_edit_core (required)
@@ -193,6 +190,17 @@ jobs:
             --timeout-method=thread \
             -m "not slow" \
             --durations=25
+
+      - name: Assert the slow family has not silently shrunk
+        # Packaging #442: the fast gate deliberately deselects `slow` (the only
+        # real-data end-to-end + interpolation-perf coverage). If the slow
+        # family ever drops below its 12-test baseline, every environment
+        # silently stops running those gates — fail instead. The nightly
+        # workflow (.github/workflows/slow-tests.yml) actually executes them.
+        run: |
+          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          echo "slow tests collected: ${count} (baseline 12)"
+          test -n "${count}" && test "${count}" -ge 12
 
   # Focused job for Well Log Workstation (#207 / PR #233): no geo-viz submodule,
   # no map_edit_core. Host-only (engine optional) so the workstation suite is

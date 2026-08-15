@@ -22,6 +22,20 @@ quarantine**: there is no `continue-on-error`, no advisory xfail registry
 "exit 124 is advisory" ceiling. A test that fails is a bug to fix, not a
 reason to loosen the gate.
 
+## Slow tests (nightly leg, packaging #442)
+
+The fast gate deliberately deselects the `slow` family (12 tests: real-data
+vendor-format smoke + interpolation perf). They run only in the dedicated
+`Slow tests (nightly)` workflow (`.github/workflows/slow-tests.yml`,
+schedule + manual dispatch), which is fail-closed: it asserts the slow family
+stays ≥ 12 collected, and fails with an explicit error when the
+representative `data/` tree is absent so the real-data tests can never
+silently skip to green. The main `Tests` job runs the same collect guard. The
+geoviz dependency install in `ci.yml` is fail-closed too — no `|| true`;
+`requirements-geoviz.txt` is the single source of truth (the old eight-line
+fallback list had drifted, missing `geoviz_well_seismic_3d`), followed by an
+`import geoviz, geoviz_well_seismic_3d` smoke.
+
 ## QGIS renderer coverage (opt-in, packaging #437)
 
 The production-preferred QGIS renderer (`prefer_qgis=True` in
