@@ -608,8 +608,11 @@ class CatalogIndex:
         elif table == "versions":
             conn.execute("DELETE FROM versions WHERE id = ?", (entity_id,))
             conn.execute("DELETE FROM version_tags WHERE version_id = ?", (entity_id,))
-            conn.execute("DELETE FROM run_inputs WHERE version_id = ?", (entity_id,))
-            conn.execute("DELETE FROM run_outputs WHERE version_id = ?", (entity_id,))
+            # Run input/output link rows are NOT deleted here: they are owned
+            # by the run record, which retains purged version ids as historical
+            # provenance (service.purge_trashed keeps runs). A full rebuild
+            # re-creates those rows from the run, so deleting them would make
+            # the incremental index diverge from a rebuild.
             if last_row is not None and lineage_keep is not None:
                 run_pairs, _version_pairs = lineage_keep
                 for parent_id in last_row[-1]:
@@ -760,6 +763,15 @@ class CatalogIndex:
                 old = last["runs"].get(run_id)
                 if old == row:
                     continue
+                # The runs row itself must be upserted (same pattern as the
+                # versions/tags loops): a run that first appears in an
+                # incremental revision would otherwise never land in the
+                # ``runs`` table — only a full rebuild writes it (DATA-1).
+                conn.execute(
+                    "INSERT OR REPLACE INTO runs (id, operation, parameters,"
+                    " generator, status, created_at) VALUES (?,?,?,?,?,?)",
+                    (run_id, *row[:-2]),
+                )
                 conn.execute("DELETE FROM run_inputs WHERE run_id = ?", (run_id,))
                 conn.execute("DELETE FROM run_outputs WHERE run_id = ?", (run_id,))
                 conn.executemany(

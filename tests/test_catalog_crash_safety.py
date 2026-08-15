@@ -298,6 +298,106 @@ def test_committed_version_never_claims_missing_payload(service):
     assert service.get_version(version.id).sha256 is not None
 
 
+# ------------------------------------------------------------------ failed-save rollback (mutators)
+
+
+def _assert_memory_matches_disk(service) -> None:
+    """Reload the canonical store and require byte-identical state."""
+    disk = CatalogStore(service.project_path).load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
+
+
+def test_remove_tag_rolls_back_on_failed_save(service, monkeypatch):
+    version = service.import_raw(_source(service.project_path.parent, "a.bin", b"v1"))
+    service.add_tag("qc", asset_id=version.asset_id)
+    before = list(service.document.asset_tags[version.asset_id])
+
+    real_save = service._store.save
+
+    def boom(_document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service._store, "save", boom)
+    with pytest.raises(OSError):
+        service.remove_tag("qc", asset_id=version.asset_id)
+    monkeypatch.setattr(service._store, "save", real_save)
+
+    # No half-applied removal in memory; disk agrees.
+    assert service.document.asset_tags[version.asset_id] == before
+    _assert_memory_matches_disk(service)
+
+
+def test_update_run_status_rolls_back_on_failed_save(service, monkeypatch):
+    run = service.register_run("op", status="running", parameters={"k": "v"})
+
+    real_save = service._store.save
+
+    def boom(_document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service._store, "save", boom)
+    with pytest.raises(OSError):
+        service.update_run_status(run.id, "failed", extra_parameters={"x": "1"})
+    monkeypatch.setattr(service._store, "save", real_save)
+
+    # The run must not be half-updated (stuck-RUNNING compensation contract):
+    # status/parameters revert in memory and match the disk.
+    assert service.get_run(run.id).status == "running"
+    assert service.get_run(run.id).parameters == {"k": "v"}
+    _assert_memory_matches_disk(service)
+
+
+def test_attach_lineage_rolls_back_on_failed_save(service, monkeypatch):
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+
+    src1 = _source(service.project_path.parent, "a.bin", b"v1")
+    src2 = _source(service.project_path.parent, "b.bin", b"v2")
+    v1 = service.import_raw(src1)
+    v2 = service.import_raw(src2)
+    adapter = CoreCatalogAdapter(service)
+
+    real_save = service._store.save
+
+    def boom(_document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service._store, "save", boom)
+    with pytest.raises(OSError):
+        adapter.attach_lineage(source_version_id=v1.id, target_version_id=v2.id)
+    monkeypatch.setattr(service._store, "save", real_save)
+
+    # The edge must not linger in memory; disk agrees (reopen would drop it).
+    assert v1.id not in service.get_version(v2.id).parent_version_ids
+    assert service.get_lineage(v2.id)["parents"] == []
+    _assert_memory_matches_disk(service)
+
+
+def test_attach_lineage_children_map_rolls_back_with_edge(service, monkeypatch):
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+
+    src1 = _source(service.project_path.parent, "a.bin", b"v1")
+    src2 = _source(service.project_path.parent, "b.bin", b"v2")
+    v1 = service.import_raw(src1)
+    v2 = service.import_raw(src2)
+    adapter = CoreCatalogAdapter(service)
+    service._ensure_maps()
+
+    real_save = service._store.save
+
+    def boom(_document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service._store, "save", boom)
+    with pytest.raises(OSError):
+        adapter.attach_lineage(source_version_id=v1.id, target_version_id=v2.id)
+    monkeypatch.setattr(service._store, "save", real_save)
+
+    # The maintained children index must not keep a phantom child entry.
+    assert service._children_by_parent.get(v1.id, []) == []
+    assert service.get_lineage(v2.id)["parents"] == []
+    _assert_memory_matches_disk(service)
+
+
 # ------------------------------------------------------------------ trash crash window (finding #3)
 
 

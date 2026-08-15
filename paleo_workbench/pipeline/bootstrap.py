@@ -103,15 +103,27 @@ def bootstrap_sample_project(
 
     # Register scanned resources as catalog INPUT versions (RAW) with the legacy
     # bridge. Best-effort: the catalog seam must never block project bootstrap.
-    # Each resource is registered independently so one failure doesn't skip the rest.
+    # Each resource is registered independently so one failure doesn't skip the
+    # rest; the whole loop runs inside service.batch_save() so a directory
+    # import persists as ONE canonical write instead of one fsync per file
+    # (bulk-registration O(N²) write path, C38).
     try:
+        from paleo_workbench.catalog import get_catalog_service
         from paleo_workbench.catalog.lifecycle import register_resource_input
 
-        for resource in resources:
-            try:
-                register_resource_input(resource)
-            except Exception:
-                pass
+        def _register_all() -> None:
+            for resource in resources:
+                try:
+                    register_resource_input(resource)
+                except Exception:
+                    pass
+
+        service = get_catalog_service()
+        if service is not None:
+            with service.batch_save():
+                _register_all()
+        else:
+            _register_all()
     except Exception:
         pass
 
