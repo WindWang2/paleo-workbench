@@ -677,3 +677,195 @@ def test_standard_geometry_survey_not_transposed(tmp_path, text_header):
     x_c, y_c = survey.il_xl_to_xy(1000, 2001)
     assert x_c - x_a == pytest.approx(40.0, abs=1e-3)
     assert y_c == pytest.approx(y_a, abs=1e-3)
+
+
+def _write_detected_geometry_segy(path, shape, *, text_header=None):
+    """Non-standard geometry: FieldRecord/CDP grid, INLINE_3D zeroed out.
+
+    The loader falls back to its detected fast/slow header pair (loader
+    inline = the fast axis = CDP for this inline-sorted layout).
+    """
+    n_il, n_xl, n_t = shape
+    vol = ground_truth_volume(shape)
+    spec = segyio.spec()
+    spec.ilines = list(range(n_il))
+    spec.xlines = list(range(n_xl))
+    spec.samples = tuple(4.0 * k for k in range(n_t))
+    spec.format = 1
+    with segyio.create(str(path), spec) as f:
+        if text_header is not None:
+            f.text[0] = text_header.encode("ascii")
+        for i in range(n_il):
+            for j in range(n_xl):
+                f.header[i * n_xl + j] = {
+                    segyio.TraceField.FieldRecord: 1000 + i,
+                    segyio.TraceField.CDP: 2000 + j,
+                    segyio.TraceField.SourceX: j * 40,
+                    segyio.TraceField.SourceY: i * 40,
+                }
+                f.trace[i * n_xl + j] = vol[i, j, :]
+    # Blank the standard geometry headers so the loader must fall back to
+    # its detected fast/slow pair (FieldRecord/CDP here).
+    with segyio.open(str(path), "r+", ignore_geometry=True) as f:
+        for t in range(n_il * n_xl):
+            f.header[t][segyio.TraceField.INLINE_3D] = 0
+            f.header[t][segyio.TraceField.CROSSLINE_3D] = 0
+    return vol
+
+
+_VALID_TEXT = (
+    "First inline : 1000  Last inline : 1020\r\n"
+    "First xline : 2000  Last xline : 2028\r\n"
+    "xmin : 0.0 xmax : 1120.0 ymin : 0.0 ymax : 800.0\r\n"
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [_VALID_TEXT, None],
+    ids=["valid-text-header", "no-text-header"],
+)
+def test_detected_geometry_survey_loads_and_aligns(tmp_path, text):
+    """Detected (fast/slow header) files: text-header swap stays valid, and
+    the trace scan reads the LOADER's header pair (not FieldRecord/CDP
+    guesses) so the survey neither errors nor mixes axes."""
+    path = tmp_path / f"det_{text is not None}.sgy"
+    shape = (21, 29, 41)
+    _write_detected_geometry_segy(path, shape, text_header=text)
+    p1, p2, p3, meta = survey_corners_from_segy(path)
+    assert meta.get("loader_geometry_source") == "detected_headers"
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(
+        p1, p2, p3,
+        n_samples=int(meta["n_samples"]),
+        dt_ms=float(meta["dt_ms"]),
+        t0_ms=float(meta.get("t0_ms", 0.0)),
+        iline_step=meta.get("loader_iline_step"),
+        xline_step=meta.get("loader_xline_step"),
+        n_inlines=meta.get("loader_n_inlines"),
+        n_crosslines=meta.get("loader_n_crosslines"),
+    )
+    survey = scene.survey
+    # Loader axes: inline = CDP (text xline, 29 values), crossline = FR.
+    assert survey.n_inlines == 29 and survey.n_crosslines == 21
+    # Non-degenerate grid: both spacings non-zero, corners distinct in XY.
+    assert abs(p2[2] - p1[2]) + abs(p2[3] - p1[3]) > 1.0
+    assert abs(p3[2] - p2[2]) + abs(p3[3] - p2[3]) > 1.0
+    # The CDP axis (survey inline) tracks +X: +1 inline moves +40 in X.
+    il0, xl0 = survey.iline_start, survey.xline_start
+    x_a, y_a = survey.il_xl_to_xy(il0, xl0)
+    x_b, y_b = survey.il_xl_to_xy(il0 + survey.iline_step, xl0)
+    assert x_b - x_a == pytest.approx(40.0, abs=1e-3)
+    assert y_b == pytest.approx(y_a, abs=1e-3)
+    # Loader axes are swapped for detected files: volume axis 0 is CDP.
+    loader_oriented = ground_truth_volume(shape).transpose(1, 0, 2)
+    access = InMemoryVolumeAccess(loader_oriented[::1, ::2, ::2])
+    access.strides = (1, 2, 2)
+    scene.set_volume_access(access)
+    x, y = survey.il_xl_to_xy(il0, xl0)
+    vi, vx = scene.registration.xy_to_volume_idx(x, y)
+    assert scene.registration.clamp_indices(vi, vx, 0.0)[:2] == (0, 0)
+
+
+def test_crossline_sorted_standard_geometry_survey_non_degenerate(tmp_path):
+    """Crossline-major files must yield a real (non-collapsed) corner set."""
+    path = tmp_path / "xl_sorted.sgy"
+    n_il, n_xl, n_t = 21, 29, 41
+    vol = ground_truth_volume((n_il, n_xl, n_t))
+    spec = segyio.spec()
+    spec.ilines = [1000 + i for i in range(n_il)]
+    spec.xlines = [2000 + j for j in range(n_xl)]
+    spec.samples = tuple(4.0 * k for k in range(n_t))
+    spec.format = 1
+    spec.sorting = segyio.TraceSortingFormat.CROSSLINE_SORTING
+    with segyio.create(str(path), spec) as f:
+        for j in range(n_xl):
+            for i in range(n_il):
+                tr = j * n_il + i
+                f.header[tr] = {
+                    segyio.TraceField.INLINE_3D: int(spec.ilines[i]),
+                    segyio.TraceField.CROSSLINE_3D: int(spec.xlines[j]),
+                    segyio.TraceField.FieldRecord: int(spec.ilines[i]),
+                    segyio.TraceField.CDP: int(spec.xlines[j]),
+                    segyio.TraceField.SourceX: j * 40,
+                    segyio.TraceField.SourceY: i * 40,
+                }
+                f.trace[tr] = vol[i, j, :]
+    p1, p2, p3, meta = survey_corners_from_segy(path)
+    # P2 must sit on the last crossline of the first inline, not collapse
+    # onto P1 (which produced zero bin spacing / degenerate grids).
+    assert (p2[2], p2[3]) != (p1[2], p1[3])
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(
+        p1, p2, p3,
+        n_samples=int(meta["n_samples"]),
+        dt_ms=float(meta["dt_ms"]),
+        t0_ms=float(meta.get("t0_ms", 0.0)),
+        iline_step=meta.get("loader_iline_step"),
+        xline_step=meta.get("loader_xline_step"),
+        n_inlines=meta.get("loader_n_inlines"),
+        n_crosslines=meta.get("loader_n_crosslines"),
+    )
+    survey = scene.survey
+    assert survey.n_inlines == 21 and survey.n_crosslines == 29
+    x_a, y_a = survey.il_xl_to_xy(1000, 2000)
+    x_b, y_b = survey.il_xl_to_xy(1001, 2000)
+    assert y_b - y_a == pytest.approx(40.0, abs=1e-3)
+    x_c, _ = survey.il_xl_to_xy(1000, 2001)
+    assert x_c - x_a == pytest.approx(40.0, abs=1e-3)
+
+
+def test_pending_slice_numbers_survive_until_registration(qtbot, tmp_path):
+    """Persisted line numbers are applied only once a registration exists."""
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    scene = page._joint_host.scene
+    if scene is None:
+        pytest.skip("engine unavailable")
+    # No volume yet -> registration None; a scene update must NOT consume
+    # the pending numbers (that dropped them before the first bind).
+    page._pending_slice_numbers = (1020.0, 2009.0)
+    page._on_joint_scene_updated()
+    assert page._pending_slice_numbers == (1020.0, 2009.0)
+    # Bind a preview volume so a registration exists, then apply.
+    strides = (2, 3, 4)
+    preview = ground_truth_volume((101, 103, 205))[
+        :: strides[0], :: strides[1], :: strides[2]
+    ]
+    p1, p2, p3, meta = survey_corners_from_segy(_odd_segy_path(tmp_path))
+    scene.set_survey_from_corners(
+        p1, p2, p3,
+        n_samples=int(meta["n_samples"]),
+        dt_ms=float(meta["dt_ms"]),
+        t0_ms=float(meta.get("t0_ms", 0.0)),
+        iline_step=meta.get("loader_iline_step"),
+        xline_step=meta.get("loader_xline_step"),
+        n_inlines=meta.get("loader_n_inlines"),
+        n_crosslines=meta.get("loader_n_crosslines"),
+    )
+    access = InMemoryVolumeAccess(preview)
+    access.strides = strides
+    scene.set_volume_access(access)
+    page._apply_pending_slice_numbers()
+    assert page._pending_slice_numbers is None
+    reg = scene.registration
+    state = scene.orthogonal_slice_state
+    il_num, xl_num = reg.volume_idx_to_il_xl(
+        state.inline_index, state.crossline_index
+    )
+    # Lattice numbers round-trip exactly (1020 -> native 10 -> preview 5
+    # with stride 2; 2009 -> native 3 -> preview 1 with stride 3).
+    assert il_num == pytest.approx(1020.0, abs=1e-6)
+    assert xl_num == pytest.approx(2009.0, abs=1e-6)
+
+
+def _odd_segy_path(tmp_path):
+    """Small odd-shape SEGY for the pending-numbers test (cached per call)."""
+    path = tmp_path / "odd_small.sgy"
+    if not path.exists():
+        write_synthetic_segy(path, (101, 103, 205), iline_step=2, xline_step=3)
+    return path

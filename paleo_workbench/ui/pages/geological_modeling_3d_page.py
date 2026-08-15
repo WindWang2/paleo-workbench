@@ -1507,11 +1507,14 @@ class GeologicalModeling3DPage(QWidget):
         pending = getattr(self, "_pending_slice_numbers", None)
         if pending is None:
             return
-        self._pending_slice_numbers = None
         scene = self._joint_host.scene
         registration = getattr(scene, "registration", None)
         if registration is None or pending[0] is None or pending[1] is None:
+            # Keep the pending numbers until a registration exists: they are
+            # consumed exactly once the volume is bound, not on every scene
+            # update (set_project fires one while registration is still None).
             return
+        self._pending_slice_numbers = None
         try:
             vi, vx = registration.il_xl_to_volume_idx(
                 float(pending[0]), float(pending[1])
