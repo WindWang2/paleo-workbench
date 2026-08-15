@@ -22,6 +22,24 @@ quarantine**: there is no `continue-on-error`, no advisory xfail registry
 "exit 124 is advisory" ceiling. A test that fails is a bug to fix, not a
 reason to loosen the gate.
 
+## QGIS renderer coverage (opt-in, packaging #437)
+
+The production-preferred QGIS renderer (`prefer_qgis=True` in
+`paleo_workbench.mapping.map_render_backend`) requires the optional
+`qgis_render_bridge` extension (vendored-QGIS build, `native/qgis_render_bridge`).
+The main `CI` `Tests` matrix **does not cover it**: it installs neither QGIS
+nor the bridge, so the fallback renderer is the effectively-gated path and
+all QGIS tests (marker `qgis`, 9 sites) self-skip there.
+
+Coverage statement: QGIS bridge changes are gated by the dedicated
+`QGIS renderer` workflow (`.github/workflows/qgis-renderer.yml`) — fail-closed
+build + import smoke + vendor-integrity checks, triggered on manual dispatch
+or on paths `native/qgis_render_bridge/**` / `third_party/qgis/**`. It does
+**not** run QGIS rendering tests (no QGIS runtime leg today); that remains an
+open follow-up (see #437) alongside the geo-viz-engine Windows-filename fix
+(#441). Any QGIS-path change must keep the `qgis` marker selection intact —
+the workflow asserts ≥ 9 `qgis` tests are collected.
+
 ## Windows WellLogEngine
 
 **Status (as of #236):** matrix row **re-enabled** (`os: [ubuntu-latest, windows-latest]`) for `shared=OFF` and `shared=ON` in `.github/workflows/well-log-engine.yml`. Windows path runs with `WELLLOG_BUILD_TEXT=OFF` and `WELLLOG_BUILD_ARROW=OFF` (HarfBuzz/FreeType/ICU and Arrow not on stock Windows runners), `WELLLOG_WARNINGS_AS_ERRORS=OFF`, and a locally built zlib prefix.

@@ -17,6 +17,13 @@ def pytest_configure(config):
 
     configure_qt_platform_for_session(warn=False)
 
+    # QGIS renderer tests are opt-in (packaging #437): they self-skip unless
+    # the bridge was built, and `pytest -m qgis` selects them explicitly in a
+    # QGIS-enabled leg.
+    config.addinivalue_line(
+        "markers", "qgis: QGIS production-renderer tests (opt-in bridge build)"
+    )
+
 
 @pytest.fixture(autouse=True)
 def cleanup_qt_deferred_deletes():

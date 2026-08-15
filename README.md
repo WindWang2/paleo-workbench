@@ -55,6 +55,32 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 python -m pytest -q
 ```
 
+## QGIS renderer (opt-in)
+
+`paleo_workbench.mapping.map_render_backend` prefers the QGIS production
+renderer when `prefer_qgis=True`, but that backend requires the optional
+`qgis_render_bridge` extension (a vendored-QGIS build under
+`native/qgis_render_bridge`; QGIS sources are fixed in `third_party/qgis`).
+It is **not** part of the default install and the main CI gate does **not**
+cover it — the CI `Tests` matrix installs neither QGIS nor the bridge, so the
+fallback renderer is the effectively-gated path and every QGIS test
+self-skips there (they carry the `qgis` pytest marker; skip reasons show the
+exact enablement commands).
+
+Build it explicitly (needs Qt6 dev headers, cmake and ninja on the system):
+
+```bash
+python -m pip install -e ".[qgis-renderer]"
+PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge
+python -m pytest -q -m qgis tests/   # run the QGIS renderer tests
+```
+
+A dedicated CI leg (`.github/workflows/qgis-renderer.yml`) builds the bridge
+and runs an import smoke plus the vendor-integrity checks. It is fail-closed
+but only runs on manual dispatch or on changes touching
+`native/qgis_render_bridge/**` / `third_party/qgis/**` — normal PRs skip it.
+See `docs/ci-merge-policy.md` for the coverage statement.
+
 ## 3D Geological Modeling (`viz/geomodel`)
 
 Page 11 adds a full 3D geological modeling workbench with:

@@ -1,11 +1,21 @@
-"""Optional native QGIS bridge contract, exercised only when built locally."""
+"""Optional native QGIS bridge contract, exercised only when built locally.
+
+Opt-in path (packaging #437): build the vendored-QGIS bridge with
+``PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge``
+and select these tests with ``pytest -m qgis``. The main CI gate does not
+build QGIS, so the module self-skips there.
+"""
 
 from __future__ import annotations
 
 import pytest
 
+from tests.qgis_support import QGIS_SKIP_REASON
 
-qgis_render_bridge = pytest.importorskip("qgis_render_bridge")
+
+pytestmark = pytest.mark.qgis
+
+qgis_render_bridge = pytest.importorskip("qgis_render_bridge", reason=QGIS_SKIP_REASON)
 
 
 def test_qgis_bridge_renders_a_memory_vector_layer(qtbot):

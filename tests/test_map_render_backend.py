@@ -15,6 +15,7 @@ from paleo_workbench.viz.native_factor_map import MapScene
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
 from paleo_workbench.project.models import FactorMapTask
 from paleo_workbench.workflow.factor_interpolation import apply_interpolation_to_task
+from tests.qgis_support import QGIS_SKIP_REASON
 
 
 def _snapshot(*, data_revision: int = 1) -> MapRenderSnapshot:
@@ -112,10 +113,11 @@ def test_qgis_backend_is_explicit_when_optional_native_bridge_is_missing_or_rend
         backend.initialize()
 
 
+@pytest.mark.qgis
 def test_qgis_backend_delivers_only_the_latest_asynchronous_frame(qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     _configure(backend)
     try:
         first = backend.request_render()
@@ -137,10 +139,11 @@ def test_qgis_backend_delivers_only_the_latest_asynchronous_frame(qtbot) -> None
     assert second > first
 
 
+@pytest.mark.qgis
 def test_qgis_single_symbol_style_revision_changes_rendered_vector_frame(qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     _configure(backend)
     try:
         first = backend.render_sync()
@@ -158,10 +161,11 @@ def test_qgis_single_symbol_style_revision_changes_rendered_vector_frame(qtbot) 
     assert first.rgba != second.rgba
 
 
+@pytest.mark.qgis
 def test_qgis_categorized_and_labeled_vector_style_uses_host_feature_attributes(qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     original = _snapshot().layers[0]
     categorized = replace(
         original,
@@ -201,10 +205,11 @@ def test_qgis_categorized_and_labeled_vector_style_uses_host_feature_attributes(
     assert plain.rgba != styled.rgba
 
 
+@pytest.mark.qgis
 def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     result = FactorGridResult.from_engine_dict(
         {
             "grid_x": [0.0, 10.0],
@@ -254,10 +259,11 @@ def test_qgis_backend_composes_the_finished_scalar_grid_without_interpolation(qt
     assert scalar.rasterize_count == 1
 
 
+@pytest.mark.qgis
 def test_qgis_backend_renders_an_external_raster_reference_mirror(tmp_path, qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     from osgeo import gdal, osr
 
     source = tmp_path / "reference.tif"
@@ -295,10 +301,11 @@ def test_qgis_backend_renders_an_external_raster_reference_mirror(tmp_path, qtbo
     assert any(frame.rgba)
 
 
+@pytest.mark.qgis
 def test_qgis_display_operations_never_reinvoke_factor_interpolation(monkeypatch, qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     import paleo_workbench.workflow.factor_interpolation as interpolation
 
     calls = 0

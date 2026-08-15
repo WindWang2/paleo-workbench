@@ -1,0 +1,113 @@
+name: QGIS renderer
+
+# QGIS production renderer bridge (packaging #437).
+#
+# The main CI workflow never builds `native/qgis_render_bridge`: it needs the
+# vendored QGIS core (third_party/qgis, ~20-60 min ninja build) which is not
+# worth paying on every PR. This dedicated leg makes the bridge genuinely
+# buildable in CI and is FAIL-CLOSED (no continue-on-error), so a change that
+# breaks the bridge build cannot silently land.
+#
+# Triggers: (1) manual `workflow_dispatch` from the Actions tab; (2) push/PR
+# touching the bridge sources, the vendored QGIS tree, or this workflow.
+# Normal PRs skip this leg entirely and only exercise the fallback renderer —
+# see README "QGIS renderer (opt-in)" for the coverage statement.
+#
+# Note: the system package list below follows QGIS 4.x build requirements
+# (core + gui + analysis, WITH_AUTH=ON). If a future QGIS vendor bump changes
+# requirements, adjust the apt list here; the job failing loudly is the point.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "native/qgis_render_bridge/**"
+      - "third_party/qgis/**"
+      - ".github/workflows/qgis-renderer.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "native/qgis_render_bridge/**"
+      - "third_party/qgis/**"
+      - ".github/workflows/qgis-renderer.yml"
+
+jobs:
+  build:
+    name: QGIS renderer bridge (build smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: System libraries (Qt6 / QGIS build deps / bridge build tools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            qt6-base-dev \
+            libqt6svg6-dev \
+            qca-qt6-dev \
+            libsqlite3-dev \
+            libexpat1-dev \
+            libproj-dev \
+            libgeos-dev \
+            libgdal-dev \
+            libgsl-dev \
+            libpq-dev \
+            libzip-dev \
+            libzstd-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            libspatialite-dev \
+            libqwt-qt6-dev \
+            libqt6opengl6-dev \
+            libqt6concurrent6 \
+            bison \
+            flex
+
+      - name: Install Python build deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pybind11>=2.12" "ninja>=1.11" "pytest>=8.0"
+
+      - name: Build vendored QGIS + qgis_render_bridge (opt-in)
+        env:
+          PALEO_WITH_QGIS_RENDERER: "1"
+          PALEO_QGIS_BUILD_JOBS: "4"
+        run: |
+          python -m pip install -e native/qgis_render_bridge
+
+      - name: Import smoke (bridge must load with the vendored QGIS runtime)
+        run: |
+          python -c "import qgis_render_bridge; print('qgis_render_bridge imported from', qgis_render_bridge.__file__)"
+
+      - name: Vendor integrity + bridge source contract checks
+        run: |
+          python -m pytest -q tests/test_qgis_vendor_source.py --timeout=60 --timeout-method=thread
+
+      - name: QGIS tests are selected, not silently skipped
+        # The leg must fail if the QGIS test set ever stops being selected
+        # (e.g. a rename), so the production path cannot silently lose
+        # coverage. Deselected == 0 and no importorskip skips once built.
+        run: |
+          python -m pytest --collect-only -q -m qgis tests/ 2>&1 | tee /tmp/qgis-collect.txt
+          grep -E "^[0-9]+ tests collected" /tmp/qgis-collect.txt
+          python - <<'EOF'
+          import re, sys
+          text = open("/tmp/qgis-collect.txt").read()
+          collected = re.search(r"^(\d+) tests collected", text, re.M)
+          assert collected and int(collected.group(1)) >= 9, f"expected >=9 qgis tests collected, got: {text}"
+          print(f"qgis tests collected: {collected.group(1)}")
+          EOF

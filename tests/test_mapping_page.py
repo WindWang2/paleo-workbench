@@ -14,6 +14,7 @@ from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+from tests.qgis_support import QGIS_SKIP_REASON
 
 
 def test_mapping_page_assembles_gis_shell(qtbot):
@@ -116,11 +117,12 @@ def test_native_layer_tree_add_layer_imports_an_immutable_reference_into_unified
     assert hidden.visible is False
 
 
+@pytest.mark.qgis
 def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)
     if page.unified_canvas.backend.backend_name != "qgis":
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     document = PaleoMapDocument(
         id="map-1",
         name="Map",

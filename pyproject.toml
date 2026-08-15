@@ -37,6 +37,16 @@ dev = [
 native = [
     "pybind11>=2.12",
 ]
+# QGIS production renderer (paleo_workbench.mapping.map_render_backend with
+# prefer_qgis=True) is OPT-IN: it builds the vendored QGIS core under
+# native/qgis_render_bridge and is NOT covered by the main CI gate (which
+# tests the fallback renderer — see README "QGIS renderer (opt-in)"). Requires
+# Qt6 development headers (qt6-base-dev etc.) and cmake/ninja on the system.
+# Build: PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge
+qgis-renderer = [
+    "pybind11>=2.12",
+    "ninja>=1.11",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
