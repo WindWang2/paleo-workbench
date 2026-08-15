@@ -215,6 +215,22 @@ class MapAuthoringDocument:
             records.extend(feature_to_record(feature, kind=kind) for feature in source)
         return records
 
+    def data_revisions(self) -> dict[str, int]:
+        """Per-layer data revision counters for render snapshot cache keys.
+
+        The committed ``VectorLayer.data_revision`` and the open edit-session
+        revision are packed into one int so every mutation (edit record, undo,
+        redo, rollback, commit) yields a distinct revision without hashing
+        feature payloads.
+        """
+        revisions: dict[str, int] = {}
+        for binding in self._bindings.values():
+            layer = binding.layer
+            session = layer.edit_session
+            session_revision = session.revision if session is not None else 0
+            revisions[layer.id] = (layer.data_revision << 32) + session_revision
+        return revisions
+
     def selected_feature_ids(self) -> set[str]:
         return self.active_layer.selection
 
