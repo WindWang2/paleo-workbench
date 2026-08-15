@@ -22,11 +22,9 @@ def test_host_empty_reload_status(qtbot, tmp_path, monkeypatch):
 
 def test_host_has_scene_when_geoviz_available():
     host = WellSeismicJointHost()
-    # In CI with geoviz on path, scene should exist
-    if host.engine_error is None:
-        assert host.scene is not None
-    else:
-        assert host.scene is None
+    if host.engine_error is not None:
+        pytest.skip(f"geoviz unavailable in this environment: {host.engine_error}")
+    assert host.scene is not None
 
 
 def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
@@ -37,7 +35,7 @@ def test_host_preferred_domain_not_forced_to_time(qtbot, tmp_path, monkeypatch):
     # Empty data → early exit; still unit-test set_vertical_domain path
     host = WellSeismicJointHost()
     if host.scene is None:
-        return
+        pytest.skip(f"geoviz unavailable: {host.engine_error}")
     from geoviz import VerticalDomain, select_depth_transform
 
     # Without a time-depth transform, Depth is refused (never faked with V0).
@@ -74,7 +72,7 @@ def test_host_depth_unavailable_status_and_unified_domain(tmp_path, monkeypatch)
     monkeypatch.setattr(mod, "_repo_root", lambda: tmp_path)
     host = WellSeismicJointHost()
     if host.scene is None:
-        return
+        pytest.skip(f"geoviz unavailable: {host.engine_error}")
     statuses: list[str] = []
     host.status_changed.connect(statuses.append)
     assert host.set_vertical_domain("Depth", emit_scene=False) is False

@@ -40,6 +40,7 @@ class WellLogPredictionPage(QWidget):
         super().__init__(parent)
         self.setObjectName("WellLogPredictionPage")
         self._project = None
+        self._project_path: Path | None = None
         self._tasks: list = []
         self._selected_index: int | None = None
         self._inference_service = None
@@ -80,6 +81,10 @@ class WellLogPredictionPage(QWidget):
         if project is not self._project:
             self._session_token = object()
         self._project = project
+
+    def set_project_path(self, path) -> None:
+        """Bind the real ``*.paleo.json`` path for export/artifact routing."""
+        self._project_path = Path(path) if path else None
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         """Cancel project-owned inference and release pinned native buffers."""
@@ -346,11 +351,7 @@ class WellLogPredictionPage(QWidget):
         data = self.canvas_panel.well_log_data
         stem = getattr(data, "well_name", None) or "well_log"
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(stem))[:64]
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_path)
         path, _ = QFileDialog.getSaveFileName(
             self,
             f"导出单井剖面 ({label})",

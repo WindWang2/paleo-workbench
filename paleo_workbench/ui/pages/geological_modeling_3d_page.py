@@ -1257,8 +1257,11 @@ class GeologicalModeling3DPage(QWidget):
                 self._stratal_status.setText("3D 视口尚未就绪，无法预览。")
                 return
             self._stratal_status.setText("正在生成演示地层切片…")
+            # Parentless on purpose: a parent would make moveToThread in
+            # OwnedWorkerJob.start a silent no-op and the computation would
+            # run on the GUI thread (review finding #8 regression, C17).
             worker = StratalWorker(
-                demo=True, fractions=tuple(fractions), parent=self
+                demo=True, fractions=tuple(fractions)
             )
             self._stratal_job.start(
                 worker,
@@ -1290,6 +1293,9 @@ class GeologicalModeling3DPage(QWidget):
         vol = renderer.volume_data()
         scene = self._joint_host.scene
         self._stratal_status.setText("正在计算比例地层切片…")
+        # Parentless on purpose: a parent would make moveToThread in
+        # OwnedWorkerJob.start a silent no-op and the computation would
+        # run on the GUI thread (review finding #8 regression, C17).
         worker = StratalWorker(
             demo=False,
             fractions=tuple(fractions),
@@ -1297,7 +1303,6 @@ class GeologicalModeling3DPage(QWidget):
             volume=vol,
             top_path=top_path,
             bottom_path=bot_path,
-            parent=self,
         )
         self._stratal_job.start(
             worker,

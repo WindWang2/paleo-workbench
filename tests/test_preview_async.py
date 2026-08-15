@@ -906,7 +906,11 @@ def test_rescan_invalidates_inflight_preview(qtbot, tmp_path, monkeypatch):
         ],
     )
     assert page.rescan_selected_asset() is True
-    assert page._preview_controller.generation > gen_before_rescan
+    # Rescan runs on a worker (#379); wait for the apply to bump generation.
+    qtbot.waitUntil(
+        lambda: page._preview_controller.generation > gen_before_rescan,
+        timeout=3000,
+    )
 
     # Release the stale worker; it must not overwrite the rescan result.
     release_first.set()

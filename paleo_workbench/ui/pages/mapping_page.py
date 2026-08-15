@@ -92,6 +92,9 @@ class MappingPage(QWidget):
         self._reference_service = ReferenceLayerService()
         self._contour_job = OwnedWorkerJob(self)
         self._contour_job.released.connect(self._clear_contour_job)
+        # Attribute-table record cache keyed by (layer, data revision) so
+        # selection-only tool operations never reconvert every feature.
+        self._attribute_table_records: tuple[object, int, list[dict[str, Any]]] | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -339,12 +342,14 @@ class MappingPage(QWidget):
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             # Avoid wiping dirty geometry when the same document is re-pushed
-            # from project refresh (e.g. other pages update shell state).
+            # from project refresh (e.g. other pages update shell state). The
+            # guard keys on the document id ONLY: a refresh may legitimately
+            # deliver the same id as a brand-new object, and that is exactly
+            # when unsaved edits must be preserved (#423).
             same_doc = (
                 previous is not None
                 and document is not None
                 and getattr(previous, "id", None) == getattr(document, "id", None)
-                and previous is document
             )
             if not same_doc or not scene.is_dirty():
                 scene.load_document(document)
@@ -703,8 +708,10 @@ class MappingPage(QWidget):
         document = self._active_document
         scene = self._edit_scene()
         records = None
+        layer_revisions = None
         if self._authoring_document is not None and self._unified_authoring_mode:
             records = self._authoring_document.records()
+            layer_revisions = self._authoring_document.data_revisions()
         elif scene is not None and document is not None:
             records = scene.export_features()
         visibility = {
@@ -716,6 +723,7 @@ class MappingPage(QWidget):
             project_crs=self._project_crs,
             visibility=visibility,
             records=records,
+            layer_revisions=layer_revisions,
             excluded_layer_ids=self._suppressed_layer_ids,
         )
         self._sync_reference_render_layers(document)
@@ -1130,9 +1138,18 @@ class MappingPage(QWidget):
             skip=(self._authoring_document.active_layer.id, feature_id, path),
         )
 
-    def _on_unified_tool_operation(self) -> None:
+    def _on_unified_tool_operation(self, edits_data: bool = True) -> None:
+        """React to one unified-canvas tool operation.
+
+        ``edits_data`` is False for pure pointer/selection feedback (measure
+        hover, select clicks, zoom): overlays repaint from live state, so the
+        document composition must not be recomposed (and rehashed) per event.
+        """
         self._sync_attribute_table_from_authoring()
-        self._refresh_unified_composition()
+        if edits_data:
+            self._refresh_unified_composition()
+        else:
+            self._sync_map_status()
         self._sync_action_state()
         self._sync_save_enabled()
         self._emit_mapping_context()
@@ -1143,11 +1160,18 @@ class MappingPage(QWidget):
             self.attribute_table.set_layer_features(())
             return
         layer = authoring.active_layer
-        source = layer.edit_session.features() if layer.edit_session is not None else layer.features()
-        self.attribute_table.set_layer_features(
-            [feature_to_record(feature, kind=authoring.active_kind) for feature in source],
-            selected_ids=layer.selection,
-        )
+        session = layer.edit_session
+        revision = (layer.data_revision << 32) + (session.revision if session is not None else 0)
+        source = session.features() if session is not None else layer.features()
+        cached = self._attribute_table_records
+        if cached is None or cached[0] is not layer or cached[1] != revision:
+            records = [
+                feature_to_record(feature, kind=authoring.active_kind) for feature in source
+            ]
+            self._attribute_table_records = (layer, revision, records)
+            self.attribute_table.set_layer_features(records, selected_ids=layer.selection)
+            return
+        self.attribute_table.set_selected_ids(layer.selection)
 
     def _on_attribute_feature_selected(self, feature_id: str) -> None:
         authoring = self._authoring_document
@@ -1161,7 +1185,7 @@ class MappingPage(QWidget):
             except KeyError:
                 return
         layer.set_selection((feature_id,) if feature_id else ())
-        self._on_unified_tool_operation()
+        self._on_unified_tool_operation(edits_data=False)
 
     def _unified_overlay_state(self) -> dict[str, object]:
         authoring = self._authoring_document

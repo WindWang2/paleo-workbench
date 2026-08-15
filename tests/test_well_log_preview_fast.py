@@ -74,3 +74,60 @@ def test_wrapped_las_preview_uses_lasio_fallback(tmp_path: Path):
     assert result.data_headers == ("DEPT", "GR", "DT")
     assert len(result.data_rows) == 6
     assert result.data_rows[0] == ("2000", "45.2", "220")
+
+
+# ---------------------------------------------------------------------------
+# #433 — "~A LOG DATA" is a title, not inline headers: the preview table must
+# show every ~CURVE column, and a column/curve mismatch must surface a warning.
+# ---------------------------------------------------------------------------
+
+LOG_DATA_LAS = """~VERSION INFORMATION
+ VERS .                 2.0 : CWLS LOG ASCII STANDARD -VERSION 2.0
+~WELL INFORMATION
+ WELL.             WELL-01 : WELL NAME
+ NULL.              -999.25 : NULL VALUE
+~CURVE INFORMATION
+ DEPT  .M                   : DEPTH
+ GR    .API                 : GAMMA RAY
+ RHOB  .G/CC                : BULK DENSITY
+~A LOG DATA
+ 2000.00   45.2   2.35
+ 2001.00   52.1   -999.25
+ 2002.00   61.8   2.41
+"""
+
+
+def test_433_a_log_data_preview_shows_all_curves(tmp_path: Path):
+    path = tmp_path / "log_data.las"
+    path.write_text(LOG_DATA_LAS, encoding="utf-8")
+    resource = ResourceItem(name="log_data.las", path=str(path), type="well_log", format="las")
+    result = las_preview(resource, _Settings())
+    assert result.data_headers == ("DEPT", "GR", "RHOB")
+    assert len(result.data_rows) == 3
+    assert result.data_rows[0] == ("2000", "45.2", "2.35")
+    assert result.data_rows[1][2] == "NaN"
+    assert result.warning == ""
+
+
+def test_433_preview_warns_on_column_curve_mismatch(tmp_path: Path):
+    # ~CURVE declared after the ~A data section: the fast parser cannot see it
+    # and falls back to the ~A words -> 2 columns vs 3 declared curves.
+    path = tmp_path / "mismatch.las"
+    path.write_text(
+        "~VERSION INFORMATION\n"
+        " VERS .                 2.0 : CWLS LOG ASCII STANDARD -VERSION 2.0\n"
+        "~WELL INFORMATION\n"
+        " WELL.             WELL-01 : WELL NAME\n"
+        " NULL.              -999.25 : NULL VALUE\n"
+        "~A LOG DATA\n"
+        " 2000.00   45.2   2.35\n"
+        " 2001.00   52.1   2.38\n"
+        "~CURVE INFORMATION\n"
+        " DEPT  .M                   : DEPTH\n"
+        " GR    .API                 : GAMMA RAY\n"
+        " RHOB  .G/CC                : BULK DENSITY\n",
+        encoding="utf-8",
+    )
+    resource = ResourceItem(name="mismatch.las", path=str(path), type="well_log", format="las")
+    result = las_preview(resource, _Settings())
+    assert "不一致" in result.warning
