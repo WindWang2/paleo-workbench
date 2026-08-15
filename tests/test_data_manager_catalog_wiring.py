@@ -309,7 +309,18 @@ def test_materialize_action_enabled_only_for_bridged_external(
 
     page = _make_page(qtbot)
     ext_resource = _make_external_resource(page, tmp_path)
-    managed_resource = _make_managed_resource(page, tmp_path, name="managed.las")
+    legacy_resource = _make_managed_resource(page, tmp_path, name="legacy.las")
+    # A genuinely managed import (payload copied into the artifacts dir)
+    # stays non-external; migration then skips the bridged resource.
+    imported_resource = _make_managed_resource(page, tmp_path, name="imported.las")
+    CoreCatalogAdapter(catalog).register_input(
+        name="imported.las",
+        path=str(_project_dir(tmp_path) / "data" / "imported.las"),
+        checksum=sha256_file(_project_dir(tmp_path) / "data" / "imported.las"),
+        kind="well_log",
+        format="las",
+        legacy_resource_id=imported_resource.id,
+    )
     catalog.migrate_legacy_resources(page.project.resources)
 
     # The menu builds the action disabled for external assets; DataPage enables
@@ -317,8 +328,12 @@ def test_materialize_action_enabled_only_for_bridged_external(
     # logic the context-menu wiring uses.
     _svc, ext_ref = page._catalog_bridge(ext_resource)
     assert ext_ref is not None and ext_ref.external is True
-    _svc, managed_ref = page._catalog_bridge(managed_resource)
-    assert managed_ref is not None and managed_ref.external is False
+    # Legacy projections are unmanaged links too (no file copy in migration,
+    # issue #396): materialize stays actionable for them.
+    _svc, legacy_ref = page._catalog_bridge(legacy_resource)
+    assert legacy_ref is not None and legacy_ref.external is True
+    _svc, imported_ref = page._catalog_bridge(imported_resource)
+    assert imported_ref is not None and imported_ref.external is False
 
     menu = AssetContextMenu()
     menu.build(ext_resource, viz_supported=False)
@@ -392,11 +407,23 @@ def test_remove_managed_bridged_asset_trashes_catalog_no_ghost(
     asset behind."""
     page = _make_page(qtbot)
     resource = _make_managed_resource(page, tmp_path)
+    # A genuinely managed bridged asset: the import path copies the payload
+    # into the artifacts dir (legacy projections are unmanaged links — issue
+    # #396 — and would be trashed metadata-only instead).
+    ref = CoreCatalogAdapter(catalog).register_input(
+        name=resource.name,
+        path=str(_project_dir(tmp_path) / "data" / resource.name),
+        checksum=sha256_file(_project_dir(tmp_path) / "data" / resource.name),
+        kind="well_log",
+        format="las",
+        legacy_resource_id=resource.id,
+    )
     catalog.migrate_legacy_resources(page.project.resources)
-    asset_id = resource.id
-    version = catalog.get_version(f"ver_{resource.id}")
+    asset_id = ref.asset_id
+    version = catalog.get_version(ref.version_id)
     payload = catalog.resolve_path(version)
     assert payload.is_file()
+    assert "artifacts" in payload.as_posix()
 
     removed = page.remove_assets([resource])
 
@@ -441,8 +468,18 @@ def test_remove_external_bridged_asset_trashes_metadata_only_keeps_file(
 def test_restore_trashed_asset_restores_payload_and_resource(qtbot, tmp_path, catalog):
     page = _make_page(qtbot)
     resource = _make_managed_resource(page, tmp_path)
+    # Genuinely managed bridged asset (import path copies the payload into
+    # the artifacts dir) so trash/restore exercises payload custody.
+    ref = CoreCatalogAdapter(catalog).register_input(
+        name=resource.name,
+        path=str(_project_dir(tmp_path) / "data" / resource.name),
+        checksum=sha256_file(_project_dir(tmp_path) / "data" / resource.name),
+        kind="well_log",
+        format="las",
+        legacy_resource_id=resource.id,
+    )
     catalog.migrate_legacy_resources(page.project.resources)
-    original_version = catalog.get_version(f"ver_{resource.id}")
+    original_version = catalog.get_version(ref.version_id)
     original_payload = catalog.resolve_path(original_version)
 
     page.remove_assets([resource])
@@ -453,9 +490,9 @@ def test_restore_trashed_asset_restores_payload_and_resource(qtbot, tmp_path, ca
     restored = page.restore_selected_asset()
 
     assert restored is True
-    asset = catalog.get_asset(resource.id)
+    asset = catalog.get_asset(ref.asset_id)
     assert asset.trashed is False
-    version = catalog.get_version(f"ver_{resource.id}")
+    version = catalog.get_version(ref.version_id)
     assert version.trashed is False
     assert catalog.resolve_path(version).read_bytes() == b"well.las-bytes"
     # The legacy ResourceItem companion is re-surfaced in the active project.
