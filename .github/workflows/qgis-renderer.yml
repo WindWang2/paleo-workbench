@@ -61,7 +61,8 @@ jobs:
           # - nlohmann-json and poly2tri are consumed from the vendored
           #   external/ copies (PREFER_INTERNAL_LIBS=TRUE for non-vcpkg
           #   builds), so only Protobuf/QScintilla/qtkeychain/QCA are
-          #   additionally required by the configure flags below.
+          #   additionally required by the configure flags below (exiv2: WITH_EXIV2
+#   defaults ON and its find_package is REQUIRED).
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
@@ -87,6 +88,7 @@ jobs:
             protobuf-compiler \
             libqscintilla2-qt6-dev \
             qtkeychain-qt6-dev \
+            libexiv2-dev \
             bison \
             flex
 
