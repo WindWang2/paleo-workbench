@@ -55,6 +55,24 @@ def test_owned_worker_job_runs_off_gui_and_releases_normal_completion(qtbot):
     assert job.worker is None
 
 
+def test_start_rejects_worker_with_parent(qtbot):
+    """A parented worker makes moveToThread a silent no-op, so run() would
+    execute on the GUI thread; OwnedWorkerJob must refuse it loudly (C17).
+    """
+    import pytest
+    from PySide6.QtWidgets import QWidget
+
+    from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+    parent = QWidget()
+    worker = _ProbeWorker()
+    worker.setParent(parent)
+    job = OwnedWorkerJob()
+    with pytest.raises(RuntimeError, match="without a parent"):
+        job.start(worker, terminal_signals=(worker.finished,))
+    assert job.is_running is False
+
+
 def test_shutdown_cancels_disconnects_results_and_detaches_blocked_worker(qtbot):
     from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
     from paleo_workbench.ui.thread_keeper import detached_job_keeper

@@ -483,10 +483,28 @@ class SeismicVolumeSource:
 
 
 def _downsample_2d(data: np.ndarray, *, step: int) -> np.ndarray:
+    """Peak-preserving LOD decimation for 2D seismic slices.
+
+    Each ``step × step`` cell keeps its largest-magnitude sample (sign
+    preserved) instead of the top-left strided sample, so a thin reflection
+    that falls between stride points survives decimation. Cells containing
+    NaN keep the first NaN (nodata stays visible).
+    """
     step = max(1, int(step))
     if step == 1:
         return np.ascontiguousarray(data, dtype=np.float32)
-    return np.ascontiguousarray(data[::step, ::step], dtype=np.float32)
+    a = np.asarray(data, dtype=np.float32)
+    rows = a.shape[0] - a.shape[0] % step
+    cols = a.shape[1] - a.shape[1] % step
+    windows = a[:rows, :cols].reshape(rows // step, step, cols // step, step)
+    cells = windows.transpose(0, 2, 1, 3).reshape(rows // step, cols // step, step * step)
+    mag = np.abs(cells)
+    nan_mask = np.isnan(mag)
+    idx = np.where(
+        nan_mask.any(axis=2), np.argmax(nan_mask, axis=2), np.argmax(mag, axis=2)
+    )
+    out = np.take_along_axis(cells, idx[..., None], axis=2)[..., 0]
+    return np.ascontiguousarray(out, dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------

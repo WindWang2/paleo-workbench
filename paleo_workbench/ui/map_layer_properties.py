@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from paleo_workbench.ui import tokens
+
 __all__ = ["MapLayerPropertiesDialog"]
 
 
@@ -113,6 +115,14 @@ class MapLayerPropertiesDialog(QDialog):
             symbology_form.addRow("Renderer", self.renderer_combo)
             symbology_form.addRow("Classification field", self.classification_field_edit)
             symbology_form.addRow("Classes (JSON)", self.classes_edit)
+            self.classes_error_label = QLabel("")
+            self.classes_error_label.setWordWrap(True)
+            self.classes_error_label.setStyleSheet(
+                f"color: {tokens.ERROR_RED}; font-size: 11px;"
+            )
+            self.classes_error_label.hide()
+            symbology_form.addRow("", self.classes_error_label)
+            self.classes_edit.textChanged.connect(self.classes_error_label.hide)
         self.tabs.addTab(symbology, "Symbology")
 
         labels = QWidget(self)
@@ -195,9 +205,29 @@ class MapLayerPropertiesDialog(QDialog):
             "style": style,
         }
 
+    def classes_json_error(self) -> str | None:
+        """Human-readable parse error for the Classes (JSON) field, or None."""
+        if self._is_scalar:
+            return None
+        classes = self.classes_edit.toPlainText().strip()
+        if not classes:
+            return None
+        try:
+            json.loads(classes)
+        except json.JSONDecodeError as exc:
+            return f"Invalid Classes JSON: {exc}"
+        return None
+
     def apply(self) -> None:
         self.properties_applied.emit(self._layer_id, self.payload())
 
     def _accept_after_apply(self) -> None:
+        # Never close the dialog over a silently discarded structured input:
+        # show an inline error next to the Classes field instead (#426).
+        error = self.classes_json_error()
+        if error:
+            self.classes_error_label.setText(error)
+            self.classes_error_label.show()
+            return
         self.apply()
         self.accept()
