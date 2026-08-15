@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMessageBox
 
 from geoviz import CancellationToken
@@ -32,7 +33,11 @@ class WorkflowController:
     def __init__(self, window) -> None:
         self.window = window
         self.preview_settings_dialog: PreviewSettingsDialog | None = None
-        self._prepare_job = OwnedWorkerJob(window)
+        # Own the prepare worker thread for the window's lifetime; tests may
+        # inject plain-object fakes as ``window``, so only parent the job when
+        # the window really is a QObject.
+        job_parent = window if isinstance(window, QObject) else None
+        self._prepare_job = OwnedWorkerJob(job_parent)
         self._prepare_generation = 0
 
     def show_preview_settings(self) -> None:
