@@ -54,6 +54,21 @@ def test_data_page_assembles_management_panels(qtbot):
     assert page.inspector_panel is not None
 
 
+def test_shutdown_wait_budget_never_below_test_budget():
+    """The production close wait budget must not be smaller than the pytest
+    branch (C18).
+
+    Regression: ``wait_ms = 5000 if "pytest" in sys.modules else 100`` made
+    detach-on-close the norm in production (any in-flight job exceeded
+    100 ms), forfeiting result delivery and feeding the detached-thread
+    app-exit crash path.  One constant serves both environments now; pin it
+    high enough that cooperative jobs finish instead of detaching.
+    """
+    from paleo_workbench.ui.pages.data_page import _SHUTDOWN_WAIT_MS
+
+    assert _SHUTDOWN_WAIT_MS >= 5_000
+
+
 def test_data_page_uses_three_pane_splitter(qtbot):
     page = DataPage(project=ProjectDocument.new("Demo"))
     qtbot.addWidget(page)
