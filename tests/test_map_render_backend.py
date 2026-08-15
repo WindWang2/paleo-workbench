@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import numpy as np
 import pytest
 
 from paleo_workbench.mapping.map_render_backend import (
@@ -365,3 +366,90 @@ def test_qgis_display_operations_never_reinvoke_factor_interpolation(monkeypatch
         backend.shutdown()
 
     assert calls == 1
+
+
+def _line_snapshot(*, stroke_width: float = 1.0) -> MapRenderSnapshot:
+    return MapRenderSnapshot(
+        project_crs="EPSG:3857",
+        layers=(
+            MapLayerSnapshot(
+                id="line",
+                name="Line",
+                layer_type="vector",
+                extent=(0.0, 0.0, 20.0, 20.0),
+                crs="EPSG:3857",
+                data_revision=1,
+                style_revision=1,
+                features=(
+                    {
+                        "id": "line-1",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[0.5, 10.125], [19.5, 10.125]],
+                        },
+                        "properties": {},
+                    },
+                ),
+                style={"stroke": "#26364d", "stroke_width": stroke_width},
+            ),
+        ),
+    )
+
+
+def _stroke_ink(backend: FallbackMapRenderBackend, *, dpi: float) -> int:
+    """Sum of pixel deviation from the background across the rendered frame.
+
+    Antialiasing preserves ink area, so the sum is proportional to the
+    painted stroke width times its length.
+    """
+    backend.set_output_size(320, 240)
+    backend.set_dpi(dpi)
+    frame = backend.render_sync()
+    pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(240, 320, 4).astype(int)
+    background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+    return int(np.abs(pixels - background).sum())
+
+
+def test_fallback_export_scales_stroke_width_with_dpi() -> None:
+    """Fallback export must honor dpi: stroke width = base × dpi/96 (<1%)."""
+    import numpy as np
+
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_layer_snapshot(_line_snapshot())
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+
+    ink_96 = _stroke_ink(backend, dpi=96.0)
+    ink_300 = _stroke_ink(backend, dpi=300.0)
+    ink_600 = _stroke_ink(backend, dpi=600.0)
+
+    assert ink_96 > 0
+    # 300/96 is the acceptance criterion (error < 1%); 600 dpi is a looser
+    # monotonicity check because sub-pixel AA rounding grows at wider strokes.
+    assert ink_300 / ink_96 == pytest.approx(300.0 / 96.0, rel=0.01)
+    assert ink_600 / ink_96 == pytest.approx(600.0 / 96.0, rel=0.03)
+
+
+def test_fallback_dpi_scales_widths_but_not_geometry_positions() -> None:
+    """Only cosmetic sizes scale with dpi; the map extent still fills the
+    output exactly (a naive painter.scale would push geometry off-canvas)."""
+    backend = FallbackMapRenderBackend()
+    backend.initialize()
+    backend.set_layer_snapshot(_line_snapshot())
+    backend.set_extent((0.0, 0.0, 20.0, 20.0))
+    backend.set_output_size(320, 240)
+
+    def line_rows(dpi: float) -> set[int]:
+        backend.set_dpi(dpi)
+        frame = backend.render_sync()
+        pixels = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(240, 320, 4).astype(int)
+        background = np.array([0x18, 0x1C, 0x22, 0xFF], dtype=int)
+        diff = np.abs(pixels - background).sum(axis=2)
+        return {int(row) for row in np.where((diff > 24).any(axis=1))[0]}
+
+    rows_96 = line_rows(96.0)
+    rows_300 = line_rows(300.0)
+    assert rows_96 and rows_300
+    # Same vertical band center (position unchanged), wider band at 300 dpi.
+    assert (min(rows_96) + max(rows_96)) // 2 == (min(rows_300) + max(rows_300)) // 2
+    assert len(rows_300) > len(rows_96)

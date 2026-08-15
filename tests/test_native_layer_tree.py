@@ -209,3 +209,33 @@ def test_native_layer_model_drop_target_matches_display_position(qtbot):
     assert model.dropMimeData(mime, Qt.DropAction.MoveAction, 3, 0, QModelIndex())
     assert _display_order(model) == ["a", "b", "c"]
     assert registry.index_of("c") == 0
+
+
+# --- drop precision across every (source, drop) pair (#392 / C23) -----------
+
+
+@pytest.mark.parametrize("drop_row", range(5))
+@pytest.mark.parametrize("source_row", range(4))
+def test_drop_mime_data_inserts_at_display_row_for_all_row_pairs(source_row, drop_row):
+    """Every (source, target) sibling pair must land exactly on the drop row
+    under the reversed-display convention (top row = highest z).
+
+    ``move_layer`` removes the dragged layer before inserting; the historical
+    off-by-one (#392) showed the rendered z-order disagreeing with the row
+    highlighted during the drag. This exhaustive grid pins the insert-before
+    semantics against regressions from either side.
+    """
+    registry = layer_model_core.LayerRegistry()
+    for layer_id in ("a", "b", "c", "d"):
+        registry.add_layer(layer_id, layer_id.upper(), layer_model_core.LayerType.Vector)
+    model = NativeLayerModel(registry)
+
+    display = _display_order(model)  # [d, c, b, a]
+    dragged = display[source_row]
+
+    mime = model.mimeData([model.index(source_row, 0, QModelIndex())])
+    assert model.dropMimeData(mime, Qt.DropAction.MoveAction, drop_row, 0, QModelIndex())
+
+    expected = [lid for lid in display if lid != dragged]
+    expected.insert(min(drop_row, len(expected)), dragged)
+    assert _display_order(model) == expected

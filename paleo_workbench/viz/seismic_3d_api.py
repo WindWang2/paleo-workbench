@@ -13,6 +13,7 @@ __all__ = [
     "fast_resample_volume_3d",
     "fast_slice_extract",
     "fast_slice_to_indexed8",
+    "global_stretch_range",
     "marching_cubes_3d",
 ]
 
@@ -26,10 +27,39 @@ def fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndarray:
 
 
 def fast_slice_to_indexed8(
-    volume: np.ndarray, axis: int, index: int
+    volume: np.ndarray, axis: int, index: int,
+    value_range: tuple[float, float] | None = None,
 ) -> tuple[np.ndarray, float, float]:
-    """Extract a 2D slice and normalize it to Indexed8 uint8 in one fast pass."""
-    return native_backend.dispatch("fast_slice_to_indexed8", volume, axis, index)
+    """Extract a 2D slice and normalize it to Indexed8 uint8 in one fast pass.
+
+    Without ``value_range`` the stretch is computed per slice (min/max over
+    every element).  Passing a volume-wide ``(vmin, vmax)`` (see
+    :func:`global_stretch_range`) makes every slice share one color mapping,
+    so adjacent slices cannot jump in contrast and dark slices do not
+    black-screen.
+    """
+    return native_backend.dispatch(
+        "fast_slice_to_indexed8", volume, axis, index, value_range=value_range
+    )
+
+
+def global_stretch_range(volume: np.ndarray) -> tuple[float, float]:
+    """Volume-wide finite min/max for a stable slice color mapping (C44).
+
+    Every element contributes (no stride sampling), so a single extreme voxel
+    is never skipped.  Compute once per volume (first frame) and reuse for
+    every slice; returns ``(0.0, 0.0)`` for empty, all-non-finite, or constant
+    volumes, which correctly renders as black.
+    """
+    flat = np.asarray(volume, dtype=np.float32).reshape(-1)
+    if flat.size == 0:
+        return (0.0, 0.0)
+    with np.errstate(invalid="ignore"):
+        v_min = float(np.nanmin(flat))
+        v_max = float(np.nanmax(flat))
+    if not (np.isfinite(v_min) and np.isfinite(v_max)) or v_min >= v_max:
+        return (0.0, 0.0)
+    return (v_min, v_max)
 
 
 def fast_resample_volume_3d(
