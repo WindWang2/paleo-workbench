@@ -877,6 +877,12 @@ class DataCatalogService:
 
         When *parent_version_ids* is omitted, the parent is inferred from the
         working-copy directory created by :meth:`create_working_copy`.
+
+        ``name`` names the new ASSET when *asset_id* is None; when committing
+        onto an existing asset it is stored as ``metadata["name"]`` on the new
+        version (so the New Version dialog's "version name" input survives
+        persistence instead of being silently dropped). An empty name writes
+        no metadata key.
         """
         working_path = Path(working_path)
         if parent_version_ids is None:
@@ -900,10 +906,13 @@ class DataCatalogService:
                 if asset in self.document.assets:
                     self._remove_asset(asset)
                 raise
+        version_metadata = dict(metadata or {})
+        if name:
+            version_metadata["name"] = name
         return self.register_version(
             asset_id, working_path, stage,
             parent_version_ids=parent_version_ids,
-            run_id=run_id, metadata=metadata, move=True,
+            run_id=run_id, metadata=version_metadata, move=True,
             _restore_payload_to=working_path,
         )
 

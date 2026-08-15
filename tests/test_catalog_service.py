@@ -557,6 +557,49 @@ def test_failed_commit_restores_working_copy(service, tmp_path, monkeypatch):
     assert len(service.document.versions) == 1
 
 
+def test_commit_working_copy_stores_version_name_in_metadata(service, tmp_path):
+    """The New Version dialog's optional name must reach the committed
+    version's metadata when committing onto an EXISTING asset (DATA-9)."""
+    src = _make_source(tmp_path, payload=b"base")
+    parent = service.import_raw(src)
+    working = service.create_working_copy(parent.id)
+    working.write_bytes(b"edited")
+
+    new_version = service.commit_working_copy(
+        working, asset_id=parent.asset_id, name="去毛刺滤波版"
+    )
+
+    assert service.get_version(new_version.id).metadata["name"] == "去毛刺滤波版"
+    # Stable, queryable through the public listing.
+    latest = service.list_versions(parent.asset_id)[-1]
+    assert latest.metadata.get("name") == "去毛刺滤波版"
+
+
+def test_commit_working_copy_empty_name_writes_no_metadata_key(service, tmp_path):
+    src = _make_source(tmp_path, payload=b"base")
+    parent = service.import_raw(src)
+    working = service.create_working_copy(parent.id)
+    working.write_bytes(b"edited")
+
+    new_version = service.commit_working_copy(working, asset_id=parent.asset_id, name="")
+
+    assert "name" not in service.get_version(new_version.id).metadata
+    # The parent's own name is untouched (no asset rename).
+    assert service.get_asset(parent.asset_id).name != ""
+
+
+def test_commit_working_copy_new_asset_branch_keeps_name_semantics(service, tmp_path):
+    """asset_id=None: the name still names the NEW ASSET (existing behavior)."""
+    src = _make_source(tmp_path, payload=b"base")
+    parent = service.import_raw(src)
+    working = service.create_working_copy(parent.id)
+    working.write_bytes(b"edited")
+
+    version = service.commit_working_copy(working, asset_id=None, name="my-derived")
+
+    assert service.get_asset(version.asset_id).name == "my-derived"
+
+
 def test_find_versions_by_tag_uses_index(service, tmp_path):
     v = service.import_raw(_make_source(tmp_path))
     service.add_tag("reviewed", version_id=v.id)
