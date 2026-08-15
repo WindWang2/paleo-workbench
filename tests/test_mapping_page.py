@@ -573,3 +573,47 @@ def test_canvas_priority_toolbar_button_toggles_mode(qtbot):
     assert page.is_canvas_priority()
     page.toolbar.canvas_priority_btn.setChecked(False)
     assert not page.is_canvas_priority()
+
+
+def test_update_state_same_id_new_object_keeps_dirty_legacy_scene(qtbot):
+    """A programmatic refresh delivering the SAME document id as a NEW object
+    must not wipe unsaved legacy scene edits (the id-equality guard must not
+    require object identity) (#423)."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+
+    from paleo_workbench.ui.pages.map_edit_scene import MapEditScene
+
+    scene = page.edit_view.scene()
+    assert isinstance(scene, MapEditScene)
+    assert scene._bound_document is document
+
+    # Unsaved edits in the legacy scene.
+    scene.set_dirty(True)
+
+    # Same id, different instance (project refresh / deep-copied shell state).
+    swapped = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    assert swapped is not document
+    page.update_state([swapped])
+
+    # Scene must not have been reloaded: edits and undo stack preserved.
+    assert scene.is_dirty() is True
+    assert scene._bound_document is document
+
+
+def test_update_state_different_id_still_reloads_scene(qtbot):
+    """A different document id reloads the scene even when it is dirty."""
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+    scene = page.edit_view.scene()
+    scene.set_dirty(True)
+
+    other = PaleoMapDocument(id="map-2", name="Map 2", linked_target_horizon="H2")
+    page.update_state([other])
+
+    assert scene.is_dirty() is False
+    assert scene._bound_document is other

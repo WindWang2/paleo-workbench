@@ -176,7 +176,13 @@ class DataToolbar(QWidget):
             self._tag_operator = operator
 
     def current_tag_selection(self) -> list[str]:
-        return [a.text() for a in self._tag_check_actions if a.isChecked()]
+        # Read the filter state, not the lazily-built menu-action mirror: the
+        # actions only exist after the menu was opened once, so reading them
+        # here would silently report [] for programmatic applies (Tag Manager
+        # 查看关联数据) and drop the tag filter on the next navigation click
+        # (#413). The menu rebuild initializes its check states from
+        # _selected_tags, so the mirror can never diverge from the source.
+        return list(self._selected_tags)
 
     def current_tag_operator(self) -> str:
         return self._tag_operator

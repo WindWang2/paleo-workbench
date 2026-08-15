@@ -41,11 +41,39 @@ SAMPLE_LAS_LOD = """~VERSION INFORMATION
 
 
 def test_las_parser_provider_registered():
-    from geoviz import get_las_parser_provider
-    hook = get_las_parser_provider()
-    if hook is None and not native_backend.has_cpp("well_log"):
-        pytest.skip("no LAS parser backend registered (well_log_core not built)")
-    assert hook is not None or native_backend.has_cpp("well_log") is True
+    from geoviz import (
+        get_downsample_provider,
+        get_isosurface_extractor,
+        get_las_parser_provider,
+        set_downsample_provider,
+        set_isosurface_extractor,
+        set_las_parser_provider,
+    )
+    from paleo_workbench.native_backend import _cpp_las_parser_provider, native_backend
+
+    if not native_backend.has_cpp("well_log"):
+        pytest.skip("well_log_core C++ extension not built in this environment")
+
+    prev = (
+        get_downsample_provider(),
+        get_isosurface_extractor(),
+        get_las_parser_provider(),
+    )
+    try:
+        native_backend.install_all_hooks()
+        hook = get_las_parser_provider()
+        assert hook is _cpp_las_parser_provider, (
+            "install_all_hooks() must register the native C++ LAS parser provider"
+        )
+        # The registered provider must parse a real LAS through the native backend.
+        headers, data = hook("~A DEPT GR\n100.0 45.0\n100.1 48.0\n100.2 50.0\n", -999.0)
+        assert headers == ("DEPT", "GR")
+        assert data.shape == (3, 2)
+        assert data[0, 0] == 100.0
+    finally:
+        set_downsample_provider(prev[0])
+        set_isosurface_extractor(prev[1])
+        set_las_parser_provider(prev[2])
 
 
 def test_las_parser_provider_parse(tmp_path: Path):

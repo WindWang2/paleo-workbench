@@ -339,12 +339,14 @@ class MappingPage(QWidget):
         scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             # Avoid wiping dirty geometry when the same document is re-pushed
-            # from project refresh (e.g. other pages update shell state).
+            # from project refresh (e.g. other pages update shell state). The
+            # guard keys on the document id ONLY: a refresh may legitimately
+            # deliver the same id as a brand-new object, and that is exactly
+            # when unsaved edits must be preserved (#423).
             same_doc = (
                 previous is not None
                 and document is not None
                 and getattr(previous, "id", None) == getattr(document, "id", None)
-                and previous is document
             )
             if not same_doc or not scene.is_dirty():
                 scene.load_document(document)
