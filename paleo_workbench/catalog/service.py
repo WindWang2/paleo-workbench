@@ -1028,10 +1028,20 @@ class DataCatalogService:
                     raise CatalogError(
                         f"cannot change terminal run {run_id} from {run.status!r} to {status!r}"
                     )
+            before_status = run.status
+            before_parameters = dict(run.parameters)
             run.status = status
             if extra_parameters:
                 run.parameters.update(extra_parameters)
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                # Snapshot-rollback: a failed save must not leave the run
+                # half-updated in memory while the disk keeps the old state
+                # (failure-compensation paths rely on this, e.g. _fail_run).
+                run.status = before_status
+                run.parameters = before_parameters
+                raise
             return run
 
     # -- model registry --------------------------------------------------------

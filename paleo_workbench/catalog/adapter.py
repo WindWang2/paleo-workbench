@@ -478,7 +478,19 @@ class CoreCatalogAdapter:
         service.get_version(source_version_id)  # raises if unknown
         if source_version_id not in target.parent_version_ids:
             service._append_parent(target_version_id, source_version_id)
-            service._save()
+            try:
+                service._save()
+            except Exception:
+                # Snapshot-rollback on a failed save: undo the in-memory edge
+                # (and the maintained children index) so memory never diverges
+                # from the disk state until a later unrelated save.
+                target.parent_version_ids.remove(source_version_id)
+                children = service._children_by_parent
+                if children is not None:
+                    bucket = children.get(source_version_id)
+                    if bucket is not None and target in bucket:
+                        bucket.remove(target)
+                raise
         return LineageEdge(
             source_version_id=source_version_id,
             target_version_id=target_version_id,

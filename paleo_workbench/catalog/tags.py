@@ -82,19 +82,30 @@ def remove_tag(
     asset_id: str | None = None,
     version_id: str | None = None,
 ) -> None:
+    """Remove one tag association; unknown tag name is a no-op.
+
+    Snapshot-rollback on a failed canonical save (same discipline as the
+    other tag mutators): a failed removal must not leave a half-applied
+    association in memory while the disk still holds the old state.
+    """
     with service._lock:
         tag = _tag_by_name(service, name)
         if tag is None:
             return
-        changed = False
-        if asset_id is not None and tag.id in service.document.asset_tags.get(asset_id, []):
-            service.document.asset_tags[asset_id].remove(tag.id)
-            changed = True
-        if version_id is not None and tag.id in service.document.version_tags.get(version_id, []):
-            service.document.version_tags[version_id].remove(tag.id)
-            changed = True
-        if changed:
-            service._save()
+        snapshot = _usage_snapshot(service)
+        try:
+            changed = False
+            if asset_id is not None and tag.id in service.document.asset_tags.get(asset_id, []):
+                service.document.asset_tags[asset_id].remove(tag.id)
+                changed = True
+            if version_id is not None and tag.id in service.document.version_tags.get(version_id, []):
+                service.document.version_tags[version_id].remove(tag.id)
+                changed = True
+            if changed:
+                service._save()
+        except Exception:
+            _restore_snapshot(service, snapshot)
+            raise
 
 
 def rename_tag(
