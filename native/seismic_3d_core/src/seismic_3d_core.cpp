@@ -730,6 +730,10 @@ py::tuple marching_cubes_3d(py::array_t<float, py::array::c_style | py::array::f
 
 PYBIND11_MODULE(seismic_3d_core, m) {
     m.doc() = "Native 3D seismic volume processing and slice extraction acceleration";
+    // Build metadata for source-freshness checks (packaging #435): consumers
+    // (native_backend.native_version, CI __file__/__version__ asserts) rely on
+    // this attribute to distinguish a fresh build from a stale committed .so.
+    m.attr("__version__") = "0.2.17a0";
     m.def("fast_slice_extract", &fast_slice_extract, py::arg("volume"), py::arg("axis"), py::arg("index"));
     m.def("fast_slice_to_indexed8", &fast_slice_to_indexed8, py::arg("volume"), py::arg("axis"), py::arg("index"), py::arg("value_range") = py::none());
     m.def("fast_resample_volume_3d", &fast_resample_volume_3d, py::arg("volume"), py::arg("target_shape"));

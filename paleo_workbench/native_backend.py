@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from decimal import Decimal
 import math
+from pathlib import Path
 import re
 from typing import Any, Callable, Generator
 import warnings
@@ -45,6 +46,71 @@ try:
 except ImportError:  # pragma: no cover
     grid_render_core = None  # type: ignore
     _HAS_GRID_RENDER_CPP = False
+
+# Feature -> loaded module (may be None) for source-origin classification.
+_NATIVE_MODULES = {
+    "seismic_3d": seismic_3d_core,
+    "well_log": well_log_core,
+    "map_edit": map_edit_core,
+    "grid_render": grid_render_core,
+}
+
+
+def _repo_root() -> Path:
+    """Monorepo root (the directory that contains ``paleo_workbench/``)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _module_origin(mod: Any) -> str:
+    """Classify where a native module was loaded from.
+
+    Returns ``"missing"`` when the module could not be imported, ``"repo_root"``
+    when the module resolves to a binary sitting directly at the repository root
+    (a committed .so that shadows freshly built modules on ``sys.path[0]`` —
+    see packaging #435), or ``"installed"`` for any other location (editable
+    in-place build under ``native/<pkg>``, site-packages, …).
+    """
+    if mod is None:
+        return "missing"
+    module_path = Path(getattr(mod, "__file__", "") or "")
+    if not module_path.is_absolute():
+        return "installed"
+    try:
+        if module_path.resolve().parent == _repo_root():
+            return "repo_root"
+    except OSError:  # pragma: no cover — path resolution edge cases
+        pass
+    return "installed"
+
+
+def native_status(feature: str) -> str:
+    """Native engine status for ``feature``: ``"fresh"``, ``"stale"`` or ``"missing"``.
+
+    Unlike :func:`has_cpp` (which only reflects import success), this
+    distinguishes a genuinely absent module (``"missing"``) from one that
+    resolved to a committed binary at the repository root (``"stale"``) — the
+    shadowing failure mode from packaging #435 where the CI "freshly built"
+    assert would otherwise pass vacuously.
+    """
+    origin = _module_origin(_NATIVE_MODULES.get(feature))
+    if origin == "repo_root":
+        return "stale"
+    if origin == "missing":
+        return "missing"
+    return "fresh"
+
+
+def native_version(feature: str) -> str | None:
+    """``__version__`` of the loaded native module for ``feature``, if exposed.
+
+    ``None`` when the module is missing or was built without build metadata
+    (committed binaries predate ``__version__``; the geo-viz-engine-built
+    ``map_edit_core`` exposes it once the engine side adds it — see #435).
+    """
+    mod = _NATIVE_MODULES.get(feature)
+    if mod is None:
+        return None
+    return getattr(mod, "__version__", None)
 
 
 def _py_render_grid_rgba(
@@ -585,7 +651,13 @@ class NativeEngineBackend:
         self._installed_hooks = False
 
     def has_cpp(self, feature: str) -> bool:
-        """Check if native C++ extension for a feature is installed."""
+        """Check if native C++ extension for a feature is installed.
+
+        Note: this reflects import success only. To distinguish a *stale*
+        committed repo-root binary (which shadows fresh builds on
+        ``sys.path[0]`` — packaging #435) from a genuinely missing module, use
+        :func:`native_status` instead.
+        """
         feature_map = {
             "seismic_3d": _HAS_SEISMIC_3D_CPP,
             "well_log": _HAS_WELL_LOG_CPP,
