@@ -1203,6 +1203,14 @@ class DataPage(QWidget):
             return
         if summary_changed:
             self._preview_controller.request(self._selected_asset)
+        if visualization_changed:
+            # Re-render the professional visualization with the new settings
+            # for the current asset; without this branch a rendered preview
+            # kept the old profile while the status bar claimed the settings
+            # were applied (#427).
+            asset = self._selected_asset
+            if isinstance(asset, ResourceItem) and self._viz_adapter.supports_resource(asset):
+                self._visualization_controller.request(asset)
         self._set_action_status("预览设置已应用")
 
     def _request_summary(self, asset: object | None) -> None:
