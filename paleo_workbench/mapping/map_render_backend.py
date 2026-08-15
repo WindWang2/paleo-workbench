@@ -386,7 +386,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
             budget = self.DEFAULT_VERTEX_BUDGET
         self._vertex_budget = max(1_000, budget)
         self._executor: ThreadPoolExecutor | None = None
-        self._render_future: Future[tuple[RenderFrame, tuple]] | None = None
+        self._render_future: Future[None] | None = None
+        self._render_generation: int | None = None
         self._render_pending = False
         self._prepared_lock = threading.Lock()
         self._prepared: dict[str, _PreparedLayer] = {}
@@ -413,6 +414,22 @@ class FallbackMapRenderBackend(MapRenderBackend):
         result["threaded"] = self._executor is not None
         result["render_active"] = self.render_active
         return result
+
+    def fallback_diagnostics(self) -> dict[str, int]:
+        """Legacy counter surface (map-perf #461 regression tests).
+
+        The v2 renderer replaces strip composition with full-frame
+        vectorised rasterisation, so `strip_reuse_count` is always 0 here;
+        the pan-correctness guarantee lives in the pixel-identity
+        assertions instead of a reuse counter.
+        """
+        d = self._diagnostics
+        return {
+            "rasterization_count": int(d["frames_rendered"]),
+            "frame_cache_hits": int(d["frames_from_cache"]),
+            "strip_reuse_count": 0,
+            "culled_feature_count": max(0, int(d["features_total"]) - int(d["features_drawn"])),
+        }
 
     def _ensure_executor(self) -> None:
         if self._executor is None:
@@ -450,7 +467,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
             # arrival and the newest state renders as soon as the worker frees.
             return self._next_generation()
         self._ensure_executor()
-        self._render_future = self._executor.submit(self._render_frame, generation)
+        # Worker: the expensive prepared-layer parse only. QPainter/QFont
+        # work stays on the GUI thread (see _prepare_layers) — rendering the
+        # frame after preparation is cheap vectorised painting.
+        self._render_future = self._executor.submit(self._prepare_layers)
+        self._render_generation = generation
         return generation
 
     def take_completed_frame(self) -> RenderFrame | None:
@@ -460,15 +481,20 @@ class FallbackMapRenderBackend(MapRenderBackend):
         future = self._render_future
         if future is not None and future.done():
             self._render_future = None
+            generation = self._render_generation
+            self._render_generation = None
             try:
-                frame, key = future.result()
+                future.result()
             except Exception:  # noqa: BLE001 - a failed frame must never crash polling
                 self._diagnostics["render_errors"] += 1
                 self._maybe_submit_pending()
                 return None
-            if frame.generation != self._generation:
+            if generation != self._generation:
                 self._maybe_submit_pending()
                 return None
+            # Preparation finished off-thread; rasterise here on the GUI
+            # thread (fonts!) — cheap now that every layer is prepared.
+            frame, key = self._render_frame(generation)
             self._frame_cache = (key, frame)
             return frame
         return None
@@ -481,7 +507,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
         if future is not None and not future.done():
             return
         self._render_pending = False
-        self._render_future = self._executor.submit(self._render_frame, self._next_generation())
+        self._render_generation = self._next_generation()
+        self._render_future = self._executor.submit(self._prepare_layers)
 
     @property
     def render_active(self) -> bool:
@@ -553,10 +580,28 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return cached[1]
         return None
 
+    def _prepare_layers(self) -> None:
+        """Parse every visible vector layer into the prepared cache.
+
+        This is the expensive first-touch pass (per-layer numpy geometry
+        parsing) and is thread-safe: the worker exists so THIS never blocks
+        the UI thread. Rasterisation itself (QPainter + fonts) stays on the
+        GUI thread — Qt font engines are not thread-safe, and painting label
+        text off the GUI thread crashed Python 3.13 runs intermittently
+        (full-suite segfault in pytestqt._process_events during a
+        2000-polygon scene paint).
+        """
+        for layer in self._snapshot.layers:
+            if not layer.visible or layer.opacity <= 0.0:
+                continue
+            if layer.layer_type == "vector" and layer.features:
+                self._prepared_layer(layer)
+
     def _render_frame(self, generation: int) -> tuple[RenderFrame, tuple]:
         # Capture the state identity before painting: coalesced viewport
         # changes during rendering must not re-key the finished frame.
         key = self._frame_key()
+        self._prepare_layers()
         width, height = self._output_size
         image = QImage(width, height, QImage.Format.Format_RGBA8888)
         image.fill(_BACKGROUND)
