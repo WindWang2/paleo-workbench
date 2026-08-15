@@ -155,3 +155,73 @@ def test_i2_clean_volume_unchanged():
     verts, faces = seismic_3d_core.marching_cubes_3d(vol, 0.5)
     assert verts.shape[1] == 3 and faces.shape[1] == 3
     assert not np.isnan(verts).any()
+
+
+# ---------------------------------------------------------------------------
+# Issue #385 — a NaN sample permanently poisons the C++ coherence running
+# sums (NaN - x == NaN), forcing every deeper sample of the affected trace
+# columns to 0.0 ("fake faults"). The window sums must recover once the NaN
+# slides out of the window, exactly like the Python fallback's per-window
+# recompute.
+# ---------------------------------------------------------------------------
+
+
+def _nan_parity(volume, iw, xw, sw):
+    cpp, py = _both_paths(compute_coherence_3d, volume, iw, xw, sw)
+    assert not isinstance(cpp, Exception)
+    return cpp, py
+
+
+def test_coherence_single_nan_recovers_and_matches_fallback():
+    """Minimal case from the issue: NaN at [2,2,6] in a (5,5,12) volume with a
+    (3,3,3) window. Before the fix every sample at k >= 8 of the 9 affected
+    trace columns was clamped to 0.0; now only window-overlapping samples are
+    zero and deeper samples recover to the fallback's values."""
+    vol = np.arange(5 * 5 * 12, dtype=np.float32).reshape(5, 5, 12) / 100.0
+    vol[2, 2, 6] = np.nan
+    cpp, py = _nan_parity(vol, 3, 3, 3)
+
+    np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
+    np.testing.assert_array_equal(cpp == 0.0, py == 0.0)
+    # The 3x3 spatial window at i=j=2 covers 9 trace columns; with half_t=1
+    # the NaN overlaps samples k in [5, 7] -> 3 zero samples per column.
+    assert (cpp == 0.0).sum() == 9 * 3
+    # Deeper samples must have recovered (not forced to zero).
+    assert cpp[2, 2, 8:].min() > 0.0
+
+
+def test_coherence_multiple_nans_recover_and_match_fallback():
+    rng = np.random.default_rng(5)
+    vol = rng.standard_normal((7, 7, 16)).astype(np.float32)
+    vol[2, 3, 4] = np.nan
+    vol[2, 3, 9] = np.nan
+    vol[5, 1, 12] = np.nan
+    cpp, py = _nan_parity(vol, 3, 3, 3)
+    np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
+    np.testing.assert_array_equal(cpp == 0.0, py == 0.0)
+    # Recovery below the last NaN: the tail of the affected columns is clean.
+    assert cpp[2, 3, 13:].min() > 0.0
+
+
+def test_coherence_sparse_nan_zero_fraction_matches_fallback():
+    """The 64x64x120 @ 0.1% NaN scenario: the fraction of forced-zero samples
+    must equal the fallback's (only windows overlapping a NaN), not 36%."""
+    rng = np.random.default_rng(11)
+    vol = rng.standard_normal((64, 64, 120)).astype(np.float32)
+    n_nan = int(vol.size * 0.001)
+    idx = rng.choice(vol.size, size=n_nan, replace=False)
+    vol.ravel()[idx] = np.nan
+    cpp, py = _nan_parity(vol, 3, 3, 3)
+    np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
+    assert (cpp == 0.0).sum() == (py == 0.0).sum()
+    # Each NaN poisons only its 3x3 spatial window x 3 vertical samples
+    # (~2.7% of cells here); nowhere near the pre-fix 36.4% tail poison.
+    assert (cpp == 0.0).mean() < 0.10
+
+
+def test_coherence_nan_free_parity_not_regressed():
+    rng = np.random.default_rng(13)
+    vol = rng.standard_normal((9, 9, 20)).astype(np.float32)
+    cpp, py = _nan_parity(vol, 3, 3, 5)
+    np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
+    assert (cpp == 0.0).sum() == 0

@@ -399,16 +399,26 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                 }
 
                 // Running-sum over the clamped vertical window [k0, k1].
+                // NaN safety (issue #385): a NaN sample makes run_num/run_den
+                // NaN, and NaN - x == NaN, so the incremental updates can never
+                // flush it once the sample leaves the window. Track how many
+                // NaN samples the window currently contains and, when the last
+                // one exits, rebuild the window sums from scratch to recover.
                 size_t k0 = 0;
                 size_t k1 = std::min(nt - 1, half_t);
                 double run_num = 0.0;
                 double run_den = 0.0;
+                size_t nan_in_window = 0;
                 for (size_t k = k0; k <= k1; ++k) {
                     run_num += mean_sq[k];
                     run_den += sum_sq[k];
+                    if (std::isnan(mean_sq[k])) ++nan_in_window;
                 }
                 for (size_t k = 0; k < nt; ++k) {
                     double den = run_den / static_cast<double>(k1 - k0 + 1) + 1e-12;
+                    // NaN propagates to 0.0 through the std::min/std::max clamp
+                    // chain whenever the window overlaps a NaN sample, matching
+                    // the Python fallback's per-window recompute semantics.
                     float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
                     dst[i * (nx * nt) + j * nt + k] = coh_val;
 
@@ -420,11 +430,23 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                             ++k1;
                             run_num += mean_sq[k1];
                             run_den += sum_sq[k1];
+                            if (std::isnan(mean_sq[k1])) ++nan_in_window;
                         }
                         while (k0 < new_lo) {
+                            if (std::isnan(mean_sq[k0])) --nan_in_window;
                             run_num -= mean_sq[k0];
                             run_den -= sum_sq[k0];
                             ++k0;
+                        }
+                        if (nan_in_window == 0 && std::isnan(run_num)) {
+                            // The window is NaN-free again but the accumulators
+                            // were poisoned; rebuild them from the window data.
+                            run_num = 0.0;
+                            run_den = 0.0;
+                            for (size_t kk = k0; kk <= k1; ++kk) {
+                                run_num += mean_sq[kk];
+                                run_den += sum_sq[kk];
+                            }
                         }
                     }
                 }
