@@ -26,11 +26,12 @@ logger = logging.getLogger(__name__)
 class PreviewVolumeWorker(QObject):
     """Background progressive LOD brick load (OwnedWorkerJob target).
 
-    Emits ``(volume, warning, generation, lod_level)``. Dense bricks are only
-    for GL display; scene slicing uses :class:`SourceBackedVolumeAccess`.
+    Emits ``(volume, warning, generation, lod_level, strides)``. Dense bricks
+    are only for GL display; scene slicing uses
+    :class:`SourceBackedVolumeAccess`.
     """
 
-    finished = Signal(object, str, int, int)  # volume, warning, generation, lod
+    finished = Signal(object, str, int, int, object)  # volume, warning, gen, lod, strides
     failed = Signal(str, int)
 
     def __init__(
@@ -56,10 +57,12 @@ class PreviewVolumeWorker(QObject):
 
             source = get_shared_seismic_source(self._path)
             source.metadata()
-            vol, warning = source.read_lod_volume(
+            vol, strides, warning = source.read_lod_volume_with_strides(
                 level=self._lod, cancellation_token=self._cancellation_token
             )
-            self.finished.emit(vol, warning or "", self._generation, self._lod)
+            self.finished.emit(
+                vol, warning or "", self._generation, self._lod, strides
+            )
         except Exception as exc:
             try:
                 from geoviz import JobCancelled
@@ -70,13 +73,20 @@ class PreviewVolumeWorker(QObject):
                 # legacy dense fallback read (H10).
                 self.failed.emit(f"已取消: {exc}", self._generation)
                 return
+            fallback_warning = (
+                f"LOD 预览读取失败({exc})；已回退整读"  # keep the real error
+            )
             try:
                 vol, warning = load_seismic_volume_from_path(self._path)
                 self.finished.emit(
-                    vol, warning or str(exc), self._generation, self._lod
+                    vol,
+                    f"{fallback_warning} · {warning}".strip(" ·"),
+                    self._generation,
+                    self._lod,
+                    (1, 1, 1),
                 )
             except Exception as exc2:
-                self.failed.emit(str(exc2), self._generation)
+                self.failed.emit(f"{fallback_warning} · {exc2}", self._generation)
 
 
 class WellSeismicJointHost(QObject):
@@ -165,8 +175,11 @@ class WellSeismicJointHost(QObject):
             self._volume_job.cancel()
         if self._scene is not None:
             # Prevent the incoming project's saved slice state from being
-            # snapped against the previous project's preview cube.
+            # snapped against the previous project's preview cube, and drop
+            # the previous project's fences/probe: their vertices are
+            # meaningless against the next survey.
             self._scene.set_volume_access(None)
+            self._scene.clear_fences()
         state = getattr(project, "joint_analysis", None)
         self._persisted_well_identity_asset_id = getattr(
             state, "well_identity_asset_id", None
@@ -205,13 +218,26 @@ class WellSeismicJointHost(QObject):
         # A replacement project/SEGY must not reconcile saved slice times
         # against the previous preview shape while the new survey is binding.
         self._scene.set_volume_access(None)
+        # Old fence vertices belong to the previous survey — drop them so the
+        # auto-default pair can be recreated for the new one.
+        self._scene.clear_fences()
         repo = _repo_root()
         self._paths = resolve_joint_assets(self._project, repo_root=repo)
         paths = self._paths
         if not paths.has_minimum():
+            # Leave an honestly empty scene instead of showing the previous
+            # project's wells over a "no data" status line.
+            self._survey_meta = {}
+            try:
+                self._scene.set_wells([])
+                self._scene.set_formation_tops({})
+                self._scene.set_well_curves({})
+            except Exception:
+                logger.debug("scene clear on empty state failed", exc_info=True)
             self.status_changed.emit(
                 "空状态：未找到 SEGY 或井位。请在「数据」导入资产，或放置 data/ 演示目录。"
             )
+            self.scene_updated.emit()
             return
         try:
             self._apply_wells_and_survey(paths)
@@ -235,29 +261,35 @@ class WellSeismicJointHost(QObject):
             self.status_changed.emit(f"已加载井/测网（无 SEGY）· 来源={paths.source}")
             self.scene_updated.emit()
 
-    def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> None:
-        """Set scene (3D) vertical domain: 'Time' or 'Depth' (case-insensitive prefix).
+    def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> bool:
+        """Set the shared (2D + 3D) vertical domain: 'Time' or 'Depth'.
 
-        Workbench product policy (#122): the detached 2D fence profile forces
-        Time extract via FenceProfile2D.set_extract_domain — this method does
-        **not** flip the 2D strip to Depth.
+        Fail-closed: Depth is only entered when the scene has an
+        authoritative time-depth transform; without one the request is
+        refused, the domain stays Time and the caller is told why (a uniform
+        velocity must never masquerade as depth). Returns True on success.
         """
-        from geoviz import VerticalDomain, select_depth_transform
+        from geoviz import VerticalDomain
 
         if self._scene is None:
-            return
-        if str(domain).lower().startswith("depth"):
-            self._scene.set_depth_transform(
-                select_depth_transform(has_external_volume=False, v0_m_s=3000.0)
+            return False
+        wants_depth = str(domain).lower().startswith("depth")
+        if wants_depth and not self._scene.depth_available:
+            self.status_changed.emit(
+                "Depth 不可用：缺少可用时深转换（速度模型/checkshot/深度域数据体），已保持 Time"
             )
+            return False
+        if wants_depth:
             self._scene.set_vertical_domain(VerticalDomain.DEPTH)
             warn = self._scene.depth_transform.approximate_warning or ""
-            self.status_changed.emit(f"竖直域=Depth（3D）· 2D 剖面仍 Time · {warn}")
+            suffix = f" · {warn}" if warn else ""
+            self.status_changed.emit(f"竖直域=Depth（2D/3D 同域）{suffix}")
         else:
             self._scene.set_vertical_domain(VerticalDomain.TIME)
-            self.status_changed.emit("竖直域=Time")
+            self.status_changed.emit("竖直域=Time（2D/3D 同域）")
         if emit_scene:
             self.scene_updated.emit()
+        return True
 
     @property
     def auto_default_fence(self) -> bool:
@@ -328,6 +360,13 @@ class WellSeismicJointHost(QObject):
                 n_samples=int(meta["n_samples"]),
                 dt_ms=float(meta["dt_ms"]),
                 t0_ms=float(meta.get("t0_ms", 0.0)),
+                # Real surveys often number lines with step > 1; derive the
+                # grid from the loader's actual counts/steps so IL/XL↔XY is
+                # exact instead of double-counting the axis.
+                iline_step=meta.get("loader_iline_step"),
+                xline_step=meta.get("loader_xline_step"),
+                n_inlines=meta.get("loader_n_inlines"),
+                n_crosslines=meta.get("loader_n_crosslines"),
             )
             if paths.horizons:
                 corners = horizon_corners_from_dat(paths.horizons[0])
@@ -369,6 +408,7 @@ class WellSeismicJointHost(QObject):
 
         assert self._scene is not None
         tops_by_well: dict[str, list[tuple[str, float]]] = {}
+        skipped_no_td = 0
         if paths.tops is not None and paths.tops.is_file():
             # Parse TD tables once for the whole tops file, not once per line.
             td_map: dict = {}
@@ -386,13 +426,22 @@ class WellSeismicJointHost(QObject):
                     md = float(md_s)
                 except ValueError:
                     continue
-                z = md
                 tbl = td_map.get(wname)
                 if tbl is not None:
+                    # Tops are stored as TWT ms (the engine converts them to
+                    # the active display domain at assembly time).
                     z = float(tbl.md_to_time_ms(md))
-                tops_by_well.setdefault(wname, []).append((tname, z))
+                    tops_by_well.setdefault(wname, []).append((tname, z))
+                else:
+                    # Without a TD table the top cannot be placed on the
+                    # seismic time axis — MD must not stand in for TWT.
+                    skipped_no_td += 1
         if tops_by_well:
             self._scene.set_formation_tops(tops_by_well)
+        if skipped_no_td:
+            self.status_changed.emit(
+                f"已跳过 {skipped_no_td} 个缺少 TD 表的层位（无法换算到时间轴）"
+            )
 
         curves: dict[str, dict[str, tuple]] = {}
         for las_path in paths.las_files[:20]:
@@ -527,9 +576,14 @@ class WellSeismicJointHost(QObject):
             ),
         )
 
-    @Slot(object, str, int, int)
+    @Slot(object, str, int, int, object)
     def _on_volume_ready(
-        self, volume, warning: str, generation: int = 0, lod: int = 0
+        self,
+        volume,
+        warning: str,
+        generation: int = 0,
+        lod: int = 0,
+        strides=(1, 1, 1),
     ) -> None:
         from geoviz import InMemoryVolumeAccess
 
@@ -545,7 +599,20 @@ class WellSeismicJointHost(QObject):
 
         access = self._source_backed_access
         if access is not None:
-            access.set_display_data(volume, lod_level=int(lod), adopt_shape=True)
+            try:
+                access.set_display_data(
+                    volume,
+                    lod_level=int(lod),
+                    adopt_shape=True,
+                    strides=tuple(int(s) for s in strides),
+                )
+            except ValueError as exc:
+                # Stride/shape mismatch is a coordinate bug — refuse the
+                # brick rather than render misregistered geometry.
+                self._volume_phase = "FAILED"
+                self.status_changed.emit(f"预览体坐标校验失败: {exc}")
+                self.scene_updated.emit()
+                return
             # Re-bind same object so registration matches display shape; wells stay.
             self._scene.set_volume_access(access)
             self._scene.set_preview_mode(True)
