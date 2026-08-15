@@ -51,6 +51,7 @@ class VisualizationPage(QWidget):
         self._prediction_tasks: list = []
         self._map_documents: list = []
         self._project: ProjectDocument | None = None
+        self._project_path: Path | None = None
         self._current_ref: VizRef | None = None
         self._adapter = VizAdapter()
         self._preview_controller = PreviewRequestController(
@@ -125,6 +126,10 @@ class VisualizationPage(QWidget):
         )
         self._sync_export_capabilities()
 
+    def set_project_path(self, path) -> None:
+        """Bind the real ``*.paleo.json`` path for export/artifact routing."""
+        self._project_path = Path(path) if path else None
+
     def update_state(
         self,
         resources: list,
@@ -149,11 +154,11 @@ class VisualizationPage(QWidget):
             project_root_text if project_root_text and project_root_text != "." else None
         )
         # Stage-12: bind project into composite well-log host so correlation
-        # tops overlay on the main visualization well-log tab.
-        project_path = None
-        if project_root_text and project_root_text != ".":
-            project_path = Path(project_root_text) / "project.paleo.json"
-        self.composite_panel.set_project(project, project_path=project_path)
+        # tops overlay on the main visualization well-log tab. The real
+        # project file path is routed via set_project_path (never fabricate a
+        # ``project.paleo.json`` name — that would create a phantom artifacts
+        # tree on export).
+        self.composite_panel.set_project(project, project_path=self._project_path)
 
         self.summary_panel.update_state(
             self._resources, self._prediction_tasks, self._map_documents
@@ -312,11 +317,7 @@ class VisualizationPage(QWidget):
         suffix = {"PNG": ".png", "SVG": ".svg", "PDF": ".pdf"}.get(label, ".png")
         stem = (self._current_ref.label if self._current_ref else tab_name) or "view"
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in stem)[:64]
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_path)
         suggested = str(start_dir / f"{safe}_{tab_name}{suffix}")
         path, _ = QFileDialog.getSaveFileName(
             self,

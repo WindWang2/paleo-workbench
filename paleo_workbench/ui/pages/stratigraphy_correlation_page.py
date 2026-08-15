@@ -563,11 +563,7 @@ class StratigraphyCorrelationPage(QWidget):
         if not model.all_tops():
             QMessageBox.warning(self, "导出", "没有分层顶数据")
             return
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_file_path())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出分层顶 CSV",
@@ -584,13 +580,17 @@ class StratigraphyCorrelationPage(QWidget):
         self._register_export(path, fmt="csv", label="分层顶 CSV")
         QMessageBox.information(self, "导出完成", f"已导出: {Path(path).name}")
 
-    def _project_file_path(self) -> Path:
+    def _project_file_path(self) -> Path | None:
+        """Real ``*.paleo.json`` path routed by AppShell, or None when unsaved.
+
+        Artifacts must derive from the real project file name (``<name>.
+        artifacts``); fabricating ``project.paleo.json`` here used to leak
+        correlation payloads into a phantom ``project.artifacts/`` tree that
+        Save As never migrates and restore could not find.
+        """
         if self._project_path is not None:
-            return self._project_path
-        root = "."
-        if self._project is not None:
-            root = getattr(self._project.meta, "project_root", ".") or "."
-        return Path(root) / "project.paleo.json"
+            return Path(self._project_path)
+        return None
 
     def _tops_from_canvas(self) -> list:
         """Collect FormationTop models with stable IDs (no-op save safe)."""
@@ -648,6 +648,14 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "保存解释", "未绑定工程")
             return
+        project_file = self._project_file_path()
+        if project_file is None:
+            QMessageBox.warning(
+                self,
+                "保存解释",
+                "请先保存工程，再保存解释版本（工件随工程文件归档到 <工程名>.artifacts/）。",
+            )
+            return
         tops = self._tops_from_canvas()
         if not tops and not self._loaded_resource_ids:
             QMessageBox.warning(self, "保存解释", "请先加载连井剖面并确保有分层顶")
@@ -681,7 +689,7 @@ class StratigraphyCorrelationPage(QWidget):
             draft.dirty = True
         self._correlation_draft = draft
         ref, msg = save_correlation_draft(
-            draft, self._project, self._project_file_path()
+            draft, self._project, project_file
         )
         if msg == "noop_unchanged":
             self.interp_status.setText(
@@ -707,13 +715,26 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "打开解释", "未绑定工程")
             return
+        project_file = self._project_file_path()
+        if project_file is None:
+            QMessageBox.information(self, "打开解释", "工程中尚无已保存的连井对比解释")
+            return
         from paleo_workbench.workflow.correlation_lifecycle import (
             restore_draft_from_project_ref,
         )
 
-        draft = restore_draft_from_project_ref(
-            self._project, self._project_file_path()
-        )
+        try:
+            draft = restore_draft_from_project_ref(self._project, project_file)
+        except (OSError, ValueError) as exc:
+            # Missing/moved interpretation payloads (e.g. refs left behind by
+            # a legacy phantom ``project.artifacts/`` save) must surface as a
+            # dialog, never as an uncaught exception inside a Qt slot.
+            QMessageBox.warning(
+                self,
+                "打开解释",
+                f"解释工件缺失或不可读，请重新保存解释版本:\n{exc}",
+            )
+            return
         if draft is None:
             QMessageBox.information(self, "打开解释", "工程中尚无已保存的连井对比解释")
             return
@@ -976,11 +997,7 @@ class StratigraphyCorrelationPage(QWidget):
             return
         opts = dialog.options()
         fmt = opts["fmt"]
-        start_dir = default_export_dir(
-            Path(self._project.meta.project_root) / "x.paleo.json"
-            if self._project and self._project.meta.project_root not in ("", ".")
-            else None
-        )
+        start_dir = default_export_dir(self._project_file_path())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "导出连井剖面",
