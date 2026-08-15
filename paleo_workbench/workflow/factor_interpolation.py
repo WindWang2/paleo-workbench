@@ -250,6 +250,10 @@ def _attach_result_to_task(
         "backend": result["backend"],
         "mean": round(result["mean"], 4),
     }
+    if result.get("duplicate_wells_dropped"):
+        task.quality_metrics["duplicate_wells_dropped"] = int(
+            result["duplicate_wells_dropped"]
+        )
     if result.get("variance_min") is not None:
         task.quality_metrics["variance_min"] = round(result["variance_min"], 4)
         task.quality_metrics["variance_max"] = round(result["variance_max"], 4)

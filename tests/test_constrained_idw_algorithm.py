@@ -281,3 +281,62 @@ def test_382_no_barrier_path_unchanged_deterministic():
     b = run_constrained_idw(pts, grid_n=96, power=2.0)
     np.testing.assert_array_equal(a["grid_z"], b["grid_z"])
     assert np.isfinite(a["grid_z"]).sum() > 0
+
+
+# --------------------------------------------------------------------------- #
+# #399 — duplicate-coordinate wells: one first-wins rule for every stage
+# --------------------------------------------------------------------------- #
+
+
+def test_399_duplicate_coordinate_wells_first_wins():
+    """Two wells at the same XY must resolve to the FIRST value everywhere.
+
+    Previously the exact-hit IDW stage kept the first well (1.0) while the
+    residual-anchor stage overwrote in list order (last-wins → 0.1): the same
+    data produced unreproducible surfaces. Deduplication at the host boundary
+    unifies both stages on first-wins.
+    """
+    pts = _pts(
+        (0.0, 0.0, 1.0),
+        (4.0, 0.0, 1.0),
+        (0.0, 4.0, 1.0),
+        (4.0, 4.0, 1.0),
+        (2.0, 2.0, 1.0),  # first measurement at (2,2)
+        (2.0, 2.0, 0.1),  # duplicate location, later measurement
+    )
+    result = run_constrained_idw(pts, grid_n=25, power=2.0)
+    assert result["n_points"] == 5
+    assert result["duplicate_wells_dropped"] == 1
+    row, col = _nearest_cell(result["grid_x"], result["grid_y"], 2.0, 2.0)
+    value = float(result["grid_z"][row, col])
+    assert math.isfinite(value)
+    assert value == pytest.approx(1.0, abs=0.05), (
+        f"duplicate cell must keep the first value (1.0), got {value}"
+    )
+
+
+def test_399_duplicate_count_surfaced_on_task():
+    """The dropped-duplicate count reaches the task quality metrics (UI hook)."""
+    from paleo_workbench.project.models import FactorMapTask
+    from paleo_workbench.workflow.factor_interpolation import apply_interpolation_to_task
+
+    pts = _pts(
+        (0.0, 0.0, 1.0),
+        (4.0, 0.0, 1.0),
+        (0.0, 4.0, 1.0),
+        (4.0, 4.0, 1.0),
+        (2.0, 2.0, 1.0),
+        (2.0, 2.0, 0.1),
+    )
+    task = FactorMapTask(
+        name="t",
+        target_horizon="H",
+        factor_type="砂",
+        method="约束IDW",
+        parameters={"sample_points": pts},
+        status="pending",
+    )
+    apply_interpolation_to_task(task, method="约束IDW", grid_n=25)
+    assert task.status == "complete"
+    assert task.quality_metrics["duplicate_wells_dropped"] == 1
+    assert task.quality_metrics["n_points"] == 5

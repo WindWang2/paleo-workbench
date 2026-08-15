@@ -144,6 +144,29 @@ def _build_wells(points: Sequence[dict[str, Any]]):
     return wells
 
 
+def _dedupe_wells(wells: Sequence[Any]) -> tuple[list[Any], int]:
+    """Drop wells sharing an identical (x, y); keep the first (first-wins).
+
+    The constrained-IDW pipeline reads the well list twice with conflicting
+    duplicate semantics: the exact-hit IDW stage keeps the first well at a
+    coordinate while the residual-anchor stage overwrites in list order
+    (last-wins). Deduplicating at the host boundary unifies both stages on
+    first-wins, so the surface is reproducible and the earlier measurement is
+    never silently discarded. Returns ``(kept_wells, dropped_count)``.
+    """
+    kept: list[Any] = []
+    seen: set[tuple[float, float]] = set()
+    dropped = 0
+    for well in wells:
+        key = (float(well.x), float(well.y))
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        kept.append(well)
+    return kept, dropped
+
+
 def _build_barriers(
     break_polylines: Sequence[Sequence[tuple[float, float]]] | None,
 ):
@@ -403,6 +426,7 @@ def run_constrained_idw(
     Config = engine["Config"]
 
     wells = _build_wells(points)
+    wells, n_duplicate_wells = _dedupe_wells(wells)
     if len(wells) < 3:
         raise ValueError(
             "约束IDW 需要至少 3 个有效样本点（含坐标与数值），当前仅 "
@@ -478,6 +502,9 @@ def run_constrained_idw(
         "grid_n": resolution,
         "n_points": len(wells),
         "n_break_lines": len(barriers),
+        # Duplicate-coordinate wells are dropped first-wins at the host
+        # boundary; report the count so callers can warn the user.
+        "duplicate_wells_dropped": n_duplicate_wells,
         "min": z_min,
         "max": z_max,
         "mean": z_mean,
