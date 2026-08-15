@@ -26,14 +26,18 @@ namespace pwb::grid_render {
 // cells emit fully-transparent black (alpha = 0). Valid cells emit the LUT colour with
 // alpha = lut_alpha * opacity / 255.
 //
-// Defensive defaults (deterministic, documented): hi <= lo  -> t = 0; gamma <= 0 ->
-// gamma = 1; lut_size < 1 is treated as an error (returns, leaving `out` unmodified).
+// Range validity (hi > lo) is judged in double precision; the per-pixel
+// interpolation then runs in float32, so near-degenerate ranges that collapse
+// in float32 still render the same on both paths. Defensive defaults
+// (deterministic, documented): hi <= lo -> t = 0; gamma <= 0 -> gamma = 1;
+// lut_size < 1 / null pointers are degenerate inputs: the output buffer is
+// zeroed (fully transparent) before returning.
 void render_grid_rgba(int width, int height,
                       const float* grid_z,
                       const std::uint8_t* mask,
                       const std::uint8_t* lut,
                       int lut_size,
-                      float lo, float hi,
+                      double lo, double hi,
                       float gamma,
                       std::uint8_t opacity,
                       std::uint8_t* out) noexcept;
