@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox
 
-from paleo_workbench.workflow.factor_interpolation import batch_prepare_factor_maps
+from geoviz import CancellationToken
+
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+from paleo_workbench.ui.pages.factor_prepare_worker import FactorPrepareWorker
+from paleo_workbench.workflow.factor_prepare_scheduler import (
+    build_prepare_snapshot,
+    commit_prepare_batch_result,
+)
 from paleo_workbench.pipeline.compile_map import compile_map_draft
 from paleo_workbench.workflow.qc import active_quality_reports
 from paleo_workbench.workflow.service import dashboard_state, home_workflow_steps
@@ -25,6 +32,8 @@ class WorkflowController:
     def __init__(self, window) -> None:
         self.window = window
         self.preview_settings_dialog: PreviewSettingsDialog | None = None
+        self._prepare_job = OwnedWorkerJob(window)
+        self._prepare_generation = 0
 
     def show_preview_settings(self) -> None:
         """Open the shared preview settings for the current DataPage."""
@@ -170,29 +179,115 @@ class WorkflowController:
         self._on_seismic_prediction_updated()
 
     def _on_well_log_send_to_prep(self) -> None:
-        """Batch-prepare factor maps from current project and open 制备 page."""
-        if not self.window.project.prediction_tasks:
+        """Batch-prepare factor maps via FactorPrepareWorker and open 制备 page.
+
+        The heavy interpolation never runs on the GUI thread: the batch runs
+        on an OwnedWorkerJob thread with progress + cancel, mirroring the
+        preparation page's own wiring (C05). The synchronous
+        ``batch_prepare_factor_maps`` API stays available for script paths.
+        """
+        project = self.window.project
+        if not project.prediction_tasks:
             QMessageBox.information(self.window, "发送制备", "请先运行测井预测")
             return
+        if self._prepare_job.is_running:
+            QMessageBox.information(self.window, "发送制备", "单因素图制备正在进行中…")
+            return
+        self._prepare_generation += 1
+        generation = self._prepare_generation
+        token = CancellationToken()
         try:
-            batch_prepare_factor_maps(self.window.project, method="IDW")
-        except Exception as exc:
+            # Snapshot on the host thread so scientific inputs match Stage-4
+            # fingerprints (same as preparation_page._start_prepare_worker).
+            snapshot = build_prepare_snapshot(
+                project, generation=generation, method="IDW"
+            )
+        except Exception as exc:  # noqa: BLE001 — surface prepare setup failure
             QMessageBox.warning(
                 self.window,
                 "发送制备失败",
                 f"{exc.__class__.__name__}: {exc}",
             )
             return
-        self.window.app_shell.update_preparation_page(
-            self.window.project.factor_map_tasks
+        worker = FactorPrepareWorker(
+            project,
+            method="IDW",
+            cancellation_token=token,
+            generation=generation,
+            snapshot=snapshot,
         )
-        self.window.app_shell.update_mapping_page(
-            self.window.project.paleomap_documents,
-            factor_tasks=self.window.project.factor_map_tasks,
-            project_crs=self.window.project.coordinate.project_crs,
-        )
+        prep_page = self.window.app_shell.preparation_page_widget()
+        if prep_page is not None and hasattr(prep_page, "task_panel"):
+            prep_page.task_panel.summary_label.setText(
+                f"制备中… 任务 {len(snapshot.tasks)} · 发送制备"
+            )
         self.window.app_shell.icon_rail.set_active(PAGE_INDEX_PREPARATION)
         self.window.app_shell._switch_page(PAGE_INDEX_PREPARATION)
+        self._prepare_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed, worker.cancelled),
+            result_connections=(
+                (worker.completed, self._on_prep_send_completed),
+                (worker.failed, self._on_prep_send_failed),
+                (worker.progress, self._on_prep_send_progress),
+                (worker.cancelled, self._on_prep_send_cancelled),
+            ),
+            cancel=token.cancel,
+            target=project,
+        )
+
+    def _prep_page(self):
+        """Current preparation page widget, if any (progress/task panel target)."""
+        try:
+            return self.window.app_shell.preparation_page_widget()
+        except Exception:  # pragma: no cover - shell teardown races
+            return None
+
+    def _on_prep_send_progress(self, update) -> None:
+        if self._prepare_job.target is not self.window.project:
+            return
+        page = self._prep_page()
+        if page is None or not hasattr(page, "task_panel"):
+            return
+        msg = update.message or update.phase
+        page.task_panel.summary_label.setText(
+            f"制备中：复用 {update.clean} · 需计算 {update.dirty} · "
+            f"已完成 {update.completed}/{update.total_tasks}"
+            + (f" · {msg}" if msg else "")
+        )
+
+    def _on_prep_send_completed(self, result) -> None:
+        project = self.window.project
+        if self._prepare_job.target is not project:
+            return
+        if int(result.generation) != int(self._prepare_generation):
+            return
+        # Fingerprint-guarded commit — same semantics as the preparation page.
+        commit_prepare_batch_result(
+            project, result, expected_generation=self._prepare_generation
+        )
+        self._on_factor_maps_updated()
+        page = self._prep_page()
+        if page is not None and hasattr(page, "task_panel"):
+            page.update_state(project.factor_map_tasks)
+            page.task_panel.summary_label.setText(
+                f"已制备 {sum(1 for t in project.factor_map_tasks if t.status == 'complete')} / "
+                f"{len(project.factor_map_tasks)} 个单因素图"
+                f" · 复用 {result.clean_count} · 计算 {result.executed_count}"
+            )
+        self.window.app_shell.icon_rail.set_active(PAGE_INDEX_PREPARATION)
+        self.window.app_shell._switch_page(PAGE_INDEX_PREPARATION)
+
+    def _on_prep_send_failed(self, message: str) -> None:
+        QMessageBox.warning(self.window, "发送制备失败", message)
+        page = self._prep_page()
+        if page is not None and hasattr(page, "task_panel"):
+            page.task_panel.summary_label.setText(f"单因素图生成失败：{message}")
+
+    def _on_prep_send_cancelled(self) -> None:
+        page = self._prep_page()
+        if page is not None and hasattr(page, "task_panel"):
+            page.task_panel.summary_label.setText("发送制备已取消")
 
     def _on_seismic_prediction_updated(self) -> None:
         """Refresh seismic / visualization / home after a new facies task."""
