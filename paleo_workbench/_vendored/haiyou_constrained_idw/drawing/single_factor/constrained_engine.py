@@ -320,22 +320,6 @@ def apply_well_residual_anchoring(
         0.0, float(getattr(config, "well_anchor_max_residual_fraction", 0.16))
     )
 
-    def _cell_aniso_dist(
-        wx: float,
-        wy: float,
-        gx: float,
-        gy: float,
-        unit_x: float,
-        unit_y: float,
-        ratio: float,
-    ) -> float:
-        if ratio <= 1.0 + 1e-9:
-            return math.hypot(gx - wx, gy - wy)
-        perp = direction_perpendicular_scale(
-            ratio, float(getattr(config, "direction_perpendicular_strength", 1.0))
-        )
-        return anisotropic_distance((wx, wy), (gx, gy), unit_x, unit_y, ratio, perpendicular_scale=perp)
-
     for well_index, well in enumerate(wells):
         col = int(np.argmin(np.abs(grid_x - well.x)))
         row = int(np.argmin(np.abs(grid_y - well.y)))
@@ -402,43 +386,63 @@ def apply_well_residual_anchoring(
             )
         )
 
-        # 1) 核心 + 过渡：有方向时用椭圆距离，无方向时用欧氏
-        for dr in range(-radius_cells, radius_cells + 1):
-            for dc in range(-radius_cells, radius_cells + 1):
-                nr = row + dr
-                nc = col + dc
-                if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
-                    continue
-                if not domain_mask[nr, nc]:
-                    continue
-                if region_labels is not None and region_labels[nr, nc] != region_labels[row, col]:
-                    continue
-                gx = float(grid_x[nc])
-                gy = float(grid_y[nr])
-                if ratio_eff > 1.0 + 1e-9:
-                    dist = _cell_aniso_dist(well.x, well.y, gx, gy, unit_x, unit_y, ratio_eff)
-                else:
-                    dist = math.hypot(gx - well.x, gy - well.y)
-                if dist > anchor_radius:
-                    continue
-                if nr == row and nc == col:
-                    result[nr, nc] = target_value
-                    stats["well_anchor_core_cells"] += 1.0
-                elif abs(residual) > 1e-9 and math.isfinite(result[nr, nc]):
-                    t = max(0.0, dist - core_radius) / max(
-                        anchor_radius - core_radius, 1e-9
-                    )
-                    t = max(0.0, min(1.0, t))
-                    weight = 0.5 * (1.0 + math.cos(math.pi * t))  # 1→0 平滑
-                    corrected = float(result[nr, nc]) + residual * halo_scale * weight
-                    if (
-                        config.value_min is not None
-                        and config.value_max is not None
-                        and float(config.value_min) <= target_value <= float(config.value_max)
-                    ):
-                        corrected = max(float(config.value_min), min(float(config.value_max), corrected))
-                    result[nr, nc] = corrected
-                    stats["well_anchor_residual_cells"] += 1.0
+        # 1) 核心 + 过渡：有方向时用椭圆距离，无方向时用欧氏（向量化窗口）
+        pr = row + np.arange(-radius_cells, radius_cells + 1, dtype=int)
+        pc = col + np.arange(-radius_cells, radius_cells + 1, dtype=int)
+        inb = (pr >= 0) & (pr < rows)
+        inb_c = (pc >= 0) & (pc < cols)
+        idx_r, idx_c = np.ix_(np.clip(pr, 0, rows - 1), np.clip(pc, 0, cols - 1))
+        patch = result[idx_r, idx_c]
+        dom = np.asarray(domain_mask, dtype=bool)[idx_r, idx_c]
+        ok = inb[:, None] & inb_c[None, :] & dom
+        if region_labels is not None:
+            ok = ok & (region_labels[idx_r, idx_c] == int(region_labels[row, col]))
+        gx_patch = np.asarray(grid_x, dtype=float)[np.clip(pc, 0, cols - 1)][None, :]
+        gy_patch = np.asarray(grid_y, dtype=float)[np.clip(pr, 0, rows - 1)][:, None]
+        if ratio_eff > 1.0 + 1e-9:
+            vx = gx_patch - float(well.x)
+            vy = gy_patch - float(well.y)
+            u = vx * unit_x + vy * unit_y
+            v = vx * (-unit_y) + vy * unit_x
+            perp = direction_perpendicular_scale(
+                ratio_eff,
+                float(getattr(config, "direction_perpendicular_strength", 1.0)),
+            )
+            cross = max(float(perp), 1.0)
+            dist = np.sqrt((u / max(ratio_eff, 1.0)) ** 2 + (v * cross) * (v * cross))
+        else:
+            dist = np.hypot(gx_patch - float(well.x), gy_patch - float(well.y))
+        dist_ok = dist <= anchor_radius
+        center_cell = (pr[:, None] == row) & (pc[None, :] == col)
+        halo = (
+            ok
+            & dist_ok
+            & ~center_cell
+            & (abs(residual) > 1e-9)
+            & np.isfinite(patch)
+        )
+        if np.any(center_cell & dist_ok & ok):
+            stats["well_anchor_core_cells"] += 1.0
+        if np.any(halo):
+            t = np.clip(
+                (dist - core_radius) / max(anchor_radius - core_radius, 1e-9),
+                0.0,
+                1.0,
+            )
+            weight = 0.5 * (1.0 + np.cos(np.pi * t))
+            corrected = patch + residual * halo_scale * weight
+            if (
+                config.value_min is not None
+                and config.value_max is not None
+                and float(config.value_min) <= target_value <= float(config.value_max)
+            ):
+                corrected = np.clip(corrected, float(config.value_min), float(config.value_max))
+            stats["well_anchor_residual_cells"] += float(np.count_nonzero(halo))
+            new_patch = np.where(halo, corrected, patch)
+            new_patch = np.where(center_cell & dist_ok & ok, target_value, new_patch)
+            result[idx_r, idx_c] = new_patch
+        elif np.any(center_cell & dist_ok & ok):
+            result[row, col] = target_value
 
     # 3) 融合：有方向时只做极轻贴井（椭圆邻域）；无方向时保留圆顶过渡
     if well_centers and (not preserve_aniso or blend_radius >= step * 1.5):
@@ -448,70 +452,115 @@ def apply_well_residual_anchoring(
         outer_well = 0.35 if preserve_aniso else 0.55
         outer_keep = 0.65 if preserve_aniso else 0.45
         for row, col, wx, wy, target_value, halo_target, unit_x, unit_y, ratio_eff in well_centers:
-            for dr in range(-blend_cells, blend_cells + 1):
-                for dc in range(-blend_cells, blend_cells + 1):
-                    nr, nc = row + dr, col + dc
-                    if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
-                        continue
-                    if not domain_mask[nr, nc] or not math.isfinite(result[nr, nc]):
-                        continue
-                    if region_labels is not None and region_labels[nr, nc] != region_labels[row, col]:
-                        continue
-                    gx = float(grid_x[nc])
-                    gy = float(grid_y[nr])
-                    if ratio_eff > 1.0 + 1e-9:
-                        dist = _cell_aniso_dist(wx, wy, gx, gy, unit_x, unit_y, ratio_eff)
-                    else:
-                        dist = math.hypot(gx - wx, gy - wy)
-                    if dist > blend_radius:
-                        continue
-                    if nr == row and nc == col:
-                        new_v = target_value
-                    elif preserve_aniso:
-                        radial = math.exp(-(dist * dist) / max(two_sig2, 1e-12))
-                        if dist <= core_radius:
-                            new_v = core_mix * halo_target + (1.0 - core_mix) * float(result[nr, nc])
-                        else:
-                            new_v = (
-                                radial * (outer_well * halo_target + outer_keep * float(result[nr, nc]))
-                                + (1.0 - radial) * float(result[nr, nc])
-                            )
-                    else:
-                        acc = 0.0
-                        wsum = 0.0
-                        sample_r = max(1, int(math.ceil(1.6 * step / step)))
-                        for sdr in range(-sample_r, sample_r + 1):
-                            for sdc in range(-sample_r, sample_r + 1):
-                                sr, sc = nr + sdr, nc + sdc
-                                if sr < 0 or sr >= rows or sc < 0 or sc >= cols:
-                                    continue
-                                if not domain_mask[sr, sc] or not math.isfinite(result[sr, sc]):
-                                    continue
-                                if region_labels is not None and region_labels[sr, sc] != region_labels[nr, nc]:
-                                    continue
-                                d2 = float(sdr * sdr + sdc * sdc) * (step * step)
-                                sw = math.exp(-d2 / max(two_sig2 * 0.35, 1e-12))
-                                acc += float(result[sr, sc]) * sw
-                                wsum += sw
-                        if wsum <= 1e-12:
-                            continue
-                        local_mean = acc / wsum
-                        radial = math.exp(-(dist * dist) / max(two_sig2, 1e-12))
-                        if dist <= core_radius:
-                            new_v = core_mix * halo_target + (1.0 - core_mix) * local_mean
-                        else:
-                            new_v = (
-                                radial * (outer_well * halo_target + outer_keep * float(result[nr, nc]))
-                                + (1.0 - radial) * local_mean
-                            )
-                    if (
-                        config.value_min is not None
-                        and config.value_max is not None
-                        and float(config.value_min) <= target_value <= float(config.value_max)
-                    ):
-                        new_v = max(float(config.value_min), min(float(config.value_max), float(new_v)))
-                    blended[nr, nc] = new_v
-                    stats["well_anchor_smooth_cells"] += 1.0
+            pr = row + np.arange(-blend_cells, blend_cells + 1, dtype=int)
+            pc = col + np.arange(-blend_cells, blend_cells + 1, dtype=int)
+            inb = (pr >= 0) & (pr < rows)
+            inb_c = (pc >= 0) & (pc < cols)
+            idx_r, idx_c = np.ix_(np.clip(pr, 0, rows - 1), np.clip(pc, 0, cols - 1))
+            patch = result[idx_r, idx_c]
+            dom = np.asarray(domain_mask, dtype=bool)[idx_r, idx_c]
+            ok = (
+                inb[:, None]
+                & inb_c[None, :]
+                & dom
+                & np.isfinite(patch)
+            )
+            if region_labels is not None:
+                ok = ok & (region_labels[idx_r, idx_c] == int(region_labels[row, col]))
+            gx_patch = np.asarray(grid_x, dtype=float)[np.clip(pc, 0, cols - 1)][None, :]
+            gy_patch = np.asarray(grid_y, dtype=float)[np.clip(pr, 0, rows - 1)][:, None]
+            if ratio_eff > 1.0 + 1e-9:
+                vx = gx_patch - wx
+                vy = gy_patch - wy
+                u = vx * unit_x + vy * unit_y
+                v = vx * (-unit_y) + vy * unit_x
+                perp = direction_perpendicular_scale(
+                    ratio_eff,
+                    float(getattr(config, "direction_perpendicular_strength", 1.0)),
+                )
+                cross = max(float(perp), 1.0)
+                dist = np.sqrt((u / max(ratio_eff, 1.0)) ** 2 + (v * cross) * (v * cross))
+            else:
+                dist = np.hypot(gx_patch - wx, gy_patch - wy)
+            dist_ok = dist <= blend_radius
+            center_cell = (pr[:, None] == row) & (pc[None, :] == col)
+            valid = ok & dist_ok
+            if preserve_aniso:
+                radial = np.exp(-(dist * dist) / max(two_sig2, 1e-12))
+                core = dist <= core_radius
+                new_v = np.where(
+                    core,
+                    core_mix * halo_target + (1.0 - core_mix) * patch,
+                    radial * (outer_well * halo_target + outer_keep * patch)
+                    + (1.0 - radial) * patch,
+                )
+            else:
+                # 局部 3x3 高斯均值（采样半径 2 格）
+                sample_r = max(1, int(math.ceil(1.6 * step / step)))
+                pr_ext = row + np.arange(
+                    -blend_cells - sample_r, blend_cells + sample_r + 1, dtype=int
+                )
+                pc_ext = col + np.arange(
+                    -blend_cells - sample_r, blend_cells + sample_r + 1, dtype=int
+                )
+                pr_clip = np.clip(pr_ext, 0, rows - 1)
+                pc_clip = np.clip(pc_ext, 0, cols - 1)
+                idx_re, idx_ce = np.ix_(pr_clip, pc_clip)
+                ext = result[idx_re, idx_ce]
+                ext_ok = (
+                    (pr_ext >= 0)[:, None]
+                    & (pr_ext < rows)[:, None]
+                    & (pc_ext >= 0)[None, :]
+                    & (pc_ext < cols)[None, :]
+                    & np.asarray(domain_mask, dtype=bool)[idx_re, idx_ce]
+                    & np.isfinite(ext)
+                )
+                if region_labels is not None:
+                    ext_ok = ext_ok & (
+                        region_labels[idx_re, idx_ce] == int(region_labels[row, col])
+                    )
+                acc = np.zeros(ext.shape, dtype=float)
+                wsum = np.zeros(ext.shape, dtype=float)
+                for sdr in range(-sample_r, sample_r + 1):
+                    for sdc in range(-sample_r, sample_r + 1):
+                        r_dst, c_dst, r_src, c_src = _offset_slices(
+                            ext.shape[0], ext.shape[1], sdr, sdc
+                        )
+                        sw = math.exp(
+                            -(float(sdr * sdr + sdc * sdc) * (step * step))
+                            / max(two_sig2 * 0.35, 1e-12)
+                        )
+                        src_ok = ext_ok[r_src, c_src]
+                        acc[r_dst, c_dst] += np.where(
+                            src_ok, ext[r_src, c_src] * sw, 0.0
+                        )
+                        wsum[r_dst, c_dst] += np.where(src_ok, sw, 0.0)
+                local_mean = np.zeros(ext.shape, dtype=float)
+                filled = wsum > 1e-12
+                local_mean[filled] = acc[filled] / wsum[filled]
+                local_mean = local_mean[
+                    sample_r : ext.shape[0] - sample_r,
+                    sample_r : ext.shape[1] - sample_r,
+                ]
+                radial = np.exp(-(dist * dist) / max(two_sig2, 1e-12))
+                core = dist <= core_radius
+                new_v = np.where(
+                    core,
+                    core_mix * halo_target + (1.0 - core_mix) * local_mean,
+                    radial * (outer_well * halo_target + outer_keep * patch)
+                    + (1.0 - radial) * local_mean,
+                )
+            new_v = np.where(center_cell, target_value, new_v)
+            if (
+                config.value_min is not None
+                and config.value_max is not None
+                and float(config.value_min) <= target_value <= float(config.value_max)
+            ):
+                new_v = np.clip(new_v, float(config.value_min), float(config.value_max))
+            stats["well_anchor_smooth_cells"] += float(np.count_nonzero(valid))
+            blended[idx_r, idx_c] = np.where(
+                valid, new_v, blended[idx_r, idx_c]
+            )
         result = blended
 
     return result, stats
@@ -830,7 +879,19 @@ def generate_constrained_idw(
 
     if use_full_point_path:
         grid_z = np.full((len(grid_y), len(grid_x)), np.nan, dtype=float)
-        for row, col in zip(*np.nonzero(domain_mask)):
+        point_rows, point_cols = np.nonzero(domain_mask)
+        # Precompute the LOS barrier mask for the whole domain once (vectorized)
+        # instead of re-testing every (cell, well) pair against every barrier
+        # segment per point-path pass.
+        point_path_blocked = _barrier_blocked_mask(
+            grid_x[point_cols],
+            grid_y[point_rows],
+            well_array[:, 0],
+            well_array[:, 1],
+            _barrier_segments(active_barriers),
+            endpoint_tolerance=config.endpoint_tolerance,
+        )
+        for cell_index, (row, col) in enumerate(zip(point_rows, point_cols)):
             pt = (float(grid_x[col]), float(grid_y[row]))
             cell_label = int(region_labels[row, col]) if region_labels is not None else -2
             c_dir = -1
@@ -863,6 +924,8 @@ def generate_constrained_idw(
                 cell_ty=c_ty,
                 well_curve_coords=well_curve_coords if well_curve_coords else None,
                 direction_geoms=direction_geoms,
+                blocked_mask=point_path_blocked,
+                cell_index=cell_index,
             )
             diagnostics["被打断线过滤的井点-网格关系数量"] += blocked_count
             diagnostics["blocked_well_grid_relations"] += blocked_count
@@ -907,7 +970,19 @@ def generate_constrained_idw(
             refine_n = int(np.count_nonzero(refine))
             diagnostics["barrier_los_refine_cells"] = refine_n
             if 0 < refine_n < 120000:
-                for row, col in zip(*np.nonzero(refine)):
+                refine_rows, refine_cols = np.nonzero(refine)
+                # Precompute the LOS barrier mask for the refine band once
+                # (vectorized), instead of re-testing every (cell, well) pair
+                # against every barrier segment per refine pass.
+                los_blocked = _barrier_blocked_mask(
+                    grid_x[refine_cols],
+                    grid_y[refine_rows],
+                    well_array[:, 0],
+                    well_array[:, 1],
+                    _barrier_segments(active_barriers),
+                    endpoint_tolerance=config.endpoint_tolerance,
+                )
+                for cell_index, (row, col) in enumerate(zip(refine_rows, refine_cols)):
                     pt = (float(grid_x[col]), float(grid_y[row]))
                     cell_label = int(region_labels[row, col]) if region_labels is not None else -2
                     c_dir = int(direction_cache["dir_index"][row, col]) if direction_cache is not None else -1
@@ -931,6 +1006,8 @@ def generate_constrained_idw(
                         cell_ratio=c_ratio,
                         well_curve_coords=well_curve_coords if well_curve_coords else None,
                         direction_geoms=direction_geoms,
+                        blocked_mask=los_blocked,
+                        cell_index=cell_index,
                     )
                     diagnostics["blocked_well_grid_relations"] += blocked_count
                     if value is None or not math.isfinite(value):
@@ -1628,6 +1705,80 @@ def summarize_point_density(points: np.ndarray, radius: float) -> Dict[str, int]
     }
 
 
+def _interpolate_grid_point_euclidean(
+    pt: PointTuple,
+    well_array: np.ndarray,
+    barriers: Sequence[BarrierLine],
+    config: ConstrainedIDWConfig,
+    density_weights: np.ndarray,
+    euclidean: np.ndarray,
+    *,
+    cell_label: int = -2,
+    well_labels: Optional[np.ndarray] = None,
+    blocked_mask: Optional[np.ndarray] = None,
+    cell_index: int = -1,
+) -> Tuple[Optional[float], int, bool]:
+    """Vectorized well-candidate selection for the pure-Euclidean IDW case.
+
+    Bit-for-bit equivalent to the scalar pass loop in :func:`_interpolate_grid_point`
+    when no direction context applies (``use_curve`` and legacy fixed-angle
+    distances both off): same label / barrier LOS filters, same radius-pass
+    candidate accumulation, same stable sort by distance, same top-k weighting.
+    Returns ``(value, blocked_well_count, used_direction=False)``.
+    """
+    n_wells = len(well_array)
+    blocked_wells = np.zeros(n_wells, dtype=bool)
+    if well_labels is not None and cell_label >= 0:
+        wl = np.asarray(well_labels, dtype=int)
+        blocked_wells |= (wl >= 0) & (wl != int(cell_label))
+    if barriers:
+        if blocked_mask is not None and cell_index >= 0:
+            blocked_wells |= np.asarray(blocked_mask[cell_index, :], dtype=bool)
+        else:
+            for idx in range(n_wells):
+                if is_blocked_by_barrier(
+                    pt,
+                    (float(well_array[idx, 0]), float(well_array[idx, 1])),
+                    barriers,
+                    config.endpoint_tolerance,
+                ):
+                    blocked_wells[idx] = True
+    n_blocked = int(blocked_wells.sum())
+
+    base_radius = max(float(config.search_radius), 1e-9)
+    radius_scales = (
+        (1.0,)
+        if bool(config.limit_interpolation_to_search_radius)
+        else (1.0, 1.5, 2.25, 3.0)
+    )
+    candidate_mask = np.zeros(n_wells, dtype=bool)
+    required_points = max(1, int(config.min_points))
+    for pass_index, radius_scale in enumerate(radius_scales):
+        r_pass = base_radius * radius_scale
+        candidate_mask |= (~blocked_wells) & (euclidean <= r_pass)
+        required_points = max(1, int(config.min_points) - pass_index)
+        if int(candidate_mask.sum()) >= required_points:
+            break
+    if int(candidate_mask.sum()) < required_points:
+        return None, n_blocked, False
+
+    cand_idx = np.nonzero(candidate_mask)[0]
+    # Stable sort by distance — matches the scalar list.sort(key=item[0]).
+    order = np.argsort(euclidean[cand_idx], kind="stable")
+    selected = cand_idx[order[: max(1, int(config.max_points))]]
+    dists = euclidean[selected]
+    values = np.asarray(well_array[selected, 2], dtype=float)
+    if density_weights.size:
+        decluster = np.asarray(density_weights[selected], dtype=float)
+    else:
+        decluster = np.ones_like(dists)
+    weights = decluster / np.power(np.maximum(dists, 1e-9), float(config.power))
+    weight_sum = float(weights.sum())
+    if weight_sum <= 0:
+        return None, n_blocked, False
+    return float(np.sum(weights * values) / weight_sum), n_blocked, False
+
+
 def _interpolate_grid_point(
     pt: PointTuple,
     well_array: np.ndarray,
@@ -1647,6 +1798,8 @@ def _interpolate_grid_point(
     cell_ty: float = 0.0,
     well_curve_coords: Optional[Dict[int, Dict[str, np.ndarray]]] = None,
     direction_geoms: Optional[Sequence[object]] = None,
+    blocked_mask: Optional[np.ndarray] = None,
+    cell_index: int = -1,
 ) -> Tuple[Optional[float], int, bool]:
     """返回 (插值结果, 被打断线过滤的井点数量, 是否使用了方向距离)。
 
@@ -1747,6 +1900,21 @@ def _interpolate_grid_point(
     required_points = max(1, int(config.min_points))
     base_radius = max(float(config.search_radius), 1e-9)
     radius_scales = (1.0,) if bool(config.limit_interpolation_to_search_radius) else (1.0, 1.5, 2.25, 3.0)
+    # Fast path: no direction context — pure Euclidean candidates with the
+    # whole well loop vectorized (identical semantics to the scalar loop).
+    if not use_curve and not used_direction:
+        return _interpolate_grid_point_euclidean(
+            pt,
+            well_array,
+            barriers,
+            config,
+            density_weights,
+            euclidean,
+            cell_label=cell_label,
+            well_labels=well_labels,
+            blocked_mask=blocked_mask,
+            cell_index=cell_index,
+        )
     for pass_index, radius_scale in enumerate(radius_scales):
         r_pass = base_radius * radius_scale
         weighted_candidates = []
@@ -1758,10 +1926,19 @@ def _interpolate_grid_point(
                     blocked_indices.add(int(idx))
                     continue
             well_pt = (float(well_array[idx, 0]), float(well_array[idx, 1]))
-            # Hard barrier LOS filter at trend-surface stage
-            if barriers and is_blocked_by_barrier(pt, well_pt, barriers, config.endpoint_tolerance):
-                blocked_indices.add(int(idx))
-                continue
+            # Hard barrier LOS filter at trend-surface stage.  A precomputed
+            # vectorized mask (see _barrier_blocked_mask) replaces the
+            # per-(cell, well) segment loop on the hot LOS refine path.
+            if barriers:
+                if blocked_mask is not None and cell_index >= 0:
+                    blocked_flag = bool(blocked_mask[cell_index, idx])
+                else:
+                    blocked_flag = is_blocked_by_barrier(
+                        pt, well_pt, barriers, config.endpoint_tolerance
+                    )
+                if blocked_flag:
+                    blocked_indices.add(int(idx))
+                    continue
 
             if use_curve:
                 wc_dir = well_curve_coords.get(int(cell_dir_index))
@@ -1863,6 +2040,97 @@ def is_blocked_by_barrier(
             if strict_segments_intersect(a, b, p0, p1, endpoint_tolerance):
                 return True
     return False
+
+
+def _barrier_segments(
+    barriers: Sequence[BarrierLine],
+) -> List[Tuple[PointTuple, PointTuple]]:
+    """Flatten all active barrier polylines into segment pairs."""
+    out: List[Tuple[PointTuple, PointTuple]] = []
+    for barrier in barriers:
+        for p0, p1 in _segments(barrier.points):
+            out.append((p0, p1))
+    return out
+
+
+def _barrier_blocked_mask(
+    cell_x: np.ndarray,
+    cell_y: np.ndarray,
+    well_x: np.ndarray,
+    well_y: np.ndarray,
+    barrier_segments: Sequence[Tuple[PointTuple, PointTuple]],
+    endpoint_tolerance: float = 1e-7,
+) -> np.ndarray:
+    """Vectorized LOS barrier mask: ``blocked[c, w]`` == segment c→w crosses a barrier.
+
+    Bit-for-bit equivalent to the reference ``is_blocked_by_barrier`` /
+    ``strict_segments_intersect`` loop (same per-element float operations, same
+    parallel / collinear branch semantics), evaluated with NumPy per segment.
+    Cells are processed in chunks bounded by an element budget so peak memory
+    stays flat as the well count grows.
+    """
+    n_cells = int(np.size(cell_x))
+    n_wells = int(np.size(well_x))
+    blocked = np.zeros((n_cells, n_wells), dtype=bool)
+    if n_cells == 0 or n_wells == 0 or not barrier_segments:
+        return blocked
+    cell_x = np.asarray(cell_x, dtype=float)
+    cell_y = np.asarray(cell_y, dtype=float)
+    well_x = np.asarray(well_x, dtype=float)
+    well_y = np.asarray(well_y, dtype=float)
+    tol = float(endpoint_tolerance)
+    # Element budget (cells x wells) per chunk.
+    chunk = max(1, 4_000_000 // max(1, n_wells))
+    for start in range(0, n_cells, chunk):
+        stop = min(start + chunk, n_cells)
+        ax = cell_x[start:stop, None]
+        ay = cell_y[start:stop, None]
+        bx = well_x[None, :]
+        by = well_y[None, :]
+        # (cell → well) offsets — identical for every segment.
+        rx = bx - ax
+        ry = by - ay
+        chunk_blocked = np.zeros((stop - start, n_wells), dtype=bool)
+        for (c, d) in barrier_segments:
+            cx, cy = c
+            dx, dy = d
+            sx = dx - cx
+            sy = dy - cy
+            denom = rx * sy - ry * sx
+            qpx = cx - ax
+            qpy = cy - ay
+            # General crossing case: segment (c, d) pierces the (cell → well)
+            # segment iff the intersection parameters fall inside both spans.
+            # Parallel pairs divide by zero here; their crossing condition is
+            # False and the collinear branch below handles them exactly.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                num_t = qpx * sy - qpy * sx
+                t = num_t / denom
+                u = (qpx * ry - qpy * rx) / denom
+            crossing = (
+                (tol < t) & (t < 1.0 - tol)
+                & (-tol <= u) & (u <= 1.0 + tol)
+            )
+            # Collinear segment-on-segment case (measure-zero for real data;
+            # only evaluated when some pair is exactly parallel).
+            if (np.abs(denom) <= 1e-12).any():
+                rr = rx * rx + ry * ry
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    t0 = (qpx * rx + qpy * ry) / rr
+                    t1 = ((dx - ax) * rx + (dy - ay) * ry) / rr
+                lo = np.minimum(t0, t1)
+                hi = np.maximum(t0, t1)
+                collinear = (
+                    (np.abs(denom) <= 1e-12)
+                    & (rr > 1e-24)
+                    & (np.abs(qpx * ry - qpy * rx) <= 1e-12)
+                    & (hi > tol)
+                    & (lo < 1.0 - tol)
+                )
+                crossing |= collinear
+            chunk_blocked |= crossing
+        blocked[start:stop] = chunk_blocked
+    return blocked
 
 
 def strict_segments_intersect(
@@ -3969,18 +4237,10 @@ def build_barrier_blank_mask(
     if not barriers or blank_distance <= 0 or len(x_coords) < 2 or len(y_coords) < 2:
         return None
 
-    x0 = float(x_coords[0])
-    y0 = float(y_coords[0])
-    dx = float(x_coords[1] - x_coords[0]) or 1.0
-    dy = float(y_coords[1] - y_coords[0]) or 1.0
     rows = len(y_coords)
     cols = len(x_coords)
-    cell = max(min(abs(dx), abs(dy)), 1e-9)
     R = float(blank_distance)
-    # 端帽半径 = R，覆盖中段矩形 + 椭圆端
-    dilation = int(math.ceil(R / cell)) + 2
     mask = np.zeros((rows, cols), dtype=bool)
-    sample_step = cell * 0.5
     domain = None
     if domain_mask is not None:
         domain = np.asarray(domain_mask, dtype=bool)
@@ -3989,50 +4249,43 @@ def build_barrier_blank_mask(
 
     for barrier in barriers:
         pts = list(getattr(barrier, "points", ()) or ())
-        if len(pts) < 1:
+        # The reference implementation only blanks for polylines with >= 2
+        # points (its sampling loop emits no cells for single points).
+        if len(pts) < 2:
             continue
-        # 沿折线采样 + 两端外伸 R（椭圆端帽轴心采样）
-        sample_pts: List[PointTuple] = []
-        for p0, p1 in _segments(pts):
-            length = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
-            samples = max(2, int(length / max(sample_step, 1e-9)) + 2)
-            for i in range(samples):
-                t = i / (samples - 1)
-                sample_pts.append(
-                    (p0[0] + t * (p1[0] - p0[0]), p0[1] + t * (p1[1] - p0[1]))
-                )
-        if len(pts) >= 2:
-            for end_idx, inward_idx, sign in ((0, 1, -1.0), (-1, -2, 1.0)):
-                ex, ey = float(pts[end_idx][0]), float(pts[end_idx][1])
-                ix, iy = float(pts[inward_idx][0]), float(pts[inward_idx][1])
-                tx, ty = ex - ix, ey - iy
-                tn = math.hypot(tx, ty)
-                if tn <= 1e-12:
-                    continue
-                ux, uy = tx / tn, ty / tn
-                n_tip = max(2, int(R / max(sample_step, 1e-9)) + 1)
-                for k in range(1, n_tip + 1):
-                    d = R * (k / n_tip)
-                    sample_pts.append((ex + sign * ux * d, ey + sign * uy * d))
-
-        for px, py in sample_pts:
-            col = int(round((px - x0) / dx))
-            row = int(round((py - y0) / dy))
-            r0 = max(0, row - dilation)
-            r1 = min(rows - 1, row + dilation)
-            c0 = max(0, col - dilation)
-            c1 = min(cols - 1, col + dilation)
-            if r1 < r0 or c1 < c0:
-                continue
-            for rr in range(r0, r1 + 1):
-                for cc in range(c0, c1 + 1):
-                    if mask[rr, cc]:
-                        continue
-                    if domain is not None and not domain[rr, cc]:
-                        continue
-                    center = (float(x_coords[cc]), float(y_coords[rr]))
-                    if _point_within_polyline_stadium_buffer(center, pts, blank_distance):
-                        mask[rr, cc] = True
+        # Vectorized stadium distance: for every grid cell, the distance to the
+        # nearest point of the polyline (min over segments of the clamped
+        # point-to-segment distance).  This replicates the per-cell
+        # _point_within_polyline_stadium_buffer semantics exactly.
+        arr_pts = np.asarray(pts, dtype=float)
+        seg_ax = arr_pts[:-1, 0]
+        seg_ay = arr_pts[:-1, 1]
+        seg_bx = arr_pts[1:, 0]
+        seg_by = arr_pts[1:, 1]
+        seg_len = np.hypot(seg_bx - seg_ax, seg_by - seg_ay)
+        cell_xx = np.asarray(x_coords, dtype=float)[None, :]  # (1, cols)
+        cell_yy = np.asarray(y_coords, dtype=float)[:, None]  # (rows, 1)
+        # (rows, cols, segments) would be too big on fine grids; iterate
+        # segments and keep a running per-cell minimum.
+        best_d = np.full((rows, cols), np.inf, dtype=float)
+        for i in range(len(seg_len)):
+            ax, ay = seg_ax[i], seg_ay[i]
+            bx, by = seg_bx[i], seg_by[i]
+            length = float(seg_len[i])
+            if length <= 1e-12:
+                d = np.hypot(cell_xx - ax, cell_yy - ay)
+            else:
+                ux, uy = (bx - ax) / length, (by - ay) / length
+                along = (cell_xx - ax) * ux + (cell_yy - ay) * uy
+                t = np.clip(along / length, 0.0, 1.0)
+                cxp = ax + t * (bx - ax)
+                cyp = ay + t * (by - ay)
+                d = np.hypot(cell_xx - cxp, cell_yy - cyp)
+            np.minimum(best_d, d, out=best_d)
+        cell_hit = best_d <= R + 1e-12
+        if domain is not None:
+            cell_hit &= domain
+        mask |= cell_hit
     return mask if bool(mask.any()) else None
 
 
@@ -5032,6 +5285,113 @@ def prune_messy_contour_fragments(
     }
 
 
+def _offset_barrier_blocked_mask(
+    x_coords: np.ndarray,
+    y_coords: np.ndarray,
+    dr: int,
+    dc: int,
+    barrier_segments: Sequence[Tuple[PointTuple, PointTuple]],
+    endpoint_tolerance: float = 1e-9,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Grid-wide mask of cells whose neighbor at offset (dr, dc) is barrier-blocked.
+
+    Returns ``(blocked, rows_dst, cols_dst)`` where ``blocked`` is the
+    (len(rows_dst), len(cols_dst)) mask over the destination slice and
+    ``rows_dst``/``cols_dst`` are the destination row/col index arrays
+    (``blocked[i, j]`` corresponds to grid cell ``(rows_dst[i], cols_dst[j])``).
+
+    The neighbor of cell (r, c) is (r + dr, c + dc); the (cell → neighbor)
+    segment is tested against every barrier segment with the same
+    ``strict_segments_intersect`` arithmetic as the reference implementation.
+    """
+    H = len(y_coords)
+    W = len(x_coords)
+    x_coords = np.asarray(x_coords, dtype=float)
+    y_coords = np.asarray(y_coords, dtype=float)
+    if dr >= 0:
+        rows_dst = np.arange(0, H - dr, dtype=int)
+        rows_src = rows_dst + dr
+    else:
+        rows_dst = np.arange(-dr, H, dtype=int)
+        rows_src = rows_dst + dr
+    if dc >= 0:
+        cols_dst = np.arange(0, W - dc, dtype=int)
+        cols_src = cols_dst + dc
+    else:
+        cols_dst = np.arange(-dc, W, dtype=int)
+        cols_src = cols_dst + dc
+    dst_x = x_coords[cols_dst][None, :]
+    dst_y = y_coords[rows_dst][:, None]
+    rx = (x_coords[cols_src] - x_coords[cols_dst])[None, :]
+    ry = (y_coords[rows_src] - y_coords[rows_dst])[:, None]
+    tol = float(endpoint_tolerance)
+    blocked = np.zeros((len(rows_dst), len(cols_dst)), dtype=bool)
+    for (c, d) in barrier_segments:
+        cx, cy = c
+        dx, dy = d
+        sx = dx - cx
+        sy = dy - cy
+        denom = rx * sy - ry * sx
+        qpx = (cx - dst_x)
+        qpy = (cy - dst_y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = (qpx * sy - qpy * sx) / denom
+            u = (qpx * ry - qpy * rx) / denom
+        crossing = (
+            (tol < t) & (t < 1.0 - tol)
+            & (-tol <= u) & (u <= 1.0 + tol)
+        )
+        if (np.abs(denom) <= 1e-12).any():
+            rr = rx * rx + ry * ry
+            with np.errstate(divide="ignore", invalid="ignore"):
+                t0 = (qpx * rx + qpy * ry) / rr
+                t1 = ((dx - dst_x) * rx + (dy - dst_y) * ry) / rr
+            lo = np.minimum(t0, t1)
+            hi = np.maximum(t0, t1)
+            crossing |= (
+                (np.abs(denom) <= 1e-12)
+                & (rr > 1e-24)
+                & (np.abs(qpx * ry - qpy * rx) <= 1e-12)
+                & (hi > tol)
+                & (lo < 1.0 - tol)
+            )
+        blocked |= crossing
+    return blocked, rows_dst, cols_dst
+
+
+def _anisotropic_fill_multiplier_vec(
+    dr: int, dc: int, field: np.ndarray, aspect: float
+) -> np.ndarray:
+    """Vectorized ``_anisotropic_fill_multiplier`` over a (rows, cols, 3) field."""
+    stretch = np.asarray(field[..., 2], dtype=float)
+    base = np.ones(stretch.shape, dtype=float)
+    active = stretch > 1.0 + 1e-9
+    ox = float(dc)
+    oy = float(dr) * aspect
+    norm = math.hypot(ox, oy)
+    if norm > 1e-12:
+        align = np.abs(ox * field[..., 0] + oy * field[..., 1]) / norm
+        base = np.where(active, 1.0 + (stretch - 1.0) * align, base)
+    return base
+
+
+def _offset_slices(rows: int, cols: int, dr: int, dc: int):
+    """Destination / source row-col slices for a neighbor offset (dr, dc)."""
+    if dr >= 0:
+        r_dst = slice(0, rows - dr)
+        r_src = slice(dr, rows)
+    else:
+        r_dst = slice(-dr, rows)
+        r_src = slice(0, rows + dr)
+    if dc >= 0:
+        c_dst = slice(0, cols - dc)
+        c_src = slice(dc, cols)
+    else:
+        c_dst = slice(-dc, cols)
+        c_src = slice(0, cols + dc)
+    return r_dst, c_dst, r_src, c_src
+
+
 def smooth_valid_grid(
     grid: np.ndarray,
     x_coords: np.ndarray,
@@ -5072,45 +5432,59 @@ def smooth_valid_grid(
     rows, cols = result.shape
     aspect = _grid_aspect(x_coords, y_coords)
     direction_strength = max(0.0, float(direction_strength))
+    barrier_segments = _barrier_segments(barriers) if barriers else []
+    near = (
+        None
+        if near_barrier_mask is None
+        else np.asarray(near_barrier_mask, dtype=bool)
+    )
+    # Neighbor-blocked masks depend only on geometry — compute once per call
+    # and reuse across iterations.
+    offset_blocked: Dict[Tuple[int, int], np.ndarray] = {}
+    if barrier_segments:
+        for (dr, dc, _weight) in offsets:
+            if dr != 0 or dc != 0:
+                offset_blocked[(dr, dc)], _, _ = _offset_barrier_blocked_mask(
+                    x_coords, y_coords, dr, dc, barrier_segments, 1e-9
+                )
     for _ in range(max(0, int(iterations))):
         next_grid = result.copy()
-        for row in range(rows):
-            center_y = float(y_coords[row])
-            for col in range(cols):
-                if not valid_mask[row, col]:
-                    continue
-                check_barrier = bool(barriers) and (
-                    near_barrier_mask is None or bool(near_barrier_mask[row, col])
-                )
-                center = (float(x_coords[col]), center_y)
-                weighted_sum = 0.0
-                weight_sum = 0.0
-                for dr, dc, weight in offsets:
-                    nr = row + dr
-                    nc = col + dc
-                    if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
-                        continue
-                    if not valid_mask[nr, nc] or not math.isfinite(float(result[nr, nc])):
-                        continue
-                    if (dr != 0 or dc != 0) and region_labels is not None \
-                            and region_labels[nr, nc] != region_labels[row, col]:
-                        continue
-                    if (dr != 0 or dc != 0) and check_barrier:
-                        neighbor = (float(x_coords[nc]), float(y_coords[nr]))
-                        if is_blocked_by_barrier(center, neighbor, barriers, 1e-9):
-                            continue
-                    if (dr != 0 or dc != 0) and direction_field is not None:
-                        field_entry = direction_field[row, col]
-                        base_multiplier = _anisotropic_fill_multiplier(dr, dc, field_entry, aspect)
-                        if base_multiplier > 1.0:
-                            weight *= 1.0 + (base_multiplier - 1.0) * direction_strength
-                    weighted_sum += float(result[nr, nc]) * weight
-                    weight_sum += weight
-                if weight_sum > 0.0:
-                    next_grid[row, col] = weighted_sum / weight_sum
+        weighted_sum = np.zeros_like(result)
+        weight_sum = np.zeros_like(result)
+        for (dr, dc, weight) in offsets:
+            r_dst, c_dst, r_src, c_src = _offset_slices(rows, cols, dr, dc)
+            ok = valid_mask[r_src, c_src]
+            eff = weight
+            if dr != 0 or dc != 0:
+                if region_labels is not None:
+                    ok = ok & (
+                        region_labels[r_src, c_src]
+                        == region_labels[r_dst, c_dst]
+                    )
+                if barrier_segments:
+                    blocked = offset_blocked[(dr, dc)]
+                    if near is not None:
+                        blocked = blocked & near[r_dst, c_dst]
+                    ok = ok & ~blocked
+                if direction_field is not None:
+                    base = _anisotropic_fill_multiplier_vec(
+                        dr, dc, direction_field[r_dst, c_dst], aspect
+                    )
+                    eff = np.where(
+                        base > 1.0,
+                        weight * (1.0 + (base - 1.0) * direction_strength),
+                        weight,
+                    )
+            weighted_sum[r_dst, c_dst] += np.where(
+                ok, result[r_src, c_src] * eff, 0.0
+            )
+            weight_sum[r_dst, c_dst] += np.where(ok, eff, 0.0)
+        populated = weight_sum > 0.0
+        next_grid[populated] = weighted_sum[populated] / weight_sum[populated]
         next_grid[~valid_mask] = np.nan
         result = next_grid
     return result
+
 
 
 def refine_domain_boundary_transition(
@@ -5146,37 +5520,48 @@ def refine_domain_boundary_transition(
         (-1, -1, 1.0), (-1, 1, 1.0), (1, -1, 1.0), (1, 1, 1.0),
     )
     rows, cols = result.shape
+    barrier_segments = _barrier_segments(barriers) if barriers else []
+    near = (
+        None
+        if near_barrier_mask is None
+        else np.asarray(near_barrier_mask, dtype=bool)
+    )
+    # Neighbor-blocked masks depend only on geometry — compute once per call
+    # and reuse across iterations.
+    offset_blocked: Dict[Tuple[int, int], np.ndarray] = {}
+    if barrier_segments:
+        for (dr, dc, _weight) in offsets:
+            offset_blocked[(dr, dc)], _, _ = _offset_barrier_blocked_mask(
+                x_coords, y_coords, dr, dc, barrier_segments, 1e-9
+            )
     for _ in range(max(0, int(iterations))):
         next_grid = result.copy()
-        for row, col in zip(*np.nonzero(edge_band)):
-            if not valid_mask[row, col]:
-                continue
-            check_barrier = bool(barriers) and (
-                near_barrier_mask is None or bool(near_barrier_mask[row, col])
+        weighted_sum = np.zeros_like(result)
+        weight_sum = np.zeros_like(result)
+        for (dr, dc, weight) in offsets:
+            r_dst, c_dst, r_src, c_src = _offset_slices(rows, cols, dr, dc)
+            ok = valid_mask[r_src, c_src] & edge_band[r_dst, c_dst]
+            if region_labels is not None:
+                ok = ok & (
+                    region_labels[r_src, c_src] == region_labels[r_dst, c_dst]
+                )
+            if barrier_segments:
+                blocked = offset_blocked[(dr, dc)]
+                if near is not None:
+                    blocked = blocked & near[r_dst, c_dst]
+                ok = ok & ~blocked
+            edge_factor = dist_to_edge[r_src, c_src] / feather
+            eff_w = weight * np.maximum(edge_factor, 0.35)
+            weighted_sum[r_dst, c_dst] += np.where(
+                ok, result[r_src, c_src] * eff_w, 0.0
             )
-            center = (float(x_coords[col]), float(y_coords[row]))
-            weighted_sum = 0.0
-            weight_sum = 0.0
-            for dr, dc, weight in offsets:
-                nr = row + dr
-                nc = col + dc
-                if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
-                    continue
-                if not valid_mask[nr, nc] or not math.isfinite(float(result[nr, nc])):
-                    continue
-                if region_labels is not None and region_labels[nr, nc] != region_labels[row, col]:
-                    continue
-                if check_barrier:
-                    neighbor = (float(x_coords[nc]), float(y_coords[nr]))
-                    if is_blocked_by_barrier(center, neighbor, barriers, 1e-9):
-                        continue
-                edge_factor = float(dist_to_edge[nr, nc]) / feather
-                weighted_sum += float(result[nr, nc]) * weight * max(edge_factor, 0.35)
-                weight_sum += weight * max(edge_factor, 0.35)
-            if weight_sum > 0.0:
-                interior = weighted_sum / weight_sum
-                blend = float(np.clip(dist_to_edge[row, col] / feather, 0.0, 1.0))
-                next_grid[row, col] = interior * blend + float(result[row, col]) * (1.0 - blend)
+            weight_sum[r_dst, c_dst] += np.where(ok, eff_w, 0.0)
+        interior = np.zeros_like(result)
+        populated = weight_sum > 0.0
+        interior[populated] = weighted_sum[populated] / weight_sum[populated]
+        blend = np.clip(dist_to_edge / feather, 0.0, 1.0)
+        band = edge_band & valid_mask
+        next_grid[band] = interior[band] * blend[band] + result[band] * (1.0 - blend[band])
         next_grid[~valid_mask] = np.nan
         result = next_grid
     return result
