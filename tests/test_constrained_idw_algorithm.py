@@ -340,3 +340,74 @@ def test_399_duplicate_count_surfaced_on_task():
     assert task.status == "complete"
     assert task.quality_metrics["duplicate_wells_dropped"] == 1
     assert task.quality_metrics["n_points"] == 5
+
+
+# --------------------------------------------------------------------------- #
+# #400 — barrier buffer must not apply metre constants to degree CRS
+# --------------------------------------------------------------------------- #
+
+
+def test_400_barrier_buffer_helper_units():
+    """Geographic CRS gets an explicit ~300 m buffer in degrees; else None."""
+    expected = 300.0 / 111_320.0
+    assert cia.barrier_buffer_distance_for_crs("EPSG:4326") == pytest.approx(expected)
+    # Host default project_crs carries a free-text suffix pyproj cannot parse.
+    assert cia.barrier_buffer_distance_for_crs("EPSG:4326 / WGS84") == pytest.approx(
+        expected
+    )
+    assert cia.barrier_buffer_distance_for_crs("EPSG:3857") is None  # projected
+    assert cia.barrier_buffer_distance_for_crs("EPSG:32650") is None  # UTM metres
+    assert cia.barrier_buffer_distance_for_crs(None) is None
+
+
+def _degree_barrier_scenario():
+    """3+3 wells (20–80 m) flanking a full-spanning barrier in degree coords."""
+    pts = _pts(
+        (0.2, 0.0, 20.0),
+        (0.2, 0.5, 30.0),
+        (0.2, 1.0, 40.0),
+        (0.8, 0.0, 60.0),
+        (0.8, 0.5, 70.0),
+        (0.8, 1.0, 80.0),
+    )
+    breaks = [[(0.5, -0.2), (0.5, 1.2)]]
+    return pts, breaks
+
+
+def test_400_degree_crs_has_no_kilometre_corridor():
+    """In a degree CRS the barrier blank band must be ~300 m, not kilometres.
+
+    The auto buffer's metre constants resolve to ~0.045° (~5 km) on a 1° map;
+    with the CRS-aware fix the band is the 300 m target, which is sub-cell at
+    every host resolution, so no corridor cells appear next to the barrier.
+    """
+    pts, breaks = _degree_barrier_scenario()
+    with_crs = run_constrained_idw(
+        pts, grid_n=60, power=2.0, break_polylines=breaks, crs="EPSG:4326 / WGS84"
+    )
+    without_crs = run_constrained_idw(pts, grid_n=60, power=2.0, break_polylines=breaks)
+    gz, gx, gy = with_crs["grid_z"], with_crs["grid_x"], with_crs["grid_y"]
+    row = int(np.argmin(np.abs(np.asarray(gy) - 0.5)))
+    central = (np.asarray(gx) >= 0.45) & (np.asarray(gx) <= 0.55)
+    n_with = int((~np.isfinite(gz[row, :]))[central].sum())
+    gz2, gx2 = without_crs["grid_z"], without_crs["grid_x"]
+    row2 = int(np.argmin(np.abs(np.asarray(gy) - 0.5)))
+    central2 = (np.asarray(gx2) >= 0.45) & (np.asarray(gx2) <= 0.55)
+    n_without = int((~np.isfinite(gz2[row2, :]))[central2].sum())
+    assert n_without >= 5, "sanity: old auto buffer must produce a wide corridor"
+    assert n_with <= 1, f"degree CRS corridor too wide: {n_with} cells (~{n_with*0.018} deg)"
+
+
+def test_400_metre_crs_behavior_unchanged():
+    """Passing a projected CRS must not alter the auto-buffer numerics."""
+    S = 111_320.0  # same geographic footprint as the degree scenario, in metres
+    pts = [
+        {"x": p["x"] * S, "y": p["y"] * S, "value": p["value"]}
+        for p in _degree_barrier_scenario()[0]
+    ]
+    breaks = [[(0.5 * S, -0.2 * S), (0.5 * S, 1.2 * S)]]
+    with_crs = run_constrained_idw(
+        pts, grid_n=60, power=2.0, break_polylines=breaks, crs="EPSG:3857"
+    )
+    auto = run_constrained_idw(pts, grid_n=60, power=2.0, break_polylines=breaks)
+    np.testing.assert_array_equal(with_crs["grid_z"], auto["grid_z"])

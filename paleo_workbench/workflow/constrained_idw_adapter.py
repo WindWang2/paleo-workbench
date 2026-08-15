@@ -388,6 +388,39 @@ def _search_radii_from_wells(
     return float(search_radius), float(decluster_radius)
 
 
+#: Barrier blank-buffer target for geographic (degree) CRS projects, metres.
+_DEGREE_CRS_BARRIER_BUFFER_METERS = 300.0
+#: Equatorial metres per degree (meridian constant). Conservative for the
+#: buffer: at any latitude the corridor is at most ~300 m wide.
+_METERS_PER_DEGREE = 111_320.0
+
+
+def barrier_buffer_distance_for_crs(crs: str | None) -> float | None:
+    """Explicit barrier blank buffer (map units) when *crs* is geographic.
+
+    The vendored engine's auto barrier buffer is calibrated for metre-scale
+    projected coordinates (≈300 m): its adaptive constants (2·grid_step,
+    3%·search_radius, 1.2%·extent) applied to degree coordinates resolve to
+    kilometres. For a geographic CRS we pass the ~300 m target converted to
+    degrees instead, keeping metre-CRS behavior untouched (returns ``None``).
+    """
+    if not crs:
+        return None
+    text = str(crs).strip().lower()
+    is_geographic = False
+    try:
+        import pyproj  # optional; heuristic fallback below when unavailable
+
+        is_geographic = bool(pyproj.CRS.from_user_input(text).is_geographic)
+    except Exception:
+        # Host default project_crs is "EPSG:4326 / WGS84" (not parseable by
+        # pyproj due to the free-text suffix) — recognize it heuristically.
+        is_geographic = "4326" in text or "wgs84" in text
+    if not is_geographic:
+        return None
+    return _DEGREE_CRS_BARRIER_BUFFER_METERS / _METERS_PER_DEGREE
+
+
 def run_constrained_idw(
     points: Sequence[dict[str, Any]],
     *,
@@ -397,6 +430,7 @@ def run_constrained_idw(
     target_horizon: str | None = None,
     break_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
     cancellation_token=None,
+    crs: str | None = None,
 ) -> dict[str, Any]:
     """Run haiyou constrained-IDW and return a host ``interpolate_factor_grid``-shaped dict.
 
@@ -461,6 +495,10 @@ def run_constrained_idw(
         # other methods). Skip haiyou's contour extraction to keep the import
         # graph narrow (no contour_extractor) and avoid duplicate contour logic.
         extract_contours=False,
+        # Geographic (degree) CRS: the engine's auto barrier buffer is
+        # metre-calibrated; pass an explicit ~300 m buffer in degrees instead
+        # of letting the metre constants expand to kilometres.
+        barrier_buffer_distance=barrier_buffer_distance_for_crs(crs) or 0.0,
     )
 
     if cancellation_token is not None:

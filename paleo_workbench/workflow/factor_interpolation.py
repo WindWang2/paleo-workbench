@@ -421,6 +421,7 @@ def apply_interpolation_to_task(
             target_horizon=task.target_horizon,
             break_polylines=breaks,
             cancellation_token=cancellation_token,
+            crs=crs,
         )
         grid_result = FactorGridResult.from_constrained_idw_dict(
             result,
