@@ -91,3 +91,46 @@ def test_toolbar_clear_preview_cache_button(qtbot):
     tb.clear_preview_cache_requested.connect(lambda: received.append(1))
     tb.clear_preview_cache_btn.click()
     assert received == [1]
+
+
+# --- programmatic tag filter state (#413) ------------------------------------
+
+def test_toolbar_programmatic_tag_selection_is_authoritative(qtbot):
+    """current_tag_selection() must read the filter state, not the lazily
+    built menu-action mirror: a programmatic apply (Tag Manager 查看关联数据)
+    with the menu never opened must not read back as empty (#413)."""
+    toolbar = DataToolbar()
+    qtbot.addWidget(toolbar)
+    toolbar.set_tag_candidates(["X", "Y"])
+
+    toolbar.apply_tag_selection(["X"], "and")
+
+    assert toolbar._selected_tags == ["X"]
+    assert toolbar.current_tag_selection() == ["X"]
+    assert toolbar.current_tag_operator() == "and"
+
+    # Opening the menu must show the same state (checked == active filter).
+    toolbar._rebuild_tag_filter_menu()
+    checked = [a.text() for a in toolbar._tag_check_actions if a.isChecked()]
+    assert checked == ["X"]
+
+
+def test_toolbar_manual_tag_menu_toggle_still_updates_selection(qtbot):
+    """The manual menu-toggle path keeps working unchanged."""
+    toolbar = DataToolbar()
+    qtbot.addWidget(toolbar)
+    toolbar.set_tag_candidates(["X", "Y"])
+    toolbar._rebuild_tag_filter_menu()
+    received = []
+    toolbar.tag_filter_changed.connect(lambda tags, op: received.append((list(tags), op)))
+
+    x_action = next(a for a in toolbar._tag_check_actions if a.text() == "X")
+    x_action.setChecked(True)
+
+    assert toolbar.current_tag_selection() == ["X"]
+    assert toolbar._selected_tags == ["X"]
+    assert received == [(["X"], "and")]
+
+    x_action.setChecked(False)
+    assert toolbar.current_tag_selection() == []
+    assert received[-1] == ([], "and")

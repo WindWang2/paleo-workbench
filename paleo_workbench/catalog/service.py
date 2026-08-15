@@ -658,9 +658,15 @@ class DataCatalogService:
         run_id: str | None = None,
         version_metadata: dict[str, Any] | None = None,
     ) -> DataVersion:
-        """Create a result asset and register its version in ONE locked,
-        atomic operation (thread-safe: workers must not mutate
+        """Create a result asset and register its version in ONE atomic
+        document operation (thread-safe: workers must not mutate
         ``document.assets`` directly — this is the only sanctioned path).
+
+        The payload copy+hash (potentially large, disk-bound) happens OUTSIDE
+        the lock: holding the lock across it would stall every concurrent
+        GUI-thread catalog call (``register_run``/``add_tags``/...) for the
+        whole I/O duration.  Only the document mutation and canonical save
+        are locked, so asset + version + run linkage still commit atomically.
 
         When *run_id* is given, the new version's lineage parents are set to
         the run's input versions, so DERIVED/OUTPUT results stay traceable to
@@ -672,30 +678,48 @@ class DataCatalogService:
         On failure the newly-created asset is rolled back from the document,
         so no half-registered asset survives. Returns the committed version.
         """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise CatalogError(f"Source file not found: {source_path}")
         with self._lock:
             parents: list[str] = []
+            run: DataRun | None = None
             if run_id is not None:
                 self._ensure_maps()
                 known = self._version_by_id
+                run = self.get_run(run_id)
                 parents = [
-                    pid
-                    for pid in self.get_run(run_id).input_version_ids
-                    if pid in known
+                    pid for pid in run.input_version_ids if pid in known
                 ]
             asset = self._new_asset(name, type, format, asset_metadata)
+        # Copy+hash+fsync of the payload — no lock held while the bytes land
+        # on disk, so GUI-thread catalog calls never wait for worker I/O.
+        version, payload = self._build_version(
+            asset, source_path, stage,
+            version_id=None,
+            parent_version_ids=parents,
+            run_id=run_id,
+            metadata=version_metadata,
+            move=False,
+        )
+        with self._lock:
             self._add_asset(asset)
+            self._add_version(version)
+            asset.current_version_id = version.id
+            run_output_added = False
+            if run is not None and version.id not in run.output_version_ids:
+                run.output_version_ids.append(version.id)
+                run_output_added = True
             try:
-                return self.register_version(
-                    asset.id,
-                    source_path,
-                    stage,
-                    parent_version_ids=parents,
-                    run_id=run_id,
-                    metadata=version_metadata,
-                )
+                self._save()
             except Exception:
-                self._remove_asset(asset)
+                if run_output_added:
+                    run.output_version_ids.remove(version.id)
+                self._rollback(
+                    assets=[asset], versions=[version], payload=payload,
+                )
                 raise
+            return version
 
     # -- import / link / materialize -----------------------------------------
 

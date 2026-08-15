@@ -620,3 +620,72 @@ def test_add_tags_batch_rolls_back_on_canonical_failure(service, tmp_path, monke
 
     assert service.document.tags == []
     assert service.document.version_tags.get(version.id, []) == []
+
+
+def test_result_asset_registration_does_not_hold_lock_across_payload_io(
+    service, tmp_path, monkeypatch
+):
+    """C70: ``register_result_asset`` (the worker-thread registration path)
+    must not hold the catalog lock while the payload is copied+hashed; a
+    concurrent GUI-thread call such as ``add_tags`` must not stall for the
+    duration of that disk I/O."""
+    import threading
+    import time as time_mod
+
+    import paleo_workbench.catalog.service as service_mod
+
+    existing = service.import_raw(_make_source(tmp_path, name="existing.las"))
+    src = _make_source(tmp_path, name="worker-result.json", payload=b"x" * 4096)
+
+    entered_placement = threading.Event()
+    real_place = service_mod.place_managed_file
+
+    def slow_place(*args, **kwargs):
+        # Stand-in for a large payload: the copy+hash+fsync takes ~0.5 s.
+        entered_placement.set()
+        time_mod.sleep(0.5)
+        return real_place(*args, **kwargs)
+
+    monkeypatch.setattr(service_mod, "place_managed_file", slow_place)
+
+    errors: list[str] = []
+
+    def register_in_worker() -> None:
+        try:
+            service.register_result_asset(
+                name="worker result",
+                type="prediction",
+                format="json",
+                asset_metadata={},
+                source_path=src,
+                stage=DataStage.OUTPUT,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface to the main thread
+            errors.append(repr(exc))
+
+    worker = threading.Thread(target=register_in_worker)
+    worker.start()
+    assert entered_placement.wait(timeout=5.0), "worker never reached payload placement"
+
+    started = time_mod.perf_counter()
+    service.add_tags(["audit-label"], asset_id=existing.asset_id)
+    elapsed_ms = (time_mod.perf_counter() - started) * 1000
+
+    worker.join(timeout=10.0)
+    assert not worker.is_alive()
+    assert errors == []
+
+    # The GUI-thread call finished well inside the 0.5 s placement window:
+    # its lock wait is decoupled from the worker's disk I/O.
+    assert elapsed_ms < 250, (
+        f"GUI add_tags stalled {elapsed_ms:.0f} ms while worker payload "
+        "I/O (0.5 s) was in flight — lock still spans copy+hash"
+    )
+    # The concurrent registration still commits a consistent document.
+    assert {"audit-label"} <= {tag.name for tag in service.document.tags}
+    assert any(v.asset_id == existing.asset_id for v in service.document.versions)
+    registered = [
+        a for a in service.document.assets if a.name == "worker result"
+    ]
+    assert len(registered) == 1
+    assert registered[0].current_version_id is not None

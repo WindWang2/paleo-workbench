@@ -80,7 +80,8 @@ def test_c1_fast_slice_extract_zero_dim_axis_raises(axis):
     with pytest.raises(IndexError):
         fast_slice_extract(vol, axis=axis, index=0)
 
-    with patch.object(seismic_3d_api, "HAS_CPP_SEISMIC", False):
+    # Python fallback must enforce the same contract
+    with disabled_acceleration():
         with pytest.raises(IndexError):
             fast_slice_extract(vol, axis=axis, index=0)
 
@@ -91,7 +92,7 @@ def test_c2_fast_resample_volume_3d_empty_source_raises():
     with pytest.raises((ValueError, std_err := Exception)):
         seismic_3d_api.fast_resample_volume_3d(vol, (4, 4, 4))
 
-    with patch.object(seismic_3d_api, "HAS_CPP_SEISMIC", False):
+    with disabled_acceleration():
         with pytest.raises(ValueError):
             seismic_3d_api.fast_resample_volume_3d(vol, (4, 4, 4))
 
@@ -103,7 +104,7 @@ def test_i3_fast_resample_volume_3d_invalid_target_shape_raises(target_shape):
     with pytest.raises(ValueError):
         seismic_3d_api.fast_resample_volume_3d(vol, target_shape)
 
-    with patch.object(seismic_3d_api, "HAS_CPP_SEISMIC", False):
+    with disabled_acceleration():
         with pytest.raises(ValueError):
             seismic_3d_api.fast_resample_volume_3d(vol, target_shape)
 
@@ -115,7 +116,7 @@ def test_c3_m3_compute_coherence_3d_invalid_windows_raise(win):
     with pytest.raises(ValueError):
         compute_coherence_3d(vol, inline_window=win)
 
-    with patch.object(seismic_3d_api, "HAS_CPP_SEISMIC", False):
+    with disabled_acceleration():
         with pytest.raises(ValueError):
             compute_coherence_3d(vol, inline_window=win)
 
@@ -182,3 +183,26 @@ def test_resample_peak_preserving_parity_random_volumes():
         with disabled_acceleration():
             fallback = fast_resample_volume_3d(vol, target)
         assert np.array_equal(native, fallback, equal_nan=True)
+def test_has_cpp_flag_patch_does_not_change_dispatch_routing():
+    """Guard #438: native_backend.dispatch routes by is_accelerated(), never by
+    the façade HAS_CPP_* constant. Flipping HAS_CPP_SEISMIC must not switch the
+    fallback path, or the Python-fallback legs above silently re-run C++."""
+    vol = np.zeros((4, 4, 4), dtype=np.float32)
+
+    old_flag = seismic_3d_api.HAS_CPP_SEISMIC
+    seismic_3d_api.HAS_CPP_SEISMIC = False
+    try:
+        with patch(
+            "paleo_workbench.native_backend.seismic_3d_core.fast_slice_extract",
+            return_value=vol,
+        ) as cpp_spy:
+            fast_slice_extract(vol, axis=0, index=0)
+    finally:
+        seismic_3d_api.HAS_CPP_SEISMIC = old_flag
+
+    assert cpp_spy.called, (
+        "dispatch must ignore HAS_CPP_SEISMIC; if it reads the flag, the "
+        "fallback legs in this file silently re-run C++ again"
+    )
+
+

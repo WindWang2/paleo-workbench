@@ -376,3 +376,83 @@ def test_asset_table_context_menu_no_emit_for_invalid_row(qtbot):
 
     assert received == []
 
+
+
+# --- header sort / selection alignment (#412) --------------------------------
+
+def _resource(name: str) -> ResourceItem:
+    return ResourceItem(
+        name=name,
+        path=f"/tmp/{name}.las",
+        type="well_log",
+        format="las",
+    )
+
+
+def _sorted_names(table) -> list[str]:
+    return [table_text(table, r, 0) for r in range(table_row_count(table))]
+
+
+def _selected_row_name(table) -> str | None:
+    rows = table.table.selectionModel().selectedRows()
+    if not rows:
+        return None
+    return table_text(table, rows[0].row(), 0)
+
+
+def test_asset_table_sort_keeps_clicked_row_highlighted(qtbot):
+    """Sorting must not desynchronize the view highlight from the selection:
+    after sorting and clicking a row, the highlight stays on the clicked
+    asset (view row -> asset mapping must agree with _visible_assets)."""
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [_resource("Alpha"), _resource("Charlie"), _resource("Bravo")]
+    table.update_assets(resources, [])
+
+    table.model.sort(0, Qt.SortOrder.AscendingOrder)
+    assert _sorted_names(table) == ["Alpha", "Bravo", "Charlie"]
+    assert [a.name for a in table._visible_assets] == ["Alpha", "Bravo", "Charlie"]
+
+    # User clicks the row showing Charlie (view row 2); the page then echoes
+    # the emitted selection back into the table.
+    table.table.selectRow(2)
+    assert table._selected_asset is not None
+    assert table._selected_asset.name == "Charlie"
+    table.set_selected_asset(table._selected_asset)
+
+    assert _selected_row_name(table) == "Charlie"
+
+
+def test_asset_table_sort_keeps_existing_selection_on_its_row(qtbot):
+    """Sorting must not leave a 'selected asset with no visible row'
+    state: the previously selected asset stays selected on its new row."""
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [_resource("Alpha"), _resource("Charlie"), _resource("Bravo")]
+    table.update_assets(resources, [])
+
+    table.set_selected_asset(resources[1])  # Charlie
+    assert _selected_row_name(table) == "Charlie"
+
+    table.model.sort(0, Qt.SortOrder.AscendingOrder)
+
+    assert _selected_row_name(table) == "Charlie"
+    assert table._selected_asset is resources[1]
+
+
+def test_asset_table_refresh_after_sort_keeps_selection_aligned(qtbot):
+    """Refreshing after a sort must not misalign the highlight: the selected
+    row still shows the selected asset (or selection is cleared)."""
+    table = DataAssetTable()
+    qtbot.addWidget(table)
+    resources = [_resource("Alpha"), _resource("Charlie"), _resource("Bravo")]
+    table.update_assets(resources, [])
+
+    table.model.sort(0, Qt.SortOrder.AscendingOrder)
+    table.table.selectRow(2)  # Charlie
+    assert table._selected_asset.name == "Charlie"
+
+    table.update_assets(resources, [])
+
+    assert _selected_row_name(table) == "Charlie"
+    assert table._selected_asset.name == "Charlie"
