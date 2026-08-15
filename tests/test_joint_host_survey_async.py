@@ -51,10 +51,14 @@ def test_joint_reload_scans_segy_off_gui_thread_and_caches(qtbot, tmp_path, monk
     def fake_corners(segy_path):
         calls["count"] += 1
         calls["thread"] = threading.current_thread().name
+        # Corners must describe the SAME 8x10x16 cube the writer built:
+        # the registration is fail-closed since the seismic-3d consistency
+        # batch — a survey claiming 2x2 would be rejected against a loaded
+        # axis of 8 ("axis 0: loaded size 8 outside native 1..2").
         return (
             (1.0, 1.0, 0.0, 0.0),
-            (1.0, 2.0, 100.0, 0.0),
-            (2.0, 2.0, 100.0, 100.0),
+            (1.0, 10.0, 100.0, 0.0),
+            (8.0, 10.0, 100.0, 100.0),
             {"n_samples": 16, "dt_ms": 1.0, "t0_ms": 0.0, "source": "test"},
         )
 

@@ -176,6 +176,10 @@ def test_dtw_propagation_unbound_engine_shows_unavailable(qtbot, monkeypatch):
     canvas.picks_model.add_pick("TopA", "W1", 100.0)
     canvas.propagate_pick_via_dtw = lambda *a, **k: []
     page.dtw_btn.click()
+    # DTW propagates on a worker; the confidence lands with the finished text.
+    qtbot.waitUntil(
+        lambda: "DTW 已为层位" in page.status_label.text(), timeout=10_000
+    )
     text = page.status_label.text()
     assert "置信度: 不可用" in text
     assert "置信度: 0.00" not in text
@@ -189,6 +193,9 @@ def test_dtw_propagation_after_load_shows_real_confidence(qtbot, tmp_path, monke
     canvas.picks_model.add_pick("TopA", "A1", 900.0)
     canvas.propagate_pick_via_dtw = lambda *a, **k: []
     page.dtw_btn.click()
+    qtbot.waitUntil(
+        lambda: "DTW 已为层位" in page.status_label.text(), timeout=10_000
+    )
     text = page.status_label.text()
     import re
 
