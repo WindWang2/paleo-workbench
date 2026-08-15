@@ -16,6 +16,7 @@ from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
+from paleo_workbench.ui.pages.filter_index import FilterQuery
 from paleo_workbench.workflow.service import dashboard_state
 
 
@@ -52,6 +53,21 @@ def test_data_page_assembles_management_panels(qtbot):
     assert page.asset_table is not None
     assert page.reader_panel is not None
     assert page.inspector_panel is not None
+
+
+def test_shutdown_wait_budget_never_below_test_budget():
+    """The production close wait budget must not be smaller than the pytest
+    branch (C18).
+
+    Regression: ``wait_ms = 5000 if "pytest" in sys.modules else 100`` made
+    detach-on-close the norm in production (any in-flight job exceeded
+    100 ms), forfeiting result delivery and feeding the detached-thread
+    app-exit crash path.  One constant serves both environments now; pin it
+    high enough that cooperative jobs finish instead of detaching.
+    """
+    from paleo_workbench.ui.pages.data_page import _SHUTDOWN_WAIT_MS
+
+    assert _SHUTDOWN_WAIT_MS >= 5_000
 
 
 def test_data_page_uses_three_pane_splitter(qtbot):
@@ -1288,3 +1304,85 @@ def test_deliver_export_artifact_resolves_project_relative_output(
     assert "源文件不存在" not in status
     assert "已导出 / 交付" in status
     assert destination.read_bytes() == b"%PDF-1.4\n%%EOF\n"
+
+
+def test_data_page_programmatic_tag_filter_survives_navigation_click(qtbot, tmp_path: Path):
+    """A tag filter applied programmatically (Tag Manager 查看关联数据, menu
+    never opened) must survive the next navigation-tree click — the visible
+    filter state must never diverge from what the table shows (#413)."""
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    well2 = tmp_path / "well2.las"
+    well2.write_text("~Version\n", encoding="utf-8")
+    project = ProjectDocument.new("Demo")
+    project.resources.extend(
+        [
+            ResourceItem(
+                name="well.las",
+                path=str(well),
+                type="well_log",
+                format="las",
+                tags=["X"],
+            ),
+            ResourceItem(
+                name="well2.las",
+                path=str(well2),
+                type="well_log",
+                format="las",
+            ),
+        ]
+    )
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    # Tag Manager double-click path: programmatic apply, menu never opened.
+    page.data_toolbar.apply_tag_selection(["X"], "and")
+    assert page.asset_table._filter_query.tags == ["X"]
+
+    # Navigation-tree node click (e.g. 测井 category).
+    page.navigation_tree.filter_query_changed.emit(
+        FilterQuery(node_type="type", node_value="well_log")
+    )
+
+    assert page.asset_table._filter_query.tags == ["X"]
+    # The toolbar still reports the active tag selection.
+    assert page.data_toolbar.current_tag_selection() == ["X"]
+
+
+def test_preview_settings_visualization_change_reloads_current_visualization(
+    qtbot, monkeypatch, tmp_path: Path
+):
+    """A settings change that only affects the visualization controller must
+    re-request the professional visualization for the current asset; the
+    summary side keeps its own reload (#427)."""
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    resource = ResourceItem(
+        name="well.las", path=str(well), type="well_log", format="las"
+    )
+    page._selected_asset = resource
+
+    visual_requests: list[object] = []
+    monkeypatch.setattr(
+        page._visualization_controller, "request", visual_requests.append
+    )
+    summary_requests: list[object] = []
+    monkeypatch.setattr(page._preview_controller, "request", summary_requests.append)
+    # Isolate the visualization-only path: pretend the summary settings did
+    # not change.
+    monkeypatch.setattr(
+        page._preview_controller, "set_settings", lambda settings: False
+    )
+
+    settings = replace(page.reader_panel.preview_settings, geoviz_max_curves=24)
+    page.reader_panel.preview_settings_changed.emit(settings)
+
+    assert visual_requests == [resource]
+    assert summary_requests == []
+
+    # A selection that cannot be visualized must not trigger a request.
+    page._selected_asset = object()
+    page.reader_panel.preview_settings_changed.emit(settings)
+    assert visual_requests == [resource]

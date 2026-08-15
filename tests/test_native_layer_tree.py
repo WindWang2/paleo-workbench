@@ -27,8 +27,9 @@ def test_native_layer_model_reads_and_mutates_only_the_cpp_registry(qtbot):
     model = NativeLayerModel(registry)
     assert model.rowCount() == 1
     group = model.index(0, 0)
-    surface = model.index(0, 0, group)
-    opacity = model.index(0, 1, group)
+    # Children are displayed in REVERSE z-order (top row = topmost).
+    surface = model.index(1, 0, group)
+    opacity = model.index(1, 1, group)
 
     assert model.data(group) == "孔隙度单因素图"
     assert model.data(surface, NativeLayerModel.LayerIdRole) == "surface"
@@ -49,9 +50,10 @@ def test_native_layer_model_handles_order_removal_active_layer_and_zoom(qtbot):
     model = NativeLayerModel(registry)
     assert model.move_layer("contour", 1)
     group = model.index(0, 0)
+    # Flat z-order after move: [factor, contour, surface]; display reverses it.
     assert [model.data(model.index(row, 0, group), NativeLayerModel.LayerIdRole) for row in range(2)] == [
-        "contour",
         "surface",
+        "contour",
     ]
 
     active = []
@@ -81,7 +83,7 @@ def test_native_layer_tree_wires_qtreeview_selection_and_zoom(qtbot):
     assert isinstance(tree.tree, QTreeView)
 
     group = tree.model.index(0, 0)
-    surface = tree.model.index(0, 0, group)
+    surface = tree.model.index(1, 0, group)
     tree.tree.setCurrentIndex(surface)
     assert tree.model.active_layer_id == "surface"
 
@@ -94,9 +96,12 @@ def test_native_layer_model_drag_drop_reparents_through_cpp_registry(qtbot):
     registry = _registry()
     registry.add_layer("second", "Second Group", layer_model_core.LayerType.Group)
     model = NativeLayerModel(registry)
-    source_group = model.index(0, 0)
-    surface = model.index(0, 0, source_group)
-    target_group = model.index(1, 0)
+    # _index_for_id resolves the display row regardless of order; flat order
+    # is [factor, surface, contour, second], display is its reverse.
+    source_group = model._index_for_id("factor")
+    surface = model._index_for_id("surface")
+    target_group = model._index_for_id("second")
+    assert model.rowCount() == 2  # display roots: [second, factor]
 
     mime = model.mimeData([surface])
     assert model.dropMimeData(mime, Qt.DropAction.MoveAction, -1, 0, target_group)
@@ -119,95 +124,118 @@ def test_native_layer_panel_exposes_real_actions_for_layer_management(qtbot):
     assert tree.properties_action.isEnabled()
 
 
-def _flat_ids(registry):
-    return [layer.id for layer in registry.layers()]
+# --- display convention: panel top = topmost layer (#422) --------------------
+
+def _display_order(model, parent=None) -> list[str]:
+    parent_index = parent if parent is not None else QModelIndex()
+    count = model.rowCount(parent_index)
+    return [
+        model.data(model.index(r, 0, parent_index), NativeLayerModel.LayerIdRole)
+        for r in range(count)
+    ]
 
 
-def _drop(model, source_row, drop_row, parent=QModelIndex(), target_parent=None):
-    if target_parent is None:
-        target_parent = parent
-    mime = model.mimeData([model.index(source_row, 0, parent)])
-    assert model.dropMimeData(
-        mime, Qt.DropAction.MoveAction, drop_row, 0, target_parent
-    )
+def test_native_layer_model_display_order_is_reversed_z_order(qtbot):
+    """The panel's top row must show the layer drawn LAST (topmost), while
+    the registry keeps z-order with index 0 = bottom, drawn first."""
+    registry = layer_model_core.LayerRegistry()
+    registry.add_layer("bottom", "bottom", layer_model_core.LayerType.ScalarGrid)
+    registry.add_layer("top", "top", layer_model_core.LayerType.ScalarGrid)
+    model = NativeLayerModel(registry)
+
+    assert _display_order(model) == ["top", "bottom"]
+    # Registry z-order untouched: index 0 = bottom.
+    assert registry.index_of("bottom") == 0
+    assert registry.index_of("top") == 1
+    # Top display row maps to the highest registry index (drawn last).
+    assert registry.index_of(model._children(None)[0].id) == registry.size - 1
+
+
+def test_native_layer_tree_move_up_raises_z_order(qtbot):
+    """'Move Up' must raise the selected layer's z-order (drawn later, higher
+    on the panel); 'Move Down' lowers it. Display: [c, b, a] for flat
+    z-order [a, b, c] (index 0 = bottom)."""
+    registry = layer_model_core.LayerRegistry()
+    for layer_id in ("a", "b", "c"):
+        registry.add_layer(layer_id, layer_id, layer_model_core.LayerType.ScalarGrid)
+    tree = NativeLayerTree(registry)
+    qtbot.addWidget(tree)
+    tree.show()
+    assert _display_order(tree.model) == ["c", "b", "a"]
+
+    # b (middle display row): Move Up enabled, raises z-order 1 -> 2.
+    tree.tree.setCurrentIndex(tree.model._index_for_id("b"))
+    assert tree.move_up_action.isEnabled()
+    assert tree.move_down_action.isEnabled()
+    tree.move_up_action.trigger()
+    assert registry.index_of("b") == 2
+    assert _display_order(tree.model) == ["b", "c", "a"]
+
+    # b is now topmost: Move Up disabled, Move Down enabled.
+    tree.tree.setCurrentIndex(tree.model._index_for_id("b"))
+    assert not tree.move_up_action.isEnabled()
+    assert tree.move_down_action.isEnabled()
+
+    # c (middle display row): Move Down lowers z-order 1 -> 0.
+    tree.tree.setCurrentIndex(tree.model._index_for_id("c"))
+    tree.move_down_action.trigger()
+    assert registry.index_of("c") == 0
+    assert _display_order(tree.model) == ["b", "a", "c"]
+
+    # c is now bottommost: Move Down disabled, Move Up enabled.
+    tree.tree.setCurrentIndex(tree.model._index_for_id("c"))
+    assert not tree.move_down_action.isEnabled()
+    assert tree.move_up_action.isEnabled()
+
+
+def test_native_layer_model_drop_target_matches_display_position(qtbot):
+    """Dropping at a display row must land the layer at that display
+    position (top display row = highest z), consistent with the convention."""
+    registry = layer_model_core.LayerRegistry()
+    for layer_id in ("a", "b", "c"):
+        registry.add_layer(layer_id, layer_id, layer_model_core.LayerType.ScalarGrid)
+    model = NativeLayerModel(registry)
+    assert _display_order(model) == ["c", "b", "a"]
+    assert [registry.index_of(l) for l in ("a", "b", "c")] == [0, 1, 2]
+
+    # Drop "a" above the top display row (row 0): it becomes the top layer.
+    mime = model.mimeData([model._index_for_id("a")])
+    assert model.dropMimeData(mime, Qt.DropAction.MoveAction, 0, 0, QModelIndex())
+    assert _display_order(model) == ["a", "c", "b"]
+    assert registry.index_of("a") == 2
+
+    # Drop "c" below the last display row: it becomes the bottom layer.
+    mime = model.mimeData([model._index_for_id("c")])
+    assert model.dropMimeData(mime, Qt.DropAction.MoveAction, 3, 0, QModelIndex())
+    assert _display_order(model) == ["a", "b", "c"]
+    assert registry.index_of("c") == 0
+
+
+# --- drop precision across every (source, drop) pair (#392 / C23) -----------
 
 
 @pytest.mark.parametrize("drop_row", range(5))
 @pytest.mark.parametrize("source_row", range(4))
-def test_drop_mime_data_inserts_at_drop_row_for_all_row_pairs(source_row, drop_row):
-    """Every (source, target) sibling pair must land on the drop row (C23).
+def test_drop_mime_data_inserts_at_display_row_for_all_row_pairs(source_row, drop_row):
+    """Every (source, target) sibling pair must land exactly on the drop row
+    under the reversed-display convention (top row = highest z).
 
-    move_layer removes the dragged layer before inserting; downward drops
-    previously overshot by one row and the rendered z-order disagreed with
-    the tree shown during the drag.
+    ``move_layer`` removes the dragged layer before inserting; the historical
+    off-by-one (#392) showed the rendered z-order disagreeing with the row
+    highlighted during the drag. This exhaustive grid pins the insert-before
+    semantics against regressions from either side.
     """
     registry = layer_model_core.LayerRegistry()
     for layer_id in ("a", "b", "c", "d"):
         registry.add_layer(layer_id, layer_id.upper(), layer_model_core.LayerType.Vector)
     model = NativeLayerModel(registry)
 
-    _drop(model, source_row, drop_row)
+    display = _display_order(model)  # [d, c, b, a]
+    dragged = display[source_row]
 
-    expected = ["a", "b", "c", "d"]
-    layer_id = expected.pop(source_row)
-    target = drop_row - 1 if drop_row > source_row else drop_row
-    expected.insert(target, layer_id)
-    assert _flat_ids(registry) == expected
+    mime = model.mimeData([model.index(source_row, 0, QModelIndex())])
+    assert model.dropMimeData(mime, Qt.DropAction.MoveAction, drop_row, 0, QModelIndex())
 
-
-def test_drop_mime_data_downward_and_upward_within_a_group(qtbot):
-    registry = layer_model_core.LayerRegistry()
-    registry.add_layer("g", "G", layer_model_core.LayerType.Group)
-    for layer_id in ("a", "b", "c", "d"):
-        registry.add_layer(layer_id, layer_id.upper(), layer_model_core.LayerType.Vector, parent_id="g")
-    model = NativeLayerModel(registry)
-    parent = model.index(0, 0)
-
-    _drop(model, 0, 2, parent)  # a below b, above c
-    assert _flat_ids(registry) == ["g", "b", "a", "c", "d"]
-
-    _drop(model, 3, 0, parent)  # d to the top of the group
-    assert _flat_ids(registry) == ["g", "d", "b", "a", "c"]
-
-
-def test_drop_mime_data_same_position_is_a_noop(qtbot):
-    registry = layer_model_core.LayerRegistry()
-    for layer_id in ("a", "b", "c", "d"):
-        registry.add_layer(layer_id, layer_id.upper(), layer_model_core.LayerType.Vector)
-    model = NativeLayerModel(registry)
-
-    _drop(model, 1, 1)  # own row
-    assert _flat_ids(registry) == ["a", "b", "c", "d"]
-
-    _drop(model, 3, 4)  # below own last row
-    assert _flat_ids(registry) == ["a", "b", "c", "d"]
-
-
-def test_drop_mime_data_cross_group_compensates_flat_removal(qtbot):
-    """Anchor and dragged layer are not siblings; the off-by-one still applies
-    when the dragged layer precedes the anchor in flat z-order."""
-    registry = layer_model_core.LayerRegistry()
-    registry.add_layer("g", "G", layer_model_core.LayerType.Group)
-    registry.add_layer("c", "C", layer_model_core.LayerType.Vector, parent_id="g")
-    for layer_id in ("a", "b", "d"):
-        registry.add_layer(layer_id, layer_id.upper(), layer_model_core.LayerType.Vector)
-    model = NativeLayerModel(registry)
-    # Flat z-order: [g, c, a, b, d]; root rows: g(0), a(1), b(2), d(3).
-    group = model.index(0, 0)
-
-    # Drag root "b" (flat 3) into the group above "c" (flat 1): "b" sits
-    # AFTER the anchor, so no removal compensation applies.
-    _drop(model, 2, 0, target_parent=group)
-    assert _flat_ids(registry) == ["g", "b", "c", "a", "d"]
-    assert registry.parent_id("b") == "g"
-
-    # Root rows are now g(0), a(1), d(2). Drag group child "c" (flat 2) to
-    # root row 2 (between "a", flat 3, and "d", flat 4): "c" PRECEDES the
-    # anchor, so removal shifts the anchor left by one and the pre-removal
-    # index would overshoot.
-    _drop(model, 1, 2, parent=group, target_parent=QModelIndex())
-    assert _flat_ids(registry) == ["g", "b", "a", "c", "d"]
-    assert registry.parent_id("c") == ""
-    assert [model.data(model.index(row, 0), NativeLayerModel.LayerIdRole) for row in range(3)] == [
-        "g", "a", "c",
-    ]
+    expected = [lid for lid in display if lid != dragged]
+    expected.insert(min(drop_row, len(expected)), dragged)
+    assert _display_order(model) == expected

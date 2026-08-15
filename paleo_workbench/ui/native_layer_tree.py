@@ -81,9 +81,13 @@ class NativeLayerModel(QAbstractItemModel):
 
     def _children(self, parent_id: str | None) -> list[Any]:
         wanted_parent = parent_id or ""
+        # Display order is the REVERSE of the registry z-order: the panel's
+        # top row shows the layer drawn last (topmost), matching mainstream
+        # GIS panels (QGIS/ArcGIS). The registry stays authoritative — its
+        # flat index 0 = bottom, drawn first (native layer_model.hpp).
         return [
             layer
-            for layer in self._registry.layers()
+            for layer in reversed(self._registry.layers())
             if self._registry.parent_id(layer.id) == wanted_parent
         ]
 
@@ -218,20 +222,16 @@ class NativeLayerModel(QAbstractItemModel):
         try:
             if not self._registry.set_parent(layer_id, parent_id):
                 return False
-            # The native registry stores authoritative flat z-order.  Convert a
+            # The native registry stores authoritative flat z-order. Convert a
             # tree sibling insertion to the corresponding absolute position.
+            # ``siblings`` is DISPLAY order (top = highest z), so the dropped
+            # layer takes the registry index of the layer it lands on in the
+            # panel; dropping below the last row means the very bottom (0).
             if siblings:
-                anchor = siblings[min(row, len(siblings) - 1)]
-                absolute = self._registry.index_of(anchor.id)
                 if row >= len(siblings):
-                    absolute += 1
-                # move_layer removes the dragged layer before inserting.  When
-                # the dragged layer currently sits before the anchor, removal
-                # shifts the anchor (and the insertion point) left by one;
-                # inserting at the pre-removal index would overshoot a row.
-                dragged_index = self._registry.index_of(layer_id)
-                if dragged_index < absolute:
-                    absolute -= 1
+                    absolute = 0
+                else:
+                    absolute = self._registry.index_of(siblings[row].id)
             else:
                 absolute = self._registry.size - 1
             self._registry.move_layer(layer_id, max(0, int(absolute)))
@@ -408,8 +408,8 @@ class NativeLayerTree(QFrame):
         self.add_layer_action.triggered.connect(self.add_layer_requested.emit)
         self.add_group_action.triggered.connect(self._add_group)
         self.remove_action.triggered.connect(self._remove_current)
-        self.move_up_action.triggered.connect(lambda: self._move_current(-1))
-        self.move_down_action.triggered.connect(lambda: self._move_current(1))
+        self.move_up_action.triggered.connect(lambda: self._move_current(1))
+        self.move_down_action.triggered.connect(lambda: self._move_current(-1))
         self.zoom_action.triggered.connect(self._zoom_current)
         self.properties_action.triggered.connect(self._properties_current)
         self._sync_action_state()
@@ -433,9 +433,13 @@ class NativeLayerTree(QFrame):
         self.remove_action.setEnabled(has_layer)
         self.zoom_action.setEnabled(has_layer)
         self.properties_action.setEnabled(has_layer)
-        self.move_up_action.setEnabled(has_layer and self.model.registry.index_of(layer_id) > 0)
-        self.move_down_action.setEnabled(
+        # Display convention: top row = highest z (drawn last). "Move Up"
+        # raises the z-order (index + 1), "Move Down" lowers it.
+        self.move_up_action.setEnabled(
             has_layer and self.model.registry.index_of(layer_id) + 1 < self.model.registry.size
+        )
+        self.move_down_action.setEnabled(
+            has_layer and self.model.registry.index_of(layer_id) > 0
         )
 
     def _add_group(self) -> None:
