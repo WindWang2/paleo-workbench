@@ -12,7 +12,13 @@ from paleo_workbench.workflow.factor_interpolation import (
     batch_prepare_factor_maps,
 )
 from paleo_workbench.workflow.interpolation_plan import (
+    _ELEMENT_BUDGET,
+    _chunk_cells_for_budget,
+    _fault_blocked_mask,
+    _fault_segments,
+    _segments_intersect,
     apply_idw_plan,
+    apply_idw_plan_multi,
     build_idw_plan,
     extract_values_aligned,
 )
@@ -149,3 +155,187 @@ def test_multi_factor_plan_matches_single_and_geoviz():
         np.testing.assert_allclose(
             multi[i]["grid_z"], ref, rtol=1e-12, atol=1e-12, equal_nan=True
         )
+
+
+# --------------------------------------------------------------------------- #
+# Fault-barrier LOS mask (vectorized) — parity + caching (issue #371)
+# --------------------------------------------------------------------------- #
+
+
+def _wavy_breaks(n_polys: int = 2, n_verts: int = 12) -> list[list[tuple[float, float]]]:
+    lines = []
+    for p in range(n_polys):
+        pts = []
+        for i in range(n_verts):
+            t = i / (n_verts - 1)
+            x = 5.0 + t * 90.0
+            y = 40.0 + (p * 15.0) + 8.0 * np.sin(t * 6.0 + p)
+            pts.append((float(x), float(y)))
+        lines.append(pts)
+    return lines
+
+
+def _reference_fault_mask(
+    cell_x: np.ndarray,
+    cell_y: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    fault_segments,
+) -> np.ndarray:
+    """Reference triple-loop mask (the pre-vectorization implementation)."""
+    blocked = np.zeros((cell_x.size, xs.size), dtype=bool)
+    for i, (node_x, node_y) in enumerate(zip(cell_x, cell_y)):
+        node = (float(node_x), float(node_y))
+        for j, (sx, sy) in enumerate(zip(xs, ys)):
+            control = (float(sx), float(sy))
+            if any(
+                _segments_intersect(node, control, s0, s1)
+                for s0, s1 in fault_segments
+            ):
+                blocked[i, j] = True
+    return blocked
+
+
+def _reference_idw_with_faults(
+    plan, values: np.ndarray, stack: np.ndarray
+) -> np.ndarray:
+    """Reference IDW (pre-vectorization chunk loop + per-pair LOS mask)."""
+    x = np.asarray(plan.source_x, dtype=np.float64)
+    y = np.asarray(plan.source_y, dtype=np.float64)
+    grid_x = np.asarray(plan.grid_x, dtype=np.float64)
+    grid_y = np.asarray(plan.grid_y, dtype=np.float64)
+    H, W = len(grid_y), len(grid_x)
+    epsilon = 1e-12
+    fault_segments = _fault_segments(plan.fault_polylines)
+    cell_x = np.tile(grid_x, H)
+    cell_y = np.repeat(grid_y, W)
+    out = np.full((stack.shape[0], cell_x.size), np.nan, dtype=np.float64)
+    chunk = 16_384
+    for start in range(0, cell_x.size, chunk):
+        stop = min(start + chunk, cell_x.size)
+        dx = cell_x[start:stop, None] - x[None, :]
+        dy = cell_y[start:stop, None] - y[None, :]
+        distances = np.maximum(np.hypot(dx, dy), epsilon)
+        weights = 1.0 / (distances ** plan.key.power)
+        if fault_segments:
+            for local_cell, (node_x, node_y) in enumerate(
+                zip(cell_x[start:stop], cell_y[start:stop])
+            ):
+                node = (float(node_x), float(node_y))
+                for sample_index, (sample_x, sample_y) in enumerate(zip(x, y)):
+                    control = (float(sample_x), float(sample_y))
+                    if any(
+                        _segments_intersect(node, control, s0, s1)
+                        for s0, s1 in fault_segments
+                    ):
+                        weights[local_cell, sample_index] = 0.0
+        totals = np.sum(weights, axis=1)
+        populated = totals > epsilon
+        if np.any(populated):
+            w_pop = weights[populated]
+            t_pop = totals[populated]
+            out[:, start:stop][:, populated] = (stack @ w_pop.T) / t_pop[None, :]
+    return out.reshape(stack.shape[0], H, W)
+
+
+def test_fault_mask_vectorized_matches_reference_loop():
+    """Vectorized mask must equal the reference per-pair loop bit-for-bit."""
+    rng = np.random.default_rng(7)
+    gx = np.linspace(-5.0, 105.0, 20)
+    gy = np.linspace(-5.0, 105.0, 20)
+    cell_x = np.tile(gx, 20)
+    cell_y = np.repeat(gy, 20)
+    xs = rng.uniform(0.0, 100.0, 40)
+    ys = rng.uniform(0.0, 100.0, 40)
+    segments = _fault_segments(_wavy_breaks())
+    got = _fault_blocked_mask(cell_x, cell_y, xs, ys, segments)
+    ref = _reference_fault_mask(cell_x, cell_y, xs, ys, segments)
+    assert got.shape == ref.shape
+    np.testing.assert_array_equal(got, ref)
+    assert ref.sum() > 0  # sanity: the case actually exercises crossings
+
+
+@pytest.mark.parametrize(
+    "brk,xs,ys",
+    [
+        # Collinear: wells sitting exactly on a horizontal fault line.
+        ([[(0.0, 25.0), (100.0, 25.0)]], [10.0, 30.0, 50.0, 70.0], [25.0] * 4),
+        # Grid-aligned vertical fault through a cell column.
+        ([[(5.0, -1.0), (5.0, 11.0)]], [2.0, 4.0, 6.0, 8.0], [2.0, 4.0, 6.0, 8.0]),
+        # Endpoint touch: fault endpoint lies exactly on a cell→well segment.
+        ([[(2.0, 2.0), (2.0, 5.0)]], [1.0, 3.0], [1.0, 3.0]),
+        # Collinear overlap: fault segment lying on the same grid row.
+        ([[(2.0, 3.0), (4.0, 3.0)]], [1.0, 5.0], [3.0, 3.0]),
+    ],
+)
+def test_fault_mask_vectorized_matches_reference_degenerate(brk, xs, ys):
+    gx = np.arange(0.0, 8.0)
+    gy = np.arange(0.0, 8.0)
+    cell_x = np.tile(gx, 8)
+    cell_y = np.repeat(gy, 8)
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    segments = _fault_segments(brk)
+    got = _fault_blocked_mask(cell_x, cell_y, xs, ys, segments)
+    ref = _reference_fault_mask(cell_x, cell_y, xs, ys, segments)
+    np.testing.assert_array_equal(got, ref)
+
+
+def test_fault_apply_bitwise_matches_reference_path():
+    """Grid output with faults must be bit-identical to the pre-vectorization path."""
+    rng = np.random.default_rng(11)
+    n_wells = 60
+    xs = rng.uniform(0.0, 100.0, n_wells)
+    ys = rng.uniform(0.0, 100.0, n_wells)
+    points = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(xs, ys, rng.uniform(10.0, 100.0, n_wells))
+    ]
+    plan = build_idw_plan(points, grid_n=18, power=2.0, fault_polylines=_wavy_breaks())
+    stack = np.ascontiguousarray(rng.uniform(5.0, 50.0, (3, n_wells)))
+    got = apply_idw_plan_multi(plan, stack)
+    ref = _reference_idw_with_faults(plan, None, stack)
+    for i in range(3):
+        np.testing.assert_array_equal(got[i]["grid_z"], ref[i])
+
+
+def test_fault_mask_computed_once_per_plan(monkeypatch):
+    """A batch of factors sharing one plan must compute the LOS mask exactly once."""
+    import paleo_workbench.workflow.interpolation_plan as ip
+
+    calls = {"n": 0}
+    original = ip._fault_blocked_mask
+
+    def counting_mask(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ip, "_fault_blocked_mask", counting_mask)
+
+    rng = np.random.default_rng(3)
+    n_wells = 40
+    xs = rng.uniform(0.0, 100.0, n_wells)
+    ys = rng.uniform(0.0, 100.0, n_wells)
+    points = [
+        {"x": float(x), "y": float(y), "value": float(v)}
+        for x, y, v in zip(xs, ys, rng.uniform(10.0, 100.0, n_wells))
+    ]
+    plan = build_idw_plan(points, grid_n=16, power=2.0, fault_polylines=_wavy_breaks())
+    stack = np.ascontiguousarray(rng.uniform(5.0, 50.0, (4, n_wells)))
+    apply_idw_plan_multi(plan, stack)
+    assert calls["n"] == 1
+    # Cached on the plan: a second apply reuses the mask.
+    apply_idw_plan_multi(plan, stack)
+    assert calls["n"] == 1
+    assert plan.fault_mask is not None
+
+
+def test_fault_chunk_budget_scales_with_well_count():
+    """Chunk cells are sized by the element budget, not a fixed cell count."""
+    assert _chunk_cells_for_budget(_ELEMENT_BUDGET, 4000) == 1048
+    assert _chunk_cells_for_budget(_ELEMENT_BUDGET, 400) == 10485
+    assert _chunk_cells_for_budget(_ELEMENT_BUDGET, 10) == 419430
+    # Larger well counts → smaller cell chunks (bounded per-chunk memory).
+    assert _chunk_cells_for_budget(_ELEMENT_BUDGET, 8000) < _chunk_cells_for_budget(
+        _ELEMENT_BUDGET, 1000
+    )

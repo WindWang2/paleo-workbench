@@ -143,6 +143,12 @@ class FormationTopCorrelator:
             suggested_depth = float(np.asarray(target_depths, dtype=float)[target_idx])
         else:
             suggested_depth = start_depth + target_idx * depth_step
+        # Normalize by the number of steps actually matched by the DTW path.
+        # Normalizing by the full-resolution reference length would overstate
+        # confidence for decimated curves (the cost is accumulated over
+        # len(path) steps, not len(ref_curve)).
+        path_len = max(1, len(alignment.path_ref))
+        confidence = float(np.exp(-alignment.cost / path_len))
         # Normalize by the number of cost cells actually accumulated: the
         # matcher decimates over-long curves, and the returned cost is summed
         # over the decimated path — normalizing by the full input length

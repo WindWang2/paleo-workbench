@@ -53,6 +53,56 @@ def test_formation_top_correlator_dtw_recommendation():
     assert recommendation.confidence > 0.0
 
 
+def test_dtw_confidence_normalized_by_matched_path_length():
+    """Confidence must not inflate for decimated curves (issue #398).
+
+    The DTW cost is accumulated over the actual matched path steps; normalizing
+    by the full-resolution reference length overstates confidence when the
+    curves were decimated before matching.  With path-length normalization the
+    decimated and full-resolution confidences on equivalent noise curves must
+    converge (acceptance: difference < 5%).
+    """
+    correlator = FormationTopCorrelator()
+    rng = np.random.default_rng(123)
+
+    full_confidences = []
+    decimated_confidences = []
+    for _ in range(3):
+        # 1000 x 1000 cells = 1e6 <= _MAX_COST_CELLS -> no decimation.
+        rec_full = correlator.recommend_top_depth(
+            ref_curve=rng.normal(0.0, 1.0, 1000),
+            target_curve=rng.normal(0.0, 1.0, 1000),
+            ref_top_depth=500.0,
+            start_depth=0.0,
+            depth_step=1.0,
+        )
+        # 3000 x 3000 cells -> decimation stride 3 inside the matcher.
+        rec_dec = correlator.recommend_top_depth(
+            ref_curve=rng.normal(0.0, 1.0, 3000),
+            target_curve=rng.normal(0.0, 1.0, 3000),
+            ref_top_depth=1500.0,
+            start_depth=0.0,
+            depth_step=1.0,
+        )
+        full_confidences.append(rec_full.confidence)
+        decimated_confidences.append(rec_dec.confidence)
+
+    for full, dec in zip(full_confidences, decimated_confidences):
+        assert abs(full - dec) < 0.05
+
+    # Identical curves score ~1.0 at both resolutions (path cost ~ 0).
+    x = np.sin(np.linspace(0.0, 40.0 * np.pi, 1000))
+    rec = correlator.recommend_top_depth(
+        ref_curve=x, target_curve=x, ref_top_depth=500.0,
+        start_depth=0.0, depth_step=1.0,
+    )
+    assert rec.confidence > 0.99
+    x2 = np.sin(np.linspace(0.0, 40.0 * np.pi, 3000))
+    rec2 = correlator.recommend_top_depth(
+        ref_curve=x2, target_curve=x2, ref_top_depth=1500.0,
+        start_depth=0.0, depth_step=1.0,
+    )
+    assert rec2.confidence > 0.99
 # ---------------------------------------------------------------------------
 # #420 — recommend_top_depth must handle descending depth axes (deepest-first
 # LAS files) instead of clipping every shallow top to index 0, and must flag
