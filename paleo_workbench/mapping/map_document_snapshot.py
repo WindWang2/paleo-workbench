@@ -13,7 +13,7 @@ from typing import Any, Iterable, Mapping
 
 from paleo_workbench.mapping.document_io import features_from_document
 from paleo_workbench.mapping.map_render_backend import MapLayerSnapshot, MapRenderSnapshot
-from paleo_workbench.mapping.map_styles import default_style_for, style_dict_revision
+from paleo_workbench.mapping.map_styles import default_style_for
 
 __all__ = ["document_render_snapshot", "extent_for_snapshot"]
 
@@ -21,11 +21,18 @@ __all__ = ["document_render_snapshot", "extent_for_snapshot"]
 _LAYER_KINDS = ("facies", "well", "line", "label")
 _LAYER_NAMES = {"facies": "Facies", "well": "Wells", "line": "Lines", "label": "Labels"}
 
-# Per-(document, kind, revision) cache of built feature tuples and extents. A
-# composition refresh that changes nothing (or one layer) must not re-walk every
-# record and coordinate; entries are immutable and shared across snapshots.
+# Per-(owner, document, kind, revision) cache of built feature tuples and
+# extents. A composition refresh that changes nothing (or one layer) must not
+# re-walk every record and coordinate; entries are immutable and shared across
+# snapshots. Each entry holds its owning authoring object and only hits on
+# exact object identity: revisions are per-owner counters, so entries from a
+# replaced owner can never leak into a new one. The bounded LRU keeps retired
+# owners from accumulating.
 _FEATURE_CACHE_LIMIT = 24
-_FEATURE_CACHE: OrderedDict[tuple[str, str, int], tuple[tuple[dict[str, Any], ...], tuple[float, float, float, float]]] = OrderedDict()
+_FEATURE_CACHE: OrderedDict[
+    tuple[int, str, str, int],
+    tuple[object, tuple[dict[str, Any], ...], tuple[float, float, float, float]],
+] = OrderedDict()
 
 
 def _authoring_style(document, kind: str) -> dict[str, Any]:
@@ -43,14 +50,21 @@ def _authoring_style(document, kind: str) -> dict[str, Any]:
 
 
 def _stable_revision(value: object) -> int:
-    """Content-stable revision via recursive tuple freezing (no JSON round-trip)."""
+    """Content-stable revision via recursive tuple freezing (no JSON round-trip).
+
+    Stable within one process (used only for in-memory change detection);
+    unhashable attribute values fall back to their string form so arbitrary
+    persisted properties never raise here.
+    """
 
     def freeze(item: object) -> object:
         if isinstance(item, Mapping):
             return tuple(sorted((str(key), freeze(child)) for key, child in item.items()))
         if isinstance(item, (list, tuple)):
             return tuple(freeze(child) for child in item)
-        return item
+        if isinstance(item, (bool, int, float, str)) or item is None:
+            return item
+        return str(item)
 
     return hash(freeze(value))
 
@@ -164,6 +178,7 @@ def document_render_snapshot(
     visibility: Mapping[str, bool] | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
     data_revisions: Mapping[str, int] | None = None,
+    cache_owner: object | None = None,
 ) -> MapRenderSnapshot:
     """Create a revisioned render snapshot from a legacy document or live scene.
 
@@ -171,12 +186,16 @@ def document_render_snapshot(
     document. ``data_revisions`` optionally supplies authoritative per-kind content
     revisions (from ``MapAuthoringDocument`` vector layers); unchanged revisions
     reuse cached feature tuples and extents without walking the records again.
+    Revision-keyed caching additionally requires ``cache_owner``: revisions are
+    owner-scoped counters, so the cache is only valid while that exact owner
+    object is alive (verified through a weak reference).
     The output has one vector layer per existing compatibility layer kind; future
     LayerRegistry-backed vector layers replace this adapter transparently.
     """
     if document is None:
         return MapRenderSnapshot(project_crs=str(project_crs or ""))
     revisions = dict(data_revisions or {})
+    owner_token = id(cache_owner) if cache_owner is not None and revisions else None
     document_id = str(getattr(document, "id", "map") or "map")
     grouped: dict[str, tuple[dict[str, Any], ...]] = {}
     bounds: dict[str, list[float]] = {}
@@ -197,10 +216,15 @@ def document_render_snapshot(
     layers: list[MapLayerSnapshot] = []
     for kind in _LAYER_KINDS:
         revision = revisions.get(kind)
-        cache_key = (document_id, kind, revision) if revision is not None else None
-        if cache_key is not None and cache_key in _FEATURE_CACHE:
-            features, extent = _FEATURE_CACHE[cache_key]
+        cache_key = (
+            (owner_token, document_id, kind, int(revision))
+            if owner_token is not None and revision is not None
+            else None
+        )
+        cached_entry = _FEATURE_CACHE.get(cache_key) if cache_key is not None else None
+        if cached_entry is not None and cached_entry[0] is cache_owner:
             _FEATURE_CACHE.move_to_end(cache_key)
+            _, features, extent = cached_entry
             data_revision = int(revision)
         else:
             grouped_features({kind})
@@ -208,7 +232,7 @@ def document_render_snapshot(
             extent = _extent_from_bounds(bounds.get(kind) or [math.inf] * 4)
             data_revision = int(revision) if revision is not None else _stable_revision(features)
             if cache_key is not None:
-                _FEATURE_CACHE[cache_key] = (features, extent)
+                _FEATURE_CACHE[cache_key] = (cache_owner, features, extent)
                 while len(_FEATURE_CACHE) > _FEATURE_CACHE_LIMIT:
                     _FEATURE_CACHE.popitem(last=False)
         style = dict(facies_style if kind == "facies" else default_style_for(kind).to_dict())

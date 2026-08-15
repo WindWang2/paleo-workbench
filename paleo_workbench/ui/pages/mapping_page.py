@@ -85,9 +85,11 @@ class MappingPage(QWidget):
         # are translated into small effective integers so unchanged refreshes
         # skip feature rebuilding end to end. Reset when the authoring document
         # object is replaced.
-        self._unified_raw_revisions: dict[str, tuple[int, int]] = {}
+        self._unified_raw_revisions: dict[str, tuple] = {}
         self._unified_effective_revisions: dict[str, int] = {}
-        self._unified_revisions_owner: int | None = None
+        # Strong reference: while the page holds it, its id() cannot be reused,
+        # so owner identity comparisons stay valid.
+        self._unified_revisions_owner: object | None = None
         self._map_tools = MapToolController()
         self._snapping = SnappingService()
         self._topology = TopologyService()
@@ -710,12 +712,11 @@ class MappingPage(QWidget):
         authoring = self._authoring_document
         if authoring is None or not self._unified_authoring_mode:
             return None
-        owner = id(authoring)
-        if self._unified_revisions_owner != owner:
+        if self._unified_revisions_owner is not authoring:
             # New authoring object: force a bump for every kind even when raw
             # keys repeat, keeping effective revisions globally monotonic (the
             # document feature cache is keyed by them and must never collide).
-            self._unified_revisions_owner = owner
+            self._unified_revisions_owner = authoring
             self._unified_raw_revisions.clear()
         revisions: dict[str, int] = {}
         for kind in ("facies", "well", "line", "label"):
@@ -746,6 +747,7 @@ class MappingPage(QWidget):
             records=records,
             excluded_layer_ids=self._suppressed_layer_ids,
             data_revisions=self._unified_data_revisions(),
+            cache_owner=self._authoring_document,
         )
         self._sync_reference_render_layers(document)
         if self._authoring_document is not None:
@@ -1561,7 +1563,7 @@ class MappingPage(QWidget):
         export lineage together with each layer's catalog provenance reference
         (DataVersion id) recorded on the render snapshot.
         """
-        if self._native_factor_scene is None and self.unified_scene is None:
+        if self._native_factor_scene is None and not self.unified_scene.registry.layers():
             return None
         from paleo_workbench.resources.export_service import export_widget_snapshot
 

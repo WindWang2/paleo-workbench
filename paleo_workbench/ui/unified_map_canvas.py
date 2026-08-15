@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from PySide6.QtCore import QMarginsF, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
+    QFont,
     QImage,
     QMouseEvent,
     QPageSize,
@@ -138,6 +139,8 @@ class UnifiedMapCanvas(QWidget):
                     int(layer.style_revision),
                     bool(layer.visible),
                     round(float(layer.opacity), 6),
+                    layer.scale_range,
+                    str(layer.source_version_id),
                 )
                 for layer in snapshot.layers
             ),
@@ -377,41 +380,35 @@ class UnifiedMapCanvas(QWidget):
     def _paint_decorations(
         self, painter: QPainter, decorations: Mapping[str, Any], *, width: int | None = None,
         height: int | None = None, scale: float = 1.0,
+        extent: tuple[float, float, float, float] | None = None,
     ) -> None:
         """Paint chrome (title/scale bar/north arrow/legend) in device pixels.
 
-        ``scale`` is ``dpi / 96`` for exports so every fixed-size element keeps
-        its on-screen proportion at any output resolution.
+        ``scale`` is ``dpi / 96`` for exports: every fixed-size element —
+        including text, which is set in pixel sizes — scales with it.
+        ``extent`` is the extent actually rendered into this target (exports
+        letterbox the view extent); the scale bar reads it so its label always
+        matches the drawn bar length.
         """
         canvas_width = self.width() if width is None else int(width)
         canvas_height = self.height() if height is None else int(height)
+        drawn_extent = self._view_extent if extent is None else extent
         elements = {str(item) for item in decorations.get("elements") or ()}
         title = str(decorations.get("title") or "")
+        title_font = QFont(painter.font())
+        title_font.setPixelSize(max(10, round(16 * scale)))
+        title_font.setBold(True)
         if title and (not elements or "标题栏" in elements or "title" in elements):
             painter.save()
             painter.setPen(QColor("#f8f9fa"))
-            font = painter.font()
-            font.setPointSize(max(10, int(font.pointSize() + 3 * scale)))
-            font.setBold(True)
-            painter.setFont(font)
+            painter.setFont(title_font)
             painter.drawText(
                 QRectF(14 * scale, 10 * scale, canvas_width - 28 * scale, canvas_height - 20 * scale),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, title,
             )
             painter.restore()
         if not elements or "比例尺" in elements or "scale_bar" in elements:
-            width_units = self._view_extent[2] - self._view_extent[0]
-            target_units = width_units * 0.2
-            if target_units > 0.0:
-                pixels = max(35.0, canvas_width * 0.2)
-                y = canvas_height - 24.0 * scale
-                painter.save()
-                painter.setPen(QPen(QColor("#ffffff"), 2.0 * scale))
-                painter.drawLine(QPointF(16 * scale, y), QPointF(16 * scale + pixels, y))
-                painter.drawLine(QPointF(16 * scale, y - 4 * scale), QPointF(16 * scale, y + 4 * scale))
-                painter.drawLine(QPointF(16 * scale + pixels, y - 4 * scale), QPointF(16 * scale + pixels, y + 4 * scale))
-                painter.drawText(QPointF(16 * scale, y - 7 * scale), f"{target_units:.3g} map units")
-                painter.restore()
+            self._paint_scale_bar(painter, drawn_extent, canvas_width, canvas_height, scale)
         if not elements or "指北针" in elements or "north_arrow" in elements:
             painter.save()
             center = QPointF(canvas_width - 28 * scale, 37 * scale)
@@ -423,6 +420,9 @@ class UnifiedMapCanvas(QWidget):
                 center + QPointF(0, 5 * scale),
                 center + QPointF(6 * scale, 10 * scale),
             ]))
+            font = QFont(painter.font())
+            font.setPixelSize(max(8, round(10 * scale)))
+            painter.setFont(font)
             painter.drawText(center + QPointF(-5 * scale, -22 * scale), "N")
             painter.restore()
         if (not elements or "图例" in elements or "legend" in elements) and decorations.get("legend_items"):
@@ -441,13 +441,74 @@ class UnifiedMapCanvas(QWidget):
                 legend_height,
             )
             painter.drawRect(rect)
+            font = QFont(painter.font())
+            font.setPixelSize(max(8, round(11 * scale)))
             for index, item in enumerate(items):
                 painter.setBrush(QColor("#6c8ebf"))
                 y = rect.top() + 14 * scale + index * row_height
                 painter.drawRect(QRectF(rect.left() + 8 * scale, y - swatch, swatch, swatch))
                 painter.setPen(QColor("#f8f9fa"))
+                painter.setFont(font)
                 painter.drawText(QPointF(rect.left() + 23 * scale, y), item)
             painter.restore()
+
+    @staticmethod
+    def _nice_scale_units(value: float) -> float:
+        """Round a map-unit length down onto the 1/2/5 × 10ⁿ ladder."""
+        if value <= 0.0 or not math.isfinite(value):
+            return value
+        exponent = math.floor(math.log10(value))
+        fraction = value / (10.0**exponent)
+        for nice in (5.0, 2.0, 1.0):
+            if fraction >= nice:
+                return nice * (10.0**exponent)
+        return 10.0**exponent
+
+    @classmethod
+    def _scale_bar_spec(
+        cls, extent: tuple[float, float, float, float], canvas_width: int, scale: float = 1.0,
+    ) -> tuple[float, float] | None:
+        """Return (nice unit length, matching pixel length) for a scale bar.
+
+        Bar length matches the printed label exactly (units → pixels via the
+        target's own extent), so the bar is a true measurement reference.
+        """
+        xmin, _, xmax, _ = extent
+        span = xmax - xmin
+        if span <= 0.0:
+            return None
+        target_units = cls._nice_scale_units(span * 0.2)
+        if target_units <= 0.0:
+            return None
+        pixels = target_units / span * canvas_width
+        if pixels < 16 * scale:
+            return None
+        return target_units, pixels
+
+    def _paint_scale_bar(
+        self,
+        painter: QPainter,
+        extent: tuple[float, float, float, float],
+        canvas_width: int,
+        canvas_height: int,
+        scale: float,
+    ) -> None:
+        spec = self._scale_bar_spec(extent, canvas_width, scale)
+        if spec is None:
+            return
+        target_units, pixels = spec
+        y = canvas_height - 24.0 * scale
+        painter.save()
+        painter.setPen(QPen(QColor("#ffffff"), 2.0 * scale))
+        painter.drawLine(QPointF(16 * scale, y), QPointF(16 * scale + pixels, y))
+        painter.drawLine(QPointF(16 * scale, y - 4 * scale), QPointF(16 * scale, y + 4 * scale))
+        painter.drawLine(QPointF(16 * scale + pixels, y - 4 * scale), QPointF(16 * scale + pixels, y + 4 * scale))
+        font = QFont(painter.font())
+        font.setPixelSize(max(8, round(10 * scale)))
+        painter.setFont(font)
+        label = f"{target_units:g} map units"
+        painter.drawText(QPointF(16 * scale, y - 7 * scale), label)
+        painter.restore()
 
     def _letterboxed_extent(self, width: int, height: int) -> tuple[float, float, float, float]:
         """Expand the view extent so geometry keeps its aspect at any export size."""
@@ -492,6 +553,7 @@ class UnifiedMapCanvas(QWidget):
             self._paint_decorations(
                 painter, (state or {}).get("decorations") or {}, width=width, height=height,
                 scale=float(dpi) / 96.0,
+                extent=self._letterboxed_extent(int(width), int(height)) if preserve_aspect else self._view_extent,
             )
             painter.end()
             return image
@@ -553,13 +615,18 @@ class UnifiedMapCanvas(QWidget):
         """Run the backend's vector pipeline plus chrome at export resolution."""
         from paleo_workbench.mapping.map_render_backend import FallbackMapRenderBackend
 
+        if self._backend.render_active:
+            # An in-flight screen render must not complete against the mutated
+            # export viewport and later surface on screen.
+            self._backend.cancel_render()
         previous_size = self._backend._output_size
         previous_dpi = self._backend._dpi
         previous_extent = self._backend._extent
+        export_extent = self._letterboxed_extent(int(width), int(height))
         try:
             self._backend.set_output_size(int(width), int(height))
             self._backend.set_dpi(float(dpi))
-            self._backend.set_extent(self._letterboxed_extent(int(width), int(height)))
+            self._backend.set_extent(export_extent)
             if isinstance(self._backend, FallbackMapRenderBackend):
                 self._backend.render_to_painter(painter, int(width), int(height), dpi=float(dpi))
             else:
@@ -572,7 +639,7 @@ class UnifiedMapCanvas(QWidget):
             state = self._overlay_provider() if self._overlay_provider is not None else {}
             self._paint_decorations(
                 painter, (state or {}).get("decorations") or {}, width=width, height=height,
-                scale=float(dpi) / 96.0,
+                scale=float(dpi) / 96.0, extent=export_extent,
             )
         finally:
             self._backend.set_output_size(*previous_size)

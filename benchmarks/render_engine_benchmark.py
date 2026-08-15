@@ -208,16 +208,23 @@ def run_size(total: int, *, viewport: tuple[float, float, float, float] = (0.0, 
 
     # --- snapshot build (first, cold) ---
     revisions = {"facies": 1, "well": 1, "line": 1, "label": 1}
+
+    class _Owner:
+        """Weakref-able stand-in for MapAuthoringDocument (cache is owner-scoped)."""
+
+    owner = _Owner()
     started = time.perf_counter()
     snapshot = document_render_snapshot(
-        document, project_crs="EPSG:3857", records=records, data_revisions=revisions
+        document, project_crs="EPSG:3857", records=records, data_revisions=revisions,
+        cache_owner=owner,
     )
     snapshot_cold_ms = (time.perf_counter() - started) * 1000.0
 
     # --- snapshot build (repeated, revisions unchanged → cached) ---
     started = time.perf_counter()
     document_render_snapshot(
-        document, project_crs="EPSG:3857", records=records, data_revisions=revisions
+        document, project_crs="EPSG:3857", records=records, data_revisions=revisions,
+        cache_owner=owner,
     )
     snapshot_warm_ms = (time.perf_counter() - started) * 1000.0
 
@@ -265,7 +272,6 @@ def run_size(total: int, *, viewport: tuple[float, float, float, float] = (0.0, 
         "zoom_render_ms": round(zoom_render_ms, 2),
         "legacy_full_view_ms": round(legacy_full_ms, 2),
         "features_total": diagnostics["features_total"],
-        "features_drawn_at_full": diagnostics["features_total"],
         "cull_ratio_at_zoom": diagnostics["features_drawn"] / max(1, diagnostics["features_total"]),
         "vertices_simplified": diagnostics["vertices_simplified"],
         "peak_rss_mb": round(_rss_mb(), 1),

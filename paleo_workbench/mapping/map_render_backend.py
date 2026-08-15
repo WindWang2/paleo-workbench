@@ -39,6 +39,9 @@ __all__ = [
 
 _BACKGROUND = QColor("#181c22")
 _BASE_DPI = 96.0
+# Beyond this many visible points, categorical grouping falls back to the
+# single-symbol fill so the Python grouping loop cannot dominate a frame.
+_CATEGORY_POINT_CAP = 50_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,6 +342,13 @@ def _prepare_geometry(geometry: object) -> tuple[str, tuple[np.ndarray, ...]] | 
     return None
 
 
+def _category_colors(style: VectorStyle) -> dict[str, str] | None:
+    """Value→fill lookup from the (value, fill, label) category tuples."""
+    if style.renderer != "categorized" or not style.categories:
+        return None
+    return {str(value): str(fill) for value, fill, _label in style.categories}
+
+
 def _bbox_for(parts: tuple[np.ndarray, ...]) -> tuple[float, float, float, float]:
     stacked = np.concatenate(parts) if len(parts) > 1 else parts[0]
     mins = stacked.min(axis=0)
@@ -376,7 +386,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
             budget = self.DEFAULT_VERTEX_BUDGET
         self._vertex_budget = max(1_000, budget)
         self._executor: ThreadPoolExecutor | None = None
-        self._render_future: Future[RenderFrame] | None = None
+        self._render_future: Future[tuple[RenderFrame, tuple]] | None = None
+        self._render_pending = False
         self._prepared_lock = threading.Lock()
         self._prepared: dict[str, _PreparedLayer] = {}
         self._frame_cache: tuple[tuple, RenderFrame] | None = None
@@ -390,6 +401,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
             "vertices_simplified": 0,
             "frames_rendered": 0,
             "frames_from_cache": 0,
+            "render_errors": 0,
             "last_render_ms": 0.0,
         }
 
@@ -412,7 +424,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
         """Render the newest generation off the UI thread when threaded.
 
         Falls back to the synchronous base contract otherwise, which keeps
-        tiny local/test maps immediately consistent.
+        tiny local/test maps immediately consistent. A request that arrives
+        while a frame is still rendering supersedes it: the in-flight frame is
+        discarded on arrival and at most one follow-up render is queued, so
+        continuous pan/zoom never builds an unbounded backlog.
         """
         if not self._initialized:
             self.initialize()
@@ -424,8 +439,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return generation
         self._completed = None
         if not self._threaded:
-            self._completed = self._render_frame(generation)
+            frame, key = self._render_frame(generation)
+            self._completed = frame
+            self._frame_cache = (key, frame)
             return generation
+        future = self._render_future
+        if future is not None and not future.done():
+            self._render_pending = True
+            # The in-flight generation no longer matches; it is discarded on
+            # arrival and the newest state renders as soon as the worker frees.
+            return self._next_generation()
         self._ensure_executor()
         self._render_future = self._executor.submit(self._render_frame, generation)
         return generation
@@ -438,14 +461,27 @@ class FallbackMapRenderBackend(MapRenderBackend):
         if future is not None and future.done():
             self._render_future = None
             try:
-                frame = future.result()
+                frame, key = future.result()
             except Exception:  # noqa: BLE001 - a failed frame must never crash polling
+                self._diagnostics["render_errors"] += 1
+                self._maybe_submit_pending()
                 return None
             if frame.generation != self._generation:
+                self._maybe_submit_pending()
                 return None
-            self._remember_frame(frame)
+            self._frame_cache = (key, frame)
             return frame
         return None
+
+    def _maybe_submit_pending(self) -> None:
+        """Render the newest state after a superseded/failed worker frame."""
+        if not self._render_pending or self._executor is None:
+            return
+        future = self._render_future
+        if future is not None and not future.done():
+            return
+        self._render_pending = False
+        self._render_future = self._executor.submit(self._render_frame, self._next_generation())
 
     @property
     def render_active(self) -> bool:
@@ -458,9 +494,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
         # on arrival; the worker itself is cooperative and cannot be interrupted.
         self._next_generation()
         self._render_future = None
+        self._render_pending = False
 
     def shutdown(self) -> None:
         self._render_future = None
+        self._render_pending = False
         executor, self._executor = self._executor, None
         if executor is not None:
             executor.shutdown(wait=False)
@@ -476,18 +514,20 @@ class FallbackMapRenderBackend(MapRenderBackend):
         if cached is not None:
             self._diagnostics["frames_from_cache"] += 1
             return replace(cached, generation=self._next_generation())
-        frame = self._render_frame(self._next_generation())
-        self._remember_frame(frame)
+        frame, key = self._render_frame(self._next_generation())
+        self._frame_cache = (key, frame)
         return frame
 
     def render_to_painter(self, painter: QPainter, width: int, height: int, *, dpi: float | None = None) -> None:
         """Paint the current composition into any QPaintDevice target.
 
         Used for vector exports (QSvgGenerator, QPdfWriter) so exported files are
-        generated by the exact same pipeline that renders the screen frame.
+        generated by the exact same pipeline that renders the screen frame,
+        including the dark map background the screen frame is filled with.
         """
         if not self._initialized:
             self.initialize()
+        painter.fillRect(QRectF(0.0, 0.0, float(width), float(height)), _BACKGROUND)
         self._paint_composition(painter, int(width), int(height), self._dpi if dpi is None else float(dpi))
 
     # -- frame cache --------------------------------------------------------
@@ -501,13 +541,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
                 int(layer.style_revision),
                 bool(layer.visible),
                 round(float(layer.opacity), 6),
+                layer.scale_range,
             )
             for layer in self._snapshot.layers
         )
         return (self._extent, self._output_size, self._dpi, layers, self._snapshot.project_crs)
-
-    def _remember_frame(self, frame: RenderFrame) -> None:
-        self._frame_cache = (self._frame_key(), frame)
 
     def _cached_frame(self) -> RenderFrame | None:
         cached = self._frame_cache
@@ -515,7 +553,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
             return cached[1]
         return None
 
-    def _render_frame(self, generation: int) -> RenderFrame:
+    def _render_frame(self, generation: int) -> tuple[RenderFrame, tuple]:
+        # Capture the state identity before painting: coalesced viewport
+        # changes during rendering must not re-key the finished frame.
+        key = self._frame_key()
         width, height = self._output_size
         image = QImage(width, height, QImage.Format.Format_RGBA8888)
         image.fill(_BACKGROUND)
@@ -529,13 +570,16 @@ class FallbackMapRenderBackend(MapRenderBackend):
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         self._diagnostics["frames_rendered"] += 1
         self._diagnostics["last_render_ms"] = elapsed_ms
-        return RenderFrame(
-            generation=generation,
-            width=image.width(),
-            height=image.height(),
-            stride=image.bytesPerLine(),
-            rgba=image.constBits().tobytes(),
-            render_ms=elapsed_ms,
+        return (
+            RenderFrame(
+                generation=generation,
+                width=image.width(),
+                height=image.height(),
+                stride=image.bytesPerLine(),
+                rgba=image.constBits().tobytes(),
+                render_ms=elapsed_ms,
+            ),
+            key,
         )
 
     # -- composition pipeline ----------------------------------------------
@@ -558,7 +602,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._diagnostics["features_drawn"] = 0
         self._diagnostics["points_drawn"] = 0
         self._diagnostics["vertices_simplified"] = 0
+        seen_layers: set[str] = set()
         for layer in self._snapshot.layers:
+            seen_layers.add(layer.id)
             if not layer.visible or layer.opacity <= 0.0:
                 continue
             scale_range = layer.scale_range
@@ -578,6 +624,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
                     )
             finally:
                 painter.restore()
+        # Drop parsed payloads for layers that left the composition so document
+        # switches do not accumulate stale prepared geometry.
+        with self._prepared_lock:
+            for layer_id in list(self._prepared):
+                if layer_id not in seen_layers:
+                    del self._prepared[layer_id]
 
     def _prepared_layer(self, layer: MapLayerSnapshot) -> _PreparedLayer:
         cached = self._prepared.get(layer.id)
@@ -637,12 +689,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
         )
         pen = QPen(
             self._color(style.stroke, "#26364d"),
-            max(0.5, stroke_width) if stroke_width > 0.0 else 1.0,
+            max(0.5, stroke_width),
         )
         dash = style.line_pattern.dash_pattern(stroke_width)
         if dash:
             pen.setDashPattern(list(dash))
-            pen.setDashCap(Qt.PenCapStyle.FlatCap)
+        elif stroke_width <= 0.0:
+            pen.setStyle(Qt.PenStyle.NoPen)
         painter.setPen(pen)
         fill = self._color(style.fill, "#6c8ebf")
         transparent_fill = style.fill == "transparent" or fill.alpha() == 0
@@ -704,6 +757,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         offsets = prepared.path_offsets
         starts = offsets[:-1]
         lengths = np.diff(offsets)
+        rings = prepared.path_is_ring
         part_visible = visible_features[prepared.path_feature]
         if not part_visible.any():
             return
@@ -735,33 +789,41 @@ class FallbackMapRenderBackend(MapRenderBackend):
         quantised = np.floor(screen / tolerance).astype(np.int64)
         # Keep a vertex only when its quantised pixel differs from a neighbour
         # (plus part endpoints), collapsing sub-pixel vertex runs.
-        keep = np.zeros(len(screen), dtype=bool)
+        pixel_keep = np.zeros(len(screen), dtype=bool)
         if len(screen) > 2:
             differs = (quantised[1:] != quantised[:-1]).any(axis=1)
-            keep[:-1] |= differs
-            keep[1:] |= differs
-        keep[starts] = True
-        keep[offsets[1:] - 1] = True
+            pixel_keep[:-1] |= differs
+            pixel_keep[1:] |= differs
+        pixel_keep[starts] = True
+        pixel_keep[offsets[1:] - 1] = True
         # Hard vertex budget: stride-decimate when a frame is still oversampled
         # (sub-pixel-dense geometry), bounding worst-case rasterisation time
-        # independently of dataset size.
-        stride = 1
+        # independently of dataset size. Rings are exempt: a global stride can
+        # drop a small ring to its two endpoints (deleting the polygon) and
+        # cracks shared edges between neighbours, so filled areas keep the
+        # pixel-grid result while lines carry the budget.
+        keep = pixel_keep
         if visible_vertices > self._vertex_budget:
-            stride = int(math.ceil(visible_vertices / self._vertex_budget))
-            positions = np.arange(len(screen))
-            keep &= (positions % stride == 0)
-            keep[starts] = True
-            keep[offsets[1:] - 1] = True
+            line_budget = visible_vertices - int(
+                lengths[part_indices][rings[part_indices]].sum()
+            )
+            stride = 1
+            if line_budget > 0:
+                stride = int(math.ceil(line_budget / self._vertex_budget))
+            if stride > 1:
+                positions = np.arange(len(screen))
+                keep = np.where(
+                    np.repeat(rings, lengths),
+                    pixel_keep,
+                    pixel_keep & (positions % stride == 0),
+                )
+                keep[starts] = True
+                keep[offsets[1:] - 1] = True
         kept_index = np.nonzero(keep)[0]
 
-        rings = prepared.path_is_ring
         part_feature = prepared.path_feature
         drawn_vertices = 0
-        categories = (
-            dict(style.categories)
-            if style.renderer == "categorized" and style.categories
-            else None
-        )
+        categories = _category_colors(style)
 
         def kept_slice(part: int) -> np.ndarray:
             start, end = offsets[part], offsets[part + 1]
@@ -816,9 +878,13 @@ class FallbackMapRenderBackend(MapRenderBackend):
             if not rings[part]:
                 continue
             kept = kept_slice(part)
-            drawn_vertices += len(kept)
             if len(kept) < 3:
-                continue
+                # A ring that collapsed below three kept vertices would vanish;
+                # fall back to its unsimplified vertices rather than dropping
+                # the polygon.
+                start, end = offsets[part], offsets[part + 1]
+                kept = np.arange(start, end)
+            drawn_vertices += len(kept)
             feature = int(part_feature[part])
             if feature != current_feature:
                 flush_polygon()
@@ -878,10 +944,10 @@ class FallbackMapRenderBackend(MapRenderBackend):
             feature_indices = feature_indices[np.sort(unique_at)]
             count = len(points)
         self._diagnostics["points_drawn"] += count
+        # Categorical grouping is a Python loop over visible points; past the
+        # cap the layer degrades to its single-symbol fill instead.
         categorized = (
-            dict(style.categories)
-            if style.renderer == "categorized" and style.categories
-            else None
+            _category_colors(style) if count <= _CATEGORY_POINT_CAP else None
         )
         batch_dots = marker_radius < 1.0 or (
             style.marker is MarkerSymbol.CIRCLE and marker_radius <= 4.0
@@ -894,6 +960,11 @@ class FallbackMapRenderBackend(MapRenderBackend):
             for position, feature_index in enumerate(feature_indices):
                 key = str(prepared.features[feature_index].properties.get(style.field) or "")
                 groups.setdefault(key, []).append(position)
+            painter.save()
+            symbol_pen = QPen(painter.pen())
+            symbol_pen.setStyle(Qt.PenStyle.SolidLine)
+            symbol_pen.setWidthF(max(1.0, stroke_width))
+            painter.setPen(symbol_pen)
             for key, positions in groups.items():
                 color_name = categorized.get(key)
                 painter.setBrush(
@@ -907,10 +978,17 @@ class FallbackMapRenderBackend(MapRenderBackend):
                         self._draw_point_symbol(painter, QPointF(px, py), marker_radius, style.marker)
                 else:
                     self._draw_dots(painter, selected, marker_radius)
+            painter.restore()
             return
         if symbol_loop:
+            painter.save()
+            symbol_pen = QPen(painter.pen())
+            symbol_pen.setStyle(Qt.PenStyle.SolidLine)
+            symbol_pen.setWidthF(max(1.0, stroke_width))
+            painter.setPen(symbol_pen)
             for px, py in points.tolist():
                 self._draw_point_symbol(painter, QPointF(px, py), marker_radius, style.marker)
+            painter.restore()
         else:
             self._draw_dots(painter, points, marker_radius)
         labels = style.labels
@@ -924,9 +1002,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
         """One batched drawPoints call for any number of dot markers."""
         painter.save()
         dot_pen = QPen(painter.pen())
+        dot_pen.setStyle(Qt.PenStyle.SolidLine)
         dot_pen.setWidthF(max(1.0, radius * 2.0))
         dot_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        dot_pen.setDashPattern([])
         painter.setPen(dot_pen)
         painter.drawPoints(QPolygonF([QPointF(px, py) for px, py in points.tolist()]))
         painter.restore()

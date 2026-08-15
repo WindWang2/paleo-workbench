@@ -47,6 +47,7 @@ class LegacyDocumentSceneAdapter:
         records: Iterable[Mapping[str, object]] | None = None,
         excluded_layer_ids: Iterable[str] = (),
         data_revisions: Mapping[str, int] | None = None,
+        cache_owner: object | None = None,
     ):
         """Synchronize revisions into the scene and return its render snapshot."""
         if document is None:
@@ -65,6 +66,7 @@ class LegacyDocumentSceneAdapter:
             visibility=visibility,
             records=records,
             data_revisions=data_revisions,
+            cache_owner=cache_owner,
         )
         excluded = {str(layer_id) for layer_id in excluded_layer_ids}
         source_layers = tuple(layer for layer in source.layers if layer.id not in excluded)

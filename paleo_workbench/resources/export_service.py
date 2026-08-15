@@ -60,7 +60,7 @@ def view_export_capabilities(widget: Any | None) -> frozenset[str]:
     kind = _export_surface_kind(target)
     if kind in {"well_log", "cross_well", "paleo_map", "unified_map"}:
         return frozenset({"PNG", "SVG", "PDF"})
-    if kind in {"native_factor_map", "unified_map"}:
+    if kind == "native_factor_map":
         return frozenset({"PNG"})
     if hasattr(target, "grab"):
         return frozenset({"PNG"})

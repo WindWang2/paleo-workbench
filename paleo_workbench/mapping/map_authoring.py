@@ -150,11 +150,16 @@ class MapAuthoringDocument:
                 ),
             )
         self.active_kind = "facies"
-        # Per-kind record cache keyed by (data_revision, session revision). A
-        # render refresh walks the document even when nothing changed; these
-        # keys make repeated ``records()`` calls O(changed layers) instead of
-        # O(all features). Cached record dicts are shared, never mutated.
-        self._records_cache: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
+        # Per-kind record cache keyed by (data_revision, session revision,
+        # session epoch). A render refresh walks the document even when nothing
+        # changed; these keys make repeated ``records()`` calls O(changed
+        # layers) instead of O(all features). Cached record dicts are shared,
+        # never mutated. The epoch increments whenever the session *object*
+        # changes (start/discard/commit/rollback): revisions alone collide
+        # after rollback because a fresh session restarts its revision at 0.
+        self._records_cache: dict[str, tuple[tuple[int, int, int], list[dict[str, Any]]]] = {}
+        self._session_generation: dict[str, int] = {kind: 0 for kind in _LAYER_KINDS}
+        self._session_refs: dict[str, object] = {}
 
     @classmethod
     def from_document(cls, document, *, project_crs: str | None = None) -> "MapAuthoringDocument":
@@ -212,12 +217,25 @@ class MapAuthoringDocument:
             for binding in self._bindings.values()
         )
 
+    def _session_epoch(self, kind: str) -> int:
+        """Bump-and-report when the layer's session object was replaced."""
+        layer = self.layer(kind)
+        session = layer.edit_session
+        if session is not self._session_refs.get(kind):
+            self._session_refs[kind] = session
+            self._session_generation[kind] = self._session_generation.get(kind, 0) + 1
+        return self._session_generation[kind]
+
     def records(self) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for kind in _LAYER_KINDS:
             layer = self.layer(kind)
             session = layer.edit_session
-            key = (layer.data_revision, session.revision if session is not None else -1)
+            key = (
+                layer.data_revision,
+                session.revision if session is not None else -1,
+                self._session_epoch(kind),
+            )
             cached = self._records_cache.get(kind)
             if cached is not None and cached[0] == key:
                 records.extend(cached[1])
@@ -228,11 +246,20 @@ class MapAuthoringDocument:
             records.extend(built)
         return records
 
-    def data_revision_key(self, kind: str) -> tuple[int, int]:
-        """Cheap change key for one layer covering commits plus live edits."""
+    def data_revision_key(self, kind: str) -> tuple[int, int, int]:
+        """Cheap change key for one layer covering commits plus live edits.
+
+        Includes the session epoch so a rollback (which discards the session
+        without bumping ``data_revision``) followed by different edits never
+        reuses a previous key.
+        """
         layer = self.layer(kind)
         session = layer.edit_session
-        return (layer.data_revision, session.revision if session is not None else -1)
+        return (
+            layer.data_revision,
+            session.revision if session is not None else -1,
+            self._session_epoch(kind),
+        )
 
     def selected_feature_ids(self) -> set[str]:
         return self.active_layer.selection

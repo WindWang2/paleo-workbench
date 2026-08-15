@@ -112,4 +112,8 @@ export lineage.
 * `benchmarks/render_engine_benchmark.py` — local benchmark incl. embedded
   origin/main renderer for same-process A/B comparison
 * `tests/test_render_engine.py`, `tests/test_map_styles.py`,
-  `tests/test_map_export_consistency.py`, `tests/test_layer_lifecycle.py`
+  `tests/test_map_export_consistency.py`, `tests/test_layer_lifecycle.py`,
+  `tests/test_render_engine_review_fixes.py` (regressions for the adversarial
+  review round: dash rendering, categorized fills, thread supersession,
+  rollback-safe record caching, owner-scoped feature cache, budget-exempt rings,
+  export chrome correctness)
