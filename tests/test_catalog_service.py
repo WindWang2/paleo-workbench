@@ -600,6 +600,101 @@ def test_commit_working_copy_new_asset_branch_keeps_name_semantics(service, tmp_
     assert service.get_asset(version.asset_id).name == "my-derived"
 
 
+# --- batch save (bulk registration write amplification, C38) ------------------
+
+
+def test_batch_save_merges_many_imports_into_one_canonical_write(service, tmp_path, monkeypatch):
+    """200 imports inside one batch must persist with a SINGLE canonical
+    store write (O(N²) full-document rewrite + fsync per version otherwise)."""
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+
+    with service.batch_save():
+        for i in range(200):
+            service.import_raw(
+                _make_source(tmp_path, name=f"w{i}.las", payload=f"data-{i}".encode())
+            )
+
+    assert calls == 1, calls
+    assert len(service.document.assets) == 200
+    # Every asset has its version (no zombie), disk equals memory, and the
+    # index is fresh for dedup/reads.
+    assert all(
+        any(v.asset_id == a.id for v in service.document.versions)
+        for a in service.document.assets
+    )
+    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
+    assert service.index_revision() == service.document.catalog_revision
+
+
+def test_batch_save_body_failure_persists_nothing_and_restores(service, tmp_path, monkeypatch):
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+
+    with pytest.raises(RuntimeError):
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="a.las"))
+            raise RuntimeError("boom")
+
+    assert calls == 0  # nothing was ever written to the canonical store
+    assert service.document.assets == []
+    assert service.document.versions == []
+    disk = CatalogStore(tmp_path / "proj" / "demo.paleo.json").load()
+    assert disk.model_dump(mode="json") == service.document.model_dump(mode="json")
+
+
+def test_batch_save_flush_failure_restores_document(service, tmp_path, monkeypatch):
+    def boom(document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service._store, "save", boom)
+
+    with pytest.raises(OSError):
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="a.las"))
+            service.import_raw(_make_source(tmp_path, name="b.las"))
+
+    # The failed flush must not leave the half-batched document in memory.
+    assert service.document.assets == []
+    assert service.document.versions == []
+
+
+def test_batch_save_nested_batches_flush_once(service, tmp_path, monkeypatch):
+    calls = 0
+    real_save = service._store.save
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return real_save(document)
+
+    monkeypatch.setattr(service._store, "save", counted)
+
+    with service.batch_save():
+        service.import_raw(_make_source(tmp_path, name="a.las"))
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="b.las"))
+        service.import_raw(_make_source(tmp_path, name="c.las"))
+
+    assert calls == 1
+    assert len(service.document.assets) == 3
+
+
 def test_find_versions_by_tag_uses_index(service, tmp_path):
     v = service.import_raw(_make_source(tmp_path))
     service.add_tag("reviewed", version_id=v.id)

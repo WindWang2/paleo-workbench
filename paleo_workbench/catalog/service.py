@@ -65,6 +65,50 @@ from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
 
 
+class _BatchSave:
+    """Context manager returned by :meth:`DataCatalogService.batch_save`.
+
+    Defers the canonical store write until the outermost batch exits; on a
+    failed body (or failed flush) the document is restored to a deep copy of
+    its pre-batch state so memory never diverges from the unwritten disk.
+    """
+
+    def __init__(self, service: "DataCatalogService") -> None:
+        self._service = service
+        self._snapshot: CatalogDocument | None = None
+
+    def __enter__(self) -> "DataCatalogService":
+        service = self._service
+        with service._lock:
+            if service._batch_depth == 0:
+                self._snapshot = service.document.model_copy(deep=True)
+            service._batch_depth += 1
+        return service
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        service = self._service
+        with service._lock:
+            service._batch_depth -= 1
+            if exc_type is not None:
+                # Body failed: nothing was written; restore the pre-batch
+                # document so the in-memory state matches the disk.
+                if service._batch_depth == 0 and self._snapshot is not None:
+                    service.document = self._snapshot
+                    service._invalidate_maps()
+                return False
+            if service._batch_depth:
+                return False  # an outer batch still owns the flush
+            try:
+                service._store.save(service.document)
+            except Exception:
+                if self._snapshot is not None:
+                    service.document = self._snapshot
+                    service._invalidate_maps()
+                raise
+            service._sync_index_best_effort()
+            return False
+
+
 class DataCatalogService:
     """Unified lifecycle service for one project."""
 
@@ -83,6 +127,8 @@ class DataCatalogService:
         # payloads (verify_integrity) on a worker thread while the UI thread
         # may be saving. Re-entrant so public methods can nest under _save.
         self._lock = threading.RLock()
+        # Active :meth:`batch_save` nesting depth: >0 defers canonical writes.
+        self._batch_depth = 0
         # Maintained id→object indexes (P4): every document list mutation goes
         # through ``_add_*`` / ``_remove_*`` so lookups stay O(1) instead of
         # linear scans. ``None`` = not yet built (built lazily from the
@@ -287,10 +333,16 @@ class DataCatalogService:
         """Persist canonical document and sync the index.
 
         The revision only advances if the canonical save succeeds, so a
-        failed save leaves no half-bumped state.
+        failed save leaves no half-bumped state. Inside :meth:`batch_save`
+        the canonical write is deferred to the context exit (one write for
+        the whole batch); the index still syncs incrementally so index-backed
+        reads and import dedup stay fresh during the batch.
         """
         with self._lock:
             self.document.catalog_revision += 1
+            if self._batch_depth:
+                self._sync_index_best_effort()
+                return
             try:
                 self._store.save(self.document)
             except Exception:
@@ -308,6 +360,23 @@ class DataCatalogService:
             except Exception:
                 # The index is a cache; canonical truth is already saved.
                 pass
+
+    def batch_save(self) -> "_BatchSave":
+        """Context manager merging many mutator calls into ONE canonical write.
+
+        While active, :meth:`_save` bumps the revision and keeps the SQLite
+        index incrementally fresh (so index-backed dedup/reads stay O(log N))
+        but DEFERS the canonical ``catalog.json`` write; a single store write
+        happens at context exit. Bulk registration / recompute loops therefore
+        pay one full-document serialization + fsync instead of one per version
+        commit (the O(N²) write path, C38).
+
+        Atomicity is preserved: when the body raises, the document is restored
+        to its pre-batch state and nothing is persisted; a failed flush
+        likewise restores and re-raises. Nested batches are supported — only
+        the outermost exit flushes.
+        """
+        return _BatchSave(self)
 
     def _ensure_index_fresh(self) -> None:
         try:
