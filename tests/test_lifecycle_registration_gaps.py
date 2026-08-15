@@ -726,3 +726,42 @@ def test_import_registration_failures_are_counted(qtbot, monkeypatch):
 
     controller.register_imported_resources([good])
     assert controller.last_registration_failures == []  # reset per call
+
+
+def test_qc_run_uses_stable_per_map_domain_key(fake):
+    """The QC DataRun must be keyed by the map's linked task (falling back to
+    the document id) — not the per-run report id — so re-QC after a recompile
+    collapses to the latest run instead of keeping every historical QC run in
+    the step aggregation (issue #373 / C15)."""
+    project = ProjectDocument.new("QC")
+    doc = PaleoMapDocument(
+        name="H1 图",
+        linked_target_horizon="H1",
+        linked_prediction_task_id="task-p1",
+        facies_polygons=[
+            {"id": "f1", "coordinates": [[0, 0], [1, 0], [1, 1], [0, 0]]}
+        ],
+    )
+    project.paleomap_documents.append(doc)
+
+    run_basic_qc(project, doc.id)
+    run_basic_qc(project, doc.id)  # re-QC of the same map
+
+    qc_runs = [r for r in fake.list_runs() if r.operation == "qc"]
+    assert len(qc_runs) == 2
+    keys = {r.domain_task_id for r in qc_runs}
+    assert keys == {"task-p1"}, keys
+
+    # The document id is the fallback key when no task is linked.
+    project2 = ProjectDocument.new("QC2")
+    doc2 = PaleoMapDocument(
+        name="H2 图",
+        linked_target_horizon="H2",
+        facies_polygons=[
+            {"id": "f1", "coordinates": [[0, 0], [1, 0], [1, 1], [0, 0]]}
+        ],
+    )
+    project2.paleomap_documents.append(doc2)
+    run_basic_qc(project2, doc2.id)
+    qc2 = [r for r in fake.list_runs() if r.operation == "qc"][-1]
+    assert qc2.domain_task_id == doc2.id
