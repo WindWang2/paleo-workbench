@@ -33,6 +33,9 @@ dev = [
     "pytest>=8.0",
     "pytest-qt>=4.5.0",
     "pytest-timeout>=2.3.1",
+    # tests/test_wheel_assets.py builds the wheel in-process via the PEP 517
+    # backend hook; modern runner venvs no longer ship setuptools implicitly.
+    "setuptools>=69",
 ]
 native = [
     "pybind11>=2.12",

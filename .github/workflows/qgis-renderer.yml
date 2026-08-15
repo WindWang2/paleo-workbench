@@ -52,13 +52,23 @@ jobs:
       - name: System libraries (Qt6 / QGIS build deps / bridge build tools)
         run: |
           sudo apt-get update
+          # Names verified against ubuntu-latest (24.04 noble):
+          # - QCA's Qt6 dev package is 'libqca-qt6-dev' (qca2 source pkg);
+          #   'qca-qt6-dev' does not exist on noble.
+          # - Qt6 QWT is not packaged on noble at all — but the vendored QGIS
+          #   falls back to its internal external/qwt-6.3.0 copy when system
+          #   Qwt >=6.2 is not found, so no QWT package is listed.
+          # - nlohmann-json and poly2tri are consumed from the vendored
+          #   external/ copies (PREFER_INTERNAL_LIBS=TRUE for non-vcpkg
+          #   builds), so only Protobuf/QScintilla/qtkeychain/QCA are
+          #   additionally required by the configure flags below.
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
             ninja-build \
             qt6-base-dev \
             libqt6svg6-dev \
-            qca-qt6-dev \
+            libqca-qt6-dev \
             libsqlite3-dev \
             libexpat1-dev \
             libproj-dev \
@@ -71,9 +81,12 @@ jobs:
             zlib1g-dev \
             libbz2-dev \
             libspatialite-dev \
-            libqwt-qt6-dev \
             libqt6opengl6-dev \
             libqt6concurrent6 \
+            libprotobuf-dev \
+            protobuf-compiler \
+            libqscintilla2-qt6-dev \
+            qtkeychain-qt6-dev \
             bison \
             flex
 
