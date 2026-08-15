@@ -151,3 +151,24 @@ def test_build_tie_arrays_feet_well_uses_foot_depths():
     expected = build_tie_arrays(WellLogDataWithDepthUnit(data, "m"), None)
     np.testing.assert_allclose(twt, expected[1] * 0.3048)
     assert float(twt[-1]) > 0.0
+
+
+# #406 — sonic unit conversion must trust curve.unit metadata; the numeric
+# fallback stays only for curves whose ~CURVE block carried no unit.
+def test_sonic_unit_metadata_beats_numeric_heuristic():
+    import numpy as np
+
+    from paleo_workbench.viz.hosts.well_tie_host import _sonic_to_us_per_m
+
+    # Dense carbonate at 145 us/m: the old median<150 heuristic reclassified
+    # it as us/ft and multiplied by 3.28084 (TWT inflated ~3.3x).
+    fast_m = np.full(50, 145.0)
+    assert np.allclose(_sonic_to_us_per_m(fast_m, "US/M"), fast_m)
+
+    # us/ft metadata converts exactly once.
+    usft = np.full(50, 44.0)
+    assert np.allclose(_sonic_to_us_per_m(usft, "US/F"), usft * 3.28084)
+
+    # Missing metadata keeps the numeric fallback.
+    assert np.allclose(_sonic_to_us_per_m(usft, ""), usft * 3.28084)
+    assert np.allclose(_sonic_to_us_per_m(fast_m, ""), fast_m * 3.28084)
