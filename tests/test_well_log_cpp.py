@@ -159,3 +159,26 @@ def test_m8_las_parse_row_truncation_warning():
     assert d_py.shape == (2, 2)
 
 
+
+
+def test_433_a_log_data_parity_both_paths():
+    """~A LOG DATA must not truncate columns; ~CURVE mnemonics are authoritative."""
+    content = """~CURVE INFORMATION
+ DEPT  .M                   : DEPTH
+ GR    .API                 : GAMMA RAY
+ RHOB  .G/CC                : BULK DENSITY
+~A LOG DATA
+ 2000.00   45.2   2.35
+ 2001.00   52.1   2.38
+ 2002.00   61.8   2.41
+"""
+    h_cpp, d_cpp = fast_las_parse_data(content)
+    with disabled_acceleration():
+        h_py, d_py = fast_las_parse_data(content)
+
+    assert h_cpp == ("DEPT", "GR", "RHOB")
+    assert h_py == ("DEPT", "GR", "RHOB")
+    assert d_cpp.shape == (3, 3)
+    assert d_py.shape == (3, 3)
+    assert d_cpp[1, 2] == 2.38
+    assert d_py[1, 2] == 2.38
