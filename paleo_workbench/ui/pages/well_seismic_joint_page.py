@@ -134,7 +134,22 @@ class WellSeismicJointPage(QWidget):
         )
 
     def _on_domain_changed(self, text: str) -> None:
-        self._host.set_vertical_domain(text)
+        applied = self._host.set_vertical_domain(text)
+        if not applied:
+            # Depth refused (no transform): revert the combo to the scene's
+            # actual domain instead of showing a state the scene is not in.
+            scene = self._host.scene
+            actual = (
+                "Depth"
+                if scene is not None
+                and scene.vertical_domain.value.startswith("depth")
+                else "Time"
+            )
+            self._domain.blockSignals(True)
+            idx = self._domain.findText(actual)
+            if idx >= 0:
+                self._domain.setCurrentIndex(idx)
+            self._domain.blockSignals(False)
 
     def export_snapshot(self, path: str | None = None) -> str | None:
         from PySide6.QtWidgets import QFileDialog

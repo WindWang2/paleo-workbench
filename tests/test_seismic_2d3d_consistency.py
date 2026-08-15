@@ -609,3 +609,71 @@ def test_td_table_rejects_non_monotonic_data():
             time_ms=np.array([100.0, 200.0, 300.0]),
             md_m=np.array([0.0, 0.0, 200.0]),
         )
+
+
+def _write_standard_geometry_segy(path, shape, *, text_header=True):
+    """Standard INLINE_3D/CROSSLINE_3D geometry (loader standard path)."""
+    n_il, n_xl, n_t = shape
+    vol = ground_truth_volume(shape)
+    spec = segyio.spec()
+    spec.ilines = [1000 + i for i in range(n_il)]
+    spec.xlines = [2000 + j for j in range(n_xl)]
+    spec.samples = tuple(4.0 * k for k in range(n_t))
+    spec.format = 1
+    with segyio.create(str(path), spec) as f:
+        if text_header:
+            f.text[0] = (
+                "First inline : 1000  Last inline : 1000\r\n"
+                "First xline : 2000  Last xline : 2000\r\n"
+                "xmin : 0.0 xmax : 0.0 ymin : 0.0 ymax : 0.0\r\n"
+            ).encode("ascii")
+        for i in range(n_il):
+            for j in range(n_xl):
+                f.header[i * n_xl + j] = {
+                    segyio.TraceField.INLINE_3D: int(spec.ilines[i]),
+                    segyio.TraceField.CROSSLINE_3D: int(spec.xlines[j]),
+                    segyio.TraceField.FieldRecord: int(spec.ilines[i]),
+                    segyio.TraceField.CDP: int(spec.xlines[j]),
+                    segyio.TraceField.SourceX: j * 40,
+                    segyio.TraceField.SourceY: i * 40,
+                }
+                f.trace[i * n_xl + j] = vol[i, j, :]
+    return vol
+
+
+@pytest.mark.parametrize("text_header", [True, False])
+def test_standard_geometry_survey_not_transposed(tmp_path, text_header):
+    """Standard-geometry SEGY corners must keep IL on the volume axis 0.
+
+    Regression for the unconditional loader-axes swap: with real
+    INLINE_3D/CROSSLINE_3D geometry the loader inline IS the text inline, so
+    swapping text-header corners transposed the survey (square grids) or
+    failed the span validation (non-square grids).
+    """
+    path = tmp_path / f"std_{text_header}.sgy"
+    shape = (21, 29, 41)  # deliberately non-square
+    _write_standard_geometry_segy(path, shape, text_header=text_header)
+    p1, p2, p3, meta = survey_corners_from_segy(path)
+    assert meta.get("loader_geometry_source") == "standard_189_193"
+    scene = WellSeismicScene()
+    scene.set_survey_from_corners(
+        p1, p2, p3,
+        n_samples=int(meta["n_samples"]),
+        dt_ms=float(meta["dt_ms"]),
+        t0_ms=float(meta.get("t0_ms", 0.0)),
+        iline_step=meta.get("loader_iline_step"),
+        xline_step=meta.get("loader_xline_step"),
+        n_inlines=meta.get("loader_n_inlines"),
+        n_crosslines=meta.get("loader_n_crosslines"),
+    )
+    survey = scene.survey
+    assert survey.n_inlines == 21 and survey.n_crosslines == 29
+    # The survey IL axis must track the volume IL axis (SourceY direction):
+    # moving +1 inline moves +40 in Y and leaves X unchanged.
+    x_a, y_a = survey.il_xl_to_xy(1000, 2000)
+    x_b, y_b = survey.il_xl_to_xy(1001, 2000)
+    assert x_b == pytest.approx(x_a, abs=1e-6)
+    assert y_b - y_a == pytest.approx(40.0, abs=1e-3)
+    x_c, y_c = survey.il_xl_to_xy(1000, 2001)
+    assert x_c - x_a == pytest.approx(40.0, abs=1e-3)
+    assert y_c == pytest.approx(y_a, abs=1e-3)

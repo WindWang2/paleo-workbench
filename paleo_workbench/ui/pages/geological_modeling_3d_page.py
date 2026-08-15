@@ -928,19 +928,25 @@ class GeologicalModeling3DPage(QWidget):
         return Qt.PartiallyChecked
 
     def set_project(self, project: ProjectDocument | None) -> None:
+        project_changed = project is not self._project
         self._project = project
         self._joint_well_visibility_restored = False
-        # Re-arm first-show loading so the NEXT project actually reloads the
-        # joint scene instead of leaving the previous volume/wells on screen.
-        self._joint_loaded_once = False
+        if project_changed:
+            # Re-arm first-show loading so the NEXT project actually reloads
+            # the joint scene instead of leaving the previous volume/wells on
+            # screen. Same-project calls (e.g. the save-flush) must NOT reset
+            # this: they would trigger a full reload on the next visit that
+            # clears user-created fences/probes and rebinds fresh ids.
+            self._joint_loaded_once = False
         # Provenance memory is per-project: never carry the previous project's
         # modeling inputs into the next one's mesh exports.
         self._last_modeling_run_inputs = []
         self._joint_host.set_project(project)
         self._restore_joint_display_settings()
         self._restore_joint_slice_settings()
-        # Drop the previous project's rendered brick/overlays immediately.
-        self._on_joint_scene_updated()
+        if project_changed:
+            # Drop the previous project's rendered brick/overlays immediately.
+            self._on_joint_scene_updated()
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         """Join the page's OwnedWorkerJobs on project switch / app close.
@@ -1478,6 +1484,10 @@ class GeologicalModeling3DPage(QWidget):
                     / 100.0
                 ),
             )
+        self._pending_slice_numbers = (
+            getattr(state, "orthogonal_inline_number", None),
+            getattr(state, "orthogonal_crossline_number", None),
+        )
         scene = self._joint_host.scene
         if scene is None:
             # Joint engine failed to construct (e.g. volume unavailable); the
@@ -1486,6 +1496,36 @@ class GeologicalModeling3DPage(QWidget):
             return
         scene.restore_orthogonal_slice_state(restored)
         self._refresh_joint_slice_card()
+
+    def _apply_pending_slice_numbers(self) -> None:
+        """Map persisted survey line numbers onto the live preview indices.
+
+        Called when a registration first exists: saved preview indices are
+        LOD-relative, but the physical line numbers are stable across
+        sessions and LOD refinements.
+        """
+        pending = getattr(self, "_pending_slice_numbers", None)
+        if pending is None:
+            return
+        self._pending_slice_numbers = None
+        scene = self._joint_host.scene
+        registration = getattr(scene, "registration", None)
+        if registration is None or pending[0] is None or pending[1] is None:
+            return
+        try:
+            vi, vx = registration.il_xl_to_volume_idx(
+                float(pending[0]), float(pending[1])
+            )
+            scene.set_orthogonal_slice_indices(
+                inline_index=max(0, min(registration.n_inline - 1, round(vi))),
+                crossline_index=max(
+                    0, min(registration.n_crossline - 1, round(vx))
+                ),
+            )
+            self._refresh_joint_slice_card()
+            self._sync_joint_slice_renderer()
+        except Exception:
+            logger.debug("pending slice numbers apply failed", exc_info=True)
 
     def _refresh_joint_slice_card(self) -> None:
         """Refresh controls from the scene-owned slice state."""
@@ -1792,6 +1832,23 @@ class GeologicalModeling3DPage(QWidget):
             )
             self._restore_joint_fence_from_project()
             self._update_domain_z_guard(domain)
+            # Reload may have left the scene on a different domain than the
+            # saved combo text (e.g. empty-data early exit): re-sync the
+            # combo from the scene so UI and scene cannot diverge.
+            scene = self._joint_host.scene
+            if scene is not None and hasattr(self, "_joint_domain"):
+                actual = (
+                    "Depth"
+                    if scene.vertical_domain.value.startswith("depth")
+                    else "Time"
+                )
+                if self._joint_domain.currentText() != actual:
+                    self._joint_domain.blockSignals(True)
+                    idx = self._joint_domain.findText(actual)
+                    if idx >= 0:
+                        self._joint_domain.setCurrentIndex(idx)
+                    self._joint_domain.blockSignals(False)
+                self._update_domain_combo_availability()
 
     def collect_joint_analysis_state(self):
         """Snapshot joint UI into project model (no voxels) — #90."""
@@ -1850,6 +1907,13 @@ class GeologicalModeling3DPage(QWidget):
             if scene is not None
             else _OSS()
         )
+        il_number = xl_number = None
+        registration = getattr(scene, "registration", None)
+        if registration is not None and slice_state.inline_index is not None:
+            il_number, xl_number = registration.volume_idx_to_il_xl(
+                float(slice_state.inline_index),
+                float(slice_state.crossline_index or 0),
+            )
         return JointAnalysisState(
             tree_checks=checks,
             well_visibility={
@@ -1870,6 +1934,8 @@ class GeologicalModeling3DPage(QWidget):
             well_width_px=self._joint_well_width.value(),
             orthogonal_inline_index=slice_state.inline_index,
             orthogonal_crossline_index=slice_state.crossline_index,
+            orthogonal_inline_number=il_number,
+            orthogonal_crossline_number=xl_number,
             time_slices=[
                 JointTimeSliceState(
                     time_ms=item.time_ms,
@@ -2209,6 +2275,12 @@ class GeologicalModeling3DPage(QWidget):
         self._joint_status.setText(text)
 
     def _on_joint_scene_updated(self) -> None:
+        if self._joint_host.scene is None:
+            # Engine unavailable: nothing to sync; widgets keep their
+            # placeholder states instead of crashing the flush path.
+            return
+        if getattr(self, "_pending_slice_numbers", None) is not None:
+            self._apply_pending_slice_numbers()
         self._apply_joint_display_settings()
         self._ensure_joint_widget()
         if self._joint_widget is not None and self._joint_host.scene is not None:

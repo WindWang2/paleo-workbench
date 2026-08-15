@@ -152,6 +152,12 @@ class SourceBackedVolumeAccess:
         if volume is None:
             self._display = None
             self._lod_level = -1
+            # Back to metadata-only: logical space is native again so slices
+            # and fence sampling stay consistent (a stale preview shape would
+            # make source reads return native-length traces for a
+            # preview-shaped scene).
+            self._shape = self._native_shape
+            self._strides = (1, 1, 1)
             return
         arr = np.ascontiguousarray(volume, dtype=np.float32)
         if arr.ndim != 3:

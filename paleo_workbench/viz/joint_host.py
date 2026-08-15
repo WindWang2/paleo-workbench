@@ -83,7 +83,7 @@ class PreviewVolumeWorker(QObject):
                     f"{fallback_warning} · {warning}".strip(" ·"),
                     self._generation,
                     self._lod,
-                    (1, 1, 1),
+                    None,  # fallback brick: strides unknown, bind in-memory
                 )
             except Exception as exc2:
                 self.failed.emit(f"{fallback_warning} · {exc2}", self._generation)
@@ -180,6 +180,16 @@ class WellSeismicJointHost(QObject):
             # meaningless against the next survey.
             self._scene.set_volume_access(None)
             self._scene.clear_fences()
+        if self._scene is not None:
+            # Drop the previous project's wells/tops/curves too: their
+            # coordinates belong to the old survey and would keep rendering
+            # until the next reload binds new ones.
+            try:
+                self._scene.set_wells([])
+                self._scene.set_formation_tops({})
+                self._scene.set_well_curves({})
+            except Exception:
+                logger.debug("scene clear on project switch failed", exc_info=True)
         state = getattr(project, "joint_analysis", None)
         self._persisted_well_identity_asset_id = getattr(
             state, "well_identity_asset_id", None
@@ -252,6 +262,15 @@ class WellSeismicJointHost(QObject):
         except Exception as exc:
             self.status_changed.emit(f"加载失败: {exc}")
             logger.exception("joint load failed")
+            # Leave an honestly-empty scene instead of the previous project's
+            # wells over a failed bind.
+            try:
+                self._scene.set_wells([])
+                self._scene.set_formation_tops({})
+                self._scene.set_well_curves({})
+            except Exception:
+                logger.debug("scene clear on load failure failed", exc_info=True)
+            self.scene_updated.emit()
             return
 
         if paths.segy is not None:
@@ -371,7 +390,14 @@ class WellSeismicJointHost(QObject):
             if paths.horizons:
                 corners = horizon_corners_from_dat(paths.horizons[0])
                 if corners is not None:
-                    corners = align_horizon_corners_to_loader_axes(*corners)
+                    # Swap horizon corners into loader axes only when the
+                    # loader geometry came from the detected header fallback
+                    # (standard INLINE_3D geometry already matches text axes).
+                    corners = align_horizon_corners_to_loader_axes(
+                        *corners,
+                        swap=meta.get("loader_geometry_source")
+                        != "standard_189_193",
+                    )
                     ok, msg = self._scene.validate_against_corners(
                         *corners, tol_m=50.0, tol_il_xl=1.0
                     )
@@ -598,7 +624,7 @@ class WellSeismicJointHost(QObject):
             return
 
         access = self._source_backed_access
-        if access is not None:
+        if access is not None and strides is not None:
             try:
                 access.set_display_data(
                     volume,
@@ -617,6 +643,9 @@ class WellSeismicJointHost(QObject):
             self._scene.set_volume_access(access)
             self._scene.set_preview_mode(True)
         else:
+            # Worker fallback brick (strides unknown) or no source-backed
+            # access: render through an in-memory access whose registration
+            # infers strides from the shape.
             self._scene.set_volume_access(InMemoryVolumeAccess(volume))
             self._scene.set_preview_mode(True)
 
