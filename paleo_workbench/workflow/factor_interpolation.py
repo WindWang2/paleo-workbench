@@ -279,6 +279,7 @@ def _apply_interpolation_isolated(
     project: ProjectDocument | None,
     cancellation_token,
     plan: InterpolationPlan | None = None,
+    fingerprint_memo: dict | None = None,
 ) -> FactorMapTask:
     """Run one task's interpolation, isolating engine failures to that task.
 
@@ -297,6 +298,7 @@ def _apply_interpolation_isolated(
             project=project,
             cancellation_token=cancellation_token,
             plan=plan,
+            fingerprint_memo=fingerprint_memo,
         )
     except JobCancelled:
         raise
@@ -318,6 +320,7 @@ def apply_interpolation_to_task(
     fault_polylines: list[list[tuple[float, float]]] | None = None,
     cancellation_token=None,
     plan: InterpolationPlan | None = None,
+    fingerprint_memo: dict | None = None,
 ) -> FactorMapTask:
     """Mutate a FactorMapTask with a real interpolation grid and quality metrics.
 
@@ -373,6 +376,7 @@ def apply_interpolation_to_task(
         power=power,
         fault_polylines=breaks,
         generator_version=GENERATOR_VERSION,
+        memo=fingerprint_memo,
     )
 
     _count_interpolation_execution()
@@ -503,6 +507,7 @@ def batch_prepare_factor_maps(
     power: float = 2.0,
     force: bool = False,
     cancellation_token=None,
+    fingerprint_memo: dict | None = None,
 ) -> list[FactorMapTask]:
     """Run real interpolation for existing tasks or create default factor maps.
 
@@ -514,8 +519,13 @@ def batch_prepare_factor_maps(
 
     ``force=True`` recomputes every prepared task (debug / migration escape hatch).
 
+    ``fingerprint_memo`` (optional, request-scoped dict) lets a caller share
+    one per-task fingerprint derivation across the classify / plan-key / apply
+    phases instead of re-serializing and re-hashing every sample 3x per task.
+
     Returns the list of tasks considered by this call (clean + dirty).
     """
+    fp_memo = fingerprint_memo if fingerprint_memo is not None else {}
     horizon = (
         target_horizon
         or project.stratigraphy.target_horizon
@@ -572,6 +582,7 @@ def batch_prepare_factor_maps(
             grid_n=grid_n,
             power=power,
             generator_version=GENERATOR_VERSION,
+            memo=fp_memo,
         )
         state = classify_factor_recompute(task, fps, force=force)
         if state is FactorDirtyState.CLEAN:
@@ -620,6 +631,7 @@ def batch_prepare_factor_maps(
                     grid_n=grid_n,
                     power=power,
                     generator_version=GENERATOR_VERSION,
+                    memo=fp_memo,
                 )
                 geo_key = f"{fingerprints.geometry}:{fingerprints.algorithm}"
                 plan = plan_cache_get(geo_key)
@@ -656,6 +668,7 @@ def batch_prepare_factor_maps(
                         power=power,
                         project=project,
                         cancellation_token=cancellation_token,
+                        fingerprint_memo=fp_memo,
                     )
                     continue
                 stack_rows.append(vals)
@@ -678,6 +691,7 @@ def batch_prepare_factor_maps(
                         grid_n=grid_n,
                         power=power,
                         generator_version=GENERATOR_VERSION,
+                        memo=fp_memo,
                     )
                     grid_result = FactorGridResult.from_engine_dict(
                         {
@@ -726,5 +740,6 @@ def batch_prepare_factor_maps(
                 plan=use_plan if METHOD_LABEL_TO_ENGINE.get(method, method) in (
                     "IDW", "idw", "mock"
                 ) else None,
+                fingerprint_memo=fp_memo,
             )
     return prepared
