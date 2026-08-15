@@ -1332,3 +1332,42 @@ def test_data_page_programmatic_tag_filter_survives_navigation_click(qtbot, tmp_
     assert page.asset_table._filter_query.tags == ["X"]
     # The toolbar still reports the active tag selection.
     assert page.data_toolbar.current_tag_selection() == ["X"]
+
+
+def test_preview_settings_visualization_change_reloads_current_visualization(
+    qtbot, monkeypatch, tmp_path: Path
+):
+    """A settings change that only affects the visualization controller must
+    re-request the professional visualization for the current asset; the
+    summary side keeps its own reload (#427)."""
+    page = DataPage(project=ProjectDocument.new("Demo"))
+    qtbot.addWidget(page)
+    well = tmp_path / "well.las"
+    well.write_text("~Version\n", encoding="utf-8")
+    resource = ResourceItem(
+        name="well.las", path=str(well), type="well_log", format="las"
+    )
+    page._selected_asset = resource
+
+    visual_requests: list[object] = []
+    monkeypatch.setattr(
+        page._visualization_controller, "request", visual_requests.append
+    )
+    summary_requests: list[object] = []
+    monkeypatch.setattr(page._preview_controller, "request", summary_requests.append)
+    # Isolate the visualization-only path: pretend the summary settings did
+    # not change.
+    monkeypatch.setattr(
+        page._preview_controller, "set_settings", lambda settings: False
+    )
+
+    settings = replace(page.reader_panel.preview_settings, geoviz_max_curves=24)
+    page.reader_panel.preview_settings_changed.emit(settings)
+
+    assert visual_requests == [resource]
+    assert summary_requests == []
+
+    # A selection that cannot be visualized must not trigger a request.
+    page._selected_asset = object()
+    page.reader_panel.preview_settings_changed.emit(settings)
+    assert visual_requests == [resource]
