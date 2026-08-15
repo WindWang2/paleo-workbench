@@ -60,7 +60,7 @@ def _load_page(qtbot, tmp_path, monkeypatch) -> StratigraphyCorrelationPage:
         mod,
         "load_correlation_wells",
         lambda project, resource_ids=None, max_wells=8: (
-            [_log("A1"), _log("A2")], ["A1", "A2"], [],
+            [_log("A1"), _log("A2")], ["A1", "A2"], ["id-a1", "id-a2"], [],
         ),
     )
     page = StratigraphyCorrelationPage()

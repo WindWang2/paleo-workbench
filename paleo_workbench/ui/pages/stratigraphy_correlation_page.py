@@ -648,6 +648,15 @@ class StratigraphyCorrelationPage(QWidget):
         if self._project is None:
             QMessageBox.warning(self, "保存解释", "未绑定工程")
             return
+        if len(self._loaded_names) != len(self._loaded_resource_ids):
+            # Never persist mispaired well identities: every top's well_id /
+            # lineage must resolve to the well that actually rendered it.
+            QMessageBox.warning(
+                self,
+                "保存解释",
+                "井名与资源 id 配对不一致，已取消保存。请重新加载连井剖面。",
+            )
+            return
         project_file = self._project_file_path()
         if project_file is None:
             QMessageBox.warning(
@@ -815,7 +824,7 @@ class StratigraphyCorrelationPage(QWidget):
         if not ids:
             QMessageBox.information(self, "地层对比", "工程中没有测井 LAS 资源")
             return
-        logs, names, warnings = load_correlation_wells(
+        logs, names, loaded_ids, warnings = load_correlation_wells(
             self._project, resource_ids=ids, max_wells=8
         )
         if not logs:
@@ -827,7 +836,10 @@ class StratigraphyCorrelationPage(QWidget):
             return
         self._loaded_logs = list(logs)
         self._loaded_names = list(names)
-        self._loaded_resource_ids = list(ids)[: len(logs)]
+        # Per-well success list from the loader: a well that failed to load
+        # mid-list must NOT shift the remaining wells onto their predecessors'
+        # resource ids (positional truncation mispaired every subsequent top).
+        self._loaded_resource_ids = list(loaded_ids)
         ok, top_notices, path_msg = self._apply_loaded_section()
         self.loaded_value.setText(f"已加载: {len(names)} 口井")
         tops_bits = []
