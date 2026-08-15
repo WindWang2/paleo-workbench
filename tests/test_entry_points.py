@@ -61,13 +61,26 @@ def test_main_exits_with_install_guidance_when_geoviz_unavailable(monkeypatch, c
     assert "requirements-geoviz.txt" in captured.err
 
 
-def _geoviz_free_env() -> dict[str, str]:
+def _geoviz_free_env(tmp_path) -> dict[str, str]:
     env = os.environ.copy()
     # Drop every geoviz/bootstrap source so the entry must fail fast with the
     # SystemExit(2) guidance instead of starting the app.
     for key in ("PYTHONPATH", "PALEO_QGIS_BUILD_DIR", "PALEO_WITH_QGIS_RENDERER"):
         env.pop(key, None)
     env["QT_QPA_PLATFORM"] = "offscreen"
+    # Dropping PYTHONPATH is not enough in CI: the geoviz packages are pip
+    # installed (editable) into site-packages, so `import geoviz` would still
+    # succeed, the gate would pass, and the subprocess would start the GUI
+    # event loop and hang until the test times out. Shadow the installed
+    # packages with a blocker package that raises ImportError on import —
+    # PYTHONPATH precedes site-packages on sys.path, so this reliably makes
+    # the subprocess geoviz-free everywhere.
+    blocker = tmp_path / "_geoviz_blocker"
+    blocker.mkdir(exist_ok=True)
+    (blocker / "geoviz.py").write_text(
+        'raise ImportError("geoviz blocked by test")\n', encoding="utf-8"
+    )
+    env["PYTHONPATH"] = str(blocker)
     return env
 
 
@@ -85,7 +98,7 @@ def test_entry_paths_exit_2_with_guidance_without_geoviz(tmp_path, command) -> N
     result = subprocess.run(
         [sys.executable, *command],
         cwd=str(tmp_path),
-        env=_geoviz_free_env(),
+        env=_geoviz_free_env(tmp_path),
         capture_output=True,
         text=True,
         timeout=120,
