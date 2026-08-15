@@ -225,3 +225,56 @@ def test_coherence_nan_free_parity_not_regressed():
     cpp, py = _nan_parity(vol, 3, 3, 5)
     np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
     assert (cpp == 0.0).sum() == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #446 — fast_slice_extract native/fallback boundary parity
+# ---------------------------------------------------------------------------
+
+
+def test_fse_float64_input_downcasts_to_float32_on_both_paths():
+    """The C++ forcecast silently downcasts float64 to float32; the fallback
+    must do the same (previously it preserved float64, so the dtype of the
+    returned slice depended on which backend was active)."""
+    vol = np.arange(2 * 3 * 4, dtype=np.float64).reshape(2, 3, 4)
+    cpp, py = _both_paths(fast_slice_extract, vol, 0, 1)
+    assert not isinstance(cpp, Exception)
+    assert cpp.dtype == np.float32 and py.dtype == np.float32
+    np.testing.assert_array_equal(cpp, py)
+    np.testing.assert_array_equal(py, vol[1].astype(np.float32))
+
+
+def test_fse_2d_input_raises_runtime_error_on_both_paths():
+    """2-D input: the C++ path raises RuntimeError; the fallback previously
+    sliced it silently."""
+    _both_raise(fast_slice_extract, np.zeros((5, 4), dtype=np.float32), 0, 1)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        dict(axis=2**33, index=0),
+        dict(axis=0, index=2**33),
+        dict(axis=-(2**33), index=0),
+        dict(axis=0, index=-(2**33)),
+    ],
+)
+def test_fse_out_of_int_range_axis_index_raise_type_error_on_both_paths(kwargs):
+    """Values that overflow the C++ int parameter raise TypeError on the native
+    path (pybind int caster); the fallback must match instead of silently
+    reducing modulo the axis count."""
+    cpp, py = _both_paths(fast_slice_extract, np.zeros((2, 3, 4), dtype=np.float32), **kwargs)
+    assert isinstance(cpp, TypeError), f"C++ path raised {type(cpp)}"
+    assert isinstance(py, TypeError), f"Python path raised {type(py)}"
+
+
+def test_fse_in_range_out_of_bounds_index_raises_index_error_on_both_paths():
+    _both_raise(fast_slice_extract, np.zeros((2, 3, 4), dtype=np.float32), 0, 7)
+
+
+def test_fse_large_in_range_axis_matches_on_both_paths():
+    """axis = 2**20 fits in a C++ int and reduces modulo 3; both paths agree."""
+    vol = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
+    cpp, py = _both_paths(fast_slice_extract, vol, 2**20, 1)
+    assert not isinstance(cpp, Exception)
+    np.testing.assert_array_equal(cpp, py)

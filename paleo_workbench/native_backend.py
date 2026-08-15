@@ -64,11 +64,18 @@ def _py_render_grid_rgba(
     index is selected by truncation toward zero; alpha is ``lut_alpha * opacity / 255``.
     """
     gz = np.ascontiguousarray(grid_z, dtype=np.float32)
+    if gz.ndim != 2:
+        # Parity with the C++ binding's argument validation.
+        raise ValueError("grid_z must be a 2-D (height, width) float32 array")
     height, width = gz.shape
     lut_buf = np.ascontiguousarray(lut, dtype=np.uint8)
+    if lut_buf.ndim != 2 or lut_buf.shape[0] < 1 or lut_buf.shape[1] != 4:
+        # Parity with the C++ binding: malformed LUTs raise instead of
+        # silently returning an all-zero raster (issue #446).
+        raise ValueError(
+            "lut must be a (lut_size, 4) RGBA uint8 array with at least one entry"
+        )
     out = np.zeros((height, width, 4), dtype=np.uint8)
-    if lut_buf.shape[0] < 1 or lut_buf.shape[1] != 4:
-        return out
     if not (gamma > 0.0):
         gamma = 1.0
     have_range = (hi - lo) > 0.0
@@ -78,7 +85,12 @@ def _py_render_grid_rgba(
     finite = np.isfinite(gz)
     valid = finite
     if mask is not None:
-        valid = valid & (np.ascontiguousarray(mask, dtype=np.uint8) != 0)
+        mask_buf = np.ascontiguousarray(mask, dtype=np.uint8)
+        if mask_buf.ndim != 2 or mask_buf.shape != gz.shape:
+            # Parity with the C++ binding: a mis-shaped mask raises instead of
+            # silently broadcasting (issue #446).
+            raise ValueError("mask must match grid_z shape")
+        valid = valid & (mask_buf != 0)
 
     with np.errstate(invalid="ignore", over="ignore"):
         if have_range:
@@ -101,7 +113,18 @@ def _py_render_grid_rgba(
 # Pure-Python Fallback Implementations
 # ---------------------------------------------------------------------------
 def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndarray:
-    vol = np.asarray(volume)
+    # Parity with the pybind11 `int` caster: values outside the C++ int range
+    # raise TypeError on the native path before any other validation.
+    if not (-(2**31) <= int(axis) < 2**31) or not (-(2**31) <= int(index) < 2**31):
+        raise TypeError(
+            f"axis and index must fit in a C++ int (got axis={axis}, index={index})"
+        )
+    # float32 dtype contract: the C++ side accepts any numeric dtype via
+    # forcecast and downcasts to float32 (issue #446), so the fallback does
+    # the same instead of silently preserving float64.
+    vol = np.asarray(volume, dtype=np.float32)
+    if vol.ndim != 3:
+        raise RuntimeError("Input volume must be 3D")
     axis_idx = int(axis) % vol.ndim
     dim = vol.shape[axis_idx]
     if dim == 0:
