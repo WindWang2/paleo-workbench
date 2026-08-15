@@ -111,15 +111,20 @@ def test_stratigraphy_register_export_links_source_resources(qtbot, catalog, pro
 
 def test_stratigraphy_register_export_no_catalog_noop(qtbot, project, tmp_path):
     """No catalog backend active (no project open) → registration no-ops."""
+    from paleo_workbench.catalog import get_catalog
     from paleo_workbench.ui.pages.stratigraphy_correlation_page import (
         StratigraphyCorrelationPage,
     )
 
+    assert get_catalog() is None  # pre-condition: no backend active
     page = StratigraphyCorrelationPage()
     page.set_project(project)
     out = _write_export(tmp_path, "x.csv")
     # No catalog set → helper returns without raising.
     page._register_export(str(out), fmt="csv", label="x")
+    # No-op contract: registration must not materialize a default backend and
+    # register an OUTPUT version behind the caller's back.
+    assert get_catalog() is None
 
 
 # ------------------------------------------------------------------ joint snapshot
@@ -138,11 +143,15 @@ def test_joint_snapshot_register_registers_output(qtbot, catalog, project, tmp_p
 
 
 def test_joint_snapshot_register_no_catalog_noop(qtbot, project, tmp_path):
+    from paleo_workbench.catalog import get_catalog
     from paleo_workbench.ui.pages.well_seismic_joint_page import WellSeismicJointPage
 
+    assert get_catalog() is None  # pre-condition: no backend active
     page = WellSeismicJointPage(project=project)
     out = _write_export(tmp_path, "joint.png")
     page._register_snapshot_export(str(out))  # no-op, no catalog
+    # No-op contract: no default backend may materialize behind the caller.
+    assert get_catalog() is None
 
 
 # ------------------------------------------------------------------ 3D mesh export
