@@ -761,9 +761,11 @@ class MapEditScene(QGraphicsScene):
                         item.set_ring_coordinates(part_index, ring_index, coords)
                     else:
                         item.set_coordinates(coords)
-                    self._refresh_hit_entry(item)
-                    self._invalidate_snap_candidates()
                     self._sync_handle_positions(item)
+                    # The drag is a visual preview: the spatial index and the
+                    # snap-candidate cache are refreshed on commit (release) or
+                    # cancel only, so a 60 Hz drag never rebuilds scene-wide
+                    # snap candidates or re-serializes the dragged feature.
             event.accept()
             return
         if self._dragging and self._tool == "move":
