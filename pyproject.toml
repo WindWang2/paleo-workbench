@@ -53,9 +53,12 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-# WellPlot Desktop: well-log-engine/apps/wellplot-desktop
-# (example and/or product as it matures — not packaged from this tree)
-# pip install -e well-log-engine/apps/wellplot-desktop
+# Installed-state entry points (packaging #440). `python -m paleo_workbench`
+# works via paleo_workbench/__main__.py; both enter paleo_workbench.main.main()
+# and exit with its status (SystemExit(2) with install guidance when geoviz is
+# unavailable). WellPlot Desktop (well-log-engine/apps/wellplot-desktop) is a
+# separate product not packaged from this tree.
+paleo-workbench = "paleo_workbench.main:main"
 
 [tool.setuptools.packages.find]
 include = ["paleo_workbench*"]

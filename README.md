@@ -28,12 +28,20 @@ Python process (ISS-ENV-01). Pytest also configures package roots via
 
 When packages are not installed, `paleo_workbench.env_bootstrap` prepends the
 checkout's `geo-viz-engine` package roots on import of `paleo_workbench` and
-again at the `python -m paleo_workbench.main` entry point.
+again at the app entry points.
 
 ```bash
-# Entry point (after install or from a source checkout with bootstrap)
+# Entry points (after `pip install .` / `pip install -e .`, or from a source
+# checkout with the geoviz bootstrap)
+paleo-workbench            # console script
+python -m paleo_workbench  # module entry
 python -m paleo_workbench.main
 ```
+
+If geoviz cannot be imported the app exits with code 2 and prints the install
+commands (geoviz is intentionally not a hard dependency; see
+`requirements-geoviz.txt`). `python paleo_workbench/main.py` script mode is
+also supported (it re-adds the repo root to `sys.path`).
 
 ### Qt display platform (Linux)
 
