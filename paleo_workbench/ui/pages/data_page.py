@@ -153,6 +153,30 @@ class _DeliveryWorker(QObject):
         self.finished.emit(checksum)
 
 
+class _ExportWorker(QObject):
+    """Asset export (format conversion + catalog registration) off the GUI
+    thread (#528): convert_fn reads and rewrites the whole source file and
+    record_export copies + hashes the output — GB-scale SEG-Y/LAS exports
+    froze the window for the whole conversion inside the context-menu slot.
+    """
+
+    finished = Signal(object)  # ExportResult
+    failed = Signal(str)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self._fn = fn
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self._fn()
+        except Exception as exc:  # defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(result)
+
+
 class DataPage(QWidget):
     data_context_changed = Signal(dict)
     import_finished = Signal(object)
@@ -180,6 +204,7 @@ class DataPage(QWidget):
         self._register_job.released.connect(self._finish_import_job)
         self._rescan_job = OwnedWorkerJob(self)
         self._deliver_job = OwnedWorkerJob(self)
+        self._export_job = OwnedWorkerJob(self)
         self._verify_job = OwnedWorkerJob(self)
         self._last_import_report: ImportReport | None = None
         self._rescan_context: tuple | None = None
@@ -330,6 +355,7 @@ class DataPage(QWidget):
         visualization_joined = self._visualization_controller.shutdown(wait_ms)
         import_joined = self._shutdown_import_jobs(wait_ms)
         deliver_joined = self._deliver_job.shutdown(wait_ms)
+        export_joined = self._export_job.shutdown(wait_ms)
         verify_joined = self._verify_job.shutdown(wait_ms)
         joined = all(
             result is not False
@@ -338,6 +364,7 @@ class DataPage(QWidget):
                 visualization_joined,
                 import_joined,
                 deliver_joined,
+                export_joined,
                 verify_joined,
             )
         )
@@ -927,19 +954,14 @@ class DataPage(QWidget):
             )
             if not output_path:
                 return
-            try:
-                result = export_project_inventory(
+            self._start_export(
+                lambda: export_project_inventory(
                     self.project,
                     Path(output_path),
                     project_path=project_file,
                     register=True,
                 )
-            except Exception as exc:
-                self._set_action_status(f"导出失败：{exc}")
-                return
-            self._set_action_status(result.message)
-            if result.success:
-                self._refresh()
+            )
             return
 
         formats = get_available_formats(asset)
@@ -955,8 +977,8 @@ class DataPage(QWidget):
         )
         if not output_path:
             return
-        try:
-            result = export_asset_to_path(
+        self._start_export(
+            lambda: export_asset_to_path(
                 asset,
                 format_label,
                 Path(output_path),
@@ -964,12 +986,37 @@ class DataPage(QWidget):
                 project_path=project_file,
                 register=True,
             )
-        except Exception as exc:
-            self._set_action_status(f"导出失败：{exc}")
+        )
+
+    def _start_export(self, export_fn) -> None:
+        """Run an export (conversion + catalog registration) off the GUI
+        thread (#528); the result lands via queued signals."""
+        if self._export_job.is_running:
+            self._set_action_status("导出正在进行中...")
+            return
+        worker = _ExportWorker(export_fn)
+        self._export_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_export_finished),
+                (worker.failed, self._handle_export_failed),
+            ),
+            target=self.project,
+        )
+        self._set_action_status("正在导出...")
+
+    @Slot(object)
+    def _handle_export_finished(self, result) -> None:
+        if self._export_job.target is not self.project:
             return
         self._set_action_status(result.message)
-        if result.success and result.artifact is not None:
+        if result.success:
             self._refresh()
+
+    @Slot(str)
+    def _handle_export_failed(self, message: str) -> None:
+        self._set_action_status(f"导出失败：{message}")
 
     def _classify_selected_asset(self, new_type: str) -> None:
         asset = self._unwrap_asset(self._selected_asset)

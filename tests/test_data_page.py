@@ -13,6 +13,7 @@ from paleo_workbench.resources.import_service import ImportReport
 from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
 from paleo_workbench.ui.pages.asset_table_model import AssetTableModel
 from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
+import paleo_workbench.ui.pages.data_page as data_page_mod
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
@@ -1115,8 +1116,13 @@ def test_data_page_export_selected_asset_las_to_csv(qtbot, tmp_path: Path):
     ):
         page._export_selected_asset("CSV")
 
-    assert out_path.exists()
-    assert "已导出" in page.data_toolbar.operation_status_label.text()
+    # The conversion + catalog registration run on a worker (#528); the
+    # result lands via queued signals.
+    qtbot.waitUntil(lambda: out_path.exists(), timeout=15_000)
+    qtbot.waitUntil(
+        lambda: "已导出" in page.data_toolbar.operation_status_label.text(),
+        timeout=15_000,
+    )
 
 
 @pytest.mark.timeout(15)
@@ -1386,3 +1392,47 @@ def test_preview_settings_visualization_change_reloads_current_visualization(
     page._selected_asset = object()
     page.reader_panel.preview_settings_changed.emit(settings)
     assert visual_requests == [resource]
+
+
+def test_data_page_export_runs_off_gui_thread(qtbot, tmp_path: Path):
+    """#528: the context-menu export must not run the conversion + catalog
+    registration synchronously in the Qt slot (GB-scale exports froze the
+    window for the whole conversion + hash)."""
+    import threading
+
+    las_content = "~V\nSTRT.M 0:\nSTOP.M 10:\nSTEP.M 1:\n~C\nDEPT.M  :\n~A\n0\n1\n"
+    src_file = tmp_path / "well.las"
+    src_file.write_text(las_content)
+    project = ProjectDocument.new("Thr")
+    project.resources.append(
+        ResourceItem(
+            name="well.las", path=str(src_file), type="well_log", format="las",
+            status="parsed",
+        )
+    )
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.update_state(dashboard_state(project), project.resources, project.export_artifacts)
+    page.asset_table.table.selectRow(0)
+
+    threads: list[str] = []
+    real = data_page_mod.export_asset_to_path
+
+    def spy(*args, **kwargs):
+        threads.append(threading.current_thread().name)
+        return real(*args, **kwargs)
+
+    with patch.object(data_page_mod, "export_asset_to_path", side_effect=spy), patch(
+        "paleo_workbench.ui.pages.data_page.QFileDialog.getSaveFileName",
+        return_value=(str(tmp_path / "out.csv"), ""),
+    ):
+        page._export_selected_asset("CSV")
+        # Nothing ran synchronously in the slot.
+        assert threads == []
+        qtbot.waitUntil(lambda: bool(threads), timeout=15_000)
+        qtbot.waitUntil(
+            lambda: not page._export_job.is_running, timeout=15_000
+        )
+
+    assert threads[0] != threading.current_thread().name
+    assert (tmp_path / "out.csv").exists()
