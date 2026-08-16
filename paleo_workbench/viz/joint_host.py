@@ -248,7 +248,7 @@ class WellSeismicJointHost(QObject):
             # the previous project's fences/probe: their vertices are
             # meaningless against the next survey.
             self._scene.set_volume_access(None)
-            self._scene.clear_fences()
+            self._clear_scene_fences()
         if self._scene is not None:
             # Drop the previous project's wells/tops/curves too: their
             # coordinates belong to the old survey and would keep rendering
@@ -267,6 +267,21 @@ class WellSeismicJointHost(QObject):
             getattr(state, "well_identity_map", None) or {}
         )
         self._well_identity_registry = None
+
+    def _clear_scene_fences(self) -> None:
+        """Drop every fence from the joint scene.
+
+        The engine's ``WellSeismicScene.clear_fences`` bulk API was removed
+        (engine "unify 2D/3D vertical domain" refactor); clear through the
+        per-fence API instead. Idempotent and safe with no fences.
+        """
+        if self._scene is None:
+            return
+        for fence in list(self._scene.fences):
+            try:
+                self._scene.remove_fence(fence.id)
+            except Exception:
+                logger.debug("joint scene fence removal failed", exc_info=True)
 
     def well_names(self) -> list[str]:
         if self._scene is None:
@@ -299,7 +314,7 @@ class WellSeismicJointHost(QObject):
         self._scene.set_volume_access(None)
         # Old fence vertices belong to the previous survey — drop them so the
         # auto-default pair can be recreated for the new one.
-        self._scene.clear_fences()
+        self._clear_scene_fences()
         repo = _repo_root()
         self._paths = resolve_joint_assets(self._project, repo_root=repo)
         paths = self._paths
