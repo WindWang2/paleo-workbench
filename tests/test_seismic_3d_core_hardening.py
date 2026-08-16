@@ -16,6 +16,8 @@ from paleo_workbench.viz.seismic_3d_api import (
     compute_coherence_3d,
     fast_resample_volume_3d,
     fast_slice_extract,
+    fast_slice_to_indexed8,
+    marching_cubes_3d,
 )
 
 # Defer the hard C++ import so missing extensions skip via pytestmark below
@@ -278,3 +280,108 @@ def test_fse_large_in_range_axis_matches_on_both_paths():
     cpp, py = _both_paths(fast_slice_extract, vol, 2**20, 1)
     assert not isinstance(cpp, Exception)
     np.testing.assert_array_equal(cpp, py)
+
+
+# ---------------------------------------------------------------------------
+# Non-finite coherence parity hardening: ±Inf data and float-overflow of the
+# float v*v in sum_sq poison the running sums exactly like NaN (Inf - Inf and
+# NaN - x are both NaN). The C++ rebuild-on-recovery must cover any non-finite
+# sample in either accumulator, not just NaN mean_sq.
+# ---------------------------------------------------------------------------
+
+
+def test_coherence_inf_recovers_and_matches_fallback():
+    """A +Inf sample zeroes exactly the window-overlapping samples; deeper
+    samples recover to the fallback's values (no sticky tail)."""
+    vol = np.arange(5 * 5 * 12, dtype=np.float32).reshape(5, 5, 12) / 100.0
+    vol[2, 2, 6] = np.inf
+    cpp, py = _nan_parity(vol, 3, 3, 3)
+    np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
+    np.testing.assert_array_equal(cpp == 0.0, py == 0.0)
+    # Same footprint as the NaN case: 3x3 columns x 3 vertical samples.
+    assert (cpp == 0.0).sum() == 9 * 3
+    assert cpp[2, 2, 8:].min() > 0.0
+
+
+def test_coherence_mixed_inf_signs_recover_and_match_fallback():
+    """+Inf and -Inf in the same spatial window make trace_sum NaN while
+    sum_sq is +Inf — both accumulators go non-finite via different routes;
+    recovery and per-window semantics must still match the fallback."""
+    vol = np.arange(5 * 5 * 12, dtype=np.float32).reshape(5, 5, 12) / 100.0
+    vol[2, 2, 6] = np.inf
+    vol[3, 3, 6] = -np.inf
+    cpp, py = _nan_parity(vol, 3, 3, 3)
+    np.testing.assert_allclose(cpp, py, rtol=1e-6, atol=1e-6)
+    np.testing.assert_array_equal(cpp == 0.0, py == 0.0)
+    assert cpp[2, 2, 8:].min() > 0.0
+
+
+def test_coherence_float_overflow_recovers_after_window():
+    """|v| ~ 1e20 overflows the float ``v * v`` so sum_sq alone goes +Inf while
+    mean_sq stays finite — the running denominator was poisoned and could never
+    recover (only isnan(run_num) was checked). Once the sample slides out of
+    the window both backends must agree again. (While the window overlaps the
+    sample the C++ Inf-denominator clamps to 0.0 versus the fallback's small
+    finite ratio — a known residual in-window gap, out of scope here.)"""
+    vol = np.arange(5 * 5 * 12, dtype=np.float32).reshape(5, 5, 12) / 100.0
+    vol[2, 2, 6] = 1e20
+    cpp, py = _nan_parity(vol, 3, 3, 3)
+    np.testing.assert_allclose(cpp[:, :, :5], py[:, :, :5], rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(cpp[:, :, 8:], py[:, :, 8:], rtol=1e-5, atol=1e-6)
+    assert cpp[2, 2, 8:].min() > 0.0
+
+
+# ---------------------------------------------------------------------------
+# fast_slice_to_indexed8 boundary parity (inherits _py_fast_slice_extract's
+# validation, plus its own float64 downcast contract)
+# ---------------------------------------------------------------------------
+
+
+def test_indexed8_non_3d_input_raises_runtime_error_on_both_paths():
+    """ndim != 3: C++ throws std::runtime_error (-> RuntimeError); the fallback
+    must raise the same type instead of silently slicing via axis % ndim."""
+    cpp, py = _both_paths(fast_slice_to_indexed8, np.zeros((5, 4), dtype=np.float32), 0, 1)
+    assert isinstance(cpp, RuntimeError), f"C++ path raised {type(cpp)}"
+    assert type(py) is type(cpp), f"fallback raised {type(py)}"
+
+
+def test_fse_non_3d_input_raises_same_exception_type_on_both_paths():
+    """Same-type check for fast_slice_extract itself, 2-D and 4-D inputs."""
+    for bad in (
+        np.zeros((5, 4), dtype=np.float32),
+        np.zeros((2, 3, 4, 5), dtype=np.float32),
+    ):
+        cpp, py = _both_paths(fast_slice_extract, bad, 0, 1)
+        assert isinstance(cpp, RuntimeError), f"C++ path raised {type(cpp)}"
+        assert type(py) is type(cpp), f"fallback raised {type(py)}"
+
+
+def test_indexed8_float64_input_downcasts_and_matches_on_both_paths():
+    """float64 input: both paths downcast to float32 before stretching, so the
+    uint8 pixels and the reported (v_min, v_max) are identical."""
+    vol = np.arange(2 * 3 * 4, dtype=np.float64).reshape(2, 3, 4) / 7.0
+    cpp, py = _both_paths(fast_slice_to_indexed8, vol, 0, 1)
+    assert not isinstance(cpp, Exception)
+    assert cpp[0].dtype == np.uint8 and py[0].dtype == np.uint8
+    np.testing.assert_array_equal(cpp[0], py[0])
+    assert cpp[1] == py[1] and cpp[2] == py[2]
+
+
+# ---------------------------------------------------------------------------
+# marching_cubes_3d fallback NaN/Inf guard: non-finite voxels are replaced by a
+# strictly-below-range sentinel before calling skimage, so no non-finite value
+# can interpolate into a vertex (the C++ path skips those cubes entirely).
+# ---------------------------------------------------------------------------
+
+
+def test_marching_cubes_fallback_non_finite_volume_emits_only_finite_vertices():
+    pytest.importorskip("skimage", reason="fallback marching cubes engine")
+    vol = np.zeros((5, 5, 5), dtype=np.float32)
+    vol[1:4, 1:4, 1:4] = 1.0
+    vol[2, 2, 2] = np.nan
+    vol[3, 3, 3] = np.inf
+    with disabled_acceleration():
+        verts, faces = marching_cubes_3d(vol, 0.5)
+    assert len(verts) > 0, "expected a surface around the non-finite voxels"
+    assert np.isfinite(verts).all(), "non-finite vertices leaked into the mesh"
+    assert faces.min() >= 0 and faces.max() < len(verts)

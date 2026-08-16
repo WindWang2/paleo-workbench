@@ -186,9 +186,9 @@ def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndar
             f"axis and index must fit in a C++ int (got axis={axis}, index={index})"
         )
     # float32 dtype contract: the C++ side accepts any numeric dtype via
-    # forcecast and downcasts to float32 (issue #446), so the fallback does
-    # the same instead of silently preserving float64.
-    vol = np.asarray(volume, dtype=np.float32)
+    # forcecast and downcasts to a contiguous float32 buffer (issue #446), so
+    # the fallback does the same instead of silently preserving float64.
+    vol = np.ascontiguousarray(volume, dtype=np.float32)
     if vol.ndim != 3:
         raise RuntimeError("Input volume must be 3D")
     axis_idx = int(axis) % vol.ndim
@@ -356,7 +356,27 @@ def _py_marching_cubes_3d(
             np.zeros((0, 3), dtype=np.float32),
             np.zeros((0, 3), dtype=np.int32),
         )
-    verts, faces, _normals, _values = marching_cubes(vol, level=level)
+    finite_mask = np.isfinite(vol)
+    if not finite_mask.all():
+        # NaN/Inf guard: skimage's edge interpolation would propagate non-finite
+        # corner values into the emitted vertices, while the C++ path skips any
+        # cube touching a non-finite voxel (cpp-core-review I2/I5). Replace
+        # those voxels with a sentinel strictly below every finite voxel and
+        # below `level` (the range check above guarantees level >= min), so
+        # they classify as outside — the surface wraps around the missing data
+        # instead of a hole, but every vertex stays finite. The sentinel is a
+        # float64 nextafter step below the finite minimum: float64 spacing is
+        # far finer than float32, so no float32 data value can collide with it
+        # (a collision would divide by zero in the edge interpolation). Run
+        # skimage on a float64 copy so the interpolation itself never
+        # overflows float32.
+        finite_min = float(vol[finite_mask].min())
+        sentinel = float(np.nextafter(finite_min, -np.inf))
+        work = vol.astype(np.float64)
+        work[~finite_mask] = sentinel
+    else:
+        work = vol
+    verts, faces, _normals, _values = marching_cubes(work, level=level)
     return verts.astype(np.float32), faces.astype(np.int32)
 
 

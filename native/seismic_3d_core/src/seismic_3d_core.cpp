@@ -467,26 +467,32 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                 }
 
                 // Running-sum over the clamped vertical window [k0, k1].
-                // NaN safety (issue #385): a NaN sample makes run_num/run_den
-                // NaN, and NaN - x == NaN, so the incremental updates can never
-                // flush it once the sample leaves the window. Track how many
-                // NaN samples the window currently contains and, when the last
-                // one exits, rebuild the window sums from scratch to recover.
+                // Non-finite safety (issue #385): a non-finite sample poisons
+                // run_num/run_den, and NaN - x == NaN / Inf - Inf == NaN, so
+                // the incremental updates can never flush it once the sample
+                // leaves the window. Either accumulator can go non-finite on
+                // its own: mean_sq via NaN/±Inf data, sum_sq additionally via
+                // float overflow of v*v (|v| >~ 1.8e19) with mean_sq still
+                // finite. Track how many non-finite samples the window
+                // currently contains and, when the last one exits, rebuild the
+                // window sums from scratch to recover — matching the Python
+                // fallback's per-window recompute semantics.
                 size_t k0 = 0;
                 size_t k1 = std::min(nt - 1, half_t);
                 double run_num = 0.0;
                 double run_den = 0.0;
-                size_t nan_in_window = 0;
+                size_t nonfinite_in_window = 0;
                 for (size_t k = k0; k <= k1; ++k) {
                     run_num += mean_sq[k];
                     run_den += sum_sq[k];
-                    if (std::isnan(mean_sq[k])) ++nan_in_window;
+                    if (!std::isfinite(mean_sq[k]) || !std::isfinite(sum_sq[k])) ++nonfinite_in_window;
                 }
                 for (size_t k = 0; k < nt; ++k) {
                     double den = run_den / static_cast<double>(k1 - k0 + 1) + 1e-12;
                     // NaN propagates to 0.0 through the std::min/std::max clamp
-                    // chain whenever the window overlaps a NaN sample, matching
-                    // the Python fallback's per-window recompute semantics.
+                    // chain whenever the window overlaps a non-finite sample,
+                    // matching the Python fallback's per-window recompute
+                    // semantics.
                     float coh_val = static_cast<float>(std::min(1.0, std::max(0.0, run_num / den)));
                     dst[i * (nx * nt) + j * nt + k] = coh_val;
 
@@ -498,16 +504,17 @@ py::array_t<float> compute_coherence_3d(py::array_t<float, py::array::c_style | 
                             ++k1;
                             run_num += mean_sq[k1];
                             run_den += sum_sq[k1];
-                            if (std::isnan(mean_sq[k1])) ++nan_in_window;
+                            if (!std::isfinite(mean_sq[k1]) || !std::isfinite(sum_sq[k1])) ++nonfinite_in_window;
                         }
                         while (k0 < new_lo) {
-                            if (std::isnan(mean_sq[k0])) --nan_in_window;
+                            if (!std::isfinite(mean_sq[k0]) || !std::isfinite(sum_sq[k0])) --nonfinite_in_window;
                             run_num -= mean_sq[k0];
                             run_den -= sum_sq[k0];
                             ++k0;
                         }
-                        if (nan_in_window == 0 && std::isnan(run_num)) {
-                            // The window is NaN-free again but the accumulators
+                        if (nonfinite_in_window == 0 &&
+                            (!std::isfinite(run_num) || !std::isfinite(run_den))) {
+                            // The window is finite again but the accumulators
                             // were poisoned; rebuild them from the window data.
                             run_num = 0.0;
                             run_den = 0.0;
