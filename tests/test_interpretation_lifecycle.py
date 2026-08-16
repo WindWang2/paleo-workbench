@@ -64,10 +64,18 @@ def test_sparse_edit_not_full_grid_copy_on_sculpt():
     after = draft.working_z()
     changed = np.count_nonzero(after != before)
     assert 0 < changed < before.size  # local patch, not whole grid rewrite semantics
-    # undo stack stores sparse indices
+    # Undo stack stores sparse indices: EXACTLY the modified cells, with
+    # payloads matching the pre/post state at those indices. The previous
+    # two assertions were disjunctions that held for ANY index array over
+    # the grid (tautologies), so a dense-patch regression (indices=arange
+    # + full copies) kept this test green (#526).
     patch = draft._mesh._undo_stack[-1]
-    assert patch.indices.size == changed or patch.indices.size <= before.size
-    assert patch.indices.size < before.size or changed < before.size
+    assert patch.indices.size == changed
+    assert patch.indices.size < before.size
+    flat_before = before.reshape(-1)
+    flat_after = after.reshape(-1)
+    np.testing.assert_array_equal(patch.old_z, flat_before[patch.indices])
+    np.testing.assert_array_equal(patch.new_z, flat_after[patch.indices])
 
 
 def test_save_new_version_immutable_and_parent_chain(tmp_path: Path):
