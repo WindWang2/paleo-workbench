@@ -782,6 +782,10 @@ class MappingPage(QWidget):
         for kind in ("facies", "well", "line", "label"):
             if self._authoring_document.layer(kind).id == layer_id:
                 self._authoring_document.set_active_kind(kind)
+                # The active tool captured the PREVIOUS layer's index and
+                # edit session; without a rebind, clicks and edits kept
+                # landing on the old layer (#523).
+                self._rebind_tool_after_layer_switch()
                 self._sync_action_state()
                 self._sync_map_status()
                 return
@@ -925,10 +929,36 @@ class MappingPage(QWidget):
         layers = (self._authoring_document.active_layer,) if self._snapping.current_layer_only else self._authoring_document.layers()
         return self._snapping.snap(point, tolerance=tolerance, layers=layers)
 
+    # Tools that capture the active layer/index/session at construction
+    # (#523). After an active-layer switch they must be REBOUND to the new
+    # layer; kind-forcing tools (add_*) are deactivated instead when the
+    # switch moved away from their kind (re-requesting them would hijack
+    # the user's layer choice).
+    _LAYER_BOUND_TOOL_ACTIONS = frozenset(
+        {"select", "identify", "select_rectangle", "move_feature", "vertex"}
+    )
+    _KIND_BOUND_TOOL_ACTIONS = {
+        "add_point": "well", "add_line": "line", "add_polygon": "facies",
+    }
+
+    def _rebind_tool_after_layer_switch(self) -> None:
+        action = getattr(self, "_active_tool_action", None)
+        if not action or action in ("pan", "zoom_in", "zoom_out", "measure_distance"):
+            return  # not bound to a layer
+        if action in self._LAYER_BOUND_TOOL_ACTIONS:
+            self._on_action_tool_requested(action)
+        elif action in self._KIND_BOUND_TOOL_ACTIONS:
+            kind = self._KIND_BOUND_TOOL_ACTIONS[action]
+            if self._authoring_document is None or (
+                self._authoring_document.active_kind != kind
+            ):
+                self._on_action_tool_requested("pan")
+
     def _on_action_tool_requested(self, action_id: str) -> None:
         authoring = self._authoring_document
         if authoring is None:
             return
+        self._active_tool_action = action_id
         if action_id == "pan":
             tool = PanTool()
         elif action_id in {"zoom_in", "zoom_out"}:
