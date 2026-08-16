@@ -57,12 +57,12 @@ def test_joint_analysis_state_roundtrip_in_project():
 
 
 def _enable_scene_depth(page):
-    """Install an explicit (demo) T-D transform so Depth is legitimately available."""
+    """Install an explicit (demo) T-D transform for deterministic depth math."""
     from geoviz import select_depth_transform
 
     scene = page._joint_host.scene
     if scene is not None:
-        scene.set_depth_transform(select_depth_transform(constant_v0=True))
+        scene.set_depth_transform(select_depth_transform(v0_m_s=3000.0))
 
 def test_geomodel_collect_joint_state(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.viz import joint_host as host_mod

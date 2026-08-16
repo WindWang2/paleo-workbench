@@ -490,9 +490,9 @@ def test_joint_widget_exposes_gr_colored_3d_overlay_specs(qtbot):
     )
 
     scene = WellSeismicScene()
-    # Depth requires an explicit transform (fail-closed); the test opts into
-    # the constant-V0 approximation the way a synthetic demo would.
-    scene.set_depth_transform(select_depth_transform(constant_v0=True))
+    # Depth is always selectable in the current engine (constant-V0 fallback);
+    # keep the explicit transform for the legacy test intent.
+    scene.set_depth_transform(select_depth_transform(v0_m_s=3000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     scene.set_wells(
         [

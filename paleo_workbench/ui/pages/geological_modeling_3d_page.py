@@ -1815,14 +1815,9 @@ class GeologicalModeling3DPage(QWidget):
                 state = getattr(self._project, "joint_analysis", None)
                 domain = getattr(state, "vertical_domain", None) or "Time"
             if hasattr(self, "_joint_domain"):
-                scene = self._joint_host.scene
-                if (
-                    scene is not None
-                    and str(domain).lower().startswith("depth")
-                    and not scene.depth_available
-                ):
-                    # Saved Depth is unrealizable without a transform.
-                    domain = "Time"
+                # Saved Depth is always realizable in the current engine
+                # (constant-V0 fallback); there is no fail-closed gate to
+                # fall back to Time on.
                 self._joint_domain.blockSignals(True)
                 idx = self._joint_domain.findText(domain)
                 if idx >= 0:
@@ -2400,12 +2395,15 @@ class GeologicalModeling3DPage(QWidget):
         )
 
     def _update_domain_combo_availability(self) -> None:
-        """Disable the Depth option while no time-depth transform exists."""
+        """Keep the Depth option enabled: the engine provides a constant-V0
+        fallback when no external transform exists and flags it via
+        ``approximate_warning`` on switch (the old fail-closed
+        ``depth_available`` gate was removed upstream)."""
         combo = getattr(self, "_joint_domain", None)
         if combo is None:
             return
         scene = self._joint_host.scene
-        depth_ok = bool(scene is not None and scene.depth_available)
+        depth_ok = scene is not None
         idx = combo.findText("Depth")
         if idx < 0:
             return

@@ -412,12 +412,17 @@ def test_fence_axis_and_amplitude_consistency(source, odd_segy, strides):
 # C4/C5/C6 — TIME/DEPTH semantics (unified + fail-closed)
 # ---------------------------------------------------------------------------
 
-def test_depth_unavailable_without_transform(odd_segy):
+def test_depth_fallback_without_external_transform(odd_segy):
+    """Engine contract (b9ac5d93): DEPTH applies via the constant-V0 fallback
+    and the approximate nature is flagged — no fail-closed refusal, no
+    ``depth_available`` attribute."""
+    from geoviz_well_seismic_3d.depth_transform import DepthTransformKind
+
     scene, _ = _scene_with_survey_and_preview(odd_segy, (2, 3, 4))
-    assert scene.depth_available is False
-    with pytest.raises(ValueError, match="no time-depth transform"):
-        scene.set_vertical_domain(VerticalDomain.DEPTH)
-    assert scene.vertical_domain is VerticalDomain.TIME
+    scene.set_vertical_domain(VerticalDomain.DEPTH)
+    assert scene.vertical_domain is VerticalDomain.DEPTH
+    assert scene.depth_transform.kind is DepthTransformKind.CONSTANT_V0
+    assert scene.depth_transform.approximate_warning
 
 
 def test_domain_round_trip_time_depth_time(odd_segy):
@@ -427,7 +432,7 @@ def test_domain_round_trip_time_depth_time(odd_segy):
     times_before = [
         reg.sample_idx_to_time_ms(p) for p in range(reg.n_sample)
     ]
-    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=2500.0))
+    scene.set_depth_transform(select_depth_transform(v0_m_s=2500.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
     tr = scene.depth_transform
@@ -449,7 +454,7 @@ def test_fence_extract_follows_scene_domain_2d3d_unified(odd_segy):
     )
     scene.add_fence(fence)
     time_ext = scene.extract_active_fence(n_along=8)
-    scene.set_depth_transform(select_depth_transform(constant_v0=True))
+    scene.set_depth_transform(select_depth_transform(v0_m_s=3000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     depth_ext = scene.extract_active_fence(n_along=8)  # what 2D shows now
     assert time_ext is not None and depth_ext is not None
@@ -543,7 +548,7 @@ def test_depth_trajectory_never_uses_md_as_z(odd_segy):
         [WellHead("W1", x, y, x, y, 200.0, id="source:w1")],
         td_tables={"source:w1": td},
     )
-    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=2000.0))
+    scene.set_depth_transform(select_depth_transform(v0_m_s=2000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     traj = scene.well_trajectories()["source:w1"]
     assert traj.has_td is True

@@ -372,21 +372,17 @@ class WellSeismicJointHost(QObject):
     def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> bool:
         """Set the shared (2D + 3D) vertical domain: 'Time' or 'Depth'.
 
-        Fail-closed: Depth is only entered when the scene has an
-        authoritative time-depth transform; without one the request is
-        refused, the domain stays Time and the caller is told why (a uniform
-        velocity must never masquerade as depth). Returns True on success.
+        Depth applies whenever the engine can provide a transform. Without an
+        external depth volume the engine falls back to a constant-V0
+        approximation and flags it via ``depth_transform.approximate_warning``
+        (engine contract: the fail-closed ``depth_available`` gate was removed
+        upstream). Returns True on success.
         """
         from geoviz import VerticalDomain
 
         if self._scene is None:
             return False
         wants_depth = str(domain).lower().startswith("depth")
-        if wants_depth and not self._scene.depth_available:
-            self.status_changed.emit(
-                "Depth 不可用：缺少可用时深转换（速度模型/checkshot/深度域数据体），已保持 Time"
-            )
-            return False
         if wants_depth:
             self._scene.set_vertical_domain(VerticalDomain.DEPTH)
             warn = self._scene.depth_transform.approximate_warning or ""
@@ -397,6 +393,7 @@ class WellSeismicJointHost(QObject):
             self.status_changed.emit("竖直域=Time（2D/3D 同域）")
         if emit_scene:
             self.scene_updated.emit()
+        return True
         return True
 
     @property

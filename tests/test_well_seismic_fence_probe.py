@@ -86,7 +86,7 @@ def test_extract_active_fence_domain_override_time_while_scene_depth():
             vertices_xy=np.array([[0.0, 0.0], [5000.0, 5000.0]], dtype=np.float64),
         )
     )
-    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=3000.0))
+    scene.set_depth_transform(select_depth_transform(v0_m_s=3000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
     # Default extraction (what the 2D profile uses) follows the scene domain.
@@ -102,17 +102,17 @@ def test_extract_active_fence_domain_override_time_while_scene_depth():
     assert scene.vertical_domain is VerticalDomain.DEPTH
 
 
-def test_depth_domain_unavailable_without_transform():
-    """Fail-closed: Depth is refused while no time-depth transform exists."""
+def test_depth_domain_uses_constant_v0_fallback():
+    """Engine contract (b9ac5d93): Depth applies via the constant-V0 fallback
+    and the approximate nature is flagged — no fail-closed refusal, no
+    ``depth_available`` attribute."""
+    from geoviz_well_seismic_3d.depth_transform import DepthTransformKind
+
     scene = _scene_with_volume()
-    assert scene.depth_available is False
-    with pytest.raises(ValueError, match="no time-depth transform"):
-        scene.set_vertical_domain(VerticalDomain.DEPTH)
-    assert scene.vertical_domain is VerticalDomain.TIME
-    scene.set_depth_transform(select_depth_transform(constant_v0=True))
-    assert scene.depth_available is True
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
+    assert scene.depth_transform.kind is DepthTransformKind.CONSTANT_V0
+    assert scene.depth_transform.approximate_warning
 
 
 def test_multi_fence_active_and_well_to_well():
@@ -312,7 +312,7 @@ def test_probe_slice_indices():
 
 def test_depth_domain_and_v0_warning():
     scene = _scene_with_volume()
-    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=2500))
+    scene.set_depth_transform(select_depth_transform(v0_m_s=2500))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
     assert scene.vertical_domain is VerticalDomain.DEPTH
     assert scene.depth_transform.approximate_warning is not None

@@ -287,12 +287,12 @@ def test_joint_2d_time_only_chip_and_empty_hint(qtbot):
     ph = getattr(page, "_joint_2d_placeholder", None)
     if ph is not None:
         assert "fence" in ph.text().lower() or "井" in ph.text()
-    # Without a time-depth transform, Depth is refused and the chip keeps
-    # reporting the actual (Time) domain — no fake Depth display.
+    # Depth applies via the engine's constant-V0 fallback; the chip reports
+    # the actual (Depth) domain — no fail-closed refusal anymore.
     page._on_joint_domain_changed("Depth")
     scene = page._joint_host.scene
-    if scene is not None and not scene.depth_available:
-        assert "Time" in page._joint_2d_time_chip.text()
+    if scene is not None:
+        assert "Depth" in page._joint_2d_time_chip.text()
     page._on_joint_domain_changed("Time")
     assert page._joint_2d_time_chip.text() == "域: Time · 2D/3D 联动"
 
@@ -344,7 +344,7 @@ def test_profile_follows_scene_extract_domain(qtbot):
     scene.add_fence(
         FenceSection("F", np.array([[0.0, 0.0], [5000.0, 5000.0]], dtype=np.float64))
     )
-    scene.set_depth_transform(select_depth_transform(constant_v0=True, v0_m_s=3000.0))
+    scene.set_depth_transform(select_depth_transform(v0_m_s=3000.0))
     scene.set_vertical_domain(VerticalDomain.DEPTH)
 
     profile = FenceProfile2D()
