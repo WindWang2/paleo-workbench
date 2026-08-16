@@ -249,3 +249,74 @@ def test_run_dtw_shutdown_cancels_inflight_job(qtbot, tmp_path, monkeypatch):
     # Release the detached worker so its thread exits before teardown.
     release.set()
     qtbot.waitUntil(lambda: detached_job_keeper().job_count() == 0, timeout=5_000)
+
+
+def test_run_dtw_recommendation_runs_off_gui_thread(qtbot, tmp_path, monkeypatch):
+    """#502: recommend_top's O(n*m) DP must not run in the click slot.
+
+    The recommendation used to execute synchronously on the GUI thread
+    (~1.5 s at the 1e6-cell decimation ceiling per click); it now runs at
+    the head of the propagation worker and lands before the finished label.
+    """
+    from paleo_workbench.viz.formation_top_correlator import TopRecommendation
+
+    page = _load_page(qtbot, tmp_path, monkeypatch)
+    canvas = page.cross_host.widget
+    canvas.picks_model.add_pick("C1", "A1", 1164.0)
+    monkeypatch.setattr(
+        canvas, "propagate_pick_via_dtw", _FakeCanvas().propagate_pick_via_dtw
+    )
+
+    calls = {"thread": None, "rec": None}
+
+    def fake_recommend_top(**kwargs):
+        calls["thread"] = threading.current_thread().name
+        calls["rec"] = TopRecommendation(
+            suggested_depth=1200.0, confidence=0.87, dtw_cost=4.2
+        )
+        return calls["rec"]
+
+    monkeypatch.setattr(page.correlation_engine, "recommend_top", fake_recommend_top)
+
+    page._run_dtw()
+    # Nothing ran synchronously in the click slot (the old freeze).
+    assert calls["thread"] is None
+
+    def _done():
+        return "建议拾取" in page.status_label.text()
+
+    qtbot.waitUntil(_done, timeout=10_000)
+    # Executed on the owned worker thread, not the GUI thread.
+    assert calls["thread"] is not None
+    assert calls["thread"] != threading.current_thread().name
+    # The recommendation arrived before the finished label consumed it
+    # (queued delivery preserves emit order within one worker).
+    assert "置信度: 0.87" in page.status_label.text()
+    assert page._dtw_confidence == 0.87
+    qtbot.waitUntil(lambda: page.dtw_btn.isEnabled(), timeout=5_000)
+    page.shutdown_workers(2_000)
+
+
+def test_run_dtw_recommendation_failure_degrades_to_unavailable(
+    qtbot, tmp_path, monkeypatch
+):
+    """A raising recommend_fn must degrade the label, not kill propagation."""
+    page = _load_page(qtbot, tmp_path, monkeypatch)
+    canvas = page.cross_host.widget
+    canvas.picks_model.add_pick("C1", "A1", 1164.0)
+    monkeypatch.setattr(
+        canvas, "propagate_pick_via_dtw", _FakeCanvas().propagate_pick_via_dtw
+    )
+
+    def boom(**kwargs):
+        raise RuntimeError("recommendation exploded")
+
+    monkeypatch.setattr(page.correlation_engine, "recommend_top", boom)
+
+    page._run_dtw()
+    qtbot.waitUntil(
+        lambda: "建议拾取" in page.status_label.text(), timeout=10_000
+    )
+    assert "置信度: 不可用" in page.status_label.text()
+    qtbot.waitUntil(lambda: page.dtw_btn.isEnabled(), timeout=5_000)
+    page.shutdown_workers(2_000)
