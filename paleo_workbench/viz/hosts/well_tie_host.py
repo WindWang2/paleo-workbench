@@ -88,6 +88,18 @@ def _twt_from_sonic(
     sonic = np.asarray(sonic, dtype=np.float64)
     if depths.size < 2:
         return np.zeros_like(depths)
+    # Gap-aware integral (#534): LAS nulls (-999.25 / blank fields) arrive
+    # as NaN; a single NaN in the raw trapezoid poisoned every TWT sample
+    # at and below the gap (NaN - x == NaN through cumsum), blanking the
+    # deepest part of the well. Bridge gaps from the nearest finite
+    # samples so the integral continues across missing intervals; an
+    # all-null curve integrates to zero (the caller already substitutes
+    # synthetic proxies when the curve is unusable).
+    finite = np.isfinite(sonic)
+    if not finite.any():
+        return np.zeros_like(depths)
+    if not finite.all():
+        sonic = np.interp(depths, depths[finite], sonic[finite])
     dz = np.diff(depths)
     if str(depth_unit or "").strip().lower() in {"ft", "f", "feet", "foot"}:
         dz = dz * 0.3048  # ft -> m

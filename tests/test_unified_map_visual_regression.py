@@ -56,15 +56,17 @@ def test_golden_fallback_composition_has_scalar_contour_symbol_and_polygon_layer
     frame = _frame(_scene())
     image = _image(frame)
 
-    # Scalar raster (NW finite quadrant, grid_z = 0.5).
-    scalar = image.pixelColor(35, 30)
+    # Probes are in letterboxed output space (#522): a 10x10 world extent
+    # in a 160x120 output letterboxes to x in [20, 140] px (12 px/unit).
+    # Scalar raster (NW finite quadrant, grid_z = 0.5) at world (2.2, 7.5).
+    scalar = image.pixelColor(46, 30)
     # Contour line: anti-aliased white over the scalar raster, so it renders as
     # a bright, near-neutral line. ``min > 100`` (bright) and a bounded spread
     # vs. the strongly tinted scalar regions keeps it robust to the specific
     # background value the north-up raster places beneath the line.
     contour = image.pixelColor(80, 60)
-    # Polygon (SW quadrant, opaque raster cell beneath).
-    polygon = image.pixelColor(30, 90)
+    # Polygon (SW quadrant, opaque raster cell beneath) at world (1.9, 2.5).
+    polygon = image.pixelColor(42, 90)
     assert (scalar.red(), scalar.green(), scalar.blue()) != BACKGROUND
     assert min(contour.red(), contour.green(), contour.blue()) > 100
     assert max(contour.red(), contour.green(), contour.blue()) - min(contour.red(), contour.green(), contour.blue()) < 25

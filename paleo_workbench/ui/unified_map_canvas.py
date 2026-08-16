@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPainterPath, Q
 from PySide6.QtWidgets import QWidget
 
 from paleo_workbench.mapping.map_render_backend import (
+    fit_extent_to_aspect,
     MapRenderBackend,
     MapRenderSnapshot,
     RenderFrame,
@@ -126,20 +127,28 @@ class UnifiedMapCanvas(QWidget):
         tool = self._tool_controller.active_tool if self._tool_controller is not None else None
         return bool(getattr(tool, "edits_data", False))
 
+    def _fitted_extent(self) -> tuple[float, float, float, float]:
+        """View extent letterboxed to the widget aspect (#522): uniform
+        units-per-pixel so shapes keep their proportions at any size."""
+        return fit_extent_to_aspect(
+            self._view_extent, self.width(), self.height()
+        )
+
     @property
     def map_units_per_pixel(self) -> float:
-        xmin, ymin, xmax, ymax = self._view_extent
+        xmin, ymin, xmax, ymax = self._fitted_extent()
+        # Uniform after letterboxing; keep max() as a degenerate guard.
         return max((xmax - xmin) / max(1, self.width()), (ymax - ymin) / max(1, self.height()))
 
     def screen_to_map(self, point: QPointF) -> tuple[float, float]:
-        xmin, ymin, xmax, ymax = self._view_extent
+        xmin, ymin, xmax, ymax = self._fitted_extent()
         return (
             xmin + point.x() * (xmax - xmin) / max(1, self.width()),
             ymax - point.y() * (ymax - ymin) / max(1, self.height()),
         )
 
     def map_to_screen(self, point: tuple[float, float]) -> QPointF:
-        xmin, ymin, xmax, ymax = self._view_extent
+        xmin, ymin, xmax, ymax = self._fitted_extent()
         return QPointF(
             (float(point[0]) - xmin) * self.width() / (xmax - xmin),
             (ymax - float(point[1])) * self.height() / (ymax - ymin),
@@ -417,7 +426,25 @@ class UnifiedMapCanvas(QWidget):
             self._backend.set_output_size(*previous_size)
             self._backend.set_dpi(previous_dpi)
 
-    def export_png(self, path: str, *, width: int = 2400, height: int = 1600, dpi: float = 300.0) -> None:
+    def export_png(
+        self,
+        path: str,
+        *,
+        width: int = 2400,
+        height: int | None = None,
+        dpi: float = 300.0,
+    ) -> None:
+        if height is None:
+            # Match the current view's aspect (#522): a fixed 2400x1600
+            # canvas letterboxed a non-3:2 view, and pre-letterboxing it
+            # stretched the export by up to ~25% relative to the screen.
+            xmin, ymin, xmax, ymax = self._view_extent
+            if xmax > xmin and ymax > ymin:
+                height = max(
+                    64, min(16000, round(width * (ymax - ymin) / (xmax - xmin)))
+                )
+            else:
+                height = 1600
         image = self.render_export_image(width, height, dpi=dpi)
         if not image.save(path, "PNG"):
             raise RuntimeError("could not save unified map PNG")

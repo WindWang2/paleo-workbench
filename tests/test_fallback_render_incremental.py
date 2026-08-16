@@ -68,8 +68,11 @@ def _render_frame(backend, extent, *, snapshot=None) -> bytes:
 
 
 def test_fallback_pan_strip_reuse_is_pixel_identical_to_full_render() -> None:
-    pan_a = (30.0, 20.0, 230.0, 220.0)  # 200x200 map window at 200px wide
-    pan_b = (40.0, 20.0, 240.0, 220.0)  # 10px right pan, same scale
+    # Aspect-matched world window (200x160 units in a 200x160 px output):
+    # pan-strip reuse is only guaranteed when the letterbox mapping
+    # (#522) is a no-op — aspect-mismatched extents re-rasterize fully.
+    pan_a = (30.0, 20.0, 230.0, 180.0)
+    pan_b = (40.0, 20.0, 240.0, 180.0)  # 10px right pan, same scale
 
     reference = FallbackMapRenderBackend()
     _configure(reference)
