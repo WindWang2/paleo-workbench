@@ -88,7 +88,7 @@ def test_host_depth_unavailable_status_and_unified_domain(tmp_path, monkeypatch)
     assert host.scene.vertical_domain is VerticalDomain.DEPTH
 
 
-def test_host_loads_gr_using_each_las_curve_depth_samples(tmp_path, monkeypatch):
+def test_host_loads_gr_using_each_las_curve_depth_samples(qtbot, tmp_path, monkeypatch):
     from paleo_workbench.project.models import ProjectDocument, ResourceItem
     from paleo_workbench.viz import joint_host as mod
 
@@ -142,8 +142,14 @@ def test_host_loads_gr_using_each_las_curve_depth_samples(tmp_path, monkeypatch)
     host.set_project(project)
 
     host.reload()
+    # The LAS/well parse runs in the assets worker (#503); wait for the
+    # no-SEGY load to land before asserting on the scene.
+    qtbot.waitUntil(
+        lambda: host.scene.gr_value_range() is not None, timeout=10_000
+    )
 
     assert host.scene.gr_value_range() == pytest.approx((10.4, 29.6))
+    host.shutdown()
 
 
 def test_joint_page_delegates_to_host(qtbot, tmp_path, monkeypatch):

@@ -152,6 +152,177 @@ class SurveyMetaWorker(QObject):
                 self.failed.emit(str(exc), self._generation)
 
 
+class JointAssetsWorker(QObject):
+    """Background parse of the joint non-SEGY assets (#503).
+
+    ``_on_survey_meta_ready`` used to run the whole remaining asset load on
+    the GUI thread: ``parse_well_heads`` + ``WellIdentityRegistry`` reconcile,
+    ``load_td_tables`` (twice — once for the well bind and again for the tops
+    conversion), a line-by-line tops parse, and up to 20
+    ``load_las_preview`` calls whose fast path still reads and parses the
+    entire LAS file. That froze the joint reload for seconds-to-minutes after
+    the SEG-Y scans had already been moved off-thread (C09 only covered
+    SEG-Y). This worker performs every file read/parse off-thread and returns
+    a plain payload; the host applies it to the scene on the GUI thread.
+    TD tables are parsed once and shared by both consumers.
+    """
+
+    finished = Signal(object, int)  # payload dict, generation
+    failed = Signal(str, int)
+
+    def __init__(
+        self,
+        paths: JointAssetPaths,
+        *,
+        generation: int = 0,
+        survey_meta: dict | None = None,
+        identity_registry: WellIdentityRegistry | None = None,
+        persisted_asset_id: str | None = None,
+        persisted_map: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__()
+        self._paths = paths
+        self._generation = int(generation)
+        self._survey_meta = survey_meta or {}
+        self._identity_registry = identity_registry
+        # Snapshot of the host's persisted identity state at start time, so
+        # the parse never observes GUI-thread mutations made while it runs.
+        self._persisted_asset_id = persisted_asset_id
+        self._persisted_map = dict(persisted_map or {})
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            payload = self._collect()
+            self.finished.emit(payload, self._generation)
+        except Exception as exc:
+            self.failed.emit(str(exc), self._generation)
+
+    def _collect(self) -> dict:
+        paths = self._paths
+        payload: dict = {
+            "horizon_corners": None,
+            "wells": [],
+            "identity_registry": None,
+            "td_tables": {},
+            "tops_by_well": {},
+            "skipped_no_td": 0,
+            "curves": {},
+            "las_paths": [str(p) for p in paths.las_files],
+        }
+
+        # Horizon corners: file read + axis-alignment math only; scene
+        # validation stays on the GUI thread (it reads the bound survey).
+        if paths.horizons:
+            from geoviz import (
+                align_horizon_corners_to_loader_axes,
+                horizon_corners_from_dat,
+            )
+
+            corners = horizon_corners_from_dat(paths.horizons[0])
+            if corners is not None:
+                # Swap horizon corners into loader axes only when the loader
+                # geometry came from the detected header fallback (standard
+                # INLINE_3D geometry already matches text axes).
+                corners = align_horizon_corners_to_loader_axes(
+                    *corners,
+                    swap=self._survey_meta.get("loader_geometry_source")
+                    != "standard_189_193",
+                )
+                payload["horizon_corners"] = corners
+
+        if paths.well_head is not None:
+            asset_id = paths.well_head_asset_id
+            if not asset_id:
+                raise RuntimeError("井位资产缺少稳定的项目资源 ID")
+            registry = self._identity_registry
+            if registry is None or registry.asset_id != asset_id:
+                registry = WellIdentityRegistry.restore(
+                    asset_id=asset_id,
+                    persisted_asset_id=self._persisted_asset_id,
+                    entries=self._persisted_map,
+                )
+            parsed = parse_well_heads(
+                paths.well_head,
+                identity_registry=registry,
+            )
+            payload["wells"] = parsed.wells
+            payload["identity_registry"] = parsed.identity_registry
+
+        # TD tables parsed ONCE for both the well bind and the tops
+        # conversion (the old flow parsed the whole directory twice).
+        td_tables: dict = {}
+        if paths.td_dir is not None:
+            td_tables = load_td_tables(paths.td_dir)
+        payload["td_tables"] = td_tables
+
+        if paths.tops is not None and paths.tops.is_file():
+            tops_by_well: dict[str, list[tuple[str, float]]] = {}
+            skipped_no_td = 0
+            for line in paths.tops.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines():
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                parts = s.split()
+                if len(parts) < 3:
+                    continue
+                wname, tname, md_s = parts[0], parts[1], parts[2]
+                try:
+                    md = float(md_s)
+                except ValueError:
+                    continue
+                tbl = td_tables.get(wname)
+                if tbl is not None:
+                    # Tops are stored as TWT ms (the engine converts them to
+                    # the active display domain at assembly time).
+                    z = float(tbl.md_to_time_ms(md))
+                    tops_by_well.setdefault(wname, []).append((tname, z))
+                else:
+                    # Without a TD table the top cannot be placed on the
+                    # seismic time axis — MD must not stand in for TWT.
+                    skipped_no_td += 1
+            payload["tops_by_well"] = tops_by_well
+            payload["skipped_no_td"] = skipped_no_td
+
+        curves: dict[str, dict[str, tuple]] = {}
+        for las_path in paths.las_files[:20]:
+            try:
+                from geoviz import load_las_preview
+
+                data = load_las_preview(str(las_path), fast=True)
+                if data is None:
+                    continue
+                import numpy as np
+
+                wname = str(
+                    getattr(data, "well_name", None)
+                    or Path(las_path).stem
+                )
+                well_curves: dict[str, tuple] = {}
+                curves_list = getattr(data, "curves", None) or []
+                for c in curves_list:
+                    name = str(getattr(c, "name", "") or getattr(c, "mnemonic", ""))
+                    if name.upper() in {"DEPT", "DEPTH", "MD"}:
+                        continue
+                    depth = np.asarray(
+                        getattr(c, "depth", []), dtype=float
+                    )
+                    vals = np.asarray(
+                        getattr(c, "values", getattr(c, "data", [])),
+                        dtype=float,
+                    )
+                    if vals.size == depth.size:
+                        well_curves[name] = (depth, vals)
+                if well_curves:
+                    curves[wname] = well_curves
+            except Exception:
+                continue
+        payload["curves"] = curves
+        return payload
+
+
 class WellSeismicJointHost(QObject):
     """Non-UI host for joint scene lifecycle.
 
@@ -170,6 +341,7 @@ class WellSeismicJointHost(QObject):
         super().__init__(parent)
         self._project: ProjectDocument | None = None
         self._volume_job = OwnedWorkerJob(self)
+        self._assets_job = OwnedWorkerJob(self)
         self._volume_generation = 0
         self._volume_phase = "EMPTY"
         self._source_backed_access = None
@@ -178,6 +350,12 @@ class WellSeismicJointHost(QObject):
         self._well_identity_registry: WellIdentityRegistry | None = None
         self._persisted_well_identity_asset_id: str | None = None
         self._persisted_well_identity_map: dict[str, str] = {}
+        # Survey payload waiting for the assets worker so the ready slot can
+        # bind the survey before validating horizon corners against it.
+        self._pending_survey_apply: dict | None = None
+        # Whether an assets-load failure must leave an honestly-empty scene
+        # (reload path) or just report status (survey-ready path).
+        self._assets_clear_on_failure = False
         self._scene = None
         self._engine_error: str | None = None
         # True while an L1 start waits for OwnedWorkerJob.released (see
@@ -327,32 +505,17 @@ class WellSeismicJointHost(QObject):
             )
             self._ensure_survey_meta(str(paths.segy))
             return
-        try:
-            self._apply_wells_and_survey(paths)
-            self._apply_tops_and_curves(paths)
-            # Restore domain after bind (survey apply no longer hard-forces UI domain)
-            domain = preferred_domain
-            if domain is None and self._project is not None:
-                state = getattr(self._project, "joint_analysis", None)
-                domain = getattr(state, "vertical_domain", None) if state else None
-            if domain:
-                self.set_vertical_domain(domain, emit_scene=False)
-        except Exception as exc:
-            self.status_changed.emit(f"加载失败: {exc}")
-            logger.exception("joint load failed")
-            # Leave an honestly-empty scene instead of the previous project's
-            # wells over a failed bind.
-            try:
-                self._scene.set_wells([])
-                self._scene.set_formation_tops({})
-                self._scene.set_well_curves({})
-            except Exception:
-                logger.debug("scene clear on load failure failed", exc_info=True)
-            self.scene_updated.emit()
-            return
-
-        self.status_changed.emit(f"已加载井/测网（无 SEGY）· 来源={paths.source}")
-        self.scene_updated.emit()
+        # No SEG-Y: the remaining asset parse (well heads, TD tables, tops,
+        # LAS previews) still runs off the GUI thread (#503). Bump the
+        # generation so a stale in-flight result from a previous reload is
+        # rejected, mirroring the SEG-Y supersede behavior.
+        self._volume_generation += 1
+        self._start_assets_load(
+            paths,
+            survey_payload=None,
+            generation=self._volume_generation,
+            clear_on_failure=True,
+        )
 
     def set_vertical_domain(self, domain: str, *, emit_scene: bool = True) -> bool:
         """Set the shared (2D + 3D) vertical domain: 'Time' or 'Depth'.
@@ -427,6 +590,8 @@ class WellSeismicJointHost(QObject):
         self._cancel_pending_lod()
         if self._volume_job.is_running:
             self._volume_job.shutdown()
+        if self._assets_job.is_running:
+            self._assets_job.shutdown()
 
     # ------------------------------------------------------------------
     # Internals
@@ -488,20 +653,15 @@ class WellSeismicJointHost(QObject):
             self._survey_payload_cache[str(payload.get("source_id") or "")] = payload
         except Exception:
             pass
-        try:
-            self._apply_wells_and_survey(paths, payload)
-            self._apply_tops_and_curves(paths)
-            domain = self._pending_domain
-            if domain is None and self._project is not None:
-                state = getattr(self._project, "joint_analysis", None)
-                domain = getattr(state, "vertical_domain", None) if state else None
-            if domain:
-                self.set_vertical_domain(domain, emit_scene=False)
-        except Exception as exc:
-            self.status_changed.emit(f"加载失败: {exc}")
-            logger.exception("joint load failed")
-            return
-        self._chain_volume_start(str(paths.segy))
+        # The remaining asset load (well heads, TD tables, tops, up to 20
+        # LAS previews) used to run right here on the GUI thread; it now
+        # runs in its own worker and is applied by _on_assets_ready (#503).
+        self._start_assets_load(
+            paths,
+            survey_payload=payload,
+            generation=generation,
+            clear_on_failure=False,
+        )
 
     @Slot(str, int)
     def _on_survey_meta_failed(self, err: str, generation: int = 0) -> None:
@@ -531,20 +691,112 @@ class WellSeismicJointHost(QObject):
             return
         self._start_volume_worker(str(segy_path))
 
-    def _apply_wells_and_survey(
-        self, paths: JointAssetPaths, survey_payload: dict | None = None
+    def _start_assets_load(
+        self,
+        paths: JointAssetPaths,
+        *,
+        survey_payload: dict | None,
+        generation: int,
+        clear_on_failure: bool,
     ) -> None:
-        from geoviz import (
-            align_horizon_corners_to_loader_axes,
-            horizon_corners_from_dat,
+        """Parse the non-SEGY joint assets off the GUI thread (#503)."""
+        if self._assets_job.is_running:
+            self._assets_job.shutdown()
+        self._assets_clear_on_failure = clear_on_failure
+        self._pending_survey_apply = survey_payload
+        registry = self._well_identity_registry
+        if (
+            registry is not None
+            and paths.well_head_asset_id is not None
+            and registry.asset_id != paths.well_head_asset_id
+        ):
+            registry = None
+        worker = JointAssetsWorker(
+            paths,
+            generation=generation,
+            survey_meta=(survey_payload or {}).get("corners_meta") or {},
+            identity_registry=registry,
+            persisted_asset_id=self._persisted_well_identity_asset_id,
+            persisted_map=self._persisted_well_identity_map,
+        )
+        self._assets_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._on_assets_ready),
+                (worker.failed, self._on_assets_failed),
+            ),
         )
 
+    @Slot(object, int)
+    def _on_assets_ready(self, payload: dict, generation: int = 0) -> None:
+        if int(generation) != int(self._volume_generation):
+            return
+        if self._scene is None:
+            return
+        paths = self._paths
+        survey_payload = self._pending_survey_apply
+        self._pending_survey_apply = None
+        try:
+            self._apply_assets_payload(payload, survey_payload)
+            # Restore domain after bind (survey apply no longer hard-forces
+            # UI domain).
+            domain = self._pending_domain
+            if domain is None and self._project is not None:
+                state = getattr(self._project, "joint_analysis", None)
+                domain = getattr(state, "vertical_domain", None) if state else None
+            if domain:
+                self.set_vertical_domain(domain, emit_scene=False)
+        except Exception as exc:
+            self.status_changed.emit(f"加载失败: {exc}")
+            logger.exception("joint load failed")
+            if self._assets_clear_on_failure:
+                # Leave an honestly-empty scene instead of the previous
+                # project's wells over a failed bind.
+                try:
+                    self._scene.set_wells([])
+                    self._scene.set_formation_tops({})
+                    self._scene.set_well_curves({})
+                except Exception:
+                    logger.debug("scene clear on load failure failed", exc_info=True)
+                self.scene_updated.emit()
+            return
+        if paths is not None and paths.segy is not None:
+            self._chain_volume_start(str(paths.segy))
+        else:
+            source = paths.source if paths is not None else ""
+            self.status_changed.emit(f"已加载井/测网（无 SEGY）· 来源={source}")
+            self.scene_updated.emit()
+
+    @Slot(str, int)
+    def _on_assets_failed(self, err: str, generation: int = 0) -> None:
+        if int(generation) != int(self._volume_generation):
+            return
+        self._pending_survey_apply = None
+        self.status_changed.emit(f"加载失败: {err}")
+        if self._assets_clear_on_failure:
+            try:
+                if self._scene is not None:
+                    self._scene.set_wells([])
+                    self._scene.set_formation_tops({})
+                    self._scene.set_well_curves({})
+            except Exception:
+                logger.debug("scene clear on load failure failed", exc_info=True)
+            self.scene_updated.emit()
+
+    def _apply_assets_payload(
+        self, payload: dict, survey_payload: dict | None
+    ) -> None:
+        """Bind the worker-parsed assets to the scene (GUI thread only)."""
         assert self._scene is not None
         # Domain is applied by reload(preferred_domain=...) after this bind.
         self._survey_meta = {}
-
-        if paths.segy is not None and survey_payload is not None:
-            p1, p2, p3 = survey_payload["p1"], survey_payload["p2"], survey_payload["p3"]
+        if survey_payload is not None:
+            p1, p2, p3 = (
+                survey_payload["p1"],
+                survey_payload["p2"],
+                survey_payload["p3"],
+            )
             meta = survey_payload["corners_meta"]
             self._survey_meta = meta
             self._scene.set_survey_from_corners(
@@ -562,121 +814,26 @@ class WellSeismicJointHost(QObject):
                 n_inlines=meta.get("loader_n_inlines"),
                 n_crosslines=meta.get("loader_n_crosslines"),
             )
-            if paths.horizons:
-                corners = horizon_corners_from_dat(paths.horizons[0])
-                if corners is not None:
-                    # Swap horizon corners into loader axes only when the
-                    # loader geometry came from the detected header fallback
-                    # (standard INLINE_3D geometry already matches text axes).
-                    corners = align_horizon_corners_to_loader_axes(
-                        *corners,
-                        swap=meta.get("loader_geometry_source")
-                        != "standard_189_193",
-                    )
-                    ok, msg = self._scene.validate_against_corners(
-                        *corners, tol_m=50.0, tol_il_xl=1.0
-                    )
-                    if not ok:
-                        raise RuntimeError(f"测网与层位角点不一致（已中止）: {msg}")
-
-        wells = []
-        if paths.well_head is not None:
-            asset_id = paths.well_head_asset_id
-            if not asset_id:
-                raise RuntimeError("井位资产缺少稳定的项目资源 ID")
-            registry = self._well_identity_registry
-            if registry is None or registry.asset_id != asset_id:
-                registry = WellIdentityRegistry.restore(
-                    asset_id=asset_id,
-                    persisted_asset_id=self._persisted_well_identity_asset_id,
-                    entries=self._persisted_well_identity_map,
-                )
-            parsed = parse_well_heads(
-                paths.well_head,
-                identity_registry=registry,
+        corners = payload.get("horizon_corners")
+        if corners is not None:
+            ok, msg = self._scene.validate_against_corners(
+                *corners, tol_m=50.0, tol_il_xl=1.0
             )
-            wells = parsed.wells
-            self._well_identity_registry = parsed.identity_registry
-        td_tables = {}
-        if paths.td_dir is not None:
-            td_tables = load_td_tables(paths.td_dir)
-        if wells:
-            self._scene.set_wells(wells, td_tables=td_tables)
-        self._scene.las_paths = [str(p) for p in paths.las_files]
-
-    def _apply_tops_and_curves(self, paths: JointAssetPaths) -> None:
-        import numpy as np
-
-        assert self._scene is not None
-        tops_by_well: dict[str, list[tuple[str, float]]] = {}
-        skipped_no_td = 0
-        if paths.tops is not None and paths.tops.is_file():
-            # Parse TD tables once for the whole tops file, not once per line.
-            td_map: dict = {}
-            if paths.td_dir is not None:
-                td_map = load_td_tables(paths.td_dir)
-            for line in paths.tops.read_text(encoding="utf-8", errors="replace").splitlines():
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                parts = s.split()
-                if len(parts) < 3:
-                    continue
-                wname, tname, md_s = parts[0], parts[1], parts[2]
-                try:
-                    md = float(md_s)
-                except ValueError:
-                    continue
-                tbl = td_map.get(wname)
-                if tbl is not None:
-                    # Tops are stored as TWT ms (the engine converts them to
-                    # the active display domain at assembly time).
-                    z = float(tbl.md_to_time_ms(md))
-                    tops_by_well.setdefault(wname, []).append((tname, z))
-                else:
-                    # Without a TD table the top cannot be placed on the
-                    # seismic time axis — MD must not stand in for TWT.
-                    skipped_no_td += 1
-        if tops_by_well:
-            self._scene.set_formation_tops(tops_by_well)
-        if skipped_no_td:
+            if not ok:
+                raise RuntimeError(f"测网与层位角点不一致（已中止）: {msg}")
+        if payload["wells"]:
+            self._scene.set_wells(payload["wells"], td_tables=payload["td_tables"])
+        self._scene.las_paths = payload["las_paths"]
+        if payload["tops_by_well"]:
+            self._scene.set_formation_tops(payload["tops_by_well"])
+        if payload["skipped_no_td"]:
             self.status_changed.emit(
-                f"已跳过 {skipped_no_td} 个缺少 TD 表的层位（无法换算到时间轴）"
+                f"已跳过 {payload['skipped_no_td']} 个缺少 TD 表的层位（无法换算到时间轴）"
             )
-
-        curves: dict[str, dict[str, tuple]] = {}
-        for las_path in paths.las_files[:20]:
-            try:
-                from geoviz import load_las_preview
-
-                data = load_las_preview(str(las_path), fast=True)
-                if data is None:
-                    continue
-                wname = str(
-                    getattr(data, "well_name", None)
-                    or Path(las_path).stem
-                )
-                well_curves: dict[str, tuple] = {}
-                curves_list = getattr(data, "curves", None) or []
-                for c in curves_list:
-                    name = str(getattr(c, "name", "") or getattr(c, "mnemonic", ""))
-                    if name.upper() in {"DEPT", "DEPTH", "MD"}:
-                        continue
-                    depth = np.asarray(
-                        getattr(c, "depth", []), dtype=float
-                    )
-                    vals = np.asarray(
-                        getattr(c, "values", getattr(c, "data", [])),
-                        dtype=float,
-                    )
-                    if vals.size == depth.size:
-                        well_curves[name] = (depth, vals)
-                if well_curves:
-                    curves[wname] = well_curves
-            except Exception:
-                continue
-        if curves:
-            self._scene.set_well_curves(curves)
+        if payload["curves"]:
+            self._scene.set_well_curves(payload["curves"])
+        if payload["identity_registry"] is not None:
+            self._well_identity_registry = payload["identity_registry"]
 
     def _start_volume_worker(self, segy_path: str) -> None:
         """Bind source-backed access (metadata cached from the survey pass), then L0."""

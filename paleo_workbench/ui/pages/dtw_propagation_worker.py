@@ -43,10 +43,16 @@ class DtwPropagationWorker(QObject):
 
     Emits per-well ``progress(done, total)``, ``finished(created_ids)`` with
     the list of new ghost-pick ids, ``failed(message)``, or ``cancelled()``.
+    An optional ``recommend_fn`` runs the DTW top-depth recommendation in the
+    same worker thread (its O(n*m) pure-Python DP froze the GUI slot for
+    ~1.5 s per click); the result is delivered early via
+    ``recommendation_ready`` so the confidence label is ready before
+    ``finished`` renders it.
     """
 
     progress = Signal(int, int)
     finished = Signal(object)  # list[str] created pick ids
+    recommendation_ready = Signal(object)  # TopRecommendation | None
     failed = Signal(str)
     cancelled = Signal()
 
@@ -59,6 +65,7 @@ class DtwPropagationWorker(QObject):
         formation: str,
         n_samples: int,
         band_radius: int | None = None,
+        recommend_fn=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -68,6 +75,7 @@ class DtwPropagationWorker(QObject):
         self._formation = formation
         self._n_samples = int(n_samples)
         self._band_radius = band_radius
+        self._recommend_fn = recommend_fn
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -75,6 +83,14 @@ class DtwPropagationWorker(QObject):
         self._cancel_event.set()
 
     def run(self) -> None:
+        if self._recommend_fn is not None:
+            # The recommendation is pure numpy over engine-bound data, so it
+            # is thread-safe; a failure degrades the confidence label only.
+            try:
+                recommendation = self._recommend_fn()
+            except Exception:
+                recommendation = None
+            self.recommendation_ready.emit(recommendation)
         try:
             if self._cancel_event.is_set():
                 self.cancelled.emit()

@@ -244,10 +244,14 @@ def test_joint_reload_parses_td_tables_once_per_phase(qtbot, tmp_path, monkeypat
     host.set_project(project)
     host.reload()
 
-    # One parse for wells/survey + one for the tops file — NOT one per top line
-    # (previously 1 + n_tops parses on the GUI thread per reload).
-    assert calls, "reload should resolve the TD directory"
-    assert len(calls) == 2
+    # Exactly ONE parse per load: the assets worker shares the TD tables
+    # between the well bind and the tops conversion — NOT one per top line
+    # (previously 1 + n_tops parses), and NOT one per phase (previously 2).
+    qtbot.waitUntil(lambda: bool(calls), timeout=10_000)
+    # Wait for the whole assets load to land before counting: a second
+    # phase-triggered parse would only be visible after completion.
+    qtbot.waitUntil(lambda: not host._assets_job.is_running, timeout=10_000)
+    assert len(calls) == 1
     host.shutdown()
 
 
