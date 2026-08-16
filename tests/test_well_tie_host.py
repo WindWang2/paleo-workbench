@@ -172,3 +172,36 @@ def test_sonic_unit_metadata_beats_numeric_heuristic():
     # Missing metadata keeps the numeric fallback.
     assert np.allclose(_sonic_to_us_per_m(usft, ""), usft * 3.28084)
     assert np.allclose(_sonic_to_us_per_m(fast_m, ""), fast_m * 3.28084)
+
+
+def test_twt_from_sonic_survives_null_samples():
+    """#534: a single LAS null (NaN) in the sonic curve used to NaN every
+    TWT sample at and below the gap via the trapezoid + cumsum; gaps are
+    now bridged from the nearest finite samples."""
+    from paleo_workbench.viz.hosts.well_tie_host import _twt_from_sonic
+
+    depths = np.array([1000.0, 1001.0, 1002.0, 1003.0, 1004.0])
+    clean = np.full(5, 100.0)  # 100 us/m flat
+    twt_clean = _twt_from_sonic(depths, clean)
+    # 2 * 100us * 1m / 1000 per meter-step, cumulative.
+    np.testing.assert_allclose(twt_clean, [0.0, 0.2, 0.4, 0.6, 0.8])
+
+    gapped = clean.copy()
+    gapped[2] = np.nan  # one missing sample mid-well
+    twt_gapped = _twt_from_sonic(depths, gapped)
+    np.testing.assert_allclose(twt_gapped, twt_clean)
+    assert np.isfinite(twt_gapped).all()
+
+    # Nulls at the edges extend the nearest finite value, not NaN.
+    edged = clean.copy()
+    edged[0] = np.nan
+    edged[-1] = np.nan
+    twt_edged = _twt_from_sonic(depths, edged)
+    assert np.isfinite(twt_edged).all()
+    np.testing.assert_allclose(twt_edged, twt_clean)
+
+    # An entirely-null curve integrates to zeros (no NaN cascade).
+    all_nan = np.full(5, np.nan)
+    np.testing.assert_allclose(
+        _twt_from_sonic(depths, all_nan), np.zeros(5)
+    )

@@ -178,6 +178,33 @@ def _iter_coordinate_pairs(value: object) -> Iterable[tuple[float, float]]:
             yield from _iter_coordinate_pairs(child)
 
 
+def fit_extent_to_aspect(
+    extent: tuple[float, float, float, float], width: float, height: float
+) -> tuple[float, float, float, float]:
+    """Letterbox the extent to the output aspect (#522).
+
+    The world axis that would be compressed is EXPANDED (centered) so
+    units-per-pixel is uniform in x and y — circles stay circles and the
+    scale bar is valid for both axes. Extent unchanged for degenerate
+    ranges or exact-aspect inputs.
+    """
+    xmin, ymin, xmax, ymax = (float(v) for v in extent)
+    w = max(1.0, float(width))
+    h = max(1.0, float(height))
+    world_w = xmax - xmin
+    world_h = ymax - ymin
+    if world_w <= 0 or world_h <= 0:
+        return (xmin, ymin, xmax, ymax)
+    # Units-per-pixel must be the LARGER of the two axes' requirements;
+    # the other (shorter) world axis is expanded to fill, letterboxed.
+    units_per_pixel = max(world_w / w, world_h / h)
+    adj_w = units_per_pixel * w
+    adj_h = units_per_pixel * h
+    cx = (xmin + xmax) / 2.0
+    cy = (ymin + ymax) / 2.0
+    return (cx - adj_w / 2, cy - adj_h / 2, cx + adj_w / 2, cy + adj_h / 2)
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
     """Explicit minimal renderer for tests and hosts without a QGIS bridge.
 
@@ -231,8 +258,8 @@ class FallbackMapRenderBackend(MapRenderBackend):
             x, y = float(point[0]), float(point[1])
         except (TypeError, ValueError):
             return None
-        xmin, ymin, xmax, ymax = self._extent
         width, height = self._output_size
+        xmin, ymin, xmax, ymax = fit_extent_to_aspect(self._extent, width, height)
         return QPointF(
             (x - xmin) * width / (xmax - xmin),
             height - (y - ymin) * height / (ymax - ymin),
@@ -390,18 +417,31 @@ class FallbackMapRenderBackend(MapRenderBackend):
         return (tuple(float(value) for value in self._extent), self._output_size, float(self._dpi), layers_key)
 
     def _pixel_scales(self) -> tuple[float, float]:
-        xmin, ymin, xmax, ymax = self._extent
+        xmin, ymin, xmax, ymax = fit_extent_to_aspect(
+            self._extent, *self._output_size
+        )
         width, height = self._output_size
         return (width / (xmax - xmin), height / (ymax - ymin))
 
     def _units_per_pixel(self) -> float:
-        xmin, ymin, xmax, ymax = self._extent
-        width, height = self._output_size
-        return max((xmax - xmin) / max(1, width), (ymax - ymin) / max(1, height))
+        # Uniform after letterboxing (#522); both axes agree.
+        xmin, _ymin, xmax, _ymax = fit_extent_to_aspect(
+            self._extent, *self._output_size
+        )
+        return (xmax - xmin) / max(1, self._output_size[0])
 
     def _reusable_shift(self) -> tuple[float, float] | None:
         """Pixel shift of the cached frame for a same-scale pan, or None."""
         if self._frame_cache is None or self._frame_cache_key is None:
+            return None
+        # Letterboxed mapping (#522): when the raw extent aspect differs
+        # from the output aspect, the pan strip math (integer-pixel blit +
+        # strip re-rasterization) is not guaranteed to reproduce the full
+        # render's subpixel phases; fall back to a full re-rasterization,
+        # which is always correct.
+        fitted = fit_extent_to_aspect(self._extent, *self._output_size)
+        raw = tuple(float(v) for v in self._extent)
+        if any(abs(a - b) > 1e-9 for a, b in zip(fitted, raw)):
             return None
         key = self._render_key()
         if key[1:] != self._frame_cache_key[1:]:
@@ -417,8 +457,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
             # Zoom changed the scale: full re-rasterization required.
             return None
         assert self._frame_cache_extent is not None
-        xmin, ymin, _xmax, _ymax = self._extent
-        c_xmin, c_ymin, _c_xmax, _c_ymax = self._frame_cache_extent
+        xmin, ymin, _xmax, _ymax = fit_extent_to_aspect(
+            self._extent, *self._output_size
+        )
+        c_xmin, c_ymin, _c_xmax, _c_ymax = fit_extent_to_aspect(
+            self._frame_cache_extent, *self._output_size
+        )
         dx_px = (xmin - c_xmin) * scales[0]
         dy_px = (ymin - c_ymin) * scales[1]
         dx, dy = round(dx_px), round(dy_px)
@@ -545,7 +589,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
             strips.append(QRectF(0.0, 0.0, width, -dy_px))
         if not strips:
             return
-        xmin, ymin, xmax, ymax = self._extent
+        xmin, ymin, xmax, ymax = fit_extent_to_aspect(
+            self._extent, width, height
+        )
         sx, sy = self._pixel_scales()
         for strip in strips:
             strip_view = (
