@@ -18,8 +18,22 @@ class SeismicHost:
 
     def __init__(self) -> None:
         self.widget = SeismicView(auto_load=False)
+        self._overlay_conn = None
+        self._overlay_expected_path: str | None = None
+
+    def _disconnect_overlay(self) -> None:
+        """Drop any pending overlay connection so a stale payload's closure
+        can never fire on a newer file's ``segy_loaded``."""
+        if self._overlay_conn is not None:
+            try:
+                self.widget.segy_loaded.disconnect(self._overlay_conn)
+            except Exception:
+                pass
+            self._overlay_conn = None
+        self._overlay_expected_path = None
 
     def clear(self) -> None:
+        self._disconnect_overlay()
         # Best-effort visual reset when API allows.
         try:
             import numpy as np
@@ -31,6 +45,10 @@ class SeismicHost:
             pass
 
     def apply(self, payload: VizPayload) -> bool:
+        # A new apply invalidates any overlay connection registered for a
+        # previous apply: that closure carries the old payload's dense volume
+        # and must not be triggered by this file's load.
+        self._disconnect_overlay()
         path = (payload.seismic_path or "").strip()
         has_segy = False
         if path and Path(path).is_file():
@@ -42,8 +60,15 @@ class SeismicHost:
 
         if payload.seismic_volume is not None:
             if has_segy:
-                def on_ready(*args, **kwargs):
+                self._overlay_expected_path = path
+
+                def on_ready(result=None, *args, **kwargs):
                     try:
+                        # Only overlay when the finished load is the file this
+                        # apply requested; a stale/older closure must no-op.
+                        actual = getattr(result, "path", None)
+                        if actual is not None and actual != self._overlay_expected_path:
+                            return
                         self.widget.load_overlay_volume(payload.seismic_volume)
                     except Exception:
                         pass
@@ -51,7 +76,9 @@ class SeismicHost:
                         self.widget.segy_loaded.disconnect(on_ready)
                     except Exception:
                         pass
-                self.widget.segy_loaded.connect(on_ready)
+                    self._overlay_conn = None
+
+                self._overlay_conn = self.widget.segy_loaded.connect(on_ready)
             else:
                 self.widget.load_demo(payload.seismic_volume)
             return True
