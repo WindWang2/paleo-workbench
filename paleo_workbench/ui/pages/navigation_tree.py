@@ -152,6 +152,7 @@ class NavigationTree(QTreeWidget):
         *,
         extra_assets: list | None = None,
         enricher=None,
+        views: list | None = None,
     ) -> None:
         counts = compute_catalog_counts(
             resources,
@@ -159,6 +160,7 @@ class NavigationTree(QTreeWidget):
             project_root=project_root,
             extra_assets=extra_assets,
             enricher=enricher,
+            views=views,
         )
         self._update_tree_counts(counts)
 

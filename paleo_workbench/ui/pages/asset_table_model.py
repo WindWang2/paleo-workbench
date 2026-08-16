@@ -92,12 +92,16 @@ class AssetTableModel(QAbstractTableModel):
         assets: list[object],
         rows: list[int],
         column_keys: list[str] | None = None,
+        views: list[object] | None = None,
     ) -> None:
         self.beginResetModel()
         if column_keys is not None:
             self._column_keys = list(column_keys)
         self._raw_assets = list(assets)
-        self._views = [self._build_view(a) for a in self._raw_assets]
+        if views is not None and len(views) == len(self._raw_assets):
+            self._views = list(views)  # shared prebuilt views (#527)
+        else:
+            self._views = [self._build_view(a) for a in self._raw_assets]
         self._filtered_rows = list(rows)
         self.endResetModel()
 

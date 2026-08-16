@@ -118,6 +118,7 @@ class DataAssetTable(QWidget):
         *,
         extra_assets: list[object] | None = None,
         enricher=None,
+        views: list[object] | None = None,
     ) -> None:
         self._resources = list(resources)
         self._artifacts = list(artifacts)
@@ -125,7 +126,9 @@ class DataAssetTable(QWidget):
         assets: list[object] = [*self._resources, *self._artifacts, *(extra_assets or [])]
         # project_root makes project-relative paths resolvable so relative
         # assets are not misreported as MISSING (F4).
-        self._index.rebuild(assets, project_root=project_root, enricher=enricher)
+        self._index.rebuild(
+            assets, project_root=project_root, enricher=enricher, views=views
+        )
         self.model.set_project_root(project_root)
         self.model.set_view_enricher(enricher)
         self._filter_query.search_text = self._search_text
@@ -134,6 +137,7 @@ class DataAssetTable(QWidget):
             assets,
             filtered,
             column_keys=self._visible_column_keys,
+            views=self._index.views,  # reuse the index's views (#527)
         )
         self._visible_assets = [assets[i] for i in filtered]
         # Auto-fit column widths to content on data refresh.

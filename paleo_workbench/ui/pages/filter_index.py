@@ -88,15 +88,27 @@ class FilterIndex:
         assets: Sequence[ResourceItem | ExportArtifact | Any],
         project_root: Path | None = None,
         enricher: Any = None,
+        views: Sequence[Any] | None = None,
     ) -> None:
         self._assets = list(assets)
-        self._views = []
-        for asset in self._assets:
-            view = asset_view_from_object(asset, project_root=project_root)
-            if enricher is not None:
-                view = enricher(view)
-            self._views.append(view)
+        if views is not None and len(views) == len(self._assets):
+            # Shared prebuilt views (#527): every AssetView build probes the
+            # filesystem (exists/stat per resource) — building them once per
+            # refresh and threading them through the consumers removed the
+            # per-pass multiplication.
+            self._views = list(views)
+        else:
+            self._views = []
+            for asset in self._assets:
+                view = asset_view_from_object(asset, project_root=project_root)
+                if enricher is not None:
+                    view = enricher(view)
+                self._views.append(view)
         self._haystacks = [self._haystack(view) for view in self._views]
+
+    @property
+    def views(self) -> list:
+        return list(self._views)
 
     def filter(self, category: str, search_text: str) -> list[int]:
         """Legacy filter interface (category string + search text)."""
@@ -244,13 +256,19 @@ def compute_catalog_counts(
     project_root: Path | None = None,
     extra_assets: Sequence[Any] | None = None,
     enricher: Any = None,
+    views: Sequence[AssetView] | None = None,
 ) -> CatalogCounts:
-    views: list[AssetView] = []
-    for asset in [*resources, *artifacts, *(extra_assets or [])]:
-        view = asset_view_from_object(asset, project_root=project_root)
-        if enricher is not None:
-            view = enricher(view)
-        views.append(view)
+    if views is not None and len(views) == len(resources) + len(artifacts) + len(
+        extra_assets or []
+    ):
+        views = list(views)  # shared prebuilt views (#527)
+    else:
+        views = []
+        for asset in [*resources, *artifacts, *(extra_assets or [])]:
+            view = asset_view_from_object(asset, project_root=project_root)
+            if enricher is not None:
+                view = enricher(view)
+            views.append(view)
 
     total = len(views)
     stage_counts = Counter(v.stage.value for v in views)
