@@ -1085,11 +1085,10 @@ class StratigraphyCorrelationPage(QWidget):
                 QMessageBox.warning(self, "导出", "请先加载 WellLogEngine 连井剖面")
                 return
             # Engine path: grab framebuffer PNG (same limitation as #169 single-well).
-            start_dir = default_export_dir(
-                Path(self._project.meta.project_root) / "x.paleo.json"
-                if self._project and self._project.meta.project_root not in ("", ".")
-                else None
-            )
+            # Derive the artifacts tree from the REAL project file name; a fabricated
+            # "x.paleo.json" would leak exports into a phantom x.artifacts/ tree that
+            # Save As never migrates and restore cannot find (#533).
+            start_dir = default_export_dir(self._project_file_path())
             path, _ = QFileDialog.getSaveFileName(
                 self,
                 "导出连井剖面 (Engine PNG)",
