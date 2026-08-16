@@ -89,7 +89,7 @@ def test_c1_fast_slice_extract_zero_dim_axis_raises(axis):
 def test_c2_fast_resample_volume_3d_empty_source_raises():
     vol = np.zeros((0, 4, 4), dtype=np.float32)
 
-    with pytest.raises((ValueError, std_err := Exception)):
+    with pytest.raises(ValueError):
         seismic_3d_api.fast_resample_volume_3d(vol, (4, 4, 4))
 
     with disabled_acceleration():
