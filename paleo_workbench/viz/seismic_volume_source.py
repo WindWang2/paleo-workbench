@@ -472,10 +472,14 @@ class SeismicVolumeSource:
             # independently.
             from geoviz import SeismicLoader
 
-            fresh_loader = SeismicLoader(self._path)
-            volume = fresh_loader.get_volume_downsampled(
-                factor=strides, cancellation_token=cancellation_token
-            )
+            # Fresh per-call loader handle must be closed: segyio keeps the
+            # file handle open until close(), and preview/LOD reads are
+            # high-frequency (scrub, LOD upgrades) — a leak would accumulate
+            # FDs.
+            with SeismicLoader(self._path) as fresh_loader:
+                volume = fresh_loader.get_volume_downsampled(
+                    factor=strides, cancellation_token=cancellation_token
+                )
             self.physical_reads += 1
             vol = np.ascontiguousarray(volume, dtype=np.float32)
             # Final bound if budget still exceeded (safety).

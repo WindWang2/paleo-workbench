@@ -120,12 +120,23 @@ class WellSeismicJointPage(QWidget):
         self._fill_well_combos()
 
     def _fill_well_combos(self) -> None:
+        a_sel = self._well_a.currentText()
+        b_sel = self._well_b.currentText()
         self._well_a.clear()
         self._well_b.clear()
         names = self._host.well_names()
         self._well_a.addItems(names)
         self._well_b.addItems(names)
-        if len(names) >= 2:
+        # Preserve the user's selection across scene refreshes (fence creation,
+        # LOD refinements re-emit scene_updated); fall back to the original
+        # defaults only when the chosen well is no longer present.
+        if a_sel in names:
+            self._well_a.setCurrentText(a_sel)
+        elif names:
+            self._well_a.setCurrentIndex(0)
+        if b_sel in names:
+            self._well_b.setCurrentText(b_sel)
+        elif len(names) >= 2:
             self._well_b.setCurrentIndex(1)
 
     def _on_well_fence(self) -> None:

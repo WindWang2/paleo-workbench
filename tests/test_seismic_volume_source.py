@@ -200,3 +200,28 @@ def test_cache_readonly_view(tmp_path: Path):
     with pytest.raises(ValueError):
         sl[0, 0] = 99.0
     src.close()
+
+
+def test_read_preview_closes_fresh_loader(monkeypatch, tmp_path):
+    """read_preview's per-call fresh loader must be closed: segyio keeps the
+    file handle open until close(), and preview reads are high-frequency."""
+    import geoviz
+
+    real_cls = geoviz.SeismicLoader
+    closed: list[bool] = []
+
+    class SpyingLoader(real_cls):
+        def close(self):
+            closed.append(True)
+            super().close()
+
+    monkeypatch.setattr(geoviz, "SeismicLoader", SpyingLoader)
+
+    segy = _write_mini_segy(tmp_path / "preview.sgy", n_il=8, n_xl=10, n_s=16)
+    src = SeismicVolumeSource(str(segy))
+    try:
+        src.read_preview()
+    finally:
+        src.close()
+
+    assert closed, "read_preview must close its fresh per-call SeismicLoader"
