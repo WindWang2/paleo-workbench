@@ -114,3 +114,131 @@ def test_qgis_bridge_coalesces_asynchronous_render_generations(qtbot):
     assert frame is not None
     assert frame["generation"] == 2
     assert (frame["width"], frame["height"]) == (256, 256)
+
+
+def _layer(layer_id, name, wkt, data_revision=1, style_revision=1):
+    return {
+        "id": layer_id,
+        "name": name,
+        "crs": "EPSG:3857",
+        "data_revision": data_revision,
+        "style_revision": style_revision,
+        "visible": True,
+        "opacity": 1.0,
+        "features": [{"id": f"{layer_id}-f1", "wkt": wkt}],
+    }
+
+
+def test_qgis_bridge_failed_snapshot_keeps_previous_layers(qtbot):
+    """#519: a throwing apply_snapshot must not delete previously valid layers.
+
+    The old code moved reused layers out of the live registry before the whole
+    snapshot validated; a later throw deleted them (and could leave null
+    pointers that settings_for() handed to QGIS). The registry must be
+    unchanged by a failed snapshot: the same render stays byte-identical.
+    """
+    bridge = qgis_render_bridge.QgisRenderBridge()
+    bridge.initialize()
+    try:
+        good = [
+            _layer("a", "A", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))"),
+            _layer("b", "B", "POLYGON ((20 0, 30 0, 30 10, 20 10, 20 0))"),
+        ]
+        bridge.set_layer_snapshot(good, "EPSG:3857")
+        before = bridge.render_sync((0.0, 0.0, 30.0, 10.0), 160, 120, 96.0)
+
+        # A is reused (revision unchanged); B is rebuilt and carries invalid
+        # WKT, so the second snapshot throws after A was already processed.
+        bad = [
+            good[0],
+            _layer("b", "B", "NOT VALID WKT", data_revision=2),
+        ]
+        with pytest.raises(Exception):
+            bridge.set_layer_snapshot(bad, "EPSG:3857")
+
+        # The previously valid registry must render IDENTICALLY: the failed
+        # snapshot must not have deleted layer A or nulled any mirror.
+        after = bridge.render_sync((0.0, 0.0, 30.0, 10.0), 160, 120, 96.0)
+        assert after["width"] == before["width"]
+        assert after["height"] == before["height"]
+        assert after["rgba"] == before["rgba"]
+    finally:
+        bridge.shutdown()
+
+
+def test_qgis_bridge_failed_pending_snapshot_does_not_swallow_next_render(qtbot):
+    """#519: a failed queued snapshot must clear the queued render so the next
+    completed frame is delivered instead of being discarded as superseded.
+
+    The sequence is deterministic: the async job is polled until it has
+    finished WITHOUT draining it, so the bad snapshot is applied from the
+    pending queue — the only path that could leave a stale pending_request.
+    """
+    bridge = qgis_render_bridge.QgisRenderBridge()
+    bridge.initialize()
+    try:
+        good = [
+            _layer("a", "A", "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))"),
+            _layer("b", "B", "POLYGON ((20 0, 30 0, 30 10, 20 10, 20 0))"),
+        ]
+        # A is reused (revision unchanged), B is rebuilt with invalid WKT:
+        # the failed apply corrupts the registry on the old code path.
+        bad = [
+            good[0],
+            _layer("b", "B", "NOT VALID WKT", data_revision=2),
+        ]
+
+        bridge.set_layer_snapshot(good, "EPSG:3857")
+        # Many small polygons + a big output keep the async job alive long
+        # enough for the bad snapshot + newer render to be QUEUED behind it.
+        many = [
+            {
+                "id": f"p{i}",
+                "name": f"P{i}",
+                "crs": "EPSG:3857",
+                "data_revision": 1,
+                "style_revision": 1,
+                "visible": True,
+                "opacity": 1.0,
+                "features": [
+                    {
+                        "id": f"p{i}-f1",
+                        "wkt": (
+                            f"POLYGON (({i % 40} {(i // 40) % 40}, "
+                            f"{i % 40 + 1} {(i // 40) % 40}, "
+                            f"{i % 40 + 1} {(i // 40) % 40 + 1}, "
+                            f"{i % 40} {(i // 40) % 40 + 1}, "
+                            f"{i % 40} {(i // 40) % 40}))"
+                        ),
+                    }
+                ],
+            }
+            for i in range(2000)
+        ]
+        bridge.set_layer_snapshot(many, "EPSG:3857")
+        bridge.request_render((0.0, 0.0, 40.0, 50.0), 1024, 1024, 96.0, 1)
+        # Queue the bad snapshot + a newer render while the job is active.
+        bridge.set_layer_snapshot(bad, "EPSG:3857")
+        bridge.request_render((0.0, 0.0, 40.0, 50.0), 1024, 1024, 96.0, 2)
+
+        # Wait for the job to finish WITHOUT draining it, then drain: the
+        # pending bad snapshot is applied here and must raise.
+        qtbot.waitUntil(lambda: not bridge.render_active, timeout=30_000)
+        with pytest.raises(Exception):
+            bridge.take_completed_frame()
+
+        # A fresh snapshot + render must now deliver ITS frame with the right
+        # generation (the failed snapshot must not have poisoned the queue).
+        bridge.set_layer_snapshot(good, "EPSG:3857")
+        bridge.request_render((0.0, 0.0, 40.0, 50.0), 1024, 1024, 96.0, 3)
+        frame = None
+
+        def take_newest():
+            nonlocal frame
+            frame = bridge.take_completed_frame()
+            return frame is not None
+
+        qtbot.waitUntil(take_newest, timeout=30_000)
+        assert frame["generation"] == 3
+    finally:
+        bridge.shutdown()
