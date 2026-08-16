@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from geoviz import CancellationToken
@@ -27,6 +27,65 @@ from paleo_workbench.ui.navigation import (
 from paleo_workbench.ui.preview_settings_dialog import PreviewSettingsDialog
 
 
+class _RecomputeWorker(QObject):
+    """Build and execute the affected-products recompute plan off the GUI thread.
+
+    The plan build walks the catalog freshness graph and the executor may
+    re-run factor interpolation, so both run on the owned worker thread. The
+    live project is never mutated here: interpolated tasks are staged as deep
+    copies and committed on the GUI thread (C05 convention).
+    """
+
+    completed = Signal(object, object, object)  # (plan, result, task_updates)
+    failed = Signal(str)
+
+    def __init__(self, project, parent=None):
+        super().__init__(parent)
+        self._project = project
+
+    def run(self) -> None:
+        try:
+            from paleo_workbench.workflow.factor_interpolation import (
+                apply_interpolation_to_task,
+            )
+            from paleo_workbench.workflow.recompute_plan import PlanExecutor
+            from paleo_workbench.workflow.service import (
+                build_affected_products_plan,
+            )
+
+            project = self._project
+            plan = build_affected_products_plan(project)
+            updates: list[tuple[str, object]] = []
+
+            def _factor_map_handler(step) -> None:
+                task_id = step.domain_task_id
+                if not task_id:
+                    raise RuntimeError(
+                        f"factor_map 步骤 {step.run_id!r} 缺少任务 id"
+                    )
+                task = next(
+                    (
+                        candidate
+                        for candidate in project.factor_map_tasks
+                        if str(getattr(candidate, "id", "")) == task_id
+                    ),
+                    None,
+                )
+                if task is None:
+                    raise RuntimeError(f"未找到单因素任务 {task_id!r}")
+                # Stage a deep copy; the host thread swaps it into the live
+                # project after the worker finishes (never mutate the shared
+                # project off the GUI thread).
+                staged = task.model_copy(deep=True)
+                apply_interpolation_to_task(staged, project=project)
+                updates.append((task_id, staged))
+
+            result = PlanExecutor(handlers={"factor_map": _factor_map_handler}).execute(plan)
+            self.completed.emit(plan, result, updates)
+        except Exception as exc:  # noqa: BLE001 — surface any plan failure to UI
+            self.failed.emit(f"{exc.__class__.__name__}: {exc}")
+
+
 class WorkflowController:
     """Manages cross-page workflow logic and signal wiring for PaleoWorkbenchWindow."""
 
@@ -39,6 +98,7 @@ class WorkflowController:
         job_parent = window if isinstance(window, QObject) else None
         self._prepare_job = OwnedWorkerJob(job_parent)
         self._prepare_generation = 0
+        self._recompute_job = OwnedWorkerJob(job_parent)
 
     def show_preview_settings(self) -> None:
         """Open the shared preview settings for the current DataPage."""
@@ -82,6 +142,93 @@ class WorkflowController:
             return
         if hasattr(page, "navigation_requested"):
             page.navigation_requested.connect(self._on_home_navigation)
+        progress = getattr(page, "workflow_progress", None)
+        if progress is not None and hasattr(progress, "recompute_requested"):
+            progress.recompute_requested.connect(self._on_recompute_requested)
+
+    def _on_recompute_requested(self) -> None:
+        """Execute the minimal affected-products recompute plan (#537).
+
+        The button was a silent no-op: recompute_requested had no consumer and
+        the plan summary was never displayed. Build the plan off the GUI thread
+        (catalog freshness scan), run the domain handlers the plan asks for,
+        then show the summary and refresh home steps.
+        """
+        project = self.window.project
+        if project is None:
+            QMessageBox.information(self.window, "更新受影响成果", "请先打开或绑定工程。")
+            return
+        if self._recompute_job.is_running:
+            QMessageBox.information(self.window, "更新受影响成果", "重算任务正在进行中…")
+            return
+        worker = _RecomputeWorker(project)
+        self._recompute_job.start(
+            worker,
+            terminal_signals=(worker.completed, worker.failed),
+            result_connections=(
+                (worker.completed, self._on_recompute_completed),
+                (worker.failed, self._on_recompute_failed),
+            ),
+            target=project,
+        )
+
+    def _on_recompute_completed(self, plan, result, task_updates) -> None:
+        # Commit staged factor tasks on the GUI thread (the worker only
+        # interpolated deep copies). Never commit into a project that is no
+        # longer the one the plan was built against (#537).
+        project = self.window.project
+        if project is not None and task_updates and self._recompute_job.target is project:
+            by_id = {
+                str(getattr(task, "id", "")): index
+                for index, task in enumerate(project.factor_map_tasks)
+            }
+            for task_id, staged in task_updates:
+                index = by_id.get(task_id)
+                if index is not None:
+                    project.factor_map_tasks[index] = staged
+        progress = self._home_workflow_progress()
+        if progress is None:
+            return
+        lines = [plan.summary_zh()]
+        if plan.cycle_error:
+            lines.append(f"依赖环: {plan.cycle_error}")
+        if result.messages:
+            lines.append("执行结果: " + "；".join(result.messages))
+        no_handler = any("no handler" in message for message in result.messages)
+        if no_handler:
+            lines.append("部分步骤没有自动重算入口，请在对应页面手动执行。")
+        elif result.stopped_early:
+            lines.append("已提前停止（上游失败）")
+        # Refresh the step strip first: update_steps rewrites plan_label, so
+        # the execution summary must be applied afterwards to persist (#537).
+        self._refresh_home_steps()
+        progress.set_recompute_plan_summary("\n".join(lines))
+
+    def _on_recompute_failed(self, message: str) -> None:
+        progress = self._home_workflow_progress()
+        if progress is not None:
+            progress.set_recompute_plan_summary(f"重算失败：{message}")
+
+    def _home_workflow_progress(self):
+        try:
+            page = self.window.app_shell.home_page_widget()
+            if page is None:
+                return None
+            progress = getattr(page, "workflow_progress", None)
+            return progress if progress is not None else None
+        except Exception:  # pragma: no cover - shell teardown races
+            return None
+
+    def _refresh_home_steps(self) -> None:
+        project = self.window.project
+        if project is None:
+            return
+        self.window.app_shell.update_home_page(
+            dashboard_state(project),
+            home_workflow_steps(project),
+            project=project,
+        )
+        self._refresh_data_page()
 
     def wire_data_visualization_jump(self) -> None:
         page = self.window.app_shell.data_page_widget()
