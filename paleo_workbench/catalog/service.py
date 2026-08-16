@@ -99,7 +99,11 @@ class _BatchSave:
             if service._batch_depth:
                 return False  # an outer batch still owns the flush
             try:
-                service._store.save(service.document)
+                # Through the guarded flush (#516): the direct _store.save
+                # skipped the #411 stale-write check and never refreshed
+                # _disk_mtime_ns, so the NEXT regular save always raised a
+                # spurious CatalogStaleWriteError after any batch.
+                service._flush_canonical_locked()
             except Exception:
                 if self._snapshot is not None:
                     service.document = self._snapshot
@@ -364,33 +368,49 @@ class DataCatalogService:
         (last-writer-wins, #411) — refuse instead.
         """
         with self._lock:
-            baseline = self._disk_mtime_ns
-            current = _disk_mtime_ns(catalog_file_for(self.project_path))
-            if baseline is None:
-                # The canonical file did not exist when this session opened
-                # (or first saved); if it exists now, another process created
-                # it since and an overwrite would drop its commits.
-                if current is not None:
-                    raise CatalogStaleWriteError(
-                        "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
-                        "本次保存已中止。请重新打开工程后重试。"
-                    )
-            elif current is not None and current != baseline:
-                raise CatalogStaleWriteError(
-                    "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
-                    "本次保存已中止。请重新打开工程后重试。"
-                )
             self.document.catalog_revision += 1
             if self._batch_depth:
                 self._sync_index_best_effort()
                 return
             try:
-                self._store.save(self.document)
+                self._flush_canonical_locked()
             except Exception:
                 self.document.catalog_revision -= 1
                 raise
-            self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
             self._sync_index_best_effort()
+
+    def _flush_canonical_locked(self) -> None:
+        """Write the canonical catalog under the #411 stale-write guard.
+
+        Caller must hold ``_lock``. Refuses to overwrite a file that advanced
+        on disk since this session's baseline, writes the document, and
+        REFRESHES the baseline so the next save does not false-positive
+        against our own write. The batch_save exit used to call
+        ``_store.save`` directly — skipping both the guard and the baseline
+        refresh, so the first post-batch save always raised a spurious
+        CatalogStaleWriteError (#516).
+        """
+        baseline = self._disk_mtime_ns
+        current = _disk_mtime_ns(catalog_file_for(self.project_path))
+        if baseline is None:
+            # The canonical file did not exist when this session opened
+            # (or first saved); if it exists now, another process created
+            # it since and an overwrite would drop its commits.
+            if current is not None:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
+                    "本次保存已中止。请重新打开工程后重试。"
+                )
+        elif current is not None and current != baseline:
+            raise CatalogStaleWriteError(
+                "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
+                "本次保存已中止。请重新打开工程后重试。"
+            )
+        try:
+            self._store.save(self.document)
+        except Exception:
+            raise
+        self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
 
     def _sync_index_best_effort(self) -> None:
         try:
@@ -934,32 +954,36 @@ class DataCatalogService:
         path = Path(path)
         if not path.is_file():
             raise CatalogError(f"External file not found: {path}")
-        asset = self._new_asset(name or path.name, type, format, metadata)
-        asset.metadata["external"] = True
-        if (
-            _legacy_resource_id is not None
-            and self._asset_by_legacy_id(_legacy_resource_id) is None
-        ):
-            asset.legacy_resource_id = _legacy_resource_id
-        version = DataVersion(
-            asset_id=asset.id,
-            version_number=1,
-            stage=DataStage.RAW,
-            managed=False,
-            path=path.resolve().as_posix(),
-            source_uri=path.resolve().as_posix(),
-            format=format or "",
-            size_bytes=path.stat().st_size,
-        )
-        asset.current_version_id = version.id
-        self._add_asset(asset)
-        self._add_version(version)
-        try:
-            self._save()
-        except Exception:
-            self._rollback(assets=[asset], versions=[version])
-            raise
-        return version
+        # Mutate + save under the lock (#517): link_external was fully
+        # unlocked, so a concurrent locked save could interleave between the
+        # document append and this write.
+        with self._lock:
+            asset = self._new_asset(name or path.name, type, format, metadata)
+            asset.metadata["external"] = True
+            if (
+                _legacy_resource_id is not None
+                and self._asset_by_legacy_id(_legacy_resource_id) is None
+            ):
+                asset.legacy_resource_id = _legacy_resource_id
+            version = DataVersion(
+                asset_id=asset.id,
+                version_number=1,
+                stage=DataStage.RAW,
+                managed=False,
+                path=path.resolve().as_posix(),
+                source_uri=path.resolve().as_posix(),
+                format=format or "",
+                size_bytes=path.stat().st_size,
+            )
+            asset.current_version_id = version.id
+            self._add_asset(asset)
+            self._add_version(version)
+            try:
+                self._save()
+            except Exception:
+                self._rollback(assets=[asset], versions=[version])
+                raise
+            return version
 
     def materialize_external(
         self, version_id: str, *, run_id: str | None = None
@@ -1028,19 +1052,21 @@ class DataCatalogService:
                 else []
             )
         if asset_id is None:
-            asset = self._new_asset(name or working_path.stem, None, None, metadata)
-            self._add_asset(asset)
-            try:
-                return self.register_version(
-                    asset.id, working_path, stage,
-                    parent_version_ids=parent_version_ids,
-                    run_id=run_id, metadata=metadata, move=True,
-                    _restore_payload_to=working_path,
-                )
-            except Exception:
-                if asset in self.document.assets:
-                    self._remove_asset(asset)
-                raise
+            # Lock across append + register (#517): mirrors _register_produced.
+            with self._lock:
+                asset = self._new_asset(name or working_path.stem, None, None, metadata)
+                self._add_asset(asset)
+                try:
+                    return self.register_version(
+                        asset.id, working_path, stage,
+                        parent_version_ids=parent_version_ids,
+                        run_id=run_id, metadata=metadata, move=True,
+                        _restore_payload_to=working_path,
+                    )
+                except Exception:
+                    if asset in self.document.assets:
+                        self._remove_asset(asset)
+                    raise
         version_metadata = dict(metadata or {})
         if name:
             version_metadata["name"] = name
@@ -1102,20 +1128,23 @@ class DataCatalogService:
         )
         if run is not None:
             run.output_version_ids = [version.id]
-        self._add_asset(asset)
-        self._add_version(version)
-        asset.current_version_id = version.id
-        if run is not None:
-            self._add_run(run)
-        try:
-            self._save()
-        except Exception:
-            self._rollback(
-                assets=[asset], versions=[version],
-                runs=[run] if run else [], payload=payload,
-            )
-            raise
-        return version
+        # Commit under the lock (#517); the payload copy/hash above stays
+        # outside so the lock is never held across disk I/O.
+        with self._lock:
+            self._add_asset(asset)
+            self._add_version(version)
+            asset.current_version_id = version.id
+            if run is not None:
+                self._add_run(run)
+            try:
+                self._save()
+            except Exception:
+                self._rollback(
+                    assets=[asset], versions=[version],
+                    runs=[run] if run else [], payload=payload,
+                )
+                raise
+            return version
 
     def register_run(
         self,
@@ -1229,6 +1258,19 @@ class DataCatalogService:
         No-op re-registrations do not rewrite the catalog file."""
         if not model_id or not model_name:
             raise CatalogError("register_model requires model_id and model_name")
+        # Mutate + save under the lock (#517).
+        with self._lock:
+            return self._register_model_locked(
+                model_id=model_id, model_name=model_name, model_type=model_type,
+                capability=capability, provider=provider, status=status,
+                metadata=metadata, provenance=provenance,
+                force_status=force_status,
+            )
+
+    def _register_model_locked(
+        self, *, model_id, model_name, model_type, capability, provider,
+        status, metadata, provenance, force_status,
+    ) -> Model:
         existing = None
         for model in self.document.models:
             if model.model_id == model_id:
@@ -1345,14 +1387,17 @@ class DataCatalogService:
             metadata=dict(metadata or {}),
             provenance=dict(provenance or {}),
         )
-        self.document.model_versions.append(version)
-        try:
-            self._save()
-        except Exception:
-            if version in self.document.model_versions:
-                self.document.model_versions.remove(version)
-            raise
-        return version
+        # Append + save under the lock (#517); the checksum hashing above
+        # stays outside so the lock is never held across disk I/O.
+        with self._lock:
+            self.document.model_versions.append(version)
+            try:
+                self._save()
+            except Exception:
+                if version in self.document.model_versions:
+                    self.document.model_versions.remove(version)
+                raise
+            return version
 
     def get_model(self, model_id: str) -> Model:
         return self._model_or_raise(model_id)
@@ -1981,18 +2026,20 @@ class DataCatalogService:
             move=False,
         )
         run.output_version_ids = [version.id]
-        self._add_version(version)
-        self._add_run(run)
-        asset.current_version_id = version.id
-        try:
-            self._save()
-        except Exception:
-            self._rollback(
-                versions=[version], runs=[run], payload=payload,
-                restore_current=(asset, previous_current),
-            )
-            raise
-        return version
+        # Commit under the lock (#517); the payload build above stays outside.
+        with self._lock:
+            self._add_version(version)
+            self._add_run(run)
+            asset.current_version_id = version.id
+            try:
+                self._save()
+            except Exception:
+                self._rollback(
+                    versions=[version], runs=[run], payload=payload,
+                    restore_current=(asset, previous_current),
+                )
+                raise
+            return version
 
     def promote_asset(
         self,
@@ -2346,10 +2393,12 @@ class DataCatalogService:
         """
         from paleo_workbench.catalog.migration import migrate_resources
 
-        report = migrate_resources(list(resources), self.project_path, self.document)
-        if report.migrated_count:
-            # Migration mutates the document lists directly (it is a pure
-            # document projection), so drop the maintained indexes.
-            self._invalidate_maps()
-            self._save()
-        return report
+        # Document projection + save under the lock (#517).
+        with self._lock:
+            report = migrate_resources(list(resources), self.project_path, self.document)
+            if report.migrated_count:
+                # Migration mutates the document lists directly (it is a pure
+                # document projection), so drop the maintained indexes.
+                self._invalidate_maps()
+                self._save()
+            return report
