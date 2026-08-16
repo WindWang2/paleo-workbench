@@ -320,6 +320,7 @@ class MappingPage(QWidget):
         *,
         factor_tasks: list | tuple | None = None,
         project_crs: str | None = None,
+        prefer_id: str | None = None,
     ) -> None:
         documents = list(map_documents or [])
         tasks = list(factor_tasks or [])
@@ -331,15 +332,45 @@ class MappingPage(QWidget):
                 self._factor_tasks_by_overlay_id[task_id] = task
             for output_id in list(getattr(task, "output_resource_ids", None) or []):
                 self._factor_tasks_by_overlay_id[str(output_id)] = task
-        prefer_id = getattr(self._active_document, "id", None)
-        document = active_map_document(documents, prefer_id=prefer_id)
         previous = self._active_document
+        if prefer_id is None:
+            prefer_id = getattr(previous, "id", None)
+        document = active_map_document(documents, prefer_id=prefer_id)
+        scene = self.edit_view.scene()
+        if (
+            isinstance(scene, MapEditScene)
+            and previous is not None
+            and document is not None
+            and getattr(previous, "id", None) != getattr(document, "id", None)
+            and self.is_dirty()
+        ):
+            # A refresh resolved a DIFFERENT document than the one holding the
+            # user's unsaved edits.  Reloading it directly would silently
+            # discard those edits, and the scene would then keep stale geometry
+            # under the new active id, so a later save_draft could write one
+            # map's features into another (#532).  Mirror the layer-tree switch
+            # prompt instead of wiping.
+            from PySide6.QtWidgets import QMessageBox
+
+            reply = QMessageBox.question(
+                self,
+                "未保存的编图修改",
+                "当前图件有未保存修改。是否先保存草稿？",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                document = previous
+            elif reply == QMessageBox.StandardButton.Save:
+                if not self.save_draft():
+                    document = previous
         self._active_document = document
         if document is not previous:
             self._presentation_dirty = False
         self.layer_tree.set_documents(documents)
         self.layer_tree.set_active_document(document)
-        scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             # Avoid wiping dirty geometry when the same document is re-pushed
             # from project refresh (e.g. other pages update shell state). The
@@ -422,25 +453,21 @@ class MappingPage(QWidget):
                 "没有可提取的单因素网格。请先在制备页生成单因素图。",
             )
             return
-        # Prefer the map linked to the last draft as active document.
-        prefer = None
+        # Prefer the map linked to the last draft as active document.  The
+        # preference is passed to update_state instead of mutating
+        # _active_document first: a pre-mutation defeats update_state's dirty
+        # guard (previous already equals the new id), leaving a dirty scene
+        # from another document under the new active id (#532).
+        prefer_id = None
         if drafts[-1].linked_map_document_id:
-            prefer = next(
-                (
-                    d
-                    for d in self._project.paleomap_documents
-                    if d.id == drafts[-1].linked_map_document_id
-                ),
-                None,
-            )
-        if prefer is not None:
-            self._active_document = prefer
+            prefer_id = str(drafts[-1].linked_map_document_id)
         self.update_state(
             self._project.paleomap_documents,
             factor_tasks=self._project.factor_map_tasks,
             project_crs=getattr(
                 getattr(self._project, "coordinate", None), "project_crs", None
             ),
+            prefer_id=prefer_id,
         )
         self.contour_drafts_updated.emit()
         QMessageBox.information(
