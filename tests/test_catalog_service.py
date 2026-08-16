@@ -918,3 +918,141 @@ def test_result_asset_registration_does_not_hold_lock_across_payload_io(
     ]
     assert len(registered) == 1
     assert registered[0].current_version_id is not None
+
+
+# --- batch flush staleness (#516) ------------------------------------------
+
+
+def test_batch_save_then_regular_save_does_not_false_positive(service, tmp_path):
+    """#516: the batch flush used to bypass _save's mtime-baseline refresh,
+    so the FIRST regular save after any batch raised a spurious
+    CatalogStaleWriteError against our own batch write."""
+    with service.batch_save():
+        service.import_raw(_make_source(tmp_path, name="a.las"))
+
+    # The very next ordinary mutator must save cleanly, not refuse.
+    v = service.import_raw(_make_source(tmp_path, name="b.las"))
+    service.add_tag("post-batch", version_id=v.id)
+    assert v.id in service.find_versions_by_tag("post-batch")
+
+
+def test_batch_flush_stale_write_raises_and_restores(service, tmp_path):
+    """#516 red/green core: external advance during the batch makes the exit
+    raise CatalogStaleWriteError and restore the pre-batch document."""
+    import os
+
+    from paleo_workbench.catalog.service import CatalogStaleWriteError
+
+    seed = service.import_raw(_make_source(tmp_path, name="seed.las"))
+    n_assets_before = len(service.document.assets)
+
+    with pytest.raises(CatalogStaleWriteError):
+        with service.batch_save():
+            service.import_raw(_make_source(tmp_path, name="a.las"))
+            catalog_file = catalog_file_for(service.project_path)
+            stat = catalog_file.stat()
+            os.utime(
+                catalog_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000)
+            )
+
+    # Snapshot restored: the batch's mutation is gone, the seed survives.
+    assert len(service.document.assets) == n_assets_before
+    assert any(v.id == seed.id for v in service.document.versions)
+
+
+# --- producer locking (#517) ------------------------------------------------
+
+
+def test_concurrent_save_never_persists_zero_version_asset(
+    service, tmp_path, monkeypatch
+):
+    """#517: a locked mutator holding the catalog lock must never observe a
+    version-less asset appended by _register_produced — the append now
+    happens inside the same critical section."""
+    import threading
+
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+
+    seed = service.import_raw(_make_source(tmp_path, name="seed.las"))
+
+    entered = threading.Event()
+    release = threading.Event()
+    real_add_tag = service.add_tag
+
+    def holding_add_tag(*args, **kwargs):
+        # Hold the CATALOG LOCK while waiting, so the producer below must
+        # block at its critical section (the real mutator runs after the
+        # release, outside the hold).
+        with service._lock:
+            entered.set()
+            release.wait(10)
+        return real_add_tag(*args, **kwargs)
+
+    monkeypatch.setattr(service, "add_tag", holding_add_tag)
+
+    adapter = CoreCatalogAdapter(service)
+    run = adapter.begin_run(operation="test", input_version_ids=[seed.id])
+    out = _make_source(tmp_path, name="out.las", payload=b"result")
+
+    b = threading.Thread(
+        target=lambda: service.add_tag("holder", version_id=seed.id)
+    )
+    b.start()
+    assert entered.wait(5), "holder thread must enter the locked mutator"
+
+    a_done = threading.Event()
+
+    def producer():
+        adapter.register_output(
+            run_id=run.run_id, name="out.las", path=str(out), kind="", format=""
+        )
+        a_done.set()
+
+    a = threading.Thread(target=producer)
+    a.start()
+    a.join(0.6)  # give the producer a moment to reach the lock
+
+    # While the lock is held by the tag mutator, the producer must NOT have
+    # appended its asset yet (old code: _add_asset ran unlocked → zero-version
+    # asset visible to every concurrent save).
+    zero = [
+        asset.id
+        for asset in service.document.assets
+        if asset.current_version_id is None
+    ]
+    assert zero == [], f"version-less assets visible mid-flight: {zero}"
+
+    release.set()
+    b.join(10)
+    assert a_done.wait(10), "producer must complete after the lock is released"
+    a.join(10)
+    # Final state: producer's asset registered with a version.
+    assert all(
+        any(v.asset_id == asset.id for v in service.document.versions)
+        for asset in service.document.assets
+    )
+
+
+# --- modeling run compensation (#518) ---------------------------------------
+
+
+def test_register_modeling_run_failure_fails_the_run(service, tmp_path):
+    """#518: a registration failure must compensate the booked run to
+    status=failed instead of leaving phantom RUNNING provenance."""
+    from paleo_workbench.catalog.adapter import CoreCatalogAdapter
+    from paleo_workbench.catalog.lifecycle import register_modeling_run
+
+    adapter = CoreCatalogAdapter(service)
+    missing = tmp_path / "gone.output"
+
+    with pytest.raises(Exception):
+        register_modeling_run(
+            name="m1",
+            source="real",
+            output_path=str(missing),
+            catalog=adapter,
+        )
+
+    runs = [r for r in service.document.runs if r.operation == "modeling"]
+    assert runs, "the run was booked"
+    assert runs[-1].status == "failed", runs[-1].status

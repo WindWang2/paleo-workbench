@@ -396,47 +396,55 @@ class CoreCatalogAdapter:
         reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
-        run = service.get_run(run_id)
-        asset = None
-        if reuse_legacy_id:
-            ref = self.resolve_legacy_resource(reuse_legacy_id)
-            if ref is not None:
-                try:
-                    asset = service.get_asset(ref.asset_id)
-                except CatalogError:
-                    asset = None
-        if asset is None:
-            asset = self._domain_task_asset(run)
-        created = False
-        if asset is None:
-            asset = service._new_asset(name, kind or None, format or None, None)
-            if (
-                reuse_legacy_id
-                and service._asset_by_legacy_id(reuse_legacy_id) is None
-            ):
-                # Bridge the new asset so the NEXT registration with the same
-                # reuse key appends a version instead of spawning an asset.
-                asset.legacy_resource_id = reuse_legacy_id
-            service._add_asset(asset)
-            created = True
-        try:
-            # register_version links the run's output in the same atomic save.
-            version = service.register_version(
-                asset.id,
-                path,
-                stage,
-                parent_version_ids=list(run.input_version_ids),
-                run_id=run.id,
-                known_sha256=checksum,
-            )
-        except Exception:
-            if created and asset in service.document.assets:
-                service._remove_asset(asset)
-            raise
-        for tag in tags or []:
-            if tag:
-                service.add_tag(tag, version_id=version.id)
-        return self._version_ref(version)
+        # Hold the catalog lock across append + register (#517): a concurrent
+        # locked _save between the unlocked _add_asset and register_version
+        # persisted a zero-version asset — this path backs every pipeline/
+        # prediction/export/qc output registration. The lock is reentrant, so
+        # the locked register_version/add_tag calls below nest safely.
+        with service._lock:
+            run = service.get_run(run_id)
+            asset = None
+            if reuse_legacy_id:
+                ref = self.resolve_legacy_resource(reuse_legacy_id)
+                if ref is not None:
+                    try:
+                        asset = service.get_asset(ref.asset_id)
+                    except CatalogError:
+                        asset = None
+            if asset is None:
+                asset = self._domain_task_asset(run)
+            created = False
+            if asset is None:
+                asset = service._new_asset(name, kind or None, format or None, None)
+                if (
+                    reuse_legacy_id
+                    and service._asset_by_legacy_id(reuse_legacy_id) is None
+                ):
+                    # Bridge the new asset so the NEXT registration with the
+                    # same reuse key appends a version instead of spawning an
+                    # asset.
+                    asset.legacy_resource_id = reuse_legacy_id
+                service._add_asset(asset)
+                created = True
+            try:
+                # register_version links the run's output in the same atomic
+                # save.
+                version = service.register_version(
+                    asset.id,
+                    path,
+                    stage,
+                    parent_version_ids=list(run.input_version_ids),
+                    run_id=run.id,
+                    known_sha256=checksum,
+                )
+            except Exception:
+                if created and asset in service.document.assets:
+                    service._remove_asset(asset)
+                raise
+            for tag in tags or []:
+                if tag:
+                    service.add_tag(tag, version_id=version.id)
+            return self._version_ref(version)
 
     def register_intermediate(
         self,
@@ -507,23 +515,27 @@ class CoreCatalogAdapter:
                 f"Cannot attach lineage from a version to itself: {source_version_id}"
             )
         service = self._service
-        target = service.get_version(target_version_id)
-        service.get_version(source_version_id)  # raises if unknown
-        if source_version_id not in target.parent_version_ids:
-            service._append_parent(target_version_id, source_version_id)
-            try:
-                service._save()
-            except Exception:
-                # Snapshot-rollback on a failed save: undo the in-memory edge
-                # (and the maintained children index) so memory never diverges
-                # from the disk state until a later unrelated save.
-                target.parent_version_ids.remove(source_version_id)
-                children = service._children_by_parent
-                if children is not None:
-                    bucket = children.get(source_version_id)
-                    if bucket is not None and target in bucket:
-                        bucket.remove(target)
-                raise
+        # Mutate + save under the lock (#517): the unlocked _append_parent
+        # window let a concurrent save persist a torn lineage edge.
+        with service._lock:
+            target = service.get_version(target_version_id)
+            service.get_version(source_version_id)  # raises if unknown
+            if source_version_id not in target.parent_version_ids:
+                service._append_parent(target_version_id, source_version_id)
+                try:
+                    service._save()
+                except Exception:
+                    # Snapshot-rollback on a failed save: undo the in-memory
+                    # edge (and the maintained children index) so memory never
+                    # diverges from the disk state until a later unrelated
+                    # save.
+                    target.parent_version_ids.remove(source_version_id)
+                    children = service._children_by_parent
+                    if children is not None:
+                        bucket = children.get(source_version_id)
+                        if bucket is not None and target in bucket:
+                            bucket.remove(target)
+                    raise
         return LineageEdge(
             source_version_id=source_version_id,
             target_version_id=target_version_id,
