@@ -397,6 +397,24 @@ class DataPage(QWidget):
         # lineage status, governance values for the table rows.
         enricher = self._lifecycle.catalog_enricher()
         catalog_rows = self._lifecycle.catalog_only_rows(enricher)
+        display_resources = list(self._resources)
+        if self._trash_view_active():
+            display_resources.extend(self._trashed_companions())
+        # Build the enriched row views ONCE per refresh (#527): every build
+        # probes the filesystem (exists/stat per resource), and the counts
+        # pass, the filter index and the table model each used to rebuild
+        # the same views — three disk-probing sweeps per refresh on the GUI
+        # thread. The counts pass covers exactly [resources, artifacts,
+        # catalog_rows]; when the table shows the same list (trash view
+        # inactive) both consumers share these views, otherwise the table
+        # falls back to building its own via the filter index.
+        counts_assets = [*self._resources, *self._artifacts, *(catalog_rows or [])]
+        shared_views = [
+            enricher(asset_view_from_object(a, project_root=preview_root))
+            if enricher is not None
+            else asset_view_from_object(a, project_root=preview_root)
+            for a in counts_assets
+        ]
         # project_root lets the tree counts and the table resolve
         # project-relative paths (F4: no MISSING false positives).
         self.navigation_tree.update_counts(
@@ -405,17 +423,21 @@ class DataPage(QWidget):
             project_root=preview_root,
             extra_assets=catalog_rows,
             enricher=enricher,
+            views=shared_views,
         )
         self.navigation_tree.set_trash_count(len(self._trashed_companions()))
-        display_resources = list(self._resources)
-        if self._trash_view_active():
-            display_resources.extend(self._trashed_companions())
+        table_views = (
+            shared_views
+            if len(display_resources) == len(self._resources)
+            else None
+        )
         self.asset_table.update_assets(
             display_resources,
             self._artifacts,
             project_root=preview_root,
             extra_assets=catalog_rows,
             enricher=enricher,
+            views=table_views,
         )
         self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
         self._update_selection_action_state()

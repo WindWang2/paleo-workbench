@@ -1436,3 +1436,42 @@ def test_data_page_export_runs_off_gui_thread(qtbot, tmp_path: Path):
 
     assert threads[0] != threading.current_thread().name
     assert (tmp_path / "out.csv").exists()
+
+
+def test_update_state_builds_row_views_once_per_refresh(qtbot, tmp_path: Path):
+    """#527: the counts pass, filter index and table model each used to
+    rebuild every AssetView (each build probes the filesystem) — three
+    sweeps per refresh. The views are now built once and shared."""
+    from paleo_workbench.ui.pages import data_page as dp_mod
+
+    las = tmp_path / "w1.las"
+    las.write_text("~V\nSTRT.M 0:\n~A\n0\n")
+    project = ProjectDocument.new("Views")
+    for i in range(6):
+        src = tmp_path / f"r{i}.las"
+        src.write_text("~V\n~A\n0\n")
+        project.resources.append(
+            ResourceItem(name=f"r{i}.las", path=str(src), type="well_log", format="las")
+        )
+
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    calls = []
+    real = dp_mod.asset_view_from_object
+
+    def spy(obj, *a, **k):
+        calls.append(1)
+        return real(obj, *a, **k)
+
+    with patch.object(dp_mod, "asset_view_from_object", side_effect=spy):
+        page.update_state(
+            dashboard_state(project), project.resources, project.export_artifacts
+        )
+
+    n = len(project.resources)
+    # One build per resource (no artifacts/catalog rows here) — NOT the
+    # historical 3x (counts + filter index + table model).
+    assert calls == [1] * n, f"expected {n} builds, got {len(calls)}"
+    # The table still received its views.
+    assert page.asset_table.model.rowCount() >= n
