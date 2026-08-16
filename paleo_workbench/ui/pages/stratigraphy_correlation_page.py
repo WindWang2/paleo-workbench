@@ -532,16 +532,12 @@ class StratigraphyCorrelationPage(QWidget):
         # Leverage StratigraphicCorrelationEngine for top depth recommendation
         # & confidence. Curves are bound via with_wells on load; an unbound or
         # empty engine returns the empty-input sentinel (dtw_cost >= 999.0),
-        # which must NOT render as a real 0.00 confidence.
-        rec = self.correlation_engine.recommend_top(
-            ref_well=ref_well,
-            target_well=wells[1] if len(wells) > 1 else ref_well,
-            ref_top_depth=ref_depth,
-        )
-        if rec.dtw_cost >= 999.0:
-            self._dtw_conf_text = "置信度: 不可用"
-        else:
-            self._dtw_conf_text = f"置信度: {rec.confidence:.2f}"
+        # which must NOT render as a real 0.00 confidence. The recommendation's
+        # O(n*m) pure-Python DTW used to run synchronously in this slot and
+        # froze the GUI for ~1.5 s per click; it now runs at the head of the
+        # propagation worker thread and arrives via _on_dtw_recommendation.
+        target_well = wells[1] if len(wells) > 1 else ref_well
+        self._dtw_conf_text = "置信度: 不可用"
         n_samples = self._max_loaded_curve_samples()
         band = bounded_dtw_band(n_samples)
         worker = DtwPropagationWorker(
@@ -551,9 +547,13 @@ class StratigraphyCorrelationPage(QWidget):
             formation=ref.formation_name,
             n_samples=n_samples,
             band_radius=band,
+            recommend_fn=lambda: self.correlation_engine.recommend_top(
+                ref_well=ref_well,
+                target_well=target_well,
+                ref_top_depth=ref_depth,
+            ),
         )
         self._dtw_formation = ref.formation_name
-        self._dtw_confidence = rec.confidence
         self.dtw_btn.setEnabled(False)
         self.status_label.setText("DTW 传播中…（再次点击可取消）")
         self._dtw_job.start(
@@ -561,6 +561,7 @@ class StratigraphyCorrelationPage(QWidget):
             terminal_signals=(worker.finished, worker.failed, worker.cancelled),
             result_connections=(
                 (worker.progress, self._on_dtw_progress),
+                (worker.recommendation_ready, self._on_dtw_recommendation),
                 (worker.finished, self._on_dtw_finished),
                 (worker.failed, self._on_dtw_failed),
                 (worker.cancelled, self._on_dtw_cancelled),
@@ -584,6 +585,15 @@ class StratigraphyCorrelationPage(QWidget):
     def _on_dtw_progress(self, done: int, total: int) -> None:
         if total > 0:
             self.status_label.setText(f"DTW 传播中… {done}/{total} 井（再次点击可取消）")
+
+    def _on_dtw_recommendation(self, rec) -> None:
+        """Apply the worker-thread recommendation (confidence label only)."""
+        if rec is None or rec.dtw_cost >= 999.0:
+            self._dtw_conf_text = "置信度: 不可用"
+            self._dtw_confidence = 0.0
+        else:
+            self._dtw_conf_text = f"置信度: {rec.confidence:.2f}"
+            self._dtw_confidence = rec.confidence
 
     def _on_dtw_finished(self, created) -> None:
         self.status_label.setText(
