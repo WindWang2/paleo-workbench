@@ -297,6 +297,52 @@ def project_point_to_polyline(pt: PointTuple, geom: PolylineGeometry) -> Tuple[f
     return best
 
 
+def project_points_to_polyline(
+    px: np.ndarray,
+    py: np.ndarray,
+    geom: PolylineGeometry,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized (s, n_signed, tx, ty, dist) for many points on one polyline."""
+    px = np.asarray(px, dtype=float)
+    py = np.asarray(py, dtype=float)
+    n = int(px.size)
+    pts = np.asarray(geom.points, dtype=float)
+    cum = np.asarray(geom.cumlen, dtype=float)
+    best_dist = np.full(n, np.inf)
+    best_s = np.zeros(n, dtype=float)
+    best_n = np.zeros(n, dtype=float)
+    best_tx = np.ones(n, dtype=float)
+    best_ty = np.zeros(n, dtype=float)
+    for i in range(len(pts) - 1):
+        ax = float(pts[i, 0])
+        ay = float(pts[i, 1])
+        bx = float(pts[i + 1, 0])
+        by = float(pts[i + 1, 1])
+        dx = bx - ax
+        dy = by - ay
+        length_sq = dx * dx + dy * dy
+        if length_sq <= 1e-24:
+            continue
+        t = np.clip(((px - ax) * dx + (py - ay) * dy) / length_sq, 0.0, 1.0)
+        cx = ax + t * dx
+        cy = ay + t * dy
+        dist = np.hypot(px - cx, py - cy)
+        better = dist < best_dist
+        if not np.any(better):
+            continue
+        length = math.sqrt(length_sq)
+        tx = dx / length
+        ty = dy / length
+        n_signed = (px - cx) * (-ty) + (py - cy) * tx
+        s = float(cum[i]) + t * length
+        best_dist = np.where(better, dist, best_dist)
+        best_s = np.where(better, s, best_s)
+        best_n = np.where(better, n_signed, best_n)
+        best_tx = np.where(better, tx, best_tx)
+        best_ty = np.where(better, ty, best_ty)
+    return best_s, best_n, best_tx, best_ty, best_dist
+
+
 def influence_strength(
     dist_to_line: float,
     core_radius: float,
@@ -391,6 +437,85 @@ def combined_influence(
         extend_mode=geom.extend_mode,
     )
     return float(g_perp * g_along)
+
+
+def _influence_strength_vec(
+    dist_to_line: np.ndarray,
+    core_radius: float,
+    influence_radius: float,
+    *,
+    exp_k: float = 3.0,
+) -> np.ndarray:
+    d = np.abs(np.asarray(dist_to_line, dtype=float))
+    core = max(float(core_radius), 0.0)
+    inf = max(float(influence_radius), core + 1e-9)
+    g = np.zeros_like(d, dtype=float)
+    inside = d <= core
+    outside = d >= inf
+    mid = ~inside & ~outside
+    g[inside] = 1.0
+    if np.any(mid):
+        t = np.clip((d[mid] - core) / max(inf - core, 1e-9), 0.0, 1.0)
+        k = max(float(exp_k), 0.5)
+        e_k = math.exp(-k)
+        g[mid] = np.clip((np.exp(-k * t) - e_k) / max(1.0 - e_k, 1e-12), 0.0, 1.0)
+    g[outside] = 0.0
+    return g
+
+
+def _along_track_envelope_vec(
+    s: np.ndarray,
+    s_start: float,
+    s_end: float,
+    *,
+    tip_length: float = 0.0,
+    extend_mode: str = "auto",
+) -> np.ndarray:
+    s0 = float(min(s_start, s_end))
+    s1 = float(max(s_start, s_end))
+    ss = np.asarray(s, dtype=float)
+    g = np.zeros_like(ss, dtype=float)
+    inside = (s0 - 1e-9 <= ss) & (ss <= s1 + 1e-9)
+    g[inside] = 1.0
+    mode = str(extend_mode or "auto").strip().lower()
+    if mode in {"none", "off", "0", "false"}:
+        return g
+    tip = max(float(tip_length), 0.0)
+    if tip <= 1e-12:
+        tip = max(0.1 * (s1 - s0), 1e-6)
+    t = np.where(ss < s0, (s0 - ss) / tip, (ss - s1) / tip)
+    taper = (~inside) & (t < 1.0)
+    if np.any(taper):
+        tt = np.clip(t[taper], 0.0, 1.0)
+        g[taper] = 1.0 - tt * tt * (3.0 - 2.0 * tt)
+    return g
+
+
+def combined_influence_vec(
+    dist_to_line: np.ndarray,
+    s: np.ndarray,
+    geom: "PolylineGeometry",
+    *,
+    tip_length: float = 0.0,
+) -> np.ndarray:
+    g_perp = _influence_strength_vec(
+        dist_to_line, geom.core_radius, geom.influence_radius
+    )
+    tip = tip_length
+    if tip <= 0.0:
+        tip = max(
+            0.12 * max(float(geom.s_end) - float(geom.s_start), 1.0),
+            float(geom.core_radius) * 0.35,
+            1.0,
+        )
+    g_along = _along_track_envelope_vec(
+        s,
+        geom.s_start,
+        geom.s_end,
+        tip_length=tip,
+        extend_mode=geom.extend_mode,
+    )
+    return g_perp * g_along
 
 
 def build_along_track_well_profiles(
@@ -928,63 +1053,141 @@ def build_grid_direction_cache(
     # Only visit domain cells (much faster than full rows×cols scan)
     multi_dir = len(geoms) >= 2
     rr, cc = np.nonzero(domain_mask)
-    for r, c in zip(rr.tolist(), cc.tolist()):
-        p = (float(grid_x[c]), float(grid_y[r]))
-        best_score = -1.0
-        best: Optional[PointCurveCoord] = None
-        second: Optional[PointCurveCoord] = None
-        second_score = -1.0
-        for geom in geoms:
-            s, n_signed, txx, tyy, dist = project_point_to_polyline(p, geom)
-            g = combined_influence(dist, s, geom)
-            if g <= 1e-9:
-                continue
-            prio_boost = 1.0 / max(float(geom.priority), 1.0)
-            score = g * (1.0 + 0.15 * prio_boost) / (1.0 + dist / max(geom.influence_radius, 1.0))
-            coord = PointCurveCoord(
-                dir_index=geom.index,
-                s=s,
-                n=n_signed,
-                tx=txx,
-                ty=tyy,
-                g=g,
-                ratio=geom.ratio,
-                distance=dist,
-            )
-            if score > best_score:
-                second, second_score = best, best_score
-                best, best_score = coord, score
-            elif multi_dir and score > second_score:
-                second, second_score = coord, score
-        if best is None:
-            continue
-        dir_index[r, c] = int(best.dir_index)
-        s_arr[r, c] = best.s
-        n_arr[r, c] = best.n
-        tx[r, c] = best.tx
-        ty[r, c] = best.ty
-        g_arr[r, c] = best.g
-        ratio[r, c] = best.ratio
+    if rr.size == 0:
+        stretch = 1.0 + (ratio - 1.0) * g_arr
+        return {
+            "dir_index": dir_index,
+            "s": s_arr,
+            "n": n_arr,
+            "tx": tx,
+            "ty": ty,
+            "g": g_arr,
+            "ratio": ratio,
+            "stretch": stretch,
+            "dir_index2": dir_index2,
+            "g2": g2,
+            "tx2": tx2,
+            "ty2": ty2,
+            "ratio2": ratio2,
+            "s2": s2,
+            "n2": n2,
+        }
 
-        # Dual-angle blend only when 2+ direction lines compete
-        if multi_dir and second is not None and second.g > 0.15 and best.g > 0.15:
-            g_a = geoms[best.dir_index]
-            g_b = geoms[second.dir_index]
+    xs = np.asarray(grid_x, dtype=float)
+    ys = np.asarray(grid_y, dtype=float)
+    px = xs[cc]
+    py = ys[rr]
+    n_cells = int(px.size)
+    best_score = np.full(n_cells, -1.0)
+    best_dir = np.full(n_cells, -1, dtype=np.int32)
+    best_s = np.zeros(n_cells)
+    best_n = np.zeros(n_cells)
+    best_tx = np.zeros(n_cells)
+    best_ty = np.zeros(n_cells)
+    best_g = np.zeros(n_cells)
+    best_ratio = np.ones(n_cells)
+    second_score = np.full(n_cells, -1.0)
+    second_dir = np.full(n_cells, -1, dtype=np.int32)
+    second_s = np.zeros(n_cells)
+    second_n = np.zeros(n_cells)
+    second_tx = np.zeros(n_cells)
+    second_ty = np.zeros(n_cells)
+    second_g = np.zeros(n_cells)
+    second_ratio = np.ones(n_cells)
+
+    for geom in geoms:
+        s, n_signed, txx, tyy, dist = project_points_to_polyline(px, py, geom)
+        g = combined_influence_vec(dist, s, geom)
+        valid = g > 1e-9
+        prio_boost = 1.0 / max(float(geom.priority), 1.0)
+        score = g * (1.0 + 0.15 * prio_boost) / (
+            1.0 + dist / max(float(geom.influence_radius), 1.0)
+        )
+        is_best = valid & (score > best_score)
+        if multi_dir:
+            is_second = valid & (~is_best) & (score > second_score)
+            second_score = np.where(is_best, best_score, second_score)
+            second_dir = np.where(is_best, best_dir, second_dir)
+            second_s = np.where(is_best, best_s, second_s)
+            second_n = np.where(is_best, best_n, second_n)
+            second_tx = np.where(is_best, best_tx, second_tx)
+            second_ty = np.where(is_best, best_ty, second_ty)
+            second_g = np.where(is_best, best_g, second_g)
+            second_ratio = np.where(is_best, best_ratio, second_ratio)
+            second_score = np.where(is_second, score, second_score)
+            second_dir = np.where(is_second, int(geom.index), second_dir)
+            second_s = np.where(is_second, s, second_s)
+            second_n = np.where(is_second, n_signed, second_n)
+            second_tx = np.where(is_second, txx, second_tx)
+            second_ty = np.where(is_second, tyy, second_ty)
+            second_g = np.where(is_second, g, second_g)
+            second_ratio = np.where(is_second, float(geom.ratio), second_ratio)
+        best_score = np.where(is_best, score, best_score)
+        best_dir = np.where(is_best, int(geom.index), best_dir)
+        best_s = np.where(is_best, s, best_s)
+        best_n = np.where(is_best, n_signed, best_n)
+        best_tx = np.where(is_best, txx, best_tx)
+        best_ty = np.where(is_best, tyy, best_ty)
+        best_g = np.where(is_best, g, best_g)
+        best_ratio = np.where(is_best, float(geom.ratio), best_ratio)
+
+    hit = best_dir >= 0
+    dir_index[rr[hit], cc[hit]] = best_dir[hit]
+    s_arr[rr[hit], cc[hit]] = best_s[hit]
+    n_arr[rr[hit], cc[hit]] = best_n[hit]
+    tx[rr[hit], cc[hit]] = best_tx[hit]
+    ty[rr[hit], cc[hit]] = best_ty[hit]
+    g_arr[rr[hit], cc[hit]] = best_g[hit]
+    ratio[rr[hit], cc[hit]] = best_ratio[hit]
+
+    if multi_dir:
+        compete = (
+            hit
+            & (second_dir >= 0)
+            & (best_g > 0.15)
+            & (second_g > 0.15)
+            & (np.abs(best_score - second_score) <= np.maximum(0.15 * best_score, 1e-6))
+        )
+        for k in np.flatnonzero(compete):
+            g_a = geoms[int(best_dir[k])]
+            g_b = geoms[int(second_dir[k])]
             zone_ok = (not g_a.zone_id) or (not g_b.zone_id) or (g_a.zone_id == g_b.zone_id)
-            close = abs(best_score - second_score) <= max(0.15 * best_score, 1e-6)
-            if zone_ok and close:
-                btx, bty, bg, br = dual_angle_blend_tangent(best, second)
-                tx[r, c] = btx
-                ty[r, c] = bty
-                dir_index2[r, c] = int(second.dir_index)
-                g2[r, c] = second.g
-                tx2[r, c] = second.tx
-                ty2[r, c] = second.ty
-                ratio2[r, c] = second.ratio
-                s2[r, c] = second.s
-                n2[r, c] = second.n
-                g_arr[r, c] = max(best.g, second.g * 0.85)
-                ratio[r, c] = br
+            if not zone_ok:
+                continue
+            best = PointCurveCoord(
+                dir_index=int(best_dir[k]),
+                s=float(best_s[k]),
+                n=float(best_n[k]),
+                tx=float(best_tx[k]),
+                ty=float(best_ty[k]),
+                g=float(best_g[k]),
+                ratio=float(best_ratio[k]),
+                distance=0.0,
+            )
+            second = PointCurveCoord(
+                dir_index=int(second_dir[k]),
+                s=float(second_s[k]),
+                n=float(second_n[k]),
+                tx=float(second_tx[k]),
+                ty=float(second_ty[k]),
+                g=float(second_g[k]),
+                ratio=float(second_ratio[k]),
+                distance=0.0,
+            )
+            btx, bty, _bg, br = dual_angle_blend_tangent(best, second)
+            r = int(rr[k])
+            c = int(cc[k])
+            tx[r, c] = btx
+            ty[r, c] = bty
+            dir_index2[r, c] = int(second.dir_index)
+            g2[r, c] = second.g
+            tx2[r, c] = second.tx
+            ty2[r, c] = second.ty
+            ratio2[r, c] = second.ratio
+            s2[r, c] = second.s
+            n2[r, c] = second.n
+            g_arr[r, c] = max(best.g, second.g * 0.85)
+            ratio[r, c] = br
 
     stretch = 1.0 + (ratio - 1.0) * g_arr
     return {

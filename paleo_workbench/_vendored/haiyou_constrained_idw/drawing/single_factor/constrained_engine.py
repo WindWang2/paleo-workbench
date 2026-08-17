@@ -201,10 +201,19 @@ def build_well_coverage_mask(
     radius_sq = float(coverage_radius) * float(coverage_radius)
     cols = np.asarray(grid_x, dtype=float)
     rows = np.asarray(grid_y, dtype=float)
-    dx = cols[None, :] - well_xy[:, 0][:, None, None]
-    dy = rows[None, :, None] - well_xy[:, 1][:, None, None]
-    dist_sq = dx * dx + dy * dy
-    return np.any(dist_sq <= radius_sq, axis=0)
+    n_wells = int(well_xy.shape[0])
+    n_rows = int(rows.size)
+    n_cols = int(cols.size)
+    cell_count = max(n_rows * n_cols, 1)
+    # Same 4M-element budget as _barrier_blocked_mask: never allocate (W,R,C).
+    chunk = max(1, 4_000_000 // cell_count)
+    mask = np.zeros((n_rows, n_cols), dtype=bool)
+    for start in range(0, n_wells, chunk):
+        batch = well_xy[start : start + chunk]
+        dx = cols[None, :] - batch[:, 0][:, None, None]
+        dy = rows[None, :, None] - batch[:, 1][:, None, None]
+        mask |= np.any(dx * dx + dy * dy <= radius_sq, axis=0)
+    return mask
 
 
 def resolve_barrier_buffer_distance(
@@ -681,6 +690,7 @@ def generate_constrained_idw(
         build_contour_component_mask,
         build_contour_support_mask,
         build_data_hull_mask,
+        data_hull_exists,
         resolve_bfs_reach_cells,
         resolve_contour_component_dilation_cells,
         resolve_contour_support_dilation_cells,
@@ -753,7 +763,8 @@ def generate_constrained_idw(
         limit_to_well_coverage=apply_well_coverage_mask,
     )
     limit_well_coverage = bool(config.limit_interpolation_to_search_radius)
-    if hull_buffer > 0.0 or float(config.data_hull_buffer_meters) > 0.0:
+    hull_requested = hull_buffer > 0.0 or float(config.data_hull_buffer_meters) > 0.0
+    if hull_requested and not limit_well_coverage:
         data_hull_mask = build_data_hull_mask(
             grid_x,
             grid_y,
@@ -763,9 +774,14 @@ def generate_constrained_idw(
         if data_hull_mask is not None:
             diagnostics["data_hull_limited"] = 1
             diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
+    elif hull_requested and data_hull_exists(well_array[:, :2]):
+        # Default limit-to-coverage path only needs "was there a hull?" —
+        # the raster is discarded (domain_hull_mask = None) so skip it.
+        diagnostics["data_hull_limited"] = 1
+        diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
     # 限制外推时不用凸包扩域：井点沿边界分布时凸包会把内部无井区包进来。
     domain_hull_mask = None if limit_well_coverage else data_hull_mask
-    if limit_well_coverage and data_hull_mask is not None:
+    if limit_well_coverage and diagnostics["data_hull_limited"]:
         diagnostics["data_hull_domain_skipped"] = 1
     else:
         diagnostics["data_hull_domain_skipped"] = 0

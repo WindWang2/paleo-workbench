@@ -794,24 +794,58 @@ class DataCatalogService:
 
         ``known_sha256`` / ``_register_blob`` (private; adapter import path):
         see :func:`paleo_workbench.catalog.storage.place_managed_file`.
+
+        Payload copy+hash+fsync happens OUTSIDE the lock (same reason as
+        :meth:`register_result_asset`). Version numbers are assigned at
+        commit time so concurrent registrations on one asset stay sequential.
         """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise CatalogError(f"Source file not found: {source_path}")
         with self._lock:
             asset = self._asset_or_raise(asset_id)
-            source_path = Path(source_path)
-            if not source_path.is_file():
-                raise CatalogError(f"Source file not found: {source_path}")
+            if run_id is not None:
+                self.get_run(run_id)  # raises before any payload is placed
+            if version_id is not None:
+                if any(v.id == version_id for v in self.document.versions):
+                    raise ImmutableVersionError(
+                        f"Version {version_id} is already committed and immutable"
+                    )
+        # Copy+hash+fsync — no lock held while the bytes land on disk.
+        version, payload = self._build_version(
+            asset, source_path, stage,
+            version_id=version_id,
+            parent_version_ids=list(parent_version_ids),
+            run_id=run_id, metadata=metadata, move=move,
+            known_sha256=known_sha256,
+            register_blob=_register_blob,
+        )
+        with self._lock:
+            try:
+                asset = self._asset_or_raise(asset_id)
+            except CatalogError:
+                self._rollback(
+                    payload=payload, restore_payload_to=_restore_payload_to,
+                )
+                raise
+            if any(v.id == version.id for v in self.document.versions):
+                self._rollback(
+                    payload=payload, restore_payload_to=_restore_payload_to,
+                )
+                raise ImmutableVersionError(
+                    f"Version {version.id} is already committed and immutable"
+                )
             run: DataRun | None = None
             if run_id is not None:
-                run = self.get_run(run_id)  # raises before any payload is placed
+                try:
+                    run = self.get_run(run_id)
+                except CatalogError:
+                    self._rollback(
+                        payload=payload, restore_payload_to=_restore_payload_to,
+                    )
+                    raise
+            version.version_number = self._next_version_number(asset.id)
             previous_current = asset.current_version_id
-            version, payload = self._build_version(
-                asset, source_path, stage,
-                version_id=version_id,
-                parent_version_ids=list(parent_version_ids),
-                run_id=run_id, metadata=metadata, move=move,
-                known_sha256=known_sha256,
-                register_blob=_register_blob,
-            )
             self._add_version(version)
             asset.current_version_id = version.id
             run_output_added = False
@@ -963,39 +997,50 @@ class DataCatalogService:
         blob (O(1)). Every managed RAW import also registers its payload in
         the content store so later imports of the same content dedup to it.
 
-        Runs fully under the service lock (re-entrant with
-        :meth:`register_version`): the new asset is added and persisted in
-        the same locked section, so a concurrent save can never persist the
-        asset without its version (zombie zero-version asset on disk).
+        Payload copy+hash happens outside the lock. The new asset is added
+        and persisted in the same locked section as its first version, so a
+        concurrent save can never persist a zombie zero-version asset.
         """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise CatalogError(f"Source file not found: {source_path}")
+        if asset_id is not None:
+            return self.register_version(
+                asset_id, source_path, DataStage.RAW, metadata=metadata,
+                known_sha256=known_sha256, _register_blob=True,
+            )
+        asset = self._new_asset(
+            name or source_path.name, type, format, metadata
+        )
+        if _legacy_resource_id is not None:
+            with self._lock:
+                if self._live_asset_by_legacy_id(_legacy_resource_id) is None:
+                    asset.legacy_resource_id = _legacy_resource_id
+        version, payload = self._build_version(
+            asset, source_path, DataStage.RAW,
+            version_id=None,
+            parent_version_ids=[],
+            run_id=None, metadata=metadata, move=False,
+            known_sha256=known_sha256,
+            register_blob=True,
+        )
         with self._lock:
-            source_path = Path(source_path)
-            if not source_path.is_file():
-                raise CatalogError(f"Source file not found: {source_path}")
-            asset: DataAsset | None = None
-            if asset_id is not None:
-                target = self._asset_or_raise(asset_id)
-            else:
-                target = self._new_asset(
-                    name or source_path.name, type, format, metadata
-                )
-                if (
-                    _legacy_resource_id is not None
-                    and target.legacy_resource_id is None
-                    and self._live_asset_by_legacy_id(_legacy_resource_id) is None
-                ):
-                    target.legacy_resource_id = _legacy_resource_id
-                asset = target
-                self._add_asset(target)
+            if (
+                _legacy_resource_id is not None
+                and self._live_asset_by_legacy_id(_legacy_resource_id) is not None
+            ):
+                asset.legacy_resource_id = None
+            self._add_asset(asset)
+            self._add_version(version)
+            asset.current_version_id = version.id
             try:
-                return self.register_version(
-                    target.id, source_path, DataStage.RAW, metadata=metadata,
-                    known_sha256=known_sha256, _register_blob=True,
-                )
+                self._save()
             except Exception:
-                if asset is not None and asset in self.document.assets:
-                    self._remove_asset(asset)
+                self._rollback(
+                    assets=[asset], versions=[version], payload=payload,
+                )
                 raise
+            return version
 
     def link_external(
         self,

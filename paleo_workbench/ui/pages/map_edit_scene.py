@@ -115,6 +115,7 @@ class MapEditScene(QGraphicsScene):
         self._navigation_lod = False
         # Last published topology issue list; emitted only on content change.
         self._last_published_issues: list[dict[str, object]] | None = None
+        self._topology_issue_cache: dict[str, list[dict[str, object]]] = {}
         self._draft_manager = MapDraftManager(self)
         self.selectionChanged.connect(self._on_selection_changed)
 
@@ -253,6 +254,7 @@ class MapEditScene(QGraphicsScene):
             if isinstance(item, QGraphicsItem):
                 self.removeItem(item)
         self._items_by_id.clear()
+        self._topology_issue_cache.clear()
         self._hit_query_index.clear()
         self._invalidate_snap_candidates()
         self._command_stack.clear()
@@ -481,6 +483,10 @@ class MapEditScene(QGraphicsScene):
 
     def refresh_topology(self, feature_id: str | None = None) -> None:
         """Validate topology and set topology_status on facies (and optional lines)."""
+        if feature_id is None:
+            self._topology_issue_cache.clear()
+        else:
+            self._topology_issue_cache.pop(feature_id, None)
         ids = [feature_id] if feature_id else list(self._items_by_id.keys())
         for fid in ids:
             item = self._items_by_id.get(fid) if fid else None
@@ -510,17 +516,27 @@ class MapEditScene(QGraphicsScene):
     def topology_issues(self) -> list[dict[str, object]]:
         """Return structured issues for the bottom workbench and save gate."""
         issues: list[dict[str, object]] = []
+        live: set[str] = set()
         for item in self._items_by_id.values():
             if not isinstance(item, FaciesPolygonItem):
                 continue
+            live.add(item.feature_id)
             issues.extend(self._facies_geometry_issues(item))
+        for stale in list(self._topology_issue_cache):
+            if stale not in live:
+                del self._topology_issue_cache[stale]
         return issues
 
     def _facies_geometry_issues(
         self,
         item: FaciesPolygonItem,
     ) -> list[dict[str, object]]:
-        return facies_geometry_issues(item)
+        cached = self._topology_issue_cache.get(item.feature_id)
+        if cached is not None:
+            return cached
+        issues = facies_geometry_issues(item)
+        self._topology_issue_cache[item.feature_id] = issues
+        return issues
 
     def validate_for_save(self) -> tuple[bool, list[dict[str, object]]]:
         issues = self.topology_issues()
@@ -943,7 +959,6 @@ class MapEditScene(QGraphicsScene):
         self.set_dirty(True)
         self.command_stack_changed.emit()
         self._refresh_vertex_handles()
-        self.refresh_topology(feature_id)
         return True
 
     def _apply_coordinates(self, feature_id: str, coordinates: list[list[float]]) -> None:
@@ -991,6 +1006,7 @@ class MapEditScene(QGraphicsScene):
 
     def _remove_feature_by_id(self, feature_id: str) -> None:
         item = self._items_by_id.pop(feature_id, None)
+        self._topology_issue_cache.pop(feature_id, None)
         self._hit_query_index.remove(feature_id)
         if item is not None and isinstance(item, QGraphicsItem):
             self.removeItem(item)
