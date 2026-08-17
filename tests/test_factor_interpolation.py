@@ -45,7 +45,8 @@ def test_interpolate_factor_grid_idw_shape_and_stats():
     assert len(result["grid_z"][0]) == 8
     assert result["min"] <= result["max"]
     assert result["n_points"] == 4
-    assert result["r_squared"] is None or 0.0 <= result["r_squared"] <= 1.0
+    # LOO R² is signed (#687): worse-than-mean interpolation may be negative.
+    assert result["r_squared"] is None or result["r_squared"] <= 1.0
 
 
 def test_kriging_routes_to_real_variogram_backend():
