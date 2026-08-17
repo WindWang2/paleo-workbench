@@ -335,10 +335,10 @@ def resolve_current_project_version_context(
             model_ref=model_ref,
         )
 
-    # 5. Explicit overrides
-        if extra_selected:
-            for asset_id, vid in extra_selected.items():
-                ctx.select(asset_id, vid)
+    # 5. Explicit overrides (must run even when there are no prediction tasks)
+    if extra_selected:
+        for asset_id, vid in extra_selected.items():
+            ctx.select(asset_id, vid)
 
     return ctx
 

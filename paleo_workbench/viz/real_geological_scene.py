@@ -33,6 +33,24 @@ class RealSceneLoadResult:
     asset_summary: dict[str, Any] = field(default_factory=dict)
 
 
+def _well_head_count(path: Path | None) -> int:
+    """Count well-head rows; 0 when the file is missing or unreadable."""
+    if path is None:
+        return 0
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    count = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if len(stripped.split()) >= 3:
+            count += 1
+    return count
+
+
 def classify_project_mode(project: ProjectDocument | None) -> str:
     """Return ``real`` if minimum real assets exist, else ``empty`` (demo is explicit)."""
     if project is None:
@@ -60,21 +78,13 @@ def build_real_scene_snapshot(
     paths = resolve_joint_assets(project, repo_root=_repo_root())
     warnings: list[str] = []
     has_segy = paths.segy is not None and Path(paths.segy).is_file()
-    well_xy = list(getattr(paths, "well_heads", None) or [])
-    # resolve_joint_assets uses various fields — probe conservatively
-    has_wells = bool(getattr(paths, "wells_csv", None) or getattr(paths, "well_path", None))
-    if not has_wells:
-        # fall back: any well-related path attribute
-        for name in ("well_heads_path", "trajectory_dir", "wells"):
-            if getattr(paths, name, None):
-                has_wells = True
-                break
-
-    has_las = bool(getattr(paths, "las_paths", None) or getattr(paths, "las_dir", None))
-    has_horizons = bool(
-        getattr(paths, "horizon_paths", None) or getattr(paths, "horizons", None)
-    )
-    has_faults = bool(getattr(paths, "fault_paths", None) or getattr(paths, "faults", None))
+    has_wells = paths.well_head is not None
+    has_las = bool(paths.las_files)
+    has_horizons = bool(paths.horizons)
+    has_faults = False
+    well_count = _well_head_count(paths.well_head) if has_wells else 0
+    if has_wells and well_count <= 0:
+        well_count = 1
 
     if not has_segy and not has_wells:
         if allow_demo:
@@ -113,7 +123,7 @@ def build_real_scene_snapshot(
         generation=generation,
         source_id=source_id,
         segy_path=segy_path,
-        well_count=int(len(well_xy)) if well_xy else (1 if has_wells else 0),
+        well_count=int(well_count),
         has_segy=has_segy,
         has_wells=has_wells,
         has_las=bool(has_las),

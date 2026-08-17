@@ -81,3 +81,49 @@ def test_composite_well_host_prefers_retained_engine_when_available(qtbot, monke
     assert host._engine_load["curve_count"] >= 1
     # No parallel legacy scene is maintained while the native surface is live.
     assert host.canvas.tracks == []
+
+
+def test_visualization_workspace_load_vizref_returns_payload(qtbot, tmp_path):
+    """#663: load(VizRef) resolves via from_ref/resolve without AttributeError."""
+    from paleo_workbench.ui.pages.composite_visualization_panel import (
+        VisualizationWorkspace,
+    )
+    from paleo_workbench.viz.models import VizPayload, VizRef
+
+    workspace = VisualizationWorkspace()
+    qtbot.addWidget(workspace)
+
+    message_ref = VizRef(kind="message", id="hint", label="hint")
+    message_payload = workspace.load(message_ref)
+    assert isinstance(message_payload, VizPayload)
+    assert message_payload.kind == "message"
+
+    las = tmp_path / "w.las"
+    las.write_text(
+        "\n".join(
+            [
+                "~VERSION INFORMATION",
+                " VERS. 2.0:",
+                " WRAP. NO:",
+                "~WELL INFORMATION",
+                " STRT.M 0.0:",
+                " STOP.M 10.0:",
+                " STEP.M 1.0:",
+                " NULL. -999.25:",
+                " WELL. TEST:",
+                "~CURVE INFORMATION",
+                " DEPT.M :",
+                " GR.GAPI :",
+                "~ASCII",
+                "0.0 10.0",
+                "1.0 20.0",
+                "2.0 30.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    well_ref = VizRef(kind="well_log", id="w1", path=str(las), label="TEST")
+    well_payload = workspace.load(well_ref)
+    assert isinstance(well_payload, VizPayload)
+    assert well_payload.kind == "well_log"
+    assert well_payload.well_log is not None

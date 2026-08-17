@@ -362,3 +362,101 @@ def test_profile_follows_scene_extract_domain(qtbot):
     ext = scene.extract_active_fence()
     assert ext is not None
     assert profile._z1 == pytest.approx(float(ext.sample_axis[-1]))
+
+
+def test_analysis_auto_tie_crossplot_not_offered_without_wells(qtbot, monkeypatch):
+    """#529: Auto-Tie / 岩性交会图 must complete via a visible path or not be offered."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    infos: list[tuple] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        staticmethod(lambda *args, **kwargs: infos.append(args)),
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page._joint_analysis_btn.setChecked(True)
+
+    auto = page._wtie_auto_proxy
+    cross = page._facies_crossplot_proxy
+    offered = auto.isEnabled() or cross.isEnabled()
+    if not offered:
+        return
+
+    auto.click()
+    cross.click()
+    joined = " ".join(str(item) for item in infos)
+    assert "三维建模" not in joined
+    assert page.bh_raw_data, "visible Auto-Tie/crossplot must have a load path"
+
+
+def test_analysis_auto_tie_crossplot_complete_from_joint_wells(qtbot, monkeypatch):
+    """#529: joint-scene wells fill bh_raw_data so visible analysis actions complete."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from geoviz_well_seismic_3d import JointWellId, WellHead
+    from paleo_workbench.ui.pages.geological_modeling_3d_page import (
+        GeologicalModeling3DPage,
+    )
+
+    infos: list[tuple] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        staticmethod(lambda *args, **kwargs: infos.append(args)),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda *args, **kwargs: infos.append(args)),
+    )
+    dialogs: list[dict] = []
+
+    class _FakeDialog:
+        def __init__(self, result, parent=None):
+            dialogs.append(result)
+
+        def exec(self):
+            return 1
+
+    monkeypatch.setattr(
+        "paleo_workbench.ui.pages.geological_modeling_3d_page.LithologyCrossplotDialog",
+        _FakeDialog,
+    )
+
+    page = GeologicalModeling3DPage()
+    qtbot.addWidget(page)
+    page._joint_host.scene.set_wells(
+        [
+            WellHead(
+                "A1",
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                120.0,
+                id=JointWellId("source:a1"),
+            )
+        ]
+    )
+    page._joint_host.scene_updated.emit()
+    page._joint_analysis_btn.setChecked(True)
+
+    assert page.bh_raw_data
+    assert page._wtie_auto_proxy.isEnabled()
+    assert page._facies_crossplot_proxy.isEnabled()
+
+    page._wtie_auto_proxy.click()
+    joined = " ".join(str(item) for item in infos)
+    assert "三维建模" not in joined
+    assert "—" not in page.label_correlation.text()
+
+    page._facies_crossplot_proxy.click()
+    assert dialogs
+    assert dialogs[0].get("points") or dialogs[0].get("clusters") is not None

@@ -511,6 +511,67 @@ def test_mapping_page_overlay_request_shows_matching_reference_layer(qtbot):
     assert layer.visible is True
 
 
+def test_factor_overlay_value_error_is_user_visible(qtbot, monkeypatch):
+    """#657: factor-card overlay failures must surface, not silently return."""
+    from PySide6.QtWidgets import QMessageBox
+
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 10.0],
+            "grid_y": [0.0, 10.0],
+            "grid_z": [[0.0, 1.0], [0.5, None]],
+            "backend": "idw",
+            "n_points": 4,
+        },
+        factor_name="Porosity",
+        crs="EPSG:3857",
+    )
+    task = FactorMapTask(
+        id="porosity-task",
+        name="Porosity",
+        target_horizon="H1",
+        factor_type="Porosity",
+        method="IDW",
+        status="complete",
+        parameters=result.to_legacy_dict(),
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state(
+        [
+            PaleoMapDocument(
+                id="map-1",
+                name="Map",
+                linked_target_horizon="H1",
+                facies_polygons=[
+                    {"id": "f1", "name": "delta", "coordinates": [[0, 0], [10, 0], [0, 10]]}
+                ],
+            )
+        ],
+        factor_tasks=[task],
+        project_crs="EPSG:3857",
+    )
+
+    def _boom(*_args, **_kwargs):
+        raise ValueError("grid artifact missing")
+
+    monkeypatch.setattr(
+        "paleo_workbench.viz.native_factor_map.scene_from_factor_task",
+        _boom,
+    )
+    warnings: list[tuple] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda *args, **kwargs: warnings.append(args)),
+    )
+
+    page.bottom_workbench.factor_shelf.factor_overlay_requested.emit(task.id)
+
+    assert warnings, "overlay failure must show a user-visible error"
+    assert "grid artifact missing" in " ".join(str(item) for item in warnings[0])
+
+
 def test_canvas_priority_mode_collapses_side_panels(qtbot):
     """Canvas-priority hides layer tree, reference panel, and bottom shelf."""
     page = MappingPage()
