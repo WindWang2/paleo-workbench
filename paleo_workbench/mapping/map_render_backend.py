@@ -681,12 +681,12 @@ class FallbackMapRenderBackend(MapRenderBackend):
 
     def _scale_denominator(self, width: int) -> float:
         """Approximate 1:N denominator assuming map units are metres."""
-        xmin, _, xmax, _ = self._extent
+        xmin, _, xmax, _ = fit_extent_to_aspect(self._extent, width, self._output_size[1])
         units_per_pixel = (xmax - xmin) / max(1, width)
         return units_per_pixel / (0.0254 / _BASE_DPI)
 
     def _paint_composition(self, painter: QPainter, width: int, height: int, dpi: float) -> None:
-        xmin, ymin, xmax, ymax = self._extent
+        xmin, ymin, xmax, ymax = fit_extent_to_aspect(self._extent, width, height)
         span_x = xmax - xmin
         span_y = ymax - ymin
         if span_x <= 0.0 or span_y <= 0.0:
@@ -1216,7 +1216,9 @@ class FallbackMapRenderBackend(MapRenderBackend):
             x, y = float(point[0]), float(point[1])
         except (TypeError, ValueError):
             return None
-        xmin, ymin, xmax, ymax = self._extent
+        xmin, ymin, xmax, ymax = fit_extent_to_aspect(
+            self._extent, *self._output_size
+        )
         width, height = self._output_size
         return QPointF(
             (x - xmin) * width / (xmax - xmin),

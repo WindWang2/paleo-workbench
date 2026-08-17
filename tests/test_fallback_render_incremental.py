@@ -115,9 +115,11 @@ def test_fallback_identical_input_serves_the_cached_frame_without_rasterizing() 
 
 def test_fallback_culls_features_outside_the_viewport() -> None:
     viewport = (50.0, 50.0, 70.0, 70.0)  # shows only a few features
+    # Square output so #522 letterboxing is a no-op for this square window;
+    # otherwise the expanded world view pulls in neighbors the subset omits.
 
     full_backend = FallbackMapRenderBackend()
-    _configure(full_backend)
+    _configure(full_backend, size=(200, 200))
     full_frame = _render_frame(full_backend, viewport)
 
     # A fresh backend whose snapshot holds exactly the visible subset must
@@ -129,7 +131,7 @@ def test_fallback_culls_features_outside_the_viewport() -> None:
         and 45.0 <= feature["geometry"]["coordinates"][0][0][1] <= 75.0
     ]
     subset_backend = FallbackMapRenderBackend()
-    _configure(subset_backend)
+    _configure(subset_backend, size=(200, 200))
     subset_backend.set_layer_snapshot(_snapshot(tuple(visible)))
     subset_frame = _render_frame(subset_backend, viewport)
 
