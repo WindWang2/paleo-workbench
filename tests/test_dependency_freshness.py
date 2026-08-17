@@ -485,6 +485,59 @@ def test_plan_executor_partial_failure():
     assert plan.skipped_run_ids or result.stopped_early
 
 
+def test_skip_dependents_on_failure_leaves_unrelated_steps_running():
+    """#669: stop_on_failure=False must skip only dependents of the failed step."""
+    from paleo_workbench.workflow.recompute_plan import RecomputePlan, RecomputeStep
+
+    plan = RecomputePlan(
+        steps=[
+            RecomputeStep(
+                order=1,
+                run_id="a",
+                operation="op_a",
+                domain_task_id="a",
+                action=PlanAction.REQUIRES_COMPUTE,
+                label="A",
+            ),
+            RecomputeStep(
+                order=2,
+                run_id="b",
+                operation="op_b",
+                domain_task_id="b",
+                action=PlanAction.REQUIRES_COMPUTE,
+                input_version_ids=["a"],
+                label="B",
+            ),
+            RecomputeStep(
+                order=3,
+                run_id="c",
+                operation="op_c",
+                domain_task_id="c",
+                action=PlanAction.REQUIRES_COMPUTE,
+                label="C",
+            ),
+        ]
+    )
+    ran: list[str] = []
+
+    def boom(_step):
+        raise RuntimeError("A failed")
+
+    def ok(step):
+        ran.append(step.run_id)
+
+    ex = PlanExecutor(
+        handlers={"op_a": boom, "op_b": ok, "op_c": ok},
+        stop_on_failure=False,
+        skip_dependents_on_failure=True,
+    )
+    ex.execute(plan)
+    assert plan.failed_run_ids == ["a"]
+    assert "b" in plan.skipped_run_ids
+    assert "c" in plan.completed_run_ids
+    assert ran == ["c"]
+
+
 def test_reuse_existing_when_identical_run_present():
     cat = InMemoryCatalog()
     raw = _raw(cat, "raw")

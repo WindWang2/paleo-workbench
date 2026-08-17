@@ -176,6 +176,33 @@ def test_open_saved_interpretation_missing_artifact_shows_dialog(qtbot, tmp_path
     assert warnings, "expected a warning dialog for the missing artifact"
 
 
+def test_open_saved_interpretation_canvas_apply_failure_is_visible(
+    qtbot, tmp_path: Path, monkeypatch
+):
+    """#660: canvas apply errors must not still claim the draft is open."""
+    from types import SimpleNamespace
+
+    proj_path = tmp_path / "tarim.paleo.json"
+    proj_path.write_text("{}", encoding="utf-8")
+    project = _project(tmp_path)
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+    page.set_project(project)
+    page.set_project_path(proj_path)
+    draft = SimpleNamespace(
+        payload=SimpleNamespace(parent_version_id="ver_1", tops=[]),
+        dirty=False,
+    )
+    monkeypatch.setattr(
+        "paleo_workbench.workflow.correlation_lifecycle.restore_draft_from_project_ref",
+        lambda *_a, **_k: draft,
+    )
+    monkeypatch.setattr(page, "_apply_draft_tops_to_canvas", lambda _draft: False)
+    page.open_saved_interpretation()
+    assert "已打开工作副本" not in page.interp_status.text()
+    assert "打开失败" in page.interp_status.text()
+
+
 def test_unsaved_project_save_interpretation_requires_project_file(qtbot, monkeypatch):
     """Saving an interpretation without a project file must ask to save first."""
     project = _project(Path("/tmp/unsaved"))

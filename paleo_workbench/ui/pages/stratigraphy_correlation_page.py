@@ -7,8 +7,11 @@ Legacy is never deleted.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Literal
+
+_LOG = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -836,7 +839,9 @@ class StratigraphyCorrelationPage(QWidget):
             QMessageBox.information(self, "打开解释", "工程中尚无已保存的连井对比解释")
             return
         self._correlation_draft = draft
-        self._apply_draft_tops_to_canvas(draft)
+        if not self._apply_draft_tops_to_canvas(draft):
+            self.interp_status.setText("解释: 打开失败（画布恢复出错）")
+            return
         self.interp_status.setText(
             f"解释: 已打开工作副本（父版本 {draft.payload.parent_version_id or '—'}）"
         )
@@ -856,8 +861,8 @@ class StratigraphyCorrelationPage(QWidget):
                 return
         self.open_saved_interpretation()
 
-    def _apply_draft_tops_to_canvas(self, draft) -> None:
-        """Push scientific tops into CrossWell tops_model when possible."""
+    def _apply_draft_tops_to_canvas(self, draft) -> bool:
+        """Push scientific tops into CrossWell tops_model. False on apply error."""
         try:
             canvas = self.cross_host.widget
             canvas.tops_model.clear()
@@ -867,8 +872,15 @@ class StratigraphyCorrelationPage(QWidget):
                 )
             self.formation_combo.clear()
             self.formation_combo.addItems(canvas.tops_model.formation_names())
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOG.exception("failed to apply draft tops to canvas")
+            QMessageBox.warning(
+                self,
+                "打开解释",
+                f"无法把层位恢复到画布:\n{exc}",
+            )
+            return False
+        return True
 
     def _refresh_interp_status(self) -> None:
         if self._project is None:

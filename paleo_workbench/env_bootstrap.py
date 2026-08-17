@@ -17,9 +17,10 @@ from pathlib import Path
 
 _BOOTSTRAPPED = False
 
-# Same layout as pyproject.toml [tool.pytest.ini_options].pythonpath
+# Package roots only — same as pyproject.toml pytest.pythonpath.
+# The bare geo-viz-engine root is inserted separately (and skipped when it
+# contains committed cpython-*.so files that would shadow built extensions).
 _GEOVIZ_RELATIVE_PATHS = (
-    "geo-viz-engine",
     "geo-viz-engine/packages/geoviz_common",
     "geo-viz-engine/packages/geoviz_paleo_map",
     "geo-viz-engine/packages/geoviz_plots",
@@ -40,6 +41,11 @@ def _repo_root() -> Path | None:
         if candidate.is_file():
             return parent
     return None
+
+
+def _engine_root_has_native_so(engine_root: Path) -> bool:
+    """True when the engine checkout root has a committed native binary."""
+    return any(engine_root.glob("*.so")) or any(engine_root.glob("*.pyd"))
 
 
 def _geoviz_importable() -> bool:
@@ -65,6 +71,11 @@ def ensure_geoviz_on_path() -> bool:
 
     root = _repo_root()
     if root is not None:
+        engine_root = root / "geo-viz-engine"
+        if engine_root.is_dir() and not _engine_root_has_native_so(engine_root):
+            text = str(engine_root)
+            if text not in sys.path:
+                sys.path.insert(0, text)
         for rel in _GEOVIZ_RELATIVE_PATHS:
             path = root / rel
             if not path.is_dir():

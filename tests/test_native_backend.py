@@ -78,6 +78,28 @@ def test_install_all_hooks_idempotent():
     install_all_hooks()
 
 
+def test_install_all_hooks_logs_when_providers_missing(monkeypatch, caplog):
+    """#622: missing geoviz hook API must warn, not silently return."""
+    import builtins
+    import logging
+
+    import paleo_workbench.native_backend as nb
+
+    backend = NativeEngineBackend()
+    real_import = builtins.__import__
+
+    def _blocked(name, *args, **kwargs):
+        if name == "geoviz":
+            raise ImportError("no hook providers")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocked)
+    with caplog.at_level(logging.WARNING, logger="paleo_workbench"):
+        backend.install_all_hooks()
+    assert backend.hooks_installed() is False
+    assert any("hook providers missing" in rec.message for rec in caplog.records)
+
+
 def _fake_module(origin_dir) -> types.ModuleType:
     mod = types.ModuleType("fake_native_module")
     mod.__file__ = str(origin_dir / "fake_native_module.cpython-313-x86_64-linux-gnu.so")
@@ -141,6 +163,9 @@ def test_native_version_is_string_or_none():
         version = native_version(feature)
         assert version is None or isinstance(version, str)
     assert native_version("no_such_feature") is None
+
+
+def test_install_all_hooks_registers_cpp_providers():
     """install_all_hooks() twice must wire the geoviz provider hooks and stay clean."""
     try:
         from geoviz import (
@@ -167,6 +192,7 @@ def test_native_version_is_string_or_none():
         assert get_downsample_provider() is _cpp_minmax_provider
         assert get_las_parser_provider() is _cpp_las_parser_provider
         assert get_isosurface_extractor() is not None
+        assert native_backend.hooks_installed() is True
     finally:
         set_downsample_provider(prev[0])
         set_isosurface_extractor(prev[1])
