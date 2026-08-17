@@ -19,8 +19,12 @@ _DENSITY_NAMES = frozenset(
 
 def _curve_arrays(
     well_log: Any, names: frozenset[str]
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """Return (depth, values) for the first curve matching *names* (case-insensitive)."""
+) -> tuple[np.ndarray, np.ndarray, str] | None:
+    """Return (depth, values, unit) for the first curve matching *names*.
+
+    The unit is the parsed ~CURVE metadata (e.g. ``US/M`` / ``US/F``): unit
+    decisions must prefer it over numeric heuristics (#406).
+    """
     curves = list(getattr(well_log, "curves", None) or [])
     for curve in curves:
         name = str(getattr(curve, "name", "") or "").strip().upper()
@@ -31,8 +35,31 @@ def _curve_arrays(
         if depth.size < 2 or values.size < 2:
             continue
         n = min(depth.size, values.size)
-        return depth[:n], values[:n]
+        unit = str(getattr(curve, "unit", "") or "").strip()
+        return depth[:n], values[:n], unit
     return None
+
+
+_SONIC_US_PER_FT = frozenset({"US/F", "US/FT", "USFT", "MICROSEC/FT"})
+
+
+def _sonic_to_us_per_m(sonic: np.ndarray, unit: str) -> np.ndarray:
+    """Convert sonic slowness to µs/m using the curve unit metadata (#406).
+
+    Fast formations sit at 140–150 µs/m — exactly where the old numeric
+    ``median < 150`` heuristic guessed µs/ft and multiplied by 3.28084,
+    inflating TWT ~3.3x. Metadata decides; the heuristic remains only as a
+    last-resort fallback when the ~CURVE block carried no unit.
+    """
+    u = unit.strip().upper().replace(" ", "")
+    if u in _SONIC_US_PER_FT:
+        return sonic * 3.28084
+    if u in {"US/M", "USM", "MICROSEC/M", "USEC/M"}:
+        return sonic
+    if not u:
+        if float(np.nanmedian(np.abs(sonic))) < 150.0:
+            return sonic * 3.28084  # unit metadata missing: numeric fallback
+    return sonic
 
 
 def _depth_axis(well_log: Any, n: int = 100) -> np.ndarray:
@@ -61,6 +88,18 @@ def _twt_from_sonic(
     sonic = np.asarray(sonic, dtype=np.float64)
     if depths.size < 2:
         return np.zeros_like(depths)
+    # Gap-aware integral (#534): LAS nulls (-999.25 / blank fields) arrive
+    # as NaN; a single NaN in the raw trapezoid poisoned every TWT sample
+    # at and below the gap (NaN - x == NaN through cumsum), blanking the
+    # deepest part of the well. Bridge gaps from the nearest finite
+    # samples so the integral continues across missing intervals; an
+    # all-null curve integrates to zero (the caller already substitutes
+    # synthetic proxies when the curve is unusable).
+    finite = np.isfinite(sonic)
+    if not finite.any():
+        return np.zeros_like(depths)
+    if not finite.all():
+        sonic = np.interp(depths, depths[finite], sonic[finite])
     dz = np.diff(depths)
     if str(depth_unit or "").strip().lower() in {"ft", "f", "feet", "foot"}:
         dz = dz * 0.3048  # ft -> m
@@ -113,6 +152,7 @@ def build_tie_arrays(
     if well_log is not None:
         depths = _depth_axis(well_log, n_fallback)
         sonic_pair = _curve_arrays(well_log, _SONIC_NAMES)
+        sonic_unit = sonic_pair[2] if sonic_pair is not None else ""
         dens_pair = _curve_arrays(well_log, _DENSITY_NAMES)
         depth_unit = str(getattr(well_log, "depth_unit", "") or "")
     else:
@@ -126,17 +166,15 @@ def build_tie_arrays(
         return None
 
     if sonic_pair is not None:
-        d_src, v_src = sonic_pair
+        d_src, v_src = sonic_pair[0], sonic_pair[1]
         sonic = np.interp(depths, d_src, v_src)
-        # Heuristic: µs/ft values are typically ~40–140; convert rough ft→m scale.
-        if float(np.nanmedian(np.abs(sonic))) < 150.0:
-            sonic = sonic * 3.28084  # µs/ft → µs/m
+        sonic = _sonic_to_us_per_m(sonic, sonic_unit)
     else:
         # Mild velocity increase with depth (µs/m).
         sonic = np.linspace(280.0, 220.0, n, dtype=np.float64)
 
     if dens_pair is not None:
-        d_src, v_src = dens_pair
+        d_src, v_src = dens_pair[0], dens_pair[1]
         density = np.interp(depths, d_src, v_src)
     else:
         density = np.linspace(2.15, 2.55, n, dtype=np.float64)

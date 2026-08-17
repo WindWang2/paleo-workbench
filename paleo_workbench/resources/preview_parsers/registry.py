@@ -113,6 +113,10 @@ class PreviewRegistry:
                 message="文件不存在",
             )
 
+        registered = self._format_parsers.get(fmt)
+        if registered is not None:
+            return registered(asset, settings)
+
         if fmt in PDF_FORMATS:
             return PreviewResult(
                 mode="pdf",

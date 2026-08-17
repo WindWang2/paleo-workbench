@@ -54,4 +54,8 @@ native/**/*_selftest
 build/
 CMakeFiles/
 .zcode/
+# Never track built native modules — a committed repo-root .so shadows a fresh
+# build on sys.path[0] and makes CI "freshly built" asserts vacuous (packaging
+# #435). Native modules are built in-place under native/<pkg> and installed
+# editable, or from the geo-viz-engine submodule.
 *.cpython-3*-x86_64-linux-gnu.so

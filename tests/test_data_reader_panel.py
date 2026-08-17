@@ -832,7 +832,9 @@ def test_reader_panel_rerenders_image_preview_on_resize(qtbot, monkeypatch, tmp_
     panel.update_asset(resource)
     initial = panel.image_label.pixmap().size()
     panel.resize(760, 520)
-    qtbot.wait(50)
+    # The resize rerender is debounced (#530): the smooth rescale runs once
+    # the resize stream settles, not per event.
+    qtbot.waitUntil(lambda: len(calls) >= 2, timeout=5_000)
 
     assert len(calls) >= 2
     assert calls[-1] == str(path)

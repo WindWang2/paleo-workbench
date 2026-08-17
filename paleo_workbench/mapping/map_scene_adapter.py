@@ -31,12 +31,14 @@ class LegacyDocumentSceneAdapter:
         self._legacy_layer_ids: set[str] = set()
         # layer_id → (data_revision, style_revision, visible, opacity, name, crs, extent)
         self._synced_state: dict[str, tuple] = {}
+        self._last_snapshot = None
 
     def clear(self) -> None:
         self.scene = MapScene()
         self._document_id = None
         self._legacy_layer_ids.clear()
         self._synced_state.clear()
+        self._last_snapshot = None
 
     def sync(
         self,
@@ -60,6 +62,7 @@ class LegacyDocumentSceneAdapter:
             self._document_id = document_id
             self._legacy_layer_ids.clear()
             self._synced_state.clear()
+            self._last_snapshot = None
 
         source = document_render_snapshot(
             document,
@@ -69,6 +72,7 @@ class LegacyDocumentSceneAdapter:
             data_revisions=data_revisions,
             cache_owner=cache_owner,
             layer_revisions=layer_revisions,
+            previous_layers=None if self._last_snapshot is None else self._last_snapshot.layers,
         )
         excluded = {str(layer_id) for layer_id in excluded_layer_ids}
         source_layers = tuple(layer for layer in source.layers if layer.id not in excluded)
@@ -121,4 +125,5 @@ class LegacyDocumentSceneAdapter:
                 existing.crs = layer.crs
             self._synced_state[layer.id] = desired
         self._legacy_layer_ids = wanted_ids
+        self._last_snapshot = source
         return self.scene.render_snapshot(project_crs=str(project_crs or ""))

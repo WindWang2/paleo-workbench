@@ -25,6 +25,42 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Guard against Windows-invalid submodule filenames
+        # Packaging #441: the pinned geo-viz-engine submodule ships filenames
+        # Windows filesystems cannot materialize ('{"filename": "ui-ref-*.png"}'),
+        # aborting recursive checkouts on windows-latest. The root fix lives in
+        # the geo-viz-engine repo (rename + gitlink bump); the two known
+        # offenders are allowlisted so CI stays green, and any NEW
+        # Windows-invalid path fails this step so the root repo never re-pins a
+        # broken submodule. Remove the allowlist after the gitlink bump.
+        run: |
+          python - <<'EOF'
+          import pathlib, sys
+          INVALID = set('<>:"|?*')
+          RESERVED = {"CON", "PRN", "AUX", "NUL",
+                      "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                      "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"}
+          KNOWN = {
+              '{"filename": "ui-ref-screenshot.png"}',
+              '{"filename": "ui-ref-scroll.png"}',
+          }
+          bad = []
+          for path in pathlib.Path("geo-viz-engine").rglob("*"):
+              for part in path.parts[1:]:
+                  if part in KNOWN:
+                      continue
+                  if any(c in INVALID or ord(c) < 32 for c in part):
+                      bad.append(str(path))
+                  elif part.split(".")[0].upper() in RESERVED:
+                      bad.append(str(path))
+          if bad:
+              print("::error::Windows-invalid filenames in geo-viz-engine (packaging #441):")
+              for p in bad:
+                  print("::error::  " + p)
+              sys.exit(1)
+          print("geo-viz-engine tree: no new Windows-invalid filenames")
+          EOF
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -76,30 +112,32 @@ jobs:
           python -m pip install --prefer-binary \
             -c /tmp/gdal-constraint.txt \
             -e ".[dev,native]"
-          # geo-viz-engine subpackages (may pull shapely, scipy, …)
-          if [ -f requirements-geoviz.txt ]; then
-            python -m pip install --prefer-binary -r requirements-geoviz.txt || true
-          fi
-          # Core geoviz packages needed by mapping/preview tests
-          python -m pip install -e geo-viz-engine/packages/geoviz_common || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_well_log || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_paleo_map || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_seismic || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_cross_well || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_plots || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_map || true
-          python -m pip install -e geo-viz-engine/packages/geoviz_well_tie || true
+          # geo-viz-engine subpackages (may pull shapely, scipy, …). These
+          # installs MUST fail closed (packaging #442): the previous `|| true`
+          # best-effort silently shrank the tested surface (broken dependency
+          # graphs surfaced only as scattered skips), and the hand-kept
+          # eight-package fallback list had drifted from
+          # requirements-geoviz.txt — geoviz_well_seismic_3d was missing.
+          # requirements-geoviz.txt is the single source of truth.
+          python -m pip install --prefer-binary -r requirements-geoviz.txt
+          # Import smoke: prove the geoviz graph actually installed.
+          python -c "import geoviz, geoviz_well_seismic_3d"
           python -m pip install shapely
 
       - name: Build map_edit_core (required)
         run: |
           python -m pip install -e geo-viz-engine/native/map_edit_core
           python -c "from geoviz_plots.map_edit import HAS_CPP; assert HAS_CPP is True, 'HAS_CPP must be True in CI'"
+          # __version__ on map_edit_core is added on the geo-viz-engine side
+          # (packaging #435 cross-repo todo); only the source resolution check
+          # applies here.
+          python -c "import map_edit_core; assert 'native/map_edit_core' in map_edit_core.__file__, 'map_edit_core must resolve to the freshly built module, not a committed root binary'"
 
       - name: Build grid_render_core (required)
         run: |
           python -m pip install -e native/grid_render_core
           python -c "import grid_render_core; assert hasattr(grid_render_core, 'render_grid_rgba'), 'grid_render_core.render_grid_rgba missing in CI'"
+          python -c "import grid_render_core; assert 'native/grid_render_core' in grid_render_core.__file__, 'grid_render_core must resolve to the freshly built module'; assert hasattr(grid_render_core, '__version__'), 'grid_render_core.__version__ missing in CI'"
 
       - name: Build layer_model_core (required)
         run: |
@@ -110,17 +148,20 @@ jobs:
         # Round-2 review (K-F1): these two extensions previously had NO CI
         # build step — the committed root binaries shadowed source on 3.13 and
         # skipped every native test on 3.12, so source-only changes shipped
-        # untested. Building here (before the root binaries could shadow)
-        # keeps both legs honest; repo-root is first on sys.path, so also
-        # verify the import resolves to a freshly built module.
+        # untested. Packaging #435 removed the committed repo-root binaries
+        # (sys.path[0] shadowing) and added native __version__ build metadata;
+        # the __file__/__version__ asserts below now verify the import resolves
+        # to the freshly built module, not a stale committed binary.
         run: |
           python -m pip install -e native/seismic_3d_core
           python -c "import seismic_3d_core; assert hasattr(seismic_3d_core, 'fast_slice_to_indexed8'), 'seismic_3d_core symbols missing in CI'"
+          python -c "import seismic_3d_core; assert 'native/seismic_3d_core' in seismic_3d_core.__file__, 'seismic_3d_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(seismic_3d_core, '__version__'), 'seismic_3d_core.__version__ missing in CI'"
 
       - name: Build well_log_core (required)
         run: |
           python -m pip install -e native/well_log_core
           python -c "import well_log_core; assert hasattr(well_log_core, 'fast_las_parse_data'), 'well_log_core symbols missing in CI'"
+          python -c "import well_log_core; assert 'native/well_log_core' in well_log_core.__file__, 'well_log_core must resolve to the freshly built module, not a committed root binary'; assert hasattr(well_log_core, '__version__'), 'well_log_core.__version__ missing in CI'"
 
       - name: Native C++ selftests (algorithm verification)
         run: |
@@ -149,6 +190,17 @@ jobs:
             --timeout-method=thread \
             -m "not slow" \
             --durations=25
+
+      - name: Assert the slow family has not silently shrunk
+        # Packaging #442: the fast gate deliberately deselects `slow` (the only
+        # real-data end-to-end + interpolation-perf coverage). If the slow
+        # family ever drops below its 14-test baseline, every environment
+        # silently stops running those gates — fail instead. The nightly
+        # workflow (.github/workflows/slow-tests.yml) actually executes them.
+        run: |
+          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          echo "slow tests collected: ${count} (baseline 14)"
+          test -n "${count}" && test "${count}" -ge 14
 
   # Focused job for Well Log Workstation (#207 / PR #233): no geo-viz submodule,
   # no map_edit_core. Host-only (engine optional) so the workstation suite is

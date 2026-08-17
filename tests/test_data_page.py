@@ -13,6 +13,7 @@ from paleo_workbench.resources.import_service import ImportReport
 from paleo_workbench.ui.pages.asset_context_menu import AssetContextMenu
 from paleo_workbench.ui.pages.asset_table_model import AssetTableModel
 from paleo_workbench.ui.pages.data_asset_table import DEFAULT_COLUMN_KEYS
+import paleo_workbench.ui.pages.data_page as data_page_mod
 from paleo_workbench.ui.pages.data_page import DataPage
 from paleo_workbench.ui.pages.data_reader_panel import DataReaderPanel
 from paleo_workbench.ui.pages.data_workspace import DataWorkspace
@@ -1115,8 +1116,13 @@ def test_data_page_export_selected_asset_las_to_csv(qtbot, tmp_path: Path):
     ):
         page._export_selected_asset("CSV")
 
-    assert out_path.exists()
-    assert "已导出" in page.data_toolbar.operation_status_label.text()
+    # The conversion + catalog registration run on a worker (#528); the
+    # result lands via queued signals.
+    qtbot.waitUntil(lambda: out_path.exists(), timeout=15_000)
+    qtbot.waitUntil(
+        lambda: "已导出" in page.data_toolbar.operation_status_label.text(),
+        timeout=15_000,
+    )
 
 
 @pytest.mark.timeout(15)
@@ -1386,3 +1392,89 @@ def test_preview_settings_visualization_change_reloads_current_visualization(
     page._selected_asset = object()
     page.reader_panel.preview_settings_changed.emit(settings)
     assert visual_requests == [resource]
+
+
+def test_data_page_export_runs_off_gui_thread(qtbot, tmp_path: Path):
+    """#528: the context-menu export must not run the conversion + catalog
+    registration synchronously in the Qt slot (GB-scale exports froze the
+    window for the whole conversion + hash)."""
+    import threading
+
+    las_content = "~V\nSTRT.M 0:\nSTOP.M 10:\nSTEP.M 1:\n~C\nDEPT.M  :\n~A\n0\n1\n"
+    src_file = tmp_path / "well.las"
+    src_file.write_text(las_content)
+    project = ProjectDocument.new("Thr")
+    project.resources.append(
+        ResourceItem(
+            name="well.las", path=str(src_file), type="well_log", format="las",
+            status="parsed",
+        )
+    )
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+    page.update_state(dashboard_state(project), project.resources, project.export_artifacts)
+    page.asset_table.table.selectRow(0)
+
+    threads: list[str] = []
+    real = data_page_mod.export_asset_to_path
+
+    def spy(*args, **kwargs):
+        threads.append(threading.current_thread().name)
+        return real(*args, **kwargs)
+
+    with patch.object(data_page_mod, "export_asset_to_path", side_effect=spy), patch(
+        "paleo_workbench.ui.pages.data_page.QFileDialog.getSaveFileName",
+        return_value=(str(tmp_path / "out.csv"), ""),
+    ):
+        page._export_selected_asset("CSV")
+        # The export must run OFF the GUI thread. Proving "not synchronous"
+        # by asserting the worker has not even started yet is a race (a
+        # fast scheduler can begin the worker before the slot's caller
+        # regains control); the thread-name check below is the real
+        # synchronous-execution guard.
+        qtbot.waitUntil(lambda: bool(threads), timeout=15_000)
+        qtbot.waitUntil(
+            lambda: not page._export_job.is_running, timeout=15_000
+        )
+
+    assert threads[0] != threading.current_thread().name
+    assert (tmp_path / "out.csv").exists()
+
+
+def test_update_state_builds_row_views_once_per_refresh(qtbot, tmp_path: Path):
+    """#527: the counts pass, filter index and table model each used to
+    rebuild every AssetView (each build probes the filesystem) — three
+    sweeps per refresh. The views are now built once and shared."""
+    from paleo_workbench.ui.pages import data_page as dp_mod
+
+    las = tmp_path / "w1.las"
+    las.write_text("~V\nSTRT.M 0:\n~A\n0\n")
+    project = ProjectDocument.new("Views")
+    for i in range(6):
+        src = tmp_path / f"r{i}.las"
+        src.write_text("~V\n~A\n0\n")
+        project.resources.append(
+            ResourceItem(name=f"r{i}.las", path=str(src), type="well_log", format="las")
+        )
+
+    page = DataPage(project=project)
+    qtbot.addWidget(page)
+
+    calls = []
+    real = dp_mod.asset_view_from_object
+
+    def spy(obj, *a, **k):
+        calls.append(1)
+        return real(obj, *a, **k)
+
+    with patch.object(dp_mod, "asset_view_from_object", side_effect=spy):
+        page.update_state(
+            dashboard_state(project), project.resources, project.export_artifacts
+        )
+
+    n = len(project.resources)
+    # One build per resource (no artifacts/catalog rows here) — NOT the
+    # historical 3x (counts + filter index + table model).
+    assert calls == [1] * n, f"expected {n} builds, got {len(calls)}"
+    # The table still received its views.
+    assert page.asset_table.model.rowCount() >= n

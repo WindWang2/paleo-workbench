@@ -236,8 +236,10 @@ def _enforce_required_curves(
     loader. Fail closed: unreadable or missing well-log inputs cannot satisfy
     the contract.
     """
-    names, inspected = _resolved_well_curve_names(project, service, input_ids)
     required = [str(curve) for curve in required_curves]
+    names, inspected = _resolved_well_curve_names(
+        project, service, input_ids, required_curves=required
+    )
     missing = [curve for curve in required if curve.upper() not in names]
     if not missing:
         return
@@ -255,6 +257,7 @@ def _resolved_well_curve_names(
     project: ProjectDocument,
     service,
     input_ids: list[str],
+    required_curves: list[str] | None = None,
 ) -> tuple[set[str], int]:
     """Return (curve mnemonics, inspected well-log input count) for resolved inputs."""
     from paleo_workbench.prediction.inference_service import _resolve_resource_version_id
@@ -263,6 +266,7 @@ def _resolved_well_curve_names(
     resolved = set(input_ids)
     names: set[str] = set()
     inspected = 0
+    required = {str(curve).strip().upper() for curve in (required_curves or ()) if str(curve).strip()}
     for resource in project.resources:
         if getattr(resource, "type", "") != "well_log":
             continue
@@ -283,6 +287,14 @@ def _resolved_well_curve_names(
             ).strip()
             if name:
                 names.add(name.upper())
+    if required and required.issubset(names):
+        return names, inspected
+    for resource in project.resources:
+        if getattr(resource, "type", "") != "well_log":
+            continue
+        version_id = _resolve_resource_version_id(service, resource.id)
+        if version_id is None or version_id not in resolved:
+            continue
         path = _resolve_resource_path(resource, project)
         if path is None:
             continue
@@ -298,6 +310,8 @@ def _resolved_well_curve_names(
             ).strip()
             if name:
                 names.add(name.upper())
+        if required and required.issubset(names):
+            return names, inspected
     return names, inspected
 
 

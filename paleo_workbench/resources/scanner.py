@@ -20,13 +20,14 @@ def _process_file(
     path: Path,
     project_path: Path | None,
     skip_checksum_over_bytes: int | None,
+    classify=classify_path,
 ) -> ResourceItem | None:
     """Process a single file: classify, stat, checksum, build ResourceItem.
 
     Returns None if the file vanished (stat OSError) — caller filters it.
     Thread-safe: uses only local state and stateless helpers.
     """
-    resource_type, resource_format, status = classify_path(path)
+    resource_type, resource_format, status = classify(path)
     resolved_path = path.resolve()
     try:
         size_bytes = resolved_path.stat().st_size
@@ -65,6 +66,7 @@ def scan_resources(
     *,
     skip_checksum_over_bytes: int | None = None,
     max_workers: int | None = None,
+    classify=classify_path,
 ) -> list[ResourceItem]:
     candidates = sorted(
         c for c in root.rglob("*") if c.is_file() and not c.name.startswith("._")
@@ -75,7 +77,9 @@ def scan_resources(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         processed = list(
             pool.map(
-                lambda p: _process_file(p, project_path, skip_checksum_over_bytes),
+                lambda p: _process_file(
+                    p, project_path, skip_checksum_over_bytes, classify
+                ),
                 candidates,
             )
         )

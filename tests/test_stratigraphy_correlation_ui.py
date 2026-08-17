@@ -68,6 +68,10 @@ def _load_page(qtbot, tmp_path, monkeypatch) -> StratigraphyCorrelationPage:
     page.set_project(_project(tmp_path))
     page.update_state()
     page.load_section()
+    qtbot.waitUntil(
+        lambda: bool(page._loaded_logs) and not page._load_job.is_running,
+        timeout=10_000,
+    )
     return page
 
 
@@ -213,3 +217,66 @@ def test_browse_after_completed_link_does_not_reactivate(qtbot, tmp_path, monkey
     page.cross_host.inner._manual_link_active = False
     page.browse_btn.setChecked(True)
     assert page.cross_host.inner._manual_link_active is False
+
+
+def test_engine_export_derives_artifacts_from_real_project_path(qtbot, tmp_path, monkeypatch):
+    """Engine-section export must not fabricate ``x.paleo.json`` (#533).
+
+    The old code routed the save dialog through ``default_export_dir(
+    project_root / "x.paleo.json")``, creating a phantom ``x.artifacts/``
+    directory tree at the project root that Save-As never migrates.
+    """
+    from PySide6.QtWidgets import QFileDialog, QWidget
+
+    project = _project(tmp_path)
+    project.meta.project_root = str(tmp_path)
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+    page.set_project(project)
+    page.set_project_path(str(tmp_path / "UI.paleo.json"))
+    page.set_backend("engine")
+    page._engine_view = QWidget()
+    page._engine_report = {"ok": True}
+
+    seen = {}
+
+    def fake_dialog(parent, title, start_dir, filter_):
+        seen["start_dir"] = start_dir
+        return "", filter_  # user cancels; nothing is written
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(fake_dialog))
+
+    page._export_section()
+
+    # No phantom tree at the project root; real artifacts tree under the
+    # project file name instead, and the dialog pointed into its exports dir.
+    assert not (tmp_path / "x.artifacts").exists()
+    assert (tmp_path / "UI.artifacts" / "exports").is_dir()
+    assert Path(seen["start_dir"]).parent == tmp_path / "UI.artifacts" / "exports"
+
+
+def test_engine_export_unsaved_project_falls_back_to_home_exports(qtbot, tmp_path, monkeypatch):
+    """With no project path the engine export must not fabricate artifacts."""
+    from PySide6.QtWidgets import QFileDialog, QWidget
+
+    project = _project(tmp_path)
+    project.meta.project_root = str(tmp_path)
+    page = StratigraphyCorrelationPage()
+    qtbot.addWidget(page)
+    page.set_project(project)
+    page.set_backend("engine")
+    page._engine_view = QWidget()
+    page._engine_report = {"ok": True}
+
+    seen = {}
+
+    def fake_dialog(parent, title, start_dir, filter_):
+        seen["start_dir"] = start_dir
+        return "", filter_
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(fake_dialog))
+
+    page._export_section()
+
+    assert Path(seen["start_dir"]).parent == Path.home() / "paleo_exports"
+    assert not (tmp_path / "x.artifacts").exists()

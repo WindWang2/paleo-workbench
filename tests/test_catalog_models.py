@@ -14,7 +14,7 @@ import pytest
 
 from paleo_workbench.catalog.models import CatalogDocument, Model, ModelVersion
 from paleo_workbench.catalog.service import DataCatalogService
-from paleo_workbench.catalog.store import catalog_file_for
+from paleo_workbench.catalog.store import CatalogStore, catalog_file_for
 
 
 @pytest.fixture
@@ -28,6 +28,55 @@ def service(tmp_path):
 
 
 # --- registration ----------------------------------------------------------
+
+
+def test_register_model_failed_save_rolls_back_in_memory(service, monkeypatch):
+    """#620: a failed re-register must not leave mutated identity in memory."""
+    model = service.register_model(
+        model_id="m1",
+        model_name="A",
+        model_type="ml",
+        capability="facies_prediction",
+        provider="python_callable",
+    )
+
+    def boom(_self, _document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(CatalogStore, "save", boom)
+    with pytest.raises(OSError):
+        service.register_model(model_id="m1", model_name="B")
+    assert model.model_name == "A"
+
+
+def test_promote_model_failed_save_rolls_back_in_memory(service, monkeypatch):
+    """#620: a failed promote must not stick production status in memory."""
+    service.register_model(
+        model_id="pkg-v1",
+        model_name="Package",
+        model_type="ml",
+        capability="facies_prediction",
+        provider="python_callable",
+        status="demo",
+        metadata={"scientific": True},
+    )
+    version = service.register_model_version(
+        "pkg-v1",
+        model_version="1",
+        demo_only=False,
+        status="demo",
+        input_schema={"required_asset_types": ["well_log"]},
+    )
+
+    def boom(_self, _document):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(CatalogStore, "save", boom)
+    with pytest.raises(OSError):
+        service.promote_model("pkg-v1", "1")
+    assert service.get_model("pkg-v1").status == "demo"
+    assert version.status == "demo"
+    assert version.demo_only is False
 
 
 def test_register_model_and_version(service):

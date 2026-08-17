@@ -17,6 +17,13 @@ def pytest_configure(config):
 
     configure_qt_platform_for_session(warn=False)
 
+    # QGIS renderer tests are opt-in (packaging #437): they self-skip unless
+    # the bridge was built, and `pytest -m qgis` selects them explicitly in a
+    # QGIS-enabled leg.
+    config.addinivalue_line(
+        "markers", "qgis: QGIS production-renderer tests (opt-in bridge build)"
+    )
+
 
 @pytest.fixture(autouse=True)
 def cleanup_qt_deferred_deletes():
@@ -26,6 +33,9 @@ def cleanup_qt_deferred_deletes():
     segmentation faults or Bus errors under offscreen *or* live platforms.
     """
     yield
+    from paleo_workbench.mapping.map_render_backend import shutdown_live_fallback_backends
+
+    shutdown_live_fallback_backends()
     app = QApplication.instance()
     if app is not None:
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

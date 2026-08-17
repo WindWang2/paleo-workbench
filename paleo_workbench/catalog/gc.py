@@ -85,8 +85,35 @@ def _walk_files(directory: Path) -> list[Path]:
     return [p for p in directory.rglob("*") if p.is_file()]
 
 
-def plan_gc(service) -> GcReport:
-    """Classify orphans in the artifacts tree (never deletes anything)."""
+def _plan_auto_gc(service) -> GcReport:
+    """Open-time plan: temp leftovers and empty dirs only (no full-tree orphan scan)."""
+    report = GcReport()
+    project_path = service.project_path
+    document = service.document
+    referenced = {v.path for v in document.versions if v.managed}
+    stage_root = catalog_dir_for(project_path).parent
+    for path in _walk_files(stage_root):
+        if not _is_temp_name(path.name):
+            continue
+        try:
+            rel = path.relative_to(stage_root.parent).as_posix()
+        except ValueError:
+            rel = ""
+        if rel not in referenced:
+            report.items.append(GcItem(TEMP_ORPHAN, path, _safe_size(path)))
+    for directory in _empty_dirs(stage_root):
+        report.items.append(GcItem(EMPTY_DIR, directory, 0))
+    return report
+
+
+def plan_gc(service, *, explicit: bool = True) -> GcReport:
+    """Classify orphans in the artifacts tree (never deletes anything).
+
+    ``explicit=False`` (open-time auto sweep) only classifies TEMP_ORPHAN and
+    EMPTY_DIR so project open does not pay three full artifacts-tree walks.
+    """
+    if not explicit:
+        return _plan_auto_gc(service)
     report = GcReport()
     project_path = service.project_path
     document = service.document
@@ -209,7 +236,7 @@ def sweep_gc(service, *, dry_run: bool = True, explicit: bool = False) -> GcRepo
     blobs too. Working copies are never swept here (see
     :func:`cleanup_working_copies`).
     """
-    report = plan_gc(service)
+    report = plan_gc(service, explicit=explicit)
     sweepable = _EXPLICIT_SWEEPABLE if explicit else _AUTO_SWEEPABLE
     removed: list[GcItem] = []
     for item in report.items:

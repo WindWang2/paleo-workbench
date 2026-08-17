@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Signal
+import logging
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QGraphicsItem,
     QGraphicsView,
@@ -58,7 +62,10 @@ from paleo_workbench.ui.pages.contour_draft_worker import (
     ContourDraftWorker,
     commit_contour_drafts,
 )
+from paleo_workbench.ui.map_export_worker import snapshot_map_export, start_map_export_job
 from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
+
+logger = logging.getLogger(__name__)
 
 
 class MappingPage(QWidget):
@@ -101,6 +108,10 @@ class MappingPage(QWidget):
         self._reference_service = ReferenceLayerService()
         self._contour_job = OwnedWorkerJob(self)
         self._contour_job.released.connect(self._clear_contour_job)
+        self._export_job = OwnedWorkerJob(self)
+        self._export_job.released.connect(self._on_export_job_released)
+        self._export_busy = False
+        self._pending_export: dict | None = None
         # Attribute-table record cache keyed by (layer, data revision) so
         # selection-only tool operations never reconvert every feature.
         self._attribute_table_records: tuple[object, int, list[dict[str, Any]]] | None = None
@@ -226,8 +237,14 @@ class MappingPage(QWidget):
         self.layer_tree.document_selected.connect(self._on_document_selected)
         self.attribute_table.property_changed.connect(self._on_property_changed)
         self.attribute_table.feature_selection_requested.connect(self._on_attribute_feature_selected)
+        self._pending_opacity_refresh = False
+        self._opacity_refresh = QTimer(self)
+        self._opacity_refresh.setSingleShot(True)
+        self._opacity_refresh.setInterval(100)
+        self._opacity_refresh.timeout.connect(self._flush_reference_opacity)
         self.reference_panel.reference_visibility_changed.connect(self._on_reference_visibility_changed)
         self.reference_panel.reference_opacity_changed.connect(self._on_reference_opacity_changed)
+        self.reference_panel.opacity_slider.sliderReleased.connect(self._flush_reference_opacity)
         self.edit_view.view_state_changed.connect(self.reference_panel.set_view_state)
         self.edit_view.view_state_changed.connect(
             self.bottom_workbench.factor_shelf.set_view_state
@@ -329,6 +346,7 @@ class MappingPage(QWidget):
         *,
         factor_tasks: list | tuple | None = None,
         project_crs: str | None = None,
+        prefer_id: str | None = None,
     ) -> None:
         documents = list(map_documents or [])
         tasks = list(factor_tasks or [])
@@ -340,15 +358,45 @@ class MappingPage(QWidget):
                 self._factor_tasks_by_overlay_id[task_id] = task
             for output_id in list(getattr(task, "output_resource_ids", None) or []):
                 self._factor_tasks_by_overlay_id[str(output_id)] = task
-        prefer_id = getattr(self._active_document, "id", None)
-        document = active_map_document(documents, prefer_id=prefer_id)
         previous = self._active_document
+        if prefer_id is None:
+            prefer_id = getattr(previous, "id", None)
+        document = active_map_document(documents, prefer_id=prefer_id)
+        scene = self.edit_view.scene()
+        if (
+            isinstance(scene, MapEditScene)
+            and previous is not None
+            and document is not None
+            and getattr(previous, "id", None) != getattr(document, "id", None)
+            and self.is_dirty()
+        ):
+            # A refresh resolved a DIFFERENT document than the one holding the
+            # user's unsaved edits.  Reloading it directly would silently
+            # discard those edits, and the scene would then keep stale geometry
+            # under the new active id, so a later save_draft could write one
+            # map's features into another (#532).  Mirror the layer-tree switch
+            # prompt instead of wiping.
+            from PySide6.QtWidgets import QMessageBox
+
+            reply = QMessageBox.question(
+                self,
+                "未保存的编图修改",
+                "当前图件有未保存修改。是否先保存草稿？",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                document = previous
+            elif reply == QMessageBox.StandardButton.Save:
+                if not self.save_draft():
+                    document = previous
         self._active_document = document
         if document is not previous:
             self._presentation_dirty = False
         self.layer_tree.set_documents(documents)
         self.layer_tree.set_active_document(document)
-        scene = self.edit_view.scene()
         if isinstance(scene, MapEditScene):
             # Avoid wiping dirty geometry when the same document is re-pushed
             # from project refresh (e.g. other pages update shell state). The
@@ -431,25 +479,21 @@ class MappingPage(QWidget):
                 "没有可提取的单因素网格。请先在制备页生成单因素图。",
             )
             return
-        # Prefer the map linked to the last draft as active document.
-        prefer = None
+        # Prefer the map linked to the last draft as active document.  The
+        # preference is passed to update_state instead of mutating
+        # _active_document first: a pre-mutation defeats update_state's dirty
+        # guard (previous already equals the new id), leaving a dirty scene
+        # from another document under the new active id (#532).
+        prefer_id = None
         if drafts[-1].linked_map_document_id:
-            prefer = next(
-                (
-                    d
-                    for d in self._project.paleomap_documents
-                    if d.id == drafts[-1].linked_map_document_id
-                ),
-                None,
-            )
-        if prefer is not None:
-            self._active_document = prefer
+            prefer_id = str(drafts[-1].linked_map_document_id)
         self.update_state(
             self._project.paleomap_documents,
             factor_tasks=self._project.factor_map_tasks,
             project_crs=getattr(
                 getattr(self._project, "coordinate", None), "project_crs", None
             ),
+            prefer_id=prefer_id,
         )
         self.contour_drafts_updated.emit()
         QMessageBox.information(
@@ -470,6 +514,8 @@ class MappingPage(QWidget):
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
         joined = self._contour_job.shutdown(wait_ms)
+        export_ok = self._export_job.shutdown(wait_ms)
+        self._end_export_busy()
         # The native raster worker lives on the embedded NativeMapCanvas and
         # never receives a QCloseEvent when the window/shell is torn down —
         # without this the QThread is destroyed while running (qFatal abort on
@@ -483,7 +529,7 @@ class MappingPage(QWidget):
                     controller.shutdown(wait_ms)
         except Exception:
             pass
-        return joined
+        return joined and export_ok
 
     def save_draft(self) -> bool:
         """Write scene features back into the active PaleoMapDocument and clear dirty."""
@@ -813,6 +859,10 @@ class MappingPage(QWidget):
         for kind in ("facies", "well", "line", "label"):
             if self._authoring_document.layer(kind).id == layer_id:
                 self._authoring_document.set_active_kind(kind)
+                # The active tool captured the PREVIOUS layer's index and
+                # edit session; without a rebind, clicks and edits kept
+                # landing on the old layer (#523).
+                self._rebind_tool_after_layer_switch()
                 self._sync_action_state()
                 self._sync_map_status()
                 return
@@ -956,10 +1006,36 @@ class MappingPage(QWidget):
         layers = (self._authoring_document.active_layer,) if self._snapping.current_layer_only else self._authoring_document.layers()
         return self._snapping.snap(point, tolerance=tolerance, layers=layers)
 
+    # Tools that capture the active layer/index/session at construction
+    # (#523). After an active-layer switch they must be REBOUND to the new
+    # layer; kind-forcing tools (add_*) are deactivated instead when the
+    # switch moved away from their kind (re-requesting them would hijack
+    # the user's layer choice).
+    _LAYER_BOUND_TOOL_ACTIONS = frozenset(
+        {"select", "identify", "select_rectangle", "move_feature", "vertex"}
+    )
+    _KIND_BOUND_TOOL_ACTIONS = {
+        "add_point": "well", "add_line": "line", "add_polygon": "facies",
+    }
+
+    def _rebind_tool_after_layer_switch(self) -> None:
+        action = getattr(self, "_active_tool_action", None)
+        if not action or action in ("pan", "zoom_in", "zoom_out", "measure_distance"):
+            return  # not bound to a layer
+        if action in self._LAYER_BOUND_TOOL_ACTIONS:
+            self._on_action_tool_requested(action)
+        elif action in self._KIND_BOUND_TOOL_ACTIONS:
+            kind = self._KIND_BOUND_TOOL_ACTIONS[action]
+            if self._authoring_document is None or (
+                self._authoring_document.active_kind != kind
+            ):
+                self._on_action_tool_requested("pan")
+
     def _on_action_tool_requested(self, action_id: str) -> None:
         authoring = self._authoring_document
         if authoring is None:
             return
+        self._active_tool_action = action_id
         if action_id == "pan":
             tool = PanTool()
         elif action_id in {"zoom_in", "zoom_out"}:
@@ -1519,10 +1595,18 @@ class MappingPage(QWidget):
         if layer is not None:
             layer.opacity = max(0.0, min(1.0, float(opacity)))
             self._presentation_dirty = True
-            self._refresh_unified_composition()
-            self._stage_composition_state()
-            self._sync_save_enabled()
-            self._emit_mapping_context()
+            self._pending_opacity_refresh = True
+            self._opacity_refresh.start()
+
+    def _flush_reference_opacity(self) -> None:
+        if not self._pending_opacity_refresh:
+            return
+        self._pending_opacity_refresh = False
+        self._opacity_refresh.stop()
+        self._refresh_unified_composition()
+        self._stage_composition_state()
+        self._sync_save_enabled()
+        self._emit_mapping_context()
 
     def _on_chrome_changed(self, chrome: dict) -> None:
         if self._active_document is None:
@@ -1564,7 +1648,12 @@ class MappingPage(QWidget):
                 contour_drafts=drafts,
                 scene=self.unified_scene,
             )
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.exception("Factor overlay failed for %s", resource_id)
+            message = f"无法叠加参考图：{exc}"
+            if getattr(self, "status_bar", None) is not None:
+                self.status_bar.scale.setText(message)
+            QMessageBox.warning(self, "参考叠加失败", message)
             return
         # Scalar rasters begin below the document's vector compatibility layers;
         # contours and samples remain above as separate registry entries.
@@ -1585,11 +1674,13 @@ class MappingPage(QWidget):
 
         The scalar-layer ids are factor-task ids by construction, so they provide
         export lineage together with each layer's catalog provenance reference
-        (DataVersion id) recorded on the render snapshot.
+        (DataVersion id) recorded on the render snapshot. Rendering runs on a
+        worker; this slot only snapshots inputs and starts the job.
         """
         if self._native_factor_scene is None and not self.unified_scene.registry.layers():
             return None
-        from paleo_workbench.resources.export_service import export_widget_snapshot
+        if self._export_job.is_running:
+            return None
 
         task_ids = [
             layer.id
@@ -1597,18 +1688,72 @@ class MappingPage(QWidget):
             if self.unified_scene.scalar_layer(layer.id) is not None
         ]
         lineage_ids = list(dict.fromkeys(task_ids + list(self.unified_canvas.snapshot_source_version_ids)))
-        return export_widget_snapshot(
-            self.unified_canvas,
-            output_path,
-            str(format_label).upper(),
-            project=self._project,
-            # MappingPage is intentionally not coupled to a controller-owned
-            # project filename. ProjectManager will relativize this path on save.
-            project_path=None,
-            linked_id=lineage_ids[0] if lineage_ids else "factor_map",
-            register=register,
-            source_task_ids=lineage_ids,
+        output = Path(output_path)
+        spec = snapshot_map_export(self.unified_canvas, output)
+        self._pending_export = {
+            "path": output,
+            "widget": self.unified_canvas,
+            "project": self._project,
+            "linked_id": lineage_ids[0] if lineage_ids else "factor_map",
+            "register": register,
+            "source_task_ids": lineage_ids,
+        }
+        self._begin_export_busy()
+        start_map_export_job(
+            self._export_job,
+            spec,
+            on_finished=self._on_map_export_finished,
+            on_failed=self._on_map_export_failed,
+            on_cancelled=self._on_map_export_cancelled,
         )
+        return None
+
+    def _begin_export_busy(self) -> None:
+        if not self._export_busy:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self._export_busy = True
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText("正在导出…")
+
+    def _end_export_busy(self) -> None:
+        if self._export_busy:
+            QApplication.restoreOverrideCursor()
+            self._export_busy = False
+
+    def _on_export_job_released(self) -> None:
+        if self._export_busy:
+            self._end_export_busy()
+
+    def _on_map_export_finished(self, path: str) -> None:
+        pending = self._pending_export
+        self._pending_export = None
+        self._end_export_busy()
+        if pending:
+            from paleo_workbench.resources.export_service import register_exported_view
+
+            register_exported_view(
+                pending["widget"],
+                pending["path"],
+                "PNG",
+                project=pending["project"],
+                project_path=None,
+                linked_id=pending["linked_id"],
+                register=pending["register"],
+                source_task_ids=pending["source_task_ids"],
+            )
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText(f"已导出视图: {Path(path).name}")
+
+    def _on_map_export_failed(self, message: str) -> None:
+        self._pending_export = None
+        self._end_export_busy()
+        QMessageBox.warning(self, "导出失败", message)
+
+    def _on_map_export_cancelled(self) -> None:
+        self._pending_export = None
+        self._end_export_busy()
+        if getattr(self, "status_bar", None) is not None:
+            self.status_bar.scale.setText("已取消导出")
 
     def _on_topology_locate_requested(self, feature_id: str) -> None:
         """Select the flagged feature and center the edit view on it."""

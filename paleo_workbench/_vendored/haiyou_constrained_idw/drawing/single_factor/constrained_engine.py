@@ -25,6 +25,10 @@ _NON_BLOCKING_MODES = {"none", "off", "no_block", "soft", "partial", "0", "false
 def is_full_block_mode(block_mode: str) -> bool:
     return str(block_mode or "").strip().lower() not in _NON_BLOCKING_MODES
 
+def _raise_if_cancelled(token) -> None:
+    if token is not None:
+        token.raise_if_cancelled()
+
 
 @dataclass(frozen=True)
 class ConstraintWell:
@@ -197,10 +201,19 @@ def build_well_coverage_mask(
     radius_sq = float(coverage_radius) * float(coverage_radius)
     cols = np.asarray(grid_x, dtype=float)
     rows = np.asarray(grid_y, dtype=float)
-    dx = cols[None, :] - well_xy[:, 0][:, None, None]
-    dy = rows[None, :, None] - well_xy[:, 1][:, None, None]
-    dist_sq = dx * dx + dy * dy
-    return np.any(dist_sq <= radius_sq, axis=0)
+    n_wells = int(well_xy.shape[0])
+    n_rows = int(rows.size)
+    n_cols = int(cols.size)
+    cell_count = max(n_rows * n_cols, 1)
+    # Same 4M-element budget as _barrier_blocked_mask: never allocate (W,R,C).
+    chunk = max(1, 4_000_000 // cell_count)
+    mask = np.zeros((n_rows, n_cols), dtype=bool)
+    for start in range(0, n_wells, chunk):
+        batch = well_xy[start : start + chunk]
+        dx = cols[None, :] - batch[:, 0][:, None, None]
+        dy = rows[None, :, None] - batch[:, 1][:, None, None]
+        mask |= np.any(dx * dx + dy * dy <= radius_sq, axis=0)
+    return mask
 
 
 def resolve_barrier_buffer_distance(
@@ -574,8 +587,10 @@ def generate_constrained_idw(
     levels: Sequence[float],
     config: ConstrainedIDWConfig,
     interpolation_areas: Optional[Sequence[BoundaryPolygon]] = None,
+    cancellation_token=None,
 ) -> ConstrainedGridResult:
     """Generate a constrained IDW surface and masked contour polylines."""
+    _raise_if_cancelled(cancellation_token)
     if len(wells) < 3:
         raise ValueError(f"有效井点不足，至少需要 3 个，当前 {len(wells)} 个")
     if not boundaries:
@@ -675,6 +690,7 @@ def generate_constrained_idw(
         build_contour_component_mask,
         build_contour_support_mask,
         build_data_hull_mask,
+        data_hull_exists,
         resolve_bfs_reach_cells,
         resolve_contour_component_dilation_cells,
         resolve_contour_support_dilation_cells,
@@ -747,7 +763,8 @@ def generate_constrained_idw(
         limit_to_well_coverage=apply_well_coverage_mask,
     )
     limit_well_coverage = bool(config.limit_interpolation_to_search_radius)
-    if hull_buffer > 0.0 or float(config.data_hull_buffer_meters) > 0.0:
+    hull_requested = hull_buffer > 0.0 or float(config.data_hull_buffer_meters) > 0.0
+    if hull_requested and not limit_well_coverage:
         data_hull_mask = build_data_hull_mask(
             grid_x,
             grid_y,
@@ -757,9 +774,14 @@ def generate_constrained_idw(
         if data_hull_mask is not None:
             diagnostics["data_hull_limited"] = 1
             diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
+    elif hull_requested and data_hull_exists(well_array[:, :2]):
+        # Default limit-to-coverage path only needs "was there a hull?" —
+        # the raster is discarded (domain_hull_mask = None) so skip it.
+        diagnostics["data_hull_limited"] = 1
+        diagnostics["data_hull_buffer_meters"] = float(hull_buffer)
     # 限制外推时不用凸包扩域：井点沿边界分布时凸包会把内部无井区包进来。
     domain_hull_mask = None if limit_well_coverage else data_hull_mask
-    if limit_well_coverage and data_hull_mask is not None:
+    if limit_well_coverage and diagnostics["data_hull_limited"]:
         diagnostics["data_hull_domain_skipped"] = 1
     else:
         diagnostics["data_hull_domain_skipped"] = 0
@@ -772,6 +794,7 @@ def generate_constrained_idw(
         well_coverage_mask=well_coverage_mask,
         data_hull_mask=domain_hull_mask,
     )
+    _raise_if_cancelled(cancellation_token)
     total_cells = int(domain_mask.size)
     valid_cells = int(np.count_nonzero(domain_mask))
     outside_cells = max(total_cells - valid_cells, 0)
@@ -805,6 +828,7 @@ def generate_constrained_idw(
     else:
         diagnostics["分割区域数"] = 1 if bool(domain_mask.any()) else 0
         diagnostics["region_count"] = diagnostics["分割区域数"]
+    _raise_if_cancelled(cancellation_token)
 
     # ── 第 3 步：区域内约束 IDW 插值趋势面（曲线坐标走廊 + 椭圆搜索）──
     from drawing.single_factor.fast_grid import interpolate_idw_grid_batch
@@ -893,8 +917,11 @@ def generate_constrained_idw(
             well_array[:, 1],
             _barrier_segments(active_barriers),
             endpoint_tolerance=config.endpoint_tolerance,
+            cancellation_token=cancellation_token,
         )
         for cell_index, (row, col) in enumerate(zip(point_rows, point_cols)):
+            if cell_index % 64 == 0:
+                _raise_if_cancelled(cancellation_token)
             pt = (float(grid_x[col]), float(grid_y[row]))
             cell_label = int(region_labels[row, col]) if region_labels is not None else -2
             c_dir = -1
@@ -967,6 +994,7 @@ def generate_constrained_idw(
             use_extended_search=bool(config.use_extended_search),
             limit_search_radius=bool(config.limit_interpolation_to_search_radius),
         )
+        _raise_if_cancelled(cancellation_token)
         # Optional LOS refine only near barriers (small band — keeps UI responsive)
         if active_barriers and near_active_mask is not None:
             refine = domain_mask & np.asarray(near_active_mask, dtype=bool)
@@ -984,8 +1012,11 @@ def generate_constrained_idw(
                     well_array[:, 1],
                     _barrier_segments(active_barriers),
                     endpoint_tolerance=config.endpoint_tolerance,
+                    cancellation_token=cancellation_token,
                 )
                 for cell_index, (row, col) in enumerate(zip(refine_rows, refine_cols)):
+                    if cell_index % 64 == 0:
+                        _raise_if_cancelled(cancellation_token)
                     pt = (float(grid_x[col]), float(grid_y[row]))
                     cell_label = int(region_labels[row, col]) if region_labels is not None else -2
                     c_dir = int(direction_cache["dir_index"][row, col]) if direction_cache is not None else -1
@@ -1086,6 +1117,7 @@ def generate_constrained_idw(
     diagnostics["方向线覆盖百分比"] = coverage_pct
     diagnostics["direction_coverage_percent"] = coverage_pct
 
+    _raise_if_cancelled(cancellation_token)
     # ── 第 4 步：区域内补洞 + 平滑（不跨区域、不跨打断线）──
     # 区域标签负责把域切成独立区，补洞/平滑不跨区；同时恢复不跨打断线的
     # 线段级隔离（配合近线预过滤保性能），未贯穿打断线产生的局部跳变也留痕。
@@ -1612,6 +1644,7 @@ def generate_constrained_idw(
     diagnostics["final_pruned_closed_contours"] = int(final_prune.get("pruned_closed", 0))
     diagnostics["kept_contour_polylines"] = int(sum(len(v) for v in contours.values()))
     diagnostics["生成等值线条数"] = int(sum(len(v) for v in contours.values()))
+    _raise_if_cancelled(cancellation_token)
     return ConstrainedGridResult(
         grid_z=contour_grid,
         grid_x=grid_x,
@@ -1777,6 +1810,100 @@ def _interpolate_grid_point_euclidean(
     return float(np.sum(weights * values) / weight_sum), n_blocked, False
 
 
+def _interpolate_grid_point_curve(
+    pt: PointTuple,
+    well_array: np.ndarray,
+    barriers: Sequence[BarrierLine],
+    config: ConstrainedIDWConfig,
+    density_weights: np.ndarray,
+    euclidean: np.ndarray,
+    candidate_distances: np.ndarray,
+    direction_weight_factors: np.ndarray,
+    g_pair: np.ndarray,
+    *,
+    cell_label: int = -2,
+    well_labels: Optional[np.ndarray] = None,
+    cell_dir_index: int = -1,
+    cell_s: float = 0.0,
+    cell_n: float = 0.0,
+    cell_ratio: float = 1.0,
+    well_curve_coords: Dict[int, Dict[str, np.ndarray]],
+    blocked_mask: Optional[np.ndarray] = None,
+    cell_index: int = -1,
+) -> Tuple[Optional[float], int, bool]:
+    """Vectorized curve-corridor candidate selection (same semantics as the scalar loop)."""
+    from drawing.single_factor.direction_corridor import pairs_in_search_neighborhood
+
+    n_wells = len(well_array)
+    blocked_wells = np.zeros(n_wells, dtype=bool)
+    if well_labels is not None and cell_label >= 0:
+        wl = np.asarray(well_labels, dtype=int)
+        blocked_wells |= (wl >= 0) & (wl != int(cell_label))
+    if barriers:
+        if blocked_mask is not None and cell_index >= 0:
+            blocked_wells |= np.asarray(blocked_mask[cell_index, :], dtype=bool)
+        else:
+            for idx in range(n_wells):
+                if is_blocked_by_barrier(
+                    pt,
+                    (float(well_array[idx, 0]), float(well_array[idx, 1])),
+                    barriers,
+                    config.endpoint_tolerance,
+                ):
+                    blocked_wells[idx] = True
+    n_blocked = int(blocked_wells.sum())
+
+    base_radius = max(float(config.search_radius), 1e-9)
+    radius_scales = (
+        (1.0,)
+        if bool(config.limit_interpolation_to_search_radius)
+        else (1.0, 1.5, 2.25, 3.0)
+    )
+    candidate_mask = np.zeros(n_wells, dtype=bool)
+    required_points = max(1, int(config.min_points))
+    for pass_index, radius_scale in enumerate(radius_scales):
+        r_pass = base_radius * radius_scale
+        in_nbhd = pairs_in_search_neighborhood(
+            euclidean=euclidean,
+            d_eff=candidate_distances,
+            g_pair=g_pair,
+            cell_s=float(cell_s),
+            cell_n=float(cell_n),
+            cell_ratio=float(cell_ratio),
+            cell_dir=int(cell_dir_index),
+            well_coords=well_curve_coords,
+            base_radius=r_pass,
+            use_extended_search=bool(config.use_extended_search),
+        )
+        candidate_mask = (~blocked_wells) & np.asarray(in_nbhd, dtype=bool)
+        required_points = max(1, int(config.min_points) - pass_index)
+        if int(candidate_mask.sum()) >= required_points:
+            break
+
+    exact = candidate_mask & (candidate_distances <= 1e-9)
+    if bool(exact.any()):
+        idx = int(np.flatnonzero(exact)[0])
+        return float(well_array[idx, 2]), n_blocked, True
+    if int(candidate_mask.sum()) < required_points:
+        return None, n_blocked, True
+
+    cand_idx = np.nonzero(candidate_mask)[0]
+    order = np.argsort(candidate_distances[cand_idx], kind="stable")
+    selected = cand_idx[order[: max(1, int(config.max_points))]]
+    dists = np.asarray(candidate_distances[selected], dtype=float)
+    values = np.asarray(well_array[selected, 2], dtype=float)
+    if density_weights.size:
+        decluster = np.asarray(density_weights[selected], dtype=float)
+    else:
+        decluster = np.ones_like(dists)
+    decluster = decluster * np.asarray(direction_weight_factors[selected], dtype=float)
+    weights = decluster / np.power(np.maximum(dists, 1e-9), float(config.power))
+    weight_sum = float(weights.sum())
+    if weight_sum <= 0:
+        return None, n_blocked, True
+    return float(np.sum(weights * values) / weight_sum), n_blocked, True
+
+
 def _interpolate_grid_point(
     pt: PointTuple,
     well_array: np.ndarray,
@@ -1808,10 +1935,7 @@ def _interpolate_grid_point(
     distances use blended curve coordinates so stretch follows bent direction
     polylines and search neighborhoods elongate along-axis.
     """
-    from drawing.single_factor.direction_corridor import (
-        pair_effective_distance,
-        pair_in_search_neighborhood,
-    )
+    from drawing.single_factor.direction_corridor import pairs_effective_distance
 
     dx = well_array[:, 0] - pt[0]
     dy = well_array[:, 1] - pt[1]
@@ -1831,28 +1955,26 @@ def _interpolate_grid_point(
     direction_weight_factors = np.ones(len(well_array), dtype=float)
     candidate_distances = euclidean.copy()
     used_direction = False
+    curve_g_pair: Optional[np.ndarray] = None
 
     if use_curve:
         used_direction = True
         geoms = direction_geoms or ()
-        for idx in range(len(well_array)):
-            d_eff, g_pair = pair_effective_distance(
-                euclidean=float(euclidean[idx]),
-                cell_dir=int(cell_dir_index),
-                cell_s=float(cell_s),
-                cell_n=float(cell_n),
-                cell_g=float(cell_g),
-                cell_ratio=float(cell_ratio),
-                well_index=int(idx),
-                well_coords=well_curve_coords,
-                geoms=geoms,
-            )
-            candidate_distances[idx] = d_eff
-            if g_pair > 1e-9:
-                # Mild corridor boost without washing out multi-center peaks
-                direction_weight_factors[idx] = 1.0 + float(
-                    config.direction_corridor_strength
-                ) * 0.35 * g_pair
+        d_eff, curve_g_pair = pairs_effective_distance(
+            euclidean=euclidean,
+            cell_dir=int(cell_dir_index),
+            cell_s=float(cell_s),
+            cell_n=float(cell_n),
+            cell_g=float(cell_g),
+            cell_ratio=float(cell_ratio),
+            well_coords=well_curve_coords,
+            geoms=geoms,
+        )
+        candidate_distances = d_eff
+        boost = curve_g_pair > 1e-9
+        direction_weight_factors[boost] = 1.0 + float(
+            config.direction_corridor_strength
+        ) * 0.35 * curve_g_pair[boost]
     else:
         # Legacy fixed-angle anisotropic distance (compatibility path)
         direction = nearest_direction_context(pt, directions, float(config.direction_taper_plateau))
@@ -1913,6 +2035,27 @@ def _interpolate_grid_point(
             blocked_mask=blocked_mask,
             cell_index=cell_index,
         )
+    if use_curve:
+        return _interpolate_grid_point_curve(
+            pt,
+            well_array,
+            barriers,
+            config,
+            density_weights,
+            euclidean,
+            candidate_distances,
+            direction_weight_factors,
+            curve_g_pair if curve_g_pair is not None else np.zeros(len(well_array)),
+            cell_label=cell_label,
+            well_labels=well_labels,
+            cell_dir_index=int(cell_dir_index),
+            cell_s=float(cell_s),
+            cell_n=float(cell_n),
+            cell_ratio=float(cell_ratio),
+            well_curve_coords=well_curve_coords or {},
+            blocked_mask=blocked_mask,
+            cell_index=cell_index,
+        )
     for pass_index, radius_scale in enumerate(radius_scales):
         r_pass = base_radius * radius_scale
         weighted_candidates = []
@@ -1938,30 +2081,10 @@ def _interpolate_grid_point(
                     blocked_indices.add(int(idx))
                     continue
 
-            if use_curve:
-                wc_dir = well_curve_coords.get(int(cell_dir_index))
-                g_well = float(wc_dir["g"][idx]) if wc_dir is not None else 0.0
-                in_nbhd = pair_in_search_neighborhood(
-                    euclidean=float(euclidean[idx]),
-                    d_eff=float(candidate_distances[idx]),
-                    g_pair=min(float(cell_g), g_well),
-                    cell_s=float(cell_s),
-                    cell_n=float(cell_n),
-                    cell_ratio=float(cell_ratio),
-                    well_index=int(idx),
-                    cell_dir=int(cell_dir_index),
-                    well_coords=well_curve_coords,
-                    base_radius=r_pass,
-                    use_extended_search=bool(config.use_extended_search),
-                )
-                if not in_nbhd:
-                    continue
-                dist = float(candidate_distances[idx])
-            else:
-                filter_d = float(candidate_distances[idx]) if config.use_extended_search else float(euclidean[idx])
-                if filter_d > r_pass:
-                    continue
-                dist = float(candidate_distances[idx]) if used_direction else float(euclidean[idx])
+            filter_d = float(candidate_distances[idx]) if config.use_extended_search else float(euclidean[idx])
+            if filter_d > r_pass:
+                continue
+            dist = float(candidate_distances[idx]) if used_direction else float(euclidean[idx])
 
             if dist <= 1e-9:
                 return float(well_array[idx, 2]), len(blocked_indices), used_direction
@@ -2058,6 +2181,7 @@ def _barrier_blocked_mask(
     well_y: np.ndarray,
     barrier_segments: Sequence[Tuple[PointTuple, PointTuple]],
     endpoint_tolerance: float = 1e-7,
+    cancellation_token=None,
 ) -> np.ndarray:
     """Vectorized LOS barrier mask: ``blocked[c, w]`` == segment c→w crosses a barrier.
 
@@ -2080,6 +2204,7 @@ def _barrier_blocked_mask(
     # Element budget (cells x wells) per chunk.
     chunk = max(1, 4_000_000 // max(1, n_wells))
     for start in range(0, n_cells, chunk):
+        _raise_if_cancelled(cancellation_token)
         stop = min(start + chunk, n_cells)
         ax = cell_x[start:stop, None]
         ay = cell_y[start:stop, None]

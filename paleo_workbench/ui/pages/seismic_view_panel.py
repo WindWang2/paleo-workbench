@@ -218,7 +218,21 @@ class SeismicViewPanel(QFrame):
     def _show_segy_loading(self, path: str) -> None:
         """Keep the engine surface visible while its worker prepares SEGY."""
         self._segy_session_active = True
-        self._expected_segy_path = str(path)
+        path = str(path)
+        already_loaded = (
+            self._expected_segy_path == path and self.volume_shape is not None
+        )
+        if already_loaded:
+            # The same SEGY is already loaded for this session (task refresh /
+            # inference write-back repeat update_state): don't cancel and
+            # re-read the whole file every time — that flashes the loading
+            # state and multiplies IO.
+            self._expected_segy_path = path
+            self.empty_label.setHidden(True)
+            self.stack.setCurrentWidget(self.view)
+            self.view_ready.emit(True)
+            return
+        self._expected_segy_path = path
         self.volume_shape = None
         self.empty_label.setHidden(True)
         self.stack.setCurrentWidget(self.view)

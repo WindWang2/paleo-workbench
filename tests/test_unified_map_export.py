@@ -4,6 +4,8 @@ from PySide6.QtGui import QImage
 
 import pytest
 
+from tests.qgis_support import QGIS_SKIP_REASON
+
 from paleo_workbench.mapping.map_render_backend import FallbackMapRenderBackend, QgisMapRenderBackend
 from paleo_workbench.resources.export_service import export_widget_snapshot, view_export_capabilities
 from paleo_workbench.project.models import ProjectDocument
@@ -50,10 +52,11 @@ def test_unified_export_registers_output_lineage(tmp_path, qtbot) -> None:
     assert result.artifact.included_map_elements[-1] == "unified_map"
 
 
+@pytest.mark.qgis
 def test_qgis_unified_export_cancels_interactive_work_without_a_stale_frame(tmp_path, qtbot) -> None:
     backend = QgisMapRenderBackend()
     if not backend.is_available:
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     canvas = UnifiedMapCanvas(backend=backend)
     qtbot.addWidget(canvas)
     canvas.resize(320, 220)

@@ -1,0 +1,7 @@
+[build-system]
+# setup.py imports pybind11.setup_helpers at module scope, so an isolated
+# PEP 517 build ('pip install -e .' uses one by default) needs pybind11 in
+# the build environment — installing it in the host env is not enough.
+# Project metadata stays in setup.py.
+requires = ["setuptools>=64", "pybind11>=2.12"]
+build-backend = "setuptools.build_meta"

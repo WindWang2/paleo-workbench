@@ -129,9 +129,9 @@ def build_lineage_chain(
         raise ValueError(f"direction must be 'ancestors' or 'descendants', got {direction!r}")
     with service._lock:
         start = service._version_or_raise(version_id)
-        service._ensure_maps()
-        by_id = service._version_by_id
-        children_index = service._children_by_parent
+        maps = service._ensure_maps()
+        by_id = maps.version_by_id
+        children_index = maps.children_by_parent
 
         root = _make_node(service, start, 0)
         seen = {start.id}
@@ -183,8 +183,7 @@ def compute_summaries(service: Any) -> dict[str, dict[str, Any]]:
     cycle itself separately).
     """
     with service._lock:
-        service._ensure_maps()
-        by_id = service._version_by_id
+        by_id = service._ensure_maps().version_by_id
         memo: dict[str, int | None] = {}
         broken: set[str] = set()
         has_parents: dict[str, bool] = {}

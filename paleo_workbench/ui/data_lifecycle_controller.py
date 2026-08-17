@@ -1180,9 +1180,8 @@ class DataLifecycleController:
             page._set_action_status("没有可校验的数据资产")
             return
         if page._verify_job.is_running:
-            # Re-clicking 校验 while a verify job is finishing must not raise
-            # (OwnedWorkerJob owns one thread at a time).
-            page._set_action_status("正在校验，请稍候")
+            page._verify_job.cancel()
+            page._set_action_status("正在取消校验...")
             return
 
         # Catalog-bridged assets are verified via the Core service (the
@@ -1201,7 +1200,9 @@ class DataLifecycleController:
                 (worker.finished, page._on_verify_finished),
                 (worker.failed, page._on_verify_failed),
             ),
+            cancel=worker.cancel,
         )
+        page.data_toolbar.set_verify_running(True)
         page._set_action_status(f"正在后台校验 {len(items)} 项数据资产完整性...")
 
     # ------------------------------------------------------------------ #

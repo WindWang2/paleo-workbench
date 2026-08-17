@@ -85,6 +85,7 @@ class VisualizationWorkspace(QFrame):
             f" border-radius: {tokens.RADIUS_BUTTON}px; background: {tokens.BG_SIDEBAR}; }}"
         )
 
+        self._project = None
         self.well_host = WellLogHost()
         self.well_section_host = WellSectionHost()
         self.seismic_host = SeismicHost()
@@ -156,6 +157,7 @@ class VisualizationWorkspace(QFrame):
 
         Production path: VisualizationPage.update_state → here → well_host.
         """
+        self._project = project
         self.well_host.set_project(project, project_path=project_path)
 
     def update_state(self, prediction_tasks: list | tuple | None) -> None:
@@ -168,14 +170,15 @@ class VisualizationWorkspace(QFrame):
         payload = VizAdapter().from_prediction(task)
         self.load(payload)
 
-    def load(self, payload_or_ref: VizPayload | VizRef) -> None:
+    def load(self, payload_or_ref: VizPayload | VizRef) -> VizPayload:
         """Deep interface method 1/2: load dataset payload into workspace."""
         if isinstance(payload_or_ref, VizRef):
-            payload = VizAdapter().from_ref(payload_or_ref)
+            payload = VizAdapter().from_ref(payload_or_ref, self._project)
         else:
             payload = payload_or_ref
 
         self.load_payload(payload)
+        return payload
 
     def export_snapshot(
         self,

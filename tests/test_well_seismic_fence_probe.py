@@ -346,6 +346,7 @@ def test_registration_scales_preview_volume_indices():
     assert ext.amplitude.shape == (16, 113)
 
 
+@pytest.mark.slow
 def test_survey_matches_loader_volume_axes_on_real_segy():
     """#81/#84: survey n_il/n_xl match SeismicLoader; preview keeps axis order."""
     from pathlib import Path

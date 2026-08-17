@@ -56,3 +56,32 @@ def test_well_log_completion_from_replaced_project_is_ignored(qtbot, monkeypatch
     page._on_inference_completed_if_current({"stale": True})
 
     assert received == []
+
+
+def test_complete_run_without_result_is_visible(qtbot, monkeypatch):
+    """#635: complete + result=None must not be a silent no-op."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMessageBox
+
+    page = WellLogPredictionPage()
+    qtbot.addWidget(page)
+    page._project = ProjectDocument.new("p")
+    seen: list[tuple] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: seen.append((args, kwargs)),
+    )
+    page._on_inference_completed(
+        {
+            "run": SimpleNamespace(
+                status="complete",
+                parameters={"error": "CatalogStore save failed"},
+                output_version_ids=["ver:1"],
+            ),
+            "result": None,
+        }
+    )
+    assert seen
+    assert "CatalogStore save failed" in str(seen[0])

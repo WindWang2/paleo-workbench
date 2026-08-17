@@ -6,14 +6,27 @@ from paleo_workbench.native_backend import native_backend
 from paleo_workbench.ui import tokens
 
 
+def _probe_opengl() -> bool:
+    """True only if an offscreen GL context can actually be created."""
+    try:
+        from PySide6.QtGui import QOffscreenSurface, QOpenGLContext, QSurfaceFormat
+    except Exception:
+        return False
+    fmt = QSurfaceFormat()
+    surface = QOffscreenSurface()
+    surface.setFormat(fmt)
+    surface.create()
+    if not surface.isValid():
+        return False
+    ctx = QOpenGLContext()
+    ctx.setFormat(fmt)
+    return bool(ctx.create())
+
+
 def get_engine_status_info() -> tuple[str, str]:
     """Return (badge_text, style_class) for current engine acceleration state."""
     has_cpp = native_backend.has_cpp("seismic_3d") or native_backend.has_cpp("well_log")
-    try:
-        from PySide6.QtGui import QOpenGLContext
-        has_gl = True
-    except Exception:
-        has_gl = False
+    has_gl = _probe_opengl()
 
     # Badge colors use the BADGE_* tokens (deeper shades) so white text clears
     # WCAG 3:1 at bold 11px; the main WARNING/SUCCESS tokens are for body text.

@@ -14,6 +14,7 @@ from paleo_workbench.ui.pages.factor_preview_grid import FactorPreviewGrid
 from paleo_workbench.ui.pages.mapping_page import MappingPage
 from paleo_workbench.ui.unified_map_canvas import UnifiedMapCanvas
 from paleo_workbench.workflow.factor_grid_result import FactorGridResult
+from tests.qgis_support import QGIS_SKIP_REASON
 
 
 def test_mapping_page_assembles_gis_shell(qtbot):
@@ -116,11 +117,12 @@ def test_native_layer_tree_add_layer_imports_an_immutable_reference_into_unified
     assert hidden.visible is False
 
 
+@pytest.mark.qgis
 def test_mapping_page_uses_the_qgis_unified_canvas_when_the_bridge_is_available(qtbot):
     page = MappingPage()
     qtbot.addWidget(page)
     if page.unified_canvas.backend.backend_name != "qgis":
-        pytest.skip("optional qgis_render_bridge is not built")
+        pytest.skip(QGIS_SKIP_REASON)
     document = PaleoMapDocument(
         id="map-1",
         name="Map",
@@ -509,6 +511,67 @@ def test_mapping_page_overlay_request_shows_matching_reference_layer(qtbot):
     assert layer.visible is True
 
 
+def test_factor_overlay_value_error_is_user_visible(qtbot, monkeypatch):
+    """#657: factor-card overlay failures must surface, not silently return."""
+    from PySide6.QtWidgets import QMessageBox
+
+    result = FactorGridResult.from_engine_dict(
+        {
+            "grid_x": [0.0, 10.0],
+            "grid_y": [0.0, 10.0],
+            "grid_z": [[0.0, 1.0], [0.5, None]],
+            "backend": "idw",
+            "n_points": 4,
+        },
+        factor_name="Porosity",
+        crs="EPSG:3857",
+    )
+    task = FactorMapTask(
+        id="porosity-task",
+        name="Porosity",
+        target_horizon="H1",
+        factor_type="Porosity",
+        method="IDW",
+        status="complete",
+        parameters=result.to_legacy_dict(),
+    )
+    page = MappingPage()
+    qtbot.addWidget(page)
+    page.update_state(
+        [
+            PaleoMapDocument(
+                id="map-1",
+                name="Map",
+                linked_target_horizon="H1",
+                facies_polygons=[
+                    {"id": "f1", "name": "delta", "coordinates": [[0, 0], [10, 0], [0, 10]]}
+                ],
+            )
+        ],
+        factor_tasks=[task],
+        project_crs="EPSG:3857",
+    )
+
+    def _boom(*_args, **_kwargs):
+        raise ValueError("grid artifact missing")
+
+    monkeypatch.setattr(
+        "paleo_workbench.viz.native_factor_map.scene_from_factor_task",
+        _boom,
+    )
+    warnings: list[tuple] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda *args, **kwargs: warnings.append(args)),
+    )
+
+    page.bottom_workbench.factor_shelf.factor_overlay_requested.emit(task.id)
+
+    assert warnings, "overlay failure must show a user-visible error"
+    assert "grid artifact missing" in " ".join(str(item) for item in warnings[0])
+
+
 def test_canvas_priority_mode_collapses_side_panels(qtbot):
     """Canvas-priority hides layer tree, reference panel, and bottom shelf."""
     page = MappingPage()
@@ -603,8 +666,11 @@ def test_update_state_same_id_new_object_keeps_dirty_legacy_scene(qtbot):
     assert scene._bound_document is document
 
 
-def test_update_state_different_id_still_reloads_scene(qtbot):
-    """A different document id reloads the scene even when it is dirty."""
+def test_update_state_different_id_prompts_instead_of_silently_wiping(qtbot, monkeypatch):
+    """A refresh resolving a DIFFERENT document id while the scene is dirty must
+    ask Save/Discard/Cancel instead of silently discarding the edits (#532)."""
+    from PySide6.QtWidgets import QMessageBox
+
     page = MappingPage()
     qtbot.addWidget(page)
     document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
@@ -613,7 +679,169 @@ def test_update_state_different_id_still_reloads_scene(qtbot):
     scene.set_dirty(True)
 
     other = PaleoMapDocument(id="map-2", name="Map 2", linked_target_horizon="H2")
+
+    asked = []
+
+    def ask(*args, **kwargs):
+        asked.append(True)
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(ask))
     page.update_state([other])
 
+    assert asked, "cross-document dirty refresh must prompt"
+    # Cancel keeps the previous document and its unsaved scene.
+    assert page.active_document() is document
+    assert scene.is_dirty() is True
+    assert scene._bound_document is document
+
+
+def test_update_state_discard_switches_and_reloads_different_document(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+    scene = page.edit_view.scene()
+    scene.set_dirty(True)
+
+    other = PaleoMapDocument(id="map-2", name="Map 2", linked_target_horizon="H2")
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Discard),
+    )
+    page.update_state([other])
+
+    assert page.active_document() is other
     assert scene.is_dirty() is False
     assert scene._bound_document is other
+
+
+def test_update_state_save_persists_before_switching_documents(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+    page.edit_view.scene().set_dirty(True)
+
+    other = PaleoMapDocument(id="map-2", name="Map 2", linked_target_horizon="H2")
+    saved = []
+
+    def fake_save_draft() -> bool:
+        saved.append(True)
+        return True
+
+    monkeypatch.setattr(page, "save_draft", fake_save_draft)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Save),
+    )
+    page.update_state([other])
+
+    assert saved == [True], "Save choice must persist the dirty document first"
+    assert page.active_document() is other
+
+
+def test_update_state_save_failure_keeps_previous_document(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+    scene = page.edit_view.scene()
+    scene.set_dirty(True)
+
+    other = PaleoMapDocument(id="map-2", name="Map 2", linked_target_horizon="H2")
+    monkeypatch.setattr(page, "save_draft", lambda: False)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Save),
+    )
+    page.update_state([other])
+
+    # A failed save must not abandon the dirty document.
+    assert page.active_document() is document
+    assert scene.is_dirty() is True
+
+
+def test_update_state_same_id_dirty_refresh_never_prompts(qtbot, monkeypatch):
+    """Same-id refreshes (the #423 path) must not prompt: unsaved edits are
+    preserved silently, exactly as before."""
+    from PySide6.QtWidgets import QMessageBox
+
+    page = MappingPage()
+    qtbot.addWidget(page)
+    document = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    page.update_state([document])
+    scene = page.edit_view.scene()
+    scene.set_dirty(True)
+
+    swapped = PaleoMapDocument(id="map-1", name="Map", linked_target_horizon="H1")
+    asked = []
+
+    def ask(*args, **kwargs):
+        asked.append(True)
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(ask))
+    page.update_state([swapped])
+
+    assert not asked
+    assert scene.is_dirty() is True
+    assert scene._bound_document is document
+
+
+def test_on_contour_completed_defers_document_switch_to_update_state(qtbot, monkeypatch):
+    """_on_contour_completed must route its preferred document through
+    update_state's dirty guard instead of pre-mutating _active_document (#532)."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QMessageBox
+
+    import paleo_workbench.ui.pages.mapping_page as mod
+    from paleo_workbench.project.models import ContourDraft
+
+    page = MappingPage()
+    qtbot.addWidget(page)
+    doc_a = PaleoMapDocument(id="map-a", name="Map A", linked_target_horizon="H1")
+    doc_b = PaleoMapDocument(id="map-b", name="Map B", linked_target_horizon="H2")
+    page.update_state([doc_a])
+
+    project = SimpleNamespace(paleomap_documents=[doc_a, doc_b], factor_map_tasks=[])
+
+    class _Job:
+        target = project
+
+    page._project = project
+    page._contour_job = _Job()
+
+    draft = ContourDraft(
+        id="draft-1",
+        name="等值线",
+        linked_factor_task_id="task-1",
+        linked_map_document_id="map-b",
+        segments=[],
+    )
+    monkeypatch.setattr(mod, "commit_contour_drafts", lambda target, result: [draft])
+    captured = {}
+
+    def fake_update_state(documents, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(page, "update_state", fake_update_state)
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+
+    page._on_contour_completed(object())
+
+    assert captured["kwargs"].get("prefer_id") == "map-b"
+    # The active document was NOT mutated behind update_state's back; the
+    # preference only flows through update_state's own guard.
+    assert page.active_document() is doc_a
+

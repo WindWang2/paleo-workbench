@@ -485,6 +485,59 @@ def test_plan_executor_partial_failure():
     assert plan.skipped_run_ids or result.stopped_early
 
 
+def test_skip_dependents_on_failure_leaves_unrelated_steps_running():
+    """#669: stop_on_failure=False must skip only dependents of the failed step."""
+    from paleo_workbench.workflow.recompute_plan import RecomputePlan, RecomputeStep
+
+    plan = RecomputePlan(
+        steps=[
+            RecomputeStep(
+                order=1,
+                run_id="a",
+                operation="op_a",
+                domain_task_id="a",
+                action=PlanAction.REQUIRES_COMPUTE,
+                label="A",
+            ),
+            RecomputeStep(
+                order=2,
+                run_id="b",
+                operation="op_b",
+                domain_task_id="b",
+                action=PlanAction.REQUIRES_COMPUTE,
+                input_version_ids=["a"],
+                label="B",
+            ),
+            RecomputeStep(
+                order=3,
+                run_id="c",
+                operation="op_c",
+                domain_task_id="c",
+                action=PlanAction.REQUIRES_COMPUTE,
+                label="C",
+            ),
+        ]
+    )
+    ran: list[str] = []
+
+    def boom(_step):
+        raise RuntimeError("A failed")
+
+    def ok(step):
+        ran.append(step.run_id)
+
+    ex = PlanExecutor(
+        handlers={"op_a": boom, "op_b": ok, "op_c": ok},
+        stop_on_failure=False,
+        skip_dependents_on_failure=True,
+    )
+    ex.execute(plan)
+    assert plan.failed_run_ids == ["a"]
+    assert "b" in plan.skipped_run_ids
+    assert "c" in plan.completed_run_ids
+    assert ran == ["c"]
+
+
 def test_reuse_existing_when_identical_run_present():
     cat = InMemoryCatalog()
     raw = _raw(cat, "raw")
@@ -593,6 +646,41 @@ def test_data_version_not_mutated_with_stale_flag():
     # to_dict must not invent stale
     d = ver.to_dict()
     assert "stale" not in d
+
+
+def test_extra_selected_wins_without_prediction_tasks():
+    """#667: extra_selected must apply even when prediction_tasks is empty."""
+
+    class _Asset:
+        def __init__(self, asset_id: str, current: str, name: str = "") -> None:
+            self.id = asset_id
+            self.current_version_id = current
+            self.name = name
+
+    class _Service:
+        def list_assets(self, include_trashed: bool = False):
+            return [_Asset("asset-h", "ver-catalog", "horizon")]
+
+    project = ProjectDocument.new("NoPred")
+    project.factor_map_tasks.append(
+        FactorMapTask(
+            id="fa",
+            name="Fa",
+            target_horizon="H1",
+            factor_type="sand",
+            method="IDW",
+            status="complete",
+        )
+    )
+    assert list(project.prediction_tasks or []) == []
+
+    ctx = resolve_current_project_version_context(
+        project,
+        catalog=None,
+        service=_Service(),
+        extra_selected={"asset-h": "ver-override"},
+    )
+    assert ctx.current_by_asset["asset-h"] == "ver-override"
 
 
 # --------------------------------------------------------------------------- cycle safety
@@ -770,6 +858,102 @@ def test_for_project_caches_graph_per_catalog_revision(monkeypatch):
         assert svc3.graph is not svc2.graph
         FreshnessService.for_project(catalog=fake)
         assert len(builds) == 2  # second revision reused
+    finally:
+        clear_dependency_graph_cache()
+
+
+def test_for_project_second_call_does_not_resweep_catalog(monkeypatch):
+    """#538: context resolution must not re-list runs or re-resolve versions
+    while the catalog revision is unchanged (50 factor tasks, ≥1000 runs)."""
+    from types import SimpleNamespace
+
+    from paleo_workbench.catalog.types import DataRunRef, DataStage, DataVersionRef
+    from paleo_workbench.workflow.freshness import clear_dependency_graph_cache
+
+    n_tasks = 50
+    n_runs = 1000
+    versions: list[DataVersionRef] = []
+    runs: list[DataRunRef] = []
+    for i in range(n_runs):
+        task_id = f"factor-{i % n_tasks}"
+        rid = f"run-{i}"
+        vid = f"ver-{i}"
+        runs.append(
+            DataRunRef(
+                run_id=rid,
+                operation="factor_map",
+                output_version_ids=[vid],
+                domain_task_id=task_id,
+                status="completed",
+            )
+        )
+        versions.append(
+            DataVersionRef(
+                asset_id=f"asset-{i}",
+                version_id=vid,
+                name=vid,
+                stage=DataStage.DERIVED,
+                producing_run_id=rid,
+            )
+        )
+
+    latest_by_task = {f"factor-{k}": f"ver-{n_runs - n_tasks + k}" for k in range(n_tasks)}
+    project = ProjectDocument.new("P")
+    for k in range(n_tasks):
+        project.factor_map_tasks.append(
+            FactorMapTask(
+                id=f"factor-{k}",
+                name=f"F{k}",
+                target_horizon="H1",
+                factor_type="砂岩含量",
+                method="IDW",
+                grid_artifact_version_id=latest_by_task[f"factor-{k}"],
+            )
+        )
+
+    document = SimpleNamespace(catalog_revision=1)
+
+    class _CountingCatalog:
+        service = SimpleNamespace(document=document)
+
+        def __init__(self) -> None:
+            self.list_runs_calls = 0
+            self.resolve_version_calls = 0
+            self._versions = {v.version_id: v for v in versions}
+            self._runs = list(runs)
+
+        def list_versions(self):
+            return list(versions)
+
+        def list_runs(self):
+            self.list_runs_calls += 1
+            return list(self._runs)
+
+        def resolve_version(self, version_id: str):
+            self.resolve_version_calls += 1
+            return self._versions.get(version_id)
+
+    class _EmptyService:
+        def list_assets(self, include_trashed=False):
+            return []
+
+    clear_dependency_graph_cache()
+    try:
+        fake = _CountingCatalog()
+        FreshnessService.for_project(
+            project, catalog=fake, service=_EmptyService()
+        )
+        # Graph rebuild lists runs once; context must reuse that index.
+        assert fake.list_runs_calls == 1
+        assert fake.resolve_version_calls == 0
+
+        fake.list_runs_calls = 0
+        fake.resolve_version_calls = 0
+        FreshnessService.for_project(
+            project, catalog=fake, service=_EmptyService()
+        )
+        assert fake.list_runs_calls == 0
+        assert fake.resolve_version_calls == 0
     finally:
         clear_dependency_graph_cache()
 # ------------------------------------------------------------------ C15 identity

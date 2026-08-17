@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
@@ -41,6 +42,33 @@ def _review_status_display(view: AssetView) -> str:
 
     value = view.governance.get("review_status", "")
     return governance_display("review_status", value) if value else "—"
+
+
+_VERSION_NUMBERS = re.compile(r"\d+")
+
+
+def _sort_tuple(view: AssetView, key: str, format_cell) -> tuple:
+    """Sort by meaning, not by the formatted display string (#651)."""
+    if key == "size":
+        size = view.size_bytes
+        return (1, 0) if size is None else (0, int(size))
+    if key == "version":
+        text = view.current_version or ""
+        if not text or text == "—":
+            return (1, (), "")
+        nums = tuple(int(n) for n in _VERSION_NUMBERS.findall(text))
+        return (0, nums, text)
+    if key == "type":
+        return (0, view.type_label or view.type)
+    if key == "modified":
+        text = view.modified_at or ""
+        return (1, "") if (not text or text == "—") else (0, text)
+    val = getattr(view, key, format_cell(view, key))
+    if isinstance(val, (DataStage, IntegrityState)):
+        val = val.value
+    if val is None:
+        val = ""
+    return (0, val)
 
 
 class AssetTableModel(QAbstractTableModel):
@@ -92,12 +120,16 @@ class AssetTableModel(QAbstractTableModel):
         assets: list[object],
         rows: list[int],
         column_keys: list[str] | None = None,
+        views: list[object] | None = None,
     ) -> None:
         self.beginResetModel()
         if column_keys is not None:
             self._column_keys = list(column_keys)
         self._raw_assets = list(assets)
-        self._views = [self._build_view(a) for a in self._raw_assets]
+        if views is not None and len(views) == len(self._raw_assets):
+            self._views = list(views)  # shared prebuilt views (#527)
+        else:
+            self._views = [self._build_view(a) for a in self._raw_assets]
         self._filtered_rows = list(rows)
         self.endResetModel()
 
@@ -233,12 +265,7 @@ class AssetTableModel(QAbstractTableModel):
 
         def sort_key(row_idx: int) -> tuple:
             view = self._views[row_idx]
-            val = getattr(view, key, self._format_cell_display(view, key))
-            if isinstance(val, (DataStage, IntegrityState)):
-                val = val.value
-            if val is None:
-                val = ""
-            return (val,)
+            return _sort_tuple(view, key, self._format_cell_display)
 
         self._filtered_rows.sort(key=sort_key, reverse=reverse)
         self.endResetModel()

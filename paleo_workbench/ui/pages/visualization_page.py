@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -20,9 +21,16 @@ from paleo_workbench.project.models import ProjectDocument
 from paleo_workbench.resources.export_service import (
     default_export_dir,
     export_widget_snapshot,
+    register_exported_view,
     view_export_capabilities,
 )
 from paleo_workbench.ui import tokens
+from paleo_workbench.ui.map_export_worker import (
+    snapshot_map_export,
+    start_map_export_job,
+    unified_map_canvas_from,
+)
+from paleo_workbench.ui.owned_worker_job import OwnedWorkerJob
 from paleo_workbench.ui.pages.composite_visualization_panel import CompositeVisualizationPanel
 from paleo_workbench.ui.pages.geoviz_preview_provider import LocalVisualizationProvider
 from paleo_workbench.ui.pages.preview_worker import PreviewRequestController
@@ -62,6 +70,10 @@ class VisualizationPage(QWidget):
         self._preview_controller.loading.connect(self._show_preview_loading)
         self._preview_controller.result_ready.connect(self._apply_preview_result)
         self._preview_controller.failed.connect(self._show_preview_error)
+        self._export_job = OwnedWorkerJob(self)
+        self._export_job.released.connect(self._on_export_job_released)
+        self._export_busy = False
+        self._pending_export: dict | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(
@@ -267,20 +279,22 @@ class VisualizationPage(QWidget):
         self._sync_export_capabilities()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        self._preview_controller.shutdown()
+        self.shutdown_workers()
         super().closeEvent(event)
 
     def event(self, event: QEvent) -> bool:  # type: ignore[override]
         if event.type() == QEvent.Type.DeferredDelete and hasattr(
             self, "_preview_controller"
         ):
-            self._preview_controller.shutdown()
+            self.shutdown_workers()
         return super().event(event)
 
     def shutdown_workers(self, wait_ms: int = 3_000) -> bool:
-        """Release async previews before a project-scoped shell is replaced."""
+        """Release async previews / export before a project-scoped shell is replaced."""
 
-        return self._preview_controller.shutdown(wait_ms)
+        export_ok = self._export_job.shutdown(wait_ms)
+        self._end_export_busy()
+        return export_ok and self._preview_controller.shutdown(wait_ms)
 
     def _reload_current(self) -> None:
         if self._current_ref is not None:
@@ -327,6 +341,17 @@ class VisualizationPage(QWidget):
         )
         if not path:
             return
+        if label == "PNG":
+            canvas = unified_map_canvas_from(widget)
+            if canvas is not None:
+                self._start_unified_png_export(
+                    canvas,
+                    Path(path),
+                    project=self._project_stub() if self._project is not None else None,
+                    linked_id=(self._current_ref.id if self._current_ref else "viz_view"),
+                    register=self._project is not None,
+                )
+                return
         result = export_widget_snapshot(
             widget,
             Path(path),
@@ -339,6 +364,84 @@ class VisualizationPage(QWidget):
             self.composite_panel.status_label.setText(result.message)
         else:
             QMessageBox.warning(self, "导出失败", result.message)
+
+    def _start_unified_png_export(
+        self,
+        canvas,
+        output_path: Path,
+        *,
+        project: ProjectDocument | None,
+        linked_id: str,
+        register: bool,
+        source_task_ids: list[str] | None = None,
+    ) -> None:
+        if self._export_job.is_running:
+            QMessageBox.information(self, "导出", "上一张地图仍在导出")
+            return
+        spec = snapshot_map_export(canvas, output_path)
+        self._pending_export = {
+            "path": output_path,
+            "widget": canvas,
+            "project": project,
+            "linked_id": linked_id,
+            "register": register,
+            "source_task_ids": list(source_task_ids or []),
+        }
+        self._begin_export_busy()
+        start_map_export_job(
+            self._export_job,
+            spec,
+            on_finished=self._on_map_export_finished,
+            on_failed=self._on_map_export_failed,
+            on_cancelled=self._on_map_export_cancelled,
+        )
+
+    def _begin_export_busy(self) -> None:
+        if not self._export_busy:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self._export_busy = True
+        self.trace_panel.export_btn.setEnabled(False)
+        self.trace_panel.export_svg_btn.setEnabled(False)
+        self.trace_panel.export_pdf_btn.setEnabled(False)
+        self.composite_panel.status_label.setText("正在导出…")
+
+    def _end_export_busy(self) -> None:
+        if not self._export_busy:
+            return
+        QApplication.restoreOverrideCursor()
+        self._export_busy = False
+        self._sync_export_capabilities()
+
+    def _on_export_job_released(self) -> None:
+        if self._export_busy:
+            self._end_export_busy()
+
+    def _on_map_export_finished(self, path: str) -> None:
+        pending = self._pending_export
+        self._pending_export = None
+        self._end_export_busy()
+        output = Path(path)
+        if pending:
+            register_exported_view(
+                pending["widget"],
+                pending["path"],
+                "PNG",
+                project=pending["project"],
+                linked_id=pending["linked_id"],
+                register=pending["register"],
+                source_task_ids=pending["source_task_ids"],
+            )
+        self.composite_panel.status_label.setText(f"已导出视图: {output.name}")
+
+    def _on_map_export_failed(self, message: str) -> None:
+        self._pending_export = None
+        self._end_export_busy()
+        QMessageBox.warning(self, "导出失败", message)
+
+    def _on_map_export_cancelled(self) -> None:
+        self._pending_export = None
+        self._end_export_busy()
+        self.composite_panel.status_label.setText("已取消导出")
 
     def _project_stub(self) -> ProjectDocument:
         if self._project is not None:

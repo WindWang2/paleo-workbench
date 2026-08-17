@@ -225,7 +225,15 @@ def test_failed_metadata_save_rolls_back_version_and_payload(service):
     # Nothing committed: no version, no asset, no payload.
     assert len(service.document.versions) == 0
     assert len(service.document.assets) == 0
-    assert not any(service.resolve_path(v).exists() for v in [])
+    leftovers = [
+        p
+        for p in service.project_path.parent.rglob("*")
+        if p.is_file()
+        and "incoming" not in p.parts
+        and p.suffix in {".bin", ".las"}
+        and p.name != "demo.paleo.json"
+    ]
+    assert leftovers == []
     assert service.plan_gc().count("stage_orphan") == 0
 
 

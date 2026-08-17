@@ -33,9 +33,22 @@ dev = [
     "pytest>=8.0",
     "pytest-qt>=4.5.0",
     "pytest-timeout>=2.3.1",
+    # tests/test_wheel_assets.py builds the wheel in-process via the PEP 517
+    # backend hook; modern runner venvs no longer ship setuptools implicitly.
+    "setuptools>=69",
 ]
 native = [
     "pybind11>=2.12",
+]
+# QGIS production renderer (paleo_workbench.mapping.map_render_backend with
+# prefer_qgis=True) is OPT-IN: it builds the vendored QGIS core under
+# native/qgis_render_bridge and is NOT covered by the main CI gate (which
+# tests the fallback renderer — see README "QGIS renderer (opt-in)"). Requires
+# Qt6 development headers (qt6-base-dev etc.) and cmake/ninja on the system.
+# Build: PALEO_WITH_QGIS_RENDERER=1 python -m pip install -e native/qgis_render_bridge
+qgis-renderer = [
+    "pybind11>=2.12",
+    "ninja>=1.11",
 ]
 
 [build-system]
@@ -43,12 +56,28 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-# WellPlot Desktop: well-log-engine/apps/wellplot-desktop
-# (example and/or product as it matures — not packaged from this tree)
-# pip install -e well-log-engine/apps/wellplot-desktop
+# Installed-state entry points (packaging #440). `python -m paleo_workbench`
+# works via paleo_workbench/__main__.py; both enter paleo_workbench.main.main()
+# and exit with its status (SystemExit(2) with install guidance when geoviz is
+# unavailable). WellPlot Desktop (well-log-engine/apps/wellplot-desktop) is a
+# separate product not packaged from this tree.
+paleo-workbench = "paleo_workbench.main:main"
 
 [tool.setuptools.packages.find]
 include = ["paleo_workbench*"]
+
+# Non-.py package assets are loaded from the filesystem at runtime
+# (paleo_workbench/ui/icon_rail.py, menu_bar.py, mapping docs, vendored
+# ATTRIBUTION.md) — without this, wheels silently ship them missing and the
+# UI degrades to plain-text navigation (packaging #439). Keep in sync with
+# tests/test_wheel_assets.py.
+[tool.setuptools.package-data]
+paleo_workbench = [
+    "ui/assets/icons/*.svg",
+    "ui/pages/prototypes/*.html",
+    "mapping/*.md",
+    "_vendored/haiyou_constrained_idw/*.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -59,7 +88,10 @@ markers = [
 ]
 pythonpath = [
     ".",
-    "geo-viz-engine",
+    # NOTE: the bare geo-viz-engine root is deliberately NOT on the path:
+    # it hosts committed cpython-313 .so binaries that shadow the freshly
+    # built extensions (packaging #435). `geoviz` itself resolves from the
+    # editable installs in requirements-geoviz.txt.
     "geo-viz-engine/packages/geoviz_common",
     "geo-viz-engine/packages/geoviz_paleo_map",
     "geo-viz-engine/packages/geoviz_plots",

@@ -95,9 +95,7 @@ class CoreCatalogAdapter:
         ]
 
     def _asset_for(self, version: DataVersion) -> DataAsset | None:
-        service = self._service
-        service._ensure_maps()
-        return service._asset_by_id.get(version.asset_id)
+        return self._service._ensure_maps().asset_by_id.get(version.asset_id)
 
     def _version_ref(self, version: DataVersion) -> DataVersionRef:
         asset = self._asset_for(version)
@@ -159,19 +157,19 @@ class CoreCatalogAdapter:
         if not domain_task_id:
             return None
         service = self._service
-        service._ensure_maps()
+        maps = service._ensure_maps()
         # Newest version first: the most recent produced asset wins.
         for version in reversed(service.document.versions):
             if not version.run_id:
                 continue
-            producing = service._run_by_id.get(version.run_id)
+            producing = maps.run_by_id.get(version.run_id)
             if (
                 producing is None
                 or producing.operation != run.operation
                 or producing.parameters.get(_DOMAIN_TASK_KEY) != domain_task_id
             ):
                 continue
-            asset = service._asset_by_id.get(version.asset_id)
+            asset = maps.asset_by_id.get(version.asset_id)
             if asset is not None and not asset.trashed:
                 return asset
         return None
@@ -396,47 +394,55 @@ class CoreCatalogAdapter:
         reuse_legacy_id: str | None = None,
     ) -> DataVersionRef:
         service = self._service
-        run = service.get_run(run_id)
-        asset = None
-        if reuse_legacy_id:
-            ref = self.resolve_legacy_resource(reuse_legacy_id)
-            if ref is not None:
-                try:
-                    asset = service.get_asset(ref.asset_id)
-                except CatalogError:
-                    asset = None
-        if asset is None:
-            asset = self._domain_task_asset(run)
-        created = False
-        if asset is None:
-            asset = service._new_asset(name, kind or None, format or None, None)
-            if (
-                reuse_legacy_id
-                and service._asset_by_legacy_id(reuse_legacy_id) is None
-            ):
-                # Bridge the new asset so the NEXT registration with the same
-                # reuse key appends a version instead of spawning an asset.
-                asset.legacy_resource_id = reuse_legacy_id
-            service._add_asset(asset)
-            created = True
-        try:
-            # register_version links the run's output in the same atomic save.
-            version = service.register_version(
-                asset.id,
-                path,
-                stage,
-                parent_version_ids=list(run.input_version_ids),
-                run_id=run.id,
-                known_sha256=checksum,
-            )
-        except Exception:
-            if created and asset in service.document.assets:
-                service._remove_asset(asset)
-            raise
-        for tag in tags or []:
-            if tag:
-                service.add_tag(tag, version_id=version.id)
-        return self._version_ref(version)
+        # Hold the catalog lock across append + register (#517): a concurrent
+        # locked _save between the unlocked _add_asset and register_version
+        # persisted a zero-version asset — this path backs every pipeline/
+        # prediction/export/qc output registration. The lock is reentrant, so
+        # the locked register_version/add_tag calls below nest safely.
+        with service._lock:
+            run = service.get_run(run_id)
+            asset = None
+            if reuse_legacy_id:
+                ref = self.resolve_legacy_resource(reuse_legacy_id)
+                if ref is not None:
+                    try:
+                        asset = service.get_asset(ref.asset_id)
+                    except CatalogError:
+                        asset = None
+            if asset is None:
+                asset = self._domain_task_asset(run)
+            created = False
+            if asset is None:
+                asset = service._new_asset(name, kind or None, format or None, None)
+                if (
+                    reuse_legacy_id
+                    and service._asset_by_legacy_id(reuse_legacy_id) is None
+                ):
+                    # Bridge the new asset so the NEXT registration with the
+                    # same reuse key appends a version instead of spawning an
+                    # asset.
+                    asset.legacy_resource_id = reuse_legacy_id
+                service._add_asset(asset)
+                created = True
+            try:
+                # register_version links the run's output in the same atomic
+                # save.
+                version = service.register_version(
+                    asset.id,
+                    path,
+                    stage,
+                    parent_version_ids=list(run.input_version_ids),
+                    run_id=run.id,
+                    known_sha256=checksum,
+                )
+            except Exception:
+                if created and asset in service.document.assets:
+                    service._remove_asset(asset)
+                raise
+            for tag in tags or []:
+                if tag:
+                    service.add_tag(tag, version_id=version.id)
+            return self._version_ref(version)
 
     def register_intermediate(
         self,
@@ -507,23 +513,27 @@ class CoreCatalogAdapter:
                 f"Cannot attach lineage from a version to itself: {source_version_id}"
             )
         service = self._service
-        target = service.get_version(target_version_id)
-        service.get_version(source_version_id)  # raises if unknown
-        if source_version_id not in target.parent_version_ids:
-            service._append_parent(target_version_id, source_version_id)
-            try:
-                service._save()
-            except Exception:
-                # Snapshot-rollback on a failed save: undo the in-memory edge
-                # (and the maintained children index) so memory never diverges
-                # from the disk state until a later unrelated save.
-                target.parent_version_ids.remove(source_version_id)
-                children = service._children_by_parent
-                if children is not None:
-                    bucket = children.get(source_version_id)
-                    if bucket is not None and target in bucket:
-                        bucket.remove(target)
-                raise
+        # Mutate + save under the lock (#517): the unlocked _append_parent
+        # window let a concurrent save persist a torn lineage edge.
+        with service._lock:
+            target = service.get_version(target_version_id)
+            service.get_version(source_version_id)  # raises if unknown
+            if source_version_id not in target.parent_version_ids:
+                service._append_parent(target_version_id, source_version_id)
+                try:
+                    service._save()
+                except Exception:
+                    # Snapshot-rollback on a failed save: undo the in-memory
+                    # edge (and the maintained children index) so memory never
+                    # diverges from the disk state until a later unrelated
+                    # save.
+                    target.parent_version_ids.remove(source_version_id)
+                    children = service._children_by_parent
+                    if children is not None:
+                        bucket = children.get(source_version_id)
+                        if bucket is not None and target in bucket:
+                            bucket.remove(target)
+                    raise
         return LineageEdge(
             source_version_id=source_version_id,
             target_version_id=target_version_id,
@@ -531,9 +541,7 @@ class CoreCatalogAdapter:
         )
 
     def _children_of(self, version_id: str) -> list[DataVersion]:
-        service = self._service
-        service._ensure_maps()
-        return list(service._children_by_parent.get(version_id, ()))
+        return list(self._service._ensure_maps().children_by_parent.get(version_id, ()))
 
     def _lineage_maps(self) -> tuple[dict[str, DataVersion], dict[str, list[str]]]:
         """Prebuilt ``(by_id, children_by_parent)`` for lineage BFS (P4).
@@ -541,11 +549,10 @@ class CoreCatalogAdapter:
         Building the child map ONCE per walk turns descendants BFS from
         O(V²) (scanning every version per frontier node) into O(V + E).
         """
-        service = self._service
-        service._ensure_maps()
-        by_id = service._version_by_id
+        maps = self._service._ensure_maps()
+        by_id = maps.version_by_id
         children: dict[str, list[str]] = {}
-        for parent_id, children_list in service._children_by_parent.items():
+        for parent_id, children_list in maps.children_by_parent.items():
             children[parent_id] = [c.id for c in children_list]
         return by_id, children
 
@@ -578,9 +585,7 @@ class CoreCatalogAdapter:
         return ordered
 
     def direct_ancestors(self, version_id: str) -> list[DataVersionRef]:
-        service = self._service
-        service._ensure_maps()
-        by_id = service._version_by_id
+        by_id = self._service._ensure_maps().version_by_id
         version = by_id.get(version_id)
         if version is None:
             return []

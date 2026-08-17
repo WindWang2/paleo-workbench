@@ -72,6 +72,41 @@ def test_open_aborts_without_closing_catalog_when_worker_does_not_join(tmp_path)
     assert "后台任务" in (controller._last_open_error or "")
 
 
+def test_catalog_maintenance_runs_off_gui_thread(qtbot, tmp_path, monkeypatch):
+    """#618: migrate / open-sweep / index rebuild must not occupy the GUI slot."""
+    import threading
+    from types import SimpleNamespace
+
+    from paleo_workbench.catalog import reset_catalog, set_catalog
+
+    seen: list[tuple[str, bool]] = []
+
+    class _FakeService:
+        def migrate_legacy_resources(self, _resources):
+            seen.append(("migrate", threading.current_thread() is not threading.main_thread()))
+
+        def _sweep_temp_on_open(self):
+            seen.append(("sweep", threading.current_thread() is not threading.main_thread()))
+
+        def ensure_index_ready(self):
+            seen.append(("index", threading.current_thread() is not threading.main_thread()))
+
+    set_catalog(SimpleNamespace(service=_FakeService()))
+    try:
+        target = tmp_path / "target.paleo.json"
+        loaded = ProjectDocument.new("Target")
+        window = _Window(loaded, target)
+        controller = ProjectController(window)
+        controller._schedule_catalog_maintenance(target, loaded)
+        qtbot.waitUntil(lambda: len(seen) == 3, timeout=3_000)
+        assert all(off_gui for _name, off_gui in seen), seen
+    finally:
+        reset_catalog()
+        thread = getattr(controller, "_maintenance_thread", None)
+        if thread is not None:
+            thread.join(timeout=2.0)
+
+
 def test_queued_catalog_maintenance_is_ignored_after_session_replacement(qtbot, tmp_path):
     target = tmp_path / "target.paleo.json"
     loaded = ProjectDocument.new("Target")

@@ -1,0 +1,118 @@
+name: Slow tests (nightly)
+
+# Packaging #442: the fast CI gate intentionally runs `-m "not slow"`, but the
+# 14 slow tests are the ONLY end-to-end real-data coverage (real LAS/DAT/SEGY
+# vendor formats, tests/test_geoviz_real_data_smoke.py) and the interpolation
+# performance gates (tests/perf/test_interpolation_perf.py). Nothing else ever
+# ran them, and they self-skip when the gitignored data/ tree is absent — so
+# the whole family could silently never run anywhere.
+#
+# This leg executes the full slow family on a schedule (and on manual
+# dispatch). It is FAIL-CLOSED in two ways:
+#   1. If the slow family shrinks below its 14-test baseline, the leg fails.
+#   2. If the representative data tree is absent, the real-data tests skip and
+#      the leg fails with an explicit message — never a silent green.
+# Providing the data makes the leg green; the perf gates then run too.
+
+on:
+  schedule:
+    # Nightly 02:17 UTC (outside the PR fast gate).
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  slow:
+    name: Slow tests (real-data + perf)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System libraries (Qt / offscreen / GDAL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            gdal-bin \
+            libgdal-dev \
+            libgl1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libegl1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-xinerama0 \
+            libxkbcommon-x11-0 \
+            libfontconfig1 \
+            libfreetype6
+          echo "GDAL_CONFIG=$(command -v gdal-config)" >> "$GITHUB_ENV"
+          gdal-config --version
+
+      - name: Install Python dependencies
+        env:
+          GDAL_CONFIG: ${{ env.GDAL_CONFIG }}
+        run: |
+          python -m pip install --upgrade pip
+          # Pin Python GDAL bindings to the system libgdal (same as ci.yml).
+          SYS_GDAL="$(gdal-config --version)"
+          echo "gdal==${SYS_GDAL}" > /tmp/gdal-constraint.txt
+          python -m pip install "numpy>=1.26"
+          python -m pip install --no-cache-dir "gdal==${SYS_GDAL}"
+          python -m pip install --prefer-binary -c /tmp/gdal-constraint.txt -e ".[dev]"
+          # Fail-closed geoviz graph (packaging #442): requirements-geoviz.txt
+          # is the single source of truth; a broken graph fails this step.
+          python -m pip install --prefer-binary -r requirements-geoviz.txt
+          python -c "import geoviz, geoviz_well_seismic_3d"
+
+      - name: Assert the slow family has not silently shrunk
+        # Baseline 14 = 7 real-data smoke + 5 interpolation perf + 2 real SEGY axis contracts (#650).
+        run: |
+          count="$(python -m pytest --collect-only -q -m slow tests/ 2>&1 | grep -oE '[0-9]+ tests collected' | grep -oE '^[0-9]+')"
+          echo "slow tests collected: ${count} (baseline 14)"
+          test -n "${count}" && test "${count}" -ge 14
+
+      - name: Run slow tests (real-data smoke + interpolation perf gates)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          set -o pipefail
+          python -m pytest -v --tb=short --timeout=300 -m slow tests/ 2>&1 | tee /tmp/slow-run.txt
+          # Fail-closed on data availability: the real-data tests self-skip
+          # when the representative data tree is absent (gitignored `data/`).
+          # A leg that skipped all of them must not report green.
+          python - <<'EOF'
+          import re, sys
+          text = open("/tmp/slow-run.txt").read()
+          absent = len(re.findall(r"representative data file is absent", text))
+          summary = re.findall(r"^=+ .* =+$", text, re.M)
+          print("\n".join(summary[-3:]))
+          if absent:
+              print(
+                  "::error::packaging #442: "
+                  f"{absent} real-data smoke test(s) skipped - the representative "
+                  "data tree is absent (see _default_data_root in "
+                  "tests/test_geoviz_real_data_smoke.py; a gitignored data/ "
+                  "tree). Provide the data and re-run this workflow manually - "
+                  "otherwise the only end-to-end vendor-format coverage never runs."
+              )
+              sys.exit(1)
+          print(f"real-data skips: {absent} (0 required for a green leg)")
+          EOF

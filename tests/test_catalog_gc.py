@@ -119,6 +119,43 @@ def test_temp_files_classified_and_swept(service, tmp_path):
     ).status_for(service.document.versions[0].id) == "verified"
 
 
+def test_auto_sweep_does_not_classify_stage_working_trash_or_blobs(
+    service, tmp_path, monkeypatch
+):
+    """#618: open-time sweep only plans TEMP_ORPHAN + EMPTY_DIR.
+
+    Full stage/working/trash/blob classification is for explicit GC, not the
+    every-open auto path that used to walk the entire artifacts tree.
+    """
+    from paleo_workbench.catalog import dedup
+    from paleo_workbench.catalog import gc as gc_mod
+
+    service.import_raw(_make_source(tmp_path, "a.bin"))
+    blob_calls: list[int] = []
+    monkeypatch.setattr(
+        dedup, "plan_blob_gc", lambda *a, **k: blob_calls.append(1) or []
+    )
+    walked: list[str] = []
+    real_walk = gc_mod._walk_files
+
+    def spy_walk(directory):
+        walked.append(Path(directory).name)
+        return real_walk(directory)
+
+    monkeypatch.setattr(gc_mod, "_walk_files", spy_walk)
+
+    report = service.sweep_gc(dry_run=True, explicit=False)
+    assert blob_calls == []
+    assert report.count(STAGE_ORPHAN) == 0
+    assert report.count(WORKING_ORPHAN) == 0
+    assert report.count(TRASH_ORPHAN) == 0
+    assert report.count(BLOB_ORPHAN) == 0
+    assert not any(
+        name in {"raw", "derived", "intermediate", "outputs", "working", "trash"}
+        for name in walked
+    )
+
+
 def test_trash_orphan_unreferenced_payload(service, tmp_path):
     service.import_raw(_make_source(tmp_path, "a.bin"))
     trash = trash_dir_for(service.project_path)

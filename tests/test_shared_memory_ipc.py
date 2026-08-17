@@ -1,5 +1,8 @@
 """Tests for UI Thread Zero-Copy Shared Memory IPC Layer (Issue #12)."""
+import shutil
 import time
+from pathlib import Path
+
 import numpy as np
 import pytest
 from PySide6.QtCore import QCoreApplication
@@ -23,42 +26,76 @@ def _worker_compute_array(meta_dict: dict) -> dict:
     return {"shm_name": shm_name, "status": "ok"}
 
 
+def _median_ms(fn, trials: int = 5, warmup: int = 1) -> float:
+    for _ in range(warmup):
+        fn()
+    samples = []
+    for _ in range(trials):
+        t0 = time.perf_counter()
+        fn()
+        samples.append((time.perf_counter() - t0) * 1000.0)
+    return float(np.median(samples))
+
+
+def _ensure_shm_budget(need_bytes: int) -> None:
+    shm = Path("/dev/shm")
+    if not shm.is_dir():
+        return
+    free = shutil.disk_usage(shm).free
+    if free < need_bytes * 2:
+        pytest.skip(f"/dev/shm free {free} bytes; need {need_bytes * 2}")
+
+
 def test_shared_memory_handle_creation_and_zero_copy():
     shape = (1000, 1000)
     dtype = "float32"
-    handle, meta = SharedMemoryArrayHandle.create(shape=shape, dtype=dtype)
-    
-    assert meta.shape == shape
-    assert meta.dtype == "float32"
-    assert meta.size_bytes == 1000 * 1000 * 4
-    
-    # Mutate handle array
-    handle.array[0, 0] = 123.45
-    
-    # Attach consumer handle
-    consumer = SharedMemoryArrayHandle(shm_name=meta.shm_name, shape=shape, dtype=dtype, is_owner=False)
-    assert consumer.array[0, 0] == 123.45
-    
-    # Cleanup
-    consumer.close()
-    handle.close()
+    handle = None
+    consumer = None
+    try:
+        handle, meta = SharedMemoryArrayHandle.create(shape=shape, dtype=dtype)
+
+        assert meta.shape == shape
+        assert meta.dtype == "float32"
+        assert meta.size_bytes == 1000 * 1000 * 4
+
+        handle.array[0, 0] = 123.45
+
+        consumer = SharedMemoryArrayHandle(
+            shm_name=meta.shm_name, shape=shape, dtype=dtype, is_owner=False
+        )
+        assert consumer.array[0, 0] == 123.45
+    finally:
+        if consumer is not None:
+            consumer.close()
+        if handle is not None:
+            handle.close()
 
 
 def test_zero_copy_ipc_latency_sub_millisecond():
-    # 100MB array: float32 array of shape (5000, 5000) = 25M elements = 100MB
-    shape = (5000, 5000)
+    # 4MB is enough to prove attach is a mapping, not a copy; 100MB blows
+    # typical 64MB Docker /dev/shm caps (#647).
+    shape = (1024, 1024)
     dtype = "float32"
-    
-    t0 = time.perf_counter()
-    handle, meta = SharedMemoryArrayHandle.create(shape=shape, dtype=dtype)
-    consumer = SharedMemoryArrayHandle(shm_name=meta.shm_name, shape=shape, dtype=dtype, is_owner=False)
-    t1 = time.perf_counter()
-    
-    elapsed_ms = (t1 - t0) * 1000.0
-    assert elapsed_ms < 10.0  # Zero-copy creation and attachment is sub-millisecond
-    
-    consumer.close()
-    handle.close()
+    need_bytes = 1024 * 1024 * 4
+    _ensure_shm_budget(need_bytes)
+
+    created = []
+
+    def _attach_once():
+        handle, meta = SharedMemoryArrayHandle.create(shape=shape, dtype=dtype)
+        consumer = SharedMemoryArrayHandle(
+            shm_name=meta.shm_name, shape=shape, dtype=dtype, is_owner=False
+        )
+        created.append((handle, consumer))
+        return handle, consumer
+
+    try:
+        elapsed_ms = _median_ms(_attach_once)
+        assert elapsed_ms < 10.0
+    finally:
+        for handle, consumer in created:
+            consumer.close()
+            handle.close()
 
 
 def test_qprocess_future_bridge(qtbot):
@@ -68,25 +105,29 @@ def test_qprocess_future_bridge(qtbot):
     received_results = []
     bridge.finished.connect(lambda req_id, res, meta: received_results.append((req_id, res)))
     
-    handle, meta = SharedMemoryArrayHandle.create(shape=(10, 10), dtype="float32")
-    
-    executor = ProcessPoolExecutor(max_workers=1)
-    future = executor.submit(_worker_compute_array, {
-        "shm_name": meta.shm_name,
-        "shape": meta.shape,
-        "dtype": meta.dtype,
-    })
-    
-    bridge.watch(future, request_id=101)
-    
-    # Wait for bridge signal via qtbot
-    qtbot.waitUntil(lambda: len(received_results) > 0, timeout=3000)
-    
-    assert len(received_results) == 1
-    req_id, res = received_results[0]
-    assert req_id == 101
-    assert res["status"] == "ok"
-    assert handle.array[0, 0] == 42.0
-    
-    executor.shutdown(wait=True)
-    handle.close()
+    handle = None
+    executor = None
+    try:
+        handle, meta = SharedMemoryArrayHandle.create(shape=(10, 10), dtype="float32")
+
+        executor = ProcessPoolExecutor(max_workers=1)
+        future = executor.submit(_worker_compute_array, {
+            "shm_name": meta.shm_name,
+            "shape": meta.shape,
+            "dtype": meta.dtype,
+        })
+
+        bridge.watch(future, request_id=101)
+
+        qtbot.waitUntil(lambda: len(received_results) > 0, timeout=3000)
+
+        assert len(received_results) == 1
+        req_id, res = received_results[0]
+        assert req_id == 101
+        assert res["status"] == "ok"
+        assert handle.array[0, 0] == 42.0
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
+        if handle is not None:
+            handle.close()

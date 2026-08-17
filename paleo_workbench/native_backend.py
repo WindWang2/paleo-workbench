@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from decimal import Decimal
+import logging
 import math
+from pathlib import Path
 import re
 from typing import Any, Callable, Generator
 import warnings
+
+_LOG = logging.getLogger("paleo_workbench")
 
 import numpy as np
 
@@ -45,6 +49,93 @@ try:
 except ImportError:  # pragma: no cover
     grid_render_core = None  # type: ignore
     _HAS_GRID_RENDER_CPP = False
+
+# Feature -> loaded module (may be None) for source-origin classification.
+_NATIVE_MODULES = {
+    "seismic_3d": seismic_3d_core,
+    "well_log": well_log_core,
+    "map_edit": map_edit_core,
+    "grid_render": grid_render_core,
+}
+
+# One-time warning per feature when dispatch / is_accelerated divert a stale
+# repo-root binary to the pure-Python fallback (#520).
+_STALE_WARNED: set[str] = set()
+
+
+def _repo_root() -> Path:
+    """Monorepo root (the directory that contains ``paleo_workbench/``)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _module_origin(mod: Any) -> str:
+    """Classify where a native module was loaded from.
+
+    Returns ``"missing"`` when the module could not be imported, ``"repo_root"``
+    when the module resolves to a binary sitting directly at the repository root
+    (a committed .so that shadows freshly built modules on ``sys.path[0]`` —
+    see packaging #435), or ``"installed"`` for any other location (editable
+    in-place build under ``native/<pkg>``, site-packages, …).
+    """
+    if mod is None:
+        return "missing"
+    module_path = Path(getattr(mod, "__file__", "") or "")
+    if not module_path.is_absolute():
+        return "installed"
+    try:
+        if module_path.resolve().parent == _repo_root():
+            return "repo_root"
+    except OSError:  # pragma: no cover — path resolution edge cases
+        pass
+    return "installed"
+
+
+def native_status(feature: str) -> str:
+    """Native engine status for ``feature``: ``"fresh"``, ``"stale"`` or ``"missing"``.
+
+    Unlike :func:`has_cpp` (which only reflects import success), this
+    distinguishes a genuinely absent module (``"missing"``) from one that
+    resolved to a committed binary at the repository root (``"stale"``) — the
+    shadowing failure mode from packaging #435 where the CI "freshly built"
+    assert would otherwise pass vacuously.
+
+    Repo-root binaries are always ``"stale"`` (they shadow ``sys.path[0]`` and
+    typically predate ``__version__``). :meth:`NativeEngineBackend.dispatch`
+    and :meth:`NativeEngineBackend.is_accelerated` refuse them.
+    """
+    origin = _module_origin(_NATIVE_MODULES.get(feature))
+    if origin == "repo_root":
+        return "stale"
+    if origin == "missing":
+        return "missing"
+    return "fresh"
+
+
+def _warn_stale_native(feature: str) -> None:
+    if feature in _STALE_WARNED:
+        return
+    _STALE_WARNED.add(feature)
+    version = native_version(feature)
+    warnings.warn(
+        f"native {feature} module resolved to a stale repo-root binary "
+        f"(version={version!r}); using the pure-Python fallback. "
+        "Rebuild the extension under native/ or install a fresh wheel.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
+def native_version(feature: str) -> str | None:
+    """``__version__`` of the loaded native module for ``feature``, if exposed.
+
+    ``None`` when the module is missing or was built without build metadata
+    (committed binaries predate ``__version__``; the geo-viz-engine-built
+    ``map_edit_core`` exposes it once the engine side adds it — see #435).
+    """
+    mod = _NATIVE_MODULES.get(feature)
+    if mod is None:
+        return None
+    return getattr(mod, "__version__", None)
 
 
 def _py_render_grid_rgba(
@@ -120,9 +211,9 @@ def _py_fast_slice_extract(volume: np.ndarray, axis: int, index: int) -> np.ndar
             f"axis and index must fit in a C++ int (got axis={axis}, index={index})"
         )
     # float32 dtype contract: the C++ side accepts any numeric dtype via
-    # forcecast and downcasts to float32 (issue #446), so the fallback does
-    # the same instead of silently preserving float64.
-    vol = np.asarray(volume, dtype=np.float32)
+    # forcecast and downcasts to a contiguous float32 buffer (issue #446), so
+    # the fallback does the same instead of silently preserving float64.
+    vol = np.ascontiguousarray(volume, dtype=np.float32)
     if vol.ndim != 3:
         raise RuntimeError("Input volume must be 3D")
     axis_idx = int(axis) % vol.ndim
@@ -252,23 +343,38 @@ def _py_compute_coherence_3d(
             trace_sq_sum = np.sum(sub**2, axis=(0, 1))
             mean_sq = (trace_sum / n_spatial) ** 2
             sum_sq = trace_sq_sum
-
-            for k in range(nt):
-                k0 = max(0, k - ht)
-                k1 = min(nt - 1, k + ht)
-                vert_len = float(k1 - k0 + 1)
-                run_num = np.sum(mean_sq[k0 : k1 + 1])
-                run_den = np.sum(sum_sq[k0 : k1 + 1]) / vert_len + 1e-12
+            # Independent window sums (not prefix totals). A 1e20 sample
+            # overflows float32 v*v on the C++ path and is ~1e40 here; baking
+            # that into a running prefix makes later `prefix[b]-prefix[a]`
+            # lose every finite sample (the s8 #621 regression).
+            run_num, vert_len = _clamped_vertical_window_sums(mean_sq, ht)
+            run_den = _clamped_vertical_window_sums(sum_sq, ht)[0] / vert_len + 1e-12
+            with np.errstate(invalid="ignore", divide="ignore"):
                 value = run_num / run_den
-                if isinstance(value, float) and math.isnan(value):
-                    # C++ parity: NaN input propagates into the sums, and the
-                    # std::min/std::max clamp chain maps NaN to 0.0 (never a
-                    # NaN sample in the output volume).
-                    coh[i, j, k] = 0.0
-                else:
-                    coh[i, j, k] = float(np.clip(value, 0.0, 1.0))
+            out = np.clip(value, 0.0, 1.0)
+            out = np.where(np.isnan(value), 0.0, out)
+            coh[i, j, :] = out.astype(np.float32, copy=False)
 
     return coh
+
+
+def _clamped_vertical_window_sums(values: np.ndarray, half: int) -> tuple[np.ndarray, np.ndarray]:
+    """Sum the clamped [k-half, k+half] window independently at every sample."""
+    nt = int(values.shape[0])
+    if nt == 0:
+        empty = np.empty(0, dtype=np.float64)
+        return empty, empty
+    data = np.asarray(values, dtype=np.float64)
+    if half <= 0:
+        return data, np.ones(nt, dtype=np.float64)
+    padded = np.pad(data, (half, half), mode="constant")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1)
+    totals = windows.sum(axis=1)
+    k = np.arange(nt)
+    vert_len = (np.minimum(nt - 1, k + half) - np.maximum(0, k - half) + 1).astype(
+        np.float64
+    )
+    return totals, vert_len
 
 
 def _py_marching_cubes_3d(
@@ -290,7 +396,27 @@ def _py_marching_cubes_3d(
             np.zeros((0, 3), dtype=np.float32),
             np.zeros((0, 3), dtype=np.int32),
         )
-    verts, faces, _normals, _values = marching_cubes(vol, level=level)
+    finite_mask = np.isfinite(vol)
+    if not finite_mask.all():
+        # NaN/Inf guard: skimage's edge interpolation would propagate non-finite
+        # corner values into the emitted vertices, while the C++ path skips any
+        # cube touching a non-finite voxel (cpp-core-review I2/I5). Replace
+        # those voxels with a sentinel strictly below every finite voxel and
+        # below `level` (the range check above guarantees level >= min), so
+        # they classify as outside — the surface wraps around the missing data
+        # instead of a hole, but every vertex stays finite. The sentinel is a
+        # float64 nextafter step below the finite minimum: float64 spacing is
+        # far finer than float32, so no float32 data value can collide with it
+        # (a collision would divide by zero in the edge interpolation). Run
+        # skimage on a float64 copy so the interpolation itself never
+        # overflows float32.
+        finite_min = float(vol[finite_mask].min())
+        sentinel = float(np.nextafter(finite_min, -np.inf))
+        work = vol.astype(np.float64)
+        work[~finite_mask] = sentinel
+    else:
+        work = vol
+    verts, faces, _normals, _values = marching_cubes(work, level=level)
     return verts.astype(np.float32), faces.astype(np.int32)
 
 
@@ -585,7 +711,13 @@ class NativeEngineBackend:
         self._installed_hooks = False
 
     def has_cpp(self, feature: str) -> bool:
-        """Check if native C++ extension for a feature is installed."""
+        """Check if native C++ extension for a feature is installed.
+
+        Note: this reflects import success only. To distinguish a *stale*
+        committed repo-root binary (which shadows fresh builds on
+        ``sys.path[0]`` — packaging #435) from a genuinely missing module, use
+        :func:`native_status` instead.
+        """
         feature_map = {
             "seismic_3d": _HAS_SEISMIC_3D_CPP,
             "well_log": _HAS_WELL_LOG_CPP,
@@ -595,10 +727,22 @@ class NativeEngineBackend:
         return feature_map.get(feature, False)
 
     def is_accelerated(self, feature: str) -> bool:
-        """Check if C++ acceleration for feature is currently active."""
+        """Check if C++ acceleration for feature is currently active.
+
+        A module that imported successfully can still be unusable: committed
+        repo-root binaries are classified ``"stale"`` by :func:`native_status`
+        and must not be dispatched (#520).
+        """
         if self._force_python:
             return False
-        return self.has_cpp(feature)
+        if not self.has_cpp(feature):
+            return False
+        status = native_status(feature)
+        if status != "fresh":
+            if status == "stale":
+                _warn_stale_native(feature)
+            return False
+        return True
 
     @contextmanager
     def disabled_acceleration(self) -> Generator[None, None, None]:
@@ -632,6 +776,10 @@ class NativeEngineBackend:
                 set_las_parser_provider,
             )
         except ImportError:  # pragma: no cover
+            _LOG.warning(
+                "geoviz hook providers missing; LAS preview, downsample and "
+                "isosurface stay on the Python path even if has_cpp() is true"
+            )
             return
 
         from paleo_workbench.viz.seismic_3d_api import marching_cubes_3d
@@ -640,6 +788,9 @@ class NativeEngineBackend:
         set_isosurface_extractor(marching_cubes_3d)
         set_las_parser_provider(_cpp_las_parser_provider)
         self._installed_hooks = True
+
+    def hooks_installed(self) -> bool:
+        return bool(self._installed_hooks)
 
 
 def _cpp_minmax_provider(

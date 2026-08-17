@@ -1,4 +1,5 @@
 import numpy as np
+from types import SimpleNamespace
 
 from paleo_workbench.prediction.adapters import MockPredictionAdapter
 from paleo_workbench.project.models import PredictionTask, ProjectDocument, ResourceItem
@@ -183,3 +184,56 @@ def test_seismic_view_bound_failure_shows_message(qtbot, monkeypatch):
     assert panel.volume_shape is None
     assert panel.stack.currentWidget() is panel.empty_label
     assert panel.empty_label.text() == "地震数据文件不存在或不可读"
+
+
+def test_seismic_view_panel_same_path_does_not_reload(qtbot, monkeypatch, tmp_path):
+    """Repeated update_state for the same already-loaded SEGY path must not
+    cancel and re-read the whole file (task refresh / inference write-back)."""
+    from PySide6.QtCore import Signal
+    from PySide6.QtWidgets import QWidget
+
+    path = tmp_path / "bound.sgy"
+    path.write_bytes(b"stub")
+    scheduled: list[str] = []
+
+    class FakeView(QWidget):
+        segy_loaded = Signal(object)
+
+        def __init__(self, *, auto_load=False):
+            super().__init__()
+            self._slice_worker = None
+
+        def load_segy_async(self, p):
+            scheduled.append(str(p))
+
+        def cancel_pending_segy_load(self):
+            pass
+
+        def is_ready(self):
+            return False
+
+    import paleo_workbench.ui.pages.seismic_view_panel as panel_module
+
+    monkeypatch.setattr(panel_module, "SeismicView", FakeView)
+    panel = panel_module.SeismicViewPanel()
+    qtbot.addWidget(panel)
+
+    panel._show_segy_loading(str(path))
+    assert scheduled == [str(path)]
+
+    # Simulate a completed load: the panel knows the volume for this path.
+    panel.volume_shape = (4, 5, 6)
+    panel._on_segy_loaded(
+        SimpleNamespace(path=str(path), volume=np.zeros((4, 5, 6), dtype=np.float32))
+    )
+
+    # Repeated update for the same path: no restart, view stays ready.
+    panel._show_segy_loading(str(path))
+    assert scheduled == [str(path)]
+    assert panel.volume_shape == (4, 5, 6)
+
+    # A different path does schedule a fresh load.
+    other = tmp_path / "other.sgy"
+    other.write_bytes(b"stub")
+    panel._show_segy_loading(str(other))
+    assert scheduled == [str(path), str(other)]

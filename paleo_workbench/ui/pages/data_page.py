@@ -153,6 +153,30 @@ class _DeliveryWorker(QObject):
         self.finished.emit(checksum)
 
 
+class _ExportWorker(QObject):
+    """Asset export (format conversion + catalog registration) off the GUI
+    thread (#528): convert_fn reads and rewrites the whole source file and
+    record_export copies + hashes the output — GB-scale SEG-Y/LAS exports
+    froze the window for the whole conversion inside the context-menu slot.
+    """
+
+    finished = Signal(object)  # ExportResult
+    failed = Signal(str)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self._fn = fn
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self._fn()
+        except Exception as exc:  # defensive UI boundary
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(result)
+
+
 class DataPage(QWidget):
     data_context_changed = Signal(dict)
     import_finished = Signal(object)
@@ -180,6 +204,7 @@ class DataPage(QWidget):
         self._register_job.released.connect(self._finish_import_job)
         self._rescan_job = OwnedWorkerJob(self)
         self._deliver_job = OwnedWorkerJob(self)
+        self._export_job = OwnedWorkerJob(self)
         self._verify_job = OwnedWorkerJob(self)
         self._last_import_report: ImportReport | None = None
         self._rescan_context: tuple | None = None
@@ -330,6 +355,7 @@ class DataPage(QWidget):
         visualization_joined = self._visualization_controller.shutdown(wait_ms)
         import_joined = self._shutdown_import_jobs(wait_ms)
         deliver_joined = self._deliver_job.shutdown(wait_ms)
+        export_joined = self._export_job.shutdown(wait_ms)
         verify_joined = self._verify_job.shutdown(wait_ms)
         joined = all(
             result is not False
@@ -338,6 +364,7 @@ class DataPage(QWidget):
                 visualization_joined,
                 import_joined,
                 deliver_joined,
+                export_joined,
                 verify_joined,
             )
         )
@@ -370,6 +397,24 @@ class DataPage(QWidget):
         # lineage status, governance values for the table rows.
         enricher = self._lifecycle.catalog_enricher()
         catalog_rows = self._lifecycle.catalog_only_rows(enricher)
+        display_resources = list(self._resources)
+        if self._trash_view_active():
+            display_resources.extend(self._trashed_companions())
+        # Build the enriched row views ONCE per refresh (#527): every build
+        # probes the filesystem (exists/stat per resource), and the counts
+        # pass, the filter index and the table model each used to rebuild
+        # the same views — three disk-probing sweeps per refresh on the GUI
+        # thread. The counts pass covers exactly [resources, artifacts,
+        # catalog_rows]; when the table shows the same list (trash view
+        # inactive) both consumers share these views, otherwise the table
+        # falls back to building its own via the filter index.
+        counts_assets = [*self._resources, *self._artifacts, *(catalog_rows or [])]
+        shared_views = [
+            enricher(asset_view_from_object(a, project_root=preview_root))
+            if enricher is not None
+            else asset_view_from_object(a, project_root=preview_root)
+            for a in counts_assets
+        ]
         # project_root lets the tree counts and the table resolve
         # project-relative paths (F4: no MISSING false positives).
         self.navigation_tree.update_counts(
@@ -378,17 +423,21 @@ class DataPage(QWidget):
             project_root=preview_root,
             extra_assets=catalog_rows,
             enricher=enricher,
+            views=shared_views,
         )
         self.navigation_tree.set_trash_count(len(self._trashed_companions()))
-        display_resources = list(self._resources)
-        if self._trash_view_active():
-            display_resources.extend(self._trashed_companions())
+        table_views = (
+            shared_views
+            if len(display_resources) == len(self._resources)
+            else None
+        )
         self.asset_table.update_assets(
             display_resources,
             self._artifacts,
             project_root=preview_root,
             extra_assets=catalog_rows,
             enricher=enricher,
+            views=table_views,
         )
         self.data_toolbar.set_tag_candidates(self._collect_tag_candidates())
         self._update_selection_action_state()
@@ -927,19 +976,14 @@ class DataPage(QWidget):
             )
             if not output_path:
                 return
-            try:
-                result = export_project_inventory(
+            self._start_export(
+                lambda: export_project_inventory(
                     self.project,
                     Path(output_path),
                     project_path=project_file,
                     register=True,
                 )
-            except Exception as exc:
-                self._set_action_status(f"导出失败：{exc}")
-                return
-            self._set_action_status(result.message)
-            if result.success:
-                self._refresh()
+            )
             return
 
         formats = get_available_formats(asset)
@@ -955,8 +999,8 @@ class DataPage(QWidget):
         )
         if not output_path:
             return
-        try:
-            result = export_asset_to_path(
+        self._start_export(
+            lambda: export_asset_to_path(
                 asset,
                 format_label,
                 Path(output_path),
@@ -964,12 +1008,37 @@ class DataPage(QWidget):
                 project_path=project_file,
                 register=True,
             )
-        except Exception as exc:
-            self._set_action_status(f"导出失败：{exc}")
+        )
+
+    def _start_export(self, export_fn) -> None:
+        """Run an export (conversion + catalog registration) off the GUI
+        thread (#528); the result lands via queued signals."""
+        if self._export_job.is_running:
+            self._set_action_status("导出正在进行中...")
+            return
+        worker = _ExportWorker(export_fn)
+        self._export_job.start(
+            worker,
+            terminal_signals=(worker.finished, worker.failed),
+            result_connections=(
+                (worker.finished, self._handle_export_finished),
+                (worker.failed, self._handle_export_failed),
+            ),
+            target=self.project,
+        )
+        self._set_action_status("正在导出...")
+
+    @Slot(object)
+    def _handle_export_finished(self, result) -> None:
+        if self._export_job.target is not self.project:
             return
         self._set_action_status(result.message)
-        if result.success and result.artifact is not None:
+        if result.success:
             self._refresh()
+
+    @Slot(str)
+    def _handle_export_failed(self, message: str) -> None:
+        self._set_action_status(f"导出失败：{message}")
 
     def _classify_selected_asset(self, new_type: str) -> None:
         asset = self._unwrap_asset(self._selected_asset)
@@ -1400,10 +1469,16 @@ class DataPage(QWidget):
                 if res.id in report.checksum_updates:
                     res.checksum = report.checksum_updates[res.id]
         self._refresh()
-        self._set_action_status(f"完整性校验完成: {report.summary_text}")
+        self.data_toolbar.set_verify_running(False)
+        cancelled = any("已取消" in detail for detail in report.details)
+        if cancelled:
+            self._set_action_status("完整性校验已取消")
+        else:
+            self._set_action_status(f"完整性校验完成: {report.summary_text}")
 
     @Slot(str)
     def _on_verify_failed(self, message: str) -> None:
+        self.data_toolbar.set_verify_running(False)
         self._set_action_status(f"完整性校验失败: {message}")
 
     # --- Preview & Workspace ---

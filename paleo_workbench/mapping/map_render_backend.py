@@ -19,6 +19,7 @@ import os
 import threading
 import time
 from typing import Any, Mapping
+import weakref
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -34,6 +35,7 @@ __all__ = [
     "QgisMapRenderBackend",
     "RenderFrame",
     "create_map_render_backend",
+    "shutdown_live_fallback_backends",
 ]
 
 
@@ -42,6 +44,19 @@ _BASE_DPI = 96.0
 # Beyond this many visible points, categorical grouping falls back to the
 # single-symbol fill so the Python grouping loop cannot dominate a frame.
 _CATEGORY_POINT_CAP = 50_000
+# Threaded fallbacks that outlive a pytest case leave executor threads
+# touching Qt after the widget is gone — Python 3.13 segfaults in
+# pytestqt._process_events (PR #447). Weak so abandoned backends still GC.
+_LIVE_FALLBACKS: weakref.WeakSet[FallbackMapRenderBackend] = weakref.WeakSet()
+
+
+def shutdown_live_fallback_backends() -> None:
+    """Join every live fallback executor. Safe to call from test teardown."""
+    for backend in list(_LIVE_FALLBACKS):
+        try:
+            backend.shutdown()
+        except Exception:  # noqa: BLE001 — teardown must not raise
+            pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +371,33 @@ def _bbox_for(parts: tuple[np.ndarray, ...]) -> tuple[float, float, float, float
     return (float(mins[0]), float(mins[1]), float(maxs[0]), float(maxs[1]))
 
 
+def fit_extent_to_aspect(
+    extent: tuple[float, float, float, float], width: float, height: float
+) -> tuple[float, float, float, float]:
+    """Letterbox the extent to the output aspect (#522).
+
+    The world axis that would be compressed is EXPANDED (centered) so
+    units-per-pixel is uniform in x and y — circles stay circles and the
+    scale bar is valid for both axes. Extent unchanged for degenerate
+    ranges or exact-aspect inputs.
+    """
+    xmin, ymin, xmax, ymax = (float(v) for v in extent)
+    w = max(1.0, float(width))
+    h = max(1.0, float(height))
+    world_w = xmax - xmin
+    world_h = ymax - ymin
+    if world_w <= 0 or world_h <= 0:
+        return (xmin, ymin, xmax, ymax)
+    # Units-per-pixel must be the LARGER of the two axes' requirements;
+    # the other (shorter) world axis is expanded to fill, letterboxed.
+    units_per_pixel = max(world_w / w, world_h / h)
+    adj_w = units_per_pixel * w
+    adj_h = units_per_pixel * h
+    cx = (xmin + xmax) / 2.0
+    cy = (ymin + ymax) / 2.0
+    return (cx - adj_w / 2, cy - adj_h / 2, cx + adj_w / 2, cy + adj_h / 2)
+
+
 class FallbackMapRenderBackend(MapRenderBackend):
     """Explicit QPainter renderer for tests and hosts without a QGIS bridge.
 
@@ -392,6 +434,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._prepared_lock = threading.Lock()
         self._prepared: dict[str, _PreparedLayer] = {}
         self._frame_cache: tuple[tuple, RenderFrame] | None = None
+        _LIVE_FALLBACKS.add(self)
         self._diagnostics = {
             "prepared_layers": 0,
             "prepared_cache_hits": 0,
@@ -535,7 +578,7 @@ class FallbackMapRenderBackend(MapRenderBackend):
         self._render_pending = False
         executor, self._executor = self._executor, None
         if executor is not None:
-            executor.shutdown(wait=False)
+            executor.shutdown(wait=True, cancel_futures=True)
         with self._prepared_lock:
             self._prepared.clear()
         self._frame_cache = None

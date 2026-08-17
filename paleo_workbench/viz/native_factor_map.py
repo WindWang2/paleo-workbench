@@ -661,34 +661,44 @@ def scene_from_factor_task(
     scene = scene or NativeMapScene()
     task_id = str(getattr(task, "id", "") or "factor_grid")
     # Re-requesting an already integrated task only changes visibility/order at
-    # the caller; it must not recreate the finished scalar payload.
-    if scene.registry.get(task_id) is not None:
-        return scene
-    outputs = list(getattr(task, "output_resource_ids", None) or [])
-    group_id = f"{task_id}:group"
-    scene.registry.add_layer(
-        group_id,
-        str(getattr(task, "name", "") or result.factor_name),
-        layer_model_core.LayerType.Group,
-    )
-    scene.add_factor_grid(
-        result,
-        layer_id=task_id,
-        name=str(getattr(task, "name", "") or result.factor_name),
-        source_ref=(
-            str(getattr(task, "grid_artifact_version_id", "") or "")
-            or str(getattr(task, "grid_artifact_path", "") or "")
-            or (str(outputs[0]) if outputs else task_id)
-        ),
-        parent_id=group_id,
-    )
+    # the caller; it must not recreate the finished scalar payload.  Derived
+    # child layers (sample points / contour drafts) are attached idempotently
+    # below regardless: this function is the only production upsert path for
+    # them, and drafts may arrive in a later call than the grid (#536).
+    if scene.registry.get(task_id) is None:
+        outputs = list(getattr(task, "output_resource_ids", None) or [])
+        group_id = f"{task_id}:group"
+        scene.registry.add_layer(
+            group_id,
+            str(getattr(task, "name", "") or result.factor_name),
+            layer_model_core.LayerType.Group,
+        )
+        scene.add_factor_grid(
+            result,
+            layer_id=task_id,
+            name=str(getattr(task, "name", "") or result.factor_name),
+            source_ref=(
+                str(getattr(task, "grid_artifact_version_id", "") or "")
+                or str(getattr(task, "grid_artifact_path", "") or "")
+                or (str(outputs[0]) if outputs else task_id)
+            ),
+            parent_id=group_id,
+        )
+    else:
+        group_id = f"{task_id}:group"
+        if scene.registry.get(group_id) is None:
+            scene.registry.add_layer(
+                group_id,
+                str(getattr(task, "name", "") or result.factor_name),
+                layer_model_core.LayerType.Group,
+            )
     points = []
     for sample in params.get("sample_points") or []:
         try:
             points.append((float(sample["x"]), float(sample["y"])))
         except (KeyError, TypeError, ValueError):
             continue
-    if points:
+    if points and scene.registry.get(f"{task_id}:samples") is None:
         scene.add_sample_points(
             f"{task_id}:samples",
             points,
@@ -698,7 +708,9 @@ def scene_from_factor_task(
         )
     for draft in contour_drafts:
         if getattr(draft, "linked_factor_task_id", None) == task_id:
-            scene.add_contour_draft(draft, source_layer_id=task_id, parent_id=group_id)
+            draft_id = str(getattr(draft, "id", "") or f"{task_id}:contours")
+            if scene.registry.get(draft_id) is None:
+                scene.add_contour_draft(draft, source_layer_id=task_id, parent_id=group_id)
     return scene
 
 

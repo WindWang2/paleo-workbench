@@ -119,3 +119,41 @@ def test_real_scene_snapshot_empty_project():
 
 def test_classify_project_mode_none():
     assert classify_project_mode(None) == "empty"
+
+
+def test_real_scene_snapshot_reads_joint_well_head_and_las(tmp_path, monkeypatch):
+    """#665: snapshot uses JointAssetPaths.well_head / las_files, not invented attrs."""
+    from paleo_workbench.project.models import ResourceItem
+    import paleo_workbench.viz.real_geological_scene as real_scene
+
+    monkeypatch.setattr(real_scene, "_repo_root", lambda: tmp_path)
+
+    well_head = tmp_path / "ExportWellHead.dat"
+    well_head.write_text("A1 1 2 0 100 1 2\n", encoding="utf-8")
+    las = tmp_path / "A1.las"
+    las.write_text("~VERSION INFORMATION\n VERS. 2.0:\n", encoding="utf-8")
+
+    project = ProjectDocument.new("Wells")
+    project.resources.extend(
+        [
+            ResourceItem(
+                name="ExportWellHead.dat",
+                path=str(well_head),
+                type="well_head",
+                format="dat",
+            ),
+            ResourceItem(
+                name="A1.las",
+                path=str(las),
+                type="well_log",
+                format="las",
+            ),
+        ]
+    )
+
+    snap = build_real_scene_snapshot(project, generation=2)
+    assert snap.has_wells is True
+    assert snap.has_las is True
+    assert snap.well_count >= 1
+    assert "无井数据" not in snap.warnings
+    assert snap.mode != "empty"

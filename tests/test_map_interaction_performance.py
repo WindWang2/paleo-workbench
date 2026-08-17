@@ -35,8 +35,15 @@ def test_vector_interaction_index_warm_queries_reuse_one_revision_cache(count: i
     warm_s = time.perf_counter() - started
 
     assert index._revision == revision
-    assert warm_s >= 0.0  # Comparative values are deliberately workstation-local.
+    started = time.perf_counter()
+    assert index.identify(probe, tolerance=0.6) is not None
+    warm_one_s = time.perf_counter() - started
+    # Cached identify must stay bounded by the work-heavy cold query. A
+    # tautological `warm_s >= 0.0` let per-query regressions stay green (#641).
+    assert warm_one_s <= max(cold_s * 4.0, 0.100)
+    assert warm_s <= max(cold_s * 200 * 4.0, 0.100)
     print(
         f"vector index {count}: build+first={cold_s * 1000:.2f}ms "
-        f"200 cached identify/snap={warm_s * 1000:.2f}ms"
+        f"200 cached identify/snap={warm_s * 1000:.2f}ms "
+        f"warm_one={warm_one_s * 1000:.2f}ms"
     )

@@ -68,6 +68,7 @@ class DataAssetRegistry:
             project_path,
             skip_checksum_over_bytes=skip_checksum_over_bytes,
             max_workers=max_workers,
+            classify=self.classify_path,
         )
 
     def parse_preview(

@@ -231,6 +231,7 @@ class QgisRenderBridge::Impl {
     void apply_snapshot(std::vector<VectorLayerSpec> layers, std::string destination_crs) {
         std::unordered_map<std::string, Mirror> next;
         std::vector<std::string> order;
+        std::vector<std::string> reused;
         for (VectorLayerSpec& spec : layers) {
             if (spec.id.empty()) throw std::invalid_argument("QGIS vector layer id is required");
             auto existing = mirrors.find(spec.id);
@@ -243,9 +244,13 @@ class QgisRenderBridge::Impl {
                 || existing->second.kind != spec.kind
                 || existing->second.source_path != spec.source_path;
 
-            Mirror mirror;
             if (!rebuild) {
-                mirror = std::move(existing->second);
+                // Keep the live mirror in `mirrors` until the whole snapshot
+                // validates.  A throw later in the loop must not leave the
+                // registry holding a moved-from (null) layer that settings_for
+                // would hand to QGIS, and must not delete the previously valid
+                // layers (#519).
+                Mirror& mirror = existing->second;
                 if (spec.kind == VectorLayerSpec::Kind::Vector
                     && mirror.style_revision != spec.style_revision) {
                     auto* vector_layer = dynamic_cast<QgsVectorLayer*>(mirror.layer.get());
@@ -255,7 +260,15 @@ class QgisRenderBridge::Impl {
                     apply_renderer_style(*vector_layer, spec);
                     apply_label_style(*vector_layer, spec);
                 }
+                mirror.data_revision = spec.data_revision;
+                mirror.style_revision = spec.style_revision;
+                mirror.kind = spec.kind;
+                mirror.source_path = spec.source_path;
+                mirror.visible = spec.visible;
+                mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
+                reused.push_back(spec.id);
             } else {
+                Mirror mirror;
                 if (spec.kind == VectorLayerSpec::Kind::Raster) {
                     mirror.layer = std::make_unique<QgsRasterLayer>(
                         QString::fromStdString(spec.source_path),
@@ -315,15 +328,22 @@ class QgisRenderBridge::Impl {
                     apply_label_style(*vector_layer, spec);
                     mirror.layer = std::move(vector_layer);
                 }
+                mirror.data_revision = spec.data_revision;
+                mirror.style_revision = spec.style_revision;
+                mirror.kind = spec.kind;
+                mirror.source_path = spec.source_path;
+                mirror.visible = spec.visible;
+                mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
+                next.emplace(spec.id, std::move(mirror));
             }
-            mirror.data_revision = spec.data_revision;
-            mirror.style_revision = spec.style_revision;
-            mirror.kind = spec.kind;
-            mirror.source_path = spec.source_path;
-            mirror.visible = spec.visible;
-            mirror.layer->setOpacity(std::clamp(spec.opacity, 0.0, 1.0));
             order.push_back(spec.id);
-            next.emplace(spec.id, std::move(mirror));
+        }
+        // Every layer validated: move the reused mirrors out of the live map.
+        for (const std::string& id : reused) {
+            auto it = mirrors.find(id);
+            if (it != mirrors.end()) {
+                next.emplace(id, std::move(it->second));
+            }
         }
         mirrors = std::move(next);
         ordered_ids = std::move(order);
@@ -335,7 +355,11 @@ class QgisRenderBridge::Impl {
         QList<QgsMapLayer*> layers;
         for (const std::string& id : ordered_ids) {
             const auto it = mirrors.find(id);
-            if (it != mirrors.end() && it->second.visible) layers.append(it->second.layer.get());
+            // The deferred-commit apply_snapshot guarantees non-null layers;
+            // skip defensively so a null can never reach QGIS (#519).
+            if (it != mirrors.end() && it->second.visible && it->second.layer) {
+                layers.append(it->second.layer.get());
+            }
         }
         settings.setLayers(layers);
         settings.setExtent(normalized_extent(request.extent));
@@ -386,7 +410,15 @@ class QgisRenderBridge::Impl {
         if (pending_snapshot) {
             auto snapshot = std::move(*pending_snapshot);
             pending_snapshot.reset();
-            apply_snapshot(std::move(snapshot.layers), std::move(snapshot.project_crs));
+            try {
+                apply_snapshot(std::move(snapshot.layers), std::move(snapshot.project_crs));
+            } catch (...) {
+                // A failed snapshot invalidates any render queued against it:
+                // keeping pending_request would make the next completed render
+                // look superseded and silently discard its frame (#519).
+                pending_request.reset();
+                throw;
+            }
         }
         if (pending_request) {
             const Request newest = *pending_request;

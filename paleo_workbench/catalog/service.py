@@ -65,6 +65,41 @@ from paleo_workbench.project.models import _now_iso
 from paleo_workbench.project.paths import artifact_dir_for
 
 
+class _CatalogMaps:
+    """One immutable-swap container for the six id indexes.
+
+    The dicts inside stay mutable for incremental ``_add_*`` / ``_remove_*``
+    updates. Readers must hold this object (from ``_ensure_maps()``) rather
+    than re-reading the six attributes after a concurrent invalidate.
+    """
+
+    __slots__ = (
+        "asset_by_id",
+        "version_by_id",
+        "run_by_id",
+        "versions_by_asset",
+        "children_by_parent",
+        "assets_by_legacy_id",
+    )
+
+    def __init__(
+        self,
+        *,
+        asset_by_id: dict[str, DataAsset],
+        version_by_id: dict[str, DataVersion],
+        run_by_id: dict[str, DataRun],
+        versions_by_asset: dict[str, list[DataVersion]],
+        children_by_parent: dict[str, list[DataVersion]],
+        assets_by_legacy_id: dict[str, DataAsset],
+    ) -> None:
+        self.asset_by_id = asset_by_id
+        self.version_by_id = version_by_id
+        self.run_by_id = run_by_id
+        self.versions_by_asset = versions_by_asset
+        self.children_by_parent = children_by_parent
+        self.assets_by_legacy_id = assets_by_legacy_id
+
+
 class _BatchSave:
     """Context manager returned by :meth:`DataCatalogService.batch_save`.
 
@@ -99,7 +134,11 @@ class _BatchSave:
             if service._batch_depth:
                 return False  # an outer batch still owns the flush
             try:
-                service._store.save(service.document)
+                # Through the guarded flush (#516): the direct _store.save
+                # skipped the #411 stale-write check and never refreshed
+                # _disk_mtime_ns, so the NEXT regular save always raised a
+                # spurious CatalogStaleWriteError after any batch.
+                service._flush_canonical_locked()
             except Exception:
                 if self._snapshot is not None:
                     service.document = self._snapshot
@@ -154,39 +193,63 @@ class DataCatalogService:
         # document on first use). A lookup miss rebuilds the maps from the
         # document as a self-healing safety net, so a missed maintenance site
         # can never return a wrong *negative* answer (only rebuild cost).
-        self._asset_by_id: dict[str, DataAsset] | None = None
-        self._version_by_id: dict[str, DataVersion] | None = None
-        self._run_by_id: dict[str, DataRun] | None = None
-        self._versions_by_asset: dict[str, list[DataVersion]] | None = None
-        self._children_by_parent: dict[str, list[DataVersion]] | None = None
-        self._assets_by_legacy_id: dict[str, DataAsset] | None = None
+        # Published as one snapshot so unlocked readers never observe a
+        # mid-rebuild / mid-invalidate None window (#619).
+        self._maps: _CatalogMaps | None = None
 
     # -- maintained indexes -------------------------------------------------
 
+    @property
+    def _asset_by_id(self) -> dict[str, DataAsset] | None:
+        maps = self._maps
+        return None if maps is None else maps.asset_by_id
+
+    @property
+    def _version_by_id(self) -> dict[str, DataVersion] | None:
+        maps = self._maps
+        return None if maps is None else maps.version_by_id
+
+    @property
+    def _run_by_id(self) -> dict[str, DataRun] | None:
+        maps = self._maps
+        return None if maps is None else maps.run_by_id
+
+    @property
+    def _versions_by_asset(self) -> dict[str, list[DataVersion]] | None:
+        maps = self._maps
+        return None if maps is None else maps.versions_by_asset
+
+    @property
+    def _children_by_parent(self) -> dict[str, list[DataVersion]] | None:
+        maps = self._maps
+        return None if maps is None else maps.children_by_parent
+
+    @property
+    def _assets_by_legacy_id(self) -> dict[str, DataAsset] | None:
+        maps = self._maps
+        return None if maps is None else maps.assets_by_legacy_id
+
+    @_assets_by_legacy_id.setter
+    def _assets_by_legacy_id(self, value: dict[str, DataAsset] | None) -> None:
+        maps = self._maps
+        if maps is not None and value is not None:
+            maps.assets_by_legacy_id = value
+
     def _invalidate_maps(self) -> None:
         """Drop the cached indexes; they rebuild lazily on next use."""
-        self._asset_by_id = None
-        self._version_by_id = None
-        self._run_by_id = None
-        self._versions_by_asset = None
-        self._children_by_parent = None
-        self._assets_by_legacy_id = None
+        self._maps = None
 
-    def _ensure_maps(self) -> None:
+    def _ensure_maps(self) -> _CatalogMaps:
         """Build the id→object indexes from the document (idempotent)."""
-        if self._asset_by_id is not None:
-            return
-        self._asset_by_id = {a.id: a for a in self.document.assets}
-        self._version_by_id = {v.id: v for v in self.document.versions}
-        self._run_by_id = {r.id: r for r in self.document.runs}
+        maps = self._maps
+        if maps is not None:
+            return maps
         versions_by_asset: dict[str, list[DataVersion]] = {}
         children: dict[str, list[DataVersion]] = {}
         for version in self.document.versions:
             versions_by_asset.setdefault(version.asset_id, []).append(version)
             for pid in version.parent_version_ids:
                 children.setdefault(pid, []).append(version)
-        self._versions_by_asset = versions_by_asset
-        self._children_by_parent = children
         # Legacy-bridge resolution order mirrors ``_find_asset_by_legacy_id``:
         # an asset whose *id* equals the legacy id wins; otherwise the first
         # asset bridged via ``legacy_resource_id`` (first-wins via setdefault).
@@ -196,25 +259,33 @@ class DataCatalogService:
         for asset in self.document.assets:
             if asset.legacy_resource_id is not None:
                 legacy.setdefault(asset.legacy_resource_id, asset)
-        self._assets_by_legacy_id = legacy
+        maps = _CatalogMaps(
+            asset_by_id={a.id: a for a in self.document.assets},
+            version_by_id={v.id: v for v in self.document.versions},
+            run_by_id={r.id: r for r in self.document.runs},
+            versions_by_asset=versions_by_asset,
+            children_by_parent=children,
+            assets_by_legacy_id=legacy,
+        )
+        self._maps = maps
+        return maps
 
     def _maps_consistent(self) -> bool:
         """Debug/self-check: cached indexes match the document exactly."""
-        if self._asset_by_id is None:
-            self._ensure_maps()
-        if len(self._asset_by_id) != len(self.document.assets):
+        maps = self._ensure_maps()
+        if len(maps.asset_by_id) != len(self.document.assets):
             return False
-        if len(self._version_by_id) != len(self.document.versions):
+        if len(maps.version_by_id) != len(self.document.versions):
             return False
-        if len(self._run_by_id) != len(self.document.runs):
+        if len(maps.run_by_id) != len(self.document.runs):
             return False
         for asset in self.document.assets:
-            if self._asset_by_id.get(asset.id) is not asset:
+            if maps.asset_by_id.get(asset.id) is not asset:
                 return False
         for version in self.document.versions:
-            if self._version_by_id.get(version.id) is not version:
+            if maps.version_by_id.get(version.id) is not version:
                 return False
-            if self._versions_by_asset.get(version.asset_id) is None:
+            if maps.versions_by_asset.get(version.asset_id) is None:
                 return False
         return True
 
@@ -364,33 +435,49 @@ class DataCatalogService:
         (last-writer-wins, #411) — refuse instead.
         """
         with self._lock:
-            baseline = self._disk_mtime_ns
-            current = _disk_mtime_ns(catalog_file_for(self.project_path))
-            if baseline is None:
-                # The canonical file did not exist when this session opened
-                # (or first saved); if it exists now, another process created
-                # it since and an overwrite would drop its commits.
-                if current is not None:
-                    raise CatalogStaleWriteError(
-                        "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
-                        "本次保存已中止。请重新打开工程后重试。"
-                    )
-            elif current is not None and current != baseline:
-                raise CatalogStaleWriteError(
-                    "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
-                    "本次保存已中止。请重新打开工程后重试。"
-                )
             self.document.catalog_revision += 1
             if self._batch_depth:
                 self._sync_index_best_effort()
                 return
             try:
-                self._store.save(self.document)
+                self._flush_canonical_locked()
             except Exception:
                 self.document.catalog_revision -= 1
                 raise
-            self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
             self._sync_index_best_effort()
+
+    def _flush_canonical_locked(self) -> None:
+        """Write the canonical catalog under the #411 stale-write guard.
+
+        Caller must hold ``_lock``. Refuses to overwrite a file that advanced
+        on disk since this session's baseline, writes the document, and
+        REFRESHES the baseline so the next save does not false-positive
+        against our own write. The batch_save exit used to call
+        ``_store.save`` directly — skipping both the guard and the baseline
+        refresh, so the first post-batch save always raised a spurious
+        CatalogStaleWriteError (#516).
+        """
+        baseline = self._disk_mtime_ns
+        current = _disk_mtime_ns(catalog_file_for(self.project_path))
+        if baseline is None:
+            # The canonical file did not exist when this session opened
+            # (or first saved); if it exists now, another process created
+            # it since and an overwrite would drop its commits.
+            if current is not None:
+                raise CatalogStaleWriteError(
+                    "数据目录元数据已被其他实例创建；为避免覆盖他人提交，"
+                    "本次保存已中止。请重新打开工程后重试。"
+                )
+        elif current is not None and current != baseline:
+            raise CatalogStaleWriteError(
+                "数据目录元数据已被其他实例修改；为避免覆盖他人提交，"
+                "本次保存已中止。请重新打开工程后重试。"
+            )
+        try:
+            self._store.save(self.document)
+        except Exception:
+            raise
+        self._disk_mtime_ns = _disk_mtime_ns(catalog_file_for(self.project_path))
 
     def _sync_index_best_effort(self) -> None:
         try:
@@ -493,35 +580,34 @@ class DataCatalogService:
     # -- lookups ------------------------------------------------------------
 
     def _asset_or_raise(self, asset_id: str) -> DataAsset:
-        self._ensure_maps()
-        asset = self._asset_by_id.get(asset_id)
+        maps = self._ensure_maps()
+        asset = maps.asset_by_id.get(asset_id)
         if asset is not None:
             return asset
         # Safety net: a missed maintenance site (or a stale map) rebuilds from
         # the document, so an unknown id is genuinely unknown before raising.
         self._invalidate_maps()
-        self._ensure_maps()
-        asset = self._asset_by_id.get(asset_id)
+        maps = self._ensure_maps()
+        asset = maps.asset_by_id.get(asset_id)
         if asset is None:
             raise CatalogError(f"Unknown asset: {asset_id}")
         return asset
 
     def _version_or_raise(self, version_id: str) -> DataVersion:
-        self._ensure_maps()
-        version = self._version_by_id.get(version_id)
+        maps = self._ensure_maps()
+        version = maps.version_by_id.get(version_id)
         if version is not None:
             return version
         self._invalidate_maps()
-        self._ensure_maps()
-        version = self._version_by_id.get(version_id)
+        maps = self._ensure_maps()
+        version = maps.version_by_id.get(version_id)
         if version is None:
             raise CatalogError(f"Unknown version: {version_id}")
         return version
 
     def _asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
         """Stable legacy-bridge resolution (id match wins, then first bridge)."""
-        self._ensure_maps()
-        return self._assets_by_legacy_id.get(legacy_resource_id)
+        return self._ensure_maps().assets_by_legacy_id.get(legacy_resource_id)
 
     def _live_asset_by_legacy_id(self, legacy_resource_id: str) -> DataAsset | None:
         """Like :meth:`_asset_by_legacy_id` but ignores trashed assets.
@@ -530,8 +616,7 @@ class DataCatalogService:
         able to re-bridge a fresh asset instead of dead-ending on the trashed
         one (review finding I2).
         """
-        self._ensure_maps()
-        asset = self._assets_by_legacy_id.get(legacy_resource_id)
+        asset = self._ensure_maps().assets_by_legacy_id.get(legacy_resource_id)
         if asset is not None and asset.trashed:
             return None
         return asset
@@ -553,13 +638,13 @@ class DataCatalogService:
         return self._version_or_raise(version_id)
 
     def get_run(self, run_id: str) -> DataRun:
-        self._ensure_maps()
-        run = self._run_by_id.get(run_id)
+        maps = self._ensure_maps()
+        run = maps.run_by_id.get(run_id)
         if run is not None:
             return run
         self._invalidate_maps()
-        self._ensure_maps()
-        run = self._run_by_id.get(run_id)
+        maps = self._ensure_maps()
+        run = maps.run_by_id.get(run_id)
         if run is None:
             raise CatalogError(f"Unknown run: {run_id}")
         return run
@@ -578,8 +663,7 @@ class DataCatalogService:
         return list(self.document.runs)
 
     def list_versions(self, asset_id: str) -> list[DataVersion]:
-        self._ensure_maps()
-        versions = list(self._versions_by_asset.get(asset_id, ()))
+        versions = list(self._ensure_maps().versions_by_asset.get(asset_id, ()))
         return sorted(versions, key=lambda v: v.version_number)
 
     def resolve_path(self, version: DataVersion) -> Path:
@@ -638,8 +722,10 @@ class DataCatalogService:
     # -- version registration ------------------------------------------------
 
     def _next_version_number(self, asset_id: str) -> int:
-        self._ensure_maps()
-        numbers = [v.version_number for v in self._versions_by_asset.get(asset_id, ())]
+        numbers = [
+            v.version_number
+            for v in self._ensure_maps().versions_by_asset.get(asset_id, ())
+        ]
         return max(numbers, default=0) + 1
 
     def _build_version(
@@ -708,24 +794,58 @@ class DataCatalogService:
 
         ``known_sha256`` / ``_register_blob`` (private; adapter import path):
         see :func:`paleo_workbench.catalog.storage.place_managed_file`.
+
+        Payload copy+hash+fsync happens OUTSIDE the lock (same reason as
+        :meth:`register_result_asset`). Version numbers are assigned at
+        commit time so concurrent registrations on one asset stay sequential.
         """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise CatalogError(f"Source file not found: {source_path}")
         with self._lock:
             asset = self._asset_or_raise(asset_id)
-            source_path = Path(source_path)
-            if not source_path.is_file():
-                raise CatalogError(f"Source file not found: {source_path}")
+            if run_id is not None:
+                self.get_run(run_id)  # raises before any payload is placed
+            if version_id is not None:
+                if any(v.id == version_id for v in self.document.versions):
+                    raise ImmutableVersionError(
+                        f"Version {version_id} is already committed and immutable"
+                    )
+        # Copy+hash+fsync — no lock held while the bytes land on disk.
+        version, payload = self._build_version(
+            asset, source_path, stage,
+            version_id=version_id,
+            parent_version_ids=list(parent_version_ids),
+            run_id=run_id, metadata=metadata, move=move,
+            known_sha256=known_sha256,
+            register_blob=_register_blob,
+        )
+        with self._lock:
+            try:
+                asset = self._asset_or_raise(asset_id)
+            except CatalogError:
+                self._rollback(
+                    payload=payload, restore_payload_to=_restore_payload_to,
+                )
+                raise
+            if any(v.id == version.id for v in self.document.versions):
+                self._rollback(
+                    payload=payload, restore_payload_to=_restore_payload_to,
+                )
+                raise ImmutableVersionError(
+                    f"Version {version.id} is already committed and immutable"
+                )
             run: DataRun | None = None
             if run_id is not None:
-                run = self.get_run(run_id)  # raises before any payload is placed
+                try:
+                    run = self.get_run(run_id)
+                except CatalogError:
+                    self._rollback(
+                        payload=payload, restore_payload_to=_restore_payload_to,
+                    )
+                    raise
+            version.version_number = self._next_version_number(asset.id)
             previous_current = asset.current_version_id
-            version, payload = self._build_version(
-                asset, source_path, stage,
-                version_id=version_id,
-                parent_version_ids=list(parent_version_ids),
-                run_id=run_id, metadata=metadata, move=move,
-                known_sha256=known_sha256,
-                register_blob=_register_blob,
-            )
             self._add_version(version)
             asset.current_version_id = version.id
             run_output_added = False
@@ -796,8 +916,7 @@ class DataCatalogService:
             parents: list[str] = []
             run: DataRun | None = None
             if run_id is not None:
-                self._ensure_maps()
-                known = self._version_by_id
+                known = self._ensure_maps().version_by_id
                 run = self.get_run(run_id)
                 parents = [
                     pid for pid in run.input_version_ids if pid in known
@@ -878,39 +997,50 @@ class DataCatalogService:
         blob (O(1)). Every managed RAW import also registers its payload in
         the content store so later imports of the same content dedup to it.
 
-        Runs fully under the service lock (re-entrant with
-        :meth:`register_version`): the new asset is added and persisted in
-        the same locked section, so a concurrent save can never persist the
-        asset without its version (zombie zero-version asset on disk).
+        Payload copy+hash happens outside the lock. The new asset is added
+        and persisted in the same locked section as its first version, so a
+        concurrent save can never persist a zombie zero-version asset.
         """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise CatalogError(f"Source file not found: {source_path}")
+        if asset_id is not None:
+            return self.register_version(
+                asset_id, source_path, DataStage.RAW, metadata=metadata,
+                known_sha256=known_sha256, _register_blob=True,
+            )
+        asset = self._new_asset(
+            name or source_path.name, type, format, metadata
+        )
+        if _legacy_resource_id is not None:
+            with self._lock:
+                if self._live_asset_by_legacy_id(_legacy_resource_id) is None:
+                    asset.legacy_resource_id = _legacy_resource_id
+        version, payload = self._build_version(
+            asset, source_path, DataStage.RAW,
+            version_id=None,
+            parent_version_ids=[],
+            run_id=None, metadata=metadata, move=False,
+            known_sha256=known_sha256,
+            register_blob=True,
+        )
         with self._lock:
-            source_path = Path(source_path)
-            if not source_path.is_file():
-                raise CatalogError(f"Source file not found: {source_path}")
-            asset: DataAsset | None = None
-            if asset_id is not None:
-                target = self._asset_or_raise(asset_id)
-            else:
-                target = self._new_asset(
-                    name or source_path.name, type, format, metadata
-                )
-                if (
-                    _legacy_resource_id is not None
-                    and target.legacy_resource_id is None
-                    and self._live_asset_by_legacy_id(_legacy_resource_id) is None
-                ):
-                    target.legacy_resource_id = _legacy_resource_id
-                asset = target
-                self._add_asset(target)
+            if (
+                _legacy_resource_id is not None
+                and self._live_asset_by_legacy_id(_legacy_resource_id) is not None
+            ):
+                asset.legacy_resource_id = None
+            self._add_asset(asset)
+            self._add_version(version)
+            asset.current_version_id = version.id
             try:
-                return self.register_version(
-                    target.id, source_path, DataStage.RAW, metadata=metadata,
-                    known_sha256=known_sha256, _register_blob=True,
-                )
+                self._save()
             except Exception:
-                if asset is not None and asset in self.document.assets:
-                    self._remove_asset(asset)
+                self._rollback(
+                    assets=[asset], versions=[version], payload=payload,
+                )
                 raise
+            return version
 
     def link_external(
         self,
@@ -934,32 +1064,36 @@ class DataCatalogService:
         path = Path(path)
         if not path.is_file():
             raise CatalogError(f"External file not found: {path}")
-        asset = self._new_asset(name or path.name, type, format, metadata)
-        asset.metadata["external"] = True
-        if (
-            _legacy_resource_id is not None
-            and self._asset_by_legacy_id(_legacy_resource_id) is None
-        ):
-            asset.legacy_resource_id = _legacy_resource_id
-        version = DataVersion(
-            asset_id=asset.id,
-            version_number=1,
-            stage=DataStage.RAW,
-            managed=False,
-            path=path.resolve().as_posix(),
-            source_uri=path.resolve().as_posix(),
-            format=format or "",
-            size_bytes=path.stat().st_size,
-        )
-        asset.current_version_id = version.id
-        self._add_asset(asset)
-        self._add_version(version)
-        try:
-            self._save()
-        except Exception:
-            self._rollback(assets=[asset], versions=[version])
-            raise
-        return version
+        # Mutate + save under the lock (#517): link_external was fully
+        # unlocked, so a concurrent locked save could interleave between the
+        # document append and this write.
+        with self._lock:
+            asset = self._new_asset(name or path.name, type, format, metadata)
+            asset.metadata["external"] = True
+            if (
+                _legacy_resource_id is not None
+                and self._asset_by_legacy_id(_legacy_resource_id) is None
+            ):
+                asset.legacy_resource_id = _legacy_resource_id
+            version = DataVersion(
+                asset_id=asset.id,
+                version_number=1,
+                stage=DataStage.RAW,
+                managed=False,
+                path=path.resolve().as_posix(),
+                source_uri=path.resolve().as_posix(),
+                format=format or "",
+                size_bytes=path.stat().st_size,
+            )
+            asset.current_version_id = version.id
+            self._add_asset(asset)
+            self._add_version(version)
+            try:
+                self._save()
+            except Exception:
+                self._rollback(assets=[asset], versions=[version])
+                raise
+            return version
 
     def materialize_external(
         self, version_id: str, *, run_id: str | None = None
@@ -1028,19 +1162,21 @@ class DataCatalogService:
                 else []
             )
         if asset_id is None:
-            asset = self._new_asset(name or working_path.stem, None, None, metadata)
-            self._add_asset(asset)
-            try:
-                return self.register_version(
-                    asset.id, working_path, stage,
-                    parent_version_ids=parent_version_ids,
-                    run_id=run_id, metadata=metadata, move=True,
-                    _restore_payload_to=working_path,
-                )
-            except Exception:
-                if asset in self.document.assets:
-                    self._remove_asset(asset)
-                raise
+            # Lock across append + register (#517): mirrors _register_produced.
+            with self._lock:
+                asset = self._new_asset(name or working_path.stem, None, None, metadata)
+                self._add_asset(asset)
+                try:
+                    return self.register_version(
+                        asset.id, working_path, stage,
+                        parent_version_ids=parent_version_ids,
+                        run_id=run_id, metadata=metadata, move=True,
+                        _restore_payload_to=working_path,
+                    )
+                except Exception:
+                    if asset in self.document.assets:
+                        self._remove_asset(asset)
+                    raise
         version_metadata = dict(metadata or {})
         if name:
             version_metadata["name"] = name
@@ -1102,20 +1238,23 @@ class DataCatalogService:
         )
         if run is not None:
             run.output_version_ids = [version.id]
-        self._add_asset(asset)
-        self._add_version(version)
-        asset.current_version_id = version.id
-        if run is not None:
-            self._add_run(run)
-        try:
-            self._save()
-        except Exception:
-            self._rollback(
-                assets=[asset], versions=[version],
-                runs=[run] if run else [], payload=payload,
-            )
-            raise
-        return version
+        # Commit under the lock (#517); the payload copy/hash above stays
+        # outside so the lock is never held across disk I/O.
+        with self._lock:
+            self._add_asset(asset)
+            self._add_version(version)
+            asset.current_version_id = version.id
+            if run is not None:
+                self._add_run(run)
+            try:
+                self._save()
+            except Exception:
+                self._rollback(
+                    assets=[asset], versions=[version],
+                    runs=[run] if run else [], payload=payload,
+                )
+                raise
+            return version
 
     def register_run(
         self,
@@ -1229,12 +1368,34 @@ class DataCatalogService:
         No-op re-registrations do not rewrite the catalog file."""
         if not model_id or not model_name:
             raise CatalogError("register_model requires model_id and model_name")
+        # Mutate + save under the lock (#517).
+        with self._lock:
+            return self._register_model_locked(
+                model_id=model_id, model_name=model_name, model_type=model_type,
+                capability=capability, provider=provider, status=status,
+                metadata=metadata, provenance=provenance,
+                force_status=force_status,
+            )
+
+    def _register_model_locked(
+        self, *, model_id, model_name, model_type, capability, provider,
+        status, metadata, provenance, force_status,
+    ) -> Model:
         existing = None
         for model in self.document.models:
             if model.model_id == model_id:
                 existing = model
                 break
         if existing is not None:
+            before = (
+                existing.model_name,
+                existing.model_type,
+                existing.capability,
+                existing.provider,
+                existing.status,
+                dict(existing.metadata),
+                dict(existing.provenance),
+            )
             changed = False
             if existing.model_name != model_name:
                 existing.model_name = model_name
@@ -1262,7 +1423,19 @@ class DataCatalogService:
                 existing.provenance.update(provenance)
                 changed = True
             if changed:
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    (
+                        existing.model_name,
+                        existing.model_type,
+                        existing.capability,
+                        existing.provider,
+                        existing.status,
+                        existing.metadata,
+                        existing.provenance,
+                    ) = before
+                    raise
             return existing
         model = Model(
             model_id=model_id,
@@ -1345,14 +1518,17 @@ class DataCatalogService:
             metadata=dict(metadata or {}),
             provenance=dict(provenance or {}),
         )
-        self.document.model_versions.append(version)
-        try:
-            self._save()
-        except Exception:
-            if version in self.document.model_versions:
-                self.document.model_versions.remove(version)
-            raise
-        return version
+        # Append + save under the lock (#517); the checksum hashing above
+        # stays outside so the lock is never held across disk I/O.
+        with self._lock:
+            self.document.model_versions.append(version)
+            try:
+                self._save()
+            except Exception:
+                if version in self.document.model_versions:
+                    self.document.model_versions.remove(version)
+                raise
+            return version
 
     def get_model(self, model_id: str) -> Model:
         return self._model_or_raise(model_id)
@@ -1412,10 +1588,19 @@ class DataCatalogService:
             ok, reason = can_promote_to_production(self, model_id, model_version)
             if not ok:
                 raise CatalogError(f"Cannot promote to production: {reason}")
+            before_model_status = model.status
+            before_version_status = version.status
+            before_demo_only = version.demo_only
             model.status = "production"
             version.status = "production"
             version.demo_only = False
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                model.status = before_model_status
+                version.status = before_version_status
+                version.demo_only = before_demo_only
+                raise
             return version
 
     def find_production_model(self, capability: str) -> ModelVersion | None:
@@ -1460,13 +1645,13 @@ class DataCatalogService:
     def get_lineage(self, version_id: str) -> dict[str, Any]:
         """Parents, children, and the producing run for a version."""
         version = self._version_or_raise(version_id)
-        self._ensure_maps()
+        maps = self._ensure_maps()
         parents = [
-            self._version_by_id[pid]
+            maps.version_by_id[pid]
             for pid in version.parent_version_ids
-            if pid in self._version_by_id
+            if pid in maps.version_by_id
         ]
-        children = list(self._children_by_parent.get(version_id, ()))
+        children = list(maps.children_by_parent.get(version_id, ()))
         run = None
         if version.run_id is not None:
             try:
@@ -1664,10 +1849,9 @@ class DataCatalogService:
 
     def _active_current_candidate(self, asset: DataAsset, exclude_id: str) -> str | None:
         """Newest non-trashed version of *asset* (excluding *exclude_id*)."""
-        self._ensure_maps()
         active = [
             v
-            for v in self._versions_by_asset.get(asset.id, ())
+            for v in self._ensure_maps().versions_by_asset.get(asset.id, ())
             if not v.trashed and v.id != exclude_id
         ]
         return active[-1].id if active else None
@@ -1897,8 +2081,19 @@ class DataCatalogService:
             surviving_asset_ids = {
                 v.asset_id for v in self.document.versions if not v.trashed
             }
+            untrashed_snapshots: list[
+                tuple[DataAsset, bool, str | None, dict[str, Any]]
+            ] = []
             for asset in trashed_assets:
                 if asset.id in surviving_asset_ids:
+                    untrashed_snapshots.append(
+                        (
+                            asset,
+                            asset.trashed,
+                            asset.trashed_at,
+                            dict(asset.metadata),
+                        )
+                    )
                     asset.trashed = False
                     asset.trashed_at = None
                     asset.metadata.pop("trash", None)
@@ -1920,6 +2115,10 @@ class DataCatalogService:
                     # stayed in the document the whole time).
                     if asset not in self.document.assets:
                         self._add_asset(asset)
+                for asset, was_trashed, was_at, was_meta in untrashed_snapshots:
+                    asset.trashed = was_trashed
+                    asset.trashed_at = was_at
+                    asset.metadata = was_meta
                 self.document.version_tags.update(removed_version_tags)
                 self.document.asset_tags.update(removed_asset_tags)
                 self.document.asset_tags.update(removed_zombie_tags)
@@ -1981,18 +2180,20 @@ class DataCatalogService:
             move=False,
         )
         run.output_version_ids = [version.id]
-        self._add_version(version)
-        self._add_run(run)
-        asset.current_version_id = version.id
-        try:
-            self._save()
-        except Exception:
-            self._rollback(
-                versions=[version], runs=[run], payload=payload,
-                restore_current=(asset, previous_current),
-            )
-            raise
-        return version
+        # Commit under the lock (#517); the payload build above stays outside.
+        with self._lock:
+            self._add_version(version)
+            self._add_run(run)
+            asset.current_version_id = version.id
+            try:
+                self._save()
+            except Exception:
+                self._rollback(
+                    versions=[version], runs=[run], payload=payload,
+                    restore_current=(asset, previous_current),
+                )
+                raise
+            return version
 
     def promote_asset(
         self,
@@ -2346,10 +2547,12 @@ class DataCatalogService:
         """
         from paleo_workbench.catalog.migration import migrate_resources
 
-        report = migrate_resources(list(resources), self.project_path, self.document)
-        if report.migrated_count:
-            # Migration mutates the document lists directly (it is a pure
-            # document projection), so drop the maintained indexes.
-            self._invalidate_maps()
-            self._save()
-        return report
+        # Document projection + save under the lock (#517).
+        with self._lock:
+            report = migrate_resources(list(resources), self.project_path, self.document)
+            if report.migrated_count:
+                # Migration mutates the document lists directly (it is a pure
+                # document projection), so drop the maintained indexes.
+                self._invalidate_maps()
+                self._save()
+            return report

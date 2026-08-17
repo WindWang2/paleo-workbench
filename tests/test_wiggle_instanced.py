@@ -160,9 +160,12 @@ def test_renderer_render_export():
     slice_data = np.random.randn(50, 100).astype(np.float32)
     renderer.set_data(slice_data, mock_gl=True)
 
-    img_bytes = renderer.render_export(dpi=300)
-    assert isinstance(img_bytes, bytes)
-    assert len(img_bytes) > 0
+    # gve 31b7f15d: this renderer has no offscreen OpenGL context, so an
+    # offscreen raster export can only fabricate a blank PNG. The honest
+    # contract is an explicit NotImplementedError; real raster export must
+    # render into a visible QOpenGLWidget and grab its framebuffer.
+    with pytest.raises(NotImplementedError, match="Offscreen high-DPI raster export"):
+        renderer.render_export(dpi=300)
 
 
 

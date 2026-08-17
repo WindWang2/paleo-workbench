@@ -27,9 +27,18 @@ export LIBGL_ALWAYS_SOFTWARE=1
 unset DISPLAY
 
 engine_pythonpath() {
-    local paths="$ENGINE"
+    # Omit the bare engine root when it contains a committed native .so
+    # (same rule as paleo_workbench.env_bootstrap / packaging #435).
+    local paths=""
+    if ! compgen -G "$ENGINE"/*.so > /dev/null && ! compgen -G "$ENGINE"/*.pyd > /dev/null; then
+        paths="$ENGINE"
+    fi
     for pkg in "$ENGINE"/packages/*/; do
-        paths="$paths:${pkg%/}"
+        if [ -n "$paths" ]; then
+            paths="$paths:${pkg%/}"
+        else
+            paths="${pkg%/}"
+        fi
     done
     printf '%s' "$paths"
 }

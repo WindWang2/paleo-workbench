@@ -908,14 +908,21 @@ def register_modeling_run(
         generator_version=None,
     )
     version: DataVersionRef | None = None
-    if output_path:
-        version = cat.register_derived(
-            run_id=run.run_id,
-            name=name,
-            path=output_path,
-            checksum=sha256_file_or_none(output_path),
-            kind="geomodel",
-            format=output_format,
-        )
-    cat.complete_run(run.run_id)
+    try:
+        if output_path:
+            version = cat.register_derived(
+                run_id=run.run_id,
+                name=name,
+                path=output_path,
+                checksum=sha256_file_or_none(output_path),
+                kind="geomodel",
+                format=output_format,
+            )
+        cat.complete_run(run.run_id)
+    except Exception:
+        # Compensation every sibling helper already has (H7): a booked run
+        # must never linger as phantom RUNNING provenance when registration
+        # or the completing save fails (#518).
+        _fail_run(cat, run.run_id)
+        raise
     return run, version

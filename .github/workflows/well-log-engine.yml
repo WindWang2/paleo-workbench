@@ -37,6 +37,9 @@ jobs:
   build-and-test:
     name: ${{ matrix.os }} / shared=${{ matrix.shared }}
     runs-on: ${{ matrix.os }}
+    # Fail-closed compile+ctest. 20 min bounds a #241 process-exit hang
+    # (jthread/LOD + DLL teardown) without cutting Ubuntu compile+ctest.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +60,9 @@ jobs:
       # geo-viz-engine submodule contains a file whose name is invalid on
       # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
       # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job.
+      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
+      # the invalid filenames in geo-viz-engine and bump the gitlink, then
+      # remove this single-submodule workaround.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -159,13 +164,9 @@ jobs:
       - name: Test (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        # Windows ctest is advisory (continue-on-error): multiple tests hang
-        # non-deterministically on the 2-vCPU runner (async-lrw-stress,
-        # pdf-spike, manifest, las-adapter -- different victim each run).
-        # Root cause is a mix of jthread/LOD mutex contention (#241) and
-        # process-exit DLL teardown. The build+configure gate (shared OFF+ON)
-        # proves MSVC portability; Ubuntu CI validates full ctest.
-        continue-on-error: true
+        # Build+test are fail-closed. Per-test --timeout 60 already bounds a
+        # single case; process-exit hangs (#241 jthread/LOD + DLL teardown)
+        # fail the job via timeout-minutes: 20 on build-and-test.
         run: ctest --test-dir build\well-log-engine --output-on-failure --parallel 1 --timeout 60 --exclude-regex async-lrw-stress
 
       - name: Test (Unix)
@@ -186,7 +187,9 @@ jobs:
       # geo-viz-engine submodule contains a file whose name is invalid on
       # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
       # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job.
+      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
+      # the invalid filenames in geo-viz-engine and bump the gitlink, then
+      # remove this single-submodule workaround.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -244,7 +247,9 @@ jobs:
       # geo-viz-engine submodule contains a file whose name is invalid on
       # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
       # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job.
+      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
+      # the invalid filenames in geo-viz-engine and bump the gitlink, then
+      # remove this single-submodule workaround.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -311,7 +316,9 @@ jobs:
       # geo-viz-engine submodule contains a file whose name is invalid on
       # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
       # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job.
+      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
+      # the invalid filenames in geo-viz-engine and bump the gitlink, then
+      # remove this single-submodule workaround.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -390,7 +397,9 @@ jobs:
       # geo-viz-engine submodule contains a file whose name is invalid on
       # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
       # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job.
+      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
+      # the invalid filenames in geo-viz-engine and bump the gitlink, then
+      # remove this single-submodule workaround.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine
@@ -518,7 +527,9 @@ jobs:
       # geo-viz-engine submodule contains a file whose name is invalid on
       # Windows filesystems ('{"filename": "ui-ref-screenshot.png"}'), which
       # aborts a recursive checkout on windows-latest. Same pattern as
-      # ci.yml's well-log-workstation job.
+      # ci.yml's well-log-workstation job. Tracking: packaging #441 — rename
+      # the invalid filenames in geo-viz-engine and bump the gitlink, then
+      # remove this single-submodule workaround.
       - name: Init well-log-engine submodule
         shell: bash
         run: git submodule update --init well-log-engine

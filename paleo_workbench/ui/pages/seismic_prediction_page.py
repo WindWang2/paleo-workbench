@@ -268,6 +268,10 @@ class SeismicPredictionPage(QWidget):
             return
         result = payload.get("result")
         if not result:
+            error = (getattr(run, "parameters", None) or {}).get("error") or (
+                "预测完成但未返回可用结果"
+            )
+            QMessageBox.warning(self, "地震预测失败", f"推断失败: {error}")
             return
         params = result.get("parameters") or {}
         factor_ids = [

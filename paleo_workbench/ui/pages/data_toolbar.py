@@ -53,6 +53,7 @@ class DataToolbar(QWidget):
         self.verify_btn.setToolTip("后台校验数据资产完整性与 SHA-256")
         self.verify_btn.clicked.connect(self.verify_requested.emit)
         layout.addWidget(self.verify_btn)
+        self._verify_running = False
 
         self.health_btn = QPushButton("健康检查")
         self.health_btn.setObjectName("SecondaryButton")
@@ -155,6 +156,15 @@ class DataToolbar(QWidget):
         self.reader_btn.setToolTip("显示或隐藏右侧预览与属性面板")
         self.reader_btn.clicked.connect(self.reader_toggled.emit)
         layout.addWidget(self.reader_btn)
+
+    def set_verify_running(self, running: bool) -> None:
+        self._verify_running = bool(running)
+        if self._verify_running:
+            self.verify_btn.setText("取消校验")
+            self.verify_btn.setToolTip("取消正在进行的完整性校验")
+        else:
+            self.verify_btn.setText("完整性校验")
+            self.verify_btn.setToolTip("后台校验数据资产完整性与 SHA-256")
 
     def set_column_settings_button(self, button: QPushButton) -> None:
         self.column_settings_slot.layout().addWidget(button)

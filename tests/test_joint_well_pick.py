@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from paleo_workbench.viz.joint_well_pick import (
     WellPickController,
     WellScreenGeom,
@@ -185,7 +187,7 @@ def test_host_remove_active_fence(tmp_path, monkeypatch):
     monkeypatch.setattr(host_mod, "_repo_root", lambda: tmp_path)
     host = WellSeismicJointHost()
     if host.scene is None:
-        return
+        pytest.skip(f"geoviz unavailable: {getattr(host, 'engine_error', None)}")
     from geoviz_well_seismic_3d import FenceSection, JointWellId, WellHead
     import numpy as np
 

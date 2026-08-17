@@ -6,6 +6,10 @@ from PySide6.QtWidgets import QHeaderView, QSizePolicy, QTableWidget, QTableWidg
 
 from paleo_workbench.ui import tokens
 
+# Hard cap: settings allow 2000×200 (400k items) which freezes the GUI.
+# Truncate the preview and keep a visible note instead of materializing that grid.
+MAX_PREVIEW_CELLS = 50_000
+
 
 class TablePreviewWidget(QTableWidget):
     def __init__(self, parent=None):
@@ -14,6 +18,8 @@ class TablePreviewWidget(QTableWidget):
         self.setAlternatingRowColors(True)
         self.setShowGrid(True)
         self.auto_fit_columns = True
+        self.truncated = False
+        self.truncation_message = ""
 
         # The global QSS (tokens.build_qss) already styles QTableWidget
         # (background, border, radius, gridline, selection) and QHeaderView::section.
@@ -59,13 +65,30 @@ class TablePreviewWidget(QTableWidget):
         rows: tuple[tuple[str, ...], ...],
     ) -> None:
         self.clear()
-        self.setColumnCount(len(headers))
+        self.truncated = False
+        self.truncation_message = ""
+        n_cols = len(headers)
+        visible_rows = rows
+        if n_cols > 0 and len(rows) * n_cols > MAX_PREVIEW_CELLS:
+            keep = max(1, MAX_PREVIEW_CELLS // n_cols)
+            visible_rows = rows[:keep]
+            self.truncated = True
+            self.truncation_message = (
+                f"表格预览已截断：显示 {keep}/{len(rows)} 行"
+                f"（上限 {MAX_PREVIEW_CELLS} 单元格）"
+            )
+            self.setToolTip(self.truncation_message)
+            self.setStatusTip(self.truncation_message)
+        else:
+            self.setToolTip("")
+            self.setStatusTip("")
+        self.setColumnCount(n_cols)
         self.setHorizontalHeaderLabels(list(headers))
-        self.setRowCount(len(rows))
+        self.setRowCount(len(visible_rows))
 
         is_curve_def = len(headers) >= 3 and headers[0] in ("曲线", "Mnemonic")
 
-        for row_index, row in enumerate(rows):
+        for row_index, row in enumerate(visible_rows):
             self.setRowHeight(row_index, 28)
             for column_index, value in enumerate(row):
                 val_str = str(value).strip() if value is not None else ""
@@ -109,7 +132,9 @@ class TablePreviewWidget(QTableWidget):
             # width, a horizontal scrollbar appears naturally.
             hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
             hdr.setStretchLastSection(False)
-            self.resizeColumnsToContents()
+            cell_count = len(visible_rows) * n_cols
+            if cell_count <= 10_000:
+                self.resizeColumnsToContents()
             for col in range(n_cols):
                 width = max(self.columnWidth(col) + 16, 75)
                 self.setColumnWidth(col, width)

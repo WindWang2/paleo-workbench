@@ -36,6 +36,20 @@ def test_status_bar_engine_badge(qtbot):
     assert bar.engine_label.text() == "⚡ GPU: OpenGL"
 
 
+def test_gpu_badge_requires_real_gl_context(qtbot, monkeypatch):
+    """#661: importing QOpenGLContext is not enough to claim a GPU badge."""
+    from PySide6.QtGui import QOpenGLContext
+
+    from paleo_workbench import native_backend as nb
+    from paleo_workbench.ui import status_bar as status_mod
+
+    monkeypatch.setattr(QOpenGLContext, "create", lambda self: False)
+    monkeypatch.setattr(nb.native_backend, "has_cpp", lambda *_a, **_k: True)
+    text, _style = status_mod.get_engine_status_info()
+    assert "GPU" not in text
+    assert "CPU" in text
+
+
 def test_status_bar_update_context_coords(qtbot):
     bar = StatusBar()
     qtbot.addWidget(bar)

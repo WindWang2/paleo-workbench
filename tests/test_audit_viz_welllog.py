@@ -119,6 +119,30 @@ def test_required_curves_enforced_on_legacy_gather_path(tmp_path):
     assert ids
 
 
+def test_required_curves_skip_las_reread_when_summary_covers(tmp_path, monkeypatch):
+    """#636: parsed_summary already covering required curves must not touch disk."""
+    las = tmp_path / "w1.las"
+    las.write_text("~Version\n VERS. 2.0 :\n~Well\n~Curve\n DEPT.m\n GR.gAPI\n~Ascii\n0 1\n")
+    project = _project_with_well(tmp_path, parsed_curves=["DEPT", "GR", "RHOB"])
+    project.resources[0].path = str(las)
+    service = _service_for(project)
+    calls: list[str] = []
+
+    def fake_load_las_preview(path, fast=False):
+        calls.append(str(path))
+        raise AssertionError("LAS header must not be re-read when summary covers required curves")
+
+    monkeypatch.setattr("geoviz.load_las_preview", fake_load_las_preview)
+    model_version = SimpleNamespace(
+        input_schema={"required_asset_types": ["well_log"], "required_curves": ["GR"]}
+    )
+
+    ids = resolve_model_inputs(project, service, model_version, strict=True)
+
+    assert ids
+    assert calls == []
+
+
 def test_required_curves_not_enforced_when_not_strict(tmp_path):
     project = _project_with_well(tmp_path, parsed_curves=["GR"])
     service = _service_for(project)

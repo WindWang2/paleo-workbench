@@ -180,6 +180,7 @@ def document_render_snapshot(
     data_revisions: Mapping[str, int] | None = None,
     cache_owner: object | None = None,
     layer_revisions: Mapping[str, int] | None = None,
+    previous_layers: Iterable[MapLayerSnapshot] | None = None,
 ) -> MapRenderSnapshot:
     """Create a revisioned render snapshot from a legacy document or live scene.
 
@@ -190,6 +191,9 @@ def document_render_snapshot(
     Revision-keyed caching additionally requires ``cache_owner``: revisions are
     owner-scoped counters, so the cache is only valid while that exact owner
     object is alive (verified through a weak reference).
+    ``layer_revisions`` is the map-perf #461 layer-id-keyed alias, bridged below.
+    ``previous_layers`` is accepted for callers that already hold the last
+    snapshot; the owner-scoped feature cache covers the same reuse.
     The output has one vector layer per existing compatibility layer kind; future
     LayerRegistry-backed vector layers replace this adapter transparently.
     """
@@ -223,28 +227,44 @@ def document_render_snapshot(
     visible_by_kind = dict(visibility or {})
     facies_style = default_style_for("facies").to_dict()
     facies_style.update(dict(getattr(document, "facies_style", None) or {}))
+    prev_by_id = {layer.id: layer for layer in (previous_layers or ())}
     layers: list[MapLayerSnapshot] = []
     for kind in _LAYER_KINDS:
+        layer_id = f"{document_id}:{kind}"
+        prev = prev_by_id.get(layer_id)
         revision = revisions.get(kind)
-        cache_key = (
-            (owner_token, document_id, kind, int(revision))
-            if owner_token is not None and revision is not None
-            else None
-        )
-        cached_entry = _FEATURE_CACHE.get(cache_key) if cache_key is not None else None
-        if cached_entry is not None and cached_entry[0] is cache_owner:
-            _FEATURE_CACHE.move_to_end(cache_key)
-            _, features, extent = cached_entry
+        if revision is None and layer_revisions is not None:
+            revision = layer_revisions.get(layer_id)
+        if (
+            prev is not None
+            and revision is not None
+            and prev.data_revision == int(revision)
+        ):
+            features = prev.features
+            extent = prev.extent
             data_revision = int(revision)
         else:
-            grouped_features({kind})
-            features = grouped.get(kind) or ()
-            extent = _extent_from_bounds(bounds.get(kind) or [math.inf] * 4)
-            data_revision = int(revision) if revision is not None else _stable_revision(features)
-            if cache_key is not None:
-                _FEATURE_CACHE[cache_key] = (cache_owner, features, extent)
-                while len(_FEATURE_CACHE) > _FEATURE_CACHE_LIMIT:
-                    _FEATURE_CACHE.popitem(last=False)
+            cache_key = (
+                (owner_token, document_id, kind, int(revision))
+                if owner_token is not None and revision is not None
+                else None
+            )
+            cached_entry = _FEATURE_CACHE.get(cache_key) if cache_key is not None else None
+            if cached_entry is not None and cached_entry[0] is cache_owner:
+                _FEATURE_CACHE.move_to_end(cache_key)
+                _, features, extent = cached_entry
+                data_revision = int(revision)
+            else:
+                source_records = (
+                    records if records is not None else features_from_document(document)
+                )
+                features = _features_for_kind(source_records, kind)
+                extent = _extent_for_features(features)
+                data_revision = int(revision) if revision is not None else _stable_revision(features)
+                if cache_key is not None:
+                    _FEATURE_CACHE[cache_key] = (cache_owner, features, extent)
+                    while len(_FEATURE_CACHE) > _FEATURE_CACHE_LIMIT:
+                        _FEATURE_CACHE.popitem(last=False)
         style = dict(facies_style if kind == "facies" else default_style_for(kind).to_dict())
         style.update(_authoring_style(document, kind))
         layers.append(
