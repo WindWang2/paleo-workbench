@@ -144,7 +144,54 @@ def test_legacy_completed_task_adapts_to_native_scene_without_interpolation():
     assert scene.contour_geometry(draft.id).paths == (((10.0, 35.0), (20.0, 35.0)),)
 
 
+def test_scene_from_factor_task_upserts_late_contour_drafts_after_grid_exists():
+    """Contour drafts generated after the scalar overlay is shown must still attach.
+
+    scene_from_factor_task is the only production upsert path for derived child
+    layers (samples/contours); short-circuiting on the existing scalar layer
+    left them silently missing while the UI claimed they were loaded (#536).
+    """
+    result = _result()
+    task = FactorMapTask(
+        id="task-porosity",
+        name="孔隙度",
+        target_horizon="H1",
+        factor_type="孔隙度",
+        method="IDW",
+        status="complete",
+        parameters={
+            **result.to_legacy_dict(),
+            "sample_points": [{"x": 10.0, "y": 30.0, "value": 0.0}],
+        },
+    )
+    draft = ContourDraft(
+        id="draft-porosity",
+        name="孔隙度等值线",
+        linked_factor_task_id=task.id,
+        segments=[
+            ContourSegment(level=0.5, coordinates=[[10.0, 35.0], [20.0, 35.0]])
+        ],
+    )
+
+    # First overlay click: scalar grid integrated, drafts not yet generated.
+    scene = scene_from_factor_task(task, crs="EPSG:3857")
+    assert scene.registry.get(task.id) is not None
+    assert scene.registry.get(draft.id) is None
+
+    # Contour-draft button click re-enters the same function with drafts.
+    scene_from_factor_task(task, crs="EPSG:3857", contour_drafts=[draft], scene=scene)
+    assert scene.registry.get(draft.id) is not None
+    assert scene.contour_geometry(draft.id).paths == (((10.0, 35.0), (20.0, 35.0)),)
+
+    # Idempotent: a later refresh with the same drafts must not duplicate.
+    scene_from_factor_task(task, crs="EPSG:3857", contour_drafts=[draft], scene=scene)
+    children = [layer.id for layer in scene.registry.children_of(f"{task.id}:group")]
+    assert children.count(draft.id) == 1
+    assert children.count(f"{task.id}:samples") == 1
+
+
 def test_idw_task_to_native_canvas_style_changes_never_rerun_interpolation(monkeypatch, qtbot):
+
     import paleo_workbench.workflow.factor_interpolation as interpolation
     from paleo_workbench.ui.native_map_canvas import NativeMapCanvas
 
